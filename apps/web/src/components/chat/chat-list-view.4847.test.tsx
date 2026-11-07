@@ -404,6 +404,28 @@ describe('ChatListView — 같은 것을 두 번 묻는 경합 · 현재 프로�
     expect(second).toBe(false);
   });
 
+  it('⭐폴링 물음의 응답은 왔는데 본문을 읽는 사이에 밀려나도 «실패»가 아니다(true)', async () => {
+    let releaseBody: (() => void) | undefined;
+    let allCalls = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url === ALL) {
+        allCalls++;
+        if (allCalls === 2) return { ok: true, json: async () => { await new Promise<void>((resolve) => { releaseBody = resolve; }); return { data: [A1, B1], total: 2 }; } };
+        return { ok: true, json: async () => ({ data: [A1, B1], total: 2 }) };
+      }
+      if (url.includes('project_id=proj-a')) return { ok: true, json: async () => ({ data: [A1], total: 1 }) };
+      return { ok: false, status: 404, json: async () => null };
+    }));
+    await mount();
+    let pollResult: boolean | undefined;
+    await act(async () => { void sseOpts.current!.onPoll!().then((ok) => { pollResult = ok; }); await Promise.resolve(); await Promise.resolve(); });
+    expect(releaseBody).not.toBeUndefined();
+    await chooseFilter('proj-a');
+    await act(async () => { releaseBody!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(pollResult).toBe(true);
+  });
+
   it('프로젝트 목록을 아직 모를 때 기억된 프로젝트 값은 일단 쓰고, 목록이 와서 내 프로젝트가 아니면 «모든 프로젝트»로 돌아간다', async () => {
     const UUID = '11111111-1111-4111-8111-111111111111';
     window.sessionStorage.setItem(CHAT_PROJECT_FILTER_KEY, UUID);
