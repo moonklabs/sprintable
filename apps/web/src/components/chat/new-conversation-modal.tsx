@@ -15,6 +15,7 @@ import { memberDisplayLabel, memberRowLabels } from '@/lib/member-display';
 import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { Select } from '@/components/ui/select';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { isNoProjectAtAll } from '@/app/(authenticated)/chats/no-project';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -58,17 +59,23 @@ interface NewConversationModalProps {
 export function NewConversationModal({ projectId, allowNoProject = false, onClose, onCreated }: NewConversationModalProps) {
   // story 4847 (AC3) — the people to pick from are the organization's; only the NEW room needs a project (the server files a room under one), so
   // the modal says which one it will be — the given default, changeable when the person can use more than one.
-  const { projectMemberships } = useDashboardContext();
+  const dashboardCtx = useDashboardContext();
+  const { projectMemberships } = dashboardCtx;
   // the default is worked out on every render (not frozen at first render): it must be one of the person's projects (an unknown one is no default), and it follows the given one while the window is open
   const onlyProject = projectMemberships.length === 1 ? projectMemberships[0]!.projectId : '';
   const defaultRoomProject = projectId === NO_ROOM_PROJECT
     ? (allowNoProject ? NO_ROOM_PROJECT : onlyProject)
-    : projectId && (projectMemberships.length === 0 || projectMemberships.some((m) => m.projectId === projectId))
-      ? projectId
-      : allowNoProject && projectMemberships.length === 0 ? NO_ROOM_PROJECT : onlyProject; // a person with no project of their own can still start a room — with none
+    : allowNoProject && isNoProjectAtAll(dashboardCtx)
+      ? NO_ROOM_PROJECT // a person KNOWN to have no project of their own can still start a room — with none; whatever default was handed in (a stale filter) is not theirs
+      : projectId && (projectMemberships.length === 0 || projectMemberships.some((m) => m.projectId === projectId))
+        ? projectId
+        : onlyProject;
   const [chosenProject, setChosenProject] = useState<string | null>(null);
-  // «no project» is a choice only while the server allows it (the list can fall back to an older server with the window open)
-  const roomProjectId = chosenProject !== null && (chosenProject !== NO_ROOM_PROJECT || allowNoProject) ? chosenProject : defaultRoomProject;
+  // a choice counts only while it is still one of the drawn options: «no project» while the server allows it (the list can fall back to an older server with the window open),
+  // a project while it is still the person's (the list of projects can change under an open window)
+  const chosenStillValid = chosenProject !== null
+    && (chosenProject === NO_ROOM_PROJECT ? allowNoProject : projectMemberships.some((m) => m.projectId === chosenProject));
+  const roomProjectId = chosenStillValid ? chosenProject! : defaultRoomProject;
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('chats');
   // story #3194 — agentNotConnected 배지 문구 재사용(발명 0, agent-management-tab.tsx와 동일 키).

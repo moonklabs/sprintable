@@ -10,6 +10,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ChatListView, CHAT_PROJECT_FILTER_KEY } from './chat-list-view';
+
+// story 4847 — the agents tab belongs to the organization's owner/admin: the ORGANIZATION role (orgMemberships), not the shell's «role» (/me: the larger of the project and organization roles)
+const ORG_ADMIN = { orgId: 'org-4847-admin', orgMemberships: [{ orgId: 'org-4847-admin', orgName: 'O', orgSlug: 'o', role: 'admin' }] }; // an org id no other test in this file uses (the domain-labels hook caches per organization)
 import { ChatRailProvider, useChatRailOptional } from '@/app/(authenticated)/chats/chat-rail-context';
 
 // story #3177(S3a) — ChatListView가 이제 NowStrip을 항상 마운트한다. 이 테스트의 관심사는
@@ -277,7 +280,7 @@ describe('ChatListView — 리스트 아바타 실사진(story #2968)', () => {
   // 대표사진처럼" 보여주면 안 된다(PR 자신의 group 원칙 위반) — 기존 group 테스트는 일반탭만
   // 커버해 이 회귀를 놓쳤다. agent 탭을 실제로 열어(role="tab" 클릭) 검증한다.
   it('agent 탭의 group 대화도 임의 참가자 사진을 대표사진처럼 노출하지 않는다(회귀 재발 방지)', async () => {
-    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'admin' });
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'admin', ...ORG_ADMIN });
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/conversations/recent-outside-project')) {
         return { ok: true, json: async () => ({ data: [] }) };
@@ -751,7 +754,7 @@ describe('ChatListView — 참가자 name="" 폴백(story #3791, 카디르 재�
   });
 
   it('에이전트 탭 — name=""이면 아바타 aria-label이 "에이전트"로 뜬다(빈 문자열 아님)', async () => {
-    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'admin' });
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'admin', ...ORG_ADMIN });
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/conversations/recent-outside-project')) {
         return { ok: true, json: async () => ({ data: [] }) };
@@ -894,7 +897,7 @@ const AGENT_ITEM = {
 
 describe('ChatListView — ChatRailContext 탭 게이트(story #3788 B-③ 후속)', () => {
   it('⭐「내 대화」 0건 + 에이전트 N건 + 에이전트 탭 활성 → conversationCount는 N(0 아님)', async () => {
-    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'admin' }); // 탭 자체가 admin/owner 전용(677행)
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'admin', ...ORG_ADMIN }); // 탭 자체가 admin/owner 전용(677행)
     stubFetchByTab([], [AGENT_ITEM]);
     await act(async () => {
       root.render(wrap(
@@ -938,7 +941,7 @@ describe('ChatListView — ChatRailContext 탭 게이트(story #3788 B-③ 후�
   // 없이 me.role만 갱신) Tabs는 사라지는데 activeList가 'agent'에 남아 안 보이는 탭의 count를
   // 계속 공급했었다. 뮤테이션 대표: isAdminOrOwner 게이트/리셋 effect 둘 다 지워야 RED.
   it('⭐admin+에이전트 탭 활성 中 role이 member로 하향(리마운트 없음) → count는 my 것(0)·activeList는 my로 리셋', async () => {
-    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'admin' });
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'admin', ...ORG_ADMIN });
     stubFetchByTab([], [AGENT_ITEM]);
     await act(async () => {
       root.render(wrap(
@@ -1014,7 +1017,7 @@ describe('ChatListView — 목록 fetch 실패 축(story #3790)', () => {
   });
 
   it('agent 탭 fetch 실패(my는 성공) → 에이전트 탭 활성 시 좌우가 모두 실패를 말한다(my N건 무관)', async () => {
-    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'admin' });
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'admin', ...ORG_ADMIN });
     stubFetchWithFailure('agent');
     await act(async () => {
       root.render(wrap(

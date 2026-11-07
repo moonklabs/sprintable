@@ -229,6 +229,43 @@ describe('NewConversationModal — 프로젝트 없는 새 방(story 4847)', () 
     expect(createBtn().disabled).toBe(true);
   });
 
+  it('⭐프로젝트가 하나도 없다고 확실한 사람에게 낡은 기본 프로젝트(옛 걸러 보기 값)가 넘어와도 그 프로젝트로 만들지 않는다 — 프로젝트 없는 방이다', async () => {
+    const posts: Array<Record<string, unknown>> = [];
+    await mount(mockFetches(posts), '99999999-9999-4999-8999-999999999999', [], true);
+    await click(botBtn());
+    await click(createBtn());
+    expect(posts).toHaveLength(1);
+    expect('project_id' in posts[0]!).toBe(false);
+  });
+
+  it('⭐셸이 «목록은 아직 믿을 수 없다»고 하는 동안(조직 동기화 중)은 프로젝트 없음으로 단정하지 않는다 — 넘어온 기본 프로젝트를 그대로 쓴다', async () => {
+    const posts: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', mockFetches(posts));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <DashboardCtx.Provider value={{ projectMemberships: [], orgSyncPending: true } as never}>
+            <NewConversationModal projectId="proj-a" allowNoProject onClose={() => {}} onCreated={() => {}} />
+          </DashboardCtx.Provider>
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await click(botBtn());
+    await click(createBtn());
+    expect(posts).toEqual([{ type: 'dm', title: null, participant_ids: ['a-bot'], project_id: 'proj-a' }]);
+  });
+
+  it('⭐고른 프로젝트가 창이 열려 있는 동안 내 프로젝트가 아니게 되면(멤버십이 바뀜) 그 고름은 거둬지고 기본값으로 만들어진다', async () => {
+    const posts: Array<Record<string, unknown>> = [];
+    await mount(mockFetches(posts), 'proj-a', [A, B], false);
+    await click(botBtn());
+    await choose(projectSelect()!, 'proj-b');
+    await act(async () => { root.render(modalTree('proj-a', [A], false)); });
+    await click(createBtn());
+    expect(posts).toEqual([{ type: 'dm', title: null, participant_ids: ['a-bot'], project_id: 'proj-a' }]);
+  });
+
   it('⭐옛 서버에서 프로젝트가 하나도 없는 사람은 만들 수 없다(지금과 같다)', async () => {
     await mount(mockFetches([]), null, [], false);
     await click(botBtn());
