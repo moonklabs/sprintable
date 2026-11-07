@@ -5744,6 +5744,7 @@
     "replyCount": "{count}개의 답글",
     "removeAttachment": "첨부 제거",
     "attachmentUploadFailed": "첨부 업로드에 실패했어요. 다시 시도해 주세요.",
+    "attachmentNeedsProject": "이 방에는 프로젝트가 없어서 파일을 올릴 수 없어요. 프로젝트가 있는 방에서 올려 주세요.",
     "maxAttachmentsReached": "한 번에 최대 {max}개까지 올릴 수 있어요.",
     "attachmentsDropped": "고른 파일 중 마지막 {dropped}개는 올리지 못했어요 — 한 메시지에 최대 {max}개까지 올릴 수 있어요.",
     "commandCandidatesLabel": "커맨드 후보",

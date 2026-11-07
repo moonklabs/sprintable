@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
+import { AttachmentNeedsProjectError } from '@/lib/chat-attachment-error';
 import Link from 'next/link';
 import { AlertTriangle, Compass, FolderOpen, Loader2, Paperclip, Send, Terminal, Type, Upload, X, Hash } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
@@ -226,6 +227,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   // story #4474: how many files the last add left out over the cap — said out loud instead of dropped in silence
   const [droppedFiles, setDroppedFiles] = useState(0);
   const [uploadFailed, setUploadFailed] = useState(false);
+  const [attachNeedsProject, setAttachNeedsProject] = useState(false); // story 4847 — the failure is «this room has no project» (a coded refusal), not a plain failure
   const [sendFailed, setSendFailed] = useState(false);
   const [sending, setSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -442,7 +444,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
     if ((!trimmed && pendingFiles.length === 0) || sending || disabled) return;
 
     setSending(true);
-    setUploadFailed(false);
+    setUploadFailed(false); setAttachNeedsProject(false);
     setSendFailed(false);
     try {
       // 1) 첨부 업로드 단계 — 실패는 "첨부 업로드 실패"로 표시(pending 유지·재시도 가능).
@@ -450,7 +452,8 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       if (pendingFiles.length > 0 && onUploadFile) {
         try {
           attachments = await Promise.all(pendingFiles.map((f) => onUploadFile(f)));
-        } catch {
+        } catch (e) {
+          if (e instanceof AttachmentNeedsProjectError) setAttachNeedsProject(true);
           setUploadFailed(true);
           return; // finally에서 setSending(false)
         }
@@ -462,8 +465,9 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           mentionedIdsRef.current.length > 0 ? mentionedIdsRef.current : undefined,
           attachments && attachments.length > 0 ? attachments : undefined,
         );
-      } catch {
-        setSendFailed(true);
+      } catch (e) {
+        // story 4847 — the send that registers an attachment in a room with no project is refused by code: say that, not «전송 실패»
+        if (e instanceof AttachmentNeedsProjectError) { setAttachNeedsProject(true); setUploadFailed(true); } else setSendFailed(true);
         return;
       }
       setText('');
@@ -587,7 +591,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
   const addFiles = (files: File[]) => {
     if (files.length === 0) return;
-    setUploadFailed(false);
+    setUploadFailed(false); setAttachNeedsProject(false);
     // the files already attached and the first of the new ones are kept; the overflow is always the LAST of the files just
     // picked — counted so the line below can say so (Yuna: the person must know which ones to pick again)
     setDroppedFiles(Math.max(0, pendingFiles.length + files.length - MAX_ATTACHMENTS));
@@ -617,7 +621,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   const removePendingFile = (index: number) => {
     setPendingFiles((prev) => prev.filter((_, i) => i !== index));
     setDroppedFiles(0);
-    setUploadFailed(false);
+    setUploadFailed(false); setAttachNeedsProject(false);
   };
 
   const atMaxAttachments = pendingFiles.length >= MAX_ATTACHMENTS;
@@ -671,7 +675,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       {/* story #2105 2차 — handleSend가 재시도 전 두 상태 모두 false로 리셋해(위 정의) 매
           시도마다 언마운트→리마운트된다. */}
       {uploadFailed && (
-        <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">{t('attachmentUploadFailed')}</p>
+        <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">{attachNeedsProject ? t('attachmentNeedsProject') : t('attachmentUploadFailed')}</p>
       )}
       {sendFailed && (
         <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">{t('sendFailed')}</p>
