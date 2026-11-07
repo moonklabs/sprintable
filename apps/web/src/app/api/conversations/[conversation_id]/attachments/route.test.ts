@@ -101,5 +101,8 @@ describe('POST /api/conversations/{id}/attachments — a prefix is taken only wh
   bad('a different shape', `org/${ORG}/docs/${CONV}/`);
   bad('a double slash', `org/${ORG}//chat/${CONV}/`);
   bad('a backslash', `org/${ORG}/chat\\${CONV}/`);
+  bad('a dot segment standing for the project', `org/${ORG}/project/../chat/${CONV}/`);
+  bad('a single-dot segment standing for the project', `org/${ORG}/project/./chat/${CONV}/`);
+  bad('a backslash inside the project segment', `org/${ORG}/project/p\\1/chat/${CONV}/`);
   bad('not a string', 42 as unknown as string);
 });

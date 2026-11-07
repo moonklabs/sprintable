@@ -835,6 +835,17 @@ describe('ChatInput — 프로젝트 없는 방의 첨부 거절을 까닭과 �
     expect(alertText()).not.toContain(needs);
   });
 
+  it('⭐a coded refusal and then an ordinary failure on the next try: the second says the bare failure (the first reason is not carried over)', async () => {
+    const upload = vi.fn().mockRejectedValueOnce(new AttachmentNeedsProjectError()).mockRejectedValue(new Error('boom'));
+    await act(async () => { root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} onUploadFile={upload} />)); });
+    await pickOne();
+    await pressEnter();
+    expect(alertText()).toContain(needs);
+    await pressEnter();
+    expect(alertText()).toContain(generic);
+    expect(alertText()).not.toContain(needs);
+  });
+
   it('⭐the reason goes away with the next try (it is not left standing)', async () => {
     const upload = vi.fn().mockRejectedValueOnce(new AttachmentNeedsProjectError()).mockResolvedValue({ url: 'u', name: 'a.txt', content_type: 'text/plain', size: 1 });
     await act(async () => { root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} onUploadFile={upload} />)); });
