@@ -306,6 +306,75 @@ describe('ChatListView — 같은 것을 두 번 묻는 경합 · 현재 프로�
     expect(container.textContent).not.toContain('에이 방');
   });
 
+  it('⭐첫 물음이 네트워크 오류로 뒤늦게 던져져도(응답 없이 reject) 지금 목록을 오류로 덮지 않는다', async () => {
+    let rejectFirst: (() => void) | undefined;
+    let allCalls = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url === ALL) {
+        allCalls++;
+        if (allCalls === 1) { await new Promise<void>((resolve) => { rejectFirst = resolve; }); throw new Error('network'); }
+        return { ok: true, json: async () => ({ data: [A1, B1], total: 2 }) };
+      }
+      if (url.includes('project_id=proj-a')) return { ok: true, json: async () => ({ data: [A1], total: 1 }) };
+      return { ok: false, status: 404, json: async () => null };
+    }));
+    await mount();
+    await chooseFilter('proj-a');
+    await chooseFilter('');
+    await act(async () => { rejectFirst!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).not.toContain(koMessages.chats.conversationsLoadFailed);
+    expect(container.textContent).toContain('비 방');
+  });
+
+  it('⭐본문을 읽는 사이에 새 물음이 생겨도 옛 본문이 새 목록을 덮지 않는다(응답은 왔고 json()만 늦은 경우)', async () => {
+    window.sessionStorage.setItem(CHAT_PROJECT_FILTER_KEY, 'proj-a');
+    let releaseBody: (() => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('project_id=proj-a')) return { ok: true, json: async () => { await new Promise<void>((resolve) => { releaseBody = resolve; }); return { data: [A1], total: 1 }; } };
+      if (url.includes('project_id=proj-b')) return { ok: true, json: async () => ({ data: [B1], total: 1 }) };
+      return { ok: false, status: 404, json: async () => null };
+    }));
+    await mount();
+    expect(releaseBody).not.toBeUndefined();
+    await chooseFilter('proj-b');
+    await act(async () => { releaseBody!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('비 방');
+    expect(container.textContent).not.toContain('에이 방');
+  });
+
+  it('⭐옛 목록의 «더 보기»가 아직 오는 중에 걸러 보기를 바꾸면: 새 목록의 «더 보기»는 눌릴 수 있고, 새 목록의 «더 보기»를 누른 뒤 옛 쪽이 도착해도 로딩이 풀리지 않는다', async () => {
+    window.sessionStorage.setItem(CHAT_PROJECT_FILTER_KEY, 'proj-a');
+    let releaseMoreA: (() => void) | undefined;
+    let releaseMoreB: (() => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('project_id=proj-a') && url.includes('offset=0')) return { ok: true, json: async () => ({ data: [A1], total: 3 }) };
+      if (url.includes('project_id=proj-a')) { await new Promise<void>((resolve) => { releaseMoreA = resolve; }); return { ok: true, json: async () => ({ data: [room('conv-a2', '에이 둘째 방', { id: A.projectId, name: A.projectName }, '2026-11-07T00:30:00Z')], total: 3 }) }; }
+      if (url.includes('project_id=proj-b') && url.includes('offset=0')) return { ok: true, json: async () => ({ data: [B1], total: 3 }) };
+      if (url.includes('project_id=proj-b')) { await new Promise<void>((resolve) => { releaseMoreB = resolve; }); return { ok: true, json: async () => ({ data: [room('conv-b2', '비 둘째 방', { id: B.projectId, name: B.projectName }, '2026-11-07T00:30:00Z')], total: 3 }) }; }
+      return { ok: false, status: 404, json: async () => null };
+    }));
+    const moreButton = () => [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.common.loadMore) || b.textContent === koMessages.common.loading && b.className.includes('text-xs')) as HTMLButtonElement | undefined;
+    await mount();
+    await act(async () => { moreButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); });
+    expect(releaseMoreA).not.toBeUndefined();
+    await chooseFilter('proj-b');
+    // B's own first page is on screen and its «더 보기» is NOT stuck in the loading state of A's pending page
+    expect(container.textContent).toContain('비 방');
+    expect(moreButton()!.disabled).toBe(false);
+    expect(moreButton()!.textContent).toContain(koMessages.common.loadMore);
+    await act(async () => { moreButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); });
+    expect(releaseMoreB).not.toBeUndefined();
+    expect(moreButton()!.disabled).toBe(true);
+    await act(async () => { releaseMoreA!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(moreButton()!.disabled).toBe(true); // A's late page must not end B's loading
+    await act(async () => { releaseMoreB!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('비 둘째 방');
+    expect(container.textContent).not.toContain('에이 둘째 방');
+  });
+
   it('프로젝트 목록을 아직 모를 때 기억된 프로젝트 값은 일단 쓰고, 목록이 와서 내 프로젝트가 아니면 «모든 프로젝트»로 돌아간다', async () => {
     const UUID = '11111111-1111-4111-8111-111111111111';
     window.sessionStorage.setItem(CHAT_PROJECT_FILTER_KEY, UUID);
