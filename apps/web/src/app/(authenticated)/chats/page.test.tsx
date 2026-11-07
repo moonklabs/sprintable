@@ -13,6 +13,9 @@ import ChatsPage from './page';
 import { ChatRailProvider, useChatRail } from './chat-rail-context';
 import { TopBarProvider } from '@/components/nav/top-bar-context';
 
+const { dashboardCtx } = vi.hoisted(() => ({ dashboardCtx: { current: { projectId: 'proj-a', projectMemberships: [{ projectId: 'proj-a', projectName: 'A' }] } as { projectId?: string; projectMemberships: Array<{ projectId: string; projectName: string }>; projectPathUnresolved?: boolean } } }));
+vi.mock('../../dashboard/dashboard-shell', () => ({ useDashboardContext: () => dashboardCtx.current }));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -116,3 +119,28 @@ describe('ChatsPage — story #3790 실패 축', () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 });
+
+// story 4847 — a person with no project at all is told so by the list (the rail); the outlet does not say a second, different thing.
+describe('ChatsPage — 프로젝트가 하나도 없는 사람(story 4847)', () => {
+  afterEach(() => { dashboardCtx.current = { projectId: 'proj-a', projectMemberships: [{ projectId: 'proj-a', projectName: 'A' }] }; });
+
+  it('⭐프로젝트 0 · 대화 0 — 오른쪽은 «대화가 없어요»도 «선택하세요»도 안 말한다(왼쪽 한 줄 하나뿐)', async () => {
+    dashboardCtx.current = { projectId: undefined, projectMemberships: [] };
+    await act(async () => { root.render(renderPage(false, 0)); });
+    expect(container.textContent).not.toContain(koMessages.chats.noConversations);
+    expect(container.textContent).not.toContain(koMessages.chats.selectConversationPrompt);
+  });
+
+  it('프로젝트 0 · 대화 있음 — 「선택하세요」는 그대로(방은 읽을 수 있다)', async () => {
+    dashboardCtx.current = { projectId: undefined, projectMemberships: [] };
+    await act(async () => { root.render(renderPage(false, 3)); });
+    expect(container.textContent).toContain(koMessages.chats.selectConversationPrompt);
+  });
+
+  it('경로의 프로젝트를 아직 푸는 중이면 «프로젝트 없음»으로 단정하지 않는다', async () => {
+    dashboardCtx.current = { projectId: undefined, projectMemberships: [], projectPathUnresolved: true };
+    await act(async () => { root.render(renderPage(false, 0)); });
+    expect(container.textContent).toContain(koMessages.chats.noConversations);
+  });
+});
+

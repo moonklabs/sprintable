@@ -1038,6 +1038,7 @@ describe('ChatListView — 목록 fetch 실패 축(story #3790)', () => {
   });
 
   it('재시도 클릭 → 재조회 中 로딩(0건 아님)을 거쳐 성공하면 실패 문구가 사라진다', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [{ projectId: 'proj-current', projectName: 'A' }], role: 'member' }); // a person with a project: the empty list says «no conversations» (no project at all says «no project yet», story 4847)
     let attempt = 0;
     // 두 번째(재시도) 응답은 수동으로 붙들어 "아직 응답 전" 창을 결정적으로 관측한다
     // (마이크로태스크가 act() 한 틱 안에서 다 풀려버리면 로딩 창을 못 잡는 레이스 방지).
@@ -1264,6 +1265,7 @@ describe('ChatListView — story #3831 지시 한 줄 compose 경유(새 API 0·
   });
 
   it('대화가 0건이면 리다이렉트 대신 새 대화 모달을 연다(onOpenChange 호출)', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [{ projectId: 'proj-current', projectName: 'A' }], role: 'member', projectId: 'proj-current' }); // a person with a project (with none, story 4847: no window to open)
     searchParamsValueRef.current = 'compose=' + encodeURIComponent('유튜브 챕터 3개로 나눠줘');
     stubFetch([]);
     const onOpenChange = vi.fn();

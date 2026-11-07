@@ -611,3 +611,80 @@ describe('ChatListView — 옛 서버(422)에서는 지금 화면과 같다 (sto
   });
 });
 
+// PO (4847 follow-up): with 4846 PR1 a room outlives its project, so a person with NO project can still have rooms. The layout no longer stops them; the list says «no project yet» only
+// when there is no project AND no room read.
+describe('ChatListView — 프로젝트가 하나도 없는 사람(story 4847, PO 후속)', () => {
+  const noProjects = () => useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'member', projectId: undefined });
+
+  it('⭐프로젝트 0 · 방 2 → 방 목록이 선다(멈춤 한 줄 없음)', async () => {
+    noProjects(); stubOrgServer([B1, N1]);
+    await mount();
+    expect(container.textContent).toContain('비 방');
+    expect(container.textContent).toContain('프로젝트 없는 방');
+    expect(container.querySelector('[data-testid="chats-no-project"]')).toBeNull();
+  });
+
+  it('⭐프로젝트 0 · 방 0 → «보여 줄 프로젝트가 아직 없어요» 한 줄(옛 멈춤과 같은 글)', async () => {
+    noProjects(); stubOrgServer([]);
+    await mount();
+    expect(container.querySelector('[data-testid="chats-no-project"]')?.textContent).toBe(koMessages.chats.noProjectYet);
+    expect(container.textContent).not.toContain(koMessages.chats.noConversations);
+  });
+
+  it('프로젝트가 있고 방이 0이면 한 줄이 아니라 «대화가 없어요»다', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [A], role: 'member', projectId: undefined });
+    stubOrgServer([]);
+    await mount();
+    expect(container.querySelector('[data-testid="chats-no-project"]')).toBeNull();
+    expect(container.textContent).toContain(koMessages.chats.noConversations);
+  });
+
+  it('⭐읽는 중에는 한 줄이 번쩍하지 않고(로딩), 읽기에 실패하면 한 줄 대신 실패 문구다', async () => {
+    noProjects();
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    await mount();
+    expect(container.querySelector('[data-testid="chats-no-project"]')).toBeNull();
+    expect(container.textContent).toContain(koMessages.common.loading);
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => null })));
+    await mount();
+    expect(container.querySelector('[data-testid="chats-no-project"]')).toBeNull();
+    expect(container.textContent).toContain(koMessages.chats.conversationsLoadFailed);
+  });
+
+  it('⭐옛 서버(422) · 프로젝트 0 → 지금 화면 그대로 «보여 줄 프로젝트가 아직 없어요»(고르세요가 아니다)', async () => {
+    noProjects();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      return { ok: false, status: 422, json: async () => ({}) };
+    }));
+    await mount();
+    expect(container.querySelector('[data-testid="chats-no-project"]')?.textContent).toBe(koMessages.chats.noProjectYet);
+  });
+
+  it('⭐경로의 프로젝트를 아직 푸는 중이면(멤버십이 아직 빈 순간) «프로젝트 없음» 한 줄이 번쩍하지 않는다', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'member', projectId: undefined, projectPathUnresolved: true });
+    stubOrgServer([]);
+    await mount();
+    expect(container.querySelector('[data-testid="chats-no-project"]')).toBeNull();
+    expect(container.textContent).toContain(koMessages.chats.noConversations);
+  });
+
+  it('⭐프로젝트 0 · 방 0이면 지시 한 줄(?compose=)이 만들 수 없는 새 대화 창을 열지 않는다', async () => {
+    searchParamsValueRef.current = 'compose=' + encodeURIComponent('지시');
+    noProjects(); stubOrgServer([]);
+    const onOpenChange = vi.fn();
+    await mount({ open: false, onOpenChange });
+    expect(onOpenChange).not.toHaveBeenCalledWith(true);
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it('프로젝트 0 · 방 있음이면 지시 한 줄은 그 목록의 가장 최근 방으로 간다', async () => {
+    searchParamsValueRef.current = 'compose=' + encodeURIComponent('지시');
+    noProjects(); stubOrgServer([B1, N1]);
+    await mount();
+    expect(String(replaceMock.mock.calls[0]![0]).startsWith('/chats/conv-b1?compose=')).toBe(true);
+  });
+});
+

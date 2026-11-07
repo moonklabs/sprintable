@@ -22,6 +22,7 @@ import { CountBadge } from '@/components/ui/count-badge';
 import { NowStrip } from './now-strip';
 import { PulseCard } from './pulse-card';
 import { useChatRailOptional } from '@/app/(authenticated)/chats/chat-rail-context';
+import { isNoProjectAtAll } from '@/app/(authenticated)/chats/no-project';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { participantDisplayLabel } from '@/lib/member-display';
@@ -408,7 +409,9 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const consumedComposeRef = useRef(false);
   // perf(17960f86): role 은 DashboardContext(서버 /api/v2/me 투영)에서 — 채팅 진입마다 `/api/me`
   // 재호출하던 round-trip 제거. /me checkRole 과 동일한 effective role 이라 게이트 의미 보존.
-  const { role, orgId, projectMemberships } = useDashboardContext();
+  const dashboardCtx = useDashboardContext();
+  const { role, orgId, projectMemberships } = dashboardCtx;
+  const noProjectAtAll = isNoProjectAtAll(dashboardCtx);
   // story 4847 — the admin's «agents» tab reads the CURRENT project's agent-only rooms (`include_agent_conversations`), so it needs a current project
   const isAdminOrOwner = (role === 'admin' || role === 'owner') && Boolean(projectId);
   // story #3888 CHANGES①(PO PR 코멘트, 2026-09-14 18:53Z) — useOrgDomainLabels를
@@ -648,10 +651,10 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       const mostRecent = pool.reduce((a, b) => (a.updated_at > b.updated_at ? a : b));
       // 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트.
       router.replace(flatHref(`/chats/${mostRecent.id}?compose=${encodeURIComponent(composeParam)}`));
-    } else {
-      setShowModal(true);
+    } else if (!noProjectAtAll) {
+      setShowModal(true); // (with no project nothing can be made yet: no window to open)
     }
-  }, [composeParam, loading, needsProject, conversations, projectId, router, setShowModal, flatHref]);
+  }, [composeParam, loading, needsProject, noProjectAtAll, conversations, projectId, router, setShowModal, flatHref]);
 
   // perf(17960f86): agent 탭("전체/에이전트", include_agent_conversations=true)은 비기본 탭이라
   // mount 시 eager fetch(측정 ~663ms 낭비) 하지 않고, 사용자가 탭을 처음 열 때 1회만 lazy 로드.
@@ -859,9 +862,17 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       </Button>
     </div>
   ) : conversations.length === 0 ? (
-    <div className="flex h-full items-center justify-center">
-      <EmptyState title={t('noConversations')} description={t('startNewConversation')} className="w-full max-w-xs" />
-    </div>
+    // story 4847 — a person with no project AND no room read has nothing to look at and nowhere to start one: say what to do next (the line the layout used to stop on).
+    // A person with no project but rooms never gets here — they see their rooms.
+    noProjectAtAll ? (
+      <div className="flex h-full items-center justify-center px-6 text-center" data-testid="chats-no-project">
+        <p className="text-sm text-muted-foreground">{t('noProjectYet')}</p>
+      </div>
+    ) : (
+      <div className="flex h-full items-center justify-center">
+        <EmptyState title={t('noConversations')} description={t('startNewConversation')} className="w-full max-w-xs" />
+      </div>
+    )
   ) : (
     <div className="space-y-4">
       {dmConvs.length > 0 && (
@@ -975,7 +986,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   if (needsProject) {
     return (
       <div className="flex h-64 items-center justify-center px-6 text-center" data-testid="chats-no-project">
-        <p className="text-sm text-muted-foreground">{t('pickProject')}</p>
+        <p className="text-sm text-muted-foreground">{projectMemberships.length === 0 ? t('noProjectYet') : t('pickProject')}</p>
       </div>
     );
   }

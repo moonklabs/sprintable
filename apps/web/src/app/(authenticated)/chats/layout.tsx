@@ -9,6 +9,7 @@ import { ChatListView } from '@/components/chat/chat-list-view';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { ChatRailProvider, useChatRail } from './chat-rail-context';
+import { isNoProjectAtAll } from './no-project';
 
 /**
  * story #2921 S1(P0-C, 챗 리디자인 시안 §S1) — D04 「Chat 분리=맥락 두동강」 처방 골격.
@@ -35,7 +36,10 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
   const t = useTranslations('chats');
   const tc = useTranslations('common');
   const pathname = usePathname();
-  const { currentTeamMemberId, projectId, projectMemberships, projectPathUnresolved } = useDashboardContext();
+  const dashboardCtx = useDashboardContext();
+  const { currentTeamMemberId, projectId } = dashboardCtx;
+  // a room is filed under a project (until 4846 PR1 lets one be made without): with no project at all «새 대화» would open a window that cannot create
+  const canStartRoom = !isNoProjectAtAll(dashboardCtx);
   const [showModal, setShowModal] = useState(false);
   const { railMode, toggleManualExpand } = useChatRail();
   // story #2921 S6 후속(유나 design:changes 2026-08-22, CI a11y 가드 지적 처방) — overlay는
@@ -51,19 +55,10 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
   // 라우트 전환 UX 그대로 계승).
   const isListRoute = pathname === '/chats';
 
-  // story #4762 (AC2) — «known to have no project» is an answer, not «still loading»: a person with no project at all used to wait on this «Loading…» for ever
-  // (4758: 7 minutes). Say what to do next, in one line. The loading line stays for a person whose own member id is not known yet.
-  // story 4847 (AC1) — a person WITH projects needs none picked to see their rooms: the list is the organization's rooms, not the current project's. So «projects exist but none
-  // is picked» is no longer a stop (the «pick one» line is gone); only «no project at all» still is — there is nothing to file a room under, and nothing to read.
-  const noProjectAtAll = Boolean(currentTeamMemberId) && !projectId && !projectPathUnresolved && projectMemberships.length === 0;
-  if (noProjectAtAll) {
-    return (
-      <div className="flex h-64 items-center justify-center px-6 text-center" data-testid="chats-no-project">
-        <p className="text-sm text-muted-foreground">{t('noProjectYet')}</p>
-      </div>
-    );
-  }
-
+  // story #4762 (AC2) — «known to have no project» is an answer, not «still loading»: a person with no project at all used to wait on this «Loading…» for ever (4758: 7 minutes);
+  // the loading line stays only for a person whose own member id is not known yet.
+  // story 4847 — the layout no longer stops anybody: the list is the organization's rooms, and a person with no project may still have rooms (a room outlives its project).
+  // The «no project yet» line is the LIST's empty state now (chat-list-view.tsx: no project and no room read) — a stop here would keep that person from rooms they have.
   if (!currentTeamMemberId) {
     // story #3788(B-④, 유나 定) — 「없다」 부품(EmptyState)으로 「아직 모른다」(로딩)를 그리지
     // 않는다(3784와 같은 축). 값은 story #3783이 common.loading을 정본화하면 자동으로 따라온다.
@@ -132,10 +127,12 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
       >
         <div className="flex flex-shrink-0 items-center justify-between border-b border-border px-3 py-2.5">
           <h1 id="chat-rail-heading" className="text-sm font-medium text-foreground">{t('title')}</h1>
-          <Button size="sm" variant="outline" onClick={() => setShowModal(true)}>
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
-            {t('newConversation')}
-          </Button>
+          {canStartRoom ? (
+            <Button size="sm" variant="outline" onClick={() => setShowModal(true)}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              {t('newConversation')}
+            </Button>
+          ) : null}
         </div>
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <ChatListView
