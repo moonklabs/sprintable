@@ -157,6 +157,9 @@ async def test_an_agent_follows_its_project_in_a_room_that_has_one():
             await s.commit()
         got = _all(await _seen(Session, w, ids, "agent_participant"))                     # revoked: the room's P1 files close, the project-less room's does not
         assert "chat_none" in got and not ({"chat_p1", "chat_agents_p1"} & got), got
+        # an agent that has P1 but is NOT in the rooms sees none of them (the project-only rule would have shown it the P1 room's file)
+        outside = _all(await _seen(Session, w, ids, "agent_plain"))
+        assert not ({"chat_p1", "chat_agents_p1", "chat_none"} & outside), outside
     finally:
         await engine.dispose()
 
@@ -201,6 +204,29 @@ async def test_the_source_link_of_a_message_is_shown_only_to_someone_who_can_rea
         try:
             async with _client_for(app) as c:
                 r = await c.get(f"/api/v2/assets/{ids.mixed}")
+            assert r.status_code == 200, r.text
+            assert not any(link["type"] == "conversation_message" for link in r.json().get("source_links", [])), r.json()
+        finally:
+            app.dependency_overrides.clear()
+        # a DELETED message is not shown as a source either (self-QA round): the mixed asset stays readable by its project, its deleted message does not
+        from sqlalchemy import text
+
+        app = await _as(Session, w, "participant")
+        try:
+            async with _client_for(app) as c:
+                before = (await c.get(f"/api/v2/assets/{ids.chat_none}")).json().get("source_links", [])
+                assert any(link["type"] == "conversation_message" for link in before), before
+                async with Session() as s:
+                    await s.execute(text(
+                        "UPDATE conversation_messages SET deleted_at = now() WHERE id IN "
+                        "(SELECT source_id FROM asset_links WHERE asset_id = :a AND source_type = 'conversation_message')"
+                    ), {"a": ids.chat_none})
+                    await s.execute(text(
+                        "INSERT INTO asset_links (id, asset_id, org_id, source_type, source_id) "
+                        "SELECT gen_random_uuid(), :a, org_id, 'story', gen_random_uuid() FROM assets WHERE id = :a"
+                    ), {"a": ids.chat_none})
+                    await s.commit()
+                r = await c.get(f"/api/v2/assets/{ids.chat_none}")
             assert r.status_code == 200, r.text
             assert not any(link["type"] == "conversation_message" for link in r.json().get("source_links", [])), r.json()
         finally:
@@ -255,6 +281,19 @@ async def test_a_loop_cannot_file_another_rooms_file_under_the_project_rule():
             await s.commit()
         # and the asset did NOT become readable to the outsider through the new link of the participant? it did become MIXED: the participant chose to file it
         # under the loop of P1 — that is a deliberate share by someone who can read it, the same as downloading and uploading it again.
+        # self-QA round: once the asset is DELETED, the loop's artifact list no longer carries it (it used to keep reading a deleted file through the link)
+        from app.services.loop import list_loop_artifacts
+
+        async with Session() as s:
+            listed = [a for g in await list_loop_artifacts(s, w.org, loop.id) for a in g.artifacts]
+            assert {a.asset_id for a in listed} == {ids.chat_p1, ids.plain_p1} and all(a.content_type is not None for a in listed)
+            await s.execute(_text("UPDATE assets SET deleted_at = now() WHERE id = :a"), {"a": ids.chat_p1})
+            await s.commit()
+        async with Session() as s:
+            listed = [a for g in await list_loop_artifacts(s, w.org, loop.id) for a in g.artifacts]
+            by_asset = {a.asset_id: a for a in listed}
+            assert by_asset[ids.chat_p1].content_type is None and by_asset[ids.chat_p1].text_content is None, by_asset      # the deleted file is not read
+            assert by_asset[ids.plain_p1].content_type is not None, by_asset
     finally:
         await engine.dispose()
 
@@ -475,6 +514,7 @@ async def test_a_copy_that_names_another_project_than_its_origin_is_nobodys_and_
         ids = SimpleNamespace(good=good, odd=odd, chat_deck=chat_deck)
         assert _three(await _seen(Session, w, ids, "participant")) == {"good", "chat_deck"}
         assert _three(await _seen(Session, w, ids, "member_outside")) == set()
+        assert "odd" not in _three(await _seen(Session, w, ids, "lost_project"))   # a person who HAS the copy's project (P2) does not get a copy that names it
 
         async with Session() as s:                                            # every message that carries the origin is deleted
             await s.execute(text(

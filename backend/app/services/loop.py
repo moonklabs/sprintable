@@ -283,7 +283,7 @@ async def list_loop_artifacts(
     assets_by_id: dict[uuid.UUID, Asset] = {}
     if asset_ids:
         assets = (await session.execute(
-            select(Asset).where(Asset.id.in_(asset_ids), Asset.org_id == org_id)
+            select(Asset).where(Asset.id.in_(asset_ids), Asset.org_id == org_id, Asset.deleted_at.is_(None))   # a deleted asset is not read through a loop link either
         )).scalars().all()
         assets_by_id = {a.id: a for a in assets}
 

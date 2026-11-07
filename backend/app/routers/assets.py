@@ -420,7 +420,7 @@ async def _enrich(
         select(ConversationMessage.id, ConversationMessage.conversation_id, ConversationMessage.content)
         .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
         .where(
-            ConversationMessage.id.in_(by_type["conversation_message"]),
+            ConversationMessage.id.in_(by_type["conversation_message"]), ConversationMessage.deleted_at.is_(None),
             Conversation.org_id == org_id, msg_scope,
         )
     )).all() if by_type.get("conversation_message") and (accessible or room_ctx is not None) else []
