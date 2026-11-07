@@ -36,6 +36,7 @@ import { ReleaseNotesProvider } from '@/components/release-notes/release-notes-g
 import { RefreshProvider } from '@/contexts/refresh-context';
 import { TeamPresenceToggleProvider } from '@/components/presence/team-presence-toggle';
 import { ActivationChecklistBanner } from '@/components/dashboard/activation-checklist-banner';
+import { useShellListScrollMemory } from '@/hooks/use-shell-list-scroll-memory';
 import { OrgHintBanner } from '@/components/nav/org-hint-banner';
 import { ReclaimNoticeAlert } from '@/components/auth/reclaim-notice';
 import type { OrgSwitcherItem } from '@/components/nav/unified-switcher';
@@ -242,10 +243,12 @@ function ScrollShell({
   navV3Flags?: NavV3Flags;
   children: React.ReactNode;
 }) {
-  const { setScrollContainer } = useTopBar();
+  const { setScrollContainer, scrollContainer } = useTopBar();
   const setRef = useCallback((el: HTMLDivElement | null) => {
     setScrollContainer(el);
   }, [setScrollContainer]);
+  // story 4853 — a chat room scrolls this column down; coming back, the list must be where it was left (not scrolled down by the onboarding box's height)
+  useShellListScrollMemory(scrollContainer, usePathname());
   const t = useTranslations('presence');
   // 2505d27d: 상시 팀 presence 패널 — 2xl=inline right-rail / <2xl=drawer. storageKey로 open 영속.
   const panel = useContextualPanelState({ storageKey: 'team-presence', defaultOpen: true });
