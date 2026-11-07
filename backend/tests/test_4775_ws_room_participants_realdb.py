@@ -89,8 +89,8 @@ def world():
         f"totp_fail_count) VALUES {_user(UA, 'A')},{_user(UB, 'B')},{_user(UC, 'C')},{_user(UO, 'Owner')}",
         f"INSERT INTO projects (id,org_id,name,slug,violation_level) VALUES ('{PROJ}','{ORG}','P','d4775c-proj','warn')",
         f"INSERT INTO org_members (id,org_id,user_id,role) VALUES (gen_random_uuid(),'{ORG}','{UO}','owner')",
-        f"INSERT INTO org_members (id,org_id,user_id,role) VALUES (gen_random_uuid(),'{ORG}','{UA}','member')",
-        f"INSERT INTO org_members (id,org_id,user_id,role) VALUES (gen_random_uuid(),'{ORG}','{UB}','member')",
+        f"INSERT INTO org_members (id,org_id,user_id,role) VALUES ('{MA}','{ORG}','{UA}','member')",  # org_member id == member id (0075 — the production invariant; REST resolves a person without a project row to the org_member id)
+        f"INSERT INTO org_members (id,org_id,user_id,role) VALUES ('{MB}','{ORG}','{UB}','member')",
         f"INSERT INTO org_members (id,org_id,user_id,role) VALUES (gen_random_uuid(),'{ORG}','{UC}','member')",
         f"INSERT INTO members (id,org_id,user_id,type,name,is_active) VALUES ('{MA}','{ORG}','{UA}','human','A',true)",
         f"INSERT INTO members (id,org_id,user_id,type,name,is_active) VALUES ('{MB}','{ORG}','{UB}','human','B',true)",
@@ -373,7 +373,7 @@ def test_the_socket_judge_answers_like_rests_can_read_conversation(world, client
                     rest = await conv_router._can_read_conversation(dm_a, db, auth, ORG)
                     sock = await socket_can_read_conversation(db, dm_a, ORG, member_id=member_id, access_user_id=access_uid, via_agent_key=via_key)
                     out[who] = (rest, sock)
-                # grant-loss: A is still a participant of the DM row-wise, but A's project access is gone — REST refuses, so must the socket
+                # grant-loss (story #4846, AC2): A is still a participant and being in the room is what reads it — REST and the socket both still allow
                 await db.execute(text(f"DELETE FROM project_access WHERE member_id='{MA}'"))
                 await db.commit()
                 auth, member_id, access_uid, via_key = cases["A (a participant)"]
@@ -387,7 +387,7 @@ def test_the_socket_judge_answers_like_rests_can_read_conversation(world, client
     got = _run(_both())
     assert got == {
         "A (a participant)": (True, True), "B (same agent, other DM)": (False, False), "the agent X by its key": (True, True),
-        "A after A's project grant is revoked": (False, False),
+        "A after A's project grant is revoked": (True, True),
     }, got
 
 
@@ -408,8 +408,9 @@ def test_the_channel_deliver_route_has_the_same_project_gate(world, client, monk
 
 # ── codex round 1: the checks that must hold LIVE, and the other doors ──────────────────────────────────────────────────────
 
-def test_a_person_whose_project_access_is_removed_after_connecting_is_not_kept(world, client):
-    """the connect gate is not the only moment: every line is judged for its sender too — REST would 403 this person now"""
+def test_a_participant_whose_project_access_is_removed_after_connecting_is_kept(world, client):
+    """story #4846 (AC2): every line is still judged for its sender, and the judge is REST's: a participant who lost the project keeps the room,
+    so the line is saved and heard (it used to be refused: the old `participant ∧ project access` rule)"""
     _make_dm(client, UA)
     dm_a = _dm_of(MA)
     with client.websocket_connect(_url_human(UA)) as wa:
@@ -417,9 +418,8 @@ def test_a_person_whose_project_access_is_removed_after_connecting_is_not_kept(w
         assert _recv_until(wa, "before-revoke")[-1]["content"] == "before-revoke"
         _run(_exec(f"DELETE FROM project_access WHERE member_id='{MA}'"))
         _say(wa, "AFTER-REVOKE")
-        got = json.loads(_rt(wa))
-        assert got == {"error": "forbidden"}
-    assert "AFTER-REVOKE" not in _saved_in(dm_a)
+        assert _recv_until(wa, "AFTER-REVOKE")[-1]["content"] == "AFTER-REVOKE"
+    assert "AFTER-REVOKE" in _saved_in(dm_a)
 
 
 def test_the_channel_route_scopes_a_new_dm_to_a_project_the_caller_reaches(world, client, monkeypatch):
@@ -503,7 +503,7 @@ def test_a_group_conversation_line_over_rest_reaches_its_participants_only(world
 def test_the_judge_fails_closed_never_open(world, client, monkeypatch):
     """`socket_can_read_conversation` answers False when it cannot tell: no such conversation · the project rule blows up · the database
     itself fails. (A judge that answers True on an exception sends a person's line to everyone in the room.)"""
-    from app.services import project_auth
+    from app.services import conversation_auth
     from app.services.conversation_auth import socket_can_read_conversation
 
     _make_dm(client, UA)
@@ -527,8 +527,8 @@ def test_the_judge_fails_closed_never_open(world, client, monkeypatch):
                 async def _boom(*a, **k):
                     raise RuntimeError("project rule failure")
 
-                monkeypatch.setattr(project_auth, "has_project_access", _boom)
-                out["the project rule blows up"] = await _ask(db, dm_a)
+                monkeypatch.setattr(conversation_auth, "conversation_project", _boom)  # story #4846: the judge's own first read (the project rule is gone)
+                out["the judge's own read blows up"] = await _ask(db, dm_a)
                 monkeypatch.undo()
                 out["the database fails"] = await _ask(_BrokenDb(), dm_a)
         finally:
@@ -537,13 +537,13 @@ def test_the_judge_fails_closed_never_open(world, client, monkeypatch):
 
     assert _run(_run_cases()) == {
         "control: a participant with access": True, "no such conversation": False,
-        "the project rule blows up": False, "the database fails": False,
+        "the judge's own read blows up": False, "the database fails": False,
     }
 
 
 def test_a_judgment_that_blows_up_keeps_nothing_and_sends_nothing(world, client, monkeypatch):
     """A's line meets a project rule that raises: it is not saved, no other socket hears it, A's socket ends (4003)"""
-    from app.services import project_auth
+    from app.services import conversation_auth
 
     _make_dm(client, UA)
     dm_a = _dm_of(MA)
@@ -552,7 +552,7 @@ def test_a_judgment_that_blows_up_keeps_nothing_and_sends_nothing(world, client,
         raise RuntimeError("project rule failure")
 
     with client.websocket_connect(_url_human(UA)) as wa, client.websocket_connect(_url_human(UO)) as wo, client.websocket_connect(_url_agent()) as wx:
-        monkeypatch.setattr(project_auth, "has_project_access", _boom)
+        monkeypatch.setattr(conversation_auth, "conversation_project", _boom)  # story #4846: the judge's own first read (the project rule is gone)
         _say(wa, "FAIL-CLOSED")
         assert json.loads(_rt(wa)) == {"error": "forbidden"}
         monkeypatch.undo()

@@ -171,6 +171,7 @@ async def test_delete_project_200():
     try:
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = _mock_project()
+        mock_result.first.return_value = None  # story #4846: no chat attachment in the project's rooms (the repository asks before it deletes)
         session.execute = AsyncMock(return_value=mock_result)
         session.delete = AsyncMock()
         session.flush = AsyncMock()
@@ -192,6 +193,7 @@ def _found_session():
     session = AsyncMock()
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = _mock_project()
+    mock_result.first.return_value = None  # story #4846: no chat attachment in the project's rooms
     session.execute = AsyncMock(return_value=mock_result)
     session.delete = AsyncMock()
     session.flush = AsyncMock()

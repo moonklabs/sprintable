@@ -34,7 +34,7 @@ from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext
+from app.dependencies.auth import AuthContext, ServerIssuedAuth
 from app.models.chat_command_audit_log import ChatCommandAuditLog
 from app.models.conversation import Conversation, ConversationMessage
 from app.models.pm import Story
@@ -126,7 +126,7 @@ def _synthetic_auth_for_sender(sender, org_id: uuid.UUID) -> AuthContext:
     agent는 자기 team_member.id를 그대로 실으면 실제 인증 경로와 동일 권한이 재현된다."""
     sender_type = getattr(sender, "type", None)
     if sender_type == "agent":
-        return AuthContext(
+        return ServerIssuedAuth(
             user_id=str(sender.id), email=None,
             claims={"app_metadata": {"api_key_id": "chat-server-command"}}, org_id=str(org_id),
         )

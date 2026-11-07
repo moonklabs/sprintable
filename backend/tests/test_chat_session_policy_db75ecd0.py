@@ -64,6 +64,7 @@ async def _call_update(title, conv_obj, participant):
     session.refresh = AsyncMock()
 
     auth = MagicMock(); auth.user_id = str(uuid.uuid4())
+    auth.claims = {}  # story #4846: a PERSON (a mock's attribute would read as an agent key's claims: the agent's-project check asks the database)
     requester = MagicMock(); requester.id = uuid.uuid4()
     with patch("app.routers.conversations._resolve_member", new=AsyncMock(return_value=requester)):
         return await update_conversation(

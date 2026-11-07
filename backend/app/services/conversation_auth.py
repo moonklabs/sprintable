@@ -21,16 +21,20 @@
 
 ## 판정 논리(캐노니컬)
 
-  readable(conv) ⟺ (participant(conv) ∧ project_access_valid(conv.project))
-                  ∨ (¬has_human_participant(conv) ∧ admin_bypass_eligible(conv.project))
+  readable(conv) ⟺ participant(conv)
+                  ∨ (¬has_human_participant(conv) ∧ admin_bypass_eligible(conv))
+
+story #4846 (E-ORG-CHAT): a room belongs to the organization and its project is a label (possibly none), so the participant branch no longer asks a
+PERSON «may you reach the room's project NOW» — being in the room is what reads it. (Before: `participant ∧ project_access_valid`.) The one
+intended difference for rooms that have a project: a PERSON who lost access to the project still reads the room.
+An AGENT is different (owner decision, AC12): revoking an agent's access to a project is the user stopping that agent there, so in a room WITH a
+project an agent participant needs its project access (`agent_project_valid`); the participant row is kept, so granting it again brings the room back.
+A room without a project asks nothing more of an agent than being in it. The admin bypass is
+unchanged for a room with a project (its project's admin for an agent; an org owner/admin for a person), and for a room WITHOUT a project it is
+the organization's owner/admin for a person and nobody for an agent (an agent holds no organization-wide role).
 
 - `participant`: `conversation_participants`에 caller_member_id 행이 있는가(원시 참가 행 —
   참가 당시 스냅샷).
-- `project_access_valid`: **참가 당시가 아니라 지금** caller가 그 project에 접근 가능한가
-  (project_access 회수 = 참가 행이 남아있어도 더 이상 못 읽음 — 3회차 이전 pass가 확립한
-  B1 grant-loss 하드닝. 이 4회차 스펙 문구("participant OR ...")는 이를 축약 표기한 것으로
-  해석해 계속 강제한다 — 문구 그대로 "participant 원시 행만 있으면 통과"로 완화하면 기존
-  하드닝의 조용한 회귀가 된다).
 - `has_human_participant`: 참가자 중 agent로 확정되지 않은 멤버가 하나라도 있으면 True(보수적
   — `_conversation_has_human_participant`와 동형). True면 admin-bypass 자체가 아예 적용 안
   된다(휴먼 참가 = private, 사적 DM/그룹 프라이버시 carve-out).
@@ -42,13 +46,8 @@
   org-admin 여부·admin-project 집합을 정확히 1회 해소하는 것" 자체가 아니다(이건 이미
   `accessible_project_ids_in_org` 1회 호출과 동일 원칙 — doc-source 인가에도 그대로 쓰인다).
 
-`project_access_valid`/`admin_bypass_eligible`을 이 함수 내부에서 계산하지 않고 파라미터로
-받는 이유: 두 소비자가 이 값을 얻는 방식이 다르다(단건은 `has_project_access` 스칼라 호출,
-벌크는 `accessible_project_ids_in_org` bulk 집합의 `.in_()` 멤버십) — "판정 로직의 불리언
-구조"(participant∧valid ∨ ¬human∧admin)만 SSOT면 되고, 그 안의 원자 조건을 어떻게
-싸게/정확하게 구하느냐는 호출 컨텍스트의 재량이다(산티아고 요구사항 2의 명시적 escape
-hatch: "핵심 불리언 로직을 이 공유 빌더가 담당하면 됨, project_id/human-participant
-pre-fetch까지 통일할 필요는 없음").
+`admin_bypass_eligible`을 이 함수 내부에서 계산하지 않고 파라미터로 받는 이유: 두 소비자(단건·벌크)가 이 값을 얻는 방식이 다르다 — "판정 로직의 불리언
+구조"(participant ∨ ¬human∧admin)만 SSOT면 되고, 그 안의 원자 조건을 어떻게 싸게/정확하게 구하느냐는 호출 컨텍스트의 재량이다.
 """
 from __future__ import annotations
 
@@ -73,8 +72,8 @@ def conversation_readable_predicate(
     conv_id_col: ColumnElement,
     *,
     caller_member_id: uuid.UUID,
-    project_access_valid: "BoolExpr | bool",
     admin_bypass_eligible: "BoolExpr | bool",
+    agent_project_valid: "BoolExpr | bool" = True,
 ) -> BoolExpr:
     """canonical read predicate — 모듈 docstring 참조. 이 함수가 SSOT, 나머지는 전부 소비자.
 
@@ -87,8 +86,7 @@ def conversation_readable_predicate(
     `caller_member_id`: `conversation_participants.member_id`/`project_access.member_id`가
     실제로 참조하는 값(휴먼=team_member 뷰 투영 id=members.id, 에이전트=members.id 직접).
 
-    `project_access_valid`/`admin_bypass_eligible`: bool 리터럴 또는 correlated
-    `ColumnElement[bool]` 둘 다 허용(단건은 보통 전자, 벌크는 후자).
+    `admin_bypass_eligible`: bool 리터럴 또는 correlated `ColumnElement[bool]` 둘 다 허용(단건은 보통 전자, 벌크는 후자).
     """
     is_participant = (
         select(1)
@@ -116,13 +114,65 @@ def conversation_readable_predicate(
         .exists()
     )
 
-    pav = _as_bool_expr(project_access_valid)
     abe = _as_bool_expr(admin_bypass_eligible)
 
     return or_(
-        and_(is_participant, pav),
+        and_(is_participant, _as_bool_expr(agent_project_valid)),
         and_(~has_human_participant, abe),
     )
+
+
+async def conversation_project(db, conversation_id: uuid.UUID, org_id: uuid.UUID) -> tuple[bool, uuid.UUID | None]:
+    """story #4846 — `(exists, project_id)` of an organization's conversation. A room may have no project, so «project_id is None» no longer
+    means «no such room»: callers that used `scalar_one_or_none()` of the project id as an existence test must ask here."""
+    from app.models.conversation import Conversation
+
+    row = (await db.execute(
+        select(Conversation.id, Conversation.project_id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+    )).first()
+    return (False, None) if row is None else (True, row[1])
+
+
+async def agent_project_valid_for_room(db, *, caller_is_agent: bool, caller_id: uuid.UUID, conv_project_id: uuid.UUID | None, org_id: uuid.UUID) -> bool:
+    """AC12 — the `agent_project_valid` atom of the predicate for ONE caller: true for a person and for a room without a project; for an agent in a room
+    with a project, whether the agent has that project NOW (the one `has_project_access`)."""
+    if not caller_is_agent or conv_project_id is None:
+        return True
+    from app.services.project_auth import has_project_access
+
+    return bool(await has_project_access(db, caller_id, conv_project_id, org_id))
+
+
+def agent_room_admin_bypass(conv_project_id: uuid.UUID | None, *, caller_id, org_id: uuid.UUID) -> BoolExpr:
+    """The agent branch of `admin_bypass_eligible`: an owner/admin grant on the room's project; a room without a project has none (an agent holds
+    no organization-wide role)."""
+    from sqlalchemy import literal
+
+    from app.services.project_auth import project_admin_valid_correlated
+
+    if conv_project_id is None:
+        return false()
+    return project_admin_valid_correlated(literal(conv_project_id), caller_id=caller_id, org_id=org_id)
+
+
+async def socket_owner_is_in_org(db, *, org_id: uuid.UUID, member_id: uuid.UUID, access_user_id: uuid.UUID, via_agent_key: bool) -> bool:
+    """story #4846 — the same fact REST's `_resolve_member` establishes before it asks the predicate: the caller is someone of THIS organization (an
+    agent: its team_members row; a person: a team_members row of the organization or a live org_members row). The participant row alone is not
+    enough — a person who left the organization may still have one — and before this story the project-access atom answered it for the socket."""
+    from app.models.project import OrgMember
+
+    if via_agent_key:
+        return (await db.execute(
+            select(1).where(TeamMember.id == member_id, TeamMember.org_id == org_id).limit(1)
+        )).first() is not None
+    in_team = (await db.execute(
+        select(1).where(TeamMember.user_id == access_user_id, TeamMember.org_id == org_id).limit(1)
+    )).first() is not None
+    if in_team:
+        return True
+    return (await db.execute(
+        select(1).where(OrgMember.org_id == org_id, OrgMember.user_id == access_user_id, OrgMember.deleted_at.is_(None)).limit(1)
+    )).first() is not None
 
 
 async def socket_can_read_conversation(
@@ -136,36 +186,37 @@ async def socket_can_read_conversation(
 ) -> bool:
     """story #4775 — may THIS socket's person/agent be sent a line of this conversation?  The same question REST answers for
     `GET /conversations/{id}/messages` (`routers/conversations.py::_can_read_conversation`), asked with what a socket knows about its owner
-    instead of an `AuthContext`: the boolean structure is the one SSOT above (`conversation_readable_predicate`), the project-access atom is
-    the one `has_project_access`, the admin-bypass atom the one correlated pair (`org_admin_valid_correlated` for a person,
-    `project_admin_valid_correlated` for an agent key) — nothing is re-derived here.
+    instead of an `AuthContext`: the boolean structure is the one SSOT above (`conversation_readable_predicate`), the admin-bypass atom the one
+    correlated pair (`org_admin_valid_correlated` for a person, `agent_room_admin_bypass` for an agent key) — nothing is re-derived here.
 
-    `member_id` is what `conversation_participants.member_id` holds for the socket's owner; `access_user_id` is what `has_project_access`
-    takes (the person's user id; the agent's member id for a key socket). A total predicate: any failure answers False (a line is only ever
+    `member_id` is what `conversation_participants.member_id` holds for the socket's owner; `access_user_id` is the person's user id (the
+    agent's member id for a key socket). A total predicate: any failure answers False (a line is only ever
     sent to a socket that was positively found allowed).
     """
     from sqlalchemy import literal
 
-    from app.models.conversation import Conversation
-    from app.services.project_auth import has_project_access, org_admin_valid_correlated, project_admin_valid_correlated
+    from app.services.project_auth import org_admin_valid_correlated
 
     try:
-        conv_project_id = (await db.execute(
-            select(Conversation.project_id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
-        )).scalar_one_or_none()
-        if conv_project_id is None:
+        found, conv_project_id = await conversation_project(db, conversation_id, org_id)
+        if not found:
+            return False
+        if not await socket_owner_is_in_org(
+            db, org_id=org_id, member_id=member_id, access_user_id=access_user_id, via_agent_key=via_agent_key,
+        ):
             return False
         admin_bypass_eligible = (
-            project_admin_valid_correlated(literal(conv_project_id), caller_id=member_id, org_id=org_id)
+            agent_room_admin_bypass(conv_project_id, caller_id=member_id, org_id=org_id)
             if via_agent_key
             else org_admin_valid_correlated(caller_id=access_user_id, org_id=org_id)
         )
-        project_access_valid = await has_project_access(db, access_user_id, conv_project_id, org_id)
         predicate = conversation_readable_predicate(
             literal(conversation_id),
             caller_member_id=member_id,
-            project_access_valid=project_access_valid,
             admin_bypass_eligible=admin_bypass_eligible,
+            agent_project_valid=await agent_project_valid_for_room(
+                db, caller_is_agent=via_agent_key, caller_id=access_user_id, conv_project_id=conv_project_id, org_id=org_id,
+            ),
         )
         return bool((await db.execute(select(predicate))).scalar_one())
     except Exception:  # noqa: BLE001 — total predicate: «cannot tell» is «no»

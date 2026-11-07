@@ -177,7 +177,7 @@ async def resolve_conversation_webhook_targets(
     db,
     *,
     org_id: uuid.UUID,
-    project_id: uuid.UUID,
+    project_id: uuid.UUID | None,
     sender_id: uuid.UUID | None,
     authorized_member_ids: set[uuid.UUID],
 ) -> list[_WebhookTarget]:
@@ -219,7 +219,9 @@ async def resolve_conversation_webhook_targets(
     member_ids_for_webhook = [mid for mid in authorized_member_ids if mid is not None and mid != sender_id]
 
     # 프로젝트-스코프 활성 webhook + 참가자 게이팅(c2dfb823).
-    wh_rows = (await db.execute(
+    # story #4846: a room without a project has no project scope — only the member-bound webhooks below reach it (`project_id == None` would
+    # have read as IS NULL and pulled in every organization-wide webhook for a room that belongs to no project).
+    wh_rows = [] if project_id is None else (await db.execute(
         select(WebhookConfig).where(
             WebhookConfig.org_id == org_id,
             WebhookConfig.project_id == project_id,
@@ -255,7 +257,7 @@ async def deliver_conversation_message_webhook(
     message_id: uuid.UUID,
     conversation_id: uuid.UUID,
     org_id: uuid.UUID,
-    project_id: uuid.UUID,
+    project_id: uuid.UUID | None,
     sender_id: uuid.UUID | None,
     thread_id: uuid.UUID | None,
     created_at: datetime,
@@ -361,7 +363,7 @@ async def deliver_conversation_message_webhook(
                 "mentioned_ids": mentioned_id_strs,
                 "content": effective_content,
                 # d0bca260: BYOA 어댑터 컨텍스트(additive top-level).
-                "project_id": str(project_id),
+                "project_id": str(project_id) if project_id is not None else None,
                 "org_id": str(org_id),
                 "conversation_title": conv_title,
                 "sender_name": sender_name,
