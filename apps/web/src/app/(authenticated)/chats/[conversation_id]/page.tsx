@@ -114,7 +114,8 @@ export default function ConversationPage() {
   const [metaRaw, setMeta] = useState<(ConversationMeta & { convId: string }) | null>(null);
   const meta = metaRaw && metaRaw.convId === conversation_id ? metaRaw : null;
   const conversationIdRef = useRef(conversation_id);
-  conversationIdRef.current = conversation_id;
+  // the ref follows the route in an effect (declared before the effect that reads the room, so it is current when that one runs)
+  useEffect(() => { conversationIdRef.current = conversation_id; }, [conversation_id]);
   const [showAddParticipant, setShowAddParticipant] = useState(false);
   const [showDeliveryContract, setShowDeliveryContract] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);

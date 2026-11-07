@@ -600,7 +600,6 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   }, [fetchConversations, filterReady]);
 
   // story 4847 (AC1) — the tab's stored filter, read after mount (the storage is not readable while hydrating) and only kept when it still names one of the person's projects.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     let stored = '';
     try { stored = window.sessionStorage.getItem(CHAT_PROJECT_FILTER_KEY) ?? ''; } catch { /* storage unavailable — «all» */ }

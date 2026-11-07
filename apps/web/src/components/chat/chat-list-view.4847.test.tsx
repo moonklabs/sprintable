@@ -97,7 +97,6 @@ async function mount(props: Partial<React.ComponentProps<typeof ChatListView>> =
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
-const rowButtons = () => [...container.querySelectorAll('button')].filter((b) => b.querySelector('[data-testid="room-project"]') || /방$/.test(b.textContent ?? ''));
 const filterSelect = () => container.querySelector('[data-testid="project-filter"]') as HTMLSelectElement | null;
 async function chooseFilter(value: string) {
   await act(async () => {
