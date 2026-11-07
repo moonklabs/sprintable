@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextvars
 import logging
 import re
+import time
 from typing import Any
 
 import httpx
@@ -64,6 +65,30 @@ def reset_api_key_override(token) -> None:
 # http 미들웨어가 요청경계서 ensure_auth_context(key) 로 1회 해소·캐시 → 명시 project_id 없는 툴도 그 키의
 # default 로 해소(stdio startup resolve_auth_context 와 parity). 싱글톤 self._* 에 쓰지 않아 테넌트 격리(무블리드).
 _auth_ctx_cache: dict[str, dict[str, str]] = {}
+# story 4849 — a key found revoked is dropped from the cache, and every key check of that key that is STILL IN FLIGHT is marked, so a check that found the key good before it was revoked
+# cannot put the entry back when it finishes. Only checks in flight are held (removed when each ends), so nothing grows with the number of keys seen.
+_inflight_checks: dict[str, set[object]] = {}
+_invalidated_checks: set[object] = set()
+# story 4849 — when each cached key was last CHECKED with the server, and how long that check is trusted. A key that passed once and was revoked afterwards is refused on the first request
+# after this window (not at the next restart); inside the window the cached context is served without asking the backend, as before.
+_auth_checked_at: dict[str, float] = {}
+AUTH_RECHECK_SECONDS = 60.0
+
+
+def set_cached_default_project(key: str, project_id: str) -> None:
+    """story 4849 — what `set_default_project` does to the cache of one key: the cached default changes, and every check of that key still in flight (it read the OLD default
+    from the server) is marked so that it cannot put the old default back when it ends."""
+    ctx = _auth_ctx_cache.get(key)
+    if ctx is not None:
+        ctx["project_id"] = project_id
+        ctx["is_project_ambiguous"] = False
+    _invalidated_checks.update(_inflight_checks.get(key, ()))
+
+
+def _forget_key(key: str) -> None:
+    _auth_ctx_cache.pop(key, None)
+    _auth_checked_at.pop(key, None)
+    _invalidated_checks.update(_inflight_checks.get(key, ()))
 
 # 백엔드 에러 본문을 MCP 에러 문자열에 노출할 때, 비정상적으로 큰 body가
 # 에이전트 컨텍스트를 잠식하지 않도록 자르는 상한.
@@ -105,6 +130,35 @@ class SprintableApiError(Exception):
         self.code = code or _derived_code
         self.message = stripped_message
         self.detail = body
+
+
+# story 4849 — what a person reads when the API key cannot be checked. Two different truths, two different lines:
+#  · the server said the key is not one it knows (401 / 403): wrong, mistyped or revoked — the person needs a NEW key, and a wrong key and a revoked key read the same
+#    (the server must not say which keys ever existed);
+#  · the server could not be asked (5xx, timeout, no connection): the key may be fine — the person must NOT be told to make a new one.
+# The key itself is never part of a line, a log message or an exception text.
+INVALID_KEY_LINE = (
+    "The API key is wrong or has been revoked. Get a new key in Sprintable: Agents → Recruit. "
+    "/ API 키가 틀렸거나 지워졌습니다. Sprintable의 Agents → Recruit에서 새 키를 받으세요."
+)
+UNREACHABLE_LINE = (
+    "The Sprintable server could not be reached to check the API key (it may be down for a moment) — the key is not at fault; try again shortly. "
+    "/ 키를 확인하려고 Sprintable 서버에 닿지 못했습니다(잠깐 아플 수 있음) — 키 탓이 아니니 잠시 뒤 다시 해 보세요."
+)
+
+
+class InvalidApiKey(SprintableApiError):
+    """The server does not know this key (401 / 403 on the key check)."""
+
+    def __init__(self, status: int = 401) -> None:
+        super().__init__(status, INVALID_KEY_LINE, None, code="INVALID_API_KEY")
+
+
+class ServerUnreachable(SprintableApiError):
+    """The key could not be checked because the server could not be asked (5xx, timeout, connection)."""
+
+    def __init__(self, status: int = 503) -> None:
+        super().__init__(status, UNREACHABLE_LINE, None, code="SERVER_UNREACHABLE")
 
 
 def _format_validation_errors(detail: list) -> str | None:
@@ -238,6 +292,8 @@ class SprintableClient:
         # 문자열), 아래 두 필드는 ambiguous일 때 require_project_id()가 가이드 메시지를 만드는 재료.
         self._project_id_ambiguous: bool = False
         self._accessible_project_ids: list[str] = []
+        # story 4849 — True once the key check of the stdio key has ANSWERED (even with no project at all); «never checked» is a different state from «checked: several / no projects»
+        self._auth_resolved: bool = False
 
     def configure(self, api_url: str, api_key: str) -> None:
         if not api_url:
@@ -247,6 +303,29 @@ class SprintableClient:
         self._base_url = api_url.rstrip("/")
         self._api_key = api_key
 
+    async def _auth_me(self) -> Any:
+        """The key check. 401 / 403 → InvalidApiKey; 5xx, a timeout or no connection → ServerUnreachable; any other failure is left as it was."""
+        try:
+            return await self.get("/api/v2/auth/me")
+        except SprintableApiError as exc:
+            if exc.status in (401, 403):
+                raise InvalidApiKey(exc.status) from None
+            if exc.status >= 500:
+                raise ServerUnreachable(exc.status) from None
+            raise
+        except httpx.TransportError:
+            raise ServerUnreachable() from None
+
+    async def _raise_if_key_revoked(self, key: str) -> None:
+        try:
+            await self.get("/api/v2/auth/me")
+        except SprintableApiError as exc:
+            if exc.status in (401, 403):
+                _forget_key(key)
+                raise InvalidApiKey(exc.status) from None
+        except Exception:  # noqa: BLE001 — transport trouble, an unreadable answer, anything: cannot tell, so the original error stands
+            pass
+
     async def resolve_auth_context(self) -> dict[str, str]:
         """GET /api/v2/auth/me → org_id/project_id/member_id 캐시(stdio 부팅 시 1회).
 
@@ -254,7 +333,8 @@ class SprintableClient:
         (resolved_default_project_id)에서 채운다 — 단일 접근가능 프로젝트 또는 명시
         default_project_id 일 때만 값이 있고, 멀티프로젝트+미설정(ambiguous)이면 빈 문자열(추측
         0). require_project_id() 가 이 ambiguous 상태를 감지해 가이드 에러를 낸다."""
-        data = await self.get("/api/v2/auth/me")
+        data = await self._auth_me()
+        self._auth_resolved = True
         self._member_id = data.get("member_id") or ""
         self._org_id = data.get("org_id") or ""
         self._project_id = data.get("resolved_default_project_id") or ""
@@ -279,25 +359,48 @@ class SprintableClient:
         project_id, ff6cb90d §1)을 그대로 사용(클라 임의선택 0). ambiguous 면 project_id 빈 채로
         둬 호출자가 명시하게 한다(require_project_id() 가 이 상태를 감지해 가이드 에러).
 
-        캐시 수명 = 프로세스. 키의 default project 가 런타임 중 바뀌면 stale 할 수 있으나(재기동 시 해소),
-        parity 가 목표라 TTL 은 의도적으로 두지 않는다(over-engineer 회피). set_default_project 툴이
-        성공 시 이 캐시를 직접 갱신해 재기동 없이도 반영한다.
+        캐시된 컨텍스트는 AUTH_RECHECK_SECONDS(60초) 동안만 «확인된 것»으로 믿는다(story 4849 — 한 번 통과한 키가
+        그 뒤 지워졌을 때 재기동까지 계속 통과하던 틈). 창 안에서는 백엔드를 안 묻는다(기존과 같음). 창이 지난 뒤
+        첫 요청이 다시 /auth/me 를 묻는다: 서버가 키를 모르면 InvalidApiKey, 서버가 아플 뿐이면(5xx·시간 넘김)
+        이미 통과한 키를 쫓아내지 않고 캐시된 값을 그대로 쓴다. set_default_project 툴은 성공 시 이 캐시를 직접 갱신한다.
         """
         if not api_key:
             return {}
         cached = _auth_ctx_cache.get(api_key)
-        if cached is not None:
+        if cached is not None and (time.monotonic() - _auth_checked_at.get(api_key, 0.0)) < AUTH_RECHECK_SECONDS:
             return cached
-        data = await self.get("/api/v2/auth/me")
-        ctx = {
-            "member_id": data.get("member_id") or "",
-            "org_id": data.get("org_id") or "",
-            "project_id": data.get("resolved_default_project_id") or "",
-            "is_project_ambiguous": bool(data.get("is_project_ambiguous")),
-            "accessible_project_ids": data.get("accessible_project_ids") or [],
-        }
-        _auth_ctx_cache[api_key] = ctx
-        return ctx
+        token = object()
+        _inflight_checks.setdefault(api_key, set()).add(token)
+        try:
+            try:
+                data = await self._auth_me()
+            except InvalidApiKey:
+                _forget_key(api_key)   # marks the checks of this key still in flight too: a slower one that succeeds later is not cached
+                raise
+            except ServerUnreachable:
+                if cached is not None:
+                    # the server is ill, not the key: a key that already passed is not turned away for it, and it is asked again in a few seconds, not on every request
+                    _auth_checked_at[api_key] = time.monotonic() - AUTH_RECHECK_SECONDS + 5.0
+                    return cached
+                raise
+            ctx = {
+                "member_id": data.get("member_id") or "",
+                "org_id": data.get("org_id") or "",
+                "project_id": data.get("resolved_default_project_id") or "",
+                "is_project_ambiguous": bool(data.get("is_project_ambiguous")),
+                "accessible_project_ids": data.get("accessible_project_ids") or [],
+            }
+            if token not in _invalidated_checks:   # not put back if the key was found revoked while this check was in flight
+                _auth_ctx_cache[api_key] = ctx
+                _auth_checked_at[api_key] = time.monotonic()
+            return ctx
+        finally:
+            _invalidated_checks.discard(token)
+            running = _inflight_checks.get(api_key)
+            if running is not None:
+                running.discard(token)
+                if not running:
+                    del _inflight_checks[api_key]
 
     def _effective_ctx(self) -> dict[str, str]:
         """현 요청의 effective 키(per-request override ∨ env 단일키)에 해소된 컨텍스트.
@@ -338,6 +441,14 @@ class SprintableClient:
             return pid
         ctx = self._effective_ctx()
         accessible = ctx.get("accessible_project_ids") or self._accessible_project_ids
+        if not ctx and not self._auth_resolved and not accessible and not self._project_id_ambiguous:
+            # story 4849 — nothing was resolved for this key (the check failed, or never ran): that is NOT «several projects» — before this, a key the server did not know was told
+            # «this key can reach several projects», a false guide.
+            raise SprintableApiError(
+                503,
+                "이 키의 프로젝트를 아직 확인하지 못했습니다. 잠시 뒤 다시 해 보세요. / The projects of this key could not be looked up yet; try again shortly.",
+                code="KEY_NOT_CHECKED",
+            )
         raise SprintableApiError(
             400,
             "여러 프로젝트에 접근 가능한 키입니다. project_id를 지정하거나 "
@@ -428,6 +539,11 @@ class SprintableClient:
                     body = resp.text
                 except Exception:
                     body = None
+            if resp.status_code == 401 and path.split("?", 1)[0] != "/api/v2/auth/me":
+                # story 4849 — a 401 is not always about the key (a connector's upstream token answers 401 too). Ask the server whether it still knows THIS key: only if it
+                # says no is this the revoked-after-cached case (same line as at connection time; the cached default is dropped so the next connection is checked again).
+                # Otherwise the original error stands, untouched.
+                await self._raise_if_key_revoked(_key)
             message = _extract_error_message(resp.status_code, body)
             raise SprintableApiError(resp.status_code, message, body, code=_extract_error_code(body))
 
