@@ -156,6 +156,10 @@ INVALID_KEY_LINE = (
     "The API key is wrong or has been revoked. Get a new key in Sprintable: Agents → Recruit. "
     "/ API 키가 틀렸거나 지워졌습니다. Sprintable의 Agents → Recruit에서 새 키를 받으세요."
 )
+# story 4858 — the same sentence for the places that can carry only plain ASCII: the `error_description` of the 401's `WWW-Authenticate` header (RFC 6750 §3). Codex prints that header whole
+# on its one error line and shows nothing of the body, so this is the only place its user can read why the key was turned away. Derived from INVALID_KEY_LINE (one sentence, one source):
+# the English half, with the arrow written as «>» (a header value is ASCII; and it must not hold a double quote or a backslash).
+INVALID_KEY_HEADER_DESCRIPTION = INVALID_KEY_LINE.split(" / ")[0].replace("→", ">")
 UNREACHABLE_LINE = (
     "The Sprintable server could not be reached to check the API key (it may be down for a moment) — the key is not at fault; try again shortly. "
     "/ 키를 확인하려고 Sprintable 서버에 닿지 못했습니다(잠깐 아플 수 있음) — 키 탓이 아니니 잠시 뒤 다시 해 보세요."
