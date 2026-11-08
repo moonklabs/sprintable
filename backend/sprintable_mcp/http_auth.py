@@ -11,6 +11,7 @@ import json
 import logging
 
 from .api_client import (
+    INVALID_KEY_HEADER_DESCRIPTION,
     INVALID_KEY_LINE,
     UNREACHABLE_LINE,
     InvalidApiKey,
@@ -55,7 +56,9 @@ async def _send_json_error(send, status: int, code: str, message: str, extra_hea
 async def _send_401_invalid_key(send) -> None:
     # story 4849 — the key was sent and the server does not know it: wrong, mistyped or revoked (one text for all). 401 on the FIRST request (initialize), so a client shows it before any tool
     # is listed: Claude Code prints «Server rejected the configured Authorization header (HTTP 401) … Error detail: {…message…}».
-    await _send_json_error(send, 401, "invalid_api_key", INVALID_KEY_LINE, [(b"www-authenticate", b'Bearer error="invalid_token"')])
+    # story 4858 — the header carries the sentence too (`error_description`): Codex shows the header and not the body, Claude Code shows the body. The key is in neither.
+    challenge = f'Bearer error="invalid_token", error_description="{INVALID_KEY_HEADER_DESCRIPTION}"'.encode("ascii")
+    await _send_json_error(send, 401, "invalid_api_key", INVALID_KEY_LINE, [(b"www-authenticate", challenge)])
 
 
 async def _send_503_unreachable(send) -> None:
