@@ -85,6 +85,13 @@ describe('[SID:4854] an address with an @ in it (a profile address)', () => {
     expect(hrefs()).toEqual(['https://medium.com/@user/post']);
     expect(container.querySelectorAll('span.font-medium.text-primary')).toHaveLength(0);
   });
+  it('an @ after a query delimiter stays inside the address (plain and markdown link)', async () => {
+    await render('go https://example.com/?x=@alice now');
+    expect(hrefs()).toEqual(['https://example.com/?x=@alice']);
+    await render('[go](https://example.com/?x=@alice)');
+    expect(hrefs()).toEqual(['https://example.com/?x=@alice']);
+    expect(container.querySelectorAll('span.font-medium.text-primary')).toHaveLength(0);
+  });
   it('a real mention beside it is still a mention', async () => {
     await render('https://medium.com/@user/post cc @alice');
     expect(hrefs()).toEqual(['https://medium.com/@user/post']);

@@ -55,6 +55,7 @@ export function splitPlainUrls(text: string): PlainPart[] {
     if (m[0].length > MAX_LINKED_URL) continue; // far longer than any address: left as text
     const url = trimTail(m[0]);
     if (!/^https?:\/\/(?:[A-Za-z0-9]|\[)[^\s/?#]*/i.test(url)) continue; // a host starts with a letter, a digit or `[` (`https://:80` and `https:///x` are not addresses)
+    try { new URL(url); } catch { continue; } // the browser must read it as an address too (`https://a:bad/x` is not one)
     if (at > from) parts.push({ kind: 'text', value: text.slice(from, at) });
     parts.push({ kind: 'url', value: url });
     from = at + url.length;
@@ -64,6 +65,6 @@ export function splitPlainUrls(text: string): PlainPart[] {
 }
 
 /** a mention is an `@name` that starts a word: the «@example» inside `probe@example.org` (or `담롱@example.org`) is not one, and neither is the «@user» of `https://medium.com/@user`.
- *  Not after a letter / digit of any script, `_`, `+`, `-`, `/`, `[` or `(` (the last two: it is already inside a markdown link). A «!» before it is left as it was (`foo!@bar` stays a mention). */
-export const MENTION_RE = /(?<![\p{L}\p{N}_+\-/[(])@([\w가-힣]+)/gu;
-export const HAS_MENTION_RE = /(?<![\p{L}\p{N}_+\-/[(])@[\w가-힣]+/u;
+ *  Not after a letter / mark / digit of any script, `_`, `+`, `-`, `/`, `=`, `?`, `&`, `#`, `[` or `(` (the last two: it is already inside a markdown link). A «!» before it is left as it was (`foo!@bar` stays a mention). */
+export const MENTION_RE = /(?<![\p{L}\p{M}\p{N}_+\-/=?&#[(])@([\w가-힣]+)/gu;
+export const HAS_MENTION_RE = /(?<![\p{L}\p{M}\p{N}_+\-/=?&#[(])@[\w가-힣]+/u;

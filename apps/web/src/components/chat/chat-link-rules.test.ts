@@ -42,7 +42,7 @@ describe('[SID:4854] splitPlainUrls — a plain message cut into text and addres
     expect(texts('a http://one.example/ b https://two.example/')).toEqual(['T:a ', 'URL:http://one.example/', 'T: b ', 'URL:https://two.example/']);
   });
   it('what is not an http(s) address stays text: mailto · javascript: · a bare host · a word that ends in http', () => {
-    for (const s of ['probe@example.org', 'javascript:alert(1)', 'www.example.org/z', 'xhttp://example.org/x', 'https://', 'https:///x', 'https://?q=1', 'https://:80', 'https://:80/x', 'https:// not-a-host', 'plain words only']) expect(splitPlainUrls(s).every((p) => p.kind === 'text'), s).toBe(true);
+    for (const s of ['probe@example.org', 'javascript:alert(1)', 'www.example.org/z', 'xhttp://example.org/x', 'https://', 'https:///x', 'https://?q=1', 'https://:80', 'https://:80/x', 'https://a:bad/x', 'https://.example.org/x', 'https://-a.example/x', 'https:// not-a-host', 'plain words only']) expect(splitPlainUrls(s).every((p) => p.kind === 'text'), s).toBe(true);
   });
 });
 
@@ -52,7 +52,7 @@ describe('[SID:4854] mentions — an @name that starts a word, not the middle of
     expect('hi @alice and @bob'.replace(MENTION_RE, '[@$1](mention:$1)')).toBe('hi [@alice](mention:alice) and [@bob](mention:bob)');
   });
   it('an e-mail address holds no mention', () => {
-    for (const s of ['probe@example.org', 'a.b+c@example.org', 'first-last@example.org', '담롱@example.org', 'https://medium.com/@user', 'https://medium.com/@user/post?x=1']) { expect(HAS_MENTION_RE.test(s), s).toBe(false); expect(s.replace(MENTION_RE, 'X'), s).toBe(s); }
+    for (const s of ['probe@example.org', 'a.b+c@example.org', 'first-last@example.org', '담롱@example.org', 'https://medium.com/@user', 'https://medium.com/@user/post?x=1', 'https://example.com/?x=@alice', 'https://example.com/a&u=@alice', 'https://example.com/#@alice', 'e' + String.fromCharCode(0x301) + '@example.org']) { expect(HAS_MENTION_RE.test(s), s).toBe(false); expect(s.replace(MENTION_RE, 'X'), s).toBe(s); }
     expect('mail probe@example.org or ping @alice'.replace(MENTION_RE, '[@$1](mention:$1)')).toBe('mail probe@example.org or ping [@alice](mention:alice)');
   });
   it('an @name right after [ or ( is left alone, as before (it is already inside a markdown link)', () => {
