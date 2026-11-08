@@ -612,3 +612,33 @@ async def test_re_homing_follows_the_chat_link_not_the_text_of_the_path_and_neve
         assert storage.deleted == []                         # and no stored object was deleted
     finally:
         await engine.dispose()
+
+
+async def test_a_file_that_only_a_doc_or_a_story_carries_goes_with_the_project():
+    """the re-homing decision is «carries a CHAT link», not «carries any link»: a file with a doc link or a story link and no chat link must go with the project — if it were
+    re-homed it would be a file with no project and no chat link, i.e. one the whole organization reads. (A surviving mutant of the lens: `chat_linked_clause` changed to «any
+    link» passed every other test.)"""
+    from sqlalchemy import text
+
+    engine, Session, w = await _world()
+    try:
+        async with Session() as s:
+            for kind, source_type in (("doc", "doc"), ("story", "story"), ("loop", "loop_artifact")):
+                path = f"org/{w.org}/project/{w.p1}/{kind}/{uuid.uuid4()}/only.txt"
+                await s.execute(text(
+                    "INSERT INTO assets (id, org_id, project_id, container, object_path, name, content_type, size_bytes) "
+                    "VALUES (gen_random_uuid(), :o, :p, 'c', :path, 'only.txt', 'text/plain', 3)"
+                ), {"o": w.org, "p": w.p1, "path": path})
+                await s.execute(text(
+                    "INSERT INTO asset_links (id, asset_id, org_id, source_type, source_id) "
+                    "SELECT gen_random_uuid(), id, :o, :t, gen_random_uuid() FROM assets WHERE object_path = :path"
+                ), {"o": w.org, "t": source_type, "path": path})
+            await s.commit()
+            assert (await s.execute(text("SELECT count(*) FROM assets WHERE object_path LIKE '%/only.txt' AND org_id = :o"), {"o": w.org})).scalar_one() == 3
+        resp = await _delete_project(Session, w, w.p1)
+        assert resp.status_code == 200, resp.text
+        async with Session() as s:
+            left = (await s.execute(text("SELECT object_path, project_id FROM assets WHERE object_path LIKE '%/only.txt' AND org_id = :o"), {"o": w.org})).all()
+        assert left == [], left                                   # none re-homed: not one of them became an asset with no project for the whole organization to read
+    finally:
+        await engine.dispose()
