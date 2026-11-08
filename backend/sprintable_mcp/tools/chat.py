@@ -211,16 +211,18 @@ class ListConversationsInput(SprintableInput):
     발견 못 함). `GET /api/v2/conversations`(agent 키 호환 확認 完 — 이 라우터의 다른
     엔드포인트와 동일 `get_current_user` 의존성)를 그대로 노출 — 새 REST·새 인증 0.
 
-    ⚠️이 REST가 받는 파라미터는 project_id(필수)·include_agent_conversations·limit·offset
+    ⚠️이 REST가 받는 파라미터는 project_id(선택 — 거르기만)·include_agent_conversations·limit·offset
     뿐이다(conversations.py::list_conversations 실측) — `since`나 참여자 필터는 API 자체에
     없어 지어내지 않는다(story 처방 2/3은 이 PR 스코프 밖, API 확장이 별도 필요).
 
-    ⚠️PO 변경요청①(2026-09-02, PR#3712 리뷰) — project_id가 REST 필수라(미지정 시 422, PO
-    실측) 이 목록은 «내가 참여한 방 전부»가 아니라 **«기본 프로젝트 안의 내 방»**이다 —
-    다중 프로젝트 org에선 조용히 좁아질 수 있다. `project_id`는 (베이스 클래스 `SprintableInput`
-    상속 필드) 다른 chat 도구와 동형인 선택적 per-call override(E-MCP-OPT ff6cb90d 관례,
-    미지정 시 client.require_project_id() 현행) — 여러 프로젝트를 훑으려면 project_id를
-    바꿔가며 반복 호출할 것."""
+    story #4846 (ORG-CHAT) — 방은 조직의 것이고 프로젝트는 표시다. 이 목록은 **«내가 든 방 전부»**(프로젝트 없는 방 포함)이고, 각 줄이 자기
+    `project_id` / `project_name`(없으면 null)을 말한다. `project_id`(베이스 클래스 필드)를 주면 그 프로젝트의 방만 거르고, 안 주면 조직 전체 —
+    프로젝트가 여럿이어도 오류 없음. «프로젝트 없는 방만»은 `only_without_project=true`."""
+
+    only_without_project: bool = Field(
+        default=False,
+        description="true면 프로젝트가 없는 방만 거른다(project_id와 같이 쓰지 않음). 기본: 조직 안 내 모든 방.",
+    )
 
     include_agent_conversations: bool = Field(
         default=False,
@@ -347,14 +349,24 @@ async def send_chat_message(args: SendChatInput) -> list[TextContent]:
 
 
 async def list_conversations(args: ListConversationsInput) -> list[TextContent]:
-    """내가 참여 중인 conversation 목록 — id·제목·참여자·마지막 메시지·미읽음 수. 알림이 안
+    """내가 든 conversation 목록(프로젝트 없는 방 포함) — id·프로젝트·제목·참여자·마지막 메시지·미읽음 수. 알림이 안
     왔어도(채널 미도달·이벤트 conversation 부재 등) 스스로 «내 앞으로 뭐가 왔는지» 점검하는
     백스톱(story #3331) — id를 몰라도 되는 유일한 대화 발견 경로. `create_conversation`은
     조회가 아니라 매번 새 방을 만드는 도구이니(dedup 없음) 기존 방이 있는지 먼저 이걸로
     확인할 것."""
     try:
-        params: dict = {"project_id": client.require_project_id()}
+        params: dict = {}
+        if args.only_without_project:
+            if args.project_id:
+                raise ValueError("only_without_project와 project_id는 같이 쓸 수 없습니다.")
+            params["project_id"] = "none"
+        elif args.project_id:
+            params["project_id"] = args.project_id
         if args.include_agent_conversations:
+            # an admin's view of the agents' rooms of ONE project (or, with `only_without_project`, of the ones that have no project): it needs the explicit
+            # project, else the key's default — and `none` is kept, never replaced by a default
+            if "project_id" not in params:
+                params["project_id"] = client.require_project_id()
             params["include_agent_conversations"] = "true"
         if args.limit is not None:
             params["limit"] = str(args.limit)
@@ -368,13 +380,15 @@ async def list_conversations(args: ListConversationsInput) -> list[TextContent]:
 async def create_conversation(args: CreateConversationInput) -> list[TextContent]:
     """새 conversation thread **생성**(조회 아님 — dedup 없이 매 호출 신규 방을 만든다, story
     #3331). 이 방이 이미 있는지 확인하고 싶으면 먼저 `list_conversations`를 쓸 것 — 이 도구를
-    조회 우회로 쓰면 빈 방만 하나 더 생긴다."""
+    조회 우회로 쓰면 빈 방만 하나 더 생긴다. `project_id`는 선택(story #4846): 주면 그 프로젝트의 방, 안 주면 키의 기본 프로젝트가 하나면 그것,
+    없으면 프로젝트 없는 방 — 프로젝트가 여럿이어도 오류 없다."""
     try:
-        body: dict = {
-            "type": "group",
-            "participant_ids": args.participant_ids,
-            "project_id": client.require_project_id(),  # E-MCP-OPT ff6cb90d: 무인자+ambiguous 명시 에러.
-        }
+        # story #4846 (AC5): `project_id` is optional — the one given, else the key's default project when it has exactly one, else the room has NO
+        # project (never an «ambiguous» error: a room belongs to the organization, its project is a label).
+        body: dict = {"type": "group", "participant_ids": args.participant_ids}
+        project_id = args.project_id or client.project_id
+        if project_id:
+            body["project_id"] = project_id
         if args.title:
             body["title"] = args.title
         conv = await client.post("/api/v2/conversations", json=body)

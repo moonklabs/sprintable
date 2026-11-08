@@ -41,6 +41,7 @@ async def _seed(session):
     stmts = [
         f"DELETE FROM conversation_participants WHERE conversation_id='{CONV}'",
         f"DELETE FROM conversations WHERE id='{CONV}'",
+        f"DELETE FROM project_access WHERE project_id='{P1}'",
         f"DELETE FROM agent_project_profiles WHERE member_id IN ('{AG_SENDER}','{AG_HERMES}')",
         f"DELETE FROM members WHERE org_id='{ORG}'",
         f"DELETE FROM org_members WHERE org_id='{ORG}'",
@@ -57,6 +58,8 @@ async def _seed(session):
         f"('{AG_HERMES}','{ORG}','agent','HermesBot',true)",
         f"INSERT INTO members (id,org_id,type,user_id,name,is_active) VALUES ('{OM_HUMAN}','{ORG}','human','{U_HUMAN}','H',true)",
         f"UPDATE members SET runtime_type='hermes' WHERE id='{AG_HERMES}'",
+        # story #4846 (AC12): an agent lists a room of a project only with that project — the sender agent holds the grant (a profile alone is a placement, not access)
+        f"INSERT INTO project_access (id,project_id,org_member_id,member_id,permission,role) VALUES (gen_random_uuid(),'{P1}',NULL,'{AG_SENDER}','granted','member')",
         # 에이전트 뷰 출현
         "INSERT INTO agent_project_profiles (id,member_id,project_id,agent_role,fakechat_port) VALUES "
         f"(gen_random_uuid(),'{AG_SENDER}','{P1}','dev',9601),"

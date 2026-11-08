@@ -344,6 +344,13 @@ async def test_create_dm_no_dedup_creates_new_session():
 
 # ─── AC5: GET /conversations — 목록 ─────────────────────────────────────────
 
+def _project_names_result():
+    """story #4846: the list reads the listed rooms' project names in one batch (a row = (project id, name)); none here."""
+    r = MagicMock()
+    r.all.return_value = []
+    return r
+
+
 @pytest.mark.anyio
 async def test_list_conversations():
     """GET /api/v2/conversations → data 배열 반환."""
@@ -386,7 +393,7 @@ async def test_list_conversations():
 
         session.execute = AsyncMock(side_effect=[
             member_result, conv_ids_result, total_result,
-            convs_result, p_rows_result, unread_result, approval_rows_result, latest_msg_result,
+            convs_result, p_rows_result, unread_result, approval_rows_result, _project_names_result(), latest_msg_result,  # story #4846: + the rooms' project names
         ])
 
         async with client as c:
@@ -440,7 +447,7 @@ async def test_list_conversations_latest_message_exposes_event_field():
 
         session.execute = AsyncMock(side_effect=[
             member_result, conv_ids_result, total_result,
-            convs_result, p_rows_result, unread_result, approval_rows_result, latest_msg_result,
+            convs_result, p_rows_result, unread_result, approval_rows_result, _project_names_result(), latest_msg_result,  # story #4846: + the rooms' project names
         ])
 
         async with client as c:
@@ -486,7 +493,7 @@ async def test_list_conversations_latest_message_event_null_when_absent():
 
         session.execute = AsyncMock(side_effect=[
             member_result, conv_ids_result, total_result,
-            convs_result, p_rows_result, unread_result, approval_rows_result, latest_msg_result,
+            convs_result, p_rows_result, unread_result, approval_rows_result, _project_names_result(), latest_msg_result,  # story #4846: + the rooms' project names
         ])
 
         async with client as c:
@@ -850,7 +857,7 @@ async def test_list_conversations_latest_message_has_attachments_true():
 
         session.execute = AsyncMock(side_effect=[
             member_result, conv_ids_result, total_result,
-            convs_result, p_rows_result, unread_result, approval_rows_result, latest_msg_result,
+            convs_result, p_rows_result, unread_result, approval_rows_result, _project_names_result(), latest_msg_result,  # story #4846: + the rooms' project names
         ])
 
         async with client as c:
@@ -893,7 +900,7 @@ async def test_list_conversations_latest_message_has_attachments_false_when_empt
 
         session.execute = AsyncMock(side_effect=[
             member_result, conv_ids_result, total_result,
-            convs_result, p_rows_result, unread_result, approval_rows_result, latest_msg_result,
+            convs_result, p_rows_result, unread_result, approval_rows_result, _project_names_result(), latest_msg_result,  # story #4846: + the rooms' project names
         ])
 
         async with client as c:
@@ -937,7 +944,7 @@ async def test_list_conversations_latest_message_has_attachments_false_when_tomb
 
         session.execute = AsyncMock(side_effect=[
             member_result, conv_ids_result, total_result,
-            convs_result, p_rows_result, unread_result, approval_rows_result, latest_msg_result,
+            convs_result, p_rows_result, unread_result, approval_rows_result, _project_names_result(), latest_msg_result,  # story #4846: + the rooms' project names
         ])
 
         async with client as c:
