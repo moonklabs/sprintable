@@ -475,115 +475,11 @@ async def test_the_event_apis_serialize_a_row_without_a_project():
         await engine.dispose()
 
 
-async def test_a_room_without_a_project_refuses_a_new_attachment_out_loud():
-    """codex 2: an attachment registered with no project would read as the organization's asset (`project_id IS NULL`) and open to a person who is
-    not in the room. Until the attachment PR of this story it is refused, with a code the web can show; a text line is not affected."""
-    from app.main import app
-
-    engine, Session, w = await _world()
-    try:
-        await _setup_app_human(app, Session, w.u_a, w.org)
-        try:
-            async with _client_for(app) as c:
-                r = await c.post(f"/api/v2/conversations/{w.n_human}/messages", json={
-                    "content": "see file",
-                    "attachments": [{"url": f"org/{w.org}/project/{w.p1}/chat/{w.n_human}/a.txt", "name": "a.txt", "size": 3, "content_type": "text/plain"}],
-                })
-                assert r.status_code == 400, r.text
-                assert "ATTACHMENT_NEEDS_PROJECT" in r.text and "cannot take an attachment yet" in r.text   # a reason a person can read
-                ok = await c.post(f"/api/v2/conversations/{w.n_human}/messages", json={"content": "text only"})
-                assert ok.status_code == 201, ok.text
-        finally:
-            app.dependency_overrides.clear()
-    finally:
-        await engine.dispose()
-
-
-async def test_the_registry_itself_refuses_a_chat_attachment_without_a_project():
-    """the one place a chat attachment becomes an asset (`sync_attachment_assets`) — whichever route brought it there: a project → registered, no project → refused;
-    a non-chat source (an org-level asset) and an empty list are not affected."""
-    from app.services.asset_registry import AttachmentNeedsProject, sync_attachment_assets
-
-    engine, Session, w = await _world()
-    try:
-        att = [{"url": f"org/{w.org}/project/{w.p1}/chat/{w.n_human}/a.txt", "name": "a.txt", "content_type": "text/plain", "size": 3}]
-        async with Session() as s:
-            with pytest.raises(AttachmentNeedsProject):
-                await sync_attachment_assets(s, org_id=w.org, project_id=None, source_type="conversation_message",
-                                             source_id=uuid.uuid4(), attachments=att, path_scope_id=w.n_human)
-            # nothing to register is not an attachment: a message EDIT that drops them all passes through
-            await sync_attachment_assets(s, org_id=w.org, project_id=None, source_type="conversation_message",
-                                         source_id=uuid.uuid4(), attachments=[], path_scope_id=w.n_human)
-    finally:
-        await engine.dispose()
-
-
-async def test_mcp_upload_never_builds_a_project_none_path():
-    from app.main import app
-
-    engine, Session, w = await _world()
-    try:
-        await _setup_app_agent(app, Session, w.g_p, w.org)
-        try:
-            async with _client_for(app) as c:
-                r = await c.post(f"/api/v2/conversations/{w.n_agents}/attachments", json={
-                    "name": "a.txt", "content_base64": "YWJj", "content_type": "text/plain",
-                })
-            assert r.status_code == 400 and "ATTACHMENT_NEEDS_PROJECT" in r.text, r.text
-        finally:
-            app.dependency_overrides.clear()
-    finally:
-        await engine.dispose()
-
-
-async def _delete_project(Session, w, project_id):
-    from app.main import app
-
-    await _setup_app_human(app, Session, w.u_o, w.org)
-    try:
-        async with _client_for(app) as c:
-            return await c.delete(f"/api/v2/projects/{project_id}")
-    finally:
-        app.dependency_overrides.clear()
-
-
-async def test_a_project_whose_rooms_hold_chat_attachments_is_not_deleted_yet():
-    """PO: the files of a room are not deleted with the project (assets cascade on the project; no job deletes the stored files) — until the attachment PR,
-    deleting such a project is refused with a code; a project whose rooms hold no attachment IS deleted and its rooms stay."""
-    from sqlalchemy import text
-
-    from app.models.conversation import ConversationMessage
-
-    engine, Session, w = await _world()
-    try:
-        async with Session() as s:
-            s.add(ConversationMessage(
-                id=uuid.uuid4(), conversation_id=w.r_human, sender_id=w.h_a, content="file",
-                attachments=[{"url": f"org/{w.org}/project/{w.p1}/chat/{w.r_human}/a.txt", "name": "a.txt", "content_type": "text/plain", "size": 3}],
-            ))
-            await s.commit()
-        r = await _delete_project(Session, w, w.p1)
-        assert r.status_code == 409 and "PROJECT_HAS_CHAT_ATTACHMENTS" in r.text, r.text
-        assert "attached in its chat rooms" in r.json()["error"]["message"]   # a reason a person can read
-        async with Session() as s:
-            assert (await s.execute(text("SELECT count(*) FROM projects WHERE id = :p"), {"p": w.p1})).scalar_one() == 1
-        # every path that deletes a project goes through the repository: the guard is there, not only in the route
-        from app.repositories.project import ProjectHasChatAttachments, ProjectRepository
-
-        async with Session() as s:
-            with pytest.raises(ProjectHasChatAttachments):
-                await ProjectRepository(s, w.org).delete(w.p1)
-        # P2 has no room with an attachment (it has no room): deleted
-        r2 = await _delete_project(Session, w, w.p2)
-        assert r2.status_code == 200, r2.text
-    finally:
-        await engine.dispose()
-
-
-async def test_project_deletion_locks_the_project_before_it_looks_for_attachments():
-    """codex 3: «checked, then an attachment was registered, then deleted». Registering an attachment inserts an asset row that references the project (a
-    key-share lock until its transaction ends); the deletion takes FOR UPDATE on the project row BEFORE the check, so it waits for one in flight and a
-    later one waits for it. Pinned from the statements the repository sends (a wall-clock race test would be a budget, not a fact)."""
+async def test_project_deletion_locks_the_project_before_it_re_homes_the_chat_files():
+    """codex 3: «re-homed, then an attachment was registered, then deleted». Registering an attachment inserts an asset row that references the project (a
+    key-share lock until its transaction ends); the deletion takes FOR UPDATE on the project row BEFORE it re-homes the chat files (assets → no project), so it
+    waits for a registration in flight and re-homes it too, and a later one waits for it. Pinned from the statements the repository sends (a wall-clock race
+    test would be a budget, not a fact)."""
     from sqlalchemy import event
 
     from app.repositories.project import ProjectRepository
@@ -603,7 +499,7 @@ async def test_project_deletion_locks_the_project_before_it_looks_for_attachment
                 event.remove(s.sync_session.get_bind(), "before_cursor_execute", _record)
             await s.rollback()
         lock = next(i for i, q in enumerate(seen) if "from projects" in q and "for update" in q)
-        check = next(i for i, q in enumerate(seen) if "jsonb_array_length" in q)
+        check = next(i for i, q in enumerate(seen) if q.startswith("update assets"))
         assert lock < check, seen
     finally:
         await engine.dispose()
@@ -633,6 +529,17 @@ async def test_a_participant_who_lost_the_project_marks_their_own_chat_event_rea
             app.dependency_overrides.clear()
     finally:
         await engine.dispose()
+
+
+async def _delete_project(Session, w, project_id):
+    from app.main import app
+
+    await _setup_app_human(app, Session, w.u_o, w.org)
+    try:
+        async with _client_for(app) as c:
+            return await c.delete(f"/api/v2/projects/{project_id}")
+    finally:
+        app.dependency_overrides.clear()
 
 
 async def test_deleting_a_project_with_text_only_rooms_keeps_the_rooms():

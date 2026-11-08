@@ -1312,6 +1312,9 @@ class ConversationResponse(BaseModel):
 
     id: uuid.UUID
     project_id: uuid.UUID | None = None  # story #4846: a room may have no project
+    # story #4846 (AC6): where a file attached in THIS room is stored — the server builds it (a room with a project keeps `org/<org>/project/<project>/chat/<room>/`,
+    # one without is `org/<org>/chat/<room>/`) so no client assembles a path from a project that may not exist. Ends with `/`; the file name follows.
+    attachment_path_prefix: str | None = None
     org_id: uuid.UUID
     type: str
     title: str | None = None
@@ -2004,6 +2007,7 @@ async def get_conversation(
     resp = ConversationResponse(
         id=conv.id,
         project_id=conv.project_id,
+        attachment_path_prefix=mcp_attachment_upload.chat_attachment_path_prefix(conv.org_id, conv.project_id, conv.id),
         org_id=conv.org_id,
         type=conv.type,
         title=conv.title,
@@ -3668,10 +3672,6 @@ async def upload_conversation_attachment(
     )).scalar_one_or_none()
     if participant is None:
         raise HTTPException(status_code=403, detail="Not a participant")
-    if conv.project_id is None:  # story #4846: the object path is project-scoped (`project/<id>/…`) — never built as `project/None`
-        from app.services.asset_registry import AttachmentNeedsProject
-
-        raise AttachmentNeedsProject()
 
     data = mcp_attachment_upload.decode_json_attachment(body.content_base64)
 
