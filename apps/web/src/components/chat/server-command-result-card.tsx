@@ -30,9 +30,14 @@ const DOT_CLASS_BY_OUTCOME: Record<ServerCommand['outcome'], string> = {
   invalid_args: 'bg-muted-foreground',
 };
 
+/** story 4847 (AC-명령) — the one machine reason this card knows (the server's `server_command.code`); any other value draws the card as before */
+export const ROOM_HAS_NO_PROJECT = 'ROOM_HAS_NO_PROJECT';
+
 export function ServerCommandResultCard({ content, serverCommand, onFillComposer }: ServerCommandResultCardProps) {
   const t = useTranslations('chats');
-  const lead = extractLeadSentence(content);
+  // the server's sentence for this code is English and only a fallback: the words shown are ours (what did not work + the way that does)
+  const roomHasNoProject = serverCommand.outcome === 'denied' && serverCommand.code === ROOM_HAS_NO_PROJECT; // the server sends it only with `denied`; the code on any other outcome is not this card
+  const lead = roomHasNoProject ? t('serverCommandRoomHasNoProject', { command: serverCommand.command }) : extractLeadSentence(content);
   const nextAction = serverCommand.outcome === 'executed' ? extractNextAction(content) : null;
   // story #92f00dc4/페드루 판정(PR #3549 리뷰 후속) — candidates는 BE가 outcome='ambiguous'일
   // 때만 구조화 배열로 싣는다(문장 comma-split 금지). 필드 부재(구서버·BE 델타 미착지)면
@@ -78,6 +83,16 @@ export function ServerCommandResultCard({ content, serverCommand, onFillComposer
             ))}
           </ul>
         </>
+      ) : null}
+
+      {roomHasNoProject ? (
+        <div className="mt-2.5 flex gap-2 rounded-lg border border-brand/15 bg-brand/10 px-2.5 py-2" data-testid="server-command-way">
+          <span className="font-bold text-brand" aria-hidden>→</span>
+          <p className="[overflow-wrap:anywhere]">
+            <span className="font-semibold text-primary">{t('serverCommandWayLabel')}</span>
+            <span className="text-xs text-foreground"> {t('serverCommandRoomHasNoProjectWay')}</span>
+          </p>
+        </div>
       ) : null}
 
       {nextAction ? (

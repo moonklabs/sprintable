@@ -124,6 +124,10 @@ export interface ChatMessage {
     outcome: 'executed' | 'denied' | 'not_found' | 'ambiguous' | 'invalid_args';
     candidates?: string[];
     target_story_number?: number;
+    /** story 4847 (AC-명령) — a machine reason the server adds ONLY to some cards (additive; other cards carry none). `ROOM_HAS_NO_PROJECT`: the command was
+     * typed in a room that has no project, so the server did not run it (a story number is per project) — `outcome` is `denied`, `content` is an English fallback
+     * line. A code this web does not know is ignored: the card is drawn as before. */
+    code?: string;
   } | null;
 }
 
