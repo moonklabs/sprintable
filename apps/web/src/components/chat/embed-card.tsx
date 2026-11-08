@@ -1205,6 +1205,7 @@ export function EntityChip({
         <Link
           href={getEntityHref('doc', entityId, (h) => withProjectParam(h, submitProjectId)) ?? '#'}
           onClick={(e) => e.stopPropagation()}
+          data-copy-ui=""
           className="inline-flex shrink-0 items-center rounded border border-primary/40 px-1.5 py-0.5 text-xs font-medium text-primary no-underline hover:bg-primary/10"
         >
           {tChats('assignApproverAndSubmit')}
@@ -1213,6 +1214,7 @@ export function EntityChip({
         <Link
           href={flatHref('/inbox?tab=gates')}
           onClick={(e) => e.stopPropagation()}
+          data-copy-ui=""
           className="inline-flex shrink-0 items-center rounded border border-border px-1.5 py-0.5 text-xs font-medium text-muted-foreground no-underline hover:bg-muted"
         >
           {tContent('submitGateLink')}
