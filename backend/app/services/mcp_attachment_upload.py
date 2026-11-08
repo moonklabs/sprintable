@@ -94,13 +94,23 @@ def resolve_attachment_content_type(declared: str, data: bytes) -> str:
     return sniff_image_content_type(data) or declared
 
 
+def chat_attachment_path_prefix(org_id: uuid.UUID, project_id: uuid.UUID | None, conversation_id: uuid.UUID) -> str:
+    """where a file attached in a chat room is stored (ends with `/`): a room with a project keeps its project-scoped namespace, a room WITHOUT one is
+    `org/<org>/chat/<room>/` (story #4846 AC6) — the one place that builds it (the room's single GET hands it to the web)."""
+    if project_id is None:
+        return f"org/{org_id}/chat/{conversation_id}/"
+    return f"org/{org_id}/project/{project_id}/chat/{conversation_id}/"
+
+
 def build_mcp_object_path(
-    *, org_id: uuid.UUID, project_id: uuid.UUID, kind: str, resource_id: uuid.UUID, safe_name: str,
+    *, org_id: uuid.UUID, project_id: uuid.UUID | None, kind: str, resource_id: uuid.UUID, safe_name: str,
 ) -> str:
     """S7 namespace + `mcp/` 마커. FE 업로드 라우트(각 리소스의 apps/web .../attachments/route.ts)와
     동일 접두(org/<org>/project/<project>/<kind>/<resource_id>/...) — path_in_source_scope 는 그
     접두까지만 segment-match 하므로(그 뒤 세그먼트 수는 안 봄) `mcp/` 추가가 IDOR 가드에 영향 없다.
     """
+    if project_id is None:   # story #4846 (AC6): a chat room without a project — `org/<org>/chat/<room>/mcp/<file>`
+        return f"org/{org_id}/{kind}/{resource_id}/mcp/{uuid.uuid4()}-{safe_name}"
     return f"org/{org_id}/project/{project_id}/{kind}/{resource_id}/mcp/{uuid.uuid4()}-{safe_name}"
 
 
@@ -116,7 +126,7 @@ def is_mcp_upload_object_path(url: str, *, kind: str, container: str = DEFAULT_C
     if not canon:
         return False
     parts = canon.split("/")
-    return (
-        len(parts) >= 7
-        and parts[0] == "org" and parts[2] == "project" and parts[4] == kind and parts[6] == "mcp"
-    )
+    with_project = len(parts) >= 7 and parts[0] == "org" and parts[2] == "project" and parts[4] == kind and parts[6] == "mcp"
+    # story #4846: a chat room without a project — only the chat namespace has this shape (a story or a doc always has its project)
+    without_project = kind == "chat" and len(parts) >= 6 and parts[0] == "org" and parts[2] == kind and parts[4] == "mcp"
+    return with_project or without_project

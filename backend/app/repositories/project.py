@@ -1,23 +1,11 @@
 import uuid
 
-from sqlalchemy import case, func, select, text
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.conversation import Conversation, ConversationMessage
+from app.models.asset import Asset
 from app.models.project import Project
 from app.repositories.base import BaseRepository
-
-
-class ProjectHasChatAttachments(Exception):
-    """story #4846 — a project with a chat room that holds a message attachment is not deleted (yet).
-
-    A room now outlives its project (conversations.project_id → NULL), but the asset rows of the files attached in its messages are deleted WITH the
-    project (assets.project_id ON DELETE CASCADE) and nothing deletes the stored files — the room would keep messages pointing at files that no longer
-    open, a loss the attachment PR of this story could not undo. The API answers 409 `PROJECT_HAS_CHAT_ATTACHMENTS` (main.py). Lifted by that PR."""
-
-    code = "PROJECT_HAS_CHAT_ATTACHMENTS"
-    # an English sentence a person can read when it reaches them; the web shows its own wording for the code (the repo's rule: no new Korean user strings in the backend, story #3779)
-    message = "This project cannot be deleted for now: files are attached in its chat rooms, and they cannot yet be kept with the rooms."
 
 
 class ProjectRepository(BaseRepository[Project]):
@@ -25,23 +13,26 @@ class ProjectRepository(BaseRepository[Project]):
         super().__init__(Project, session, org_id)
 
     async def delete(self, id: uuid.UUID) -> bool:
-        """The one place a project is deleted through: refuses (ProjectHasChatAttachments) before anything is touched.
+        """The one place a project is deleted through. A room outlives its project (conversations.project_id → NULL), and so must the files attached in its
+        messages: their asset rows hang on the project (assets.project_id ON DELETE CASCADE) and nothing deletes the stored files, so the rows are first
+        re-homed to NO project — every file that carries a chat-message link is the ROOM's (it is read by the room rule, whatever other link it has: a file with no
+        project and a chat link is never read as the organization's), and its path stays readable because a room without a project accepts the project-pathed files it
+        already holds. Everything else of the project goes with it, as before.
 
-        The project row is locked FOR UPDATE first: registering an attachment inserts an asset row that references the project, which holds a key-share
-        lock on it until that transaction commits — so the check below waits for a registration in flight and sees it, and a registration that comes
-        after waits for this deletion (no «checked, then an attachment arrived, then deleted» window)."""
+        The project row is locked FOR UPDATE first: registering an attachment inserts an asset row that references the project, which holds a key-share lock
+        on it until that transaction commits — so this waits for a registration in flight and re-homes it too, and one that comes after waits for this deletion."""
         await self.session.execute(select(Project.id).where(Project.id == id, Project.org_id == self.org_id).with_for_update())
-        attachments = ConversationMessage.attachments
-        has_chat_attachments = (await self.session.execute(
-            select(ConversationMessage.id)
-            .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
-            .where(
-                Conversation.project_id == id, Conversation.org_id == self.org_id,
-                # a JSONB array with something in it (NULL, JSON null, an object or a scalar are not a list of attachments)
-                func.jsonb_array_length(case((func.jsonb_typeof(attachments) == 'array', attachments), else_=text("'[]'::jsonb"))) > 0,
-            )
-            .limit(1)
-        )).first() is not None
-        if has_chat_attachments:
-            raise ProjectHasChatAttachments()
+        from app.services.chat_asset_scope import chat_linked_clause   # the room rule's own test for «this file is carried by a chat message»
+
+        # lock the project's asset rows BEFORE reading their links: a registration that attaches an existing file to a message inserts a link that references the asset row
+        # (it takes a key-share lock on it), so it either finished before this lock — and its chat link is seen below — or waits for this deletion; a statement that
+        # reads the links first could miss a link that is being committed and let a file the message now carries go with the project
+        await self.session.execute(
+            select(Asset.id).where(Asset.org_id == self.org_id, Asset.project_id == id).order_by(Asset.id).with_for_update()
+        )
+        await self.session.execute(
+            update(Asset)
+            .where(Asset.org_id == self.org_id, Asset.project_id == id, chat_linked_clause())
+            .values(project_id=None)
+        )
         return await super().delete(id)

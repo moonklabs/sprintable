@@ -56,6 +56,20 @@ def _chat_only(entity) -> ColumnElement:
     return and_(chat_link, ~other_link)
 
 
+def _room_scoped(entity) -> ColumnElement:
+    """the asset is read by its ROOM: it has a chat-message link and either no other link (a chat-only file) or no project at all. A file with no project is, to the
+    rest of the asset code, the ORGANIZATION's; so a project-less file that carries a chat link must never fall back to that whatever other link it gets — a link can arrive
+    by a race (a loop artifact filed while its project is being deleted), and the closed reading is the safe one."""
+    chat_link = exists().where(AssetLink.asset_id == entity.id, AssetLink.source_type == "conversation_message")
+    other_link = exists().where(AssetLink.asset_id == entity.id, AssetLink.source_type != "conversation_message")
+    return and_(chat_link, or_(~other_link, entity.project_id.is_(None)))
+
+
+def chat_linked_clause() -> ColumnElement:
+    """the asset carries a chat-message link (whatever other links it has) — the files a deleted project's rooms keep: read and kept by the ROOM"""
+    return exists().where(AssetLink.asset_id == Asset.id, AssetLink.source_type == "conversation_message")
+
+
 def chat_only_clause() -> ColumnElement:
     return _chat_only(Asset)
 
@@ -95,8 +109,8 @@ def _derived_from(derived, origin) -> ColumnElement:
 def _plain_scope(entity, project_rule: ColumnElement, caller: dict) -> ColumnElement:
     """the visibility of an asset that is its OWN thing (not a derived copy): chat-only → the room rule; any other → `project_rule`"""
     return or_(
-        and_(_chat_only(entity), _room_readable(entity, **caller)),
-        and_(~_chat_only(entity), project_rule),
+        and_(_room_scoped(entity), _room_readable(entity, **caller)),
+        and_(~_room_scoped(entity), project_rule),
     )
 
 
@@ -110,7 +124,7 @@ def asset_scope_clause(
     `project_rule` is the caller's project scope as before; for a copy it is applied as the copy's own project, which is its origin's (the path carries it)."""
     caller = dict(caller_member_id=caller_member_id, is_agent=is_agent, user_id=user_id, org_id=org_id)
     origin = aliased(Asset)
-    derived_like = and_(Asset.object_path.like("converted/%"), ~_chat_only(Asset))
+    derived_like = and_(Asset.object_path.like("converted/%"), ~_room_scoped(Asset))
     origin_readable = exists().where(_derived_from(Asset, origin), origin.deleted_at.is_(None), _plain_scope(origin, project_rule, caller))
     return or_(
         and_(derived_like, origin_readable),

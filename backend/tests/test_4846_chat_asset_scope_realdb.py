@@ -214,20 +214,16 @@ async def test_the_source_link_of_a_message_is_shown_only_to_someone_who_can_rea
         app = await _as(Session, w, "participant")
         try:
             async with _client_for(app) as c:
-                before = (await c.get(f"/api/v2/assets/{ids.chat_none}")).json().get("source_links", [])
+                before = (await c.get(f"/api/v2/assets/{ids.mixed}")).json().get("source_links", [])
                 assert any(link["type"] == "conversation_message" for link in before), before
                 async with Session() as s:
                     await s.execute(text(
                         "UPDATE conversation_messages SET deleted_at = now() WHERE id IN "
                         "(SELECT source_id FROM asset_links WHERE asset_id = :a AND source_type = 'conversation_message')"
-                    ), {"a": ids.chat_none})
-                    await s.execute(text(
-                        "INSERT INTO asset_links (id, asset_id, org_id, source_type, source_id) "
-                        "SELECT gen_random_uuid(), :a, org_id, 'story', gen_random_uuid() FROM assets WHERE id = :a"
-                    ), {"a": ids.chat_none})
+                    ), {"a": ids.mixed})
                     await s.commit()
-                r = await c.get(f"/api/v2/assets/{ids.chat_none}")
-            assert r.status_code == 200, r.text
+                r = await c.get(f"/api/v2/assets/{ids.mixed}")
+            assert r.status_code == 200, r.text            # a file with a project and another context: the project rule keeps it readable
             assert not any(link["type"] == "conversation_message" for link in r.json().get("source_links", [])), r.json()
         finally:
             app.dependency_overrides.clear()

@@ -127,7 +127,12 @@ async def authorize_attachment(
             )
         )).scalar_one_or_none()
         if conv_proj is None:
-            raise HTTPException(status_code=404, detail="Conversation not found")
+            # story #4846: a room without a project has project_id NULL — that is not «no such room»; ask whether the ROOM exists
+            room = (await db.execute(
+                select(Conversation.id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+            )).scalar_one_or_none()
+            if room is None:
+                raise HTTPException(status_code=404, detail="Conversation not found")
         if not path_in_source_scope(path, "conversation_message", conv_proj, conversation_id, org_id):
             raise HTTPException(status_code=403, detail="Attachment path not scoped to this conversation")
         # 권한: conversation 참가자(canonical member). team_member 봐주기 없음.
