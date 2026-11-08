@@ -1420,8 +1420,10 @@ async def upload_doc_attachment(
         org_id=org_id, project_id=doc.project_id, kind="doc", resource_id=doc_id, safe_name=safe_name,
     )
 
+    # story 4856 — the bytes decide what a picture is (the caller may have declared a generic or wrong type): store and report the resolved type.
+    content_type = mcp_attachment_upload.resolve_attachment_content_type(body.content_type, data)
     uploaded = await get_storage_provider().put_object(
-        DEFAULT_CONTAINER, object_path, data, content_type=body.content_type,
+        DEFAULT_CONTAINER, object_path, data, content_type=content_type,
     )
     if not uploaded:
         raise HTTPException(status_code=502, detail="upload failed")
@@ -1442,7 +1444,7 @@ async def upload_doc_attachment(
     except Exception:  # noqa: BLE001 — created_by 는 비필수(asset.created_by nullable).
         created_by = None
 
-    att = {"url": object_path, "name": body.name, "content_type": body.content_type, "size": len(data)}
+    att = {"url": object_path, "name": body.name, "content_type": content_type, "size": len(data)}
     url_map = await sync_attachment_assets(
         session, org_id=org_id, project_id=doc.project_id, source_type="doc",
         source_id=doc_id, attachments=[att], created_by=created_by,
@@ -1455,8 +1457,8 @@ async def upload_doc_attachment(
     await session.commit()
 
     return UploadDocAttachmentResponse(
-        asset_id=asset_id, filename=body.name, size=len(data), mime=body.content_type,
+        asset_id=asset_id, filename=body.name, size=len(data), mime=content_type,
         embed_snippet=_build_doc_attachment_embed_snippet(
-            asset_id=asset_id, name=body.name, content_type=body.content_type, size=len(data),
+            asset_id=asset_id, name=body.name, content_type=content_type, size=len(data),
         ),
     )
