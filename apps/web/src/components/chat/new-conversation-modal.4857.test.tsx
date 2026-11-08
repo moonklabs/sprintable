@@ -79,6 +79,18 @@ describe('NewConversationModal — 나 자신은 상대 목록에 없다(story 4
     expect(posts).toEqual([{ type: 'dm', title: null, participant_ids: ['human-other'], project_id: 'proj-a' }]);
   });
 
+  it('⭐둘 이상 골라 모임방을 만들어도 참가자에 내 id는 없다', async () => {
+    const posts: unknown[] = [];
+    await mount(mockFetches(ROSTER, posts), ME);
+    await click(btn('다른사람'));
+    await click(btn('점검봇'));
+    await click(createBtn());
+    expect(posts).toHaveLength(1);
+    const body = posts[0] as { type: string; participant_ids: string[] };
+    expect(body.type).toBe('group');
+    expect(body.participant_ids.sort()).toEqual(['a-bot', 'human-other']);
+  });
+
   it('⭐나밖에 없는 조직이면 고를 사람이 없어 만들 수 없다', async () => {
     const posts: unknown[] = [];
     await mount(mockFetches([ROSTER[0]!], posts), ME);
