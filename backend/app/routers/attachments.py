@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
 from app.models.asset import Asset, AssetLink
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
@@ -47,7 +47,7 @@ async def authorize_attachment(
     asset_id: uuid.UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> dict:
     """GET /api/v2/attachments/authorize — 첨부 접근 인가(200) / 거부(403).
 
@@ -167,7 +167,7 @@ async def authorize_attachment(
             role = await _effective_org_role(auth, org_id, db, member, project_id=conv_proj)
             if not (
                 role in ("owner", "admin")
-                and not await _conversation_has_human_participant(conversation_id, db)
+                and not await _conversation_has_human_participant(conversation_id, db, org_id)
             ):
                 raise HTTPException(status_code=403, detail="Not a participant of this conversation")
         # ② 정확 매치: stored url == bare path(신규) OR == legacy 전체 URL. substring 금지.

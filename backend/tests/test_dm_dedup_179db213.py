@@ -106,7 +106,7 @@ async def test_concurrent_api_create_same_pair_single_dm_realdb(monkeypatch):
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from app.main import app
-    from app.dependencies.auth import get_current_user, get_verified_org_id
+    from app.dependencies.auth import get_current_user, get_verified_org_id, get_verified_org_id_no_project_gate
     from app.dependencies.database import get_db
 
     org, proj = uuid.uuid4(), uuid.uuid4()
@@ -139,6 +139,7 @@ async def test_concurrent_api_create_same_pair_single_dm_realdb(monkeypatch):
         app.dependency_overrides[get_db] = _db
         app.dependency_overrides[get_current_user] = _auth
         app.dependency_overrides[get_verified_org_id] = _org
+        app.dependency_overrides[get_verified_org_id_no_project_gate] = _org
 
         body = {"type": "dm", "participant_ids": [str(other)], "project_id": str(proj)}
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:

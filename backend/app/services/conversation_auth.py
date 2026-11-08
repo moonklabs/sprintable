@@ -57,6 +57,7 @@ from sqlalchemy import and_, false, or_, select, true
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.conversation import ConversationParticipant
+from app.models.member import Member
 from app.models.team import TeamMember
 
 BoolExpr = ColumnElement  # bool 스칼라를 내는 SQLAlchemy Core 표현식(가독용 별칭)
@@ -68,10 +69,24 @@ def _as_bool_expr(value: "BoolExpr | bool") -> BoolExpr:
     return true() if value else false()
 
 
+def participant_is_agent(member_id_col, org_id: uuid.UUID) -> BoolExpr:
+    """story #4846 (AC11) — THE one definition of «this participant is an agent»: a `members` row of THIS organization with type `agent`. It is the identity anchor
+    (`team_members` is only a view over it that also needs a project profile / grant): an agent whose only project was deleted loses those rows and with them its place
+    in the view, and a room of agents would then read as a room with a person in it (hidden from an admin's agents-only view, closed to the owner's bypass). Anything
+    that is not confirmed here — an orphan id, a row of another organization, a person — counts as a PERSON (the conservative rule of «who is in the room»).
+    The readable predicate, the single-room check (`_conversation_has_human_participant`) and the bulk one (`_conversations_with_human_participant`) all use this."""
+    return (
+        select(1)
+        .where(Member.id == member_id_col, Member.org_id == org_id, Member.type == "agent")
+        .exists()
+    )
+
+
 def conversation_readable_predicate(
     conv_id_col: ColumnElement,
     *,
     caller_member_id: uuid.UUID,
+    org_id: uuid.UUID,
     admin_bypass_eligible: "BoolExpr | bool",
     agent_project_valid: "BoolExpr | bool" = True,
 ) -> BoolExpr:
@@ -102,14 +117,7 @@ def conversation_readable_predicate(
         select(1)
         .where(
             ConversationParticipant.conversation_id == conv_id_col,
-            ~(
-                select(1)
-                .where(
-                    TeamMember.id == ConversationParticipant.member_id,
-                    TeamMember.type == "agent",
-                )
-                .exists()
-            ),
+            ~participant_is_agent(ConversationParticipant.member_id, org_id),
         )
         .exists()
     )
@@ -213,6 +221,7 @@ async def socket_can_read_conversation(
         predicate = conversation_readable_predicate(
             literal(conversation_id),
             caller_member_id=member_id,
+            org_id=org_id,
             admin_bypass_eligible=admin_bypass_eligible,
             agent_project_valid=await agent_project_valid_for_room(
                 db, caller_is_agent=via_agent_key, caller_id=access_user_id, conv_project_id=conv_project_id, org_id=org_id,

@@ -637,6 +637,7 @@ async def list_entity_backlinks(
         chat_predicate = conversation_readable_predicate(
             Conversation.id,
             caller_member_id=caller_member_id,
+            org_id=org_id,
             # story #4846: no project-access atom any more — being in the room reads it (conversation_auth docstring). An agent's
             # admin bypass correlates `Conversation.project_id`; a room without a project makes that comparison false (no bypass).
             # §6회차(마지막 atom) fix: 위에서 조립한 correlated EXISTS — 사전계산된 bool/`.in_()`

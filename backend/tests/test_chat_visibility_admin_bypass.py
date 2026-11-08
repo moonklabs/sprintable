@@ -51,54 +51,7 @@ def _rows_all(rows):
     return res
 
 
-def _routing_db(*, participant_rows, agent_ids):
-    """ConversationParticipant 조회 → participant_rows, TeamMember 조회 → agent_ids 반환.
-
-    participant_rows: [(conversation_id, member_id), ...] (또는 member_id만 필요한 단건 헬퍼용)
-    agent_ids: 'agent'로 확정된 TeamMember.id 집합.
-    """
-    db = AsyncMock()
-
-    async def _execute(stmt, *a, **k):
-        sql = str(stmt).lower()
-        if "conversation_participants" in sql:
-            cols = stmt.selected_columns if hasattr(stmt, "selected_columns") else None
-            ncols = len(list(cols)) if cols is not None else 1
-            if ncols >= 2:
-                # batch 헬퍼: (conversation_id, member_id) 행
-                return _rows_all(participant_rows)
-            # 단건 헬퍼: member_id만
-            return _scalars_all([mid for _, mid in participant_rows])
-        if "team_members" in sql:
-            # 참가자 중 agent 확정 id
-            return _scalars_all(list(agent_ids))
-        return _scalars_all([])
-
-    db.execute = AsyncMock(side_effect=_execute)
-    return db
-
-
-# ─── CP5: batch 헬퍼(list_conversations) — agent-only만 통과 ──────────────────
-
-@pytest.mark.anyio
-async def test_cp5_batch_excludes_human_convs():
-    """conv_ids 중 휴먼 참가 대화만 human-set에 — agent-only는 제외(admin에게 추가 노출)."""
-    from app.routers.conversations import _conversations_with_human_participant
-
-    conv_human = uuid.uuid4()   # 휴먼 참가 (private)
-    conv_agent = uuid.uuid4()   # agent-only
-    human = uuid.uuid4()
-    a1, a2, a3 = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
-    db = _routing_db(
-        participant_rows=[
-            (conv_human, human), (conv_human, a1),
-            (conv_agent, a2), (conv_agent, a3),
-        ],
-        agent_ids={a1, a2, a3},  # human만 agent 확정 외
-    )
-    human_set = await _conversations_with_human_participant([conv_human, conv_agent], db)
-    assert human_set == {conv_human}  # private만 — agent-only는 admin 노출 허용
-
+# ─── CP5: batch 헬퍼(list_conversations) — 실 DB 판은 test_conv_human_participant_realdb.py(story #4846 AC11: members 기준 한 식) ───
 
 @pytest.mark.anyio
 async def test_cp5_batch_empty_input():
@@ -107,7 +60,7 @@ async def test_cp5_batch_empty_input():
 
     db = AsyncMock()
     db.execute = AsyncMock(side_effect=AssertionError("should not query on empty input"))
-    assert await _conversations_with_human_participant([], db) == set()
+    assert await _conversations_with_human_participant([], db, uuid.uuid4()) == set()
 
 
 

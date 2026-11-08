@@ -76,10 +76,67 @@ async def test_helper_conservatism_real_view():
             # ① agent(뷰 출현) + 미앵커 휴먼(agent 미확정) → 보수적 human=True (산티아고 케이스).
             mixed = uuid.uuid4()
             await _conv_with(s, mixed, [AGENT, HUMAN_UNANCHORED])
-            assert await _conversation_has_human_participant(mixed, s) is True
+            assert await _conversation_has_human_participant(mixed, s, ORG) is True
             # ② agent-only(둘 다 뷰 agent) → False.
             agent_only = uuid.uuid4()
             await _conv_with(s, agent_only, [AGENT, AGENT2])
-            assert await _conversation_has_human_participant(agent_only, s) is False
+            assert await _conversation_has_human_participant(agent_only, s, ORG) is False
+    finally:
+        await engine.dispose()
+
+
+ORG_B = uuid.UUID("e6000000-0000-0000-0000-000000000002")
+AGENT_NO_PROFILE = uuid.UUID("e6000000-0000-0000-0000-0000000000a3")  # a member of the organization with NO project profile (so not in the team_members view)
+AGENT_OTHER_ORG = uuid.UUID("e6000000-0000-0000-0000-0000000000a4")
+PERSON = uuid.UUID("e6000000-0000-0000-0000-0000000000b1")
+ADMIN = uuid.UUID("e6000000-0000-0000-0000-0000000000b2")
+
+
+@pytest.mark.anyio
+async def test_one_definition_of_who_is_an_agent_in_all_three_places():
+    """story #4846 AC11 — «does this room have a person in it» has ONE definition (`participant_is_agent`: a `members` row of THIS organization with type agent) and the readable
+    predicate, the single-room check and the bulk check all use it. The case that made it necessary: an agent whose only project was deleted has no profile row, so it is not in
+    the `team_members` view any more — through the view a room of such agents read as a room with a person in it."""
+    from sqlalchemy import select
+
+    from app.models.conversation import Conversation
+    from app.routers.conversations import _conversation_has_human_participant, _conversations_with_human_participant
+    from app.services.conversation_auth import conversation_readable_predicate
+
+    engine = create_async_engine(_ASYNC)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as s:
+            await _seed(s)
+            for sql in [
+                f"DELETE FROM members WHERE org_id='{ORG_B}'",
+                f"DELETE FROM organizations WHERE id='{ORG_B}'",
+                f"INSERT INTO organizations (id,name,slug,plan) VALUES ('{ORG_B}','E6b','e6orgb','free')",
+                "INSERT INTO members (id,org_id,type,name,is_active) VALUES "
+                f"('{AGENT_NO_PROFILE}','{ORG}','agent','NoProfile',true),('{PERSON}','{ORG}','human','Person',true),"
+                f"('{ADMIN}','{ORG}','human','Admin',true),('{AGENT_OTHER_ORG}','{ORG_B}','agent','Other',true)",
+            ]:
+                await s.execute(text(sql))
+            await s.commit()
+
+            only_agents = uuid.uuid4()      # a profile-less agent and a profiled one: agents only
+            await _conv_with(s, only_agents, [AGENT_NO_PROFILE, AGENT])
+            with_person = uuid.uuid4()
+            await _conv_with(s, with_person, [AGENT, PERSON])
+            with_orphan = uuid.uuid4()      # an id that is no member at all counts as a person (conservative)
+            await _conv_with(s, with_orphan, [AGENT, HUMAN_UNANCHORED])
+            with_other_org_agent = uuid.uuid4()  # an agent of ANOTHER organization is not confirmed here, so it counts as a person
+            await _conv_with(s, with_other_org_agent, [AGENT, AGENT_OTHER_ORG])
+            rooms = {only_agents: False, with_person: True, with_orphan: True, with_other_org_agent: True}
+
+            bulk = await _conversations_with_human_participant(list(rooms), s, ORG)
+            for room, has_person in rooms.items():
+                assert await _conversation_has_human_participant(room, s, ORG) is has_person, ("single", room)
+                assert (room in bulk) is has_person, ("bulk", room)
+                # the predicate: a non-participant admin reads the room only when it has no person in it
+                readable = (await s.execute(select(conversation_readable_predicate(
+                    Conversation.id, caller_member_id=ADMIN, org_id=ORG, admin_bypass_eligible=True,
+                )).where(Conversation.id == room))).scalar_one()
+                assert readable is (not has_person), ("predicate", room)
     finally:
         await engine.dispose()

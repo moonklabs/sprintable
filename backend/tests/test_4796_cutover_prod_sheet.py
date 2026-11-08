@@ -907,7 +907,10 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     # story #4846: 0471 alters a column and a foreign key — exactly what the block exists to list. Every OTHER revision after 0466 is still only an index build.
     mine = [h for h in hits if h.startswith("0471_")]
     assert any("alter_column" in h for h in mine) and any("drop_constraint" in h for h in mine), mine
-    hits = [h for h in hits if not h.startswith("0471_")]
+    # story #4846: 0472 swaps the foreign key of `events` (written in upgrade() itself, so the reading lists it)
+    swap = [h for h in hits if h.startswith("0472_")]
+    assert any("DROP CONSTRAINT" in h for h in swap) and any("ON DELETE SET NULL NOT VALID" in h for h in swap) and not any("VALIDATE" in h for h in swap), swap
+    hits = [h for h in hits if not h.startswith(("0471_", "0472_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)
