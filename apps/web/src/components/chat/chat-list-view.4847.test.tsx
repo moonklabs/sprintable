@@ -9,6 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ChatListView, CHAT_PROJECT_FILTER_KEY } from './chat-list-view';
+import { ChatRailProvider, useChatRail } from '@/app/(authenticated)/chats/chat-rail-context';
 
 vi.mock('@/hooks/use-auto-refresh', () => ({ useAutoRefresh: () => {} }));
 
@@ -42,6 +43,9 @@ let container: HTMLDivElement;
 let root: Root;
 
 const A = { projectId: 'proj-a', projectName: '프로젝트 에이' };
+// the agents tab belongs to the organization's owner/admin (the organization role, orgMemberships — not the shell's «role»)
+const ORG_ADMIN = { orgId: 'org-4847-admin', orgMemberships: [{ orgId: 'org-4847-admin', orgName: 'O', orgSlug: 'o', role: 'admin' }] };
+const orgAs = (role: string) => ({ orgId: 'org-4847-admin', orgMemberships: [{ orgId: 'org-4847-admin', orgName: 'O', orgSlug: 'o', role }] });
 const B = { projectId: 'proj-b', projectName: '프로젝트 비' };
 
 const room = (id: string, title: string, project: { id: string; name: string } | null, updated_at: string) => ({
@@ -429,7 +433,7 @@ describe('ChatListView — 같은 것을 두 번 묻는 경합 · 현재 프로�
     const UUID = '11111111-1111-4111-8111-111111111111';
     window.sessionStorage.setItem(CHAT_PROJECT_FILTER_KEY, UUID);
     const fetchMock = stubOrgServer();
-    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'member', projectId: undefined });
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'member', projectId: undefined, orgSyncPending: true }); // the shell says the list is not reliable yet
     await mount();
     expect(listCalls(fetchMock)).toEqual([`/api/conversations?limit=30&offset=0&project_id=${UUID}`]);
     useDashboardContextMock.mockReturnValue({ projectMemberships: [A, B], role: 'member', projectId: undefined }); // the shell has now told the person's projects
@@ -440,15 +444,42 @@ describe('ChatListView — 같은 것을 두 번 묻는 경합 · 현재 프로�
   });
 });
 
+describe('ChatListView — 프로젝트가 하나도 없다고 확실한 사람의 낡은 걸러 보기 값(story 4847, codex)', () => {
+  const UUID = '22222222-2222-4222-8222-222222222222';
+
+  it('⭐프로젝트가 없다고 확실한데 탭에 옛 프로젝트 값이 남아 있으면 그 값으로 묻지 않는다 — «모든 방»으로 묻고 «새 대화»를 열 수 있다는 표지가 선다', async () => {
+    window.sessionStorage.setItem(CHAT_PROJECT_FILTER_KEY, UUID);
+    const fetchMock = stubOrgServer([N1]);
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'member', projectId: undefined });
+    await act(async () => { root.render(wrap(<ChatRailProvider><OrgWideReport /><ChatListView projectId={null} currentTeamMemberId="me-1" /></ChatRailProvider>)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(listCalls(fetchMock)).toEqual(['/api/conversations?limit=30&offset=0']);
+    expect(container.querySelector('[data-testid="org-wide-report"]')?.textContent).toBe('true');
+  });
+
+  it('⭐프로젝트가 있던 사람이 프로젝트 없는 조직으로 옮겨(멤버십이 비면) 남은 걸러 보기 값은 «모든 프로젝트»로 돌아가 저장도 지워진다', async () => {
+    window.sessionStorage.setItem(CHAT_PROJECT_FILTER_KEY, A.projectId);
+    const fetchMock = stubOrgServer([A1, B1]);
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [A, B], role: 'member', projectId: undefined });
+    await mount();
+    expect(listCalls(fetchMock).at(-1)).toBe(`/api/conversations?limit=30&offset=0&project_id=${A.projectId}`);
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'member', projectId: undefined });
+    await act(async () => { root.render(wrap(<ChatListView projectId={null} currentTeamMemberId="me-1" />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(listCalls(fetchMock).at(-1)).toBe('/api/conversations?limit=30&offset=0');
+    expect(window.sessionStorage.getItem(CHAT_PROJECT_FILTER_KEY)).toBeNull();
+  });
+});
+
 describe('ChatListView — 관리자의 에이전트 탭 · 지시 한 줄 · 새 방(story 4847)', () => {
   it('에이전트 탭은 지금 프로젝트가 있을 때만 있다(그 프로젝트의 에이전트 방을 읽는 탭이라)', async () => {
     stubOrgServer();
-    useDashboardContextMock.mockReturnValue({ projectMemberships: [A, B], role: 'admin', projectId: undefined });
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [A, B], role: 'admin', ...ORG_ADMIN, projectId: undefined });
     await mount({ projectId: null });
     expect(container.textContent).not.toContain(koMessages.chats.agentChatsTab);
     await act(async () => { root.unmount(); });
     root = createRoot(container);
-    useDashboardContextMock.mockReturnValue({ projectMemberships: [A, B], role: 'admin', projectId: 'proj-a' });
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [A, B], role: 'admin', ...ORG_ADMIN, projectId: 'proj-a' });
     await mount({ projectId: 'proj-a' });
     expect(container.textContent).toContain(koMessages.chats.agentChatsTab);
   });
@@ -557,7 +588,7 @@ describe('ChatListView — 옛 서버(422)에서는 지금 화면과 같다 (sto
   });
 
   it('관리자의 에이전트 탭도 그대로: 같은 주소(project_id · include_agent_conversations)로 읽는다', async () => {
-    const fetchMock = oldServer(); ctx({ role: 'admin' });
+    const fetchMock = oldServer(); ctx({ role: 'admin', ...ORG_ADMIN });
     await mount({ projectId: 'proj-a' });
     const tab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === koMessages.chats.agentChatsTab)!;
     await act(async () => { tab.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); tab.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
@@ -624,11 +655,11 @@ describe('ChatListView — 프로젝트가 하나도 없는 사람(story 4847, P
     expect(container.querySelector('[data-testid="chats-no-project"]')).toBeNull();
   });
 
-  it('⭐프로젝트 0 · 방 0 → «보여 줄 프로젝트가 아직 없어요» 한 줄(옛 멈춤과 같은 글)', async () => {
+  it('⭐프로젝트 0 · 방 0 · 조직 전체를 읽는 서버 → «대화가 없어요»(프로젝트 없이 방을 만들 수 있으니 시작할 곳이 있다) — 한 줄 멈춤이 아니다', async () => {
     noProjects(); stubOrgServer([]);
     await mount();
-    expect(container.querySelector('[data-testid="chats-no-project"]')?.textContent).toBe(koMessages.chats.noProjectYet);
-    expect(container.textContent).not.toContain(koMessages.chats.noConversations);
+    expect(container.querySelector('[data-testid="chats-no-project"]')).toBeNull();
+    expect(container.textContent).toContain(koMessages.chats.noConversations);
   });
 
   it('프로젝트가 있고 방이 0이면 한 줄이 아니라 «대화가 없어요»다', async () => {
@@ -671,13 +702,52 @@ describe('ChatListView — 프로젝트가 하나도 없는 사람(story 4847, P
     expect(container.textContent).toContain(koMessages.chats.noConversations);
   });
 
-  it('⭐프로젝트 0 · 방 0이면 지시 한 줄(?compose=)이 만들 수 없는 새 대화 창을 열지 않는다', async () => {
+  it('⭐옛 서버(422) · 프로젝트 0 · 방 0이면 지시 한 줄(?compose=)이 만들 수 없는 새 대화 창을 열지 않는다', async () => {
     searchParamsValueRef.current = 'compose=' + encodeURIComponent('지시');
-    noProjects(); stubOrgServer([]);
+    noProjects();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      return { ok: false, status: 422, json: async () => ({}) };
+    }));
     const onOpenChange = vi.fn();
     await mount({ open: false, onOpenChange });
     expect(onOpenChange).not.toHaveBeenCalledWith(true);
     expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it('⭐프로젝트 0 · 방 0이어도 서버가 조직 전체를 읽어 주면 지시 한 줄(?compose=)이 새 대화 창을 연다(프로젝트 없는 방을 만들 수 있다)', async () => {
+    searchParamsValueRef.current = 'compose=' + encodeURIComponent('지시');
+    noProjects(); stubOrgServer([]);
+    const onOpenChange = vi.fn();
+    await mount({ open: false, onOpenChange });
+    expect(onOpenChange).toHaveBeenCalledWith(true);
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it('⭐프로젝트 0 · 읽기 실패(서버가 조직 전체를 읽어 주는지 모름)면 지시 한 줄(?compose=)이 만들 수 있는지 모르는 새 대화 창을 열지 않는다', async () => {
+    searchParamsValueRef.current = 'compose=' + encodeURIComponent('지시');
+    noProjects();
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => null })));
+    const onOpenChange = vi.fn();
+    await mount({ open: false, onOpenChange });
+    expect(container.textContent).toContain(koMessages.chats.conversationsLoadFailed);
+    expect(onOpenChange).not.toHaveBeenCalledWith(true);
+  });
+
+  it('⭐프로젝트 0이고 읽기가 한 번 실패한 뒤 다시 읽어 서버가 허락한다고 알면 지시 한 줄(?compose=)이 그제야 새 대화 창을 연다(실패 때 소비되지 않는다)', async () => {
+    searchParamsValueRef.current = 'compose=' + encodeURIComponent('지시');
+    noProjects();
+    let failing = true;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      return failing ? { ok: false, status: 500, json: async () => null } : { ok: true, json: async () => ({ data: [], total: 0 }) };
+    }));
+    const onOpenChange = vi.fn();
+    await mount({ open: false, onOpenChange });
+    expect(onOpenChange).not.toHaveBeenCalledWith(true);
+    failing = false;
+    await act(async () => { await sseOpts.current!.onPoll!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(onOpenChange).toHaveBeenCalledWith(true);
   });
 
   it('프로젝트 0 · 방 있음이면 지시 한 줄은 그 목록의 가장 최근 방으로 간다', async () => {
@@ -688,3 +758,239 @@ describe('ChatListView — 프로젝트가 하나도 없는 사람(story 4847, P
   });
 });
 
+// story 4847 — the server that answers the whole-organization read also lets a room be made with no project: the list says so (up to the layout and the outlet) and the new-room window offers
+// «조직 (프로젝트 없음)». An older server (422) gets neither. A project's OWN list proves nothing — an older server answers that too.
+function OrgWideReport() {
+  const { roomsAreOrgWide } = useChatRail();
+  return <div data-testid="org-wide-report">{String(roomsAreOrgWide)}</div>;
+}
+/** what the right-hand outlet would be told about the visible list's load (a refused agents view must not read there as «불러오지 못했어요») */
+function LoadErrorReport() {
+  const { conversationsLoadError } = useChatRail();
+  return <div data-testid="load-error-report">{String(conversationsLoadError)}</div>;
+}
+
+describe('ChatListView — 프로젝트 없는 방을 만들 수 있는 서버(story 4847)', () => {
+  const orgWideReported = () => container.querySelector('[data-testid="org-wide-report"]')?.textContent;
+  const newRoomSelect = () => document.body.querySelector('#new-room-project') as HTMLSelectElement | null;
+  const noneChoice = () => newRoomSelect()?.querySelector('option[value="none"]');
+
+  beforeEach(() => {
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: false, media: query, addEventListener: () => {}, removeEventListener: () => {},
+    })) as unknown as typeof window.matchMedia;
+  });
+
+  async function mountWithRail(props: Partial<React.ComponentProps<typeof ChatListView>> = {}) {
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <OrgWideReport />
+          <ChatListView projectId={null} currentTeamMemberId="me-1" {...props} />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('⭐조직 전체 질문에 답이 오면 «프로젝트 없는 방을 만들 수 있음»을 위(레일 context)로 알린다 — 응답 前엔 아니다', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    await mountWithRail();
+    expect(orgWideReported()).toBe('false');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    stubOrgServer();
+    await mountWithRail();
+    expect(orgWideReported()).toBe('true');
+  });
+
+  it('⭐목록이 다시 마운트돼도(레일 context는 그대로) 이미 알려진 «프로젝트 없는 방을 만들 수 있음»은 새 응답이 오기 前에 꺼지지 않는다', async () => {
+    stubOrgServer();
+    await mountWithRail();
+    expect(orgWideReported()).toBe('true');
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {}))); // the next read never answers
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <OrgWideReport />
+          <div key="other"><ChatListView projectId={null} currentTeamMemberId="me-1" /></div>
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(orgWideReported()).toBe('true'); // the flag belongs to the rail, not to the list that happened to report it
+  });
+
+  it('⭐옛 서버(조직 전체 질문이 422)는 알리지 않는다 — 프로젝트 단위로 물러난 뒤에도', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [A], role: 'member', projectId: A.projectId });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('project_id=')) return { ok: true, json: async () => ({ data: [A1], total: 1 }) };
+      return { ok: false, status: 422, json: async () => ({}) };
+    }));
+    await mountWithRail({ projectId: A.projectId });
+    expect(container.textContent).toContain('에이 방'); // the project's own list was answered…
+    expect(orgWideReported()).toBe('false');          // …which an older server does as well: it proves nothing
+  });
+
+  it('⭐조직 전체를 읽는 서버면 새 대화 창에 «조직 (프로젝트 없음)»이 있고, 옛 서버면 없다', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [A, B], role: 'member', projectId: A.projectId });
+    stubOrgServer();
+    await mountWithRail({ projectId: A.projectId, open: true, onOpenChange: () => {} });
+    expect(noneChoice()?.textContent).toBe(koMessages.chats.newRoomProjectNone);
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('project_id=')) return { ok: true, json: async () => ({ data: [A1], total: 1 }) };
+      return { ok: false, status: 422, json: async () => ({}) };
+    }));
+    await mountWithRail({ projectId: A.projectId, open: true, onOpenChange: () => {} });
+    expect(newRoomSelect()).not.toBeNull(); // two projects: the project choice is still there
+    expect(noneChoice()).toBeNull();
+  });
+
+  it('⭐걸러 보기를 «프로젝트 없음»으로 두고 새 대화를 열면 새 방의 기본값이 «조직 (프로젝트 없음)»이다', async () => {
+    stubOrgServer();
+    window.sessionStorage.setItem(CHAT_PROJECT_FILTER_KEY, 'none');
+    await mountWithRail({ open: true, onOpenChange: () => {} });
+    expect(newRoomSelect()?.value).toBe('none');
+  });
+
+  it('⭐프로젝트 하나뿐인 사람이 «프로젝트 A»만 걸러 보면 «조직 전체»를 묻지 않았으니 알리지 않는다(그 질문은 옛 서버도 답한다)', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [A, B], role: 'member', projectId: undefined });
+    window.sessionStorage.setItem(CHAT_PROJECT_FILTER_KEY, A.projectId);
+    stubOrgServer();
+    await mountWithRail();
+    expect(orgWideReported()).toBe('false');
+  });
+});
+
+// story 4847 — the agents view (`include_agent_conversations`) is the organization owner/admin's: the server refuses everyone else with 403. The tab stands on the ORGANIZATION role
+// (orgMemberships), not on the shell's «role» (/me: the larger of the project and organization roles — a project admin who is only an organization member has `admin` there and used
+// to see a tab the server then refused), and a 403 is said as what it is, not as a failure to retry.
+describe('ChatListView — 에이전트 탭은 조직 owner/admin 몫(story 4847 · 서버와 같은 술어)', () => {
+  const tabs = () => [...container.querySelectorAll('[role="tab"]')].map((t) => t.textContent);
+  const withCtx = (extra: Record<string, unknown>) => useDashboardContextMock.mockReturnValue({ projectMemberships: [A, B], projectId: 'proj-a', ...extra });
+  const openAgentTab = async () => {
+    const tab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === koMessages.chats.agentChatsTab)!;
+    await act(async () => { tab.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); tab.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  };
+
+  it('⭐프로젝트 관리자(셸 role=admin)가 조직에서는 member면 탭이 없다 — 서버가 403으로 거절할 보기를 보여 주지 않는다', async () => {
+    stubOrgServer(); withCtx({ role: 'admin', ...orgAs('member') });
+    await mount({ projectId: 'proj-a' });
+    expect(tabs()).not.toContain(koMessages.chats.agentChatsTab);
+  });
+
+  it('⭐조직 owner · 조직 admin이면 셸 role이 무엇이든 탭이 있다', async () => {
+    for (const orgRole of ['owner', 'admin']) {
+      stubOrgServer(); withCtx({ role: 'member', ...orgAs(orgRole) });
+      await mount({ projectId: 'proj-a' });
+      expect(tabs()).toContain(koMessages.chats.agentChatsTab);
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+    }
+  });
+
+  it('현재 조직이 조직 목록에 아직 없으면(아직 모름) 탭을 세우지 않는다', async () => {
+    stubOrgServer(); withCtx({ role: 'owner', orgId: 'org-9', orgMemberships: [{ orgId: 'org-4847-admin', orgName: 'O', orgSlug: 'o', role: 'owner' }] });
+    await mount({ projectId: 'proj-a' });
+    expect(tabs()).not.toContain(koMessages.chats.agentChatsTab);
+  });
+
+  it('⭐서버가 403으로 거절하면 «이 보기는 조직 관리자만»이다 — «불러오지 못했어요»도 «다시 시도»도 아니다(탭 안 · 내 대화 탭은 그대로)', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('include_agent_conversations=true')) return { ok: false, status: 403, json: async () => ({}) };
+      if (url.startsWith('/api/conversations?')) return { ok: true, json: async () => ({ data: [A1], total: 1 }) };
+      return { ok: false, status: 404, json: async () => null };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: false, media: query, addEventListener: () => {}, removeEventListener: () => {},
+    })) as unknown as typeof window.matchMedia;
+    withCtx({ role: 'admin', ...ORG_ADMIN });
+    await act(async () => {
+      root.render(wrap(
+        <ChatRailProvider>
+          <LoadErrorReport />
+          <ChatListView projectId="proj-a" currentTeamMemberId="me-1" />
+        </ChatRailProvider>,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    await openAgentTab();
+    expect(container.querySelector('[data-testid="load-error-report"]')?.textContent).toBe('false'); // the outlet is not told «failed» either
+    const note = container.querySelector('[data-testid="agent-chats-admin-only"]');
+    expect(note?.textContent).toBe(koMessages.chats.agentChatsAdminOnly);
+    expect(container.textContent).not.toContain(koMessages.chats.conversationsLoadFailed);
+    expect([...container.querySelectorAll('button')].some((b) => b.textContent === koMessages.common.retry)).toBe(false);
+  });
+
+  it('⭐거절은 영원하지 않다 — 다음에 다시 물어(폴링) 이번엔 열려 주면 «조직 관리자만» 안내는 걷힌다', async () => {
+    let agentStatus = 403;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('include_agent_conversations=true')) {
+        return agentStatus === 403 ? { ok: false, status: 403, json: async () => ({}) } : { ok: true, json: async () => ({ data: [], total: 0 }) };
+      }
+      if (url.startsWith('/api/conversations?')) return { ok: true, json: async () => ({ data: [A1], total: 1 }) };
+      return { ok: false, status: 404, json: async () => null };
+    }));
+    withCtx({ role: 'admin', ...ORG_ADMIN });
+    await mount({ projectId: 'proj-a' });
+    await openAgentTab();
+    expect(container.querySelector('[data-testid="agent-chats-admin-only"]')).not.toBeNull();
+    agentStatus = 200;
+    await act(async () => { await sseOpts.current!.onPoll!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="agent-chats-admin-only"]')).toBeNull();
+    expect(container.textContent).toContain(koMessages.chats.noAgentConversations);
+  });
+
+  it('⭐탭이 사라졌다가(조직 역할이 내려감) 돌아오면 옛 거절은 걷히고 다시 묻는다', async () => {
+    let agentStatus = 403;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('include_agent_conversations=true')) {
+        return agentStatus === 403 ? { ok: false, status: 403, json: async () => ({}) } : { ok: true, json: async () => ({ data: [], total: 0 }) };
+      }
+      if (url.startsWith('/api/conversations?')) return { ok: true, json: async () => ({ data: [A1], total: 1 }) };
+      return { ok: false, status: 404, json: async () => null };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const agentAsks = () => fetchMock.mock.calls.filter((c) => String(c[0]).includes('include_agent_conversations=true')).length;
+    const rerender = async () => {
+      await act(async () => { root.render(wrap(<ChatListView projectId="proj-a" currentTeamMemberId="me-1" />)); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    };
+    withCtx({ role: 'admin', ...ORG_ADMIN });
+    await mount({ projectId: 'proj-a' });
+    await openAgentTab();
+    expect(container.querySelector('[data-testid="agent-chats-admin-only"]')).not.toBeNull();
+    expect(agentAsks()).toBe(1);
+    withCtx({ role: 'admin', ...orgAs('member') }); // the organization role went down: the tab is gone
+    await rerender();
+    expect(tabs()).not.toContain(koMessages.chats.agentChatsTab);
+    agentStatus = 200;
+    withCtx({ role: 'admin', ...ORG_ADMIN }); // …and came back
+    await rerender();
+    await openAgentTab();
+    expect(agentAsks()).toBe(2); // asked again, not answered from the old refusal
+    expect(container.querySelector('[data-testid="agent-chats-admin-only"]')).toBeNull();
+  });
+
+  it('⭐다른 실패(500)는 그대로 «불러오지 못했어요 · 다시 시도»다 — 403만 따로 말한다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('include_agent_conversations=true')) return { ok: false, status: 500, json: async () => ({}) };
+      if (url.startsWith('/api/conversations?')) return { ok: true, json: async () => ({ data: [A1], total: 1 }) };
+      return { ok: false, status: 404, json: async () => null };
+    }));
+    withCtx({ role: 'admin', ...ORG_ADMIN });
+    await mount({ projectId: 'proj-a' });
+    await openAgentTab();
+    expect(container.querySelector('[data-testid="agent-chats-admin-only"]')).toBeNull();
+    expect(container.textContent).toContain(koMessages.chats.conversationsLoadFailed);
+  });
+});

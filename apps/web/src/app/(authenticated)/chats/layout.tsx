@@ -38,10 +38,11 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const dashboardCtx = useDashboardContext();
   const { currentTeamMemberId, projectId } = dashboardCtx;
-  // a room is filed under a project (until 4846 PR1 lets one be made without): with no project at all «새 대화» would open a window that cannot create
-  const canStartRoom = !isNoProjectAtAll(dashboardCtx);
   const [showModal, setShowModal] = useState(false);
-  const { railMode, toggleManualExpand } = useChatRail();
+  const { railMode, toggleManualExpand, roomsAreOrgWide } = useChatRail();
+  // a room is filed under a project unless the server serves the organization's rooms as a whole — it then lets one be made with none («조직(프로젝트 없음)»).
+  // So with no project at all «새 대화» is there when the list was answered org-wide, and hidden on an older server (where the window could not create anything).
+  const canStartRoom = !isNoProjectAtAll(dashboardCtx) || roomsAreOrgWide;
   // story #2921 S6 후속(유나 design:changes 2026-08-22, CI a11y 가드 지적 처방) — overlay는
   // 모바일 드로어와 동형인데 접근 가능한 dialog 시맨틱이 없었다(「손수 구현된 모달」로 CI가
   // 정당하게 잡음). 당시 contextual-panel-layout.tsx의 반응형 드로어와 같은 useFocusTrap

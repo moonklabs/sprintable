@@ -32,24 +32,25 @@ function wrap(node: React.ReactNode) {
 // layout.test.tsx의 ReadingOpenProbe와 같은 형 — 실 ChatListView(SSE·fetch)는 이 파일
 // 스코프 밖, 이 파일은 outlet이 context 값을 정확히 읽어 가르는지만 잰다.
 function StateProbe({
-  loading, count, error, onRetry,
-}: { loading: boolean; count: number; error?: boolean; onRetry?: () => void }) {
-  const { setConversationsLoading, setConversationCount, setConversationsLoadError, setRetryConversations } = useChatRail();
+  loading, count, error, onRetry, orgWide,
+}: { loading: boolean; count: number; error?: boolean; onRetry?: () => void; orgWide?: boolean }) {
+  const { setConversationsLoading, setConversationCount, setConversationsLoadError, setRetryConversations, setRoomsAreOrgWide } = useChatRail();
   useEffect(() => {
     setConversationsLoading(loading);
     setConversationCount(count);
     setConversationsLoadError(error ?? false);
+    setRoomsAreOrgWide(orgWide ?? false);
     if (onRetry) setRetryConversations(onRetry);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, count, error, onRetry, setConversationsLoading, setConversationCount, setConversationsLoadError]);
+  }, [loading, count, error, onRetry, orgWide, setConversationsLoading, setConversationCount, setConversationsLoadError, setRoomsAreOrgWide]);
   return null;
 }
 
-function renderPage(loading: boolean, count: number, error?: boolean, onRetry?: () => void) {
+function renderPage(loading: boolean, count: number, error?: boolean, onRetry?: () => void, orgWide?: boolean) {
   return wrap(
     <TopBarProvider>
       <ChatRailProvider>
-        <StateProbe loading={loading} count={count} error={error} onRetry={onRetry} />
+        <StateProbe loading={loading} count={count} error={error} onRetry={onRetry} orgWide={orgWide} />
         <ChatsPage />
       </ChatRailProvider>
     </TopBarProvider>,
@@ -129,6 +130,12 @@ describe('ChatsPage — 프로젝트가 하나도 없는 사람(story 4847)', ()
     await act(async () => { root.render(renderPage(false, 0)); });
     expect(container.textContent).not.toContain(koMessages.chats.noConversations);
     expect(container.textContent).not.toContain(koMessages.chats.selectConversationPrompt);
+  });
+
+  it('⭐프로젝트 0 · 대화 0 · 조직 전체를 읽는 서버 — 프로젝트 없이 방을 만들 수 있으니 오른쪽도 보통의 «대화가 없어요»를 말한다', async () => {
+    dashboardCtx.current = { projectId: undefined, projectMemberships: [] };
+    await act(async () => { root.render(renderPage(false, 0, false, undefined, true)); });
+    expect(container.textContent).toContain(koMessages.chats.noConversations);
   });
 
   it('프로젝트 0 · 대화 있음 — 「선택하세요」는 그대로(방은 읽을 수 있다)', async () => {

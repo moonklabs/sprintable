@@ -32,9 +32,10 @@ import { ChatsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 export default function ChatsPage() {
   const t = useTranslations('chats');
   const tc = useTranslations('common');
-  const { conversationsLoading, conversationCount, conversationsLoadError, retryConversations } = useChatRail();
-  // story 4847 — a person with no project at all is told so in the list (the rail); this side says nothing more (two different lines would be two voices)
-  const noProjectAtAll = isNoProjectAtAll(useDashboardContext());
+  const { conversationsLoading, conversationCount, conversationsLoadError, retryConversations, roomsAreOrgWide } = useChatRail();
+  // story 4847 — a person with no project at all, on a server that cannot make a room without one, is told so in the list (the rail); this side says nothing more (two different lines would be two voices).
+  // On a server that serves the organization's rooms a room can be made with none, so there is something to start and the outlet says «no conversations» like anywhere else.
+  const noProjectAtAll = isNoProjectAtAll(useDashboardContext()) && !roomsAreOrgWide;
 
   return (
     <>

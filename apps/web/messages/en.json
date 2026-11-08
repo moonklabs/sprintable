@@ -5817,6 +5817,8 @@
     "notificationsMuted": "Notifications muted",
     "newRoomProject": "Project for this room",
     "newRoomProjectPick": "Choose a project",
+    "newRoomProjectNone": "Organization (no project)",
+    "agentChatsAdminOnly": "Only organization admins can see this view.",
     "roomProjectAsk": "This room has no project — the project for stories, docs and attachments",
     "roomNoProject": "No project",
     "projectFilterLabel": "Filter by project",
