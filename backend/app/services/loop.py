@@ -211,7 +211,7 @@ async def create_loop_artifact(
     decision은 payload에 필드가 없으므로 항상 'pending' — client가 chosen/rejected로 직접
     생성할 방법이 스키마 레벨에서부터 없다(S5 게이트 전용 전이)."""
     asset = (await session.execute(
-        select(Asset).where(Asset.id == payload.asset_id, Asset.org_id == org_id)
+        select(Asset).where(Asset.id == payload.asset_id, Asset.org_id == org_id, Asset.deleted_at.is_(None))
     )).scalar_one_or_none()
     if asset is None:
         raise LoopServiceError("ASSET_NOT_FOUND", "자산을 찾을 수 없습니다.")
@@ -220,6 +220,23 @@ async def create_loop_artifact(
         raise LoopServiceError(
             "ASSET_PROJECT_MISMATCH", "자산이 이 루프와 같은 프로젝트에 속하지 않습니다."
         )
+    # story #4846 (AC10): linking an asset to a loop makes it a MIXED asset (another living context), which the asset routes read by the project rule. So a
+    # file that belongs to a chat room can be linked here only by someone who can read that room — otherwise a project member who is not in the room could
+    # file it under their own loop and read it. (The story/doc links cannot be made this way: their registration checks the object path against the source.)
+    from sqlalchemy import true as _true
+
+    from app.services.chat_asset_scope import asset_scope_clause
+
+    if (await session.execute(
+        select(Asset.id).where(
+            Asset.id == asset.id,
+            asset_scope_clause(
+                _true(), caller_member_id=caller.id, is_agent=getattr(caller, "type", "human") == "agent",
+                user_id=getattr(caller, "user_id", None) or caller.id, org_id=org_id,
+            ),
+        )
+    )).first() is None:
+        raise LoopServiceError("ASSET_NOT_FOUND", "자산을 찾을 수 없습니다.")
 
     repo = LoopArtifactRepository(session, org_id)
     artifact = await repo.create(
@@ -266,7 +283,7 @@ async def list_loop_artifacts(
     assets_by_id: dict[uuid.UUID, Asset] = {}
     if asset_ids:
         assets = (await session.execute(
-            select(Asset).where(Asset.id.in_(asset_ids), Asset.org_id == org_id)
+            select(Asset).where(Asset.id.in_(asset_ids), Asset.org_id == org_id, Asset.deleted_at.is_(None))   # a deleted asset is not read through a loop link either
         )).scalars().all()
         assets_by_id = {a.id: a for a in assets}
 
