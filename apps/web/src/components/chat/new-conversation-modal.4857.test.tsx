@@ -88,6 +88,19 @@ describe('NewConversationModal — 나 자신은 상대 목록에 없다(story 4
     expect(posts).toEqual([]);
   });
 
+  it('⭐내 행을 뺀 뒤에 이름 겹침을 센다 — 이름 없는 사람이 나와 상대 둘이어도 상대 행에 «· ID» 꼬리가 안 붙는다', async () => {
+    const roster = [{ id: 'unnamed-me-1234', name: '', type: 'human' }, { id: 'unnamed-other-5678', name: '', type: 'human' }] as unknown as typeof ROSTER;
+    await mount(mockFetches(roster, []), 'unnamed-me-1234');
+    const rows = [...document.body.querySelectorAll('li button')];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.textContent).not.toMatch(/unnamed-/);
+  });
+
+  it('내 id로 거른다(사람인지 에이전트인지 따지지 않는다)', async () => {
+    await mount(mockFetches(ROSTER, []), 'a-bot');
+    expect(rowNames()).toEqual(['내이름', '다른사람']);
+  });
+
   it('내가 누군지 아직 모르면(id 없음) 목록을 건드리지 않는다', async () => {
     await mount(mockFetches(ROSTER, []), undefined);
     expect(rowNames()).toEqual(['내이름', '다른사람', '점검봇']);
