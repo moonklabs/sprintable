@@ -60,7 +60,7 @@ export function NewConversationModal({ projectId, allowNoProject = false, onClos
   // story 4847 (AC3) — the people to pick from are the organization's; only the NEW room needs a project (the server files a room under one), so
   // the modal says which one it will be — the given default, changeable when the person can use more than one.
   const dashboardCtx = useDashboardContext();
-  const { projectMemberships } = dashboardCtx;
+  const { projectMemberships, currentTeamMemberId } = dashboardCtx;
   // the default is worked out on every render (not frozen at first render): it must be one of the person's projects (an unknown one is no default), and it follows the given one while the window is open
   const onlyProject = projectMemberships.length === 1 ? projectMemberships[0]!.projectId : '';
   const defaultRoomProject = projectId === NO_ROOM_PROJECT
@@ -83,7 +83,10 @@ export function NewConversationModal({ projectId, allowNoProject = false, onClos
   // story #3776(1층B) — "취소", common ns의 기존 cancel 키 재사용.
   const tc = useTranslations('common');
   const [members, setMembers] = useState<Member[]>([]);
-  const rowLabels = memberRowLabels(members, tc, () => '');
+  // story 4857 — the person to talk WITH is somebody else: the shared roster (/api/members also feeds assignee · mention pickers, where «me» belongs) lists me too,
+  // and a room needs at least one other (the server files `{me, ...picked}` — picking only myself made a one-person room). Worked out on every render, like the default project.
+  const people = currentTeamMemberId ? members.filter((m) => m.id !== currentTeamMemberId) : members;
+  const rowLabels = memberRowLabels(people, tc, () => '');
   // story #3194 — 별도 state로 둔다(members setter와 순서 경쟁 없이 항상 render에서만 merge).
   // story 4675: the same read also says which computer each agent is bound to (the chip) — one map, two facts
   const [factsById, setFactsById] = useState<Record<string, AgentFacts>>({});
@@ -180,7 +183,7 @@ export function NewConversationModal({ projectId, allowNoProject = false, onClos
             <div className="py-6 text-center text-sm text-muted-foreground">{tc('loading')}</div>
           ) : (
             <ul className="space-y-1">
-              {members.map((m) => (
+              {people.map((m) => (
                 <li key={m.id}>
                   <button
                     type="button"
