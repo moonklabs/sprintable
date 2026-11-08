@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useMemo, useRef, useState } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -37,6 +37,7 @@ import { ApprovalRequestCard, type CardState } from './approval-request-card';
 import { EventBlockCard } from './event-block-card';
 import { parseBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
 import { segmentMessageContent } from './message-segments';
+import { classifyChatHref, HAS_MENTION_RE, MENTION_RE, splitPlainUrls } from './chat-link-rules';
 import { EmbedGroup } from './embed-group';
 import { toEmbedCardOpenPanel } from './embed-card-open-panel-adapter';
 import { ReportMessageSummary } from './report-message-summary';
@@ -131,7 +132,7 @@ function hastNodeText(node: HastTextLike | undefined): string {
 // Convert @name tokens to markdown links so react-markdown v10 can render them via the `a` component.
 // Uses negative lookbehind to skip already-linked mentions (e.g. inside [...]).
 function prepareMentions(content: string): string {
-  return content.replace(/(?<![[(])@([\w가-힣]+)/g, '[@$1](mention:$1)');
+  return content.replace(MENTION_RE, '[@$1](mention:$1)'); // story 4854: not the «@example» of an e-mail address (chat-link-rules.ts)
 }
 
 // story #2002: 원클릭 복사 — inline(단일 백틱)은 클릭 즉시 복사, 블록(펜스)은 호버 시 드러나는
@@ -231,7 +232,7 @@ export function ChatMarkdown({ content: rawContent, references, entityStatusByKe
   const markdownish = /[*_`#\[\]>~]|entity:/.test(detectionText)
     || (hasComment && (/^(?: {4}|\t)/m.test(rawContent) || /^\s*(?:[-*+]|\d+[.)])\s/m.test(detectionText)));
   const content = hasComment && !markdownish ? stripHtmlCommentsFromPlainText(rawContent) : rawContent;
-  const hasMention = /@[\w가-힣]+/.test(content);
+  const hasMention = HAS_MENTION_RE.test(content);
   const hasMarkdown = markdownish;
 
   // story #2021: react-markdown이 리졸브한 컴포넌트 함수 참조를 그대로 React 엘리먼트 type으로
@@ -354,6 +355,11 @@ export function ChatMarkdown({ content: rawContent, references, entityStatusByKe
           );
         }
       }
+      // story 4854 — an address that is not a link (empty: a `javascript:` link the markdown reader emptied · or any kind but http(s)/mailto) is text; before, it was an anchor that
+      // looked like a link and, pressed, opened THIS page again in a new window. A mail address is a plain anchor (no new window).
+      const kind = classifyChatHref(href);
+      if (kind === 'none') return <span className={text}>{children}</span>;
+      if (kind === 'mail') return <a href={href} className={`underline underline-offset-2 ${text}`}>{children}</a>;
       return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
     },
   }), [text, muted, codeBg, border, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey, flatHref]);
@@ -361,7 +367,10 @@ export function ChatMarkdown({ content: rawContent, references, entityStatusByKe
   if (!hasMarkdown && !hasMention) {
     return (
       <span className={`whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-relaxed ${text}`}>
-        {content}
+        {/* story 4854 — a plain message (no markdown character) used to show an address as dead text; the plain path links http(s) addresses now (whitespace and line breaks stay as typed) */}
+        {splitPlainUrls(content).map((part, i) => part.kind === 'url'
+          ? <a key={i} href={part.value} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{part.value}</a>
+          : <Fragment key={i}>{part.value}</Fragment>)}
       </span>
     );
   }
