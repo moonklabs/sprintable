@@ -2330,6 +2330,19 @@ describe('ChatBubble — story #92f00dc4 server_command 카드 라우팅', () =>
     expect(onFillComposer).toHaveBeenCalledWith('/assign #2947 채영1');
   });
 
+  it('⭐story 4847 — server_command.code=ROOM_HAS_NO_PROJECT면 우리 문구 카드로 뜬다(서버의 영어 폴백 글은 안 보임)', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ChatBubble
+          message={{ ...baseMessage, content: 'This command works in a room that has a project.', server_command: { command: 'assign', outcome: 'denied', code: 'ROOM_HAS_NO_PROJECT' } }}
+          isMine={false}
+        />,
+      ));
+    });
+    expect(container.textContent).toContain('이 방에는 프로젝트가 없어 /assign 명령을 쓸 수 없어요');
+    expect(container.textContent).not.toContain('This command works in a room that has a project.');
+  });
+
   it('삭제된(tombstone) 메시지는 server_command가 있어도 삭제 placeholder가 우선한다', async () => {
     await act(async () => {
       root.render(wrap(<ChatBubble message={{ ...serverCmdMessage, content: '', deleted_at: '2026-08-27T00:00:00.000Z' }} isMine={false} />));
