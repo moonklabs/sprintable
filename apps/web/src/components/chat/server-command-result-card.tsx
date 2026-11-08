@@ -36,7 +36,7 @@ export const ROOM_HAS_NO_PROJECT = 'ROOM_HAS_NO_PROJECT';
 export function ServerCommandResultCard({ content, serverCommand, onFillComposer }: ServerCommandResultCardProps) {
   const t = useTranslations('chats');
   // the server's sentence for this code is English and only a fallback: the words shown are ours (what did not work + the way that does)
-  const roomHasNoProject = serverCommand.code === ROOM_HAS_NO_PROJECT;
+  const roomHasNoProject = serverCommand.outcome === 'denied' && serverCommand.code === ROOM_HAS_NO_PROJECT; // the server sends it only with `denied`; the code on any other outcome is not this card
   const lead = roomHasNoProject ? t('serverCommandRoomHasNoProject', { command: serverCommand.command }) : extractLeadSentence(content);
   const nextAction = serverCommand.outcome === 'executed' ? extractNextAction(content) : null;
   // story #92f00dc4/페드루 판정(PR #3549 리뷰 후속) — candidates는 BE가 outcome='ambiguous'일

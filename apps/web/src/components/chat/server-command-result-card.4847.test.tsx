@@ -6,6 +6,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { ServerCommandResultCard } from './server-command-result-card';
+import { normalizeToMessage } from '@/hooks/use-chat-sse';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
 
@@ -74,6 +75,17 @@ describe('ServerCommandResultCard — ROOM_HAS_NO_PROJECT(story 4847)', () => {
     await draw({ command: 'done', outcome: 'denied', code: 'SOMETHING_NEW' }, "'/done' 실패 — 새 사유");
     expect(container.textContent).toContain("'/done' 실패 — 새 사유");
     expect(container.querySelector('[data-testid="server-command-way"]')).toBeNull();
+  });
+
+  it('⭐이 코드는 denied일 때만 이 카드 — 다른 outcome에 실려 와도 지금 카드 그대로', async () => {
+    await draw({ command: 'done', outcome: 'executed', code: 'ROOM_HAS_NO_PROJECT' }, "'/done' 완료 — 전이됐습니다.");
+    expect(container.textContent).toContain("'/done' 완료 — 전이됐습니다.");
+    expect(container.querySelector('[data-testid="server-command-way"]')).toBeNull();
+  });
+
+  it('⭐서버가 보낸 그대로의 메시지(normalizeToMessage)가 code를 잃지 않는다', () => {
+    const msg = normalizeToMessage({ id: 'm1', content: FALLBACK, server_command: { command: 'assign', outcome: 'denied', code: 'ROOM_HAS_NO_PROJECT' } });
+    expect(msg.server_command).toEqual({ command: 'assign', outcome: 'denied', code: 'ROOM_HAS_NO_PROJECT' });
   });
 
   it('코드가 있는 카드에 후보 존 · 다음 행동 박스는 안 뜬다', async () => {
