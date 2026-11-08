@@ -274,8 +274,13 @@ async def _conversation_has_human_participant(conversation_id: uuid.UUID, db: As
     return any(p not in agent_ids for p in pids)  # agent 확정 외 = human 보수적
 
 
-async def _conversations_with_human_participant(conv_ids: list[uuid.UUID], db: AsyncSession) -> set[uuid.UUID]:
-    """conv_ids 중 휴먼 참가자가 있는 conversation_id 집합(보수적·agent 확정 외 human)."""
+async def _conversations_with_human_participant(
+    conv_ids: list[uuid.UUID], db: AsyncSession, org_id: uuid.UUID | None = None,
+) -> set[uuid.UUID]:
+    """conv_ids 중 휴먼 참가자가 있는 conversation_id 집합(보수적·agent 확정 외 human).
+
+    story #4846: with `org_id` only an agent of THAT organization is confirmed as an agent — a participant row naming an agent of another organization
+    stays «not confirmed» and so counts as a person (the conservative rule of this function), which keeps the room out of an admin's agents-only view."""
     if not conv_ids:
         return set()
     rows = (await db.execute(
@@ -285,7 +290,9 @@ async def _conversations_with_human_participant(conv_ids: list[uuid.UUID], db: A
     # member_id 중 agent 확정 집합
     all_mids = {m for _, m in rows}
     agent_ids = set((await db.execute(
-        select(TeamMember.id).where(TeamMember.id.in_(all_mids), TeamMember.type == "agent")
+        select(TeamMember.id).where(
+            TeamMember.id.in_(all_mids), TeamMember.type == "agent", *([TeamMember.org_id == org_id] if org_id is not None else []),
+        )
     )).scalars().all()) if all_mids else set()
     result: set[uuid.UUID] = set()
     for cid, mid in rows:
@@ -1621,7 +1628,7 @@ async def list_conversations(
             select(Conversation.id).where(Conversation.org_id == org_id, Conversation.project_id.is_(None))
         )).all()}
         if no_project_convs:
-            conv_ids.update(no_project_convs - await _conversations_with_human_participant(list(no_project_convs), db))
+            conv_ids.update(no_project_convs - await _conversations_with_human_participant(list(no_project_convs), db, org_id))
     elif include_agent_conversations:
         agent_ids_result = await db.execute(
             select(TeamMember.id).where(
@@ -1639,7 +1646,7 @@ async def list_conversations(
                 )
             )
             candidate_conv_ids = {r[0] for r in agent_conv_result.all()}
-            human_convs = await _conversations_with_human_participant(list(candidate_conv_ids), db)
+            human_convs = await _conversations_with_human_participant(list(candidate_conv_ids), db, org_id)
             conv_ids.update(candidate_conv_ids - human_convs)  # agent-only만 admin에게 추가
 
     if not conv_ids:

@@ -273,6 +273,26 @@ async def test_a_project_admin_who_is_an_ordinary_organization_member_cannot_loo
         await engine.dispose()
 
 
+async def test_an_agent_of_another_organization_in_a_room_does_not_make_it_an_agents_room_of_this_one():
+    """self-QA round: the "is there a person in this room" classifier confirmed an agent without asking whose organization it belongs to, so a participant row
+    naming an agent of ANOTHER organization (planted — the write paths check the organization) made the room look agents-only and put it, and its last line,
+    in this organization's owner's `none` view. An agent of another organization is not confirmed: it counts as a person (the function's conservative rule)."""
+    from tests.test_1994_backlink_api_realdb import _make_agent_member, _make_conversation, _make_org, _make_project
+
+    engine, Session, w = await _world()
+    try:
+        async with Session() as s:
+            other = await _make_org(s)
+            other_project = await _make_project(s, other.id, "OP")
+            foreign = await _make_agent_member(s, other.id, other_project.id)
+            foreign = foreign if isinstance(foreign, uuid.UUID) else getattr(foreign, "id", foreign)
+            planted = await _make_conversation(s, w.org, None, [foreign], foreign, "group")   # this organization's room, no project, only a foreign agent in it
+        r = await _list(Session, w, "org_owner", project_id="none", include_agent_conversations="true")
+        assert r.status_code == 200 and str(planted) not in _ids(r) and _ids(r) == [str(w.n_agents)], r.text
+    finally:
+        await engine.dispose()
+
+
 async def test_the_admins_agent_view_takes_none_for_the_agents_rooms_without_a_project():
     """lens recommendation: the agents' rooms that have no project are in no project's view — `none` finds them (and only the agent-only ones)"""
     engine, Session, w = await _world()
