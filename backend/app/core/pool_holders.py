@@ -272,6 +272,7 @@ def _prune(pool: _Pool) -> None:
 
 
 _INVALIDATION_LINES_PER_MIN = 20
+_INVAL_WINDOW_MAX_KEYS = 256  # hard bound of the per-pool-and-kind rate table
 _REASON_CHARS = 100
 _inval_window: dict[str, list[float]] = {}
 
@@ -289,6 +290,11 @@ def _invalidation_budget(pool_name: str, cancelled: bool, now: float) -> bool:
     if len(_inval_window) > 64:
         for k, v in list(_inval_window.items()):
             if not v or now - v[-1] >= 60.0:
+                _inval_window.pop(k, None)
+        if len(_inval_window) > _INVAL_WINDOW_MAX_KEYS:
+            # a hard bound too (codex): many uniquely named pools invalidating inside one minute leave nothing stale to prune - the oldest keys go, the newest (this one) stays
+            oldest_first = sorted(_inval_window.items(), key=lambda kv: kv[1][-1] if kv[1] else 0.0)
+            for k, _ in oldest_first[: len(_inval_window) - _INVAL_WINDOW_MAX_KEYS]:
                 _inval_window.pop(k, None)
     return True
 

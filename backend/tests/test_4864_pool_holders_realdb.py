@@ -581,22 +581,32 @@ async def test_an_invalidation_that_is_not_an_interrupted_statement_carries_no_s
     line = [r.getMessage() for r in caplog.records if "invalidated" in r.getMessage()][0]
     assert "running when interrupted: n/a (not an interrupted statement)" in line, line
 
+    caplog.clear()  # from here on ONLY what the real hook writes counts (the direct call above must not stand in for it)
+    pool_holders._inval_window.clear()
     async with eng.connect() as conn:  # the same through the real hook, from INSIDE SQLAlchemy's greenlet (an explicit invalidate of a live connection)
         await conn.execute(text("select 1"))
         await conn.invalidate(ConnectionResetError("failover"))
-    real = [r.getMessage() for r in caplog.records if "invalidated" in r.getMessage()][-1]
-    assert "running when interrupted: n/a (not an interrupted statement)" in real, real
+    real = [r.getMessage() for r in caplog.records if "invalidated" in r.getMessage()]
+    assert len(real) == 1, real  # exactly one line, written by the installed hook
+    assert "exc=ConnectionResetError" in real[0] and "running when interrupted: n/a (not an interrupted statement)" in real[0], real[0]
 
 
 async def test_a_huge_cancellation_reason_is_cut_before_it_is_processed(watched, monkeypatch):
     """codex (5462): the cap must come BEFORE split/join - a megabytes-long Task.cancel(msg) must not be walked whole inside the pool machinery."""
     from app.core import db_error_redaction, pool_holders
 
-    seen: list[int] = []
+    whole_splits: list[int] = []
+    slices: list[slice] = []
 
     class Spy(str):
-        def split(self, *a, **k):  # only reached if the code splits the WHOLE text
-            seen.append(len(self))
+        # the text is taken in by SLICING; any other way of reading the whole of it (split, iteration, str()) would not go through __getitem__ with a bounded stop
+        def __getitem__(self, key):
+            if isinstance(key, slice):
+                slices.append(key)
+            return super().__getitem__(key)
+
+        def split(self, *a, **k):  # reached only if the code splits the WHOLE text (a slice returns a plain str, which does not come here)
+            whole_splits.append(len(self))
             return super().split(*a, **k)
 
     monkeypatch.setattr(db_error_redaction, "safe_exception_text", lambda exc: Spy("word " * 200_000))
@@ -604,7 +614,8 @@ async def test_a_huge_cancellation_reason_is_cut_before_it_is_processed(watched,
     pool_holders._inval_window.clear()
     fake = object()
     pool_holders._log_invalidation(pool_holders._pools[name], fake, fake, asyncio.CancelledError("x"))
-    assert not seen or max(seen) <= pool_holders._REASON_CHARS * 8, f"split() ran on a text of {max(seen)} characters"
+    assert not whole_splits, f"split() ran on a text of {max(whole_splits)} characters"
+    assert slices and all(s.stop is not None and s.stop <= pool_holders._REASON_CHARS * 8 for s in slices), f"the text was not cut first: {slices}"
 
 
 async def test_a_cancellation_reason_is_one_line_and_cut(watched, caplog):
@@ -633,6 +644,22 @@ def test_the_rate_limit_table_does_not_grow_for_ever_with_dynamic_pool_names():
         pool_holders._inval_window[f"gone-{i}:other"] = [old]
     assert pool_holders._invalidation_budget("fresh", False, time.monotonic()) is True
     assert len(pool_holders._inval_window) <= 2, len(pool_holders._inval_window)
+
+
+def test_the_rate_limit_table_has_a_hard_bound_even_when_every_name_is_fresh():
+    """codex (5462): pruning stale keys is not a bound - many uniquely named pools invalidating inside ONE minute leave nothing stale. The table is cut to the newest keys."""
+    import time
+
+    from app.core import pool_holders
+
+    pool_holders._inval_window.clear()
+    now = time.monotonic()
+    for i in range(3 * pool_holders._INVAL_WINDOW_MAX_KEYS):
+        assert pool_holders._invalidation_budget(f"fresh-{i}", False, now + i * 0.001) is True
+    assert len(pool_holders._inval_window) <= pool_holders._INVAL_WINDOW_MAX_KEYS, len(pool_holders._inval_window)
+    last = f"fresh-{3 * pool_holders._INVAL_WINDOW_MAX_KEYS - 1}:other"
+    assert last in pool_holders._inval_window, "the newest key must survive the cut"
+    pool_holders._inval_window.clear()
 
 
 async def test_this_modules_own_frames_are_never_reported_as_the_app(monkeypatch):
