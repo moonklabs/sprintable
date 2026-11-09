@@ -105,7 +105,9 @@ def test_the_stream_stamps_its_own_org_on_both_live_and_backfill_frames():
 
     source = inspect.getsource(ev_module.agent_event_stream)
     assert "_with_stream_org(event_data, org_id)" in source, "the live frame carries the stream's org"
-    assert "_backfill_frame_data(evt, org_id, sender_orgs) for evt in batch" in source, "the backfill frame carries it too"
+    # story #4870: the same frame, now also handed the copy of the payload with a room's words withheld when the caller may not read the room
+    assert "_backfill_frame_data(evt, org_id, sender_orgs, _withheld.get(str(evt.id))) for evt in batch" in source, "the backfill frame carries it too"
+    assert "withheld_payloads(db, org_id, auth, " in source, "the backfill batch asks the room-read gate once"
     assert "sender_orgs = await _sender_orgs_for(db, batch)" in source, "the backfill batch looks its senders up once"
 
 

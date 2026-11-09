@@ -983,13 +983,13 @@ async def _dispatch_conversation_event(
 
 # story #4846 (AC9) — what a mention carries to someone who is NOT in the room and could not be put in it: that somebody mentioned them, where, and who — never the words.
 # A closed list of what stays (anything not named here is dropped, so a field added to the message payload later does not start to travel to a person who cannot read it).
-_MENTION_WITHOUT_TEXT_KEYS = ("id", "conversation_id", "created_at", "sender_org_id", "sender")
+# story #4870: the list and the shape live in ONE place now (`services/event_room_gate.py`) — the roads that read a stored copy back withhold the words in exactly this shape.
+from app.services.event_room_gate import MENTION_WITHOUT_TEXT_KEYS as _MENTION_WITHOUT_TEXT_KEYS  # noqa: E402
+from app.services.event_room_gate import payload_without_room_words as _payload_without_room_words  # noqa: E402
 
 
 def _mention_payload_without_text(payload: dict, target_id: uuid.UUID) -> dict:
-    out = {k: payload[k] for k in _MENTION_WITHOUT_TEXT_KEYS if k in payload}
-    out.update(content="", attachments=[], mentioned_ids=[str(target_id)], content_withheld=True)
-    return out
+    return _payload_without_room_words(payload, recipient_id=target_id, mention=True)
 
 
 async def _admit_mentioned_non_participants(

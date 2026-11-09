@@ -32,6 +32,7 @@ from app.dependencies.database import get_db
 from app.models.agent_gateway import AgentEventCursor, AgentGatewaySession
 from app.models.api_key import ApiKey
 from app.models.event import Event
+from app.services.event_room_gate import StoredEvent, withheld_payloads
 from app.models.organization import Organization
 from app.models.team import TeamMember
 from app.routers.events import _agent_connections, _event_to_payload, _uuid_text_or_none, _with_stream_org
@@ -468,9 +469,9 @@ async def _fetch_events(
     return rows.fetchall()
 
 
-def _row_to_payload(row: object) -> dict:
+def _row_to_payload(row: object, payload: "dict | None" = None) -> dict:  # story #4870: `payload`, when given, replaces the stored one (a room's words withheld from an agent that may not read the room now)
     """_fetch_events row â SSE payload dict."""
-    _payload = (json.loads(row.payload)  # type: ignore[attr-defined]
+    _payload = payload if payload is not None else (json.loads(row.payload)  # type: ignore[attr-defined]
                if isinstance(row.payload, str) else row.payload)
     return {
         "event_id": row.event_id,  # type: ignore[attr-defined]
@@ -498,6 +499,19 @@ def _row_to_payload(row: object) -> dict:
         "expects_response": (_payload or {}).get("expects_response"),
         "recipient_id": getattr(row, "recipient_id", None),
     }
+
+
+def _stored_event_of_row(row: object) -> "StoredEvent":
+    """story #4870 — a `_fetch_events` row as the room-read gate sees a stored copy (the key is the row's event id; the payload may come back as text)."""
+    _p = json.loads(row.payload) if isinstance(row.payload, str) else row.payload  # type: ignore[attr-defined]
+    return StoredEvent(
+        key=row.event_id,  # type: ignore[attr-defined]
+        event_type=row.event_type,  # type: ignore[attr-defined]
+        source_entity_type=row.source_entity_type,  # type: ignore[attr-defined]
+        source_entity_id=row.source_entity_id,  # type: ignore[attr-defined]
+        payload=_p,
+        recipient_id=row.recipient_id,  # type: ignore[attr-defined]
+    )
 
 
 async def _sender_orgs_for_rows(db: AsyncSession, rows: list) -> dict[str, str | None]:
@@ -1017,6 +1031,9 @@ async def agent_stream(
                     async with async_session_factory() as db:
                         rows = await _fetch_events(db, agent_id, floor, _BACKFILL_LIMIT, uuid.UUID(org_id_str), _accept_types)
                         sender_orgs = await _sender_orgs_for_rows(db, rows) if rows else {}
+                        # story #4870: the replay is a re-read of stored copies — a room's words go out only to an agent that may read the room NOW (one question for the batch);
+                        # the words are taken out of the frame otherwise, the row and its seq stay (the cursor and the ack are unchanged)
+                        _withheld = await withheld_payloads(db, uuid.UUID(org_id_str), auth, [_stored_event_of_row(r) for r in rows]) if rows else {}
                     if not rows:
                         return
                     _revoked = await _recheck_if_older_than(_ACCESS_RECHECK_BEFORE_BATCH_SEC)
@@ -1033,7 +1050,7 @@ async def agent_stream(
                             _sent_unacked.add(gseq)
                             # story 4649: the stream's org and the sender's org lead every frame (the daemon compares them)
                             data = _with_stream_org(
-                                {**_row_to_payload(row), "sender_org_id": sender_orgs.get(str(row.sender_id)) if row.sender_id is not None else None},
+                                {**_row_to_payload(row, _withheld.get(row.event_id)), "sender_org_id": sender_orgs.get(str(row.sender_id)) if row.sender_id is not None else None},
                                 uuid.UUID(org_id_str),
                             )
                             _sse = _frame_data({**data, "is_backfill": is_backfill})
