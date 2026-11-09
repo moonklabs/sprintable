@@ -22,6 +22,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 from app.core.database import Base
+from app.core.migration_lock_timeout import apply_lock_timeout
 import app.models  # noqa: F401 — register all models with metadata
 
 target_metadata = Base.metadata
@@ -66,6 +67,9 @@ def run_migrations_online() -> None:
     cfg["sqlalchemy.url"] = get_url()
     connectable = engine_from_config(cfg, prefix="sqlalchemy.", poolclass=pool.NullPool)
     with connectable.connect() as connection:
+        # story #4873 — a migration FAILS FAST on a lock it cannot get instead of queueing behind another connection (and holding up every later user of that table); the deployer stops
+        # before the swap on a failed migration and the old release keeps serving. See app/core/migration_lock_timeout.py.
+        apply_lock_timeout(connection)
         insp = inspect(connection)
         # Fresh-install path: an EMPTY database (no alembic_version, no application tables) is
         # provisioned from the squashed baseline SNAPSHOT (dev's exact 0096 end-state — schema
@@ -103,6 +107,7 @@ def run_migrations_online() -> None:
             connection.commit()
             # NOTE: no return — continue to the incremental path to apply post-baseline migrations.
 
+        apply_lock_timeout(connection)  # again: the baseline snapshot's pg_dump preamble ends with `SET lock_timeout = 0`
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():
             context.run_migrations()
