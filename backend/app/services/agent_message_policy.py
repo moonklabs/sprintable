@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import uuid
 
+from types import SimpleNamespace
+
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.models.member import Member
 from app.models.team import AgentMessageAllowlist, TeamMember
@@ -41,6 +44,35 @@ async def ensure_creator_allowlisted(session: AsyncSession, agent_member_id: uui
         .on_conflict_do_nothing(constraint="uq_agent_message_allowlist_pair")
     )
     return True
+
+
+async def reserved_publisher_ids(db: AsyncSession, ids: set[uuid.UUID]) -> set[uuid.UUID]:
+    """story #4868 (AC4) — the reserved system publisher («시스템 발행», `runtime_type='system-publisher'`) among `ids`. It is the server's own voice: it has no creator and no policy to meet,
+    so the message policy leaves it out of the question altogether (neither as an agent to judge nor as a «person» in the room)."""
+    if not ids:
+        return set()
+    from app.services.system_publisher_guard import SYSTEM_PUBLISHER_RUNTIME_TYPE
+
+    return set((await db.execute(
+        select(Member.id).where(Member.id.in_(ids), Member.runtime_type == SYSTEM_PUBLISHER_RUNTIME_TYPE, Member.type == "agent")
+    )).scalars().all())
+
+
+async def agent_policy_subjects(db: AsyncSession, ids: set[uuid.UUID]) -> list[SimpleNamespace]:
+    """story #4868 (AC4) — the agents among `ids` that the message policy judges, read from the `members` ANCHOR (not the `team_members` view).
+
+    The view lists an agent only while it holds a project (a placement or a grant), so an agent that lost all its projects fell out of the policy's agent query — «no agent here → skip» — and a
+    conversation with it was let through without asking its creator (the policy then did not apply again until a project came back). Same row the view projected: `id`, the mode, and `created_by`
+    (the OWNER's user id — the view's `owner.user_id`). A deleted agent is left out (the view left it out too). The caller takes `reserved_publisher_ids` out of `ids` first."""
+    if not ids:
+        return []
+    owner = aliased(Member)
+    rows = (await db.execute(
+        select(Member.id, Member.message_policy_mode, owner.user_id)
+        .outerjoin(owner, owner.id == Member.owner_member_id)
+        .where(Member.id.in_(ids), Member.type == "agent", Member.deleted_at.is_(None))
+    )).all()
+    return [SimpleNamespace(id=r[0], message_policy_mode=r[1], created_by=r[2]) for r in rows]
 
 
 async def policy_denial(db: AsyncSession, agent_tm: TeamMember, humans: list[tuple[uuid.UUID, uuid.UUID | None]]) -> dict | None:

@@ -535,7 +535,7 @@ async def test_13_the_participant_payload_carries_the_departed_marker():
             rows = [SimpleNamespace(conversation_id=conv, member_id=gone), SimpleNamespace(conversation_id=conv, member_id=here)] if Db.calls == 1 else []
             return SimpleNamespace(all=lambda: rows)
 
-    async def fake_lookup(ids, _db):
+    async def fake_lookup(ids, _db, **_kw):   # story #4868: the room's org may come with it
         return resolved
 
     with patch("app.routers.conversations.lookup_members_by_ids", fake_lookup):

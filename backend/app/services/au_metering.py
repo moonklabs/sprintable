@@ -160,12 +160,21 @@ def _au_weight_for(method: str, response: Response) -> int:
     return 0
 
 
+from app.core.bounded_gate import LoopGate  # noqa: E402 — story #4867
+from app.core.config import settings as _gate_settings  # noqa: E402
+
+_au_gate = LoopGate(lambda: _gate_settings.au_metering_max_concurrent, name="au_metering")
+
+
 async def _record_au_usage_safe(org_id: uuid.UUID, delta: int) -> None:
     """`pg_pubsub.fire_and_forget()`로 던져지는 실제 DB 왕복 — 이 코루틴 자신이 예외를
     전부 삼켜야 한다(안 그러면 "Task exception was never retrieved" — 아무도 안 기다리는
     태스크의 예외는 로그 없이 사라지거나 인터프리터 경고로만 남는다)."""
     try:
-        await record_au_usage(org_id, delta)
+        # story #4867 — one task per agent API request, each with its own pool connection and an org-wide advisory lock: only `au_metering_max_concurrent` run at a time, the rest wait
+        # their turn (nothing is dropped, nothing is merged: every delta is still written)
+        async with _au_gate.slot():
+            await record_au_usage(org_id, delta)
     except Exception:
         logger.error("AU metering failed org_id=%s delta=%s", org_id, delta, exc_info=True)
 

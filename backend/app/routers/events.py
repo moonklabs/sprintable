@@ -44,6 +44,7 @@ from app.core.sse_event_name import sse_event_name, validate_event_type
 from app.dependencies.database import get_db
 from app.dependencies.ownership import _is_org_admin
 from app.models.event import Event
+from app.services.event_room_gate import stored_event, withheld_payloads
 from app.services.agent_onboarding_config import resolve_locale_from_request
 from app.services.stream_access import RECHECK_BEFORE_SEND_SEC, AccessRecheck, SeatRecheck
 from app.services.org_locale import resolve_org_locale
@@ -346,7 +347,9 @@ def _should_skip_live_event(eid: str | None, sent_event_ids: set[str]) -> bool:
     return bool(eid) and eid in sent_event_ids
 
 
-def _event_to_payload(event: "Event") -> dict:
+def _event_to_payload(event: "Event", payload: "dict | None" = None) -> dict:
+    # story #4870: `payload` replaces the stored one in what is handed back (the room's words withheld from a caller who may not read the room now); the stored row is never changed
+    _payload = event.payload if payload is None else payload
     return {
         # story 4649 — 백필은 배치 조회 결과(_backfill_frame_data가 넣는다)로 채운다. 여기서는 모른다고 둔다.
         # 행의 org_id는 만든 곳이라 쓰지 않고, 저장된 payload의 값은 신뢰하지 않는다.
@@ -355,10 +358,10 @@ def _event_to_payload(event: "Event") -> dict:
         "event_type": event.event_type,
         "source": {"type": event.source_entity_type, "id": str(event.source_entity_id) if event.source_entity_id else None},
         "sender_id": str(event.sender_id) if event.sender_id else None,
-        "payload": event.payload,
+        "payload": _payload,
         # E-EVENT-INJECT S1: content를 SSE top-level로 노출(conversation.message_created 미러).
         # connector가 top-level content를 읽어 드롭 안 걸리게.
-        "content": (event.payload or {}).get("content"),
+        "content": (_payload or {}).get("content"),
         "created_at": event.created_at.isoformat(),
         # story #4245 — 만든 트랜잭션 id(xid8 · 문자열 — 64비트라 JS number 정밀도 밖일 수 있음). 옛 행 None.
         "created_xid": str(event.created_xid) if getattr(event, "created_xid", None) is not None else None,
@@ -400,7 +403,7 @@ async def _sender_orgs_for(db: "AsyncSession", events: list) -> dict[str, str | 
 
 
 def _backfill_frame_data(event: "Event", stream_org_id: "uuid.UUID | None" = None,
-                         sender_orgs: "dict[str, str | None] | None" = None) -> dict:
+                         sender_orgs: "dict[str, str | None] | None" = None, payload: "dict | None" = None) -> dict:
     """story #4505 (Mirko live 00:51Z · PO 01:06Z) — a backfill frame in the shape of the live one. A live frame is the pushed
     dict, whose payload keys are top-level (`gate_id`, `status`, `conversation_id` …); a backfill frame was `_event_to_payload`,
     where they sit only under `payload` — so a handler reading the live shape (the approvals inbox `payload.gate_id`, the chat
@@ -408,9 +411,9 @@ def _backfill_frame_data(event: "Event", stream_org_id: "uuid.UUID | None" = Non
     never appeared until reload. The payload's keys are also put at the top level here, never over a key the frame already
     has (event_id · event_type · source · sender_id · payload · content · created_at · created_xid). Backfill only — the live
     dispatch (`dispatch_router`) and the agent gateway build their own frames and are unchanged."""
-    data = _event_to_payload(event)
+    data = _event_to_payload(event, payload)
     data["sender_org_id"] = (sender_orgs or {}).get(str(event.sender_id)) if event.sender_id is not None else None
-    flat = {k: v for k, v in (event.payload or {}).items() if k not in data}
+    flat = {k: v for k, v in ((event.payload or {}) if payload is None else payload).items() if k not in data}
     return _with_stream_org({**flat, **data}, stream_org_id)
 
 
@@ -694,7 +697,9 @@ async def agent_event_stream(
                         return
                     batch = pending_events[i : i + _SSE_BATCH_SIZE]
                     sender_orgs = await _sender_orgs_for(db, batch)  # story 4649: one lookup for the batch's senders
-                    batch_data = [_backfill_frame_data(evt, org_id, sender_orgs) for evt in batch]  # story #4505: the live frame's shape
+                    # story #4870: a stored copy of a room's words is read back only by who may read the room NOW (one question for the batch); the words are taken out of the frame otherwise
+                    _withheld = await withheld_payloads(db, org_id, auth, [stored_event(e) for e in batch])
+                    batch_data = [_backfill_frame_data(evt, org_id, sender_orgs, _withheld.get(str(evt.id))) for evt in batch]  # story #4505: the live frame's shape
                     # 1c22da3e fix: yield 먼저 → 성공 후 delivered 마킹.
                     # 선마킹 시 yield(클라 disconnect 등) 실패하면 이벤트가 delivered로
                     # 남아 영구 누락. 후마킹 + 클라 seen_ids dedup 으로 손실 0(재전송 허용).
@@ -1008,7 +1013,13 @@ async def get_pending_events(
         response.headers["X-Result-Count"] = str(len(events))
         if events:
             response.headers["X-Next-Cursor"] = events[-1].created_at.isoformat()
-    return [EventResponse.model_validate(e) for e in events]
+    # story #4870: the pending list is a re-read of stored copies — the room's words are handed back only to who may read the room NOW (the rows are kept; the stored copy is not changed)
+    withheld = await withheld_payloads(db, org_id, auth, [stored_event(e) for e in events])
+    responses = [EventResponse.model_validate(e) for e in events]
+    for e, resp in zip(events, responses):
+        if str(e.id) in withheld:
+            resp.payload = withheld[str(e.id)]
+    return responses
 
 
 @router.patch("/{event_id}/delivered", response_model=EventResponse)
@@ -1041,7 +1052,12 @@ async def mark_delivered(
     await db.execute(update(Event).where(Event.id == event.id).values(status="delivered", delivered_at=func.coalesce(Event.delivered_at, datetime.now(timezone.utc))))
     await db.commit()
     await db.refresh(event)
-    return EventResponse.model_validate(event)
+    response = EventResponse.model_validate(event)
+    # story #4870: the same gate as the pending list
+    withheld = await withheld_payloads(db, org_id, auth, [stored_event(event)])
+    if str(event.id) in withheld:
+        response.payload = withheld[str(event.id)]
+    return response
 
 
 # ─── S3: 큐 관리 (expired + cleanup) ─────────────────────────────────────────

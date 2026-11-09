@@ -40,6 +40,19 @@ BACKLOG = 2_400
 IDLE = 10.0  # no frame for this long = the stream is waiting for a wake (nothing more is coming on this one)
 
 
+async def _a_room_the_agent_reads(s, agent_id: str) -> str:
+    """story #4870 — a stored message copy is replayed with its words only when its room can be read NOW, so the messages here sit in a real
+    room the agent is seated in (a made-up room id is a room nobody may read: the words would be withheld)."""
+    from app.models.conversation import Conversation, ConversationParticipant
+
+    room = Conversation(id=uuid.uuid4(), project_id=None, org_id=ORG, type="group", title="4569 room", created_by=uuid.UUID(agent_id))
+    s.add(room)
+    await s.flush()
+    s.add(ConversationParticipant(conversation_id=room.id, member_id=uuid.UUID(agent_id)))
+    await s.flush()
+    return str(room.id)
+
+
 async def _put_backlog_and_a_message(agent_id: str) -> int:
     """BACKLOG connection_test rows, then one message, in one commit; the message's seq.
 
@@ -69,7 +82,7 @@ async def _put_backlog_and_a_message(agent_id: str) -> int:
                 FROM generate_series(0, :n - 1) AS i
             """), {**params, "first": first})
             message = Event(project_id=PROJ, org_id=ORG, event_type="conversation.message_created", recipient_id=uuid.UUID(agent_id),
-                            recipient_type="agent", payload={"content": _NEW, "conversation_id": str(uuid.uuid4())},
+                            recipient_type="agent", payload={"content": _NEW, "conversation_id": await _a_room_the_agent_reads(s, agent_id)},
                             status="pending")
             s.add(message)
             await s.flush()
@@ -194,7 +207,7 @@ async def _put_one_event(agent_id: str, content: str) -> int:
     try:
         async with async_sessionmaker(eng)() as s:
             event = Event(project_id=PROJ, org_id=ORG, event_type="conversation.message_created", recipient_id=uuid.UUID(agent_id),
-                          recipient_type="agent", payload={"content": content, "conversation_id": str(uuid.uuid4())}, status="pending")
+                          recipient_type="agent", payload={"content": content, "conversation_id": await _a_room_the_agent_reads(s, agent_id)}, status="pending")
             s.add(event)
             await s.flush()
             seq = await assign_recipient_seq(s, event)
