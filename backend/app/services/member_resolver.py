@@ -449,8 +449,9 @@ async def lookup_members_by_ids(
 ) -> dict[uuid.UUID, ResolvedMember]:
     """ID 집합 → ResolvedMember 맵. AC2-3 shadow 플래그로 레거시/앵커 분기.
 
-    story #4868 — `org_id` (optional): the organization the caller reads for. It only narrows the one thing this resolver adds beyond the `team_members` view — the organization's
-    reserved system publisher (see `_reserved_publisher_members`): with an `org_id`, another organization's publisher is not supplemented. Callers that read a room's messages pass it."""
+    story #4868 — `org_id` (optional): the organization the caller reads for. It is what lets this resolver add the one thing beyond the `team_members` view — that organization's reserved
+    system publisher (see `_reserved_publisher_members`): WITH an `org_id` the publisher of THAT organization is supplemented, another organization's is not; WITHOUT one nothing is (the
+    answer is what it was before 4868). The callers that read a room's messages and participants pass it."""
     if not ids:
         return {}
     if settings.member_ssot_resolver_shadow:
@@ -466,15 +467,16 @@ async def _reserved_publisher_members(
     The view shows the publisher only while it holds a `project_access` grant (that is why it was given one — story #2791); when the project it was anchored to is gone, the view loses it and
     the legacy lookup answered «an unnamed person» for its messages (display, the agent kind of chain_depth, webhook `sender_name`, an attachment's `created_by`). The fallback is ONLY for
     this reserved row, and what it answers is that ONE row's own name (the server gave it, and the reserved row cannot be renamed — story #3999) and `agent` — nothing of another member or another organization can come through it; with an
-    `org_id` the row must also be that organization's. Any other member that is not in the view stays what it was (the OrgMember / orphan fallbacks below)."""
+    `org_id` the row must be that organization's — and WITHOUT an `org_id` nothing is supplemented. Any other member that is not in the view stays what it was (the OrgMember / orphan fallbacks below)."""
+    if org_id is None:
+        return {}   # no organization named → nothing is supplemented (as before 4868): the default must never mix another organization's publisher in
     from app.models.member import Member
     from app.services.system_publisher_guard import SYSTEM_PUBLISHER_RUNTIME_TYPE
 
     stmt = select(Member.id, Member.org_id, Member.name).where(
-        Member.id.in_(ids), Member.runtime_type == SYSTEM_PUBLISHER_RUNTIME_TYPE, Member.type == "agent", Member.deleted_at.is_(None),
+        Member.id.in_(ids), Member.org_id == org_id,
+        Member.runtime_type == SYSTEM_PUBLISHER_RUNTIME_TYPE, Member.type == "agent", Member.deleted_at.is_(None),
     )
-    if org_id is not None:
-        stmt = stmt.where(Member.org_id == org_id)
     return {
         mid: ResolvedMember(
             id=mid, user_id=None, name=pub_name, type="agent", role="member", org_id=oid, project_id=None,

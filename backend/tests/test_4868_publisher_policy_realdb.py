@@ -332,3 +332,166 @@ async def test_another_organizations_publisher_row_in_a_rooms_participants_is_no
         assert entry.get("name") is None, entry                                                  # was: «시스템 발행»
     finally:
         await engine.dispose()
+
+
+# ─── decision A: the publisher is supplemented only for the organization that is named, and only its own ─────────
+
+async def test_the_publisher_is_supplemented_only_when_an_organization_is_named_and_is_its_own():
+    from app.services.member_resolver import lookup_members_by_ids
+    from tests.test_1994_backlink_api_realdb import _make_org, _make_project
+
+    engine, Session, w = await _world()
+    try:
+        pub = await _publisher(Session, w.org)
+        async with Session() as s:
+            other_org = await _make_org(s)
+            await _make_project(s, other_org.id, "Other")
+        async with Session() as s:
+            no_org = await lookup_members_by_ids({pub}, s)                                       # the default: nothing is supplemented (as before 4868)
+            wrong_org = await lookup_members_by_ids({pub}, s, org_id=other_org.id)
+            own_org = await lookup_members_by_ids({pub}, s, org_id=w.org)
+        assert no_org[pub].name is None and no_org[pub].resolved is False
+        assert wrong_org[pub].name is None and wrong_org[pub].resolved is False
+        assert own_org[pub].name == PUBLISHER_NAME
+    finally:
+        await engine.dispose()
+
+
+# ─── C: what the reserved fallback must NOT do ──────────────────────────────────────────────────────────────────
+
+async def test_a_deleted_publisher_is_not_supplemented():
+    from datetime import datetime, timezone
+
+    from app.services.member_resolver import lookup_members_by_ids
+
+    engine, Session, w = await _world()
+    try:
+        pub = await _publisher(Session, w.org)
+        async with Session() as s:
+            await s.execute(text("UPDATE members SET deleted_at = :t WHERE id = :p"), {"t": datetime.now(timezone.utc), "p": pub})
+            await s.commit()
+        async with Session() as s:
+            got = await lookup_members_by_ids({pub}, s, org_id=w.org)
+        assert got[pub].name is None and got[pub].resolved is False
+    finally:
+        await engine.dispose()
+
+
+async def test_only_an_agent_row_with_the_reserved_marker_is_supplemented_a_person_with_it_is_not():
+    from app.services.member_resolver import lookup_members_by_ids
+
+    engine, Session, w = await _world()
+    try:
+        async with Session() as s:
+            await s.execute(text("UPDATE members SET runtime_type = 'system-publisher' WHERE id = :h"), {"h": w.h_c})   # a PERSON carrying the marker (it cannot be set through the API — #3999/#4717)
+            await s.execute(text("DELETE FROM project_access WHERE member_id = :h OR org_member_id = :h"), {"h": w.h_c})      # and not in the view, so the fallback is asked
+            await s.commit()
+        async with Session() as s:
+            got = await lookup_members_by_ids({w.h_c}, s, org_id=w.org)
+        assert got[w.h_c].name != PUBLISHER_NAME and got[w.h_c].type == "human"
+    finally:
+        await engine.dispose()
+
+
+async def _publisher_messages(Session, w, room):
+    """a root message of the room, a reply, and messages of two publishers: this organization's (its project gone) and another organization's (a stale row)."""
+    from app.models.conversation import ConversationMessage
+    from tests.test_1994_backlink_api_realdb import _make_org, _make_project
+
+    own = await _publisher(Session, w.org)
+    async with Session() as s:
+        other_org = await _make_org(s)
+        await _make_project(s, other_org.id, "Other")
+    foreign = await _publisher(Session, other_org.id)
+    ids = {}
+    async with Session() as s:
+        root = ConversationMessage(conversation_id=room, sender_id=w.h_a, content="root")
+        s.add(root)
+        await s.flush()
+        for key, sender in (("own", own), ("foreign", foreign)):
+            top = ConversationMessage(conversation_id=room, sender_id=sender, content=f"top-{key}")
+            reply = ConversationMessage(conversation_id=room, sender_id=sender, content=f"reply-{key}", thread_id=root.id)
+            s.add_all([top, reply])
+            await s.flush()
+            ids[key] = (top.id, reply.id)
+        await s.commit()
+        ids["root"] = root.id
+    return ids
+
+
+def _rows(r):
+    body = r.json()
+    rows = body.get("items") or body.get("data") or body.get("messages") or []
+    return (rows.get("items") or rows.get("messages") or []) if isinstance(rows, dict) else rows
+
+
+def _sender_name(rows, content):
+    item = next(i for i in rows if i.get("content") == content)
+    return (item.get("sender") or {}).get("name")
+
+
+async def test_the_message_list_names_this_organizations_publisher_and_not_another_organizations():
+    engine, Session, w = await _world()
+    try:
+        ids = await _publisher_messages(Session, w, w.r_human)
+        r = await _as(Session, w, "participant", "GET", f"/api/v2/conversations/{w.r_human}/messages?limit=100")
+        assert r.status_code == 200, r.text
+        assert _sender_name(_rows(r), "top-own") == PUBLISHER_NAME                              # control: the organization's own publisher
+        assert _sender_name(_rows(r), "top-foreign") != PUBLISHER_NAME                          # was: named too
+    finally:
+        await engine.dispose()
+
+
+async def test_one_message_names_this_organizations_publisher_and_not_another_organizations():
+    engine, Session, w = await _world()
+    try:
+        ids = await _publisher_messages(Session, w, w.r_human)
+        own = await _as(Session, w, "participant", "GET", f"/api/v2/conversations/{w.r_human}/messages/{ids['own'][0]}")
+        foreign = await _as(Session, w, "participant", "GET", f"/api/v2/conversations/{w.r_human}/messages/{ids['foreign'][0]}")
+        assert own.status_code == 200 and foreign.status_code == 200, (own.text, foreign.text)
+        assert PUBLISHER_NAME in own.text                                                       # control
+        assert PUBLISHER_NAME not in foreign.text                                               # was: named
+    finally:
+        await engine.dispose()
+
+
+async def test_the_replies_name_this_organizations_publisher_and_not_another_organizations():
+    engine, Session, w = await _world()
+    try:
+        ids = await _publisher_messages(Session, w, w.r_human)
+        r = await _as(Session, w, "participant", "GET", f"/api/v2/conversations/{w.r_human}/messages/{ids['root']}/replies?limit=100")
+        assert r.status_code == 200, r.text
+        assert _sender_name(_rows(r), "reply-own") == PUBLISHER_NAME                            # control
+        assert _sender_name(_rows(r), "reply-foreign") != PUBLISHER_NAME                        # was: named
+    finally:
+        await engine.dispose()
+
+
+async def test_the_policy_does_not_judge_a_deleted_agent():
+    from datetime import datetime, timezone
+
+    from app.services.agent_message_policy import agent_policy_subjects
+
+    engine, Session, w = await _world()
+    try:
+        alive, gone = await _agents_org_wide(Session, w, w.p1, w.p1)
+        async with Session() as s:
+            await s.execute(text("UPDATE members SET deleted_at = :t WHERE id = :g"), {"t": datetime.now(timezone.utc), "g": gone})
+            await s.commit()
+        async with Session() as s:
+            got = await agent_policy_subjects(s, {alive, gone})
+        assert {a.id for a in got} == {alive}                                                    # the view left a deleted agent out too
+    finally:
+        await engine.dispose()
+
+
+# ─── B: ONE people-first order ───────────────────────────────────────────────────────────────────────────────────
+
+def test_the_named_are_seated_people_before_agents_whatever_the_order_they_come_in():
+    from app.routers.conversations import _people_first
+
+    agent, person, other_agent = uuid.UUID(int=1), uuid.UUID(int=2), uuid.UUID(int=3)
+    for order in ([agent, person], [person, agent], [other_agent, agent, person], [person, other_agent, agent]):
+        got = _people_first(order, {agent, other_agent})
+        assert all(got.index(person) < got.index(a) for a in got if a in {agent, other_agent}), got
+    assert _people_first([other_agent, agent, person], {agent, other_agent}) == [person, other_agent, agent]       # stable inside each kind

@@ -990,6 +990,12 @@ def _mention_payload_without_text(payload: dict, target_id: uuid.UUID) -> dict:
     return out
 
 
+def _people_first(ids, agent_ids) -> list:
+    """story #4868 — the order in which the named are put in a room: people before agents (stable inside each kind). An agent's creator policy asks WHO IS IN THE ROOM, so a creator named in the same
+    message must be seated before the agent is asked — the mention's order (or the id order of a set) must not decide who gets in. ONE order for the group room's mention and the 1:1 fork."""
+    return sorted(ids, key=lambda m: m in agent_ids)
+
+
 async def _may_seat_mentioned(
     db: AsyncSession, conversation: Conversation, sender: "ResolvedMember | TeamMember", current: set[uuid.UUID], mid: uuid.UUID, *, is_agent: bool,
 ) -> bool:
@@ -1043,7 +1049,7 @@ async def _admit_mentioned_non_participants(
             db, caller_is_agent=True, caller_id=mid, conv_project_id=conversation.project_id, org_id=conversation.org_id,
         ):
             withheld.add(mid)
-    for mid in sorted(outside, key=lambda m: m in outside_agents):   # people first (stable: the mention order is kept within each kind) — see the DM fork
+    for mid in _people_first(outside, outside_agents):
         if not await _may_seat_mentioned(db, conversation, sender, current, mid, is_agent=mid in outside_agents):
             withheld.add(mid)
             continue
@@ -2989,7 +2995,7 @@ async def send_message_core(
             )).scalars().all())
             _acc = set(current_participant_ids)
             _seat: list[uuid.UUID] = []
-            for mid in sorted(non_participants):
+            for mid in _people_first(sorted(non_participants), _agent_ids):   # people first (the ids come from a set: sorted only to be repeatable)
                 if await _may_seat_mentioned(db, conv, sender, _acc, mid, is_agent=mid in _agent_ids):
                     _acc.add(mid)
                     _seat.append(mid)

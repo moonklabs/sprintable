@@ -243,9 +243,8 @@ async def test_lookup_members_orphan_name_is_none():
     orphan_id = uuid.uuid4()
     session = AsyncMock()
     empty_tm = MagicMock(); empty_tm.scalars.return_value.all.return_value = []
-    empty_pub = MagicMock(); empty_pub.all.return_value = []   # story #4868: the reserved publisher's anchor lookup (nothing for a true orphan)
     empty_om = MagicMock(); empty_om.scalars.return_value.all.return_value = []
-    session.execute = AsyncMock(side_effect=[empty_tm, empty_pub, empty_om])  # user 쿼리는 om이 비어 skip
+    session.execute = AsyncMock(side_effect=[empty_tm, empty_om])  # user 쿼리는 om이 비어 skip
 
     result = await lookup_members_by_ids({orphan_id}, session)
     assert orphan_id in result
