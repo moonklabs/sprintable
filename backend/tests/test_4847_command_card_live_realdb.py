@@ -288,3 +288,41 @@ async def test_10_a_person_who_blocked_the_sender_gets_no_card_even_when_the_roo
         assert {str(sender_id), str(third)} <= who, "the others still get it"
     finally:
         await engine.dispose()
+
+
+async def test_11_the_agents_of_the_room_are_left_out_of_the_card_delivery(monkeypatch):
+    """by design the agents never see a command line the server already executed (so none can do it a second time) — nor its result card: they would react to a command they were never shown. Asked of
+    the delivery call itself (what it is told to leave out): an agent's records are made by a path this room fixture does not reach, so the argument is the observable."""
+    import app.routers.conversations as conv_mod
+    from app.main import app
+
+    engine, Session, org, sender_id, sender_user, other_id, conv_id = await _room(with_project=True, with_agent=True)
+    agent_id = _room.agent
+    try:
+        from app.models.conversation import Conversation
+        from app.models.team import TeamMember
+
+        async with Session() as session:  # (this suite's DB keeps team_members as a plain table: the agent is entered there, as a real DB's view would show it)
+            project_id = (await session.get(Conversation, conv_id)).project_id
+            session.add(TeamMember(id=agent_id, org_id=org.id, project_id=project_id, type="agent", name="agent-x", user_id=None, is_active=True))
+            await session.commit()
+        from app.services import channel_router
+
+        async def _route(message_id, db):  # the room decision names the agent too: its exclusion must come from the server-command rule, not from «not named»
+            return [channel_router.DeliveryDecision(member_id=m, channel="sse", level="all", reason="test") for m in (other_id, agent_id)]
+
+        monkeypatch.setattr(channel_router, "route_message", _route)
+        calls = []
+        real = conv_mod._dispatch_conversation_event
+
+        async def spy(db, conv, msg, org_id, sender, *args, **kwargs):
+            calls.append((bool((getattr(msg, "msg_metadata", None) or {}).get("server_command")), set(kwargs.get("exclude_ids") or set())))
+            return await real(db, conv, msg, org_id, sender, *args, **kwargs)
+
+        monkeypatch.setattr(conv_mod, "_dispatch_conversation_event", spy)
+        await _send(Session, app, sender_user, org.id, conv_id, "/assign 99999 nobody", monkeypatch)
+        card_calls = [ex for is_card, ex in calls if is_card]
+        assert card_calls, "the card was delivered through the dispatch"
+        assert all(agent_id in ex for ex in card_calls), "the agents of the room are left out of the card's delivery"
+    finally:
+        await engine.dispose()
