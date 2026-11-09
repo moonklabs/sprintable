@@ -77,7 +77,7 @@ def _alembic(sqlalchemy_url: str, *args: str, lock_timeout_ms: str | None = None
 def _revision(dsn: str) -> str | None:
     import psycopg2
 
-    conn = psycopg2.connect(dsn)
+    conn = psycopg2.connect(dsn, connect_timeout=15)
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT version_num FROM alembic_version")
@@ -94,7 +94,7 @@ def _may_create_databases() -> bool:
 
     admin_url, _ = _admin_and_dsn("unused")
     try:
-        conn = psycopg2.connect(admin_url.render_as_string(hide_password=False))
+        conn = psycopg2.connect(admin_url.render_as_string(hide_password=False), connect_timeout=15)
     except psycopg2.Error:
         return False
     try:
@@ -121,7 +121,7 @@ def test_a_migration_fails_fast_when_another_connection_holds_the_table_and_runs
     admin_dsn = admin_url.render_as_string(hide_password=False)
     fresh_dsn = fresh_url.set(drivername="postgresql").render_as_string(hide_password=False)
 
-    admin = psycopg2.connect(admin_dsn)
+    admin = psycopg2.connect(admin_dsn, connect_timeout=15)
     admin.autocommit = True
     holder = None
     try:
@@ -134,7 +134,7 @@ def test_a_migration_fails_fast_when_another_connection_holds_the_table_and_runs
         assert _revision(fresh_dsn) == "0470"
 
         # another connection that has READ `events` inside a transaction it never ends — the lock an `ALTER TABLE events` has to wait for
-        holder = psycopg2.connect(fresh_dsn)
+        holder = psycopg2.connect(fresh_dsn, connect_timeout=15)
         with holder.cursor() as cur:
             cur.execute("BEGIN")
             cur.execute("LOCK TABLE events IN ACCESS SHARE MODE")
@@ -155,11 +155,16 @@ def test_a_migration_fails_fast_when_another_connection_holds_the_table_and_runs
         assert done.returncode == 0, (done.stdout + done.stderr)[-1500:]
         assert _revision(fresh_dsn) == "0471"
     finally:
-        if holder is not None:
-            holder.close()
-        with admin.cursor() as cur:
-            try:
-                cur.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
-            except psycopg2.Error:
-                cur.execute(f'DROP DATABASE IF EXISTS "{name}"')
-        admin.close()
+        # cleanup must never replace the test's own failure with its own
+        try:
+            if holder is not None:
+                holder.close()
+            with admin.cursor() as cur:
+                try:
+                    cur.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+                except psycopg2.Error:
+                    cur.execute(f'DROP DATABASE IF EXISTS "{name}"')
+        except Exception:  # noqa: BLE001 — best effort
+            pass
+        finally:
+            admin.close()
