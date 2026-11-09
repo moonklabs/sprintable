@@ -48,6 +48,8 @@ async def test_a_person_who_stays_in_a_room_and_lost_its_project_sees_the_rooms_
         in_p1 = f"ac4-p1-{uuid.uuid4().hex[:8]}"
         no_project = f"ac4-free-{uuid.uuid4().hex[:8]}"
         await _say(Session, w, "participant", w.r_human, f"a room of P1 {in_p1}")
+        # a room with no project: the activity row exists because the message's fan-out reaches an agent of a project (`g_p` is in `n_human`) — an event with NO project at all makes
+        # no activity row (`activity_events.project_id` is NOT NULL, `upsert_activity_from_events` skips it), so there is nothing to show or hide in that case
         await _say(Session, w, "participant", w.n_human, f"a room with no project {no_project}")
         text = await _org_wide_stream(Session, w, "lost_project")
         assert in_p1 in text and no_project in text, "a person in the room read nothing of its activity once the project was lost"
