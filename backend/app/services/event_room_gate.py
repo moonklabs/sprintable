@@ -159,6 +159,8 @@ def notification_carries_room_words(n: dict) -> bool:
     if n.get("type") not in NOTIFICATION_ROOM_WORD_TYPES:
         return False
     event = n.get("event")
+    if event is not None and not isinstance(event, dict):
+        return True   # an event of a shape nobody writes (a list, a scalar): it cannot be shown to hold no words, so it is treated as holding them
     return bool(n.get("body")) or (isinstance(event, dict) and any(k not in _NOTIFICATION_EVENT_KEPT_KEYS and k != "content_withheld" for k in event))
 
 

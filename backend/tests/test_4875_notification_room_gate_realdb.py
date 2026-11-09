@@ -142,7 +142,7 @@ async def test_a_card_payload_in_the_event_is_taken_out_with_the_preview_and_the
 
 
 async def test_a_notice_that_points_at_a_room_but_holds_no_message_is_left_as_it_is():
-    """the circuit-breaker notice and a computer's turn-ended notice say a sentence of their own: they are not a copy of a room's words and are not touched."""
+    """the circuit-breaker notice (and the other generated notices that point at a room, e.g. a computer's turn-ended notice) say a sentence of their own: they are not a copy of a room's words and are not touched."""
     engine, Session, w = await _world()
     try:
         nid = await _insert_notification(Session, w, type_="conversation.circuit_breaker_opened", body="agents were paused here", event=None, reference_id=w.r_human)
@@ -175,3 +175,49 @@ async def test_a_bare_mention_has_nothing_to_take_out_and_is_handed_back_as_it_i
         assert mine["body"] is None and mine["event"] == {"sender_name": "someone"}
     finally:
         await engine.dispose()
+
+
+async def test_a_card_without_a_preview_is_taken_out_too():
+    """an event-publishing message can leave a notification whose body is empty and whose whole content is the card (`event.payload`): the card is the words."""
+    engine, Session, w = await _world()
+    try:
+        words = f"n4875-only-card-{uuid.uuid4().hex[:8]}"
+        nid = await _insert_notification(Session, w, type_="conversation.message", body=None, event={"sender_name": "someone", "event_key": "k", "payload": {"summary": words}}, reference_id=w.r_human)
+        assert words in str(next(n for n in await _list(Session, w) if n["id"] == str(nid)))   # in the room
+        await _leave(Session, w.h_d, w.r_human)
+        mine = next(n for n in await _list(Session, w) if n["id"] == str(nid))
+        assert words not in str(mine) and mine["event"] == {"sender_name": "someone", "content_withheld": True}
+    finally:
+        await engine.dispose()
+
+
+async def test_an_organization_owner_reads_a_room_of_agents_only_but_not_a_room_with_people_in_it():
+    """the gate is the room-read predicate, not «participant»: the owner/admin rule reads a room of agents only (4846 AC13/14) and never a room that has a person in it."""
+    engine, Session, w = await _world()
+    try:
+        words = f"n4875-owner-{uuid.uuid4().hex[:8]}"
+        from app.models.notification import Notification
+
+        async with Session() as s:
+            ids = {}
+            for key, room in (("agents", w.r_agents), ("people", w.r_human)):
+                n = Notification(id=uuid.uuid4(), org_id=w.org, user_id=w.u_o, type="conversation.message", title="t", body=f"preview {words}", is_read=False,
+                                 reference_type="conversation", reference_id=room, event={"sender_name": "someone"})
+                s.add(n)
+                ids[key] = str(n.id)
+            await s.commit()
+        items = {n["id"]: n for n in await _list(Session, w, "org_owner")}
+        assert words in str(items[ids["agents"]])                                              # the owner reads the agents-only room
+        assert words not in str(items[ids["people"]])                                          # …but not a room with people in it
+    finally:
+        await engine.dispose()
+
+
+def test_an_event_of_a_shape_nobody_writes_is_treated_as_holding_words():
+    from app.services.event_room_gate import notification_carries_room_words, notification_without_room_words
+
+    for odd in (["a card"], "a card", 7):
+        n = {"type": "conversation.message", "body": None, "event": odd}
+        assert notification_carries_room_words(n) is True
+        assert notification_without_room_words(n)["event"] == {"content_withheld": True}      # normalized: no words, no foreign shape
+    assert notification_carries_room_words({"type": "conversation.message", "body": None, "event": None}) is False
