@@ -368,7 +368,6 @@ async def try_execute_server_command(
                 # story 4847: the card reaches the person who typed the command on their own open screens (the same shape and route as the echo of their own line)
                 from app.routers.conversations import _msg_payload
 
-                await db.refresh(reply)  # created_at & co. are the server's: the payload reads loaded attributes only
                 pushes.append((str(sender.id), {
                     "event_type": "conversation.message_created",
                     **_msg_payload(reply, sender_resolved, viewer_member_id=sender.id),
