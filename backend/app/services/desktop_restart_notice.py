@@ -100,7 +100,7 @@ async def tell(db: AsyncSession, setup: DesktopSetup, *, agent_member_id: uuid.U
     others = await _others(db, setup, agent_member_id, also)
     restart_key = f"{session_key}|{at.astimezone(timezone.utc).isoformat(timespec='microseconds')}"  # one spelling of an instant: a retry that carries the same time in another offset is the same end
     told = 0
-    for person in people:
+    for person in sorted(people, key=lambda p: str(p.user_id)):  # one fixed order for the per-person locks: two setups holding the same two people can never take them in opposite orders
         try:
             async with db.begin_nested():  # one person's failure undoes only that person's notice
                 await _lock_person(db, org_id, person.user_id)

@@ -16,6 +16,7 @@ from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (a
     ORG2,
     OWNER,
     OWNER_TM,
+    _addresses,  # the autouse fixture that gives the exchange its MCP · API addresses: without it every `_device` is a 503 on a shell that has none set
     _client,
     _dispose_global_engine_after_test,
     _sql,
@@ -56,6 +57,12 @@ async def _notices(member=OWNER_TM):
     rows = await _sql(fetch=("SELECT payload FROM events WHERE recipient_id = :m AND event_type = 'dispatched' "
                              "AND payload->>'event_type' = :t ORDER BY created_at"), params={"m": member, "t": TYPE})
     return [r[0] for r in rows]
+
+
+async def _cards(user_id) -> int:
+    """how many restart notices (notification rows — the record of «told») this person holds"""
+    rows = await _sql(fetch="SELECT count(*) FROM notifications WHERE type = 'agent.restart_stopped' AND user_id = :u", params={"u": user_id})
+    return rows[0][0]
 
 
 async def test_01_a_stopped_report_that_says_nobody_started_it_again_tells_the_person_once(world):
@@ -271,7 +278,7 @@ async def test_14_a_later_session_under_the_same_key_that_ends_again_is_a_new_no
 async def test_15_one_persons_failed_notice_does_not_undo_or_block_the_other_and_the_retry_completes(world, monkeypatch):
     from sqlalchemy import text
 
-    from tests.test_4685_limit_notice_realdb import PLAIN_TM, _pair, _second_person
+    from tests.test_4685_limit_notice_realdb import PLAIN_TM, PLAIN_USER, _pair, _second_person
 
     await _second_person()
     async with _client() as c:
@@ -293,14 +300,14 @@ async def test_15_one_persons_failed_notice_does_not_undo_or_block_the_other_and
 
         monkeypatch.setattr(nd, "dispatch_notification", first_one_breaks)
         await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": []}}, at=AT0)
-        told = [len(await _notices(OWNER_TM)), len(await _notices(PLAIN_TM))]
-        assert sorted(told) == [0, 1], "the person whose notice broke got none, the other still got theirs"
+        told = [await _cards(OWNER), await _cards(PLAIN_USER)]
+        assert sorted(told) == [0, 1], f"the person whose notice broke got none, the other still got theirs (got {told})"
         monkeypatch.setattr(nd, "dispatch_notification", real)
         await _report(c, device, a, "stopped", 3, extra={"restart_stopped": {"also": []}}, at=AT0)  # the daemon's retry
-        assert [len(await _notices(OWNER_TM)), len(await _notices(PLAIN_TM))] == [1, 1], "the retry tells the one who was missed — and not the one already told"
+        assert [await _cards(OWNER), await _cards(PLAIN_USER)] == [1, 1], "the retry tells the one who was missed — and not the one already told"
         await _sql("UPDATE notifications SET created_at = now() - interval '10 minutes' WHERE type = 'agent.restart_stopped'")  # their windows are over
         await _report(c, device, a, "stopped", 4, extra={"restart_stopped": {"also": []}}, at=AT0)  # a late retry
-        assert [len(await _notices(OWNER_TM)), len(await _notices(PLAIN_TM))] == [1, 1], "nobody is told the same end twice, whatever failed before"
+        assert [await _cards(OWNER), await _cards(PLAIN_USER)] == [1, 1], "nobody is told the same end twice, whatever failed before"
 
 
 async def test_16_a_member_of_one_setup_with_a_stale_session_row_in_another_is_not_counted(world):
@@ -342,7 +349,7 @@ async def test_17_no_session_level_advisory_lock_is_ever_left_on_a_connection(wo
 
         monkeypatch.setattr(nd, "dispatch_notification", broken)
         await _report(c, device, a, "stopped", 4, extra={"restart_stopped": {"also": []}}, at="2026-11-09T03:00:00+00:00")  # failed
-        held = await _sql(fetch="SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'")
+        held = await _sql(fetch="SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND database = (SELECT oid FROM pg_database WHERE datname = current_database())")  # (this database only: lanes share one PG cluster)
         assert held[0][0] == 0, "nothing may keep an advisory lock after the transaction"
 
 
@@ -406,3 +413,18 @@ async def test_21_a_dispatcher_that_says_told_without_writing_the_notification_r
         monkeypatch.setattr(nd, "dispatch_notification", real)
         await _report(c, device, a, "stopped", 3, extra={"restart_stopped": {"also": []}}, at=AT0)
         assert len(await _notices()) == 1, "the retry tells the person whole"
+
+
+async def test_22_a_revoked_setup_of_the_same_machine_does_not_count(world):
+    async with _client() as c:
+        device = await _device(c, "d4863 mac v")
+        a = device["agents"][0]["member_id"]
+        gone = await _device(c, "d4863 mac v2")
+        mate = gone["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _report(c, gone, mate, "working", 1, key="s-g")
+        await _sql(f"UPDATE desktop_setups SET machine_key = 'mk-4863-v' WHERE id IN ('{device['setup_id']}', '{gone['setup_id']}')")
+        await _sql(f"UPDATE desktop_setups SET revoked_at = now() WHERE id = '{gone['setup_id']}'")  # that setup was revoked: its agents are not this computer's any more
+        await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": [mate]}})
+        (n,) = await _notices()
+        assert n["title"] == f"{n['agent_name']} · 꺼진 뒤 다시 서지 못함", "a revoked setup's agent is not «another agent of this computer»"
