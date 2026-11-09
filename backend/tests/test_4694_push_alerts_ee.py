@@ -233,7 +233,7 @@ def test_the_vm_backends_have_their_own_policy_so_the_old_one_going_blind_is_not
     f = vm["conditions"][0]["conditionMatchedLog"]["filter"]
     assert 'resource.type="gce_instance"' in f and "cloud_run_revision" not in f
     assert 'jsonPayload.event="expo_push_credentials_error"' in f                                                # structured shape
-    assert f.rstrip(")").endswith('OR "expo_push_credentials_error"') or '"expo_push_credentials_error")' in f   # plain-text docker shape
+    assert ' OR "expo_push_credentials_error")' in f, "the plain-text docker shape: a bare quoted term next to the structured one"
     pattern = re.search(r'resource_name"=~"([^"]+)"', f).group(1)
     assert re.search(pattern, "sprintable-vm-dev") and re.search(pattern, "sprintable-vm-prod")
     assert not re.search(pattern, "sprintable-vm-devx") and not re.search(pattern, "sprintable-vm-staging") and not re.search(pattern, "xsprintable-vm-dev")

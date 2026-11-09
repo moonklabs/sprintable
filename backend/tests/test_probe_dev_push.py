@@ -403,6 +403,9 @@ def test_no_cloud_run_dev_backend_reads_the_dev_vm_instead_and_never_the_prod_vm
         'resource.type="gce_instance"' in f and 'labels."compute.googleapis.com/resource_name"="sprintable-vm-dev"' in f for f in reads
     )
     assert not any("sprintable-vm-prod" in f or "cloud_run_revision" in f for f in reads)
+    # the VM's diagnostics read matches the plain-text docker line AND is narrowed to the teacher's member prefix (never every member's)
+    assert any('"push_diagnostics"' in f and f'"{MEMBER}"' in f for f in reads)
+    assert any('"expo push: sent"' in f and f'"org={ORG}"' in f for f in reads)
     assert {tuple(c[1:3]) for c in calls} == {("run", "services"), ("logging", "read")}      # still only the two verbs
 
 
