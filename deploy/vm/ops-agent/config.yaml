@@ -1,4 +1,5 @@
-# story 4869 (AC5) — the backend / frontend / caddy container logs go to Cloud Logging.
+# story 4869 (AC5) — the backend and frontend container logs go to Cloud Logging. Caddy's logs do NOT: its access log keeps the client address, which the Caddyfile has decided is personal data and
+# "not shipped anywhere" (and it has the URI removed, so it would carry no probe value anyway). Adding caddy is one word here and one label in compose.yml — a decision for the product owner.
 #
 # Why: since the move from Cloud Run (dev 10-27, prod 10-29) the container logs lived only in Docker's json-file log on the VM (10 MB × 5, gone when a container is recreated): the Ops Agent's default
 # configuration reads syslog only, so Cloud Logging held syslog + ops-agent-health and nothing of the app. Everything that read the Cloud Run logs went blind (the push probe, the credential-error alert).
@@ -7,7 +8,7 @@
 # The shape this produces (the contract the log readers rely on — infra/probe_dev_push.py, backend/monitoring/alert_policies.json):
 #   resource gce_instance + the agent's default label compute.googleapis.com/resource_name = the VM's name (this file changes neither)
 #   log name   containers                                  (one log for all three services)
-#   labels.container = backend | frontend | caddy          (from the container's label sprintable_service, which compose.yml sets and the json-file driver writes into each line's `attrs`)
+#   labels.container = backend | frontend                  (from the container's label sprintable_service, which compose.yml sets and the json-file driver writes into each line's `attrs`)
 #   a line the app wrote as one JSON object   → its keys flat in jsonPayload  (jsonPayload.event, jsonPayload.level, …)
 #   any other line                            → jsonPayload.message
 # Services without that label (db, migrate, gateway-db) are NOT shipped: database logs stay on the VM.
@@ -25,7 +26,7 @@ logging:
     only_our_services:
       type: exclude_logs
       match_any:
-        - 'NOT jsonPayload.attrs.sprintable_service =~ "^(backend|frontend|caddy)$"'
+        - 'NOT jsonPayload.attrs.sprintable_service =~ "^(backend|frontend)$"'
     log_to_message:
       type: modify_fields
       fields:

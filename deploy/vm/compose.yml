@@ -23,8 +23,8 @@ x-logging: &logging
   options:
     max-size: "10m"
     max-file: "5"
-    # story 4869: write the container label `sprintable_service` (set below on backend / frontend / caddy only) into every line of the json-file log as `attrs.sprintable_service`; the Ops Agent
-    # (ops-agent/config.yaml) ships exactly the lines that carry it, as labels.container. A service without the label (db, migrate, gateway-db) is not shipped.
+    # story 4869: write the container label `sprintable_service` (set below on backend / frontend only) into every line of the json-file log as `attrs.sprintable_service`; the Ops Agent
+    # (ops-agent/config.yaml) ships exactly the lines that carry it, as labels.container. A service without the label (caddy: its access log keeps the client address and is "not shipped anywhere", see the Caddyfile · db · migrate · gateway-db) is not shipped.
     labels: "sprintable_service"
 
 services:
@@ -164,8 +164,6 @@ services:
       start_period: 30s
 
   caddy:
-    labels:
-      sprintable_service: caddy   # story 4869: ships this container's log to Cloud Logging (see x-logging)
     image: caddy:2.8.4-alpine
     restart: unless-stopped
     logging: *logging

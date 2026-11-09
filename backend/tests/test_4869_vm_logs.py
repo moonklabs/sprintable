@@ -1,4 +1,4 @@
-"""story 4869 AC5 — the backend / frontend / caddy container logs reach Cloud Logging.
+"""story 4869 AC5 — the backend and frontend container logs reach Cloud Logging.
 
 Since the move from Cloud Run the logs lived only in Docker's json-file log on the VM; the Ops Agent's default configuration reads syslog only. This pins:
 1. the Ops Agent configuration (`deploy/vm/ops-agent/config.yaml`) and the contract its readers rely on (log name `containers`, `labels.container`, only our three services);
@@ -24,8 +24,8 @@ _ROOT = Path(__file__).resolve().parents[2]
 _VM = _ROOT / "deploy/vm"
 _CONFIG = _VM / "ops-agent/config.yaml"
 _INSTALLER = _VM / "bin/install-ops-agent-config.sh"
-SHIPPED = ["backend", "frontend", "caddy"]
-NOT_SHIPPED = ["db", "migrate", "gateway-db"]
+SHIPPED = ["backend", "frontend"]
+NOT_SHIPPED = ["caddy", "db", "migrate", "gateway-db"]   # caddy: its access log keeps the client address — personal data, «not shipped anywhere» (Caddyfile)
 
 CFG = yaml.safe_load(_CONFIG.read_text())
 COMPOSE = yaml.safe_load((_VM / "compose.yml").read_text())
