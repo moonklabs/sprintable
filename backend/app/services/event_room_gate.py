@@ -155,3 +155,33 @@ def stored_event(row: Any, *, key: "str | None" = None) -> StoredEvent:
         payload=getattr(row, "payload", None),
         recipient_id=getattr(row, "recipient_id", None),
     )
+
+
+# ─── a person's notification rows (story #4875) ─────────────────────────────────────────────────────────────────────────────────────────────
+
+# the notification kinds whose `body` is a message preview and whose `event` carries the message's own event payload (`routers/conversations.py` writes them for the people of a room)
+NOTIFICATION_ROOM_TYPES = frozenset({"conversation.message", "conversation.mention"})
+
+
+async def room_notifications_to_withhold(db, org_id: uuid.UUID, auth, rows: Any) -> "dict[uuid.UUID, dict | None]":
+    """story #4875 — `notification id → the `event` to hand back instead` for the person's notification rows about a room's words whose room this caller may not read NOW.
+    Same question as every stored copy (`readable_room_clause`, one statement for the page): a person is a participant, or the organization's owner/admin of a room with no person in it;
+    the project is not part of it for a person. A row that names no usable room is withheld too (fail closed). Rows of any other kind are not in the answer. The caller blanks `body`
+    and uses the returned `event` (the sender's name only — the shape of a mention from outside the room, 4846 AC9); the stored row is never changed."""
+    candidates: dict[uuid.UUID, "uuid.UUID | None"] = {}
+    events: dict[uuid.UUID, Any] = {}
+    for n in rows:
+        if getattr(n, "type", None) in NOTIFICATION_ROOM_TYPES and getattr(n, "reference_type", None) == "conversation":
+            candidates[n.id] = _uuid_or_none(getattr(n, "reference_id", None))
+            events[n.id] = getattr(n, "event", None)
+    if not candidates:
+        return {}
+    readable = await readable_conversation_ids(db, org_id, auth, {r for r in candidates.values() if r is not None})
+    out: dict[uuid.UUID, dict | None] = {}
+    for nid, room in candidates.items():
+        if room is not None and room in readable:
+            continue
+        ev = events[nid]
+        sender = ev.get("sender_name") if isinstance(ev, dict) else None
+        out[nid] = {"sender_name": sender} if sender else None
+    return out
