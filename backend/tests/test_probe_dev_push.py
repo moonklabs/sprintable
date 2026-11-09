@@ -422,6 +422,7 @@ def test_the_vm_source_names_the_logs_that_arrive_and_no_value(monkeypatch, caps
             ents += [{"logName": "projects/p/logs/we ird/name with spaces!!", "textPayload": "x"}]
             ents += [{"logName": "projects/p/logs/sprintable-backend-1", "textPayload": "x"}]
             ents += [{"logName": f"projects/p/logs/{MEMBER_FULL}", "textPayload": "x"}, {"logName": "projects/p/logs/0.9.9-secretbuild", "textPayload": "x"}]
+            ents += [{"logName": f"projects/p/logs/sprintable-backend-{MEMBER_FULL}", "textPayload": "x"}, {"logName": "projects/p/logs/sprintable-backend-123", "textPayload": "x"}]
             return json.dumps(ents)
         return "[]"
 
@@ -429,7 +430,7 @@ def test_the_vm_source_names_the_logs_that_arrive_and_no_value(monkeypatch, caps
     _env(monkeypatch)
     assert probe.main() == 0
     out = capsys.readouterr().out
-    assert "④" in out and "syslog: 3건" in out and "ops-agent-health: 1건" in out and "sprintable-backend-1: 1건" in out and "(other): 3건" in out
+    assert "④" in out and "syslog: 3건" in out and "ops-agent-health: 1건" in out and "sprintable-backend-1: 1건" in out and "(other): 5건" in out
     assert "SECRET" not in out and "teacher.private" not in out and "spaces" not in out
     assert MEMBER_FULL not in out and MEMBER not in out and "secretbuild" not in out and "0.9.9" not in out     # an id- or version-shaped log name never prints
 
