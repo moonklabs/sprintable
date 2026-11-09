@@ -7,6 +7,7 @@ from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
+from app.core import pool_holders
 from app.core.config import settings
 from app.core.request_db_timing import engine_pool_kwargs, instrument_if_enabled
 
@@ -52,6 +53,11 @@ def _build_engine_kwargs() -> dict:
     pgb = settings.db_pgbouncer
     connect_args: dict = {"statement_cache_size": 0} if pgb else {}
     connect_args["server_settings"] = {"application_name": db_application_name()}
+    # story #4864 — the database itself ends a session that sits inside an open transaction longer than this (ms). Prod 11-09: nine sessions «idle in transaction» for 2–15 hours, each
+    # holding a place of the request pool until nothing was left. A request's transaction is never meant to wait minutes: a connection that does is a bug, and 5 minutes of it
+    # is the most it may cost. Not for PgBouncer (it refuses a startup parameter it does not know) and not for the worker pool (its advisory-lock connections are built to stay).
+    if not pgb and settings.db_idle_in_txn_timeout_ms > 0:
+        connect_args["server_settings"]["idle_in_transaction_session_timeout"] = str(int(settings.db_idle_in_txn_timeout_ms))
     return {
         "pool_size": settings.db_pgbouncer_pool_size if pgb else settings.db_pool_size,
         "max_overflow": settings.db_pgbouncer_max_overflow if pgb else settings.db_max_overflow,
@@ -71,6 +77,7 @@ def _build_engine_kwargs() -> dict:
 engine = create_async_engine(settings.database_url, **_build_engine_kwargs())
 # story #4332 — 요청마다 SQL 수 · 합계 ms(app/core/request_db_timing.py) · 플래그가 켜진 경우에만(까디르 4697 ①).
 instrument_if_enabled(engine.sync_engine)
+pool_holders.install(engine, "request")  # story #4864 — who holds the pool's connections, and since when (app/core/pool_holders.py)
 
 async_session_factory = async_sessionmaker(
     engine,
@@ -87,6 +94,8 @@ read_engine = (
     else engine
 )
 instrument_if_enabled(read_engine.sync_engine)
+if read_engine is not engine:
+    pool_holders.install(read_engine, "read")
 read_session_factory = async_sessionmaker(
     read_engine,
     expire_on_commit=False,
@@ -114,6 +123,7 @@ worker_engine = create_async_engine(
         "server_settings": {"application_name": db_application_name("worker")},
     },
 )
+pool_holders.install(worker_engine, "worker")
 worker_session_factory = async_sessionmaker(
     worker_engine,
     expire_on_commit=False,
