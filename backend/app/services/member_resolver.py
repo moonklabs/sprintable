@@ -444,18 +444,51 @@ def is_agent_member_expr(member_id_col):
 async def lookup_members_by_ids(
     ids: set[uuid.UUID],
     session: AsyncSession,
+    *,
+    org_id: uuid.UUID | None = None,
 ) -> dict[uuid.UUID, ResolvedMember]:
-    """ID 집합 → ResolvedMember 맵. AC2-3 shadow 플래그로 레거시/앵커 분기."""
+    """ID 집합 → ResolvedMember 맵. AC2-3 shadow 플래그로 레거시/앵커 분기.
+
+    story #4868 — `org_id` (optional): the organization the caller reads for. It only narrows the one thing this resolver adds beyond the `team_members` view — the organization's
+    reserved system publisher (see `_reserved_publisher_members`): with an `org_id`, another organization's publisher is not supplemented. Callers that read a room's messages pass it."""
     if not ids:
         return {}
     if settings.member_ssot_resolver_shadow:
         return await _lookup_members_by_ids_anchor(ids, session)
-    return await _lookup_members_by_ids_legacy(ids, session)
+    return await _lookup_members_by_ids_legacy(ids, session, org_id=org_id)
+
+
+async def _reserved_publisher_members(
+    session: AsyncSession, ids: set[uuid.UUID], org_id: uuid.UUID | None,
+) -> dict[uuid.UUID, ResolvedMember]:
+    """story #4868 — the reserved system publisher («시스템 발행», `runtime_type='system-publisher'`) read from the `members` ANCHOR for the ids the `team_members` view does not show.
+
+    The view shows the publisher only while it holds a `project_access` grant (that is why it was given one — story #2791); when the project it was anchored to is gone, the view loses it and
+    the legacy lookup answered «an unnamed person» for its messages (display, the agent kind of chain_depth, webhook `sender_name`, an attachment's `created_by`). The fallback is ONLY for
+    this reserved row, and what it answers is a constant (the name, `agent`) — never a column of the row — so nothing of another member or another organization can come through it; with an
+    `org_id` the row must also be that organization's. Any other member that is not in the view stays what it was (the OrgMember / orphan fallbacks below)."""
+    from app.models.member import Member
+    from app.services.system_publisher_guard import SYSTEM_PUBLISHER_DISPLAY_NAME, SYSTEM_PUBLISHER_RUNTIME_TYPE
+
+    stmt = select(Member.id, Member.org_id).where(
+        Member.id.in_(ids), Member.runtime_type == SYSTEM_PUBLISHER_RUNTIME_TYPE, Member.type == "agent", Member.deleted_at.is_(None),
+    )
+    if org_id is not None:
+        stmt = stmt.where(Member.org_id == org_id)
+    return {
+        mid: ResolvedMember(
+            id=mid, user_id=None, name=SYSTEM_PUBLISHER_DISPLAY_NAME, type="agent", role="member", org_id=oid, project_id=None,
+            runtime_type=SYSTEM_PUBLISHER_RUNTIME_TYPE,
+        )
+        for mid, oid in (await session.execute(stmt)).all()
+    }
 
 
 async def _lookup_members_by_ids_legacy(
     ids: set[uuid.UUID],
     session: AsyncSession,
+    *,
+    org_id: uuid.UUID | None = None,
 ) -> dict[uuid.UUID, ResolvedMember]:
     """레거시 ID 집합 → ResolvedMember 맵. TeamMember 우선, 없으면 OrgMember, 그래도 없으면 orphan fallback."""
     if not ids:
@@ -474,6 +507,9 @@ async def _lookup_members_by_ids_legacy(
     }
 
     missing = ids - set(result.keys())
+    if missing:
+        result.update(await _reserved_publisher_members(session, missing, org_id))   # story #4868
+        missing = ids - set(result.keys())
     if missing:
         oms = (await session.execute(
             select(OrgMember).where(OrgMember.id.in_(missing))
