@@ -74,6 +74,10 @@ async def _as(Session, w, caller, method, path, json_body=None):
 
     kind, _member, user = _callers(w)[caller]
     await (_setup_app_human if kind == "human" else _setup_app_agent)(app, Session, user, w.org)
+    from app.dependencies.database import get_db
+    from tests.conftest import override_db_and_read
+
+    override_db_and_read(app, app.dependency_overrides[get_db])   # the one way a test overrides the session (the guard of story 2451): the activity log reads through `get_read_db`
     try:
         async with _client_for(app) as c:
             return await c.request(method, path, json=json_body)
@@ -196,5 +200,36 @@ async def test_activity_that_is_not_about_a_room_is_shown_to_the_project_as_befo
         assert st == 200 and marker in text                                                     # the log entry about a story
         st, text = await _stream_text(Session, w, "member_outside")
         assert st == 200 and marker in text                                                     # the stream row about a story
+    finally:
+        await engine.dispose()
+
+
+async def test_the_activity_logs_total_and_pages_count_only_what_the_caller_may_see():
+    """the room's entry is cut BEFORE the count and the page: a project member who is not in the room sees a `total` without it, and a page of 1 never has a hole where it was."""
+    from app.models.activity_log import ActivityLog
+
+    engine, Session, w = await _world()
+    try:
+        words = f"ac14-total-{uuid.uuid4().hex[:8]}"
+        await _say(Session, w, "agent_participant", w.r_human, f"counted {words}")
+        async with Session() as s:
+            for n in range(2):
+                s.add(ActivityLog(
+                    id=uuid.uuid4(), org_id=w.org, project_id=w.p1, actor_id=w.h_a, actor_type="human", action="story_created",
+                    entity_type="story", entity_id=uuid.uuid4(), context={"n": n},
+                ))
+            await s.commit()
+        st, text = await _log_text(Session, w, "participant")
+        assert st == 200
+        mine = json.loads(text)
+        st, text = await _log_text(Session, w, "member_outside")
+        assert st == 200
+        theirs = json.loads(text)
+        room_rows_seen_by_participant = [i for i in mine["items"] if i.get("entity_type") == "conversation"]
+        assert room_rows_seen_by_participant, "control: the participant sees the room's entry"
+        assert theirs["total"] == mine["total"] - len(room_rows_seen_by_participant)           # the count leaves the room's entries out
+        assert theirs["total"] == len(theirs["items"]) and not [i for i in theirs["items"] if i.get("entity_type") == "conversation"]
+        r = await _as(Session, w, "member_outside", "GET", f"/api/v2/activity-logs?project_id={w.p1}&limit=1&offset=1")
+        assert r.status_code == 200 and len(r.json()["items"]) == 1                              # a page past the first row is still full: no hole where the room's entry was
     finally:
         await engine.dispose()
