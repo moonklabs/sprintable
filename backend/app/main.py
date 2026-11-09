@@ -177,7 +177,7 @@ async def lifespan(app: FastAPI):
 
     from app.core import pool_holders as _pool_holders  # story #4864 — names whoever keeps a pooled connection too long (logs only; changes nothing)
 
-    pool_holders_task = None if _os.environ.get("PYTEST_CURRENT_TEST") else _pool_holders.start_watch()
+    pool_holders_task = _pool_holders.start_watch()  # None under pytest / when switched off (the guard lives in start_watch, so a test can see the lifespan call it)
     try:
         yield
     finally:
@@ -201,6 +201,10 @@ async def lifespan(app: FastAPI):
             embedded_timers_task.cancel()
         if pool_holders_task is not None:
             pool_holders_task.cancel()
+            try:
+                await pool_holders_task  # cancelled AND awaited: nothing is left running when the lifespan returns
+            except asyncio.CancelledError:
+                pass
         try:
             if task is not None:
                 try:

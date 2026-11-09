@@ -104,43 +104,54 @@ async def test_report_line_for_a_long_hold_and_none_for_a_calm_pool(watched):
     assert [l for l in pool_holders.report_lines(warn_sec=0.2) if f"pool={name} " in l] == []
 
 
-async def test_a_pool_meant_to_hold_long_stays_quiet_until_nearly_full():
-    """The worker pool keeps an advisory-lock connection for the process's life: the age rule must not write a line for it every poll forever (PO 5452 review) —
-    while the request pool, at the same moment and with the same age, does. Only «nearly full» speaks for the worker pool."""
+async def test_only_the_connection_marked_long_lived_is_left_out_of_the_age_rule():
+    """The L2 worker's advisory-lock connection is held for the process's life on purpose and must not write a line every poll forever — but ONLY that one: any other connection of the same
+    pool held past the line still does (codex on 5452: exempting the whole worker pool hid a hung cron beside the lock connection). Nearly full still speaks."""
     from app.core import pool_holders
 
-    suffix = f"{os.getpid()}-{id(object())}"
-    wname, rname = f"t4864-worker-{suffix}", f"t4864-request-{suffix}"
-    weng = create_async_engine(_async_url(), pool_size=2, max_overflow=1)
-    reng = create_async_engine(_async_url(), pool_size=2, max_overflow=1)
-    pool_holders.install(weng, wname, age_rule=False)
-    pool_holders.install(reng, rname)
+    name = f"t4867-{os.getpid()}-{id(object())}"
+    eng = create_async_engine(_async_url(), pool_size=2, max_overflow=1)
+    pool_holders.install(eng, name)
+    mine = lambda: [l for l in pool_holders.report_lines(warn_sec=0.2) if f"pool={name} " in l]  # noqa: E731
     try:
-        release = asyncio.Event()
+        release_a, release_b = asyncio.Event(), asyncio.Event()
+        marked = asyncio.Event()
 
-        async def hold(eng):
+        async def hold_long():  # the «lock connection»
+            async with eng.connect() as conn:
+                await conn.execute(text("select 1"))
+                await pool_holders.mark_long_lived(conn, name)
+                marked.set()
+                await release_a.wait()
+
+        async def hold_plain(release):
             async with eng.connect() as conn:
                 await conn.execute(text("select 1"))
                 await release.wait()
 
-        tasks = [asyncio.create_task(hold(weng)), asyncio.create_task(hold(reng))]
-        # wait until the REQUEST-like pool speaks (its connection is past the line), then the worker pool — same age, same moment — must still be silent
-        assert await _until(lambda: any(f"pool={rname} " in l for l in pool_holders.report_lines(warn_sec=0.2)))
-        lines = pool_holders.report_lines(warn_sec=0.2)
-        assert [l for l in lines if f"pool={wname} " in l] == [], "an old connection alone must not make the worker pool talk"
-        assert len([l for l in lines if f"pool={rname} " in l]) == 1, "the request pool keeps the age rule"
-        # nearly full (3 of 3) still speaks, for the worker pool too
-        more = [asyncio.create_task(hold(weng)), asyncio.create_task(hold(weng))]
-        assert await _until(lambda: any(f"pool={wname} " in l for l in pool_holders.report_lines(warn_sec=0.2)))
-        full = [l for l in pool_holders.report_lines(warn_sec=0.2) if f"pool={wname} " in l]
-        assert len(full) == 1 and "checked_out=3/3" in full[0] and "held_over_0s=0" in full[0], full
-        release.set()
-        await asyncio.gather(*tasks, *more)
+        # the plain connection is held FIRST, then the marked one joins: a mark that exempted more than its own connection (the whole pool, every connection held at that moment) would hide this one
+        tb = asyncio.create_task(hold_plain(release_b))
+        assert await _until(lambda: len(mine()) == 1), "an unmarked connection past the line must be reported"
+        assert "checked_out=1/3" in mine()[0] and "held_over_0s=1" in mine()[0], mine()
+        ta = asyncio.create_task(hold_long())
+        await asyncio.wait_for(marked.wait(), 8)
+        await asyncio.sleep(0.5)  # well past the 0.2 s line for the marked one as well
+        line = mine()
+        assert len(line) == 1 and "checked_out=2/3" in line[0] and "held_over_0s=1" in line[0], line  # the marked one is NOT counted, the plain one still is
+        release_b.set()
+        await tb
+        assert await _until(lambda: mine() == []), "the marked connection alone: quiet however old"
+        # nearly full (3 of 3) speaks whatever the marks say
+        extra_release = asyncio.Event()
+        more = [asyncio.create_task(hold_plain(extra_release)), asyncio.create_task(hold_plain(extra_release))]
+        assert await _until(lambda: len(mine()) == 1)
+        assert "checked_out=3/3" in mine()[0], mine()
+        extra_release.set()
+        release_a.set()
+        await asyncio.gather(ta, *more)
     finally:
-        await weng.dispose()
-        await reng.dispose()
-        pool_holders._pools.pop(wname, None)
-        pool_holders._pools.pop(rname, None)
+        await eng.dispose()
+        pool_holders._pools.pop(name, None)
 
 
 async def test_the_route_and_the_await_chain_reach_the_holder_through_the_middleware(watched, monkeypatch):
@@ -208,7 +219,7 @@ async def test_a_record_handed_out_again_without_a_checkin_leaves_no_stale_conne
         listener(_Raw(), raw._connection_record, None)  # the same record is handed out again; no checkin in between
         live = {cid for h in reg.holders.values() for cid in h.conn_ids}
         assert len(reg.holders) == 1
-        assert set(reg.by_conn) <= live, "stale connection ids of the replaced holder are still in by_conn"
+        assert set(reg.by_conn) == live, "by_conn must hold exactly the live holder's ids: a stale id of the replaced holder is still there, or the live holder's id is missing"
     assert reg.holders == {} and reg.by_conn == {}
 
 
@@ -219,13 +230,34 @@ def test_the_default_idle_in_transaction_line_is_fifteen_minutes():
     assert Settings.model_fields["db_idle_in_txn_timeout_ms"].default == 900_000
 
 
-def test_the_app_registers_its_worker_pool_without_the_age_rule():
-    import app.core.database  # noqa: F401 — the import installs the watch on the three engines
+async def test_the_l2_worker_marks_its_advisory_lock_connection_long_lived():
+    """The real L2 trigger worker takes its lock connection from the app's worker pool: that holder must carry the mark, and the worker pool must stay quiet with it held."""
+    from app.core import pool_holders
+    from app.services.l2_trigger_worker import L2TriggerWorker
 
+    worker = L2TriggerWorker(use_advisory_lock=True)
+    try:
+        await worker._ensure_lock()
+        held = pool_holders.snapshot("worker")
+        assert len(held) == 1 and held[0]["long"] is True, held
+        assert [l for l in pool_holders.report_lines(warn_sec=0.0) if "pool=worker " in l] == [], "the lock connection alone must not make the worker pool talk"
+    finally:
+        await worker._release_lock()
+    assert pool_holders.snapshot("worker") == []
+
+
+def test_forgetting_a_holder_never_removes_the_entry_of_a_newer_one_with_the_same_id():
+    """An id() is reused once its object is freed: the old holder's connection ids may now point at a NEWER holder (codex/Kadir on 5452)."""
     from app.core import pool_holders
 
-    assert pool_holders._pools["worker"].age_rule is False
-    assert pool_holders._pools["request"].age_rule is True
+    pool = pool_holders._Pool("t4867-own", engine=None)
+    old = pool_holders._Holder.__new__(pool_holders._Holder)
+    new = pool_holders._Holder.__new__(pool_holders._Holder)
+    old.conn_ids, new.conn_ids = (1111, 2222), (1111,)
+    pool.by_conn[1111] = new  # the id 1111 was reused by the newer holder
+    pool.by_conn[2222] = old
+    pool_holders._forget(pool, old)
+    assert pool.by_conn == {1111: new}, "only the entries that still point at the old holder may go"
 
 
 async def test_a_connection_never_given_back_by_a_finished_task_counts_as_leaked(watched):
@@ -351,3 +383,66 @@ async def test_the_request_engine_ends_sessions_idle_in_a_transaction(monkeypatc
             assert "terminat" in str(err.value).lower() or "connection" in str(err.value).lower()
     finally:
         await eng.dispose()
+
+
+async def test_the_real_lifespan_starts_the_watch_and_cancels_and_awaits_it_at_the_end(monkeypatch):
+    """AC7 (Kadir, 5453 delta): deleting the `start_watch` call from the lifespan left every test green, because pytest skips the watch. Here the real lifespan runs with a spy for
+    start_watch: it must be called once, its Task must still be running while the app runs, and at the end it must be cancelled AND finished (awaited)."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from app.core import pool_holders
+    from app.main import lifespan
+
+    fake_engine = MagicMock()
+    fake_engine.dispose = AsyncMock()
+    monkeypatch.setattr("app.core.database.engine", fake_engine)
+
+    async def quiet_listen():
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr("app.services.pg_pubsub.listen_loop", quiet_listen)
+    seen = {"calls": 0, "task": None, "cancelled": False, "finished": False}
+
+    async def fake_watch():
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            seen["cancelled"] = True
+            await asyncio.sleep(0.05)  # a slow clean-up: only an AWAITED cancel sees it finish before the lifespan returns
+            seen["finished"] = True
+            raise
+
+    def spy():
+        seen["calls"] += 1
+        seen["task"] = asyncio.create_task(fake_watch())
+        return seen["task"]
+
+    monkeypatch.setattr(pool_holders, "start_watch", spy)
+    async with lifespan(MagicMock()):
+        await asyncio.sleep(0.05)
+        assert seen["calls"] == 1, "the lifespan must call start_watch exactly once"
+        assert seen["task"] is not None and not seen["task"].done()
+        assert seen["cancelled"] is False
+    assert seen["cancelled"] is True, "the lifespan must cancel the watch task"
+    assert seen["finished"] is True and seen["task"].done(), "the lifespan must AWAIT the cancelled task, not just cancel it"
+
+
+async def test_start_watch_gives_a_task_outside_pytest_and_nothing_under_it_or_when_off(monkeypatch):
+    from app.core import pool_holders
+    from app.core.config import settings
+
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "x")
+    assert pool_holders.start_watch() is None, "pytest must not get a background loop"
+    monkeypatch.delenv("PYTEST_CURRENT_TEST")
+    monkeypatch.setattr(settings, "pool_holder_watch_enabled", False)
+    assert pool_holders.start_watch() is None, "switched off"
+    monkeypatch.setattr(settings, "pool_holder_watch_enabled", True)
+    task = pool_holders.start_watch()
+    try:
+        assert isinstance(task, asyncio.Task) and not task.done()
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass

@@ -123,7 +123,7 @@ worker_engine = create_async_engine(
         "server_settings": {"application_name": db_application_name("worker")},
     },
 )
-pool_holders.install(worker_engine, "worker", age_rule=False)  # its advisory-lock connection is meant to be held for the process life
+pool_holders.install(worker_engine, "worker")
 worker_session_factory = async_sessionmaker(
     worker_engine,
     expire_on_commit=False,

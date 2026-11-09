@@ -96,7 +96,7 @@ _APP_MARK = "/app/"  # only frames under this path segment are kept in an await 
 
 
 class _Holder:
-    __slots__ = ("since", "task", "had_task", "scope", "record", "chain", "conn_id", "conn_ids")
+    __slots__ = ("since", "task", "had_task", "scope", "record", "chain", "conn_id", "conn_ids", "long_lived")
 
     def __init__(self, record: Any, task: "asyncio.Task | None", scope: Any, conn_id: int, extra_ids: tuple = ()) -> None:
         self.since = time.monotonic()
@@ -106,14 +106,14 @@ class _Holder:
         self.record = weakref.ref(record)
         self.chain = _checkout_chain()  # where it was checked out — text only, no reference to the task or the frames
         self.conn_id = conn_id
+        self.long_lived = False  # a connection that is MEANT to be held for the process's life (mark_long_lived): never «held too long»
         self.conn_ids = (conn_id, *extra_ids)  # SQLAlchemy's GC line prints the DRIVER connection inside the pooled one (its address), so both are keys
 
 
 class _Pool:
-    def __init__(self, name: str, engine: Any, age_rule: bool = True) -> None:
+    def __init__(self, name: str, engine: Any) -> None:
         self.name = name
         self.engine = engine
-        self.age_rule = age_rule  # False: a connection held for long is NORMAL here (the worker pool's advisory-lock connection) — only «nearly full» is worth a line
         self.holders: dict[int, _Holder] = {}
         self.by_conn: dict[int, _Holder] = {}  # id(dbapi connection) → holder, for the garbage-collector line (the log argument is the connection object)
 
@@ -142,17 +142,14 @@ class PoolHolderScopeMiddleware:
                 pass
 
 
-def install(engine: Any, name: str, *, age_rule: bool = True) -> None:
-    """Listen to this engine's pool. Idempotent per engine name. Fail-open.
-
-    `age_rule=False` for a pool whose connections are MEANT to be held long (the worker pool: the L2 trigger worker's advisory-lock connection stays for the process's life): the
-    «held longer than pool_holder_warn_sec» rule is left out for it, so it does not write a line every poll forever; it still reports when it is nearly full."""
+def install(engine: Any, name: str) -> None:
+    """Listen to this engine's pool. Idempotent per engine name. Fail-open."""
     try:
         from app.core.config import settings
 
         if not settings.pool_holder_watch_enabled or name in _pools:
             return
-        pool = _Pool(name, engine, age_rule)
+        pool = _Pool(name, engine)
         _pools[name] = pool
         sync_engine = engine.sync_engine
 
@@ -166,8 +163,7 @@ def install(engine: Any, name: str, *, age_rule: bool = True) -> None:
                 h = _Holder(connection_record, task, _scope_var.get(), id(dbapi_connection), (id(inner),) if inner is not None else ())
                 prev = pool.holders.get(id(connection_record))
                 if prev is not None:  # the record is being handed out again without a checkin in between (SQLAlchemy's GC path terminates the connection and reuses the record)
-                    for cid in prev.conn_ids:
-                        pool.by_conn.pop(cid, None)
+                    _forget(pool, prev)
                 pool.holders[id(connection_record)] = h
                 for cid in h.conn_ids:
                     pool.by_conn[cid] = h
@@ -175,8 +171,7 @@ def install(engine: Any, name: str, *, age_rule: bool = True) -> None:
                     for k in list(pool.holders)[: _MAX_TRACKED // 2]:
                         old = pool.holders.pop(k, None)
                         if old is not None:
-                            for cid in old.conn_ids:
-                                pool.by_conn.pop(cid, None)
+                            _forget(pool, old)
             except Exception:  # noqa: BLE001
                 pass
 
@@ -184,8 +179,7 @@ def install(engine: Any, name: str, *, age_rule: bool = True) -> None:
             try:
                 h = pool.holders.pop(id(connection_record), None)
                 if h is not None:
-                    for cid in h.conn_ids:
-                        pool.by_conn.pop(cid, None)
+                    _forget(pool, h)
             except Exception:  # noqa: BLE001
                 pass
 
@@ -236,6 +230,14 @@ def _attach_gc_filter(engine: Any) -> None:
         logging.getLogger(name).addFilter(_GcLineFilter())
 
 
+def _forget(pool: _Pool, h: "_Holder") -> None:
+    """Take a holder's connection ids out of by_conn — but only the entries that STILL POINT AT IT. An id() can be reused once an object is freed; without this check, forgetting an old
+    holder would delete the entry of a newer one that happens to share the id (and its garbage-collector line would lose its place)."""
+    for cid in h.conn_ids:
+        if pool.by_conn.get(cid) is h:
+            pool.by_conn.pop(cid, None)
+
+
 def _sweep_by_conn(pool: _Pool) -> None:
     """by_conn must never hold a holder that is no longer in `holders` (it would keep the scope and the chain alive for good)."""
     live = {id(h) for h in pool.holders.values()}
@@ -250,8 +252,7 @@ def _prune(pool: _Pool) -> None:
         rec = h.record()
         if rec is None or getattr(rec, "fairy_ref", True) is None:
             pool.holders.pop(key, None)
-            for cid in h.conn_ids:
-                pool.by_conn.pop(cid, None)
+            _forget(pool, h)
     _sweep_by_conn(pool)
 
 
@@ -293,7 +294,7 @@ def snapshot(name: str = "request") -> list[dict]:
     for h in pool.holders.values():
         task = h.task() if h.task is not None else None
         gone = h.had_task and (task is None or task.done())
-        out.append({"age": now - h.since, "route": _route_of(h.scope), "at": _where(task, h.had_task), "from": " ← ".join(reversed(h.chain)) or "-", "leak": bool(gone)})
+        out.append({"age": now - h.since, "route": _route_of(h.scope), "at": _where(task, h.had_task), "from": " ← ".join(reversed(h.chain)) or "-", "leak": bool(gone), "long": h.long_lived})
     out.sort(key=lambda r: r["age"], reverse=True)
     return out
 
@@ -314,7 +315,7 @@ def report_lines(warn_sec: float) -> list[str]:
         try:
             held = snapshot(name)
             out, cap = _capacity(pool.engine)
-            old = [r for r in held if r["age"] >= warn_sec] if pool.age_rule else []
+            old = [r for r in held if r["age"] >= warn_sec and not r["long"]]
             near_full = cap > 0 and out >= cap * _FULL_FRACTION
             if not old and not near_full:
                 continue
@@ -343,11 +344,33 @@ async def watch() -> None:
             logger.warning("pool_holders watch tick failed", exc_info=True)
 
 
-def start_watch() -> "asyncio.Task | None":
+async def mark_long_lived(async_connection: Any, name: str) -> None:
+    """Say that this AsyncConnection of pool `name` is MEANT to be held for the life of the process (the L2 trigger worker's advisory-lock connection): it is left out of the
+    «held longer than pool_holder_warn_sec» rule — every other connection of the pool is still judged by it. Fail-open: a failure here only means the connection is judged like any other."""
     try:
+        pool = _pools.get(name)
+        if pool is None:
+            return
+        raw = await async_connection.get_raw_connection()
+        dbapi = getattr(raw, "dbapi_connection", None)
+        for key in (id(dbapi), id(getattr(dbapi, "_connection", None))):
+            h = pool.by_conn.get(key)
+            if h is not None:
+                h.long_lived = True
+                return
+    except Exception:  # noqa: BLE001
+        logger.warning("pool_holders.mark_long_lived failed for %s", name, exc_info=True)
+
+
+def start_watch() -> "asyncio.Task | None":
+    """The watch loop as a Task for the lifespan to keep and cancel — or None: switched off, or running under pytest (the test suite starts and stops the app on a new loop per test
+    and must not leave a loop behind; a test that wants the loop calls `watch()` itself)."""
+    try:
+        import os
+
         from app.core.config import settings
 
-        if not settings.pool_holder_watch_enabled:
+        if not settings.pool_holder_watch_enabled or os.environ.get("PYTEST_CURRENT_TEST"):
             return None
         return asyncio.create_task(watch(), name="pool_holders_watch")
     except Exception:  # noqa: BLE001
