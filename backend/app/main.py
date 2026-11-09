@@ -168,6 +168,10 @@ async def lifespan(app: FastAPI):
         from app.services.desktop_limit_notice import lift_sweep_loop  # story 4781: the «working again» line waits for the hold, the sweep tells it when no report comes
 
         lift_sweep_task = asyncio.create_task(lift_sweep_loop())
+
+    from app.core import pool_holders as _pool_holders  # story #4864 — names whoever keeps a pooled connection too long (logs only; changes nothing)
+
+    pool_holders_task = None if _os.environ.get("PYTEST_CURRENT_TEST") else _pool_holders.start_watch()
     try:
         yield
     finally:
@@ -187,6 +191,8 @@ async def lifespan(app: FastAPI):
             delivery_dispatcher_task.cancel()
         if lift_sweep_task is not None:
             lift_sweep_task.cancel()
+        if pool_holders_task is not None:
+            pool_holders_task.cancel()
         try:
             if task is not None:
                 try:
@@ -512,6 +518,13 @@ from app.core.request_db_timing import RequestDbTimingMiddleware, timing_enabled
 
 if timing_enabled():
     app.add_middleware(RequestDbTimingMiddleware)
+
+# story #4864 — the request's scope in a contextvar, so a pooled connection that is held too long can say which route took it (app/core/pool_holders.py). Pure ASGI, no I/O.
+from app.core.config import settings as _pool_holder_settings  # noqa: E402
+from app.core.pool_holders import PoolHolderScopeMiddleware  # noqa: E402
+
+if _pool_holder_settings.pool_holder_watch_enabled:
+    app.add_middleware(PoolHolderScopeMiddleware)
 
 app.include_router(auth.router)
 app.include_router(health.router)
