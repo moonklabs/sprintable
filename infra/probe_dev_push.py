@@ -100,14 +100,16 @@ def _text_of(entry: dict) -> str:
 
 
 def _json_payload_of(entry: dict) -> dict:
-    """구조화 칸(jsonPayload). docker 줄이 JSON 글 그대로 `log`/`message` 한 칸에 담겨 오면(Ops Agent 가 JSON 으로 안 푼 모양) 그 글을 한 번 푼다 — 객체가 아니면 빈 dict."""
+    """구조화 칸(jsonPayload). 줄이 JSON 글 그대로 한 칸에 담겨 오면 — jsonPayload 의 `log`/`message`, 또는 줄 전체가 `textPayload` 로 저장되는 모양(story 4796 · Ops Agent 가 JSON 으로 안 푼 모양) —
+    그 글을 한 번 푼다. 객체가 아니면 빈 dict(없는 jsonPayload 는 {})."""
     jp = entry.get("jsonPayload")
-    if not isinstance(jp, dict):
-        return {}
-    if "event" in jp:
-        return jp
-    for key in ("log", "message"):
-        raw = jp.get(key)
+    if isinstance(jp, dict):
+        if "event" in jp:
+            return jp
+        texts = [jp.get("log"), jp.get("message")]
+    else:
+        texts = [entry.get("textPayload")]
+    for raw in texts:
         if isinstance(raw, str) and raw.lstrip().startswith("{"):
             try:
                 inner = json.loads(raw)
@@ -115,7 +117,7 @@ def _json_payload_of(entry: dict) -> dict:
                 continue
             if isinstance(inner, dict):
                 return inner
-    return jp
+    return jp if isinstance(jp, dict) else {}
 
 
 # ── ① expo push: sent ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -268,8 +270,14 @@ def agg_diag_lines(diags: list[Diag]) -> list[str]:
 
 
 # ── ③ 필터 없이 그 서비스 최근 1줄의 «칸 이름만» ──────────────────────────────────────────────────────────────────────────────
-_FIELD_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,39}$")
+_FIELD_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,39}")  # fullmatch
+_HEX_RUN = re.compile(r"[0-9A-Fa-f]{12,}")                  # a key / id written as a field name (Kadir 5461): never printed
 _FIELD_NAMES_MAX = 40
+
+
+def _plain_name(k: object) -> bool:
+    """짧은 식별자 모양 AND 16진 덩어리(밑줄을 뺀 12자 이상)를 품지 않음 — 키 · id 가 «이름»으로 와도 값이 아니라 «(other)» 로 접힌다."""
+    return isinstance(k, str) and _FIELD_NAME.fullmatch(k) is not None and _HEX_RUN.search(k.replace("_", "")) is None
 
 
 def field_names(entry: object) -> list[str]:
@@ -279,17 +287,17 @@ def field_names(entry: object) -> list[str]:
         return []
     names: set[str] = set()
     for k, v in entry.items():
-        names.add(k if isinstance(k, str) and _FIELD_NAME.match(k) else _OTHER)
+        names.add(k if _plain_name(k) else _OTHER)
         if k == "jsonPayload" and isinstance(v, dict):
             for jk in v:
-                names.add(f"jsonPayload.{jk}" if isinstance(jk, str) and _FIELD_NAME.match(jk) else f"jsonPayload.{_OTHER}")
+                names.add(f"jsonPayload.{jk}" if _plain_name(jk) else f"jsonPayload.{_OTHER}")
     ordered = sorted(names)
     return ordered[:_FIELD_NAMES_MAX] + ([f"… 외 {len(ordered) - _FIELD_NAMES_MAX}개"] if len(ordered) > _FIELD_NAMES_MAX else [])
 
 
 # 닫힌 목록(codex 검수 · 로그 이름이 멤버 id · 앱 버전 꼴일 수 있다): 알려진 시스템 로그 이름 + 우리 compose 서비스 이름(`sprintable-<서비스>` · 끝에 숫자 한두 자리). 그 밖은 «(other)».
 _KNOWN_LOG_IDS = frozenset({"syslog", "messages", "auth", "kern", "ops-agent-health", "ops-agent-fluent-bit", "ops-agent-metrics", "docker", "containers"})
-_COMPOSE_LOG_ID = re.compile(r"^sprintable-(backend|frontend|caddy|db|migrate|gateway-db|deployer)(-[0-9]{1,2})?$")
+_COMPOSE_LOG_ID = re.compile(r"sprintable-(backend|frontend|caddy|db|migrate|gateway-db|deployer)(-[0-9]{1,2})?")  # fullmatch: no trailing newline passes
 _LOG_IDS_READ = 500
 
 
@@ -300,7 +308,7 @@ def log_ids(entries: list[dict]) -> list[str]:
     for e in entries:
         name = e.get("logName") if isinstance(e, dict) else None
         tail = name.rsplit("/", 1)[-1] if isinstance(name, str) else "?"
-        counts[tail if tail in _KNOWN_LOG_IDS or _COMPOSE_LOG_ID.match(tail) else _OTHER] += 1
+        counts[tail if tail in _KNOWN_LOG_IDS or _COMPOSE_LOG_ID.fullmatch(tail) else _OTHER] += 1
     return [f"  {k}: {v}건" for k, v in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
 
 

@@ -472,5 +472,45 @@ def test_a_diagnostics_line_that_arrives_as_json_text_in_one_field_is_read_once(
     for e in (structured, wrapped):
         diags, members = probe.parse_diagnostics([e], MEMBER)
         assert members == 1 and [(d.stage, d.permission, d.platform) for d in diags] == [("ok", "granted", "ios")]
+    # shape A (Kadir 5461): the WHOLE line is one text in textPayload — the push read already takes that shape, the diagnostics read must too
+    text_only = {"timestamp": "2026-11-09T07:02:00Z", "textPayload": inner + "\n"}
+    diags, members = probe.parse_diagnostics([text_only], MEMBER)
+    assert members == 1 and [(d.stage, d.permission, d.platform) for d in diags] == [("ok", "granted", "ios")]
     # not an object / not push_diagnostics → nothing, no crash
-    assert probe.parse_diagnostics([{"jsonPayload": {"log": "{not json"}}, {"jsonPayload": {"log": "[1,2]"}}], MEMBER) == ([], 0)
+    assert probe.parse_diagnostics([{"jsonPayload": {"log": "{not json"}}, {"jsonPayload": {"log": "[1,2]"}}, {"textPayload": "{not json"}, {"textPayload": "plain line"}], MEMBER) == ([], 0)
+
+
+def test_on_the_vm_a_text_only_diagnostics_line_reaches_section_two(monkeypatch, capsys):
+    import json
+    line = json.dumps({"event": "push_diagnostics", "member_id": MEMBER_FULL, "stage": "device_token", "permission": "granted", "error_code": "E_REGISTRATION_FAILED", "platform": "android"})
+
+    def fake_run(cmd):
+        if cmd[:4] == ["gcloud", "run", "services", "list"]:
+            return ""
+        if '"push_diagnostics"' in cmd[3]:
+            return json.dumps([{"timestamp": "2026-11-09T07:03:00Z", "textPayload": line}])
+        return "[]"
+
+    monkeypatch.setattr(probe, "_run", fake_run)
+    _env(monkeypatch)
+    assert probe.main() == 0
+    out = capsys.readouterr().out
+    assert "stage=device_token" in out and "error_code=E_REGISTRATION_FAILED" in out and "platform=android" in out
+    assert MEMBER_FULL not in out
+
+
+# ── Kadir 5461: no trailing-newline pass · a hex-shaped field name never prints ───────────────────────────────────────────────────────────────
+
+def test_a_log_name_with_a_trailing_newline_is_not_in_the_closed_list():
+    ents = [{"logName": "projects/p/logs/syslog\n"}, {"logName": "projects/p/logs/sprintable-backend-1\n"}, {"logName": "projects/p/logs/syslog"}, {"logName": "projects/p/logs/sprintable-backend-1"}]
+    out = probe.log_ids(ents)
+    assert "  syslog: 1건" in out and "  sprintable-backend-1: 1건" in out and "  (other): 2건" in out
+    assert not any("\n" in line.strip("\n") for line in out)
+
+
+def test_field_names_fold_a_hex_shaped_name_and_a_trailing_newline():
+    key32 = "a3f9c1d2e4b5a6978877665544332211"      # starts with a letter, 32 hex: a key written as a field name
+    names = probe.field_names({key32: 1, "jsonPayload": {key32: 2, "event": 3, "msg\n": 4, "e75ca548_1111_2222": 5, "member_id": 6}})
+    assert key32 not in "\n".join(names) and "e75ca548" not in "\n".join(names)
+    assert {"(other)", "jsonPayload", "jsonPayload.(other)", "jsonPayload.event", "jsonPayload.member_id"} == set(names)
+    assert probe.field_names({"timestamp": 1, "severity": 2, "jsonPayload": {"expo_push_credentials_error": 1}}) == ["jsonPayload", "jsonPayload.expo_push_credentials_error", "severity", "timestamp"]
