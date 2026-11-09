@@ -40,7 +40,7 @@ fi
 { was_x=0; case $- in *x*) was_x=1 ;; esac; set +x; } 2> /dev/null
 attempt=1
 code=000
-body=""
+status_word=""
 while :; do
   token_json="$(curl -q --noproxy '*' -fsS -m 10 -H 'Metadata-Flavor: Google' "$md/instance/service-accounts/default/token" 2> /dev/null)" || token_json=""
   token="$(printf '%s' "$token_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])' 2> /dev/null)" || token=""
@@ -49,10 +49,16 @@ while :; do
       -d '{"payload":"c2lnbmluZy1jaGVjaw=="}' "$iam/v1/projects/-/serviceAccounts/$sa:signBlob" 2> /dev/null)" || out=""
     code="$(printf '%s' "$out" | tail -n 1)"
     case "$code" in [0-9][0-9][0-9]) ;; *) code=000 ;; esac   # the transfer failed outright (no network · DNS · TLS) = «no answer», not an empty code
-    body="$(printf '%s' "$out" | sed '$d' | head -c 300)"
+    # the answer is untrusted text: show only a status word of the form PERMISSION_DENIED (capitals and underscores), never the response itself
+    status_word="$(printf '%s' "$out" | sed '$d' | python3 -c 'import json,re,sys
+try:
+    w = json.load(sys.stdin)["error"]["status"]
+except Exception:
+    w = ""
+print(w if re.fullmatch(r"[A-Z_]{3,40}", str(w)) else "")' 2> /dev/null)" || status_word=""
   else
     code=000
-    body="no access token from the metadata server"
+    status_word=""
   fi
   [ "$code" = 200 ] && break
   [ "$attempt" -ge "$tries" ] && break
@@ -74,7 +80,7 @@ fi
     echo "SIGNING CHECK FAILED: $sa cannot sign as itself (signBlob answered HTTP $code after $attempt tries)."
   fi
   echo "  Attachment previews and file opening (/api/attachments/sign) are BLOCKED for everyone until this is fixed."
-  [ -n "$body" ] && echo "  answer: $body"
+  [ -n "$status_word" ] && echo "  API status: $status_word"
   echo "  Fix, from a machine with gcloud (RUNBOOK §2 — on this account only, never project-wide):"
   echo "    gcloud iam service-accounts add-iam-policy-binding $sa --member serviceAccount:$sa --role roles/iam.serviceAccountTokenCreator"
   echo "  then run this check again: sudo /opt/sprintable/bin/check-signing.sh"

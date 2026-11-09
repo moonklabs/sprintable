@@ -53,6 +53,7 @@ case "$url" in
     set -- ${FAKE_SIGN_CODE_FIRST-}
     if [ "$n" -le "$#" ]; then eval "code=\${$n}"; fi
     [ "$well_formed" = 1 ] || code=400
+    [ "${FAKE_BODY_ECHO_TOKEN-}" = 1 ] && { printf '{"error":{"code":403,"message":"bad bearer %s","status":"PERMISSION_DENIED"}}\n%s' "$FAKE_TOKEN" "$code"; exit 0; }
     if [ "$code" = 200 ]; then printf '{"keyId":"k","signedBlob":"c2ln"}\n200'; else printf '{"error":{"code":%s,"message":"Permission '"'"'iam.serviceAccounts.signBlob'"'"' denied on resource (or it may not exist).","status":"PERMISSION_DENIED"}}\n%s' "$code" "$code"; fi ;;
 esac
 exit 0
@@ -98,7 +99,8 @@ def test_signblob_403_is_a_loud_failure_that_names_the_account_the_damage_and_th
     # the fix line is the account's OWN policy, one account only
     assert f"gcloud iam service-accounts add-iam-policy-binding {SA} --member serviceAccount:{SA} --role roles/iam.serviceAccountTokenCreator" in err
     assert "projects add-iam-policy-binding" not in err
-    assert "signBlob' denied" in err, "the answer of the API is shown"
+    assert "PERMISSION_DENIED" in err, "the API's status word is shown"
+    assert "denied on resource" not in err, "the raw response text is not echoed"
 
 
 def test_a_grant_that_has_not_arrived_yet_is_retried_then_passes(box) -> None:
@@ -225,6 +227,15 @@ def test_a_loopback_override_is_the_test_hook_and_is_used(box) -> None:
     assert p.returncode == 0 and "SIGNCALL url=http://127.0.0.1:8099/v1/projects/-/serviceAccounts/" in log
 
 
+@pytest.mark.parametrize("how", ["plain", "dash_x"])
+def test_a_response_that_echoes_the_bearer_is_never_printed(box, how: str) -> None:
+    """the IAM answer is untrusted (a loopback override or a compromised endpoint can send anything): only a whitelisted status word is shown, never the response text"""
+    kw = {"_bash": ("-x",)} if how == "dash_x" else {}
+    p, _ = box(FAKE_SIGN_CODE="403", FAKE_BODY_ECHO_TOKEN="1", SIGNING_CHECK_TRIES="1", **kw)
+    assert p.returncode == 1 and "SIGNING CHECK FAILED" in p.stderr
+    assert TOKEN not in p.stdout and TOKEN not in p.stderr
+
+
 # ───────────────────────── the setup path: RUNBOOK §2 gives the grant, bootstrap runs the check ─────────────────────────
 
 def _runbook_account_step() -> str:
@@ -234,7 +245,9 @@ def _runbook_account_step() -> str:
 
 def test_the_runbook_gives_the_account_the_signing_grant_on_itself_only() -> None:
     step = _runbook_account_step()
-    lines = [l for l in step.splitlines() if "serviceAccountTokenCreator" in l and not l.lstrip().startswith("#")]
+    # only the commands (inside code fences) count; the prose of the section may talk about the role
+    commands = "\n".join(block for i, block in enumerate(step.split("```")) if i % 2 == 1)
+    lines = [l for l in commands.splitlines() if "serviceAccountTokenCreator" in l and not l.lstrip().startswith("#")]
     assert lines == ["gcloud iam service-accounts add-iam-policy-binding $SAE --project $PROJECT --member serviceAccount:$SAE --role roles/iam.serviceAccountTokenCreator"], lines
     assert "projects add-iam-policy-binding $PROJECT --member serviceAccount:$SAE --role roles/iam.serviceAccountTokenCreator" not in step, "never project-wide"
     # it comes after the account is made and before the section ends
