@@ -92,6 +92,53 @@ async def test_report_line_for_a_long_hold_and_none_for_a_calm_pool(watched):
     assert [l for l in pool_holders.report_lines(warn_sec=0.2) if f"pool={name} " in l] == []
 
 
+async def test_a_pool_meant_to_hold_long_stays_quiet_until_nearly_full():
+    """The worker pool keeps an advisory-lock connection for the process's life: the age rule must not write a line for it every poll forever (PO 5452 review) —
+    while the request pool, at the same moment and with the same age, does. Only «nearly full» speaks for the worker pool."""
+    from app.core import pool_holders
+
+    suffix = f"{os.getpid()}-{id(object())}"
+    wname, rname = f"t4864-worker-{suffix}", f"t4864-request-{suffix}"
+    weng = create_async_engine(_async_url(), pool_size=2, max_overflow=1)
+    reng = create_async_engine(_async_url(), pool_size=2, max_overflow=1)
+    pool_holders.install(weng, wname, age_rule=False)
+    pool_holders.install(reng, rname)
+    try:
+        release = asyncio.Event()
+
+        async def hold(eng):
+            async with eng.connect() as conn:
+                await conn.execute(text("select 1"))
+                await release.wait()
+
+        tasks = [asyncio.create_task(hold(weng)), asyncio.create_task(hold(reng))]
+        await asyncio.sleep(0.6)
+        lines = pool_holders.report_lines(warn_sec=0.2)
+        assert [l for l in lines if f"pool={wname} " in l] == [], "an old connection alone must not make the worker pool talk"
+        assert len([l for l in lines if f"pool={rname} " in l]) == 1, "the request pool keeps the age rule"
+        # nearly full (3 of 3) still speaks, for the worker pool too
+        more = [asyncio.create_task(hold(weng)), asyncio.create_task(hold(weng))]
+        await asyncio.sleep(0.4)
+        full = [l for l in pool_holders.report_lines(warn_sec=0.2) if f"pool={wname} " in l]
+        assert len(full) == 1 and "checked_out=3/3" in full[0] and "held_over_0s=0" in full[0], full
+        release.set()
+        await asyncio.gather(*tasks, *more)
+    finally:
+        await weng.dispose()
+        await reng.dispose()
+        pool_holders._pools.pop(wname, None)
+        pool_holders._pools.pop(rname, None)
+
+
+def test_the_app_registers_its_worker_pool_without_the_age_rule():
+    import app.core.database  # noqa: F401 — the import installs the watch on the three engines
+
+    from app.core import pool_holders
+
+    assert pool_holders._pools["worker"].age_rule is False
+    assert pool_holders._pools["request"].age_rule is True
+
+
 async def test_a_connection_never_given_back_by_a_finished_task_counts_as_leaked(watched):
     from app.core import pool_holders
 

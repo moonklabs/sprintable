@@ -78,9 +78,10 @@ class _Holder:
 
 
 class _Pool:
-    def __init__(self, name: str, engine: Any) -> None:
+    def __init__(self, name: str, engine: Any, age_rule: bool = True) -> None:
         self.name = name
         self.engine = engine
+        self.age_rule = age_rule  # False: a connection held for long is NORMAL here (the worker pool's advisory-lock connection) — only «nearly full» is worth a line
         self.holders: dict[int, _Holder] = {}
         self.by_conn: dict[int, _Holder] = {}  # id(dbapi connection) → holder, for the garbage-collector line (the log argument is the connection object)
 
@@ -109,14 +110,17 @@ class PoolHolderScopeMiddleware:
                 pass
 
 
-def install(engine: Any, name: str) -> None:
-    """Listen to this engine's pool. Idempotent per engine name. Fail-open."""
+def install(engine: Any, name: str, *, age_rule: bool = True) -> None:
+    """Listen to this engine's pool. Idempotent per engine name. Fail-open.
+
+    `age_rule=False` for a pool whose connections are MEANT to be held long (the worker pool: the L2 trigger worker's advisory-lock connection stays for the process's life): the
+    «held longer than pool_holder_warn_sec» rule is left out for it, so it does not write a line every poll forever; it still reports when it is nearly full."""
     try:
         from app.core.config import settings
 
         if not settings.pool_holder_watch_enabled or name in _pools:
             return
-        pool = _Pool(name, engine)
+        pool = _Pool(name, engine, age_rule)
         _pools[name] = pool
         sync_engine = engine.sync_engine
 
@@ -265,7 +269,7 @@ def report_lines(warn_sec: float) -> list[str]:
         try:
             held = snapshot(name)
             out, cap = _capacity(pool.engine)
-            old = [r for r in held if r["age"] >= warn_sec]
+            old = [r for r in held if r["age"] >= warn_sec] if pool.age_rule else []
             near_full = cap > 0 and out >= cap * _FULL_FRACTION
             if not old and not near_full:
                 continue
