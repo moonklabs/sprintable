@@ -66,10 +66,16 @@ for B in sprintable-avatars-dev sprintable-channel-media-dev sprintable-memo-att
   gcloud storage buckets add-iam-policy-binding gs://$B --member serviceAccount:$SAE --role roles/storage.objectAdmin
 done
 gcloud projects add-iam-policy-binding $PROJECT --member serviceAccount:$SAE --role roles/aiplatform.user --condition=None
+# the account signs AS ITSELF (story 4869). The backend and the frontend make V4 signed URLs for attachment previews / file opening with the metadata credentials and no key file; that calls IAM
+# signBlob on the account's own name. The grant is on the ACCOUNT (not the project): the account's own policy was empty on both live VMs on 2026-11-09 and every /api/attachments/sign answered 400
+# «Permission 'iam.serviceAccounts.signBlob' denied». It is not in the parity list above because the Cloud Run account had it on itself, not as a project role.
+gcloud iam service-accounts add-iam-policy-binding $SAE --project $PROJECT --member serviceAccount:$SAE --role roles/iam.serviceAccountTokenCreator
 ```
-Undo: `gcloud iam service-accounts delete $SAE` (removes its bindings with it).
+Undo: `gcloud iam service-accounts delete $SAE` (removes its bindings with it); only this grant: the same arguments with `remove-iam-policy-binding`.
 
-**Accepted limit — one identity on the VM.** The containers can reach the metadata server, because the backend needs it for Vertex AI, Cloud Storage and Firebase exactly as it does on Cloud Run. So an SSRF/RCE in the backend could use the VM service account, which also holds the deploy-time grants (database password secret, read of the backups bucket, create-only write there). Mitigations in place: per-secret grants only, backups bucket create-only (no overwrite/delete), deploy bucket read-only. Splitting the identities would need a second VM and is not part of this story.
+**The setup asks once.** The last thing `bootstrap.sh` (§6) does on the VM is `check-signing.sh`: one `signBlob` call as the VM's own account; anything but HTTP 200 (after six tries ten seconds apart — a new grant takes up to a minute to reach every endpoint) stops the script with «SIGNING CHECK FAILED … attachment previews and file opening are BLOCKED» and the grant line to run. Re-run it any time: `sudo /opt/sprintable/bin/check-signing.sh`. The frontend's signing (`apps/web/src/lib/storage/providers/gcs.ts`) uses the same one account on the VM, so this one grant covers it too.
+
+**Accepted limit — one identity on the VM.** The containers can reach the metadata server, because the backend needs it for Vertex AI, Cloud Storage and Firebase exactly as it does on Cloud Run. So an SSRF/RCE in the backend could use the VM service account, which also holds the deploy-time grants (database password secret, read of the backups bucket, create-only write there). **Since story 4869 the account also signs as itself** (RUNBOOK §2, `roles/iam.serviceAccountTokenCreator` on itself — what the attachment previews need): an attacker who holds the VM's identity can therefore make Cloud Storage signed URLs, valid up to 7 days, in the account's name for any object the account may read. That is what a signing function is — it cannot be granted without it. Mitigations in place: per-secret grants only, backups bucket create-only (no overwrite/delete), deploy bucket read-only. Splitting the identities would need a second VM and is not part of this story.
 Cloud Build's service account additionally needs `roles/storage.objectAdmin` on `gs://$DEPLOY_BUCKET` (the dev bundle build writes the bundle and `candidates/<sha>.json`, §5 — never `desired.json`, which is written by hand in §7 step 6).
 
 ## 3. Database password (new, VM only)
