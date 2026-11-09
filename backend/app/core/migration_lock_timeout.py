@@ -31,7 +31,9 @@ def migration_lock_timeout_ms(environ: Mapping[str, str] | None = None) -> int:
 
 
 def apply_lock_timeout(connection, environ: Mapping[str, str] | None = None) -> int:
-    """Set the migration connection's `lock_timeout` for the whole session and COMMIT it — a plain `SET` inside a transaction that later rolls back is rolled back with it, and a migration
+    """Call it on a connection that holds NO work of its own yet (a fresh one, or one whose only transaction is a read such as an inspector's): it COMMITS, and would commit anything else open.
+
+    Set the migration connection's `lock_timeout` for the whole session and COMMIT it — a plain `SET` inside a transaction that later rolls back is rolled back with it, and a migration
     that fails is exactly the case that must keep the limit for the next statements. The value is an int checked above, so it is safe to write into the statement."""
     ms = migration_lock_timeout_ms(environ)
     connection.exec_driver_sql(f"SET lock_timeout = {ms}")

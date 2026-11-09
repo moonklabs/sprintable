@@ -45,6 +45,16 @@ def test_a_value_that_is_not_a_whole_non_negative_number_of_milliseconds_is_refu
         migration_lock_timeout_ms({ENV_NAME: raw})
 
 
+def test_the_sql_script_of_an_offline_upgrade_carries_the_limit_too():
+    import subprocess as sp
+
+    env = {**os.environ, "ALEMBIC_DATABASE_URL": "postgresql+psycopg2://u:p@localhost:5432/none", "PYTHONPATH": str(BACKEND), ENV_NAME: "2500"}
+    out = sp.run([sys.executable, "-m", "alembic", "upgrade", "0470:0471", "--sql"], cwd=BACKEND, env=env, capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stderr[-1500:]
+    assert "SET lock_timeout = 2500" in out.stdout
+    assert out.stdout.index("SET lock_timeout = 2500") < out.stdout.index("ALTER TABLE events")      # before the first statement that needs the lock
+
+
 # ─── the migration itself ────────────────────────────────────────────────────────────────────────────────────────
 
 def _admin_and_dsn(db_name: str):
@@ -77,10 +87,34 @@ def _revision(dsn: str) -> str | None:
         conn.close()
 
 
-@pytest.mark.timeout(600)   # the repo's 30 s default is for in-process tests: this one builds a database through hundreds of migrations in a subprocess (its own watchdog below judges the wait)
+def _may_create_databases() -> bool:
+    if not _REAL_DB_URL:
+        return False
+    import psycopg2
+
+    admin_url, _ = _admin_and_dsn("unused")
+    try:
+        conn = psycopg2.connect(admin_url.render_as_string(hide_password=False))
+    except psycopg2.Error:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT rolsuper OR rolcreatedb FROM pg_roles WHERE rolname = current_user")
+            row = cur.fetchone()
+            return bool(row and row[0])
+    finally:
+        conn.close()
+
+
+# the repo's 30 s default is for in-process tests: this one builds a database through hundreds of migrations in a subprocess. Its steps are bounded below (build 300 s + blocked 60 s + done 120 s = 480 s),
+# so this limit is the larger one and the `finally` (which drops the database) always runs.
+@pytest.mark.timeout(600)
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 def test_a_migration_fails_fast_when_another_connection_holds_the_table_and_runs_once_it_lets_go():
     import psycopg2
+
+    if not _may_create_databases():
+        pytest.skip("the test role may not create databases")
 
     name = f"t4873_{uuid.uuid4().hex[:10]}"
     admin_url, fresh_url = _admin_and_dsn(name)
@@ -95,7 +129,7 @@ def test_a_migration_fails_fast_when_another_connection_holds_the_table_and_runs
             cur.execute(f'CREATE DATABASE "{name}"')
         sqlalchemy_url = fresh_url.render_as_string(hide_password=False)
 
-        built = _alembic(sqlalchemy_url, "upgrade", "0470", timeout=900)
+        built = _alembic(sqlalchemy_url, "upgrade", "0470", timeout=300)
         assert built.returncode == 0, (built.stdout + built.stderr)[-1500:]
         assert _revision(fresh_dsn) == "0470"
 
@@ -110,13 +144,14 @@ def test_a_migration_fails_fast_when_another_connection_holds_the_table_and_runs
         except subprocess.TimeoutExpired:
             pytest.fail("the migration WAITED for the lock instead of failing fast (no lock_timeout on the migration connection)")
         assert blocked.returncode != 0
-        assert "lock timeout" in (blocked.stdout + blocked.stderr).lower(), (blocked.stdout + blocked.stderr)[-1500:]
+        text_out = (blocked.stdout + blocked.stderr)
+        assert "lock timeout" in text_out.lower() or "LockNotAvailable" in text_out, text_out[-1500:]   # Postgres: «canceling statement due to lock timeout» (SQLSTATE 55P03)
         assert _revision(fresh_dsn) == "0470"                                                   # nothing of 0471 was kept
 
         holder.rollback()
         holder.close()
         holder = None
-        done = _alembic(sqlalchemy_url, "upgrade", "0471", timeout=300)                         # the default limit, nobody holds the table now
+        done = _alembic(sqlalchemy_url, "upgrade", "0471", timeout=120)                         # the default limit, nobody holds the table now
         assert done.returncode == 0, (done.stdout + done.stderr)[-1500:]
         assert _revision(fresh_dsn) == "0471"
     finally:

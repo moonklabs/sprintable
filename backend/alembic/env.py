@@ -22,7 +22,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 from app.core.database import Base
-from app.core.migration_lock_timeout import apply_lock_timeout
+from app.core.migration_lock_timeout import apply_lock_timeout, migration_lock_timeout_ms
 import app.models  # noqa: F401 — register all models with metadata
 
 target_metadata = Base.metadata
@@ -59,6 +59,7 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
     )
     with context.begin_transaction():
+        context.execute(f"SET lock_timeout = {migration_lock_timeout_ms()}")   # story #4873: the SQL script of `--sql` carries the limit too
         context.run_migrations()
 
 
