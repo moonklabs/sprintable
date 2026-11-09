@@ -11,7 +11,7 @@ name itself.
   or the pool is ≥ 80% out, writes ONE warning line per pool: the counts and the oldest few holders — age · route · the file:line the holding task is awaiting at this moment
   (`Task.get_stack`) · and `task_done` when the task that checked the connection out has already finished (that is a leak, not a wait).
 - When SQLAlchemy's garbage collector finds a connection that was never given back («The garbage collector is trying to clean up non-checked-in connection …»,
-  logged by the pool's class logger; in async code it cannot even close it properly and the database keeps the session «idle in transaction»), a log filter adds WHERE that
+  logged by the pool's class logger; in async code the collector cannot await the connection's rollback, so SQLAlchemy can only terminate it abruptly), a log filter adds WHERE that
   connection was checked out (the await chain of the task that took it: the last app frames, file:line) to that very line. That line is how the leaking code names itself.
 - Nothing here changes a connection, a pool or a request. Every step is inside a try: a failure of the watch is a missing line, never a failed request.
 - The scope is kept only while the connection is checked out (a reference in the registry). Nothing from the request is copied into the log line but the route template,
@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import sys
 import time
 import weakref
 from contextvars import ContextVar
@@ -37,13 +38,45 @@ _FULL_FRACTION = 0.8
 _REPORT_HOLDERS = 5
 
 
-def _await_chain(task: "asyncio.Task | None", limit: int = 5) -> list[str]:
-    """The app frames of a task's await chain, outermost first: «app/…py:123 func». Follows cr_await / gi_yieldfrom down from the task's coroutine, so it sees the
-    coroutines that are awaiting right now (a running task's innermost frame included). `sys._getframe()` cannot: SQLAlchemy's pool events run in a greenlet whose
-    frames stop at the greenlet."""
+def _app_frame_text(frame: Any) -> "str | None":
+    """«app/…py:123 func» for a frame under the app tree (not a library), else None."""
+    fn = frame.f_code.co_filename
+    if "site-packages" in fn:
+        return None
+    i = fn.rfind(_APP_MARK)
+    return f"{fn[i + 1:]}:{frame.f_lineno} {frame.f_code.co_name}" if i >= 0 else None
+
+
+def _checkout_chain(limit: int = 5) -> list[str]:
+    """The app frames of the CALLER's stack at checkout, outermost first.
+
+    SQLAlchemy's pool events run inside a greenlet whose own frames stop at the greenlet, and a coroutine that is running has no `cr_await` (CPython answers None for an executing frame),
+    so neither the greenlet's frames nor the task's await chain show who is asking. The greenlet's PARENT is parked at its switch: its frame chain (`f_back`) is the real call stack of
+    the code that awaited the pool — the endpoint, the service, the helper."""
     out: list[str] = []
+    try:
+        import greenlet
+
+        g = greenlet.getcurrent()
+        frame = g.parent.gr_frame if getattr(g, "parent", None) is not None else sys._getframe()
+        for _ in range(250):
+            if frame is None:
+                break
+            text = _app_frame_text(frame)
+            if text:
+                out.append(text)
+            frame = frame.f_back
+    except Exception:  # noqa: BLE001
+        pass
+    out.reverse()  # outermost first; the last ones are the innermost
+    return out[-limit:]
+
+
+def _suspended_frames(task: "asyncio.Task | None") -> list[Any]:
+    """The frames of a SUSPENDED task's await chain, outermost first (follows cr_await / gi_yieldfrom / ag_await). `Task.get_stack()` is not enough: it returns only the outermost coroutine."""
+    frames: list[Any] = []
     if task is None:
-        return out
+        return frames
     try:
         obj = task.get_coro()
         for _ in range(80):
@@ -51,17 +84,15 @@ def _await_chain(task: "asyncio.Task | None", limit: int = 5) -> list[str]:
                 break
             frame = getattr(obj, "cr_frame", None) or getattr(obj, "gi_frame", None) or getattr(obj, "ag_frame", None)
             if frame is not None:
-                fn = frame.f_code.co_filename
-                i = fn.rfind("/app/")
-                if i >= 0:
-                    out.append(f"{fn[i + 1:]}:{frame.f_lineno} {frame.f_code.co_name}")
+                frames.append(frame)
             obj = getattr(obj, "cr_await", None) or getattr(obj, "gi_yieldfrom", None) or getattr(obj, "ag_await", None)
     except Exception:  # noqa: BLE001
         pass
-    return out[-limit:]
+    return frames
 
 
 _MAX_TRACKED = 5000
+_APP_MARK = "/app/"  # only frames under this path segment are kept in an await chain (a test points it at its own directory)
 
 
 class _Holder:
@@ -73,7 +104,7 @@ class _Holder:
         self.had_task = task is not None  # a task that finished AND was collected leaves a dead weakref: that is a leak too, not «no task»
         self.scope = scope
         self.record = weakref.ref(record)
-        self.chain = _await_chain(task)  # where it was checked out — text only, no reference to the task or the frames
+        self.chain = _checkout_chain()  # where it was checked out — text only, no reference to the task or the frames
         self.conn_id = conn_id
         self.conn_ids = (conn_id, *extra_ids)  # SQLAlchemy's GC line prints the DRIVER connection inside the pooled one (its address), so both are keys
 
@@ -133,6 +164,10 @@ def install(engine: Any, name: str, *, age_rule: bool = True) -> None:
                     task = None
                 inner = getattr(dbapi_connection, "_connection", None)
                 h = _Holder(connection_record, task, _scope_var.get(), id(dbapi_connection), (id(inner),) if inner is not None else ())
+                prev = pool.holders.get(id(connection_record))
+                if prev is not None:  # the record is being handed out again without a checkin in between (SQLAlchemy's GC path terminates the connection and reuses the record)
+                    for cid in prev.conn_ids:
+                        pool.by_conn.pop(cid, None)
                 pool.holders[id(connection_record)] = h
                 for cid in h.conn_ids:
                     pool.by_conn[cid] = h
@@ -201,6 +236,14 @@ def _attach_gc_filter(engine: Any) -> None:
         logging.getLogger(name).addFilter(_GcLineFilter())
 
 
+def _sweep_by_conn(pool: _Pool) -> None:
+    """by_conn must never hold a holder that is no longer in `holders` (it would keep the scope and the chain alive for good)."""
+    live = {id(h) for h in pool.holders.values()}
+    for cid, h in list(pool.by_conn.items()):
+        if id(h) not in live:
+            pool.by_conn.pop(cid, None)
+
+
 def _prune(pool: _Pool) -> None:
     """A record that is checked in (its fairy is gone) or was dropped is not a holder, whatever happened to the checkin event (an invalidated connection)."""
     for key, h in list(pool.holders.items()):
@@ -209,6 +252,7 @@ def _prune(pool: _Pool) -> None:
             pool.holders.pop(key, None)
             for cid in h.conn_ids:
                 pool.by_conn.pop(cid, None)
+    _sweep_by_conn(pool)
 
 
 def _route_of(scope: Any) -> str:
@@ -221,20 +265,19 @@ def _route_of(scope: Any) -> str:
 
 
 def _where(task: "asyncio.Task | None", had_task: bool = False) -> str:
-    """The file:line the holding task is waiting at right now (the innermost frame of its await chain)."""
+    """Where the holding task is waiting right now: the innermost app frame of its await chain and, when different, the innermost frame of all (e.g. `locks.py:... wait`)."""
     if task is None:
         return "task_gone" if had_task else "no_task"
     if task.done():
         return "task_done"  # the task that took the connection has finished and it was never given back: a leak
     try:
-        frames = task.get_stack(limit=1)
+        frames = _suspended_frames(task)
         if not frames:
             return "no_frame"
-        f = frames[-1]
-        path = f.f_code.co_filename
-        i = path.rfind("/app/")
-        short = path[i + 1:] if i >= 0 else path.rsplit("/", 1)[-1]
-        return f"{short}:{f.f_lineno} in {f.f_code.co_name}()"
+        last = frames[-1]
+        short_last = f"{last.f_code.co_filename.rsplit('/', 1)[-1]}:{last.f_lineno} {last.f_code.co_name}"
+        app = next((t for t in (_app_frame_text(f) for f in reversed(frames)) if t), None)
+        return f"{app} (in {short_last})" if app and app != short_last else (app or short_last)
     except Exception:  # noqa: BLE001
         return "unknown"
 
