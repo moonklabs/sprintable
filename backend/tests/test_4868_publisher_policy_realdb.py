@@ -532,3 +532,60 @@ async def test_a_dm_mention_of_a_person_forks_as_before_and_of_a_refused_agent_a
         assert w.h_c in set(await _members_of(Session, uuid.UUID(forked)))
     finally:
         await engine.dispose()
+
+
+# ─── the 1:1 fork seats PEOPLE FIRST (a list-mode agent and a person it does not allow cannot both be in) ─────────
+
+async def _list_mode_agent_with_id_order(Session, w, *, below: bool):
+    """a list-mode agent (project P1) that allows only h_a and h_b, whose id is smaller (`below`) or larger than h_c's — so an id-ordered seating would put it first or last."""
+    from app.models.team import AgentMessageAllowlist
+
+    for _ in range(60):
+        (agent,) = await _agents_org_wide(Session, w, w.p1)
+        if (agent < w.h_c) is below:
+            async with Session() as s:
+                await s.execute(text("UPDATE members SET message_policy_mode = 'list' WHERE id = :a"), {"a": agent})
+                for allowed in (w.h_a, w.h_b):
+                    s.add(AgentMessageAllowlist(agent_member_id=agent, allowed_id=allowed, org_id=w.org))
+                await s.commit()
+            return agent
+    raise AssertionError("could not draw an agent id on the wanted side of the person's id")
+
+
+@pytest.mark.parametrize("below", [True, False])
+async def test_a_dm_mention_of_a_person_and_a_list_agent_that_does_not_allow_them_seats_the_person_whatever_the_ids(below):
+    """the policy of a list-mode agent asks every PERSON in the room: seated first, the agent would turn the person away; so the people go first and the agent is the one left out — whatever the ids' order."""
+    from tests.test_1994_backlink_api_realdb import _make_conversation
+
+    engine, Session, w = await _world()
+    try:
+        agent = await _list_mode_agent_with_id_order(Session, w, below=below)
+        async with Session() as s:
+            dm = await _make_conversation(s, w.org, w.p1, [w.h_a, w.h_b], w.h_a, "dm")
+        r = await _as(Session, w, "participant", "POST", f"/api/v2/conversations/{dm}/messages", {"content": f"both {uuid.uuid4().hex[:8]}", "mentioned_ids": [str(agent), str(w.h_c)]})
+        assert r.status_code == 201, r.text
+        forked = r.json().get("forked_conversation_id")
+        assert forked, r.json()                                                                  # the person is put in a new group
+        members = set(await _members_of(Session, uuid.UUID(forked)))
+        assert w.h_c in members and agent not in members, (below, members)                       # the person is in; the agent that does not allow them is not
+    finally:
+        await engine.dispose()
+
+
+# ─── the participants list names THIS organization's publisher ──────────────────────────────────────────────────────
+
+async def test_the_participants_list_names_this_organizations_publisher_as_an_agent():
+    from tests.test_4846_ac14_room_reads_realdb import _put_in_room
+
+    engine, Session, w = await _world()
+    try:
+        own = await _publisher(Session, w.org)
+        await _put_in_room(Session, w.r_human, own)
+        r = await _as(Session, w, "participant", "GET", f"/api/v2/conversations/{w.r_human}")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        parts = (body.get("data") or body).get("participants") or []
+        entry = next(p for p in parts if str(p.get("member_id")) == str(own))
+        assert entry.get("name") == PUBLISHER_NAME and entry.get("type") == "agent", entry       # without the room's org passed on, the organization's own publisher lost its name here
+    finally:
+        await engine.dispose()
