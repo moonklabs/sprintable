@@ -31,18 +31,29 @@ class _Out:
 
 @pytest.fixture()
 def configured(monkeypatch):
+    """`configure_logging()` changes global state that outlives the test: the root handlers and level, the levels of httpx / httpcore / urllib3, the uvicorn loggers' handlers and propagation, and — through
+    `install_record_redaction()` — the LogRecord factory and `Logger.makeRecord`. All of it is put back, so no other test sees what this one did."""
     buf = io.StringIO()
     monkeypatch.setattr(sys, "stdout", buf)
     root = logging.getLogger()
-    saved = (list(root.handlers), root.level, {n: logging.getLogger(n).level for n in ("httpx", "httpcore")})
+    watched = ("httpx", "httpcore", "urllib3", "uvicorn", "uvicorn.access", "uvicorn.error")
+    saved_loggers = {n: (logging.getLogger(n).level, list(logging.getLogger(n).handlers), logging.getLogger(n).propagate) for n in watched}
+    saved_root = (list(root.handlers), root.level)
+    saved_factory = logging.getLogRecordFactory()
+    saved_make_record = logging.Logger.makeRecord
     configure_logging(json_logs=True)
     try:
         yield _Out(buf)
     finally:
-        root.handlers[:] = saved[0]
-        root.setLevel(saved[1])
-        for n, lvl in saved[2].items():
-            logging.getLogger(n).setLevel(lvl)
+        logging.setLogRecordFactory(saved_factory)
+        logging.Logger.makeRecord = saved_make_record  # type: ignore[method-assign]
+        root.handlers[:] = saved_root[0]
+        root.setLevel(saved_root[1])
+        for n, (lvl, handlers, propagate) in saved_loggers.items():
+            lg = logging.getLogger(n)
+            lg.setLevel(lvl)
+            lg.handlers[:] = handlers
+            lg.propagate = propagate
 
 
 def _call(client_cls, *, status: int = 200) -> None:
@@ -81,3 +92,15 @@ def test_without_the_setting_the_url_would_be_logged_so_the_canary_test_is_not_v
     logging.getLogger("httpx").setLevel(logging.INFO)
     _call(httpx.Client)
     assert QUERY_CANARY in configured.text(), "the same request at INFO does log the URL: the tests above prove the setting, not an absent log"
+
+
+def test_urllib3_retry_and_redirect_lines_do_not_carry_the_path_and_query(configured) -> None:
+    """urllib3 (under requests: google-auth, the Cloud Storage client) logs «Retrying … : /path?query» at WARNING and the URL of a redirect at INFO; the backend keeps it at ERROR"""
+    log = logging.getLogger("urllib3.connectionpool")
+    log.warning("Retrying (Retry(total=2)) after connection broken by 'ReadTimeoutError': /v1/%s?access_token=%s", PATH_CANARY, QUERY_CANARY)
+    logging.getLogger("urllib3.poolmanager").info("Redirecting https://x.example.test/a -> https://x.example.test/%s?sig=%s", PATH_CANARY, QUERY_CANARY)
+    log.error("a real failure is still visible")
+    out = configured.text()
+    assert QUERY_CANARY not in out and PATH_CANARY not in out
+    assert "a real failure is still visible" in out
+

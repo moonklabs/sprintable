@@ -466,6 +466,7 @@ async def test_14_no_log_line_carries_a_draft_line_or_a_name_on_any_clock_road(w
     from app.main import app  # noqa: F401 — importing the app configures logging and clears the root handlers (caplog's included): attach it again
     logging.getLogger().addHandler(caplog.handler)
     caplog.set_level(logging.DEBUG)
+    caplog.set_level(logging.INFO, logger="httpx")  # story 4869: the app sets httpx to WARNING (its INFO lines carry full request URLs); this test counts the test client's own request lines as the proof that the capture works
     async with _client() as c:
         device, agent, phone, _der = await _setup(c, "d4424 mac 4733n")
         sid = device["setup_id"]
@@ -1178,6 +1179,7 @@ async def test_37_no_log_line_carries_what_a_person_typed_on_any_edit_road(world
 
     logging.getLogger().addHandler(caplog.handler)
     caplog.set_level(logging.DEBUG)
+    caplog.set_level(logging.INFO, logger="httpx")  # story 4869: the app sets httpx to WARNING (its INFO lines carry full request URLs); this test counts the test client's own request lines as the proof that the capture works
     async with _client() as c:
         device, agent, phone, _der = await _setup(c, "d4424 mac 4733s37")
         sid = device["setup_id"]
