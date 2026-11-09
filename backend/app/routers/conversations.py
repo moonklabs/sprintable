@@ -1012,9 +1012,18 @@ async def _admit_mentioned_non_participants(
     from app.models.member import Member
     from app.services.conversation_auth import agent_project_valid_for_room
 
-    outside_agents = set((await db.execute(
-        select(Member.id).where(Member.id.in_(outside), Member.org_id == conversation.org_id, Member.type == "agent")
-    )).scalars().all()) if outside else set()
+    # …and the same for an agent that IS a participant but has lost the room's project (AC14): the delivery cut above leaves it out of the message and the webhook, so the
+    # mention event would be the one road still carrying the words — it keeps the mention (the bell) and nothing of the words, as an outsider the sender could not add does.
+    named = [m for m in dict.fromkeys(mentioned_ids) if m != sender.id]
+    named_agents = set((await db.execute(
+        select(Member.id).where(Member.id.in_(named), Member.org_id == conversation.org_id, Member.type == "agent")
+    )).scalars().all()) if named else set()
+    outside_agents = named_agents & set(outside)
+    for mid in named:
+        if mid in current and mid in named_agents and not await agent_project_valid_for_room(
+            db, caller_is_agent=True, caller_id=mid, conv_project_id=conversation.project_id, org_id=conversation.org_id,
+        ):
+            withheld.add(mid)
     for mid in outside:
         if mid in outside_agents and not await agent_project_valid_for_room(
             db, caller_is_agent=True, caller_id=mid, conv_project_id=conversation.project_id, org_id=conversation.org_id,

@@ -275,3 +275,43 @@ async def test_a_card_dispatched_straight_to_the_participants_skips_an_agent_tha
         assert got and all(words in p for _t, p in got)                                       # control: the agent WITH the project is
     finally:
         await engine.dispose()
+
+
+async def test_a_mention_of_a_participant_agent_that_has_not_the_rooms_project_carries_the_bell_and_none_of_the_words():
+    """the THIRD road (found in review): the delivery cut leaves a project-less participant agent out of the message and the webhook, but the mention event is its own road — it
+    carried the whole message. Now it carries who named whom and where (the bell), never the words: not in the event row, not in the live push, and no webhook for it."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.models.webhook_config import WebhookConfig
+
+    engine, Session, w = await _world()
+    try:
+        lost, kept, lost_hook_agent = await _agents_org_wide(Session, w, w.p2, w.p1, w.p2)
+        room = await _people_project_room(Session, w)
+        for a in (lost, kept, lost_hook_agent):
+            await _put_in_room(Session, room, a)
+        async with Session() as s:
+            hook_lost = WebhookConfig(id=uuid.uuid4(), org_id=w.org, member_id=lost_hook_agent, project_id=w.p2, url="https://lost.example/hook", events=[])
+            s.add(hook_lost)
+            await s.commit()
+        words = f"ac14-mention-{uuid.uuid4().hex[:8]}"
+        pushed: list = []
+        spy = AsyncMock()
+        with patch("app.routers.conversations._push_to_agent", side_effect=lambda pid, payload: pushed.append((str(pid), payload))), \
+                patch("app.services.conversation_webhook.deliver_conversation_message_webhook", spy):
+            r = await _as(Session, w, "participant", "POST", f"/api/v2/conversations/{room}/messages",
+                          {"content": f"hello {words}", "mentioned_ids": [str(lost), str(kept), str(lost_hook_agent)]})
+            assert r.status_code == 201, r.text
+        msg = uuid.UUID((r.json().get("data") or r.json())["id"])
+        for gone in (lost, lost_hook_agent):                                                   # no webhook agent and no webhook-less agent: the same
+            got = await _events_for(Session, msg, gone)
+            assert got, "the mention (the bell) still reaches the agent that was named"
+            assert all(words not in p for _t, p in got), got                                  # …with none of the words
+            assert all('"content_withheld": true' in p for _t, p in got), got
+            assert all(words not in json.dumps(payload) for pid, payload in pushed if pid == str(gone)), pushed   # nor in the live push
+        got = await _events_for(Session, msg, kept)
+        assert got and any(words in p for _t, p in got), got                                  # control: the agent WITH the project is named as before, words and all
+        targets = {t.id for t in spy.await_args.kwargs["targets"]} if spy.await_count else set()
+        assert hook_lost.id not in targets, targets                                           # and its webhook is not called
+    finally:
+        await engine.dispose()
