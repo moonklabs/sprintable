@@ -2815,6 +2815,11 @@ async def send_message_core(
     )).scalar_one_or_none()
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    # story #4846 (main hotfix): this release places a room by its project. A room with no project (the next release makes them) is not one it can see — the same «not found» as its reads.
+    # Without this the member check below (`_resolve_member(project_id=None)`) has no project to check, and the auto-join further down would seat ANY member of the organization
+    # who knows the room's id in a group room they were never in.
+    if conv.project_id is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
 
     sender = await _resolve_room_member(auth, org_id, db, conversation_id)
     if after_commit is not None and sender.type != "agent":
@@ -3832,6 +3837,10 @@ async def upload_conversation_attachment(
     )).scalar_one_or_none()
     if participant is None:
         raise HTTPException(status_code=403, detail="Not a participant")
+    # story #4846 (main hotfix): a room can have no project once the next release's migration has run — the object path below names the project, so a room without one is refused
+    # here instead of storing the file under «project/None/».
+    if conv.project_id is None:
+        raise HTTPException(status_code=422, detail="Conversation has no project")
 
     data = mcp_attachment_upload.decode_json_attachment(body.content_base64)
 
