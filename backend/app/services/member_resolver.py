@@ -920,7 +920,39 @@ async def conversation_member_ids_of_its_org(
     )).all()
     if not rows:
         return set()
-    return await org_recipient_ids({r[0] for r in rows}, rows[0][1], session)
+    recipients = await org_recipient_ids({r[0] for r in rows}, rows[0][1], session)
+    return await without_agents_lacking_the_rooms_project(session, conversation_id, rows[0][1], recipients)
+
+
+async def without_agents_lacking_the_rooms_project(
+    session: AsyncSession,
+    conversation_id: uuid.UUID,
+    org_id: uuid.UUID,
+    member_ids: set[uuid.UUID],
+) -> set[uuid.UUID]:
+    """story #4846 (AC14) — the recipients of a room's words, minus the AGENTS that cannot read the room. An agent reads a room WITH a project only while it has that project (AC12:
+    taking the project away cuts it off — HTTP, socket, list), but a participant row survives the loss, so the delivery kept sending it the whole message: the events, the webhook, the
+    channels. The ONE place that decides it for delivery; the participants route and the admission of a mention ask the same `agent_project_valid_for_room`. A room without a project
+    asks nothing of an agent's projects, and a person is never asked (AC2: a participant reads whatever their project access)."""
+    if not member_ids:
+        return member_ids
+    from app.models.conversation import Conversation
+    from app.models.member import Member
+    from app.services.conversation_auth import agent_project_valid_for_room
+
+    project_id = (await session.execute(
+        select(Conversation.project_id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+    )).scalar_one_or_none()
+    if project_id is None:
+        return member_ids
+    agents = set((await session.execute(
+        select(Member.id).where(Member.id.in_(member_ids), Member.org_id == org_id, Member.type == "agent")
+    )).scalars().all())
+    cut = {
+        a for a in agents
+        if not await agent_project_valid_for_room(session, caller_is_agent=True, caller_id=a, conv_project_id=project_id, org_id=org_id)
+    }
+    return member_ids - cut
 
 
 async def filter_org_member_ids(

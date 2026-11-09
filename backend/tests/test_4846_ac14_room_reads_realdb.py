@@ -130,3 +130,116 @@ async def test_the_activity_of_a_rooms_notification_carries_the_message_preview_
         assert not leaked, f"the activity of the room's notification showed its preview to a project member who is not in the room: {leaked}"
     finally:
         await engine.dispose()
+
+
+# ─── the participants route and the delivery: an AGENT reads a room WITH a project only while it has that project (AC12) ────────────────────────────────────────
+
+async def _people_project_room(Session, w):
+    """a room of P1 with two people and nothing else."""
+    from tests.test_1994_backlink_api_realdb import _make_conversation
+
+    async with Session() as s:
+        return await _make_conversation(s, w.org, w.p1, [w.h_a, w.h_b], w.h_a, "group")
+
+
+async def _agents_org_wide(Session, w, *project_ids):
+    """agents each placed in ONE project; every one allows everyone (org_wide), so only the PROJECT decides what these tests look at."""
+    from sqlalchemy import text
+
+    from tests.test_1994_backlink_api_realdb import _make_agent_member
+
+    ids = []
+    async with Session() as s:
+        for pid in project_ids:
+            a = await _make_agent_member(s, w.org, pid)
+            ids.append(a if isinstance(a, uuid.UUID) else a.id)
+        for a in ids:
+            await s.execute(text("UPDATE members SET message_policy_mode = 'org_wide' WHERE id = :a"), {"a": a})
+        await s.commit()
+    return ids
+
+
+async def _events_for(Session, msg_id, member_id):
+    from sqlalchemy import text
+
+    async with Session() as s:
+        return [(r[0], r[1]) for r in (await s.execute(
+            text("SELECT event_type, payload::text FROM events WHERE source_entity_id = :m AND recipient_id = :r"), {"m": msg_id, "r": member_id},
+        )).all()]
+
+
+async def _put_in_room(Session, room, member_id):
+    """the participant row as an OLD add (or a later loss of the project) leaves it — written directly, past the route."""
+    from app.models.conversation import ConversationParticipant
+
+    async with Session() as s:
+        s.add(ConversationParticipant(conversation_id=room, member_id=member_id))
+        await s.commit()
+
+
+async def test_the_participants_route_does_not_seat_an_agent_that_has_not_the_rooms_project():
+    engine, Session, w = await _world()
+    try:
+        outside, inside = await _agents_org_wide(Session, w, w.p2, w.p1)                  # P2 only · P1
+        room = await _people_project_room(Session, w)
+        r = await _as(Session, w, "participant", "POST", f"/api/v2/conversations/{room}/participants", {"member_id": str(outside)})
+        assert r.status_code == 403, r.text                                                  # an agent that cannot read the room is not seated in it
+        r = await _as(Session, w, "participant", "POST", f"/api/v2/conversations/{room}/participants", {"member_id": str(inside)})
+        assert r.status_code == 201, r.text                                                  # control: the agent WITH the project is
+        # a room WITHOUT a project asks nothing of the agent's projects (unchanged)
+        from tests.test_1994_backlink_api_realdb import _make_conversation
+
+        async with Session() as s:
+            free = await _make_conversation(s, w.org, None, [w.h_a, w.h_b], w.h_a, "group")
+        r = await _as(Session, w, "participant", "POST", f"/api/v2/conversations/{free}/participants", {"member_id": str(outside)})
+        assert r.status_code == 201, r.text
+    finally:
+        await engine.dispose()
+
+
+async def test_a_message_is_not_delivered_to_a_participant_agent_that_has_not_the_rooms_project():
+    """the SECOND wall: an agent that sits in the room (seated before this rule, or whose project was taken away later) is not sent the words of a room it can no longer read —
+    not as an event, not by webhook. (Its reads are 403 already; the delivery was the gap.)"""
+    from unittest.mock import AsyncMock, patch
+
+    from app.models.webhook_config import WebhookConfig
+
+    engine, Session, w = await _world()
+    try:
+        # two pairs: one pair is reached by EVENT (an agent with a webhook is reached by the webhook INSTEAD — the events skip it, by design), the other by WEBHOOK
+        lost, kept, lost_hook_agent, kept_hook_agent = await _agents_org_wide(Session, w, w.p2, w.p1, w.p2, w.p1)
+        room = await _people_project_room(Session, w)
+        for a in (lost, kept, lost_hook_agent, kept_hook_agent):
+            await _put_in_room(Session, room, a)
+        async with Session() as s:
+            hook_lost = WebhookConfig(id=uuid.uuid4(), org_id=w.org, member_id=lost_hook_agent, project_id=w.p2, url="https://lost.example/hook", events=[])
+            hook_kept = WebhookConfig(id=uuid.uuid4(), org_id=w.org, member_id=kept_hook_agent, project_id=w.p1, url="https://kept.example/hook", events=[])
+            s.add_all([hook_lost, hook_kept])
+            await s.commit()
+        words = f"ac14-delivery-{uuid.uuid4().hex[:8]}"
+        spy = AsyncMock()
+        with patch("app.services.conversation_webhook.deliver_conversation_message_webhook", spy):
+            r = await _say(Session, w, "participant", room, f"to the room {words}")
+        msg = uuid.UUID((r.json().get("data") or r.json())["id"])
+        assert await _events_for(Session, msg, lost) == []                                    # no event for the agent without the project
+        got = await _events_for(Session, msg, kept)
+        assert got and all(words in p for _t, p in got)                                       # control: the one WITH the project is delivered to as before
+        targets = {t.id for t in spy.await_args.kwargs["targets"]} if spy.await_count else set()
+        assert hook_lost.id not in targets and hook_kept.id in targets, targets               # nor by webhook (control: the webhook of the one WITH the project is used)
+    finally:
+        await engine.dispose()
+
+
+async def test_a_room_without_a_project_delivers_to_its_agents_whatever_their_projects_are():
+    engine, Session, w = await _world()
+    try:
+        (outside,) = await _agents_org_wide(Session, w, w.p2)
+        from tests.test_1994_backlink_api_realdb import _make_conversation
+
+        async with Session() as s:
+            free = await _make_conversation(s, w.org, None, [w.h_a, w.h_b, outside], w.h_a, "group")
+        r = await _say(Session, w, "participant", free, "no project here")
+        msg = uuid.UUID((r.json().get("data") or r.json())["id"])
+        assert await _events_for(Session, msg, outside)                                       # unchanged: a room with no project asks nothing of an agent's projects
+    finally:
+        await engine.dispose()
