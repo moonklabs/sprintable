@@ -138,6 +138,15 @@ async def test_list_activity_logs_resolves_actor_name_via_member_resolver(
 
     monkeypatch.setattr("app.services.member_resolver.lookup_members_by_ids", _fake_lookup)
 
+    # story #4846 (AC14): the log now filters a room's rows by the room-read rule — which asks the database more than this in-order mock answers. This test is about the actor name;
+    # the rule has its own real-database tests (test_4846_ac14_room_reads_realdb).
+    async def _any_room(_db, _org_id, _auth):
+        from sqlalchemy import true
+
+        return true()
+
+    monkeypatch.setattr("app.services.conversation_auth.readable_room_clause", _any_room)
+
     resp = await router.list_activity_logs(
         project_id=None, actor_id=None, action=None, entity_type=None,
         entity_id=None, from_=None, to=None, limit=30, offset=0,
