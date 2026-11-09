@@ -65,14 +65,15 @@ _OWN: dict = {"tag": None, "neighbour_seen": []}
 
 
 @pytest.fixture(autouse=True)
-def _own_connections():
-    from tests.own_connection_probe import tag_every_checkout, unique_tag
+async def _own_connections():
+    from tests.own_connection_probe import dispose_app_engines, tag_every_checkout, unique_tag
 
     _OWN["neighbour_seen"] = []
     with tag_every_checkout(unique_tag("t4879-4404")) as tag:
         _OWN["tag"] = tag
         yield tag
     _OWN["tag"] = None
+    await dispose_app_engines()  # the pooled connections still carry this test's tag: empty the app's pools (write, read, worker)
 
 
 @pytest.fixture(autouse=True)
@@ -101,13 +102,15 @@ async def _idle_in_transaction() -> int:
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import create_async_engine
 
-    base = "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND state LIKE 'idle in transaction%' AND pid <> pg_backend_pid()"
     engine = create_async_engine(_async_url(), isolation_level="AUTOCOMMIT")
     try:
         async with engine.connect() as conn:
-            own = (await conn.execute(text(base + " AND application_name = :app"), {"app": _OWN["tag"]})).scalar_one()
-            everyone = (await conn.execute(text(base))).scalar_one()
-        _OWN["neighbour_seen"].append(everyone >= 1)
+            # ONE statement: own / the fixture's neighbour / everyone are one snapshot
+            own, neighbour, everyone = (await conn.execute(text(
+                "SELECT count(*) FILTER (WHERE application_name = :own), count(*) FILTER (WHERE application_name = :nb), count(*) FROM pg_stat_activity "
+                "WHERE datname = current_database() AND state LIKE 'idle in transaction%' AND pid <> pg_backend_pid()"
+            ), {"own": _OWN["tag"], "nb": _OWN["tag"] + "-neighbour"})).one()
+        _OWN["neighbour_seen"].append(neighbour == 1 and everyone >= 1)  # the fixture's neighbour itself, idle in its transaction
         return own
     finally:
         await engine.dispose()

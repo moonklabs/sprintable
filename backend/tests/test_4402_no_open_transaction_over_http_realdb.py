@@ -44,13 +44,14 @@ _OWN: dict = {"tag": None}
 
 
 @pytest.fixture(autouse=True)
-def _own_connections():
-    from tests.own_connection_probe import tag_every_checkout, unique_tag
+async def _own_connections():
+    from tests.own_connection_probe import dispose_app_engines, tag_every_checkout, unique_tag
 
     with tag_every_checkout(unique_tag("t4879-4402")) as tag:
         _OWN["tag"] = tag
         yield tag
     _OWN["tag"] = None
+    await dispose_app_engines()  # the pooled connections still carry this test's tag: empty the app's pools (write, read, worker)
 
 
 @pytest.fixture(autouse=True)
@@ -84,11 +85,13 @@ class _Probe:
 
     async def idle_in_transaction(self) -> int:
         from sqlalchemy import text
-        base = "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND state LIKE 'idle in transaction%' AND pid <> pg_backend_pid()"
+        # ONE statement: own / the fixture's neighbour / everyone are one snapshot
         async with self.engine.connect() as conn:
-            own = (await conn.execute(text(base + " AND application_name = :app"), {"app": _OWN["tag"]})).scalar_one()
-            everyone = (await conn.execute(text(base))).scalar_one()
-        self.neighbour_seen.append(everyone >= 1)
+            own, neighbour, everyone = (await conn.execute(text(
+                "SELECT count(*) FILTER (WHERE application_name = :own), count(*) FILTER (WHERE application_name = :nb), count(*) FROM pg_stat_activity "
+                "WHERE datname = current_database() AND state LIKE 'idle in transaction%' AND pid <> pg_backend_pid()"
+            ), {"own": _OWN["tag"], "nb": _OWN["tag"] + "-neighbour"})).one()
+        self.neighbour_seen.append(neighbour == 1 and everyone >= 1)  # the fixture's neighbour itself, idle in its transaction
         return own
 
     async def close(self):

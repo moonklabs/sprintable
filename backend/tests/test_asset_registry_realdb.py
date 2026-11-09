@@ -1029,7 +1029,7 @@ async def test_grace_cron_holds_no_open_transaction_during_blob_delete(monkeypat
     from unittest.mock import MagicMock
 
     from app.routers import cron
-    from tests.own_connection_probe import idle_in_tx_count, neighbour_transaction, tagged_engine, unique_tag
+    from tests.own_connection_probe import NEIGHBOUR_SUFFIX, idle_in_tx_snapshot, neighbour_transaction, tagged_engine, unique_tag
 
     marker = unique_tag("t4879-grace")
     engine = tagged_engine(_ASYNC, marker)
@@ -1038,17 +1038,16 @@ async def test_grace_cron_holds_no_open_transaction_during_blob_delete(monkeypat
         aid = await _seed_expired_asset(Session)
         prov, started, release = _blocking_delete_provider()
         monkeypatch.setattr(cron, "get_storage_provider", lambda: prov)
-        async with neighbour_transaction(_ASYNC, marker + "-neighbour"):
+        async with neighbour_transaction(_ASYNC, marker + NEIGHBOUR_SUFFIX):
             async with Session() as worker:
                 task = asyncio.create_task(cron.assets_grace_hard_delete(MagicMock(), session=worker))
                 try:
                     await asyncio.wait_for(started.wait(), 20)
-                    own = await idle_in_tx_count(Session, marker)
-                    everyone = await idle_in_tx_count(Session)
+                    own, neighbour, everyone = await idle_in_tx_snapshot(Session, marker)  # one statement: one snapshot of the three numbers
                 finally:
                     release.set()
                     await task
-        assert everyone >= 1, "the neighbour's open transaction must be visible database-wide: this test runs in the noisy condition on purpose"
+        assert neighbour == 1 and everyone >= 1, f"the fixture's neighbour must be idle in its transaction at that moment: this test runs in the noisy condition on purpose ({neighbour}, {everyone})"
         assert own == 0, f"the cron's own connection sat idle in transaction during the blob delete ({own})"
         async with Session() as s:
             assert (await s.execute(text(f"SELECT count(*) FROM assets WHERE id='{aid}'"))).scalar_one() == 0

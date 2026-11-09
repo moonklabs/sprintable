@@ -113,6 +113,76 @@ async def test_our_tag_wins_over_an_earlier_listener_on_the_global_engine():
         await global_engine.dispose()
 
 
+async def test_the_snapshot_reads_own_neighbour_and_everyone_in_one_statement():
+    from tests.own_connection_probe import NEIGHBOUR_SUFFIX, async_url, idle_in_tx_snapshot, neighbour_transaction, tagged_engine, unique_tag
+
+    tag = unique_tag("t4879-h6")
+    engine = tagged_engine(_RAW, tag)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with neighbour_transaction(_RAW, tag + NEIGHBOUR_SUFFIX):
+            async with Session() as mine:
+                await mine.execute(text("select 1"))  # ours, idle in transaction
+                own, neighbour, everyone = await idle_in_tx_snapshot(Session, tag)
+                await mine.rollback()
+        assert (own, neighbour) == (1, 1) and everyone >= 2, (own, neighbour, everyone)
+        own2, neighbour2, _everyone2 = await idle_in_tx_snapshot(Session, tag)
+        assert (own2, neighbour2) == (0, 0), (own2, neighbour2)  # both gone again
+    finally:
+        await engine.dispose()
+    assert async_url(_RAW).startswith("postgresql+asyncpg://")
+
+
+async def test_a_pooled_connection_loses_the_tag_when_the_app_engines_are_disposed():
+    """The tag stays on a pooled connection after the block: a test that uses tag_every_checkout ends with dispose_app_engines(), after which the next checkout is a fresh,
+    untagged connection (the worker pool included - nobody else disposes it)."""
+    from sqlalchemy import text as _t
+
+    from app.core.database import async_session_factory
+    from tests.own_connection_probe import dispose_app_engines, tag_every_checkout, unique_tag
+
+    tag = unique_tag("t4879-h7")
+    with tag_every_checkout(tag):
+        async with async_session_factory() as s:
+            assert (await s.execute(_t("select current_setting('application_name')"))).scalar_one() == tag
+    await dispose_app_engines()
+    async with async_session_factory() as s:
+        assert (await s.execute(_t("select current_setting('application_name')"))).scalar_one() != tag
+    await dispose_app_engines()
+
+
+async def test_a_failure_while_registering_leaves_no_listener_behind(monkeypatch):
+    from types import SimpleNamespace
+
+    from tests import own_connection_probe as probe
+
+    tag = probe.unique_tag("t4879-h8")
+    monkeypatch.setattr(probe, "_app_engines", lambda: [SimpleNamespace(sync_engine=object())])  # event.listen on this raises after the class-level one was registered
+    with pytest.raises(Exception):
+        with probe.tag_every_checkout(tag):
+            pass
+    engine = create_async_engine(probe.async_url(_RAW))  # first connection checked out AFTER the failed block
+    try:
+        async with engine.connect() as conn:
+            assert (await conn.execute(text("select current_setting('application_name')"))).scalar_one() != tag
+    finally:
+        await engine.dispose()
+
+
+async def test_a_neighbour_is_really_idle_in_its_transaction():
+    """Guards the noisy condition itself: the neighbour fixture's connection is idle IN A TRANSACTION (not merely connected)."""
+    from tests.own_connection_probe import NEIGHBOUR_SUFFIX, async_url, idle_in_tx_count, neighbour_transaction, unique_tag
+
+    engine = create_async_engine(async_url(_RAW))
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    tag = unique_tag("t4879-h9")
+    try:
+        async with neighbour_transaction(_RAW, tag + NEIGHBOUR_SUFFIX):
+            assert await idle_in_tx_count(Session, tag + NEIGHBOUR_SUFFIX) == 1
+    finally:
+        await engine.dispose()
+
+
 def test_unique_tags_differ_and_leave_room_for_the_neighbour_suffix():
     from tests.own_connection_probe import unique_tag
 

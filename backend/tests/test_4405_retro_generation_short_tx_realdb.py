@@ -114,21 +114,19 @@ async def test_retro_row_not_locked_and_no_open_transaction_during_recommend_llm
                     assert await asyncio.to_thread(started.wait, 20), "추천 LLM이 시작되지 않음"
                     async with Session() as other:
                         await other.execute(text("SET LOCAL lock_timeout = '2s'"))
-                        idle_in_tx = (await other.execute(text(
-                            "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()"
-                            " AND pid <> pg_backend_pid() AND state LIKE 'idle in transaction%' AND application_name = :app"
-                        ), {"app": marker})).scalar_one()
-                        everyone = (await other.execute(text(
-                            "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()"
+                        # ONE statement: own / the fixture's neighbour / everyone are one snapshot
+                        idle_in_tx, neighbour, everyone = (await other.execute(text(
+                            "SELECT count(*) FILTER (WHERE application_name = :own), count(*) FILTER (WHERE application_name = :nb), count(*)"
+                            " FROM pg_stat_activity WHERE datname = current_database()"
                             " AND pid <> pg_backend_pid() AND state LIKE 'idle in transaction%'"
-                        ))).scalar_one()
+                        ), {"own": marker, "nb": marker + "-neighbour"})).one()
                         await other.execute(text("UPDATE retro_sessions SET title = 'edited' WHERE id = :id"), {"id": retro_id})
                         await other.commit()
                 finally:
                     release.set()
                     counts = await task
 
-        assert everyone >= 1, "the neighbour's open transaction must be visible database-wide: this test runs in the noisy condition on purpose"
+        assert neighbour == 1 and everyone >= 1, f"the fixture's neighbour must be idle in its transaction at that moment: this test runs in the noisy condition on purpose ({neighbour}, {everyone})"
         assert idle_in_tx == 0
         assert counts["completed"] == 1
         title, synthesis, next_hypotheses = await _row(
