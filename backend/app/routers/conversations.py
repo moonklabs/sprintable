@@ -418,11 +418,15 @@ async def _fetch_conversation_participants(
     all_member_ids = {r.member_id for r in p_rows}
     resolved_map = await lookup_members_by_ids(all_member_ids, db) if all_member_ids else {}
 
-    # E-CHAT-CMD S8b: participant 의 runtime_type 노출(team_members 뷰서 read — 에이전트만 값, 휴먼 NULL).
+    # E-CHAT-CMD S8b: participant 의 runtime_type 노출(에이전트만 값, 휴먼 NULL). story #4846: read from the `members` anchor, not the `team_members` view — the view
+    # also needs a project profile / grant, which an agent (the server's system publisher, placed in ONE project) loses when that project is deleted, while the room
+    # and its participant row stay: the participant would show no runtime.
+    from app.models.member import Member
+
     runtime_type_map: dict[uuid.UUID, str | None] = {}
     if all_member_ids:
         rt_rows = (await db.execute(
-            select(TeamMember.id, TeamMember.runtime_type).where(TeamMember.id.in_(all_member_ids))
+            select(Member.id, Member.runtime_type).where(Member.id.in_(all_member_ids))
         )).all()
         runtime_type_map = {r.id: r.runtime_type for r in rt_rows}
 
@@ -469,8 +473,10 @@ async def _lookup_sender_runtime_types(
     쿼리 1회로 해소(N+1 방지, list_messages의 member_map 배치조회와 동일 관례)."""
     if not sender_ids:
         return {}
+    from app.models.member import Member      # story #4846: the anchor, not the view (see `_fetch_conversation_participants`)
+
     rows = (await db.execute(
-        select(TeamMember.id, TeamMember.runtime_type).where(TeamMember.id.in_(sender_ids))
+        select(Member.id, Member.runtime_type).where(Member.id.in_(sender_ids))
     )).all()
     return {r.id: r.runtime_type for r in rows}
 

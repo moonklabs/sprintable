@@ -325,3 +325,26 @@ async def test_an_agent_resolved_through_the_anchor_carries_its_runtime_kind():
         assert resolved.runtime_type == "system-publisher"
     finally:
         await engine.dispose()
+
+
+async def test_an_agent_that_lost_its_last_project_still_shows_its_runtime_kind_as_a_participant_and_as_a_sender():
+    """The server's system publisher is placed in ONE project; when that project is deleted its profile and grant go (it leaves the `team_members` view) while the room and
+    its participant row stay. Its runtime kind — which the participant list and the sender of a message show — is read from the `members` anchor, so it does not turn blank."""
+    from sqlalchemy import text
+
+    from app.routers.conversations import _fetch_conversation_participants, _lookup_sender_runtime_types
+
+    engine, Session, w = await _world()
+    try:
+        async with Session() as s:
+            await s.execute(text("UPDATE members SET runtime_type = 'system-publisher' WHERE id = :m"), {"m": w.g_p})
+            await s.commit()
+        await _strip_every_project(Session, w.g_p)
+        async with Session() as s:
+            assert (await s.execute(text("SELECT count(*) FROM team_members WHERE id = :m"), {"m": w.g_p})).scalar_one() == 0      # gone from the view, as the deleted project leaves it
+            assert (await _lookup_sender_runtime_types({w.g_p}, s)) == {w.g_p: "system-publisher"}
+            rooms = await _fetch_conversation_participants([w.n_human], s)
+        mine = [p for p in rooms[w.n_human] if p["member_id"] == str(w.g_p)]      # the payload carries the id as text
+        assert len(mine) == 1 and mine[0]["runtime_type"] == "system-publisher"
+    finally:
+        await engine.dispose()
