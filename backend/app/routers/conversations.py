@@ -2595,6 +2595,11 @@ async def send_message_core(
     )).scalar_one_or_none()
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    # story #4846 (main hotfix): this release places a room by its project. A room with no project (the next release makes them) is not one it can see — the same «not found» as its reads.
+    # Without this the member check below (`_resolve_member(project_id=None)`) has no project to check, and the auto-join further down would seat ANY member of the organization
+    # who knows the room's id in a group room they were never in.
+    if conv.project_id is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
 
     sender = await _resolve_member(auth, org_id, db, project_id=conv.project_id)
     if after_commit is not None and sender.type != "agent":

@@ -212,3 +212,39 @@ def test_no_project_is_no_attachment_scope_but_a_manual_source_keeps_its_free_pa
     assert path_in_source_scope("anything/at/all.png", "manual", None, room) is True                      # unchanged: manual sources carry no path rule
     proj = uuid.uuid4()
     assert path_in_source_scope(f"org/{org}/project/{proj}/chat/{room}/f.png", "conversation_message", proj, room, org_id=org) is True   # the normal case, unchanged
+
+
+async def test_a_member_who_is_not_in_a_group_room_with_no_project_cannot_post_into_it_or_join_it():
+    """kadir's lens on this change: the member check of `send_message` has no project to check for a room without one, and the auto-join of a group room would seat any member of the
+    organization who knows the room's id. This release cannot see such a room (its reads answer 404), so the write answers the same 404 — and nobody is seated."""
+    from sqlalchemy import func, select
+
+    from app.main import app
+    from app.models.conversation import ConversationParticipant
+
+    engine, Session, org, p1, h, u, g, with_project, without_project, ids = await _world()
+    try:
+        async with Session() as s:
+            p2 = await _make_project(s, org, "P2")
+            outsider, u_out = await _make_human_member(s, org, p2.id)        # in the organization, NOT in the room, no access to P1
+
+        async def count():
+            async with Session() as s:
+                return (await s.execute(select(func.count()).select_from(ConversationParticipant).where(ConversationParticipant.conversation_id == without_project))).scalar_one()
+
+        async def post(user, room):
+            await _setup_app_human(app, Session, user, org)
+            try:
+                async with _client_for(app) as c:
+                    return await c.post(f"/api/v2/conversations/{room}/messages", json={"content": "let me in", "mentioned_ids": []})
+            finally:
+                app.dependency_overrides.clear()
+
+        before = await count()
+        r = await post(u_out, without_project)
+        assert r.status_code == 404, (r.status_code, r.text)
+        assert await count() == before, "nobody is seated by a refused post"
+        r = await post(u_out, with_project)                                    # control: a room WITH a project asks the project of the member, as always
+        assert r.status_code == 403, (r.status_code, r.text)
+    finally:
+        await engine.dispose()
