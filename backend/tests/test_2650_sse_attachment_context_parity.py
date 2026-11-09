@@ -38,6 +38,13 @@ def _participants_are_org_members(monkeypatch):
     monkeypatch.setattr("app.services.member_resolver.conversation_member_ids_in_org", _participants_as_one_query)
     monkeypatch.setattr("app.services.member_resolver.conversation_member_ids_of_its_org", _participants_as_one_query)
 
+    # story #4846 (AC14): the cut of agents that have not the room's project has its own real-database tests (test_4846_ac14_*) — it asks the database more questions than this
+    # in-order mock answers, and this file is about attachment context.
+    async def _everyone(_session, _conversation_id, _org_id, member_ids):
+        return member_ids
+
+    monkeypatch.setattr("app.services.member_resolver.without_agents_lacking_the_rooms_project", _everyone)
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
