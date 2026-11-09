@@ -1,7 +1,7 @@
 """story 4826 (공개 2-③ (나)) — the app's own server runs the scheduled jobs itself.
 
 No database here (the realdb file next to it covers the last-run table, the refresh query and a call through the real app):
-- the list of 15 jobs agrees with `infra/cloud-scheduler/jobs.json` (route · method · interval · deadline) and, together with the 12 left to the hosted deployment, is the
+- the list of 15 jobs agrees with `infra/cloud-scheduler/jobs.json` (route · method · interval · deadline) and, together with the 10 left to the hosted deployment, is the
   whole manifest — a job added to the manifest fails here until someone decides «timer or hosted-only»
 - the loop: catch-up (only a job whose interval passed, once however many were missed) · staggered start · one lap at a time per job · a failed lap never ends the loop
 - a lap: a prerequisite that is not met = no call and no «last run»; a failure, an error answer and a deadline are logged, never raised; a cancel passes through
@@ -56,7 +56,7 @@ def _deadline(job: dict) -> float:
 
 def test_fifteen_local_jobs_and_twelve_left_to_the_hosted_deployment() -> None:
     assert len(LOCAL_JOBS) == 15
-    assert len(EXCLUDED) == 12
+    assert len(EXCLUDED) == 10
     assert all(reason.strip() for reason in EXCLUDED.values())
 
 
