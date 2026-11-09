@@ -280,13 +280,21 @@ def _log_invalidation(pool: _Pool, dbapi_connection: Any, connection_record: Any
         _inval_window[pool.name] = window
         h = pool.by_conn.get(id(dbapi_connection)) or pool.holders.get(id(connection_record))
         kind = type(exception).__name__
-        note = str(exception)[:100] if isinstance(exception, asyncio.CancelledError) else ""  # a cancellation's reason is a fixed phrase; other exceptions may carry server text — class only
         running = " ← ".join(reversed(_checkout_chain(8))) or "no app frame"
         taken = (" ← ".join(reversed(h.chain)) if h and h.chain else "-")
-        logger.warning(
-            "pool_holders connection invalidated pool=%s exc=%s%s route=%s held_for=%ss checked out at: %s | running when interrupted: %s",
-            pool.name, kind, f"({note})" if note else "", _route_of(h.scope) if h else "-", int(now - h.since) if h else -1, taken, running,
-        )
+        where = (_route_of(h.scope) if h else "-", int(now - h.since) if h else -1, taken, running)
+        # the exception is never turned into text here (story #4741: a log call must hand the exception OBJECT to the record, where the value redaction sees it):
+        # a cancellation's reason is a fixed phrase and goes in as a %s argument; any other exception is named by class only
+        if isinstance(exception, asyncio.CancelledError):
+            logger.warning(
+                "pool_holders connection invalidated pool=%s exc=%s(%s) route=%s held_for=%ss checked out at: %s | running when interrupted: %s",
+                pool.name, kind, exception, *where,
+            )
+        else:
+            logger.warning(
+                "pool_holders connection invalidated pool=%s exc=%s route=%s held_for=%ss checked out at: %s | running when interrupted: %s",
+                pool.name, kind, *where,
+            )
     except Exception:  # noqa: BLE001
         pass
 
