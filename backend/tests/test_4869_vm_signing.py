@@ -53,7 +53,7 @@ case "$url" in
     set -- ${FAKE_SIGN_CODE_FIRST-}
     if [ "$n" -le "$#" ]; then eval "code=\${$n}"; fi
     [ "$well_formed" = 1 ] || code=400
-    [ "${FAKE_BODY_ECHO_TOKEN-}" = 1 ] && { printf '{"error":{"code":403,"message":"bad bearer %s","status":"PERMISSION_DENIED"}}\n%s' "$FAKE_TOKEN" "$code"; exit 0; }
+    [ "${FAKE_BODY_ECHO_TOKEN-}" = 1 ] && { printf '{"error":{"code":403,"message":"bad bearer %s","status":"%s"}}\n%s' "$FAKE_TOKEN" "$FAKE_TOKEN" "$code"; exit 0; }   # the bearer in the message AND in the status field (the one field the script reads)
     if [ "$code" = 200 ]; then printf '{"keyId":"k","signedBlob":"c2ln"}\n200'; else printf '{"error":{"code":%s,"message":"Permission '"'"'iam.serviceAccounts.signBlob'"'"' denied on resource (or it may not exist).","status":"PERMISSION_DENIED"}}\n%s' "$code" "$code"; fi ;;
 esac
 exit 0
