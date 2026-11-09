@@ -115,7 +115,15 @@ async def test_requests_cancelled_inside_a_statement_give_every_pool_place_back(
         held.clear()
         assert eng.pool.checkedout() == 0
     finally:
-        for c in held:
-            await asyncio.shield(c.close())
-        gc.collect()  # a place lost by a failing run has no database connection behind it; let the collector drop what the pool no longer owns
-        await eng.dispose()
+        # cleanup must run to the end whatever happened above (a failed assertion, a cancellation of the test, a connection whose close() raises):
+        # shielded from cancellation, each close on its own, and dispose() unconditionally last
+        with anyio.CancelScope(shield=True):
+            try:
+                for c in held:
+                    try:
+                        await c.close()
+                    except Exception:  # noqa: BLE001 — a broken probe connection must not skip the rest of the cleanup
+                        pass
+            finally:
+                gc.collect()  # a place lost by a failing run has no database connection behind it; let the collector drop what the pool no longer owns
+                await eng.dispose()
