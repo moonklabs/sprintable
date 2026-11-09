@@ -371,3 +371,38 @@ async def test_19_two_reports_at_once_for_one_person_are_ordered_into_one_notice
             _report(c, d2, a2, "stopped", 2, extra={"restart_stopped": {"also": []}}, at=AT0),
         )
         assert len(await _notices()) == 1, "without the per-person lock both read «no notice yet» and both tell"
+
+
+async def test_20_the_same_end_with_its_time_in_another_offset_is_the_same_end(world):
+    async with _client() as c:
+        device = await _device(c, "d4863 mac t")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": []}}, at="2026-11-09T10:00:00+09:00")
+        assert len(await _notices()) == 1
+        await _sql("UPDATE notifications SET created_at = now() - interval '10 minutes' WHERE type = 'agent.restart_stopped'")  # the window is over: only the same-end record is left to stop a repeat
+        await _report(c, device, a, "stopped", 3, extra={"restart_stopped": {"also": []}}, at="2026-11-09T01:00:00+00:00")  # the same instant, spelled in UTC
+        assert len(await _notices()) == 1, "an end is an instant: two spellings of it are one end"
+
+
+async def test_21_a_dispatcher_that_says_told_without_writing_the_notification_row_is_not_told(world, monkeypatch):
+    async with _client() as c:
+        device = await _device(c, "d4863 mac u")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+
+        import app.services.notification_dispatch as nd
+
+        real = nd.dispatch_notification
+
+        async def bell_only(db, *args, **kwargs):
+            kwargs.pop("created_rows", None)  # …nothing made is reported back, as when the Notification insert failed and only the bell line was written
+            await real(db, *args, **kwargs)
+            return 1
+
+        monkeypatch.setattr(nd, "dispatch_notification", bell_only)
+        await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": []}}, at=AT0)
+        assert await _notices() == [], "not told: the savepoint took the half-written line back"
+        monkeypatch.setattr(nd, "dispatch_notification", real)
+        await _report(c, device, a, "stopped", 3, extra={"restart_stopped": {"also": []}}, at=AT0)
+        assert len(await _notices()) == 1, "the retry tells the person whole"

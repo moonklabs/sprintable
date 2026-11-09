@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -75,6 +75,10 @@ def _words(locale: str, agent: str, others: int) -> tuple[str, str]:
     return title, t("desktop_restart_notice.body", locale)
 
 
+class _NoRecord(Exception):
+    """the dispatcher answered «told» but wrote no Notification row (the record of «already told»): undone, never counted"""
+
+
 async def _lock_person(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> None:
     """Two reports at once for one person are ordered: the second reads what the first wrote (the lock lasts to the end of the transaction)."""
     await db.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(f"restart_notice:{org_id}:{user_id}", 0))))
@@ -94,26 +98,31 @@ async def tell(db: AsyncSession, setup: DesktopSetup, *, agent_member_id: uuid.U
         return 0
     name = await _agent_name(db, agent_member_id)
     others = await _others(db, setup, agent_member_id, also)
-    restart_key = f"{session_key}|{at.isoformat()}"
+    restart_key = f"{session_key}|{at.astimezone(timezone.utc).isoformat(timespec='microseconds')}"  # one spelling of an instant: a retry that carries the same time in another offset is the same end
     told = 0
     for person in people:
         try:
             async with db.begin_nested():  # one person's failure undoes only that person's notice
                 await _lock_person(db, org_id, person.user_id)
                 mine = (Notification.org_id == org_id, Notification.user_id == person.user_id, Notification.type == TYPE)
-                recent = Notification.created_at >= func.now() - timedelta(seconds=RESTART_KEY_LOOKBACK_SEC)
+                recent = Notification.created_at >= func.clock_timestamp() - timedelta(seconds=RESTART_KEY_LOOKBACK_SEC)
                 if (await db.execute(select(Notification.id).where(*mine, recent, Notification.event["payload"]["restart_key"].astext == restart_key).limit(1))).first() is not None:
                     logger.info("desktop restart notice: already told for this end setup=%s to=%s", setup_id, member_prefix(person.member_id))
                     continue
-                if (await db.execute(select(Notification.id).where(*mine, Notification.created_at >= func.now() - timedelta(seconds=WINDOW_SEC)).limit(1))).first() is not None:
+                if (await db.execute(select(Notification.id).where(*mine, Notification.created_at >= func.clock_timestamp() - timedelta(seconds=WINDOW_SEC)).limit(1))).first() is not None:
                     logger.info("desktop restart notice: not sent (a notice went to this person within the window) setup=%s to=%s", setup_id, member_prefix(person.member_id))
                     continue
                 title, body = _words(person.locale, name, others)
+                made: list = []
                 sent = await dispatch_notification(
                     db, org_id=org_id, event_type="agent.restart_stopped", target_member_ids=[person.member_id], title=title, body=body,
                     reference_type="agent", reference_id=agent_member_id, source_project_id=project_id,
-                    event={"payload": {"agent_name": name, "restart_key": restart_key}},
+                    event={"payload": {"agent_name": name, "restart_key": restart_key}}, created_rows=made,
                 )
+                if sent and not any(isinstance(r, Notification) for r in made):
+                    # the dispatcher can say «1» when only the bell line was written (its Notification insert failed): that is not «told» — the row we read «already told» from is missing.
+                    # Raise inside the savepoint: the half-written bell line goes too, and a retry tells this person whole.
+                    raise _NoRecord()
         except Exception:  # noqa: BLE001 — this person's notice only; a retry tells them (and nobody twice)
             logger.warning("desktop restart notice: failed setup=%s to=%s", setup_id, member_prefix(person.member_id), exc_info=True)
             continue
