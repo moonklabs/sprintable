@@ -270,18 +270,25 @@ def agg_diag_lines(diags: list[Diag]) -> list[str]:
 
 
 # ── ③ 필터 없이 그 서비스 최근 1줄의 «칸 이름만» ──────────────────────────────────────────────────────────────────────────────
-_FIELD_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,39}")  # fullmatch
-_HEX_RUN = re.compile(r"[0-9A-Fa-f]{8,}")                  # a key / id (or the 8-char org/member prefix the filters use) written as a field name: never printed
+# 닫힌 목록(codex 검수 4회 · 까디르 렌즈): 칸 «이름»도 값이 될 수 있다(키 · id · 버전 · 사람 이름이 키로 온 항목). 이름은 이 목록에 있을 때만 그대로 — 나머지는 «(other)».
+# 로그 항목 최상위 칸 + backend 가 쓰는 구조화 칸(JsonFormatter · expo_push · push_diagnostics) + docker/Ops Agent 모양(log · stream · container …).
+_KNOWN_FIELD_NAMES = frozenset({
+    "insertId", "logName", "resource", "timestamp", "receiveTimestamp", "severity", "labels", "jsonPayload", "textPayload", "trace", "spanId", "traceSampled",
+    "sourceLocation", "httpRequest", "operation", "errorGroups",
+    "message", "logger", "exception", "event", "reason", "org_id", "event_type", "recipients", "muted", "devices", "to", "error_platforms", "codes", "errors",
+    "member_id", "stage", "permission", "error_code", "platform", "route", "serviceContext",
+    "log", "stream", "time", "container", "container_name", "tag", "source", "attrs",
+})
 _FIELD_NAMES_MAX = 40
 
 
 def _plain_name(k: object) -> bool:
-    """짧은 식별자 모양 AND 16진 덩어리(밑줄을 뺀 8자 이상 — 필터가 쓰는 조직/멤버 앞 8자리도 포함)를 품지 않음 — 키 · id 가 «이름»으로 와도 값이 아니라 «(other)» 로 접힌다."""
-    return isinstance(k, str) and _FIELD_NAME.fullmatch(k) is not None and _HEX_RUN.search(k.replace("_", "")) is None
+    """이름이 닫힌 목록(_KNOWN_FIELD_NAMES)에 있을 때만 — 키 · id · 버전 · 사람 이름이 «이름»으로 와도 값이 아니라 «(other)» 로 접힌다."""
+    return isinstance(k, str) and k in _KNOWN_FIELD_NAMES
 
 
 def field_names(entry: object) -> list[str]:
-    """로그 항목 하나의 «칸 이름»만 — 최상위 칸과 `jsonPayload.<칸>`. **값은 한 글자도 안 낸다.** 이름이 짧은 식별자 모양이 아니면 «(other)» 로 접는다
+    """로그 항목 하나의 «칸 이름»만 — 최상위 칸과 `jsonPayload.<칸>`. **값은 한 글자도 안 낸다.** 이름이 닫힌 목록(_KNOWN_FIELD_NAMES) 밖이면 «(other)» 로 접는다
     (이름이 값이 되는 항목 — 예: 사용자 id 를 키로 쓴 맵 — 을 막는다). 필터가 틀렸는지 정말 0건인지를 가르려는 것."""
     if not isinstance(entry, dict):
         return []

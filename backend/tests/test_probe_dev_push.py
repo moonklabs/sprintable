@@ -212,7 +212,8 @@ def test_field_names_carry_no_values_and_odd_names_fold():
     _no_secret("\n".join(names))
 
 
-def test_field_names_cap_and_junk():
+def test_field_names_cap_and_junk(monkeypatch):
+    monkeypatch.setattr(probe, "_KNOWN_FIELD_NAMES", frozenset({f"k{i}" for i in range(80)} | {"jsonPayload"}))   # the cap is about how MANY known names print
     names = probe.field_names({"jsonPayload": {f"k{i}": i for i in range(80)}})
     assert len(names) == probe._FIELD_NAMES_MAX + 1 and names[-1].startswith("… 외 ")
     assert probe.field_names(None) == [] and probe.field_names("x") == [] and probe.field_names({}) == []
@@ -510,7 +511,8 @@ def test_a_log_name_with_a_trailing_newline_is_not_in_the_closed_list():
 
 def test_field_names_fold_a_hex_shaped_name_and_a_trailing_newline():
     key32 = "a3f9c1d2e4b5a6978877665544332211"      # starts with a letter, 32 hex: a key written as a field name
-    names = probe.field_names({key32: 1, "jsonPayload": {key32: 2, "event": 3, "msg\n": 4, "e75ca548_1111_2222": 5, "member_id": 6, MEMBER: 7, ORG: 8}})
+    names = probe.field_names({key32: 1, "jsonPayload": {key32: 2, "event": 3, "msg\n": 4, "e75ca548_1111_2222": 5, "member_id": 6, MEMBER: 7, ORG: 8, "alice_kim_x": 9, "v1_2_3": 10, "message\n": 11}})
+    assert "alice_kim_x" not in "\n".join(names) and "v1_2_3" not in "\n".join(names) and "message\n" not in "".join(names)       # free-text- or version-shaped keys fold too (codex round 4)
     assert key32 not in "\n".join(names) and MEMBER not in "\n".join(names) and ORG not in "\n".join(names)     # the 8-char prefixes the filters use never print either
     assert {"(other)", "jsonPayload", "jsonPayload.(other)", "jsonPayload.event", "jsonPayload.member_id"} == set(names)
-    assert probe.field_names({"timestamp": 1, "severity": 2, "jsonPayload": {"expo_push_credentials_error": 1}}) == ["jsonPayload", "jsonPayload.expo_push_credentials_error", "severity", "timestamp"]
+    assert probe.field_names({"timestamp": 1, "severity": 2, "jsonPayload": {"codes": 1}}) == ["jsonPayload", "jsonPayload.codes", "severity", "timestamp"]
