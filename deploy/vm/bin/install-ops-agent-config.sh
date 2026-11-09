@@ -8,7 +8,7 @@
 # Same content already in place is «nothing to do» ONLY if the log component is up AND this very file is known to have been loaded: a marker next to the target (`<target>.loaded`, the checksum of the file) is
 # written once the agent has come up with it. A run that was cut off between writing the file and the restart (ssh drop, kill -9, power) leaves no marker, so the next run restarts the agent and converges —
 # whatever the kind of interruption. Backups left by such a run (`<target>.previous.*`) are named in the output and never touched.
-# Known limits: two copies of this script at the same time are not guarded (bootstrap is run by one person, one at a time); the units are asked once, not for a stretch of time; a symbolic link as the target is followed.
+# Two copies at the same time are refused: a lock directory `<target>.lock.d` holds the pid of the one that runs (a lock whose process is gone is taken over). Known limits: the units are asked once, not for a stretch of time; a symbolic link as the target is followed.
 # Settings for a test: OPS_AGENT_CONFIG (target file), OPS_AGENT_UNITS (units that must be active, default the log component; must not be empty), OPS_AGENT_TRIES / OPS_AGENT_WAIT (default 12 × 5 s).
 # Exit codes: 0 in place, loaded and working · 1 not in place or the agent did not come up (old state restored where there was one) · 2 bad usage.
 set -uo pipefail
@@ -25,6 +25,26 @@ case "$wait_s" in '' | *[!0-9]*) echo "OPS_AGENT_WAIT must be a whole number of 
 tries=$((10#$tries)) # «08» is a number here, not a broken octal one
 wait_s=$((10#$wait_s))
 [ -n "${units//[[:space:]]/}" ] || { echo "OPS_AGENT_UNITS must name at least one unit (an empty or blank list would make «the agent is up» always true)" >&2; exit 2; }
+
+lockdir="${target}.lock.d"
+# shellcheck disable=SC2329 # called by the EXIT trap
+release_lock() {
+  rm -f "$lockdir/pid" 2> /dev/null
+  rmdir "$lockdir" 2> /dev/null
+}
+if ! mkdir "$lockdir" 2> /dev/null; then
+  holder="$(cat "$lockdir/pid" 2> /dev/null || true)"
+  if [ -n "$holder" ] && kill -0 "$holder" 2> /dev/null; then
+    echo "OPS AGENT CONFIG FAILED: another run of this installer is in progress (pid $holder, lock $lockdir) — two runs would overwrite each other's backup and marker" >&2
+    exit 1
+  fi
+  echo "ops agent config: taking over a stale lock $lockdir (its process${holder:+ $holder} is gone)" >&2
+  rm -f "$lockdir/pid"
+  rmdir "$lockdir" 2> /dev/null
+  mkdir "$lockdir" 2> /dev/null || { echo "OPS AGENT CONFIG FAILED: cannot take the lock $lockdir" >&2; exit 1; }
+fi
+echo "$$" > "$lockdir/pid"
+trap release_lock EXIT
 
 units_up() {
   local u
@@ -51,8 +71,9 @@ restore() {
     if cp -p "$backup" "$target"; then
       rm -f "$backup" || echo "  warning — the backup $backup could not be removed after the restore (delete it by hand)" >&2
     else
-      ok=0
       echo "  the previous configuration could NOT be copied back — it is kept as $backup" >&2
+      echo "  the agent is NOT restarted: the file at $target may be half-written; the running agent keeps the configuration it already has in memory. Copy $backup over $target by hand, then: sudo systemctl restart google-cloud-ops-agent" >&2
+      return 1
     fi
   else
     rm -f "$target" || { ok=0; echo "  $target (ours) could NOT be removed" >&2; }
