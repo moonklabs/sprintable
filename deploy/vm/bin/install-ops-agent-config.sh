@@ -11,8 +11,8 @@ set -uo pipefail
 src="$1"
 target="${OPS_AGENT_CONFIG:-/etc/google-cloud-ops-agent/config.yaml}"
 units="${OPS_AGENT_UNITS:-google-cloud-ops-agent-fluent-bit}"
-tries="${OPS_AGENT_TRIES:-12}"
-wait_s="${OPS_AGENT_WAIT:-5}"
+tries="${OPS_AGENT_TRIES-12}"
+wait_s="${OPS_AGENT_WAIT-5}"
 case "$tries" in '' | *[!0-9]* | 0) echo "OPS_AGENT_TRIES must be a whole number >= 1 (got '$tries')" >&2; exit 2 ;; esac
 case "$wait_s" in '' | *[!0-9]*) echo "OPS_AGENT_WAIT must be a whole number of seconds (got '$wait_s')" >&2; exit 2 ;; esac
 
@@ -39,6 +39,7 @@ units_up() {
 restore() {
   if [ -n "$backup" ]; then
     cp -p "$backup" "$target"
+    rm -f "$backup"
   else
     rm -f "$target"
   fi
