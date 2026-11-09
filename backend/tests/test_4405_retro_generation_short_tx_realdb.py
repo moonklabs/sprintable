@@ -86,7 +86,13 @@ async def _row(Session, sql, params):
 
 @pytest.mark.anyio
 async def test_retro_row_not_locked_and_no_open_transaction_during_recommend_llm():
-    engine = create_async_engine(_ASYNC)
+    """Counts only THIS test's engine's connections (application_name tag, tests/own_connection_probe.py): the shared non-destructive database also holds a neighbour's
+    transactions at times (CI run 42639791595). That noisy condition is made on purpose - a connection under another name sits idle in a transaction while the worker runs -
+    and the test must stay green with it (the database-wide count is asserted >= 1); the worker holding a transaction on its own engine goes RED."""
+    from tests.own_connection_probe import neighbour_transaction, tagged_engine, unique_tag
+
+    marker = unique_tag("t4879-retro")
+    engine = tagged_engine(_ASYNC, marker)
     Session = async_sessionmaker(engine, expire_on_commit=False)
     try:
         org_id, retro_id = await _seed_retro(Session)
@@ -102,21 +108,27 @@ async def test_retro_row_not_locked_and_no_open_transaction_during_recommend_llm
             return _NEXT_RAW
 
         with patch("app.services.llm_client.generate_text", side_effect=_llm):
-            task = asyncio.create_task(_run_jobs(Session, [job_id]))
-            try:
-                assert await asyncio.to_thread(started.wait, 20), "추천 LLM이 시작되지 않음"
-                async with Session() as other:
-                    await other.execute(text("SET LOCAL lock_timeout = '2s'"))
-                    idle_in_tx = (await other.execute(text(
-                        "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()"
-                        " AND pid <> pg_backend_pid() AND state LIKE 'idle in transaction%'"
-                    ))).scalar_one()
-                    await other.execute(text("UPDATE retro_sessions SET title = 'edited' WHERE id = :id"), {"id": retro_id})
-                    await other.commit()
-            finally:
-                release.set()
-                counts = await task
+            async with neighbour_transaction(_ASYNC, marker + "-neighbour"):
+                task = asyncio.create_task(_run_jobs(Session, [job_id]))
+                try:
+                    assert await asyncio.to_thread(started.wait, 20), "추천 LLM이 시작되지 않음"
+                    async with Session() as other:
+                        await other.execute(text("SET LOCAL lock_timeout = '2s'"))
+                        idle_in_tx = (await other.execute(text(
+                            "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()"
+                            " AND pid <> pg_backend_pid() AND state LIKE 'idle in transaction%' AND application_name = :app"
+                        ), {"app": marker})).scalar_one()
+                        everyone = (await other.execute(text(
+                            "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()"
+                            " AND pid <> pg_backend_pid() AND state LIKE 'idle in transaction%'"
+                        ))).scalar_one()
+                        await other.execute(text("UPDATE retro_sessions SET title = 'edited' WHERE id = :id"), {"id": retro_id})
+                        await other.commit()
+                finally:
+                    release.set()
+                    counts = await task
 
+        assert everyone >= 1, "the neighbour's open transaction must be visible database-wide: this test runs in the noisy condition on purpose"
         assert idle_in_tx == 0
         assert counts["completed"] == 1
         title, synthesis, next_hypotheses = await _row(
@@ -125,6 +137,25 @@ async def test_retro_row_not_locked_and_no_open_transaction_during_recommend_llm
         assert title == "edited"
         assert synthesis["learned"][0]["text"] == "온보딩 가설이 반증됐다"
         assert next_hypotheses and next_hypotheses[0]["statement"].startswith("온보딩을 단순화")
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_the_retro_tag_counts_a_transaction_its_engine_holds_open():
+    """Positive control for the test above: the application_name tag really lands on this test's connections (a probe that always reads 0 would prove nothing)."""
+    from tests.own_connection_probe import idle_in_tx_count, tagged_engine, unique_tag
+
+    marker = unique_tag("t4879-retro-ctl")
+    engine = tagged_engine(_ASYNC, marker)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as holder:
+            await holder.execute(text("select 1"))  # autobegin: idle in transaction, ours
+            assert await idle_in_tx_count(Session, marker) == 1
+            assert await idle_in_tx_count(Session, marker + "-someone-else") == 0
+            await holder.rollback()
+        assert await idle_in_tx_count(Session, marker) == 0
     finally:
         await engine.dispose()
 

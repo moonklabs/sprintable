@@ -58,6 +58,36 @@ async def _dispose_global_engine_after_test():
     await _global_engine.dispose()
 
 
+# story #4879 - the probe counts only THIS test's connections. The code under test runs on engines this module does not create (the app's global engine, engines made by other
+# test modules' helpers), so for the whole test every connection checked out of any engine carries a unique application_name (tests/own_connection_probe.py), and a neighbour
+# under another name sits idle in a transaction on purpose: the shared CI database holds such connections at times (CI run 42639791595 failed a sibling test with 1).
+_OWN: dict = {"tag": None, "neighbour_seen": []}
+
+
+@pytest.fixture(autouse=True)
+def _own_connections():
+    from tests.own_connection_probe import tag_every_checkout, unique_tag
+
+    _OWN["neighbour_seen"] = []
+    with tag_every_checkout(unique_tag("t4879-4404")) as tag:
+        _OWN["tag"] = tag
+        yield tag
+    _OWN["tag"] = None
+
+
+@pytest.fixture(autouse=True)
+async def _noisy_neighbour(_own_connections):
+    from tests.own_connection_probe import neighbour_transaction
+
+    async with neighbour_transaction(_REAL_DB_URL, _own_connections + "-neighbour"):
+        yield
+
+
+def _neighbour_was_seen() -> bool:
+    """the neighbour's open transaction was visible database-wide at every moment the test counted its own"""
+    return bool(_OWN["neighbour_seen"]) and all(_OWN["neighbour_seen"])
+
+
 def _async_url() -> str:
     url = _REAL_DB_URL
     for prefix in ("postgresql+psycopg2://", "postgresql+asyncpg://", "postgresql://"):
@@ -67,16 +97,18 @@ def _async_url() -> str:
 
 
 async def _idle_in_transaction() -> int:
+    """This test's idle-in-transaction backends (its application_name tag); notes that the neighbour was visible database-wide at the same moment."""
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import create_async_engine
 
+    base = "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND state LIKE 'idle in transaction%' AND pid <> pg_backend_pid()"
     engine = create_async_engine(_async_url(), isolation_level="AUTOCOMMIT")
     try:
         async with engine.connect() as conn:
-            return (await conn.execute(text(
-                "SELECT count(*) FROM pg_stat_activity "
-                "WHERE datname = current_database() AND state LIKE 'idle in transaction%' AND pid <> pg_backend_pid()"
-            ))).scalar_one()
+            own = (await conn.execute(text(base + " AND application_name = :app"), {"app": _OWN["tag"]})).scalar_one()
+            everyone = (await conn.execute(text(base))).scalar_one()
+        _OWN["neighbour_seen"].append(everyone >= 1)
+        return own
     finally:
         await engine.dispose()
 
@@ -150,6 +182,7 @@ async def test_a_slow_upload_holds_no_transaction_and_a_second_publisher_is_told
     try:
         await run_worker_tick(Session)
         assert seen["idle_in_tx"] == 0
+        assert _neighbour_was_seen(), "the neighbour's open transaction must be visible database-wide: the noisy condition is on purpose"
         assert seen["claimed_row_visible"] is True
         assert seen["second"] == "in_progress"
         assert seen["second_seconds"] < 5  # not queued on the INSERT for the whole upload (poll ≈ 3 s at most)
@@ -160,6 +193,29 @@ async def test_a_slow_upload_holds_no_transaction_and_a_second_publisher_is_told
         assert len(rows) == 1 and rows[0].external_container_id and rows[0].container_claimed_at is None
     finally:
         app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+async def test_the_tag_counts_a_transaction_held_open_on_the_engines_these_tests_use():
+    """Positive control (story #4879): the application_name tag lands on the connections of the app's global engine AND of the engine another module's helper creates for
+    these tests - a probe that always reads 0 would prove nothing."""
+    from sqlalchemy import text
+
+    from app.core.database import async_session_factory
+
+    engine, Session = await _realdb_session()
+    try:
+        async with Session() as helper_side:
+            await helper_side.execute(text("SELECT 1"))  # autobegin: idle in transaction on the helper's engine
+            assert await _idle_in_transaction() == 1
+            async with async_session_factory() as app_side:
+                await app_side.execute(text("SELECT 1"))  # and on the app's global engine
+                assert await _idle_in_transaction() == 2
+                await app_side.rollback()
+            await helper_side.rollback()
+        assert await _idle_in_transaction() == 0
+        assert _neighbour_was_seen()
+    finally:
         await engine.dispose()
 
 
@@ -267,6 +323,7 @@ async def test_ads_boost_slow_create_holds_no_transaction_and_commits_the_marker
         assert counts["completed"] == 1, counts
         assert calls == [1]
         assert seen == {"idle_in_tx": 0, "marker": True}
+        assert _neighbour_was_seen(), "the neighbour's open transaction must be visible database-wide: the noisy condition is on purpose"
         run = await _run(Session, gate_id)
         assert run.campaign_id and run.create_claimed_at is None and run.create_call_started_at is None
     finally:
