@@ -13,7 +13,8 @@
 #   any other line                            → jsonPayload.message
 # Services without that label (db, migrate, gateway-db) are NOT shipped: database logs stay on the VM.
 # The backend's uvicorn ACCESS lines (logger "uvicorn.access": client address + the request target, which can carry one-time codes and tokens — the very things the Caddyfile strips) are dropped here, after the
-# app's JSON is parsed; everything else the backend logs is shipped as the code wrote it (the same lines Cloud Run's log held).
+# app's JSON is parsed. So are the lines of the loggers httpx / httpcore (an outgoing request's FULL URL: access tokens, an OAuth client_secret, webhook secrets) — a second layer: the root fix is in the backend
+# (app/core/logging_config.py sets both loggers to WARNING, story 4869). Everything else the backend logs is shipped as the code wrote it (the same lines Cloud Run's log held).
 logging:
   receivers:
     containers:
@@ -43,6 +44,7 @@ logging:
       type: exclude_logs
       match_any:
         - 'jsonPayload.logger = "uvicorn.access"'
+        - 'jsonPayload.logger =~ "^(httpx|httpcore)"'
   service:
     pipelines:
       containers:
