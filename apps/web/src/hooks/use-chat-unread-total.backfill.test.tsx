@@ -141,7 +141,7 @@ describe('useChatUnreadTotal — the badge equals the server count (story 4876)'
     await act(async () => { requests[1]!.answer(4); }); // this answer was taken before the new message
     await settle();
     expect(badge()).toBe('4');
-    await waitDebounce();
+    await advance(1500); // the next recount waits out the minimum gap after the last one
     expect(requests).toHaveLength(3); // the new message is asked about again
     await act(async () => { requests[2]!.answer(5); });
     await settle();
@@ -254,5 +254,44 @@ describe('useChatUnreadTotal — the badge equals the server count (story 4876)'
     expect(requests).toHaveLength(2);
     await waitDebounce();
     expect(requests).toHaveLength(2); // the old timer must not add a third
+  });
+  it('⭐every badge on the screen takes the recount\'s number (3 → 6 on all three, not on one)', async () => {
+    await mount(3);
+    await act(async () => { requests[0]!.answer(3); });
+    await settle();
+    expect([badge('n'), badge('n1'), badge('n2')]).toEqual(['3', '3', '3']);
+    await emit({ id: 'b1', conversation_id: 'c1', sender: { id: 'agent' }, is_backfill: true });
+    await waitDebounce();
+    expect(requests).toHaveLength(2); // one shared request for the three badges
+    await act(async () => { requests[1]!.answer(6); }); // a different number from before
+    await settle();
+    expect([badge('n'), badge('n1'), badge('n2')]).toEqual(['6', '6', '6']);
+  });
+
+  it('⭐a recount asks anew even while the first request is still out (it does not join it): two requests, the newer answer wins', async () => {
+    await mount();
+    expect(requests).toHaveLength(1); // the first request, never answered yet
+    await emit({ id: 'l1', conversation_id: 'c1', sender: { id: 'agent' }, is_backfill: false });
+    await waitDebounce(); // the recount fires with the first request still out
+    expect(requests).toHaveLength(2); // a NEW request — not a ride on the first
+    await act(async () => { requests[1]!.answer(5); });
+    await act(async () => { requests[0]!.answer(4); }); // the older answer lands last
+    await settle();
+    expect(badge()).toBe('5');
+  });
+
+  it('⭐a steady trickle of events (300 ms apart, just over the quiet wait) is capped at one recount per 1.5 s: 33 events → at most 7 recounts', async () => {
+    await mount();
+    let answered = 0;
+    const answerAll = async () => { while (answered < requests.length) { const r = requests[answered]!; answered += 1; await act(async () => { r.answer(2); }); } await settle(); };
+    await answerAll();
+    for (let i = 0; i < 33; i += 1) {
+      await emit({ id: `t${i}`, conversation_id: 'c1', sender: { id: 'agent' }, is_backfill: true });
+      await advance(300);
+      await answerAll();
+    }
+    const recounts = requests.length - 1; // minus the first fetch
+    expect(recounts).toBeGreaterThanOrEqual(5); // it still follows the stream…
+    expect(recounts).toBeLessThanOrEqual(7); // …but never one recount per event (that would be ~33)
   });
 });

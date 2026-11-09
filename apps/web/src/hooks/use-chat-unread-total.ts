@@ -19,9 +19,11 @@ import { useSseMultiplexerContext } from '@/components/realtime-provider';
  */
 const RECOUNT_QUIET_MS = 250;
 const RECOUNT_MAX_WAIT_MS = 1500; // a steady stream of events still gets a recount within this long of the burst's first event
+const RECOUNT_MIN_GAP_MS = 1500; // …but two recounts are never closer than this: whatever the event spacing, at most ~0.67 requests a second
 const refetchers = new Set<() => void>();
 let recountTimer: ReturnType<typeof setTimeout> | null = null;
 let recountFirstAt = 0;
+let lastRecountAt = Number.NEGATIVE_INFINITY;
 function scheduleServerRecount(): void {
   const now = Date.now();
   if (recountTimer) {
@@ -29,10 +31,13 @@ function scheduleServerRecount(): void {
   } else {
     recountFirstAt = now;
   }
-  // wait for quiet, but never past the ceiling counted from the first event of this burst
-  const wait = Math.min(RECOUNT_QUIET_MS, Math.max(0, recountFirstAt + RECOUNT_MAX_WAIT_MS - now));
+  // wait for quiet, but never past the ceiling counted from the first event of this burst…
+  const quiet = Math.min(RECOUNT_QUIET_MS, Math.max(0, recountFirstAt + RECOUNT_MAX_WAIT_MS - now));
+  // …and never sooner than the minimum gap after the last recount (events spaced just over the quiet wait would otherwise recount for each one)
+  const wait = Math.max(quiet, lastRecountAt + RECOUNT_MIN_GAP_MS - now);
   recountTimer = setTimeout(() => {
     recountTimer = null;
+    lastRecountAt = Date.now();
     // every badge asks inside one dispatch, so the shared request (fetchChatUnreadTotal · fresh) goes out once
     for (const run of [...refetchers]) run();
   }, wait);
