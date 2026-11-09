@@ -157,10 +157,14 @@ mkdir -p "$EV_TMP/bin" "$EV_TMP/evidence"
 cat > "$EV_TMP/bin/psql" <<'STUB'
 #!/usr/bin/env bash
 echo "FAKE_PSQL $*" >> "${FAKE_PSQL_LOG:?}"
-[ -n "${FAKE_PSQL_HANG:-}" ] && exec sleep 1000  # DB 무응답(연결 포화 등) 흉내
+[ -n "${FAKE_PSQL_HANG:-}" ] && exec -a "psql-hang-${FAKE_PSQL_HANG}" sleep 1000  # DB 무응답(연결 포화 등) 흉내 — 이름에 이 판 표지(FAKE_PSQL_HANG)가 붙는다
 echo "fake psql row"
 STUB
 chmod +x "$EV_TMP/bin/psql"
+# 매달린 가짜 psql을 끌 때 쓰는 표지 — 이 판만 가진다. 정리는 이 표지로만 한다(`pkill -f "sleep 1000"`은 남의 sleep 1000까지 끈다).
+# (the «-end» keeps one run's token from being a prefix of another run's after a pid is reused: …-45-end is not inside …-456-end)
+HANG_TAG="stall4319hang$$-${RANDOM}-end"
+unset FAKE_PSQL_HANG   # a value inherited from the caller would name a hung sleep with a token the cleanup below does not know
 # 가짜 pytest — 명령줄에 pytest가 있는 python 프로세스(실 CI의 `.venv/bin/python …/pytest`와 같은 모양). conftest처럼
 # SIGUSR1 · SIGUSR2를 받으면 증거 폴더에 덤프 파일을 쓴다.
 cat > "$EV_TMP/fake_pytest.py" <<'PY'
@@ -208,7 +212,7 @@ for _case in pg_timeout collect_cap; do
   else _env=(STALL_EVIDENCE_PG_TIMEOUT_SEC=60 STALL_EVIDENCE_COLLECT_MAX_SEC=2); _want="증거 수집 시한 초과"; fi
   set +e
   _t0=$(date +%s)
-  OUT="$(env "${_env[@]}" PATH="$EV_TMP/bin:$PATH" FAKE_PSQL_HANG=1 FAKE_PSQL_LOG="$EV_TMP/psql.log" STALL_EVIDENCE_DIR="$EV_TMP/evidence" \
+  OUT="$(env "${_env[@]}" PATH="$EV_TMP/bin:$PATH" FAKE_PSQL_HANG="$HANG_TAG" FAKE_PSQL_LOG="$EV_TMP/psql.log" STALL_EVIDENCE_DIR="$EV_TMP/evidence" \
     STALL_EVIDENCE_LEAD_SEC=2 STALL_EVIDENCE_DUMP_WAIT_SEC=1 STALL_KILL_AFTER=1s \
     "$SCRIPT" 0.1 -- "$PYTHON_BIN" "$EV_TMP/fake_pytest.py" 60 pytest-marker 2>&1)"
   CODE=$?
@@ -220,7 +224,33 @@ for _case in pg_timeout collect_cap; do
     echo "  FAIL DB 무응답(${_case}) — exit=${CODE} took=${_took}s — 출력: $OUT"; FAIL=1
   fi
 done
-pkill -f "sleep 1000" 2>/dev/null || true
+# 남의 sleep 1000(이 판이 띄운 것이 아닌)을 하나 세워 두고, 정리가 그것을 건드리지 않는지 본다.
+sleep "1000.$$" & _BYST=$!
+trap 'kill "$_BYST" 2>/dev/null || true' EXIT   # 중간에 끊겨도 1000초짜리가 남지 않게
+pkill -f -- "$HANG_TAG" 2>/dev/null || true
+# 넓은 패턴이 껐다면 그 죽음은 pkill이 돌아온 뒤 잠시 뒤에 닿는다 — 살았는지는 «프로세스 표의 상태»(없음 · 좀비 Z = 죽음)로, 죽는 쪽은 바로 끝나고 사는 쪽만 최대 1초 지켜본다.
+_alive=1
+for _i in 1 2 3 4 5; do
+  _st="$(ps -o stat= -p "$_BYST" 2>/dev/null | tr -d ' ' || true)"
+  case "$_st" in ""|Z*) _alive=0; break ;; esac
+  sleep 0.2
+done
+if [ "$_alive" -eq 1 ]; then
+  echo "  ok   정리는 이 판 표지로만 끈다 — 남의 «sleep 1000»은 그대로"
+else
+  echo "  FAIL 정리가 이 판 것이 아닌 «sleep 1000»까지 껐다(넓은 패턴)"; FAIL=1
+fi
+kill "$_BYST" 2>/dev/null || true
+{ wait "$_BYST"; } 2>/dev/null || true
+# 이 파일의 끄기 줄(pkill · killall)은 코드 줄이면 전부 정확히 아래 한 줄 — 같은 줄에 다른 명령이 붙거나 넓은 패턴이 다시 들어오면 여기서 빨개진다.
+# (찾는 글자는 [p]kill · [k]illall 꼴로 써서 이 검사 줄 자신은 걸리지 않는다. 읽기 실패는 삼키지 않는다 — set -e 가 드러낸다.)
+_ALLOWED='p'"kill -f -- \"\$HANG_TAG\" 2>/dev/null || true"
+_kills="$(awk -v ok="$_ALLOWED" '/[p]kill|[k]illall/ && $0 !~ /^[[:space:]]*#/ && $0 != ok { print NR ": " $0 }' "${BASH_SOURCE[0]}")"
+if [ -z "$_kills" ]; then
+  echo "  ok   이 파일의 끄기 줄은 전부 이 판 표지 하나(정확히 그 한 줄)"
+else
+  echo "  FAIL 표지 한 줄이 아닌 끄기 줄: $_kills"; FAIL=1
+fi
 
 rm -f "$EV_TMP/psql.log"
 set +e
