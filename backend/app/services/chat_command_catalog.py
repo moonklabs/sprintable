@@ -288,7 +288,7 @@ CATALOG: dict[str, Callable] = {"done": _execute_done, "assign": _execute_assign
 
 async def try_execute_server_command(
     db: AsyncSession, *, org_id: uuid.UUID, conv: Conversation, msg: ConversationMessage, sender,
-    pushes: list[tuple[str, dict]] | None = None,
+    cards: list[ConversationMessage] | None = None,
 ) -> bool:
     """카탈로그 명중이면 집행+감사+결과카드까지 전부 처리하고 True. 미명중(카탈로그 밖
     커맨드·비-커맨드 메시지)이면 아무것도 안 하고 False — 호출자는 기존 경로(capability
@@ -296,10 +296,9 @@ async def try_execute_server_command(
     이 함수 자신이 `classify_command()`를 부른다(판정은 이 모듈이 새로 안 하고 그대로
     재사용 — 호출부가 후보를 이중 스레딩할 필요 없음).
 
-    story 4847 (AC-명령 실시간): `pushes` — 넘기면 결과 카드를 «명령을 친 사람 자신의 열린 화면»에 실시간으로 보낼 push 한 건이 담긴다
-    (`(member id, payload)`, `conversation.message_created` 꼴 — 일반 전송의 보낸 사람 echo와 같은 길). 카드는 sender = 친 사람이라
-    `_dispatch_conversation_event`의 받는 사람 목록(sender 뺌)에 그 사람이 없어서, 이걸 안 밀면 웹은 방을 다시 열 때만 카드를 본다. 보내는 일은
-    호출부가 commit 뒤에 한다(Event가 커밋된 뒤 push — 일반 전송과 같은 규칙). 기본 None = 기존 동작 그대로."""
+    story 4847 (AC-명령 실시간): `cards` — 넘기면 결과 카드를 이 함수가 직접 배달하지 않고 이 목록에 담아 호출부(send_message)에 넘긴다 — 호출부가 «그 명령을 친 줄과 같은 받는 사람 계산»
+    (같은 제외 집합 · commit 뒤 실시간 push · 친 사람 echo)으로 배달한다. 카드는 방의 글이라 보통 글과 같은 길을 가야 한다. 카드는 명령을 친 글과 **같은 스레드**에 들어가고
+    스레드의 reply_count · last_reply_at도 보통 전송과 같은 한 곳(`_bump_thread_counters`)으로 갱신한다. 기본 None = 예전 그대로(이 함수가 직접 배달)."""
     from app.services.command_classifier import classify_command
 
     candidate = classify_command(msg.content)
@@ -350,6 +349,7 @@ async def try_execute_server_command(
             _server_command_meta["target_story_number"] = result.target_story_number
         reply = ConversationMessage(
             conversation_id=conv.id, sender_id=sender.id, content=result.reply_content,
+            thread_id=msg.thread_id,  # story 4847: the card answers the line that asked for it — in the same thread
             mentioned_ids=[sender.id],
             msg_metadata={
                 "activation": {"kind": "result", "audience": [str(sender.id)], "expects_response": False},
@@ -361,18 +361,15 @@ async def try_execute_server_command(
             },
         )
         db.add(reply)
-        await db.flush()
-        if sender_resolved is not None:
-            await _dispatch_conversation_event(db, conv, reply, org_id, sender_resolved)
-            if pushes is not None:
-                # story 4847: the card reaches the person who typed the command on their own open screens (the same shape and route as the echo of their own line)
-                from app.routers.conversations import _msg_payload
+        if msg.thread_id is not None:
+            from app.routers.conversations import _bump_thread_counters
 
-                pushes.append((str(sender.id), {
-                    "event_type": "conversation.message_created",
-                    **_msg_payload(reply, sender_resolved, viewer_member_id=sender.id),
-                    "recipient_id": str(sender.id),
-                }))
+            await _bump_thread_counters(db, msg.thread_id)  # the same rule as an ordinary reply into the thread
+        await db.flush()
+        if cards is not None:
+            cards.append(reply)  # the caller delivers it (same recipients as the line that asked for it, live after the commit)
+        elif sender_resolved is not None:
+            await _dispatch_conversation_event(db, conv, reply, org_id, sender_resolved)
     except Exception:  # noqa: BLE001 — 회신 배달 실패가 집행 자체(이미 위에서 끝남)를 되돌리지 않는다.
         logger.warning("서버 집행 커맨드 결과 카드 배달 실패(비차단) command=%s message=%s", candidate.name, msg.id, exc_info=True)
 
