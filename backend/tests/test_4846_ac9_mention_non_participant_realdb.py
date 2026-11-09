@@ -193,3 +193,35 @@ async def test_what_is_pushed_live_to_a_mentioned_outsider_carries_none_of_the_w
         assert all(p.get("content_withheld") is True for p in mine)
     finally:
         await engine.dispose()
+
+
+async def test_the_webhook_of_a_mentioned_agent_is_sent_the_message_only_when_it_was_put_in_the_room():
+    """two agents with a webhook each, both mentioned from outside the room: the one that was put in the room gets the message by webhook (it is a participant now, as
+    any participant); the one that could not be put in (it has not the room's project) gets NONE — a webhook is a delivery of the words like any other."""
+    from unittest.mock import AsyncMock, patch
+
+    from sqlalchemy import text
+
+    from app.models.webhook_config import WebhookConfig
+    from tests.test_1994_backlink_api_realdb import _make_agent_member, _make_conversation
+
+    engine, Session, w = await _world()
+    try:
+        async with Session() as s:
+            outside = await _make_agent_member(s, w.org, w.p2)                     # has P2 only: cannot be put in a room of P1
+            inside = await _make_agent_member(s, w.org, w.p1)
+            outside, inside = (a if isinstance(a, uuid.UUID) else a.id for a in (outside, inside))
+            await s.execute(text("UPDATE members SET message_policy_mode = 'org_wide' WHERE id IN (:a, :b)"), {"a": outside, "b": inside})
+            hook_out = WebhookConfig(id=uuid.uuid4(), org_id=w.org, member_id=outside, project_id=w.p2, url="https://out.example/hook", events=[])
+            hook_in = WebhookConfig(id=uuid.uuid4(), org_id=w.org, member_id=inside, project_id=w.p1, url="https://in.example/hook", events=[])
+            s.add_all([hook_out, hook_in])
+            await s.commit()
+            room = await _make_conversation(s, w.org, w.p1, [w.h_a, w.h_b], w.h_a, "group")
+        spy = AsyncMock()
+        with patch("app.services.conversation_webhook.deliver_conversation_message_webhook", spy):
+            await _say(Session, w, "participant", room, f"webhook pair {uuid.uuid4().hex[:8]}", mentioned=[outside, inside])
+        assert spy.await_count == 1, spy.await_args_list
+        targets = {t.id for t in spy.await_args.kwargs["targets"]}
+        assert targets == {hook_in.id}, targets                                                # the one put in is delivered to; the one left out is not
+    finally:
+        await engine.dispose()
