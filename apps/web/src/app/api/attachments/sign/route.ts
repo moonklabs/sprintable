@@ -2,6 +2,7 @@ import { getServerSession } from '@/lib/db/server';
 import { GCS_MEMO_ATTACHMENTS_BUCKET } from '@/lib/storage/config';
 import { canonicalObjectPath as _canonicalObjectPath } from '@/lib/storage/canonical';
 import { createStorageService } from '@/lib/storage/factory';
+import { resolveReadDisposition } from '@/lib/storage/sign-disposition';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
 import { backendFetch } from '@/lib/backend-fetch';
@@ -54,7 +55,8 @@ export async function GET(request: Request) {
       if (!authRes.ok) return ApiErrors.badRequest('attachment authorization failed');
       const a = (await authRes.json()) as { container?: string; object_path?: string };
       if (!a.container || !a.object_path) return ApiErrors.badRequest('asset authorization incomplete');
-      const url = await storage.signRead(a.container, a.object_path, { disposition });
+      // story 4860: a stored script-capable document (html · svg · xml) is signed as a download, whatever the caller asked for
+      const url = await storage.signRead(a.container, a.object_path, { disposition: await resolveReadDisposition(storage, a.container, a.object_path, disposition) });
       return apiSuccess({ url });
     }
 
@@ -76,7 +78,10 @@ export async function GET(request: Request) {
     if (authRes.status === 403) return ApiErrors.forbidden('첨부 접근 권한이 없습니다');
     if (!authRes.ok) return ApiErrors.badRequest('attachment authorization failed');
 
-    const url = await storage.signRead(GCS_MEMO_ATTACHMENTS_BUCKET, objectPath, { disposition });
+    // story 4860: same rule on the room · story path (a person's upload and an agent's are the same object)
+    const url = await storage.signRead(GCS_MEMO_ATTACHMENTS_BUCKET, objectPath, {
+      disposition: await resolveReadDisposition(storage, GCS_MEMO_ATTACHMENTS_BUCKET, objectPath, disposition),
+    });
     return apiSuccess({ url });
   } catch (err: unknown) {
     return handleApiError(err);
