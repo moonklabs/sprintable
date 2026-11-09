@@ -832,6 +832,15 @@ async def _viewer_blocked_sender_ids(
     return set(rows), viewer_id
 
 
+async def _bump_thread_counters(db: AsyncSession, root_id: uuid.UUID) -> None:
+    """a reply into a thread: the root message's reply_count / last_reply_at move atomically. One place for the ordinary send and for the result card of a server command (story 4847)."""
+    await db.execute(
+        update(ConversationMessage)
+        .where(ConversationMessage.id == root_id)
+        .values(reply_count=ConversationMessage.reply_count + 1, last_reply_at=datetime.now(timezone.utc))
+    )
+
+
 async def _dispatch_conversation_event(
     db: AsyncSession,
     conversation: Conversation,
@@ -3091,14 +3100,7 @@ async def send_message_core(
 
     # reply인 경우 root message의 reply_count / last_reply_at 원자 업데이트
     if root_msg is not None:
-        await db.execute(
-            update(ConversationMessage)
-            .where(ConversationMessage.id == body.thread_id)
-            .values(
-                reply_count=ConversationMessage.reply_count + 1,
-                last_reply_at=datetime.now(timezone.utc),
-            )
-        )
+        await _bump_thread_counters(db, body.thread_id)
 
     await db.flush()
 
@@ -3235,8 +3237,8 @@ async def send_message_core(
     # 우선(결정적) → 나머지 기존 게이트 흐름"). 미명중(카탈로그 밖 커맨드·비-커맨드)은
     # 아무 부작용 없이 False — 아래 capability gate·에이전트 dispatch가 그대로 진행된다.
     from app.services.chat_command_catalog import try_execute_server_command
-    server_command_pushes: list[tuple[str, dict]] = []  # story 4847: the result card, for the person who typed the command (pushed after the commit, below)
-    server_command_executed = await try_execute_server_command(db, org_id=org_id, conv=conv, msg=msg, sender=sender, pushes=server_command_pushes)
+    server_command_cards: list[ConversationMessage] = []  # story 4847: the result card(s) — delivered below with the recipients of an ordinary message
+    server_command_executed = await try_execute_server_command(db, org_id=org_id, conv=conv, msg=msg, sender=sender, cards=server_command_cards)
 
     # E-CHAT-CMD S4: capability gate — 슬래시 커맨드를 미지원 런타임 에이전트에 주입 차단(+audit+hint).
     # 비-command 면 빈 결과 → 무영향. 차단 대상은 dispatch exclude 로 합쳐 주입 0.
@@ -3341,6 +3343,19 @@ async def send_message_core(
         # dispatch 실패를 삼키지 않고 surface — 게이트웨이 이벤트 미생성 무음 방지
         logger.error("conversation event dispatch failed conversation_id=%s", conversation_id, exc_info=True)
         raise HTTPException(status_code=500, detail="event dispatch failed") from _dispatch_err
+
+    # story 4847: a server command's result card is a message of the room like any other — it goes to the recipients of the line that asked for it, live, after the commit, except those who must not
+    # get it (agents the sender blocked, people who blocked the sender, people whose preferences turn it off). NOT excluded: the people the typed line reaches by Discord and the agents it reaches by
+    # webhook — only the typed line is sent that way, the card is not, so they would get it nowhere. Best effort, as the card always was: a delivery failure never fails the send.
+    for _card in server_command_cards:
+        try:
+            async with db.begin_nested():
+                pending_sse_pushes += await _dispatch_conversation_event(
+                    db, conv, _card, org_id, sender,
+                    exclude_ids=blocked_agent_ids | user_blocker_ids | preference_excluded_ids,
+                )
+        except Exception:  # noqa: BLE001
+            logger.warning("server command result card delivery failed conversation_id=%s message=%s", conversation_id, _card.id, exc_info=True)
 
     # story #2608 P1 AC1 + #2617: agent가 보낸 메시지면 연쇄 깊이를 잰다(chain_depth.py 판정
     # 로직 SSOT — route_message() 안의 게이트와 같은 함수 재사용, 중복 구현 없음). 호출
@@ -3602,7 +3617,12 @@ async def send_message_core(
         if body.client_nonce:
             _echo["client_nonce"] = body.client_nonce
         pending_sse_pushes.append((str(sender.id), _echo))
-        pending_sse_pushes += server_command_pushes  # after the echo of their own line: the card answers it
+        for _card in server_command_cards:  # after the echo of their own line: the card answers it — to the person who typed it too (the recipients above leave the sender out)
+            pending_sse_pushes.append((str(sender.id), {
+                "event_type": "conversation.message_created",
+                **_msg_payload(_card, sender, viewer_member_id=sender.id),
+                "recipient_id": str(sender.id),
+            }))
 
     # commit 완료 후 SSE push — Event가 DB에 커밋된 상태에서 push해야 race condition 없음
     def _push_pending_sse() -> None:
