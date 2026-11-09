@@ -143,6 +143,82 @@ async def test_a_pool_meant_to_hold_long_stays_quiet_until_nearly_full():
         pool_holders._pools.pop(rname, None)
 
 
+async def test_the_route_and_the_await_chain_reach_the_holder_through_the_middleware(watched, monkeypatch):
+    """codex round: the other tests build the scope and the chain by hand. Here a real request goes through PoolHolderScopeMiddleware + FastAPI routing and takes a connection:
+    the holder must name the route TEMPLATE (never the path value) and the app frames that were awaiting. Test frames stand in for «app/» frames."""
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    from app.core import pool_holders
+
+    name, eng = watched
+    monkeypatch.setattr(pool_holders, "_APP_MARK", "/tests/")
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def _take_a_connection():
+        async with eng.connect() as conn:
+            await conn.execute(text("select 1"))
+            entered.set()
+            await release.wait()
+
+    app = FastAPI()
+
+    @app.get("/items/{item_id}")
+    async def item(item_id: str):
+        await _take_a_connection()
+        return {"ok": True}
+
+    wrapped = pool_holders.PoolHolderScopeMiddleware(app)
+    async with AsyncClient(transport=ASGITransport(app=wrapped), base_url="http://t") as client:
+        request = asyncio.create_task(client.get("/items/abc123-secret"))
+        await asyncio.wait_for(entered.wait(), 8)
+        held = pool_holders.snapshot(name)
+        line = [l for l in pool_holders.report_lines(warn_sec=0.0) if f"pool={name} " in l][0]
+        release.set()
+        assert (await request).status_code == 200
+    assert len(held) == 1
+    assert held[0]["route"] == "GET /items/{item_id}", held
+    assert "abc123-secret" not in line and "abc123-secret" not in held[0]["route"], "the path value must never reach the log"
+    assert "_take_a_connection" in held[0]["from"] and "item" in held[0]["from"], held
+    # and where the holder waits NOW: the innermost app frame of its (suspended) await chain, not the outermost coroutine (httpx's client.get)
+    assert "_take_a_connection" in held[0]["at"], held
+
+
+def test_the_app_puts_the_scope_middleware_in_its_stack():
+    import app.main as main
+    from app.core import pool_holders
+
+    assert any(mw.cls is pool_holders.PoolHolderScopeMiddleware for mw in main.app.user_middleware)
+
+
+async def test_a_record_handed_out_again_without_a_checkin_leaves_no_stale_connection_ids(watched):
+    """SQLAlchemy's GC path terminates a connection without a checkin event and may hand the record out again: the old holder's connection ids must not stay in by_conn
+    (codex: memory growth + a later GC line pointing at the wrong place)."""
+    from app.core import pool_holders
+
+    name, eng = watched
+    reg = pool_holders._pools[name]
+    listener = next(f for f in eng.sync_engine.pool.dispatch.checkout if getattr(f, "__name__", "") == "_checkout")
+
+    class _Raw:
+        _connection = object()
+
+    async with eng.connect() as conn:
+        raw = await conn.get_raw_connection()
+        listener(_Raw(), raw._connection_record, None)  # the same record is handed out again; no checkin in between
+        live = {cid for h in reg.holders.values() for cid in h.conn_ids}
+        assert len(reg.holders) == 1
+        assert set(reg.by_conn) <= live, "stale connection ids of the replaced holder are still in by_conn"
+    assert reg.holders == {} and reg.by_conn == {}
+
+
+def test_the_default_idle_in_transaction_line_is_fifteen_minutes():
+    """PO 11-09 (B): 900 s. Five minutes would cut the legitimate request paths that can sit that long (SSE backfill · direct webhook fan-out · request-pool cron); the zombies of 11-09 were hours old."""
+    from app.core.config import Settings
+
+    assert Settings.model_fields["db_idle_in_txn_timeout_ms"].default == 900_000
+
+
 def test_the_app_registers_its_worker_pool_without_the_age_rule():
     import app.core.database  # noqa: F401 — the import installs the watch on the three engines
 

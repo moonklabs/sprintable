@@ -54,7 +54,7 @@ def _build_engine_kwargs() -> dict:
     connect_args: dict = {"statement_cache_size": 0} if pgb else {}
     connect_args["server_settings"] = {"application_name": db_application_name()}
     # story #4864 — the database itself ends a session that sits inside an open transaction longer than this (ms). Prod 11-09: nine sessions «idle in transaction» for 2–15 hours, each
-    # holding a place of the request pool until nothing was left. A request's transaction is never meant to wait minutes: a connection that does is a bug, and 5 minutes of it
+    # holding a place of the request pool until nothing was left. A request's transaction is never meant to wait minutes: a connection that does is a bug, and 15 minutes of it
     # is the most it may cost. Not for PgBouncer (it refuses a startup parameter it does not know) and not for the worker pool (its advisory-lock connections are built to stay).
     if not pgb and settings.db_idle_in_txn_timeout_ms > 0:
         connect_args["server_settings"]["idle_in_transaction_session_timeout"] = str(int(settings.db_idle_in_txn_timeout_ms))

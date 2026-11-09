@@ -100,7 +100,7 @@ class Settings(BaseSettings):
     pool_holder_watch_enabled: bool = True
     pool_holder_warn_sec: int = 60
     pool_holder_poll_sec: int = 15
-    db_idle_in_txn_timeout_ms: int = 300_000
+    db_idle_in_txn_timeout_ms: int = 900_000  # PO 11-09: 15 min — the zombies of 11-09 were hours old, and a few legitimate request paths (SSE backfill · direct webhook fan-out · request-pool cron) can sit past 5 min
     # story #4336(PO 04:52Z) — 발행 명령 워커 틱 예산 = min(스케줄러 시한, 이 서비스의 요청 시한) − 여유(publication_command.py).
     # 요청 시한은 배포가 Cloud Run `--timeout`과 같은 값을 넣는다(cloudbuild `_BACKEND_TIMEOUT`). 모르면 보수적으로 300(옛 prod 값).
     backend_request_timeout_seconds: int = 300
