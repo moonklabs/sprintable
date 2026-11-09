@@ -287,18 +287,20 @@ def field_names(entry: object) -> list[str]:
     return ordered[:_FIELD_NAMES_MAX] + ([f"… 외 {len(ordered) - _FIELD_NAMES_MAX}개"] if len(ordered) > _FIELD_NAMES_MAX else [])
 
 
-_LOG_ID = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
+# 닫힌 목록(codex 검수 · 로그 이름이 멤버 id · 앱 버전 꼴일 수 있다): 알려진 시스템 로그 이름 + 우리 compose 서비스 이름(`sprintable-<서비스>` · 끝에 숫자 한두 자리). 그 밖은 «(other)».
+_KNOWN_LOG_IDS = frozenset({"syslog", "messages", "auth", "kern", "ops-agent-health", "ops-agent-fluent-bit", "ops-agent-metrics", "docker", "containers"})
+_COMPOSE_LOG_ID = re.compile(r"^sprintable-(backend|frontend|caddy|db|migrate|gateway-db|deployer)(-[0-9]{1,2})?$")
 _LOG_IDS_READ = 500
 
 
 def log_ids(entries: list[dict]) -> list[str]:
     """항목들의 «로그 이름 끝 칸»(`projects/…/logs/<이 칸>`)과 개수 — VM 에서 어떤 로그가 올라오는지(syslog · ops-agent-health · 백엔드 컨테이너 …)를 가르는 용도.
-    이름이 짧은 식별자 모양이 아니면 «(other)» 로 접는다. 값(본문)은 읽지 않는다."""
+    이름이 닫힌 목록(알려진 시스템 로그 · 우리 compose 서비스 이름) 밖이면 «(other)» 로 접는다 — 멤버 id · 앱 버전 꼴 이름이 새지 않게. 값(본문)은 읽지 않는다."""
     counts: dict[str, int] = defaultdict(int)
     for e in entries:
         name = e.get("logName") if isinstance(e, dict) else None
         tail = name.rsplit("/", 1)[-1] if isinstance(name, str) else "?"
-        counts[tail if _LOG_ID.match(tail) else _OTHER] += 1
+        counts[tail if tail in _KNOWN_LOG_IDS or _COMPOSE_LOG_ID.match(tail) else _OTHER] += 1
     return [f"  {k}: {v}건" for k, v in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
 
 
