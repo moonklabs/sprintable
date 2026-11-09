@@ -175,6 +175,12 @@ class CommandOutcome:
     # CommandOutcome은 이미 target_id(story.id, UUID)를 갖고 있지만 사람이 타이핑하는
     # 형태(story_number)가 아니다. ambiguous 한정으로 그 값을 그대로 실어 보낸다.
     target_story_number: int | None = None
+    # story #4846 — a machine code the web translates into its own wording (a sentence in `reply_content` is only the fallback a person can read); set where there is no
+    # server-side Korean wording to point at. Goes into the card's `server_command` marker as `code`.
+    code: str | None = None
+
+
+ROOM_HAS_NO_PROJECT = "ROOM_HAS_NO_PROJECT"
 
 
 async def _execute_done(
@@ -291,27 +297,34 @@ async def try_execute_server_command(
     from app.services.command_classifier import classify_command
 
     candidate = classify_command(msg.content)
-    if candidate is None or candidate.name not in CATALOG or not conv.project_id:
+    if candidate is None or candidate.name not in CATALOG:
         return False
 
-    auth = _synthetic_auth_for_sender(sender, org_id)
-    handler = CATALOG[candidate.name]
-    try:
-        if candidate.name == "assign":
-            result = await handler(db, org_id=org_id, project_id=conv.project_id, auth=auth, candidate=candidate)
-        else:
-            result = await handler(db, org_id=org_id, auth=auth, candidate=candidate, project_id=conv.project_id)
-    except Exception:  # noqa: BLE001 — 집행 실패가 메시지 전송 자체를 막으면 안 된다(best-effort 회신).
-        logger.warning("서버 집행 커맨드 처리 중 예외 command=%s message=%s", candidate.name, msg.id, exc_info=True)
-        result = CommandOutcome("denied", f"'/{candidate.name}' 처리 중 오류가 발생했습니다.", reason="internal_error")
+    if not conv.project_id:
+        # story #4846: these commands act on a story of the ROOM's project, and a story number is only unique within a project (`UNIQUE(project_id, story_number)`),
+        # so in a room without a project there is nothing to act on. Say so with a result card — silence would look the same as a broken command. No execution, no audit row.
+        result = CommandOutcome(
+            "denied", "This command works in a room that has a project.", reason=ROOM_HAS_NO_PROJECT, code=ROOM_HAS_NO_PROJECT,
+        )
+    else:
+        auth = _synthetic_auth_for_sender(sender, org_id)
+        handler = CATALOG[candidate.name]
+        try:
+            if candidate.name == "assign":
+                result = await handler(db, org_id=org_id, project_id=conv.project_id, auth=auth, candidate=candidate)
+            else:
+                result = await handler(db, org_id=org_id, auth=auth, candidate=candidate, project_id=conv.project_id)
+        except Exception:  # noqa: BLE001 — 집행 실패가 메시지 전송 자체를 막으면 안 된다(best-effort 회신).
+            logger.warning("서버 집행 커맨드 처리 중 예외 command=%s message=%s", candidate.name, msg.id, exc_info=True)
+            result = CommandOutcome("denied", f"'/{candidate.name}' 처리 중 오류가 발생했습니다.", reason="internal_error")
 
-    db.add(ChatCommandAuditLog(
-        org_id=org_id, project_id=conv.project_id, conversation_id=conv.id, message_id=msg.id,
-        actor_id=sender.id, actor_type=getattr(sender, "type", "human") or "human",
-        command=candidate.name, raw_args=candidate.args,
-        target_type=result.target_type, target_id=result.target_id, outcome=result.outcome,
-        before_value=result.before_value, after_value=result.after_value, reason=result.reason,
-    ))
+        db.add(ChatCommandAuditLog(
+            org_id=org_id, project_id=conv.project_id, conversation_id=conv.id, message_id=msg.id,
+            actor_id=sender.id, actor_type=getattr(sender, "type", "human") or "human",
+            command=candidate.name, raw_args=candidate.args,
+            target_type=result.target_type, target_id=result.target_id, outcome=result.outcome,
+            before_value=result.before_value, after_value=result.after_value, reason=result.reason,
+        ))
 
     try:
         from app.routers.conversations import _dispatch_conversation_event
@@ -323,6 +336,8 @@ async def try_execute_server_command(
             # PO 리뷰 델타 2회차 — ambiguous일 때만. FE가 reply_content의 comma-join
             # 문장을 파싱하지 않고 이 배열로 클릭형 후보 행을 바로 그린다.
             _server_command_meta["candidates"] = result.candidates
+        if result.code is not None:
+            _server_command_meta["code"] = result.code     # story #4846 — the web shows its own wording for the code
         if result.target_story_number is not None:
             # PO 리뷰 델타 3회차 — ambiguous 후보 클릭이 "/assign #<번호> <이름>"으로
             # 해소된 명령을 채우려면 원 스토리 참조(사람이 타이핑하는 형태)가 필요하다.

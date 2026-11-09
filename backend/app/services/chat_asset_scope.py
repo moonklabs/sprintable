@@ -46,7 +46,7 @@ def room_readable_clause(
         or_(conv_project_col.is_(None), project_access_valid_correlated(conv_project_col, caller_id=user_id, org_id=org_id))
         if is_agent else True
     )
-    return conversation_readable_predicate(conv_id_col, caller_member_id=caller_member_id, admin_bypass_eligible=admin, agent_project_valid=agent_ok)
+    return conversation_readable_predicate(conv_id_col, caller_member_id=caller_member_id, org_id=org_id, admin_bypass_eligible=admin, agent_project_valid=agent_ok)
 
 
 def _chat_only(entity) -> ColumnElement:

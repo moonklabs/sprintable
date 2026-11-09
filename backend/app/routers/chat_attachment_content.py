@@ -7,7 +7,7 @@ import uuid
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
 from app.services.chat_attachment_service import read_message_attachment
 
@@ -21,7 +21,7 @@ async def get_message_attachment_content(
     index: int,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> dict:
     r = await read_message_attachment(db, auth, org_id, conversation_id, message_id, index)
     return {

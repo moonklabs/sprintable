@@ -524,7 +524,7 @@ async def test_http_round_trip_human_sends_done_command():
     from app.main import app
     from app.dependencies.auth import AuthContext, get_current_user
     from app.dependencies.database import get_db
-    from app.routers.conversations import get_verified_org_id
+    from app.routers.conversations import get_verified_org_id, get_verified_org_id_no_project_gate
     from tests.conftest import override_db_and_read
     from httpx import AsyncClient, ASGITransport
     from sqlalchemy import select
@@ -558,6 +558,7 @@ async def test_http_round_trip_human_sends_done_command():
         override_db_and_read(app, _db)
         app.dependency_overrides[get_current_user] = _auth
         app.dependency_overrides[get_verified_org_id] = _org
+        app.dependency_overrides[get_verified_org_id_no_project_gate] = _org
 
         client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
         try:

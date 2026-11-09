@@ -86,9 +86,13 @@ async def upsert_activity_from_events(db: AsyncSession, event_ids: list[uuid.UUI
     if not event_ids:
         return []
 
+    # story #4846: an activity belongs to a project (`activity_events.project_id` is NOT NULL), and the chat event rows of a room without a project have none — those produce
+    # no activity (they used to violate the column on every send and log a skipped extraction). The one place that decides it, so the delivery hook and the backfill agree.
     rows = (
         await db.execute(
-            select(Event).where(Event.id.in_(event_ids)).order_by(Event.created_at, Event.id)
+            select(Event)
+            .where(Event.id.in_(event_ids), Event.project_id.is_not(None))
+            .order_by(Event.created_at, Event.id)
         )
     ).scalars().all()
 

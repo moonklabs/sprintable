@@ -170,7 +170,7 @@ async def test_ac2_socket_and_bulk_predicate_give_the_same_answer_as_http():
                     bulk = set((await s.execute(
                         select(Conversation.id).where(
                             Conversation.org_id == w.org,
-                            conversation_readable_predicate(Conversation.id, caller_member_id=member, admin_bypass_eligible=admin),
+                            conversation_readable_predicate(Conversation.id, caller_member_id=member, org_id=w.org, admin_bypass_eligible=admin),
                         )
                     )).scalars().all())
                     assert (conv_id in bulk) == (want == 200), (room, caller, "bulk")
@@ -586,7 +586,7 @@ async def test_a_revoked_agent_loses_the_rooms_of_that_project_and_gets_them_bac
                     select(Conversation.id).where(
                         Conversation.org_id == w.org,
                         conversation_readable_predicate(
-                            Conversation.id, caller_member_id=w.g_p, admin_bypass_eligible=False,
+                            Conversation.id, caller_member_id=w.g_p, org_id=w.org, admin_bypass_eligible=False,
                             agent_project_valid=await agent_project_valid_for_room(
                                 s, caller_is_agent=True, caller_id=w.g_p, conv_project_id=w.p1, org_id=w.org),
                         ),

@@ -151,13 +151,24 @@ async def _resolve_member(
     """TeamMember 우선; grant-only 휴먼이면 ResolvedMember(org_member.id) 반환."""
     is_api_key = bool(auth.claims.get("app_metadata", {}).get("api_key_id"))
     if is_api_key:
-        # story #4846: an agent of ANOTHER organization is not a member here (the socket judge asks the same of its owner)
-        tm = (await db.execute(
-            select(TeamMember).where(TeamMember.id == uuid.UUID(auth.user_id), TeamMember.org_id == org_id)
+        # story #4846 (AC11): an agent is resolved as a MEMBER OF THE ORGANIZATION (the `members` anchor), not through the `team_members` view — the view also needs a project
+        # profile / grant, which an agent loses when its only project is deleted, and it would then be «not found» in the rooms it is still a participant of. An agent of
+        # ANOTHER organization is not a member here (the socket judge asks the same of its owner).
+        from app.models.member import Member
+        from app.services.member_resolver import ResolvedMember
+
+        anchor = (await db.execute(
+            select(Member).where(Member.id == uuid.UUID(auth.user_id), Member.org_id == org_id, Member.deleted_at.is_(None))
         )).scalars().first()
-        if tm is None:
+        if anchor is None:
             raise HTTPException(status_code=400, detail="Team member not found")
-        return tm
+        # the key names a member of THIS organization; its `type` is what the anchor says (before this story the lookup did not filter by type either — a key held
+        # for a person's member id still resolved), so the filter is not narrowed here. A member that was deleted is not found (the `team_members` view this lookup
+        # used to go through left deleted members out: `deleted_at IS NULL` is the part of the view's filter that still applies to the anchor)
+        return ResolvedMember(
+            id=anchor.id, user_id=anchor.user_id, name=anchor.name, type=anchor.type, role="member", org_id=anchor.org_id,
+            project_id=None, avatar_url=anchor.avatar_url, runtime_type=anchor.runtime_type,
+        )
 
     # JWT 휴먼: team_member 먼저 시도
     filters = [TeamMember.user_id == uuid.UUID(auth.user_id), TeamMember.org_id == org_id]
@@ -254,51 +265,36 @@ async def _is_org_owner_or_admin(auth: AuthContext, org_id: uuid.UUID, db: Async
     return role in ("owner", "admin")
 
 
-async def _conversation_has_human_participant(conversation_id: uuid.UUID, db: AsyncSession) -> bool:
-    """대화에 휴먼 참가자가 있으면 True(=private·admin 우회 금지).
-    보수적: agent team_member로 확정 안 된 참가자는 human 간주(grant-only/미앵커 휴먼 포함).
+async def _conversation_has_human_participant(conversation_id: uuid.UUID, db: AsyncSession, org_id: uuid.UUID) -> bool:
+    """True when the room has a participant who is not a confirmed agent of this organization (private: no admin bypass). One definition — `participant_is_agent`
+    (conversation_auth), the same expression the readable predicate uses — so the single-room check, the bulk check and the predicate cannot disagree (story #4846 AC11).
+    The attachment authorize route calls this for its admin-bypass decision."""
+    from app.services.conversation_auth import participant_is_agent
 
-    story #2697: get_conversation()은 더 이상 이 함수를 안 쓴다(conversation_readable_
-    predicate SSOT로 이관) — 하지만 attachments.py의 authorize 엔드포인트가 여전히 이
-    정확한 함수를 직접 import해 자신의 admin-bypass 판정에 쓴다(별도 콜사이트, 삭제 시
-    ImportError). 그래서 이 함수는 존치 — 삭제가 아니라 "소비자 하나만 이관"이 맞는
-    변경이었다(#2697 첫 시도에서 삭제했다가 test_attachment_authorize_a54ddc16.py로 잡힘)."""
-    pids = (await db.execute(
-        select(ConversationParticipant.member_id).where(ConversationParticipant.conversation_id == conversation_id)
-    )).scalars().all()
-    if not pids:
-        return False
-    agent_ids = set((await db.execute(
-        select(TeamMember.id).where(TeamMember.id.in_(pids), TeamMember.type == "agent")
-    )).scalars().all())
-    return any(p not in agent_ids for p in pids)  # agent 확정 외 = human 보수적
+    return (await db.execute(
+        select(
+            select(1)
+            .where(ConversationParticipant.conversation_id == conversation_id, ~participant_is_agent(ConversationParticipant.member_id, org_id))
+            .exists()
+        )
+    )).scalar_one()
 
 
 async def _conversations_with_human_participant(
-    conv_ids: list[uuid.UUID], db: AsyncSession, org_id: uuid.UUID | None = None,
+    conv_ids: list[uuid.UUID], db: AsyncSession, org_id: uuid.UUID,
 ) -> set[uuid.UUID]:
-    """conv_ids 중 휴먼 참가자가 있는 conversation_id 집합(보수적·agent 확정 외 human).
+    """The subset of `conv_ids` that has a participant who is not a confirmed agent of this organization — the same definition as the readable predicate and the
+    single-room check (`participant_is_agent`, story #4846 AC11): an agent of another organization, an orphan id and a person all count as a person."""
+    from app.services.conversation_auth import participant_is_agent
 
-    story #4846: with `org_id` only an agent of THAT organization is confirmed as an agent — a participant row naming an agent of another organization
-    stays «not confirmed» and so counts as a person (the conservative rule of this function), which keeps the room out of an admin's agents-only view."""
     if not conv_ids:
         return set()
     rows = (await db.execute(
-        select(ConversationParticipant.conversation_id, ConversationParticipant.member_id)
-        .where(ConversationParticipant.conversation_id.in_(conv_ids))
-    )).all()
-    # member_id 중 agent 확정 집합
-    all_mids = {m for _, m in rows}
-    agent_ids = set((await db.execute(
-        select(TeamMember.id).where(
-            TeamMember.id.in_(all_mids), TeamMember.type == "agent", *([TeamMember.org_id == org_id] if org_id is not None else []),
-        )
-    )).scalars().all()) if all_mids else set()
-    result: set[uuid.UUID] = set()
-    for cid, mid in rows:
-        if mid not in agent_ids:  # human 참가자 발견
-            result.add(cid)
-    return result
+        select(ConversationParticipant.conversation_id)
+        .where(ConversationParticipant.conversation_id.in_(conv_ids), ~participant_is_agent(ConversationParticipant.member_id, org_id))
+        .distinct()
+    )).scalars().all()
+    return set(rows)
 
 
 # ─── story #1976 (E-CHAT-REALTIME 트랙A): read state 서버 truth ──────────────────
@@ -422,11 +418,15 @@ async def _fetch_conversation_participants(
     all_member_ids = {r.member_id for r in p_rows}
     resolved_map = await lookup_members_by_ids(all_member_ids, db) if all_member_ids else {}
 
-    # E-CHAT-CMD S8b: participant 의 runtime_type 노출(team_members 뷰서 read — 에이전트만 값, 휴먼 NULL).
+    # E-CHAT-CMD S8b: participant 의 runtime_type 노출(에이전트만 값, 휴먼 NULL). story #4846: read from the `members` anchor, not the `team_members` view — the view
+    # also needs a project profile / grant, which an agent (the server's system publisher, placed in ONE project) loses when that project is deleted, while the room
+    # and its participant row stay: the participant would show no runtime.
+    from app.models.member import Member
+
     runtime_type_map: dict[uuid.UUID, str | None] = {}
     if all_member_ids:
         rt_rows = (await db.execute(
-            select(TeamMember.id, TeamMember.runtime_type).where(TeamMember.id.in_(all_member_ids))
+            select(Member.id, Member.runtime_type).where(Member.id.in_(all_member_ids))
         )).all()
         runtime_type_map = {r.id: r.runtime_type for r in rt_rows}
 
@@ -473,8 +473,10 @@ async def _lookup_sender_runtime_types(
     쿼리 1회로 해소(N+1 방지, list_messages의 member_map 배치조회와 동일 관례)."""
     if not sender_ids:
         return {}
+    from app.models.member import Member      # story #4846: the anchor, not the view (see `_fetch_conversation_participants`)
+
     rows = (await db.execute(
-        select(TeamMember.id, TeamMember.runtime_type).where(TeamMember.id.in_(sender_ids))
+        select(Member.id, Member.runtime_type).where(Member.id.in_(sender_ids))
     )).all()
     return {r.id: r.runtime_type for r in rows}
 
@@ -1664,6 +1666,7 @@ async def list_conversations(
     readable = conversation_readable_predicate(
         Conversation.id,
         caller_member_id=sender.id,
+        org_id=org_id,
         admin_bypass_eligible=include_agent_conversations,
         agent_project_valid=(
             or_(
@@ -1962,7 +1965,7 @@ async def get_conversation(
     conversation_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),  # story #4846: room-bound — being in the room is the access, the X-Project-Id tab project is not asked
 ) -> ConversationResponse:
     """GET /api/v2/conversations/{id} — 단독 메타 조회(project_id 포함).
 
@@ -2127,6 +2130,7 @@ async def _can_read_conversation(
         predicate = conversation_readable_predicate(
             literal(conversation_id),
             caller_member_id=sender.id,
+            org_id=org_id,
             admin_bypass_eligible=admin_bypass_eligible,
             agent_project_valid=await agent_project_valid_for_room(
                 db, caller_is_agent=is_api_key, caller_id=uuid.UUID(auth.user_id), conv_project_id=conv_project_id, org_id=org_id,
@@ -2169,7 +2173,7 @@ async def list_messages(
     thread_id: uuid.UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
     response: Response = None,  # type: ignore[assignment]
 ) -> dict:
     """GET /api/v2/conversations/{id}/messages — cursor 기반 페이지네이션.
@@ -2239,7 +2243,7 @@ async def get_message(
     message_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> dict:
     """GET /api/v2/conversations/{id}/messages/{message_id} — 단건 원문 조회(최상위+리플 공용).
 
@@ -2282,7 +2286,7 @@ async def delete_message(
     message_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> dict:
     """DELETE /api/v2/conversations/{id}/messages/{message_id} — story #2319.
 
@@ -2341,7 +2345,7 @@ async def list_message_replies(
     before: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> dict:
     """GET /api/v2/conversations/{id}/messages/{message_id}/replies — 이 메시지의 리플 목록.
 
@@ -2399,7 +2403,7 @@ async def list_working_members(
     conversation_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> dict:
     """1aeecdde P2: GET /api/v2/conversations/{id}/working — 지금 답장 생성 중인 member 목록.
 
@@ -2436,7 +2440,7 @@ async def set_conversation_mute(
     body: MuteRequest,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> dict:
     """PATCH /api/v2/conversations/{id}/mute — per-대화 알림 mute/unmute (270c87e6).
 
@@ -2470,7 +2474,7 @@ async def mark_conversation_read(
     body: MarkReadRequest,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> dict:
     """POST /api/v2/conversations/{id}/read — read state 서버 truth 갱신(멱등·GREATEST 래칫).
 
@@ -2544,7 +2548,7 @@ async def release_circuit_breaker_endpoint(
     body: CircuitBreakerReleaseRequest,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> dict:
     """POST /api/v2/conversations/{id}/circuit-breaker/release — story #2630 수동 해제.
 
@@ -2589,7 +2593,7 @@ async def add_participant(
     body: AddParticipantRequest,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> dict:
     """POST /api/v2/conversations/{id}/participants — 참여자 추가."""
     conv = (await db.execute(
@@ -2678,7 +2682,7 @@ async def send_message(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> dict:
     """POST /api/v2/conversations/{id}/messages — 전송 + SSE dispatch."""
     return await send_message_core(conversation_id, body, background_tasks, db=db, auth=auth, org_id=org_id)
@@ -3646,7 +3650,7 @@ async def upload_conversation_attachment(
     body: UploadConversationAttachmentRequest,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> MessageAttachment:
     """E-MCP-OPT S2(bbfd24ba): 비-브라우저 클라이언트(MCP)용 JSON/base64 첨부 업로드.
 
@@ -3715,7 +3719,7 @@ async def update_conversation_status(
     body: UpdateStatusRequest,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> dict:
     """PATCH /api/v2/conversations/{id}/status — open/resolved 전환."""
     if body.status not in ("open", "resolved"):
@@ -3767,7 +3771,7 @@ async def update_conversation(
     body: UpdateConversationRequest,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> dict:
     """PATCH /api/v2/conversations/{id} — 방 title·free_response 사용자 편집(EF-S2 AC3·
     story #2603 P0 AC2·참여자 권한).
