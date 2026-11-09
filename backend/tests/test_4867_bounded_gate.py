@@ -131,7 +131,12 @@ def test_open_all_wakes_a_backlog_bigger_than_any_fixed_number_of_permits():
         h = asyncio.create_task(holder())
         await asyncio.sleep(0.01)
         tasks = [asyncio.create_task(piece()) for _ in range(backlog)]
-        await asyncio.sleep(0.3)
+        sem = gate._semaphore()
+        for _ in range(1000):  # wait until the WHOLE backlog is really queued (a fixed sleep can leave late tasks to arrive after open_all and bypass the gate — codex)
+            if len(sem._waiters or ()) == backlog:
+                break
+            await asyncio.sleep(0.01)
+        assert len(sem._waiters or ()) == backlog, f"only {len(sem._waiters or ())} of {backlog} pieces are queued"
         assert entered == 0, "the holder keeps the gate shut: nobody enters yet"
         bounded_gate.open_all()
         await asyncio.sleep(0.5)
@@ -289,11 +294,19 @@ async def test_the_lifespan_resets_the_gates_at_start_and_opens_them_when_it_sto
 
     monkeypatch.setattr("app.services.pg_pubsub.listen_loop", quiet_listen)
     calls: list[str] = []
+    fake_engine.dispose = AsyncMock(side_effect=lambda: calls.append("dispose"))
+
+    async def fake_drain(*a, **k):
+        calls.append("drain")
+
+    monkeypatch.setattr("app.services.pg_pubsub.drain_background_tasks", fake_drain)
     monkeypatch.setattr(bounded_gate, "reset_all", lambda: calls.append("reset"))
     monkeypatch.setattr(bounded_gate, "open_all", lambda: calls.append("open"))
     async with lifespan(MagicMock()):
         assert calls == ["reset"], calls
-    assert calls == ["reset", "open"], calls
+    assert calls[:2] == ["reset", "open"], calls
+    # the order is the point (codex): the gates open BEFORE the 5-second drain that would cancel what still waits at them, and the drain comes before the engine goes
+    assert calls.index("open") < calls.index("drain") < calls.index("dispose"), calls
 
 
 @pytest.fixture
