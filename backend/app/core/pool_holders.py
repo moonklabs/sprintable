@@ -308,6 +308,25 @@ def _capacity(engine: Any) -> tuple[int, int]:
         return 0, 0
 
 
+_GATE_REPORT_WAIT_SEC = 1.0  # a gate whose longest waiter has waited this long gets the request pool's line out even when the pool itself is not near full
+_GATED_POOL = "request"  # the pool the concurrency gates (core/bounded_gate.py) protect
+
+
+def _gates_text() -> "tuple[str, bool]":
+    """«pg_notify running=4/4 waiting=37 oldest_wait=2.1s; au_metering …» for every named gate, and whether one of them is backed up (its longest waiter >= _GATE_REPORT_WAIT_SEC).
+    Story 4867 (Kadir's lens): a burst used to fail on the pool timeout and leave a log line; behind a gate it queues, and the queue must not be invisible."""
+    try:
+        from app.core.bounded_gate import gate_stats
+
+        stats = gate_stats()
+        text = "; ".join(
+            f"{s['name']} running={s['running']}/{s['limit'] if s['limit'] > 0 else 'off'} waiting={s['waiting']} oldest_wait={s['oldest_wait']:.1f}s" for s in stats
+        )
+        return text, any(s["oldest_wait"] >= _GATE_REPORT_WAIT_SEC for s in stats)
+    except Exception:  # noqa: BLE001
+        return "", False
+
+
 def report_lines(warn_sec: float) -> list[str]:
     """One line per pool that has something worth saying; [] when all is calm."""
     lines = []
@@ -317,12 +336,14 @@ def report_lines(warn_sec: float) -> list[str]:
             out, cap = _capacity(pool.engine)
             old = [r for r in held if r["age"] >= warn_sec and not r["long"]]
             near_full = cap > 0 and out >= cap * _FULL_FRACTION
-            if not old and not near_full:
+            gates, backed_up = _gates_text() if name == _GATED_POOL else ("", False)
+            if not old and not near_full and not backed_up:
                 continue
             top = "; ".join(f"age={int(r['age'])}s {r['route']} now at {r['at']} (checked out at {r['from']})" for r in held[:_REPORT_HOLDERS])
             leaks = sum(1 for r in held if r["leak"])
             lines.append(
                 f"pool_holders pool={name} checked_out={out}/{cap} held_over_{int(warn_sec)}s={len(old)} leaked={leaks} oldest=[{top}]"
+                + (f" gates=[{gates}]" if gates else "")
             )
         except Exception:  # noqa: BLE001
             logger.warning("pool_holders report failed for %s", name, exc_info=True)

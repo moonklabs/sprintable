@@ -69,7 +69,7 @@ def _route_path_template(request: Request) -> str:
 from app.core.bounded_gate import LoopGate  # noqa: E402 — story #4867
 from app.core.config import settings as _gate_settings  # noqa: E402
 
-_recording_gate = LoopGate(lambda: _gate_settings.tool_call_recording_max_concurrent)
+_recording_gate = LoopGate(lambda: _gate_settings.tool_call_recording_max_concurrent, name="tool_call_recording")
 
 
 async def _record_tool_call_safe(**kwargs) -> None:
