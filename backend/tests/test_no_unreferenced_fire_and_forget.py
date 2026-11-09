@@ -26,7 +26,10 @@ _APP_DIR = Path(__file__).parent.parent / "app"
 # engine.dispose() 前에 백그라운드 루프를 반드시 먼저 멈춰야 하는 순서를 못 지키게 되는
 # 퇴행이라 전환하지 않았다). 이 안전성이 유지되는지는
 # test_realtime_main_lifespan_shutdown_order.py가 실행으로 계속 지킨다.
+# core/pool_holders.py: story #4864 — start_watch() returns the Task and main.py's lifespan keeps it in `pool_holders_task` and cancel()s it in the finally (the same tracked pattern as main.py's other
+# loops); the file itself holds no unreferenced task.
 _ALLOWED_FILES = {
+    _APP_DIR / "core" / "pool_holders.py",
     _APP_DIR / "main.py",
     _APP_DIR / "services" / "pg_pubsub.py",
     _APP_DIR / "services" / "l2_trigger_worker.py",

@@ -33,6 +33,17 @@ def _async_url() -> str:
     return url.replace("postgresql+psycopg2://", "postgresql+asyncpg://").replace("postgresql://", "postgresql+asyncpg://")
 
 
+async def _until(pred, timeout: float = 8.0, step: float = 0.05):
+    """Poll instead of sleeping a guessed time (Kadir's 4% flake on slow machines): True as soon as `pred()` holds."""
+    loop = asyncio.get_running_loop()
+    end = loop.time() + timeout
+    while loop.time() < end:
+        if pred():
+            return True
+        await asyncio.sleep(step)
+    return pred()
+
+
 @pytest.fixture
 async def watched():
     """A small engine of its own, under the module's registry with a unique name; the registry entry is removed afterwards."""
@@ -80,8 +91,9 @@ async def test_report_line_for_a_long_hold_and_none_for_a_calm_pool(watched):
             await release.wait()  # holds the connection and waits
 
     t = asyncio.create_task(holder())
-    await asyncio.sleep(0.5)
-    lines = [l for l in pool_holders.report_lines(warn_sec=0.2) if f"pool={name} " in l]
+    mine = lambda: [l for l in pool_holders.report_lines(warn_sec=0.2) if f"pool={name} " in l]  # noqa: E731
+    assert await _until(lambda: len(mine()) == 1), "no report line for a connection held past the warn line"
+    lines = mine()
     release.set()
     await t
     assert len(lines) == 1, lines
@@ -112,13 +124,14 @@ async def test_a_pool_meant_to_hold_long_stays_quiet_until_nearly_full():
                 await release.wait()
 
         tasks = [asyncio.create_task(hold(weng)), asyncio.create_task(hold(reng))]
-        await asyncio.sleep(0.6)
+        # wait until the REQUEST-like pool speaks (its connection is past the line), then the worker pool — same age, same moment — must still be silent
+        assert await _until(lambda: any(f"pool={rname} " in l for l in pool_holders.report_lines(warn_sec=0.2)))
         lines = pool_holders.report_lines(warn_sec=0.2)
         assert [l for l in lines if f"pool={wname} " in l] == [], "an old connection alone must not make the worker pool talk"
         assert len([l for l in lines if f"pool={rname} " in l]) == 1, "the request pool keeps the age rule"
         # nearly full (3 of 3) still speaks, for the worker pool too
         more = [asyncio.create_task(hold(weng)), asyncio.create_task(hold(weng))]
-        await asyncio.sleep(0.4)
+        assert await _until(lambda: any(f"pool={wname} " in l for l in pool_holders.report_lines(warn_sec=0.2)))
         full = [l for l in pool_holders.report_lines(warn_sec=0.2) if f"pool={wname} " in l]
         assert len(full) == 1 and "checked_out=3/3" in full[0] and "held_over_0s=0" in full[0], full
         release.set()
@@ -153,6 +166,13 @@ async def test_a_connection_never_given_back_by_a_finished_task_counts_as_leaked
     await asyncio.create_task(take_and_forget())
     held = pool_holders.snapshot(name)
     assert len(held) == 1 and held[0]["leak"] is True
+    # the finished task object may also be collected, which leaves a DEAD weakref: still a leak, not «no task» (Kadir: leaked= must not read 0 once the task object is gone).
+    # Whether CPython collects it in a test is not ours to decide, so the dead weakref is put there by hand.
+    reg = pool_holders._pools[name]
+    for h in reg.holders.values():
+        h.task = lambda: None
+    held = pool_holders.snapshot(name)
+    assert len(held) == 1 and held[0]["leak"] is True and held[0]["at"] == "task_gone", held
     line = [l for l in pool_holders.report_lines(warn_sec=0.0) if f"pool={name} " in l][0]
     assert "leaked=1" in line, line
     await keep[0].close()
@@ -180,9 +200,11 @@ async def test_the_real_garbage_collector_line_gets_the_suffix(watched):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")  # SAWarning twin of the same event
             await asyncio.create_task(leaky())
-            gc.collect()
-            await asyncio.sleep(0.3)
-            gc.collect()
+            for _ in range(100):
+                gc.collect()
+                if "non-checked-in connection" in buf.getvalue():
+                    break
+                await asyncio.sleep(0.05)
         out = buf.getvalue()
     finally:
         pool_log.removeHandler(handler)
@@ -205,6 +227,7 @@ def test_the_garbage_collector_line_gets_the_place_it_was_checked_out_at(watched
         h = pool_holders._Holder.__new__(pool_holders._Holder)
         h.since = pool_holders.time.monotonic() - 42
         h.task = None
+        h.had_task = False
         h.scope = {"method": "GET", "route": type("R", (), {"path": "/api/v2/example"})()}
         h.record = lambda: None
         h.chain = ["app/routers/a.py:10 outer", "app/services/b.py:20 inner"]
@@ -246,7 +269,7 @@ async def test_the_request_engine_ends_sessions_idle_in_a_transaction(monkeypatc
     try:
         async with eng.connect() as conn:
             assert (await conn.execute(text("show idle_in_transaction_session_timeout"))).scalar() == "1500ms"
-            await asyncio.sleep(2.5)  # sits inside the transaction the first statement opened
+            await asyncio.sleep(3.5)  # sits inside the transaction the first statement opened (line 1.5 s: margin for a slow machine)
             with pytest.raises(Exception) as err:
                 await conn.execute(text("select 1"))
             assert "terminat" in str(err.value).lower() or "connection" in str(err.value).lower()

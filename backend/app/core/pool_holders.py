@@ -65,11 +65,12 @@ _MAX_TRACKED = 5000
 
 
 class _Holder:
-    __slots__ = ("since", "task", "scope", "record", "chain", "conn_id", "conn_ids")
+    __slots__ = ("since", "task", "had_task", "scope", "record", "chain", "conn_id", "conn_ids")
 
     def __init__(self, record: Any, task: "asyncio.Task | None", scope: Any, conn_id: int, extra_ids: tuple = ()) -> None:
         self.since = time.monotonic()
         self.task = weakref.ref(task) if task is not None else None
+        self.had_task = task is not None  # a task that finished AND was collected leaves a dead weakref: that is a leak too, not «no task»
         self.scope = scope
         self.record = weakref.ref(record)
         self.chain = _await_chain(task)  # where it was checked out — text only, no reference to the task or the frames
@@ -182,7 +183,7 @@ class _GcLineFilter(logging.Filter):
                 if h is not None:
                     task = h.task() if h.task is not None else None
                     where = " ← ".join(reversed(h.chain)) if h.chain else "no app frame"
-                    record.msg = f"{msg} | pool_holders: pool={pool.name} held_for={int(time.monotonic() - h.since)}s {_route_of(h.scope)} checked out at: {where}" + (" (task finished)" if task is not None and task.done() else "")
+                    record.msg = f"{msg} | pool_holders: pool={pool.name} held_for={int(time.monotonic() - h.since)}s {_route_of(h.scope)} checked out at: {where}" + (" (task finished)" if h.had_task and (task is None or task.done()) else "")
                     record.args = ()
                     break
         except Exception:  # noqa: BLE001
@@ -219,10 +220,10 @@ def _route_of(scope: Any) -> str:
     return f"{method} {path}" if path else f"{method} <unrouted>"
 
 
-def _where(task: "asyncio.Task | None") -> str:
+def _where(task: "asyncio.Task | None", had_task: bool = False) -> str:
     """The file:line the holding task is waiting at right now (the innermost frame of its await chain)."""
     if task is None:
-        return "no_task"
+        return "task_gone" if had_task else "no_task"
     if task.done():
         return "task_done"  # the task that took the connection has finished and it was never given back: a leak
     try:
@@ -248,7 +249,8 @@ def snapshot(name: str = "request") -> list[dict]:
     out = []
     for h in pool.holders.values():
         task = h.task() if h.task is not None else None
-        out.append({"age": now - h.since, "route": _route_of(h.scope), "at": _where(task), "from": " ← ".join(reversed(h.chain)) or "-", "leak": bool(task is not None and task.done())})
+        gone = h.had_task and (task is None or task.done())
+        out.append({"age": now - h.since, "route": _route_of(h.scope), "at": _where(task, h.had_task), "from": " ← ".join(reversed(h.chain)) or "-", "leak": bool(gone)})
     out.sort(key=lambda r: r["age"], reverse=True)
     return out
 
