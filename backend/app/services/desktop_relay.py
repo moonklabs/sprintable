@@ -356,6 +356,13 @@ class SessionStateReport(SessionReport):
 class SnapshotSession(SessionReport):
     session_key: str = Field(pattern=SESSION_KEY_PATTERN)
 
+    @model_validator(mode="after")
+    def _no_restart_stopped_in_a_snapshot(self) -> "SnapshotSession":
+        # story 4863: a snapshot lists live sessions only and tells nobody — the field belongs to a single `stopped` report (a refusal, never a silent drop)
+        if self.restart_stopped is not None:
+            raise ValueError("restart_stopped is carried by a single stopped report, not a snapshot")
+        return self
+
 
 class SessionSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -633,20 +640,20 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
 
     await on_session_reported(db, setup, session_key, report.state, at)
     await after_report(db, setup, row, was_limited=was_limited)
-    if report.restart_stopped is not None:
-        await _tell_restart_stopped(db, setup, row, report.restart_stopped.also)  # story 4863
     return row
 
 
-async def _tell_restart_stopped(db: AsyncSession, setup: DesktopSetup, row: DesktopSession, also: list[uuid.UUID]) -> None:
-    """story 4863: the notice is the echo of the record — a failure here never fails the state report (its work is in a savepoint)."""
+async def tell_restart_stopped(db: AsyncSession, setup: DesktopSetup, *, agent_member_id: uuid.UUID, session_key: str, also: list[uuid.UUID]) -> None:
+    """story 4863: AFTER the state report is committed — the notice is its echo, never its condition: a failure (the notice's own, or its commit) leaves the report standing and nothing claimed (the claims are let
+    go inside), so the daemon's retry or the next report tells it. Called by the route; never raises."""
     from app.services import desktop_restart_notice
 
     try:
-        async with db.begin_nested():
-            await desktop_restart_notice.tell(db, setup, agent_member_id=row.agent_member_id, session_key=row.session_key, also=also)
+        await desktop_restart_notice.tell(db, setup, agent_member_id=agent_member_id, session_key=session_key, also=also)
+        await db.commit()
     except Exception:  # noqa: BLE001
-        logger.warning("desktop restart notice failed setup=%s session=%s", setup.id, row.session_key, exc_info=True)
+        await db.rollback()
+        logger.warning("desktop restart notice failed setup=%s session=%s", setup.id, session_key, exc_info=True)
 
 
 def _stale(seq: int, latest: int) -> DesktopRelayError:

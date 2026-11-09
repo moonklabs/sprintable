@@ -33,8 +33,8 @@ logger = logging.getLogger(__name__)
 # The event type is a LITERAL at its dispatch call (the deep-link manifest scanner reads the source): «agent.restart_stopped» — registered in schemas/deeplink_manifest.py.
 # one notice per person per this long (the same 5 minutes as the limit notice)
 WINDOW_SEC = 300
-# the same session told once for this long (a daemon asking again after a lost answer)
-SESSION_TTL_SEC = 3600
+# the same session told once for this long (a daemon asking again after a lost answer — a day: longer than any retry, shorter than the key's usefulness)
+SESSION_TTL_SEC = 86400
 # at most this many other agents are counted from one report
 ALSO_MAX = 32
 
@@ -71,9 +71,11 @@ async def _release(key: str) -> None:
 
 
 async def _others(db: AsyncSession, setup: DesktopSetup, agent_member_id: uuid.UUID, also: list[uuid.UUID]) -> int:
-    """How many OTHER agents the report names that have a session on THIS computer — a session row on this setup or on another live setup of the same organization with the
-    same machine key. Any other id (another computer's agent, another organization's, a made-up one) is dropped: one device token cannot put somebody else's agent into a notice."""
+    """How many OTHER agents the report names that are on THIS computer: set up with it NOW (a member of this setup or of another live setup of the same organization with the same machine
+    key) AND with a session row there. Any other id (another computer's agent, another organization's, an agent that moved away, a made-up one) is dropped: one device token cannot put somebody
+    else's agent into a notice or inflate its number."""
     from app.models.desktop_relay import DesktopSession
+    from app.services.desktop_relay import _setup_agents
 
     wanted = {a for a in also[:ALSO_MAX] if a != agent_member_id}
     if not wanted:
@@ -81,11 +83,19 @@ async def _others(db: AsyncSession, setup: DesktopSetup, agent_member_id: uuid.U
     same_computer = DesktopSetup.id == setup.id
     if setup.machine_key is not None:
         same_computer = or_(same_computer, DesktopSetup.machine_key == setup.machine_key)
-    return int((await db.execute(
-        select(func.count(func.distinct(DesktopSession.agent_member_id)))
-        .select_from(DesktopSession).join(DesktopSetup, DesktopSetup.id == DesktopSession.setup_id)
-        .where(DesktopSession.agent_member_id.in_(wanted), DesktopSetup.org_id == setup.org_id, DesktopSetup.revoked_at.is_(None), same_computer)
-    )).scalar_one())
+    setups = (await db.execute(
+        select(DesktopSetup).where(DesktopSetup.org_id == setup.org_id, DesktopSetup.revoked_at.is_(None), same_computer)
+    )).scalars().all()
+    on_this_computer: set[uuid.UUID] = set()
+    for s in setups:
+        on_this_computer |= _setup_agents(s)
+    wanted &= on_this_computer
+    if not wanted:
+        return 0
+    with_session = set((await db.execute(
+        select(DesktopSession.agent_member_id).where(DesktopSession.agent_member_id.in_(wanted), DesktopSession.setup_id.in_([s.id for s in setups]))
+    )).scalars().all())
+    return len(wanted & with_session)
 
 
 def _words(locale: str, agent: str, others: int) -> tuple[str, str]:
@@ -114,6 +124,7 @@ async def tell(db: AsyncSession, setup: DesktopSetup, *, agent_member_id: uuid.U
             return 0
         name = await _agent_name(db, agent_member_id)
         others = await _others(db, setup, agent_member_id, also)
+        failed = False
         for person in people:
             window = _key("window", str(setup.org_id), str(person.user_id))
             if not await _claim(window, WINDOW_SEC):
@@ -121,14 +132,19 @@ async def tell(db: AsyncSession, setup: DesktopSetup, *, agent_member_id: uuid.U
                 continue
             title, body = _words(person.locale, name, others)
             try:
-                sent = await dispatch_notification(
-                    db, org_id=setup.org_id, event_type="agent.restart_stopped", target_member_ids=[person.member_id], title=title, body=body,
-                    reference_type="agent", reference_id=agent_member_id, source_project_id=setup.project_id,
-                    event={"payload": {"agent_name": name}},
-                )
-            except Exception:
-                await _release(window)  # nothing was told: the window is let go (the claim of the session goes in the handler below) — a later report may still tell this person
-                raise
+                async with db.begin_nested():  # one person's failure undoes only that person's notice
+                    sent = await dispatch_notification(
+                        db, org_id=setup.org_id, event_type="agent.restart_stopped", target_member_ids=[person.member_id], title=title, body=body,
+                        reference_type="agent", reference_id=agent_member_id, source_project_id=setup.project_id,
+                        event={"payload": {"agent_name": name}},
+                    )
+            except BaseException as exc:  # (a cancellation too: the claim must not stay held for a notice that was never made)
+                await _release(window)
+                if not isinstance(exc, Exception):
+                    raise
+                failed = True
+                logger.warning("desktop restart notice: failed setup=%s to=%s", setup.id, member_prefix(person.member_id), exc_info=True)
+                continue
             if not sent:
                 # the dispatcher answers 0 (it does not raise) when it told nobody (a failure it swallowed · a person whose settings turn the notice off):
                 # the window is let go so the next report may still tell this person
@@ -137,9 +153,9 @@ async def tell(db: AsyncSession, setup: DesktopSetup, *, agent_member_id: uuid.U
                 continue
             told += 1
             logger.info("desktop restart notice: sent setup=%s to=%s others=%d", setup.id, member_prefix(person.member_id), others)
-        if told == 0:
-            await _release(once)  # not told to anyone (window held by others or switched off): the same session asked again is judged again
+        if failed or told == 0:
+            await _release(once)  # a person was not told (a failure · the window held by others · switched off): the same session asked again is judged again — whoever was told is held by their window
         return told
-    except Exception:
+    except BaseException:
         await _release(once)
         raise

@@ -205,3 +205,90 @@ async def test_10_a_database_error_inside_the_notice_does_not_undo_the_report(wo
         await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": []}})  # 200 — the record stands
         row = await _sql(fetch=f"SELECT state FROM desktop_sessions WHERE setup_id = '{device['setup_id']}' AND session_key = 's-1'")
         assert row[0][0] == "stopped"
+
+
+async def test_11_a_snapshot_cannot_carry_the_field(world):
+    async with _client() as c:
+        device = await _device(c, "d4863 mac k")
+        a = device["agents"][0]["member_id"]
+        row = {"session_key": "s-1", "agent_member_id": a, "runtime": "claude", "state": "working", "at": _now().isoformat()}
+        ok = await c.put("/api/v2/desktop/relay/sessions", headers=_tok(device["device_token"]), json={"report_seq": 1, "sessions": [row]})
+        assert ok.status_code == 200, ok.text
+        refused = await c.put("/api/v2/desktop/relay/sessions", headers=_tok(device["device_token"]),
+                              json={"report_seq": 2, "sessions": [{**row, "state": "stopped", "restart_stopped": {"also": []}}]})
+        assert refused.status_code == 422, "a snapshot lists live sessions and tells nobody: the field is refused, never dropped in silence"
+        assert await _notices() == []
+
+
+async def test_12_the_notice_comes_after_the_report_is_committed(world, monkeypatch):
+    from app.services import desktop_restart_notice
+
+    seen: list[str] = []
+    real = desktop_restart_notice.tell
+
+    async def spy(*args, **kwargs):
+        rows = await _sql(fetch=f"SELECT state FROM desktop_sessions WHERE setup_id = '{args[1].id}' AND session_key = 's-1'")
+        seen.append(rows[0][0] if rows else "no-row")  # read from ANOTHER connection: only a committed report is visible
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(desktop_restart_notice, "tell", spy)
+    async with _client() as c:
+        device = await _device(c, "d4863 mac l")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": []}})
+        assert seen == ["stopped"], "a claim made before the commit would be held for a notice a failed commit rolled back"
+        assert len(await _notices()) == 1
+
+
+async def test_13_an_agent_that_moved_away_is_not_counted_though_its_old_session_row_is_still_there(world):
+    async with _client() as c:
+        device = await _device(c, "d4863 mac m")
+        a = device["agents"][0]["member_id"]
+        mate_setup = await _device(c, "d4863 mac m2")
+        mate = mate_setup["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _report(c, mate_setup, mate, "working", 1, key="s-m")
+        await _sql(f"UPDATE desktop_setups SET machine_key = 'mk-4863-m' WHERE id IN ('{device['setup_id']}', '{mate_setup['setup_id']}')")
+        await _sql(f"UPDATE desktop_setups SET members = '[]'::jsonb WHERE id = '{mate_setup['setup_id']}'")  # the mate was moved to another computer: its old row stays, the setup no longer has it
+        await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": [mate]}})
+        (n,) = await _notices()
+        assert n["title"] == f"{n['agent_name']} · 꺼진 뒤 다시 서지 못함", "no «외 1개» for an agent that is no longer on this computer"
+
+
+def test_14_a_late_retry_of_the_same_session_stays_one_notice_for_a_day():
+    from app.services import desktop_restart_notice
+
+    assert desktop_restart_notice.SESSION_TTL_SEC >= 24 * 3600 > desktop_restart_notice.WINDOW_SEC
+
+
+async def test_15_one_persons_failed_notice_does_not_undo_or_block_the_other_and_the_retry_completes(world, monkeypatch):
+    from sqlalchemy import text
+
+    from tests.test_4685_limit_notice_realdb import PLAIN_TM, _pair, _second_person
+
+    await _second_person()
+    async with _client() as c:
+        device = await _device(c, "d4863 mac n")
+        a = device["agents"][0]["member_id"]
+        await _pair(device["setup_id"], OWNER_TM)
+        await _pair(device["setup_id"], PLAIN_TM)  # two people hold this computer from their phones
+        await _report(c, device, a, "working", 1)
+
+        import app.services.notification_dispatch as nd
+
+        real, calls = nd.dispatch_notification, {"n": 0}
+
+        async def first_one_breaks(db, *args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                await db.execute(text("SELECT 1 FROM table_that_is_not_there_4863"))  # a failed statement: aborts the transaction unless it has its own savepoint
+            return await real(db, *args, **kwargs)
+
+        monkeypatch.setattr(nd, "dispatch_notification", first_one_breaks)
+        await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": []}})
+        told = [len(await _notices(OWNER_TM)), len(await _notices(PLAIN_TM))]
+        assert sorted(told) == [0, 1], "the person whose notice broke got none, the other still got theirs"
+        monkeypatch.setattr(nd, "dispatch_notification", real)
+        await _report(c, device, a, "stopped", 3, extra={"restart_stopped": {"also": []}})  # the daemon's retry
+        assert [len(await _notices(OWNER_TM)), len(await _notices(PLAIN_TM))] == [1, 1], "the retry tells the one who was missed — and not the one already told"

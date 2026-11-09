@@ -251,9 +251,13 @@ async def post_session_state(
     except relay.DesktopRelayError as exc:
         await db.rollback()
         return _error(exc)
+    out = {"session_key": row.session_key, "state": row.state, "report_seq": row.last_report_seq}
     await db.commit()
     desktop_commands.push_session_changed(watchers)  # story #4534 — the DM headers read the chip again
-    return {"session_key": row.session_key, "state": row.state, "report_seq": row.last_report_seq}
+    if body.restart_stopped is not None:
+        # story 4863: after the report is committed — the notice is its echo (a failure there never touches the report)
+        await relay.tell_restart_stopped(db, setup, agent_member_id=body.agent_member_id, session_key=session_key, also=body.restart_stopped.also)
+    return out
 
 
 @router.post("/relay/commands/{command_id}/result")
