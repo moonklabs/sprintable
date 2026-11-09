@@ -12,6 +12,8 @@
 #   a line the app wrote as one JSON object   → its keys flat in jsonPayload  (jsonPayload.event, jsonPayload.level, …)
 #   any other line                            → jsonPayload.message
 # Services without that label (db, migrate, gateway-db) are NOT shipped: database logs stay on the VM.
+# The backend's uvicorn ACCESS lines (logger "uvicorn.access": client address + the request target, which can carry one-time codes and tokens — the very things the Caddyfile strips) are dropped here, after the
+# app's JSON is parsed; everything else the backend logs is shipped as the code wrote it (the same lines Cloud Run's log held).
 logging:
   receivers:
     containers:
@@ -22,7 +24,7 @@ logging:
     docker_line:
       type: parse_json
       time_key: time
-      time_format: "%Y-%m-%dT%H:%M:%S.%fZ"
+      time_format: "%Y-%m-%dT%H:%M:%S.%L%z"
     only_our_services:
       type: exclude_logs
       match_any:
@@ -37,8 +39,12 @@ logging:
     app_json:
       type: parse_json
       field: message
+    no_access_lines:
+      type: exclude_logs
+      match_any:
+        - 'jsonPayload.logger = "uvicorn.access"'
   service:
     pipelines:
       containers:
         receivers: [containers]
-        processors: [docker_line, only_our_services, log_to_message, app_json]
+        processors: [docker_line, only_our_services, log_to_message, app_json, no_access_lines]

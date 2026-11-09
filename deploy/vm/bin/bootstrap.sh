@@ -99,7 +99,7 @@ systemctl enable --now docker
 # the metadata server stays out of reach of the support gateway's database container (only a rule on its own bridge; harmless where that container does not exist)
 systemctl enable --now sprintable-gateway-db-firewall.service
 # the backup and restore-check timers are NOT enabled here: their first run would find no database (the unit fails and says so every night until the restore). RUNBOOK §7 step 6 enables them with the deploy timer.
-# story 4869 (AC5): the container logs of backend / frontend / caddy go to Cloud Logging (the Ops Agent's default configuration reads syslog only). The installer puts the configuration in place, restarts the agent
+# story 4869 (AC5): the container logs of backend / frontend go to Cloud Logging (not caddy: its access log keeps the client address) (the Ops Agent's default configuration reads syslog only). The installer puts the configuration in place, restarts the agent
 # and puts the old file back if the agent's log component does not come up with it.
 echo "== Ops Agent configuration (container logs → Cloud Logging)"
 if ! /opt/sprintable/bin/install-ops-agent-config.sh "$src/ops-agent/config.yaml"; then
