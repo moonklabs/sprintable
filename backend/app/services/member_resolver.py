@@ -465,22 +465,22 @@ async def _reserved_publisher_members(
 
     The view shows the publisher only while it holds a `project_access` grant (that is why it was given one — story #2791); when the project it was anchored to is gone, the view loses it and
     the legacy lookup answered «an unnamed person» for its messages (display, the agent kind of chain_depth, webhook `sender_name`, an attachment's `created_by`). The fallback is ONLY for
-    this reserved row, and what it answers is a constant (the name, `agent`) — never a column of the row — so nothing of another member or another organization can come through it; with an
+    this reserved row, and what it answers is that ONE row's own name (the server gave it, and the reserved row cannot be renamed — story #3999) and `agent` — nothing of another member or another organization can come through it; with an
     `org_id` the row must also be that organization's. Any other member that is not in the view stays what it was (the OrgMember / orphan fallbacks below)."""
     from app.models.member import Member
-    from app.services.system_publisher_guard import SYSTEM_PUBLISHER_DISPLAY_NAME, SYSTEM_PUBLISHER_RUNTIME_TYPE
+    from app.services.system_publisher_guard import SYSTEM_PUBLISHER_RUNTIME_TYPE
 
-    stmt = select(Member.id, Member.org_id).where(
+    stmt = select(Member.id, Member.org_id, Member.name).where(
         Member.id.in_(ids), Member.runtime_type == SYSTEM_PUBLISHER_RUNTIME_TYPE, Member.type == "agent", Member.deleted_at.is_(None),
     )
     if org_id is not None:
         stmt = stmt.where(Member.org_id == org_id)
     return {
         mid: ResolvedMember(
-            id=mid, user_id=None, name=SYSTEM_PUBLISHER_DISPLAY_NAME, type="agent", role="member", org_id=oid, project_id=None,
+            id=mid, user_id=None, name=pub_name, type="agent", role="member", org_id=oid, project_id=None,
             runtime_type=SYSTEM_PUBLISHER_RUNTIME_TYPE,
         )
-        for mid, oid in (await session.execute(stmt)).all()
+        for mid, oid, pub_name in (await session.execute(stmt)).all()
     }
 
 

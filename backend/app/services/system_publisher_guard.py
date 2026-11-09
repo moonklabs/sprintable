@@ -19,8 +19,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 SYSTEM_PUBLISHER_RUNTIME_TYPE = "system-publisher"
-# story #4868 — what the resolver answers for the reserved publisher when the `team_members` view does not show it (the name `routers/events.py::_get_or_create_system_publisher` gives the row).
-SYSTEM_PUBLISHER_DISPLAY_NAME = "시스템 발행"
 
 
 def assert_not_system_publisher(runtime_type: str | None) -> None:
