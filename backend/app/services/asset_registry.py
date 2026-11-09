@@ -88,8 +88,6 @@ def path_in_source_scope(
     """
     pid, sid = str(project_id), str(source_id)
     kind = {"conversation_message": "chat", "story": "story", "doc": "doc"}.get(source_type)
-    if kind is not None and project_id is None:
-        return False  # story #4846 (main hotfix): no project is no scope — never the path segment «None» (manual sources have no path rule and stay as they were)
     if kind is None:
         return True  # manual 등 경로 제약 없는 source(신뢰 등록)
     if any(segment in ("", ".", "..") for segment in object_path.split("/")) or any(ch in object_path for ch in ("\\", "%")) or any(ord(ch) < 32 for ch in object_path):
