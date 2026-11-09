@@ -233,3 +233,33 @@ async def socket_can_read_conversation(
 
         logging.getLogger(__name__).warning("socket_can_read_conversation failed conversation=%s", conversation_id, exc_info=True)
         return False
+
+
+async def readable_room_clause(db, org_id: uuid.UUID, auth) -> BoolExpr:
+    """story #4846 (AC14) — «this caller may read this room» as a clause over the `Conversation` columns: the SAME predicate as every read (`conversation_readable_predicate`),
+    in the correlated bulk form `backlinks.py` uses, for the roads that carry a room's WORDS outside the room's own routes — the activity stream and the activity log copy a message
+    (its text, its preview) into a row that is filtered by PROJECT access, so a member of the room's project who is not in the room read what it says there. Use it inside an
+    EXISTS / IN that selects from `Conversation` (join the row's room to it first). A caller who cannot be resolved reads no room (`false()`), as the backlinks do."""
+    from app.services.backlinks import _chat_predicate_inputs  # lazy: backlinks imports this module
+    from app.models.conversation import Conversation
+    from app.services.project_auth import org_admin_valid_correlated, project_access_valid_correlated, project_admin_valid_correlated
+
+    caller_member_id, is_api_key = await _chat_predicate_inputs(db, org_id, auth)
+    if caller_member_id is None:
+        return false()
+    uid = uuid.UUID(str(auth.user_id))
+    admin_bypass_eligible = (
+        project_admin_valid_correlated(Conversation.project_id, caller_id=caller_member_id, org_id=org_id)
+        if is_api_key
+        else org_admin_valid_correlated(caller_id=uid, org_id=org_id)
+    )
+    return conversation_readable_predicate(
+        Conversation.id,
+        caller_member_id=caller_member_id,
+        org_id=org_id,
+        admin_bypass_eligible=admin_bypass_eligible,
+        agent_project_valid=(
+            or_(Conversation.project_id.is_(None), project_access_valid_correlated(Conversation.project_id, caller_id=uid, org_id=org_id))
+            if is_api_key else True
+        ),
+    )
