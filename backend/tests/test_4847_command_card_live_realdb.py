@@ -290,7 +290,7 @@ async def test_10_a_person_who_blocked_the_sender_gets_no_card_even_when_the_roo
 
 async def test_11_the_agents_of_the_room_are_left_out_of_the_card_delivery(monkeypatch):
     """by design the agents never see a command line the server already executed (so none can do it a second time) — nor its result card: they would react to a command they were never shown. Asked of
-    the delivery call itself (what it is told to leave out): an agent's records are made by a path this room fixture does not reach, so the argument is the observable."""
+    the delivery call itself (what it is told to leave out): a live push never reaches an agent, so the argument is the observable."""
     import app.routers.conversations as conv_mod
     from app.main import app
 
@@ -299,16 +299,11 @@ async def test_11_the_agents_of_the_room_are_left_out_of_the_card_delivery(monke
     try:
         from sqlalchemy import select, text
 
-        from app.models.conversation import Conversation
         from app.models.team import TeamMember
 
         async with Session() as session:
             # a runtime that DOES take slash commands: the capability gate does not exclude it, so only the server-command rule can
             await session.execute(text("UPDATE members SET runtime_type = 'claude-code' WHERE id = :i"), {"i": agent_id})
-            kind = (await session.execute(text("SELECT table_type FROM information_schema.tables WHERE table_name = 'team_members'"))).scalar_one()
-            if kind == "BASE TABLE":  # (a create_all DB keeps team_members as a plain table; a migrated DB shows the agent through its view — nothing to enter)
-                project_id = (await session.get(Conversation, conv_id)).project_id
-                session.add(TeamMember(id=agent_id, org_id=org.id, project_id=project_id, type="agent", name="agent-x", user_id=None, is_active=True, runtime_type="claude-code"))
             await session.commit()
             seen = (await session.execute(select(TeamMember.type, TeamMember.runtime_type).where(TeamMember.id == agent_id))).first()
             assert seen is not None and seen[0] == "agent" and seen[1] == "claude-code", "precondition: the agent is a team member that takes slash commands"
