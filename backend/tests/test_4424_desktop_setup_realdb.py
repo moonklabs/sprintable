@@ -93,6 +93,9 @@ async def _sql(*stmts: str, params: dict | None = None, fetch: str | None = None
 
 
 _CLEAN = [
+    # story #4846 (0472): deleting a project no longer deletes the `events` rows of its rooms (`project_id` is `SET NULL`), so the delivery rows these tests make are removed by name —
+    # left behind they pile up on the fixed recipient ids and the next test counts them.
+    f"DELETE FROM events WHERE org_id IN ('{ORG}','{ORG2}')",
     f"DELETE FROM agent_run_tool_calls WHERE org_id IN ('{ORG}','{ORG2}')",
     "DELETE FROM onboarding_events WHERE session_id IN (SELECT id FROM desktop_setups WHERE device_name LIKE 'd4424%')",
     f"DELETE FROM agent_api_keys WHERE team_member_id IN (SELECT id FROM members WHERE org_id IN ('{ORG}','{ORG2}'))",

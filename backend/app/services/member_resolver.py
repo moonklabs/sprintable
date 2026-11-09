@@ -67,6 +67,9 @@ class ResolvedMember:
     # story #4752 — a human whose account was deleted and anonymized (`users.anonymized_at` set): the name is gone for good (None), and this marker lets a screen word «탈퇴한 사용자 / Deleted user»
     # in its own locale (the server carries no Korean sentence — story #3779). Independent of `resolved` (the person is a real, resolved member).
     departed: bool = field(default=False)
+    # story #4846 — the runtime kind of an agent (`members.runtime_type`), set only where a caller is resolved through the `members` anchor (an api-key caller of a room). The
+    # `team_members` view carried it and the send path reads it (`system-publisher` is judged by it), so an anchor-resolved caller must carry it too. None for everyone else.
+    runtime_type: str | None = field(default=None)
 
 
 def is_human_member_condition(member_id_col, *, user_id: uuid.UUID | None = None):

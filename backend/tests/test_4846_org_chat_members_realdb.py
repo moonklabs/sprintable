@@ -242,3 +242,62 @@ async def test_every_route_of_one_room_checks_the_organization_only():
         names = _dependency_names(route.dependant)
         assert "get_verified_org_id_no_project_gate" in names, (route.path, route.methods)
         assert "get_verified_org_id" not in names, (route.path, route.methods)
+
+
+async def test_a_key_claim_on_a_person_resolves_as_that_person_and_a_deleted_member_is_not_found():
+    """The api-key branch of `_resolve_member` asks the `members` anchor for the id, whatever its type (before story #4846 the lookup did not filter by type either),
+    so a person's id carrying an `api_key_id` claim is resolved AS A PERSON — never as an agent, never with a wider reach. A member that was deleted is not found: the
+    `team_members` view the lookup used to go through left deleted members out (`deleted_at IS NULL`), and the anchor lookup keeps that part of the filter."""
+    from fastapi import HTTPException
+    from sqlalchemy import text
+
+    from app.dependencies.auth import AuthContext
+    from app.routers.conversations import _resolve_member, _resolve_room_member
+    from tests.test_1994_backlink_api_realdb import _make_human_member
+
+    engine, Session, w = await _world()
+    try:
+        async with Session() as s:
+            member, _user = await _make_human_member(s, w.org, w.p1)
+            person = member if isinstance(member, uuid.UUID) else member.id
+        auth = AuthContext(user_id=str(person), email=None, claims={"app_metadata": {"api_key_id": str(uuid.uuid4()), "org_id": str(w.org)}}, org_id=str(w.org))
+        async with Session() as s:
+            resolved = await _resolve_member(auth, w.org, s, project_id=None)
+            assert resolved.id == person and resolved.type == "human"      # a person stays a person (control: the lookup finds the live member)
+        async with Session() as s:
+            await s.execute(text("UPDATE members SET deleted_at = now() WHERE id = :m"), {"m": person})
+            await s.commit()
+        async with Session() as s:
+            with pytest.raises(HTTPException) as e:
+                await _resolve_member(auth, w.org, s, project_id=None)
+            assert e.value.status_code == 400                               # was found (and then read and wrote a room without a project) once the type filter was lifted
+            with pytest.raises(HTTPException) as e2:
+                await _resolve_room_member(auth, w.org, s, w.n_human)
+            assert e2.value.status_code == 403
+    finally:
+        await engine.dispose()
+
+
+async def test_after_0472_a_new_event_row_naming_a_project_that_does_not_exist_is_refused_by_the_foreign_key():
+    """0472 adds `events_project_id_fkey` `NOT VALID`: the rows that exist are not scanned, but every NEW row is checked at once. Measured here with a row whose every other
+    column is filled (the same row with no project goes in — the control), so the refusal is the foreign key's and nothing else's."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models.event import Event
+
+    engine, Session, w = await _world()
+    try:
+        def _row(project_id):
+            return Event(id=uuid.uuid4(), org_id=w.org, project_id=project_id, event_type="chat.message", recipient_id=w.g_p, recipient_type="agent", payload={})
+
+        async with Session() as s:
+            s.add(_row(None))                                                # control: no project is a valid event (a room without a project)
+            s.add(_row(w.p1))                                                # control: a real project is a valid event
+            await s.commit()
+        async with Session() as s:
+            s.add(_row(uuid.uuid4()))                                        # a project that does not exist
+            with pytest.raises(IntegrityError) as e:
+                await s.commit()
+            assert "events_project_id_fkey" in str(e.value)
+    finally:
+        await engine.dispose()

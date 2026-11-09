@@ -158,13 +158,16 @@ async def _resolve_member(
         from app.services.member_resolver import ResolvedMember
 
         anchor = (await db.execute(
-            select(Member).where(Member.id == uuid.UUID(auth.user_id), Member.org_id == org_id, Member.type == "agent")
+            select(Member).where(Member.id == uuid.UUID(auth.user_id), Member.org_id == org_id, Member.deleted_at.is_(None))
         )).scalars().first()
         if anchor is None:
             raise HTTPException(status_code=400, detail="Team member not found")
+        # the key names a member of THIS organization; its `type` is what the anchor says (before this story the lookup did not filter by type either — a key held
+        # for a person's member id still resolved), so the filter is not narrowed here. A member that was deleted is not found (the `team_members` view this lookup
+        # used to go through left deleted members out: `deleted_at IS NULL` is the part of the view's filter that still applies to the anchor)
         return ResolvedMember(
-            id=anchor.id, user_id=None, name=anchor.name, type="agent", role="member", org_id=anchor.org_id,
-            project_id=None, avatar_url=anchor.avatar_url,
+            id=anchor.id, user_id=None, name=anchor.name, type=anchor.type, role="member", org_id=anchor.org_id,
+            project_id=None, avatar_url=anchor.avatar_url, runtime_type=anchor.runtime_type,
         )
 
     # JWT 휴먼: team_member 먼저 시도
