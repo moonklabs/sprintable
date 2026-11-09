@@ -68,7 +68,7 @@ fi
 
 echo "== tooling → /opt/sprintable"
 install -d -m 0755 /opt/sprintable/bin /opt/sprintable/releases /opt/sprintable/runtime /etc/sprintable
-for f in deployer.py render_env.py lib.sh backup.sh restore.sh restore-check.sh rowcounts.sh rowcounts.sql dump-source.sh front-door.sh gateway-db-firewall.sh check-signing.sh; do
+for f in deployer.py render_env.py lib.sh backup.sh restore.sh restore-check.sh rowcounts.sh rowcounts.sql dump-source.sh front-door.sh check-signing.sh gateway-db-firewall.sh; do
   install -m 0755 "$src/bin/$f" "/opt/sprintable/bin/$f"
 done
 # releases already on this VM were checked against the compose copy that is installed NOW (before this run replaces it): remember that per release (deployer.py, COMPOSE_STAMP), so that a compose change
