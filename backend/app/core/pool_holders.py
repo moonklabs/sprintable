@@ -308,7 +308,9 @@ def _log_invalidation(pool: _Pool, dbapi_connection: Any, connection_record: Any
             return
         h = pool.by_conn.get(id(dbapi_connection)) or pool.holders.get(id(connection_record))
         kind = type(exception).__name__
-        if _inside_db_greenlet():
+        if not cancelled:
+            running = "n/a (not an interrupted statement)"  # a pre-ping failure or an explicit invalidate(): the stack there is the checkout code, NOT a cancelled statement
+        elif _inside_db_greenlet():
             running = " ← ".join(reversed(_checkout_chain(8))) or "no app frame"
         else:
             running = "unknown (not inside a database call: a finalizer or garbage collector reached the invalidation)"
@@ -319,7 +321,8 @@ def _log_invalidation(pool: _Pool, dbapi_connection: Any, connection_record: Any
         if cancelled:
             from app.core.db_error_redaction import safe_exception_text
 
-            reason = " ".join(safe_exception_text(exception).split())[:_REASON_CHARS]
+            # cut BEFORE any processing: a huge Task.cancel(msg) must not be split and joined whole inside the pool machinery (a few times the cap is enough to find 100 characters)
+            reason = " ".join(safe_exception_text(exception)[: _REASON_CHARS * 8].split())[:_REASON_CHARS]
             logger.warning(
                 "pool_holders connection invalidated pool=%s exc=%s(%s) route=%s held_for=%ss checked out at: %s | running when interrupted: %s",
                 pool.name, kind, reason, *where,

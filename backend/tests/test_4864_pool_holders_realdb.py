@@ -554,6 +554,59 @@ def test_the_diagnostic_never_reports_its_own_frames_as_the_running_application(
     assert not [f for f in chain if "pool_holders.py" in f], chain
 
 
+def test_without_a_greenlet_parent_the_chain_names_the_immediate_caller(monkeypatch):
+    """codex (5462): the fallback walk must start at the CALLER of _checkout_chain - dropping it would hide the very code that asked for the connection."""
+    from app.core import pool_holders
+
+    monkeypatch.setattr(pool_holders, "_APP_MARK", "/tests/")  # test frames stand in for app frames
+
+    def i_am_the_immediate_caller():
+        return pool_holders._checkout_chain(8)
+
+    chain = i_am_the_immediate_caller()
+    assert chain and "i_am_the_immediate_caller" in chain[-1], chain  # outermost first: the immediate caller is the last one
+
+
+async def test_an_invalidation_that_is_not_an_interrupted_statement_carries_no_stack(watched, caplog):
+    """codex (5462): a pre-ping failure or an explicit invalidate() inside SQLAlchemy's greenlet must not be reported as «running when interrupted: <checkout code>»."""
+    import logging
+
+    from app.core import pool_holders
+
+    name, eng = watched
+    pool_holders._inval_window.clear()
+    caplog.set_level(logging.WARNING, logger="app.pool_holders")
+    fake = object()
+    pool_holders._log_invalidation(pool_holders._pools[name], fake, fake, ConnectionResetError("failover"))
+    line = [r.getMessage() for r in caplog.records if "invalidated" in r.getMessage()][0]
+    assert "running when interrupted: n/a (not an interrupted statement)" in line, line
+
+    async with eng.connect() as conn:  # the same through the real hook, from INSIDE SQLAlchemy's greenlet (an explicit invalidate of a live connection)
+        await conn.execute(text("select 1"))
+        await conn.invalidate(ConnectionResetError("failover"))
+    real = [r.getMessage() for r in caplog.records if "invalidated" in r.getMessage()][-1]
+    assert "running when interrupted: n/a (not an interrupted statement)" in real, real
+
+
+async def test_a_huge_cancellation_reason_is_cut_before_it_is_processed(watched, monkeypatch):
+    """codex (5462): the cap must come BEFORE split/join - a megabytes-long Task.cancel(msg) must not be walked whole inside the pool machinery."""
+    from app.core import db_error_redaction, pool_holders
+
+    seen: list[int] = []
+
+    class Spy(str):
+        def split(self, *a, **k):  # only reached if the code splits the WHOLE text
+            seen.append(len(self))
+            return super().split(*a, **k)
+
+    monkeypatch.setattr(db_error_redaction, "safe_exception_text", lambda exc: Spy("word " * 200_000))
+    name, eng = watched
+    pool_holders._inval_window.clear()
+    fake = object()
+    pool_holders._log_invalidation(pool_holders._pools[name], fake, fake, asyncio.CancelledError("x"))
+    assert not seen or max(seen) <= pool_holders._REASON_CHARS * 8, f"split() ran on a text of {max(seen)} characters"
+
+
 async def test_a_cancellation_reason_is_one_line_and_cut(watched, caplog):
     import logging
 
