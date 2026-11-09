@@ -243,8 +243,9 @@ async def test_lookup_members_orphan_name_is_none():
     orphan_id = uuid.uuid4()
     session = AsyncMock()
     empty_tm = MagicMock(); empty_tm.scalars.return_value.all.return_value = []
+    empty_pub = MagicMock(); empty_pub.all.return_value = []   # story #4868: the reserved publisher's anchor lookup (nothing for a true orphan)
     empty_om = MagicMock(); empty_om.scalars.return_value.all.return_value = []
-    session.execute = AsyncMock(side_effect=[empty_tm, empty_om])  # user 쿼리는 om이 비어 skip
+    session.execute = AsyncMock(side_effect=[empty_tm, empty_pub, empty_om])  # user 쿼리는 om이 비어 skip
 
     result = await lookup_members_by_ids({orphan_id}, session)
     assert orphan_id in result
@@ -315,10 +316,11 @@ async def test_policy_creator_in_participants_group():
 
 
 @pytest.mark.anyio
-async def test_policy_creator_not_in_participants_403():
+async def test_policy_creator_not_in_participants_403(monkeypatch):
     """그룹: 에이전트 creator가 참가자에 없음 → 403."""
     from app.routers.conversations import _enforce_agent_creator_policy
     from fastapi import HTTPException
+    monkeypatch.setattr("app.services.agent_message_policy.reserved_publisher_ids", AsyncMock(return_value=set()))   # story #4868: its own query, real-DB tests in test_4868_*
     agent_id = uuid.uuid4()
     creator_user_id = uuid.uuid4()
 
@@ -330,6 +332,7 @@ async def test_policy_creator_not_in_participants_403():
 
     session = AsyncMock()
     agents_result = MagicMock(); agents_result.scalars.return_value.all.return_value = [agent_tm]
+    agents_result.all.return_value = [(agent_id, None, creator_user_id)]   # story #4868 (AC4): the anchor's column rows (id, mode, creator's user id)
     # remaining TM 없음
     empty_tms = MagicMock(); empty_tms.scalars.return_value.all.return_value = []
     empty_oms = MagicMock(); empty_oms.scalars.return_value.all.return_value = []
@@ -341,10 +344,11 @@ async def test_policy_creator_not_in_participants_403():
 
 
 @pytest.mark.anyio
-async def test_policy_no_creator_in_human_conversation_403():
+async def test_policy_no_creator_in_human_conversation_403(monkeypatch):
     """creator 없는 에이전트 + 휴먼 대화 → 403."""
     from app.routers.conversations import _enforce_agent_creator_policy
     from fastapi import HTTPException
+    monkeypatch.setattr("app.services.agent_message_policy.reserved_publisher_ids", AsyncMock(return_value=set()))   # story #4868
     agent_id = uuid.uuid4()
 
     sender = ResolvedMember(
@@ -355,6 +359,7 @@ async def test_policy_no_creator_in_human_conversation_403():
 
     session = AsyncMock()
     agents_result = MagicMock(); agents_result.scalars.return_value.all.return_value = [agent_tm]
+    agents_result.all.return_value = [(agent_id, None, None)]   # story #4868 (AC4): the anchor's column rows (id, mode, creator's user id)
     session.execute = AsyncMock(return_value=agents_result)
 
     with pytest.raises(HTTPException) as exc_info:

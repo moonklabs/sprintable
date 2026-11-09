@@ -33,7 +33,15 @@ def _agent(agent_id: uuid.UUID, mode: str, created_by: uuid.UUID | None) -> Magi
 def _result(items):
     r = MagicMock()
     r.scalars.return_value.all.return_value = items
+    # story #4868 (AC4): the policy reads its agents from the `members` anchor as column rows (id, mode, creator's user id) — `.all()` — not as view objects
+    r.all.return_value = [(getattr(i, "id", None), getattr(i, "message_policy_mode", None), getattr(i, "created_by", None)) for i in items]
     return r
+
+
+@pytest.fixture(autouse=True)
+def _no_reserved_publisher_in_these_rooms(monkeypatch):
+    # story #4868 (AC4): «who of these ids is the server's own voice» is its own question (a query of its own, real-database tests in test_4868_*); these in-order mocks are about the policy's decision.
+    monkeypatch.setattr("app.services.agent_message_policy.reserved_publisher_ids", AsyncMock(return_value=set()))
 
 
 @pytest.fixture

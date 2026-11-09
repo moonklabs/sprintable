@@ -173,8 +173,9 @@ async def test_lookup_members_by_ids_legacy_org_member_no_display_name_is_none(m
 
     session = AsyncMock()
     # TeamMember.in_ → []  /  OrgMember.in_(missing) → [om]  /  User.in_(user_ids) → [user]
+    # (story #4868: between the first two sits the reserved publisher's anchor lookup — nothing for an org member)
     session.execute = AsyncMock(side_effect=[
-        _sql_result(all_=[]), _sql_result(all_=[om]), _sql_result(all_=[user]),
+        _sql_result(all_=[]), _sql_result(all_=[]), _sql_result(all_=[om]), _sql_result(all_=[user]),
     ])
 
     out = await lookup_members_by_ids({mid}, session)
