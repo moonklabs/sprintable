@@ -3344,15 +3344,15 @@ async def send_message_core(
         logger.error("conversation event dispatch failed conversation_id=%s", conversation_id, exc_info=True)
         raise HTTPException(status_code=500, detail="event dispatch failed") from _dispatch_err
 
-    # story 4847: a server command's result card is a message of the room like any other — it goes to the same recipients as the line that asked for it (same exclusions: the agents of the room, the
-    # people who blocked the sender, …) and live, after the commit. Best effort, as the card always was: a delivery failure never fails the send.
+    # story 4847: a server command's result card is a message of the room like any other — it goes to the recipients of the line that asked for it, live, after the commit, except those who must not
+    # get it (agents the sender blocked, people who blocked the sender, people whose preferences turn it off). NOT excluded: the people the typed line reaches by Discord and the agents it reaches by
+    # webhook — only the typed line is sent that way, the card is not, so they would get it nowhere. Best effort, as the card always was: a delivery failure never fails the send.
     for _card in server_command_cards:
         try:
             async with db.begin_nested():
                 pending_sse_pushes += await _dispatch_conversation_event(
                     db, conv, _card, org_id, sender,
-                    exclude_ids=discord_exclude_ids | blocked_agent_ids | user_blocker_ids | preference_excluded_ids,
-                    webhook_covered_ids=webhook_covered_ids,
+                    exclude_ids=blocked_agent_ids | user_blocker_ids | preference_excluded_ids,
                 )
         except Exception:  # noqa: BLE001
             logger.warning("server command result card delivery failed conversation_id=%s message=%s", conversation_id, _card.id, exc_info=True)

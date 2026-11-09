@@ -219,3 +219,21 @@ async def test_07_a_person_who_blocked_the_sender_gets_no_card_either(monkeypatc
         assert who == {str(sender_id)}, "the person who blocked the sender is not sent the card; the person who typed it still is"
     finally:
         await engine.dispose()
+
+
+async def test_08_a_person_the_typed_line_reaches_by_discord_still_gets_the_card_live(monkeypatch):
+    """only the typed line is sent to Discord (and to webhooks) — the card is not, so excluding that person from the card would leave them without it anywhere."""
+    from app.main import app
+    from app.services import channel_router
+
+    engine, Session, org, sender_id, sender_user, other_id, conv_id = await _room(with_project=True)
+    try:
+        async def _route(message_id, db):
+            return [channel_router.DeliveryDecision(member_id=other_id, channel="discord", level="all", reason="test")]
+
+        monkeypatch.setattr(channel_router, "route_message", _route)
+        pushes = await _send(Session, app, sender_user, org.id, conv_id, "/assign 99999 nobody", monkeypatch)
+        who = {pid for pid, _ in _cards(pushes)}
+        assert str(other_id) in who, "the Discord-routed person gets the card live: nothing else delivers it to them"
+    finally:
+        await engine.dispose()
