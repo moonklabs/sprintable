@@ -446,3 +446,155 @@ async def test_start_watch_gives_a_task_outside_pytest_and_nothing_under_it_or_w
             await task
         except asyncio.CancelledError:
             pass
+
+
+async def test_a_statement_cancelled_in_flight_logs_which_code_was_running(watched, monkeypatch, caplog):
+    """prod 11-09: «Exception terminating connection … CancelledError» 19 ms after a POST, no «reset» failure. SQLAlchemy invalidates a connection whose statement is interrupted by a
+    CancelledError; the pool watch now says WHICH code was awaiting the database (test frames stand in for «app/» frames)."""
+    import logging
+
+    from app.core import pool_holders
+
+    name, eng = watched
+    monkeypatch.setattr(pool_holders, "_APP_MARK", "/tests/")
+    pool_holders._inval_window.clear()
+
+    async def the_slow_statement_under_test():
+        async with eng.connect() as conn:
+            await conn.execute(text("select pg_sleep(5)"))
+
+    caplog.set_level(logging.WARNING, logger="app.pool_holders")
+    task = asyncio.create_task(the_slow_statement_under_test())
+    await asyncio.sleep(0.4)  # the statement is running on the server
+    task.cancel("Cancelled via cancel scope 1234 by <Task coro>")
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert await _until(lambda: any("connection invalidated" in r.getMessage() for r in caplog.records)), [r.getMessage() for r in caplog.records]
+    line = [r.getMessage() for r in caplog.records if "connection invalidated" in r.getMessage()][0]
+    assert f"pool={name} " in line and "exc=CancelledError(Cancelled via cancel scope 1234" in line, line
+    running = line.split("running when interrupted:", 1)[1]  # NOT the whole line: «checked out at» names the same function and would hide a missing running-stack
+    assert "the_slow_statement_under_test" in running, "the line must name the code that was running when the statement was cancelled: " + line
+
+
+def _installed_invalidate_hook(eng):
+    """The listener `install()` registered for the pool's «invalidate» event — calling it is what SQLAlchemy does, so a test through it fails when the registration is removed."""
+    return next(f for f in eng.sync_engine.pool.dispatch.invalidate if getattr(f, "__name__", "") == "_invalidate")
+
+
+async def test_invalidation_lines_come_through_the_installed_hook_and_are_rate_limited(watched, caplog):
+    import logging
+
+    from app.core import pool_holders
+
+    name, eng = watched
+    pool_holders._inval_window.clear()
+    caplog.set_level(logging.WARNING, logger="app.pool_holders")
+    hook = _installed_invalidate_hook(eng)
+    fake = object()
+    hook(fake, fake, None)  # a soft invalidation without an exception says nothing
+    assert not [r for r in caplog.records if "invalidated" in r.getMessage()]
+    for _ in range(50):
+        hook(fake, fake, RuntimeError("x"))
+    lines = [r.getMessage() for r in caplog.records if "invalidated" in r.getMessage()]
+    assert len(lines) == pool_holders._INVALIDATION_LINES_PER_MIN
+    assert "exc=RuntimeError route=-" in lines[0] and "(x)" not in lines[0], "a non-cancellation exception is named by class only: " + lines[0]
+
+
+async def test_failover_noise_does_not_use_up_the_budget_of_the_cancellations(watched, caplog):
+    """codex: pre-ping failures and explicit invalidations fire the same event; 20 of them in a minute must not hide the first real CancelledError."""
+    import logging
+
+    from app.core import pool_holders
+
+    name, eng = watched
+    pool_holders._inval_window.clear()
+    caplog.set_level(logging.WARNING, logger="app.pool_holders")
+    hook = _installed_invalidate_hook(eng)
+    fake = object()
+    for _ in range(40):
+        hook(fake, fake, ConnectionResetError("failover"))
+    hook(fake, fake, asyncio.CancelledError("Cancelled via cancel scope 1 by <Task>"))
+    lines = [r.getMessage() for r in caplog.records if "invalidated" in r.getMessage()]
+    assert len(lines) == pool_holders._INVALIDATION_LINES_PER_MIN + 1 and "exc=CancelledError(" in lines[-1], lines[-1]
+
+
+async def test_a_soft_invalidation_writes_no_line(watched, caplog):
+    import logging
+
+    from app.core import pool_holders
+
+    name, eng = watched
+    pool_holders._inval_window.clear()
+    caplog.set_level(logging.WARNING, logger="app.pool_holders")
+    async with eng.connect() as conn:
+        raw = await conn.get_raw_connection()
+        raw.invalidate(soft=True)  # fires «soft_invalidate», not «invalidate»: the connection is only recycled at its next checkout
+    assert not [r for r in caplog.records if "invalidated" in r.getMessage()]
+
+
+async def test_outside_a_database_call_the_line_says_unknown_not_a_misleading_stack(watched, caplog):
+    """codex: from a garbage-collector / finalizer context there is no awaited database call; the frames there are whatever triggered the collection."""
+    import logging
+
+    from app.core import pool_holders
+
+    name, eng = watched
+    pool_holders._inval_window.clear()
+    caplog.set_level(logging.WARNING, logger="app.pool_holders")
+    fake = object()
+    pool_holders._log_invalidation(pool_holders._pools[name], fake, fake, asyncio.CancelledError("x"))  # called from the loop's own greenlet, as a finalizer would
+    line = [r.getMessage() for r in caplog.records if "invalidated" in r.getMessage()][0]
+    assert "running when interrupted: unknown (not inside a database call" in line, line
+
+
+def test_the_diagnostic_never_reports_its_own_frames_as_the_running_application():
+    from app.core import pool_holders
+
+    chain = pool_holders._checkout_chain(20)  # default «/app/» mark: pool_holders.py itself lives under app/
+    assert not [f for f in chain if "pool_holders.py" in f], chain
+
+
+async def test_a_cancellation_reason_is_one_line_and_cut(watched, caplog):
+    import logging
+
+    from app.core import pool_holders
+
+    name, eng = watched
+    pool_holders._inval_window.clear()
+    caplog.set_level(logging.WARNING, logger="app.pool_holders")
+    fake = object()
+    pool_holders._log_invalidation(pool_holders._pools[name], fake, fake, asyncio.CancelledError("A" * 400 + "\nsecond line"))
+    line = [r.getMessage() for r in caplog.records if "invalidated" in r.getMessage()][0]
+    reason = line.split("exc=CancelledError(", 1)[1].split(") route=", 1)[0]
+    assert reason == "A" * pool_holders._REASON_CHARS, reason
+
+
+def test_the_rate_limit_table_does_not_grow_for_ever_with_dynamic_pool_names():
+    import time
+
+    from app.core import pool_holders
+
+    pool_holders._inval_window.clear()
+    old = time.monotonic() - 3600
+    for i in range(100):
+        pool_holders._inval_window[f"gone-{i}:other"] = [old]
+    assert pool_holders._invalidation_budget("fresh", False, time.monotonic()) is True
+    assert len(pool_holders._inval_window) <= 2, len(pool_holders._inval_window)
+
+
+async def test_this_modules_own_frames_are_never_reported_as_the_app(monkeypatch):
+    """codex (5462): the instrumentation's own frames (_checkout_chain / _log_invalidation live under app/ too) must never be named as «the code that was running». A frame whose
+    file IS pool_holders.py — made here by compiling a line under that file name — is left out, while a frame of any other app file is still named."""
+    import sys
+
+    from app.core import pool_holders
+
+    monkeypatch.setattr(pool_holders, "_APP_MARK", "/app/")
+    ns: dict = {}
+    exec(compile("import sys\nframe = sys._getframe()\n", pool_holders.__file__, "exec"), ns)
+    assert pool_holders.__file__.rfind("/app/") >= 0, "the premise: this module lives under /app/"
+    assert pool_holders._app_frame_text(ns["frame"]) is None, "the module's own frame was reported as an app frame"
+    other = {}
+    exec(compile("import sys\nframe = sys._getframe()\n", pool_holders.__file__.replace("pool_holders.py", "some_other_service.py"), "exec"), other)
+    assert pool_holders._app_frame_text(other["frame"]) is not None, "any OTHER app file must still be named"
+    assert sys is not None
