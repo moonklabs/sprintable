@@ -6,6 +6,47 @@ import { fetchChatUnreadTotal } from '@/lib/chat-unread-total-client';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 
 /**
+ * story 4876 — a message event is NOT always «one more unread». The server number (the fetch) and the SSE stream are two views of the same
+ * messages: on the FIRST connect the server replays the person's still-pending events (`is_backfill: true`, events.py `_BACKFILL_INITIAL_EVENTS`) —
+ * messages that arrived while nobody was connected, which the fetch already counts. `prev + 1` for each of them showed 4 unread on a server that had 2
+ * (measured on dev, both phones: fetch `count:2` and two replayed `conversation.message_created` landed in the same tick). The same double count
+ * happens when a live event arrives while the first fetch is out (its answer may or may not include it), and an event before any server number
+ * is known would count from 0. In those cases the event only means «the number changed» — ask the server again (one shared recount for every badge
+ * on the screen, sent once the events go quiet) instead of adding 1. A live event with a server number in hand keeps the instant +1. A request that fails
+ * leaves no number we can trust, so the next event asks again instead of adding to a stale one.
+ * Known, older and not changed here: nothing in this hook starts over when the organization is switched (the shell's automatic switch raises `bumpOrgSyncVersion()`, the manual switcher
+ * `use-unified-switcher.ts` → `router.refresh()` raises nothing), so the badge keeps the old organization's number until the next read, reconnect or focus recount — before and after story 4876.
+ */
+const RECOUNT_QUIET_MS = 250;
+const RECOUNT_MAX_WAIT_MS = 1500; // a steady stream of events still gets a recount within this long of the burst's first event
+const RECOUNT_MIN_GAP_MS = 1500; // …but two recounts are never closer than this: whatever the event spacing, at most ~0.67 requests a second
+const refetchers = new Set<() => void>();
+let recountTimer: ReturnType<typeof setTimeout> | null = null;
+let recountFirstAt = 0;
+let lastRecountAt = Number.NEGATIVE_INFINITY;
+// The gaps are measured on the monotonic clock: the wall clock (`Date.now()`) can be set back by hand or jump when a sleeping machine wakes, and then «now − last recount»
+// would be hugely negative and the next recount would never go out.
+function scheduleServerRecount(): void {
+  const now = performance.now();
+  if (recountTimer) {
+    clearTimeout(recountTimer); // trailing edge: the burst is not over yet
+  } else {
+    recountFirstAt = now;
+  }
+  // wait for quiet, but never past the ceiling counted from the first event of this burst…
+  const quiet = Math.min(RECOUNT_QUIET_MS, Math.max(0, recountFirstAt + RECOUNT_MAX_WAIT_MS - now));
+  // …and never sooner than the minimum gap after the last recount (events spaced just over the quiet wait would otherwise recount for each one)
+  // (the gap term is also capped at the gap itself: a clock that misbehaves can postpone a recount by at most one gap, never for good)
+  const wait = Math.max(quiet, Math.min(RECOUNT_MIN_GAP_MS, lastRecountAt + RECOUNT_MIN_GAP_MS - now));
+  recountTimer = setTimeout(() => {
+    recountTimer = null;
+    lastRecountAt = performance.now();
+    // every badge asks inside one dispatch, so the shared request (fetchChatUnreadTotal · fresh) goes out once
+    for (const run of [...refetchers]) run();
+  }, wait);
+}
+
+/**
  * story #1977(트랙B) — GNB 채팅 unread 총합(3번째 표면: 데스크톱 사이드바 채팅 항목 +
  * 모바일 4탭 채팅 탭, 유나 시안 768e89b5 v2 ③). `/api/conversations/unread-count`(story #1992,
  * caller 전 참여 대화 unread_count SUM)를 서버 truth로 삼는다.
@@ -20,6 +61,9 @@ import { useSseMultiplexerContext } from '@/components/realtime-provider';
 export function useChatUnreadTotal(currentTeamMemberId?: string): number {
   const [total, setTotal] = useState(0);
   const fetchTotalRef = useRef<(() => void) | null>(null);
+  // story 4876 — do we hold a server number yet, and is a request for it out right now
+  const haveServerCountRef = useRef(false);
+  const requestsOutRef = useRef(0);
   const mux = useSseMultiplexerContext();
   const muxRef = useRef(mux);
   useEffect(() => { muxRef.current = mux; }, [mux]);
@@ -29,10 +73,16 @@ export function useChatUnreadTotal(currentTeamMemberId?: string): number {
     async function fetchTotal(fresh = false) {
       // story #4263 AC1 — 공용 요청(진행 중이면 합류): 이 훅이 한 화면에 여럿 마운트돼도 같은 순간 1번(fetchWithAuth · 401 처리는 그 안).
       // ① 이벤트가 부른 재조회(fresh)는 이벤트 전에 뜬 요청에 합류하지 않는다.
+      requestsOutRef.current += 1;
       const count = await fetchChatUnreadTotal({ fresh });
-      if (!cancelled && count !== null) setTotal(count);
+      requestsOutRef.current -= 1;
+      if (cancelled) return;
+      if (count !== null) { haveServerCountRef.current = true; setTotal(count); }
+      else haveServerCountRef.current = false; // a failed request: the number on screen may be stale — the next event asks again instead of adding 1
     }
     fetchTotalRef.current = () => void fetchTotal(true); // SSE 이벤트(conversation.read · 재연결)용
+    const recount = () => void fetchTotal(true);
+    refetchers.add(recount);
 
     void fetchTotal();
     const handleVisibility = () => {
@@ -48,6 +98,8 @@ export function useChatUnreadTotal(currentTeamMemberId?: string): number {
     return () => {
       cancelled = true;
       fetchTotalRef.current = null;
+      refetchers.delete(recount);
+      if (refetchers.size === 0 && recountTimer) { clearTimeout(recountTimer); recountTimer = null; } // the last badge is gone: nobody to recount for
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('focus', handleVisibility);
     };
@@ -55,7 +107,13 @@ export function useChatUnreadTotal(currentTeamMemberId?: string): number {
 
   useChatSse({
     // story #4440 — my own message (now echoed to my other tabs) is never unread
-    onConversationMessage: (payload) => { if (!isOwnMessage(payload, currentTeamMemberId)) setTotal((prev) => prev + 1); },
+    onConversationMessage: (payload) => {
+      if (isOwnMessage(payload, currentTeamMemberId)) return;
+      // story 4876 — a replayed event (is_backfill), an event with no server number yet, or one that lands while a request is out only says
+      // «the number changed»: take the server's number, never prev + 1 (the fetch may already count it)
+      if (payload.is_backfill === true || !haveServerCountRef.current || requestsOutRef.current > 0) { scheduleServerRecount(); return; }
+      setTotal((prev) => prev + 1);
+    },
     onConversationRead: () => fetchTotalRef.current?.(),
     // story #1978(트랙C) — SSE 드롭 중 놓친 conversation.message_created는 낙관 +1이 못 따라오니
     // 재연결 시 서버 truth로 스냅해 drift를 없앤다. visibility/focus(위)는 이미 있었지만 그건
