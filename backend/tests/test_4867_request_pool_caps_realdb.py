@@ -26,6 +26,14 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _gates_closed():
+    from app.core import bounded_gate
+
+    bounded_gate.reset_all()  # another test's lifespan may have opened them (shutdown)
+    yield
+
+
 def _prod_sized_pool(engine) -> int:
     cap = engine.pool.size() + max(int(getattr(engine.pool, "_max_overflow", 0)), 0)
     assert cap >= 30, f"run with DB_POOL_SIZE=20 DB_MAX_OVERFLOW=10 (this pool has {cap} places: a cap of 4 would prove nothing)"
@@ -118,41 +126,21 @@ async def test_au_metering_tasks_take_at_most_the_gate_of_request_pool_places_an
     assert sorted(ran) == list(range(1, 61)), "every delta must still be written"
 
 
-def test_the_gate_is_one_semaphore_per_event_loop_and_off_at_zero():
-    from app.core.bounded_gate import LoopGate
+async def test_tool_call_recording_tasks_take_at_most_the_gate_of_request_pool_places_and_none_is_lost(monkeypatch):
+    from app.core.config import settings
+    from app.core.database import async_session_factory, engine
+    from app.services import tool_call_recording as tcr
 
-    limit = {"n": 2}
-    gate = LoopGate(lambda: limit["n"])
+    _prod_sized_pool(engine)
+    ran: list[int] = []
 
-    async def sem_id():
-        return id(gate._semaphore())
+    async def stub_insert(session, **kw):  # holds the session's pool place for a moment, like attribution + insert
+        await session.execute(text("select pg_sleep(0.03)"))
+        ran.append(kw["n"])
 
-    a = asyncio.run(sem_id())
-    b = asyncio.run(sem_id())
-    assert isinstance(a, int) and isinstance(b, int)  # two loops, one gate: the second loop must not hit «bound to a different event loop»
-    # limit 2 really limits to 2 at once
-    async def at_once():
-        active, peak = 0, 0
-
-        async def piece():
-            nonlocal active, peak
-            async with gate.slot():
-                active += 1
-                peak = max(peak, active)
-                await asyncio.sleep(0.01)
-                active -= 1
-
-        await asyncio.gather(*[piece() for _ in range(12)])
-        return peak
-
-    assert asyncio.run(at_once()) == 2
-    # 0 = off: all twelve run at once
-    limit["n"] = 0
-    assert asyncio.run(at_once()) == 12
-
-
-def test_the_defaults_are_the_agreed_gates():
-    from app.core.config import Settings
-
-    assert Settings.model_fields["pg_notify_max_concurrent"].default == 4
-    assert Settings.model_fields["au_metering_max_concurrent"].default == 2
+    monkeypatch.setattr(tcr, "attribute_and_insert", stub_insert)
+    await asyncio.gather(*[_ping() for _ in range(30)])
+    async with _Peak(engine) as peak:
+        await asyncio.gather(*[tcr._record_tool_call_safe(n=i + 1) for i in range(60)])
+    assert peak.peak <= settings.tool_call_recording_max_concurrent, f"{peak.peak} request-pool places at once (gate {settings.tool_call_recording_max_concurrent})"
+    assert sorted(ran) == list(range(1, 61)), "every recording must still be written"

@@ -65,6 +65,9 @@ async def lifespan(app: FastAPI):
     # 객체 자체를 재생성(shutdown.py의 reset_shutdown_event 참조 — 모듈 속성 접근으로 최신
     # 객체를 읽어야 하므로 아래도 `shutdown_module.shutdown_event`로 접근, 정적 import 금지).
     shutdown_module.reset_shutdown_event()
+    from app.core import bounded_gate as _bounded_gate_start
+
+    _bounded_gate_start.reset_all()  # story #4867 — gates are closed (limiting) while the app runs
     warn_if_webhook_secret_misconfigured()  # Bot-M.2 P3: 웹훅 secret misconfig 를 트래픽 前 경고.
     # E-ARCH S1: PG_LISTEN_ENABLED=false인 서비스(api)는 이 검증 자체가 무의미 — LISTEN을 절대
     # 안 켜므로 DB_PGBOUNCER/DATABASE_URL_DIRECT 정합을 강제할 이유가 없다(무해·불필요 fail 방지).
@@ -185,6 +188,11 @@ async def lifespan(app: FastAPI):
         # 이 신호를 구독해 강제 CancelledError를 기다리지 않고 스스로 정상 종료한다 — 다른
         # 정리 작업(태스크 cancel 등)보다 먼저 set해 SSE 스트림이 최대한 빨리 반응하게 한다.
         shutdown_module.shutdown_event.set()
+        # story #4867 — the pieces waiting at a concurrency gate (pg_notify · AU metering · tool-call recording) would be cancelled by the 5-second drain and their writes lost:
+        # open every gate now, so everything that waits goes through at once
+        from app.core import bounded_gate as _bounded_gate
+
+        _bounded_gate.open_all()
         if task is not None:
             task.cancel()
         if l2_task is not None:

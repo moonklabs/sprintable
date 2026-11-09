@@ -66,13 +66,20 @@ def _route_path_template(request: Request) -> str:
     return path if isinstance(path, str) else request.url.path
 
 
+from app.core.bounded_gate import LoopGate  # noqa: E402 — story #4867
+from app.core.config import settings as _gate_settings  # noqa: E402
+
+_recording_gate = LoopGate(lambda: _gate_settings.tool_call_recording_max_concurrent)
+
+
 async def _record_tool_call_safe(**kwargs) -> None:
     """`fire_and_forget()`로 던져지는 실제 DB 왕복 — 이 코루틴 자신이 예외를 전부
     삼켜야 한다(AUMeteringMiddleware의 `_record_au_usage_safe`와 동형 이유)."""
     try:
         from app.core.database import async_session_factory
 
-        async with async_session_factory() as session, session.begin():
+        # story #4867 — one task per agent tool-call request, each with its own pool connection: only `tool_call_recording_max_concurrent` run at a time, the rest wait their turn
+        async with _recording_gate.slot(), async_session_factory() as session, session.begin():
             await attribute_and_insert(session, **kwargs)
     except Exception:
         logger.error("tool-call recording failed agent_id=%s", kwargs.get("agent_id"), exc_info=True)

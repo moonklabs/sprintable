@@ -104,6 +104,7 @@ class Settings(BaseSettings):
     # story #4867 — background work that takes a REQUEST-pool place per piece is let through `limit` at a time (app/core/bounded_gate.py; 0 = no gate). Nothing is dropped: the rest wait their turn.
     pg_notify_max_concurrent: int = 4  # one org-wide event = one pg_notify per member (a 40-member org took 30 of 30 places at once)
     au_metering_max_concurrent: int = 2  # one AU metering task per agent API request (its own connection + an org-wide advisory lock)
+    tool_call_recording_max_concurrent: int = 2  # one tool-call recording task per agent tool-call request (its own connection)
     # story #4336(PO 04:52Z) — 발행 명령 워커 틱 예산 = min(스케줄러 시한, 이 서비스의 요청 시한) − 여유(publication_command.py).
     # 요청 시한은 배포가 Cloud Run `--timeout`과 같은 값을 넣는다(cloudbuild `_BACKEND_TIMEOUT`). 모르면 보수적으로 300(옛 prod 값).
     backend_request_timeout_seconds: int = 300
