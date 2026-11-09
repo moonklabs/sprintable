@@ -29,7 +29,10 @@ _APP_DIR = Path(__file__).parent.parent / "app"
 # embedded_timers.py: story 4826 — the app's own server's job loops. run_embedded_timers keeps every task in a local list and `gather`s it, cancelling and awaiting each in its
 # finally; start_embedded_timers returns the one task to the lifespan in main.py, which keeps it in embedded_timers_task and cancels + awaits it in ITS finally — not fire-and-forget;
 # test_4826_embedded_timers.py runs the real lifespan: 15 loops up on start, all cancelled on stop.
+# core/pool_holders.py: story #4864 — start_watch() returns the Task and main.py's lifespan keeps it in `pool_holders_task` and cancel()s it in the finally (the same tracked pattern as main.py's other
+# loops); the file itself holds no unreferenced task.
 _ALLOWED_FILES = {
+    _APP_DIR / "core" / "pool_holders.py",
     _APP_DIR / "services" / "embedded_timers.py",
     _APP_DIR / "main.py",
     _APP_DIR / "services" / "pg_pubsub.py",
