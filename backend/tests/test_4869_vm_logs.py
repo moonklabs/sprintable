@@ -63,12 +63,22 @@ def test_only_the_three_services_are_shipped_and_everything_without_the_label_is
 def test_the_service_becomes_labels_container_and_the_app_line_becomes_message_then_json() -> None:
     procs = CFG["logging"]["processors"]
     assert procs["docker_line"]["type"] == "parse_json" and procs["docker_line"]["time_key"] == "time"
+    # Docker writes «2026-11-09T04:34:44.123456789Z»; the fractional-seconds directive of the agent's parser is %L (Python's %f is not one)
+    assert procs["docker_line"]["time_format"] == "%Y-%m-%dT%H:%M:%S.%L%z"
     fields = procs["log_to_message"]["fields"]
     assert fields["jsonPayload.message"] == {"move_from": "jsonPayload.log"}
     assert fields['labels."container"'] == {"move_from": "jsonPayload.attrs.sprintable_service"}
     assert procs["app_json"] == {"type": "parse_json", "field": "message"}
     order = CFG["logging"]["service"]["pipelines"]["containers"]["processors"]
-    assert order == ["docker_line", "only_our_services", "log_to_message", "app_json"], "unwrap → drop the others → rename → parse the app's JSON"
+    assert order == ["docker_line", "only_our_services", "log_to_message", "app_json", "no_access_lines"], "unwrap → drop the others → rename → parse the app's JSON → drop the access lines"
+
+
+def test_the_backends_uvicorn_access_lines_are_dropped_after_the_apps_json_is_parsed() -> None:
+    """the access line carries the client address and the request target (one-time codes and tokens travel there — the Caddyfile strips them): it must not reach Cloud Logging"""
+    proc = CFG["logging"]["processors"]["no_access_lines"]
+    assert proc == {"type": "exclude_logs", "match_any": ['jsonPayload.logger = "uvicorn.access"']}
+    order = CFG["logging"]["service"]["pipelines"]["containers"]["processors"]
+    assert order.index("no_access_lines") > order.index("app_json"), "`logger` is a key of the app's JSON: it exists only after that parse"
 
 
 def test_the_configuration_changes_no_resource_or_default_label() -> None:
@@ -190,6 +200,37 @@ def test_with_no_previous_file_a_failed_install_removes_ours_so_the_agent_runs_o
     run, target, new = box
     p, _ = run(FAKE_ACTIVE="0")
     assert p.returncode == 1 and not target.exists()
+
+
+def test_the_same_content_with_the_log_component_down_is_not_a_success(box) -> None:
+    """a crashed agent must not read as «already in place, nothing to do»"""
+    run, target, new = box
+    target.parent.mkdir(parents=True)
+    target.write_text(new.read_text())
+    p, log = run(FAKE_ACTIVE="0")
+    assert p.returncode == 1 and "OPS AGENT CONFIG FAILED" in p.stderr and "restart google-cloud-ops-agent" in log
+    assert target.read_text() == new.read_text(), "the file is not touched"
+
+
+def test_a_write_that_fails_is_a_failure_and_the_previous_file_is_back(box, tmp_path: Path) -> None:
+    """no `set -e` in the installer: every step is checked — a failing `install` never reads as success"""
+    run, target, new = box
+    target.parent.mkdir(parents=True)
+    target.write_text("# the previous configuration\n")
+    fake = tmp_path / "bin" / "install"
+    fake.write_text("#!/bin/sh\nexit 1\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    p, log = run()
+    assert p.returncode == 1 and "cannot write" in p.stderr
+    assert target.read_text() == "# the previous configuration\n" and not list(target.parent.glob("config.yaml.previous.*"))
+    assert "restart" not in log, "nothing was installed, the agent is not touched"
+
+
+def test_a_target_directory_that_cannot_be_made_is_a_failure(box, tmp_path: Path) -> None:
+    run, target, new = box
+    (tmp_path / "etc").write_text("a file where the directory should be")
+    p, _ = run()
+    assert p.returncode == 1 and "cannot write" in p.stderr
 
 
 def test_a_successful_install_leaves_no_backup_file(box) -> None:
