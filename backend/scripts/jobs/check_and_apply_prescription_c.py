@@ -148,7 +148,13 @@ def main() -> int:
     # 애초에 그 스코프 밖). 출력에 URL 자체를 담지 않는다(AC5).
     engine = create_engine(os.environ["ALEMBIC_DATABASE_URL"])
 
+    # story #4873 — the replay calls migrations' `upgrade()` directly on THIS connection (not through alembic/env.py), so it carries the same lock_timeout: a DDL that cannot get its lock
+    # fails fast instead of queueing behind another connection and holding up every later user of the table. migrate.sh runs from the backend root (where alembic.ini is).
+    sys.path.insert(0, os.getcwd())
+    from app.core.migration_lock_timeout import apply_lock_timeout
+
     with engine.connect() as conn:
+        apply_lock_timeout(conn)
         try:
             current_revs = [row[0] for row in conn.execute(text("SELECT version_num FROM alembic_version"))]
         except Exception:
