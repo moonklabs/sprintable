@@ -256,7 +256,7 @@ async def post_session_state(
     desktop_commands.push_session_changed(watchers)  # story #4534 — the DM headers read the chip again
     if body.restart_stopped is not None:
         # story 4863: after the report is committed — the notice is its echo (a failure there never touches the report)
-        await relay.tell_restart_stopped(db, setup, agent_member_id=body.agent_member_id, session_key=session_key, also=body.restart_stopped.also)
+        await relay.tell_restart_stopped(db, setup, agent_member_id=body.agent_member_id, session_key=session_key, at=body.at, also=body.restart_stopped.also)
     return out
 
 

@@ -31,9 +31,8 @@ TYPE = "agent.restart_stopped"
 
 @pytest.fixture(autouse=True)
 async def _remote_control_on_and_korean(world):
-    from app.services import desktop_restart_notice
-
-    desktop_restart_notice._local.clear()  # the window and the once-per-session claims live in this process without Redis: each test starts with none
+    # the record of «already told» is the notification row itself: nothing of an earlier test (or an earlier run on this database) may stand in for it
+    await _sql("DELETE FROM notifications WHERE type = 'agent.restart_stopped'", "DELETE FROM events WHERE payload->>'event_type' = 'agent.restart_stopped'")
     await _sql(f"UPDATE organizations SET remote_control_enabled_at = now() WHERE id = '{ORG}'",
                f"UPDATE users SET locale = 'ko' WHERE id = '{OWNER}'")
     yield
@@ -43,8 +42,11 @@ def _now():
     return datetime.now(timezone.utc)
 
 
-async def _report(c, device, agent, state, seq, *, key="s-1", extra=None, expect=200):
-    body = {"report_seq": seq, "agent_member_id": agent, "runtime": "claude", "state": state, "at": _now().isoformat(), **(extra or {})}
+AT0 = "2026-11-09T01:00:00+00:00"
+
+
+async def _report(c, device, agent, state, seq, *, key="s-1", extra=None, expect=200, at=None):
+    body = {"report_seq": seq, "agent_member_id": agent, "runtime": "claude", "state": state, "at": at or _now().isoformat(), **(extra or {})}
     r = await c.post(f"/api/v2/desktop/relay/sessions/{key}/state", headers=_tok(device["device_token"]), json=body)
     assert r.status_code == expect, r.text
     return r
@@ -63,14 +65,14 @@ async def test_01_a_stopped_report_that_says_nobody_started_it_again_tells_the_p
         await _report(c, device, agent, "working", 1)
         await _report(c, device, agent, "stopped", 2)  # the end itself (the daemon says it at once)
         assert await _notices() == [], "an ended session alone is not this notice: the app may well start it again"
-        await _report(c, device, agent, "stopped", 3, extra={"restart_stopped": {"also": []}})
+        await _report(c, device, agent, "stopped", 3, extra={"restart_stopped": {"also": []}}, at=AT0)
         (n,) = await _notices()
         assert n["title"] == f"{n['agent_name']} · 꺼진 뒤 다시 서지 못함"
         assert n["body"] == "밖에서 꺼진 뒤 다시 띄우지 못했어요. 이 컴퓨터의 Sprintable 앱을 열어 확인해 주세요."
         # nothing of the computer in the words: no path, no user name, no key
         assert "/" not in n["body"] and "~" not in n["body"] and "sdt_" not in str(n)
         # the same session said again (a retry after a lost answer) is not told again
-        await _report(c, device, agent, "stopped", 4, extra={"restart_stopped": {"also": []}})
+        await _report(c, device, agent, "stopped", 4, extra={"restart_stopped": {"also": []}}, at=AT0)
         assert len(await _notices()) == 1
 
 
@@ -135,12 +137,12 @@ async def test_06_a_failing_notice_never_fails_the_report(world, monkeypatch):
             raise RuntimeError("the dispatcher is down")
 
         monkeypatch.setattr(nd, "dispatch_notification", boom)
-        await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": []}})  # 200 — the record stands
+        await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": []}}, at=AT0)  # 200 — the record stands
         row = await _sql(fetch=f"SELECT state FROM desktop_sessions WHERE setup_id = '{device['setup_id']}' AND session_key = 's-1'")
         assert row[0][0] == "stopped"
-        # …and since nobody was told, the same session said again IS told (the claim was let go)
+        # …and since nobody was told (nothing is recorded for a notice that failed), the same end said again IS told
         monkeypatch.undo()
-        await _report(c, device, a, "stopped", 3, extra={"restart_stopped": {"also": []}})
+        await _report(c, device, a, "stopped", 3, extra={"restart_stopped": {"also": []}}, at=AT0)
         assert len(await _notices()) == 1
 
 
@@ -172,19 +174,16 @@ async def test_08_the_same_machine_counts_across_setups_but_never_across_organiz
         assert n["title"] == f"{n['agent_name']} 외 1개 · 꺼진 뒤 다시 서지 못함", "the mate on the same machine counts; the other organization's agent does not"
 
 
-async def test_09_the_same_session_said_again_after_the_window_is_still_told_once(world):
-    from app.services import desktop_restart_notice
-
+async def test_09_the_same_end_said_again_after_the_window_is_still_told_once(world):
     async with _client() as c:
         device = await _device(c, "d4863 mac i")
         a = device["agents"][0]["member_id"]
         await _report(c, device, a, "working", 1)
-        await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": []}})
+        await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": []}}, at=AT0)
         assert len(await _notices()) == 1
-        for k in [k for k in desktop_restart_notice._local if ":window:" in k]:
-            del desktop_restart_notice._local[k]  # the person's five minutes are over
-        await _report(c, device, a, "stopped", 3, extra={"restart_stopped": {"also": []}})  # a retry of the same session's saying, late
-        assert len(await _notices()) == 1, "the session was told already: a late retry is not a second notice"
+        await _sql("UPDATE notifications SET created_at = now() - interval '10 minutes' WHERE type = 'agent.restart_stopped'")  # the person's five minutes are over
+        await _report(c, device, a, "stopped", 3, extra={"restart_stopped": {"also": []}}, at=AT0)  # a retry of the same end, late
+        assert len(await _notices()) == 1, "this end was told already: a late retry is not a second notice"
 
 
 async def test_10_a_database_error_inside_the_notice_does_not_undo_the_report(world, monkeypatch):
@@ -256,10 +255,17 @@ async def test_13_an_agent_that_moved_away_is_not_counted_though_its_old_session
         assert n["title"] == f"{n['agent_name']} · 꺼진 뒤 다시 서지 못함", "no «외 1개» for an agent that is no longer on this computer"
 
 
-def test_14_a_late_retry_of_the_same_session_stays_one_notice_for_a_day():
-    from app.services import desktop_restart_notice
-
-    assert desktop_restart_notice.SESSION_TTL_SEC >= 24 * 3600 > desktop_restart_notice.WINDOW_SEC
+async def test_14_a_later_session_under_the_same_key_that_ends_again_is_a_new_notice(world):
+    async with _client() as c:
+        device = await _device(c, "d4863 mac o")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": []}}, at=AT0)
+        assert len(await _notices()) == 1
+        await _sql("UPDATE notifications SET created_at = now() - interval '10 minutes' WHERE type = 'agent.restart_stopped'")
+        await _report(c, device, a, "working", 3)  # a new session under the same key
+        await _report(c, device, a, "stopped", 4, extra={"restart_stopped": {"also": []}}, at="2026-11-09T02:00:00+00:00")  # …and it ends from outside later
+        assert len(await _notices()) == 2, "the key is reused; the end is not the same end"
 
 
 async def test_15_one_persons_failed_notice_does_not_undo_or_block_the_other_and_the_retry_completes(world, monkeypatch):
@@ -286,9 +292,82 @@ async def test_15_one_persons_failed_notice_does_not_undo_or_block_the_other_and
             return await real(db, *args, **kwargs)
 
         monkeypatch.setattr(nd, "dispatch_notification", first_one_breaks)
-        await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": []}})
+        await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": []}}, at=AT0)
         told = [len(await _notices(OWNER_TM)), len(await _notices(PLAIN_TM))]
         assert sorted(told) == [0, 1], "the person whose notice broke got none, the other still got theirs"
         monkeypatch.setattr(nd, "dispatch_notification", real)
-        await _report(c, device, a, "stopped", 3, extra={"restart_stopped": {"also": []}})  # the daemon's retry
+        await _report(c, device, a, "stopped", 3, extra={"restart_stopped": {"also": []}}, at=AT0)  # the daemon's retry
         assert [len(await _notices(OWNER_TM)), len(await _notices(PLAIN_TM))] == [1, 1], "the retry tells the one who was missed — and not the one already told"
+        await _sql("UPDATE notifications SET created_at = now() - interval '10 minutes' WHERE type = 'agent.restart_stopped'")  # their windows are over
+        await _report(c, device, a, "stopped", 4, extra={"restart_stopped": {"also": []}}, at=AT0)  # a late retry
+        assert [len(await _notices(OWNER_TM)), len(await _notices(PLAIN_TM))] == [1, 1], "nobody is told the same end twice, whatever failed before"
+
+
+async def test_16_a_member_of_one_setup_with_a_stale_session_row_in_another_is_not_counted(world):
+    async with _client() as c:
+        device = await _device(c, "d4863 mac p")
+        a = device["agents"][0]["member_id"]
+        keeper = await _device(c, "d4863 mac p2")    # the setup the agent belongs to now — it has no session row of its own for the agent
+        old = await _device(c, "d4863 mac p3")       # a setup the agent was in before: its row stays
+        mate = old["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _report(c, old, mate, "working", 1, key="s-old")
+        await _sql(f"UPDATE desktop_setups SET machine_key = 'mk-4863-p' WHERE id IN ('{device['setup_id']}', '{keeper['setup_id']}', '{old['setup_id']}')")
+        await _sql(f"UPDATE desktop_setups SET members = '[]'::jsonb WHERE id = '{old['setup_id']}'",   # the old setup no longer has the agent…
+                   f"UPDATE desktop_setups SET members = '{{}}'::jsonb || (SELECT members FROM desktop_setups WHERE id = '{old['setup_id']}') WHERE false")
+        await _sql(f"UPDATE desktop_setups SET members = jsonb_build_array(jsonb_build_object('member_id', '{mate}', 'kind', 'agent', 'stage', 'x')) WHERE id = '{keeper['setup_id']}'")  # …the other one does, but holds no session of it
+        await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": [mate]}})
+        (n,) = await _notices()
+        assert n["title"] == f"{n['agent_name']} · 꺼진 뒤 다시 서지 못함", "membership and the session row must be in the SAME setup"
+
+
+async def test_17_no_session_level_advisory_lock_is_ever_left_on_a_connection(world, monkeypatch):
+    """The per-person lock is `pg_advisory_xact_lock` (transaction scope): after a report — told, failed or folded — no advisory lock is held by any connection (a session-scope lock would stay on a pooled one)."""
+    import inspect
+
+    from app.services import desktop_restart_notice
+
+    source = inspect.getsource(desktop_restart_notice)
+    assert "pg_advisory_xact_lock" in source and "pg_advisory_lock" not in source.replace("pg_advisory_xact_lock", ""), "transaction scope only"
+    async with _client() as c:
+        device = await _device(c, "d4863 mac q")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": []}}, at=AT0)  # told
+        await _report(c, device, a, "stopped", 3, extra={"restart_stopped": {"also": []}}, at=AT0)  # recognised: nothing new
+        import app.services.notification_dispatch as nd
+
+        async def broken(db, *_a, **_k):
+            raise RuntimeError("down")
+
+        monkeypatch.setattr(nd, "dispatch_notification", broken)
+        await _report(c, device, a, "stopped", 4, extra={"restart_stopped": {"also": []}}, at="2026-11-09T03:00:00+00:00")  # failed
+        held = await _sql(fetch="SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'")
+        assert held[0][0] == 0, "nothing may keep an advisory lock after the transaction"
+
+
+async def test_18_a_retry_is_recognised_within_the_lookback_only(world):
+    async with _client() as c:
+        device = await _device(c, "d4863 mac r")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": []}}, at=AT0)
+        assert len(await _notices()) == 1
+        await _sql("UPDATE notifications SET created_at = now() - interval '2 days' WHERE type = 'agent.restart_stopped'")
+        await _report(c, device, a, "stopped", 3, extra={"restart_stopped": {"also": []}}, at=AT0)
+        assert len(await _notices()) == 2, "the lookup reads the person's recent notices only — days later the same text is a new notice, not a scan of everything they ever had"
+
+
+async def test_19_two_reports_at_once_for_one_person_are_ordered_into_one_notice(world):
+    import asyncio
+
+    async with _client() as c:
+        d1, d2 = await _device(c, "d4863 mac s1"), await _device(c, "d4863 mac s2")
+        a1, a2 = d1["agents"][0]["member_id"], d2["agents"][0]["member_id"]
+        await _report(c, d1, a1, "working", 1)
+        await _report(c, d2, a2, "working", 1)
+        await asyncio.gather(
+            _report(c, d1, a1, "stopped", 2, extra={"restart_stopped": {"also": []}}, at=AT0),
+            _report(c, d2, a2, "stopped", 2, extra={"restart_stopped": {"also": []}}, at=AT0),
+        )
+        assert len(await _notices()) == 1, "without the per-person lock both read «no notice yet» and both tell"

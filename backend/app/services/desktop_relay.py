@@ -643,17 +643,18 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
     return row
 
 
-async def tell_restart_stopped(db: AsyncSession, setup: DesktopSetup, *, agent_member_id: uuid.UUID, session_key: str, also: list[uuid.UUID]) -> None:
-    """story 4863: AFTER the state report is committed — the notice is its echo, never its condition: a failure (the notice's own, or its commit) leaves the report standing and nothing claimed (the claims are let
-    go inside), so the daemon's retry or the next report tells it. Called by the route; never raises."""
+async def tell_restart_stopped(db: AsyncSession, setup: DesktopSetup, *, agent_member_id: uuid.UUID, session_key: str, at: datetime, also: list[uuid.UUID]) -> None:
+    """story 4863: AFTER the state report is committed — the notice is its echo, never its condition: a failure (the notice's own, or its commit) leaves the report standing and nothing recorded, so the
+    daemon's retry or the next report tells it. Called by the route; never raises."""
     from app.services import desktop_restart_notice
 
+    setup_id = setup.id  # (a plain value: the log line after a rollback must not touch an expired object)
     try:
-        await desktop_restart_notice.tell(db, setup, agent_member_id=agent_member_id, session_key=session_key, also=also)
+        await desktop_restart_notice.tell(db, setup, agent_member_id=agent_member_id, session_key=session_key, at=at, also=also)
         await db.commit()
     except Exception:  # noqa: BLE001
         await db.rollback()
-        logger.warning("desktop restart notice failed setup=%s session=%s", setup.id, session_key, exc_info=True)
+        logger.warning("desktop restart notice failed setup=%s session=%s", setup_id, session_key, exc_info=True)
 
 
 def _stale(seq: int, latest: int) -> DesktopRelayError:
