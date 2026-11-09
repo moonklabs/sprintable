@@ -13,6 +13,7 @@ import pytest
 
 from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (autouse ones apply here too)
     ORG,
+    ORG2,
     OWNER,
     OWNER_TM,
     _client,
@@ -152,3 +153,35 @@ async def test_07_nobody_to_tell_is_not_a_failure(world):
         await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": []}})  # 200 — nobody told
         await _sql(f"UPDATE members SET is_active = true WHERE id = '{OWNER_TM}'")
         assert await _notices() == []
+
+
+async def test_08_the_same_machine_counts_across_setups_but_never_across_organizations(world):
+    async with _client() as c:
+        device = await _device(c, "d4863 mac h")
+        a = device["agents"][0]["member_id"]
+        same_machine = await _device(c, "d4863 mac h2")      # another setup of the SAME computer (same machine key, same organization)
+        foreign = await _device(c, "d4863 mac h3")           # a setup that shares the machine key but belongs to ANOTHER organization
+        mate, outsider = same_machine["agents"][0]["member_id"], foreign["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _report(c, same_machine, mate, "working", 1, key="s-m")
+        await _report(c, foreign, outsider, "working", 1, key="s-f")
+        await _sql(f"UPDATE desktop_setups SET machine_key = 'mk-4863' WHERE id IN ('{device['setup_id']}', '{same_machine['setup_id']}', '{foreign['setup_id']}')",
+                   f"UPDATE desktop_setups SET org_id = '{ORG2}' WHERE id = '{foreign['setup_id']}'")
+        await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": [mate, outsider]}})
+        (n,) = await _notices()
+        assert n["title"] == f"{n['agent_name']} 외 1개 · 꺼진 뒤 다시 서지 못함", "the mate on the same machine counts; the other organization's agent does not"
+
+
+async def test_09_the_same_session_said_again_after_the_window_is_still_told_once(world):
+    from app.services import desktop_restart_notice
+
+    async with _client() as c:
+        device = await _device(c, "d4863 mac i")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": []}})
+        assert len(await _notices()) == 1
+        for k in [k for k in desktop_restart_notice._local if ":window:" in k]:
+            del desktop_restart_notice._local[k]  # the person's five minutes are over
+        await _report(c, device, a, "stopped", 3, extra={"restart_stopped": {"also": []}})  # a retry of the same session's saying, late
+        assert len(await _notices()) == 1, "the session was told already: a late retry is not a second notice"
