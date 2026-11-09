@@ -24,8 +24,10 @@ const refetchers = new Set<() => void>();
 let recountTimer: ReturnType<typeof setTimeout> | null = null;
 let recountFirstAt = 0;
 let lastRecountAt = Number.NEGATIVE_INFINITY;
+// The gaps are measured on the monotonic clock: the wall clock (`Date.now()`) can be set back by hand or jump when a sleeping machine wakes, and then «now − last recount»
+// would be hugely negative and the next recount would never go out.
 function scheduleServerRecount(): void {
-  const now = Date.now();
+  const now = performance.now();
   if (recountTimer) {
     clearTimeout(recountTimer); // trailing edge: the burst is not over yet
   } else {
@@ -34,10 +36,11 @@ function scheduleServerRecount(): void {
   // wait for quiet, but never past the ceiling counted from the first event of this burst…
   const quiet = Math.min(RECOUNT_QUIET_MS, Math.max(0, recountFirstAt + RECOUNT_MAX_WAIT_MS - now));
   // …and never sooner than the minimum gap after the last recount (events spaced just over the quiet wait would otherwise recount for each one)
-  const wait = Math.max(quiet, lastRecountAt + RECOUNT_MIN_GAP_MS - now);
+  // (the gap term is also capped at the gap itself: a clock that misbehaves can postpone a recount by at most one gap, never for good)
+  const wait = Math.max(quiet, Math.min(RECOUNT_MIN_GAP_MS, lastRecountAt + RECOUNT_MIN_GAP_MS - now));
   recountTimer = setTimeout(() => {
     recountTimer = null;
-    lastRecountAt = Date.now();
+    lastRecountAt = performance.now();
     // every badge asks inside one dispatch, so the shared request (fetchChatUnreadTotal · fresh) goes out once
     for (const run of [...refetchers]) run();
   }, wait);

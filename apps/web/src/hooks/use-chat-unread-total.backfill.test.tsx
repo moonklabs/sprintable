@@ -53,7 +53,7 @@ const badge = (id = 'n') => container.querySelector(`[data-testid="${id}"]`)!.te
 const emit = async (payload: Record<string, unknown>) => { await act(async () => { for (const h of sse.handlers) h(payload); }); await settle(); };
 
 beforeEach(async () => {
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
   vi.resetModules();
   sse.handlers = [];
   sse.reads = [];
@@ -293,5 +293,53 @@ describe('useChatUnreadTotal — the badge equals the server count (story 4876)'
     const recounts = requests.length - 1; // minus the first fetch
     expect(recounts).toBeGreaterThanOrEqual(5); // it still follows the stream…
     expect(recounts).toBeLessThanOrEqual(7); // …but never one recount per event (that would be ~33)
+  });
+  it('⭐the wall clock set back by an hour right after a recount does not stop the next one (the gap is measured on the monotonic clock)', async () => {
+    await mount();
+    await act(async () => { requests[0]!.answer(2); });
+    await settle();
+    await emit({ id: 'b1', conversation_id: 'c1', sender: { id: 'agent' }, is_backfill: true });
+    await waitDebounce(); // recount #1
+    expect(requests).toHaveLength(2);
+    await act(async () => { requests[1]!.answer(2); });
+    await settle();
+    vi.setSystemTime(Date.now() - 3_600_000); // someone sets the clock back, or a sleeping VM wakes with an old time
+    await emit({ id: 'b2', conversation_id: 'c1', sender: { id: 'agent' }, is_backfill: true });
+    await advance(1600); // one gap (1.5 s) and a little
+    expect(requests).toHaveLength(3); // recount #2 went out
+  });
+
+  it('even a monotonic clock that jumps back an hour postpones the next recount by at most one gap, not for good', async () => {
+    await mount();
+    await act(async () => { requests[0]!.answer(2); });
+    await settle();
+    await emit({ id: 'b1', conversation_id: 'c1', sender: { id: 'agent' }, is_backfill: true });
+    await waitDebounce(); // recount #1
+    expect(requests).toHaveLength(2);
+    await act(async () => { requests[1]!.answer(2); });
+    await settle();
+    const real = performance.now.bind(performance);
+    const spy = vi.spyOn(performance, 'now').mockImplementation(() => real() - 3_600_000);
+    try {
+      await emit({ id: 'b2', conversation_id: 'c1', sender: { id: 'agent' }, is_backfill: true });
+      await advance(1600);
+      expect(requests).toHaveLength(3);
+    } finally { spy.mockRestore(); }
+  });
+  it('⭐the wall clock set FORWARD by an hour does not let a recount through inside the minimum gap (the gap is measured on the monotonic clock)', async () => {
+    await mount();
+    await act(async () => { requests[0]!.answer(2); });
+    await settle();
+    await emit({ id: 'b1', conversation_id: 'c1', sender: { id: 'agent' }, is_backfill: true });
+    await waitDebounce(); // recount #1
+    expect(requests).toHaveLength(2);
+    await act(async () => { requests[1]!.answer(2); });
+    await settle();
+    vi.setSystemTime(Date.now() + 3_600_000); // the wall clock jumps an hour ahead
+    await emit({ id: 'b2', conversation_id: 'c1', sender: { id: 'agent' }, is_backfill: true });
+    await advance(400); // well inside the 1.5 s gap since recount #1
+    expect(requests).toHaveLength(2); // no second recount yet
+    await advance(1500);
+    expect(requests).toHaveLength(3); // it goes out once the gap has passed
   });
 });
