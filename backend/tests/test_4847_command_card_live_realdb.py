@@ -47,7 +47,7 @@ async def _dispose_global_engine_after_test():
     await _global_engine.dispose()
 
 
-async def _room(*, with_project: bool, with_agent: bool = False):
+async def _room(*, with_project: bool, with_agent: bool = False, with_third: bool = False):
     """(Session factory, org, sender member id, sender user, the other person's member id, room id) — `_room.agent` holds the agent member's id when there is one"""
     engine, Session = await _session_factory()
     async with Session() as session:
@@ -57,6 +57,10 @@ async def _room(*, with_project: bool, with_agent: bool = False):
         other_id, _other_user = await _make_human_member(session, org.id, project.id)
         members = [sender_id, other_id]
         _room.agent = None
+        _room.third = None
+        if with_third:
+            _room.third, _third_user = await _make_human_member(session, org.id, project.id)
+            members.append(_room.third)
         if with_agent:
             _room.agent = await _make_agent_member(session, org.id, project.id)
             members.append(_room.agent)
@@ -235,5 +239,52 @@ async def test_08_a_person_the_typed_line_reaches_by_discord_still_gets_the_card
         pushes = await _send(Session, app, sender_user, org.id, conv_id, "/assign 99999 nobody", monkeypatch)
         who = {pid for pid, _ in _cards(pushes)}
         assert str(other_id) in who, "the Discord-routed person gets the card live: nothing else delivers it to them"
+    finally:
+        await engine.dispose()
+
+
+async def test_09_a_person_whose_preferences_turn_the_room_off_gets_no_card(monkeypatch):
+    """the room's own notification decision names the people the typed line reaches; whoever it leaves out (muted) is left out of the card too."""
+    from app.main import app
+    from app.services import channel_router
+
+    engine, Session, org, sender_id, sender_user, other_id, conv_id = await _room(with_project=True, with_third=True)
+    muted = _room.third
+    try:
+        async def _route(message_id, db):
+            return [channel_router.DeliveryDecision(member_id=other_id, channel="sse", level="all", reason="test")]  # the third person is not named: muted
+
+        monkeypatch.setattr(channel_router, "route_message", _route)
+        pushes = await _send(Session, app, sender_user, org.id, conv_id, "/assign 99999 nobody", monkeypatch)
+        who = {pid for pid, _ in _cards(pushes)}
+        assert str(muted) not in who, "the muted person gets no card"
+        assert who == {str(sender_id), str(other_id)}, "the person the decision names, and the one who typed it, do"
+    finally:
+        await engine.dispose()
+
+
+async def test_10_a_person_who_blocked_the_sender_gets_no_card_even_when_the_room_decision_fails(monkeypatch):
+    """the block is its own lookup: a failing notification decision (no preference exclusion at all) must not let the card through to someone who blocked the sender."""
+    import uuid as _uuid
+
+    from app.main import app
+    from app.models.user_block import UserBlock
+    from app.services import channel_router
+
+    engine, Session, org, sender_id, sender_user, other_id, conv_id = await _room(with_project=True, with_third=True)
+    third = _room.third
+    try:
+        async with Session() as session:
+            session.add(UserBlock(id=_uuid.uuid4(), blocker_member_id=other_id, blocked_member_id=sender_id))
+            await session.commit()
+
+        async def _route_fails(message_id, db):
+            raise channel_router.ChannelRouterError("simulated")
+
+        monkeypatch.setattr(channel_router, "route_message", _route_fails)
+        pushes = await _send(Session, app, sender_user, org.id, conv_id, "/assign 99999 nobody", monkeypatch)
+        who = {pid for pid, _ in _cards(pushes)}
+        assert str(other_id) not in who, "whoever blocked the sender is not sent the card, whatever the room decision did"
+        assert {str(sender_id), str(third)} <= who, "the others still get it"
     finally:
         await engine.dispose()
