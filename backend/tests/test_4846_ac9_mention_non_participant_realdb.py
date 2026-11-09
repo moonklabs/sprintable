@@ -146,3 +146,50 @@ async def test_a_mention_of_someone_already_in_the_room_is_unchanged():
         assert got and all(words in payload for _t, payload in got)                           # a participant keeps the words
     finally:
         await engine.dispose()
+
+
+async def test_a_mentioned_agent_without_the_rooms_project_is_not_put_in_the_room_and_gets_no_words_while_one_with_it_is():
+    """an agent reads a room WITH a project only while it has that project (AC12): putting one that does not in the room would send it the whole message to a seat it cannot
+    read. (Both agents allow everyone — org_wide — so the creator policy passes and only the project decides.)"""
+    from sqlalchemy import text
+
+    from tests.test_1994_backlink_api_realdb import _make_agent_member, _make_conversation
+
+    engine, Session, w = await _world()
+    try:
+        async with Session() as s:
+            outside = await _make_agent_member(s, w.org, w.p2)                     # has P2 only
+            inside = await _make_agent_member(s, w.org, w.p1)                      # has P1
+            outside, inside = (a if isinstance(a, uuid.UUID) else a.id for a in (outside, inside))
+            await s.execute(text("UPDATE members SET message_policy_mode = 'org_wide' WHERE id IN (:a, :b)"), {"a": outside, "b": inside})
+            await s.commit()
+            room = await _make_conversation(s, w.org, w.p1, [w.h_a, w.h_b], w.h_a, "group")     # a room WITH project P1, two people
+        words = f"ac9-project-{uuid.uuid4().hex[:8]}"
+        msg = await _say(Session, w, "participant", room, f"for P1 {words}", mentioned=[outside, inside])
+        members = await _participant_ids(Session, room)
+        assert outside not in members and inside in members                                    # the one without P1 stays out, the one with P1 is put in
+        out_events = await _events_for(Session, msg, outside)
+        assert [t for t, _p in out_events] == ["conversation:mention"] and words not in out_events[0][1]
+        in_events = await _events_for(Session, msg, inside)
+        assert in_events and all(words in p for _t, p in in_events)
+    finally:
+        await engine.dispose()
+
+
+async def test_what_is_pushed_live_to_a_mentioned_outsider_carries_none_of_the_words_either():
+    """the persisted event is one thing, the live push (SSE) another: both are built from the same payload, and a change to one must not leak through the other."""
+    from unittest.mock import patch
+
+    engine, Session, w = await _world()
+    try:
+        words = f"ac9-live-{uuid.uuid4().hex[:8]}"
+        pushed: list = []
+        with patch("app.routers.conversations._push_to_agent", side_effect=lambda pid, payload: pushed.append((str(pid), payload))):
+            await _say(Session, w, "agent_participant", w.n_human, f"live push {words}", mentioned=[w.h_c],
+                       extra={"event_context": {"event_key": "ac9.test", "payload": {"note": words}}})
+        mine = [p for pid, p in pushed if pid == str(w.h_c)]
+        assert mine, pushed                                                                    # the mention IS pushed to them (the bell)
+        assert all(words not in json.dumps(p, default=str) for p in mine)                      # without a word
+        assert all(p.get("content_withheld") is True for p in mine)
+    finally:
+        await engine.dispose()

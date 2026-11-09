@@ -1004,7 +1004,20 @@ async def _admit_mentioned_non_participants(
     outside = [m for m in dict.fromkeys(mentioned_ids) if m not in current and m != sender.id]
     withheld: set[uuid.UUID] = set()
     added = False
+    # an AGENT in a room with a project reads it only while it has that project (AC12): putting one that does not in the room would send it the whole message to a seat it
+    # cannot read — so it is «could not add» too (the participants route lacks this check; the mention must not open the same hole automatically)
+    from app.models.member import Member
+    from app.services.conversation_auth import agent_project_valid_for_room
+
+    outside_agents = set((await db.execute(
+        select(Member.id).where(Member.id.in_(outside), Member.org_id == conversation.org_id, Member.type == "agent")
+    )).scalars().all()) if outside else set()
     for mid in outside:
+        if mid in outside_agents and not await agent_project_valid_for_room(
+            db, caller_is_agent=True, caller_id=mid, conv_project_id=conversation.project_id, org_id=conversation.org_id,
+        ):
+            withheld.add(mid)
+            continue
         try:
             await _enforce_agent_creator_policy(sender, list(current | {mid}), db)
         except HTTPException as e:
