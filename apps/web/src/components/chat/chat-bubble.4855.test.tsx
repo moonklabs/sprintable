@@ -549,7 +549,7 @@ describe('story 4855 — a drag / double click on inline code or a link does not
     expect(writeText).not.toHaveBeenCalled();
   });
 
-  it('link text can be dragged-selected: the anchor is not draggable', async () => {
+  it('the anchor is not draggable: a link drag does not take the place of a selection that runs over the link text', async () => {
     await render('see [the docs](https://example.com/docs) now');
     const a = container.querySelector('a[href="https://example.com/docs"]') as HTMLAnchorElement;
     expect(a).not.toBeNull();

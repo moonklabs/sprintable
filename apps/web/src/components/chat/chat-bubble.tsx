@@ -389,7 +389,8 @@ export function ChatMarkdown({ content: rawContent, references, entityStatusByKe
       }
       // story 4854 — an address that is not a link (empty: a `javascript:` link the markdown reader emptied · or any kind but http(s)/mailto) is text; before, it was an anchor that
       // looked like a link and, pressed, opened THIS page again in a new window. A mail address is a plain anchor (no new window).
-      // story 4855 — `draggable={false}` on both anchors: a press on link text and a drag over it SELECTS the text (measured: with the default draggable link the drag took the link and nothing was selected)
+      // story 4855 — `draggable={false}` on both anchors: the link does not take the drag over (a default draggable link starts a link drag instead of a selection), so a selection that
+      // STARTS on the text next to a link runs on over the link's text. A selection that starts INSIDE the link text is not made by Chromium (measured: nothing is selected) — this does not change that.
       const kind = classifyChatHref(href);
       if (kind === 'none') return <span className={text}>{children}</span>;
       if (kind === 'mail') return <a href={href} draggable={false} className={`underline underline-offset-2 ${text}`}>{children}</a>;
