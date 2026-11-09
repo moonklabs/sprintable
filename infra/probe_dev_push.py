@@ -271,12 +271,12 @@ def agg_diag_lines(diags: list[Diag]) -> list[str]:
 
 # ── ③ 필터 없이 그 서비스 최근 1줄의 «칸 이름만» ──────────────────────────────────────────────────────────────────────────────
 _FIELD_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,39}")  # fullmatch
-_HEX_RUN = re.compile(r"[0-9A-Fa-f]{12,}")                  # a key / id written as a field name (Kadir 5461): never printed
+_HEX_RUN = re.compile(r"[0-9A-Fa-f]{8,}")                  # a key / id (or the 8-char org/member prefix the filters use) written as a field name: never printed
 _FIELD_NAMES_MAX = 40
 
 
 def _plain_name(k: object) -> bool:
-    """짧은 식별자 모양 AND 16진 덩어리(밑줄을 뺀 12자 이상)를 품지 않음 — 키 · id 가 «이름»으로 와도 값이 아니라 «(other)» 로 접힌다."""
+    """짧은 식별자 모양 AND 16진 덩어리(밑줄을 뺀 8자 이상 — 필터가 쓰는 조직/멤버 앞 8자리도 포함)를 품지 않음 — 키 · id 가 «이름»으로 와도 값이 아니라 «(other)» 로 접힌다."""
     return isinstance(k, str) and _FIELD_NAME.fullmatch(k) is not None and _HEX_RUN.search(k.replace("_", "")) is None
 
 

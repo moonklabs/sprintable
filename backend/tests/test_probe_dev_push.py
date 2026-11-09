@@ -510,7 +510,7 @@ def test_a_log_name_with_a_trailing_newline_is_not_in_the_closed_list():
 
 def test_field_names_fold_a_hex_shaped_name_and_a_trailing_newline():
     key32 = "a3f9c1d2e4b5a6978877665544332211"      # starts with a letter, 32 hex: a key written as a field name
-    names = probe.field_names({key32: 1, "jsonPayload": {key32: 2, "event": 3, "msg\n": 4, "e75ca548_1111_2222": 5, "member_id": 6}})
-    assert key32 not in "\n".join(names) and "e75ca548" not in "\n".join(names)
+    names = probe.field_names({key32: 1, "jsonPayload": {key32: 2, "event": 3, "msg\n": 4, "e75ca548_1111_2222": 5, "member_id": 6, MEMBER: 7, ORG: 8}})
+    assert key32 not in "\n".join(names) and MEMBER not in "\n".join(names) and ORG not in "\n".join(names)     # the 8-char prefixes the filters use never print either
     assert {"(other)", "jsonPayload", "jsonPayload.(other)", "jsonPayload.event", "jsonPayload.member_id"} == set(names)
     assert probe.field_names({"timestamp": 1, "severity": 2, "jsonPayload": {"expo_push_credentials_error": 1}}) == ["jsonPayload", "jsonPayload.expo_push_credentials_error", "severity", "timestamp"]
