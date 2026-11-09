@@ -520,7 +520,7 @@ async def _retry_deliver(
             return
 
         except Exception as exc:
-            error_msg = safe_exception_text(exc)[:500]  # story #4741: logged and stored below — a database error's text carries the row's values
+            error_msg = redact_urls(safe_exception_text(exc))[:500]  # story #4741: logged and stored below — a database error's text carries the row's values; story 4869: and an HTTP status error's text holds the whole request URL (the webhook's secret)
             if attempt < _MAX_RETRIES:
                 backoff = _BACKOFF_BASE * (2 ** (attempt - 1))
                 logger.warning(

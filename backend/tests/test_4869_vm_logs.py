@@ -140,7 +140,7 @@ _FAKE_SYSTEMCTL = r"""#!/bin/sh
 printf 'systemctl %s\n' "$*" >> "$FAKE_LOG"
 case "$1" in
   is-active) [ "${FAKE_ACTIVE-1}" = 1 ] && exit 0 || exit 3 ;;
-  restart) [ "${FAKE_RESTART_FAIL-0}" = 1 ] && exit 5 ;;
+  restart) [ -n "${FAKE_SWAP_LOCK_PID-}" ] && printf '424242\n' > "$FAKE_SWAP_LOCK_PID"; [ "${FAKE_RESTART_FAIL-0}" = 1 ] && exit 5 ;;
 esac
 exit 0
 """
@@ -402,6 +402,35 @@ def test_a_lock_whose_process_is_gone_is_taken_over_and_removed_at_the_end(box) 
     p, _ = run()
     assert p.returncode == 0 and "taking over a stale lock" in p.stderr
     assert not lock.exists(), "released at the end"
+
+
+def test_a_lock_that_is_still_being_made_is_waited_for_not_taken_over(box) -> None:
+    """the other run has made the directory but not yet written its pid (empty `pid` file): it is not stale — the pid appears within the wait and the run is refused"""
+    run, target, new = box
+    lock = target.parent / "config.yaml.lock.d"
+    lock.mkdir(parents=True)
+    (lock / "pid").write_text("")
+    sleeper = subprocess.Popen(["sleep", "30"])
+    writer = subprocess.Popen(["sh", "-c", f"sleep 0.6; echo {sleeper.pid} > '{lock}/pid'"])
+    try:
+        p, log = run()
+        assert p.returncode == 1 and "another run of this installer is in progress" in p.stderr and "taking over" not in p.stderr and "systemctl" not in log
+        assert lock.is_dir() and (lock / "pid").read_text().strip() == str(sleeper.pid), "the other run's lock is untouched"
+    finally:
+        writer.wait()
+        sleeper.kill()
+        sleeper.wait()
+
+
+def test_a_run_never_removes_a_lock_that_another_run_owns(box) -> None:
+    """the cleanup of a run whose lock was taken over must leave the new owner's lock: a fake `systemctl` that rewrites the pid file while the installer runs stands for the takeover"""
+    run, target, new = box
+    lock = target.parent / "config.yaml.lock.d"
+    p, _ = run(FAKE_SWAP_LOCK_PID=str(lock / "pid"))
+    assert p.returncode == 0
+    assert lock.is_dir() and (lock / "pid").read_text().strip() == "424242", "released only by its owner"
+    (lock / "pid").unlink()
+    lock.rmdir()
 
 
 @pytest.mark.parametrize("fail", [False, True])

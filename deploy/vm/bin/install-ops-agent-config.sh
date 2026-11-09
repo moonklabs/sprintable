@@ -8,7 +8,7 @@
 # Same content already in place is «nothing to do» ONLY if the log component is up AND this very file is known to have been loaded: a marker next to the target (`<target>.loaded`, the checksum of the file) is
 # written once the agent has come up with it. A run that was cut off between writing the file and the restart (ssh drop, kill -9, power) leaves no marker, so the next run restarts the agent and converges —
 # whatever the kind of interruption. Backups left by such a run (`<target>.previous.*`) are named in the output and never touched.
-# Two copies at the same time are refused: a lock directory `<target>.lock.d` holds the pid of the one that runs (a lock whose process is gone is taken over). Known limits: the units are asked once, not for a stretch of time; a symbolic link as the target is followed.
+# Two copies at the same time are refused: a lock directory `<target>.lock.d` holds the pid of the one that runs (a lock whose process is gone is taken over; a lock with no pid yet is waited for up to 2 s; only its owner removes it). Known limits: two runs that find the SAME stale lock at the very same instant can both take it (a mkdir lock cannot do better without flock; bootstrap is run by one person); a recycled pid keeps a dead run's lock «alive» (the message says how to remove it); the units are asked once, not for a stretch of time; a symbolic link as the target is followed.
 # Settings for a test: OPS_AGENT_CONFIG (target file), OPS_AGENT_UNITS (units that must be active, default the log component; must not be empty), OPS_AGENT_TRIES / OPS_AGENT_WAIT (default 12 × 5 s).
 # Exit codes: 0 in place, loaded and working · 1 not in place or the agent did not come up (old state restored where there was one) · 2 bad usage.
 set -uo pipefail
@@ -30,13 +30,22 @@ mkdir -p "$(dirname "$target")" || { echo "OPS AGENT CONFIG FAILED: cannot write
 lockdir="${target}.lock.d"
 # shellcheck disable=SC2329 # called by the EXIT trap
 release_lock() {
+  # only the run that owns the lock removes it (a run that was wrongly judged stale must not remove the lock of the one that took over)
+  [ "$(cat "$lockdir/pid" 2> /dev/null)" = "$$" ] || return 0
   rm -f "$lockdir/pid" 2> /dev/null
   rmdir "$lockdir" 2> /dev/null
 }
 if ! mkdir "$lockdir" 2> /dev/null; then
   holder="$(cat "$lockdir/pid" 2> /dev/null || true)"
+  # the run that made the directory writes its pid a moment later: an empty lock is «being made», not «stale» — wait for the pid (up to 2 s) before judging
+  waited=0
+  while [ -z "$holder" ] && [ "$waited" -lt 10 ]; do
+    sleep 0.2
+    waited=$((waited + 1))
+    holder="$(cat "$lockdir/pid" 2> /dev/null || true)"
+  done
   if [ -n "$holder" ] && kill -0 "$holder" 2> /dev/null; then
-    echo "OPS AGENT CONFIG FAILED: another run of this installer is in progress (pid $holder, lock $lockdir) — two runs would overwrite each other's backup and marker" >&2
+    echo "OPS AGENT CONFIG FAILED: another run of this installer is in progress (pid $holder, lock $lockdir) — two runs would overwrite each other's backup and marker; if no installer is running, remove $lockdir and run again" >&2
     exit 1
   fi
   echo "ops agent config: taking over a stale lock $lockdir (its process${holder:+ $holder} is gone)" >&2

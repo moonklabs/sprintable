@@ -19,12 +19,12 @@ def url_host(url: object) -> str:
         if not host:
             return _UNPARSEABLE
         return f"{host}:{parts.port}" if parts.port else host
-    except ValueError:
+    except Exception:  # a log helper runs inside `except` blocks: it must never raise (an object whose __str__ raises, a bad port)
         return _UNPARSEABLE
 
 
 def redact_urls(text: str) -> str:
-    """Every URL inside `text` replaced by `scheme://host/…` (the path, query and user info are gone)."""
+    """Every http(s) URL inside `text` replaced by `scheme://host/…` (the path, query and user info are gone). HTTP libraries put the ABSOLUTE request URL, with its scheme, in their messages — that is what this is for; a bare «host/path» without a scheme is not recognised."""
 
     def _one(m: re.Match[str]) -> str:
         url = m.group(0)

@@ -117,6 +117,44 @@ async def test_conversation_webhook_names_the_host_and_scrubs_the_status_error_t
     assert "hooks.example.test:8443" in text and "delivery failed" in text and "Client error '404 Not Found'" in text
 
 
+@pytest.mark.asyncio
+async def test_the_retry_loop_scrubs_the_url_from_the_log_and_from_the_stored_last_error(monkeypatch, caplog) -> None:
+    """`_retry_deliver` (the webhook delivery with retries): the HTTP status error's text holds the whole request URL; it goes to the warning, to the permanent-failure error AND into `last_error` that is stored — none of them may carry the URL's secret"""
+    import uuid
+
+    from app.services import conversation_webhook as cw
+
+    async def _attempt(url, secret, payload):
+        req = httpx.Request("POST", url)
+        raise httpx.HTTPStatusError(f"Client error '404 Not Found' for url '{url}'", request=req, response=httpx.Response(404, request=req))
+
+    stored: list[str | None] = []
+
+    async def _status(delivery_id, status, attempt_count=None, last_error=None):
+        stored.append(last_error)
+
+    monkeypatch.setattr(cw, "_attempt_delivery", _attempt)
+    monkeypatch.setattr(cw, "_update_delivery_status", _status)
+    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
+    caplog.set_level(logging.WARNING)
+    await cw._retry_deliver(uuid.uuid4(), URL, None, {})
+    text = _no_canary(caplog)
+    assert "failed permanently" in text and "attempt 1/" in text and "Client error '404 Not Found'" in text
+    last = [s for s in stored if s]
+    assert last and all(PATH_CANARY not in s and QUERY_CANARY not in s for s in last), last
+
+
+def test_url_host_never_raises_on_what_a_log_argument_can_be() -> None:
+    """it runs inside `except` blocks: an object whose __str__ raises, or a port that is not a number, reads «(unparseable-url)» instead of replacing the real error"""
+
+    class _Boom:
+        def __str__(self) -> str:
+            raise RuntimeError("boom")
+
+    assert url_host(_Boom()) == "(unparseable-url)"
+    assert url_host("https://host.example:notaport/x") in {"(unparseable-url)", "host.example"}
+
+
 # ───────────────────────── nothing in backend/app prints «url=» without the helper ─────────────────────────
 
 _LOG_METHODS = {"debug", "info", "warning", "error", "exception", "critical", "log"}
