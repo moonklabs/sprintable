@@ -302,11 +302,11 @@ async def test_11_the_agents_of_the_room_are_left_out_of_the_card_delivery(monke
         from app.models.team import TeamMember
 
         async with Session() as session:
-            # a runtime that DOES take slash commands: the capability gate does not exclude it, so only the server-command rule can
-            await session.execute(text("UPDATE members SET runtime_type = 'claude-code' WHERE id = :i"), {"i": agent_id})
+            # a runtime that DOES take deterministic commands (hermes — not claude-code, which the capability gate blocks anyway): the gate does not exclude it, so only the server-command rule can
+            await session.execute(text("UPDATE members SET runtime_type = 'hermes' WHERE id = :i"), {"i": agent_id})
             await session.commit()
             seen = (await session.execute(select(TeamMember.type, TeamMember.runtime_type).where(TeamMember.id == agent_id))).first()
-            assert seen is not None and seen[0] == "agent" and seen[1] == "claude-code", "precondition: the agent is a team member that takes slash commands"
+            assert seen is not None and seen[0] == "agent" and seen[1] == "hermes", "precondition: the agent is a team member that takes slash commands"
         from app.services import channel_router
 
         async def _route(message_id, db):  # the room decision names the agent too: its exclusion must come from the server-command rule, not from «not named»
