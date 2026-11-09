@@ -24,7 +24,8 @@ TOKEN = "ya29.SECRET-TOKEN-VALUE"
 # the fake curl: answers the two metadata reads, and for signBlob answers what FAKE_SIGN_CODE says; logs every call (arguments only) and whether the bearer token reached it on standard input
 _FAKE_CURL = r"""#!/bin/sh
 printf 'curl %s\n' "$*" >> "$FAKE_LOG"
-printf 'ENV SSLKEYLOGFILE=%s\n' "${SSLKEYLOGFILE-unset}" >> "$FAKE_LOG"   # printf, not echo: sh's echo turns the backslash-n inside curl's -w argument into a real newline
+printf 'ENV SSLKEYLOGFILE=%s\n' "${SSLKEYLOGFILE-unset}" >> "$FAKE_LOG"
+printf 'ENVTOKEN %s\n' "$(env | grep -v '^FAKE_' | grep -c -F -- "$FAKE_TOKEN")" >> "$FAKE_LOG"   # how many variables of curl's environment (the test's own FAKE_* excluded) hold the bearer   # printf, not echo: sh's echo turns the backslash-n inside curl's -w argument into a real newline
 # strict like the real service: curl must be started with -q (no ~/.curlrc may read the bearer header), the metadata server wants its header, and signBlob must be a POST of the exact JSON payload
 # with the header file on standard input and the status code appended — anything else is answered 400 / refused
 [ "$1" = "-q" ] || { printf 'NOQ %s\n' "$*" >> "$FAKE_LOG"; exit 2; }
@@ -153,6 +154,14 @@ def test_no_curl_call_can_be_routed_through_a_proxy_of_the_environment(box) -> N
     assert p.returncode == 0
     calls = [l for l in log.splitlines() if l.startswith("curl ")]
     assert len(calls) == 3 and all(l.startswith("curl -q --noproxy * ") for l in calls), calls
+
+
+def test_the_bearer_is_never_in_the_environment_of_a_curl_call(box) -> None:
+    """an `export token` (or any variable the script exports) would hand the bearer to every child process: the fake curl counts the variables of its environment that hold it"""
+    p, log = box()
+    assert p.returncode == 0
+    counts = [l for l in log.splitlines() if l.startswith("ENVTOKEN ")]
+    assert len(counts) == 3 and set(counts) == {"ENVTOKEN 0"}, counts
 
 
 def test_the_tls_key_log_variable_never_reaches_curl(box) -> None:
