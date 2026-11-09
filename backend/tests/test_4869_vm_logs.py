@@ -318,10 +318,12 @@ def test_a_half_written_file_and_a_failing_restore_never_claim_that_the_previous
     cp = tmp_path / "bin" / "cp"
     cp.write_text('#!/bin/sh\nif [ -e "$FAKE_LOG.cp" ]; then exit 1; fi\n: > "$FAKE_LOG.cp"\nexec /bin/cp "$@"\n')
     cp.chmod(cp.stat().st_mode | stat.S_IXUSR)
-    p, _ = run()
+    p, log = run()
     assert p.returncode == 1
     assert "could NOT be copied back" in p.stderr and "NOT fully back" in p.stderr
     assert "the previous state is back" not in p.stderr and "is back and" not in p.stderr
+    assert "systemctl restart" not in log, "a half-written file must not be handed to the agent by a restart (the running agent keeps its configuration in memory)"
+    assert "is NOT restarted" in p.stderr
     assert list(target.parent.glob("config.yaml.previous.*")), "the backup is kept"
 
 
@@ -362,6 +364,52 @@ def test_a_restore_that_fails_is_said_so_not_claimed(box, tmp_path: Path) -> Non
     assert p.returncode == 1
     assert "could NOT be copied back" in p.stderr and "NOT fully back" in p.stderr
     assert list(target.parent.glob("config.yaml.previous.*")), "the backup is kept when the restore failed"
+
+
+def test_a_marker_for_another_file_does_not_count_as_loaded(box) -> None:
+    """same file, agent up, but the marker holds another checksum (the file was changed after it was loaded): the agent must be restarted"""
+    run, target, new = box
+    target.parent.mkdir(parents=True)
+    target.write_text(new.read_text())
+    (target.parent / "config.yaml.loaded").write_text("1 2\n")
+    p, log = run()
+    assert p.returncode == 0 and log.count("systemctl restart google-cloud-ops-agent") == 1
+    assert (target.parent / "config.yaml.loaded").read_text() != "1 2\n"
+
+
+def test_two_runs_at_once_are_refused_while_the_first_is_alive(box) -> None:
+    run, target, new = box
+    lock = target.parent / "config.yaml.lock.d"
+    lock.mkdir(parents=True)
+    sleeper = subprocess.Popen(["sleep", "30"])
+    try:
+        (lock / "pid").write_text(f"{sleeper.pid}\n")
+        p, log = run()
+        assert p.returncode == 1 and "another run of this installer is in progress" in p.stderr and "systemctl" not in log
+        assert not target.exists() and lock.is_dir(), "the other run's lock is left alone"
+    finally:
+        sleeper.kill()
+        sleeper.wait()
+
+
+def test_a_lock_whose_process_is_gone_is_taken_over_and_removed_at_the_end(box) -> None:
+    run, target, new = box
+    lock = target.parent / "config.yaml.lock.d"
+    lock.mkdir(parents=True)
+    gone = subprocess.Popen(["true"])
+    gone.wait()
+    (lock / "pid").write_text(f"{gone.pid}\n")
+    p, _ = run()
+    assert p.returncode == 0 and "taking over a stale lock" in p.stderr
+    assert not lock.exists(), "released at the end"
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_the_lock_is_released_after_success_and_after_failure(box, fail: bool) -> None:
+    run, target, new = box
+    p, _ = run(FAKE_ACTIVE="0" if fail else "1")
+    assert p.returncode == (1 if fail else 0)
+    assert not (target.parent / "config.yaml.lock.d").exists()
 
 
 def test_a_successful_install_leaves_no_backup_file(box) -> None:

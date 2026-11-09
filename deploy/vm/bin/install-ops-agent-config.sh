@@ -26,6 +26,7 @@ tries=$((10#$tries)) # «08» is a number here, not a broken octal one
 wait_s=$((10#$wait_s))
 [ -n "${units//[[:space:]]/}" ] || { echo "OPS_AGENT_UNITS must name at least one unit (an empty or blank list would make «the agent is up» always true)" >&2; exit 2; }
 
+mkdir -p "$(dirname "$target")" || { echo "OPS AGENT CONFIG FAILED: cannot write $target (its directory cannot be made) — nothing was changed" >&2; exit 1; }
 lockdir="${target}.lock.d"
 # shellcheck disable=SC2329 # called by the EXIT trap
 release_lock() {
