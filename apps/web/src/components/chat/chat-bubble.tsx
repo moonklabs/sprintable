@@ -953,6 +953,7 @@ export function ChatBubble({
 
           {/* story #4443 PR2 — the viewer's zone and locale (was ko-KR in the runtime's zone: «오전 07:32» in en too) */}
           {/* story 4855 — touch-only «⋯» opens the menu (a long press on the text is the platform's selection).
+              Shown where the primary pointer is coarse OR nothing can hover (a device that reports a fine primary pointer — a stylus source, a tablet with a mouse — but cannot hover would otherwise never show it).
               Absolutely placed beside the time (never over it, never pushing it) and out of the way of the text. */}
           <span data-chat-meta="" className="relative inline-block">
             <time className="text-micro text-muted-foreground" dateTime={message.created_at}><ViewerDate value={message.created_at} options={VIEWER_TIME_OPTIONS} /></time>
@@ -962,7 +963,7 @@ export function ChatBubble({
               data-testid="chat-bubble-menu-button"
               aria-label={t('messageActions')}
               onClick={handleOpenMenuButton}
-              className={`absolute top-1/2 hidden h-8 min-h-0 w-8 min-w-0 -translate-y-1/2 items-center justify-center rounded-full border-0 p-0 text-muted-foreground pointer-coarse:inline-flex ${isMine ? 'right-full mr-1' : 'left-full ml-1'}`}
+              className={`absolute top-1/2 hidden h-8 min-h-0 w-8 min-w-0 -translate-y-1/2 items-center justify-center rounded-full border-0 p-0 text-muted-foreground pointer-coarse:inline-flex [@media(hover:none)]:inline-flex ${isMine ? 'right-full mr-1' : 'left-full ml-1'}`}
             >
               <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
             </Button>

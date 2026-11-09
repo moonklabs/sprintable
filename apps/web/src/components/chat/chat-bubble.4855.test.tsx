@@ -462,6 +462,24 @@ describe('story 4855 — the platform keeps the long press on the text; the «�
     expect(menu()).not.toBeNull();
     expect(menuLabels()).toContain('메시지 전체 복사');
   });
+
+  it('the «⋯» button is also shown where nothing can hover (a device whose primary pointer reads «fine» — a stylus source, a tablet with a mouse — must still get it), and the two classes generate the real media rules', async () => {
+    await render('hello brave new world');
+    const btn = container.querySelector('[data-testid="chat-bubble-menu-button"]') as HTMLButtonElement;
+    const classes = btn.className.split(/\s+/);
+    expect(classes).toContain('hidden');
+    expect(classes).toContain('pointer-coarse:inline-flex');
+    expect(classes).toContain('[@media(hover:none)]:inline-flex');
+    // the class names are only text until Tailwind turns them into CSS: compile the button's own classes and read the media rules back
+    const { compile } = await import('tailwindcss');
+    const css = (await compile('@tailwind utilities;')).build(classes);
+    expect(css).toMatch(/\.pointer-coarse\\:inline-flex\s*\{\s*@media \(pointer: coarse\)\s*\{\s*display: inline-flex;/);
+    expect(css).toMatch(/\.\\\[\\@media\\\(hover\\:none\\\)\\\]\\:inline-flex\s*\{\s*@media \(hover:\s*none\)\s*\{\s*display: inline-flex;/);
+    // and the plain «hidden» comes BEFORE both (a later rule wins), so the media rules can show the button
+    expect(css.indexOf('.hidden')).toBeGreaterThan(-1);
+    expect(css.indexOf('.hidden')).toBeLessThan(css.indexOf('pointer-coarse'));
+    expect(css.indexOf('.hidden')).toBeLessThan(css.indexOf('hover\\:none'));
+  });
 });
 
 describe('story 4855 — a drag / double click on inline code or a link does not fire the one-click copy or a drag', () => {
