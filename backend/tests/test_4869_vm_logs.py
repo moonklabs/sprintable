@@ -216,6 +216,40 @@ def test_the_marker_is_gone_after_a_restore(box) -> None:
     assert p.returncode == 1 and not (target.parent / "config.yaml.loaded").exists()
 
 
+@pytest.mark.parametrize("units", ["", "   ", "\t"])
+def test_a_blank_unit_list_is_refused_because_it_would_make_the_agent_always_up(box, units: str) -> None:
+    run, target, _ = box
+    p, log = run(OPS_AGENT_UNITS=units)
+    assert p.returncode == 2 and "OPS_AGENT_UNITS" in p.stderr and not target.exists() and "systemctl" not in log
+
+
+@pytest.mark.parametrize("name,value", [("OPS_AGENT_TRIES", "08"), ("OPS_AGENT_TRIES", "09"), ("OPS_AGENT_WAIT", "08"), ("OPS_AGENT_WAIT", "00")])
+def test_numbers_with_a_leading_zero_are_numbers_not_broken_octal_ones(box, name: str, value: str) -> None:
+    """`$((08))` is an error in bash: it used to abort the script after the file was installed and before any restore — here the agent never comes up (FAKE_ACTIVE=0) and the failure path must still restore"""
+    run, target, new = box
+    target.parent.mkdir(parents=True)
+    target.write_text("# old\n")
+    env = {name: value, "FAKE_ACTIVE": "0"}
+    if name == "OPS_AGENT_TRIES":
+        env["OPS_AGENT_WAIT"] = "0"
+    else:
+        env["OPS_AGENT_TRIES"] = "2"
+    p, _ = run(**env)
+    assert p.returncode == 1 and "the previous state is back" in p.stderr and "syntax error" not in p.stderr and "value too great" not in p.stderr
+    assert target.read_text() == "# old\n"
+
+
+def test_a_backup_that_cannot_be_removed_after_a_restore_is_reported(box, tmp_path: Path) -> None:
+    run, target, new = box
+    target.parent.mkdir(parents=True)
+    target.write_text("# old\n")
+    rm = tmp_path / "bin" / "rm"
+    rm.write_text('#!/bin/sh\nfor a in "$@"; do case "$a" in *.previous.*) exit 1 ;; esac; done\nexec /bin/rm "$@"\n')
+    rm.chmod(rm.stat().st_mode | stat.S_IXUSR)
+    p, _ = run(FAKE_ACTIVE="0")
+    assert p.returncode == 1 and "could not be removed after the restore" in p.stderr
+
+
 def test_an_empty_unit_list_is_refused_because_it_would_make_the_agent_always_up(box) -> None:
     run, target, _ = box
     p, log = run(OPS_AGENT_UNITS="")
