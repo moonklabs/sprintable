@@ -891,11 +891,14 @@ async def _dispatch_conversation_event(
             )
 
     # 참여자 조회 — story #4500: this org's conversation · this org's members only
-    from app.services.member_resolver import conversation_member_ids_in_org
+    from app.services.member_resolver import conversation_member_ids_in_org, without_agents_lacking_the_rooms_project
 
     participant_ids = (
         await conversation_member_ids_in_org(db, conversation.id, org_id)
     ) - {sender.id} - (exclude_ids or set())
+    # story #4846 (AC14): an agent that has not the room's project cannot read the room (AC12) — and is not sent its words either (the webhook / channel decisions in
+    # `route_message` take the same cut, in `conversation_member_ids_of_its_org`)
+    participant_ids = await without_agents_lacking_the_rooms_project(db, conversation.id, org_id, participant_ids)
 
     if not participant_ids:
         return []
@@ -1009,9 +1012,18 @@ async def _admit_mentioned_non_participants(
     from app.models.member import Member
     from app.services.conversation_auth import agent_project_valid_for_room
 
-    outside_agents = set((await db.execute(
-        select(Member.id).where(Member.id.in_(outside), Member.org_id == conversation.org_id, Member.type == "agent")
-    )).scalars().all()) if outside else set()
+    # …and the same for an agent that IS a participant but has lost the room's project (AC14): the delivery cut above leaves it out of the message and the webhook, so the
+    # mention event would be the one road still carrying the words — it keeps the mention (the bell) and nothing of the words, as an outsider the sender could not add does.
+    named = [m for m in dict.fromkeys(mentioned_ids) if m != sender.id]
+    named_agents = set((await db.execute(
+        select(Member.id).where(Member.id.in_(named), Member.org_id == conversation.org_id, Member.type == "agent")
+    )).scalars().all()) if named else set()
+    outside_agents = named_agents & set(outside)
+    for mid in named:
+        if mid in current and mid in named_agents and not await agent_project_valid_for_room(
+            db, caller_is_agent=True, caller_id=mid, conv_project_id=conversation.project_id, org_id=conversation.org_id,
+        ):
+            withheld.add(mid)
     for mid in outside:
         if mid in outside_agents and not await agent_project_valid_for_room(
             db, caller_is_agent=True, caller_id=mid, conv_project_id=conversation.project_id, org_id=conversation.org_id,
@@ -2676,6 +2688,15 @@ async def add_participant(
     target = await resolve_member_identity(body.member_id, org_id, db)
     if target is None:
         raise HTTPException(status_code=404, detail="Member not found")
+
+    # story #4846 (AC14): an agent reads a room WITH a project only while it has that project (AC12) — seating one that has not would hand it every message of a room it cannot
+    # read (the delivery cuts it off too, for a seat taken before this rule or a project taken away later; the mention's admission asks the same question).
+    from app.services.conversation_auth import agent_project_valid_for_room
+
+    if not await agent_project_valid_for_room(
+        db, caller_is_agent=getattr(target, "type", None) == "agent", caller_id=body.member_id, conv_project_id=conv.project_id, org_id=org_id,
+    ):
+        raise HTTPException(status_code=403, detail="Agent has no access to this room's project")
 
     # E-MSG-POLICY S1: 참가자 추가도 동일 정책 게이트 (back-door 차단).
     # 기존 참가자 ∪ 신규 대상으로 각 에이전트 정책 재검증 (list 모드 비허용 휴먼 추가 시 403 등).
