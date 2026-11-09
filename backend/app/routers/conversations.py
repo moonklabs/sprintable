@@ -978,6 +978,48 @@ async def _dispatch_conversation_event(
             for pid_str, event in events_to_push]
 
 
+# story #4846 (AC9) — what a mention carries to someone who is NOT in the room and could not be put in it: that somebody mentioned them, where, and who — never the words.
+# A closed list of what stays (anything not named here is dropped, so a field added to the message payload later does not start to travel to a person who cannot read it).
+_MENTION_WITHOUT_TEXT_KEYS = ("id", "conversation_id", "created_at", "sender_org_id", "sender")
+
+
+def _mention_payload_without_text(payload: dict, target_id: uuid.UUID) -> dict:
+    out = {k: payload[k] for k in _MENTION_WITHOUT_TEXT_KEYS if k in payload}
+    out.update(content="", attachments=[], mentioned_ids=[str(target_id)], content_withheld=True)
+    return out
+
+
+async def _admit_mentioned_non_participants(
+    db: AsyncSession, conversation: Conversation, sender: "ResolvedMember | TeamMember", mentioned_ids: list[uuid.UUID],
+) -> set[uuid.UUID]:
+    """story #4846 (AC9) — a mention of someone who is not in the room: if the sender could add them (the same gate as «add a participant»: the agents' creator /
+    allowlist policy over the room's people plus this one), they are put in the room — the message and everything after it reach them as it reaches any participant (the
+    1:1 «mention forks a group» of CB-S2 does the same). If the sender could not, they keep the mention (the bell) and nothing of the words: the ids returned here.
+    Before this a group room sent the mention WITH the text to a person who could not read the room (story #2127 meant «a mention reaches whoever it names»; the words were the hole)."""
+    if not mentioned_ids:
+        return set()
+    current = set((await db.execute(
+        select(ConversationParticipant.member_id).where(ConversationParticipant.conversation_id == conversation.id)
+    )).scalars().all())
+    outside = [m for m in dict.fromkeys(mentioned_ids) if m not in current and m != sender.id]
+    withheld: set[uuid.UUID] = set()
+    added = False
+    for mid in outside:
+        try:
+            await _enforce_agent_creator_policy(sender, list(current | {mid}), db)
+        except HTTPException as e:
+            if e.status_code != 403:
+                raise
+            withheld.add(mid)
+            continue
+        db.add(ConversationParticipant(conversation_id=conversation.id, member_id=mid))
+        current.add(mid)
+        added = True
+    if added:
+        await db.flush()
+    return withheld
+
+
 async def _dispatch_mention_events(
     db: AsyncSession,
     conversation: Conversation,
@@ -987,6 +1029,7 @@ async def _dispatch_mention_events(
     mention_targets: set[uuid.UUID],
     webhook_covered_ids: set[uuid.UUID] | None = None,
     references: list[dict[str, str]] | None = None,
+    content_withheld_ids: set[uuid.UUID] | None = None,
 ) -> list[tuple[str, dict]]:
     """AC1: 멘션 대상에게 conversation:mention Event INSERT + flush. push 페이로드 반환 (commit 후 호출).
 
@@ -1008,6 +1051,7 @@ async def _dispatch_mention_events(
     # E-EVENT-1CONFIG(이중수신 박멸): webhook-covered agent 는 SSE(conversation:mention) 스킵 —
     # webhook 이 동일 메시지를 전달. covered 집합은 webhook 실 전달과 같은 snapshot(TOCTOU 차단).
     webhook_covered = webhook_covered_ids or set()
+    withheld = content_withheld_ids or set()   # story #4846 (AC9): named but not in the room (and not addable) — the bell, not the words
 
     events_to_push: list[tuple[str, Event]] = []
     for pid in sorted(mention_targets):  # deadlock 방지: 일관 락 순서
@@ -1024,7 +1068,7 @@ async def _dispatch_mention_events(
             sender_id=sender.id,
             recipient_id=pid,
             recipient_type=m_type,
-            payload=payload,
+            payload=_mention_payload_without_text(payload, pid) if pid in withheld else payload,
             status="pending",
         )
         db.add(event)
@@ -1041,7 +1085,7 @@ async def _dispatch_mention_events(
     # E-ACTIVATION S1(까디르 QA blocker): 멘션 반환도 recipient_seq/recipient_id를 실어야
     # direct-push↔wake-rescan 활성화 판정이 동형이 된다(안 실으면 대상 본인한테도 addressed_to_you=no로 새고
     # 리플레이 시 뒤집힘 — 이 기능이 막으려던 과소/과잉참여를 오히려 만든다).
-    return [(pid_str, {"event_id": str(event.id), "event_type": "conversation:mention", **payload,
+    return [(pid_str, {"event_id": str(event.id), "event_type": "conversation:mention", **event.payload,
                        "recipient_seq": event.recipient_seq, "recipient_id": pid_str})
             for pid_str, event in events_to_push]
 
@@ -2912,6 +2956,12 @@ async def send_message_core(
             conversation_id = fork_conv_id
             conv = fork_conv
 
+    # story #4846 (AC9): a group room's mention of someone who is not in it — put them in if the sender could add them (the same gate as «add a participant»), else they keep
+    # the mention and not the words (`withheld_mentions`: the delivery below sends them the bell only). A DM never reaches here with an outsider: the fork above made them one.
+    withheld_mentions: set[uuid.UUID] = set()
+    if valid_mentioned_ids and sender.id is not None:
+        withheld_mentions = await _admit_mentioned_non_participants(db, conv, sender, valid_mentioned_ids)
+
     # thread_id 유효성 검증 — 같은 conversation의 top-level message만 허용
     root_msg: ConversationMessage | None = None
     if body.thread_id is not None:
@@ -3304,6 +3354,7 @@ async def send_message_core(
                         db, conv, msg, org_id, sender, mention_targets,
                         webhook_covered_ids=webhook_covered_ids,
                         references=msg_references,
+                        content_withheld_ids=withheld_mentions,
                     )
                 pending_sse_pushes += mention_pushes
                 mention_evented = frozenset(uuid.UUID(pid) for pid, _ in mention_pushes)
@@ -3343,6 +3394,23 @@ async def send_message_core(
                     # 자체가 안 감). filter_human_member_ids(member_resolver.py, org_members·
                     # team_members(human) 둘 다 보는 배치 조회)로 통일.
                     human_mention_targets = list(await filter_human_member_ids(mention_targets, db))
+                    # story #4846 (AC9): a person named from outside the room whom the sender could not put in it gets the bell and a push — with no words (no preview, no
+                    # event card: an event card carries the message's own payload).
+                    bare_mention_targets = [t for t in human_mention_targets if t in withheld_mentions]
+                    human_mention_targets = [t for t in human_mention_targets if t not in withheld_mentions]
+                    if bare_mention_targets:
+                        from app.services.notification_dispatch import dispatch_notification as _dispatch_bare
+                        await _dispatch_bare(
+                            db, org_id=org_id, event_type="conversation.mention",
+                            target_member_ids=bare_mention_targets,
+                            title=f"{sender.name or UNNAMED_MEMBER_LABEL}님이 나를 멘션했어요",
+                            body=None,
+                            reference_type="conversation", reference_id=conversation_id,
+                            source_project_id=conv.project_id,
+                            event={"sender_name": sender.name or UNNAMED_MEMBER_LABEL},
+                            via_outbox=True,
+                            human_event_recorded_for=mention_evented,
+                        )
                     if human_mention_targets:
                         from app.services.notification_dispatch import dispatch_notification
                         await dispatch_notification(

@@ -793,15 +793,18 @@ async def test_send_message_filters_cross_org_mentions_group():
 
         mention_calls = {}
         async def _capture_mention(db, conversation, msg, org_id, sender, mention_targets,
-                                   webhook_covered_ids=None, references=None):
+                                   webhook_covered_ids=None, references=None, content_withheld_ids=None):
             mention_calls["targets"] = set(mention_targets)
             return []
 
         # story #4505: mentions resolve through member_resolver.org_mention_ids (alias → canonical, then the org filter)
+        # story #4846 (AC9): putting a mentioned outsider in the room is its own helper with its own real-database tests (test_4846_ac9_*); this test is about the cross-org filter
         with patch("app.services.member_resolver.canonicalize_member_ids",
                    new=AsyncMock(side_effect=lambda ids, *a, **kw: {i: i for i in ids})), \
              patch("app.services.member_resolver.filter_org_member_ids",
                    new=AsyncMock(return_value={valid_id})), \
+             patch("app.routers.conversations._admit_mentioned_non_participants",
+                   new=AsyncMock(return_value=set())), \
              patch("app.services.conversation_webhook.resolve_conversation_webhook_targets",
                    new=AsyncMock(return_value=[])), \
              patch("app.routers.conversations._dispatch_conversation_event",
