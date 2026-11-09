@@ -48,6 +48,7 @@ const INBOX_LABEL_KEYS: Record<string, string> = {
   'agent.turn_ended': 'filter_agent_turn_ended', // story #4534 — «다음 일 기다림»
   'agent.limit_paused': 'filter_agent_limit_paused', // story #4833 — «한도로 쉬는 중»
   'agent.limit_lifted': 'filter_agent_limit_lifted', // story #4833 — «다시 일하는 중»
+  'agent.restart_stopped': 'filter_agent_restart_stopped', // story 4863 — «꺼진 뒤 다시 서지 못함»
 };
 
 export function getInboxNotificationLabel(
@@ -143,6 +144,12 @@ export function getDispatchedHeadline(
     // story #4534 (명세 B-3 푸시) — «{에이전트} · 다음 일 기다림» (the agent first, as the push title); never «마쳤어요»
     const agent = typeof payload?.['agent_name'] === 'string' ? payload['agent_name'].trim() : '';
     const label = t('filter_agent_turn_ended');
+    return agent ? `${agent} · ${label}` : label;
+  }
+  if (inner === 'agent.restart_stopped') {
+    // story 4863 — «{에이전트} · 꺼진 뒤 다시 서지 못함»: the name only from `payload.agent_name`, the server's title is not read (as the limit notices)
+    const agent = typeof payload?.['agent_name'] === 'string' ? payload['agent_name'].trim() : '';
+    const label = t('filter_agent_restart_stopped');
     return agent ? `${agent} · ${label}` : label;
   }
   if (inner === 'agent.limit_paused' || inner === 'agent.limit_lifted') {

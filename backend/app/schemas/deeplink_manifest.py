@@ -802,6 +802,19 @@ DEEPLINK_MANIFEST = DeepLinkManifest(
                 required_payload=["reference_id"],
             ),
         ),
+        # story 4863 — an agent on the person's computer was ended from outside and nothing started it again (reference_id = the agent). Like the limit notices:
+        # no screen of its own to open yet → the «지금» tab.
+        DeepLinkManifestEntry(
+            app=DeepLinkAppFields(
+                type="agent.restart_stopped", target="now", parent_tab=ParentTab.all,
+                target_promotion_pending=True,
+                return_policy=ReturnPolicy.fallback_now,
+            ),
+            payload=DeepLinkPayloadFields(
+                org_id_included=True, project_id_included=False,
+                required_payload=["reference_id"],
+            ),
+        ),
         # story #4534 (E-DESKTOP-2 B-3) — the turn a phone's [지금 지시] went into has ended: opens the conversation the agent
         # answers in (reference_id = that conversation). project_id: the device's setup may have none, so not promised.
         DeepLinkManifestEntry(
