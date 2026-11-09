@@ -62,6 +62,9 @@ async def get_activity_stream(
     if project_id is None:
         from app.services.project_auth import accessible_project_ids_in_org
         project_ids = await accessible_project_ids_in_org(db, uuid.UUID(auth.user_id), org_id)
+    # story #4846 (AC14) — a chat message's activity copies its words: shown only to who may read its room (the same predicate as every read), not to every member of the project.
+    from app.services.conversation_auth import readable_room_clause
+
     rows, next_cursor = await query_activity_stream(
         db,
         org_id,
@@ -77,6 +80,7 @@ async def get_activity_stream(
         before_seq=before_seq,
         order=order,
         limit=limit,
+        room_read_clause=await readable_room_clause(db, org_id, auth),
     )
     return ActivityStreamResponse(
         items=[ActivityStreamItem.model_validate(row) for row in rows],

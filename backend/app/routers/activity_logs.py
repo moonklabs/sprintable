@@ -104,6 +104,19 @@ async def list_activity_logs(
     # AC5: org scope 필터 (외부 접근 불가 — get_verified_org_id가 403 처리)
     q = select(ActivityLog).where(ActivityLog.org_id == org_id)
 
+    # story #4846 (AC14) — an entry about a ROOM («message_sent» keeps a preview of what an agent said there) is shown only to who may read that room (the same predicate as every read),
+    # not to every member of its project. Entries about anything else are untouched.
+    from sqlalchemy import exists as _exists
+    from sqlalchemy import or_ as _or
+
+    from app.models.conversation import Conversation
+    from app.services.conversation_auth import readable_room_clause
+
+    q = q.where(_or(
+        ActivityLog.entity_type.is_distinct_from("conversation"),
+        _exists().where(Conversation.id == ActivityLog.entity_id, Conversation.org_id == org_id, await readable_room_clause(db, org_id, auth)),
+    ))
+
     if project_id:
         q = q.where(ActivityLog.project_id == project_id)
     else:
