@@ -36,6 +36,8 @@ if [ -z "$sa" ]; then
   exit 2
 fi
 
+# `bash -x` (or SHELLOPTS=xtrace) prints every command with its expanded values — the bearer token would be among them. No trace inside the part that holds the token; it is switched back on after.
+{ was_x=0; case $- in *x*) was_x=1 ;; esac; set +x; } 2> /dev/null
 attempt=1
 code=000
 body=""
@@ -57,6 +59,8 @@ while :; do
   attempt=$((attempt + 1))
   sleep "$wait_s"
 done
+unset token token_json
+[ "$was_x" = 1 ] && set -x
 
 if [ "$code" = 200 ]; then
   echo "signing check: $sa can sign as itself (signBlob 200) — attachment previews and file opening work"

@@ -69,14 +69,14 @@ def box(tmp_path: Path):
     log = tmp_path / "curl.log"
     log.write_text("")
 
-    def run(**env: str) -> tuple[subprocess.CompletedProcess, str]:
+    def run(_bash: tuple = (), **env: str) -> tuple[subprocess.CompletedProcess, str]:
         full = {
             "PATH": f"{bin_dir}:{os.environ['PATH']}", "HOME": str(tmp_path),
             "FAKE_LOG": str(log), "FAKE_SA": SA, "FAKE_TOKEN": TOKEN, "FAKE_COUNT": str(tmp_path / "count"),
             "SIGNING_CHECK_WAIT": "0", "SIGNING_CHECK_TRIES": "3",
             **env,
         }
-        p = subprocess.run(["bash", str(_SCRIPT)], capture_output=True, text=True, env=full, timeout=60)
+        p = subprocess.run(["bash", *_bash, str(_SCRIPT)], capture_output=True, text=True, env=full, timeout=60)
         return p, log.read_text()
 
     return run
@@ -161,18 +161,30 @@ def test_the_tls_key_log_variable_never_reaches_curl(box) -> None:
     assert len(envs) == 3 and set(envs) == {"ENV SSLKEYLOGFILE=unset"}, envs
 
 
-def test_the_source_has_exactly_three_curl_calls_each_with_dash_q_and_noproxy_star_and_no_other_proxy_option() -> None:
-    """the fake cannot prove routing (a later `--noproxy ''` would win in real curl), so the source text is pinned too: a continued line is ONE command, and every mention of curl is a call"""
+def test_the_source_holds_exactly_these_three_curl_commands_and_no_other_mention_of_curl() -> None:
+    """an exact-text pin (a whitelist): any new option, a variable that expands to options, an env-prefixed call or a fourth call changes this text and fails here — to be reviewed on purpose, then this test updated"""
     code = re.sub(r"(?m)^\s*#.*$", "", _SCRIPT.read_text())
     code = re.sub(r"\\\n\s*", " ", code)
+    code = re.sub(r"[ \t]+", " ", code)
+    expected = [
+        "$(curl -q --noproxy '*' -fsS -m 10 -H 'Metadata-Flavor: Google' \"$md/instance/service-accounts/default/email\" 2> /dev/null)",
+        "$(curl -q --noproxy '*' -fsS -m 10 -H 'Metadata-Flavor: Google' \"$md/instance/service-accounts/default/token\" 2> /dev/null)",
+        "| curl -q --noproxy '*' -sS -m 20 -w '\\n%{http_code}' -X POST -H @- -H 'Content-Type: application/json' -d '{\"payload\":\"c2lnbmluZy1jaGVjaw==\"}' \"$iam/v1/projects/-/serviceAccounts/$sa:signBlob\" 2> /dev/null)",
+    ]
+    for e in expected:
+        assert code.count(e) == 1, f"missing or changed: {e}"
     assert code.lower().count("curl") == 3, "a fourth call, an indirection ($CURL_BIN) or a mention of curl in code"
-    calls = re.findall(r"curl [^)]*", code)
-    assert len(calls) == 3, calls
-    for c in calls:
-        assert c.startswith("curl -q --noproxy '*' "), c
-        assert c.count("--noproxy") == 1 and "--proxy" not in c and not re.search(r"\s-x\s", c), c
-        assert " -K " not in c and "--config" not in c, c
-        assert "--location" not in c and not re.search(r"\s-[A-Za-z]*L", c), "curl must not follow redirects"
+
+
+@pytest.mark.parametrize("how", ["dash_x", "shellopts"])
+@pytest.mark.parametrize("code", ["200", "403"])
+def test_a_bash_trace_never_prints_the_bearer_token(box, how: str, code: str) -> None:
+    """`bash -x` prints every command with its expanded values: the token must not be among them (stdout, stderr — the trace goes to stderr)"""
+    kw = {"_bash": ("-x",)} if how == "dash_x" else {"SHELLOPTS": "xtrace"}
+    p, _ = box(FAKE_SIGN_CODE=code, SIGNING_CHECK_TRIES="1", **kw)
+    assert p.returncode == (0 if code == "200" else 1)
+    assert TOKEN not in p.stdout and TOKEN not in p.stderr, "the token is in the trace"
+    assert "+ " in p.stderr, "the trace itself is still on outside the token part (the test would pass for the wrong reason otherwise)"
 
 
 def test_the_signblob_request_is_exactly_the_documented_one(box) -> None:
