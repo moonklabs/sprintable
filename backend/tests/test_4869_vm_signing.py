@@ -23,7 +23,8 @@ TOKEN = "ya29.SECRET-TOKEN-VALUE"
 
 # the fake curl: answers the two metadata reads, and for signBlob answers what FAKE_SIGN_CODE says; logs every call (arguments only) and whether the bearer token reached it on standard input
 _FAKE_CURL = r"""#!/bin/sh
-printf 'curl %s\n' "$*" >> "$FAKE_LOG"   # printf, not echo: sh's echo turns the backslash-n inside curl's -w argument into a real newline
+printf 'curl %s\n' "$*" >> "$FAKE_LOG"
+printf 'ENV SSLKEYLOGFILE=%s\n' "${SSLKEYLOGFILE-unset}" >> "$FAKE_LOG"   # printf, not echo: sh's echo turns the backslash-n inside curl's -w argument into a real newline
 # strict like the real service: curl must be started with -q (no ~/.curlrc may read the bearer header), the metadata server wants its header, and signBlob must be a POST of the exact JSON payload
 # with the header file on standard input and the status code appended — anything else is answered 400 / refused
 [ "$1" = "-q" ] || { printf 'NOQ %s\n' "$*" >> "$FAKE_LOG"; exit 2; }
@@ -150,6 +151,28 @@ def test_no_curl_call_can_be_routed_through_a_proxy_of_the_environment(box) -> N
     assert p.returncode == 0
     calls = [l for l in log.splitlines() if l.startswith("curl ")]
     assert len(calls) == 3 and all(l.startswith("curl -q --noproxy * ") for l in calls), calls
+
+
+def test_the_tls_key_log_variable_never_reaches_curl(box) -> None:
+    """curl writes TLS secrets to $SSLKEYLOGFILE: the check unsets it before any call"""
+    p, log = box(SSLKEYLOGFILE="/tmp/keys.log")
+    assert p.returncode == 0
+    envs = [l for l in log.splitlines() if l.startswith("ENV SSLKEYLOGFILE=")]
+    assert len(envs) == 3 and set(envs) == {"ENV SSLKEYLOGFILE=unset"}, envs
+
+
+def test_the_source_has_exactly_three_curl_calls_each_with_dash_q_and_noproxy_star_and_no_other_proxy_option() -> None:
+    """the fake cannot prove routing (a later `--noproxy ''` would win in real curl), so the source text is pinned too: a continued line is ONE command, and every mention of curl is a call"""
+    code = re.sub(r"(?m)^\s*#.*$", "", _SCRIPT.read_text())
+    code = re.sub(r"\\\n\s*", " ", code)
+    assert code.lower().count("curl") == 3, "a fourth call, an indirection ($CURL_BIN) or a mention of curl in code"
+    calls = re.findall(r"curl [^)]*", code)
+    assert len(calls) == 3, calls
+    for c in calls:
+        assert c.startswith("curl -q --noproxy '*' "), c
+        assert c.count("--noproxy") == 1 and "--proxy" not in c and not re.search(r"\s-x\s", c), c
+        assert " -K " not in c and "--config" not in c, c
+        assert "--location" not in c and not re.search(r"\s-[A-Za-z]*L", c), "curl must not follow redirects"
 
 
 def test_the_signblob_request_is_exactly_the_documented_one(box) -> None:

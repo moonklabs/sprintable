@@ -11,6 +11,8 @@
 # Exit codes: 0 signed · 1 refused or no answer (the message says which) · 2 the metadata server could not be read (not on a GCE VM?), or the settings are refused (bad count/wait, a URL override that is not loopback).
 set -uo pipefail
 
+# curl writes TLS session secrets to the file named by SSLKEYLOGFILE (with them a recorded HTTPS exchange, bearer header included, can be read back): not for this check
+unset SSLKEYLOGFILE
 md="${SIGNING_CHECK_METADATA_URL:-http://metadata.google.internal/computeMetadata/v1}"
 iam="${SIGNING_CHECK_IAM_URL:-https://iamcredentials.googleapis.com}"
 tries="${SIGNING_CHECK_TRIES-6}"
@@ -44,7 +46,7 @@ while :; do
     out="$(printf 'Authorization: Bearer %s\n' "$token" | curl -q --noproxy '*' -sS -m 20 -w '\n%{http_code}' -X POST -H @- -H 'Content-Type: application/json' \
       -d '{"payload":"c2lnbmluZy1jaGVjaw=="}' "$iam/v1/projects/-/serviceAccounts/$sa:signBlob" 2> /dev/null)" || out=""
     code="$(printf '%s' "$out" | tail -n 1)"
-    case "$code" in [0-9][0-9][0-9]) ;; *) code=000 ;; esac   # curl failed outright (no network · DNS · TLS) = «no answer», not an empty code
+    case "$code" in [0-9][0-9][0-9]) ;; *) code=000 ;; esac   # the transfer failed outright (no network · DNS · TLS) = «no answer», not an empty code
     body="$(printf '%s' "$out" | sed '$d' | head -c 300)"
   else
     code=000
