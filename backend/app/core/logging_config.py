@@ -78,3 +78,9 @@ def configure_logging(json_logs: bool = True) -> None:
     for name in ("uvicorn", "uvicorn.access", "uvicorn.error"):
         logging.getLogger(name).handlers.clear()
         logging.getLogger(name).propagate = True
+
+    # story 4869 — httpx / httpcore log EVERY outgoing request at INFO with its FULL URL («HTTP Request: GET https://graph.facebook.com/…?access_token=…»): Instagram / Facebook / Meta Ads tokens,
+    # an OAuth client_secret, a GA4 token and the organisation webhook URLs travel in the query or the path of those URLs. They must reach no log (Cloud Run's, and now the VM's Cloud Logging);
+    # WARNING keeps failures visible (a failed request is logged by the code that made it, without the URL's secrets).
+    for name in ("httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
