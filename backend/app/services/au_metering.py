@@ -163,7 +163,7 @@ def _au_weight_for(method: str, response: Response) -> int:
 from app.core.bounded_gate import LoopGate  # noqa: E402 — story #4867
 from app.core.config import settings as _gate_settings  # noqa: E402
 
-_au_gate = LoopGate(lambda: _gate_settings.au_metering_max_concurrent)
+_au_gate = LoopGate(lambda: _gate_settings.au_metering_max_concurrent, name="au_metering")
 
 
 async def _record_au_usage_safe(org_id: uuid.UUID, delta: int) -> None:
