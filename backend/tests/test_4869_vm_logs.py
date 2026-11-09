@@ -140,6 +140,7 @@ _FAKE_SYSTEMCTL = r"""#!/bin/sh
 printf 'systemctl %s\n' "$*" >> "$FAKE_LOG"
 case "$1" in
   is-active) [ "${FAKE_ACTIVE-1}" = 1 ] && exit 0 || exit 3 ;;
+  restart) [ "${FAKE_RESTART_FAIL-0}" = 1 ] && exit 5 ;;
 esac
 exit 0
 """
@@ -231,6 +232,38 @@ def test_a_target_directory_that_cannot_be_made_is_a_failure(box, tmp_path: Path
     (tmp_path / "etc").write_text("a file where the directory should be")
     p, _ = run()
     assert p.returncode == 1 and "cannot write" in p.stderr
+
+
+def test_a_restart_that_fails_is_a_failure_even_if_the_unit_still_shows_active(box) -> None:
+    """`systemctl restart` failing while the old process keeps running would otherwise read as «unit active = success» with the new file never loaded"""
+    run, target, new = box
+    target.parent.mkdir(parents=True)
+    target.write_text("# the previous configuration\n")
+    p, log = run(FAKE_RESTART_FAIL="1", FAKE_ACTIVE="1")
+    assert p.returncode == 1 and "OPS AGENT CONFIG FAILED" in p.stderr and "restart" in p.stderr
+    assert target.read_text() == "# the previous configuration\n" and not list(target.parent.glob("config.yaml.previous.*"))
+
+
+def test_a_target_that_is_a_directory_is_refused_and_nothing_is_changed(box) -> None:
+    run, target, new = box
+    target.mkdir(parents=True)
+    p, log = run()
+    assert p.returncode == 1 and "not a regular file" in p.stderr and "systemctl" not in log
+    assert not (target / "new.yaml").exists() and not list(target.iterdir())
+
+
+def test_a_restore_that_fails_is_said_so_not_claimed(box, tmp_path: Path) -> None:
+    """the old file could not be copied back: the installer says it is NOT fully back and keeps the backup, instead of claiming the old configuration is back"""
+    run, target, new = box
+    target.parent.mkdir(parents=True)
+    target.write_text("# the previous configuration\n")
+    fake = tmp_path / "bin" / "cp"
+    fake.write_text("#!/bin/sh\n# the first cp (the backup) works; any later one fails\nif [ -e \"$FAKE_LOG.cp\" ]; then exit 1; fi\n: > \"$FAKE_LOG.cp\"\nexec /bin/cp \"$@\"\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    p, log = run(FAKE_ACTIVE="0")
+    assert p.returncode == 1
+    assert "could NOT be copied back" in p.stderr and "NOT fully back" in p.stderr
+    assert list(target.parent.glob("config.yaml.previous.*")), "the backup is kept when the restore failed"
 
 
 def test_a_successful_install_leaves_no_backup_file(box) -> None:

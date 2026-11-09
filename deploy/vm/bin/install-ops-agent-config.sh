@@ -33,13 +33,17 @@ fail() {
   exit 1
 }
 
+if [ -e "$target" ] && [ ! -f "$target" ]; then
+  fail "$target exists and is not a regular file — nothing was changed"
+fi
+
 if [ -f "$target" ] && cmp -s "$src" "$target"; then
   if units_up; then
     echo "ops agent config: already in place ($target), unit(s) [$units] active — nothing to do"
     exit 0
   fi
   echo "ops agent config: already in place but unit(s) [$units] are not active — restarting the agent" >&2
-  systemctl restart google-cloud-ops-agent || true
+  systemctl restart google-cloud-ops-agent || fail "the agent could not be restarted (systemctl restart failed)"
   attempt=1
   while :; do
     sleep "$wait_s"
@@ -71,26 +75,32 @@ restore() {
       echo "  the previous configuration could NOT be copied back — it is kept as $backup" >&2
     fi
   else
-    rm -f "$target" || ok=0
+    rm -f "$target" || { ok=0; echo "  $target (ours) could NOT be removed" >&2; }
   fi
-  systemctl restart google-cloud-ops-agent || true
+  systemctl restart google-cloud-ops-agent || { ok=0; echo "  the agent could not be restarted after the restore" >&2; }
   [ "$ok" = 1 ]
 }
 
-systemctl restart google-cloud-ops-agent || true
+give_up() {
+  echo "OPS AGENT CONFIG FAILED: $1 — the previous state is put back and the agent restarted." >&2
+  echo "  Look: sudo journalctl -u google-cloud-ops-agent-fluent-bit -n 50 --no-pager   (the configuration is deploy/vm/ops-agent/config.yaml)" >&2
+  if ! restore; then
+    echo "OPS AGENT CONFIG: the previous state is NOT fully back — see the lines above, look at $target by hand" >&2
+  fi
+  exit 1
+}
+
+systemctl restart google-cloud-ops-agent || give_up "systemctl restart google-cloud-ops-agent failed"
 attempt=1
 while :; do
   sleep "$wait_s"
   units_up && break
-  if [ "$attempt" -ge "$tries" ]; then
-    echo "OPS AGENT CONFIG FAILED: with the new configuration the unit(s) [$units] did not come up within $((tries * wait_s)) s — the previous state is put back and the agent restarted." >&2
-    echo "  Look: sudo journalctl -u google-cloud-ops-agent-fluent-bit -n 50 --no-pager   (the configuration is deploy/vm/ops-agent/config.yaml)" >&2
-    restore
-    exit 1
-  fi
+  [ "$attempt" -ge "$tries" ] && give_up "with the new configuration the unit(s) [$units] did not come up within $((tries * wait_s)) s"
   attempt=$((attempt + 1))
 done
 
-[ -n "$backup" ] && rm -f "$backup"
+if [ -n "$backup" ] && ! rm -f "$backup"; then
+  echo "ops agent config: warning — the backup $backup could not be removed (the new configuration works; delete it by hand)" >&2
+fi
 echo "ops agent config: installed ($target), unit(s) [$units] active"
 exit 0
