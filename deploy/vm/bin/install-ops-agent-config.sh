@@ -60,9 +60,11 @@ restore() {
 }
 
 give_up() {
-  echo "OPS AGENT CONFIG FAILED: $1 — the previous state is put back and the agent restarted." >&2
+  echo "OPS AGENT CONFIG FAILED: $1 — putting the previous state back." >&2
   echo "  Look: sudo journalctl -u google-cloud-ops-agent-fluent-bit -n 50 --no-pager   (the configuration is deploy/vm/ops-agent/config.yaml)" >&2
-  if ! restore; then
+  if restore; then
+    echo "  the previous state is back and the agent restarted." >&2
+  else
     echo "OPS AGENT CONFIG: the previous state is NOT fully back — see the lines above, look at $target by hand" >&2
   fi
   exit 1

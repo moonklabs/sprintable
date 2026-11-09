@@ -228,7 +228,7 @@ def test_an_agent_that_does_not_come_up_gets_its_old_configuration_back_and_the_
     target.write_text("# the previous configuration\n")
     p, log = run(FAKE_ACTIVE="0")
     assert p.returncode == 1
-    assert "OPS AGENT CONFIG FAILED" in p.stderr and "previous state is put back" in p.stderr
+    assert "OPS AGENT CONFIG FAILED" in p.stderr and "the previous state is back and the agent restarted" in p.stderr
     assert target.read_text() == "# the previous configuration\n"
     assert log.count("systemctl restart google-cloud-ops-agent") == 2, "restarted once with the new file and once after putting the old one back"
     assert not list(target.parent.glob("config.yaml.previous.*")), "no backup file is left behind"
@@ -268,7 +268,7 @@ def test_a_write_that_fails_is_a_failure_and_the_previous_file_is_back(box, tmp_
     fake.write_text("#!/bin/sh\nexit 1\n")
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
     p, log = run()
-    assert p.returncode == 1 and "cannot write" in p.stderr and "previous state is put back" in p.stderr
+    assert p.returncode == 1 and "cannot write" in p.stderr and "the previous state is back and the agent restarted" in p.stderr
     assert target.read_text() == "# the previous configuration\n" and not list(target.parent.glob("config.yaml.previous.*"))
     assert log.count("systemctl restart google-cloud-ops-agent") == 1, "after a restore the agent is restarted once (the file may have been half written)"
 
@@ -287,7 +287,7 @@ def test_a_half_written_file_and_a_failing_restore_never_claim_that_the_previous
     p, _ = run()
     assert p.returncode == 1
     assert "could NOT be copied back" in p.stderr and "NOT fully back" in p.stderr
-    assert "previous file (if any) is back" not in p.stderr and "is back" not in p.stderr.replace("is put back", "")
+    assert "the previous state is back" not in p.stderr and "is back and" not in p.stderr
     assert list(target.parent.glob("config.yaml.previous.*")), "the backup is kept"
 
 
