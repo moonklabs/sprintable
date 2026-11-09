@@ -269,8 +269,8 @@ async def test_a_dm_mention_of_several_seats_only_those_the_sender_may_add():
 
 
 @pytest.mark.parametrize("agent_first", [True, False])
-async def test_naming_an_agents_creator_with_it_seats_both_whatever_the_order_of_the_mention(agent_first):
-    """the creator policy asks who is in the room: a creator named in the SAME message is seated first, so the agent passes — the mention's order does not decide."""
+async def test_naming_an_agents_creator_with_it_seats_both_in_a_dm_whatever_the_order_of_the_mention(agent_first):
+    """the creator policy asks who is in the room: a creator named in the SAME message is in the room by the time the agent is asked again, so the agent passes — the mention's order does not decide."""
     from tests.test_1994_backlink_api_realdb import _make_conversation
 
     engine, Session, w = await _world()
@@ -284,6 +284,25 @@ async def test_naming_an_agents_creator_with_it_seats_both_whatever_the_order_of
         rooms = await _rooms_with(Session, restricted)
         assert len(rooms) == 1
         assert w.h_c in set(await _members_of(Session, rooms[0]))
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.parametrize("agent_first", [True, False])
+async def test_naming_an_agents_creator_with_it_seats_both_in_a_group_whatever_the_order_of_the_mention(agent_first):
+    """the same in a group room (the people are seated before the agents are asked: the mention's order does not decide)."""
+    from tests.test_1994_backlink_api_realdb import _make_conversation
+
+    engine, Session, w = await _world()
+    try:
+        (restricted,) = await _agents_org_wide(Session, w, w.p1)
+        await _creator_only(Session, restricted, w.h_c)
+        async with Session() as s:
+            room = await _make_conversation(s, w.org, w.p1, [w.h_a, w.h_b], w.h_a, "group")
+        named = [restricted, w.h_c] if agent_first else [w.h_c, restricted]
+        await _mention_in_dm(Session, w, room, named, f"group with creator {uuid.uuid4().hex[:8]}")
+        members = set(await _members_of(Session, room))
+        assert {restricted, w.h_c} <= members
     finally:
         await engine.dispose()
 

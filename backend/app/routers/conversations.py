@@ -2989,7 +2989,7 @@ async def send_message_core(
             )).scalars().all())
             _acc = set(current_participant_ids)
             _seat: list[uuid.UUID] = []
-            for mid in sorted(non_participants, key=lambda m: (m in _agent_ids, m)):   # people first: an agent's creator policy asks who is in the room, so a named creator must be seated before it is asked
+            for mid in sorted(non_participants):
                 if await _may_seat_mentioned(db, conv, sender, _acc, mid, is_agent=mid in _agent_ids):
                     _acc.add(mid)
                     _seat.append(mid)
