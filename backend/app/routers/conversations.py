@@ -166,7 +166,7 @@ async def _resolve_member(
         # for a person's member id still resolved), so the filter is not narrowed here. A member that was deleted is not found (the `team_members` view this lookup
         # used to go through left deleted members out: `deleted_at IS NULL` is the part of the view's filter that still applies to the anchor)
         return ResolvedMember(
-            id=anchor.id, user_id=None, name=anchor.name, type=anchor.type, role="member", org_id=anchor.org_id,
+            id=anchor.id, user_id=anchor.user_id, name=anchor.name, type=anchor.type, role="member", org_id=anchor.org_id,
             project_id=None, avatar_url=anchor.avatar_url, runtime_type=anchor.runtime_type,
         )
 

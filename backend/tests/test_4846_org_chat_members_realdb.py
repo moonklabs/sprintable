@@ -260,10 +260,12 @@ async def test_a_key_claim_on_a_person_resolves_as_that_person_and_a_deleted_mem
         async with Session() as s:
             member, _user = await _make_human_member(s, w.org, w.p1)
             person = member if isinstance(member, uuid.UUID) else member.id
+            person_user = _user if isinstance(_user, uuid.UUID) else _user.id
         auth = AuthContext(user_id=str(person), email=None, claims={"app_metadata": {"api_key_id": str(uuid.uuid4()), "org_id": str(w.org)}}, org_id=str(w.org))
         async with Session() as s:
             resolved = await _resolve_member(auth, w.org, s, project_id=None)
             assert resolved.id == person and resolved.type == "human"      # a person stays a person (control: the lookup finds the live member)
+            assert resolved.user_id == person_user                         # …and keeps the account the old row carried (the creator checks compare it)
         async with Session() as s:
             await s.execute(text("UPDATE members SET deleted_at = now() WHERE id = :m"), {"m": person})
             await s.commit()
@@ -299,5 +301,27 @@ async def test_after_0472_a_new_event_row_naming_a_project_that_does_not_exist_i
             with pytest.raises(IntegrityError) as e:
                 await s.commit()
             assert "events_project_id_fkey" in str(e.value)
+    finally:
+        await engine.dispose()
+
+
+async def test_an_agent_resolved_through_the_anchor_carries_its_runtime_kind():
+    """The send path switches its server-publisher branch on `getattr(sender, "runtime_type")` (`system-publisher`), and the `team_members` row the lookup used to return carried it —
+    so the caller resolved through the `members` anchor must carry the anchor's `runtime_type`, or every server-issued notice answers 403."""
+    from sqlalchemy import text
+
+    from app.dependencies.auth import AuthContext
+    from app.routers.conversations import _resolve_member
+
+    engine, Session, w = await _world()
+    try:
+        async with Session() as s:
+            await s.execute(text("UPDATE members SET runtime_type = 'system-publisher' WHERE id = :m"), {"m": w.g_p})
+            await s.commit()
+        auth = AuthContext(user_id=str(w.g_p), email=None, claims={"app_metadata": {"api_key_id": str(uuid.uuid4()), "org_id": str(w.org)}}, org_id=str(w.org))
+        async with Session() as s:
+            resolved = await _resolve_member(auth, w.org, s, project_id=None)
+        assert resolved.id == w.g_p and resolved.type == "agent"
+        assert resolved.runtime_type == "system-publisher"
     finally:
         await engine.dispose()
