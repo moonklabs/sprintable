@@ -404,22 +404,44 @@ def test_a_lock_whose_process_is_gone_is_taken_over_and_removed_at_the_end(box) 
     assert not lock.exists(), "released at the end"
 
 
-def test_a_lock_that_is_still_being_made_is_waited_for_not_taken_over(box) -> None:
-    """the other run has made the directory but not yet written its pid (empty `pid` file): it is not stale — the pid appears within the wait and the run is refused"""
+def test_a_lock_that_is_still_being_made_is_waited_for_not_taken_over(box, tmp_path: Path) -> None:
+    """the other run has made the directory but not yet written its pid (empty `pid` file): it is not stale. No timing here: a stand-in `sleep` writes the live pid of the other run the FIRST time the installer
+    waits 0.2 s — so the test fails if the installer does not wait at all, and cannot pass if it does not look again afterwards"""
     run, target, new = box
     lock = target.parent / "config.yaml.lock.d"
     lock.mkdir(parents=True)
     (lock / "pid").write_text("")
     sleeper = subprocess.Popen(["sleep", "30"])
-    writer = subprocess.Popen(["sh", "-c", f"sleep 0.6; echo {sleeper.pid} > '{lock}/pid'"])
+    fake_sleep = tmp_path / "bin" / "sleep"
+    fake_sleep.write_text(
+        '#!/bin/sh\nif [ "$1" = 0.2 ]; then printf \'%s\\n\' "$FAKE_OTHER_PID" > "$FAKE_LOCK_PID"; printf \'waited\\n\' >> "$FAKE_LOG"; fi\nexec /bin/sleep "$@"\n'
+    )
+    fake_sleep.chmod(fake_sleep.stat().st_mode | stat.S_IXUSR)
     try:
-        p, log = run()
+        p, log = run(FAKE_OTHER_PID=str(sleeper.pid), FAKE_LOCK_PID=str(lock / "pid"))
+        assert "waited" in log, "the installer waited for the pid before judging"
         assert p.returncode == 1 and "another run of this installer is in progress" in p.stderr and "taking over" not in p.stderr and "systemctl" not in log
         assert lock.is_dir() and (lock / "pid").read_text().strip() == str(sleeper.pid), "the other run's lock is untouched"
     finally:
-        writer.wait()
         sleeper.kill()
         sleeper.wait()
+
+
+def test_a_lock_whose_pid_cannot_be_written_stops_the_run_and_leaves_no_lock(box, tmp_path: Path) -> None:
+    """mkdir succeeded but the pid file cannot be written (a stand-in `mkdir` makes the lock directory read-only): nothing is installed, no lock is left behind"""
+    import shutil
+
+    if os.geteuid() == 0:
+        pytest.skip("root can write into a read-only directory")
+    run, target, new = box
+    real_mkdir = shutil.which("mkdir")
+    fake = tmp_path / "bin" / "mkdir"
+    fake.write_text(f'#!/bin/sh\n"{real_mkdir}" "$@" || exit $?\nfor last; do :; done\ncase "$last" in *.lock.d) chmod 555 "$last" ;; esac\n')
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    p, log = run()
+    assert p.returncode == 1 and "cannot write the pid file of the lock" in p.stderr
+    assert "systemctl" not in log and not target.exists()
+    assert not (target.parent / "config.yaml.lock.d").exists(), "the lock that could not be filled is removed again"
 
 
 def test_a_run_never_removes_a_lock_that_another_run_owns(box) -> None:

@@ -53,7 +53,11 @@ if ! mkdir "$lockdir" 2> /dev/null; then
   rmdir "$lockdir" 2> /dev/null
   mkdir "$lockdir" 2> /dev/null || { echo "OPS AGENT CONFIG FAILED: cannot take the lock $lockdir" >&2; exit 1; }
 fi
-echo "$$" > "$lockdir/pid"
+if ! echo "$$" > "$lockdir/pid"; then
+  rmdir "$lockdir" 2> /dev/null
+  echo "OPS AGENT CONFIG FAILED: cannot write the pid file of the lock $lockdir — nothing was changed" >&2
+  exit 1
+fi
 trap release_lock EXIT
 
 units_up() {

@@ -152,7 +152,7 @@ def test_url_host_never_raises_on_what_a_log_argument_can_be() -> None:
             raise RuntimeError("boom")
 
     assert url_host(_Boom()) == "(unparseable-url)"
-    assert url_host("https://host.example:notaport/x") in {"(unparseable-url)", "host.example"}
+    assert url_host("https://host.example:notaport/x") == "(unparseable-url)"
 
 
 # ───────────────────────── nothing in backend/app prints «url=» without the helper ─────────────────────────
