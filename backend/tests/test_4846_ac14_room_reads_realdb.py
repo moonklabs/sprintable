@@ -243,3 +243,35 @@ async def test_a_room_without_a_project_delivers_to_its_agents_whatever_their_pr
         assert await _events_for(Session, msg, outside)                                       # unchanged: a room with no project asks nothing of an agent's projects
     finally:
         await engine.dispose()
+
+
+async def test_a_card_dispatched_straight_to_the_participants_skips_an_agent_that_has_not_the_rooms_project():
+    """the approval cards (`approval_delivery`) and the command-reply cards (`chat_command_catalog`) call `_dispatch_conversation_event` themselves — they do NOT pass through the
+    `route_message` decisions that a sent message does — so the cut has to hold at the dispatch too, not only in the decisions."""
+    from app.models.conversation import ConversationMessage
+    from app.routers.conversations import _dispatch_conversation_event
+    from app.models.conversation import Conversation
+    from app.services.member_resolver import ResolvedMember
+    from sqlalchemy import select
+
+    engine, Session, w = await _world()
+    try:
+        lost, kept = await _agents_org_wide(Session, w, w.p2, w.p1)
+        room = await _people_project_room(Session, w)
+        await _put_in_room(Session, room, lost)
+        await _put_in_room(Session, room, kept)
+        words = f"ac14-card-{uuid.uuid4().hex[:8]}"
+        async with Session() as s:
+            conv = (await s.execute(select(Conversation).where(Conversation.id == room))).scalar_one()
+            msg = ConversationMessage(conversation_id=room, sender_id=w.h_a, content=f"a card {words}")
+            s.add(msg)
+            await s.flush()
+            sender = ResolvedMember(id=w.h_a, user_id=w.u_a, name="someone", type="human", role="member", org_id=w.org)
+            await _dispatch_conversation_event(s, conv, msg, w.org, sender)
+            await s.commit()
+            msg_id = msg.id
+        assert await _events_for(Session, msg_id, lost) == []                                 # the agent without the project is not sent the card
+        got = await _events_for(Session, msg_id, kept)
+        assert got and all(words in p for _t, p in got)                                       # control: the agent WITH the project is
+    finally:
+        await engine.dispose()
