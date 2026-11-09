@@ -5,6 +5,7 @@
 # account's own name, which needs `roles/iam.serviceAccountTokenCreator` granted to the account ON ITSELF (RUNBOOK §2). Without it every /api/attachments/sign answers 400 «Permission
 # 'iam.serviceAccounts.signBlob' denied» and every picture / file in a chat stops opening (11-09: dev and prod, since the move from Cloud Run). Nothing else shows it at setup time — so the setup asks once.
 #
+# Every curl call is made with -q (no ~/.curlrc) and --noproxy '*' (an http_proxy / https_proxy / all_proxy in root's environment must not be able to receive the bearer header): this check talks to the metadata server and to Google directly or it reports «no answer».
 # One signBlob call with a fixed harmless payload; exit 0 only on HTTP 200. The bearer token is passed on standard input (never in an argument list) and is never printed.
 # IAM grants take up to a minute to reach every endpoint: a refusal is retried SIGNING_CHECK_TRIES times (default 6) SIGNING_CHECK_WAIT seconds apart (default 10) before it is called a failure.
 # Exit codes: 0 signed · 1 refused or no answer (the message says which) · 2 the metadata server could not be read (not on a GCE VM?), or the settings are refused (bad count/wait, a URL override that is not loopback).
@@ -27,7 +28,7 @@ done
 case "$tries" in '' | *[!0-9]* | 0) echo "SIGNING CHECK: SIGNING_CHECK_TRIES must be a whole number >= 1 (got '$tries')" >&2; exit 2 ;; esac
 case "$wait_s" in '' | *[!0-9]*) echo "SIGNING CHECK: SIGNING_CHECK_WAIT must be a whole number of seconds (got '$wait_s')" >&2; exit 2 ;; esac
 
-sa="$(curl -q -fsS -m 10 -H 'Metadata-Flavor: Google' "$md/instance/service-accounts/default/email" 2> /dev/null)" || sa=""
+sa="$(curl -q --noproxy '*' -fsS -m 10 -H 'Metadata-Flavor: Google' "$md/instance/service-accounts/default/email" 2> /dev/null)" || sa=""
 if [ -z "$sa" ]; then
   echo "SIGNING CHECK: could not read this VM's service account from the metadata server (is this a GCE VM?)" >&2
   exit 2
@@ -37,10 +38,10 @@ attempt=1
 code=000
 body=""
 while :; do
-  token_json="$(curl -q -fsS -m 10 -H 'Metadata-Flavor: Google' "$md/instance/service-accounts/default/token" 2> /dev/null)" || token_json=""
+  token_json="$(curl -q --noproxy '*' -fsS -m 10 -H 'Metadata-Flavor: Google' "$md/instance/service-accounts/default/token" 2> /dev/null)" || token_json=""
   token="$(printf '%s' "$token_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])' 2> /dev/null)" || token=""
   if [ -n "$token" ]; then
-    out="$(printf 'Authorization: Bearer %s\n' "$token" | curl -q -sS -m 20 -w '\n%{http_code}' -X POST -H @- -H 'Content-Type: application/json' \
+    out="$(printf 'Authorization: Bearer %s\n' "$token" | curl -q --noproxy '*' -sS -m 20 -w '\n%{http_code}' -X POST -H @- -H 'Content-Type: application/json' \
       -d '{"payload":"c2lnbmluZy1jaGVjaw=="}' "$iam/v1/projects/-/serviceAccounts/$sa:signBlob" 2> /dev/null)" || out=""
     code="$(printf '%s' "$out" | tail -n 1)"
     case "$code" in [0-9][0-9][0-9]) ;; *) code=000 ;; esac   # curl failed outright (no network · DNS · TLS) = «no answer», not an empty code

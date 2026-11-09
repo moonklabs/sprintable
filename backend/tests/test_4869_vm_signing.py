@@ -144,6 +144,14 @@ def test_every_curl_call_starts_with_dash_q_so_no_curlrc_can_trace_the_bearer_he
     assert len(calls) == 3 and all(l.startswith("curl -q ") for l in calls), calls
 
 
+def test_no_curl_call_can_be_routed_through_a_proxy_of_the_environment(box) -> None:
+    """a proxy variable in root's environment would receive the Authorization header: every call says --noproxy '*'"""
+    p, log = box(http_proxy="http://evil.example:8080", https_proxy="http://evil.example:8080", all_proxy="http://evil.example:8080")
+    assert p.returncode == 0
+    calls = [l for l in log.splitlines() if l.startswith("curl ")]
+    assert len(calls) == 3 and all(l.startswith("curl -q --noproxy * ") for l in calls), calls
+
+
 def test_the_signblob_request_is_exactly_the_documented_one(box) -> None:
     """the fake answers 400 to anything but a POST of the exact payload with the header file on standard input, the JSON content type and the status code appended — a change to any of those fails the pass test above"""
     p, log = box()
