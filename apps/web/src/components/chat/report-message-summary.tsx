@@ -44,6 +44,7 @@ export function ReportMessageSummary({
           <button
             type="button"
             onClick={() => setExpanded(false)}
+            data-copy-ui=""
             className="mt-1 text-editorial-meta font-medium text-primary hover:underline"
           >
             {t('reportCollapse')}
@@ -65,7 +66,8 @@ export function ReportMessageSummary({
     : null;
 
   return (
-    <div>
+    // story 4855 — the folded card shows a SUMMARY of the message: copying the whole message takes the source, not these lines (data-copy-source)
+    <div data-copy-source="">
       {density.kicker ? (
         // story #3052(2984-S4) — MaterialChip(S1, 헤어라인+fill 0) 채택, bg-proof-blue-soft
         // 채움 폐지(§2 doc ⓒ kicker 판정 — 순수 SHIFT, 신호 아님).
@@ -104,6 +106,7 @@ export function ReportMessageSummary({
       <button
         type="button"
         onClick={() => setExpanded(true)}
+        data-copy-ui=""
         className="mt-1.5 text-editorial-meta font-semibold text-primary hover:underline"
       >
         {t('reportViewFull')}

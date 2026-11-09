@@ -20,11 +20,34 @@ describe('copyTextSafely(story #3986)', () => {
     expect(writeText).toHaveBeenCalledWith('hello');
   });
 
-  it('⭐navigator.clipboard.writeText 거부(권한 등) — { ok: false }(삼키지 않는다)', async () => {
+  it('⭐navigator.clipboard.writeText 거부 + execCommand 폴백도 실패 — { ok: false }(삼키지 않는다)', async () => {
     const writeText = vi.fn().mockRejectedValue(new DOMException('denied', 'NotAllowedError'));
     vi.stubGlobal('navigator', { clipboard: { writeText } });
+    document.execCommand = vi.fn().mockReturnValue(false);
     const result = await copyTextSafely('hello');
     expect(result).toEqual({ ok: false });
+    expect(document.execCommand).toHaveBeenCalledWith('copy');
+  });
+
+  // story 4855 — the phone app's web view exposes writeText and refuses it: the old-style copy must still be tried (measured: «Couldn't copy» while the platform's Copy worked)
+  it('story 4855: writeText exists but is REFUSED (a web view) — the execCommand copy is tried and its success is { ok: true }', async () => {
+    const writeText = vi.fn().mockRejectedValue(new DOMException('denied', 'NotAllowedError'));
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    let copiedValue = '';
+    document.execCommand = vi.fn().mockImplementation(() => { copiedValue = (document.querySelector('textarea') as HTMLTextAreaElement).value; return true; });
+    const result = await copyTextSafely('안녕 hello');
+    expect(result).toEqual({ ok: true });
+    expect(writeText).toHaveBeenCalledWith('안녕 hello');
+    expect(copiedValue).toBe('안녕 hello'); // the fallback copied the very text
+    expect(document.querySelector('textarea')).toBeNull(); // and left nothing behind
+  });
+
+  it('story 4855: writeText succeeding does NOT also run the old-style copy', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    document.execCommand = vi.fn().mockReturnValue(true);
+    expect(await copyTextSafely('hello')).toEqual({ ok: true });
+    expect(document.execCommand).not.toHaveBeenCalled();
   });
 
   it('navigator.clipboard 자체가 없는 환경(비보안 컨텍스트) — execCommand 폴백 성공하면 { ok: true }', async () => {
@@ -39,6 +62,55 @@ describe('copyTextSafely(story #3986)', () => {
     document.execCommand = vi.fn().mockReturnValue(false);
     const result = await copyTextSafely('hello');
     expect(result).toEqual({ ok: false });
+  });
+});
+
+describe('execCommand fallback cleanup (story 4855)', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('the person\'s text selection is still there after the fallback copy', async () => {
+    vi.stubGlobal('navigator', {});
+    const p = document.createElement('p');
+    p.textContent = 'select this part';
+    document.body.appendChild(p);
+    const range = document.createRange();
+    range.setStart(p.firstChild!, 7);
+    range.setEnd(p.firstChild!, 11);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.execCommand = vi.fn().mockReturnValue(true);
+    expect(await copyTextSafely('whole text')).toEqual({ ok: true });
+    expect(window.getSelection()!.toString()).toBe('this');
+    p.remove();
+  });
+
+  it('the focus moves and returns WITHOUT scrolling the page', async () => {
+    vi.stubGlobal('navigator', {});
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+    input.focus();
+    focus.mockClear();
+    document.execCommand = vi.fn().mockReturnValue(true);
+    await copyTextSafely('hello');
+    expect(focus.mock.calls.length).toBeGreaterThanOrEqual(2);
+    for (const call of focus.mock.calls) expect(call[0]).toEqual({ preventScroll: true });
+    focus.mockRestore();
+    input.remove();
+  });
+
+  it('when execCommand THROWS the temporary textarea is removed and the focus goes back', async () => {
+    vi.stubGlobal('navigator', {});
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    input.focus();
+    document.execCommand = vi.fn(() => { throw new Error('boom'); });
+    const result = await copyTextSafely('hello');
+    expect(result).toEqual({ ok: false });
+    expect(document.querySelectorAll('textarea').length).toBe(0);
+    expect(document.activeElement).toBe(input);
+    input.remove();
   });
 });
 

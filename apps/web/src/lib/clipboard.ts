@@ -8,25 +8,48 @@
  *
  * 호출부는 `try/catch` 대신 `{ ok }`만 보고 분기한다(성공 표시는 ok일 때만).
  */
-async function writeToClipboardOrFallback(text: string): Promise<void> {
-  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-  // 비보안 컨텍스트·구형 브라우저 폴백(agent-api-key-manager.tsx 선례 그대로).
+/** The old-style copy: a hidden read-only textarea, selected, `execCommand('copy')`. Throws when the browser says it did not copy. */
+function execCommandCopy(text: string): void {
   const prev = document.activeElement as HTMLElement | null;
   const el = document.createElement('textarea');
   el.value = text;
   el.setAttribute('readonly', '');
   el.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px';
+  // the person's own text selection (highlight · handles) is put back afterwards: the temporary field's selection replaces it for the copy
+  const sel = typeof window.getSelection === 'function' ? window.getSelection() : null;
+  const saved: Range[] = [];
+  for (let i = 0; sel && i < sel.rangeCount; i += 1) saved.push(sel.getRangeAt(i).cloneRange());
   document.body.appendChild(el);
-  el.focus();
-  el.select();
-  el.setSelectionRange(0, el.value.length);
-  const ok = document.execCommand('copy');
-  document.body.removeChild(el);
-  prev?.focus();
+  let ok = false;
+  try {
+    el.focus({ preventScroll: true });
+    el.select();
+    el.setSelectionRange(0, el.value.length);
+    ok = document.execCommand('copy');
+  } finally {
+    // the temporary field never stays and the focus goes back, also when a step above throws
+    document.body.removeChild(el);
+    prev?.focus({ preventScroll: true });
+    if (sel && saved.length > 0) {
+      sel.removeAllRanges();
+      for (const r of saved) sel.addRange(r);
+    }
+  }
   if (!ok) throw new Error('execCommand copy failed');
+}
+
+async function writeToClipboardOrFallback(text: string): Promise<void> {
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // story 4855 — a web view (the phone app's) can EXPOSE `navigator.clipboard.writeText` and still REFUSE it (measured on the Android app: «Couldn't copy» on every press while the
+      // platform's own Copy worked). The refusal is not the end: the old-style copy below is tried, and only when it fails too is the copy reported as failed.
+    }
+  }
+  // 비보안 컨텍스트·구형 브라우저·writeText를 거부하는 웹뷰 폴백(agent-api-key-manager.tsx 선례 그대로).
+  execCommandCopy(text);
 }
 
 export type CopyResult = { ok: true } | { ok: false };

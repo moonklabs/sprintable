@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { MessageSquareReply, Copy, ShieldOff, Trash2, Quote } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 export interface CiteAction {
   /** story #2265(C-7) PR2 — 아직 선택 중이 아니면 "start"(여기부터), 이미 다른 메시지가
@@ -18,6 +19,9 @@ interface MessageContextMenuProps {
   isMine: boolean;
   onReply: () => void;
   onCopy: () => void;
+  /** story 4855 — the text selected in the message when the menu opened; non-empty adds «Copy selection» above «Copy whole message». */
+  selectedText?: string;
+  onCopySelection?: () => void;
   onDelete: () => void;
   onClose: () => void;
   /** 생략하면(undefined) 인용 항목 자체를 안 그린다 — 기존 호출부 무변경 보장. */
@@ -30,7 +34,7 @@ interface MessageContextMenuProps {
   onBlock?: () => void;
 }
 
-export function MessageContextMenu({ x, y, isMine, onReply, onCopy, onDelete, onClose, citeAction, isDeleted = false, onBlock }: MessageContextMenuProps) {
+export function MessageContextMenu({ x, y, isMine, onReply, onCopy, selectedText, onCopySelection, onDelete, onClose, citeAction, isDeleted = false, onBlock }: MessageContextMenuProps) {
   // story #3776(1층A) — "사용자 차단" 항목, chats ns의 기존 blockUserConfirmConfirm 키 재사용.
   const tChats = useTranslations('chats');
   // story #3776(1층B) — "삭제", common ns의 기존 delete 키 재사용.
@@ -51,11 +55,18 @@ export function MessageContextMenu({ x, y, isMine, onReply, onCopy, onDelete, on
     };
   }, [onClose]);
 
-  // Clamp menu inside viewport
+  // Clamp menu inside viewport — first by an estimate (no flash), then by the menu's own measured size (a longer label such as «Copy whole message» is wider than 160px)
   const menuW = 160;
-  const menuH = (isMine ? 112 : 80) + (citeAction ? 36 : 0) + (!isMine && onBlock ? 36 : 0);
-  const clampedX = Math.min(x, window.innerWidth - menuW - 8);
-  const clampedY = Math.min(y, window.innerHeight - menuH - 8);
+  const hasSelection = Boolean(selectedText && onCopySelection);
+  const menuH = (isMine && !isDeleted ? 125 : 80) + (hasSelection ? 36 : 0) + (citeAction ? 36 : 0) + (!isMine && onBlock ? 36 : 0);
+  const estimated = { left: Math.min(x, window.innerWidth - menuW - 8), top: Math.min(y, window.innerHeight - menuH - 8) };
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    el.style.left = `${Math.max(8, Math.min(x, window.innerWidth - rect.width - 8))}px`;
+    el.style.top = `${Math.max(8, Math.min(y, window.innerHeight - rect.height - 8))}px`;
+  }, [x, y]);
 
   return (
     <div
@@ -63,22 +74,34 @@ export function MessageContextMenu({ x, y, isMine, onReply, onCopy, onDelete, on
       role="menu"
       // story #3000 로드맵 PR-B(L1) — floating 팝업은 --elev-overlay(오버레이 전용) 토큰으로.
       className="fixed z-50 min-w-[160px] overflow-hidden rounded-lg border border-border bg-popover py-1 shadow-[var(--elev-overlay)]"
-      style={{ left: clampedX, top: clampedY }}
+      style={estimated}
     >
       <button
         type="button"
         role="menuitem"
         onClick={() => { onReply(); onClose(); }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-muted"
+        className="flex w-full items-center gap-2.5 whitespace-nowrap px-3 py-2 text-sm hover:bg-muted"
       >
         <MessageSquareReply className="h-3.5 w-3.5 text-muted-foreground" />
         {tChats('replyToMessage')}
       </button>
+      {hasSelection && (
+        <Button
+          type="button"
+          variant="ghost"
+          role="menuitem"
+          onClick={() => { onCopySelection?.(); onClose(); }}
+          className="flex h-auto min-h-0 w-full min-w-0 justify-start gap-2.5 whitespace-nowrap rounded-none border-0 px-3 py-2 text-sm font-normal"
+        >
+          <Copy className="h-3.5 w-3.5 text-muted-foreground" />
+          {tChats('copySelection')}
+        </Button>
+      )}
       <button
         type="button"
         role="menuitem"
         onClick={() => { onCopy(); onClose(); }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-muted"
+        className="flex w-full items-center gap-2.5 whitespace-nowrap px-3 py-2 text-sm hover:bg-muted"
       >
         <Copy className="h-3.5 w-3.5 text-muted-foreground" />
         {tChats('copyMessage')}
@@ -88,7 +111,7 @@ export function MessageContextMenu({ x, y, isMine, onReply, onCopy, onDelete, on
           type="button"
           role="menuitem"
           onClick={() => { onBlock(); onClose(); }}
-          className="flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-muted"
+          className="flex w-full items-center gap-2.5 whitespace-nowrap px-3 py-2 text-sm hover:bg-muted"
         >
           <ShieldOff className="h-3.5 w-3.5 text-muted-foreground" />
           {tChats('blockUserConfirmConfirm')}
@@ -99,7 +122,7 @@ export function MessageContextMenu({ x, y, isMine, onReply, onCopy, onDelete, on
           type="button"
           role="menuitem"
           onClick={() => { citeAction.onSelect(); onClose(); }}
-          className="flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-muted"
+          className="flex w-full items-center gap-2.5 whitespace-nowrap px-3 py-2 text-sm hover:bg-muted"
         >
           <Quote className="h-3.5 w-3.5 text-muted-foreground" />
           {citeAction.kind === 'start' ? tChats('citeFromHere') : tChats('citeToHere')}
@@ -112,7 +135,7 @@ export function MessageContextMenu({ x, y, isMine, onReply, onCopy, onDelete, on
             type="button"
             role="menuitem"
             onClick={() => { onDelete(); onClose(); }}
-            className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-foreground hover:bg-destructive-tint"
+            className="flex w-full items-center gap-2.5 whitespace-nowrap px-3 py-2 text-sm text-foreground hover:bg-destructive-tint"
           >
             <Trash2 className="h-3.5 w-3.5" />
             {tc('delete')}

@@ -2275,7 +2275,8 @@ describe('ChatBubble — story #3129 커맨드 렌더에서도 참조 토큰 파
       ));
     });
     expect(container.textContent).toContain('/review');
-    expect(container.querySelector('button')).toBeNull();
+    // (the touch-only «⋯» menu button of story 4855 is on every message; the point here is: no reference chip)
+    expect(container.querySelector('button:not([data-testid="chat-bubble-menu-button"])')).toBeNull();
   });
 });
 

@@ -61,7 +61,8 @@ function GateGroup({ refs, eventDefinitionsByKey }: { refs: EmbedGroupProps['ref
       : `결재 ${total}건 · 대기 ${pendingCount}건`;
 
   return (
-    <div className="rounded-lg border border-border bg-muted/20">
+    // story 4855 — a gate group is a card (header · approve / reject buttons), not text: whole-message copy takes the message's source
+    <div data-copy-source="" className="rounded-lg border border-border bg-muted/20">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}
@@ -116,7 +117,8 @@ function ConciseList({ entityType, refs, onOpenReadingPanel }: { entityType: str
   const openPanel = toEmbedCardOpenPanel(onOpenReadingPanel);
 
   return (
-    <div className="space-y-1.5">
+    // story 4855 — while folded, the card list shows only part of the message's links: whole-message copy takes the source (data-copy-source), and «+N more» / «fold» is a control, not text (data-copy-ui)
+    <div className="space-y-1.5" {...(hiddenCount > 0 && !expanded ? { 'data-copy-source': '' } : {})}>
       {visible.map((r) => (
         <EmbedCard key={r.entityId} entity_type={entityType} entity_id={r.entityId} title={r.label} status={null} onOpenReadingPanel={openPanel} />
       ))}
@@ -124,6 +126,7 @@ function ConciseList({ entityType, refs, onOpenReadingPanel }: { entityType: str
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}
+          data-copy-ui=""
           className="text-xs font-medium text-primary hover:underline"
         >
           {expanded ? tChats('reportCollapse') : `+${hiddenCount} 더보기`}

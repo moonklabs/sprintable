@@ -142,3 +142,28 @@ describe('MessageContextMenu — 로드맵 PR-B L1(floating elev-overlay)', () =
     expect(menu?.className).not.toContain('shadow-md');
   });
 });
+
+describe('MessageContextMenu — story 4855 clamping by the menu\'s measured size', () => {
+  it('a menu wider than the estimate opened near the right edge is moved left by its own width', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 400 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 220, height: 120, x: 0, y: 0, top: 0, left: 0, right: 220, bottom: 120, toJSON: () => ({}) } as DOMRect);
+    await act(async () => {
+      root.render(wrap(<MessageContextMenu x={390} y={50} isMine={false} onReply={NOOP} onCopy={NOOP} onDelete={NOOP} onClose={NOOP} />));
+    });
+    const menu = document.querySelector('[role="menu"]') as HTMLElement;
+    expect(menu.style.left).toBe('172px'); // 400 - 220 - 8
+    spy.mockRestore();
+  });
+
+  it('with a selection the first item copies the selection', async () => {
+    const onCopySelection = vi.fn();
+    await act(async () => {
+      root.render(wrap(<MessageContextMenu x={0} y={0} isMine={false} onReply={NOOP} onCopy={NOOP} onDelete={NOOP} onClose={NOOP} selectedText="abc" onCopySelection={onCopySelection} />));
+    });
+    const items = Array.from(document.querySelectorAll('[role="menuitem"]')) as HTMLElement[];
+    expect(items[1]!.textContent).toContain('선택한 글 복사');
+    await act(async () => { items[1]!.click(); });
+    expect(onCopySelection).toHaveBeenCalledTimes(1);
+  });
+});
