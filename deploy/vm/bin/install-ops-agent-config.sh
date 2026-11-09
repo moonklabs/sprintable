@@ -22,7 +22,9 @@ tries="${OPS_AGENT_TRIES-12}"
 wait_s="${OPS_AGENT_WAIT-5}"
 case "$tries" in '' | *[!0-9]* | 0) echo "OPS_AGENT_TRIES must be a whole number >= 1 (got '$tries')" >&2; exit 2 ;; esac
 case "$wait_s" in '' | *[!0-9]*) echo "OPS_AGENT_WAIT must be a whole number of seconds (got '$wait_s')" >&2; exit 2 ;; esac
-[ -n "$units" ] || { echo "OPS_AGENT_UNITS must name at least one unit (an empty list would make «the agent is up» always true)" >&2; exit 2; }
+tries=$((10#$tries)) # «08» is a number here, not a broken octal one
+wait_s=$((10#$wait_s))
+[ -n "${units//[[:space:]]/}" ] || { echo "OPS_AGENT_UNITS must name at least one unit (an empty or blank list would make «the agent is up» always true)" >&2; exit 2; }
 
 units_up() {
   local u
@@ -47,7 +49,7 @@ restore() {
   rm -f "$marker"
   if [ -n "$backup" ]; then
     if cp -p "$backup" "$target"; then
-      rm -f "$backup"
+      rm -f "$backup" || echo "  warning — the backup $backup could not be removed after the restore (delete it by hand)" >&2
     else
       ok=0
       echo "  the previous configuration could NOT be copied back — it is kept as $backup" >&2
