@@ -129,16 +129,14 @@ async def test_02_a_command_in_a_room_with_no_project_pushes_the_card_with_its_m
         await engine.dispose()
 
 
-async def test_03_the_card_goes_to_the_rooms_other_people_too_and_never_to_an_agent_of_the_room(monkeypatch):
+async def test_03_the_card_goes_to_the_rooms_other_people_too(monkeypatch):
     from app.main import app
 
-    engine, Session, org, sender_id, sender_user, other_id, conv_id = await _room(with_project=True, with_agent=True)
-    agent_id = _room.agent
+    engine, Session, org, sender_id, sender_user, other_id, conv_id = await _room(with_project=True)
     try:
         pushes = await _send(Session, app, sender_user, org.id, conv_id, "/assign 99999 nobody", monkeypatch)
         who = {pid for pid, _ in _cards(pushes)}
         assert who == {str(sender_id), str(other_id)}, "the person who typed it and the room's other person — the recipients of an ordinary message"
-        assert str(agent_id) not in who, "the agents of the room are left out, as for the line that asked for it"
         other_card = next(p for pid, p in _cards(pushes) if pid == str(other_id))
         assert other_card["server_command"]["command"] == "assign" and other_card["event_type"] == "conversation.message_created"
         plain = await _send(Session, app, sender_user, org.id, conv_id, "just a line", monkeypatch)
@@ -299,13 +297,21 @@ async def test_11_the_agents_of_the_room_are_left_out_of_the_card_delivery(monke
     engine, Session, org, sender_id, sender_user, other_id, conv_id = await _room(with_project=True, with_agent=True)
     agent_id = _room.agent
     try:
+        from sqlalchemy import select, text
+
         from app.models.conversation import Conversation
         from app.models.team import TeamMember
 
-        async with Session() as session:  # (this suite's DB keeps team_members as a plain table: the agent is entered there, as a real DB's view would show it)
-            project_id = (await session.get(Conversation, conv_id)).project_id
-            session.add(TeamMember(id=agent_id, org_id=org.id, project_id=project_id, type="agent", name="agent-x", user_id=None, is_active=True))
+        async with Session() as session:
+            # a runtime that DOES take slash commands: the capability gate does not exclude it, so only the server-command rule can
+            await session.execute(text("UPDATE members SET runtime_type = 'claude-code' WHERE id = :i"), {"i": agent_id})
+            kind = (await session.execute(text("SELECT table_type FROM information_schema.tables WHERE table_name = 'team_members'"))).scalar_one()
+            if kind == "BASE TABLE":  # (a create_all DB keeps team_members as a plain table; a migrated DB shows the agent through its view — nothing to enter)
+                project_id = (await session.get(Conversation, conv_id)).project_id
+                session.add(TeamMember(id=agent_id, org_id=org.id, project_id=project_id, type="agent", name="agent-x", user_id=None, is_active=True, runtime_type="claude-code"))
             await session.commit()
+            seen = (await session.execute(select(TeamMember.type, TeamMember.runtime_type).where(TeamMember.id == agent_id))).first()
+            assert seen is not None and seen[0] == "agent" and seen[1] == "claude-code", "precondition: the agent is a team member that takes slash commands"
         from app.services import channel_router
 
         async def _route(message_id, db):  # the room decision names the agent too: its exclusion must come from the server-command rule, not from «not named»
