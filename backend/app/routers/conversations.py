@@ -3203,7 +3203,8 @@ async def send_message_core(
     # 우선(결정적) → 나머지 기존 게이트 흐름"). 미명중(카탈로그 밖 커맨드·비-커맨드)은
     # 아무 부작용 없이 False — 아래 capability gate·에이전트 dispatch가 그대로 진행된다.
     from app.services.chat_command_catalog import try_execute_server_command
-    server_command_executed = await try_execute_server_command(db, org_id=org_id, conv=conv, msg=msg, sender=sender)
+    server_command_pushes: list[tuple[str, dict]] = []  # story 4847: the result card, for the person who typed the command (pushed after the commit, below)
+    server_command_executed = await try_execute_server_command(db, org_id=org_id, conv=conv, msg=msg, sender=sender, pushes=server_command_pushes)
 
     # E-CHAT-CMD S4: capability gate — 슬래시 커맨드를 미지원 런타임 에이전트에 주입 차단(+audit+hint).
     # 비-command 면 빈 결과 → 무영향. 차단 대상은 dispatch exclude 로 합쳐 주입 0.
@@ -3569,6 +3570,7 @@ async def send_message_core(
         if body.client_nonce:
             _echo["client_nonce"] = body.client_nonce
         pending_sse_pushes.append((str(sender.id), _echo))
+        pending_sse_pushes += server_command_pushes  # after the echo of their own line: the card answers it
 
     # commit 완료 후 SSE push — Event가 DB에 커밋된 상태에서 push해야 race condition 없음
     def _push_pending_sse() -> None:
