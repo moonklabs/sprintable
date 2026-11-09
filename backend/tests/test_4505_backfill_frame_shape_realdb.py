@@ -154,5 +154,6 @@ def test_the_stream_builds_its_backfill_frames_with_the_live_shape():
 
     source = inspect.getsource(ev_module.agent_event_stream)
     # story 4649: the stream passes its own org (the frame's stream_org_id) — same builder, same shape
-    assert "_backfill_frame_data(evt, org_id, sender_orgs) for evt in batch" in source
+    # story 4870: and the copy of the payload with a room's words withheld, when the caller may not read the room now
+    assert "_backfill_frame_data(evt, org_id, sender_orgs, _withheld.get(str(evt.id))) for evt in batch" in source
     assert "_event_to_payload(evt) for evt in batch" not in source

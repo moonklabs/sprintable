@@ -371,8 +371,8 @@ async def _execution_log(Session, w, room, preview: str, *, with_preview: bool =
 async def _owner_reads_log(Session, w, log_id):
     """the log's detail as an organization owner (the admin role claim `require_admin` reads), who is NOT in any of the rooms."""
     from app.dependencies.auth import AuthContext, get_current_user
-    from app.dependencies.database import get_db
     from app.main import app
+    from tests.conftest import override_db_and_read
 
     async def _db():
         async with Session() as s:
@@ -381,7 +381,7 @@ async def _owner_reads_log(Session, w, log_id):
     async def _auth():
         return AuthContext(user_id=str(w.u_o), email="owner@test", claims={"app_metadata": {"org_id": str(w.org), "role": "owner"}})
 
-    app.dependency_overrides[get_db] = _db
+    override_db_and_read(app, _db)
     app.dependency_overrides[get_current_user] = _auth
     try:
         async with _client_for(app) as c:
