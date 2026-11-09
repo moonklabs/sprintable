@@ -1243,7 +1243,7 @@ class ConversationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    project_id: uuid.UUID
+    project_id: uuid.UUID | None = None  # story #4846: a room may have no project
     org_id: uuid.UUID
     type: str
     title: str | None = None
@@ -3546,6 +3546,10 @@ async def upload_conversation_attachment(
     )).scalar_one_or_none()
     if participant is None:
         raise HTTPException(status_code=403, detail="Not a participant")
+    # story #4846 (main hotfix): a room can have no project once the next release's migration has run — the object path below names the project, so a room without one is refused
+    # here instead of storing the file under «project/None/».
+    if conv.project_id is None:
+        raise HTTPException(status_code=422, detail="Conversation has no project")
 
     data = mcp_attachment_upload.decode_json_attachment(body.content_base64)
 

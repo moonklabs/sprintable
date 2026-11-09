@@ -157,7 +157,7 @@ async def _resolve_member_id(
 class NotificationResponse(BaseModel):
     id: uuid.UUID
     org_id: uuid.UUID
-    project_id: uuid.UUID
+    project_id: uuid.UUID | None = None  # story #4846: a room without a project has none
     event_type: str
     source_entity_type: str | None
     source_entity_id: uuid.UUID | None
