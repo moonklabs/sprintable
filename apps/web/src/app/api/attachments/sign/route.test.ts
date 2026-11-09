@@ -58,6 +58,52 @@ describe('[SID:4860] /api/attachments/sign — disposition by stored type', () =
     expect(signedWith()).toBe('inline');
   });
 
+  // the strings the security review opened in a real Chrome (answered by looking at the content): none of them is on the allow list, so every one is a download
+  it.each(['application/unknown', 'unknown/unknown', '*/*', 'text/xsl', 'html', 'text', 'text /html', '', null])(
+    'room path: a stored %j is signed as attachment',
+    async (t) => {
+      h.headObject.mockResolvedValue({ size: 1, contentType: t });
+      const res = await GET(roomReq());
+      expect(res.status).toBe(200);
+      expect(signedWith()).toBe('attachment');
+    },
+  );
+
+  it.each([
+    'application/unknown',
+    'unknown/unknown',
+    '*/*',
+    'text/xsl',
+    'html',
+    'text',
+    'text /html',
+    '',
+    null,
+    'audio/svg+xml',
+    `${String.fromCodePoint(0xa0)}image/png${String.fromCodePoint(0xa0)}`,
+  ])('asset path: a stored %j is signed as attachment', async (t) => {
+    h.headObject.mockResolvedValue({ size: 1, contentType: t });
+    const res = await GET(assetReq());
+    expect(res.status).toBe(200);
+    expect(signedWith()).toBe('attachment');
+  });
+
+  it.each(['application/octet-stream', 'application/json', 'text/markdown', 'application/zip'])(
+    'a stored %s (not on the allow list) is signed as attachment',
+    async (t) => {
+      h.headObject.mockResolvedValue({ size: 1, contentType: t });
+      await GET(roomReq());
+      expect(signedWith()).toBe('attachment');
+    },
+  );
+
+  it.each(['image/webp', 'image/avif', 'image/bmp', 'audio/mpeg', 'video/mp4'])('a stored %s (on the allow list) keeps inline', async (t) => {
+    h.headObject.mockResolvedValue({ size: 1, contentType: t });
+    const res = await GET(roomReq());
+    expect(res.status).toBe(200);
+    expect(signedWith()).toBe('inline');
+  });
+
   it('an explicit ?disposition=attachment is kept for a picture', async () => {
     const res = await GET(roomReq('&disposition=attachment'));
     expect(res.status).toBe(200);
