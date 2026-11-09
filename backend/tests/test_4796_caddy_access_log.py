@@ -87,7 +87,7 @@ def test_the_global_options_and_the_proxy_settings_were_not_touched() -> None:
 
 def test_the_container_keeps_the_logs_under_the_limit_of_every_other_container() -> None:
     caddy = COMPOSE["services"]["caddy"]
-    assert caddy["logging"] == COMPOSE["x-logging"] == {"driver": "json-file", "options": {"max-size": "10m", "max-file": "5"}}
+    assert caddy["logging"] == COMPOSE["x-logging"] == {"driver": "json-file", "options": {"max-size": "10m", "max-file": "5", "labels": "sprintable_service"}}
 
 
 def test_the_runbook_says_how_to_count_the_requests_and_what_the_log_keeps() -> None:

@@ -1,0 +1,43 @@
+# story 4869 (AC5) — the backend / frontend / caddy container logs go to Cloud Logging.
+#
+# Why: since the move from Cloud Run (dev 10-27, prod 10-29) the container logs lived only in Docker's json-file log on the VM (10 MB × 5, gone when a container is recreated): the Ops Agent's default
+# configuration reads syslog only, so Cloud Logging held syslog + ops-agent-health and nothing of the app. Everything that read the Cloud Run logs went blind (the push probe, the credential-error alert).
+#
+# Installed by bootstrap.sh (bin/install-ops-agent-config.sh: back up the old file, install, restart the agent, check that its log component is up, put the old file back if it is not).
+# The shape this produces (the contract the log readers rely on — infra/probe_dev_push.py, backend/monitoring/alert_policies.json):
+#   resource gce_instance + the agent's default label compute.googleapis.com/resource_name = the VM's name (this file changes neither)
+#   log name   containers                                  (one log for all three services)
+#   labels.container = backend | frontend | caddy          (from the container's label sprintable_service, which compose.yml sets and the json-file driver writes into each line's `attrs`)
+#   a line the app wrote as one JSON object   → its keys flat in jsonPayload  (jsonPayload.event, jsonPayload.level, …)
+#   any other line                            → jsonPayload.message
+# Services without that label (db, migrate, gateway-db) are NOT shipped: database logs stay on the VM.
+logging:
+  receivers:
+    containers:
+      type: files
+      include_paths:
+        - /var/lib/docker/containers/*/*-json.log
+  processors:
+    docker_line:
+      type: parse_json
+      time_key: time
+      time_format: "%Y-%m-%dT%H:%M:%S.%fZ"
+    only_our_services:
+      type: exclude_logs
+      match_any:
+        - 'NOT jsonPayload.attrs.sprintable_service =~ "^(backend|frontend|caddy)$"'
+    log_to_message:
+      type: modify_fields
+      fields:
+        jsonPayload.message:
+          move_from: jsonPayload.log
+        labels."container":
+          move_from: jsonPayload.attrs.sprintable_service
+    app_json:
+      type: parse_json
+      field: message
+  service:
+    pipelines:
+      containers:
+        receivers: [containers]
+        processors: [docker_line, only_our_services, log_to_message, app_json]

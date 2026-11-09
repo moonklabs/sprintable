@@ -68,7 +68,7 @@ fi
 
 echo "== tooling → /opt/sprintable"
 install -d -m 0755 /opt/sprintable/bin /opt/sprintable/releases /opt/sprintable/runtime /etc/sprintable
-for f in deployer.py render_env.py lib.sh backup.sh restore.sh restore-check.sh rowcounts.sh rowcounts.sql dump-source.sh front-door.sh check-signing.sh gateway-db-firewall.sh; do
+for f in deployer.py render_env.py lib.sh backup.sh restore.sh restore-check.sh rowcounts.sh rowcounts.sql dump-source.sh front-door.sh check-signing.sh install-ops-agent-config.sh gateway-db-firewall.sh; do
   install -m 0755 "$src/bin/$f" "/opt/sprintable/bin/$f"
 done
 # releases already on this VM were checked against the compose copy that is installed NOW (before this run replaces it): remember that per release (deployer.py, COMPOSE_STAMP), so that a compose change
@@ -99,6 +99,13 @@ systemctl enable --now docker
 # the metadata server stays out of reach of the support gateway's database container (only a rule on its own bridge; harmless where that container does not exist)
 systemctl enable --now sprintable-gateway-db-firewall.service
 # the backup and restore-check timers are NOT enabled here: their first run would find no database (the unit fails and says so every night until the restore). RUNBOOK §7 step 6 enables them with the deploy timer.
+# story 4869 (AC5): the container logs of backend / frontend / caddy go to Cloud Logging (the Ops Agent's default configuration reads syslog only). The installer puts the configuration in place, restarts the agent
+# and puts the old file back if the agent's log component does not come up with it.
+echo "== Ops Agent configuration (container logs → Cloud Logging)"
+if ! /opt/sprintable/bin/install-ops-agent-config.sh "$src/ops-agent/config.yaml"; then
+  echo "bootstrap stopped: the Ops Agent did not accept deploy/vm/ops-agent/config.yaml (the old configuration is back) — see the message above" >&2
+  exit 1
+fi
 # story 4869: the VM account must be able to sign as ITSELF (RUNBOOK §2) or every attachment preview / file opening is refused (400 «signBlob denied») — nothing else would show it at setup time, so ask once, loudly
 echo "== signing check (this VM's account signs as itself — attachment previews)"
 if ! /opt/sprintable/bin/check-signing.sh; then
