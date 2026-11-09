@@ -25,7 +25,7 @@ import contextlib
 import weakref
 from collections.abc import AsyncIterator, Callable
 
-_OPEN_PERMITS = 10_000  # more than any backlog: «everything through at once»
+_OPEN_PERMITS = 10_000  # only if a future Python hides the waiter queue (`_waiters`): then «more than any backlog we have seen»
 _gates: "weakref.WeakSet[LoopGate]" = weakref.WeakSet()
 
 
@@ -70,11 +70,16 @@ class LoopGate:
             return
         sem = self._by_loop.get(id(loop))
         if sem is not None:
-            for _ in range(_OPEN_PERMITS):
+            # one permit per piece that waits right now (+1), however many that is: a fixed number would leave the tail of a bigger backlog waiting
+            # at the gate, to be cancelled by the 5-second drain (codex). The count is read before the first release (each release wakes one waiter).
+            # (`_waiters` is None until the first piece has had to wait: nobody waits then)
+            waiting = len(sem._waiters or ()) if hasattr(sem, "_waiters") else _OPEN_PERMITS
+            for _ in range(waiting + 1):
                 sem.release()
 
     def close(self) -> None:
         self._open = False
+        self._by_loop.clear()  # a semaphore that open() inflated must not come back with the extra permits: the next piece makes a fresh one at `limit`
 
 
 def open_all() -> None:

@@ -109,12 +109,160 @@ def test_open_all_lets_everything_through_including_what_already_waits():
     asyncio.run(scenario())
 
 
+def test_open_all_wakes_a_backlog_bigger_than_any_fixed_number_of_permits():
+    """codex: a fixed 10 000 permits leave the tail of a bigger backlog waiting at the gate, to be cancelled by the 5-second drain. One holder blocks the gate, 10 050 pieces queue behind it."""
+    gate = LoopGate(lambda: 1)
+    backlog = 10_050
+
+    async def scenario():
+        hold = asyncio.Event()
+        entered = 0
+
+        async def holder():
+            async with gate.slot():
+                await hold.wait()
+
+        async def piece():
+            nonlocal entered
+            async with gate.slot():
+                entered += 1
+                await hold.wait()  # slow database work: a piece that finishes at once would pass the turn on by its own release and hide the shortfall
+
+        h = asyncio.create_task(holder())
+        await asyncio.sleep(0.01)
+        tasks = [asyncio.create_task(piece()) for _ in range(backlog)]
+        await asyncio.sleep(0.3)
+        assert entered == 0, "the holder keeps the gate shut: nobody enters yet"
+        bounded_gate.open_all()
+        await asyncio.sleep(0.5)
+        assert entered == backlog, f"{backlog - entered} pieces were left waiting at the opened gate (all of them are blocked in slow work, none releases)"
+        hold.set()
+        await asyncio.wait_for(asyncio.gather(h, *tasks), timeout=10)
+
+    asyncio.run(scenario())
+
+
+def test_reset_all_closes_a_gate_that_was_opened_inside_a_live_loop():
+    """codex: open_all() outside a running loop touches no semaphore, so the old test never saw a REAL opened semaphore come back. Open it inside the loop that uses it
+    (its permits are inflated), reset, and the same loop must be held to `limit` again."""
+    gate = LoopGate(lambda: 2)
+
+    async def scenario():
+        await _run_pieces(gate, n=5, hold=0.001)  # the loop's semaphore exists and has contended
+        in_use = gate._semaphore()  # the gate holds its semaphore only weakly: something in use keeps it alive across the reset, as a long piece would
+        assert in_use is not None
+        bounded_gate.open_all()  # inflates the live semaphore
+        assert await _run_pieces(gate) == 12  # open: everything at once
+        bounded_gate.reset_all()
+        peak = await _run_pieces(gate)
+        assert in_use is not None  # still referenced up to here
+        return peak
+
+    assert asyncio.run(scenario()) == 2
+
+
 def test_reset_all_closes_the_gates_again():
     gate = LoopGate(lambda: 1)
     bounded_gate.open_all()
     assert asyncio.run(_run_pieces(gate)) == 12  # open: everything at once
     bounded_gate.reset_all()
     assert asyncio.run(_run_pieces(gate)) == 1
+
+
+def _spy_on(monkeypatch, gate, events: list):
+    """Replace a production gate's slot() with one that writes down when a piece gets in and out — the work between the two is what the gate is for."""
+    import contextlib
+
+    @contextlib.asynccontextmanager
+    async def slot():
+        events.append("gate-in")
+        try:
+            yield
+        finally:
+            events.append("gate-out")
+
+    monkeypatch.setattr(gate, "slot", slot)
+
+
+def _assert_work_is_inside_the_gate(events: list):
+    assert events[0] == "gate-in" and events[-1] == "gate-out", events
+    assert "work" in events[1:-1], f"the database work must run INSIDE the gate: {events}"
+
+
+@pytest.mark.anyio
+async def test_pg_notify_takes_its_pool_place_inside_the_gate(monkeypatch):
+    """The wiring without a database (codex: every production-wrapper test was skipped when no Postgres is configured): delete the `_notify_gate.slot()` and this fails."""
+    import contextlib
+
+    from app.services import pg_pubsub
+
+    events: list = []
+    _spy_on(monkeypatch, pg_pubsub._notify_gate, events)
+
+    class FakeSession:
+        async def execute(self, *a, **k):
+            events.append("work")
+
+        async def commit(self):
+            events.append("commit")
+
+    @contextlib.asynccontextmanager
+    async def fake_factory():
+        events.append("session-open")
+        yield FakeSession()
+        events.append("session-close")
+
+    monkeypatch.setattr("app.core.database.async_session_factory", fake_factory)
+    await pg_pubsub.pg_notify("org", "00000000-0000-0000-0000-000000000001", "presence", {"x": 1})
+    _assert_work_is_inside_the_gate(events)
+    assert events.index("session-open") > events.index("gate-in") and events.index("session-close") < events.index("gate-out"), events
+
+
+@pytest.mark.anyio
+async def test_au_metering_writes_inside_the_gate(monkeypatch):
+    import uuid
+
+    from app.services import au_metering
+
+    events: list = []
+    _spy_on(monkeypatch, au_metering._au_gate, events)
+
+    async def fake_record(org_id, delta):
+        events.append("work")
+
+    monkeypatch.setattr(au_metering, "record_au_usage", fake_record)
+    await au_metering._record_au_usage_safe(uuid.uuid4(), 3)
+    _assert_work_is_inside_the_gate(events)
+
+
+@pytest.mark.anyio
+async def test_tool_call_recording_writes_inside_the_gate(monkeypatch):
+    import contextlib
+
+    from app.services import tool_call_recording
+
+    events: list = []
+    _spy_on(monkeypatch, tool_call_recording._recording_gate, events)
+
+    class FakeSession:
+        def begin(self):
+            @contextlib.asynccontextmanager
+            async def tx():
+                yield
+
+            return tx()
+
+    @contextlib.asynccontextmanager
+    async def fake_factory():
+        yield FakeSession()
+
+    async def fake_insert(session, **kwargs):
+        events.append("work")
+
+    monkeypatch.setattr("app.core.database.async_session_factory", fake_factory)
+    monkeypatch.setattr(tool_call_recording, "attribute_and_insert", fake_insert)
+    await tool_call_recording._record_tool_call_safe(agent_id="a1")
+    _assert_work_is_inside_the_gate(events)
 
 
 def test_the_defaults_are_the_agreed_gates():
