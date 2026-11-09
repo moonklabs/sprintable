@@ -414,7 +414,7 @@ async def _fetch_conversation_participants(
     )).all()
 
     all_member_ids = {r.member_id for r in p_rows}
-    resolved_map = await lookup_members_by_ids(all_member_ids, db) if all_member_ids else {}
+    resolved_map = await lookup_members_by_ids(all_member_ids, db, org_id=device_org_id) if all_member_ids else {}   # story #4868: the room's org narrows the reserved-publisher fallback
 
     # E-CHAT-CMD S8b: participant 의 runtime_type 노출(에이전트만 값, 휴먼 NULL). story #4846: read from the `members` anchor, not the `team_members` view — the view
     # also needs a project profile / grant, which an agent (the server's system publisher, placed in ONE project) loses when that project is deleted, while the room
@@ -1043,7 +1043,7 @@ async def _admit_mentioned_non_participants(
             db, caller_is_agent=True, caller_id=mid, conv_project_id=conversation.project_id, org_id=conversation.org_id,
         ):
             withheld.add(mid)
-    for mid in outside:
+    for mid in sorted(outside, key=lambda m: m in outside_agents):   # people first (stable: the mention order is kept within each kind) — see the DM fork
         if not await _may_seat_mentioned(db, conversation, sender, current, mid, is_agent=mid in outside_agents):
             withheld.add(mid)
             continue
@@ -2989,7 +2989,7 @@ async def send_message_core(
             )).scalars().all())
             _acc = set(current_participant_ids)
             _seat: list[uuid.UUID] = []
-            for mid in sorted(non_participants):
+            for mid in sorted(non_participants, key=lambda m: (m in _agent_ids, m)):   # people first: an agent's creator policy asks who is in the room, so a named creator must be seated before it is asked
                 if await _may_seat_mentioned(db, conv, sender, _acc, mid, is_agent=mid in _agent_ids):
                     _acc.add(mid)
                     _seat.append(mid)

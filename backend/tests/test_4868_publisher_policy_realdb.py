@@ -81,8 +81,9 @@ async def test_the_publisher_whose_project_is_gone_is_still_named_in_a_rooms_mes
         if isinstance(rows, dict):
             rows = rows.get("items") or rows.get("messages") or []
         item = next(i for i in rows if marker in str(i.get("content")))
-        assert PUBLISHER_NAME in str(item), item                                                 # was: an unnamed person
-        assert str((item.get("sender") or {}).get("type", "agent")) == "agent", item
+        sender = item.get("sender")
+        assert isinstance(sender, dict), item
+        assert sender.get("name") == PUBLISHER_NAME and sender.get("type") == "agent", sender    # was: an unnamed person
     finally:
         await engine.dispose()
 
@@ -179,7 +180,7 @@ async def test_the_server_issued_publisher_meets_no_message_policy():
 
     engine, Session, w = await _world()
     try:
-        pub = await _publisher(Session, w.org)
+        pub = await _publisher(Session, w.org, project_gone=False)                              # still IN the view (it holds its grant): the old query judged it, so this is what the exclusion changes
         (restricted,) = await _agents_org_wide(Session, w, w.p1)
         await _creator_only(Session, restricted, w.h_b)
         sender = SimpleNamespace(id=w.h_a, user_id=w.u_a)
@@ -218,7 +219,8 @@ async def test_a_dm_mention_does_not_fork_the_agent_in_past_its_creator_policy()
         msg = await _mention_in_dm(Session, w, dm, [restricted], f"hello {words}")
         assert await _rooms_with(Session, restricted) == []                                      # was: seated in the new group
         got = await _events_for(Session, msg, restricted)
-        assert all(words not in p for _t, p in got), got                                         # it keeps the mention (the bell), not the words
+        assert got and all(words not in p for _t, p in got), got                                 # it keeps the mention (the bell), not the words
+        assert all('"content_withheld": true' in p for _t, p in got), got
         # control: an agent that allows everyone is forked in, as before
         words2 = f"ac6-dm-ok-{uuid.uuid4().hex[:8]}"
         await _mention_in_dm(Session, w, dm, [open_agent], f"hello {words2}")
@@ -244,5 +246,70 @@ async def test_a_deleted_agents_runtime_type_is_not_read_from_the_anchor_as_the_
         async with Session() as s:
             got = await _lookup_sender_runtime_types({alive, gone}, s)
         assert got.get(alive) == "claude-code" and gone not in got                                 # was: the deleted agent's kind came back
+    finally:
+        await engine.dispose()
+
+
+async def test_a_dm_mention_of_several_seats_only_those_the_sender_may_add():
+    from tests.test_1994_backlink_api_realdb import _make_conversation
+
+    engine, Session, w = await _world()
+    try:
+        restricted, open_one = await _agents_org_wide(Session, w, w.p1, w.p1)
+        await _creator_only(Session, restricted, w.h_c)                                         # its creator h_c is NOT in the DM, and not named
+        async with Session() as s:
+            dm = await _make_conversation(s, w.org, w.p1, [w.h_a, w.h_b], w.h_a, "dm")
+        await _mention_in_dm(Session, w, dm, [restricted, open_one], f"both {uuid.uuid4().hex[:8]}")
+        assert await _rooms_with(Session, restricted) == []                                      # not seated
+        forked = await _rooms_with(Session, open_one)
+        assert len(forked) == 1                                                                  # the one that allows everyone is
+        assert restricted not in set(await _members_of(Session, forked[0]))
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.parametrize("agent_first", [True, False])
+async def test_naming_an_agents_creator_with_it_seats_both_whatever_the_order_of_the_mention(agent_first):
+    """the creator policy asks who is in the room: a creator named in the SAME message is seated first, so the agent passes — the mention's order does not decide."""
+    from tests.test_1994_backlink_api_realdb import _make_conversation
+
+    engine, Session, w = await _world()
+    try:
+        (restricted,) = await _agents_org_wide(Session, w, w.p1)
+        await _creator_only(Session, restricted, w.h_c)
+        async with Session() as s:
+            dm = await _make_conversation(s, w.org, w.p1, [w.h_a, w.h_b], w.h_a, "dm")
+        named = [restricted, w.h_c] if agent_first else [w.h_c, restricted]
+        await _mention_in_dm(Session, w, dm, named, f"with creator {uuid.uuid4().hex[:8]}")
+        rooms = await _rooms_with(Session, restricted)
+        assert len(rooms) == 1
+        assert w.h_c in set(await _members_of(Session, rooms[0]))
+    finally:
+        await engine.dispose()
+
+
+async def _members_of(Session, room):
+    async with Session() as s:
+        return [r[0] for r in (await s.execute(text("SELECT member_id FROM conversation_participants WHERE conversation_id = :c"), {"c": room})).all()]
+
+
+async def test_another_organizations_publisher_row_in_a_rooms_participants_is_not_named_there():
+    """a stale participant row naming ANOTHER organization's reserved publisher: the participants list of this organization's room does not turn it into «시스템 발행»."""
+    from tests.test_1994_backlink_api_realdb import _make_org, _make_project
+    from tests.test_4846_ac14_room_reads_realdb import _put_in_room
+
+    engine, Session, w = await _world()
+    try:
+        async with Session() as s:
+            other_org = await _make_org(s)
+            await _make_project(s, other_org.id, "Other")
+        foreign = await _publisher(Session, other_org.id)
+        await _put_in_room(Session, w.r_human, foreign)
+        r = await _as(Session, w, "participant", "GET", f"/api/v2/conversations/{w.r_human}")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        parts = (body.get("data") or body).get("participants") or []
+        entry = next(p for p in parts if str(p.get("member_id")) == str(foreign))
+        assert entry.get("name") is None, entry                                                  # was: «시스템 발행»
     finally:
         await engine.dispose()
