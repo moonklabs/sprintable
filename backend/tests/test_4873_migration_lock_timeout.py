@@ -77,6 +77,7 @@ def _revision(dsn: str) -> str | None:
         conn.close()
 
 
+@pytest.mark.timeout(600)   # the repo's 30 s default is for in-process tests: this one builds a database through hundreds of migrations in a subprocess (its own watchdog below judges the wait)
 @pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 def test_a_migration_fails_fast_when_another_connection_holds_the_table_and_runs_once_it_lets_go():
     import psycopg2
