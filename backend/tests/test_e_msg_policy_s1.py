@@ -177,3 +177,27 @@ async def test_no_participants_skip():
     sender = _human_sender(uuid.uuid4(), uuid.uuid4())
     session = AsyncMock()
     await _enforce_agent_creator_policy(sender, [], session)  # 빈 참가자 → skip (쿼리 없음)
+
+
+# ── story #4868 (AC4): the policy reads its agents from the `members` ANCHOR, not from the `team_members` view ─────
+
+@pytest.mark.anyio
+async def test_the_policy_asks_the_members_anchor_for_its_agents_not_the_view():
+    """an agent that lost all its projects is not in the `team_members` view: the question that finds the agents must be asked of `members`. (The real-database tests in test_4868_* prove the behaviour; this
+    pins the table the in-order mocks above cannot see.)"""
+    seen: list[str] = []
+    sender = _human_sender(uuid.uuid4(), uuid.uuid4())
+    agent_id = uuid.uuid4()
+    agent = _agent(agent_id, "creator_only", uuid.uuid4())
+
+    async def execute(stmt, *_a, **_k):
+        seen.append(str(stmt))
+        return _result([agent])
+
+    session = AsyncMock()
+    session.execute = execute
+    with pytest.raises(HTTPException) as exc:
+        await _enforce_agent_creator_policy(sender, [agent_id], session)
+    assert exc.value.status_code == 403
+    first = seen[0]
+    assert "FROM members" in first and "team_members" not in first, first

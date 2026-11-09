@@ -425,6 +425,17 @@ def _rows(r):
     return (rows.get("items") or rows.get("messages") or []) if isinstance(rows, dict) else rows
 
 
+def _find_sender(obj):
+    if isinstance(obj, dict):
+        if isinstance(obj.get("sender"), dict):
+            return obj["sender"]
+        for v in obj.values():
+            hit = _find_sender(v)
+            if hit is not None:
+                return hit
+    return None
+
+
 def _sender_name(rows, content):
     item = next(i for i in rows if i.get("content") == content)
     return (item.get("sender") or {}).get("name")
@@ -437,7 +448,8 @@ async def test_the_message_list_names_this_organizations_publisher_and_not_anoth
         r = await _as(Session, w, "participant", "GET", f"/api/v2/conversations/{w.r_human}/messages?limit=100")
         assert r.status_code == 200, r.text
         assert _sender_name(_rows(r), "top-own") == PUBLISHER_NAME                              # control: the organization's own publisher
-        assert _sender_name(_rows(r), "top-foreign") != PUBLISHER_NAME                          # was: named too
+        foreign_sender = next(i for i in _rows(r) if i.get("content") == "top-foreign").get("sender") or {}
+        assert foreign_sender.get("name") is None and foreign_sender.get("type") == "human", foreign_sender   # was: named too — now the unresolved placeholder, as before 4868
     finally:
         await engine.dispose()
 
@@ -451,6 +463,8 @@ async def test_one_message_names_this_organizations_publisher_and_not_another_or
         assert own.status_code == 200 and foreign.status_code == 200, (own.text, foreign.text)
         assert PUBLISHER_NAME in own.text                                                       # control
         assert PUBLISHER_NAME not in foreign.text                                               # was: named
+        found = _find_sender(foreign.json())
+        assert found is not None and found.get("name") is None and found.get("type") == "human", found
     finally:
         await engine.dispose()
 
@@ -462,7 +476,8 @@ async def test_the_replies_name_this_organizations_publisher_and_not_another_org
         r = await _as(Session, w, "participant", "GET", f"/api/v2/conversations/{w.r_human}/messages/{ids['root']}/replies?limit=100")
         assert r.status_code == 200, r.text
         assert _sender_name(_rows(r), "reply-own") == PUBLISHER_NAME                            # control
-        assert _sender_name(_rows(r), "reply-foreign") != PUBLISHER_NAME                        # was: named
+        foreign_sender = next(i for i in _rows(r) if i.get("content") == "reply-foreign").get("sender") or {}
+        assert foreign_sender.get("name") is None and foreign_sender.get("type") == "human", foreign_sender   # was: named
     finally:
         await engine.dispose()
 
@@ -495,3 +510,25 @@ def test_the_named_are_seated_people_before_agents_whatever_the_order_they_come_
         got = _people_first(order, {agent, other_agent})
         assert all(got.index(person) < got.index(a) for a in got if a in {agent, other_agent}), got
     assert _people_first([other_agent, agent, person], {agent, other_agent}) == [person, other_agent, agent]       # stable inside each kind
+
+
+async def test_a_dm_mention_of_a_person_forks_as_before_and_of_a_refused_agent_alone_does_not_fork():
+    from tests.test_1994_backlink_api_realdb import _make_conversation
+
+    engine, Session, w = await _world()
+    try:
+        (restricted,) = await _agents_org_wide(Session, w, w.p1)
+        await _creator_only(Session, restricted, w.h_c)
+        async with Session() as s:
+            dm_a = await _make_conversation(s, w.org, w.p1, [w.h_a, w.h_b], w.h_a, "dm")
+            dm_b = await _make_conversation(s, w.org, w.p1, [w.h_a, w.h_b], w.h_a, "dm")
+        refused = await _as(Session, w, "participant", "POST", f"/api/v2/conversations/{dm_a}/messages", {"content": "only the restricted agent", "mentioned_ids": [str(restricted)]})
+        assert refused.status_code == 201, refused.text
+        assert not refused.json().get("forked") and "forked_conversation_id" not in refused.json()                               # nobody could be added: no fork, the message stays in the DM
+        person = await _as(Session, w, "participant", "POST", f"/api/v2/conversations/{dm_b}/messages", {"content": "a person", "mentioned_ids": [str(w.h_c)]})
+        assert person.status_code == 201, person.text
+        forked = person.json().get("forked_conversation_id")
+        assert forked, person.json()                                                              # a person is put in a new group, as before
+        assert w.h_c in set(await _members_of(Session, uuid.UUID(forked)))
+    finally:
+        await engine.dispose()
