@@ -76,7 +76,7 @@ def test_the_service_becomes_labels_container_and_the_app_line_becomes_message_t
 def test_the_backends_uvicorn_access_lines_are_dropped_after_the_apps_json_is_parsed() -> None:
     """the access line carries the client address and the request target (one-time codes and tokens travel there — the Caddyfile strips them): it must not reach Cloud Logging"""
     proc = CFG["logging"]["processors"]["no_access_lines"]
-    assert proc == {"type": "exclude_logs", "match_any": ['jsonPayload.logger = "uvicorn.access"', 'jsonPayload.logger =~ "^(httpx|httpcore)"']}
+    assert proc == {"type": "exclude_logs", "match_any": ['jsonPayload.logger = "uvicorn.access"', 'jsonPayload.logger =~ "^(httpx|httpcore|urllib3)"']}
     order = CFG["logging"]["service"]["pipelines"]["containers"]["processors"]
     assert order.index("no_access_lines") > order.index("app_json"), "`logger` is a key of the app's JSON: it exists only after that parse"
 

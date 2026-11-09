@@ -84,3 +84,6 @@ def configure_logging(json_logs: bool = True) -> None:
     # WARNING keeps failures visible (a failed request is logged by the code that made it, without the URL's secrets).
     for name in ("httpx", "httpcore"):
         logging.getLogger(name).setLevel(logging.WARNING)
+    # urllib3 (under `requests` — google-auth, the Cloud Storage client) logs the PATH AND QUERY of a request when it retries (WARNING: «Retrying … after connection broken by …: /path?query») and the URL of a redirect;
+    # a signed Cloud Storage URL carries its signature in that query. ERROR keeps real failures and drops the retry / redirect lines.
+    logging.getLogger("urllib3").setLevel(logging.ERROR)

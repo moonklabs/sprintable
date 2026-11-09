@@ -44,7 +44,7 @@ logging:
       type: exclude_logs
       match_any:
         - 'jsonPayload.logger = "uvicorn.access"'
-        - 'jsonPayload.logger =~ "^(httpx|httpcore)"'
+        - 'jsonPayload.logger =~ "^(httpx|httpcore|urllib3)"'
   service:
     pipelines:
       containers:

@@ -18,6 +18,7 @@ from sqlalchemy.orm import aliased
 
 from app.core.datetime_query import OffsetDatetime
 from app.core.config import settings
+from app.core.log_safe import url_host
 from app.core.pagination import assemble_page, decode_cursor
 from app.dependencies.auth import (
     AuthContext,
@@ -1331,7 +1332,7 @@ async def _dispatch_discord_outbound(
                 await client.post(wh_url, json=discord_payload)
         except Exception:
             logger.warning(
-                "Discord outbound failed member_id=%s url=%s", decision.member_id, wh_url, exc_info=True
+                "Discord outbound failed member_id=%s url=%s", decision.member_id, url_host(wh_url), exc_info=True  # story 4869: the host only (the path of a Discord webhook is its secret)
             )
 
 
