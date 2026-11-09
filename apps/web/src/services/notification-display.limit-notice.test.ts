@@ -30,6 +30,15 @@ describe('agent limit notice (story #4833)', () => {
     expect(getDispatchedHeadline(ko, 'dispatched', { event_type: 'agent.limit_paused', agent_name: 'Lead' })).not.toBe(ko('eventFallback'));
   });
 
+  it('story 4863 — «꺼진 뒤 다시 서지 못함» with the agent name from the payload only; the /inbox row label is the same words', () => {
+    const payload = { event_type: 'agent.restart_stopped', agent_name: 'Lead', title: '서버 제목' };
+    expect(getDispatchedHeadline(ko, 'dispatched', payload)).toBe('Lead · 꺼진 뒤 다시 서지 못함');
+    expect(getDispatchedHeadline(en, 'dispatched', payload)).toBe('Lead · Stopped and did not start again');
+    expect(getDispatchedHeadline(ko, 'dispatched', { event_type: 'agent.restart_stopped' })).toBe('꺼진 뒤 다시 서지 못함');
+    expect(getInboxNotificationLabel(ko, 'agent.restart_stopped')).toBe('꺼진 뒤 다시 서지 못함');
+    expect(getDispatchedHeadline(ko, 'dispatched', payload)).not.toBe(ko('eventFallback'));
+  });
+
   it('negative control — an unknown agent event still falls to the generic line (the table did not become a catch-all)', () => {
     expect(getDispatchedHeadline(ko, 'dispatched', { event_type: 'agent.something_new', agent_name: 'Lead' })).toBe(ko('eventFallback'));
   });

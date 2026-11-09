@@ -291,6 +291,15 @@ WidenedMode = Literal["plan", "default", "acceptEdits", "auto", "dontAsk", "bypa
 WIDENED_MAX_AHEAD = timedelta(minutes=5)
 
 
+class SessionRestartStopped(BaseModel):
+    """story 4863: «this ended session's agent was not started again» — said by the daemon (which outlives the app) on the `stopped` report of a session the OUTSIDE ended, once the app's
+    restart waits plus a margin have gone and no session of the agent stands. `also` = the OTHER agents (ids) that stand in the same state at that moment — counted for «{agent} and N more»,
+    never named; ids the organization does not know are not counted."""
+    model_config = ConfigDict(extra="forbid")
+
+    also: list[uuid.UUID] = Field(default_factory=list, max_length=32)
+
+
 class SessionReport(BaseModel):
     """One session's state — nothing else: no terminal bytes, no prompt text, no path, no key (extra fields → 422)."""
 
@@ -314,6 +323,8 @@ class SessionReport(BaseModel):
     first_screen: SessionFirstScreen | None = None
     # story #4779 (AC3): why work does not reach this agent (its tools link) — each report sets it (a report without it clears it)
     work_hold: SessionWorkHold | None = None
+    # story 4863: with `stopped` only — the session was ended from outside and nothing started the agent again (the people who hold the computer are told once, `desktop_restart_notice`)
+    restart_stopped: SessionRestartStopped | None = None
     # story #4641: a widening a person made at the terminal — the three together or none; the daemon decides the order (from ≠ to only)
     permission_widened_at: OffsetDatetime | None = None
     permission_widened_from: WidenedMode | None = None
@@ -328,6 +339,8 @@ class SessionReport(BaseModel):
             raise ValueError("limit is carried with waiting_input · error · paused_limit only")
         if self.system is not None and self.state != "waiting_system":
             raise ValueError("system is carried with waiting_system only")
+        if self.restart_stopped is not None and self.state != "stopped":
+            raise ValueError("restart_stopped is carried with stopped only")
         widened = (self.permission_widened_at, self.permission_widened_from, self.permission_widened_to)
         if any(v is not None for v in widened) and not all(v is not None for v in widened):
             raise ValueError("permission widening: the at, from and to come together or not at all")
@@ -620,7 +633,20 @@ async def record_session_state(db: AsyncSession, setup: DesktopSetup, session_ke
 
     await on_session_reported(db, setup, session_key, report.state, at)
     await after_report(db, setup, row, was_limited=was_limited)
+    if report.restart_stopped is not None:
+        await _tell_restart_stopped(db, setup, row, report.restart_stopped.also)  # story 4863
     return row
+
+
+async def _tell_restart_stopped(db: AsyncSession, setup: DesktopSetup, row: DesktopSession, also: list[uuid.UUID]) -> None:
+    """story 4863: the notice is the echo of the record — a failure here never fails the state report (its work is in a savepoint)."""
+    from app.services import desktop_restart_notice
+
+    try:
+        async with db.begin_nested():
+            await desktop_restart_notice.tell(db, setup, agent_member_id=row.agent_member_id, session_key=row.session_key, also=also)
+    except Exception:  # noqa: BLE001
+        logger.warning("desktop restart notice failed setup=%s session=%s", setup.id, row.session_key, exc_info=True)
 
 
 def _stale(seq: int, latest: int) -> DesktopRelayError:

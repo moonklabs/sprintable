@@ -81,7 +81,7 @@ export function getEntityHref(
   // (nav-v3-destinations) 여기서 적지 않고, 로그인한 사람을 «오늘»로 보내는 루트 `/`로 간다(이 종이 푸시 딥링크 기본값으로 이미 쓰는 그 주소).
   // 다른 에이전트 알림(입장 등)은 그대로.
   const inner = dispatchedInnerType(notification.event_type ?? '', notification.payload) ?? notification.event_type;
-  if (inner === 'agent.limit_paused' || inner === 'agent.limit_lifted') return '/';
+  if (inner === 'agent.limit_paused' || inner === 'agent.limit_lifted' || inner === 'agent.restart_stopped') return '/'; // story 4863: the restart-stopped notice lands on «오늘» too
   switch (source_entity_type) {
     case 'story':
       return withProjectParam(`/flow?story=${source_entity_id}`, p);

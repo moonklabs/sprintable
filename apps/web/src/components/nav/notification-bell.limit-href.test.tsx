@@ -20,6 +20,10 @@ describe('bell link for the agent limit notices (story #4833)', () => {
     expect(getEntityHref({ ...base, event_type: 'agent.limit_paused', payload: null })).toBe('/');
   });
 
+  it('story 4863 — the restart-stopped notice opens the Today screen too', () => {
+    expect(getEntityHref({ ...base, event_type: 'dispatched', payload: { event_type: 'agent.restart_stopped' } })).toBe('/');
+  });
+
   it('negative control — another agent notice, and a limit notice with no entity, open nothing', () => {
     expect(getEntityHref({ ...base, event_type: 'dispatched', payload: { event_type: 'agent_joined' } })).toBeNull();
     expect(getEntityHref({ ...base, source_entity_id: null, event_type: 'dispatched', payload: { event_type: 'agent.limit_paused' } })).toBeNull();
