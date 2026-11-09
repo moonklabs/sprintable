@@ -209,7 +209,7 @@ def test_the_policy_file_has_the_log_match_policy_for_both_backends_and_bakes_in
     policies = _policies()
     names = [p["displayName"] for p in policies]
     assert len(names) == len(set(names)), "a policy name appears twice (the script skips by name)"
-    (p,) = [p for p in policies if "Expo push credentials error" in p["displayName"]]
+    (p,) = [p for p in policies if p["displayName"] == "Sprintable — Expo push credentials error (dev · prod)"]   # the Cloud Run policy (the VM one is pinned below)
     cond = p["conditions"][0]["conditionMatchedLog"]
     f = cond["filter"]
     assert 'jsonPayload.event="expo_push_credentials_error"' in f
@@ -221,6 +221,26 @@ def test_the_policy_file_has_the_log_match_policy_for_both_backends_and_bakes_in
     assert p["alertStrategy"]["notificationRateLimit"]["period"].endswith("s")                  # a log-match policy needs the rate limit
     assert p["notificationChannels"] == [], "the channel is the operator's (existing one, passed in) — none baked into the file"
     assert expo.EXPO_CREDENTIALS_ERROR_EVENT == "expo_push_credentials_error"                    # the filter and the code say the same word
+
+
+def test_the_vm_backends_have_their_own_policy_so_the_old_one_going_blind_is_not_the_only_net():
+    """story 4796 moved dev (10-27) and prod (10-29) off Cloud Run: the policy above matches `cloud_run_revision` only. A SEPARATE policy (own name → `setup_monitoring.sh alerts`
+    creates it; an existing policy is skipped by name and would never get a changed filter) watches the VM instances' logs for the same event."""
+    policies = _policies()
+    (old,) = [p for p in policies if p["displayName"] == "Sprintable — Expo push credentials error (dev · prod)"]
+    (vm,) = [p for p in policies if p["displayName"] == "Sprintable — Expo push credentials error (VM backends dev · prod)"]
+    assert 'resource.type="cloud_run_revision"' in old["conditions"][0]["conditionMatchedLog"]["filter"]         # the old one is left as it was
+    f = vm["conditions"][0]["conditionMatchedLog"]["filter"]
+    assert 'resource.type="gce_instance"' in f and "cloud_run_revision" not in f
+    assert 'jsonPayload.event="expo_push_credentials_error"' in f                                                # structured shape
+    assert f.rstrip(")").endswith('OR "expo_push_credentials_error"') or '"expo_push_credentials_error")' in f   # plain-text docker shape
+    pattern = re.search(r'resource_name"=~"([^"]+)"', f).group(1)
+    assert re.search(pattern, "sprintable-vm-dev") and re.search(pattern, "sprintable-vm-prod")
+    assert not re.search(pattern, "sprintable-vm-devx") and not re.search(pattern, "sprintable-vm-staging") and not re.search(pattern, "xsprintable-vm-dev")
+    assert vm["severity"] == "ERROR" and vm["notificationChannels"] == [] and vm["combiner"] == "OR"
+    assert vm["alertStrategy"]["notificationRateLimit"]["period"].endswith("s")
+    names = [p["displayName"] for p in policies]
+    assert len(names) == len(set(names))
 
 
 def test_the_script_skips_existing_policies_and_reuses_given_channels():

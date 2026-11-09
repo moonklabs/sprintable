@@ -382,8 +382,88 @@ def test_one_failing_branch_does_not_stop_the_other(monkeypatch, capsys):
     assert "PERMISSION_DENIED on push read" in out and "(해당 항목 없음)" in out
 
 
-def test_no_dev_backend_is_an_error(monkeypatch, capsys):
-    monkeypatch.setattr(probe, "_run", lambda cmd: "sprintable-backend-prod\n")
+# ── story 4796: dev 백엔드는 10-27 부터 VM — Cloud Run 서비스가 없다 ─────────────────────────────────────────────────────────────────────
+
+def test_no_cloud_run_dev_backend_reads_the_dev_vm_instead_and_never_the_prod_vm(monkeypatch, capsys):
+    calls: list[list[str]] = []
+
+    def fake_run(cmd):
+        calls.append(cmd)
+        if cmd[:4] == ["gcloud", "run", "services", "list"]:
+            return "sprintable-backend-prod\nsprintable-frontend-dev\n"   # no sprintable-backend-dev
+        return "[]"
+
+    monkeypatch.setattr(probe, "_run", fake_run)
     _env(monkeypatch)
-    assert probe.main() == 1
-    assert "sprintable-backend-dev 서비스를 못 찾았다" in capsys.readouterr().out
+    assert probe.main() == 0                                        # not an error any more: the log is elsewhere
+    out = capsys.readouterr().out
+    assert "로그 출처: VM sprintable-vm-dev" in out and "story 4796" in out
+    reads = [c[3] for c in calls if c[1] == "logging"]
+    assert reads and all(
+        'resource.type="gce_instance"' in f and 'labels."compute.googleapis.com/resource_name"="sprintable-vm-dev"' in f for f in reads
+    )
+    assert not any("sprintable-vm-prod" in f or "cloud_run_revision" in f for f in reads)
+    assert {tuple(c[1:3]) for c in calls} == {("run", "services"), ("logging", "read")}      # still only the two verbs
+
+
+def test_the_vm_source_names_the_logs_that_arrive_and_no_value(monkeypatch, capsys):
+    import json
+
+    def fake_run(cmd):
+        if cmd[:4] == ["gcloud", "run", "services", "list"]:
+            return ""
+        flt = cmd[3]
+        if "--limit=500" in cmd:   # ④ — the log names
+            ents = [{"logName": "projects/p/logs/syslog", "textPayload": "SECRET-LINE teacher.private@example.com"}] * 3
+            ents += [{"logName": "projects/p/logs/ops-agent-health", "jsonPayload": {"k": "SECRET-VALUE"}}]
+            ents += [{"logName": "projects/p/logs/we ird/name with spaces!!", "textPayload": "x"}]
+            return json.dumps(ents)
+        return "[]"
+
+    monkeypatch.setattr(probe, "_run", fake_run)
+    _env(monkeypatch)
+    assert probe.main() == 0
+    out = capsys.readouterr().out
+    assert "④" in out and "syslog: 3건" in out and "ops-agent-health: 1건" in out and "(other): 1건" in out
+    assert "SECRET" not in out and "teacher.private" not in out and "spaces" not in out
+
+
+def test_the_cloud_run_path_has_no_vm_section_and_keeps_its_filters(monkeypatch, capsys):
+    seen: list[str] = []
+
+    def fake_run(cmd):
+        if cmd[:4] == ["gcloud", "run", "services", "list"]:
+            return "sprintable-backend-dev\n"
+        seen.append(cmd[3])
+        return "[]"
+
+    monkeypatch.setattr(probe, "_run", fake_run)
+    _env(monkeypatch)
+    assert probe.main() == 0
+    out = capsys.readouterr().out
+    assert "로그 출처: Cloud Run sprintable-backend-dev" in out and "④" not in out
+    assert seen and all("gce_instance" not in f for f in seen)
+    assert any('jsonPayload.event="push_diagnostics"' in f for f in seen)
+
+
+def test_docker_shaped_entries_are_read_the_same_as_cloud_run_entries():
+    line = "expo push: sent org=54bac162 event=conversation.message devices=1 ok=1 error=0 reasons=None\n"
+    for e in (
+        {"timestamp": "2026-11-09T07:00:00Z", "textPayload": line},
+        {"timestamp": "2026-11-09T07:00:00Z", "jsonPayload": {"message": line}},
+        {"timestamp": "2026-11-09T07:00:00Z", "jsonPayload": {"log": line}},            # docker json-file → Ops Agent
+    ):
+        (p,) = probe.parse_pushes([e], ORG)
+        assert (p.devices, p.ok, p.error, p.event) == (1, 1, 0, "conversation.message")
+
+
+def test_a_diagnostics_line_that_arrives_as_json_text_in_one_field_is_read_once():
+    import json
+    inner = json.dumps({"event": "push_diagnostics", "member_id": MEMBER_FULL, "stage": "ok", "permission": "granted", "error_code": None, "platform": "ios"})
+    structured = {"timestamp": "2026-11-09T07:01:00Z", "jsonPayload": json.loads(inner)}
+    wrapped = {"timestamp": "2026-11-09T07:01:00Z", "jsonPayload": {"log": inner + "\n"}}
+    for e in (structured, wrapped):
+        diags, members = probe.parse_diagnostics([e], MEMBER)
+        assert members == 1 and [(d.stage, d.permission, d.platform) for d in diags] == [("ok", "granted", "ios")]
+    # not an object / not push_diagnostics → nothing, no crash
+    assert probe.parse_diagnostics([{"jsonPayload": {"log": "{not json"}}, {"jsonPayload": {"log": "[1,2]"}}], MEMBER) == ([], 0)

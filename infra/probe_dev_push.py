@@ -37,6 +37,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 _REGION = "asia-northeast3"
+_VM_NAME = "sprintable-vm-dev"  # story 4796 — dev 백엔드는 10-27 부터 이 VM(docker compose) 위에서 돈다. Cloud Run dev 서비스는 없다.
 _MAX_ENTRIES = 5000
 _GCLOUD_TIMEOUT_SECONDS = 90
 _DAYS_MIN, _DAYS_MAX, _DAYS_DEFAULT = 1, 30, 14
@@ -85,16 +86,36 @@ def _day(ts: object) -> str:
 
 
 def _text_of(entry: dict) -> str:
-    """항목의 «본문 글» — textPayload 또는 jsonPayload.message. 다른 칸은 보지 않는다."""
+    """항목의 «본문 글» — textPayload · jsonPayload.message · jsonPayload.log(docker json-file 을 Ops Agent 가 올릴 때의 칸 · story 4796). 다른 칸은 보지 않는다."""
     t = entry.get("textPayload")
     if isinstance(t, str):
         return t
     jp = entry.get("jsonPayload")
     if isinstance(jp, dict):
-        m = jp.get("message")
-        if isinstance(m, str):
-            return m
+        for key in ("message", "log"):
+            m = jp.get(key)
+            if isinstance(m, str):
+                return m
     return ""
+
+
+def _json_payload_of(entry: dict) -> dict:
+    """구조화 칸(jsonPayload). docker 줄이 JSON 글 그대로 `log`/`message` 한 칸에 담겨 오면(Ops Agent 가 JSON 으로 안 푼 모양) 그 글을 한 번 푼다 — 객체가 아니면 빈 dict."""
+    jp = entry.get("jsonPayload")
+    if not isinstance(jp, dict):
+        return {}
+    if "event" in jp:
+        return jp
+    for key in ("log", "message"):
+        raw = jp.get(key)
+        if isinstance(raw, str) and raw.lstrip().startswith("{"):
+            try:
+                inner = json.loads(raw)
+            except ValueError:
+                continue
+            if isinstance(inner, dict):
+                return inner
+    return jp
 
 
 # ── ① expo push: sent ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -209,8 +230,8 @@ def parse_diagnostics(entries: list[dict], member_prefix: str) -> tuple[list[Dia
     out: list[Diag] = []
     members: set[str] = set()
     for e in entries:
-        jp = e.get("jsonPayload")
-        if not isinstance(jp, dict) or jp.get("event") != "push_diagnostics":
+        jp = _json_payload_of(e)
+        if jp.get("event") != "push_diagnostics":
             continue
         mid = jp.get("member_id")
         if not isinstance(mid, str) or not mid.lower().startswith(member_prefix.lower()):
@@ -266,6 +287,21 @@ def field_names(entry: object) -> list[str]:
     return ordered[:_FIELD_NAMES_MAX] + ([f"… 외 {len(ordered) - _FIELD_NAMES_MAX}개"] if len(ordered) > _FIELD_NAMES_MAX else [])
 
 
+_LOG_ID = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
+_LOG_IDS_READ = 500
+
+
+def log_ids(entries: list[dict]) -> list[str]:
+    """항목들의 «로그 이름 끝 칸»(`projects/…/logs/<이 칸>`)과 개수 — VM 에서 어떤 로그가 올라오는지(syslog · ops-agent-health · 백엔드 컨테이너 …)를 가르는 용도.
+    이름이 짧은 식별자 모양이 아니면 «(other)» 로 접는다. 값(본문)은 읽지 않는다."""
+    counts: dict[str, int] = defaultdict(int)
+    for e in entries:
+        name = e.get("logName") if isinstance(e, dict) else None
+        tail = name.rsplit("/", 1)[-1] if isinstance(name, str) else "?"
+        counts[tail if _LOG_ID.match(tail) else _OTHER] += 1
+    return [f"  {k}: {v}건" for k, v in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
+
+
 # ── gcloud ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 class _GcloudError(Exception):
     pass
@@ -300,6 +336,11 @@ def _dev_backends() -> list[str]:
     out = _run(["gcloud", "run", "services", "list", f"--region={_REGION}", "--format=value(metadata.name)", *_project_args()])
     names = [n.strip() for n in out.splitlines() if n.strip()]
     return [n for n in names if n == "sprintable-backend-dev"]
+
+
+def _vm_filter() -> str:
+    """dev VM(story 4796)의 로그 — 인스턴스 이름으로 가른다(prod VM · 다른 서비스가 섞이지 않게). 컨테이너 로그가 Cloud Logging 에 올라와 있어야 줄이 나온다."""
+    return f'(resource.type="gce_instance" AND labels."compute.googleapis.com/resource_name"="{_VM_NAME}")'
 
 
 def _read(flt: str, limit: int = _MAX_ENTRIES) -> list[dict]:
@@ -367,13 +408,16 @@ def main() -> int:
     except _GcloudError as exc:
         print(f"✗ Cloud Run 서비스 목록을 못 읽었다 — gcloud 오류 문구 그대로:\n{exc}")
         return 1
-    print(f"백엔드 서비스: {', '.join(backends) or '(없음)'}")
-    if not backends:
-        print("✗ sprintable-backend-dev 서비스를 못 찾았다")
-        return 1
+    print(f"백엔드 서비스: {', '.join(backends) or '(Cloud Run 에 없음)'}")
+    if backends:
+        svc, vm = _service_filter(backends), False
+        print(f"로그 출처: Cloud Run {', '.join(backends)}")
+    else:
+        # story 4796: dev 백엔드는 10-27 부터 VM 위에서 돈다 — Cloud Run 서비스가 없는 것은 오류가 아니라 «로그가 다른 자리에 있다»는 뜻.
+        svc, vm = _vm_filter(), True
+        print(f"로그 출처: VM {_VM_NAME}(Cloud Run 에 dev 백엔드 서비스 없음 — story 4796) · 컨테이너 로그가 Cloud Logging 에 안 올라와 있으면 ① ② 는 0건이고 ③ 이 그것을 보인다")
 
     t = f'timestamp>="{since}"'
-    svc = _service_filter(backends)
     out: list[str] = []
 
     def one():
@@ -387,7 +431,11 @@ def main() -> int:
     out += _section("① expo push: sent — 채팅 알림 발송 (devices · ok · error · reasons)", one)
 
     def two():
-        es = _read(f'{svc} AND jsonPayload.event="push_diagnostics" AND jsonPayload.member_id:"{member_prefix}" AND {t}')
+        if vm:  # docker 줄이 JSON 글 그대로 한 칸에 오는 모양까지(parse_diagnostics 가 한 번 푼다)
+            diag_flt = f'{svc} AND ("push_diagnostics" AND "{member_prefix}") AND {t}'
+        else:
+            diag_flt = f'{svc} AND jsonPayload.event="push_diagnostics" AND jsonPayload.member_id:"{member_prefix}" AND {t}'
+        es = _read(diag_flt)
         diags, members = parse_diagnostics(es, member_prefix)
         warn = [f"  ⚠ 앞 8자리에 서로 다른 멤버 {members}명이 걸렸다 — 아래는 섞여 있다"] if members > 1 else []
         if not diags:
@@ -401,6 +449,13 @@ def main() -> int:
         return ([f"  {' · '.join(field_names(es[0]))}"] if es else []), len(es)
 
     out += _section("③ 필터 없이 이 서비스 최근 1줄의 칸 이름만 (값 0) — ① ② 가 0건일 때 «필터가 틀렸나 · 정말 0인가»를 가르는 용도", three)
+
+    if vm:
+        def four():
+            es = _read(f"{svc} AND {t}", limit=_LOG_IDS_READ)
+            return log_ids(es), len(es)
+
+        out += _section("④ 이 VM 에서 Cloud Logging 으로 올라오는 로그 이름과 개수(최근 항목 중) — 백엔드 컨테이너 로그가 목록에 없으면 «올라오지 않는다»가 답(story 4796 · 4869)", four)
 
     print("\n".join(out))
     return 0
