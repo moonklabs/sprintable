@@ -536,20 +536,26 @@ async def test_a_dm_mention_of_a_person_forks_as_before_and_of_a_refused_agent_a
 
 # ─── the 1:1 fork seats PEOPLE FIRST (a list-mode agent and a person it does not allow cannot both be in) ─────────
 
-async def _list_mode_agent_with_id_order(Session, w, *, below: bool):
-    """a list-mode agent (project P1) that allows only h_a and h_b, whose id is smaller (`below`) or larger than h_c's — so an id-ordered seating would put it first or last."""
+async def _list_mode_agent_next_to(Session, w, *, below: bool):
+    """a list-mode agent (project P1) that allows only h_a and h_b, with the id right BELOW (`below`) or right ABOVE the person h_c's id — made, not drawn, so an id-ordered seating puts it first or last on every run
+    (a random draw gave up on the runs where h_c's id sat near either end of the id space)."""
+    from app.models.member import AgentProjectProfile, Member
+    from app.models.project_access import ProjectAccess
     from app.models.team import AgentMessageAllowlist
 
-    for _ in range(60):
-        (agent,) = await _agents_org_wide(Session, w, w.p1)
-        if (agent < w.h_c) is below:
-            async with Session() as s:
-                await s.execute(text("UPDATE members SET message_policy_mode = 'list' WHERE id = :a"), {"a": agent})
-                for allowed in (w.h_a, w.h_b):
-                    s.add(AgentMessageAllowlist(agent_member_id=agent, allowed_id=allowed, org_id=w.org))
-                await s.commit()
-            return agent
-    raise AssertionError("could not draw an agent id on the wanted side of the person's id")
+    delta = -1 if below else 1
+    assert 0 < w.h_c.int + delta < (1 << 128) - 1                                                 # the person's id is not the first or last uuid
+    agent = uuid.UUID(int=w.h_c.int + delta)
+    async with Session() as s:
+        s.add(Member(id=agent, org_id=w.org, type="agent", user_id=None, name=f"agent-{agent.hex[:6]}", message_policy_mode="list"))
+        await s.flush()
+        s.add(AgentProjectProfile(id=uuid.uuid4(), member_id=agent, project_id=w.p1))
+        s.add(ProjectAccess(id=uuid.uuid4(), project_id=w.p1, org_member_id=None, member_id=agent, permission="granted", role="member"))
+        for allowed in (w.h_a, w.h_b):
+            s.add(AgentMessageAllowlist(agent_member_id=agent, allowed_id=allowed, org_id=w.org))
+        await s.commit()
+    assert (agent < w.h_c) is below
+    return agent
 
 
 @pytest.mark.parametrize("below", [True, False])
@@ -559,7 +565,7 @@ async def test_a_dm_mention_of_a_person_and_a_list_agent_that_does_not_allow_the
 
     engine, Session, w = await _world()
     try:
-        agent = await _list_mode_agent_with_id_order(Session, w, below=below)
+        agent = await _list_mode_agent_next_to(Session, w, below=below)
         async with Session() as s:
             dm = await _make_conversation(s, w.org, w.p1, [w.h_a, w.h_b], w.h_a, "dm")
         r = await _as(Session, w, "participant", "POST", f"/api/v2/conversations/{dm}/messages", {"content": f"both {uuid.uuid4().hex[:8]}", "mentioned_ids": [str(agent), str(w.h_c)]})
