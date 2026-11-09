@@ -130,7 +130,7 @@ async def pg_notify(
     try:
         from sqlalchemy import text
         from app.core.database import async_session_factory
-        async with async_session_factory() as session:
+        async with _notify_gate.slot(), async_session_factory() as session:  # story #4867: only `pg_notify_max_concurrent` of these hold a request-pool place at once, the rest wait their turn (nothing dropped). One line, so the raw-connection site below keeps its pinned line (test_4796_vm_db_pool)
             await session.execute(
                 text("SELECT pg_notify(:ch, :pl)"),
                 {"ch": _CHANNEL, "pl": payload_str},
@@ -265,3 +265,10 @@ async def listen_loop() -> None:
                     pass
         await asyncio.sleep(delay)
         delay = min(delay * 2, 30)
+
+
+# story #4867 — defined at the END of the module on purpose: test_4796_vm_db_pool pins the line of the raw `asyncpg.connect` above, so nothing may be added before it
+from app.core.bounded_gate import LoopGate  # noqa: E402
+from app.core.config import settings as _gate_settings  # noqa: E402
+
+_notify_gate = LoopGate(lambda: _gate_settings.pg_notify_max_concurrent)
