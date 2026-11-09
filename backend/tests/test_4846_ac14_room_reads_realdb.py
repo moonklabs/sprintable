@@ -288,7 +288,7 @@ async def test_a_mention_of_a_participant_agent_that_has_not_the_rooms_project_c
     try:
         lost, kept, lost_hook_agent = await _agents_org_wide(Session, w, w.p2, w.p1, w.p2)
         room = await _people_project_room(Session, w)
-        for a in (lost, kept, lost_hook_agent):
+        for a in (lost, kept, lost_hook_agent, w.h_d):                                         # w.h_d: a PERSON in the room who has only P2 — a person is not cut by project (AC2)
             await _put_in_room(Session, room, a)
         async with Session() as s:
             hook_lost = WebhookConfig(id=uuid.uuid4(), org_id=w.org, member_id=lost_hook_agent, project_id=w.p2, url="https://lost.example/hook", events=[])
@@ -300,7 +300,7 @@ async def test_a_mention_of_a_participant_agent_that_has_not_the_rooms_project_c
         with patch("app.routers.conversations._push_to_agent", side_effect=lambda pid, payload: pushed.append((str(pid), payload))), \
                 patch("app.services.conversation_webhook.deliver_conversation_message_webhook", spy):
             r = await _as(Session, w, "participant", "POST", f"/api/v2/conversations/{room}/messages",
-                          {"content": f"hello {words}", "mentioned_ids": [str(lost), str(kept), str(lost_hook_agent)]})
+                          {"content": f"hello {words}", "mentioned_ids": [str(lost), str(kept), str(lost_hook_agent), str(w.h_d)]})
             assert r.status_code == 201, r.text
         msg = uuid.UUID((r.json().get("data") or r.json())["id"])
         for gone in (lost, lost_hook_agent):                                                   # no webhook agent and no webhook-less agent: the same
@@ -313,5 +313,7 @@ async def test_a_mention_of_a_participant_agent_that_has_not_the_rooms_project_c
         assert got and any(words in p for _t, p in got), got                                  # control: the agent WITH the project is named as before, words and all
         targets = {t.id for t in spy.await_args.kwargs["targets"]} if spy.await_count else set()
         assert hook_lost.id not in targets, targets                                           # and its webhook is not called
+        got = await _events_for(Session, msg, w.h_d)
+        assert any(t == "conversation:mention" and words in p for t, p in got), got            # control: a PERSON who lost the project is named with the words, as always (only AGENTS are cut by project)
     finally:
         await engine.dispose()
