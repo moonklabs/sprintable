@@ -357,13 +357,42 @@ def test_a_waiter_that_is_cancelled_leaves_the_waiting_count():
     asyncio.run(scenario())
 
 
+def test_a_waiter_cancelled_right_after_it_was_granted_the_permit_keeps_the_gate_whole():
+    """codex: the cancellation must arrive AFTER the semaphore handed the permit over (the cancel-after-grant window), not while the first holder still blocks it.
+    The holder is the test itself (outside the ledger); release() grants the waiter's future and cancel() lands in the same step, before the waiter ran."""
+    gate = LoopGate(lambda: 1, name="t4867-grant")
+
+    async def scenario():
+        sem = gate._semaphore()
+        await sem.acquire()  # the only permit is held outside the gate's ledger
+
+        async def piece():
+            async with gate.slot():
+                return "in"
+
+        waiter = asyncio.create_task(piece())
+        await asyncio.sleep(0.05)
+        assert gate.stats()["waiting"] == 1
+        sem.release()  # hands the permit to the waiter ...
+        waiter.cancel()  # ... and the cancellation arrives before it has run: cancel AFTER the grant
+        result = (await asyncio.gather(waiter, return_exceptions=True))[0]
+        assert isinstance(result, asyncio.CancelledError), result
+        s = gate.stats()
+        assert (s["running"], s["waiting"]) == (0, 0), s
+        assert await asyncio.wait_for(piece(), 1) == "in", "the permit that was granted to the cancelled waiter must not be lost"
+
+    asyncio.run(scenario())
+
+
 def test_the_three_production_gates_are_named_and_an_anonymous_gate_is_left_out():
     from app.services import au_metering, pg_pubsub, tool_call_recording  # noqa: F401 — importing them creates the gates
 
-    LoopGate(lambda: 1)  # anonymous: never listed
+    anonymous = LoopGate(lambda: 1)  # anonymous: never listed — and kept ALIVE here (a temporary would be collected at once and prove nothing)
+    assert anonymous in bounded_gate._gates
     names = [s["name"] for s in bounded_gate.gate_stats()]
     assert {"pg_notify", "au_metering", "tool_call_recording"} <= set(names), names
     assert None not in names and "" not in names
+    assert anonymous.name is None and all(s["name"] for s in bounded_gate.gate_stats()), "the anonymous gate must not be listed"
 
 
 @pytest.mark.anyio
@@ -373,6 +402,7 @@ async def test_the_pool_watch_line_carries_the_gate_counts_and_comes_out_when_a_
     from types import SimpleNamespace
 
     from app.core import pool_holders
+    from app.services import au_metering, pg_pubsub, tool_call_recording  # noqa: F401 — importing them creates the production gates this test reads off the line
 
     stub_pool = SimpleNamespace(size=lambda: 20, _max_overflow=10, checkedout=lambda: 0)
     # the registry is swapped whole (and put back by monkeypatch): the real `request` pool the app registered at import must stay, and no other pool may speak in this test
