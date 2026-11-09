@@ -1,10 +1,11 @@
 'use client';
 
+import { useEmbeddedServer } from '@/components/embedded-server-context';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations, useLocale } from 'next-intl';
 import { useSearchParams } from 'next/navigation';
 import { Check, Circle, Info, Loader2 } from 'lucide-react';
-import { appSetupLink, nativeReturnApp, RETURN_APP_PARAM, type NativeReturnApp } from '@/lib/auth/native-return-app';
+import { appSetupLink, appWorkdirLink, nativeReturnApp, RETURN_APP_PARAM, type NativeReturnApp } from '@/lib/auth/native-return-app';
 import { PhoneAppGet } from './phone-pairing';
 import { PHONE_APP_INVITE_ANDROID_TARGET, PHONE_APP_PUBLISHED, PHONE_APP_STORE_ANDROID_TARGET, PHONE_APP_TEST_GROUP_TARGET, phoneAppLinks } from '@/lib/phone-app-store';
 import { Button } from '@/components/ui/button';
@@ -41,7 +42,7 @@ export function SignInBand({ runtimes }: { runtimes: DesktopRuntime[] }) {
   );
 }
 
-export function SetupProgressView({ setupId, recipeName, phoneControlFailed = false, onPhoneRetry }: { setupId: string | null; recipeName: string; phoneControlFailed?: boolean; /** story 4711 (PO 10-16): a solo start whose «폰으로도 다루기» switch did not turn on — turns it on again; true = it did */ onPhoneRetry?: () => Promise<boolean> }) {
+export function SetupProgressView({ setupId, recipeName, phoneControlFailed = false, onPhoneRetry, canWorkdir = false }: { setupId: string | null; recipeName: string; phoneControlFailed?: boolean; /** story 4832: the app said `caps=workdir` — the move page's per-agent [작업 폴더 고르기] link is offered (an older app gets none) */ canWorkdir?: boolean; /** story 4711 (PO 10-16): a solo start whose «폰으로도 다루기» switch did not turn on — turns it on again; true = it did */ onPhoneRetry?: () => Promise<boolean> }) {
   const t = useTranslations('desktop.setup');
   const tOnboarding = useTranslations('onboarding'); // story 4711: [대화 열기] is the words the first-instruction card already uses (Yuna)
   const locale = useLocale();
@@ -142,7 +143,7 @@ export function SetupProgressView({ setupId, recipeName, phoneControlFailed = fa
   // story 4498 (PO 10:50Z · Yuna 10:51Z): a disconnected setup ends here — whatever the steps had reached before (a result
   // shown before the disconnect is not drawn as «done»: nothing continues), and opened again by its address the same card
   if (progress.disconnected) return <Failure failure="disconnected" todayHref={flatHref(resolveNavV3Destinations(navV3Flags ?? DEFAULT_NAV_V3_FLAGS).today.path)} />;
-  if (move) return <MoveProgressBody move={move} onRetry={() => void poll()} todayHref={flatHref(resolveNavV3Destinations(navV3Flags ?? DEFAULT_NAV_V3_FLAGS).today.path)} phoneControlFailed={phoneControlFailed} isAdmin={isAdmin} app={app} />;
+  if (move) return <MoveProgressBody move={move} onRetry={() => void poll()} todayHref={flatHref(resolveNavV3Destinations(navV3Flags ?? DEFAULT_NAV_V3_FLAGS).today.path)} phoneControlFailed={phoneControlFailed} isAdmin={isAdmin} app={app} canWorkdir={canWorkdir} />;
   if (progress.blocked) return <Failure failure="managed" />;
   if (progress.expired) return <Failure failure="expired" />;
   // the folder-trust question is Claude Code's (Codex does not ask it) — Yuna v24 · PO 11:19Z
@@ -312,7 +313,13 @@ function PhoneControlFailedLine() {
  * its band's [폰 페어링] pressed (sprintable-mobile · no setup starts). A member reads where pairing is done instead. The org's
  * remote-control line (§E ③e · [켜기]) joins with the switch pieces after the security lens.
  */
-export function PhoneHandoffCard({ isAdmin, app }: { isAdmin: boolean; app: NativeReturnApp | null }) {
+export function PhoneHandoffCard(props: { isAdmin: boolean; app: NativeReturnApp | null }) {
+  // story 4832: the app's own server has no phone relay — the card (phone app, pairing, the remote-control line) says nothing there
+  const embedded = useEmbeddedServer();
+  return embedded ? null : <PhoneHandoffCardBody {...props} />;
+}
+
+function PhoneHandoffCardBody({ isAdmin, app }: { isAdmin: boolean; app: NativeReturnApp | null }) {
   // the file's namespace with dotted keys (the repo's i18n key check binds one namespace per hook name in a file — story #2371)
   const t = useTranslations('desktop.setup');
   const tRemote = useTranslations('desktop.remote');
@@ -359,7 +366,7 @@ export function PhoneHandoffCard({ isAdmin, app }: { isAdmin: boolean; app: Nati
  * story #4576 (Yuna «② 옮긴 뒤 진행 표시»): a move's two steps — no first task, no result, no [결과 보기]. Agents by their own names
  * (always the `…Bare` forms: name + particle). A moved agent waiting for its folder is ①'s note (as the trust note), not a failure.
  */
-function MoveProgressBody({ move, onRetry, todayHref, phoneControlFailed, isAdmin, app }: { move: MoveProgress; onRetry: () => void; todayHref: string; phoneControlFailed: boolean; isAdmin: boolean; app: NativeReturnApp | null }) {
+function MoveProgressBody({ move, onRetry, todayHref, phoneControlFailed, isAdmin, app, canWorkdir }: { move: MoveProgress; onRetry: () => void; todayHref: string; phoneControlFailed: boolean; isAdmin: boolean; app: NativeReturnApp | null; canWorkdir: boolean }) {
   const t = useTranslations('desktop.setup');
   const RUNTIME: Record<DesktopRuntime, string> = { claude: 'Claude Code', codex: 'Codex' };
   if (move.blocked) return <Failure failure="managed" />;
@@ -367,6 +374,11 @@ function MoveProgressBody({ move, onRetry, todayHref, phoneControlFailed, isAdmi
   const group = (names: string[]) => ({ text: names.join(' · '), last: names.at(-1) ?? '', count: names.length });
   const done = move.connected === 'done';
   const [readyShown, connectShown] = move.shown;
+  // story 4832: one link per agent that waits for its folder — only for an app that said `caps=workdir` (an older app would read the link as «start a setup»), and only
+  // for an id the link can carry (uuid-shaped); an agent without such an id keeps the pointer line
+  const folderLinks = canWorkdir
+    ? move.folderWaitIds.flatMap((memberId, i) => { const href = appWorkdirLink(app, memberId); return href ? [{ memberId, name: move.folderWait[i] ?? '', href }] : []; })
+    : [];
   return (
     <Card className="break-keep flex flex-col gap-4 p-6" data-testid="setup-move-progress">
       <header>
@@ -379,9 +391,20 @@ function MoveProgressBody({ move, onRetry, todayHref, phoneControlFailed, isAdmi
         <Step state={readyShown} paused={move.folderWait.length > 0} label={move.ready === 'done' ? t('stepReadyDone') : t('stepReadyRunning')}
           detail={move.pairs.length ? move.pairs.map((p) => `${p.name} · ${RUNTIME[p.runtime]}`).join(', ') : null}>
           {move.folderWait.length ? (
-            <span className="mt-1 flex gap-2 rounded-md bg-muted p-2 text-xs" data-testid="setup-move-folder-wait">
-              <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-              {(() => { const g = group(move.folderWait); return t('move.folderWait', { names: g.text, josa: pickEunNeunJosa(g.last), count: g.count }); })()}
+            <span className="mt-1 flex flex-col gap-2 rounded-md bg-muted p-2 text-xs" data-testid="setup-move-folder-wait">
+              <span className="flex gap-2">
+                <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                {/* story 4832: an app that answers the per-agent link is asked here (the buttons below); an older one keeps the pointer to the window's notice */}
+                {/* every waiting agent has its button → «아래 버튼»; some have none (an id the link cannot carry) → the pointer line, which covers them all */}
+                {(() => { const g = group(move.folderWait); return t(folderLinks.length === move.folderWait.length ? 'move.folderWaitHere' : 'move.folderWait', { names: g.text, josa: pickEunNeunJosa(g.last), count: g.count }); })()}
+              </span>
+              {folderLinks.length ? (
+                <span className="flex flex-wrap gap-2">
+                  {folderLinks.map((l) => (
+                    <Button key={l.memberId} asChild variant="outline" size="sm"><a href={l.href} data-testid="setup-move-pick-folder" data-member={l.memberId}>{t('move.pickFolder', { name: l.name })}</a></Button>
+                  ))}
+                </span>
+              ) : null}
             </span>
           ) : null}
         </Step>

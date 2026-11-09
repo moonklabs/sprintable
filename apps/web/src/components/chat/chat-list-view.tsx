@@ -10,6 +10,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { EmptyState } from '@/components/ui/empty-state';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Select } from '@/components/ui/select';
 import { NewConversationModal } from './new-conversation-modal';
 import { ConnectionLostBanner } from './connection-lost-banner';
 import { isOwnMessage, useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
@@ -21,6 +22,7 @@ import { CountBadge } from '@/components/ui/count-badge';
 import { NowStrip } from './now-strip';
 import { PulseCard } from './pulse-card';
 import { useChatRailOptional } from '@/app/(authenticated)/chats/chat-rail-context';
+import { isNoProjectAtAll } from '@/app/(authenticated)/chats/no-project';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { participantDisplayLabel } from '@/lib/member-display';
@@ -79,10 +81,14 @@ interface ConversationItem {
   updated_at: string;
   unread_count?: number;
   participants?: Participant[];
+  /** story 4847 — the project the room is filed under, as the organization-wide list says it (null = the room has none; absent = the project-only list of an older server) */
+  project_id?: string | null;
+  project_name?: string | null;
 }
 
 interface ChatListViewProps {
-  projectId: string;
+  /** the project the person is looking at now, or null when none is picked — the list does not need one (it is the organization's rooms); it only seeds a NEW room's project and the admin's agent tab */
+  projectId: string | null;
   currentTeamMemberId: string;
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
@@ -142,11 +148,14 @@ function ConversationRow({
   currentMemberId,
   isAgentConv,
   domainLabels,
+  projectLabel,
   onClick,
 }: {
   conv: ConversationItem;
   currentMemberId: string;
   isAgentConv?: boolean;
+  /** story 4847 (AC1) — which project the room is in, drawn under its name (absent = nothing to say, e.g. the project-only list) */
+  projectLabel?: string;
   // story #3888 CHANGES①(PO PR 코멘트, 2026-09-14 18:53Z) — 부모(ChatListView)가 1회만
   // 호출한 useOrgDomainLabels 결과를 prop으로 받는다(행마다 재호출 금지 — 요청 중복 방지).
   domainLabels: OrgDomainLabels;
@@ -204,7 +213,7 @@ function ConversationRow({
 
   const participantLayer = conv.participants && conv.participants.length > 0 ? (
     conv.type === 'dm' ? (
-      <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+      <div className="mt-0.5 flex items-center gap-1 text-editorial-meta text-muted-foreground">
         <span className="rounded bg-muted px-1 py-0.5 font-medium text-muted-foreground">{t('you')}</span>
         <span>↔</span>
         <span className="max-w-[80px] truncate rounded bg-muted px-1 py-0.5 font-medium text-muted-foreground">
@@ -215,20 +224,20 @@ function ConversationRow({
         {/* story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
         {isAgentInConv && (
           // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
-          <span className="flex-shrink-0 rounded border border-info/30 bg-info/12 px-1.5 py-0.5 text-[10px] font-medium text-foreground">
+          <span className="flex-shrink-0 rounded border border-info/30 bg-info/12 px-1.5 py-0.5 text-micro font-medium text-foreground">
             {t('agent')}
           </span>
         )}
         {/* story 4675 (F2): a DM with an agent names its computer after the «에이전트» chip; a group row says nothing (several · Q-b) */}
-        {isAgentInConv ? <DeviceChip name={others[0]?.device_name} className="text-[10px]" /> : null}
+        {isAgentInConv ? <DeviceChip name={others[0]?.device_name} className="text-micro" /> : null}
       </div>
     ) : (
-      <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+      <div className="mt-0.5 flex items-center gap-1.5 text-editorial-meta text-muted-foreground">
         <div className="flex -space-x-1.5">
           {others.slice(0, 3).map((p) => (
             <div
               key={p.member_id}
-              className="relative flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-medium text-muted-foreground ring-1 ring-background"
+              className="relative flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full bg-muted text-micro font-medium text-muted-foreground ring-1 ring-background"
             >
               {/* [SID:4286 · 유나 결정 2] 이름이 없으면 날것 «?» 대신 아이콘 — 4646 공용 표식(UnnamedMemberIcon · 에이전트 Bot · 사람 User). */}
               {p.name ? firstGraphemes(p.name, 1) : <UnnamedMemberIcon type={p.type} className="h-3 w-3" aria-hidden />}
@@ -239,7 +248,7 @@ function ConversationRow({
             </div>
           ))}
           {others.length > 3 && (
-            <div className="flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-medium text-muted-foreground ring-1 ring-background">
+            <div className="flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full bg-muted text-micro font-medium text-muted-foreground ring-1 ring-background">
               +{others.length - 3}
             </div>
           )}
@@ -259,7 +268,9 @@ function ConversationRow({
       type="button"
       variant="ghost"
       onClick={onClick}
-      className="h-auto w-full items-center justify-start gap-3 rounded-lg px-3 py-2.5 text-left font-normal transition hover:bg-muted/60 active:bg-muted"
+      // story 4853 (phone · point 1) — while the round support button floats over this list (it carries `data-support-launcher` on <html>, support-widget-launcher.tsx) the row keeps its
+      // right side clear of it at phone width, so the time and the unread badge are not hidden behind it. A class literal on purpose (Tailwind reads it as written): the attribute is the launcher's SUPPORT_LAUNCHER_ATTR.
+      className="h-auto w-full items-center justify-start gap-3 rounded-lg px-3 py-2.5 text-left font-normal transition hover:bg-muted/60 active:bg-muted max-md:[:root[data-support-launcher]_&]:pr-16"
     >
       {/* story #2968 — 1:1(DM·agent 탭)은 avatar.tsx 정본으로 실사진(3단 폴백은 그 컴포넌트
           책임). group은 특정 1인 사진이 의미가 없어(다인원) 기존 아이콘 자리를 유지한다. */}
@@ -291,13 +302,14 @@ function ConversationRow({
               재분류(구조·크기 불변). preview는 이미 text-xs+muted+기본무게(400)라 Body-small
               규칙에 이미 부합 — 무편집. */}
           <span className="truncate text-sm font-semibold text-foreground">{displayName}</span>
-          <span className="flex-shrink-0 text-[10px] text-muted-foreground">{formatTime(time, locale, displayTimezone)}</span>
+          <span className="flex-shrink-0 text-micro text-muted-foreground">{formatTime(time, locale, displayTimezone)}</span>
         </div>
+        {projectLabel ? <p className="truncate text-micro text-muted-foreground" data-testid="room-project">{projectLabel}</p> : null}
         {participantLayer}
         <div className="flex items-center justify-between gap-1">
           <p className="truncate text-xs text-muted-foreground">{preview}</p>
           {unread > 0 && (
-            <span className="flex-shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground">
+            <span className="flex-shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-micro font-semibold text-primary-foreground">
               {unread > 99 ? '99+' : unread}
             </span>
           )}
@@ -381,6 +393,8 @@ export function applyConversationMessageUpdate(
 }
 
 const PAGE_LIMIT = 30;
+/** story 4847 — the tab's own «걸러 보기» choice (a tab-scoped convenience: it never reaches the server and never changes the current project) */
+export const CHAT_PROJECT_FILTER_KEY = 'sprintable.chats.projectFilter';
 
 export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChange }: ChatListViewProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
@@ -397,8 +411,14 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const consumedComposeRef = useRef(false);
   // perf(17960f86): role 은 DashboardContext(서버 /api/v2/me 투영)에서 — 채팅 진입마다 `/api/me`
   // 재호출하던 round-trip 제거. /me checkRole 과 동일한 effective role 이라 게이트 의미 보존.
-  const { role, orgId } = useDashboardContext();
-  const isAdminOrOwner = role === 'admin' || role === 'owner';
+  const dashboardCtx = useDashboardContext();
+  const { orgId, orgMemberships, projectMemberships } = dashboardCtx;
+  const noProjectAtAll = isNoProjectAtAll(dashboardCtx);
+  // story 4847 — the admin's «agents» tab reads the CURRENT project's agent-only rooms (`include_agent_conversations`), so it needs a current project.
+  // The server gives that view to a person only as an organization owner/admin — the ORGANIZATION role (`org_members.role`, the list `/api/v2/organizations` carries into
+  // `orgMemberships`), not the shell's «role» (/me: the larger of the project role and the organization role — a project admin would see a tab the server then refuses with 403).
+  const orgRole = orgMemberships?.find((o) => o.orgId === orgId)?.role;
+  const isAdminOrOwner = (orgRole === 'admin' || orgRole === 'owner') && Boolean(projectId);
   // story #3888 CHANGES①(PO PR 코멘트, 2026-09-14 18:53Z) — useOrgDomainLabels를
   // ConversationRow(행 컴포넌트) 안에서 부르면 목록 1회 마운트에 대화 수만큼(최대 30+
   // 에이전트 대화) 같은 domain-labels 요청이 중복 발사된다(story #4748 前엔 훅 자체에 캐시·dedupe가 없었다 — 지금은 훅이 한 조직 값을 한 번만 받아 이 부모 1회 호출은 렌더 수를 줄이는 몫만 남는다).
@@ -420,6 +440,8 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // 걷고, 실패하면 catch가 다시 켠다.
   const [loadError, setLoadError] = useState(false);
   const [agentLoadError, setAgentLoadError] = useState(false);
+  // story 4847 — the server refused the agents view (403): it is for organization owners/admins only. The line of defence behind the tab's own condition (a role that changed under us, an older shell).
+  const [agentForbidden, setAgentForbidden] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [myOffset, setMyOffset] = useState(0);
   const [myTotal, setMyTotal] = useState(0);
@@ -428,6 +450,14 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // story #3788(B-③ 후속) — 사용자가 지금 보고 있는 탭. ChatRailContext로 끌어올려(아래)
   // 우측 outlet이 «보이는 목록»을 세도록 한다(안 보이는 탭의 0/N은 모순을 안 만든다).
   const [activeList, setActiveList] = useState<'my' | 'agent'>('my');
+  // story 4847 (AC1) — «걸러 보기»: '' = every room of the organization, 'none' = the rooms that have no project, else one project's id. It is the TAB's own choice
+  // (sessionStorage), never the current project — looking at one project's rooms does not move the person.
+  const [projectFilter, setProjectFilter] = useState('');
+  const [filterReady, setFilterReady] = useState(false);
+  // story 4847 — an older server answers the organization-wide read with 422 (it still wants a project): fall back to that project's own list (and the old «다른 프로젝트» block)
+  const [projectOnly, setProjectOnly] = useState(false);
+  // …and with no current project an older server has nothing to list: the screen then says so in one line, as it did before (the layout used to stop there)
+  const [needsProject, setNeedsProject] = useState(false);
   const [internalShowModal, setInternalShowModal] = useState(false);
   const showModal = open !== undefined ? open : internalShowModal;
   const setShowModal = onOpenChange ?? setInternalShowModal;
@@ -448,11 +478,22 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // my 0건이어도 사용자가 지금 에이전트 탭을 보고 있고 거기 N건이 있으면 우측이 「없다」고
   // 말하면 안 된다). optional이라 ChatRailProvider 밖(격리 단위테스트)에서는 조용히 no-op.
   const chatRail = useChatRailOptional();
+  // story 4847 — the server answered the whole-organization read: it serves the organization's rooms as a whole, so a room may be made without a project too (the «조직(프로젝트 없음)» choice, and a «새 대화» for a person who has no project).
+  // An older server answers 422 there and gets neither. Only a question about all rooms (or the ones with none) proves it: a project's own list is one an older server answers as well.
+  // The answer lives in the rail context (the layout's button and the outlet read it, and it outlives this list's remount); the list keeps its own only without a provider (isolated tests).
+  const [localOrgWide, setLocalOrgWide] = useState(false);
+  const roomsAreOrgWide = chatRail ? chatRail.roomsAreOrgWide : localOrgWide;
+  const setRoomsAreOrgWide = chatRail ? chatRail.setRoomsAreOrgWide : setLocalOrgWide;
 
   // 전환 in-flight 경합 가드(RC): fetch 응답 적용 시점에 여전히 같은 프로젝트인지 검증해 stale 응답을
   // drop 한다. render 단계 동기라 async resolve 시 항상 최신 projectId 를 가리킨다(assignee last-write-wins 동류).
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
+  // story 4847 — the MY list's requests are numbered: only the newest whole-list ask (and a «더 보기» that belongs to it) may answer. Comparing what was asked is not enough —
+  // two asks for the same thing (the filter set back to «all», a refetch after a reconnect) must not let the older one's failure, 422 or page cover the newer list.
+  const listSeqRef = useRef(0);
+  // the project the list is scoped by: only the project-only fallback is — in the organization-wide list the current project is not part of the question, so changing it asks nothing
+  const scopeProjectId = projectOnly ? projectId : null;
 
   // story #3621 — boolean 반환(성공/실패)을 추가했다. AC1 폴링 fallback이 이 값으로
   // 폴 간격을 좁히거나(성공) 넓힌다(실패, sse-polling-fallback.ts). 기존 호출부(`void
@@ -462,50 +503,63 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     // 덮지 않는다(그 실패는 loadingMore 버튼 자리가 이미 담당). 전체/최초 로드(append=false)
     // 실패만 loadError로 세계를 가른다. 재시도(retry)는 항상 append=false로 부른다.
     //
-    // 카디르 QA(#4142, 9e6bd5c8d 재현) — 성공 경로는 `projectId !== projectIdRef.current`로
-    // stale 응답을 거르는데 실패 경로(!res.ok·catch)는 그 검사가 없어, 프로젝트 A pending
-    // 中 B로 전환 → B 성공 렌더 → 뒤늦게 도착한 A의 실패가 B 화면을 덮는 클래스가 있었다
-    // ("지정 경로만 막는 fix는 클래스를 남긴다"). 이 클로저가 캡처한 `projectId`(이 호출을
-    // 일으킨 시점의 프로젝트)를 응답 시점의 `projectIdRef.current`(최신)와 항상 먼저
-    // 대조 — 성공/실패 두 경로가 같은 가드를 탄다.
+    // 카디르 QA(#4142, 9e6bd5c8d 재현) — 성공 경로는 stale 응답을 거르는데 실패 경로(!res.ok·catch)는
+    // 그 검사가 없어, A pending 中 B로 전환 → B 성공 렌더 → 뒤늦게 도착한 A의 실패가 B 화면을 덮는
+    // 클래스가 있었다("지정 경로만 막는 fix는 클래스를 남긴다"). 성공/실패/422/finally 모두 같은 `stale()`를 먼저 탄다.
+    // story 4847: 비교 대상은 «무엇을 물었나»가 아니라 «몇 번째 물음인가»(같은 것을 두 번 물으면 같은 질문이라 못 가른다).
+    const seq = append ? listSeqRef.current : ++listSeqRef.current;
+    const stale = () => seq !== listSeqRef.current;
+    let fallingBack = false; // the project-only list is being asked for next: until it answers the screen is still «loading», not «0 rooms»
     if (!append) setLoadError(false);
+    const scopeQuery = scopeProjectId ? `&project_id=${scopeProjectId}` : projectFilter ? `&project_id=${projectFilter}` : '';
     try {
       const res = await fetchWithAuth(
-        `/api/conversations?project_id=${projectId}&limit=${PAGE_LIMIT}&offset=${nextOffset}`
+        `/api/conversations?limit=${PAGE_LIMIT}&offset=${nextOffset}${scopeQuery}`
       );
+      if (stale()) return true; // 더 새로운 물음이 있음 — 이 응답은 현 화면 안 덮음. (실패가 아니다: 폴링은 `true`면 간격을 넓히지 않는다 — 밀려난 물음을 실패로 세면 안 된다)
       if (!res.ok) {
-        if (!append && projectId === projectIdRef.current) setLoadError(true);
+        // story 4847 — a server that does not yet answer the organization-wide read (it requires a project): ask for the current project's rooms instead
+        if (res.status === 422) {
+          setRoomsAreOrgWide(false);
+          if (!projectIdRef.current) { setNeedsProject(true); return false; } // nothing to ask for: the «pick a project» line (also when the project was lost while in the project-only list)
+          if (!projectOnly) { fallingBack = true; setProjectOnly(true); return false; }
+        }
+        if (!append) setLoadError(true);
         return false;
       }
       const json = await res.json() as { data: ConversationItem[]; total: number };
-      if (projectId !== projectIdRef.current) return false; // 전환됨 — stale 응답 drop(현 화면 안 덮음)
+      if (stale()) return true;
       const items = json.data ?? [];
+      if (!scopeProjectId && (!projectFilter || projectFilter === 'none')) setRoomsAreOrgWide(true);
       setConversations((prev) => append ? [...prev, ...items] : items);
       setMyOffset(nextOffset + items.length);
       setMyTotal(json.total ?? 0);
       return true;
     } catch {
-      if (!append && projectId === projectIdRef.current) setLoadError(true);
+      if (!append && !stale()) setLoadError(true);
       return false;
     } finally {
       // 페드루 그라운딩(2026-09-10 12:34Z) — 위 loadError와 같은 축: A의 늦은 finally가
       // B로 전환된 뒤 B의 loading을 조용히 꺼버리면(응답 도착 前인데도 "로딩 아님"으로
       // 보임) B가 아직 안 왔는데도 순간 잘못된 화면(0건 등)이 뜬다.
-      if (projectId === projectIdRef.current) setLoading(false);
-      setLoadingMore(false);
+      if (!stale()) { if (!fallingBack) setLoading(false); setLoadingMore(false); }
     }
-  }, [projectId]);
+  }, [scopeProjectId, projectFilter, projectOnly, setRoomsAreOrgWide]);
 
   const fetchAllConversations = useCallback(async (nextOffset = 0, append = false) => {
     // 카디르 QA(#4142) — 위 fetchConversations와 동형 stale-drop 가드(성공/실패 두 경로
     // 대칭).
-    if (!append) setAgentLoadError(false);
+    if (!append) { setAgentLoadError(false); setAgentForbidden(false); }
+    if (!projectId) return; // story 4847 — the agents tab only exists with a current project
     try {
       const res = await fetchWithAuth(
         `/api/conversations?project_id=${projectId}&include_agent_conversations=true&limit=${PAGE_LIMIT}&offset=${nextOffset}`
       );
       if (!res.ok) {
-        if (!append && projectId === projectIdRef.current) setAgentLoadError(true);
+        if (projectId === projectIdRef.current) {
+          if (res.status === 403) setAgentForbidden(true); // not a failure to retry: this view is not this person's
+          else if (!append) setAgentLoadError(true);
+        }
         return;
       }
       const json = await res.json() as { data: ConversationItem[]; total: number };
@@ -526,6 +580,8 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // story #2168 PR-② — 프로젝트 밖 최근 대화. BE가 이미 인가로 거른 5개만 주므로 페이지네이션
   // 불요. 전환 in-flight 가드는 위 fetchConversations와 동형(stale 응답 drop).
   const fetchOutsideProjectConversations = useCallback(async () => {
+    // story 4847 — the organization-wide list already holds every room: this block (kept, not removed) is only the project-only fallback's
+    if (!projectOnly || !projectId) { setOutsideProjectConvs([]); return; }
     try {
       const res = await fetchWithAuth(`/api/conversations/recent-outside-project?project_id=${projectId}&limit=5`);
       if (!res.ok) return;
@@ -533,7 +589,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       if (projectId !== projectIdRef.current) return;
       setOutsideProjectConvs(json.data ?? []);
     } catch { /* non-critical — 섹션이 비어도 현재 프로젝트 목록엔 영향 없음 */ }
-  }, [projectId]);
+  }, [projectId, projectOnly]);
 
   useEffect(() => { void fetchOutsideProjectConversations(); }, [fetchOutsideProjectConversations]);
 
@@ -549,6 +605,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // 페인트될 새 없이 함께 사라졌다. cross-project-toast-provider.tsx(layout 레벨 상주)가 도착한
   // 페이지에서 대신 띄운다.
   const handleOutsideProjectClick = useCallback((conv: OutsideProjectConversation) => {
+    if (!projectId) return; // story 4847 — the block only exists in the project-only list, which always has a current project
     queuePendingToast(t('movedToProjectToast', { name: conv.project_name }));
     // `pn`(대상 프로젝트명)은 실패 화면(권한 회수 등)에서 dashboardContext.projectMemberships가
     // 이미 그 프로젝트를 못 가진 상태일 수 있어(바로 그게 실패 사유) 클릭 시점 값을 실어 보낸다.
@@ -563,26 +620,63 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // 있음으로 전환하면 순간 「대화가 없습니다」). 전환 즉시(fetchConversations identity가
   // projectId 변경으로 바뀌는 매 순간) 목록을 비우고 로딩을 세운 뒤 새로 fetch한다.
   useEffect(() => {
+    if (!filterReady) return; // story 4847 — ask once the tab's own filter is read (no first ask for «all» that the stored choice then replaces)
     setConversations([]);
     setLoading(true);
     void fetchConversations(0, false);
-  }, [fetchConversations]);
+  }, [fetchConversations, filterReady]);
+
+  // story 4847 (AC1) — the tab's stored filter, read after mount (the storage is not readable while hydrating) and only kept when it still names one of the person's projects.
+  useEffect(() => {
+    let stored = '';
+    try { stored = window.sessionStorage.getItem(CHAT_PROJECT_FILTER_KEY) ?? ''; } catch { /* storage unavailable — «all» */ }
+    // the person's project list may not be known at this first moment (the shell fills it in): a project-shaped value is kept then and dropped below once the list says it is not theirs
+    // — but not for a person who is KNOWN to have no project (that value is another organization's or a stale one: asking with it would answer nothing and hide the room-start button)
+    const known = projectMemberships.length === 0 ? !noProjectAtAll && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stored) : projectMemberships.some((m) => m.projectId === stored);
+    if (stored === 'none' || known) setProjectFilter(stored);
+    setFilterReady(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // an older server, and a project is picked after all: the project-only list it can answer
+  useEffect(() => {
+    if (needsProject && projectId) { setNeedsProject(false); setProjectOnly(true); setLoading(true); setRoomsAreOrgWide(false); } // loading in the same step: no moment of «0 rooms» for the instruction line to land on
+  }, [needsProject, projectId, setRoomsAreOrgWide]);
+
+  const handleProjectFilterChange = useCallback((next: string) => {
+    setProjectFilter(next);
+    try {
+      if (next) window.sessionStorage.setItem(CHAT_PROJECT_FILTER_KEY, next);
+      else window.sessionStorage.removeItem(CHAT_PROJECT_FILTER_KEY);
+    } catch { /* storage unavailable — the choice just does not outlive the page */ }
+  }, []);
+
+  // story 4847 — a chosen project that is not (or no longer) one of the person's: back to «all» (e.g. the filter was kept before the project list was known)
+  useEffect(() => {
+    if (!projectFilter || projectFilter === 'none') return;
+    if (projectMemberships.length === 0) { if (noProjectAtAll) handleProjectFilterChange(''); return; } // known to have none: nothing to filter by; merely not told yet: wait
+    if (!projectMemberships.some((m) => m.projectId === projectFilter)) handleProjectFilterChange('');
+  }, [projectFilter, projectMemberships, noProjectAtAll, handleProjectFilterChange]);
 
   // story #3831 — compose 값은 목록이 로드된 뒤 딱 한 번만 소비한다(consumedComposeRef) —
   // 안 그러면 목록이 갱신될 때마다(새 메시지 SSE 등) 다시 리다이렉트/모달을 트리거한다.
   // 대화가 있으면 updated_at 최신 1건(가장 최근 대화)으로 보낸다 — API 응답 배열 순서에
   // 기대지 않고 값으로 직접 고른다.
   useEffect(() => {
-    if (!composeParam || loading || consumedComposeRef.current) return;
+    if (!composeParam || loading || needsProject || consumedComposeRef.current) return; // with the «pick a project» line up there is no list to route to yet
+    // story 4847 — the instruction line came from the current project's «오늘»: it goes to that project's latest room (the list now holds every project's)
+    const pool = projectId ? conversations.filter((c) => c.project_id === undefined || c.project_id === projectId) : conversations;
+    // no room to route to and no window that can make one (no project of one's own, on a server not known to allow a room without one — e.g. the read failed): keep the line, a later answer may allow it
+    if (pool.length === 0 && noProjectAtAll && !roomsAreOrgWide) return;
     consumedComposeRef.current = true;
-    if (conversations.length > 0) {
-      const mostRecent = conversations.reduce((a, b) => (a.updated_at > b.updated_at ? a : b));
+    if (pool.length > 0) {
+      const mostRecent = pool.reduce((a, b) => (a.updated_at > b.updated_at ? a : b));
       // 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트.
       router.replace(flatHref(`/chats/${mostRecent.id}?compose=${encodeURIComponent(composeParam)}`));
     } else {
       setShowModal(true);
     }
-  }, [composeParam, loading, conversations, router, setShowModal, flatHref]);
+  }, [composeParam, loading, needsProject, noProjectAtAll, roomsAreOrgWide, conversations, projectId, router, setShowModal, flatHref]);
 
   // perf(17960f86): agent 탭("전체/에이전트", include_agent_conversations=true)은 비기본 탭이라
   // mount 시 eager fetch(측정 ~663ms 낭비) 하지 않고, 사용자가 탭을 처음 열 때 1회만 lazy 로드.
@@ -707,6 +801,13 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     void fetchConversations(0, false);
   };
 
+  // story 4847 (AC1) — what the row says about its project: the name the list gives, else the person's own project list, «프로젝트 없음» for a room that has none, nothing in the project-only list
+  const projectLabelOf = (c: ConversationItem): string | undefined => {
+    if (c.project_id === undefined) return undefined;
+    if (c.project_id === null) return t('roomNoProject');
+    return c.project_name ?? projectMemberships.find((m) => m.projectId === c.project_id)?.projectName ?? undefined;
+  };
+
   const dmConvs = conversations.filter((c) => c.type === 'dm');
   const groupConvs = conversations.filter((c) => c.type === 'group');
 
@@ -719,7 +820,12 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // 없습니다」·오른쪽 「선택하면…」 모순 재발). 처방 둘 다: ①isAgent 판정 자체에
   // isAdminOrOwner를 게이트 ②isAdminOrOwner가 꺼지는 전환에서 activeList를 'my'로 리셋.
   useEffect(() => {
-    if (!isAdminOrOwner) setActiveList('my');
+    if (!isAdminOrOwner) {
+      setActiveList('my');
+      // story 4847 — the agents view is gone with the tab: what it was told (a refusal) and that it was read must not outlive it, or the same person getting the tab back would see the old refusal without a new ask
+      agentLoadedRef.current = false;
+      setAgentForbidden(false);
+    }
   }, [isAdminOrOwner]);
 
   // story #3790(유나 定) — 재시도는 항상 append=false(전체 재조회)로 부른다. 시작 시
@@ -783,28 +889,36 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       </Button>
     </div>
   ) : conversations.length === 0 ? (
-    <div className="flex h-full items-center justify-center">
-      <EmptyState title={t('noConversations')} description={t('startNewConversation')} className="w-full max-w-xs" />
-    </div>
+    // story 4847 — a person with no project AND no room read has nothing to look at and nowhere to start one: say what to do next (the line the layout used to stop on).
+    // A person with no project but rooms never gets here — they see their rooms. On an org-wide server a room can be made with no project, so there is somewhere to start: the ordinary empty state.
+    noProjectAtAll && !roomsAreOrgWide ? (
+      <div className="flex h-full items-center justify-center px-6 text-center" data-testid="chats-no-project">
+        <p className="text-sm text-muted-foreground">{t('noProjectYet')}</p>
+      </div>
+    ) : (
+      <div className="flex h-full items-center justify-center">
+        <EmptyState title={t('noConversations')} description={t('startNewConversation')} className="w-full max-w-xs" />
+      </div>
+    )
   ) : (
     <div className="space-y-4">
       {dmConvs.length > 0 && (
         <div>
-          <p className="mb-1 px-3 text-[11px] font-medium text-muted-foreground">
+          <p className="mb-1 px-3 text-editorial-meta font-medium text-muted-foreground">
             {t('dmSection')}
           </p>
           {dmConvs.map((conv) => (
-            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
+            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} projectLabel={projectLabelOf(conv)} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
           ))}
         </div>
       )}
       {groupConvs.length > 0 && (
         <div>
-          <p className="mb-1 px-3 text-[11px] font-medium text-muted-foreground">
+          <p className="mb-1 px-3 text-editorial-meta font-medium text-muted-foreground">
             {t('groupSection')}
           </p>
           {groupConvs.map((conv) => (
-            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
+            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} projectLabel={projectLabelOf(conv)} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
           ))}
         </div>
       )}
@@ -833,7 +947,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // 조용히 안 보인다 — "몰랐다"(완전 분리)도 "경계 흐림"(섞음)도 아닌 세 번째 선택.
   const outsideProjectSection = outsideProjectConvs.length > 0 && (
     <div className="mt-4 border-t border-border pt-4">
-      <p className="mb-1 px-3 text-[11px] font-medium text-muted-foreground">
+      <p className="mb-1 px-3 text-editorial-meta font-medium text-muted-foreground">
         {t('otherProjectsSection')}
       </p>
       {outsideProjectConvs.map((conv) => (
@@ -855,6 +969,10 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     <div className="flex h-full items-center justify-center">
       <p className="text-sm text-muted-foreground">{tc('loading')}</p>
     </div>
+  ) : agentForbidden ? (
+    <div className="px-2 py-4" data-testid="agent-chats-admin-only">
+      <p className="text-xs text-muted-foreground">{t('agentChatsAdminOnly')}</p>
+    </div>
   ) : agentLoadError ? (
     <div className="px-2 py-4">
       <p className="text-xs text-muted-foreground">{t('conversationsLoadFailed')}</p>
@@ -874,7 +992,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     </div>
   ) : (
     <div>
-      <p className="mb-1 px-3 text-[11px] font-medium text-muted-foreground">
+      <p className="mb-1 px-3 text-editorial-meta font-medium text-muted-foreground">
         {t('agentSection')}
       </p>
       {agentOnlyConvs.map((conv) => (
@@ -895,6 +1013,14 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       )}
     </div>
   );
+
+  if (needsProject) {
+    return (
+      <div className="flex h-64 items-center justify-center px-6 text-center" data-testid="chats-no-project">
+        <p className="text-sm text-muted-foreground">{projectMemberships.length === 0 ? t('noProjectYet') : t('pickProject')}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -918,6 +1044,23 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
           onExpandedChange={(v) => setExpandedSurface(v ? 'pulse' : null)}
         />
       </div>
+      {/* story 4847 (AC1) — 프로젝트로 걸러 보기: the organization's rooms are all here; this narrows them to one project's (or to the ones with none) without moving the person */}
+      {!projectOnly && projectMemberships.length > 1 && activeList === 'my' ? (
+        <div className="px-4 pt-2">
+          <Select
+            aria-label={t('projectFilterLabel')}
+            data-testid="project-filter"
+            value={projectFilter}
+            onChange={(e) => handleProjectFilterChange(e.target.value)}
+          >
+            <option value="">{t('projectFilterAll')}</option>
+            {projectMemberships.map((m) => (
+              <option key={m.projectId} value={m.projectId}>{m.projectName}</option>
+            ))}
+            <option value="none">{t('roomNoProject')}</option>
+          </Select>
+        </div>
+      ) : null}
       {isAdminOrOwner ? (
         <Tabs
           defaultValue="my"
@@ -946,7 +1089,8 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
 
       {showModal && (
         <NewConversationModal
-          projectId={projectId}
+          projectId={projectFilter ? projectFilter : projectId}
+          allowNoProject={roomsAreOrgWide}
           onClose={() => setShowModal(false)}
           onCreated={handleCreated}
         />

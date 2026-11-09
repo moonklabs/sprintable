@@ -48,15 +48,15 @@ export function RecentsSection({ recentSlugs, docs, selectedSlug, onSelect, labe
         <Clock className="size-3 shrink-0" />
         {/* rebase 발견(2026-08-23, #2973/#3391 rebase 중) — label(t('recentDocs'))이 한글이라
             mono uppercase가 2967과 동일 결함(흐림)을 낸다 — sans로. */}
-        <span className="flex-1 text-left text-[9.5px] font-semibold">{label}</span>
+        <span className="flex-1 text-left text-micro font-semibold">{label}</span>
         {recentDocs.length > 0 && (
-          <span className="font-mono text-[9.5px] tabular-nums">{recentDocs.length}</span>
+          <span className="font-mono text-micro tabular-nums">{recentDocs.length}</span>
         )}
       </button>
       {!collapsed && (
         <div className="px-2 pb-1">
           {recentDocs.length === 0 ? (
-            <p className="px-2 py-1 text-[11px] italic text-muted-foreground">{emptyLabel}</p>
+            <p className="px-2 py-1 text-editorial-meta italic text-muted-foreground">{emptyLabel}</p>
           ) : (
             <ul className="space-y-0.5">
               {recentDocs.map((doc) => (
@@ -66,7 +66,7 @@ export function RecentsSection({ recentSlugs, docs, selectedSlug, onSelect, labe
                     onClick={() => onSelect(doc.slug)}
                     aria-current={selectedSlug === doc.slug ? 'page' : undefined}
                     className={cn(
-                      'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] font-semibold transition-colors',
+                      'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold transition-colors',
                       selectedSlug === doc.slug
                         ? 'bg-primary/10 text-primary'
                         : 'text-foreground/80 hover:bg-muted hover:text-foreground'

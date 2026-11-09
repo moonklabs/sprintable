@@ -1,5 +1,6 @@
 import { backendFetch } from '@/lib/backend-fetch';
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 export async function POST(request: Request) {
   const rawBody = await request.text();

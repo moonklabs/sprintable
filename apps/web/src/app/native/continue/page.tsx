@@ -3,6 +3,7 @@ import { getTranslations } from 'next-intl/server';
 import { getServerSession } from '@/lib/db/server';
 import { CONTINUE_PATH, continueQuery, parseContinueStart, startParamsFrom } from '@/lib/auth/desktop-continue';
 import { DesktopContinueCard } from '@/components/desktop/desktop-continue-card';
+import { emailUnverified } from '@/lib/auth/email-unverified';
 
 /**
  * story 4712 — «브라우저 이어받기». The Mac app opens this page in the person's browser with its PKCE challenge (first run, no web session in
@@ -30,10 +31,13 @@ export default async function DesktopContinuePage({ searchParams }: { searchPara
   const session = await getServerSession();
   const here = `${CONTINUE_PATH}?${continueQuery(start)}`;
   if (!session) redirect(`/login?next=${encodeURIComponent(here)}`);
+  // a person who just signed up in this browser (the app opened this page beside its own window) has not verified the e-mail yet: say so on the card
+  // — [열기] still works (this page gates on the session only), the line only tells them where the mail is
+  const unverified = await emailUnverified(session.access_token);
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-muted px-4">
-      <DesktopContinueCard account={session.email} start={{ challenge: start.challenge, returnApp: start.returnApp }} here={here} failed={raw['failed'] === '1'} />
+      <DesktopContinueCard account={session.email} start={{ challenge: start.challenge, returnApp: start.returnApp }} here={here} failed={raw['failed'] === '1'} emailUnverified={unverified} />
     </main>
   );
 }

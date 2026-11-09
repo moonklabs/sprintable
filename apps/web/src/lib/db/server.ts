@@ -3,11 +3,12 @@ import { jwtVerify } from 'jose';
 import { cache } from 'react';
 import { verifySprintableSession, SP_FS_COOKIE } from '@/lib/auth/firebase-session';
 import { backendFetch } from '@/lib/backend-fetch';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
 export const SP_AT_COOKIE = 'sp_at';
 export const SP_RT_COOKIE = 'sp_rt';
 
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 export interface ServerSession {
   user_id: string;

@@ -753,6 +753,12 @@ def test_the_rate_limits_the_sheet_lists_are_the_ones_in_the_code_and_the_accept
                 route = next((d for d in node.decorator_list if isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute) and d.func.attr in ("get", "post")), None)
                 if lim and route:
                     limits[prefix + route.args[0].value] = int(lim.args[0].value.split("/")[0])
+    # the sheet is the HOSTED deployment's: a limit counts only if its route is registered on the app a hosted process builds. A router that is
+    # registered conditionally (story 4825's embedded-only `local_auth`: no embedded switch in a hosted environment, so no route — pinned by
+    # test_4825_local_bootstrap_realdb.py::test_08) is not on the sheet, and no file name has to be excepted here.
+    from app.main import app as _hosted_app
+    registered = {getattr(r, "path", None) for r in _hosted_app.routes}
+    limits = {path: n for path, n in limits.items() if path in registered}
     assert limits == {"/api/v2/legal/{doc_type}": 60, "/api/v2/auth/register": 5, "/api/v2/auth/token": 10, "/api/v2/auth/refresh": 20, "/api/v2/auth/switch-account": 20, "/api/v2/auth/native-bootstrap": 10,
                       "/api/v2/auth/native-bootstrap/challenges": 10, "/api/v2/auth/device-installations/registration-challenges": 10, "/api/v2/auth/device-installations/register": 10}, limits
     g5 = SHEET.split("**The two acceptances of G5")[1].split("## G2, the read-only look")[0]
@@ -895,8 +901,16 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     root = _fresh(tmp_path, "new")
     p, _ = _run(block, root, extra={"REPO": str(_ROOT), "CUR": "0466"})
     assert p.returncode == 0, p.stderr
-    assert "revisions to run: 3" in p.stdout
+    newer = [f for f in (_ROOT / "backend/alembic/versions").glob("0*.py") if int(re.match(r"0(\d{3})", f.name).group(1)) > 466]
+    assert len(newer) >= 3 and f"revisions to run: {len(newer)}" in p.stdout  # the revisions after 0466 — counted from the files, so a new migration does not move this (story 4826)
     hits = [line for line in p.stdout.splitlines() if re.match(r"^0\d{3}[a-z]?_\S+\.py:\d+: ", line)]
+    # story #4846: 0471 alters a column and a foreign key — exactly what the block exists to list. Every OTHER revision after 0466 is still only an index build.
+    mine = [h for h in hits if h.startswith("0471_")]
+    assert any("alter_column" in h for h in mine) and any("drop_constraint" in h for h in mine), mine
+    # story #4846: 0472 swaps the foreign key of `events` (written in upgrade() itself, so the reading lists it)
+    swap = [h for h in hits if h.startswith("0472_")]
+    assert any("DROP CONSTRAINT" in h for h in swap) and any("ON DELETE SET NULL NOT VALID" in h for h in swap) and not any("VALIDATE" in h for h in swap), swap
+    hits = [h for h in hits if not h.startswith(("0471_", "0472_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)

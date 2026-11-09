@@ -1,5 +1,6 @@
 'use client';
 
+import { useEmbeddedServer } from '@/components/embedded-server-context';
 import { firstGraphemes } from '@/lib/first-graphemes';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -64,6 +65,7 @@ function Avatar({ url, label, className }: { url?: string | null; label: string;
 }
 
 export function ProfileMenu({ name, avatarUrl, triggerClassName }: ProfileMenuProps) {
+  const embedded = useEmbeddedServer(); // story 4832: the app's own owner has a local address (owner@local.sprintable) that means nothing to the person — not shown under the name
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const tn = useTranslations('nav');
   // story #3775 — useAccountSwitcher(아래)에 넘길 표시명을 미리 정해야 해서 그 훅이
@@ -105,7 +107,7 @@ export function ProfileMenu({ name, avatarUrl, triggerClassName }: ProfileMenuPr
                   {isExpired ? (
                     <span className="truncate text-xs text-muted-foreground">{t('reloginRequired')}</span>
                   ) : (
-                    acc.email && acc.email !== label && (
+                    acc.email && !embedded && acc.email !== label && (
                       <span className="truncate text-xs text-muted-foreground">{acc.email}</span>
                     )
                   )}

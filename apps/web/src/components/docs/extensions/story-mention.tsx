@@ -106,19 +106,19 @@ export function StoryMentionMenu({
 
   // story #3866(§DS 게이트 A/카드) — 손코딩 border+rounded+bg-card 대신 Card(surface='solid'
   // → border-border/80 bg-card)로. 떠있는 팝업 특유의 옅은 테두리·elev 그림자는 className
-  // 덮어쓰기(twMerge가 border-border/80→border-white/10로 충돌 해소)로 유지 — wiki-link.tsx·
+  // 덮어쓰기(twMerge가 border-border/80→border-overlay-line-1로 충돌 해소)로 유지 — wiki-link.tsx·
   // slash-command.tsx의 팝업(이 파일보다 먼저 생겨 가드 baseline에 이미 잡힌 손코딩)과 같은
   // 시각 언어를 Card 프리미티브로 재현한다(신규 파일이라 새 손코딩을 늘리지 않는다).
   if (items.length === 0) {
     return (
-      <Card surface="solid" radius="compact" className="w-56 border-white/10 p-3 text-xs text-muted-foreground shadow-[var(--elev-overlay)]">
+      <Card surface="solid" radius="compact" className="w-56 border-overlay-line-1 p-3 text-xs text-muted-foreground shadow-[var(--elev-overlay)]">
         {emptyLabel}
       </Card>
     );
   }
 
   return (
-    <Card surface="solid" radius="compact" className="max-h-64 w-56 overflow-y-auto border-white/10 p-1 shadow-[var(--elev-overlay)]">
+    <Card surface="solid" radius="compact" className="max-h-64 w-56 overflow-y-auto border-overlay-line-1 p-1 shadow-[var(--elev-overlay)]">
       {items.map((item, i) => (
         <Button
           key={item.id}

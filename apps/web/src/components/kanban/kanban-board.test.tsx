@@ -556,7 +556,7 @@ describe('KanbanBoard — 스토리 생성 실패 접근성(story #2105 2차)', 
     expect(alertEl?.getAttribute('aria-live')).toBe('assertive');
     // story 3466 후속(무효 유틸 4곳) — 이 배너가 no-op text-destructive-foreground
     // 대신 실 렌더 색을 갖는지.
-    expect(alertEl?.className).toContain('text-white');
+    expect(alertEl?.className).toContain('text-on-scrim'); // story 4831: text-white → 바탕 이름(항상 흰색)
     expect(alertEl?.className).toContain('dark:text-proof-bg');
     expect(alertEl?.className).not.toContain('text-destructive-foreground');
   });
@@ -911,7 +911,7 @@ describe('KanbanBoard — 상세 패널 story 전환 시 로컬 state 리셋(#35
       titleButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve();
     });
-    expect(dialog().querySelector('[data-testid="story-title-input"]')).not.toBeNull();
+    expect(dialog().querySelector('input[data-slot="input"][data-testid="story-title-input"]')).not.toBeNull();
 
     await openPanel('S2');
 

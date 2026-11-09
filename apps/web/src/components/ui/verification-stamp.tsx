@@ -27,7 +27,7 @@ export function VerificationStamp({
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-[5px] rounded-[5px] border border-proof-line px-2 py-1 pl-[7px] text-[10px] font-bold tracking-[0.06em] text-muted-foreground uppercase shadow-[var(--elev-inset)]',
+        'inline-flex items-center gap-1 rounded-xl border border-proof-line px-2 py-1 text-micro font-bold tracking-[0.06em] text-muted-foreground uppercase shadow-[var(--elev-inset)]',
         className,
       )}
     >

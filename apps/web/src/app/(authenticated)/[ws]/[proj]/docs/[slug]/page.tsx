@@ -24,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { useDocsLayout } from '../docs-context';
 import { DocAssigneeControl } from '@/components/docs/doc-assignee-control';
 import { DocBreadcrumb } from '@/components/docs/doc-breadcrumb';
@@ -360,11 +361,11 @@ export default function DocSlugPage() {
                 ✕
               </Button>
             </div>
-            <textarea
+            <Textarea
               readOnly
               value={mdCopyFailedRaw}
               onFocus={(e) => e.currentTarget.select()}
-              className="w-full resize-none rounded border border-border bg-background p-1.5 font-mono text-base lg:text-xs text-foreground"
+              className="resize-none p-1.5 font-mono lg:text-xs"
               rows={4}
               data-testid="docs-copy-markdown-failed-raw"
             />

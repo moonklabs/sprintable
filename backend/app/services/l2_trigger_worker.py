@@ -196,6 +196,9 @@ class L2TriggerWorker:
 
             self._lock_conn = await worker_engine.connect()
             await self._lock_conn.execution_options(isolation_level="AUTOCOMMIT")
+            from app.core import pool_holders
+
+            await pool_holders.mark_long_lived(self._lock_conn, "worker")  # story #4867: held for the process life ON PURPOSE — not a «held too long» for the pool watch
         got = (
             await self._lock_conn.execute(
                 text("SELECT pg_try_advisory_lock(:k)"), {"k": self._ADVISORY_LOCK_KEY}

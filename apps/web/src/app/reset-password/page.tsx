@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
+import { Input } from '@/components/ui/input';
 import { FIREBASE_AUTH_ENABLED } from '@/lib/auth/firebase-client';
 import { shouldPromptTotpReenroll } from '@/lib/auth/totp-reenroll';
 
@@ -110,13 +111,11 @@ export default function ResetPasswordPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            <input
+            <Input
               type="password"
               placeholder={t('placeholder')}
               autoComplete="new-password"
-              className={`w-full rounded-lg border px-4 py-3 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand ${
-                touched && !isValid ? 'border-destructive' : 'border-border'
-              }`}
+              className={touched && !isValid ? 'h-auto border-destructive px-4 py-3' : 'h-auto px-4 py-3'}
               value={password}
               onChange={(e) => { setPassword(e.target.value); setTouched(true); }}
               onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}

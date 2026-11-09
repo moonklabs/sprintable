@@ -27,9 +27,8 @@ export const CalloutNode = Node.create({
       'div',
       mergeAttributes(HTMLAttributes, {
         'data-callout': '',
-        class: 'callout',
-        style:
-          'border-left: 3px solid #f59e0b; background: rgba(245,158,11,0.08); padding: 12px 16px; border-radius: 0 6px 6px 0; margin: 8px 0;',
+        // story 4831: 인라인 style(리터럴 hex · px)을 바탕 토큰 클래스로. 에디터 안은 globals.css의 `.tiptap-content … div[data-callout]` 규칙이 같은 토큰으로 같은 모양을 준다.
+        class: 'callout my-2 rounded-r-md border-l-[3px] border-proof-amber bg-proof-amber-soft px-4 py-3',
       }),
       0,
     ];

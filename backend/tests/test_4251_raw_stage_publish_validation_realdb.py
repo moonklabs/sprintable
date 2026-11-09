@@ -97,7 +97,7 @@ async def _world(Session, *, stages=None, meta=None, bindings=None, routing=None
         org_id, project_id = await _seed_org(s)
         owner_user = await _seed_human(s, org_id, role="owner")
         owner = (await s.execute(select(OrgMember.id).where(OrgMember.user_id == owner_user))).scalar_one()
-        members = {key: await _seed_agent(s, org_id, project_id) for key in ("writer", "editor", "analyst", "outsider")}
+        members = {key: await _seed_agent(s, org_id, project_id, grant=True) for key in ("writer", "editor", "analyst", "outsider")}
         story_id = await _seed_story(s, org_id, project_id)
         definition = EventDefinition(
             id=uuid.uuid4(), key=f"org.t4251{uuid.uuid4().hex[:6]}.recipe", org_id=org_id, name="레시피",

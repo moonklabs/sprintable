@@ -143,7 +143,7 @@ describe('AgentApiKeyManager — #2838 발급 시 만료 명시 전송', () => {
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    const select = document.querySelector('select') as HTMLSelectElement | null;
+    const select = document.querySelector('select[data-slot="select"]') as HTMLSelectElement | null;
     expect(select).toBeTruthy();
     expect(select?.value).toBe('90d');
     const options = Array.from(select?.options ?? []).map((o) => o.value);
@@ -205,7 +205,7 @@ describe('AgentApiKeyManager — #2838 발급 시 만료 명시 전송', () => {
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    const select = document.querySelector('select') as HTMLSelectElement;
+    const select = document.querySelector('select[data-slot="select"]') as HTMLSelectElement;
     const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;
     await act(async () => {
       nativeSetter.call(select, 'never');

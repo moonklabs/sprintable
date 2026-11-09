@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import sys
 
-from .api_client import SprintableApiError, client
+from .api_client import InvalidApiKey, ServerUnreachable, SprintableApiError, client
 from .config import settings
 from .server import MAX_MCP_REQUEST_BODY_SIZE, filter_tools_by_scope, mcp, transport_security
 from .sse_bridge import start_sse_bridge
@@ -19,8 +19,14 @@ async def _setup() -> list[str] | None:
     try:
         manifest = await client.get("/api/v2/mcp/manifest")
         return manifest.get("scope")
+    except InvalidApiKey:
+        raise   # story 4849 — request() asked the server again and it no longer knows the key (revoked between the two startup calls): the same refusal, not a quiet start
+    except SprintableApiError as exc:
+        print(f"Warning: MCP manifest fetch 실패 (status {exc.status}) — 레거시 비파괴셋으로 degrade", file=sys.stderr)
+        return None
     except Exception as exc:  # noqa: BLE001
-        print(f"Warning: MCP manifest fetch 실패 ({exc}) — 레거시 비파괴셋으로 degrade", file=sys.stderr)
+        # the type only: the text of an error could echo what was sent (the key)
+        print(f"Warning: MCP manifest fetch 실패 ({type(exc).__name__}) — 레거시 비파괴셋으로 degrade", file=sys.stderr)
         return None
 
 
@@ -54,14 +60,18 @@ def main() -> None:
     client.configure(settings.sprintable_api_url, settings.agent_api_key)
     try:
         _scope = asyncio.run(_setup())
+    except (InvalidApiKey, ServerUnreachable) as exc:
+        # story 4849 — a process that just exits shows the person only «Connection closed» (measured with Claude Code 2.1.319), so the reason on stderr is never read. What the person DOES
+        # see (measured with a stdio server that answers `initialize` with a JSON-RPC error): the session lists the server as failed and quotes the error message. So answer with that.
+        print(f"Error: {exc.message}", file=sys.stderr)
+        serve_key_refusal(exc.message)
+        return
     except SprintableApiError as exc:
-        if exc.status == 401:
-            print("Error: Invalid API Key — AGENT_API_KEY를 확인하는.", file=sys.stderr)
-        else:
-            print(f"Error: /auth/me {exc.status}: {exc}", file=sys.stderr)
+        # anything else keeps its status; the backend's text is not printed (it could echo what was sent)
+        print(f"Error: /auth/me {exc.status}", file=sys.stderr)
         sys.exit(1)
     except Exception as exc:
-        print(f"Error: auth context resolve failed: {exc}", file=sys.stderr)
+        print(f"Error: auth context resolve failed ({type(exc).__name__})", file=sys.stderr)   # the type only: the text of an error could echo the key
         sys.exit(1)
 
     # E-MCP S3: 허용 toolset만 노출 (S2 wrapper의 call-time 차단은 유지·defense-in-depth)
@@ -70,6 +80,26 @@ def main() -> None:
         print(f"MCP toolset: {n_hidden} tools hidden by key scope", file=sys.stderr)
 
     asyncio.run(_run())
+
+
+def serve_key_refusal(message: str, stdin=None, stdout=None) -> None:
+    """story 4849 — the stdio server for a key that cannot be used: it answers EVERY request (initialize first) with a JSON-RPC error carrying `message`, offers no tool, calls no backend,
+    opens no event stream, and ends when the client closes its input. Notifications (no ``id``) get no answer. Newline-delimited JSON, as the MCP stdio transport frames it."""
+    import json
+
+    stdin = stdin if stdin is not None else sys.stdin
+    stdout = stdout if stdout is not None else sys.stdout
+    for raw in stdin:
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            req = json.loads(raw)
+        except ValueError:
+            continue
+        if isinstance(req, dict) and "id" in req and "method" in req:
+            stdout.write(json.dumps({"jsonrpc": "2.0", "id": req["id"], "error": {"code": -32001, "message": message}}, ensure_ascii=False) + "\n")
+            stdout.flush()
 
 
 async def _run() -> None:

@@ -5,7 +5,9 @@ import { DesktopOpenAppCard } from '@/components/desktop/desktop-open-app-card';
 import { DesktopRemoteControlCard } from '@/components/desktop/desktop-remote-control-card';
 import { DesktopRemoteDevices } from '@/components/desktop/desktop-remote-devices';
 import { PhoneSessionManagement } from '@/components/desktop/phone-session-management';
+import { PhoneRelayLocalNotice } from '@/components/desktop/phone-relay-local-notice';
 import { isDesktopDownloadEnabled } from '@/lib/desktop-download-gate';
+import { isEmbeddedServer } from '@/lib/embedded-api-origin';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 
@@ -27,25 +29,32 @@ import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
  * story #4017 CHANGES 1(페드루 PO 지적, 2026-09-22) — 「로그인 후 홈」 목적지를 proxy.ts와
  * 같이 resolveNavV3Destinations(readNavV3FlagsFromEnv()).today.path로 — 하드코딩
  * '/org-briefing'은 TODAY_V3_ENABLED가 나중에 ON이 되면 목적지가 갈리는 조용한 드리프트였다.
+ *
+ * story 4829 (공개 2-⑥ (나)) — the phone relay needs the Sprintable server on the internet, which the app's own server (local mode, `isEmbeddedServer()`) does not have: there the three phone
+ * cards («원격 제어» · «원격 기기» · «세션 관리») are one line of guidance. Hosted mode draws them as before — each card has its own condition, so the hosted children are
+ * exactly what they were.
  */
 export default function DesktopPage() {
   if (!isDesktopDownloadEnabled(process.env.DESKTOP_DOWNLOAD_ENABLED)) {
     redirect(resolveNavV3Destinations(readNavV3FlagsFromEnv()).today.path);
   }
 
+  const local = isEmbeddedServer();
   return (
     <div className="mx-auto w-full max-w-3xl space-y-4 p-6">
       {/* story #4763 AC5: «앱 열기» first on a Mac, the download right under it */}
       <DesktopOpenAppCard />
       <DesktopDownloadCard />
       {/* story #4535 — the org's «원격 제어» (an owner switches it; everyone else reads its state) */}
-      <DesktopRemoteControlCard />
+      {local ? <PhoneRelayLocalNotice /> : null}
+      {local ? null : <DesktopRemoteControlCard />}
       {/* story #4533 — «원격 기기»: my phones as pairs, [빼기] only (the web never pairs) */}
-      <DesktopRemoteDevices />
+      {local ? null : <DesktopRemoteDevices />}
       {/* story #4733 — «세션 관리»: end and start the sessions of a paired computer from the phone app (nothing outside the phone app) */}
-      <PhoneSessionManagement />
+      {local ? null : <PhoneSessionManagement />}
       {/* story #4424 — «연결된 기기» (org owner/admin only; nothing for a member) */}
-      <DesktopDevices />
+      {/* story 4832: a local install has one computer — nothing to list or disconnect */}
+      {local ? null : <DesktopDevices />}
     </div>
   );
 }

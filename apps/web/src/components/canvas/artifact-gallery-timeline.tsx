@@ -46,11 +46,11 @@ export function ArtifactGalleryTimeline({ versions, className, onSelectVersion, 
               />
               {!isLast ? <span className="h-0.5 flex-1 bg-border" aria-hidden="true" /> : null}
             </div>
-            <p className={cn('text-[11px] font-bold tabular-nums', v.isAnchor ? 'text-success' : 'text-foreground', isSelected && 'underline underline-offset-2')}>
+            <p className={cn('text-editorial-meta font-bold tabular-nums', v.isAnchor ? 'text-success' : 'text-foreground', isSelected && 'underline underline-offset-2')}>
               v{v.versionNumber}
               {v.isAnchor ? <span className="ml-1 font-medium">{t('versionAnchorTag')}</span> : null}
             </p>
-            {v.summary ? <p className="mt-0.5 truncate text-[11.5px] text-muted-foreground">{v.summary}</p> : null}
+            {v.summary ? <p className="mt-0.5 truncate text-editorial-meta text-muted-foreground">{v.summary}</p> : null}
           </>
         );
         return (

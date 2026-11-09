@@ -112,7 +112,7 @@ async def test_ws_chat_refuses_that_one_message_with_its_own_frame_and_keeps_the
             return False
 
         async def execute(self, *_a, **_k):
-            return mock.Mock(scalar_one_or_none=lambda: agent)
+            return mock.Mock(scalar_one_or_none=lambda: agent, first=lambda: (uuid.uuid4(), None))  # first(): the judge's (id, project_id) row
 
         def add(self, msg):
             saved.append(msg.content)

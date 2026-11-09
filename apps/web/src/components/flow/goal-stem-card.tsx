@@ -201,13 +201,13 @@ function QuietPrompt({
     <div className="flex flex-wrap items-center gap-2 rounded-md border border-dashed border-border px-3 py-2">
       <span className="text-xs text-muted-foreground">{t('nextMakerQuietPrompt')}</span>
       <div className="ml-auto flex gap-1.5">
-        <button type="button" disabled={busy} onClick={onContinue} className="rounded border border-border px-2 py-1 text-[11px] font-medium disabled:opacity-50">
+        <button type="button" disabled={busy} onClick={onContinue} className="rounded border border-border px-2 py-1 text-editorial-meta font-medium disabled:opacity-50">
           {t('nextMakerQuietContinue')}
         </button>
-        <button type="button" disabled={busy} onClick={onClose} className="rounded border border-border px-2 py-1 text-[11px] font-medium disabled:opacity-50">
+        <button type="button" disabled={busy} onClick={onClose} className="rounded border border-border px-2 py-1 text-editorial-meta font-medium disabled:opacity-50">
           {t('nextMakerQuietClose')}
         </button>
-        <button type="button" disabled={busy} onClick={onArchive} className="rounded border border-border px-2 py-1 text-[11px] font-medium disabled:opacity-50">
+        <button type="button" disabled={busy} onClick={onArchive} className="rounded border border-border px-2 py-1 text-editorial-meta font-medium disabled:opacity-50">
           {t('nextMakerQuietArchive')}
         </button>
       </div>
@@ -232,14 +232,14 @@ function NextPickList({
 
   return (
     <div className="space-y-1.5">
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-editorial-meta text-muted-foreground">
         {t('nextMakerPickHint', { n: candidates.length })}
       </p>
       {top.map((c) => (
         <PickRow key={c.story.id} candidate={c} isTop memberMap={memberMap} promoting={promotingId === c.story.id} onPromote={onPromote} onSelectStory={onSelectStory} t={t} />
       ))}
       {rest.length > 0 && !showRest && (
-        <button type="button" onClick={onShowRest} className="w-full rounded-md border border-dashed border-border py-1.5 text-[11px] text-muted-foreground">
+        <button type="button" onClick={onShowRest} className="w-full rounded-md border border-dashed border-border py-1.5 text-editorial-meta text-muted-foreground">
           {t('nextMakerPickRest', { n: rest.length })}
         </button>
       )}
@@ -268,7 +268,7 @@ function PickRow({
         <div className="truncate text-xs text-foreground">
           #{candidate.story.storyNumber} {candidate.story.title}
         </div>
-        <div className="mt-0.5 flex flex-wrap gap-2 text-[10.5px] text-muted-foreground">
+        <div className="mt-0.5 flex flex-wrap gap-2 text-micro text-muted-foreground">
           {candidate.reasons.map((r) => (
             <span key={r} className={r === 'owned' ? '' : 'font-medium text-primary'}>
               {r === 'owned' && ownerName
@@ -282,7 +282,7 @@ function PickRow({
         type="button"
         disabled={promoting}
         onClick={() => onPromote(candidate.story.id)}
-        className="shrink-0 rounded-md border border-primary bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground disabled:opacity-50"
+        className="shrink-0 rounded-md border border-primary bg-primary px-2.5 py-1 text-editorial-meta font-medium text-primary-foreground disabled:opacity-50"
       >
         {promoting ? <Loader2 className="size-3 animate-spin" aria-hidden="true" /> : t('nextMakerPromoteAction')}
       </button>

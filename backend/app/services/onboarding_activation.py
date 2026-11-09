@@ -24,6 +24,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.config import settings
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.project import OrgMember
 from app.models.team import TeamMember
@@ -202,6 +203,10 @@ async def get_first_instruction_conversation_id(
     )).scalar_one_or_none()
 
 
+# story 4832 — the checklist steps that are the person's own in a local (embedded) install (see `get_activation_state`)
+LOCAL_APPLICABLE_STEPS: tuple[str, ...] = ("agent_connected", "first_roundtrip")
+
+
 async def get_activation_state(
     db: AsyncSession, user: User, *, requested_org_id: uuid.UUID | None = None,
 ) -> dict:
@@ -232,12 +237,17 @@ async def get_activation_state(
         "agent_connected": agent_connected,
         "first_roundtrip": roundtrip_done,
     }
-    completed = sum(1 for v in steps.values() if v)
+    # story 4832 — a local (embedded) install has no sign-up: the app makes the account, its verified address and its organization on the first start, so three of the
+    # five steps are done before the person has done anything and say nothing about them. The steps that COUNT there are the two that are theirs. `steps` keeps all five
+    # keys (the web's type is unchanged); `applicable_steps` names the ones `completed` / `total` / `all_complete` are over. Hosted: all five, exactly as before.
+    applicable = list(LOCAL_APPLICABLE_STEPS) if settings.is_embedded else list(steps)
+    completed = sum(1 for k in applicable if steps[k])
     return {
         "steps": steps,
+        "applicable_steps": applicable,
         "completed": completed,
-        "total": len(steps),
-        "all_complete": completed == len(steps),
+        "total": len(applicable),
+        "all_complete": completed == len(applicable),
         "first_instruction_conversation_id": (
             str(first_instruction_conv_id) if first_instruction_conv_id else None
         ),

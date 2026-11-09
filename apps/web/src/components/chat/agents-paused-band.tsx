@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useFormatter, useTranslations } from 'next-intl';
 import { Pause } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
@@ -122,9 +123,10 @@ export function AgentsPausedBand({ conversationId, state, onResumed }: {
             <p id="agents-paused-confirm" className="text-sm text-foreground">{t('confirm')}</p>
             <label className="flex flex-col gap-1 text-sm text-foreground">
               {t('reasonLabel')}
-              <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t('reasonPlaceholder')}
+              {/* 손으로 푼 경고 색 면(bg-warning-tint) 안일 수 있어 불투명 면을 남긴다 — 흐린 안내 글자가 색 면 위에 얹히지 않게(부품은 투명 · dark:bg-input/30). */}
+              <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t('reasonPlaceholder')}
                 aria-describedby="agents-paused-reason-note" aria-invalid={tooLong || undefined}
-                className="rounded border border-border bg-background px-2 py-1 text-base lg:text-sm" />
+                className="h-auto bg-background px-2 py-1 dark:bg-background" />
             </label>
             {/* the reason a disabled button is disabled, as visible text (not a title) */}
             <p id="agents-paused-reason-note" className="text-xs text-foreground">

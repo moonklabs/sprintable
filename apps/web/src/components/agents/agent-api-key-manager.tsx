@@ -15,6 +15,8 @@ import {
 } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import { ToolPermissionPicker } from '@/components/agents/tool-permission-picker';
 import { copyTextSafely } from '@/lib/clipboard';
@@ -258,11 +260,11 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
             </Button>
           </div>
           {copyFailedOnboardingMessage ? (
-            <textarea
+            <Textarea
               readOnly
               value={copyFailedOnboardingMessage}
               onFocus={(e) => e.currentTarget.select()}
-              className="w-full resize-none rounded border border-border bg-background p-2 font-mono text-base lg:text-xs text-foreground"
+              className="resize-none p-2 font-mono lg:text-xs"
               rows={4}
               data-testid="agent-api-key-copy-failed-raw-onboarding-message"
             />
@@ -282,8 +284,8 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
       {/* story #2838 — 만료 선택(항상 화면에 노출, 침묵 각인 금지). */}
       <div className="mb-4">
         <label className="text-sm font-medium mb-1 block">{t('agentApiKeyExpiryLabel')}</label>
-        <select
-          className="rounded-md border border-input bg-background px-2 py-1 text-base lg:text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+        <Select
+          className="h-auto w-auto px-2 py-1 lg:text-xs"
           value={selectedExpiry}
           disabled={loading}
           onChange={(e) => setSelectedExpiry(e.target.value as ExpiryChoice)}
@@ -293,7 +295,7 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
           <option value="180d">{t('agentApiKeyExpiry180d')}</option>
           <option value="365d">{t('agentApiKeyExpiry365d')}</option>
           <option value="never">{t('agentApiKeyExpiryNever')}</option>
-        </select>
+        </Select>
       </div>
 
       {apiKeys.length === 0 ? (

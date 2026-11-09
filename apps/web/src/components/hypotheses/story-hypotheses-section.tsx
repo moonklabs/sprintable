@@ -8,6 +8,7 @@ import { HypothesisStatusBadge } from './hypothesis-status-badge';
 import { HypothesisGateBadge } from './hypothesis-gate-badge';
 import type { GateItem } from '@/components/kanban/types';
 import { fetchWithAuth } from '@/lib/db/client';
+import { Input } from '@/components/ui/input';
 
 /**
  * Story-detail panel "linked hypotheses" surface (E1-S8c / S9 fold · blueprint §6.5).
@@ -158,7 +159,7 @@ export function StoryHypothesesSection({
               </span>
               {isCrossEpic(h) ? (
                 <span
-                  className="inline-flex shrink-0 items-center gap-1 text-[11px] text-warning-strong"
+                  className="inline-flex shrink-0 items-center gap-1 text-editorial-meta text-warning-strong"
                   title={t('crossEpicHint')}
                 >
                   <AlertTriangle className="size-3" aria-hidden />
@@ -197,18 +198,18 @@ export function StoryHypothesesSection({
               <X className="size-3.5" />
             </button>
           </div>
-          <div className="flex items-center gap-1.5 rounded-md border border-border px-2">
-            <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-            <input
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+            <Input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t('pickerSearch')}
-              className="w-full bg-transparent py-1.5 text-base lg:text-xs focus:outline-none"
+              className="h-auto py-1.5 pl-7 lg:text-xs bg-background dark:bg-background"
             />
           </div>
           {/* story에선 가설을 생성하지 않는다 — 생성은 에픽 상세/MCP 경로(AC①). */}
-          <p className="text-[11px] text-muted-foreground">{t('createElsewhereHint')}</p>
+          <p className="text-editorial-meta text-muted-foreground">{t('createElsewhereHint')}</p>
           {candidates === null ? (
             <p className="px-1 py-2 text-xs text-muted-foreground">…</p>
           ) : filteredCandidates.length === 0 ? (
@@ -228,7 +229,7 @@ export function StoryHypothesesSection({
                     </span>
                     {isCrossEpic(h) ? (
                       <span
-                        className="inline-flex shrink-0 items-center gap-1 text-[11px] text-warning-strong"
+                        className="inline-flex shrink-0 items-center gap-1 text-editorial-meta text-warning-strong"
                         title={t('crossEpicHint')}
                       >
                         <AlertTriangle className="size-3" aria-hidden />

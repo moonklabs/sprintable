@@ -12,7 +12,7 @@ import koMessages from '../../../messages/ko.json';
 import { ChatListView } from './chat-list-view';
 
 vi.mock('@/hooks/use-auto-refresh', () => ({ useAutoRefresh: () => {} }));
-vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ({ role: 'member' }) }));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ({ role: 'member', projectMemberships: [] }) }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   useSearchParams: () => new URLSearchParams(''),

@@ -79,7 +79,7 @@ describe('[SID:4412] «link existing campaign» (Yuna 00:49Z)', () => {
     expect($('boost-adopt-campaign')?.textContent).toBe('찾을 캠페인: Boost 1_2');
     expect($('boost-adopt-weight')?.textContent).toBe(koMessages.cage.boostAdoptWeight);
     expect(dialog.textContent).toContain(koMessages.cage.adsBoostBudgetLabel); // the start confirmation's conditions
-    expect(dialog.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(dialog.querySelector('[role="checkbox"]')).toBeNull();
     expect(($('boost-adopt-confirm') as HTMLButtonElement).disabled).toBe(false);
   });
 

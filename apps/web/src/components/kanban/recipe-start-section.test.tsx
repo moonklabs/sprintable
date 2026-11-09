@@ -175,10 +175,10 @@ describe('RecipeStartSection', () => {
     ]);
     expect(container.textContent).toContain('레시피 A');
     expect(container.textContent).toContain('레시피 B');
-    expect(container.querySelectorAll('input[type="radio"]').length).toBe(2);
+    expect(container.querySelectorAll('[role="radio"]').length).toBe(2);
     expect(container.querySelector('button')).toBeNull();
 
-    const radios = container.querySelectorAll('input[type="radio"]');
+    const radios = container.querySelectorAll('[role="radio"]');
     await act(async () => { radios[1].dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); });
     expect(container.querySelector('button')).not.toBeNull();
@@ -204,7 +204,7 @@ describe('RecipeStartSection', () => {
     expect(conversationLink).not.toBeNull();
     // 시작 안 한 후보가 레시피 B 하나뿐이라 라디오 없이 자동 선택(#4075 단일 후보 관례,
     // 시작된 A는 애초 라디오 목록 대상이 아니다) — 시작 버튼이 바로 뜬다.
-    expect(container.querySelectorAll('input[type="radio"]').length).toBe(0);
+    expect(container.querySelectorAll('[role="radio"]').length).toBe(0);
     expect(container.querySelector('button')?.textContent).toContain('레시피 시작');
   });
 
@@ -221,7 +221,7 @@ describe('RecipeStartSection', () => {
         last_published_at: '2026-09-21T00:00:00Z', current_stage_position: 3, total_stages: 9,
       }),
     ]);
-    expect(container.querySelectorAll('input[type="radio"]').length).toBe(0);
+    expect(container.querySelectorAll('[role="radio"]').length).toBe(0);
     expect(container.querySelector('button')).toBeNull();
     expect(container.textContent).toContain('레시피 A');
     expect(container.textContent).toContain('레시피 B');
@@ -343,7 +343,7 @@ describe('RecipeStartSection — 플랫폼 프리셋 이름 로케일(story #420
   it('시작 전 후보가 여럿이면 이름 줄 대신 라디오 라벨(규칙 하나 · 이름이 두 번 뜨지 않음)', async () => {
     await render([candidateStub({ key: 'org.acme.a', name: '레시피 A' }), candidateStub({ key: 'org.acme.b', name: '레시피 B' })]);
     expect(container.querySelector('[data-testid="recipe-start-name"]')).toBeNull();
-    expect(container.querySelectorAll('input[type="radio"]').length).toBe(2);
+    expect(container.querySelectorAll('[role="radio"]').length).toBe(2);
   });
 });
 
@@ -447,5 +447,27 @@ describe('RecipeStartSection — 이 단계 완료(story #4249)', () => {
       const reloads = fetchMock.mock.calls.filter(([u]) => String(u).startsWith('/api/events/definitions/start-candidates')).length;
       expect(reloads).toBe(status === 500 ? 1 : 2);
     }
+  });
+});
+
+describe('[SID:4831] 레시피 고르기 라디오(바탕 부품)', () => {
+  it('카드(라벨) 글자를 누르면 그 레시피가 골라져 시작 버튼이 나타나고 하나만 골라진다 · 스페이스로도 고른다', async () => {
+    await render([
+      candidateStub({ key: 'org.acme.a', name: '레시피 A' }),
+      candidateStub({ key: 'org.acme.b', name: '레시피 B' }),
+    ]);
+    const radios = () => [...container.querySelectorAll('[role="radio"]')] as HTMLElement[];
+    const checked = () => radios().map((r) => r.getAttribute('aria-checked'));
+    expect(radios().map((r) => r.getAttribute('data-slot'))).toEqual(['radio-group-item', 'radio-group-item']);
+    expect(checked()).toEqual(['false', 'false']);
+    expect(container.querySelector('button')).toBeNull();
+    await act(async () => { (container.querySelectorAll('label')[1] as HTMLElement).click(); });
+    expect(checked()).toEqual(['false', 'true']);
+    expect(container.querySelector('button')).not.toBeNull();
+    await act(async () => {
+      radios()[0]!.focus();
+      radios()[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+    });
+    expect(checked()).toEqual(['true', 'false']);
   });
 });

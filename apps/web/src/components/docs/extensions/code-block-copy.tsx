@@ -53,9 +53,9 @@ function MermaidBlockView({ node, editor, selected }: ReactNodeViewProps) {
     <NodeViewWrapper className="my-4 not-prose" data-mermaid-id={id}>
       <div className="rounded-xl border border-border bg-muted">
         <div className="flex items-center justify-between px-3 py-2" contentEditable={false}>
-          <span className="text-[11px] font-medium text-muted-foreground">mermaid</span>
+          <span className="text-editorial-meta font-medium text-muted-foreground">mermaid</span>
           {isEditable && (
-            <span className="text-[11px] text-muted-foreground">{showCode ? t('mermaidEditingCode') : t('mermaidClickToEdit')}</span>
+            <span className="text-editorial-meta text-muted-foreground">{showCode ? t('mermaidEditingCode') : t('mermaidClickToEdit')}</span>
           )}
         </div>
 
@@ -192,7 +192,7 @@ function ShikiBlockView({ node, editor, selected, updateAttributes }: ReactNodeV
               onClick={() => isEditable && setShowLangMenu((v) => !v)}
               onKeyDown={langKeys.onTriggerKeyDown}
               {...(isEditable ? langKeys.triggerProps : {})}
-              className={`flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium transition ${
+              className={`flex items-center gap-1 rounded px-2 py-0.5 text-editorial-meta font-medium transition ${
                 isEditable
                   ? 'text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer'
                   : 'text-muted-foreground cursor-default'
@@ -226,7 +226,7 @@ function ShikiBlockView({ node, editor, selected, updateAttributes }: ReactNodeV
             type="button"
             contentEditable={false}
             onClick={handleCopy}
-            className="rounded-md border border-border bg-card px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition hover:text-foreground"
+            className="rounded-md border border-border bg-card px-3 py-1.5 text-editorial-meta font-medium text-muted-foreground transition hover:text-foreground"
           >
             {copyFailed ? t('codeCopyFailed') : copied ? t('codeCopied') : t('codeCopy')}
           </button>

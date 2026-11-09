@@ -1,10 +1,12 @@
 // story #4630 (PO 10:18Z · option (b) after Kadir qa:changes) — a password change ends every session, this one too: the BFF sends
 // no refresh token, never hands a new pair to the browser, and clears this browser's session cookies on success.
+// story 4838 — the cookie-carrying change asks the repo's origin check first, as the other state-changing auth routes do (reset-password · logout-others).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/auth-helpers', () => ({ getOrgProjectAuthContext: vi.fn(async () => ({ id: 'me' })) }));
 vi.mock('@/lib/db/server', () => ({ SP_AT_COOKIE: 'sp_at', SP_RT_COOKIE: 'sp_rt' }));
 
+import { getOrgProjectAuthContext } from '@/lib/auth-helpers';
 import { PATCH } from './route';
 
 const req = () => new Request('http://localhost:3000/api/auth/change-password', {
@@ -40,5 +42,36 @@ describe('[SID:4630] /api/auth/change-password', () => {
     expect(res.status).toBe(400);
     expect((await res.json() as { error: { code: string } }).error.code).toBe('WRONG_PASSWORD');
     expect(res.cookies.get('sp_at')).toBeUndefined();
+  });
+});
+
+describe('[SID:4838] /api/auth/change-password — origin check', () => {
+  const from = (headers: Record<string, string>) => new Request('http://127.0.0.1:3000/api/auth/change-password', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', cookie: 'sp_at=at-1; sp_rt=rt-this-browser', host: '127.0.0.1:3000', ...headers },
+    body: JSON.stringify({ current_password: 'Old-pass-1', new_password: 'New-pass-1!' }),
+  });
+  const okFetch = () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: { message: 'ok', sessions_ended: 1 } }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  };
+
+  it('another site is refused before anything is sent to the backend or cleared in the browser', async () => {
+    const fetchMock = okFetch();
+    vi.mocked(getOrgProjectAuthContext).mockClear();
+    const res = await PATCH(from({ origin: 'https://evil.example' }));
+    expect(res.status).toBe(403);
+    expect(getOrgProjectAuthContext).not.toHaveBeenCalled(); // the origin is asked before anything of the session is looked at
+    expect((await res.json() as { error: { code: string } }).error.code).toBe('CSRF_FORBIDDEN');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(res.cookies.get('sp_at')).toBeUndefined();
+  });
+
+  it('the app window itself (same origin) goes through', async () => {
+    const fetchMock = okFetch();
+    const res = await PATCH(from({ origin: 'http://127.0.0.1:3000' }));
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

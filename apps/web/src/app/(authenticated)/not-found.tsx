@@ -15,7 +15,7 @@ export default function NotFound() {
   return (
     <div className="flex min-h-[50vh] items-center justify-center p-6">
       <div className="w-full max-w-sm space-y-4 rounded-2xl border bg-card p-8 text-center shadow-lg">
-        <p className="text-4xl font-bold text-muted-foreground">404</p>
+        <p className="text-display font-bold text-muted-foreground">404</p>
         <div className="space-y-2">
           <p className="text-lg font-semibold text-foreground">{t('title')}</p>
           <p className="text-sm text-muted-foreground">{t('description')}</p>

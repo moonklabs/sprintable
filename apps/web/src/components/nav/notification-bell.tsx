@@ -71,12 +71,17 @@ export interface EventNotification {
 // export — story #2956 QA changes(카디르+codex, 2026-08-23) 회귀가드(notification-bell.test.tsx)가
 // 전체 컴포넌트 마운트 없이 딥링크 판정만 직접 검증.
 export function getEntityHref(
-  notification: Pick<EventNotification, 'source_entity_type' | 'source_entity_id' | 'payload' | 'target_project_id' | 'target_doc_slug'>,
+  notification: Pick<EventNotification, 'source_entity_type' | 'source_entity_id' | 'payload' | 'target_project_id' | 'target_doc_slug'> & { event_type?: string },
 ): string | null {
   const { source_entity_type, source_entity_id } = notification;
   if (!source_entity_id) return null;
   // story #4244 — 링크는 대상 자기 프로젝트(target_project_id)를 싣는다(모르면 주소 그대로 — 틀린 p를 만들지 않는다).
   const p = notification.target_project_id ?? null;
+  // story #4833 — 에이전트가 한도로 멈췄다 · 다시 돈다는 알림은 열 화면이 «오늘»이다(딥링크 목록의 target=now). «오늘»의 주소는 플래그를 따르므로
+  // (nav-v3-destinations) 여기서 적지 않고, 로그인한 사람을 «오늘»로 보내는 루트 `/`로 간다(이 종이 푸시 딥링크 기본값으로 이미 쓰는 그 주소).
+  // 다른 에이전트 알림(입장 등)은 그대로.
+  const inner = dispatchedInnerType(notification.event_type ?? '', notification.payload) ?? notification.event_type;
+  if (inner === 'agent.limit_paused' || inner === 'agent.limit_lifted' || inner === 'agent.restart_stopped') return '/'; // story 4863: the restart-stopped notice lands on «오늘» too
   switch (source_entity_type) {
     case 'story':
       return withProjectParam(`/flow?story=${source_entity_id}`, p);
@@ -316,7 +321,7 @@ function NotificationPanel({
             className={cn(
               // story #2062: showUnreadOnly=true면 bg-primary(링색과 동일) — focus-inset 컨테이너
               // 안에서는 inset 링이 안 보이므로 focus-outset으로 바깥 링을 되돌린다(유나 규격).
-              'focus-outset rounded-full px-2.5 py-0.5 text-[11px] font-medium transition',
+              'focus-outset rounded-full px-2.5 py-0.5 text-editorial-meta font-medium transition',
               showUnreadOnly
                 ? 'bg-primary text-primary-foreground'
                 : 'bg-muted text-muted-foreground hover:text-foreground',

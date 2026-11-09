@@ -12,7 +12,9 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import { _resetActivationStatusCacheForTests } from '@/hooks/use-activation-status';
-import { SupportWidgetLauncher } from './support-widget-launcher';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { SupportWidgetLauncher, SUPPORT_LAUNCHER_ATTR } from './support-widget-launcher';
 
 const ACTIVATION_COMPLETE_KEY = 'sprintable_activation_checklist_complete:org-1';
 // story #4219 F1 — 완주 플래그는 org 범위라 런처도 대시보드 컨텍스트의 org로 읽는다.
@@ -134,6 +136,24 @@ describe('SupportWidgetLauncher — story #3260 셸', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     });
     expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  // story 4831 덮개 명단 잠금 — 이 패널은 팝오버가 아니라 우하단 도크에 떠 있는 «비모달» 상담 패널이다. 바깥을 눌러도 닫히지 않는 것이 맞는 동작이라
+  // (Base UI Popover는 바깥 누름으로 닫는다) 바탕 Popover로 옮기지 않고 명단에 남긴다. 옮기려면 이 시험이 먼저 빨개져야 한다.
+  it('열린 패널은 바깥을 눌러도(pointerdown · mousedown · click) 닫히지 않고, 모달이 아니다(aria-modal 없음)', async () => {
+    await mount();
+    const btn = container.querySelector('button') as HTMLButtonElement;
+    await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const panel = container.querySelector('[role="dialog"]')!;
+    expect(panel).toBeTruthy();
+    expect(panel.getAttribute('aria-modal') ?? 'false').toBe('false'); // 모달이 아니다(속성 없음 · "false" 모두 같은 뜻)
+    await act(async () => {
+      document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(container.querySelector('[role="dialog"]')).toBeTruthy();
+    expect(btn.getAttribute('aria-expanded')).toBe('true');
   });
 
   it('본체 대화가 아니라 Sprintable에 직접 연결된다는 문구가 패널에 드러난다(외부 위젯 패키징 요건)', async () => {
@@ -371,6 +391,71 @@ describe('SupportWidgetLauncher — story #3274 2차: 설정 라우트 숨김(�
     usePathnameMock.mockReturnValue('/board');
     await mount();
     expect(container.querySelector('button')).toBeTruthy();
+  });
+});
+
+// story 4853 (phone · point 1) — while the button is drawn, <html> carries data-support-launcher, so a screen under the button (the chat list) can keep clear of it with a CSS variant.
+// The mark follows the SAME «drawn» value as the early return: never on while the button is not there.
+describe('SupportWidgetLauncher — story 4853: <html> is marked while the button is drawn', () => {
+  const marked = () => document.documentElement.hasAttribute(SUPPORT_LAUNCHER_ATTR);
+  afterEach(() => { document.documentElement.removeAttribute(SUPPORT_LAUNCHER_ATTR); });
+
+  it('the attribute is data-support-launcher (the chat list row names it in a CSS variant)', () => {
+    expect(SUPPORT_LAUNCHER_ATTR).toBe('data-support-launcher');
+    const list = readFileSync(join(__dirname, '..', 'chat', 'chat-list-view.tsx'), 'utf8');
+    expect(list).toContain(`max-md:[:root[${SUPPORT_LAUNCHER_ATTR}]_&]:pr-16`);
+  });
+
+  it('drawn (onboarding not finished) — marked, also on the mobile chat LIST where the button floats over the rows', async () => {
+    setInnerWidth(500);
+    usePathnameMock.mockReturnValue('/chats');
+    await mount();
+    expect(container.querySelector('button')).toBeTruthy();
+    expect(marked()).toBe(true);
+  });
+
+  it('removed when the launcher goes away (unmount)', async () => {
+    await mount();
+    expect(marked()).toBe(true);
+    await act(async () => { root.unmount(); });
+    expect(marked()).toBe(false);
+    root = createRoot(container); // afterEach unmounts it again
+  });
+
+  it('not drawn (the mobile chat room) → not marked', async () => {
+    setInnerWidth(500);
+    usePathnameMock.mockReturnValue('/chats/conv-123');
+    await mount();
+    expect(container.querySelector('button')).toBeNull();
+    expect(marked()).toBe(false);
+  });
+
+  it('not drawn (the settings pages) → not marked', async () => {
+    usePathnameMock.mockReturnValue('/settings');
+    await mount();
+    expect(container.querySelector('button')).toBeNull();
+    expect(marked()).toBe(false);
+  });
+
+  it('not drawn (a finished onboarding) → not marked', async () => {
+    window.localStorage.setItem(ACTIVATION_COMPLETE_KEY, '1');
+    usePathnameMock.mockReturnValue('/board');
+    await mount();
+    expect(container.querySelector('button')).toBeNull();
+    expect(marked()).toBe(false);
+  });
+
+  it('the mark follows the route: drawn on the list, gone when the person goes into a room (mobile), back on the list', async () => {
+    setInnerWidth(500);
+    usePathnameMock.mockReturnValue('/chats');
+    await mount();
+    expect(marked()).toBe(true);
+    usePathnameMock.mockReturnValue('/chats/conv-123');
+    await mount();
+    expect(marked()).toBe(false);
+    usePathnameMock.mockReturnValue('/chats');
+    await mount();
+    expect(marked()).toBe(true);
   });
 });
 

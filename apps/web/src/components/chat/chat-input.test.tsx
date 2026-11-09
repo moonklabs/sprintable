@@ -10,6 +10,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ChatInput } from './chat-input';
 import { invalidateOrgDomainLabels } from '@/hooks/use-org-domain-labels';
+import { AttachmentNeedsProjectError } from '@/lib/chat-attachment-error';
 
 // story #3289(도메인탈고정·축1 Phase1 FE잔여, AC2) — kanban-board.test.tsx와 동형 mock.
 // orgId를 안 주면(기본 beforeEach) useOrgDomainLabels가 no-op이라 기존 44개 테스트는 무회귀.
@@ -67,7 +68,7 @@ afterEach(async () => {
 });
 
 function textarea(): HTMLTextAreaElement {
-  return container.querySelector('textarea') as HTMLTextAreaElement;
+  return container.querySelector('textarea[data-slot="textarea"]') as HTMLTextAreaElement;
 }
 
 describe('ChatInput — 진입 시 자동 포커스(story #2032 AC1)', () => {
@@ -778,5 +779,80 @@ describe('ChatInput — the blur timer goes with the component (story 4510)', ()
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// story 4847 — a room with no project (it outlives its project since 4846 PR1) cannot take a NEW attachment: the refusal is a CODE, and the composer says why in its own words
+// instead of the bare «첨부 업로드 실패». (4846 PR2 · AC6 lifts the refusal; the code then simply stops coming and these tests describe the refusal only.)
+describe('ChatInput — 프로젝트 없는 방의 첨부 거절을 까닭과 함께 말한다(story 4847)', () => {
+  const needs = koMessages.chats.attachmentNeedsProject;
+  const generic = koMessages.chats.attachmentUploadFailed;
+  async function pickOne() {
+    const input = container.querySelector('input[type=file]') as HTMLInputElement;
+    Object.defineProperty(input, 'files', { configurable: true, value: [new File(['x'], 'a.txt', { type: 'text/plain' })] });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+  }
+  async function pressEnter() {
+    await act(async () => { textarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+  const alertText = () => [...container.querySelectorAll('[role=alert]')].map((e) => e.textContent).join(' | ');
+
+  it('⭐the upload refused by code → the one-line reason, not the bare failure', async () => {
+    await act(async () => { root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} onUploadFile={vi.fn().mockRejectedValue(new AttachmentNeedsProjectError())} />)); });
+    await pickOne();
+    await pressEnter();
+    expect(alertText()).toContain(needs);
+    expect(alertText()).not.toContain(generic);
+  });
+
+  it('any other upload failure still says the bare failure', async () => {
+    await act(async () => { root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} onUploadFile={vi.fn().mockRejectedValue(new Error('boom'))} />)); });
+    await pickOne();
+    await pressEnter();
+    expect(alertText()).toContain(generic);
+    expect(alertText()).not.toContain(needs);
+  });
+
+  it('⭐the send that registers the attachment refused by code → the same reason, not «전송 실패»', async () => {
+    const onSend = vi.fn().mockRejectedValue(new AttachmentNeedsProjectError());
+    await act(async () => { root.render(withIntl(<ChatInput threadId="c1" onSend={onSend} onUploadFile={vi.fn().mockResolvedValue({ url: 'u', name: 'a.txt', content_type: 'text/plain', size: 1 })} />)); });
+    await pickOne();
+    await pressEnter();
+    expect(onSend).toHaveBeenCalled();
+    expect(alertText()).toContain(needs);
+    expect(alertText()).not.toContain(koMessages.chats.sendFailed);
+  });
+
+  it('a send refused any other way still says «전송 실패»', async () => {
+    await act(async () => { root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn().mockRejectedValue(new Error('403'))} />)); });
+    await act(async () => { textarea().focus(); });
+    const ta = textarea();
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(ta, '안녕');
+    await act(async () => { ta.dispatchEvent(new Event('input', { bubbles: true })); });
+    await pressEnter();
+    expect(alertText()).toContain(koMessages.chats.sendFailed);
+    expect(alertText()).not.toContain(needs);
+  });
+
+  it('⭐a coded refusal and then an ordinary failure on the next try: the second says the bare failure (the first reason is not carried over)', async () => {
+    const upload = vi.fn().mockRejectedValueOnce(new AttachmentNeedsProjectError()).mockRejectedValue(new Error('boom'));
+    await act(async () => { root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} onUploadFile={upload} />)); });
+    await pickOne();
+    await pressEnter();
+    expect(alertText()).toContain(needs);
+    await pressEnter();
+    expect(alertText()).toContain(generic);
+    expect(alertText()).not.toContain(needs);
+  });
+
+  it('⭐the reason goes away with the next try (it is not left standing)', async () => {
+    const upload = vi.fn().mockRejectedValueOnce(new AttachmentNeedsProjectError()).mockResolvedValue({ url: 'u', name: 'a.txt', content_type: 'text/plain', size: 1 });
+    await act(async () => { root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} onUploadFile={upload} />)); });
+    await pickOne();
+    await pressEnter();
+    expect(alertText()).toContain(needs);
+    await pressEnter();
+    expect(alertText()).not.toContain(needs);
   });
 });

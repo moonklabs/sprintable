@@ -71,9 +71,9 @@ describe('UnifiedSwitcher — 새 프로젝트 창의 접근 체크 목록 (stor
     await openNewProject();
     const dialog = document.body.querySelector('[role="dialog"]')!;
     expect(dialog.querySelector('[data-testid="project-access-picker"]')).not.toBeNull();
-    const boxes = [...dialog.querySelectorAll<HTMLInputElement>('[data-testid="project-access-checkbox"]')];
+    const boxes = [...dialog.querySelectorAll<HTMLElement>('[data-testid="project-access-checkbox"]')];
     expect(boxes.map((b) => b.getAttribute('data-agent-id'))).toEqual(['a-1']);
-    expect(boxes[0]!.checked).toBe(false);
+    expect(boxes[0]!.getAttribute('aria-checked')).toBe('false');
     expect(dialog.querySelector('[data-testid="project-folder-field"]')).toBeNull(); // app only · piece ③
     // the two inputs that were there stay
     expect(dialog.querySelector('#unified-proj-name')).not.toBeNull();
@@ -126,5 +126,36 @@ describe('UnifiedSwitcher — 새 프로젝트 창의 접근 체크 목록 (stor
     await settle();
     expect(pickFolder).toHaveBeenCalledTimes(1);
     expect(dialog.querySelector('[data-testid="project-folder-path"]')!.textContent).toBe('~/work/a');
+  });
+});
+
+// story 4831 부품 교체(공용 부품 ④) — 새 프로젝트 창의 이름 · 설명 칸이 바탕 Input · Textarea가 되어도 쓴 글이 칸에 남고(상태에 이어짐) 필수 · 3줄이 그대로다.
+describe('UnifiedSwitcher — 새 프로젝트 창의 칸 (story 4831 부품)', () => {
+  it('이름 칸은 바탕 Input(필수)이고 설명 칸은 바탕 Textarea(3줄)이며, 쓴 글이 칸에 그대로 남는다', async () => {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <SidebarProvider>
+            <UnifiedSwitcher orgs={ORGS} currentOrgId="org-1" projects={PROJECTS} currentProjectId="proj-1" />
+          </SidebarProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    await openNewProject();
+    const dialog = document.body.querySelector('[role="dialog"]')!;
+    const name = dialog.querySelector('#unified-proj-name') as HTMLInputElement;
+    const desc = dialog.querySelector('#unified-proj-desc') as HTMLTextAreaElement;
+    expect(name.dataset.slot).toBe('input');
+    expect(name.required).toBe(true);
+    expect(desc.dataset.slot).toBe('textarea');
+    expect(desc.rows).toBe(3);
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(name, '새 프로젝트');
+      name.dispatchEvent(new Event('input', { bubbles: true }));
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(desc, '설명 한 줄');
+      desc.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect((dialog.querySelector('#unified-proj-name') as HTMLInputElement).value).toBe('새 프로젝트');
+    expect((dialog.querySelector('#unified-proj-desc') as HTMLTextAreaElement).value).toBe('설명 한 줄');
   });
 });

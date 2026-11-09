@@ -14,6 +14,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db, get_read_db
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.event import Event
+from app.services.event_room_gate import stored_event, withheld_payloads
 from app.models.team import TeamMember
 
 router = APIRouter(prefix="/api/v2/event-notifications", tags=["event-notifications", "Organization"])
@@ -157,7 +158,7 @@ async def _resolve_member_id(
 class NotificationResponse(BaseModel):
     id: uuid.UUID
     org_id: uuid.UUID
-    project_id: uuid.UUID
+    project_id: uuid.UUID | None = None  # story #4846: a room without a project has none
     event_type: str
     source_entity_type: str | None
     source_entity_id: uuid.UUID | None
@@ -209,7 +210,9 @@ async def list_notifications(
         .offset(offset)
     )
     events = result.scalars().all()
-    items = [NotificationListItem(**NotificationResponse.model_validate(e).model_dump()) for e in events]
+    # story #4870: a stored copy of a room's words is read back only by who may read the room NOW (the words are taken out of the copy handed back otherwise; the row stays)
+    withheld = await withheld_payloads(db, org_id, auth, [stored_event(e) for e in events])
+    items = [NotificationListItem(**{**NotificationResponse.model_validate(e).model_dump(), **({"payload": withheld[str(e.id)]} if str(e.id) in withheld else {})}) for e in events]
     from app.services.notification_targets import resolve_reference_targets
     targets = await resolve_reference_targets(db, org_id, ((i.source_entity_type, i.source_entity_id) for i in items))
     for i in items:
@@ -262,8 +265,9 @@ async def mark_read(
     event = result.scalar_one_or_none()
     if event is None:
         raise HTTPException(status_code=404, detail="Notification not found")
-    # event.project_id로 정확한 member_id resolve → access check
-    member_id = await _resolve_member_id(auth, org_id, db, project_id=event.project_id)
+    # story #4846: the recipient is the caller, whatever happened to their access to the event's project (a participant who lost it still marks their own
+    # line read; the event may carry no project at all) — so the member is resolved for the organization; `recipient_id != member_id` below is the gate.
+    member_id = await _resolve_member_id(auth, org_id, db, project_id=None)
     if event.recipient_id != member_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -271,7 +275,12 @@ async def mark_read(
         event.read_at = datetime.now(timezone.utc)
         await db.commit()
         await db.refresh(event)
-    return NotificationResponse.model_validate(event)
+    response = NotificationResponse.model_validate(event)
+    # story #4870: the same gate as the list (the stored row is not touched; only the copy handed back loses the words)
+    withheld = await withheld_payloads(db, org_id, auth, [stored_event(event)])
+    if str(event.id) in withheld:
+        response.payload = withheld[str(event.id)]
+    return response
 
 
 @router.patch("/read-all")

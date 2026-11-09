@@ -8,10 +8,14 @@ import { useTranslations } from 'next-intl';
 import { AgentIdentity } from '@/components/ui/agent-identity';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { buildPolicyDeniedMessage, parseAgentMessagePolicyDenied } from '@/lib/agent-message-policy-error';
 import { memberDisplayLabel, memberRowLabels } from '@/lib/member-display';
 import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
+import { Select } from '@/components/ui/select';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { isNoProjectAtAll } from '@/app/(authenticated)/chats/no-project';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -40,13 +44,38 @@ interface AgentFacts {
 // 딥링크가 필요해 단순 문자열보다 구조가 더 필요하다(그 외 실패는 기존처럼 문자열 그대로).
 type ModalError = { kind: 'generic'; message: string } | { kind: 'policy'; message: string; agentId: string };
 
+/** story 4847 — the value that stands for «no project» in the project choice (and as the default handed in by the list's filter «프로젝트 없음») */
+export const NO_ROOM_PROJECT = 'none';
+
 interface NewConversationModalProps {
-  projectId: string;
+  /** the project a NEW room is made in when the person does not choose another: the list's project filter (`NO_ROOM_PROJECT` for «프로젝트 없음»), else the current project, else none (they pick) — story 4847 */
+  projectId: string | null;
+  /** story 4847 — the server serves the organization's rooms as a whole, so a room may be made with no project: the choice «조직 (프로젝트 없음)» is offered (and is the only one for a person with no project of their own) */
+  allowNoProject?: boolean;
   onClose: () => void;
   onCreated: (conversationId: string) => void;
 }
 
-export function NewConversationModal({ projectId, onClose, onCreated }: NewConversationModalProps) {
+export function NewConversationModal({ projectId, allowNoProject = false, onClose, onCreated }: NewConversationModalProps) {
+  // story 4847 (AC3) — the people to pick from are the organization's; only the NEW room needs a project (the server files a room under one), so
+  // the modal says which one it will be — the given default, changeable when the person can use more than one.
+  const dashboardCtx = useDashboardContext();
+  const { projectMemberships, currentTeamMemberId } = dashboardCtx;
+  // the default is worked out on every render (not frozen at first render): it must be one of the person's projects (an unknown one is no default), and it follows the given one while the window is open
+  const onlyProject = projectMemberships.length === 1 ? projectMemberships[0]!.projectId : '';
+  const defaultRoomProject = projectId === NO_ROOM_PROJECT
+    ? (allowNoProject ? NO_ROOM_PROJECT : onlyProject)
+    : allowNoProject && isNoProjectAtAll(dashboardCtx)
+      ? NO_ROOM_PROJECT // a person KNOWN to have no project of their own can still start a room — with none; whatever default was handed in (a stale filter) is not theirs
+      : projectId && (projectMemberships.length === 0 || projectMemberships.some((m) => m.projectId === projectId))
+        ? projectId
+        : onlyProject;
+  const [chosenProject, setChosenProject] = useState<string | null>(null);
+  // a choice counts only while it is still one of the drawn options: «no project» while the server allows it (the list can fall back to an older server with the window open),
+  // a project while it is still the person's (the list of projects can change under an open window)
+  const chosenStillValid = chosenProject !== null
+    && (chosenProject === NO_ROOM_PROJECT ? allowNoProject : projectMemberships.some((m) => m.projectId === chosenProject));
+  const roomProjectId = chosenStillValid ? chosenProject! : defaultRoomProject;
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('chats');
   // story #3194 — agentNotConnected 배지 문구 재사용(발명 0, agent-management-tab.tsx와 동일 키).
@@ -54,7 +83,10 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
   // story #3776(1층B) — "취소", common ns의 기존 cancel 키 재사용.
   const tc = useTranslations('common');
   const [members, setMembers] = useState<Member[]>([]);
-  const rowLabels = memberRowLabels(members, tc, () => '');
+  // story 4857 — the person to talk WITH is somebody else: the shared roster (/api/members also feeds assignee · mention pickers, where «me» belongs) lists me too,
+  // and a room needs at least one other (the server files `{me, ...picked}` — picking only myself made a one-person room). Worked out on every render, like the default project.
+  const people = currentTeamMemberId ? members.filter((m) => m.id !== currentTeamMemberId) : members;
+  const rowLabels = memberRowLabels(people, tc, () => '');
   // story #3194 — 별도 state로 둔다(members setter와 순서 경쟁 없이 항상 render에서만 merge).
   // story 4675: the same read also says which computer each agent is bound to (the chip) — one map, two facts
   const [factsById, setFactsById] = useState<Record<string, AgentFacts>>({});
@@ -65,8 +97,8 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
   const [error, setError] = useState<ModalError | null>(null);
 
   useEffect(() => {
-    fetchWithAuth(`/api/members?is_active=true&project_id=${projectId}`)
-      .then((r) => r.json())
+    fetchWithAuth('/api/members?is_active=true')
+      .then((r) => { if (!r.ok) throw new Error(`members ${r.status}`); return r.json(); })
       .then((json) => {
         // story #3997 — 「시스템 발행」에게 DM을 보내는 것 자체가 의미 없다(연결
         // 대상이 아닌 내부 멤버) — 선택지에서 제외.
@@ -88,14 +120,14 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
         setFactsById(map);
       })
       .catch(() => {});
-  }, [projectId]);
+  }, []);
 
   const toggle = (id: string) => {
     setSelected((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
   };
 
   const isDm = selected.length === 1;
-  const canCreate = selected.length >= 1;
+  const canCreate = selected.length >= 1 && roomProjectId !== '';
 
   const handleCreate = async () => {
     if (!canCreate || creating) return;
@@ -109,7 +141,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
           type: isDm ? 'dm' : 'group',
           title: !isDm && groupTitle.trim() ? groupTitle.trim() : null,
           participant_ids: selected,
-          project_id: projectId,
+          project_id: roomProjectId === NO_ROOM_PROJECT ? undefined : roomProjectId, // no key = a room with no project
         }),
       });
       if (!res.ok) {
@@ -151,7 +183,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
             <div className="py-6 text-center text-sm text-muted-foreground">{tc('loading')}</div>
           ) : (
             <ul className="space-y-1">
-              {members.map((m) => (
+              {people.map((m) => (
                 <li key={m.id}>
                   <button
                     type="button"
@@ -163,7 +195,7 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
                         : 'text-foreground hover:bg-muted'
                     }`}
                   >
-                    <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
+                    <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-muted text-micro font-medium text-muted-foreground">
                       {/* [SID:4286 · 유나 결정 2] 이름이 없으면 날것 «?» 대신 아이콘(에이전트 Bot · 사람 User — 4646 공용 표식). */}
                       {m.name ? firstGraphemes(m.name, 2).toUpperCase() : <UnnamedMemberIcon type={m.type} className="h-3 w-3" aria-hidden />}
                     </div>
@@ -187,16 +219,30 @@ export function NewConversationModal({ projectId, onClose, onCreated }: NewConve
             </ul>
           )}
 
+          {/* story 4847 — which project the new room is filed under (only asked when there is a real choice) */}
+          {projectMemberships.length + (allowNoProject ? 1 : 0) > 1 && (
+            <div className="mt-3">
+              <label htmlFor="new-room-project" className="mb-1 block text-xs text-muted-foreground">{t('newRoomProject')}</label>
+              <Select id="new-room-project" value={roomProjectId} onChange={(e) => setChosenProject(e.target.value)} disabled={creating}>
+                {roomProjectId === '' ? <option value="">{t('newRoomProjectPick')}</option> : null}
+                {projectMemberships.map((p) => (
+                  <option key={p.projectId} value={p.projectId}>{p.projectName}</option>
+                ))}
+                {allowNoProject ? <option value={NO_ROOM_PROJECT}>{t('newRoomProjectNone')}</option> : null}
+              </Select>
+            </div>
+          )}
+
           {/* Group title (2명+ 선택 시) */}
           {selected.length >= 2 && (
             <div className="mt-3">
               <label className="mb-1 block text-xs text-muted-foreground">{t('groupTitle')}</label>
-              <input
+              <Input
                 type="text"
                 value={groupTitle}
                 onChange={(e) => setGroupTitle(e.target.value)}
                 placeholder={t('groupTitlePlaceholder')}
-                className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-base lg:text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                className="h-auto py-1.5"
               />
             </div>
           )}

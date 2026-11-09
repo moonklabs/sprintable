@@ -19,8 +19,9 @@ import {
 } from '@/lib/auth/account-vault';
 import { clearSuperseded, markSuperseded } from '@/lib/auth/switch-epoch';
 import { backendFetch } from '@/lib/backend-fetch';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 interface SwitchResult {
   access_token: string;

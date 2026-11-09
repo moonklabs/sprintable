@@ -112,6 +112,14 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "사용 한도에 걸려 멈췄어요 — 풀리는 시각은 아직 몰라요. 다시 일하기 시작하면 또 알려요.",
         "en": "Hit the usage limit and stopped — the reset time isn't known yet. You'll get another notice when work starts again.",
     },
+    # story 4863: an agent on the person's computer was ended from outside and nothing started it again — the one notice (provisional words: Yuna's lens is asked for in the PR).
+    # No token · key · account · path in them.
+    "desktop_restart_notice.title": {"ko": "{agent} · 꺼진 뒤 다시 서지 못함", "en": "{agent} · Stopped and did not start again"},
+    "desktop_restart_notice.title_many": {"ko": "{agent} 외 {others}개 · 꺼진 뒤 다시 서지 못함", "en": "{agent} and {others} more · Stopped and did not start again"},
+    "desktop_restart_notice.body": {
+        "ko": "밖에서 꺼진 뒤 다시 띄우지 못했어요. 이 컴퓨터의 Sprintable 앱을 열어 확인해 주세요.",
+        "en": "It was ended from outside and could not be started again. Open the Sprintable app on that computer to check.",
+    },
     # story #4686 (Yuna `run-info-1014.md` (5)): where the limit hit — the account first (a usage limit hits the ACCOUNT), then the model.
     # Appended to the «stood» body only (never to «lifted»); no line at all when nothing is known.
     "desktop_limit_notice.where": {"ko": "한도가 걸린 곳: {where}.", "en": "Limit reached on: {where}."},

@@ -37,8 +37,10 @@ from fastapi import BackgroundTasks
 
 _REAL_DB_URL = os.getenv("PARITY_TEST_DATABASE_URL") or os.getenv("ALEMBIC_DATABASE_URL")
 
+# story #4846: a TeamMember seeded on the create_all schema needs its `members` anchor (the room code resolves an api-key caller through it) — see conftest
 pytestmark = [
     pytest.mark.destructive_schema,
+    pytest.mark.usefixtures("team_member_has_members_anchor"),
     pytest.mark.skipif(not _REAL_DB_URL, reason="통합 테스트는 실 PG(PARITY/ALEMBIC_DATABASE_URL) 필요"),
     pytest.mark.anyio,
 ]

@@ -50,6 +50,7 @@ Visit `http://localhost:3108`. The database is initialized automatically on firs
 | `SECRET_KEY` | — | Application secret key — **required, set before production** |
 | `NEXT_PUBLIC_FASTAPI_URL` | `http://localhost:8000` | FastAPI backend URL (used by the frontend) |
 | `GITHUB_WEBHOOK_SECRET` | — | Optional: auto-close stories on PR merge |
+| `DISABLE_ANALYTICS` | unset | Set to `true` to serve the web app without the usage-record (Google Analytics) tag — read on every request, no rebuild. A build from this repository has no tag unless it was given `NEXT_PUBLIC_GA4_MEASUREMENT_ID`. See [usage records and permission switches](usage-records-and-permission-switches.md) |
 
 ---
 

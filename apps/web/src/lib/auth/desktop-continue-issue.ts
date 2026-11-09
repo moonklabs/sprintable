@@ -7,8 +7,9 @@ import { continueReturnPath, type ContinueStart } from '@/lib/auth/desktop-conti
 import { overContinueLimit } from '@/lib/auth/desktop-continue-limit';
 import { BFF_BACKEND_EXTERNAL_CHAIN_TIMEOUT_MS } from '@/lib/backend-signal';
 import { backendFetch } from '@/lib/backend-fetch';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 const APP_LINK_ORIGIN = () => process.env['MOBILE_APP_LINK_ORIGIN'] ?? 'https://dev-app.sprintable.ai';
 
 export type ContinueIssue = { ok: true; url: string } | { ok: false; status: 429 | 502; code: 'RATE_LIMITED' | 'ISSUE_FAILED' };

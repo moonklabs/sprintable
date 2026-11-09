@@ -56,9 +56,9 @@ function DocPreviewCard({ title, snippet, x, y }: { title: string; snippet: stri
     >
       <p className="mb-1 text-xs font-semibold text-foreground truncate">{title}</p>
       {snippet ? (
-        <p className="text-[11px] leading-relaxed text-muted-foreground line-clamp-4">{snippet}</p>
+        <p className="text-editorial-meta leading-relaxed text-muted-foreground line-clamp-4">{snippet}</p>
       ) : (
-        <p className="text-[11px] text-muted-foreground opacity-60">{t('noContentPreview')}</p>
+        <p className="text-editorial-meta text-muted-foreground opacity-60">{t('noContentPreview')}</p>
       )}
     </div>,
     document.body,
@@ -446,7 +446,7 @@ function TreeNode({
           >
             {pickerOpen && moveState ? (
               <>
-                <p id={pickerTitleId} className="px-3 pb-1 pt-1.5 text-[11px] font-semibold text-muted-foreground">{t('docTreeMovePickerTitle')}</p>
+                <p id={pickerTitleId} className="px-3 pb-1 pt-1.5 text-editorial-meta font-semibold text-muted-foreground">{t('docTreeMovePickerTitle')}</p>
                 {/* 유나 #4730(확정 01:43Z) — 트리와 같은 깊이 우선 순서 + 깊이만큼 들여쓰기(12 + 깊이×12px · 맨 위 단계 = 0 · 맨 위 폴더 = 1).
                     지금 있는 자리는 누를 수 없는 줄(aria-disabled · aria-current="location")로 남겨 트리 모양을 지키고, 줄 끝에 «현재 위치»(aria-hidden — aria-current가 이미 읽음).
                     긴 이름은 truncate + title. 열면 첫 누를 수 있는 줄에 초점 · ↑↓는 꺼진 줄에도 닿는다. */}
@@ -457,7 +457,7 @@ function TreeNode({
                     style={{ paddingLeft: `${12 + target.depth * 12}px` }}
                     className={DOC_MENU_ITEM}>
                     <span className="min-w-0 flex-1 truncate">{moveTargetTitles.get(target.id)}</span>
-                    {target.current ? <span aria-hidden="true" data-current-location="" className="shrink-0 text-[11px] text-muted-foreground">{t('docTreeMoveCurrentLocation')}</span> : null}
+                    {target.current ? <span aria-hidden="true" data-current-location="" className="shrink-0 text-editorial-meta text-muted-foreground">{t('docTreeMoveCurrentLocation')}</span> : null}
                   </Button>
                 ))}
               </>
@@ -480,11 +480,11 @@ function TreeNode({
                 <Button type="button" variant="ghost" role="menuitem" onClick={handleDelete} className={DOC_MENU_ITEM_DESTRUCTIVE}>{t('docTreeDelete')}</Button>
                 {/* 까닭 줄은 하나만 — 태그 필터 까닭 · 정렬 까닭 · «더 보기로 더 불러오면» 순(유나 확정 · story #4376 태그 필터 추가). */}
                 {moveState?.filterLocked ? (
-                  <p id={filterNoteId} className="mt-1 break-keep border-t border-border px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground">{t('moveTagFilterActive')}</p>
+                  <p id={filterNoteId} className="mt-1 break-keep border-t border-border px-3 pb-1 pt-1.5 text-editorial-meta text-muted-foreground">{t('moveTagFilterActive')}</p>
                 ) : moveState?.sortLocked ? (
-                  <p id={sortNoteId} className="mt-1 break-keep border-t border-border px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground">{t('moveSortModeActiveError')}</p>
+                  <p id={sortNoteId} className="mt-1 break-keep border-t border-border px-3 pb-1 pt-1.5 text-editorial-meta text-muted-foreground">{t('moveSortModeActiveError')}</p>
                 ) : moveState?.downUnloaded ? (
-                  <p id={unloadedNoteId} className="mt-1 break-keep border-t border-border px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground">{t('docTreeMoveDownUnloaded')}</p>
+                  <p id={unloadedNoteId} className="mt-1 break-keep border-t border-border px-3 pb-1 pt-1.5 text-editorial-meta text-muted-foreground">{t('docTreeMoveDownUnloaded')}</p>
                 ) : null}
               </>
             )}
@@ -535,7 +535,7 @@ function TreeNode({
             </SortableContext>
           ) : (
             <p
-              className="py-1 text-[11px] italic text-muted-foreground"
+              className="py-1 text-editorial-meta italic text-muted-foreground"
               style={{ paddingLeft: `${Math.min((depth + 1) * 14 + 24, 88)}px` }}
             >
               {/* story #4390 — 예전엔 기본값 'No child docs'(영어)를 호출부가 안 넘겨 한국어 화면에도 영어가 나왔다 → 로케일 문장(docs.noChildDocs). */}

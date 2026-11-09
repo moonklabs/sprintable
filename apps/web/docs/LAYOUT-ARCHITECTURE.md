@@ -119,7 +119,7 @@ story #3876에서 삭제됐다. 현재 라이브 문서 레이아웃은 `docs-cl
 
 **파일**: `src/components/ui/contextual-panel-layout.tsx`
 
-우측 컨텍스트 패널 드로어. `bg-black/55` 오버레이만 사용 — **준수 중**.
+컨텍스트 패널(넓은 화면 인라인 칸 / 좁은 화면 서랍). 서랍 가지는 바탕 `Sheet`(story 4831) — 가림막 · 초점 · Esc는 Sheet가 맡고, 패널(GlassPanel)이 자기 카드 면을 가져서 Sheet는 투명 껍데기로만 쓴다 — **준수 중**.
 
 ### Page Shell 공통 규칙
 

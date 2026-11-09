@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { EMPTY_TODAY_SNAPSHOT, useTodaySnapshot } from './use-today-snapshot';
 import { AgentProgressSection, NeedsMeSection, PublishedSection } from './today-sections';
+import { AgentStateSection } from './agent-state-section';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { findSoleAgentDm, sendInstruction } from '@/lib/today-instruct';
 import { TodayPairCard } from './today-pair-card';
@@ -177,6 +178,7 @@ export function OrgBriefingShell() {
         <div className="space-y-6">
           <NeedsMeSection items={snapshot.needsMe} count={snapshot.needsMeCount} />
           <AgentProgressSection items={snapshot.agentProgress} />
+          <AgentStateSection />
           <PublishedSection published={snapshot.published} usage={snapshot.usage} />
         </div>
       )}

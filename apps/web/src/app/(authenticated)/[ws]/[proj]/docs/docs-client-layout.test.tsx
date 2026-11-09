@@ -111,7 +111,7 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     const calls: string[] = [];
     const fetchMock = stubFetch({ onCall: (url) => calls.push(url) });
     await mount();
-    const input = container.querySelector('input[type="text"]') as HTMLInputElement;
+    const input = container.querySelector('input[type="text"][data-slot="input"]') as HTMLInputElement;
     expect(input).toBeTruthy();
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
@@ -284,7 +284,7 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     await mount();
     const newFolderBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('새 폴더'));
     await act(async () => { newFolderBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const input = container.querySelector('input[placeholder="폴더 이름"]') as HTMLInputElement;
+    const input = container.querySelector('input[data-slot="input"][placeholder="폴더 이름"]') as HTMLInputElement;
     expect(input).toBeTruthy();
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
@@ -297,6 +297,52 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     await act(async () => { await Promise.resolve(); });
     const postCall = calls.find((c) => c.init?.method === 'POST' && (JSON.parse((c.init.body as string) ?? '{}').is_folder === true));
     expect(postCall).toBeTruthy();
+  });
+});
+
+describe('DocsClientLayout — 새 폴더 이름 칸의 한글 조합(IME) 가드 (story 4831 측정 중 발견)', () => {
+  const keydown = (el: Element, key: string, init: KeyboardEventInit = {}) => {
+    const ev = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
+    el.dispatchEvent(ev);
+    return ev;
+  };
+  async function openFolderForm() {
+    await mount();
+    const newFolderBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('새 폴더'));
+    await act(async () => { newFolderBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const input = container.querySelector('input[data-slot="input"][placeholder="폴더 이름"]') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '기획문');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    return input;
+  }
+  const posts = (calls: Array<{ url: string; init?: RequestInit }>) => calls.filter((c) => c.init?.method === 'POST' && c.url.includes('/api/docs'));
+
+  it('조합 중의 엔터는 폴더를 만들지 않고, 조합이 끝난 뒤의 엔터만 만든다', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    stubFetch({ onCall: (url, init) => calls.push({ url, init }) });
+    const input = await openFolderForm();
+    let ev!: KeyboardEvent;
+    await act(async () => { ev = keydown(input, 'Enter', { isComposing: true }); });
+    await act(async () => { await Promise.resolve(); });
+    expect(posts(calls)).toHaveLength(0);
+    expect(ev.defaultPrevented).toBe(false);
+    await act(async () => { keydown(input, 'Enter', { keyCode: 229 }); });
+    expect(posts(calls)).toHaveLength(0);
+    await act(async () => { ev = keydown(input, 'Enter'); });
+    await act(async () => { await Promise.resolve(); });
+    expect(ev.defaultPrevented).toBe(true);
+    expect(posts(calls)).toHaveLength(1);
+  });
+
+  it('조합 중의 에스케이프는 새 폴더 폼을 닫지 않고, 조합이 아닌 에스케이프는 닫는다', async () => {
+    stubFetch();
+    const input = await openFolderForm();
+    await act(async () => { keydown(input, 'Escape', { isComposing: true }); });
+    expect(container.querySelector('input[data-slot="input"][placeholder="폴더 이름"]')).not.toBeNull();
+    await act(async () => { keydown(input, 'Escape'); });
+    expect(container.querySelector('input[data-slot="input"][placeholder="폴더 이름"]')).toBeNull();
   });
 });
 

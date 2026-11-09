@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Textarea } from '@/components/ui/textarea';
 import { CommentBodyText } from '@/components/content/comment-body-text';
 import type { CommentItem } from '@/components/content/comments-section';
 
@@ -236,13 +237,13 @@ export function CommentReplyDialog({
                   {t('commentsReplyPrefillFetchFailed')}
                 </p>
               ) : null}
-              <textarea
+              <Textarea
                 id="comments-reply-text"
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 placeholder={t('commentsReplyTextPlaceholder')}
                 rows={4}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="min-h-0 bg-background dark:bg-background"
               />
             </div>
 

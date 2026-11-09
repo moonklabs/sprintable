@@ -1,12 +1,16 @@
 'use client';
 
+import { useEmbeddedServer } from '@/components/embedded-server-context';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { fetchWithAuth, refreshSessionAfterChange, switchOrg } from '@/lib/db/client';
 import { presetDescription, presetName } from '@/lib/platform-preset-copy';
 import { pickEulReulJosa, pickEunNeunJosa, pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle';
@@ -16,6 +20,8 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { SetupProgressView } from './desktop-setup-progress';
 import { DesktopSetupAgent, DesktopSetupQuick } from './desktop-setup-quick';
 import { showsQuickCard } from '@/lib/desktop-setup-quick';
+import { desktopApp } from '@/lib/desktop-app';
+import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { defaultOrgName } from '@/lib/default-org-name';
 import { InviteCheckFailedCard } from './invite-check-failed';
 import { formatLocaleDate } from '@/lib/i18n';
@@ -25,7 +31,7 @@ import {
   agentRoomOf, agentRowCount, confirmBody, firstProjectConfirmBody, newOrgConfirmBody, setupFragment, hasSetupFragment, listableRecipe, parseSetupFragment, rememberActiveSetup, type OldRuntime, type SetupQuery, defaultWorkdirHint, needsAnAgent, setupRoleRows, workdirInputOk, withPreselectedAgent,
   type AgentRoom, type AttachableAgent, type DesktopRuntime, roomShort, type PreselectHold, type SetupRecipe, type SetupRoleRow, movedRowCount, ownerKey, preselectHoldOf, withAttachable, withDefaultRecipeFirst,
   addAgentTool, hasSignInCheck, JUDGED_AGENT_TOOLS,
-  moveConfirmBody, movableState, moveListOrder } from '@/lib/desktop-setup';
+  moveConfirmBody, moveRowState, moveListOrder } from '@/lib/desktop-setup';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { appSetupLink, nativeReturnApp, RETURN_APP_PARAM } from '@/lib/auth/native-return-app';
 import { putOrgRemoteControl, useOrgRemoteControl } from '@/lib/org-remote-control';
@@ -174,10 +180,10 @@ export async function renewToken(): Promise<boolean> {
 }
 
 /** The address a reload goes to for this setup's progress (4429 ①): the setup id only — no code (it is used already). */
-export const PROGRESS_FRAGMENT = (setupId: string) => `#progress=${encodeURIComponent(setupId)}`;
-function reloadToProgress(setupId: string): void {
+export const PROGRESS_FRAGMENT = (setupId: string, canWorkdir = false) => `#progress=${encodeURIComponent(setupId)}${canWorkdir ? '&caps=workdir' : ''}`;
+function reloadToProgress(setupId: string, canWorkdir = false): void {
   // replaceState, not `location.hash =`: no hashchange for the page's own handler (same as 4429 ②)
-  window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(setupId));
+  window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(setupId, canWorkdir));
   window.location.reload();
 }
 
@@ -196,14 +202,14 @@ export async function fetchMyInvites(): Promise<MyInvite[]> {
  * The setup is saved but its progress cannot be read with the old token (4429 ① · Yuna 09:42Z): in the progress's place, not over
  * it — «앱이 받아 가기를 기다리는 중» would say what the page does not know. No red: only «seeing» is blocked.
  */
-export function SetupDoneReload({ setupId }: { setupId: string | null }) {
+export function SetupDoneReload({ setupId, canWorkdir = false }: { setupId: string | null; /** story 4832: the app's `caps=workdir` mark, kept in the progress address a reload goes to */ canWorkdir?: boolean }) {
   const t = useTranslations('desktop.setup');
   return (
     <Card className="break-keep flex flex-col gap-3 p-6" data-testid="setup-done-reload">
       <h1 className="text-lg font-semibold">{t('doneReload.title')}</h1>
       <p className="text-sm text-muted-foreground">{t('doneReload.body')}</p>
       <div className="flex gap-2">
-        <Button onClick={() => (setupId ? reloadToProgress(setupId) : window.location.reload())}>{t('failure.has-org.action')}</Button>
+        <Button onClick={() => (setupId ? reloadToProgress(setupId, canWorkdir) : window.location.reload())}>{t('failure.has-org.action')}</Button>
       </div>
     </Card>
   );
@@ -232,7 +238,7 @@ export interface MyInvite { invite_id: string; org_id: string; org_name: string;
  */
 type OrgMode = { kind: 'has-org' } | { kind: 'checking' } | { kind: 'new' } | { kind: 'invited'; invites: MyInvite[] } | { kind: 'invite-failed' };
 
-export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null, old = [], canMove = false, preselect = null }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null; old?: OldRuntime[]; canMove?: boolean; /** story 4680: the agent the recruiter just made — chosen for the first agent row once the list has it */ preselect?: string | null }) {
+export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = null, old = [], canMove = false, canWorkdir = false, preselect = null, initialKind = 'recipe' }: { code: string; runtimes: DesktopRuntime[]; blocked?: DesktopRuntime[]; setupId?: string | null; old?: OldRuntime[]; canMove?: boolean; /** story 4832: the app answers the progress page's per-agent folder link (`caps=workdir`) */ canWorkdir?: boolean; /** story 4680: the agent the recruiter just made — chosen for the first agent row once the list has it */ preselect?: string | null; /** story 4832: `move` = the page opens with «이미 있는 에이전트 옮기기» chosen (the sidebar's move door · the card's move link); still only a choice — nothing is ticked */ initialKind?: 'recipe' | 'move' }) {
   // ⑥ 갈래 가: 찾았지만 회사 설정으로 도구를 못 붙이는 런타임은 고를 수 없고, 꺼진 선택지로만 보인다. PO 08:37Z · 유나 08:38Z.
   const runtimes = useMemo(() => found.filter((r) => !blocked.includes(r)), [found, blocked]);
   const claudeBlocked = blocked.includes('claude');
@@ -333,14 +339,14 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   useEffect(() => {
     const where = focusAfterFold.current;
     focusAfterFold.current = null;
-    if (where === 'list') recipeListRef.current?.querySelector<HTMLInputElement>('input[name=recipe]:checked')?.focus();
+    if (where === 'list') recipeListRef.current?.querySelector<HTMLElement>('[role=radio][data-checked]')?.focus();
     if (where === 'change') recipeChangeRef.current?.focus();
   }, [pickingRecipe]);
   const [view, setView] = useState<View>({ kind: 'loading' });
   const [rateLine, setRateLine] = useState<string | null>(null);
   // story #4576 — «레시피로 시작» (default: moving stops the agent wherever it worked, so only when a person chooses it) or
   // «이미 있는 에이전트 옮기기»; the agents ticked for the move (none by default — the same reason)
-  const [setupKind, setSetupKind] = useState<'recipe' | 'move'>('recipe');
+  const [setupKind, setSetupKind] = useState<'recipe' | 'move'>(canMove ? initialKind : 'recipe');
   const [moving, setMoving] = useState<string[]>([]);
 
   // 로그인이 필요했던 설정이면 한 번(4426 · 사람 손 셈) — 설정 id가 없으면 이 흐름에 묶을 수 없어 보내지 않는다
@@ -440,7 +446,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     attachableRef.current = list;
     setAttachable(list);
     // Kadir 4969 (2선): ticks follow the fresh list — an agent that dropped out is untied, never ticked again by itself
-    setMoving((ms) => ms.filter((id) => list.some((a) => a.id === id && movableState(a, runtimes) === 'ok')));
+    setMoving((ms) => ms.filter((id) => list.some((a) => a.id === id && moveRowState(a, runtimes) !== 'runtime-missing')));
     // story 4680: the recruiter's agent (`agent=` in the address) takes the first agent row once it is among the choices — once
     // (PO 5065 ②): the list is read again on «목록 다시 불러오기» (4576 · move mode) and a recipe change rebuilds the rows; a
     // person's own choice after that is never written over. Whether to apply is decided here (the updater stays pure); a
@@ -551,7 +557,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     if (target === 'start') { focusStartOrRoles(); return; }
     const el = target === 'hold-put' ? document.querySelector<HTMLElement>('[data-preselect-put]')
       : target.startsWith('put:') ? document.querySelector<HTMLElement>(`[data-put-on-team="${target.slice(4)}"]`)
-      : target.startsWith('move:') ? document.getElementById(`setup-move-${target.slice(5)}`)
+      : target.startsWith('move:') ? document.querySelector<HTMLElement>(`[role=checkbox][data-move-id="${target.slice(5)}"]`)
         : rolesRef.current?.querySelector<HTMLElement>('select');
     el?.focus();
   }, [attachable, teamState]);
@@ -565,14 +571,16 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   const moveMode = showKinds && canMove && setupKind === 'move';
   // story 4670 AC1 (PO dev walk 10-15): the tick is for BOTH ways — the hire → «이 컴퓨터에서 시작» road lands on «옮기기» (the agent
   // just made is an «existing agent»), so a tick that left that way out left the usual new-customer road without it.
-  const showPhoneControl = newOrg || (orgMode.kind === 'has-org' && (remoteReadFailed || (!!remoteState && remoteState.can_change && !remoteState.enabled)));
+  const embedded = useEmbeddedServer(); // story 4832: the app's own server has no phone relay — no tick, so no PUT either (`turnPhoneControlOn` gates on this)
+  const showPhoneControl = !embedded && (newOrg || (orgMode.kind === 'has-org' && (remoteReadFailed || (!!remoteState && remoteState.can_change && !remoteState.enabled))));
   const movable = useMemo(() => moveListOrder(attachable, runtimes), [attachable, runtimes]);
   // story 4678: the ones [프로젝트 팀에 넣기] can help — not on the team, and a runtime this computer has (without one, putting it on
   // the team would still leave it unusable: that is the line the move list gives instead)
   const outsiders = attachable.filter((a) => !a.in_project && runtimes.includes(a.runtime));
-  const movableOutsiders = movable.filter((a) => !a.in_project && runtimes.includes(a.runtime));
-  const moveChosen = moving.filter((id) => attachable.some((a) => a.id === id && movableState(a, runtimes) === 'ok'));
-  const anyMovable = movable.some((a) => movableState(a, runtimes) === 'ok');
+  const moveChosen = moving.filter((id) => attachable.some((a) => a.id === id && moveRowState(a, runtimes) !== 'runtime-missing'));
+  // story 4832: the ticked agents that are not on the team yet — the confirmation asks the server to put them there (`add_to_team`)
+  const moveAddToTeam = moveChosen.filter((id) => attachable.some((a) => a.id === id && !a.in_project));
+  const anyMovable = movable.some((a) => moveRowState(a, runtimes) !== 'runtime-missing');
   const roleName = (role: string) => stageRoleLabel(role, tOrg);
   const humanRoles = useMemo(() => rows.filter((r) => r.owner.kind === 'me').map((r) => stageRoleLabel(r.role, tOrg)), [rows, tOrg]);
   const humanList = humanRoles.join(' · ');
@@ -667,7 +675,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     try {
       const res = await fetchWithAuth('/api/desktop/setup-codes/confirm', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(moveConfirmBody(code, chosenProject, moveChosen)),
+        body: JSON.stringify(moveConfirmBody(code, chosenProject, moveChosen, moveAddToTeam)),
       });
       if (res.ok) {
         // the tab had no project: the one moved into becomes the tab's, as a recipe start does (story 4496)
@@ -701,7 +709,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
   // — «이미 조직이 있어요» [다시 불러오기] (4429 ②) and, story 4721, the member card's [다시 확인] and its switch into the new organization
   const reloadKeepingSetup = () => {
     // replaceState, not `location.hash =`: no hashchange (the page's own handler would take the values off again before the reload)
-    window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment({ code, runtimes: found, setupId, blocked, old, ...(canMove ? { canMove: true as const } : {}), ...(preselect ? { agent: preselect } : {}) }));
+    window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment({ code, runtimes: found, setupId, blocked, old, ...(canMove ? { canMove: true as const } : {}), ...(canWorkdir ? { canWorkdir: true as const } : {}), ...(preselect ? { agent: preselect } : {}) }));
     window.location.reload();
   };
   if (orgMode.kind === 'invited') return <InvitedInApp invites={orgMode.invites} onReload={reloadKeepingSetup} />;
@@ -723,8 +731,8 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
     // story 4494 (Yuna 10:11Z ⓐ): nothing usable, but installed below the floor — say that, not «찾지 못했어요»
     return blocked.length === 0 && old.length > 0 ? <TooOldCard old={old} /> : <Failure failure={blocked.length > 0 ? 'managed' : 'no-agent'} />;
   }
-  if (view.kind === 'done-reload') return <SetupDoneReload setupId={setupId} />;
-  if (view.kind === 'started') return <SetupProgressView setupId={setupId} recipeName={recipe ? presetName(recipe, tPreset) : ''} phoneControlFailed={phoneControlFailed} />;
+  if (view.kind === 'done-reload') return <SetupDoneReload setupId={setupId} canWorkdir={canWorkdir} />;
+  if (view.kind === 'started') return <SetupProgressView setupId={setupId} recipeName={recipe ? presetName(recipe, tPreset) : ''} phoneControlFailed={phoneControlFailed} canWorkdir={canWorkdir} />;
 
   const setOwner = (role: string, key: string) => {
     preselectSpent.current = true; // story 4680 (PO (나)): a person set a row — the recruiter's preselect never lands after this
@@ -754,19 +762,19 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       {showKinds ? (
         <section aria-labelledby="setup-kind" data-testid="setup-kind">
           <h2 id="setup-kind" className="text-sm font-medium">{t('move.kindLabel')}</h2>
-          <div role="radiogroup" aria-labelledby="setup-kind" className="mt-2 flex flex-col gap-2">
-            <label className="flex cursor-pointer gap-3 rounded-md border p-3 has-[:checked]:border-primary">
+          <RadioGroup name="setup-kind" aria-labelledby="setup-kind" className="mt-2" value={moveMode ? 'move' : 'recipe'} onValueChange={(v) => setSetupKind(v === 'move' ? 'move' : 'recipe')}>
+            <label className="flex cursor-pointer gap-3 rounded-md border p-3 has-[[data-checked]]:border-primary">
               {/* Kadir 4969 (2선): no switching while a start is on its way — an offline [다시 시도] must repeat what was sent */}
-              <input type="radio" name="setup-kind" value="recipe" checked={!moveMode} disabled={view.kind === 'starting'} onChange={() => setSetupKind('recipe')} className="mt-1 shrink-0 self-start" />
+              <RadioGroupItem value="recipe" disabled={view.kind === 'starting'} className="mt-1 self-start" />
               <span><span className="block text-sm font-medium">{t('move.kindRecipe')}</span>
                 <span className="block text-xs text-muted-foreground">{t('move.kindRecipeDesc')}</span></span>
             </label>
-            <label className={`flex gap-3 rounded-md border p-3 has-[:checked]:border-primary ${canMove ? 'cursor-pointer' : 'cursor-not-allowed'}`} data-testid="setup-kind-move" data-disabled={canMove ? undefined : 'true'}>
-              <input type="radio" name="setup-kind" value="move" checked={moveMode} disabled={!canMove || view.kind === 'starting'} onChange={() => setSetupKind('move')} className="mt-1 shrink-0 self-start" />
+            <label className={`flex gap-3 rounded-md border p-3 has-[[data-checked]]:border-primary ${canMove ? 'cursor-pointer' : 'cursor-not-allowed'}`} data-testid="setup-kind-move" data-disabled={canMove ? undefined : 'true'}>
+              <RadioGroupItem value="move" disabled={!canMove || view.kind === 'starting'} className="mt-1 self-start" />
               <span><span className={`block text-sm font-medium ${canMove ? '' : 'text-muted-foreground'}`}>{t('move.kindMove')}</span>
                 <span className="block text-xs text-muted-foreground" data-testid={canMove ? undefined : 'setup-kind-move-why'}>{canMove ? t('move.kindMoveDesc') : t('move.kindMoveOldApp')}</span></span>
             </label>
-          </div>
+          </RadioGroup>
         </section>
       ) : null}
 
@@ -818,12 +826,12 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
       {/* story 4496 ⓑ: projects exist but the tab has none and there are several — the person picks one (none is made) */}
       {orgMode.kind === 'has-org' && !projectId && orgProjects.length > 1 ? (
         <label className="flex flex-col gap-1 text-sm font-medium" data-testid="setup-project-pick">{t('projectPick.label')}
-          <select className="rounded-md border bg-background px-2 py-1 text-base font-normal lg:text-sm" value={pickedProject}
+          <Select className="h-auto bg-background px-2 py-1 font-normal dark:bg-background" value={pickedProject}
             // Kadir 4969 (2선): the old project's ticks never ride to the new one — cleared before its list comes
             onChange={(e) => { setMoving([]); setPickedProject(e.target.value); }}>
             <option value="" disabled>{t('projectPick.placeholder')}</option>
             {orgProjects.map((p) => <option key={p.projectId} value={p.projectId}>{p.projectName}</option>)}
-          </select>
+          </Select>
         </label>
       ) : null}
 
@@ -839,28 +847,25 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
           ) : (
           <ul className="mt-2 flex flex-col divide-y rounded-md border">
             {movable.map((a) => {
-              const state = movableState(a, runtimes);
-              const on = state === 'ok' && moving.includes(a.id);
-              // move.rowNotInProject says the same as the select's existingNotInProject (4565) without the name — change one, change both
-              // (kept two keys: the en select line starts lower-case after «{name} · »)
-              // story 4678: «팀에 아직 없어요» is a line with a button next to it — only where the button can help; a missing runtime is the
-              // blocker that stays whatever the team says
-              const canPutOnTeam = state === 'not-in-project' && runtimes.includes(a.runtime);
-              const second = canPutOnTeam ? t('move.rowNotInProject')
-                : state === 'runtime-missing' || state === 'not-in-project' ? t('move.rowRuntimeMissing', { runtime: RUNTIME_LABEL[a.runtime], iGa: pickIGaJosa(RUNTIME_LABEL[a.runtime]) })
-                  : t('onThisComputer', { runtime: RUNTIME_LABEL[a.runtime] });
+              const state = moveRowState(a, runtimes);
+              const tickable = state !== 'runtime-missing';
+              const on = tickable && moving.includes(a.id);
+              // story 4832: an agent off the team can be ticked — the line says so BEFORE the tick (moving it puts it on the team too, in the same confirmation); a program this
+              // computer lacks is the blocker that stays
+              const second = state === 'runtime-missing' ? t('move.rowRuntimeMissing', { runtime: RUNTIME_LABEL[a.runtime], iGa: pickIGaJosa(RUNTIME_LABEL[a.runtime]) })
+                : state === 'needs-team' ? t('move.rowNeedsTeam', { runtime: RUNTIME_LABEL[a.runtime] })
+                  : t('move.rowOk', { runtime: RUNTIME_LABEL[a.runtime] });
               return (
                 <li key={a.id} className="p-3" data-testid="setup-move-row" data-state={state}>
                   <div className="flex gap-3">
-                    <input type="checkbox" id={`setup-move-${a.id}`} checked={on} disabled={state !== 'ok'} onChange={(e) => toggleMove(a.id, e.target.checked)} className="mt-1 shrink-0 self-start" />
+                    <Checkbox id={`setup-move-${a.id}`} data-move-id={a.id} checked={on} disabled={!tickable} onCheckedChange={(checked) => toggleMove(a.id, checked === true)} className="mt-1 self-start" />
                     <div className="min-w-0 break-keep">
-                      <label htmlFor={`setup-move-${a.id}`} className={`block ${state === 'ok' ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-                        <span className={`block text-sm font-medium ${state === 'ok' ? '' : 'text-muted-foreground'}`}>{a.name}</span>
+                      <label htmlFor={`setup-move-${a.id}`} className={`block ${tickable ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                        <span className={`block text-sm font-medium ${tickable ? '' : 'text-muted-foreground'}`}>{a.name}</span>
                         <span className="block text-xs text-muted-foreground">{second}</span>
                       </label>
                       {/* the 4565 note under a ticked row only (same place, same words — under the name's column) */}
                       {on ? <MovedAgentNote agent={a} /> : null}
-                      {canPutOnTeam ? <div className="mt-1"><PutOnTeamButton agent={a} state={teamState[a.id]} onPress={() => void putOnTeam(a, movableOutsiders)} /></div> : null}
                     </div>
                   </div>
                 </li>
@@ -892,14 +897,26 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
             </div>
           ) : null}
           {pickingRecipe ? (
-            <div role="radiogroup" aria-labelledby="setup-recipe" className="mt-2 flex flex-col gap-2" data-testid="setup-recipe-list" id="setup-recipe-list" ref={recipeListRef}
+            <div className="mt-2" data-testid="setup-recipe-list" id="setup-recipe-list" ref={recipeListRef}
+              // a key is not a press: cleared in the capture phase so it runs before the part's own arrow handling (an arrow's click only chooses)
+              onKeyDownCapture={() => { pressInList.current = false; }}
+              // story 4504 AC4 + 4831: the fold is on a click that reaches the radio itself — the visible control (a span) or its hidden input (what a
+              // label's default action clicks when the card's TEXT is pressed) — never on the label's own click (a browser does the label's
+              // default action only after the listeners and the update they flushed, so folding there removed the radio before it was chosen).
+              // Both the choice (the radio's change) and this fold are state updates of the same click: React batches them into one render, so the
+              // list goes away in the render that also holds the choice (real Chromium: the pressed card is the chosen one). An arrow key's click has no press: it only chooses.
+              onClick={(e) => {
+                const t = e.target as Element;
+                if (!(t.closest('[role=radio]') || (t instanceof HTMLInputElement && t.type === 'radio'))) return;
+                if (pressInList.current) { pressInList.current = false; foldRecipes(true); }
+              }}
               onKeyDown={(e) => {
                 pressInList.current = false; // a key, not a press: an arrow's click only chooses
                 if (e.key !== 'Enter' && e.key !== ' ') return;
                 e.preventDefault();
                 // a screen reader can put focus on a radio without choosing it: Enter/Space there chooses that one (PO 03:41Z)
-                const el = e.target as HTMLInputElement;
-                if (el.name === 'recipe' && !el.checked) { const r = recipes.find((x) => x.id === el.value); if (r) pick(r); }
+                const el = (e.target as HTMLElement).closest<HTMLElement>('[role=radio][data-recipe-id]');
+                if (el && el.getAttribute('aria-checked') !== 'true') { const r = recipes.find((x) => x.id === el.getAttribute('data-recipe-id')); if (r) pick(r); }
                 foldRecipes(true);
               }}
               onPointerDown={(down) => {
@@ -926,7 +943,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
                   if (!list || list.contains(document.activeElement)) return; // focus still in the list: its next blur folds as usual
                   if (up.type === 'pointercancel' || (up.target instanceof Node && list.contains(up.target))) {
                     // without scrolling: after a cancelled touch the person was scrolling the list — never pull it back (PO 06:26Z)
-                    list.querySelector<HTMLInputElement>('input[name=recipe]:checked')?.focus({ preventScroll: true });
+                    list.querySelector<HTMLElement>('[role=radio][data-checked]')?.focus({ preventScroll: true });
                   } else foldRecipes(document.hasFocus());
                 };
                 window.addEventListener('pointerup', release);
@@ -938,6 +955,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
                 if (e.currentTarget.contains(to) || to === recipeChangeRef.current) return; // [바꾸기]'s own click folds it
                 foldRecipes(to === null && document.hasFocus());
               }}>
+            <RadioGroup name="recipe" aria-labelledby="setup-recipe" value={recipeId} onValueChange={(v) => { const r = recipes.find((x) => x.id === v); if (r) pick(r); }}>
               {recipeOrder.map((id) => recipes.find((x) => x.id === id)).filter((r): r is NonNullable<typeof r> => !!r).map((r) => (
                 // story 4504 AC4 (live 2026-10-03 02:18Z): a person's click chooses, THEN folds — the fold is on the radio's own click
                 // (after its change), never on the label's: a browser does the label's default action (that radio click) only after
@@ -945,14 +963,14 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
                 // press inside the list (pointer) folds; an arrow key's click (no press) only chooses.
                 // story 4553: the radio keeps its own size in the flex label (no stretch to the card's height) — its focus ring is a ring,
                 // not a card-tall capsule
-                <label key={r.id} className="flex cursor-pointer gap-3 rounded-md border p-3 has-[:checked]:border-primary">
-                  <input type="radio" name="recipe" value={r.id} checked={r.id === recipeId} onChange={() => pick(r)} className="mt-1 shrink-0 self-start"
-                    onClick={() => { if (pressInList.current) { pressInList.current = false; foldRecipes(true); } }} />
+                <label key={r.id} className="flex cursor-pointer gap-3 rounded-md border p-3 has-[[data-checked]]:border-primary">
+                  <RadioGroupItem value={r.id} data-recipe-id={r.id} className="mt-1 self-start" />
                   <span><span className="block text-sm font-medium">{presetName(r, tPreset)}</span>
                     {presetDescription(r, tPreset) ? <span className="block text-xs text-muted-foreground">{presetDescription(r, tPreset)}</span> : null}
                     <RecipeRolesLine recipe={r} runtimes={runtimes} /></span>
                 </label>
               ))}
+            </RadioGroup>
             </div>
           ) : null}
         </section>
@@ -977,7 +995,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
                 {r.choices.length === 1
                   ? <span className="text-sm">{r.owner.kind === 'me' ? t('me', { name: myName }) : r.owner.kind === 'existing' ? r.owner.name : t('onThisComputer', { runtime: RUNTIME_LABEL[r.owner.runtime] })}</span>
                   : (
-                    <select aria-label={t('ownerFor', { role: roleName(r.role) })} className="max-w-[55%] shrink-0 rounded-md border bg-background px-2 py-1 text-base lg:text-sm"
+                    <Select aria-label={t('ownerFor', { role: roleName(r.role) })} className="h-auto w-auto max-w-[55%] shrink-0 bg-background px-2 py-1 dark:bg-background"
                       value={ownerKey(r.owner)} onChange={(e) => setOwner(r.role, e.target.value)}>
                       {attachable.length === 0 ? (
                         <>
@@ -1011,7 +1029,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
                           ) : null}
                         </>
                       )}
-                    </select>
+                    </Select>
                   )}
                 </div>
                 {/* story #4565 (Yuna 02:32Z ② · 02:39Z): an existing agent with a live key — what moving it does, then when it was last seen */}
@@ -1074,7 +1092,7 @@ export function DesktopSetup({ code, runtimes: found, blocked = [], setupId = nu
         {showPhoneControl ? (
           // story 4670 AC1 (Yuna §M): a bordered box, the phone icon, a semibold label, a bigger tick — inside the sticky footer, just above «시작»
           <div className="flex gap-3 rounded-md border p-3" data-testid="setup-phone-control">
-            <input type="checkbox" id="setup-phone-control" checked={phoneControl} onChange={(e) => setPhoneControl(e.target.checked)} disabled={view.kind === 'starting'} className="mt-0.5 size-5 shrink-0 self-start accent-primary" />
+            <Checkbox id="setup-phone-control" checked={phoneControl} onCheckedChange={(checked) => setPhoneControl(checked === true)} disabled={view.kind === 'starting'} className="mt-0.5 size-5 self-start" />
             <label htmlFor="setup-phone-control" className="block min-w-0 flex-1 cursor-pointer break-keep">
               <span className="flex items-center gap-1.5 text-sm font-semibold"><Smartphone className="size-4 shrink-0 text-primary" aria-hidden />{t('phoneControl.label')}</span>
               <span className="mt-0.5 block text-xs text-muted-foreground">{t('phoneControl.help')}</span>
@@ -1561,27 +1579,58 @@ export function progressFromFragment(hash: string): string | null {
   return /^[A-Za-z0-9-]{1,64}$/.test(id) ? id : null;
 }
 
+/** story 4832: the `caps=workdir` the page kept in that address (the app said it answers the per-agent folder link) — a reload of the progress must not lose it. */
+export function progressWorkdirFromFragment(hash: string): boolean {
+  return (new URLSearchParams(hash.replace(/^#/, '')).get('caps') ?? '').split(',').map((c) => c.trim()).includes('workdir');
+}
+
 /** After that reload: renew the token first (a new page load may get it now), then the progress — or the same card again. */
-function ResumeProgress({ setupId }: { setupId: string }) {
+function ResumeProgress({ setupId, canWorkdir = false }: { setupId: string; canWorkdir?: boolean }) {
   const t = useTranslations('desktop.setup');
   const [ok, setOk] = useState<boolean | null>(null);
   useEffect(() => { let off = false; void renewToken().then((r) => { if (!off) setOk(r); }); return () => { off = true; }; }, []);
   // named like the page's other loading card, so a screen reader is not silent (Yuna 10:02Z)
   if (ok === null) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
-  return ok ? <SetupProgressView setupId={setupId} recipeName="" /> : <SetupDoneReload setupId={setupId} />;
+  return ok ? <SetupProgressView setupId={setupId} recipeName="" canWorkdir={canWorkdir} /> : <SetupDoneReload setupId={setupId} canWorkdir={canWorkdir} />;
+}
+
+/** story 4832 (AC2 «막다른 곳 0»): how long the app's own window waits for the setup values before it goes on to the start screen. The app can add them to the same page a moment after it opened it (after a sign-in
+ *  return — dev 실측 15:24Z), so the page must not leave at once; it also must not stay: nothing in the window would ever bring them (a reload of the card after its values left the address). */
+export const IN_APP_SETUP_WAIT_MS = 4000;
+
+/** The page inside the desktop app (the bridge is there) without setup values: not a guest to be told «open it in the app» — this IS the app. It waits (no words: the card's loading mark) for
+ *  the values, then goes on to the start screen. A browser never gets here (`desktopApp()` is undefined there) and keeps the «앱 열기» card. */
+function InAppSetupWait() {
+  const t = useTranslations('desktop.setup');
+  const router = useRouter();
+  const { navV3Flags } = useDashboardContext();
+  const flatHref = useFlatHref();
+  const todayHref = flatHref(resolveNavV3Destinations(navV3Flags ?? DEFAULT_NAV_V3_FLAGS).today.path);
+  useEffect(() => {
+    const id = setTimeout(() => {
+      // values that reached the address at the last moment (their `hashchange` still queued behind this timer) are not sent away: the handler takes them in a tick
+      const hash = window.location.hash;
+      if (hasSetupFragment(hash) || progressFromFragment(hash)) return;
+      router.replace(todayHref);
+    }, IN_APP_SETUP_WAIT_MS);
+    return () => clearTimeout(id);
+  }, [router, todayHref]);
+  return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
 }
 
 export function DesktopSetupEntry() {
-  const [entry, setEntry] = useState<{ query: SetupQuery | null; progress?: string | null } | null>(null);
+  const [entry, setEntry] = useState<{ query: SetupQuery | null; progress?: string | null; progressWorkdir?: boolean; inApp?: boolean } | null>(null);
   const searchParams = useSearchParams();
   const strip = () => window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
   useEffect(() => {
     const hash = window.location.hash;
     const query = parseSetupFragment(hash);
     const progress = query ? null : progressFromFragment(hash);
+    const progressWorkdir = progress ? progressWorkdirFromFragment(hash) : false;
     // off the address at once; the state change follows on the next microtask (no cascading render inside the effect)
     if (hash) strip();
-    void Promise.resolve().then(() => setEntry({ query, progress }));
+    const inApp = !query && !progress && desktopApp() !== undefined;
+    void Promise.resolve().then(() => setEntry({ query, progress, progressWorkdir, ...(inApp ? { inApp: true } : {}) }));
     // The values can also arrive AFTER this page is up: after an email login the desktop app reopens the same page with its `#`,
     // and that is a same-document fragment change, not a new load (dev 실측 15:24Z — the page showed «데스크톱 앱에서 열어 주세요»).
     // A newer code replaces an older one (the app restarted the setup).
@@ -1593,7 +1642,7 @@ export function DesktopSetupEntry() {
       const progress = q ? null : progressFromFragment(hash);
       if (!q && !progress) return;
       strip();
-      setEntry({ query: q, progress });
+      setEntry({ query: q, progress, progressWorkdir: progress ? progressWorkdirFromFragment(hash) : false });
     };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
@@ -1604,8 +1653,9 @@ export function DesktopSetupEntry() {
     if (hasSetupFragment(window.location.hash)) strip();
   }, [searchParams]);
   if (!entry) return null;
-  if (!entry.query && entry.progress) return <ResumeProgress setupId={entry.progress} />;
-  return entry.query ? <SetupOrProgress key={entry.query.code} query={entry.query} /> : <OpenInDesktopApp />;
+  if (!entry.query && entry.progress) return <ResumeProgress setupId={entry.progress} canWorkdir={entry.progressWorkdir === true} />;
+  if (entry.query) return <SetupOrProgress key={entry.query.code} query={entry.query} />;
+  return entry.inApp ? <InAppSetupWait /> : <OpenInDesktopApp />;
 }
 
 /** story 4701: how long «시작» waits for the existing-agents list before the page says it failed (Yuna 4701-copy-1015 §3: the limit is the implementer's call) */
@@ -1627,6 +1677,8 @@ function SetupOrProgress({ query }: { query: SetupQuery }) {
   const id = query.setupId && SETUP_ID_SHAPE.test(query.setupId) ? query.setupId : null;
   const [started, setStarted] = useState<boolean | null>(id ? null : false);
   const [teamPath, setTeamPath] = useState(false);
+  // story 4832: the card's own «이미 있는 에이전트 옮기기» link — the recipe page with the move chosen (the sidebar's move door opens it the same way: `kind=move`)
+  const [moveFirst, setMoveFirst] = useState(false);
   useEffect(() => {
     if (!id) return;
     let off = false;
@@ -1636,19 +1688,19 @@ function SetupOrProgress({ query }: { query: SetupQuery }) {
       .then((ok) => {
         if (off) return;
         // replaceState, not `location.hash =`: no hashchange for the page's own handler (same as 4429 ②)
-        if (ok) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(id));
+        if (ok) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(id, query.canWorkdir === true));
         setStarted(ok);
       });
     return () => { off = true; };
-  }, [id]);
+  }, [id, query.canWorkdir]);
   if (started === null) return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
-  if (started && id) return <SetupProgressView setupId={id} recipeName="" />;
+  if (started && id) return <SetupProgressView setupId={id} recipeName="" canWorkdir={query.canWorkdir === true} />;
   // story 4711: an app that can take the first setup in three steps gets that card; the recipe setup is one link away («팀 꾸리기»).
   // A recruiter's agent (`agent=`) keeps the recipe page for now — its own branch of the card comes with the recruiter's PR.
   // story 4711 (`agent=` branch): a recruiter's agent, an app that can move → the card with ① fixed to that agent (a move, never a new agent)
   if (query.agent && query.canMove === true && !teamPath) return <DesktopSetupAgent query={query} onTeam={() => setTeamPath(true)} />;
-  if (showsQuickCard(query, teamPath) && !query.agent) return <DesktopSetupQuick query={query} onTeam={() => setTeamPath(true)} />;
-  return <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} canMove={query.canMove === true} preselect={query.agent ?? null} />;
+  if (showsQuickCard(query, teamPath) && !query.agent) return <DesktopSetupQuick query={query} onTeam={() => setTeamPath(true)} onMove={query.canMove === true ? () => { setMoveFirst(true); setTeamPath(true); } : undefined} />;
+  return <DesktopSetup code={query.code} runtimes={query.runtimes} blocked={query.blocked} setupId={query.setupId} old={query.old ?? []} canMove={query.canMove === true} canWorkdir={query.canWorkdir === true} preselect={query.agent ?? null} initialKind={query.kind === 'move' || moveFirst ? 'move' : 'recipe'} />;
 }
 
 /** 코드 없이 브라우저로 직접 온 경우(AC5). */
@@ -1689,10 +1741,10 @@ function AgentToolsLine({ runtime, tools, onChange }: { runtime: DesktopRuntime;
           <Button type="button" variant="ghost" size="sm" className="h-auto p-0 text-muted-foreground" aria-label={t('tools.remove', { tool: name })} onClick={() => onChange(tools.filter((x) => x !== name))}>×</Button>
         </span>
       ))}
-      <input
+      <Input
         aria-label={t('tools.label')}
         list="agent-tool-suggestions"
-        className="h-7 w-40 rounded-md border bg-background px-2 text-base lg:text-sm"
+        className="h-7 w-40 bg-background px-2 py-0 dark:bg-background"
         placeholder={t('tools.placeholder')}
         value={draft}
         onChange={(e) => { setDraft(e.target.value); setError(null); }}

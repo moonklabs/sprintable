@@ -129,7 +129,7 @@ describe('DocSlugPage — 마크다운 복사 실패 패널(story #3986 CHANGES)
     await act(async () => { await vi.advanceTimersByTimeAsync(3500); });
 
     // 3초 코스메틱 타이머는 지났어도, 원문 칸은 그대로 남아야 한다.
-    const raw = container.querySelector('[data-testid="docs-copy-markdown-failed-raw"]') as HTMLTextAreaElement | null;
+    const raw = container.querySelector('[data-testid="docs-copy-markdown-failed-raw"][data-slot="textarea"]') as HTMLTextAreaElement | null;
     expect(raw).not.toBeNull();
     expect(raw!.value).toBe(RAW_MARKDOWN);
   });

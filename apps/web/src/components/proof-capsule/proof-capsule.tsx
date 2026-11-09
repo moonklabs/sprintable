@@ -173,7 +173,7 @@ function StateHeader({ state, label }: { state: ProofState; label: string }) {
     blue: 'bg-proof-blue', amber: 'bg-proof-amber', green: 'bg-proof-green', red: 'bg-proof-red',
   };
   return (
-    <span className={cn('inline-flex items-center gap-1.5 text-[11px] font-semibold', tone[state])}>
+    <span className={cn('inline-flex items-center gap-1.5 text-editorial-meta font-semibold', tone[state])}>
       <span className={cn('size-1.5 rounded-full', dotTone[state])} aria-hidden="true" />
       {label}
     </span>
@@ -190,10 +190,10 @@ function EvidenceRow({ evidence, sweep }: { evidence: ProofCapsuleEvidence; swee
           aria-hidden="true"
         />
       ) : null}
-      <div className="mb-2 text-[8.5px] font-bold uppercase tracking-[0.12em] text-proof-ink-3">
+      <div className="mb-2 text-micro font-bold uppercase tracking-[0.12em] text-proof-ink-3">
         {t('evidence.label')}
       </div>
-      <div className="flex flex-wrap items-center gap-3.5 text-[13px] leading-[1.45] text-proof-ink-2">
+      <div className="flex flex-wrap items-center gap-3.5 text-editorial-ui leading-[1.45] text-proof-ink-2">
         {evidence.acMet != null && evidence.acTotal != null ? (
           <span className="inline-flex items-center gap-1">
             <Check className="motion-safe:animate-proof-check-in size-3.5 text-proof-green" strokeWidth={3} aria-hidden="true" />
@@ -210,11 +210,11 @@ function EvidenceRow({ evidence, sweep }: { evidence: ProofCapsuleEvidence; swee
           <span className="text-proof-red">{t('evidence.autoFailed')}</span>
         ) : null}
         {evidence.diff ? (
-          <span className="font-mono text-[11px] text-proof-ink-3">diff +{evidence.diff.add} / −{evidence.diff.del}</span>
+          <span className="font-mono text-editorial-meta text-proof-ink-3">diff +{evidence.diff.add} / −{evidence.diff.del}</span>
         ) : null}
       </div>
       {evidence.proofCount != null ? (
-        <div className="mt-2 inline-flex items-center gap-1 text-[11px] text-proof-ink-3">
+        <div className="mt-2 inline-flex items-center gap-1 text-editorial-meta text-proof-ink-3">
           <ChevronDown className="size-3" aria-hidden="true" />
           {t('evidence.count', { count: evidence.proofCount })}
         </div>
@@ -227,18 +227,18 @@ function GateRow({ gate, human }: { gate: ProofCapsuleGate; human: ProofCapsuleH
   const t = useTranslations('proofCapsule');
   return (
     <div className="mt-3.5 border-t border-proof-line-soft pt-3">
-      <div className="mb-2 text-[8.5px] font-bold uppercase tracking-[0.12em] text-proof-ink-3">
+      <div className="mb-2 text-micro font-bold uppercase tracking-[0.12em] text-proof-ink-3">
         {t('gate.label')}
       </div>
-      <div className="flex flex-wrap items-center gap-3.5 text-[13px] text-proof-ink-2">
+      <div className="flex flex-wrap items-center gap-3.5 text-editorial-ui text-proof-ink-2">
         <span>{t.rich('gate.owner', { name: human.label ?? human.name ?? '', b: (chunks) => <b className="text-proof-ink">{chunks}</b> })}</span>
         {gate.risk ? (
-          <span className="font-mono text-[10.5px]">{t('gate.risk', { risk: t(`risk.${gate.risk}`) })}</span>
+          <span className="font-mono text-micro">{t('gate.risk', { risk: t(`risk.${gate.risk}`) })}</span>
         ) : null}
         {/* story #3054(2984-S6) — 헤어라인+elev CTA 채택, bg-proof-blue-soft 채움 폐지. */}
         <a
           href={gate.href}
-          className="ml-auto inline-flex items-center gap-1 rounded-[6px] border border-proof-line bg-proof-panel px-3 py-1 text-[11.5px] font-semibold text-foreground shadow-[var(--elev-card)] transition-colors duration-[140ms] hover:bg-muted"
+          className="ml-auto inline-flex items-center gap-1 rounded-md border border-proof-line bg-proof-panel px-3 py-1 text-editorial-meta font-semibold text-foreground shadow-[var(--elev-card)] transition-colors duration-[140ms] hover:bg-muted"
         >
           {gate.action}
           <ArrowRight className="size-3" aria-hidden="true" />
@@ -274,7 +274,7 @@ function FullVariant({
       <div className="min-w-0 flex-1 px-4.5 py-4">
         <StateHeader state={proofState} label={stateLabel} />
         {claimLabel === null ? null : (
-          <div className="mb-1 mt-3 text-[8.5px] font-bold uppercase tracking-[0.12em] text-proof-ink-3" data-testid="proof-capsule-claim-label">
+          <div className="mb-1 mt-3 text-micro font-bold uppercase tracking-[0.12em] text-proof-ink-3" data-testid="proof-capsule-claim-label">
             {claimLabel ?? t('claim.label')}
           </div>
         )}
@@ -283,8 +283,8 @@ function FullVariant({
             일 때만 font-serif(Source Serif 4, layout.tsx 기배선) 켠다. 다른 상태(blue/amber/
             red)는 무변경(sans 그대로). */}
         {/* 눈썹이 없으면(claimLabel=null) 눈썹이 맡던 위 간격(mt-3)을 claim이 대신 — 상태 줄과 붙지 않게. */}
-        <div className={cn('text-[19px] font-bold leading-[1.25] tracking-[-0.012em] text-proof-ink', proofState === 'green' && 'font-serif', claimLabel === null && 'mt-3')}>{claim}</div>
-        <div className="mt-2.5 flex flex-wrap items-center gap-3 text-[11px] text-proof-ink-3">
+        <div className={cn('text-lg font-bold leading-[1.25] tracking-[-0.012em] text-proof-ink', proofState === 'green' && 'font-serif', claimLabel === null && 'mt-3')}>{claim}</div>
+        <div className="mt-2.5 flex flex-wrap items-center gap-3 text-editorial-meta text-proof-ink-3">
           {human ? (
             <span className="inline-flex items-center gap-1.5">
               <Avatar name={human.name} label={human.label} actorType="human" size={19} />
@@ -299,7 +299,7 @@ function FullVariant({
           ) : null}
           {now ? <span className="text-proof-ink-2">{t.rich('claim.now', { now, b: (chunks) => <b>{chunks}</b> })}</span> : null}
           {proofState === 'blue' ? (
-            <span className="inline-flex items-center gap-1.5 text-[10px] text-proof-ink-3">
+            <span className="inline-flex items-center gap-1.5 text-micro text-proof-ink-3">
               <span className="motion-safe:animate-proof-pulse size-1.5 rounded-full bg-proof-citron" aria-hidden="true" />
               {t('claim.running')}
             </span>
@@ -345,15 +345,15 @@ function CardVariant({
           <button
             type="button"
             onClick={onClaimClick}
-            className="mt-1.5 line-clamp-2 w-full text-left text-[12.5px] font-semibold leading-snug text-proof-ink hover:underline"
+            className="mt-1.5 line-clamp-2 w-full text-left text-xs font-semibold leading-snug text-proof-ink hover:underline"
           >
             {claim}
           </button>
         ) : (
-          <div className="mt-1.5 line-clamp-2 text-[12.5px] font-semibold leading-snug text-proof-ink">{claim}</div>
+          <div className="mt-1.5 line-clamp-2 text-xs font-semibold leading-snug text-proof-ink">{claim}</div>
         )}
         {evidence ? (
-          <div className="mt-1.5 flex items-center gap-2.5 text-[10.5px] text-proof-ink-3">
+          <div className="mt-1.5 flex items-center gap-2.5 text-micro text-proof-ink-3">
             {evidence.acMet != null && evidence.acTotal != null ? (
               <span className="inline-flex items-center gap-1">
                 <Check className="size-3 text-proof-green" strokeWidth={3} aria-hidden="true" />
@@ -394,22 +394,22 @@ function InlineRow({
             // 유나 비차단 refinement(2026-08-22, PR#3356) — GATE/STEER/BLOCK/Q 글자수 편차
             // (1~5자)로 auto-width면 claim 좌측 정렬이 들쭉날쭉했다. min-w로 폭 통일(최장
             // 라벨 STEER 기준)+text-center로 짧은 라벨(Q)도 같은 자리에 정렬.
-            <span className="min-w-[30px] rounded-[4px] border border-proof-line bg-proof-sunk px-1.5 py-0.5 text-center text-[8px] font-bold uppercase tracking-[0.04em] text-proof-ink-2">
+            <span className="min-w-[30px] rounded-md border border-proof-line bg-proof-sunk px-1.5 py-0.5 text-center text-micro font-bold uppercase tracking-[0.04em] text-proof-ink-2">
               {typeBadge}
             </span>
           ) : null}
           <StateHeader state={proofState} label={stateLabel} />
         </span>
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-proof-ink" title={claim}>{claim}</span>
+        <span className="min-w-0 flex-1 truncate text-editorial-ui font-medium text-proof-ink" title={claim}>{claim}</span>
         <span className="inline-flex shrink-0 items-center gap-2">
-          {duration ? <span className="shrink-0 text-[10.5px] font-medium text-proof-ink-3">{duration}</span> : null}
+          {duration ? <span className="shrink-0 text-micro font-medium text-proof-ink-3">{duration}</span> : null}
           {human ? <Avatar name={human.name} label={human.label} actorType="human" size={22} /> : null}
           {agent ? <Avatar name={agent.name} label={agent.label} actorType="agent" size={22} /> : null}
           {gate ? (
             <a
               href={gate.href}
               className={cn(
-                'rounded-[8px] border px-2.5 py-1 text-[10.5px] font-semibold transition-colors duration-[140ms]',
+                'rounded-xl border px-2.5 py-1 text-micro font-semibold transition-colors duration-[140ms]',
                 GATE_BUTTON_TONE[gate.tone ?? 'primary'],
               )}
             >
@@ -437,11 +437,11 @@ function AuditRow({ proofState, claim, now, human, agent, className }: Pick<Proo
   const actor = agent ?? human;
   const actorLabel = actor ? (actor.label ?? actor.name) : null;
   return (
-    <div className={cn('flex items-center gap-2 rounded-[6px] border border-proof-line bg-proof-panel px-3 py-2 text-[11px]', className)}>
+    <div className={cn('flex items-center gap-2 rounded-xl border border-proof-line bg-proof-panel px-3 py-2 text-editorial-meta', className)}>
       <span className={cn('size-1.5 shrink-0 rounded-full', dotTone[proofState])} aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate font-medium text-proof-ink" title={claim}>{claim}</span>
       {actor ? <Avatar name={actor.name} label={actor.label} actorType={agent ? 'agent' : 'human'} size={16} /> : null}
-      <span className="shrink-0 font-mono text-[9.5px] text-proof-ink-3">{[now, actorLabel].filter(Boolean).join(' ')}</span>
+      <span className="shrink-0 font-mono text-micro text-proof-ink-3">{[now, actorLabel].filter(Boolean).join(' ')}</span>
     </div>
   );
 }

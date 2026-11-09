@@ -115,7 +115,7 @@ function NowStripSeverityGroup({ severity, items }: { severity: NowStripSeverity
 
   return (
     <div className="space-y-1">
-      <p className={cn('px-1 pt-1 text-[10.5px] font-semibold tracking-wide uppercase', SEVERITY_GROUP_TEXT[severity])}>
+      <p className={cn('px-1 pt-1 text-micro font-semibold tracking-wide uppercase', SEVERITY_GROUP_TEXT[severity])}>
         {t(SEVERITY_GROUP_LABEL_KEY[severity])}
       </p>
       {visible.map((item) => <NowStripCard key={item.key} item={item} />)}
@@ -124,7 +124,7 @@ function NowStripSeverityGroup({ severity, items }: { severity: NowStripSeverity
           type="button"
           variant="link"
           onClick={() => setGroupExpanded((v) => !v)} aria-expanded={groupExpanded}
-          className="h-auto p-0 px-1 text-[11px] font-medium"
+          className="h-auto p-0 px-1 text-editorial-meta font-medium"
         >
           {groupExpanded ? t('nowStripCollapse') : t('nowStripGroupMore', { count: hiddenCount })}
         </Button>
@@ -205,21 +205,21 @@ export function NowStrip({ resolveName, expanded: expandedProp, onExpandedChange
         className="h-auto w-full items-center justify-start gap-2.5 rounded-b-none px-3 py-2.5 text-left font-normal hover:bg-muted/40"
         aria-expanded={expanded}
       >
-        <span className="text-[12.5px] font-semibold text-foreground">{t('nowStripLabel')}</span>
-        <span className="font-mono text-[12.5px] font-semibold text-foreground">{t('nowStripCount', { count: summary.total })}</span>
+        <span className="text-xs font-semibold text-foreground">{t('nowStripLabel')}</span>
+        <span className="font-mono text-xs font-semibold text-foreground">{t('nowStripCount', { count: summary.total })}</span>
         <span className="ml-0.5 flex items-center gap-2">
           {summary.danger > 0 && (
-            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1 text-editorial-meta text-muted-foreground">
               <span className={cn('size-2 rounded-full', SEVERITY_SOLID_BG.danger)} aria-hidden="true" />{summary.danger}
             </span>
           )}
           {summary.warn > 0 && (
-            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1 text-editorial-meta text-muted-foreground">
               <span className={cn('size-2 rounded-full', SEVERITY_SOLID_BG.warn)} aria-hidden="true" />{summary.warn}
             </span>
           )}
           {summary.info > 0 && (
-            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1 text-editorial-meta text-muted-foreground">
               <span className={cn('size-2 rounded-full', SEVERITY_SOLID_BG.info)} aria-hidden="true" />{summary.info}
             </span>
           )}

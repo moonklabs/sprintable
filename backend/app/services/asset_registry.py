@@ -59,6 +59,15 @@ def _prefix_segments_match(object_path: str, segments: list[str]) -> bool:
     return len(parts) > n and parts[:n] == segments and parts[n] != ""
 
 
+def _prefix_segments_match_any(object_path: str, segments: list[str | None]) -> bool:
+    """`_prefix_segments_match` where a `None` segment matches any single non-empty segment (the project of a room that has since lost it)."""
+    parts = object_path.split("/")
+    n = len(segments)
+    if len(parts) <= n or parts[n] == "":
+        return False
+    return all((want is None and got != "") or want == got for want, got in zip(segments, parts[:n]))
+
+
 def path_in_source_scope(
     object_path: str,
     source_type: str,
@@ -81,6 +90,21 @@ def path_in_source_scope(
     kind = {"conversation_message": "chat", "story": "story", "doc": "doc"}.get(source_type)
     if kind is None:
         return True  # manual 등 경로 제약 없는 source(신뢰 등록)
+    if any(segment in ("", ".", "..") for segment in object_path.split("/")) or any(ch in object_path for ch in ("\\", "%")) or any(ord(ch) < 32 for ch in object_path):
+        # story #4846: a path that walks (`..`, `.`) or has an empty segment is not a path INTO a namespace — a store that normalizes paths would resolve
+        # `org/A/chat/R1/../../../B/chat/R2/x` to another room's (or organization's) object after the prefix check passed. The same for a backslash, a NUL or any
+        # control character, and for a percent sign (an encoded `%2e%2e` — no store here decodes before it writes, but a path is checked as the characters it is).
+        # Every file the servers and the web build ends in `<uuid>-<name>` with the name reduced to `[\w.-]` under uuid-only prefixes, so nothing legitimate has any of these.
+        return False
+    if kind == "chat" and project_id is None:
+        # story #4846 (AC6): a chat room WITHOUT a project (it never had one, or its project was deleted). Its files live under the organization and the ROOM:
+        # `org/<org>/chat/<room>/<file>` — both the organization and the room are exact; and the files it already holds from when it had a project
+        # (`org/<org>/project/<any>/chat/<room>/…`, or the legacy `chat/<any>/<room>/…`) stay readable, because the room — not the old project — is what binds them.
+        return org_id is not None and (
+            _prefix_segments_match(object_path, ["org", str(org_id), "chat", sid])
+            or _prefix_segments_match_any(object_path, ["org", str(org_id), "project", None, "chat", sid])
+            or _prefix_segments_match_any(object_path, ["chat", None, sid])
+        )
     # legacy: <kind>/<project>/<source>/<file>
     if _prefix_segments_match(object_path, [kind, pid, sid]):
         return True
@@ -118,7 +142,6 @@ async def sync_attachment_assets(
     """
     if source_type not in ASSET_LINK_SOURCE_TYPES:
         raise ValueError(f"invalid asset link source_type: {source_type}")
-
     scope_id = path_scope_id if path_scope_id is not None else source_id
     asset_ids: list[uuid.UUID] = []
     url_map: dict[str, uuid.UUID] = {}

@@ -458,3 +458,23 @@ describe('[SID:4565] existing agents in the rows', () => {
     expect(startFailedLine('workdir_needed', null)).toBe('workdirNeeded');
   });
 });
+
+describe('[SID:4832] caps=workdir — the app that answers the per-agent folder link', () => {
+  const base = { code: `${'A'.repeat(20)}_-${'b'.repeat(21)}`, runtimes: 'claude', setup: 's-1' };
+  const parse = (caps: string) => parseSetupQuery(new URLSearchParams({ ...base, caps }));
+  it('only an app that says `workdir` is read as one (an older app\'s caps never are; no caps → nothing)', () => {
+    expect(parse('move,solo,workdir')).toMatchObject({ canMove: true, canSolo: true, canWorkdir: true });
+    expect(parse('workdir')).toMatchObject({ canWorkdir: true });
+    expect('canWorkdir' in parse('move,solo')!).toBe(false);
+    expect('canWorkdir' in parse('')!).toBe(false);
+    expect('canWorkdir' in parse('workdirs,Workdir, work dir')!).toBe(false);
+    expect('canWorkdir' in parseSetupQuery(new URLSearchParams(base))!).toBe(false);
+  });
+  it('a reload puts the mark back (the fragment carries it; without it the fragment says nothing of it)', () => {
+    const q = parse('move,solo,workdir')!;
+    expect(parseSetupFragment(setupFragment(q))).toEqual(q);
+    expect(new URLSearchParams(setupFragment(q).replace(/^#/, '')).get('caps')).toBe('move,solo,workdir');
+    const older = parse('move,solo')!;
+    expect(new URLSearchParams(setupFragment(older).replace(/^#/, '')).get('caps')).toBe('move,solo');
+  });
+});

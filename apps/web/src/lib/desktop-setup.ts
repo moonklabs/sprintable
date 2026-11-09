@@ -28,6 +28,12 @@ export interface SetupQuery { code: string; runtimes: DesktopRuntime[]; setupId:
   /** story 4711: the app said `caps=solo` — it can take the first setup in three steps (one new agent for a picked folder).
    *  Absent = an app from before: the page is today's recipe setup. Only present when true. */
   canSolo?: true;
+  /** story 4832: the app said `caps=workdir` — it answers the move progress page's per-agent [작업 폴더 고르기] link (`intent=workdir`). Absent = an app from before: the
+   *  page keeps «창 아래 알림에서 고르기» and shows NO link (an older app would read the link as «start a setup»). Only present when true. */
+  canWorkdir?: true;
+  /** story 4832: `kind=move` — the app was asked to open the page with «이미 있는 에이전트 옮기기» chosen (the sidebar's own door). Only with `caps=move`
+   *  (an app that cannot take a move would show a choice it cannot keep); absent otherwise. */
+  kind?: 'move';
   /** story 4711: the runtime the person had picked before the Mac folder window (`pick=` — the app puts it back, the address is new). */
   pick?: DesktopRuntime;
   /** story 4711: the versions the app read (`rv=claude:2.1.289,codex:0.159.3`) — shown after the program's name; only well-shaped ones. */
@@ -81,11 +87,12 @@ export function parseSetupQuery(params: { get(name: string): string | null }): S
   const caps = new Set((params.get('caps') ?? '').split(',').map((s) => s.trim()));
   const agent = params.get('agent') ?? '';
   const solo = caps.has('solo') ? { canSolo: true as const } : {};
+  const workdir = caps.has('workdir') ? { canWorkdir: true as const } : {};
   const pickAsked = params.get('pick') ?? '';
   const pick = DESKTOP_RUNTIMES.find((r) => r === pickAsked && runtimes.includes(r));
   const versions = parseRuntimeVersions(params.get('rv'), runtimes);
   const folder = parseSoloFolder(params);
-  return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)), ...withOld(parseOldRuntimes(params.get('old'), runtimes)), ...(caps.has('move') ? { canMove: true as const } : {}), ...solo, ...(pick ? { pick } : {}), ...(Object.keys(versions).length ? { versions } : {}), ...(folder ? { folder } : {}), ...(AGENT_ID_RE.test(agent) ? { agent } : {}) };
+  return { code, runtimes, setupId: /^[A-Za-z0-9-]{1,64}$/.test(setup) ? setup : null, blocked: runtimes.filter((r) => blockedAsked.has(r)), ...withOld(parseOldRuntimes(params.get('old'), runtimes)), ...(caps.has('move') ? { canMove: true as const } : {}), ...solo, ...workdir, ...(pick ? { pick } : {}), ...(Object.keys(versions).length ? { versions } : {}), ...(folder ? { folder } : {}), ...(AGENT_ID_RE.test(agent) ? { agent } : {}), ...(params.get('kind') === 'move' && caps.has('move') ? { kind: 'move' as const } : {}) };
 }
 
 
@@ -387,10 +394,13 @@ export function confirmBody(code: string, rows: readonly SetupRoleRow[], project
 /** story #4576 — «이미 있는 에이전트 옮기기»: no recipe (the server takes that as a move — device and keys only: no recipe-stage
  * binding · no story · no publish). Every row is an agent the organization already has; a move has no recipe role, so the row's
  * `role` is a fixed word the server does not read. No folder: each agent's working folder is chosen in the app after the move. */
-export interface MoveConfirmBody { code: string; project_id: string; roles: { role: string; agent_id: string }[] }
+export interface MoveConfirmBody { code: string; project_id: string; roles: { role: string; agent_id: string; add_to_team?: true }[] }
 export const MOVE_ROW_ROLE = 'move';
-export function moveConfirmBody(code: string, projectId: string, agentIds: readonly string[]): MoveConfirmBody {
-  return { code, project_id: projectId, roles: [...new Set(agentIds)].map((agent_id) => ({ role: MOVE_ROW_ROLE, agent_id })) };
+/** story 4832: `addToTeam` = the ticked agents that are not on the project's team yet — their rows carry `add_to_team: true` (the server puts them on the team in the
+ *  same confirmation; a row without it is refused as before). Only ids that are also in `agentIds` count. */
+export function moveConfirmBody(code: string, projectId: string, agentIds: readonly string[], addToTeam: readonly string[] = []): MoveConfirmBody {
+  const team = new Set(addToTeam);
+  return { code, project_id: projectId, roles: [...new Set(agentIds)].map((agent_id) => ({ role: MOVE_ROW_ROLE, agent_id, ...(team.has(agent_id) ? { add_to_team: true as const } : {}) })) };
 }
 
 /** story #4576 — whether an attachable agent can be moved from this computer now: in this project and its runtime found here. */
@@ -398,9 +408,15 @@ export type MovableState = 'ok' | 'not-in-project' | 'runtime-missing';
 export function movableState(a: AttachableAgent, runtimes: readonly DesktopRuntime[]): MovableState {
   return !a.in_project ? 'not-in-project' : !runtimes.includes(a.runtime) ? 'runtime-missing' : 'ok';
 }
-/** the move list's order (Yuna): the movable ones first, the rest after — each group in the server's order. */
+/** story 4832 — the MOVE list's own reading of a row (the recruiter's single-agent branch keeps `movableState`): an agent off the project's team whose program is found
+ *  here can be ticked — moving it puts it on the team (`add_to_team`, the admin the list is read for may do that); only a program this computer lacks blocks. */
+export type MoveRowState = 'ok' | 'needs-team' | 'runtime-missing';
+export function moveRowState(a: AttachableAgent, runtimes: readonly DesktopRuntime[]): MoveRowState {
+  return !runtimes.includes(a.runtime) ? 'runtime-missing' : a.in_project ? 'ok' : 'needs-team';
+}
+/** the move list's order (Yuna): the ready ones first, then the ones the move would also put on the team, the blocked last — each group in the server's order. */
 export function moveListOrder(attachable: readonly AttachableAgent[], runtimes: readonly DesktopRuntime[]): AttachableAgent[] {
-  return [...attachable.filter((a) => movableState(a, runtimes) === 'ok'), ...attachable.filter((a) => movableState(a, runtimes) !== 'ok')];
+  return (['ok', 'needs-team', 'runtime-missing'] as const).flatMap((state) => attachable.filter((a) => moveRowState(a, runtimes) === state));
 }
 
 /** (나) confirm-new-org's body (design doc 9a4cb445): the usual fields without a project, plus the new organization's and first
@@ -423,9 +439,10 @@ export function setupFragment(q: SetupQuery): string {
   if (q.setupId) p.set('setup', q.setupId);
   if (q.blocked.length) p.set('blocked', q.blocked.join(','));
   if (q.old?.length) p.set('old', q.old.map((o) => `${o.runtime}:${o.version}:${o.min}`).join(','));
-  const caps = [...(q.canMove ? ['move'] : []), ...(q.canSolo ? ['solo'] : [])];
+  const caps = [...(q.canMove ? ['move'] : []), ...(q.canSolo ? ['solo'] : []), ...(q.canWorkdir ? ['workdir'] : [])];
   if (caps.length) p.set('caps', caps.join(','));
   if (q.agent) p.set('agent', q.agent);
+  if (q.kind) p.set('kind', q.kind);
   if (q.pick) p.set('pick', q.pick);
   const rv = Object.entries(q.versions ?? {});
   if (rv.length) p.set('rv', rv.map(([r, v]) => `${r}:${v}`).join(','));
@@ -716,6 +733,8 @@ export interface MoveProgress {
   /** ① done, ② not: the agents not connected yet (not failed · not stopped · not past the threshold) — ②'s own line (Yuna 05:20Z) */
   stillPreparing: string[];
   folderWait: string[];
+  /** story 4832: the agents in `folderWait`, by member id and in the same order — the per-agent [작업 폴더 고르기] link names its agent by id (never by name) */
+  folderWaitIds: string[];
   startFailed: { memberId: string; name: string; runtime: DesktopRuntime | null; line: StartFailedLine; limit: number | null }[];
   stopped: { names: string[]; claude: boolean } | null;
   notConnected: { names: string[]; claude: boolean } | null;
@@ -761,6 +780,7 @@ export function moveProgress(s: SetupStatus, now: number, handedOverSeenAt: numb
     pairs: ready === 'done' ? ids.filter((id) => !failedIds.has(id) && !stoppedIds.has(id)).map((id) => ({ name: nameOf(id), runtime: runtimeOf(id) })).filter((p): p is { name: string; runtime: DesktopRuntime } => !!p.runtime) : [],
     stillPreparing: ready === 'done' && connectedStep !== 'done' ? pending.filter((id) => !late.includes(id)).map(nameOf) : [],
     folderWait: ids.filter((id) => waitIds.has(id)).map(nameOf),
+    folderWaitIds: ids.filter((id) => waitIds.has(id)),
     startFailed,
     stopped: stoppedIds.size ? { names: ids.filter((id) => stoppedIds.has(id)).map(nameOf), claude: ids.some((id) => stoppedIds.has(id) && runtimeOf(id) === 'claude') } : null,
     notConnected: late.length ? { names: late.map(nameOf), claude: late.some((id) => runtimeOf(id) === 'claude') } : null,

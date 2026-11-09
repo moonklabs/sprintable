@@ -8,6 +8,7 @@ import { ChevronLeft, CheckCircle, XCircle } from 'lucide-react';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { GateEvidence, GateActivityHistory, GateLinkedEvidenceSection, gateNeedsAction, gateDecision } from '@/components/cage/gate-evidence';
 import { NewsletterSendStatus } from '@/components/cage/newsletter-send-status';
 import { resolveDisplayTimezone } from '@/lib/schedule-format';
@@ -495,24 +496,27 @@ export default function GateDetailPage() {
                     {decisionFacts.options.length > 0 ? (
                       <div className="space-y-1 pt-1">
                         <p className="text-xs font-medium text-foreground">{t('decisionOptionsLabel')}</p>
-                        {decisionFacts.options.map((option) =>
-                          canAct && !isSigFlowGate ? (
-                            <label
-                              key={option}
-                              className="flex cursor-pointer items-start gap-1.5 rounded-md p-1 text-xs text-foreground hover:bg-muted/40"
-                            >
-                              <input
-                                type="radio"
-                                name="decision-option"
-                                className="mt-0.5"
-                                checked={selectedOption === option}
-                                onChange={() => setSelectedOption(option)}
-                              />
-                              <span>{option}</span>
-                            </label>
-                          ) : (
+                        {canAct && !isSigFlowGate ? (
+                          <RadioGroup
+                            name="decision-option"
+                            value={selectedOption}
+                            onValueChange={(value) => setSelectedOption(String(value))}
+                            className="gap-1"
+                          >
+                            {decisionFacts.options.map((option) => (
+                              <label
+                                key={option}
+                                className="flex cursor-pointer items-start gap-1.5 rounded-md p-1 text-xs text-foreground hover:bg-muted/40"
+                              >
+                                <RadioGroupItem value={option} className="mt-0.5" />
+                                <span>{option}</span>
+                              </label>
+                            ))}
+                          </RadioGroup>
+                        ) : (
+                          decisionFacts.options.map((option) => (
                             <p key={option} className="text-xs text-muted-foreground">{option}</p>
-                          ),
+                          ))
                         )}
                       </div>
                     ) : null}
@@ -561,7 +565,7 @@ export default function GateDetailPage() {
             //   Auto로 단정하던 게 자기모순의 절반이었다).
             const resolvedStatusExtra = (
               <>
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-editorial-meta text-muted-foreground">
                   {gate.status !== 'pending'
                     ? (gate.resolver_id && memberNames[gate.resolver_id]
                         // story #3806 PR 9(페드루 PO 리뷰 2026-09-11 실측) — 이름을 아직
@@ -599,7 +603,7 @@ export default function GateDetailPage() {
             // 폴백한다(resolvedStatusExtra의 gateDetailResolvedByStatus/gateDetailResolvedStatus
             // 폴백과 동형 패턴).
             const unauthorizedExtra = (
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-editorial-meta text-muted-foreground">
                 {gate.designated_approver_id && gate.designated_approver_id !== currentTeamMemberId
                   ? (memberNames[gate.designated_approver_id]
                       ? t('gateReadonlyDesignatedElsewhereNamed', { name: memberNames[gate.designated_approver_id] })
@@ -613,7 +617,7 @@ export default function GateDetailPage() {
             // 누른다"가 아니라 "이 게이트는 다른 게이트가 대신 결정한다"는 별개 사실이라
             // 문구도 별개(unauthorizedExtra와 절대 안 섞는다).
             const deferredExtra = gate.deferred_to_gate_id ? (
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-editorial-meta text-muted-foreground">
                 {t('gateDeferredToRecipeGate')}
                 {' · '}
                 <Link href={deferredGateHref(gate.deferred_to_gate_id)} className="font-medium text-primary hover:underline">

@@ -11,6 +11,7 @@ from app.dependencies.database import get_db
 from app.models.agent_routing_rule import AgentRoutingRule
 from app.models.project import OrgMember
 from app.models.team import TeamMember
+from app.services.event_room_gate import withhold_room_preview
 from app.models.workflow_execution_log import WorkflowExecutionLog
 
 router = APIRouter(prefix="/api/v2/workflow-executions", tags=["workflow-executions", "Work"])
@@ -236,7 +237,7 @@ async def get_execution(
     id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     org_id: uuid.UUID = Depends(get_verified_org_id),
-    _: AuthContext = Depends(require_admin),
+    auth: AuthContext = Depends(require_admin),
 ) -> ExecutionLogDetail:
     result = await db.execute(
         select(WorkflowExecutionLog).where(
@@ -278,6 +279,7 @@ async def get_execution(
         duration_ms=log.duration_ms,
         created_at=log.created_at,
         completed_at=log.completed_at,
-        event_context=log.event_context or {},
+        # story #4870 AC5: the message preview in the log is a copy of a room's words — shown only to who may read that room now (an owner/admin does not read a room with a person in it)
+        event_context=await withhold_room_preview(db, org_id, auth, log.event_context or {}),
         action=log.action,
     )

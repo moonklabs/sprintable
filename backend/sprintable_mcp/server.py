@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic.fields import PydanticUndefined
 
 from .api_client import (
+    InvalidApiKey,
     _api_key_override,
     client,
     reset_project_override,
@@ -35,7 +36,7 @@ from .api_client import (
 from .config import settings
 from .datetime_params import offset_required_note
 from .removed_args import removed_arg_hints
-from .response import ok
+from .response import err, ok
 from .schemas import SprintableInput
 from .tools.attachments import MAX_TOTAL_ATTACHMENT_BYTES
 
@@ -258,6 +259,8 @@ async def _load_scope_for(key: str) -> list[str] | None:
     try:
         manifest = await client.get("/api/v2/mcp/manifest")
         scope: list[str] | None = manifest.get("scope") or []
+    except InvalidApiKey:
+        raise   # story 4849 — the server no longer knows this key: say so (nothing is cached as «fail-open» for it)
     except Exception:
         scope = _SCOPE_FAILOPEN  # 매니페스트 미가용 → fail-open(백엔드가 최종 SSOT)
         logger.warning("MCP toolset manifest load failed — falling back to legacy scope")
@@ -337,7 +340,10 @@ def _flat(name: str, doc: str, input_cls: type[BaseModel], fn):
         # E-MCP-HTTP S1: effective 키(http=per-request bearer override·stdio=env 단일키)별 scope 로드
         # (per-key bounded 캐시). 멀티테넌트서 키마다 다른 scope 정확 적용.
         _eff_key = _api_key_override.get() or settings.agent_api_key
-        _scope = await _load_scope_for(_eff_key)
+        try:
+            _scope = await _load_scope_for(_eff_key)
+        except InvalidApiKey as exc:
+            return err(exc)   # story 4849 — the same «Error: INVALID_API_KEY: …» reply as any tool error
         if not is_tool_allowed(name, _scope):
             return _denied(name)
         # 85429ee0: per-call project_id override → contextvar(tool 호출 스코프). client.project_id +
@@ -949,9 +955,10 @@ _TOOL_DEFS: list[tuple] = [
     # Chat (5)
     ("sprintable_list_conversations",
      "[조직] 내가 참여한 방 목록 — 알림이 안 왔어도 스스로 점검하는 백스톱(story #3331)."
-     " id를 몰라도 되는 유일한 대화 발견 경로다(단, project_id 단위 목록 — API 자체가"
-     " project_id 필수라 «기본 프로젝트 안의 내 방»만 보인다, 여러 프로젝트를 훑으려면"
-     " project_id를 바꿔 반복 호출할 것) — send/list_chat_messages/get_chat_message는"
+     " id를 몰라도 되는 유일한 대화 발견 경로다. 방은 조직의 것이고 프로젝트는 표시라(story #4846)"
+     " project_id를 안 주면 조직 안 내 모든 방(프로젝트 없는 방 포함)을 준다 — 프로젝트가 여럿이어도"
+     " 오류 없음. project_id를 주면 그 프로젝트의 방만, `only_without_project=true`면 프로젝트 없는 방만."
+     " 각 줄이 자기 project_id·project_name(없으면 null)을 말한다 — send/list_chat_messages/get_chat_message는"
      " conversation_id를 이미 알아야 하는데, 그 id를 얻을 방법이 이 도구뿐이었다(채널로"
      " 밀려오지 않은 방은 존재 자체를 몰랐다). 세션 시작 시·긴 정지 후 재기동 시 «내 앞으로"
      " 뭐가 왔는지» 먼저 이걸로 훑을 것. id·type·title·participants·last_read_at·"
@@ -972,7 +979,9 @@ _TOOL_DEFS: list[tuple] = [
     ("sprintable_create_conversation",
      "[조직] 새 conversation thread **생성**(조회 아님 — dedup 없이 매 호출 신규 방을 만든다,"
      " story #3331). 이 방이 이미 있는지 확인하고 싶으면 먼저 `sprintable_list_conversations`를"
-     " 쓸 것 — 이 도구를 조회 우회로 쓰면 빈 방만 하나 더 생긴다.",
+     " 쓸 것 — 이 도구를 조회 우회로 쓰면 빈 방만 하나 더 생긴다. project_id는 선택(story #4846):"
+     " 주면 그 프로젝트의 방, 안 주면 키의 기본 프로젝트가 하나면 그것, 없으면 프로젝트 없는 방 — 프로젝트가"
+     " 여럿이어도 오류 없다.",
      CreateConversationInput, create_conversation),
     ("sprintable_list_chat_messages",
      "[조직] conversation thread 메시지 목록 조회. conversation_id로 대화를 지정(thread_id는"

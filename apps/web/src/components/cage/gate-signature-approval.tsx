@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { CheckCircle, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Textarea } from '@/components/ui/textarea';
 import { GateEvidence } from '@/components/cage/gate-evidence';
 import type { GateItem } from '@/components/kanban/types';
 import { sigApproveAndSignLabelKey } from '@/lib/newsletter-gate-approve-label';
@@ -89,34 +91,36 @@ export function GateSignatureApproval({
   // 아니므로 canSign과 다른 축) 사유만 필수. 예전엔 이 버튼이 resolving만 봐서 사유 빈 채로도
   // 즉시 제출됐다(서버도 무검증이라 그대로 저장 — 반려 통지가 사유 없이 나감, #3330 AC2 무력화).
   const canReject = reason.trim().length > 0 && !resolving;
+  // story #4833 (4814 실측: 사유를 안 쓰면 «승인하고 서명»이 눌려도 아무 일도 없고 왜인지 안 보였다) — 단추가 막혀 있는 까닭을 단추 바로 위에 한 줄로.
+  // 막힌 단추는 눌러도 반응이 없으므로(#1954 AC: 근거 열람+사유 없인 비활성) 안내는 단추가 아니라 줄이 맡는다. 풀리면(또는 처리 중이면) 줄도 사라진다.
+  const hint = resolving
+    ? null
+    : reason.trim().length === 0
+      ? (rejectOnly || evidenceViewed ? t('sigHintReason') : t('sigHintEvidenceAndReason'))
+      : (!rejectOnly && !evidenceViewed ? t('sigHintEvidence') : null);
 
   return (
     <div className="space-y-4">
       <div>
-        <p className="mb-2 text-[11px] font-semibold text-muted-foreground">{t('sigEvidenceLabel')}</p>
+        <p className="mb-2 text-editorial-meta font-semibold text-muted-foreground">{t('sigEvidenceLabel')}</p>
         <GateEvidence gate={gate} />
         <label className="mt-3 flex min-h-12 items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm">
-          <input
-            type="checkbox"
-            checked={evidenceViewed}
-            onChange={(e) => setEvidenceViewed(e.target.checked)}
-            className="size-4 shrink-0"
-          />
+          <Checkbox checked={evidenceViewed} onCheckedChange={(checked) => setEvidenceViewed(checked)} />
           {t('sigEvidenceViewedLabel')}
         </label>
       </div>
 
       <div>
-        <label className="mb-1 block text-[11px] font-semibold text-muted-foreground" htmlFor="gate-sig-reason">
+        <label className="mb-1 block text-editorial-meta font-semibold text-muted-foreground" htmlFor="gate-sig-reason">
           {t('sigReasonLabel')}
         </label>
-        <textarea
+        <Textarea
           id="gate-sig-reason"
           rows={3}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           placeholder={t('sigReasonPlaceholder')}
-          className="w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          className="resize-none"
         />
       </div>
 
@@ -133,7 +137,17 @@ export function GateSignatureApproval({
 
       <div className="flex flex-col gap-2">
         {/* story #4558 — «승인은 내 서명으로 기록돼요»는 승인이 있는 패널에만(반려 전용 패널엔 승인이 없다). */}
-        {rejectOnly ? null : <p className="text-center text-[11px] text-muted-foreground">{t('sigConsequenceNote')}</p>}
+        {rejectOnly ? null : <p className="text-center text-editorial-meta text-muted-foreground">{t('sigConsequenceNote')}</p>}
+        {/* the live region stays mounted (text in and out) so a screen reader announces the change; with no text it is sr-only (no gap in the column) */}
+        <p
+          className={hint ? 'text-center text-xs text-foreground' : 'sr-only'}
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          data-testid="gate-sig-hint"
+        >
+          {hint}
+        </p>
         <div className={compact || rejectOnly ? 'flex flex-col gap-2' : 'flex gap-2'}>
           {/* story #4558(유나 정본 §0) — 이 일의 이름은 «반려» 하나: 진입 [반려] → 이 단추 «반려» → 결과 «반려됨». 예전 «변경 요청»은
               결정 패널 한 곳에만 있던 낱말이라 판단 요청(바꿀 결과물이 없는 게이트)에 맞지 않았고, 연필 아이콘은 «고쳐 달라»의 뜻이라

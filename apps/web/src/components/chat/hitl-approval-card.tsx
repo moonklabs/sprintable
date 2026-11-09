@@ -63,16 +63,16 @@ export function HitlApprovalCard({ request, createdAt, answer, onRespond }: Hitl
       {/* 유나 design:changes(2026-08-11) — tint 배경 위 계열색 글자(text-warning)는 라이트에서
           2.06:1로 AA 미달(DS 규칙 #2420 v3: tint/subtle 배경 위 글자는 --foreground). 경고
           정체성은 bg-warning-bg+border+아이콘이 이미 싣는다. */}
-      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+      <div className="mb-1.5 flex items-center gap-1.5 text-editorial-meta font-medium text-foreground">
         <Lock className="h-3 w-3" aria-hidden />
         {t('hitlRequestLabel')}
       </div>
 
-      <code className="mb-1.5 inline-block max-w-full truncate rounded bg-black/5 px-1.5 py-0.5 font-mono text-xs text-foreground dark:bg-white/10">
+      <code className="mb-1.5 inline-block max-w-full truncate rounded bg-overlay-fill-2 px-1.5 py-0.5 font-mono text-xs text-foreground">
         {request.toolName}
       </code>
 
-      <pre className="mb-2.5 max-h-32 overflow-auto scrollbar-visible whitespace-pre-wrap break-all rounded-lg bg-black/5 p-2 font-mono text-[11px] leading-relaxed text-muted-foreground dark:bg-white/5">
+      <pre className="mb-2.5 max-h-32 overflow-auto scrollbar-visible whitespace-pre-wrap break-all rounded-lg bg-overlay-fill-1 p-2 font-mono text-editorial-meta leading-relaxed text-muted-foreground">
         {request.inputSummary}
       </pre>
 
@@ -143,7 +143,7 @@ export function HitlApprovalCard({ request, createdAt, answer, onRespond }: Hitl
 
       {sendError && (
         // 유나 design:changes — text-destructive on bg-warning-bg = 4.37:1(AA 4.5 미달, 라이트).
-        <p role="alert" aria-live="assertive" className="mt-1.5 text-[11px] text-foreground">
+        <p role="alert" aria-live="assertive" className="mt-1.5 text-editorial-meta text-foreground">
           {t('hitlSendFailed')}
         </p>
       )}

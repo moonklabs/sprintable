@@ -8,7 +8,7 @@ import { ThemeProvider } from '@/components/providers/theme-provider';
 import { ContentPaintedSignal } from '@/components/providers/content-painted-signal';
 import { FetchGateInstaller } from '@/components/providers/fetch-gate-installer';
 import { PhoneBridgeClaim } from '@/components/providers/phone-bridge-claim';
-import { GoogleAnalytics } from '@/components/google-analytics';
+import { AnalyticsGate } from '@/components/analytics-gate';
 import { resolveAppUrl } from '@/services/app-url';
 import "./globals.css";
 
@@ -87,7 +87,7 @@ export default async function RootLayout({
       </head>
       <body className="h-full">
         <PhoneBridgeClaim>
-        <GoogleAnalytics />
+        <AnalyticsGate />
         <FetchGateInstaller />
         <ContentPaintedSignal />
         <ThemeProvider

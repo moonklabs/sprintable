@@ -44,7 +44,8 @@ export function ReportMessageSummary({
           <button
             type="button"
             onClick={() => setExpanded(false)}
-            className="mt-1 text-[11px] font-medium text-primary hover:underline"
+            data-copy-ui=""
+            className="mt-1 text-editorial-meta font-medium text-primary hover:underline"
           >
             {t('reportCollapse')}
           </button>
@@ -65,7 +66,8 @@ export function ReportMessageSummary({
     : null;
 
   return (
-    <div>
+    // story 4855 — the folded card shows a SUMMARY of the message: copying the whole message takes the source, not these lines (data-copy-source)
+    <div data-copy-source="">
       {density.kicker ? (
         // story #3052(2984-S4) — MaterialChip(S1, 헤어라인+fill 0) 채택, bg-proof-blue-soft
         // 채움 폐지(§2 doc ⓒ kicker 판정 — 순수 SHIFT, 신호 아님).
@@ -80,7 +82,7 @@ export function ReportMessageSummary({
       </p>
       {density.topLevelItems.length > 0 ? (
         <>
-          <p className="mb-1 mt-2.5 text-[9.5px] font-bold uppercase tracking-wide text-muted-foreground">
+          <p className="mb-1 mt-2.5 text-micro font-bold uppercase tracking-wide text-muted-foreground">
             {t('reportEvidenceLabel')}
           </p>
           <ul className="mb-1.5 flex flex-col gap-0.5">
@@ -97,14 +99,15 @@ export function ReportMessageSummary({
           <span className="font-bold text-brand" aria-hidden>→</span>
           <p className="[overflow-wrap:anywhere]">
             <span className="font-semibold text-primary">{t('reportNextActionLabel')}</span>
-            <span className="text-[12.5px] text-foreground"> {density.nextAction}</span>
+            <span className="text-xs text-foreground"> {density.nextAction}</span>
           </p>
         </div>
       ) : null}
       <button
         type="button"
         onClick={() => setExpanded(true)}
-        className="mt-1.5 text-[11.5px] font-semibold text-primary hover:underline"
+        data-copy-ui=""
+        className="mt-1.5 text-editorial-meta font-semibold text-primary hover:underline"
       >
         {t('reportViewFull')}
       </button>

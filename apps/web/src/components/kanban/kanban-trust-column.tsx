@@ -166,7 +166,7 @@ export function KanbanTrustColumn({
         </div>
       </div>
       {locked && (
-        <p className={`mb-2 text-[10px] leading-snug ${closedDuringDrag ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>
+        <p className={`mb-2 text-micro leading-snug ${closedDuringDrag ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>
           {t('trustLockedDropHint')}
         </p>
       )}

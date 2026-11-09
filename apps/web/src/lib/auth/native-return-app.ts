@@ -58,12 +58,19 @@ export function appReturnUrl(searchParams: URLSearchParams): string {
   return query ? `${base}?${query}` : base;
 }
 
+/** story 4832: the move progress page's [작업 폴더 고르기] for ONE agent — `intent=workdir&member=<id>` (never `agent=`: an app that did not know `workdir` would read `agent=` as «start
+ *  that agent»; the page offers this link only to an app that said `caps=workdir`). null for an id that is not uuid-shaped — no link at all rather than a bare setup link. */
+export function appWorkdirLink(app: NativeReturnApp | null, memberId: string): string | null {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(memberId) ? `${appScheme(app)}:/desktop/setup?intent=workdir&member=${memberId}` : null;
+}
+
 /** the setup page's «open the app» links (`/desktop/setup`, `?intent=reopen`) for that app · story 4670 (U2): `pair` = the app's band
  *  [폰 페어링] entry, as if pressed (the setup's end card [폰 페어링 열기]) — no setup starts.
  *  story 4680 (D2 · 4677): `agent` — the recruiter's [이 컴퓨터에서 시작] from a browser: the app reads `?agent=` (D1 mobile) and
  *  puts it in its setup page's fragment, so that agent is chosen there. Only a uuid-shaped id goes into the link. `intent` wins
- *  when both are given (a reopen/pair is the setup the person has — no agent to choose); no caller passes both today (PO 5065). */
-export function appSetupLink(app: NativeReturnApp | null, intent?: 'reopen' | 'pair' | 'folder', opts?: { agent?: string | null; pick?: 'claude' | 'codex' | null }): string {
+ *  when both are given (a reopen/pair is the setup the person has — no agent to choose); no caller passes both today (PO 5065).
+ *  story 4832: `move` — the sidebar's «이 컴퓨터로 에이전트 옮기기»: the app opens its setup page with «이미 있는 에이전트 옮기기» already chosen (`kind=move` in the `#`). */
+export function appSetupLink(app: NativeReturnApp | null, intent?: 'reopen' | 'pair' | 'folder' | 'move', opts?: { agent?: string | null; pick?: 'claude' | 'codex' | null }): string {
   const agent = opts?.agent && /^[0-9a-f-]{36}$/i.test(opts.agent) ? opts.agent : null;
   // story 4711: `intent=folder` asks the app for its Mac folder window; `pick` is the program the person had chosen (the app puts it back)
   const pick = intent === 'folder' && (opts?.pick === 'claude' || opts?.pick === 'codex') ? `&pick=${opts.pick}` : '';

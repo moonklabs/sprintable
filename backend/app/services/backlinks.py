@@ -637,16 +637,20 @@ async def list_entity_backlinks(
         chat_predicate = conversation_readable_predicate(
             Conversation.id,
             caller_member_id=caller_member_id,
-            # §5회차 Blocker 1 fix: 별도 사전 SELECT로 만든 project id 집합의 `.in_()` 멤버십이
-            # 아니라, 메인 statement와 **같은 스냅샷**에서 평가되는 correlated EXISTS(doc-source의
-            # `project_access_valid_correlated(Doc.project_id, ...)`와 동일 SSOT 호출) —
-            # TOCTOU-by-construction을 project_access_valid atom에도 적용.
-            project_access_valid=project_access_valid_correlated(
-                Conversation.project_id, caller_id=uid, org_id=org_id,
-            ),
+            org_id=org_id,
+            # story #4846: no project-access atom any more — being in the room reads it (conversation_auth docstring). An agent's
+            # admin bypass correlates `Conversation.project_id`; a room without a project makes that comparison false (no bypass).
             # §6회차(마지막 atom) fix: 위에서 조립한 correlated EXISTS — 사전계산된 bool/`.in_()`
             # 멤버십이 아니라 메인 statement 실행 시점의 스냅샷으로 평가된다.
             admin_bypass_eligible=admin_bypass_eligible,
+            # story #4846 (AC12): an agent needs its project in a room that has one; a person, and a room without a project, ask nothing more.
+            agent_project_valid=(
+                or_(
+                    Conversation.project_id.is_(None),
+                    project_access_valid_correlated(Conversation.project_id, caller_id=uid, org_id=org_id),
+                )
+                if is_api_key else True
+            ),
         )
 
     # ── 단일 authz-embedded keyset 쿼리 — Python authz filter/retry 0, 2-phase 없음 ──

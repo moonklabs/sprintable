@@ -198,14 +198,14 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
         {/* story #3010(로드맵 P3, L5 대비) — text-proof-faint 라이트 대비 미달(story #2993
             유나 처방과 동일 클래스) → text-proof-ink-3(아래 kicker·empty body 2곳). */}
         <div>
-          <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-proof-ink-3">{t('kicker')}</div>
+          <div className="text-editorial-meta font-bold uppercase tracking-[0.12em] text-proof-ink-3">{t('kicker')}</div>
           {/* story #3010(로드맵 P3, L6, 유나 판정 2026-08-24) — 이 h2는 반복 그룹 라벨이 아니라
               섹션 주 제목(단일 마운트)이라 L6 대상. weight만 font-editorial-heading(820)로
-              교체, 19px 크기는 유지. */}
-          <h2 className="text-[19px] font-editorial-heading leading-tight tracking-[-0.014em] text-proof-ink">{t('title')}</h2>
+              교체. 크기는 글자 눈금의 lg(18px) (story 4831: 눈금에 없는 19px에서). */}
+          <h2 className="text-lg font-editorial-heading leading-tight tracking-[-0.014em] text-proof-ink">{t('title')}</h2>
         </div>
         {!loading ? (
-          <div className="shrink-0 text-[13px] font-medium text-proof-ink-3">
+          <div className="shrink-0 text-editorial-ui font-medium text-proof-ink-3">
             {t.rich('count', { count: shown.length, b: (chunks) => <b className="text-proof-ink">{chunks}</b> })}
           </div>
         ) : null}
@@ -218,11 +218,11 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
           {/* story #3099(DS·AA 후속) — green 소형텍스트(11px bold) AA 미달, 텍스트는 중립화
               (text-proof-ink)하고 색 신호는 아이콘 하나로 좁힌다(#3090과 동형: 색은 그래픽,
               텍스트는 중립 — 아이콘은 3:1 non-text 기준으로 이미 PASS). */}
-          <div className="inline-flex items-center gap-1.5 text-[11px] font-bold tracking-[0.02em] text-proof-ink">
+          <div className="inline-flex items-center gap-1.5 text-editorial-meta font-bold tracking-[0.02em] text-proof-ink">
             <ShieldCheck className="size-3.5 text-proof-green" aria-hidden="true" />{t('allClear')}
           </div>
-          <p className="text-[15px] font-semibold text-proof-ink-2">{t('emptyTitle')}</p>
-          <p className="text-[12.5px] text-proof-ink-3">{t('emptyBody')}</p>
+          <p className="text-base font-semibold text-proof-ink-2">{t('emptyTitle')}</p>
+          <p className="text-xs text-proof-ink-3">{t('emptyBody')}</p>
         </div>
       ) : (
         <div>
@@ -247,7 +247,7 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
             <button
               type="button"
               onClick={() => router.push(flatHref('/inbox?tab=gates'))}
-              className="flex w-full items-center gap-1.5 border-t border-proof-line-soft bg-proof-sunk px-5 py-2.5 text-left text-[12.5px] text-proof-ink-3 transition-colors hover:bg-proof-line-soft hover:text-proof-ink-2"
+              className="flex w-full items-center gap-1.5 border-t border-proof-line-soft bg-proof-sunk px-5 py-2.5 text-left text-xs text-proof-ink-3 transition-colors hover:bg-proof-line-soft hover:text-proof-ink-2"
             >
               <span className="size-1 rounded-full bg-proof-faint" aria-hidden="true" />
               <span className="flex-1 break-keep">{overflowLine}</span>
@@ -255,7 +255,7 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
             </button>
           ) : overflowLine ? (
             // story #4382(까디르 메모 ①) — 스토리로 묶여 넘침이 0이어도 BE가 잘랐으면 줄이 선다(수는 «더 있을 수 있어요»).
-            <div className="flex items-center gap-1.5 border-t border-proof-line-soft bg-proof-sunk px-5 py-2.5 text-[12.5px] text-proof-ink-3">
+            <div className="flex items-center gap-1.5 border-t border-proof-line-soft bg-proof-sunk px-5 py-2.5 text-xs text-proof-ink-3">
               <span className="size-1 rounded-full bg-proof-faint" aria-hidden="true" />
               <span className="break-keep">{overflowLine}</span>
             </div>

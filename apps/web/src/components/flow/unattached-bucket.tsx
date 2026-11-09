@@ -105,11 +105,11 @@ function SuggestionChips({
   }, [storyId, onAttached]);
 
   if (loadError) {
-    return <p className="text-[11px] text-muted-foreground">{t('bucketSuggestionError')}</p>;
+    return <p className="text-editorial-meta text-muted-foreground">{t('bucketSuggestionError')}</p>;
   }
   if (!suggestions) {
     return (
-      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-1.5 text-editorial-meta text-muted-foreground">
         <Loader2 className="size-3 animate-spin" aria-hidden="true" />
         {t('loading')}
       </div>
@@ -117,7 +117,7 @@ function SuggestionChips({
   }
   const hasCandidates = suggestions.goal_candidates.length > 0 || suggestions.hypothesis_candidates.length > 0;
   if (!hasCandidates) {
-    return <p className="text-[11px] text-muted-foreground">{t('bucketNoSuggestion')}</p>;
+    return <p className="text-editorial-meta text-muted-foreground">{t('bucketNoSuggestion')}</p>;
   }
 
   return (
@@ -130,7 +130,7 @@ function SuggestionChips({
             disabled={attachingId !== null}
             onClick={() => void attachGoal(c.id)}
             className={cn(
-              'rounded-full border border-brand/40 bg-brand/5 px-2.5 py-1 text-[11px] text-brand-text transition hover:bg-brand/10 disabled:opacity-50',
+              'rounded-full border border-brand/40 bg-brand/5 px-2.5 py-1 text-editorial-meta text-brand-text transition hover:bg-brand/10 disabled:opacity-50',
             )}
           >
             {t('bucketGoalChip', { text: c.text })}
@@ -143,7 +143,7 @@ function SuggestionChips({
             disabled={attachingId !== null}
             onClick={() => void attachHypothesis(c.id)}
             className={cn(
-              'rounded-full border border-info-border bg-info-tint px-2.5 py-1 text-[11px] text-foreground transition hover:opacity-80 disabled:opacity-50',
+              'rounded-full border border-info-border bg-info-tint px-2.5 py-1 text-editorial-meta text-foreground transition hover:opacity-80 disabled:opacity-50',
             )}
           >
             {t('bucketHypothesisChip', { text: c.text })}
@@ -151,7 +151,7 @@ function SuggestionChips({
         ))}
       </div>
       {attachError ? (
-        <p role="alert" className="text-[11px] text-destructive">{t('bucketAttachError')}</p>
+        <p role="alert" className="text-editorial-meta text-destructive">{t('bucketAttachError')}</p>
       ) : null}
     </div>
   );
@@ -168,7 +168,7 @@ function BucketRow({ story, onAttached }: { story: BucketStory; onAttached: (sto
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}
-          className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-brand-text hover:bg-brand/10"
+          className="shrink-0 rounded-md px-2 py-1 text-editorial-meta font-medium text-brand-text hover:bg-brand/10"
         >
           {expanded ? t('bucketHideSuggestion') : t('bucketShowSuggestion')}
         </button>

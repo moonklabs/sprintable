@@ -24,9 +24,13 @@ export function mapApiError(status: number, body: { error?: { code?: string; mes
   return Object.assign(new Error(msg), { code: code ?? `HTTP_${status}`, status });
 }
 
-function getBaseUrl(): string {
+/**
+ * story 4824: `SPRINTABLE_API_ORIGIN` (read when the process runs) first — the desktop app's own server picks its backend port at launch, and a NEXT_PUBLIC value is
+ * replaced by its build-time value (apps/web/src/lib/fastapi-url.ts has the same rule; this package cannot import from the app). Without it: exactly as before.
+ */
+export function getBaseUrl(): string {
   return (
-    (typeof process !== 'undefined' && process.env['NEXT_PUBLIC_FASTAPI_URL']) ||
+    (typeof process !== 'undefined' && (process.env['SPRINTABLE_API_ORIGIN'] || process.env['NEXT_PUBLIC_FASTAPI_URL'])) ||
     'http://localhost:8000'
   );
 }

@@ -6,6 +6,8 @@ import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { cn } from '@/lib/utils';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
 import { InviteError, inviteErrorMessage } from '@/lib/invite-error-message';
 import { fetchWithAuth } from '@/lib/db/client';
 import { orgRoleLabel } from '@/lib/org-member-role';
@@ -171,7 +173,7 @@ export function InviteClient({ chatsHref }: InviteClientProps) {
         {/* story #2105 2차 — 'preview-loading'에서 비동기로 전이되는 결과다(reset-password의
             정적 초기렌더 invalidLink와 달리 마운트 후 상태변화라 aria-live 대상). */}
         <div role="alert" aria-live="assertive" aria-atomic="true" className="space-y-3 py-8 text-center">
-          <div className="text-3xl">✕</div>
+          <div className="text-display">✕</div>
           <p className="text-sm text-destructive">{errorMsg}</p>
           {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- story a539c649 S2 오탐, invite-accept-client.tsx 주석 참고 */}
           <a href="/login" className="text-sm font-medium text-brand-text hover:text-brand-text/85">
@@ -212,7 +214,7 @@ export function InviteClient({ chatsHref }: InviteClientProps) {
       {preview && (
         <div className="space-y-6">
           <div className="space-y-3 text-center animate-in fade-in slide-in-from-bottom-2 duration-500 delay-100 fill-mode-backwards">
-            <h1 className="text-2xl font-normal tracking-tight text-foreground sm:text-3xl">
+            <h1 className="text-2xl font-normal tracking-tight text-foreground sm:text-display">
               {t.rich('joinHeading', {
                 org: preview.org_name,
                 b: (chunks) => <span className="font-semibold text-foreground">{chunks}</span>,
@@ -269,30 +271,30 @@ export function InviteClient({ chatsHref }: InviteClientProps) {
 
             <div className="space-y-3">
               {authMode === 'signup' && (
-                <input
+                <Input
                   type="text"
                   placeholder={t('namePlaceholder')}
                   autoComplete="name"
-                  className="w-full rounded-lg border border-border bg-background px-4 py-3 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+                  className="h-auto bg-background px-4 py-3 dark:bg-background"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
                   disabled={submitting}
                 />
               )}
-              <input
+              <Input
                 type="email"
                 placeholder={t2('email')}
                 autoComplete="email"
-                className="w-full rounded-lg border border-border bg-background px-4 py-3 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+                className="h-auto bg-background px-4 py-3 dark:bg-background"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={submitting}
               />
-              <input
+              <Input
                 type="password"
                 placeholder={t2('password')}
                 autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
-                className="w-full rounded-lg border border-border bg-background px-4 py-3 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+                className="h-auto bg-background px-4 py-3 dark:bg-background"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && void handleSubmit()}
@@ -300,11 +302,10 @@ export function InviteClient({ chatsHref }: InviteClientProps) {
               />
               {authMode === 'signup' && (
                 <label className="flex items-start gap-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={tosAccepted}
-                    onChange={(e) => setTosAccepted(e.target.checked)}
-                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-border accent-brand"
+                    onCheckedChange={(checked) => setTosAccepted(checked === true)}
+                    className="mt-0.5"
                     disabled={submitting}
                   />
                   <span className="text-xs text-muted-foreground">

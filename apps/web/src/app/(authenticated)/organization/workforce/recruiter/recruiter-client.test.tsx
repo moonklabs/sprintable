@@ -473,7 +473,7 @@ describe('recruiter-client STEP4 ②깨우기 — story #2434(정직한 "반쪽"
     expect(fnMatch).not.toBeNull();
     const fn = fnMatch![0];
     expect(fn).toContain('t.rich(`kitOrientingWakeBody_${method}`');
-    expect(fn).toContain('font-mono text-[11px] break-all text-muted-foreground');
+    expect(fn).toContain('font-mono text-editorial-meta break-all text-muted-foreground');
     expect(fn).toMatch(/path,\s*\n\s*code: \(chunks\)/); // 태그명(code) ≠ 값 인자명(path)
     expect(fn).not.toMatch(/text-info|text-primary|underline/); // 링크 색 금지
   });

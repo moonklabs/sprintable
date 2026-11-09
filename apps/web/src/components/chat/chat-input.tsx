@@ -1,12 +1,16 @@
 'use client';
 
 import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
+import { AttachmentNeedsProjectError } from '@/lib/chat-attachment-error';
 import Link from 'next/link';
 import { AlertTriangle, Compass, FolderOpen, Loader2, Paperclip, Send, Terminal, Type, Upload, X, Hash } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,6 +38,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { participantDisplayLabel } from '@/lib/member-display';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { isImeComposing } from '@/lib/ime-composition';
 import { memberDisplayLabel, memberRowLabels, type MemberRow } from '@/lib/member-display';
 import { draftOwnerSegment } from '@/lib/tab-owner';
 
@@ -222,6 +227,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   // story #4474: how many files the last add left out over the cap — said out loud instead of dropped in silence
   const [droppedFiles, setDroppedFiles] = useState(0);
   const [uploadFailed, setUploadFailed] = useState(false);
+  const [attachNeedsProject, setAttachNeedsProject] = useState(false); // story 4847 — the failure is «this room has no project» (a coded refusal), not a plain failure
   const [sendFailed, setSendFailed] = useState(false);
   const [sending, setSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -438,7 +444,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
     if ((!trimmed && pendingFiles.length === 0) || sending || disabled) return;
 
     setSending(true);
-    setUploadFailed(false);
+    setUploadFailed(false); setAttachNeedsProject(false);
     setSendFailed(false);
     try {
       // 1) 첨부 업로드 단계 — 실패는 "첨부 업로드 실패"로 표시(pending 유지·재시도 가능).
@@ -446,7 +452,8 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       if (pendingFiles.length > 0 && onUploadFile) {
         try {
           attachments = await Promise.all(pendingFiles.map((f) => onUploadFile(f)));
-        } catch {
+        } catch (e) {
+          if (e instanceof AttachmentNeedsProjectError) setAttachNeedsProject(true);
           setUploadFailed(true);
           return; // finally에서 setSending(false)
         }
@@ -458,8 +465,9 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           mentionedIdsRef.current.length > 0 ? mentionedIdsRef.current : undefined,
           attachments && attachments.length > 0 ? attachments : undefined,
         );
-      } catch {
-        setSendFailed(true);
+      } catch (e) {
+        // story 4847 — the send that registers an attachment in a room with no project is refused by code: say that, not «전송 실패»
+        if (e instanceof AttachmentNeedsProjectError) { setAttachNeedsProject(true); setUploadFailed(true); } else setSendFailed(true);
         return;
       }
       setText('');
@@ -529,6 +537,9 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // 한글 등 입력기 조합 중의 키(엔터=글자 확정, 에스케이프=조합 취소, 방향키=후보 고르기)는 발송 · 선택 · 닫기로 읽지 않는다.
+    // 안 거르면 조합 중 엔터가 메시지를 보낸 뒤 확정된 마지막 음절이 빈 입력창에 다시 남는다(4831 측정 중 발견).
+    if (isImeComposing(e)) return;
     // command(/) picker — mention/entity와 정확 동일 패턴(§5.2 가드·§5.4 a11y는 렌더). 배타라 최상단.
     if (commandCandidates.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setCommandIndex((i) => (i + 1) % commandCandidates.length); return; }
@@ -580,7 +591,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
   const addFiles = (files: File[]) => {
     if (files.length === 0) return;
-    setUploadFailed(false);
+    setUploadFailed(false); setAttachNeedsProject(false);
     // the files already attached and the first of the new ones are kept; the overflow is always the LAST of the files just
     // picked — counted so the line below can say so (Yuna: the person must know which ones to pick again)
     setDroppedFiles(Math.max(0, pendingFiles.length + files.length - MAX_ATTACHMENTS));
@@ -610,7 +621,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   const removePendingFile = (index: number) => {
     setPendingFiles((prev) => prev.filter((_, i) => i !== index));
     setDroppedFiles(0);
-    setUploadFailed(false);
+    setUploadFailed(false); setAttachNeedsProject(false);
   };
 
   const atMaxAttachments = pendingFiles.length >= MAX_ATTACHMENTS;
@@ -664,7 +675,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       {/* story #2105 2차 — handleSend가 재시도 전 두 상태 모두 false로 리셋해(위 정의) 매
           시도마다 언마운트→리마운트된다. */}
       {uploadFailed && (
-        <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">{t('attachmentUploadFailed')}</p>
+        <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">{attachNeedsProject ? t('attachmentNeedsProject') : t('attachmentUploadFailed')}</p>
       )}
       {sendFailed && (
         <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">{t('sendFailed')}</p>
@@ -747,11 +758,12 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
             {t('steerPanelTitle')}
           </div>
           <div className="flex flex-wrap gap-1.5">
-            <select
+            {/* 조종 패널은 info 색 면(bg-info/8) 안이라 두 칸 모두 불투명 면을 남긴다(부품은 투명 · dark:bg-input/30). */}
+            <Select
               aria-label={t('steerPanelTargetLabel')}
               value={steerTargetId}
               onChange={(e) => setSteerTargetId(e.target.value)}
-              className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-base lg:text-xs text-foreground"
+              className="h-auto min-w-0 flex-1 bg-background px-2 py-1 lg:text-xs dark:bg-background"
             >
               <option value="">{t('steerPanelTargetPlaceholder')}</option>
               {steerTargets.map((p) => (
@@ -761,9 +773,9 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                 // #3758(9번째) — resolved 비트로 갈라 그린다(participantDisplayLabel).
                 <option key={p.member_id} value={p.member_id}>{participantDisplayLabel(p, tc)}</option>
               ))}
-            </select>
+            </Select>
             <div className="relative min-w-0 flex-1">
-              <input
+              <Input
                 type="text"
                 value={steerWorkItem ? steerWorkItem.title : steerWorkItemQuery}
                 onChange={(e) => {
@@ -774,7 +786,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                 onFocus={() => { if (!steerWorkItem) workItemPicker.setEntityQuery(steerWorkItemQuery); }}
                 placeholder={t('steerPanelWorkItemPlaceholder')}
                 aria-label={t('steerPanelWorkItemLabel')}
-                className="w-full rounded-md border border-border bg-background px-2 py-1 text-base lg:text-xs text-foreground placeholder:text-muted-foreground"
+                className="h-auto bg-background px-2 py-1 lg:text-xs dark:bg-background"
               />
               {/* story #3000 로드맵 PR-B(L1) — 이 파일의 floating 드롭다운 4곳(작업항목·커맨드·
                   멘션·엔티티 후보) 전부 --elev-overlay(오버레이 전용) 토큰으로 통일. */}
@@ -823,11 +835,11 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   <Terminal className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
                   {/* story #92f00dc4(doc exec-command-final-spec-92f00dc4 §①) — 커맨드명
                       mono+primary·인자 힌트 mono+muted(있을 때만)·설명은 우측 정렬. */}
-                  <span className="font-mono text-[12.5px] font-semibold text-primary">/{cmd.name}</span>
+                  <span className="font-mono text-xs font-semibold text-primary">/{cmd.name}</span>
                   {cmd.argHintKey ? (
-                    <span className="shrink-0 whitespace-nowrap font-mono text-[11.5px] text-muted-foreground">{t(cmd.argHintKey)}</span>
+                    <span className="shrink-0 whitespace-nowrap font-mono text-editorial-meta text-muted-foreground">{t(cmd.argHintKey)}</span>
                   ) : null}
-                  <span className="ml-auto truncate pl-2 text-[11.5px] text-foreground">{t(cmd.descKey)}</span>
+                  <span className="ml-auto truncate pl-2 text-editorial-meta text-foreground">{t(cmd.descKey)}</span>
                 </button>
               </li>
             ))}
@@ -879,7 +891,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
               return (
               <li key={`${entity.entity_type}:${entity.entity_id}`}>
                 {isNewGroup && (
-                  <div className="sticky top-0 bg-popover px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <div className="sticky top-0 bg-popover px-3 pb-1 pt-2 text-editorial-meta font-semibold uppercase tracking-wide text-muted-foreground">
                     {domainLabels.entityTypeLabel(entity.entity_type) ?? entityTypeLabel(entity.entity_type)}
                   </div>
                 )}
@@ -980,7 +992,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         />
 
         {/* Textarea */}
-        <textarea
+        <Textarea
           ref={textareaRef}
           rows={1}
           value={text}
@@ -1007,7 +1019,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           }}
           disabled={disabled || sending || steerSending}
           placeholder={steerMode ? t('steerPanelInstructionPlaceholder') : (placeholder ?? t('inputPlaceholderMobile'))}
-          className="flex-1 resize-none rounded-xl border border-border bg-muted/30 px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-40"
+          className="min-h-0 flex-1 resize-none bg-muted/30 disabled:opacity-40 dark:bg-muted/30"
           style={{ minHeight: '36px', maxHeight: '160px' }}
         />
 

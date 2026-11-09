@@ -10,6 +10,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { PHONE_APP_STORE_ANDROID } from '@/lib/phone-app-store';
 import { PhoneBridgeClaim } from '@/components/providers/phone-bridge-claim';
+import { EmbeddedServerProvider } from '@/components/embedded-server-context';
 
 vi.mock('@/lib/phone-app-store', async (orig) => ({
   ...(await orig<typeof import('@/lib/phone-app-store')>()),
@@ -95,5 +96,19 @@ describe('[SID:4671] a Mac draws the card too (the QR is for the phone)', () => 
       expect(h.querySelectorAll('svg').length).toBe(1);
       act(() => root.unmount()); root = createRoot(host);
     }
+  });
+});
+
+describe('[SID:4832] the phone app card on the app\'s own server', () => {
+  it('no phone relay there — its QR and store link could not reach a loopback server: nothing drawn; outside the local server the card is as above', async () => {
+    await act(async () => {
+      root.render(<PhoneBridgeClaim><NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC"><EmbeddedServerProvider embedded><PhoneAppCard elsewhere /></EmbeddedServerProvider></NextIntlClientProvider></PhoneBridgeClaim>);
+    });
+    expect(host.querySelector('[data-testid="phone-app-card"]')).toBeNull();
+    expect(host.textContent).toBe('');
+    await act(async () => {
+      root.render(<PhoneBridgeClaim><NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC"><EmbeddedServerProvider embedded={false}><PhoneAppCard elsewhere /></EmbeddedServerProvider></NextIntlClientProvider></PhoneBridgeClaim>);
+    });
+    expect(host.querySelector('[data-testid="phone-app-card"]')).not.toBeNull();
   });
 });

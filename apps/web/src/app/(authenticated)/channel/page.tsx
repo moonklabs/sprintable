@@ -25,8 +25,9 @@ interface ChannelMsg {
 
 type WsStatus = 'idle' | 'connecting' | 'connected' | 'disconnected';
 
-function fastapiWsBase(): string {
-  return (process.env.NEXT_PUBLIC_FASTAPI_URL ?? 'http://localhost:8000')
+/** story 4824: the backend's address comes from the server (/api/channel/token) at run time; the build-time value is only the fallback for an older answer */
+function fastapiWsBase(origin: string | null): string {
+  return (origin ?? process.env.NEXT_PUBLIC_FASTAPI_URL ?? 'http://localhost:8000')
     .replace(/^https:\/\//, 'wss://')
     .replace(/^http:\/\//, 'ws://');
 }
@@ -54,6 +55,7 @@ export default function ChannelPage() {
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [wsStatus, setWsStatus] = useState<WsStatus>('idle');
   const [token, setToken] = useState<string | null>(null);
+  const [backendOrigin, setBackendOrigin] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -65,7 +67,7 @@ export default function ChannelPage() {
   useEffect(() => {
     fetchWithAuth('/api/channel/token')
       .then((r) => r.json())
-      .then((d: { token: string }) => setToken(d.token))
+      .then((d: { token: string; backend_origin?: string }) => { setBackendOrigin(d.backend_origin ?? null); setToken(d.token); })
       .catch(() => {});
   }, []);
 
@@ -75,7 +77,7 @@ export default function ChannelPage() {
     setWsStatus('connecting');
 
     const ws = new WebSocket(
-      `${fastapiWsBase()}/ws/chat/${agentId}?token=${encodeURIComponent(token)}`,
+      `${fastapiWsBase(backendOrigin)}/ws/chat/${agentId}?token=${encodeURIComponent(token)}`,
     );
     wsRef.current = ws;
 
@@ -112,7 +114,7 @@ export default function ChannelPage() {
     };
 
     return () => { ws.close(); wsRef.current = null; };
-  }, [token, agentId]);
+  }, [token, agentId, backendOrigin]);
 
   // 자동 스크롤
   useEffect(() => {

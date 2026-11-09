@@ -64,13 +64,53 @@ def decode_json_attachment(content_base64: str, *, max_size: int = MAX_JSON_ATTA
     return data
 
 
+# story 4856 — the declared `content_type` is what the CALLER says; an agent that does not know a picture's type passes a generic one («application/octet-stream»), a near miss
+# («image/jpg») or a wrong one, and the server used to store and report it as given. The chat bubble draws a picture only for `image/*` (a thumbnail, and a larger view on a click),
+# so such a picture became a file card, and its size was never measured. The server knows better than the caller: it reads the first bytes.
+_IMAGE_MAGIC: tuple[tuple[str, bytes, int, bytes | None], ...] = (
+    # (content type, signature, offset, a second signature that must follow at offset 8 — only for WebP's RIFF container)
+    ("image/png", b"\x89PNG\r\n\x1a\n", 0, None),
+    ("image/jpeg", b"\xff\xd8\xff", 0, None),
+    ("image/gif", b"GIF87a", 0, None),
+    ("image/gif", b"GIF89a", 0, None),
+    ("image/webp", b"RIFF", 0, b"WEBP"),
+)
+
+
+def sniff_image_content_type(data: bytes) -> str | None:
+    """the picture type the first bytes say (PNG · JPEG · GIF · WebP), or None when they are not one of those. SVG is not sniffed on purpose (it can carry script)."""
+    for content_type, signature, offset, second in _IMAGE_MAGIC:
+        if data[offset:offset + len(signature)] != signature:
+            continue
+        if second is not None and data[8:8 + len(second)] != second:
+            continue
+        return content_type
+    return None
+
+
+def resolve_attachment_content_type(declared: str, data: bytes) -> str:
+    """the content type to store and report: when the bytes are a picture, the type the bytes say (the caller's value may be generic, a near miss or wrong); otherwise the
+    caller's value as declared (documents, text, … are not judged here)."""
+    return sniff_image_content_type(data) or declared
+
+
+def chat_attachment_path_prefix(org_id: uuid.UUID, project_id: uuid.UUID | None, conversation_id: uuid.UUID) -> str:
+    """where a file attached in a chat room is stored (ends with `/`): a room with a project keeps its project-scoped namespace, a room WITHOUT one is
+    `org/<org>/chat/<room>/` (story #4846 AC6) — the one place that builds it (the room's single GET hands it to the web)."""
+    if project_id is None:
+        return f"org/{org_id}/chat/{conversation_id}/"
+    return f"org/{org_id}/project/{project_id}/chat/{conversation_id}/"
+
+
 def build_mcp_object_path(
-    *, org_id: uuid.UUID, project_id: uuid.UUID, kind: str, resource_id: uuid.UUID, safe_name: str,
+    *, org_id: uuid.UUID, project_id: uuid.UUID | None, kind: str, resource_id: uuid.UUID, safe_name: str,
 ) -> str:
     """S7 namespace + `mcp/` 마커. FE 업로드 라우트(각 리소스의 apps/web .../attachments/route.ts)와
     동일 접두(org/<org>/project/<project>/<kind>/<resource_id>/...) — path_in_source_scope 는 그
     접두까지만 segment-match 하므로(그 뒤 세그먼트 수는 안 봄) `mcp/` 추가가 IDOR 가드에 영향 없다.
     """
+    if project_id is None:   # story #4846 (AC6): a chat room without a project — `org/<org>/chat/<room>/mcp/<file>`
+        return f"org/{org_id}/{kind}/{resource_id}/mcp/{uuid.uuid4()}-{safe_name}"
     return f"org/{org_id}/project/{project_id}/{kind}/{resource_id}/mcp/{uuid.uuid4()}-{safe_name}"
 
 
@@ -86,7 +126,7 @@ def is_mcp_upload_object_path(url: str, *, kind: str, container: str = DEFAULT_C
     if not canon:
         return False
     parts = canon.split("/")
-    return (
-        len(parts) >= 7
-        and parts[0] == "org" and parts[2] == "project" and parts[4] == kind and parts[6] == "mcp"
-    )
+    with_project = len(parts) >= 7 and parts[0] == "org" and parts[2] == "project" and parts[4] == kind and parts[6] == "mcp"
+    # story #4846: a chat room without a project — only the chat namespace has this shape (a story or a doc always has its project)
+    without_project = kind == "chat" and len(parts) >= 6 and parts[0] == "org" and parts[2] == kind and parts[4] == "mcp"
+    return with_project or without_project

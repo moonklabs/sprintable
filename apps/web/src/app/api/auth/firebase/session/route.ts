@@ -17,8 +17,9 @@ import { setFirebaseSessionCookie } from '@/lib/auth/firebase-session';
 import { cookieBase, markSessionChanged } from '@/lib/auth/cookies';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { backendFetch } from '@/lib/backend-fetch';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 // doc §5 Phase1 항목5(issuer별 metrics+neutral failure reason).
 function logSessionFailure(reason: string): void {

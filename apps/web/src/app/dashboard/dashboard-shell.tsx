@@ -1,5 +1,6 @@
 'use client';
 
+import { EmbeddedServerProvider } from '@/components/embedded-server-context';
 import { createContext, useContext, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, startTransition } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -35,6 +36,7 @@ import { ReleaseNotesProvider } from '@/components/release-notes/release-notes-g
 import { RefreshProvider } from '@/contexts/refresh-context';
 import { TeamPresenceToggleProvider } from '@/components/presence/team-presence-toggle';
 import { ActivationChecklistBanner } from '@/components/dashboard/activation-checklist-banner';
+import { useShellListScrollMemory } from '@/hooks/use-shell-list-scroll-memory';
 import { OrgHintBanner } from '@/components/nav/org-hint-banner';
 import { ReclaimNoticeAlert } from '@/components/auth/reclaim-notice';
 import type { OrgSwitcherItem } from '@/components/nav/unified-switcher';
@@ -160,6 +162,8 @@ interface DashboardShellProps extends DashboardContext {
   // 부분적으로 stale하면(org_id는 reset·project_id는 옛 org 그대로) `orgId`와 갈릴 수 있다 — 아래
   // 자동 switch-org effect의 불일치 판정은 이 값을 우선한다(없으면 `orgId`로 폴백).
   jwtOrgId?: string;
+  /** story 4832 — the page is served by the desktop app's own (embedded) server: the layout reads it from the server's env, the shell provides it to `useEmbeddedServer()` */
+  embedded?: boolean;
   children: React.ReactNode;
 }
 
@@ -239,10 +243,12 @@ function ScrollShell({
   navV3Flags?: NavV3Flags;
   children: React.ReactNode;
 }) {
-  const { setScrollContainer } = useTopBar();
+  const { setScrollContainer, scrollContainer } = useTopBar();
   const setRef = useCallback((el: HTMLDivElement | null) => {
     setScrollContainer(el);
   }, [setScrollContainer]);
+  // story 4853 — a chat room scrolls this column down; coming back, the list must be where it was left (not scrolled down by the onboarding box's height)
+  useShellListScrollMemory(scrollContainer, usePathname());
   const t = useTranslations('presence');
   // 2505d27d: 상시 팀 presence 패널 — 2xl=inline right-rail / <2xl=drawer. storageKey로 open 영속.
   const panel = useContextualPanelState({ storageKey: 'team-presence', defaultOpen: true });
@@ -419,6 +425,7 @@ export function DashboardShell({
   activationSeedFromHint,
   activationOrgId,
   initialActivationCollapsed,
+  embedded = false,
   children,
 }: DashboardShellProps) {
   const pathname = usePathname();
@@ -546,6 +553,7 @@ export function DashboardShell({
   return (
     <ToastProvider>
     <CommandPaletteProvider>
+    <EmbeddedServerProvider embedded={embedded}>
     <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug: scopedProjectSlug, projectPathUnresolved: pathUnresolved, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete, activationSeedFromHint, activationOrgId, initialActivationCollapsed, navV3Flags, inShell: true }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
@@ -595,6 +603,7 @@ export function DashboardShell({
       </RealtimeProvider>
       </RefreshProvider>
     </DashboardCtx.Provider>
+    </EmbeddedServerProvider>
     </CommandPaletteProvider>
     </ToastProvider>
   );

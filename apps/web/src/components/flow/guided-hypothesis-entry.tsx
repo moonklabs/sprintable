@@ -59,7 +59,7 @@ export function GuidedHypothesisEntry({
 
   return (
     <div className="flex flex-col items-center gap-4 rounded-2xl border border-dashed border-border bg-muted/20 px-6 py-10 text-center">
-      <span aria-hidden="true" className="text-3xl opacity-40">◐</span>
+      <span aria-hidden="true" className="text-display opacity-40">◐</span>
       <div className="space-y-1">
         <h3 className="text-sm font-semibold text-foreground">{t('earthEmptyInviteTitle')}</h3>
         <p className="max-w-xs text-xs text-muted-foreground">{t('earthEmptyInviteBody')}</p>

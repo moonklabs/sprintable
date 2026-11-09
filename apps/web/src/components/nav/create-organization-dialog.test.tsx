@@ -304,3 +304,25 @@ describe('CreateOrganizationDialog — 대화상자·온보딩 폼 낱말 일치
     expect(koMessages.nav.switcherNewOrganization).not.toBe(koMessages.onboarding.createProject);
   });
 });
+
+// story 4831 부품 교체(공용 부품 ④) — 이름 · 주소 칸이 바탕 Input이 되어도 둘 다 필수이고 고쳐 쓴 주소가 요청 본문에 실린다.
+describe('CreateOrganizationDialog — 바탕 부품(story 4831)', () => {
+  it('이름 · 주소 칸은 바탕 Input(필수)이고, 이름에서 만들어진 주소를 고쳐 쓰면 고친 주소가 요청에 실린다', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: { id: 'o-2', name: 'Test Org', slug: 'my-org' } }) }));
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+    const name = document.body.querySelector('#org-name') as HTMLInputElement;
+    const slug = document.body.querySelector('#org-slug') as HTMLInputElement;
+    expect(name.dataset.slot).toBe('input');
+    expect(slug.dataset.slot).toBe('input');
+    expect(name.required).toBe(true);
+    expect(slug.required).toBe(true);
+    await act(async () => { setNativeValue(name, 'Test Org'); });
+    expect(slug.value).toBe('test-org'); // 이름에서 만들어진 주소
+    await act(async () => { setNativeValue(slug, 'my-org'); });
+    const form = document.body.querySelector('form') as HTMLFormElement;
+    await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(JSON.parse((fetchMock.mock.calls[0] as unknown as [string, { body: string }])[1].body)).toEqual({ name: 'Test Org', slug: 'my-org' });
+  });
+});

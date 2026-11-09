@@ -130,8 +130,8 @@ async def _setup_newsletter(Session):
     ctx = await _setup(Session)
     async with Session() as s:
         await _seed_system_publisher_teammember_shim(s, ctx["org_id"], ctx["project_id"])
-        sender_id = await _seed_agent(s, ctx["org_id"], ctx["project_id"])
-        bystander_id = await _seed_agent(s, ctx["org_id"], ctx["project_id"])
+        sender_id = await _seed_agent(s, ctx["org_id"], ctx["project_id"], grant=True)   # story #4846 AC12
+        bystander_id = await _seed_agent(s, ctx["org_id"], ctx["project_id"], grant=True)
     return {**ctx, "sender_id": sender_id, "bystander_id": bystander_id}
 
 

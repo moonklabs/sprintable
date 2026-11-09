@@ -981,7 +981,7 @@ describe('StoryDetailPanel — 제목/설명/완료기준 저장 실패 시 문�
 
     const titleBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('원래 제목'));
     await act(async () => { titleBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const input = container.querySelector('[data-testid="story-title-input"]') as HTMLInputElement;
+    const input = container.querySelector('input[data-slot="input"][data-testid="story-title-input"]') as HTMLInputElement;
     await act(async () => { setNativeValue(input, '새 제목'); });
     const saveBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '저장');
     await act(async () => { saveBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });

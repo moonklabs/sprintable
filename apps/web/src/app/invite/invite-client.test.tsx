@@ -130,7 +130,7 @@ describe('InviteClient — 결과 피드백 접근성(story #2105 2차)', () => 
 
     const nameInput = container.querySelector('input[type="text"]') as HTMLInputElement;
     const passwordInput = container.querySelector('input[type="password"]') as HTMLInputElement;
-    const tosCheckbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    const tosCheckbox = container.querySelector('[data-slot="checkbox"]') as HTMLElement;
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
     await act(async () => {
       setter.call(nameInput, '홍길동');
@@ -212,7 +212,7 @@ describe('InviteClient — error.code 분기 (story #2484)', () => {
 
     const nameInput = container.querySelector('input[type="text"]') as HTMLInputElement;
     const passwordInput = container.querySelector('input[type="password"]') as HTMLInputElement;
-    const tosCheckbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    const tosCheckbox = container.querySelector('[data-slot="checkbox"]') as HTMLElement;
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
     await act(async () => {
       setter.call(nameInput, '홍길동');

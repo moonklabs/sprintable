@@ -63,8 +63,22 @@
 		}
 	}
 
-	encode zstd gzip
-	reverse_proxy frontend:3000 {
-		flush_interval -1
+	# story 4843 — `/api/v2/*` on the app name goes STRAIGHT to the backend, not through the web server's rewrite (next.config.ts `rewrites()` -> the API name -> this front door a second time). The agents' clients
+	# (a Bearer key, no cookie) reach the API on this name too, and their stream (`GET /api/v2/agent/stream`, ended by the backend every ~5 minutes on purpose) went through that rewrite: measured on dev, when the
+	# upstream of a rewritten response is cut the web server never ends the client's side of it (locally, Next 16.2.2: 20 of 20 left open, `head sent`, for good), so ~36 an hour piled up in `next-server` and in
+	# this front door (168 requests in flight here against 62 at the backend), and both processes grew by the day (prod 2026-11-01 -> 11-03: next-server 689 -> 1021 MB, caddy 327 -> 663 MB; the VM stopped answering
+	# on 11-04). Here a cut upstream ends the client's connection, and the response is not compressed (`encode` would hold back and re-encode an event stream: the API name has none either).
+	# The web UI does not use this path with its cookie (its calls go through its own `/api/...` routes, never `/api/v2/...` directly: the backend would answer 401 to a cookie), so nothing it depends on skips the web server.
+	handle /api/v2/* {
+		reverse_proxy backend:8000 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		encode zstd gzip
+		reverse_proxy frontend:3000 {
+			flush_interval -1
+		}
 	}
 }

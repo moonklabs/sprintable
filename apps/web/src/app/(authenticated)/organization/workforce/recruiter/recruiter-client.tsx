@@ -12,6 +12,8 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -280,7 +282,7 @@ export function WakeMethodBody({ method, path }: { method: import('@/services/re
         // 태그명(code)이 ICU 인자명(path)과 겹치면 next-intl이 인자 값을 조용히 삼킨다(콘솔
         // 에러도 없음, 실 렌더로만 잡힘) — 반드시 둘을 분리하고 둘 다 넘긴다.
         path,
-        code: (chunks) => <span className="font-mono text-[11px] break-all text-muted-foreground">{chunks}</span>,
+        code: (chunks) => <span className="font-mono text-editorial-meta break-all text-muted-foreground">{chunks}</span>,
       })}
     </>
   );
@@ -295,7 +297,7 @@ export function ConnectCliBody({ command }: { command: string }) {
     <>
       {t.rich('kitOrientingConnectBodyCli', {
         command,
-        cmd: (chunks) => <span className="font-mono text-[11px] break-all text-muted-foreground">{chunks}</span>,
+        cmd: (chunks) => <span className="font-mono text-editorial-meta break-all text-muted-foreground">{chunks}</span>,
       })}
     </>
   );
@@ -335,9 +337,9 @@ export function LiveConnectionBadge({ agentId }: { agentId: string }) {
   }, [agentId]);
 
   if (status === 'online') {
-    return <Badge variant="success" className="text-[9px]">{t('connectLiveBadgeOnline')}</Badge>;
+    return <Badge variant="success" className="text-micro">{t('connectLiveBadgeOnline')}</Badge>;
   }
-  return <Badge variant="chip" className="text-[9px]">{t('connectLiveBadgePending')}</Badge>;
+  return <Badge variant="chip" className="text-micro">{t('connectLiveBadgePending')}</Badge>;
 }
 
 // ─── 메인 컴포넌트 ───────────────────────────────────────────────────────────
@@ -601,7 +603,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
       <p className="text-sm font-semibold text-foreground">{t('runtimeQuestion')}</p>
       {!runtimeCapabilities ? (
         <div className="space-y-1">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeSupportedLabel')}</p>
+          <p className="text-micro font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeSupportedLabel')}</p>
           <div className="grid grid-cols-3 gap-2">
             {[0, 1, 2].map((i) => <Skeleton key={i} className="h-14 rounded-xl" />)}
           </div>
@@ -618,7 +620,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
               the list as before with one line and the way to install (the app's setup ① card) */}
           {bridge && foundHere.length > 0 ? (
             <div className="space-y-1" data-testid="recruiter-found-here">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <p className="text-micro font-semibold uppercase tracking-wide text-muted-foreground">
                 {t('foundHereTitle')}<span className="ml-1 normal-case tracking-normal" data-testid="recruiter-found-here-device">· {bridge.device.name}</span>
               </p>
               <div className="grid grid-cols-3 gap-2">
@@ -640,8 +642,8 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                     >
                       {sel && <Check className="absolute right-2 top-2 h-3.5 w-3.5 text-primary" aria-hidden />}
                       <span className="text-xs font-bold text-foreground">{runtimeDisplayName(cap)}</span>
-                      <span className="text-[10px] text-muted-foreground">{t('foundHereVersion', { version: found.version })}</span>
-                      <span className="w-full truncate font-mono text-[10px] text-muted-foreground" title={found.executable}>{found.executable}</span>
+                      <span className="text-micro text-muted-foreground">{t('foundHereVersion', { version: found.version })}</span>
+                      <span className="w-full truncate font-mono text-micro text-muted-foreground" title={found.executable}>{found.executable}</span>
                     </Button>
                   );
                 })}
@@ -658,7 +660,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
             </p>
           ) : null}
           <div className="space-y-1">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeSupportedLabel')}</p>
+            <p className="text-micro font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeSupportedLabel')}</p>
             <div className="grid grid-cols-3 gap-2">
               {displayedSupportedRuntimes.filter((rc) => !foundSlugs.has(rc.slug)).map((rc) => {
                 const sel = runtime === rc.slug;
@@ -680,14 +682,14 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                       {rc.icon ?? firstGraphemes(runtimeDisplayName(rc), 1).toUpperCase()}
                     </span>
                     <span className="text-xs font-bold text-foreground">{runtimeDisplayName(rc)}</span>
-                    {rc.tier === 'experimental' && <Badge variant="info" className="text-[9px]">{t('runtimeExperimental')}</Badge>}
+                    {rc.tier === 'experimental' && <Badge variant="info" className="text-micro">{t('runtimeExperimental')}</Badge>}
                   </button>
                 );
               })}
             </div>
           </div>
           <div className="space-y-1">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeComingSoonLabel')}</p>
+            <p className="text-micro font-semibold uppercase tracking-wide text-muted-foreground">{t('runtimeComingSoonLabel')}</p>
             <div className="grid grid-cols-3 gap-2">
               {comingSoonRuntimes.map((rc) => (
                 <button key={rc.slug} type="button" disabled className="flex cursor-not-allowed flex-col items-start gap-1 rounded-xl border border-border bg-muted/40 p-2.5 text-left opacity-55">
@@ -695,7 +697,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                     {rc.icon ?? firstGraphemes(runtimeDisplayName(rc), 1).toUpperCase()}
                   </span>
                   <span className="text-xs font-bold text-foreground">{runtimeDisplayName(rc)}</span>
-                  <Badge variant="chip" className="text-[9px]">{t('runtimeComingSoonBadge')}</Badge>
+                  <Badge variant="chip" className="text-micro">{t('runtimeComingSoonBadge')}</Badge>
                 </button>
               ))}
             </div>
@@ -1201,12 +1203,12 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   {/* 선생님 피드백(2026-07-07, ~110직군): 플랫 리스트 탐색 불가 — 검색 + division 그루핑. */}
                   <div className="relative">
                     <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
-                    <input
+                    <Input
                       type="text"
                       value={roleQuery}
                       onChange={(e) => setRoleQuery(e.target.value)}
                       placeholder={t('roleSearchPlaceholder')}
-                      className="w-full rounded-lg border border-border bg-card py-2 pl-8 pr-3 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                      className="bg-card pl-8 dark:bg-card"
                     />
                   </div>
                   {/* 다음 버튼이 긴 리스트 하단에 묻히지 않도록 리스트 자체를 bounded-height 스크롤로 격리 —
@@ -1216,7 +1218,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                       <p className="py-6 text-center text-sm text-muted-foreground">{t('roleSearchEmpty')}</p>
                     ) : roleGroups.map((group) => (
                       <div key={group.label} className="space-y-2">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{group.label}</p>
+                        <p className="text-micro font-semibold uppercase tracking-wide text-muted-foreground">{group.label}</p>
                         <div className="grid gap-3 sm:grid-cols-2">
                           {group.roles.map((role) => {
                             const Icon = CATEGORY_ICON[role.category] ?? Briefcase;
@@ -1239,7 +1241,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                                 {role.description && <span className="text-xs leading-relaxed text-muted-foreground">{role.description}</span>}
                                 <span className="flex flex-wrap gap-1 pt-0.5">
                                   {role.default_tool_groups.map((g) => (
-                                    <span key={g} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                                    <span key={g} className="rounded bg-muted px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
                                       {tAgents.has(`toolPermissions.groups.${g}`) ? tAgents(`toolPermissions.groups.${g}`) : g}
                                     </span>
                                   ))}
@@ -1271,7 +1273,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 </div>
                 {equipSkip
                   ? <CheckCircle2 className="size-5 shrink-0 text-primary" aria-hidden />
-                  : <Badge variant="chip" className="shrink-0 text-[10px]">{t('equipSkipBadge')}</Badge>}
+                  : <Badge variant="chip" className="shrink-0 text-micro">{t('equipSkipBadge')}</Badge>}
               </button>
 
               <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
@@ -1344,24 +1346,24 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 <div className="space-y-3 rounded-xl border border-border bg-muted/20 p-3">
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-muted-foreground">{tSettings('agentNameLabel')}</label>
-                    <input
+                    <Input
                       type="text"
                       value={equipName}
                       onChange={(e) => setEquipName(e.target.value)}
                       placeholder={tSettings('agentNamePlaceholder')}
-                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                      className="bg-card dark:bg-card"
                     />
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-muted-foreground">{tSettings('agentRoleLabel')}</label>
-                    <select
+                    <Select
                       value={equipRole}
                       onChange={(e) => setEquipRole(e.target.value as 'member' | 'admin')}
-                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                      className="bg-card dark:bg-card"
                     >
                       <option value="member">{tSettings('agentRoleMember')}</option>
                       <option value="admin">{tSettings('agentRoleAdmin')}</option>
-                    </select>
+                    </Select>
                   </div>
                   {/* story #2433(B) — "역할 없이(키만)"도 STEP3(실행환경)이 스킵돼 런타임을 고를
                       길이 없었다(equip-skip은 STEP2 이후 바로 생성). 키만 받는 사람도 런타임은
@@ -1403,7 +1405,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-foreground">{t('agentQuestion')}</p>
                 <div className="space-y-2.5 rounded-xl border border-info-border bg-info-tint/40 p-3">
-                  <div className="flex w-fit rounded-lg border border-border bg-muted p-[3px]">
+                  <div className="flex w-fit rounded-lg border border-border bg-muted p-1">
                     <button
                       type="button"
                       onClick={() => setAgentMode('new')}
@@ -1420,15 +1422,18 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                     </button>
                   </div>
                   {agentMode === 'new' ? (
-                    <input
+                    <Input
                       type="text"
                       value={newAgentName}
                       onChange={(e) => setNewAgentName(e.target.value)}
                       placeholder={suggestedAgentName || t('agentNamePlaceholder')}
-                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                      // 이 칸은 info-tint 조상 안이라 불투명 면(bg-card)이 흐린 안내 글자를 받친다(dark:도 불투명 — 부품의 dark:bg-input/30이 덮지 않게).
+                      // placeholder:text-muted-foreground는 부품이 이미 내지만, 정적 가드(verify-no-muted-on-tint)는 부품 안의 클래스를 못 봐서 불투명 경계를 읽도록 여기에도 적는다.
+                      className="bg-card placeholder:text-muted-foreground dark:bg-card"
                     />
                   ) : (
-                    <select
+                    <Select
+                      className="bg-card dark:bg-card"
                       value={selectedExistingAgentId}
                       onChange={(e) => {
                         setSelectedExistingAgentId(e.target.value);
@@ -1437,11 +1442,10 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                         // 충분 — 다음 recruit 클릭이 새 agentId로 다시 실측한다).
                         setExistingKeyRotateWarning(null);
                       }}
-                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                     >
                       <option value="">{t('agentSelectPlaceholder')}</option>
                       {((agents) => { const labels = memberOptionLabels(agents.map((a) => ({ ...a, type: 'agent' })), tc); return agents.map((a) => <option key={a.id} value={a.id}>{labels.get(a.id)}</option>); })(existingAgents ?? [])}
-                    </select>
+                    </Select>
                   )}
                   <p className="flex items-start gap-1.5 text-xs text-info">
                     <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
@@ -1557,7 +1561,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                       <p>{tSettings('agentFakechatWebhookOffNote')}</p>
                       <p>
                         {tSettings.rich('agentFakechatSuccessCheck', {
-                          code: (chunks) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">{chunks}</code>,
+                          code: (chunks) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-editorial-meta text-foreground">{chunks}</code>,
                         })}
                       </p>
                     </div>
@@ -1609,7 +1613,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 <p className="text-sm font-bold text-foreground">{t('kitOrientingTitle', { role: selectedRole.name })}</p>
                 <div className="grid gap-2 sm:grid-cols-3">
                   <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">1</span>
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-micro font-bold text-primary">1</span>
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-1">
                         <p className="text-xs font-bold text-foreground">{t('kitOrientingConnectLabel')}</p>
@@ -1618,12 +1622,12 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                             유효로 저장한 것만 확認됐을 뿐이라 neutral(chip) — success 색을 쓰면
                             A-3 거짓성공의 화면판이 된다(PO+유나 2026-08-05 정정). */}
                         {connectConfirm.tier === 'confirmed' && (
-                          <Badge variant="success" className="text-[9px]">
+                          <Badge variant="success" className="text-micro">
                             {t('connectConfirmedBadge', { date: connectConfirm.measuredAt ?? '' })}
                           </Badge>
                         )}
                         {connectConfirm.tier === 'config-verified' && (
-                          <Badge variant="chip" className="text-[9px]">{t('connectConfigVerifiedBadge')}</Badge>
+                          <Badge variant="chip" className="text-micro">{t('connectConfigVerifiedBadge')}</Badge>
                         )}
                         {/* story #2657 — 위 connectConfirm 배지(런타임-클래스 과거 실측)와 별개
                             축: "이 에이전트" 지금 상태(라이브 presence). 병합 금지, 나란히. */}
@@ -1643,7 +1647,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                       여기서 말한다. 매핑에 없는(아직 등재 안 된) 런타임이면 "아직 없다"를
                       명시적으로 말한다 — 침묵하지 않는다(§2 처방 그대로). */}
                   <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">2</span>
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-micro font-bold text-primary">2</span>
                     <div className="min-w-0">
                       <p className="text-xs font-bold text-foreground">{t('kitOrientingWakeLabel')}</p>
                       {/* story #2434(유나양 규격 v1, 2026-08-03) — "실행하세요"류 지시형은 그 경로를
@@ -1689,7 +1693,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                     </div>
                   </div>
                   <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2.5">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">3</span>
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-micro font-bold text-primary">3</span>
                     <div className="min-w-0">
                       <p className="text-xs font-bold text-foreground">{t('kitOrientingGuideLabel')}</p>
                       {/* story #2648(boss 08-14 재현·PO 특定) — guideFilename(SPRINTABLE_ONBOARDING.md)이
@@ -1785,7 +1789,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 <div className="flex flex-wrap items-center gap-1.5 text-xs">
                   <Badge variant="success">{t('scopeCore')}</Badge>
                   {recruitResult.tool_allowlist.map((g) => (
-                    <span key={g} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                    <span key={g} className="rounded bg-muted px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
                       {tAgents.has(`toolPermissions.groups.${g}`) ? tAgents(`toolPermissions.groups.${g}`) : g}
                     </span>
                   ))}
@@ -1793,8 +1797,8 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5 text-xs">
                   <Badge variant="destructive">{t('scopeBlocked')}</Badge>
-                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground line-through opacity-60">admin</span>
-                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground line-through opacity-60">destructive</span>
+                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-micro text-muted-foreground line-through opacity-60">admin</span>
+                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-micro text-muted-foreground line-through opacity-60">destructive</span>
                   <span className="text-destructive">{t('scopeBlockedNote')}</span>
                 </div>
 

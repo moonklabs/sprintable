@@ -291,7 +291,10 @@ async def test_create_project_access_rejects_inactive_agent_target():
             auth = MagicMock()
             auth.user_id = str(uuid.uuid4())
             auth.claims = {"app_metadata": {"org_id": str(org)}}
-            with patch("app.routers.project_access._require_owner_or_admin", AsyncMock(return_value=None)):
+            # story 4832: «who may do it» is asked by the route AND inside the grant function (one rule, `can_manage_project_access`) — this test is about
+            # the active-agent check, so both are stood in for (the access route's own parity test: test_4832_move_adds_to_team_realdb)
+            with patch("app.routers.project_access._require_owner_or_admin", AsyncMock(return_value=None)), \
+                    patch("app.services.project_agent_grant.can_manage_project_access", AsyncMock(return_value=True)):
                 from fastapi import HTTPException
                 with pytest.raises(HTTPException) as exc_info:
                     await create_project_access(

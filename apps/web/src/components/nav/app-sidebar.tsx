@@ -11,7 +11,7 @@ import { CommandPalette } from '@/components/command-palette/command-palette';
 import { useCommandPalette } from '@/components/command-palette/command-palette-context';
 import { ProfileMenu } from '@/components/nav/profile-menu';
 import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosure';
-import { NewProjectEntry } from '@/components/nav/new-project-entry';
+import { MoveAgentsEntry, NewProjectEntry } from '@/components/nav/new-project-entry';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
 import { Button } from '@/components/ui/button';
 import { fetchDesignatedPendingCount, subscribeDesignatedPendingCount } from '@/lib/designated-pending-count-client';
@@ -110,7 +110,7 @@ function KbdHint({ children }: { children: React.ReactNode }) {
     // 3826-pre — text-sidebar-foreground/60(알파 합성)이 v3 ink 재조정 후 실 브라우저
     // 대비 미달(#767573/#fbfaf9 = 4.43:1)로 바뀌었다. solid text-muted-foreground(=
     // --proof-ink-3, AA 조정 済)로 교체 — active 상태는 알파 대신 solid 전체 강조.
-    <kbd className="hidden rounded border border-sidebar-border/60 bg-sidebar-accent/40 px-1.5 py-0 font-mono text-[10px] font-medium text-muted-foreground group-data-[active=true]/menu-button:text-sidebar-foreground sm:inline-flex">
+    <kbd className="hidden rounded border border-sidebar-border/60 bg-sidebar-accent/40 px-1.5 py-0 font-mono text-micro font-medium text-muted-foreground group-data-[active=true]/menu-button:text-sidebar-foreground sm:inline-flex">
       {children}
     </kbd>
   );
@@ -129,7 +129,7 @@ function KbdHint({ children }: { children: React.ReactNode }) {
 function ScopeMark({ children }: { children: React.ReactNode }) {
   return (
     // 3826-pre — KbdHint와 동일 사유(알파 합성 → solid muted 교체).
-    <span className="text-[10px] font-medium text-muted-foreground group-data-[active=true]/menu-button:text-sidebar-foreground">
+    <span className="text-micro font-medium text-muted-foreground group-data-[active=true]/menu-button:text-sidebar-foreground">
       {children}
     </span>
   );
@@ -356,16 +356,16 @@ export function AppSidebar({
         // 헤어라인+elev 채택, bg-proof-blue-soft 채움 폐지. hover는 이제 solid 전환 대신
         // bg-sidebar-accent(기존 다른 nav 항목의 hover 관례와 정합) — AA 대비 이슈였던
         // hover:text-white/sidebar-primary-foreground 분기 자체가 불필요해졌다.
-        className="flex items-center gap-2 rounded-[9px] border border-proof-blue bg-transparent px-2.5 py-2 text-proof-blue shadow-[var(--elev-card)] transition hover:bg-sidebar-accent"
+        className="flex items-center gap-2 rounded-xl border border-proof-blue bg-transparent px-2.5 py-2 text-proof-blue shadow-[var(--elev-card)] transition hover:bg-sidebar-accent"
       >
         <MessageSquare className="size-[18px] shrink-0" />
-        <span className="flex-1 truncate text-[13px] font-bold">{t(chatCenterItem.labelKey)}</span>
+        <span className="flex-1 truncate text-editorial-ui font-bold">{t(chatCenterItem.labelKey)}</span>
         {/* text-white 대신 sidebar-primary-foreground(다크에서 근흑색 — 수동 대비 확認,
             4.61 라이트·4.81 다크는 카드 톤이고 이 자리는 solid pill이라 별도 확認 필요했다:
             bg-proof-blue+text-white는 다크에서 3.21로 AA 미달. sidebar-primary-foreground는
             sidebar-primary(=proof-blue)와 짝으로 설계된 토큰이라 이 자리에 맞다). */}
         {chatUnreadTotal > 0 ? (
-          <span className="shrink-0 rounded-full bg-sidebar-primary px-1.5 py-0.5 text-[9px] font-bold text-sidebar-primary-foreground">
+          <span className="shrink-0 rounded-full bg-sidebar-primary px-1.5 py-0.5 text-micro font-bold text-sidebar-primary-foreground">
             {chatUnreadTotal > 99 ? '99+' : chatUnreadTotal}
           </span>
         ) : null}
@@ -386,6 +386,8 @@ export function AppSidebar({
         />
         {/* story 4713: inside the desktop app «+ 새 프로젝트» is one line right here, outside the switcher's menu (a browser: nothing) */}
         <NewProjectEntry className="mt-1 h-8 min-h-0 w-full justify-start gap-2 px-2.5 text-sm text-muted-foreground" />
+        {/* story 4832: the door for this organization's agents → this computer, named by what it does (not behind «새 프로젝트») */}
+        <MoveAgentsEntry className="h-8 min-h-0 w-full justify-start gap-2 px-2.5 text-sm text-muted-foreground" />
         {/* 3826-pre — text-sidebar-foreground/60(알파 합성) → solid text-muted-foreground.
             v3 ink 재조정 후 실 대비 미달 실측(#767573/#fbfaf9=4.43:1·⌘K kbd
             #747371/#f7f6f3=4.37:1). */}
@@ -397,7 +399,7 @@ export function AppSidebar({
         >
           <Search className="size-4" />
           <span className="flex-1 truncate">{t('search')}</span>
-          <kbd className="hidden rounded border border-sidebar-border/60 bg-sidebar-accent/40 px-1.5 py-0 font-mono text-[10px] font-medium text-muted-foreground sm:inline-flex">
+          <kbd className="hidden rounded border border-sidebar-border/60 bg-sidebar-accent/40 px-1.5 py-0 font-mono text-micro font-medium text-muted-foreground sm:inline-flex">
             ⌘K
           </kbd>
         </button>
@@ -562,21 +564,21 @@ export function AppSidebar({
                 <SidebarGroupContent>
                   {/* story #3855 AC2 — 캡션 1줄(§⑤ 해요체·「이사 안내판」 취지). 링크·머리말
                       둘 다 아닌 순수 안내문이라 SidebarMenu 밖, 첫 그룹 위에 한 번만. */}
-                  <p className="px-[9px] pt-px pb-1 text-[11.5px] text-muted-foreground" data-testid="legacy-moving-caption">
+                  <p className="px-2 pt-px pb-1 text-editorial-meta text-muted-foreground" data-testid="legacy-moving-caption">
                     {t('moreLegacyMovingCaption')}
                   </p>
                   {legacyGroups.map((group, groupIndex) => (
                     <div key={group.target} className="space-y-0.5" data-legacy-group={group.target}>
                       {/* 픽셀 커밋(페드루 PO 판정 2026-09-14 07:34Z, 유나 시안 77731332
                           getComputedStyle 대조) — 묶음 사이 구분선(border 토큰) 1px·margin
-                          5px 8px 4px, 첫 그룹 앞엔 없음. */}
-                      {groupIndex > 0 ? <div className="mx-2 mt-[5px] mb-1 h-px bg-border" /> : null}
+                          4px 8px 4px(story 4831: 위 5px를 눈금의 4px로), 첫 그룹 앞엔 없음. */}
+                      {groupIndex > 0 ? <div className="mx-2 mt-1 mb-1 h-px bg-border" /> : null}
                       {/* AC2 — 머리말은 링크·버튼이 아니다(순수 텍스트, 클릭 불가). 시안이
                           지정한 안내 문구(머리말 옆 회색 note, 예: 「만드는 곳(일)…」)는 PO가
                           §⑤ 내부 낱말·사이드바 폭 이유로 명시 제외했다 — 이름+개수 pill만. */}
-                      <p className="flex items-baseline gap-1.5 px-2 pt-0.5 pb-px text-[11px] font-bold tracking-[.03em] text-muted-foreground">
+                      <p className="flex items-baseline gap-1.5 px-2 pt-0.5 pb-px text-editorial-meta font-bold tracking-[.03em] text-muted-foreground">
                         <span>{t(group.labelKey)}</span>
-                        <span className="rounded-full bg-muted px-1.5 text-[10px] font-bold leading-[15px] text-muted-foreground">
+                        <span className="rounded-full bg-muted px-1.5 text-micro font-bold leading-[15px] text-muted-foreground">
                           {group.items.length}
                         </span>
                       </p>

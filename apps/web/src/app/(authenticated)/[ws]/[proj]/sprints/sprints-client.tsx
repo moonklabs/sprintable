@@ -7,6 +7,7 @@ import { Plus, X, Play, StopCircle, ChevronRight, Trash2, AlertTriangle, Target,
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { WorkspaceFrameLoading } from '@/components/workspace/workspace-frame-loading';
@@ -23,9 +24,9 @@ import StandupPage from '../standup/standup-client';
 function SprintCycleBar({ startLabel, endLabel }: { startLabel: string; endLabel: string }) {
   return (
     <div className="flex items-center gap-2 text-muted-foreground" aria-hidden="true">
-      <span className="text-[10px] leading-none">{startLabel}</span>
+      <span className="text-micro leading-none">{startLabel}</span>
       <div className="h-2 w-24 rounded-full bg-gradient-to-r from-info/60 to-info/20" />
-      <span className="text-[10px] leading-none">{endLabel}</span>
+      <span className="text-micro leading-none">{endLabel}</span>
     </div>
   );
 }
@@ -253,34 +254,34 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
         <div className="space-y-3">
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">{t('sprintTitle')}</label>
-            <input
+            <Input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               required
               placeholder={t('sprintTitlePlaceholder')}
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              className="h-auto bg-background dark:bg-background"
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">{t('startDate')}</label>
-              <input
+              <Input
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
                 required
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="h-auto bg-background dark:bg-background"
               />
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">{t('endDate')}</label>
-              <input
+              <Input
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
                 required
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="h-auto bg-background dark:bg-background"
               />
             </div>
           </div>
@@ -289,12 +290,12 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
             <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><Target className="size-3.5" />{t('planSection')}</p>
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">{t('goalLabel')}</label>
-              <input
+              <Input
                 type="text"
                 value={goal}
                 onChange={(e) => setGoal(e.target.value)}
                 placeholder={t('goalPlaceholder')}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="h-auto bg-background dark:bg-background"
               />
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -303,15 +304,15 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
                   <Clock className="size-3.5" />{t('capacityLabel')}
                 </label>
                 <div className="relative">
-                  <input
+                  <Input
                     type="number"
                     min="0"
                     value={capacity}
                     onChange={(e) => setCapacity(e.target.value)}
                     placeholder="0"
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2 pr-8 text-base lg:text-sm text-foreground tabular-nums placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                    className="h-auto pr-8 tabular-nums bg-background dark:bg-background"
                   />
-                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">SP</span>
+                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-micro text-muted-foreground">SP</span>
                 </div>
               </div>
               <div className="space-y-1">
@@ -319,15 +320,15 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
                   <Users className="size-3.5" />{t('teamSizeLabel')}
                 </label>
                 <div className="relative">
-                  <input
+                  <Input
                     type="number"
                     min="1"
                     value={teamSize}
                     onChange={(e) => setTeamSize(e.target.value)}
                     placeholder="0"
-                    className="w-full rounded-xl border border-border bg-background px-3 py-2 pr-6 text-base lg:text-sm text-foreground tabular-nums placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                    className="h-auto pr-6 tabular-nums bg-background dark:bg-background"
                   />
-                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">{t('personCountUnit')}</span>
+                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-micro text-muted-foreground">{t('personCountUnit')}</span>
                 </div>
               </div>
             </div>
@@ -347,9 +348,9 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
 
           {error ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
           <div className="flex items-center justify-between gap-2 pt-1">
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-editorial-meta text-muted-foreground">
               {declaredCount > 0 ? (
-                <span className="flex items-center gap-1"><Badge variant="success" className="text-[9px]">{t('declareCount', { count: declaredCount })}</Badge></span>
+                <span className="flex items-center gap-1"><Badge variant="success" className="text-micro">{t('declareCount', { count: declaredCount })}</Badge></span>
               ) : t('activateBlocked')}
             </span>
             <div className="flex gap-2">
@@ -959,7 +960,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
             ✦ {t('declareGateQuestion')}
           </p>
-          <p className="text-[11px] leading-snug text-muted-foreground">{t('declareGateHint')}</p>
+          <p className="text-editorial-meta leading-snug text-muted-foreground">{t('declareGateHint')}</p>
           {!addingHypothesis ? (
             <Button size="sm" variant="outline" onClick={() => setAddingHypothesis(true)}>{t('declareAddCta')}</Button>
           ) : (
@@ -1013,15 +1014,15 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           <div className="grid grid-cols-3 gap-2">
             <div className="rounded-md border border-border bg-muted/30 p-2 text-center">
               <p className="text-xl font-bold text-foreground">{burndown.completion_pct}%</p>
-              <p className="text-[10px] text-muted-foreground">{t('completionRate')}</p>
+              <p className="text-micro text-muted-foreground">{t('completionRate')}</p>
             </div>
             <div className="rounded-md border border-border bg-muted/30 p-2 text-center">
               <p className="text-xl font-bold text-foreground">{burndown.done_points}<span className="text-xs text-muted-foreground">/{burndown.total_points}</span></p>
-              <p className="text-[10px] text-muted-foreground">SP</p>
+              <p className="text-micro text-muted-foreground">SP</p>
             </div>
             <div className="rounded-md border border-border bg-muted/30 p-2 text-center">
               <p className="text-xl font-bold text-foreground">{burndown.done_count}<span className="text-xs text-muted-foreground">/{burndown.stories_count}</span></p>
-              <p className="text-[10px] text-muted-foreground">{t('stories')}</p>
+              <p className="text-micro text-muted-foreground">{t('stories')}</p>
             </div>
           </div>
           {burndown.ideal_line.length > 0 ? (

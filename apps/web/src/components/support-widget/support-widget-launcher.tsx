@@ -14,6 +14,14 @@ import { leaveMultilineFieldOnEsc } from '@/lib/inner-layer-esc';
 const PANEL_ID = 'support-widget-panel';
 
 /**
+ * story 4853 (phone · point 1) — while the launcher button is on screen, `<html>` carries this attribute, so a screen that the button floats over can leave room for it
+ * with a CSS variant (`[:root[data-support-launcher]_&]:…`) and no React coupling: the chat list's rows keep their time column clear of the round button at phone width
+ * (measured on the phone app: «17 minutes ago» was hidden behind it). Only while the button is drawn — a person who finished the onboarding, the mobile chat room and the
+ * settings pages never get the room.
+ */
+export const SUPPORT_LAUNCHER_ATTR = 'data-support-launcher';
+
+/**
  * story #3274(지원v1·후속, 선생님 확定 2026-09-01 — "좌하단은 말이 안 됨"·"상시 플로팅
  * 자체가 방해") — 상시 노출 폐기. 새 모델: **온보딩 단계(activation 미완주)에서만** 이
  * 플로팅이 뜬다. 완주 후 일반 진입은 설정 > 문의 탭(settings/page.tsx `support` 탭 —
@@ -100,6 +108,15 @@ export function SupportWidgetLauncher() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [open]);
 
+  // story 4853 — the one place that says «the button is drawn»: the early return below and the `<html>` mark read the same value (they can not drift apart).
+  const launcherShown = !(allComplete || !activationState || isMobileChatDetailRoute || isSettingsRoute);
+  useEffect(() => {
+    if (!launcherShown) return undefined;
+    const html = document.documentElement;
+    html.setAttribute(SUPPORT_LAUNCHER_ATTR, '');
+    return () => html.removeAttribute(SUPPORT_LAUNCHER_ATTR);
+  }, [launcherShown]);
+
   // 모든 hook 호출 뒤에만 조건부 반환한다(hook 호출 순서는 렌더마다 불변이어야 하는 React
   // 규칙) — 온보딩 완주 후엔 이 컴포넌트 자체가 통째로 사라진다(story #3274 새 모델, AC④).
   // 모바일 채팅-상세에서도 통째로 숨긴다(패널이 열려있었다면 그것도 함께 사라짐 — 겹치는
@@ -109,7 +126,7 @@ export function SupportWidgetLauncher() {
   // 빠져 있어 fetch 실패/로딩 중(allComplete=false, state=null)에 배너는 숨는데 런처만
   // fail-open으로 뜨는 비대칭이 있었다("배너 ⟺ 플로팅" 불변식 위반). banner와 정확히
   // 대칭시킨다 — 로딩/실패 중엔 둘 다 보수적으로 숨는다(PO 확認 정책).
-  if (allComplete || !activationState || isMobileChatDetailRoute || isSettingsRoute) return null;
+  if (!launcherShown) return null;
 
   return (
     <>

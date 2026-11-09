@@ -1058,7 +1058,7 @@ describe('ApprovalsQueue', () => {
       mockFetches([highRiskActionable({ id: 'g-sig-evidence' })], []);
       await mount();
       const dialog = await openSignatureDialog();
-      const checkbox = dialog.querySelector('input[type="checkbox"]') as HTMLInputElement;
+      const checkbox = dialog.querySelector('[role="checkbox"]') as HTMLElement;
       await act(async () => {
         checkbox.click();
       });
@@ -1077,7 +1077,7 @@ describe('ApprovalsQueue', () => {
       const calls = mockFetches([highRiskActionable({ id: 'g-sig-approve' })], []);
       await mount();
       const dialog = await openSignatureDialog();
-      const checkbox = dialog.querySelector('input[type="checkbox"]') as HTMLInputElement;
+      const checkbox = dialog.querySelector('[role="checkbox"]') as HTMLElement;
       await act(async () => { checkbox.click(); });
       const textarea = dialog.querySelector('textarea') as HTMLTextAreaElement;
       await act(async () => {
@@ -1384,7 +1384,7 @@ describe('ApprovalsQueue — story #3113 결정 게이트(agent_decision_request
     );
     await act(async () => { expandBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
-    const radios = Array.from(container.querySelectorAll('input[type="radio"]'));
+    const radios = Array.from(container.querySelectorAll('[role="radio"]'));
     expect(radios).toHaveLength(3);
     await act(async () => { radios[1]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
@@ -1484,7 +1484,7 @@ describe('ApprovalsQueue — 레시피 발행 게이트 본 초안 버전 (story
     const reviewBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateReviewDraftToApprove));
     await act(async () => { reviewBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     let dialog = document.body.querySelector('[data-slot="dialog-content"]')!;
-    await act(async () => { (dialog.querySelector('input[type="checkbox"]') as HTMLInputElement).click(); });
+    await act(async () => { (dialog.querySelector('[role="checkbox"]') as HTMLElement).click(); });
     const textarea = dialog.querySelector('textarea') as HTMLTextAreaElement;
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
@@ -1500,7 +1500,7 @@ describe('ApprovalsQueue — 레시피 발행 게이트 본 초안 버전 (story
     expect(rowFetches).toBe(1);
     dialog = document.body.querySelector('[data-slot="dialog-content"]')!;
     expect(dialog.querySelector('[data-testid="linked-site-draft"]')?.textContent).toContain('제목 v2');
-    expect((dialog.querySelector('input[type="checkbox"]') as HTMLInputElement).checked).toBe(false);
+    expect((dialog.querySelector('[role="checkbox"]') as HTMLElement).getAttribute('aria-checked')).toBe('false');
   });
 });
 

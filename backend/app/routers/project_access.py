@@ -62,10 +62,8 @@ async def _require_owner_or_admin(
     row = result.first()
     if row is None:
         raise HTTPException(status_code=404, detail="Project not found")
-    from app.services.project_auth import has_project_role
-    if not await has_project_role(
-        session, uuid.UUID(auth.user_id), project_id, min_role="admin"
-    ):
+    from app.services.project_auth import can_manage_project_access
+    if not await can_manage_project_access(session, uuid.UUID(auth.user_id), project_id):
         raise HTTPException(status_code=403, detail="owner or admin role required")
 
 
@@ -159,46 +157,27 @@ async def create_project_access(
         )
 
     if body.member_id is not None:
-        # 18073a52: 에이전트 grant — member_id(=agent members.id) 앵커, org_member_id 없음.
-        # 대상이 프로젝트 org 의 활성 에이전트인지 검증(ensure_human_member skip).
-        from sqlalchemy import text
-        # story #2953: 에러 문구가 "active agent"라 말하면서 실제론 deleted_at만 봐 비활성
-        # (is_active=false·미삭제) 에이전트에도 grant를 새로 만들 수 있던 라벨-실체 불일치.
-        agent_ok = (await session.execute(
-            text(
-                "SELECT 1 FROM members m JOIN projects p ON p.id = :pid "
-                "WHERE m.id = :mid AND m.type = 'agent' AND m.deleted_at IS NULL "
-                "AND m.is_active = true AND m.org_id = p.org_id LIMIT 1"
-            ),
-            {"pid": str(project_id), "mid": str(body.member_id)},
-        )).scalar_one_or_none()
-        if agent_ok is None:
-            raise HTTPException(
-                status_code=400, detail="member_id must be an active agent in the project's org"
+        # 18073a52: agent grant — member_id (= the agent's members.id) is the anchor, no org_member_id. story 4832: the checks and the write are
+        # `grant_agent_project_access` (one function for every path that puts an agent on a team); the route commits right after
+        from app.services.project_agent_grant import (
+            AGENT_INVALID, ALREADY_GRANTED, NOT_ALLOWED, PROJECT_NOT_FOUND, AgentGrantRefused, grant_agent_project_access,
+        )
+        try:
+            record = await grant_agent_project_access(
+                session, project_id=project_id, member_id=body.member_id, by_user_id=uuid.UUID(auth.user_id),
             )
-        # story #3999 — 예약 멤버(「시스템 발행」) 대상 grant 생성을 원자적으로 거부(§3994/§3997
-        # FE 진입점은 이미 막았으나, 직접 API 호출 우회 방어는 서버가 정본).
-        await assert_member_id_not_system_publisher(session, body.member_id)
-        existing = await session.execute(
-            select(ProjectAccess).where(
-                ProjectAccess.project_id == project_id,
-                ProjectAccess.member_id == body.member_id,
-            )
-        )
-        if existing.scalar_one_or_none() is not None:
-            raise HTTPException(status_code=409, detail="Access record already exists")
-        record = ProjectAccess(
-            project_id=project_id,
-            org_member_id=None,
-            member_id=body.member_id,
-            permission=body.permission,
-        )
-        # S4 (org-level 멀티프로젝트): grant 확장 시 per-project 런타임(agent_project_profiles)도
-        # 멱등 생성 — 안 하면 뷰 branch3(런타임 NULL)로만 떠 presence/런타임 write 가 0행 무음 누락.
-        from app.services.agent_anchor_sync import ensure_agent_project_profile
-        await ensure_agent_project_profile(
-            session, member_id=body.member_id, project_id=project_id
-        )
+        except AgentGrantRefused as e:
+            if e.reason == PROJECT_NOT_FOUND:
+                raise HTTPException(status_code=404, detail="Project not found") from None
+            if e.reason == NOT_ALLOWED:
+                raise HTTPException(status_code=403, detail="owner or admin role required") from None
+            if e.reason == AGENT_INVALID:
+                raise HTTPException(
+                    status_code=400, detail="member_id must be an active agent in the project's org"
+                ) from None
+            if e.reason == ALREADY_GRANTED:
+                raise HTTPException(status_code=409, detail="Access record already exists") from None
+            raise
     else:
         # E-SECURITY SEC-S8(story 83ea3d6a) J — 까심 전수스윕 CRITICAL: 에이전트 분기는
         # target agent의 org가 project org와 일치하는지 검증하나(`m.org_id = p.org_id`), 휴먼
@@ -239,7 +218,8 @@ async def create_project_access(
             permission=body.permission,
             member_id=body.org_member_id if member_ok else None,
         )
-    session.add(record)
+    if body.member_id is None:
+        session.add(record)
     await session.commit()
     await session.refresh(record)
     return ProjectAccessResponse.model_validate(record)

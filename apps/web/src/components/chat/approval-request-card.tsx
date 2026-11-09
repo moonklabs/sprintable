@@ -297,7 +297,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
   if (state.kind !== 'ready') {
     return (
       <div className="min-w-0 max-w-full rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">
-        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+        <div className="mb-1.5 flex items-center gap-1.5 text-editorial-meta font-medium text-foreground">
           <FileText className="h-3 w-3" aria-hidden />
           {t('approvalRequestLabel')}
         </div>
@@ -642,13 +642,13 @@ function ApprovalRequestBody({
             <p className="text-xs font-medium text-foreground">{t('approvalRequestEscalationOrg', { orgName: escalationOrgName })}</p>
           ) : null}
           {escalationReason ? (
-            <p className="text-[11px] text-muted-foreground">{t('approvalRequestEscalationReason', { reason: escalationReason })}</p>
+            <p className="text-editorial-meta text-muted-foreground">{t('approvalRequestEscalationReason', { reason: escalationReason })}</p>
           ) : null}
           {escalationDetail ? (
             <p className="text-xs text-foreground">{escalationDetail}</p>
           ) : null}
           {escalationSummary ? (
-            <p className="text-[11px] text-muted-foreground [white-space:pre-wrap]">{escalationSummary}</p>
+            <p className="text-editorial-meta text-muted-foreground [white-space:pre-wrap]">{escalationSummary}</p>
           ) : null}
         </div>
       ) : null}
@@ -666,10 +666,10 @@ function ApprovalRequestBody({
             </ul>
           ) : null}
           {decisionAssumption ? (
-            <p className="text-[11px] text-muted-foreground">{t('approvalRequestAssumption', { assumption: decisionAssumption })}</p>
+            <p className="text-editorial-meta text-muted-foreground">{t('approvalRequestAssumption', { assumption: decisionAssumption })}</p>
           ) : null}
           {requesterId ? (
-            <p className="text-[11px] text-muted-foreground">{requester ? t('approvalRequestRequestedBy', { name: requester.label }) : nameSkeleton}</p>
+            <p className="text-editorial-meta text-muted-foreground">{requester ? t('approvalRequestRequestedBy', { name: requester.label }) : nameSkeleton}</p>
           ) : null}
         </div>
       ) : null}
@@ -679,7 +679,7 @@ function ApprovalRequestBody({
           그대로 남아 "이미 요청했다"는 사실을 재확인시킨다 — 3연발 클릭의 근본 처방. */}
       {gate.status === 'pending' && discussionRequested ? (
         <div className="min-w-0 rounded-lg border border-warning/30 bg-warning/8 p-2 [overflow-wrap:anywhere]">
-          <p className="text-[11px] font-medium text-warning-strong">
+          <p className="text-editorial-meta font-medium text-warning-strong">
             {/* [SID:4286] 요청자 이름을 불러오는 중이면 이름 없는 배너 문구로 선다(id 조각 0). */}
             {needsDiscussRequesterName && discussRequester !== null
               ? t(discussRequester.fallback ? 'approvalRequestDiscussionRequestedByFallback' : 'approvalRequestDiscussionRequestedBy', {
@@ -725,7 +725,7 @@ function ApprovalRequestBody({
                   gates/[id]/page.tsx의 gateDetailResolvedByStatus를 그대로 재사용(동일 개념=
                   동일 어휘, DS 원칙 — 새 키 안 만듦). */}
               {gate.resolver_id && gate.resolver_id !== currentTeamMemberId ? (
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-editorial-meta text-muted-foreground">
                   {resolver
                     ? tCage(resolver.fallback ? 'gateDetailResolvedByStatusFallback' : 'gateDetailResolvedByStatus', {
                       name: resolver.label,
@@ -736,7 +736,7 @@ function ApprovalRequestBody({
                 </p>
               ) : null}
               {gate.resolution_note ? (
-                <p className="text-[11px] text-muted-foreground">{t('approvalRequestResolutionNote', { note: gate.resolution_note })}</p>
+                <p className="text-editorial-meta text-muted-foreground">{t('approvalRequestResolutionNote', { note: gate.resolution_note })}</p>
               ) : null}
             </div>
           )}
@@ -787,7 +787,7 @@ function ApprovalRequestBody({
         // story #2091(P0)과 동일 fail-closed 규율 — can_approve=false(무권한 뷰어)는 액션을
         // 렌더하지 않는다. 고위험도 이제 챗 안에서 완결되므로(#2625) 여기 남는 유일한
         // "액션 불가" 사유는 무권한뿐이다.
-        <p className="text-[11px] text-muted-foreground">{tCage('gateReadonlyNotAuthorized')}</p>
+        <p className="text-editorial-meta text-muted-foreground">{tCage('gateReadonlyNotAuthorized')}</p>
       ) : needsFullFlow || rejectPanelOpen || signPanelOpen ? (
         // story #2975(유나양 design 판정 2026-08-24) 갭 자체발견(#2982 작업 중) — 그 블로커
         // 처방(key={SHA}로 재조회 後 evidenceViewed/reason 강제 리셋)이 gates/[id]/page.tsx
@@ -815,7 +815,7 @@ function ApprovalRequestBody({
       ) : (
         <>
           {transitionError ? (
-            <p role="alert" aria-live="assertive" className="text-[11px] text-foreground">
+            <p role="alert" aria-live="assertive" className="text-editorial-meta text-foreground">
               {tCage('gateTransitionError', { reason: transitionError })}
             </p>
           ) : null}
@@ -963,10 +963,10 @@ function DelegateApprovalControl({ gateId, onDelegated }: { gateId: string; onDe
 
   return (
     <div className="space-y-1.5">
-      {error ? <p role="alert" aria-live="assertive" className="text-[11px] text-foreground">{error}</p> : null}
+      {error ? <p role="alert" aria-live="assertive" className="text-editorial-meta text-foreground">{error}</p> : null}
       {/* story #3040 v3 AC2 — 동명 표시이름이 실재할 때만(음성 대조: 비동명 org는 렌더 0). */}
       {hasDuplicateNames ? (
-        <p role="alert" className="text-[11px] text-warning-strong">{t('approvalRequestDelegateDuplicateWarning')}</p>
+        <p role="alert" className="text-editorial-meta text-warning-strong">{t('approvalRequestDelegateDuplicateWarning')}</p>
       ) : null}
       <OperatorDropdownSelect
         value={selected}

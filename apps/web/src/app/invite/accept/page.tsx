@@ -4,6 +4,7 @@ import { getServerSession } from '@/lib/db/server';
 import { InviteAcceptClient } from './invite-accept-client';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveChatsHref } from '@/lib/nav-v3-destinations';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
 interface Props {
   searchParams: Promise<{ token?: string }>;
@@ -26,7 +27,7 @@ export default async function InviteAcceptPage({ searchParams }: Props) {
     redirect(`/login?next=${encodeURIComponent(`/invite/accept?token=${token}`)}`);
   }
 
-  const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+  const fastapiUrl = fastapiBaseUrl();
   const inviteRes = await fetch(`${fastapiUrl}/api/v2/invites/${token}`, {
     headers: { Authorization: `Bearer ${session.access_token}` },
     cache: 'no-store',

@@ -18,6 +18,8 @@ import { getEntityHref } from '@/components/chat/embed-card';
 import { parseInsightsBoardApiError } from './insights-board-error';
 import type { FollowUpCreateResponse, FollowUpKind } from './types';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 
 /**
  * story #3503 — hypothesis-resolve-dialog.tsx의 다이얼로그 골격(Dialog>DialogContent
@@ -164,13 +166,13 @@ export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }:
               <label className="text-xs font-medium text-muted-foreground" htmlFor="follow-up-title">
                 {t('followUpTitleLabel')}
               </label>
-              <input
+              <Input
                 id="follow-up-title"
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder={t('followUpTitlePlaceholder')}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="h-auto text-foreground bg-background dark:bg-background"
               />
             </div>
 
@@ -178,13 +180,13 @@ export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }:
               <label className="text-xs font-medium text-muted-foreground" htmlFor="follow-up-note">
                 {t('followUpNoteLabel')}
               </label>
-              <textarea
+              <Textarea
                 id="follow-up-note"
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 placeholder={t('followUpNotePlaceholder')}
                 rows={3}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="min-h-0 text-foreground bg-background dark:bg-background"
               />
             </div>
 

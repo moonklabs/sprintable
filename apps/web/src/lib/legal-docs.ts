@@ -1,4 +1,5 @@
 import { backendFetch } from '@/lib/backend-fetch';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 /**
  * story #2606 — 공개 법적 문서(약관/개인정보처리방침/환불정책) 서버사이드 fetch.
  *
@@ -17,7 +18,7 @@ export interface LegalDocument {
   effectiveFrom: string;
 }
 
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 /** 미발행(404) 또는 조회 실패 시 null — 페이지가 "준비 중" 상태를 렌더한다(placeholder 지어내지 않음). */
 export async function getCurrentLegalDocument(

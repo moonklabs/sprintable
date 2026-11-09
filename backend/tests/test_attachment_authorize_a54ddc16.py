@@ -27,7 +27,7 @@ def anyio_backend():
 
 async def _client(session):
     from app.main import app
-    from app.dependencies.auth import get_current_user, get_verified_org_id
+    from app.dependencies.auth import get_current_user, get_verified_org_id, get_verified_org_id_no_project_gate
     from app.dependencies.database import get_db
 
     ctx = MagicMock()
@@ -46,6 +46,7 @@ async def _client(session):
     app.dependency_overrides[get_db] = _db
     app.dependency_overrides[get_current_user] = _auth
     app.dependency_overrides[get_verified_org_id] = _org
+    app.dependency_overrides[get_verified_org_id_no_project_gate] = _org
     from httpx import ASGITransport, AsyncClient
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), app
 

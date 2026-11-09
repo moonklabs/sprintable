@@ -205,7 +205,7 @@ describe('[4534] commandOnPhone — the ends', () => {
 
   it.each([
     ['cancelled', 'cancelled'], ['biometric_required', 'biometric_required'], ['no_screen_lock', 'no_screen_lock'],
-    ['key_invalidated', 'key_invalidated'], ['not_registered', 'not_registered'], ['signed_out', 'signed_out'],
+    ['key_invalidated', 'key_invalidated'], ['no_key', 'not_paired'], ['not_registered', 'not_registered'], ['signed_out', 'signed_out'], // [SID:4834] no_key = never paired
     ['remote_control_off', 'remote_off'], ['conversation_not_found', 'conversation_not_found'],
     ['sign_failed', 'failed'], ['bad_request', 'failed'], ['not_phone_app', 'failed'], ['timeout', 'failed'],
   ])('the shell says %s → %s, nothing posted', async (code, kind) => {

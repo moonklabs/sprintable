@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Bell, BellOff, ChevronLeft, UserPlus, Pencil, Settings } from 'lucide-react';
@@ -12,6 +12,9 @@ import type { PresenceStatus } from '@/components/chat/presence-dot';
 import { AddParticipantModal } from '@/components/chat/add-participant-modal';
 import { DeliveryContractModal } from '@/components/chat/delivery-contract-modal';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { Avatar } from '@/components/shared/avatar';
 import { useDashboardContext } from '../../../dashboard/dashboard-shell';
@@ -21,6 +24,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { CHAT_API_PREFIX } from '@/lib/chat-api-prefix';
 import { participantDisplayLabel } from '@/lib/member-display';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { isImeComposing } from '@/lib/ime-composition';
 
 interface Participant {
   member_id: string;
@@ -55,6 +59,10 @@ interface ConversationMeta {
   freeResponse: boolean;
   // story #4631 C — the open flood block (agent messages paused), absent when none is open
   agentsPaused: AgentsPausedState | null;
+  // story 4847 (AC2) — the project THIS ROOM belongs to (the server's single-room answer says it). It is what the story/doc pickers, the attachments and the
+  // mention search work in — not the project the person happens to be looking at: opening a room no longer switches the current project. null = the room has none;
+  // undefined = the answer did not say (an older response without the field): not the same as «none», so nothing is asked and nothing is guessed.
+  projectId: string | null | undefined;
 }
 
 // story #2168 PR-②(오르테가 지적) — `?from=`은 사용자가 URL을 통해 조작 가능한 값이다.
@@ -98,13 +106,24 @@ export default function ConversationPage() {
   const composeText = searchParams.get('compose');
   const t = useTranslations('chats');
   const tc = useTranslations('common');
-  const { currentTeamMemberId, projectId } = useDashboardContext();
+  const { currentTeamMemberId, projectMemberships } = useDashboardContext();
   const { addToast } = useToast();
-  const [meta, setMeta] = useState<ConversationMeta | null>(null);
+  // story 4847 — this page component is REUSED when the person moves from one room to the next (the route segment only changes): what was read for another room is not this room's.
+  // Each piece of per-room state therefore says which room it is for, and an answer for another room is dropped. (The room's project is now what the pickers and the attachments
+  // work in, so a stale one would put a room's files into another room's project.)
+  const [metaRaw, setMeta] = useState<(ConversationMeta & { convId: string }) | null>(null);
+  const meta = metaRaw && metaRaw.convId === conversation_id ? metaRaw : null;
+  const conversationIdRef = useRef(conversation_id);
+  // the ref follows the route in an effect (declared before the effect that reads the room, so it is current when that one runs)
+  useEffect(() => { conversationIdRef.current = conversation_id; }, [conversation_id]);
   const [showAddParticipant, setShowAddParticipant] = useState(false);
   const [showDeliveryContract, setShowDeliveryContract] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
+  const [chosen, setChosen] = useState<{ convId: string; projectId: string } | null>(null); // story 4847 — for a room that has no project of its own
+  const chosenProjectId = chosen && chosen.convId === conversation_id ? chosen.projectId : null;
+  const [metaFailedFor, setMetaFailedFor] = useState<string | null>(null); // story 4847 — the room whose own facts could not be read (not a 403): say so and offer to read them again
+  const metaFailed = metaFailedFor === conversation_id;
 
   // story #2168 PR-② — chat-list-view.tsx의 "다른 프로젝트" 항목 클릭이 실어 보내는 복귀 정보.
   // `from` = 원래 있던 프로젝트(뒤로가기 시 복귀 대상) · `pn` = 이 대화가 속한 프로젝트명(권한
@@ -114,23 +133,27 @@ export default function ConversationPage() {
   const conversationProjectName = searchParams.get('pn');
   // ⛔실패 자리(스펙 확定) — 능동으로 눌러 들어왔는데(다른 프로젝트 섹션 경유) 그 사이 권한이
   // 회수돼 403이면, 조용히 빠지는 게 아니라 그때만 안내한다(중립 톤·다음 발 포함·빨강 금지).
-  const [blocked, setBlocked] = useState(false);
+  const [blockedFor, setBlockedFor] = useState<string | null>(null);
+  const blocked = blockedFor === conversation_id;
 
   // story #2009: 목록 통호출(`/api/conversations?project_id=`, default limit 30)+client
   // `.find()` 우회를 폐기 — 대화 1건 메타 보려고 매번 최대30건치 쿼리(latest_message N+1
   // 포함)를 낭비했고, org 대화가 30건 넘으면 최근 30건 밖 대화를 열 때 `.find()`가 undefined를
   // 반환해 헤더가 영구 공백이었다(정합성 버그, BE #2286이 단독조회에 participants 추가해 해소).
   const fetchMeta = useCallback(async () => {
-    if (!projectId) return;
+    const forId = conversation_id;
     try {
-      const res = await fetchWithAuth(`/api/conversations/${conversation_id}`);
-      if (res.status === 403) { setBlocked(true); return; }
-      if (!res.ok) return;
+      const res = await fetchWithAuth(`/api/conversations/${forId}`);
+      if (conversationIdRef.current !== forId) return; // the person has moved to another room: this answer is not for the one on screen
+      if (res.status === 403) { setBlockedFor(forId); return; }
+      if (!res.ok) { setMetaFailedFor(forId); return; }
       const conv = await res.json() as {
         title: string | null; type: 'dm' | 'group'; participants?: Participant[]; muted?: boolean; last_read_at?: string | null;
-        free_response?: boolean; circuit_breaker?: AgentsPausedState | null;
+        free_response?: boolean; circuit_breaker?: AgentsPausedState | null; project_id?: string | null;
       };
+      if (conversationIdRef.current !== forId) return;
       setMeta({
+        convId: forId,
         title: conv.title,
         type: conv.type,
         participants: conv.participants ?? [],
@@ -138,9 +161,11 @@ export default function ConversationPage() {
         lastReadAt: conv.last_read_at ?? null,
         freeResponse: conv.free_response ?? false,
         agentsPaused: conv.circuit_breaker ?? null,
+        projectId: conv.project_id,
       });
-    } catch { /* non-critical */ }
-  }, [conversation_id, projectId]);
+      setMetaFailedFor((f) => (f === forId ? null : f));
+    } catch { if (conversationIdRef.current === forId) setMetaFailedFor(forId); }
+  }, [conversation_id]);
 
   // per-대화 알림 mute 토글 (270c87e6 AC③⑤). 낙관 갱신 → PATCH /mute → 실패 시 롤백.
   // mute는 알림 생성/노출만 억제(참여자 지위·메시지 수신 불변, BE).
@@ -252,6 +277,10 @@ export default function ConversationPage() {
     // story #3758(9번째) — resolved 비트로 갈라 그린다.
     .map((p) => ({ agentId: p.member_id, agentName: participantDisplayLabel(p, tc), runtimeType: p.runtime_type ?? null }));
 
+  // story 4847 (AC2) — the room's own project works the pickers and the attachments; a room with none lets the person choose (one project → that one).
+  const roomProjectId = meta ? (meta.projectId ?? (meta.projectId === null ? (chosenProjectId ?? (projectMemberships.length === 1 ? projectMemberships[0]!.projectId : undefined)) : undefined)) : undefined;
+  const askRoomProject = Boolean(meta) && meta!.projectId === null && projectMemberships.length > 1;
+
   return (
     <>
       <TopBarSlot
@@ -298,17 +327,19 @@ export default function ConversationPage() {
               />
             )}
             {editingTitle && meta?.type === 'group' ? (
-              <input
+              <Input
                 autoFocus
                 value={titleDraft}
                 onChange={(e) => setTitleDraft(e.target.value)}
                 onKeyDown={(e) => {
+                  // 한글 등 입력기 조합 중의 엔터(글자 확정) · 에스케이프(조합 취소)는 저장 · 닫기로 읽지 않는다 — 반쯤 쓴 방 이름이 저장되던 것(4831 측정 중 발견).
+                  if (isImeComposing(e)) return;
                   if (e.key === 'Enter') void handleSaveTitle();
                   else if (e.key === 'Escape') setEditingTitle(false);
                 }}
                 onBlur={() => void handleSaveTitle()}
                 aria-label={t('editRoomName')}
-                className="min-w-0 rounded border border-border bg-background px-1.5 py-0.5 text-base lg:text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="h-auto w-auto min-w-0 px-1.5 py-0.5 font-medium"
               />
             ) : meta?.type === 'group' ? (
               <button
@@ -383,12 +414,29 @@ export default function ConversationPage() {
           {/* story #4534 — a DM with an agent: its session on the computer (the web looks · inside the phone app: [멈춤] [지금 지시]) */}
           {headerAvatarParticipant?.type === 'agent' ? <AgentSessionStrip agentId={headerAvatarParticipant.member_id} conversationId={conversation_id} /> : null}
           {/* story #4631 C · D — agent messages paused: the band (and an owner/admin's [멈춤 풀기]) — one per conversation */}
+          {metaFailed && !meta ? (
+            <div className="flex items-center gap-2 border-b border-border px-4 py-2" role="status" data-testid="room-info-failed">
+              <p className="text-xs text-muted-foreground">{t('roomInfoLoadFailed')}</p>
+              <Button type="button" variant="link" size="xs" onClick={() => void fetchMeta()} className="h-auto px-0 text-xs">{tc('retry')}</Button>
+            </div>
+          ) : null}
+          {askRoomProject ? (
+            <div className="flex items-center gap-2 border-b border-border px-4 py-2" data-testid="room-project-ask">
+              <label htmlFor="room-project" className="flex-shrink-0 text-xs text-muted-foreground">{t('roomProjectAsk')}</label>
+              <Select id="room-project" value={chosenProjectId ?? ''} onChange={(e) => setChosen(e.target.value ? { convId: conversation_id, projectId: e.target.value } : null)} className="max-w-xs">
+                <option value="">{t('newRoomProjectPick')}</option>
+                {projectMemberships.map((p) => (
+                  <option key={p.projectId} value={p.projectId}>{p.projectName}</option>
+                ))}
+              </Select>
+            </div>
+          ) : null}
           <AgentsPausedBand key={conversation_id} conversationId={conversation_id} state={meta?.agentsPaused ?? null} onResumed={() => void fetchMeta()} />
           <ChatView
             key={conversation_id}
             threadId={conversation_id}
             currentTeamMemberId={currentTeamMemberId}
-            projectId={projectId}
+            projectId={roomProjectId}
             apiPrefix={CHAT_API_PREFIX}
             commandTargets={commandTargets}
             presenceById={presenceById}
@@ -401,11 +449,10 @@ export default function ConversationPage() {
         )}
       </div>
 
-      {showAddParticipant && meta && projectId && (
+      {showAddParticipant && meta && (
         <AddParticipantModal
           conversationId={conversation_id}
           conversationType={meta.type}
-          projectId={projectId}
           existingParticipantIds={meta.participants.map((p) => p.member_id)}
           onClose={() => setShowAddParticipant(false)}
           onAdded={handleParticipantAdded}

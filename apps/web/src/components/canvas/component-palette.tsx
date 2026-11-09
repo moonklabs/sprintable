@@ -15,7 +15,7 @@ export function ComponentPalette({ onAdd, disabled, className }: ComponentPalett
   const t = useTranslations('canvas');
   return (
     <div className={className}>
-      <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{t('paletteLabel')}</p>
+      <p className="mb-2 text-micro font-bold uppercase tracking-wide text-muted-foreground">{t('paletteLabel')}</p>
       <div className="space-y-1.5">
         {PALETTE_TYPES.map((type) => (
           <button
@@ -23,7 +23,7 @@ export function ComponentPalette({ onAdd, disabled, className }: ComponentPalett
             type="button"
             disabled={disabled}
             onClick={() => onAdd(type)}
-            className="w-full rounded-md border border-border bg-card px-2 py-1.5 text-left text-[11px] text-foreground hover:border-primary/40 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full rounded-md border border-border bg-card px-2 py-1.5 text-left text-editorial-meta text-foreground hover:border-primary/40 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
           >
             {type}
           </button>

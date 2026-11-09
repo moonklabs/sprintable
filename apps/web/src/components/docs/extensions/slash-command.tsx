@@ -482,7 +482,7 @@ const SlashMenu = forwardRef<
         className={`flex w-full cursor-default items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${
           isActive
             ? 'bg-brand/14 text-brand-text'
-            : 'text-foreground hover:bg-white/6'
+            : 'text-foreground hover:bg-overlay-fill-1'
         }`}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => command(item)}
@@ -492,7 +492,7 @@ const SlashMenu = forwardRef<
         </span>
         <span className="flex min-w-0 flex-col">
           <span className="text-xs font-medium leading-tight">{item.title}</span>
-          <span className="truncate text-[11px] text-muted-foreground">{item.description}</span>
+          <span className="truncate text-editorial-meta text-muted-foreground">{item.description}</span>
         </span>
       </div>
     );
@@ -508,14 +508,14 @@ const SlashMenu = forwardRef<
       // 목록은 탭 순서에 넣지 않는다 — 초점은 편집기에 두고 ↑↓가 켜진 항목을 보이게 굴린다(activedescendant 규약).
       onMouseDown={(event) => event.preventDefault()}
       // story #3007(로드맵 P2·PR-E, L1) — 슬래시메뉴는 floating이라 --elev-overlay.
-      className="max-h-72 w-64 overflow-y-auto rounded-xl border border-white/10 bg-card p-1 shadow-[var(--elev-overlay)]"
+      className="max-h-72 w-64 overflow-y-auto rounded-xl border border-overlay-line-1 bg-card p-1 shadow-[var(--elev-overlay)]"
     >
       {grouped ? (
         grouped.map((group, groupIndex) => {
           const labelId = `${idPrefix}-group-${groupIndex}`;
           return (
             <div key={group.label} role="group" aria-labelledby={labelId}>
-              <p id={labelId} role="presentation" className="px-2.5 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+              <p id={labelId} role="presentation" className="px-2.5 pb-0.5 pt-1.5 text-micro font-semibold uppercase tracking-[0.15em] text-muted-foreground">
                 {group.label}
               </p>
               {group.items.map((item) => {

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
+import { Dialog, DialogOverlay, DialogPortal } from '@/components/ui/dialog';
 import { ExternalLink, MousePointerClick } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ArtifactStage, isResponsiveHtml, RESPONSIVE_PREVIEW_BREAKPOINTS, type ResponsivePreviewBreakpoint } from './artifact-stage';
@@ -71,9 +72,9 @@ export function ArtifactExpandDialog({
   const previewWidth = breakpoint === 'desktop' ? undefined : RESPONSIVE_PREVIEW_BREAKPOINTS[breakpoint];
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/40 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogPortal>
+        <DialogOverlay className="bg-scrim-1" />
         <DialogPrimitive.Popup data-modal-popup=""
           className={cn(
             'fixed top-1/2 left-1/2 z-50 flex h-[85vh] w-[90vw] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden',
@@ -158,7 +159,7 @@ export function ArtifactExpandDialog({
             />
           </div>
         </DialogPrimitive.Popup>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+      </DialogPortal>
+    </Dialog>
   );
 }

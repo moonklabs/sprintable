@@ -50,7 +50,7 @@ function AuthFailureBadge({ info }: { info: AgentAuthFailureInfo | undefined }) 
       // 유나 design:changes(2026-08-20, PR#3275) — border 없는 bg-warning-tint 단독은 패널
       // 배경과 대비 1.06(라이트)/1.67(다크)로 AC2 layer①(≥3:1) 미달. 클러스터 행 Badge
       // variant="warning"이 이미 쓰는 관례(border-warning-border)를 그대로 맞춘다.
-      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-warning-border bg-warning-tint px-1.5 py-0.5 text-[10px] font-semibold text-foreground"
+      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-warning-border bg-warning-tint px-1.5 py-0.5 text-micro font-semibold text-foreground"
     >
       <KeyRound className="size-2.5 shrink-0" aria-hidden />
       {t('authFailureBadge')}

@@ -235,3 +235,16 @@ describe('CommentReplyDialog', () => {
     expect(document.querySelector('[data-testid="comments-reply-submit-button"]')).not.toBeNull();
   });
 });
+
+// story 4831 부품 교체(공용 부품 ②) — 답변 칸이 바탕 Textarea가 되어도 줄 수(4)와 자리표시자가 그대로다.
+describe('CommentReplyDialog — 바탕 부품(story 4831)', () => {
+  it('답변 칸은 바탕 Textarea이고 4줄 · 자리표시자가 그대로다', async () => {
+    await act(async () => {
+      root.render(wrap(<CommentReplyDialog comment={COMMENT} onClose={vi.fn()} onCreateDraft={vi.fn()} onSubmit={vi.fn()} />));
+    });
+    const textarea = document.querySelector('#comments-reply-text') as HTMLTextAreaElement;
+    expect(textarea.dataset.slot).toBe('textarea');
+    expect(textarea.rows).toBe(4);
+    expect(textarea.placeholder).toBe((koMessages.content as unknown as Record<string, string>).commentsReplyTextPlaceholder);
+  });
+});

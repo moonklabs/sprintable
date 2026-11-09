@@ -203,3 +203,24 @@ describe('SupportWidgetPanelBody — story #3260 Phase 2', () => {
     });
   });
 });
+
+// story 4831 부품 교체(공용 부품 ④) — 상담 입력 칸이 바탕 Input이 되어도 한 줄에서 남는 폭을 채우고(flex-1) 본문색을 가지며, 쓴 글(공백 제거)이 전송되고 칸이 비워진다.
+describe('SupportWidgetPanelBody — 바탕 부품(story 4831)', () => {
+  it('입력 칸은 바탕 Input(flex-1 · text-foreground)이고, 쓰고 보내면 공백이 제거된 글이 sendMessage로 가며 칸이 비워진다', async () => {
+    const session = baseSession();
+    await mount(session);
+    const input = container.querySelector('form input[type="text"]') as HTMLInputElement;
+    expect(input.dataset.slot).toBe('input');
+    const tokens = input.className.split(/\s+/);
+    expect(tokens).toContain('flex-1');
+    expect(tokens).toContain('text-foreground');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '  안녕하세요  ');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const form = container.querySelector('form') as HTMLFormElement;
+    await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+    expect(session.sendMessage).toHaveBeenCalledWith('안녕하세요');
+    expect(input.value).toBe('');
+  });
+});

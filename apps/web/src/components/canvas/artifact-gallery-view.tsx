@@ -119,14 +119,14 @@ function ArtifactCard({
         title={axisT('galleryOpenDetailAction')}
         className="flex flex-col gap-1.5 px-3 pt-2.5 pb-3 hover:underline"
       >
-        <span className="min-w-0 truncate text-[13px] font-semibold text-foreground">{artifact.title}</span>
+        <span className="min-w-0 truncate text-editorial-ui font-semibold text-foreground">{artifact.title}</span>
         <span className="flex items-center gap-1.5 no-underline">
           {artifact.anchorVersion != null ? (
-            <span className="shrink-0 rounded border border-success px-1.5 py-0.5 text-[9px] font-extrabold text-success">
+            <span className="shrink-0 rounded border border-success px-1.5 py-0.5 text-micro font-extrabold text-success">
               {axisT('galleryAnchorPill', { version: artifact.anchorVersion })}
             </span>
           ) : null}
-          <span className="shrink-0 rounded border border-border bg-muted/60 px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-muted-foreground">
+          <span className="shrink-0 rounded border border-border bg-muted/60 px-1.5 py-0.5 text-editorial-meta font-bold tabular-nums text-muted-foreground">
             {axisT('galleryLatestChip', { version: artifact.latestVersionNumber })}
           </span>
           {/* story #2724(2026-08-17, 페드루 PO 판정) — 카드 레벨 미연결 배지. 사이드바 "무소속"
@@ -134,7 +134,7 @@ function ArtifactCard({
            * Summary 주석 참조)라 중복 아님 — 그리드 스크롤만으로 바로 보이는 게 목적(발견성).
            * ⚠️표현(색·아이콘·문구 톤)은 스케치 — 유나 design 게이트에서 다듬어짐 전제. */}
           {artifact.unlinked ? (
-            <span className="ml-auto shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] font-medium italic text-muted-foreground">
+            <span className="ml-auto shrink-0 rounded border border-border px-1.5 py-0.5 text-micro font-medium italic text-muted-foreground">
               {axisT('galleryUnlinkedBadge')}
             </span>
           ) : null}
@@ -311,7 +311,7 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
             aria-pressed={selectedGroupId === g.id}
             onClick={() => setSelectedGroupId(g.id)}
             className={cn(
-              'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors',
+              'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-editorial-ui transition-colors',
               selectedGroupId === g.id ? 'bg-muted/70' : 'hover:bg-muted/40',
             )}
           >
@@ -319,7 +319,7 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
             <span className={cn('min-w-0 flex-1 truncate font-medium', g.unassigned ? 'italic text-muted-foreground' : 'text-foreground')}>
               {g.label}
             </span>
-            <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{g.artifacts.length}</span>
+            <span className="shrink-0 text-editorial-meta tabular-nums text-muted-foreground">{g.artifacts.length}</span>
           </button>
         ))}
       </div>
@@ -329,7 +329,7 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
   return (
     <div className="mx-auto max-w-5xl px-4 py-6">
       <div className="mb-4">
-        <h1 className="text-[20px] font-extrabold tracking-tight text-foreground">{t('galleryTitle')}</h1>
+        <h1 className="text-xl font-extrabold tracking-tight text-foreground">{t('galleryTitle')}</h1>
         <p className="mt-0.5 text-xs text-muted-foreground">{t('gallerySubtitle')}</p>
       </div>
 
@@ -381,7 +381,7 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
           {/* 반응형(유나 판정 위임 — 목업은 데스크톱만 명시): 좁은 화면=상단 접이식 셀렉터로
            * collapse(네이티브 details/summary — 접근성 기본 제공), lg+=상시 노출 레일 유지. */}
           <details className="rounded-xl border border-border bg-card lg:hidden">
-            <summary className="cursor-pointer select-none rounded-xl px-3 py-2.5 text-[13px] font-semibold text-foreground">
+            <summary className="cursor-pointer select-none rounded-xl px-3 py-2.5 text-editorial-ui font-semibold text-foreground">
               {axisLabel(axis)} · {selectedGroup?.label ?? ''}
             </summary>
             {railContent}
@@ -394,12 +394,12 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
               24px 정본으로 정정했던 그 자리) 전면 폐지, proof-surface(13px 균일 라운드)+
               proof-surface-lift(뜬 표면 재질) 채택. 옛 rounded-xl은 흡수. */}
           <div className="proof-surface proof-surface-lift overflow-hidden border border-border bg-card px-5 py-4">
-            <div className="mb-3 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{axisLabel(axis)}</div>
+            <div className="mb-3 text-editorial-meta font-bold uppercase tracking-wide text-muted-foreground">{axisLabel(axis)}</div>
             {!selectedGroup || selectedGroup.artifacts.length === 0 ? (
-              <p className="py-8 text-center text-[12.5px] text-muted-foreground">{t('galleryGroupEmpty')}</p>
+              <p className="py-8 text-center text-xs text-muted-foreground">{t('galleryGroupEmpty')}</p>
             ) : (
               <>
-                <h2 className="mb-3 text-[16px] font-extrabold text-foreground">{selectedGroup.label}</h2>
+                <h2 className="mb-3 text-base font-extrabold text-foreground">{selectedGroup.label}</h2>
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3.5">
                   {selectedGroup.artifacts.map((artifact) => (
                     <ArtifactCard

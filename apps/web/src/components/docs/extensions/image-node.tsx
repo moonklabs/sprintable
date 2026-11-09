@@ -174,7 +174,7 @@ function ImageView({ node, updateAttributes, selected }: ReactNodeViewProps) {
           <div className="relative z-[1] flex flex-col items-center gap-2 text-xs text-muted-foreground">
             <Loader2 className="size-[18px] animate-spin text-info" aria-hidden />
             <span>{t('attachUploading')}</span>
-            <span className="text-[10px]">
+            <span className="text-micro">
               {filename}
               {size ? ` · ${formatFileSize(size)}` : ''}
             </span>
@@ -251,7 +251,7 @@ function ImageView({ node, updateAttributes, selected }: ReactNodeViewProps) {
             selected ? 'ring-2 ring-brand ring-offset-1' : ''
           } ${isResizing ? 'select-none' : ''}`}
         />
-        <span className="pointer-events-none absolute bottom-1.5 right-1.5 rounded bg-black/55 px-1.5 py-px text-[9px] font-medium text-white">
+        <span className="pointer-events-none absolute bottom-1.5 right-1.5 rounded bg-scrim-2 px-1.5 py-px text-micro font-medium text-on-scrim">
           {t('attachAssetTag')}
         </span>
         {selected ? <ResizeHandles onStart={handleResizeStart} /> : null}

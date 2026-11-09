@@ -35,8 +35,9 @@ import { cookieBase } from '@/lib/auth/cookies';
 import { SP_AT_COOKIE, SP_RT_COOKIE, resolveFirebaseServerSession } from '@/lib/db/server';
 import { resolveAppUrl } from '@/services/app-url';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 function logBootstrapFailure(reason: string): void {
   // doc §9.1: code/쿼리/원문 절대 로그 금지 — reason enum만.

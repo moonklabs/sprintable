@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { Shield, ShieldCheck, ShieldX, Sparkles, User, CheckCircle, XCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { gateNeedsAction } from '@/components/cage/gate-evidence';
 import type { GateItem } from '@/components/kanban/types';
 import type { Hypothesis } from '@sprintable/core-storage';
@@ -95,13 +96,13 @@ export function HypothesisGateBadge({ hypothesis, gate, resolveName = () => '', 
         </Badge>
         {/* owner/drafted_by/confirmed_by 구분 미니 evidence */}
         {draftedBy ? (
-          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1 text-editorial-meta text-muted-foreground">
             <Sparkles className="size-3 shrink-0" />
             {t('gateDraftedBy', { name: resolveName(draftedBy) })}
           </span>
         ) : null}
         {actorId && (state === 'confirmed' || state === 'rejected') ? (
-          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1 text-editorial-meta text-muted-foreground">
             <User className="size-3 shrink-0" />
             {t(state === 'rejected' ? 'gateRejectedBy' : 'gateConfirmedBy', { name: resolveName(actorId) })}
           </span>
@@ -135,12 +136,12 @@ export function HypothesisGateBadge({ hypothesis, gate, resolveName = () => '', 
       {/* 반려 사유 입력(인라인) */}
       {canAct && rejectNote !== null ? (
         <div className="flex items-center gap-1.5">
-          <input
+          <Input
             type="text"
             value={rejectNote}
             onChange={(e) => setRejectNote(e.target.value)}
             placeholder={t('gateRejectNotePlaceholder')}
-            className="h-7 flex-1 rounded-md border border-border bg-background px-2 text-base lg:text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            className="h-7 min-w-0 flex-1 px-2 py-0 lg:text-xs bg-background dark:bg-background"
           />
           <Button
             size="sm"
