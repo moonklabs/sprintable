@@ -428,3 +428,33 @@ async def test_22_a_revoked_setup_of_the_same_machine_does_not_count(world):
         await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": [mate]}})
         (n,) = await _notices()
         assert n["title"] == f"{n['agent_name']} · 꺼진 뒤 다시 서지 못함", "a revoked setup's agent is not «another agent of this computer»"
+
+
+async def test_23_the_window_is_measured_by_the_clock_not_by_the_start_of_the_transaction(world):
+    """A report that waited for the person's lock reads «five minutes ago» at the moment it looks, not at the moment its transaction began (`now()` is the start): with the lock held 3.5 s and a notice
+    297 s old, the clock says 300.5 s — outside the window, so the new end IS told; the transaction start would say 297 s — inside, and the notice would be silently dropped."""
+    import asyncio
+
+    from sqlalchemy import func, select
+
+    from app.core.database import async_session_factory
+
+    async with _client() as c:
+        device = await _device(c, "d4863 mac w")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+        await _sql(f"INSERT INTO notifications (id, org_id, user_id, type, title, body, is_read, created_at) VALUES "
+                   f"(gen_random_uuid(), '{ORG}', '{OWNER}', 'agent.restart_stopped', 'earlier', 'earlier', false, now() - interval '297 seconds')")
+
+        async def hold_the_persons_lock():
+            async with async_session_factory() as s:
+                await s.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(f"restart_notice:{ORG}:{OWNER}", 0))))
+                await asyncio.sleep(3.5)  # the lock is held while the report below starts its transaction and waits
+                await s.commit()
+
+        holder = asyncio.create_task(hold_the_persons_lock())
+        await asyncio.sleep(0.6)  # (the holder has the lock before the report starts)
+        await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": []}}, at="2026-11-09T04:00:00+00:00")
+        await holder
+        rows = await _sql(fetch=f"SELECT count(*) FROM notifications WHERE type = 'agent.restart_stopped' AND user_id = '{OWNER}'")
+        assert rows[0][0] == 2, "the new end is told: the earlier notice is already older than the window by the clock"
