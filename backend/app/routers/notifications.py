@@ -133,7 +133,11 @@ async def list_notifications(
         notif_type=notif_type,
     )
     page, has_more, next_cursor = assemble_page(rows, limit, lambda n: (n.created_at, n.id))
-    data = [NotificationListItem(**NotificationResponse.model_validate(n).model_dump()) for n in page]
+    # story #4875 — a notification keeps a preview of a room's message; it is handed back only to someone who may read that room NOW (the gate of 4870: one predicate, one question for the page).
+    from app.services.event_room_gate import withhold_notification_room_words
+
+    dumped = await withhold_notification_room_words(db, repo.org_id, auth, [NotificationResponse.model_validate(n).model_dump() for n in page])
+    data = [NotificationListItem(**d) for d in dumped]
     await _enrich_notification_targets(db, repo.org_id, data)
     return {
         "data": data,
@@ -180,7 +184,11 @@ async def mark_read(
     notif = await repo.mark_read(id, user_id)
     if notif is None:
         raise HTTPException(status_code=404, detail="Notification not found")
-    return NotificationResponse.model_validate(notif)
+    # story #4875 — the read state is saved on the row; what is handed back asks the same room-read question as the list.
+    from app.services.event_room_gate import withhold_notification_room_words
+
+    (dumped,) = await withhold_notification_room_words(db, repo.org_id, auth, [NotificationResponse.model_validate(notif).model_dump()])
+    return NotificationResponse(**dumped)
 
 
 @router.get("/notification-settings", response_model=list[NotificationSettingResponse])

@@ -145,6 +145,49 @@ async def withhold_room_preview(db, org_id: uuid.UUID, auth, event_context: Any)
     return {**ctx, "metadata": {**meta, "content_preview": "", "content_withheld": True}}
 
 
+# ─── story #4875 — the person's side: a `notifications` row ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# A message that mentions a person (`conversation.mention`) or is sent in a room they are in (`conversation.message`) leaves a notification row whose `body` is a preview of the message and whose `event`
+# can carry the message's own payload (the card). Those two kinds are the notification copies of a room's words; every other kind that points at a conversation (the circuit-breaker notice, a
+# computer's turn-ended notice) says a sentence of its own and is left as it is.
+NOTIFICATION_ROOM_WORD_TYPES = frozenset({"conversation.mention", "conversation.message"})
+_NOTIFICATION_EVENT_KEPT_KEYS = ("sender_name",)
+
+
+def notification_carries_room_words(n: dict) -> bool:
+    """does this notification (as a dict: type, body, event, reference_*) hold a room's words — by its KIND, and only when it holds any: a bare mention (no preview, an event of only the sender's name)
+    has nothing to take out."""
+    if n.get("type") not in NOTIFICATION_ROOM_WORD_TYPES:
+        return False
+    event = n.get("event")
+    return bool(n.get("body")) or (isinstance(event, dict) and any(k not in _NOTIFICATION_EVENT_KEPT_KEYS and k != "content_withheld" for k in event))
+
+
+def notification_without_room_words(n: dict) -> dict:
+    """the same notification without its words: no preview, and an event that keeps only who wrote (`sender_name`) plus `content_withheld` (the closed list — a field added to the event later does not
+    start to travel). The row, its title and its read state are untouched."""
+    event = n.get("event") if isinstance(n.get("event"), dict) else {}
+    kept = {k: event[k] for k in _NOTIFICATION_EVENT_KEPT_KEYS if k in event}
+    return {**n, "body": None, "event": {**kept, "content_withheld": True}}
+
+
+async def withhold_notification_room_words(db, org_id: uuid.UUID, auth, items: "list[dict]") -> "list[dict]":
+    """story #4875 — before a road hands notification rows back (the list, the single read), ask once for the whole batch «may this caller read the room NOW» and take the words out of the copies
+    whose room they may not read — or whose room cannot be named (fail closed). Same question as every stored copy: the room-read predicate; a PERSON is not cut by project (4846 AC2) — one who
+    lost the project but is still in the room reads on. Nothing is written: the ORM row is not touched (the caller builds the replacement from its own dump)."""
+    rooms: dict[int, "uuid.UUID | None"] = {}
+    for i, n in enumerate(items):
+        if notification_carries_room_words(n):
+            rooms[i] = _uuid_or_none(n.get("reference_id")) if n.get("reference_type") == "conversation" else None
+    if not rooms:
+        return items
+    readable = await readable_conversation_ids(db, org_id, auth, {r for r in rooms.values() if r is not None})
+    out = list(items)
+    for i, room in rooms.items():
+        if room is None or room not in readable:
+            out[i] = notification_without_room_words(items[i])
+    return out
+
+
 def stored_event(row: Any, *, key: "str | None" = None) -> StoredEvent:
     """an ORM `Event` (or any object with its columns) as the gate's view of it."""
     return StoredEvent(
