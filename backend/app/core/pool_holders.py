@@ -41,7 +41,7 @@ _REPORT_HOLDERS = 5
 def _app_frame_text(frame: Any) -> "str | None":
     """«app/…py:123 func» for a frame under the app tree (not a library), else None."""
     fn = frame.f_code.co_filename
-    if "site-packages" in fn:
+    if "site-packages" in fn or fn == __file__:  # a library, or THIS module's own frames (the diagnostic is not the code that was running)
         return None
     i = fn.rfind(_APP_MARK)
     return f"{fn[i + 1:]}:{frame.f_lineno} {frame.f_code.co_name}" if i >= 0 else None
@@ -58,7 +58,7 @@ def _checkout_chain(limit: int = 5) -> list[str]:
         import greenlet
 
         g = greenlet.getcurrent()
-        frame = g.parent.gr_frame if getattr(g, "parent", None) is not None else sys._getframe()
+        frame = g.parent.gr_frame if getattr(g, "parent", None) is not None else sys._getframe(1)
         for _ in range(250):
             if frame is None:
                 break
@@ -70,6 +70,17 @@ def _checkout_chain(limit: int = 5) -> list[str]:
         pass
     out.reverse()  # outermost first; the last ones are the innermost
     return out[-limit:]
+
+
+def _inside_db_greenlet() -> bool:
+    """True when the caller runs inside SQLAlchemy's greenlet bridge (an awaited database call). An invalidation reached from a garbage-collector / finalizer, or from sync code, does not:
+    its «stack» is whatever code happened to trigger the collection — not the code that was interrupted."""
+    try:
+        import greenlet
+
+        return getattr(greenlet.getcurrent(), "parent", None) is not None
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _suspended_frames(task: "asyncio.Task | None") -> list[Any]:
@@ -183,8 +194,12 @@ def install(engine: Any, name: str) -> None:
             except Exception:  # noqa: BLE001
                 pass
 
+        def _invalidate(dbapi_connection, connection_record, exception):  # noqa: ANN001
+            _log_invalidation(pool, dbapi_connection, connection_record, exception)
+
         event.listen(sync_engine, "checkout", _checkout)
         event.listen(sync_engine, "checkin", _checkin)
+        event.listen(sync_engine, "invalidate", _invalidate)
         _attach_gc_filter(engine)
     except Exception:  # noqa: BLE001
         logger.warning("pool_holders.install failed for %s", name, exc_info=True)
@@ -254,6 +269,77 @@ def _prune(pool: _Pool) -> None:
             pool.holders.pop(key, None)
             _forget(pool, h)
     _sweep_by_conn(pool)
+
+
+_INVALIDATION_LINES_PER_MIN = 20
+_INVAL_WINDOW_MAX_KEYS = 256  # hard bound of the per-pool-and-kind rate table
+_REASON_CHARS = 100
+_inval_window: dict[str, list[float]] = {}
+
+
+def _invalidation_budget(pool_name: str, cancelled: bool, now: float) -> bool:
+    """One budget per pool AND kind: a failover's pre-ping failures must not use up the 20 lines a minute before the first real cancellation (codex). The table is pruned of keys whose
+    newest line is more than a minute old once it has more than 64 keys (dynamically named engines in tests would otherwise grow it for ever)."""
+    key = f"{pool_name}:{'cancel' if cancelled else 'other'}"
+    window = [t for t in _inval_window.get(key, []) if now - t < 60.0]
+    if len(window) >= _INVALIDATION_LINES_PER_MIN:
+        _inval_window[key] = window
+        return False
+    window.append(now)
+    _inval_window[key] = window
+    if len(_inval_window) > 64:
+        for k, v in list(_inval_window.items()):
+            if not v or now - v[-1] >= 60.0:
+                _inval_window.pop(k, None)
+        if len(_inval_window) > _INVAL_WINDOW_MAX_KEYS:
+            # a hard bound too (codex): many uniquely named pools invalidating inside one minute leave nothing stale to prune - the oldest keys go, the newest (this one) stays
+            oldest_first = sorted(_inval_window.items(), key=lambda kv: kv[1][-1] if kv[1] else 0.0)
+            for k, _ in oldest_first[: len(_inval_window) - _INVAL_WINDOW_MAX_KEYS]:
+                _inval_window.pop(k, None)
+    return True
+
+
+def _log_invalidation(pool: _Pool, dbapi_connection: Any, connection_record: Any, exception: Any) -> None:
+    """story #4864 (prod 11-09 08:01Z): «Exception terminating connection … CancelledError: Cancelled via cancel scope … BaseHTTPMiddleware» 19 ms after a POST's 201, a garbage-collector
+    line 0.11 s later — and no «Exception during reset» line. SQLAlchemy invalidates (and terminates) a connection when a statement is interrupted by a BaseException such as CancelledError;
+    this says WHICH statement: one warning per hard invalidation (at most 20 a minute per pool and kind) with the exception, the route and age of the holder if it is still known, and the
+    call stack of the code that was running — the frames of the greenlet parent, i.e. the code that was awaiting the database when the cancellation hit (or, from a finalizer outside a
+    database call, a plain «unknown»). Never raises."""
+    try:
+        if exception is None:
+            return
+        now = time.monotonic()
+        cancelled = isinstance(exception, asyncio.CancelledError)
+        if not _invalidation_budget(pool.name, cancelled, now):
+            return
+        h = pool.by_conn.get(id(dbapi_connection)) or pool.holders.get(id(connection_record))
+        kind = type(exception).__name__
+        if not cancelled:
+            running = "n/a (not an interrupted statement)"  # a pre-ping failure or an explicit invalidate(): the stack there is the checkout code, NOT a cancelled statement
+        elif _inside_db_greenlet():
+            running = " ← ".join(reversed(_checkout_chain(8))) or "no app frame"
+        else:
+            running = "unknown (not inside a database call: a finalizer or garbage collector reached the invalidation)"
+        taken = (" ← ".join(reversed(h.chain)) if h and h.chain else "-")
+        where = (_route_of(h.scope) if h else "-", int(now - h.since) if h else -1, taken, running)
+        # story #4741: a log call hands an exception to the record as an OBJECT or through the redaction helper, never as str(exc). A cancellation's reason is a free text anybody can pass
+        # to Task.cancel(msg): it goes through safe_exception_text, one line, cut at _REASON_CHARS. Any other exception is named by class only.
+        if cancelled:
+            from app.core.db_error_redaction import safe_exception_text
+
+            # cut BEFORE any processing: a huge Task.cancel(msg) must not be split and joined whole inside the pool machinery (a few times the cap is enough to find 100 characters)
+            reason = " ".join(safe_exception_text(exception)[: _REASON_CHARS * 8].split())[:_REASON_CHARS]
+            logger.warning(
+                "pool_holders connection invalidated pool=%s exc=%s(%s) route=%s held_for=%ss checked out at: %s | running when interrupted: %s",
+                pool.name, kind, reason, *where,
+            )
+        else:
+            logger.warning(
+                "pool_holders connection invalidated pool=%s exc=%s route=%s held_for=%ss checked out at: %s | running when interrupted: %s",
+                pool.name, kind, *where,
+            )
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _route_of(scope: Any) -> str:
