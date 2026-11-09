@@ -185,3 +185,23 @@ async def test_09_the_same_session_said_again_after_the_window_is_still_told_onc
             del desktop_restart_notice._local[k]  # the person's five minutes are over
         await _report(c, device, a, "stopped", 3, extra={"restart_stopped": {"also": []}})  # a retry of the same session's saying, late
         assert len(await _notices()) == 1, "the session was told already: a late retry is not a second notice"
+
+
+async def test_10_a_database_error_inside_the_notice_does_not_undo_the_report(world, monkeypatch):
+    """Not only a Python exception: a failed statement aborts the transaction — without its own savepoint the report that carried the field would be lost with it."""
+    from sqlalchemy import text
+
+    async with _client() as c:
+        device = await _device(c, "d4863 mac j")
+        a = device["agents"][0]["member_id"]
+        await _report(c, device, a, "working", 1)
+
+        import app.services.notification_dispatch as nd
+
+        async def broken_statement(db, *_a, **_k):
+            await db.execute(text("SELECT 1 FROM table_that_is_not_there_4863"))
+
+        monkeypatch.setattr(nd, "dispatch_notification", broken_statement)
+        await _report(c, device, a, "stopped", 2, extra={"restart_stopped": {"also": []}})  # 200 — the record stands
+        row = await _sql(fetch=f"SELECT state FROM desktop_sessions WHERE setup_id = '{device['setup_id']}' AND session_key = 's-1'")
+        assert row[0][0] == "stopped"
