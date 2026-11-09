@@ -85,13 +85,11 @@ async def _enforce_agent_creator_policy(
 
     all_ids = set(participant_ids) | {sender.id}
 
-    # 에이전트 participant 조회
-    agent_tms = (await db.execute(
-        select(TeamMember).where(
-            TeamMember.id.in_(all_ids),
-            TeamMember.type == "agent",
-        )
-    )).scalars().all()
+    # 에이전트 participant 조회 — story #4868 (AC4): the `members` anchor, not the `team_members` view (an agent that lost all its projects is not in the view and its policy was skipped)
+    from app.services.agent_message_policy import agent_policy_subjects, reserved_publisher_ids
+
+    all_ids -= await reserved_publisher_ids(db, all_ids)   # the server's own voice («시스템 발행») meets no policy and is not a «person» of the room
+    agent_tms = await agent_policy_subjects(db, all_ids)
     if not agent_tms:
         return  # 에이전트 없음 → skip
 
@@ -416,7 +414,7 @@ async def _fetch_conversation_participants(
     )).all()
 
     all_member_ids = {r.member_id for r in p_rows}
-    resolved_map = await lookup_members_by_ids(all_member_ids, db) if all_member_ids else {}
+    resolved_map = await lookup_members_by_ids(all_member_ids, db, org_id=device_org_id) if all_member_ids else {}   # story #4868: the room's org narrows the reserved-publisher fallback
 
     # E-CHAT-CMD S8b: participant 의 runtime_type 노출(에이전트만 값, 휴먼 NULL). story #4846: read from the `members` anchor, not the `team_members` view — the view
     # also needs a project profile / grant, which an agent (the server's system publisher, placed in ONE project) loses when that project is deleted, while the room
@@ -426,7 +424,7 @@ async def _fetch_conversation_participants(
     runtime_type_map: dict[uuid.UUID, str | None] = {}
     if all_member_ids:
         rt_rows = (await db.execute(
-            select(Member.id, Member.runtime_type).where(Member.id.in_(all_member_ids))
+            select(Member.id, Member.runtime_type).where(Member.id.in_(all_member_ids), Member.deleted_at.is_(None))   # story #4868 (AC5): the view left a deleted member out too
         )).all()
         runtime_type_map = {r.id: r.runtime_type for r in rt_rows}
 
@@ -476,7 +474,7 @@ async def _lookup_sender_runtime_types(
     from app.models.member import Member      # story #4846: the anchor, not the view (see `_fetch_conversation_participants`)
 
     rows = (await db.execute(
-        select(Member.id, Member.runtime_type).where(Member.id.in_(sender_ids))
+        select(Member.id, Member.runtime_type).where(Member.id.in_(sender_ids), Member.deleted_at.is_(None))   # story #4868 (AC5)
     )).all()
     return {r.id: r.runtime_type for r in rows}
 
@@ -992,6 +990,33 @@ def _mention_payload_without_text(payload: dict, target_id: uuid.UUID) -> dict:
     return _payload_without_room_words(payload, recipient_id=target_id, mention=True)
 
 
+def _people_first(ids, agent_ids) -> list:
+    """story #4868 — the order in which the named are put in a room: people before agents (stable inside each kind). An agent's creator policy asks WHO IS IN THE ROOM, so a creator named in the same
+    message must be seated before the agent is asked — the mention's order (or the id order of a set) must not decide who gets in. ONE order for the group room's mention and the 1:1 fork."""
+    return sorted(ids, key=lambda m: m in agent_ids)
+
+
+async def _may_seat_mentioned(
+    db: AsyncSession, conversation: Conversation, sender: "ResolvedMember | TeamMember", current: set[uuid.UUID], mid: uuid.UUID, *, is_agent: bool,
+) -> bool:
+    """story #4846 (AC9) / #4868 (AC6) — whether the sender could put `mid` (named in a message, not in the room) in the room: the SAME gate as «add a participant» — an agent in a room
+    with a project reads it only while it has that project (AC12), and the agents' creator / allowlist policy over the room's people plus this one. ONE decision for the group room's
+    mention and for the 1:1 «mention forks a group» (CB-S2): before 4868 the fork seated whoever was named, past the policy."""
+    from app.services.conversation_auth import agent_project_valid_for_room
+
+    if is_agent and not await agent_project_valid_for_room(
+        db, caller_is_agent=True, caller_id=mid, conv_project_id=conversation.project_id, org_id=conversation.org_id,
+    ):
+        return False
+    try:
+        await _enforce_agent_creator_policy(sender, list(current | {mid}), db)
+    except HTTPException as e:
+        if e.status_code != 403:
+            raise
+        return False
+    return True
+
+
 async def _admit_mentioned_non_participants(
     db: AsyncSession, conversation: Conversation, sender: "ResolvedMember | TeamMember", mentioned_ids: list[uuid.UUID],
 ) -> set[uuid.UUID]:
@@ -1024,17 +1049,8 @@ async def _admit_mentioned_non_participants(
             db, caller_is_agent=True, caller_id=mid, conv_project_id=conversation.project_id, org_id=conversation.org_id,
         ):
             withheld.add(mid)
-    for mid in outside:
-        if mid in outside_agents and not await agent_project_valid_for_room(
-            db, caller_is_agent=True, caller_id=mid, conv_project_id=conversation.project_id, org_id=conversation.org_id,
-        ):
-            withheld.add(mid)
-            continue
-        try:
-            await _enforce_agent_creator_policy(sender, list(current | {mid}), db)
-        except HTTPException as e:
-            if e.status_code != 403:
-                raise
+    for mid in _people_first(outside, outside_agents):
+        if not await _may_seat_mentioned(db, conversation, sender, current, mid, is_agent=mid in outside_agents):
             withheld.add(mid)
             continue
         db.add(ConversationParticipant(conversation_id=conversation.id, member_id=mid))
@@ -2279,7 +2295,7 @@ async def list_messages(
     msgs = list(reversed(page))
 
     sender_ids = {m.sender_id for m in msgs if m.sender_id}
-    member_map = await lookup_members_by_ids(sender_ids, db)
+    member_map = await lookup_members_by_ids(sender_ids, db, org_id=org_id)   # story #4868: org_id narrows the reserved-publisher fallback
     # story #3106 — runtime_type_map도 페이지 전체 1회 배치(위 member_map과 동일 관례).
     runtime_type_map = await _lookup_sender_runtime_types(sender_ids, db)
     # story #2263 AC6(오르테가 판정 2026-07-29): 페이지 전체를 쿼리 1회로 해소(N+1 방지) —
@@ -2331,7 +2347,7 @@ async def get_message(
     if msg is None:
         raise HTTPException(status_code=404, detail="Message not found")
 
-    sender_map = await lookup_members_by_ids({msg.sender_id} if msg.sender_id else set(), db)
+    sender_map = await lookup_members_by_ids({msg.sender_id} if msg.sender_id else set(), db, org_id=org_id)   # story #4868
     # story #3106 — list_messages와 동형(단건이라 배치도 최대 1행).
     runtime_type_map = await _lookup_sender_runtime_types(
         {msg.sender_id} if msg.sender_id else set(), db,
@@ -2444,7 +2460,7 @@ async def list_message_replies(
     msgs = list(reversed(page))
 
     sender_ids = {m.sender_id for m in msgs if m.sender_id}
-    member_map = await lookup_members_by_ids(sender_ids, db)
+    member_map = await lookup_members_by_ids(sender_ids, db, org_id=org_id)   # story #4868: org_id narrows the reserved-publisher fallback
     # story #3106 — list_messages와 동형(위 참고).
     runtime_type_map = await _lookup_sender_runtime_types(sender_ids, db)
     # story #2263 AC6: list_messages와 동형 — 페이지 전체 쿼리 1회(N+1 방지).
@@ -2969,6 +2985,22 @@ async def send_message_core(
         )).scalars().all())
 
         non_participants = [mid for mid in valid_member_ids if mid not in current_participant_ids]
+        # story #4868 (AC6): only those the sender could add (the same gate as «add a participant» and as a group room's mention — `_may_seat_mentioned`) go into the new group. The others
+        # stay outside the DM: if nobody goes in, there is no fork and the message stays in the DM; the mention below then gives them the bell without the words, as everywhere.
+        if non_participants:
+            from app.models.member import Member
+
+            _agent_ids = set((await db.execute(
+                select(Member.id).where(Member.id.in_(non_participants), Member.org_id == org_id, Member.type == "agent")
+            )).scalars().all())
+            _acc = set(current_participant_ids)
+            _seat: list[uuid.UUID] = []
+            for mid in _people_first(sorted(non_participants), _agent_ids):   # people first (the ids come from a set: sorted only to be repeatable)
+                if await _may_seat_mentioned(db, conv, sender, _acc, mid, is_agent=mid in _agent_ids):
+                    _acc.add(mid)
+                    _seat.append(mid)
+            non_participants = _seat
+            valid_member_ids = set(_seat)
         if non_participants:
             fork_conv_id = uuid.uuid4()
             fork_conv = Conversation(

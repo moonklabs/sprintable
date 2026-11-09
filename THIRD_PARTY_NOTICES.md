@@ -5,7 +5,7 @@ This file is generated from the lockfiles — do not edit it by hand. Regenerate
 Licence values are the package registries' own declarations for each locked version (`scripts/third-party-notices.licenses.json`); where a registry value is empty or ambiguous, the licence file of the upstream project was read and the reason is given; libraries that no lockfile lists are entered by hand in the generator, with the licence name their own metadata gives. Source lockfiles:
 
 - `pnpm-lock.yaml` (digest of its package list: 43f75032e641)
-- `backend/uv.lock` (digest of its package list: 460ca2791df3)
+- `backend/uv.lock` (digest of its package list: 0e1558114668)
 - `support-gateway/uv.lock` (digest of its package list: 0b04151eb640)
 
 Scope: every package the lockfiles above resolve — whether a product ships it or only the build or the tests use it — and the hand entries below. Operating-system packages inside the container images are not lockfile entries and are not listed.
@@ -1098,8 +1098,8 @@ The registry gave no usable value for these; the upstream licence file was read.
 - side-channel-weakmap 1.0.2
 - sisteransi 1.0.5
 - space-separated-tokens 2.0.2
-- sqlalchemy 2.0.49
 - sqlalchemy 2.0.52
+- sqlalchemy 2.0.57
 - stable-hash 0.0.5
 - stackback 0.0.2
 - statuses 2.0.2
