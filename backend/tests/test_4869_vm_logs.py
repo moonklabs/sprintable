@@ -76,7 +76,7 @@ def test_the_service_becomes_labels_container_and_the_app_line_becomes_message_t
 def test_the_backends_uvicorn_access_lines_are_dropped_after_the_apps_json_is_parsed() -> None:
     """the access line carries the client address and the request target (one-time codes and tokens travel there — the Caddyfile strips them): it must not reach Cloud Logging"""
     proc = CFG["logging"]["processors"]["no_access_lines"]
-    assert proc == {"type": "exclude_logs", "match_any": ['jsonPayload.logger = "uvicorn.access"']}
+    assert proc == {"type": "exclude_logs", "match_any": ['jsonPayload.logger = "uvicorn.access"', 'jsonPayload.logger =~ "^(httpx|httpcore)"']}
     order = CFG["logging"]["service"]["pipelines"]["containers"]["processors"]
     assert order.index("no_access_lines") > order.index("app_json"), "`logger` is a key of the app's JSON: it exists only after that parse"
 
@@ -177,12 +177,49 @@ def test_a_fresh_install_puts_the_file_in_place_restarts_the_agent_and_checks_th
     assert "installed" in p.stdout
 
 
-def test_the_same_content_is_a_no_op_without_a_restart(box) -> None:
+def test_a_second_run_is_a_no_op_without_a_restart_once_the_first_one_loaded_the_file(box) -> None:
+    run, target, new = box
+    p, _ = run()
+    assert p.returncode == 0 and (target.parent / "config.yaml.loaded").is_file(), "the marker is written once the agent came up with the file"
+    p, log = run()
+    assert p.returncode == 0 and "already in place and loaded" in p.stdout
+    assert log.count("systemctl restart") == 1, "only the first run restarted the agent"
+
+
+def test_a_run_cut_off_between_the_write_and_the_restart_converges_on_the_next_run(box) -> None:
+    """the file is in place but nobody ever loaded it (no marker): «already in place» must NOT be the answer"""
     run, target, new = box
     target.parent.mkdir(parents=True)
     target.write_text(new.read_text())
     p, log = run()
-    assert p.returncode == 0 and "already in place" in p.stdout and "restart" not in log
+    assert p.returncode == 0 and "not known to be loaded" in p.stderr
+    assert log.count("systemctl restart google-cloud-ops-agent") == 1, "the agent was restarted"
+    assert (target.parent / "config.yaml.loaded").is_file()
+
+
+def test_a_backup_left_by_an_interrupted_run_is_named_and_never_touched(box) -> None:
+    run, target, new = box
+    target.parent.mkdir(parents=True)
+    orphan = target.parent / "config.yaml.previous.AbC123"
+    orphan.write_text("# the configuration that was in place before the interrupted run\n")
+    p, _ = run()
+    assert p.returncode == 0 and str(orphan) in p.stderr
+    assert orphan.read_text().startswith("# the configuration that was in place before")
+
+
+def test_the_marker_is_gone_after_a_restore(box) -> None:
+    run, target, new = box
+    target.parent.mkdir(parents=True)
+    target.write_text("# old\n")
+    (target.parent / "config.yaml.loaded").write_text("stale marker\n")
+    p, _ = run(FAKE_ACTIVE="0")
+    assert p.returncode == 1 and not (target.parent / "config.yaml.loaded").exists()
+
+
+def test_an_empty_unit_list_is_refused_because_it_would_make_the_agent_always_up(box) -> None:
+    run, target, _ = box
+    p, log = run(OPS_AGENT_UNITS="")
+    assert p.returncode == 2 and "OPS_AGENT_UNITS" in p.stderr and not target.exists() and "systemctl" not in log
 
 
 def test_an_agent_that_does_not_come_up_gets_its_old_configuration_back_and_the_installer_fails_loudly(box) -> None:
@@ -213,6 +250,15 @@ def test_the_same_content_with_the_log_component_down_is_not_a_success(box) -> N
     assert target.read_text() == new.read_text(), "the file is not touched"
 
 
+def test_a_failed_restart_in_the_same_content_branch_says_the_agent_could_not_be_restarted(box) -> None:
+    """(a mutant that ignores this restart failure must not survive: the unit-down branch without a marker)"""
+    run, target, new = box
+    target.parent.mkdir(parents=True)
+    target.write_text(new.read_text())
+    p, _ = run(FAKE_ACTIVE="0", FAKE_RESTART_FAIL="1")
+    assert p.returncode == 1 and "could not be restarted (systemctl restart failed)" in p.stderr
+
+
 def test_a_write_that_fails_is_a_failure_and_the_previous_file_is_back(box, tmp_path: Path) -> None:
     """no `set -e` in the installer: every step is checked — a failing `install` never reads as success"""
     run, target, new = box
@@ -222,9 +268,27 @@ def test_a_write_that_fails_is_a_failure_and_the_previous_file_is_back(box, tmp_
     fake.write_text("#!/bin/sh\nexit 1\n")
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
     p, log = run()
-    assert p.returncode == 1 and "cannot write" in p.stderr
+    assert p.returncode == 1 and "cannot write" in p.stderr and "previous state is put back" in p.stderr
     assert target.read_text() == "# the previous configuration\n" and not list(target.parent.glob("config.yaml.previous.*"))
-    assert "restart" not in log, "nothing was installed, the agent is not touched"
+    assert log.count("systemctl restart google-cloud-ops-agent") == 1, "after a restore the agent is restarted once (the file may have been half written)"
+
+
+def test_a_half_written_file_and_a_failing_restore_never_claim_that_the_previous_file_is_back(box, tmp_path: Path) -> None:
+    """a write that is cut off leaves a truncated file; if the copy back fails too, the output says the previous configuration is NOT back, and the backup stays"""
+    run, target, new = box
+    target.parent.mkdir(parents=True)
+    target.write_text("# the previous configuration\n")
+    inst = tmp_path / "bin" / "install"
+    inst.write_text('#!/bin/sh\n# writes half of the file, then fails\nhead -c 5 "$3" > "$4"\nexit 1\n')
+    inst.chmod(inst.stat().st_mode | stat.S_IXUSR)
+    cp = tmp_path / "bin" / "cp"
+    cp.write_text('#!/bin/sh\nif [ -e "$FAKE_LOG.cp" ]; then exit 1; fi\n: > "$FAKE_LOG.cp"\nexec /bin/cp "$@"\n')
+    cp.chmod(cp.stat().st_mode | stat.S_IXUSR)
+    p, _ = run()
+    assert p.returncode == 1
+    assert "could NOT be copied back" in p.stderr and "NOT fully back" in p.stderr
+    assert "previous file (if any) is back" not in p.stderr and "is back" not in p.stderr.replace("is put back", "")
+    assert list(target.parent.glob("config.yaml.previous.*")), "the backup is kept"
 
 
 def test_a_target_directory_that_cannot_be_made_is_a_failure(box, tmp_path: Path) -> None:
