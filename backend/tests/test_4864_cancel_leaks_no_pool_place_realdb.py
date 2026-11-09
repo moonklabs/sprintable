@@ -40,19 +40,17 @@ def _async_url() -> str:
 
 
 def test_the_installed_sqlalchemy_carries_the_cancellation_fix_13699():
-    """Pure: no database. The fix is looked up in the code that runs, not only in the version string (a vendored or patched build counts)."""
-    import inspect
-
+    """Pure: no database. The fix is a RELEASE fact (first in 2.0.56), not a source-text fact: the behaviour itself is pinned by the
+    real-database test below, which fails on its own if a later release regresses it. This guard only fails fast, and loudly, on a downgrade
+    or lock drift when no database is at hand."""
     import sqlalchemy
-    from sqlalchemy.pool import base
 
-    src = inspect.getsource(base._finalize_fairy)
-    assert "13699" in src and "_checkin_failed" in src, (
+    m = re.match(r"(\d+)\.(\d+)\.(\d+)", sqlalchemy.__version__)
+    assert m, f"unparseable SQLAlchemy version {sqlalchemy.__version__!r}"
+    assert tuple(int(p) for p in m.groups()) >= (2, 0, 56), (
         f"SQLAlchemy {sqlalchemy.__version__} returns no pool place when a cancellation leaves _finalize_fairy — "
         "story 4864: stay on >=2.0.56 (sqlalchemy issue #13699) or carry an equivalent patch"
     )
-    major, minor, patch = (int(p) for p in re.match(r"(\d+)\.(\d+)\.(\d+)", sqlalchemy.__version__).groups())
-    assert (major, minor, patch) >= (2, 0, 56) or (major, minor) >= (2, 1)
 
 
 @_needs_db
@@ -84,6 +82,7 @@ async def test_requests_cancelled_inside_a_statement_give_every_pool_place_back(
                         await s.commit()
         assert scope.cancel_called
 
+    held: list = []  # connections taken by the final probe: closed in `finally` whatever happened
     try:
         for _ in range(rounds):
             async with anyio.create_task_group() as tg:
@@ -99,17 +98,24 @@ async def test_requests_cancelled_inside_a_statement_give_every_pool_place_back(
         assert not gc_lines, f"{len(gc_lines)} places were only found by the garbage collector"
 
         # and the pool really serves its full size again: 30 at once, each answered
-        held: list = []
+        answers: list = []
 
         async def ping():
             conn = await eng.connect()
             held.append(conn)
-            return (await conn.execute(text("select 1"))).scalar_one()
+            answers.append((await conn.execute(text("select 1"))).scalar_one())
 
-        got = await asyncio.wait_for(asyncio.gather(*(ping() for _ in range(total))), timeout=15)
-        assert got == [1] * total
+        with anyio.fail_after(15):
+            async with anyio.create_task_group() as tg:  # one failure cancels its siblings: none outlives the test
+                for _ in range(total):
+                    tg.start_soon(ping)
+        assert answers == [1] * total
         for c in held:
             await c.close()
+        held.clear()
         assert eng.pool.checkedout() == 0
     finally:
+        for c in held:
+            await asyncio.shield(c.close())
+        gc.collect()  # a place lost by a failing run has no database connection behind it; let the collector drop what the pool no longer owns
         await eng.dispose()
