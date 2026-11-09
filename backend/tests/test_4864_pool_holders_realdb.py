@@ -351,3 +351,49 @@ async def test_the_request_engine_ends_sessions_idle_in_a_transaction(monkeypatc
             assert "terminat" in str(err.value).lower() or "connection" in str(err.value).lower()
     finally:
         await eng.dispose()
+
+
+async def test_a_statement_cancelled_in_flight_logs_which_code_was_running(watched, monkeypatch, caplog):
+    """prod 11-09: «Exception terminating connection … CancelledError» 19 ms after a POST, no «reset» failure. SQLAlchemy invalidates a connection whose statement is interrupted by a
+    CancelledError; the pool watch now says WHICH code was awaiting the database (test frames stand in for «app/» frames)."""
+    import logging
+
+    from app.core import pool_holders
+
+    name, eng = watched
+    monkeypatch.setattr(pool_holders, "_APP_MARK", "/tests/")
+    pool_holders._inval_window.clear()
+
+    async def the_slow_statement_under_test():
+        async with eng.connect() as conn:
+            await conn.execute(text("select pg_sleep(5)"))
+
+    caplog.set_level(logging.WARNING, logger="app.pool_holders")
+    task = asyncio.create_task(the_slow_statement_under_test())
+    await asyncio.sleep(0.4)  # the statement is running on the server
+    task.cancel("Cancelled via cancel scope 1234 by <Task coro>")
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert await _until(lambda: any("connection invalidated" in r.getMessage() for r in caplog.records)), [r.getMessage() for r in caplog.records]
+    line = [r.getMessage() for r in caplog.records if "connection invalidated" in r.getMessage()][0]
+    assert f"pool={name} " in line and "exc=CancelledError(Cancelled via cancel scope 1234" in line, line
+    running = line.split("running when interrupted:", 1)[1]  # NOT the whole line: «checked out at» names the same function and would hide a missing running-stack
+    assert "the_slow_statement_under_test" in running, "the line must name the code that was running when the statement was cancelled: " + line
+
+
+async def test_invalidation_lines_are_rate_limited_and_quiet_without_an_exception(watched, caplog):
+    import logging
+
+    from app.core import pool_holders
+
+    name, eng = watched
+    pool_holders._inval_window.clear()
+    caplog.set_level(logging.WARNING, logger="app.pool_holders")
+    pool = pool_holders._pools[name]
+    pool_holders._log_invalidation(pool, object(), object(), None)  # a soft invalidation without an exception says nothing
+    assert not [r for r in caplog.records if "invalidated" in r.getMessage()]
+    for _ in range(50):
+        pool_holders._log_invalidation(pool, object(), object(), RuntimeError("x"))
+    assert len([r for r in caplog.records if "invalidated" in r.getMessage()]) == pool_holders._INVALIDATION_LINES_PER_MIN
+    line = [r.getMessage() for r in caplog.records if "invalidated" in r.getMessage()][0]
+    assert "exc=RuntimeError route=-" in line and "(x)" not in line, "a non-cancellation exception is named by class only: " + line

@@ -189,8 +189,12 @@ def install(engine: Any, name: str, *, age_rule: bool = True) -> None:
             except Exception:  # noqa: BLE001
                 pass
 
+        def _invalidate(dbapi_connection, connection_record, exception):  # noqa: ANN001
+            _log_invalidation(pool, dbapi_connection, connection_record, exception)
+
         event.listen(sync_engine, "checkout", _checkout)
         event.listen(sync_engine, "checkin", _checkin)
+        event.listen(sync_engine, "invalidate", _invalidate)
         _attach_gc_filter(engine)
     except Exception:  # noqa: BLE001
         logger.warning("pool_holders.install failed for %s", name, exc_info=True)
@@ -253,6 +257,38 @@ def _prune(pool: _Pool) -> None:
             for cid in h.conn_ids:
                 pool.by_conn.pop(cid, None)
     _sweep_by_conn(pool)
+
+
+_INVALIDATION_LINES_PER_MIN = 20
+_inval_window: dict[str, list[float]] = {}
+
+
+def _log_invalidation(pool: _Pool, dbapi_connection: Any, connection_record: Any, exception: Any) -> None:
+    """story #4864 (prod 11-09 08:01Z): «Exception terminating connection … CancelledError: Cancelled via cancel scope … BaseHTTPMiddleware» 19 ms after a POST's 201, then a garbage-collector
+    line — and no «Exception during reset» line. SQLAlchemy invalidates (and terminates) a connection when a statement is interrupted by a BaseException such as CancelledError; this says WHICH
+    statement: one warning per invalidation (at most 20 a minute per pool) with the exception, the route and age of the holder if it is still known, and the call stack of the code that
+    was running — the frames of the greenlet parent, i.e. the code that was awaiting the database when the cancellation hit. Never raises."""
+    try:
+        if exception is None:
+            return
+        now = time.monotonic()
+        window = [t for t in _inval_window.get(pool.name, []) if now - t < 60.0]
+        if len(window) >= _INVALIDATION_LINES_PER_MIN:
+            _inval_window[pool.name] = window
+            return
+        window.append(now)
+        _inval_window[pool.name] = window
+        h = pool.by_conn.get(id(dbapi_connection)) or pool.holders.get(id(connection_record))
+        kind = type(exception).__name__
+        note = str(exception)[:100] if isinstance(exception, asyncio.CancelledError) else ""  # a cancellation's reason is a fixed phrase; other exceptions may carry server text — class only
+        running = " ← ".join(reversed(_checkout_chain(8))) or "no app frame"
+        taken = (" ← ".join(reversed(h.chain)) if h and h.chain else "-")
+        logger.warning(
+            "pool_holders connection invalidated pool=%s exc=%s%s route=%s held_for=%ss checked out at: %s | running when interrupted: %s",
+            pool.name, kind, f"({note})" if note else "", _route_of(h.scope) if h else "-", int(now - h.since) if h else -1, taken, running,
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _route_of(scope: Any) -> str:
