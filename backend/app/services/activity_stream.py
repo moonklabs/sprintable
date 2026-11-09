@@ -14,7 +14,7 @@ from collections.abc import Collection
 from datetime import datetime
 from typing import Literal
 
-from sqlalchemy import select, text, tuple_
+from sqlalchemy import and_, exists, or_, select, text, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -228,8 +228,12 @@ async def query_activity_stream(
     before_seq: int | None = None,
     order: Literal["asc", "desc"] = "asc",
     limit: int = 50,
+    room_read_clause=None,
 ) -> tuple[list[ActivityEvent], int | None]:
     """L1 BE-5: activity_events를 org-scope + 필터로 조회(activity_seq cursor).
+
+    story #4846 (AC14): `room_read_clause` (`conversation_auth.readable_room_clause`, a clause over the `Conversation` columns) keeps the activity of a CHAT MESSAGE only for a
+    caller who may read its room — the row copies the message's text, and the project filter below knows nothing of who is in the room. Every other kind of activity is untouched.
 
     반환: (rows, next_cursor). next_cursor는 페이지가 가득 찼을 때만 마지막 seq — None이면 더 없음.
     org_id는 항상 강제(AC①).
@@ -241,6 +245,28 @@ async def query_activity_stream(
     if order not in ("asc", "desc"):
         raise ValueError(f"order must be 'asc' or 'desc', got {order!r}")
     query = select(ActivityEvent).where(ActivityEvent.org_id == org_id)
+    if room_read_clause is not None:
+        from app.models.conversation import Conversation, ConversationMessage
+
+        # two kinds of row carry a room's words: the activity of a chat MESSAGE (`conversation_message`, object = the message: its text) and the activity of a ROOM notification
+        # (`conversation`, object = the room: the bell's `dispatch_notification` event whose payload keeps the message preview as `body`). Both are kept only for a caller who may
+        # read the room; a null or any other type is untouched.
+        query = query.where(or_(
+            and_(ActivityEvent.object_type.is_distinct_from("conversation_message"), ActivityEvent.object_type.is_distinct_from("conversation")),
+            and_(
+                ActivityEvent.object_type == "conversation_message",
+                exists().where(
+                    ConversationMessage.id == ActivityEvent.object_id,
+                    Conversation.id == ConversationMessage.conversation_id,
+                    Conversation.org_id == org_id,
+                    room_read_clause,
+                ),
+            ),
+            and_(
+                ActivityEvent.object_type == "conversation",
+                exists().where(Conversation.id == ActivityEvent.object_id, Conversation.org_id == org_id, room_read_clause),
+            ),
+        ))
     if project_id is not None:
         query = query.where(ActivityEvent.project_id == project_id)
     # story #4350 — project 필터 없으면 caller가 접근 가능한 프로젝트로만(SEC-S8 · 빈 집합이면 0건).
