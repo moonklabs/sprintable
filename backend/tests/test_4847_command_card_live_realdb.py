@@ -200,3 +200,22 @@ async def test_06_a_command_outside_a_thread_leaves_the_card_top_level(monkeypat
             assert all(r.thread_id is None for r in rows)
     finally:
         await engine.dispose()
+
+
+async def test_07_a_person_who_blocked_the_sender_gets_no_card_either(monkeypatch):
+    """the card is delivered with the exclusions of the line that asked for it: whoever does not get the line does not get its answer."""
+    import uuid as _uuid
+
+    from app.main import app
+    from app.models.user_block import UserBlock
+
+    engine, Session, org, sender_id, sender_user, other_id, conv_id = await _room(with_project=True)
+    try:
+        async with Session() as session:
+            session.add(UserBlock(id=_uuid.uuid4(), blocker_member_id=other_id, blocked_member_id=sender_id))
+            await session.commit()
+        pushes = await _send(Session, app, sender_user, org.id, conv_id, "/assign 99999 nobody", monkeypatch)
+        who = {pid for pid, _ in _cards(pushes)}
+        assert who == {str(sender_id)}, "the person who blocked the sender is not sent the card; the person who typed it still is"
+    finally:
+        await engine.dispose()
