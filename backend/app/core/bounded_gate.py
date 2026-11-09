@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 import weakref
 from collections.abc import AsyncIterator, Callable
 
@@ -30,10 +31,14 @@ _gates: "weakref.WeakSet[LoopGate]" = weakref.WeakSet()
 
 
 class LoopGate:
-    def __init__(self, limit: Callable[[], int]) -> None:
+    def __init__(self, limit: Callable[[], int], name: "str | None" = None) -> None:
         self._limit = limit
+        self.name = name  # a NAMED gate shows in the pool-holder watch line (gate_stats); an anonymous one (a test's) does not
         self._by_loop: "weakref.WeakValueDictionary[int, asyncio.Semaphore]" = weakref.WeakValueDictionary()
         self._open = False
+        self._running = 0  # pieces inside the gate right now
+        self._waiting: "dict[int, float]" = {}  # ticket → time.monotonic() when the piece began to wait at the gate (its length is the queue)
+        self._ticket = 0
         _gates.add(self)
 
     def _semaphore(self) -> "asyncio.Semaphore | None":
@@ -58,8 +63,30 @@ class LoopGate:
         if sem is None:
             yield
             return
-        async with sem:
+        # the same acquire / release as `async with sem`, with a ledger of who waits and who runs: before the gate a burst failed on the pool timeout and left a log line,
+        # now it queues here — and the queue must be visible (story 4867, Kadir's lens: «no bound and no count on the waiting line»)
+        ticket = self._ticket
+        self._ticket += 1
+        self._waiting[ticket] = time.monotonic()
+        try:
+            await sem.acquire()
+        finally:
+            self._waiting.pop(ticket, None)  # got in, or was cancelled while waiting: either way it no longer waits
+        self._running += 1
+        try:
             yield
+        finally:
+            self._running -= 1
+            sem.release()
+
+    def stats(self) -> dict:
+        """What the pool watch prints: how many run, how many wait, how long the longest waiter has waited (seconds)."""
+        oldest = time.monotonic() - min(self._waiting.values()) if self._waiting else 0.0
+        try:
+            limit = int(self._limit())
+        except Exception:  # noqa: BLE001
+            limit = -1
+        return {"name": self.name, "running": self._running, "limit": limit, "waiting": len(self._waiting), "oldest_wait": oldest}
 
     def open(self) -> None:
         """Let everything through from now on, and wake whatever already waits on this loop's semaphore."""
@@ -80,6 +107,11 @@ class LoopGate:
     def close(self) -> None:
         self._open = False
         self._by_loop.clear()  # a semaphore that open() inflated must not come back with the extra permits: the next piece makes a fresh one at `limit`
+
+
+def gate_stats() -> list[dict]:
+    """Stats of every NAMED gate, by name (the pool watch prints them; a test's anonymous gate is left out)."""
+    return sorted((g.stats() for g in list(_gates) if g.name), key=lambda s: s["name"])
 
 
 def open_all() -> None:

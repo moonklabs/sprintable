@@ -309,6 +309,129 @@ async def test_the_lifespan_resets_the_gates_at_start_and_opens_them_when_it_sto
     assert calls.index("open") < calls.index("drain") < calls.index("dispose"), calls
 
 
+def test_the_gate_counts_who_runs_who_waits_and_how_long_the_longest_waited():
+    """Kadir's lens (5457): behind a gate a burst queues instead of failing on the pool timeout — the queue must show. No database."""
+    gate = LoopGate(lambda: 2, name="t4867-count")
+
+    async def scenario():
+        hold = asyncio.Event()
+
+        async def piece():
+            async with gate.slot():
+                await hold.wait()
+
+        tasks = [asyncio.create_task(piece()) for _ in range(6)]
+        await asyncio.sleep(0.1)
+        s = gate.stats()
+        assert (s["running"], s["limit"], s["waiting"]) == (2, 2, 4), s
+        assert s["oldest_wait"] >= 0.05, s  # the longest waiter has waited about the sleep above
+        hold.set()
+        await asyncio.gather(*tasks)
+        s = gate.stats()
+        assert (s["running"], s["waiting"], s["oldest_wait"]) == (0, 0, 0.0), s
+
+    asyncio.run(scenario())
+
+
+def test_a_waiter_that_is_cancelled_leaves_the_waiting_count():
+    gate = LoopGate(lambda: 1, name="t4867-cancel")
+
+    async def scenario():
+        hold = asyncio.Event()
+
+        async def piece():
+            async with gate.slot():
+                await hold.wait()
+
+        first = asyncio.create_task(piece())
+        waiters = [asyncio.create_task(piece()) for _ in range(3)]
+        await asyncio.sleep(0.05)
+        assert gate.stats()["waiting"] == 3
+        waiters[0].cancel()
+        await asyncio.gather(waiters[0], return_exceptions=True)
+        assert gate.stats()["waiting"] == 2, gate.stats()
+        hold.set()
+        await asyncio.gather(first, *waiters[1:])
+        assert (gate.stats()["running"], gate.stats()["waiting"]) == (0, 0)
+
+    asyncio.run(scenario())
+
+
+def test_a_waiter_cancelled_right_after_it_was_granted_the_permit_keeps_the_gate_whole():
+    """codex: the cancellation must arrive AFTER the semaphore handed the permit over (the cancel-after-grant window), not while the first holder still blocks it.
+    The holder is the test itself (outside the ledger); release() grants the waiter's future and cancel() lands in the same step, before the waiter ran."""
+    gate = LoopGate(lambda: 1, name="t4867-grant")
+
+    async def scenario():
+        sem = gate._semaphore()
+        await sem.acquire()  # the only permit is held outside the gate's ledger
+
+        async def piece():
+            async with gate.slot():
+                return "in"
+
+        waiter = asyncio.create_task(piece())
+        await asyncio.sleep(0.05)
+        assert gate.stats()["waiting"] == 1
+        sem.release()  # hands the permit to the waiter ...
+        waiter.cancel()  # ... and the cancellation arrives before it has run: cancel AFTER the grant
+        result = (await asyncio.gather(waiter, return_exceptions=True))[0]
+        assert isinstance(result, asyncio.CancelledError), result
+        s = gate.stats()
+        assert (s["running"], s["waiting"]) == (0, 0), s
+        assert await asyncio.wait_for(piece(), 1) == "in", "the permit that was granted to the cancelled waiter must not be lost"
+
+    asyncio.run(scenario())
+
+
+def test_the_three_production_gates_are_named_and_an_anonymous_gate_is_left_out():
+    from app.services import au_metering, pg_pubsub, tool_call_recording  # noqa: F401 — importing them creates the gates
+
+    anonymous = LoopGate(lambda: 1)  # anonymous: never listed — and kept ALIVE here (a temporary would be collected at once and prove nothing)
+    assert anonymous in bounded_gate._gates
+    names = [s["name"] for s in bounded_gate.gate_stats()]
+    assert {"pg_notify", "au_metering", "tool_call_recording"} <= set(names), names
+    assert None not in names and "" not in names
+    assert anonymous.name is None and all(s["name"] for s in bounded_gate.gate_stats()), "the anonymous gate must not be listed"
+
+
+@pytest.mark.anyio
+async def test_the_pool_watch_line_carries_the_gate_counts_and_comes_out_when_a_gate_is_backed_up(monkeypatch):
+    """The request pool is calm (0 of 30 checked out) — the line must still come out once a gate's longest waiter has waited past the line, with the counts on it; calm = no line.
+    The pool is a stand-in (no database): the line reads only its size and checked-out count."""
+    from types import SimpleNamespace
+
+    from app.core import pool_holders
+    from app.services import au_metering, pg_pubsub, tool_call_recording  # noqa: F401 — importing them creates the production gates this test reads off the line
+
+    stub_pool = SimpleNamespace(size=lambda: 20, _max_overflow=10, checkedout=lambda: 0)
+    # the registry is swapped whole (and put back by monkeypatch): the real `request` pool the app registered at import must stay, and no other pool may speak in this test
+    monkeypatch.setattr(pool_holders, "_pools", {"request": pool_holders._Pool("request", SimpleNamespace(pool=stub_pool))})
+    monkeypatch.setattr(pool_holders, "_GATE_REPORT_WAIT_SEC", 0.05)
+    gate = LoopGate(lambda: 1, name="t4867-line")
+    hold = asyncio.Event()
+
+    async def piece():
+        async with gate.slot():
+            await hold.wait()
+
+    tasks: list = []
+    try:
+        assert pool_holders.report_lines(60) == [], "a calm pool with idle gates says nothing"
+        tasks = [asyncio.create_task(piece()) for _ in range(4)]
+        await asyncio.sleep(0.15)
+        lines = pool_holders.report_lines(60)
+        assert len(lines) == 1, lines
+        line = lines[0]
+        assert "pool=request checked_out=0/30" in line, line
+        assert "gates=[" in line and "t4867-line running=1/1 waiting=3 oldest_wait=" in line, line
+        assert "pg_notify running=0/" in line, line  # the production gates are on the same line, idle
+    finally:
+        hold.set()
+        await asyncio.gather(*tasks, return_exceptions=True)
+    assert pool_holders.report_lines(60) == [], "the backlog is gone: the line goes quiet again"
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"

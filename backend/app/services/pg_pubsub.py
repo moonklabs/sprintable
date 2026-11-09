@@ -271,4 +271,4 @@ async def listen_loop() -> None:
 from app.core.bounded_gate import LoopGate  # noqa: E402
 from app.core.config import settings as _gate_settings  # noqa: E402
 
-_notify_gate = LoopGate(lambda: _gate_settings.pg_notify_max_concurrent)
+_notify_gate = LoopGate(lambda: _gate_settings.pg_notify_max_concurrent, name="pg_notify")
