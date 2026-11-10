@@ -126,6 +126,11 @@ async def test_the_event_card_of_an_event_publishing_message_is_withheld_with_th
         assert rows and card not in r.text and "preview" not in r.text, r.text
         assert rows[0]["event"] == {"sender_name": "X"}, rows[0]["event"]
         assert rows[0]["title"] == "X님의 새 메시지"
+        # the single read mark answers with the same copy: the card goes with the preview (Kadir's lens: the read-mark answer must not keep the event card)
+        r = await _as(Session, w, "member_outside", "PATCH", f"/api/v2/notifications/{rows[0]['id']}/read")
+        assert r.status_code == 200 and r.json()["is_read"] is True, r.text
+        assert card not in r.text and "preview" not in r.text, r.text
+        assert r.json()["event"] == {"sender_name": "X"} and r.json()["body"] is None, r.json()
     finally:
         await engine.dispose()
 
