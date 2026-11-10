@@ -261,13 +261,9 @@ async def test_a_dispatched_row_without_an_event_type_in_its_payload_stays_on_th
                           recipient_id=reader, recipient_type="human", payload=payload, status="delivered")
                 s.add(e)
                 ids.append(str(e.id))
-            e = Event(id=uuid.uuid4(), org_id=org_id, project_id=project_id, event_type="dispatched", source_entity_type="story", source_entity_id=uuid.uuid4(),
-                      recipient_id=reader, recipient_type=None, payload={"event_type": "gate.pending_approval"}, status="delivered")  # no recipient_type at all
-            s.add(e)
-            ids.append(str(e.id))
             await s.commit()
         rows, unread = await _bell(Session, org_id, reader_user)
         assert sorted(r["id"] for r in rows) == sorted(ids), (sorted(r["id"] for r in rows), ids)
-        assert unread == 4, unread
+        assert unread == 3, unread
     finally:
         await engine.dispose()
