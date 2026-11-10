@@ -130,7 +130,7 @@ class FakeRunner:
                     verb = "up:gwdb" if a[-1] == "gateway-db" else "up:db" if a[-1] == "db" else "up:all"
                 if verb == "exec":
                     tail = a[a.index("exec"):]
-                    verb = "exec:" + ("gwdb-metadata" if "169.254.169.254" in " ".join(tail) else "gwdb-reload" if "pg_reload_conf" in " ".join(tail) else "gwdb-ready" if "pg_database" in " ".join(tail) else "health-gwdb" if "gateway-db" in tail
+                    verb = "exec:" + ("migrate-stop" if "pg_terminate_backend" in " ".join(tail) else "gwdb-metadata" if "169.254.169.254" in " ".join(tail) else "gwdb-reload" if "pg_reload_conf" in " ".join(tail) else "gwdb-ready" if "pg_database" in " ".join(tail) else "health-gwdb" if "gateway-db" in tail
                                       else "reload" if "reload" in a else "health-be" if "python" in a else "health-fe")
                 out.append(verb)
             elif a[:1] == ["iptables"]:
@@ -196,7 +196,7 @@ def _text_tree(root: Path) -> str:
 def test_a_deploy_migrates_before_it_swaps_and_checks_health_after(world) -> None:
     d = world.publish("a" * 40)
     assert world.dep.run_once() == "deployed"
-    assert world.runner.verbs() == ["iptables", "login", "pull", "logout", "up:db", "up:gwdb", "exec:gwdb-ready", "exec:gwdb-metadata", "run", "iptables", "up:all", "exec:reload", "exec:gwdb-reload", "exec:gwdb-metadata", "exec:health-be", "exec:health-fe", "exec:gwdb-ready", "image"]
+    assert world.runner.verbs() == ["iptables", "login", "pull", "logout", "up:db", "up:gwdb", "exec:gwdb-ready", "exec:gwdb-metadata", "ps", "exec:migrate-stop", "run", "iptables", "up:all", "exec:reload", "exec:gwdb-reload", "exec:gwdb-metadata", "exec:health-be", "exec:health-fe", "exec:gwdb-ready", "image"]
     cur = _state(world, "current.json")
     assert cur["sha"] == d["sha"] and cur["previous"] is None
     assert (world.cfg.install_dir / "releases" / d["sha"] / "compose.yml").exists()
