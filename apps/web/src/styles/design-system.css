@@ -35,6 +35,7 @@
   --ds-failed-soft: #faeef0;
   --ds-info: #1f5fbf;
   --ds-info-soft: #edf2fa;
+  --ds-scrim: #000000;
 }
 
 .dark {
@@ -64,6 +65,7 @@
   --ds-failed-soft: #342e33;
   --ds-info: #7db4ff;
   --ds-info-soft: #242e3d;
+  --ds-scrim: #000000;
 }
 
 @theme inline {
@@ -93,6 +95,7 @@
   --color-ds-failed-soft: var(--ds-failed-soft);
   --color-ds-info: var(--ds-info);
   --color-ds-info-soft: var(--ds-info-soft);
+  --color-ds-scrim: var(--ds-scrim);
 
   /* 글자 눈금(굵기는 400 · 600 두 가지만 — 호출부가 font-normal / font-semibold) */
   --text-ds-title: 18px;
