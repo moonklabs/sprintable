@@ -90,10 +90,9 @@
   },
   "mobileTabBar": {
     "navLabel": "모바일 탭 내비게이션",
-    "approvals": "결재",
     "more": "전체",
-    "approvalsPendingSr": "대기 {count}건",
-    "approvalsPendingSrCapped": "대기 9건 이상",
+    "approvalsPendingSr": "결재 대기 {count}건",
+    "approvalsPendingSrCapped": "결재 대기 9건 이상",
     "chatUnreadSr": "안읽음 {count}건",
     "chatUnreadSrCapped": "안읽음 99건 이상"
   },

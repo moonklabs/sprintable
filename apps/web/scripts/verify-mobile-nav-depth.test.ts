@@ -86,10 +86,10 @@ describe('실 NAV_GROUPS ∪ OTHER_NAV_ITEMS — story #2684 AC3 판별자, stor
   // 있어(바텀 탭 「결재」가 이미 depth 1로 커버) 어느 배열에 살든 depth 1 그대로다. board도
   // NAV_GROUPS 소속인 채 동일 취급 — "바텀 탭 커버 축"은 소속 배열과 무관하다는 것 자체가
   // 이 판별자의 핵심 불변식.
-  it('board·inbox는 depth 1이고 그 외는 전부 depth 2다(바텀 탭 축과 정확히 일치, 소속 배열 무관)', () => {
+  it('⭐board·org-briefing은 depth 1이고 그 외는 전부 depth 2다(바텀 탭 축과 정확히 일치, 소속 배열 무관) — «결재 탭»이 없어졌으니 결재(inbox)는 «전체» 목록의 depth 2(story #4885 폰 탭 넷)', () => {
     const entries = computeMobileDepths(groups, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
     const depth1Ids = entries.filter((e) => e.depth === 1).map((e) => e.id).sort();
-    expect(depth1Ids).toEqual(['board', 'inbox']);
+    expect(depth1Ids).toEqual(['board', 'org-briefing']);
     expect(entries.filter((e) => e.depth === 2).length).toBe(entries.length - 2);
   });
 
