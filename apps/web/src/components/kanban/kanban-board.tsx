@@ -1264,8 +1264,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     addToast({ title: msg.title, type: msg.type });
   }, [t, addToast]);
 
-  const handleCreateStory = useCallback(async (columnId: string, title: string) => {
-    if (!projectId) return;
+  // story #4888 — 만들기 결과를 돌려준다(true = 만들어짐). 목록 보기의 «스토리 추가» 입구는 실패하면 입력칸과 제목을 그대로 남겨야 해서 결과가 필요하다(열 컴포저는 예전처럼 결과를 안 본다).
+  const createStoryReporting = useCallback(async (columnId: string, title: string): Promise<boolean> => {
+    if (!projectId) return false;
     try {
       const res = await fetch('/api/stories', {
         method: 'POST',
@@ -1282,18 +1283,24 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       if (!res.ok) {
         bumpTransitionErrorNonce();
         setTransitionError(t('createStoryFailed'));
-        return;
+        return false;
       }
       const json = await res.json();
       const created = json.data as KanbanStory;
       setStories((prev) => [...prev, created]);
       // 카드 렌더 컬럼(created.status)과 카운트를 동일 source로 정합 — BE가 status를 정규화해도 무어긋남
       adjustColumnTotal(created.status, +1);
+      return true;
     } catch {
       bumpTransitionErrorNonce();
       setTransitionError(t('createStoryFailed'));
+      return false;
     }
   }, [projectId, selectedSprintId, selectedEpicId, t, adjustColumnTotal, bumpTransitionErrorNonce]);
+
+  const handleCreateStory = useCallback(async (columnId: string, title: string) => {
+    await createStoryReporting(columnId, title);
+  }, [createStoryReporting]);
 
   // story #2949 — 트러스트 뷰의 인라인 컴포저는 TrustColumnId(예: 'queued')를 넘긴다.
   // handleCreateStory는 그 값을 그대로 story.status로 POST하므로(classic 뷰는 컬럼id=status라
@@ -1831,6 +1838,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               storyLineMap={storyLineMap}
               projectId={projectId}
               getStatusLabel={domainLabels.statusLabel}
+              onCreateStory={(title) => createStoryReporting('backlog', title)}
             />
           </div>
         ) : axisMode === 'trust' ? (

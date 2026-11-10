@@ -1555,6 +1555,98 @@ describe('KanbanBoard — story #3043 <lg 기본값=list(칸반 다열은 opt-in
   });
 });
 
+// story #4888(UI-5 보드 · 목록 화면, PO 11-10 20:20Z · 디디 셸 실측) — 폰 390은 일감 탭의 기본 보기가 «목록»인데 목록 보기에는 만들기 입구가 0이라
+// 일감 → 보드 보기로 바꾸기 → 스토리 추가(3동작 + 입력)로만 만들 수 있었다. 있는 «스토리 추가»(같은 동작 · 같은 입력칸)를 목록 보기에도 한 자리.
+describe('KanbanBoard — 목록 보기의 «스토리 추가» 입구(story #4888)', () => {
+  async function stubPost(posted: Array<Record<string, unknown>>) {
+    const baseFetch = vi.mocked(fetch);
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url === '/api/stories' && init?.method === 'POST') {
+        const body = JSON.parse(init.body as string) as Record<string, unknown>;
+        posted.push(body);
+        return { ok: true, json: async () => ({ data: { id: 'new-list-1', priority: 'medium', ...body } }) };
+      }
+      return baseFetch(url, init);
+    }));
+  }
+  const addEntry = () => [...container.querySelectorAll('[data-testid="list-story-composer"] button')].find((b) => b.textContent?.includes('스토리 추가')) as HTMLButtonElement | undefined;
+
+  it('⭐폰(기본 보기 = 목록): 보드 보기로 바꾸지 않고도 «스토리 추가»가 있다 — 누르면 입력칸 · 제목 + Enter → status backlog로 POST · 목록에 바로 선다', async () => {
+    isMobileMock = true;
+    const posted: Array<Record<string, unknown>> = [];
+    stubFetch([{ id: 's-existing', title: '있던 카드', status: 'backlog', priority: 'medium' }]);
+    await stubPost(posted);
+    await mount();
+    expect(container.querySelector('button[aria-pressed="true"][title="목록 보기"]')).not.toBeNull(); // 지금 보기 = 목록
+    expect(addEntry()).toBeTruthy();
+    await act(async () => { addEntry()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const input = container.querySelector('[data-testid="list-story-composer"] input') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, '폰에서 만든 일감');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toMatchObject({ title: '폰에서 만든 일감', status: 'backlog', priority: 'medium' });
+    expect(container.textContent).toContain('폰에서 만든 일감');
+    expect(container.textContent).toContain('있던 카드');
+  });
+
+  it('⭐서버가 거절해도(POST 실패) 입력칸과 쓴 제목은 그대로 · 오류가 뜬다 · 목록에 가짜 카드 없음 (codex 5543-2)', async () => {
+    isMobileMock = true;
+    stubFetch([{ id: 's-existing', title: '있던 카드', status: 'backlog', priority: 'medium' }]);
+    const baseFetch = vi.mocked(fetch);
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url === '/api/stories' && init?.method === 'POST') return { ok: false, status: 500, json: async () => null };
+      return baseFetch(url, init);
+    }));
+    await mount();
+    await act(async () => { addEntry()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const input = container.querySelector('[data-testid="list-story-composer"] input') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, '거절당할 일감');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+    const still = container.querySelector('[data-testid="list-story-composer"] input') as HTMLInputElement | null;
+    expect(still).not.toBeNull();
+    expect(still!.value).toBe('거절당할 일감');
+    const alertEl = await waitForAlert();
+    expect(alertEl?.textContent).toContain('스토리 추가에 실패했어요');
+    expect(container.querySelectorAll('[title="거절당할 일감"]')).toHaveLength(0);
+    expect(container.textContent).toContain('있던 카드');
+  });
+
+  it('⭐입구는 목록 맨 위(상태 묶음들보다 앞)에 있다', async () => {
+    isMobileMock = true;
+    stubFetch([{ id: 's1', title: '카드1', status: 'backlog', priority: 'medium' }]);
+    await mount();
+    const entry = container.querySelector('[data-testid="list-story-composer"]')!;
+    const firstGroupButton = [...container.querySelectorAll('[data-testid="kanban-content-area"] button')].find((b) => b.getAttribute('aria-expanded') !== null)!;
+    expect(firstGroupButton).toBeTruthy();
+    expect(entry.compareDocumentPosition(firstGroupButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('보드 보기(데스크톱 기본)에는 목록용 입구가 없다 — 열 머리 «+» 컴포저와 겹치지 않는다', async () => {
+    isMobileMock = false;
+    stubFetch([{ id: 's-desktop', title: '데스크톱카드', status: 'backlog', priority: 'medium' }]);
+    await mount();
+    expect(container.querySelector('[data-testid="list-story-composer"]')).toBeNull();
+  });
+
+  it('데스크톱에서 목록 보기로 바꿔도 같은 입구가 선다(폭이 아니라 보기에 달린 입구)', async () => {
+    isMobileMock = false;
+    stubFetch([{ id: 's-desktop', title: '데스크톱카드', status: 'backlog', priority: 'medium' }]);
+    await mount();
+    const listToggle = container.querySelector<HTMLButtonElement>('button[title="목록 보기"]')!;
+    await act(async () => { listToggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(addEntry()).toBeTruthy();
+  });
+});
+
 // story #3287([도메인탈고정·축1 Phase1] AC4) — org 라벨 오버라이드가 클래식(5-status)
 // 컬럼 헤더 텍스트만 바꾸고, canonical status(드래그·색상·전이 판정에 쓰는 col.id)와
 // 신뢰축(TRUST_COLUMNS, 다른 어휘) 라벨은 절대 안 건드리는지 실 렌더로 고정.

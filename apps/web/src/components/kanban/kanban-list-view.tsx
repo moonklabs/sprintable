@@ -8,6 +8,7 @@ import { COLUMNS, type KanbanStory, type KanbanMember, type LineStatusSummary } 
 import { StoryCard } from './story-card';
 import type { LabelData } from '@/components/ui/label-chip';
 import { CountBadge } from '@/components/ui/count-badge';
+import { ListStoryComposer } from './list-story-composer';
 
 interface KanbanListViewProps {
   stories: KanbanStory[];
@@ -28,6 +29,8 @@ interface KanbanListViewProps {
   /** story #3287 AC4 — org 라벨 오버라이드(useOrgDomainLabels().statusLabel). 없으면
    * 기존 t(col.i18nKey) 그대로(회귀 0). 그룹 헤더+카드 내부 배지 둘 다에 쓰인다. */
   getStatusLabel?: (canonicalSlug: string) => string | undefined;
+  /** story #4888 — 목록 보기에도 «스토리 추가» 입구 한 자리(같은 동작: 상태 backlog로 만든다). 없으면 입구도 없다(옛 호출부 무변). */
+  onCreateStory?: (title: string) => Promise<boolean | void> | boolean | void;
 }
 
 interface StatusGroupProps {
@@ -108,12 +111,13 @@ function StatusGroup({
 
 export function KanbanListView({
   stories, epicMap, memberMap, onStoryClick, onChangeStatus,
-  executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap, projectId, getStatusLabel,
+  executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap, projectId, getStatusLabel, onCreateStory,
 }: KanbanListViewProps) {
   const t = useTranslations('board');
 
   return (
     <div className="space-y-2">
+      {onCreateStory ? <ListStoryComposer onCreate={onCreateStory} /> : null}
       {COLUMNS.map((col) => {
         const colStories = stories.filter((s) => s.status === col.id);
         return (
