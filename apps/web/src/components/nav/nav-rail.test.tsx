@@ -83,9 +83,14 @@ describe('NavRail — B 셸 초안(아이콘 막대)', () => {
   it('⭐건수 배지: «오늘» 아이콘은 넘겨받은 todayCount를 그대로 그린다(셈은 UI-5 몫 — 막대는 값을 받아 그리기만) · «대화»는 안 읽은 수', async () => {
     await mount({ todayCount: 3, chatUnreadTotal: 120 });
     const badgeOf = (id: string) => container.querySelector(`[data-rail-item="${id}"] [data-testid="rail-badge"]`)?.textContent;
-    // 보이는 수는 맨 끝 글자(앞의 sr-only는 안 보이는 이름)
-    expect(badgeOf('org-briefing')?.trim().endsWith('3')).toBe(true);
-    expect(badgeOf('chats')?.trim().endsWith('99+')).toBe(true);
+    // 보이는 수 = sr-only 이름을 뺀 글(안 보이는 이름 + 공백 + 수) — 정확히 비교
+    const visible = (id: string) => {
+      const b = container.querySelector(`[data-rail-item="${id}"] [data-testid="rail-badge"]`);
+      return b ? [...b.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join('') : undefined;
+    };
+    expect(visible('org-briefing')).toBe('3');
+    expect(visible('chats')).toBe('99+');
+    expect(badgeOf('org-briefing')).toContain('사람 손이 필요한 일');
     expect(badgeOf('board')).toBeUndefined();
     // 옆 목록의 «결재» 줄에는 따로 숫자가 없다 — 숫자는 «오늘» 하나(결재만 세는 두 번째 셈을 두지 않는다)
     expect(container.querySelector('[data-flyout-item="inbox"] [data-testid="rail-badge"]')).toBeNull();
@@ -235,6 +240,7 @@ describe('NavRail — B 셸 초안(아이콘 막대)', () => {
     expect(home.className).toContain('bg-ds-needs-hand-bar');
     expect(home.className).toContain('text-ds-on-needs-hand');
     expect(home.querySelector('.sr-only')?.textContent?.trim()).toBe('사람 손이 필요한 일');
+    expect(chat.querySelector('.sr-only')?.textContent?.trim()).toBe('안 읽은 글');
     expect(chat.getAttribute('data-kind')).toBe('unread');
     expect(chat.className).toContain('bg-ds-action');
     expect(chat.className).toContain('text-ds-on-action');
