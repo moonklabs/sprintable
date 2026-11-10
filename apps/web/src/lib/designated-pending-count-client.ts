@@ -4,7 +4,7 @@ import { isBackfillEvent } from '@/lib/realtime/sse-multiplexer';
 
 /**
  * story #4171(E-MOBILE-SPEED) — `GET /api/gates/designated-pending-count` 진행 중 요청 공유.
- * 모바일 첫 화면에서 사이드바(닫힌 시트라도 hook은 돈다)와 하단 탭바가 마운트 때 각자 불러 같은
+ * 모바일 첫 화면에서 사이드바(닫힌 시트라도 hook은 돈다)와 그 밖의 구독자가 마운트 때 각자 불러 같은
  * 요청이 2번 나갔다. 동시에 부른 호출은 요청 하나를 나눠 쓰고, 응답이 오면 공유를 끝낸다(저장하는
  * 값 없음 — 폴링·포커스·SSE 재조회는 매번 새로 묻는다). 실패·예외는 null.
  * 합류는 요청 맥락(인터셉터가 싣는 org·project)이 같을 때만 — org 전환 직전에 출발한 요청에 전환 뒤
@@ -56,7 +56,7 @@ export function resetDesignatedPendingCountStateForTest(): void {
 export function fetchDesignatedPendingCount(opts?: { fresh?: boolean }): Promise<number | null> {
   const key = getRequestContextKey();
   if (!opts?.fresh && inFlight && inFlight.key === key) return inFlight.promise;
-  // 같은 이벤트의 구독자 여럿(사이드바 · 탭바 · 훅 여러 마운트)은 한 동기 디스패치 안에서 잇달아 부른다 — 그 안의 fresh 호출끼리는 합류한다
+  // 같은 이벤트의 구독자 여럿(사이드바 · 훅 여러 마운트 — 폰 탭바는 story #4885부터 이 수를 안 센다)은 한 동기 디스패치 안에서 잇달아 부른다 — 그 안의 fresh 호출끼리는 합류한다
   // (이벤트당 요청 1). 디스패치가 끝나면(마이크로태스크) 다음 fresh는 새로 묻는다.
   if (opts?.fresh && inFlight && inFlight.key === key && inFlight.turn !== null && inFlight.turn === freshTurn) return inFlight.promise;
   let turn: object | null = null;
@@ -89,7 +89,7 @@ export function fetchDesignatedPendingCount(opts?: { fresh?: boolean }): Promise
   return promise;
 }
 
-/** story #4263 — 결재 대기 수를 바꿀 수 있는 게이트 SSE 이벤트(승인 · 반려 · 위임 · 토스). 사이드바와 모바일 탭바가 같은 목록 · 같은 판정을 쓴다. */
+/** story #4263 — 결재 대기 수를 바꿀 수 있는 게이트 SSE 이벤트(승인 · 반려 · 위임 · 토스). 사이드바와 그 밖의 구독자가 같은 목록 · 같은 판정을 쓴다. */
 export const DESIGNATED_PENDING_COUNT_EVENTS = ['conversation.gate_resolved', 'conversation.gate_delegated', 'conversation.gate_tossed'] as const;
 
 /** story #4612 — the server's transient SSE name for a permission request's later change (backend services/agent_permissions.py) */

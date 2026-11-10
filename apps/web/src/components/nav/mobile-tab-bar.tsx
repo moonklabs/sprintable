@@ -225,6 +225,8 @@ export function MobileTabBar({
   // 유저 event-stream 연결이 중복된다 — dashboard-shell.tsx가 단일 호출한 값을 prop으로 받는다.
   // story #4885 — 「홈」 탭 배지 = 웹 막대 「홈」 배지와 **같은 수**(홈 화면 «내 손이 필요해요»의 줄 수): 둘 다 홈 모델(useHomeModel) 하나를 읽는다 — 이 탭바가 따로 세던 결재 대기 fetch · SSE 구독은 걷었다.
   // 읽기가 불완전하면(partial) 수는 «이상»이라 «N+»로 그린다(웹 막대 ds CountBadge atLeast와 같은 규칙 · 같은 상한 99).
+  // ⚠️홈 모델 공급자(HomeModelProvider)는 대시보드 셸(dashboard-shell.tsx) 안에만 있다. 셸 밖 별도 라우트(/today · /chat · /connect-rules = v3 시안 · 환경 플래그 TODAY_V3_ENABLED 등이 꺼진 기본에선 안 서는 화면)가 이 탭바를 직접 얹으면
+  // 공급자가 없어 모델이 비어 있고 «홈» 배지는 안 그려진다(0으로 읽힌다) — 그 화면들엔 org · 멤버 · 프로젝트 컨텍스트가 없어 공급자를 세울 수 없다(각 layout.tsx 주석). 시험이 이 «공급자 없음 = 배지 없음 · 오류 없음»을 고정한다.
   const { model: homeModel, partial: homePartial } = useHomeModel();
   const homeCount = homeModel?.badge ?? 0;
 

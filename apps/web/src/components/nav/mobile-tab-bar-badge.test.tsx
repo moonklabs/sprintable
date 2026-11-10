@@ -190,3 +190,21 @@ describe('MobileTabBar — 탭 접근성 이름에 카운트 포함(story #3518)
     expect([...container.querySelectorAll('a')].some((a) => a.getAttribute('href') === '/org-briefing')).toBe(false);
   });
 });
+
+// story #4885 — 홈 모델 공급자가 없는 셸 밖 화면(v3 시안 /today · /chat · /connect-rules — 환경 플래그가 꺼진 기본에선 안 선다)에 이 탭바가 얹히면: 오류 없이 렌더되고 «홈» 배지는 없다.
+describe('MobileTabBar — 홈 모델 공급자 없음(셸 밖 v3 화면, story #4885)', () => {
+  it('공급자 없이 렌더돼도 오류 없이 탭 넷이 서고 «홈» 배지는 안 뜬다(대화 배지는 그대로)', async () => {
+    vi.resetModules();
+    vi.doUnmock('@/components/home/home-model-provider');
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const { MobileTabBar } = await import('./mobile-tab-bar');
+    await act(async () => { root.render(wrap(<MobileTabBar chatUnreadTotal={4} />)); });
+    expect(container.querySelectorAll('[data-testid="mobile-tab-bar"] a')).toHaveLength(4);
+    const home = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/org-briefing')!;
+    expect(home.querySelector('span[aria-hidden]')).toBeNull();
+    const chat = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/chats')!;
+    expect(chat.querySelector('span[aria-hidden]')?.textContent).toBe('4');
+  });
+});
