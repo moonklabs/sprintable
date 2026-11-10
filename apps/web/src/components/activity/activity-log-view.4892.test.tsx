@@ -103,6 +103,18 @@ describe('ActivityLogView — «더 보기» failure (4892 §5 item 6)', () => {
     expect(container.textContent).toContain(koMessages.activityLog.forbiddenTitle);
   });
 
+  it('«더 보기» is a ds Button; while it asks it keeps its words, shows busy, and is not pressed twice', async () => {
+    let release: (v: unknown) => void = () => {};
+    await mount(() => new Promise((resolve) => { release = resolve; }));
+    expect(moreButton()!.getAttribute('data-slot')).toBe('ds-button');
+    await act(async () => { moreButton()!.click(); });
+    const busy = container.querySelector('button[data-slot="ds-button"][aria-busy="true"]') as HTMLButtonElement | null;
+    expect(busy).not.toBeNull();
+    await act(async () => { busy!.click(); });
+    expect(secondPageCalls()).toBe(1);   // a press while it is asking does nothing
+    await act(async () => { release(page(['b1'], 100, 30)); await Promise.resolve(); });
+  });
+
   it('a good second page shows no toast', async () => {
     await mount(() => page(['b1'], 100, 30));
     await press();
