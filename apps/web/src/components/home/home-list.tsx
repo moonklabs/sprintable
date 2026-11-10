@@ -155,6 +155,8 @@ export function HomeList({ model, sources }: { model: HomeModel; sources: HomeSo
           tone="needs-hand"
           level={2}
           count={<CountBadge kind="needs-hand" label={t('needsHandLabel')} count={model.header.needsHand} data-testid="home-needs-hand-count" />}
+          // the old section said it beside its title when there were rows: money and outbound sends are signed one at a time
+          trailing={model.needsHand.length > 0 ? <span data-testid="home-needs-hand-hint">{tb('needsMeHint')}</span> : undefined}
         />
         {model.needsHand.length === 0 && hiddenNeedsMe === 0 ? (
           <EmptyState icon="check_circle" title={t('emptyAllTitle')} description={t('emptyAllDescription')} />
