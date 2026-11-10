@@ -105,6 +105,23 @@ describe('GoalsClient — 보기 전환 «목록 | 스윔레인»(story #4888)',
     expect(viewBtn(koMessages.goals.viewList)?.getAttribute('aria-pressed')).toBe('true');
   });
 
+  // codex 5543-goals BLOCKING — 같은 마운트에서 projectId만 바뀌는 이동(프로젝트 전환)에서 이전 프로젝트의 보기가 남으면 다른 프로젝트가 엉뚱한 보기로 열린다.
+  // 위 시험은 매번 다시 마운트해 이걸 못 잡았다(거짓 통과) — 여기선 root.render로 같은 마운트에 projectId만 바꿔 건다.
+  it('⭐같은 마운트에서 프로젝트만 바뀌어도 그 프로젝트의 보기로 맞춘다 — 스윔레인이던 proj-1에서 proj-2(저장값 없음)로 가면 목록, 다시 proj-1로 오면 스윔레인', async () => {
+    const { GoalsClient } = await import('./goals-client');
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-1" />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await click(viewBtn(koMessages.goals.viewSwimlane)!);
+    expect(container.querySelector('[data-testid="swimlane-board-stub"]')).not.toBeNull();
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-2" />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="swimlane-board-stub"]')).toBeNull();
+    expect(viewBtn(koMessages.goals.viewList)?.getAttribute('aria-pressed')).toBe('true');
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-1" />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="swimlane-board-stub"]')).not.toBeNull();
+  });
+
   it('저장소가 막혀도(getItem · setItem이 던짐) 화면은 서고 이번 전환은 된다', async () => {
     vi.stubGlobal('localStorage', { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } });
     await mount();

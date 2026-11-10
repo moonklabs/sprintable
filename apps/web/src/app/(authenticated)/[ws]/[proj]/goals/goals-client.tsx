@@ -1004,9 +1004,12 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
   // 기본은 목록(예전 /goals 그대로). 고른 보기는 프로젝트별로 이 브라우저에 기억한다(스윔레인 보드가 축 전환을 기억하는 것과 같은 방식 · 저장이 막혀도 화면은 선다).
   const [view, setViewState] = useState<'list' | 'swimlane'>('list');
   useEffect(() => {
+    // 프로젝트가 바뀔 때마다(같은 화면이 다시 마운트되지 않고 projectId만 바뀌는 이동 포함) 그 프로젝트의 보기로 맞춘다 — 저장값이 없으면 기본(목록). 이전 프로젝트의 보기를 끌고 가지 않는다.
+    let next: 'list' | 'swimlane' = 'list';
     try {
-      if (window.localStorage.getItem(`goals-view:${projectId}`) === 'swimlane') setViewState('swimlane');
+      if (window.localStorage.getItem(`goals-view:${projectId}`) === 'swimlane') next = 'swimlane';
     } catch { /* 저장소 막힘 — 기본 보기로 */ }
+    setViewState(next);
   }, [projectId]);
   const setView = useCallback((next: 'list' | 'swimlane') => {
     setViewState(next);
