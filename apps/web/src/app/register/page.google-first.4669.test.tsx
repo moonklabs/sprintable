@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
-// story 4669 (U6 · AC1 · Yuna A-5) — with Google on (NEXT_PUBLIC_OAUTH_ENABLED=true) the sign-up page leads with [Google로 계속]
-// and folds the e-mail form under [이메일로 가입]; a build with no OAuth keeps the e-mail form open as before. Harness as
+// story 4669 (U6 · AC1 · Yuna A-5) — with Google on (NEXT_PUBLIC_OAUTH_ENABLED=true) the sign-up page leads with [Google로 계속];
+// story 4891 (UI-8 U1 · PO 11-10): the e-mail form is on the same screen under it (it was folded behind [이메일로 가입]) — one screen, the terms checkbox still gating both ways. Harness as
 // page.test.tsx (next/navigation mocked · the flag set per test). Reverted (the form open and Google below it) → T1 red.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -51,44 +51,52 @@ async function mount() {
 const byTestId = (id: string) => container.querySelector(`[data-testid=${id}]`);
 const inputs = () => [...container.querySelectorAll('input')];
 
-describe('[SID:4669] RegisterPage — Google first, the e-mail form folded', () => {
-  it('T1 OAuth on: [Google로 계속] is the first control after the terms line · no e-mail inputs · [이메일로 가입] folded (one-way: no aria-expanded)', async () => {
+describe('[SID:4669 · 4891] RegisterPage — Google first, the e-mail form on the same screen', () => {
+  it('T1 OAuth on: ONE screen — the terms line, then [Google로 계속] (the brand button, first control after the terms), then the three e-mail fields and [회원가입] — nothing folded, nothing to open', async () => {
     process.env['NEXT_PUBLIC_OAUTH_ENABLED'] = 'true';
     await mount();
     const google = byTestId('register-google') as HTMLAnchorElement;
     expect(google?.textContent?.trim()).toBe(koMessages.register.continueWithGoogle);
     expect(google.className).toContain('bg-brand'); // the one brand-colored control on the screen
-    // the only inputs are the terms checkbox — the e-mail form is folded
-    expect(inputs().map((i) => i.type)).toEqual(['checkbox']);
-    expect(byTestId('register-email-form')).toBeNull();
-    const open = byTestId('register-email-open');
-    expect(open?.textContent?.trim()).toBe(koMessages.register.emailSignUp);
-    // Yuna (5064 design): the button goes away when pressed — a disclosure that never collapses has no expanded state to announce
-    expect(open?.hasAttribute('aria-expanded')).toBe(false);
-    expect(open?.hasAttribute('aria-controls')).toBe(false);
-    expect(container.textContent).toContain(koMessages.register.or);
-    // Google comes before the fold button in the document
-    expect(google.compareDocumentPosition(open!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
-
-  it('T2 OAuth on: [이메일로 가입] opens the form in place — focus lands on the name field (the button is gone) · name · e-mail · password · [회원가입] (not brand-colored)', async () => {
-    process.env['NEXT_PUBLIC_OAUTH_ENABLED'] = 'true';
-    await mount();
-    const open = byTestId('register-email-open') as HTMLButtonElement;
-    open.focus();
-    await act(async () => { open.click(); });
-    expect(byTestId('register-email-form')).not.toBeNull();
+    // reverted (the e-mail form folded behind a button again) → only the checkbox is here and the fold button exists
     expect(inputs().map((i) => i.type)).toEqual(['checkbox', 'text', 'email', 'password']);
     expect(byTestId('register-email-open')).toBeNull();
-    // Yuna (5064 design · 4723's class): the pressed button vanished — the keyboard focus must be on the first field, not the body
-    // (reverted — no focus() — the active element is the body and this fails)
-    expect(document.activeElement).toBe(inputs()[1]);
-    expect(document.activeElement).not.toBe(document.body);
+    const form = byTestId('register-email-form') as HTMLElement;
+    expect(form).not.toBeNull();
+    expect(container.textContent).toContain(koMessages.register.or);
+    // the order: Google first (story 4669's «Google 먼저»), the e-mail form under it
+    expect(google.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const submit = byTestId('register-submit') as HTMLButtonElement;
     expect(submit.textContent?.trim()).toBe(koMessages.register.submit);
-    expect(submit.className).not.toContain('bg-brand');
-    // Google still first, still the brand button
-    expect((byTestId('register-google') as HTMLAnchorElement).className).toContain('bg-brand');
+    expect(submit.className).not.toContain('bg-brand'); // with Google on the e-mail way is the second way
+  });
+
+  it('T2 OAuth on, the terms gate BOTH ways (AUTH-07): unticked by default · [Google로 계속] goes nowhere and [회원가입] is off · ticking opens both · the e-mail request carries tos_accepted:true', async () => {
+    process.env['NEXT_PUBLIC_OAUTH_ENABLED'] = 'true';
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/auth/register') return { ok: true, json: async () => ({ data: { ok: true } }) };
+      return { ok: true, json: async () => ({ data: {} }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+    const [terms, name, email, password] = inputs() as HTMLInputElement[];
+    // the checkbox starts unticked (reverted — pre-ticked — both ways would be open here)
+    expect(terms!.getAttribute('aria-checked') ?? String(terms!.checked)).not.toBe('true');
+    expect((byTestId('register-google') as HTMLAnchorElement).getAttribute('href')).toBeNull();
+    const submit = () => byTestId('register-submit') as HTMLButtonElement;
+    const type = async (el: HTMLInputElement, value: string) => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      await act(async () => { setter.call(el, value); el.dispatchEvent(new Event('input', { bubbles: true })); });
+    };
+    await type(name!, '지우'); await type(email!, 'jiwoo@example.com'); await type(password!, 'Passw0rd!x');
+    expect(submit().disabled, 'the fields alone do not open [회원가입] — the terms are not ticked').toBe(true);
+    await act(async () => { (terms as HTMLInputElement).click(); });
+    expect(submit().disabled).toBe(false);
+    expect((byTestId('register-google') as HTMLAnchorElement).getAttribute('href')).toBe('/auth/login?provider=google&tos_accepted=true');
+    await act(async () => { submit().click(); await Promise.resolve(); await Promise.resolve(); });
+    const call = fetchMock.mock.calls.find((c) => c[0] === '/api/auth/register') as unknown as [string, RequestInit];
+    expect(JSON.parse(String(call[1].body))).toEqual({ email: 'jiwoo@example.com', password: 'Passw0rd!x', display_name: '지우', tos_accepted: true });
+    vi.unstubAllGlobals();
   });
 
   it('T3 OAuth off (OSS · local): the e-mail form is open as before · no Google · no fold button · [회원가입] is the brand button', async () => {
