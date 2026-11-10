@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -9,9 +9,7 @@ import { useTranslations } from 'next-intl';
 import { MessageSquare, Grid2x2, Newspaper, Workflow } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { CornerCountBadge } from '@/components/ui/corner-count-badge';
-import { MOBILE_BREAKPOINT } from '@/hooks/use-mobile';
-import { fetchDesignatedPendingCount, subscribeDesignatedPendingCount } from '@/lib/designated-pending-count-client';
-import { useSseMultiplexerContext } from '@/components/realtime-provider';
+import { useHomeModel } from '@/components/home/home-model-provider';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { WORKSPACE_FRAME_TAB_PATHS } from '@/components/workspace/workspace-frame-tabs';
 import {
@@ -225,68 +223,10 @@ export function MobileTabBar({
   // 채팅 항목(app-sidebar.tsx)과 동일 소스. story #2007(perf·서버부하): 여기서 직접
   // useChatUnreadTotal()을 호출하면 AppSidebar와 각자 SSE(EventSource) 연결을 열어 동일
   // 유저 event-stream 연결이 중복된다 — dashboard-shell.tsx가 단일 호출한 값을 prop으로 받는다.
-  // 결재함 배지 = 서명 대기 수(유나 §3.1 정합) — GateInbox가 이미 쓰는 것과 동일한
-  // `/api/gates?status=pending` 재사용(신규 집계 안 만듦). gate_overridden은 override 시
-  // approver row status가 "overridden"으로 전이돼(gate_service.py) pending 조회에서 자동 제외
-  // — 별도 필터 불요(백엔드 확認 완료).
-  //
-  // ⚠️fix(story #1974, 선생님 실사용 지적, prod 승격 예정): 이 fetch가 caller 스코프 필터 없이
-  // org 전체 pending을 반환해 "남의 게이트도 내 배지로 세는" 구조적 오배지였다(코드로 확定).
-  // `assigned_to_me=true`(디디 BE 계약, #1974)로 "내가 승인 가능한 것만" 스코프. BE 배포 전엔
-  // FastAPI가 미인식 쿼리파라미터를 무시하므로 안전한 no-op(기존과 동일 org-wide 동작) — 배포되면
-  // 자동으로 개인화 적용.
-  const [pendingCount, setPendingCount] = useState(0);
-  const mux = useSseMultiplexerContext();
-  const muxRef = useRef(mux);
-  useEffect(() => { muxRef.current = mux; }, [mux]);
-
-  // story #4263 AC2 — 사이드바와 같은 라이브 갱신(게이트 SSE 이벤트 · #4245 워터마크 판정 공유). 이 구독이 있으니 SSE가 살아 있는 동안엔
-  // 창 포커스 재조회가 필요 없다(아래 loadPendingCount가 생략). 데스크톱(탭바 숨김)에선 구독도 안 한다(아래 effect와 같은 폭 판정).
-  useEffect(() => {
-    if (!mux || typeof window === 'undefined' || window.innerWidth >= MOBILE_BREAKPOINT) return;
-    return subscribeDesignatedPendingCount(mux, setPendingCount);
-  }, [mux]);
-
-  useEffect(() => {
-    // 유나 가디언 지적(#2249 병합 처리) — 탭바 자체는 `lg:hidden`(CSS 시각 게이팅)이지만
-    // CSS hidden은 DOM 마운트/effect 실행을 막지 않는다. 배지 fetch는 <1024에서만 필요하니
-    // 데스크톱에서도 매번 나가던 것을 막는다. useIsMobile()의 mount-시 undefined→effect
-    // 확定 타이밍 레이스(유나 지적)를 피하려 여기서도 use-synthetic-parent-tab-history.ts와
-    // 동일하게 window.innerWidth를 effect 내부에서 동기 판정한다(첫 렌더 즉시 정확한 값).
-    if (typeof window === 'undefined' || window.innerWidth >= MOBILE_BREAKPOINT) return;
-
-    let cancelled = false;
-    // ⚠️fix(story #1974, 선생님 실사용 지적): 마운트 1회 fetch뿐이라 게이트를 다른 탭/기기에서
-    // 처리해도 배지가 안 줄어드는 stale 문제 — DB 실측(2026-07-17)으로 확認(dev pending=0인데
-    // 사용자 배지는 그대로 남아있었음). window focus 복귀 시 재조회해 완화(전형적인 "다른 곳에서
-    // 처리하고 이 탭으로 돌아옴" 시나리오를 커버 — 실시간 push는 아니지만 이 스토리 스코프에선
-    // 충분, 완전한 실시간 갱신은 #1960 결재함 큐 스코프).
-    async function loadPendingCount() {
-      try {
-        // story #3084(2026-08-25 층1, PO 확定) — assigned_to_me(넓은 project-access 질문)를
-        // designated-pending-count(순수 "내가 지정 결재자인 미해소 건", room 추론 0)로 교체
-        // — app-sidebar.tsx와 동일 SSOT 전환(그 파일 주석 참고).
-        // story #4171 — 사이드바와 진행 중 요청 공유(모바일 첫 화면 중복 1건 제거).
-        const count = await fetchDesignatedPendingCount();
-        if (count !== null && !cancelled) setPendingCount(count);
-      } catch {
-        // 배지 카운트 실패는 치명적이지 않음 — 숫자 없이 탭만 정상 동작.
-      }
-    }
-
-    void loadPendingCount();
-    // story #4263 AC2 — SSE가 살아 있으면(mux.isAlive · 4252와 같은 판정) 위 구독이 수를 따라가고 있어 포커스 재조회를 생략한다.
-    // 죽었거나 끊겼던 뒤엔 재조회(정확성 우선).
-    const handleFocus = () => {
-      if (muxRef.current?.isAlive()) return;
-      void loadPendingCount();
-    };
-    window.addEventListener('focus', handleFocus);
-    return () => {
-      cancelled = true;
-      window.removeEventListener('focus', handleFocus);
-    };
-  }, []);
+  // story #4885 — 「홈」 탭 배지 = 웹 막대 「홈」 배지와 **같은 수**(홈 화면 «내 손이 필요해요»의 줄 수): 둘 다 홈 모델(useHomeModel) 하나를 읽는다 — 이 탭바가 따로 세던 결재 대기 fetch · SSE 구독은 걷었다.
+  // 읽기가 불완전하면(partial) 수는 «이상»이라 «N+»로 그린다(웹 막대 ds CountBadge atLeast와 같은 규칙 · 같은 상한 99).
+  const { model: homeModel, partial: homePartial } = useHomeModel();
+  const homeCount = homeModel?.badge ?? 0;
 
   // story #4217 — 못 푼 프로젝트 경로(오류 상태)에선 어느 탭도 활성 아님(링크는 bare라 그 경로를 가리키지 않는다).
   const activeKey = projectPathUnresolved ? null : getActiveTabKey(pathname, navV3Flags);
@@ -309,16 +249,13 @@ export function MobileTabBar({
         // 현재 페이지 RSC 데이터 프리패치 1건 — 이미 떠 있는 화면이라 쓸 곳이 없다). «활성»이 아니라 «경로 일치»로 가른다 —
         // 채팅 탭은 대화 상세(/chats/{id})에서도 활성이지만 거기선 /chats 프리패치가 목록 복귀를 빠르게 한다.
         const isCurrentPage = staticPathOnly(href) === pathname;
-        // story #1977: "채팅" 탭 배지 = GNB unread 총합(결재함 배지와 동일 brand, 구분은
-        // 색이 아니라 아이콘+탭 순서 — 유나 시안 768e89b5 v2 디자인 노트).
-        // story #4006 AC8 — v3 4탭엔 「승인」이 없다. 같은 pendingCount를 「오늘」 탭
-        // 배지로 그대로 옮겨 붙인다(승인 큐가 「오늘」의 결정 큐로 흡수됐다는 뜻 —
-        // PO 確定, 위 V3_TABS 주석 참고. 새 fetch 0).
-        const badge = key === 'today' && pendingCount > 0
-          ? pendingCount
+        // story #1977: "채팅" 탭 배지 = GNB unread 총합. story #4885 — 「홈」 탭 배지 = 홈 모델의 «내 손이 필요한 일» 수(웹 막대와 같은 수 · 같은 상한 99 · partial이면 N+).
+        const badge = key === 'today' && homeCount > 0
+          ? homeCount
           : key === 'chat' && chatUnreadTotal > 0
             ? chatUnreadTotal
             : null;
+        const badgeText = badge === null ? null : badge > 99 ? '99+' : key === 'today' && homePartial ? `${badge}+` : badge;
         // story #3518(유나 사전 스티어, 2026-09-05) — CornerCountBadge는 aria-hidden이라
         // 그 수를 보조기술에 전하는 책임은 이 링크에 있다(계약은 corner-count-badge.tsx
         // 주석 참고). ⚠️여기 aria-label을 쓰지 않는다 — 이 탭은 벨/프레즌스와 달리
@@ -326,13 +263,12 @@ export function MobileTabBar({
         // 통째로 갈아치우면 그 보이는 라벨이 이름에서 사라진다(WCAG 2.5.3 Label in
         // Name 위반 — 음성 입력 사용자가 화면에 보이는 말("채팅")로 이 링크를 못
         // 부른다). 대신 시각 라벨 뒤에 sr-only 텍스트를 덧붙인다 — 보이는 라벨은
-        // 그대로 두고 수만 "더한다". 상한(9+/99+)도 이름에 반영한다(캡 값이 아니라
-        // "그 이상"이라는 사실을 문장으로 — 시각 배지의 캡과 같은 뜻).
+        // 그대로 두고 수만 "더한다". 상한(99+)·불완전(N+)도 이름에 반영한다("그 이상"이라는 사실을 문장으로).
         const srCountText = badge === null
           ? null
           : key === 'chat'
             ? (badge > 99 ? t('chatUnreadSrCapped') : t('chatUnreadSr', { count: badge }))
-            : (badge > 9 ? t('approvalsPendingSrCapped') : t('approvalsPendingSr', { count: badge }));
+            : (badge > 99 || homePartial ? t('homeNeedsHandSrAtLeast', { count: Math.min(badge, 99) }) : t('homeNeedsHandSr', { count: badge }));
         return (
           <Link
             key={key}
@@ -352,8 +288,8 @@ export function MobileTabBar({
                 <CornerCountBadge
                   variant="primary"
                   className="absolute -top-1 left-full ml-0.5"
-                  // story #1977: 채팅 unread 총합은 99+ 상한(시안 768e89b5 v2) — 결재함은 기존 9+ 유지
-                  value={key === 'chat' ? (badge > 99 ? '99+' : badge) : badge > 9 ? '9+' : badge}
+                  // 채팅 · 홈 둘 다 99+ 상한(홈은 웹 막대와 같은 수 — story #4885)
+                  value={badgeText ?? badge}
                 />
               ) : null}
             </span>

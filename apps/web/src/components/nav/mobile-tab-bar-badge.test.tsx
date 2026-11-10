@@ -13,6 +13,11 @@ import enMessages from '../../../messages/en.json';
 vi.mock('next/navigation', () => ({
   usePathname: () => '/flow',
 }));
+// story #4885 — 「홈」 탭 배지는 홈 모델(useHomeModel) 하나를 읽는다(웹 막대 「홈」 배지와 같은 수). 모델 값만 시험이 정한다.
+const { homeState } = vi.hoisted(() => ({ homeState: { badge: 0, partial: false } }));
+vi.mock('@/components/home/home-model-provider', () => ({
+  useHomeModel: () => ({ model: { badge: homeState.badge }, sources: null, loadError: false, partial: homeState.partial, retry: () => {} }),
+}));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -34,19 +39,9 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function mount(pendingCount: number, chatUnreadTotal: number, locale: 'ko' | 'en' = 'ko', flags?: import('@/lib/nav-v3-destinations').NavV3Flags) {
-  // MobileTabBar의 pendingCount effect는 window.innerWidth < MOBILE_BREAKPOINT(1024)일
-  // 때만 fetch한다(유나 지적 #2249 — 데스크톱에서 불필요한 왕복 금지). jsdom 기본값(1024)은
-  // 그 조건을 안 타므로 모바일 폭으로 명시 고정한다(390 — 이 레포 라이브픽셀 관례 폭).
-  Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 390 });
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-    if (url.includes('/api/gates/designated-pending-count')) {
-      return new Response(JSON.stringify({ count: pendingCount }), {
-        status: 200, headers: { 'content-type': 'application/json' },
-      });
-    }
-    return new Response(JSON.stringify([]), { status: 200, headers: { 'content-type': 'application/json' } });
-  }));
+async function mount(homeBadge: number, chatUnreadTotal: number, locale: 'ko' | 'en' = 'ko', flags?: import('@/lib/nav-v3-destinations').NavV3Flags, partial = false) {
+  homeState.badge = homeBadge;
+  homeState.partial = partial;
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -55,13 +50,13 @@ async function mount(pendingCount: number, chatUnreadTotal: number, locale: 'ko'
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 }
 
-describe('MobileTabBar — 결재/채팅 카운트 배지(story #3431 CornerCountBadge 통합)', () => {
+describe('MobileTabBar — 홈(내 손이 필요한 일)/채팅 카운트 배지(story #3431 CornerCountBadge 통합 · #4885 홈 모델)', () => {
   it('두 배지 모두 0건이면 배지 자체가 안 뜬다', async () => {
     await mount(0, 0);
     expect(container.querySelector('span[aria-hidden]')).toBeNull();
   });
 
-  it('결재 대기 5건 — primary variant·10px·9+ 상한 유지', async () => {
+  it('홈 5건 — primary variant·10px 유지', async () => {
     await mount(5, 0);
     const badge = container.querySelector('span[aria-hidden]');
     expect(badge?.textContent).toBe('5');
@@ -72,10 +67,20 @@ describe('MobileTabBar — 결재/채팅 카운트 배지(story #3431 CornerCoun
     expect(badge?.className).toContain('left-full');
   });
 
-  it('결재 대기 12건 — 9+ 상한(기존 로직 무변경)', async () => {
+  it('홈 12건 — 그대로 12(웹 막대와 같은 수 · 예전 9+ 상한은 걷었다)', async () => {
     await mount(12, 0);
     const badge = container.querySelector('span[aria-hidden]');
-    expect(badge?.textContent).toBe('9+');
+    expect(badge?.textContent).toBe('12');
+  });
+
+  it('홈 150건 — 웹 막대와 같은 99+ 상한', async () => {
+    await mount(150, 0);
+    expect(container.querySelector('span[aria-hidden]')?.textContent).toBe('99+');
+  });
+
+  it('⭐홈 읽기가 불완전(partial) 5건 — «5+»(웹 막대 atLeast와 같은 규칙)', async () => {
+    await mount(5, 0, 'ko', undefined, true);
+    expect(container.querySelector('span[aria-hidden]')?.textContent).toBe('5+');
   });
 
   it('채팅 unread 150건 — 99+ 상한(기존 로직 무변경, 결재와 다른 캡)', async () => {
@@ -122,11 +127,11 @@ describe('MobileTabBar — 탭 접근성 이름에 카운트 포함(story #3518)
     expect(chatLink.getAttribute('aria-label')).toBeNull(); // 접근성 이름을 통째로 안 갈아치운다(WCAG 2.5.3).
   });
 
-  // story #4885(폰 탭 넷) — «결재» 탭이 없어졌고 서명 대기 수는 «홈» 탭 배지가 된다(새 fetch 0). 접근성 이름 = 보이는 라벨 «홈» + 수 문장.
-  it('결재 대기 5건 — «홈» 탭의 접근성 이름이 «보이는 라벨+수»(라벨을 안 지운다)', async () => {
+  // story #4885(폰 탭 넷) — «결재» 탭이 없어졌고 «홈» 탭 배지 = 홈 모델의 «내 손이 필요한 일» 수. 접근성 이름 = 보이는 라벨 «홈» + 수 문장.
+  it('홈 5건 — «홈» 탭의 접근성 이름이 «보이는 라벨+수»(라벨을 안 지운다)', async () => {
     await mount(5, 0);
     const approvalsLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/org-briefing')!;
-    expect(approxAccessibleName(approvalsLink)).toBe('홈 결재 대기 5건');
+    expect(approxAccessibleName(approvalsLink)).toBe('홈 내 손이 필요한 일 5건');
   });
 
   it('채팅 unread 3건 — 접근성 이름이 «보이는 라벨+수»', async () => {
@@ -135,12 +140,16 @@ describe('MobileTabBar — 탭 접근성 이름에 카운트 포함(story #3518)
     expect(approxAccessibleName(chatLink)).toBe('대화 안읽음 3건');
   });
 
-  it('결재 대기 12건(시각 9+ 표기) — 접근성 이름엔 "9건 이상"(캡을 말로 반영, 시각 캡과 같은 뜻)', async () => {
-    await mount(12, 0);
-    const approvalsLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/org-briefing')!;
-    expect(approxAccessibleName(approvalsLink)).toBe('홈 결재 대기 9건 이상');
-    const badge = container.querySelector('span[aria-hidden]');
-    expect(badge?.textContent).toBe('9+'); // 시각 배지는 그대로 '9+'.
+  it('홈 150건(시각 99+ 표기) — 접근성 이름엔 «99건 이상»(캡을 말로 반영)', async () => {
+    await mount(150, 0);
+    const home = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/org-briefing')!;
+    expect(approxAccessibleName(home)).toBe('홈 내 손이 필요한 일 99건 이상');
+  });
+
+  it('홈 partial 5건(시각 5+) — 접근성 이름엔 «5건 이상»', async () => {
+    await mount(5, 0, 'ko', undefined, true);
+    const home = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/org-briefing')!;
+    expect(approxAccessibleName(home)).toBe('홈 내 손이 필요한 일 5건 이상');
   });
 
   it('채팅 unread 150건(시각 99+ 표기) — 접근성 이름엔 "99건 이상"', async () => {
@@ -151,19 +160,18 @@ describe('MobileTabBar — 탭 접근성 이름에 카운트 포함(story #3518)
     expect(badge?.textContent).toBe('99+');
   });
 
-  // story #3518(유나 사전 스티어 H, PO 決定) — 결재 sr 문구는 EN에서 "pending approval"
-  // 이라는 셀 수 있는 명사라 ICU plural이 실제로 갈린다(1 vs 그 외). 채팅 "unread"는
+  // story #3518(유나 사전 스티어 H, PO 決定) — 홈 sr 문구는 EN에서 셀 수 있는 명사("thing")라 ICU plural이 실제로 갈린다(1 vs 그 외). 채팅 "unread"는
   // 형용사성이라 단수·복수 형태 차이가 없다(그래도 count=1 경계값은 확인).
-  it('[en] 결재 대기 1건 — ICU plural one 갈래("1 pending approval", 단수)', async () => {
+  it('[en] 홈 1건 — ICU plural one 갈래(단수)', async () => {
     await mount(1, 0, 'en');
     const approvalsLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/org-briefing')!;
-    expect(approxAccessibleName(approvalsLink)).toBe('Home 1 pending approval');
+    expect(approxAccessibleName(approvalsLink)).toBe('Home 1 thing needs your hand');
   });
 
-  it('[en] 결재 대기 5건 — ICU plural other 갈래("5 pending approvals", 복수)', async () => {
+  it('[en] 홈 5건 — ICU plural other 갈래(복수)', async () => {
     await mount(5, 0, 'en');
     const approvalsLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/org-briefing')!;
-    expect(approxAccessibleName(approvalsLink)).toBe('Home 5 pending approvals');
+    expect(approxAccessibleName(approvalsLink)).toBe('Home 5 things need your hand');
   });
 
   it('[en] 채팅 unread 1건 — "1 unread"(형태 안 갈림, count=1 경계값 확인)', async () => {
@@ -174,11 +182,11 @@ describe('MobileTabBar — 탭 접근성 이름에 카운트 포함(story #3518)
   });
 
   // 폰 탭 넷(story #4885) — 탭 세트는 플래그로 갈리지 않는다: v3 «오늘» 화면이 켜져 있으면 «홈» 탭이 /today에 착지하고 배지 · 접근 이름은 그대로다(codex 권고).
-  it('⭐v3 오늘 화면 ON(/today) — «홈» 탭이 /today에 착지하고 같은 서명 대기 배지 · 접근 이름', async () => {
+  it('⭐v3 오늘 화면 ON(/today) — «홈» 탭이 /today에 착지하고 같은 홈 배지 · 접근 이름', async () => {
     await mount(5, 0, 'ko', { todayV3Enabled: true, chatV3Enabled: false, connectRulesV3Enabled: false });
     const home = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/today')!;
     expect(home).toBeDefined();
-    expect(approxAccessibleName(home)).toBe('홈 결재 대기 5건');
+    expect(approxAccessibleName(home)).toBe('홈 내 손이 필요한 일 5건');
     expect([...container.querySelectorAll('a')].some((a) => a.getAttribute('href') === '/org-briefing')).toBe(false);
   });
 });
