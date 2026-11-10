@@ -27,6 +27,7 @@
   --ds-action-soft: #efedfc;
   --ds-needs-hand: #9a4b00;
   --ds-needs-hand-bar: #d6791c;
+  --ds-on-needs-hand: #1a0f00;
   --ds-needs-hand-soft: #ffefe0;
   --ds-done: #0b7a5e;
   --ds-done-soft: #e7f2ef;
@@ -55,6 +56,7 @@
   --ds-action-soft: #2b2c46;
   --ds-needs-hand: #ffb77d;
   --ds-needs-hand-bar: #d6791c;
+  --ds-on-needs-hand: #1a0f00;
   --ds-needs-hand-soft: #342f2e;
   --ds-done: #46deb2;
   --ds-done-soft: #1e3334;
@@ -83,6 +85,7 @@
   --color-ds-action-soft: var(--ds-action-soft);
   --color-ds-needs-hand: var(--ds-needs-hand);
   --color-ds-needs-hand-bar: var(--ds-needs-hand-bar);
+  --color-ds-on-needs-hand: var(--ds-on-needs-hand);
   --color-ds-needs-hand-soft: var(--ds-needs-hand-soft);
   --color-ds-done: var(--ds-done);
   --color-ds-done-soft: var(--ds-done-soft);

@@ -1,0 +1,83 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { ListRow } from './list-row';
+
+let container: HTMLDivElement;
+let root: Root;
+beforeEach(() => {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+});
+afterEach(async () => {
+  await act(async () => { root.unmount(); });
+  container.remove();
+});
+const row = () => container.querySelector('[data-slot="ds-list-row"]') as HTMLElement;
+
+describe('ds ListRow', () => {
+  it('앞 자리 · 제목 · 고정폭 둘째 줄 · 오른쪽 행동', async () => {
+    await act(async () => {
+      root.render(<ListRow leading={<i data-testid="lead" />} title="결제 수단 두 개 추가 승인" subtitle="개발 에이전트 · 12분 전" trailing={<button type="button">허용</button>} />);
+    });
+    expect(row().querySelector('[data-testid="lead"]')).not.toBeNull();
+    expect(row().textContent).toContain('결제 수단 두 개 추가 승인');
+    expect(row().querySelector('.font-mono')!.textContent).toBe('개발 에이전트 · 12분 전');
+    expect(row().querySelector('button')!.textContent).toBe('허용');
+  });
+
+  it('⭐손 필요 줄은 왼쪽 4px 막대 + data-needs-hand', async () => {
+    await act(async () => { root.render(<ListRow title="줄" needsHand needsHandLabel="내 손이 필요" />); });
+    expect(row().getAttribute('data-needs-hand')).toBe('true');
+    expect(row().className).toContain('before:bg-ds-needs-hand-bar');
+    await act(async () => { root.render(<ListRow title="줄" />); });
+    expect(row().getAttribute('data-needs-hand')).toBeNull();
+    expect(row().className).not.toContain('before:bg-ds-needs-hand-bar');
+  });
+
+  it('선택은 aria-current + 눌린 면', async () => {
+    await act(async () => { root.render(<ListRow title="줄" selected />); });
+    expect(row().getAttribute('aria-current')).toBe('true');
+    expect(row().className).toContain('bg-ds-surface-high');
+  });
+
+  it('⭐asChild면 링크 요소가 줄이 된다(href 유지 · 같은 모양)', async () => {
+    await act(async () => { root.render(<ListRow asChild needsHand needsHandLabel="내 손이 필요"><a href="https://example.com/story/1">줄 전체가 링크</a></ListRow>); });
+    const a = container.querySelector('a')!;
+    expect(a.getAttribute('href')).toBe('https://example.com/story/1');
+    expect(a.className).toContain('min-h-14');
+    expect(a.getAttribute('data-needs-hand')).toBe('true');
+  });
+
+  it('⭐손 필요 줄은 읽히는 이름도 가진다(일반 줄 · asChild 둘 다) · 일반 줄은 없다', async () => {
+    await act(async () => { root.render(<ListRow title="줄" needsHand needsHandLabel="내 손이 필요" />); });
+    expect(row().querySelector('.sr-only')?.textContent).toBe('내 손이 필요');
+    await act(async () => { root.render(<ListRow asChild needsHand needsHandLabel="내 손이 필요"><a href="https://example.com/s/1">제목</a></ListRow>); });
+    const a = container.querySelector('a')!;
+    expect(a.querySelector('.sr-only')?.textContent).toBe('내 손이 필요');
+    expect(a.textContent).toContain('제목');
+    await act(async () => { root.render(<ListRow title="줄" />); });
+    expect(row().querySelector('.sr-only')).toBeNull();
+  });
+
+  it('타입: asChild는 요소 자식이 필수 · 아니면 title이 필수', () => {
+    // @ts-expect-error asChild에 자식 요소 없음
+    const a = <ListRow asChild />;
+    // @ts-expect-error asChild에 글 자식
+    const b = <ListRow asChild>글</ListRow>;
+    // @ts-expect-error 일반 줄에 title 없음
+    const c = <ListRow />;
+    expect([a, b, c]).toHaveLength(3);
+  });
+
+  it('⭐asChild에 Fragment · 글을 주면 그리지 않는다(모양 · 의미를 새게 하지 않는다)', async () => {
+    const frag = (<><a href="https://example.com/s/1">제목</a></>) as never;
+    await act(async () => { root.render(<ListRow asChild needsHand needsHandLabel="내 손이 필요">{frag}</ListRow>); });
+    expect(container.querySelector('a')).toBeNull();
+    const text = '글' as never;
+    await act(async () => { root.render(<ListRow asChild>{text}</ListRow>); });
+    expect(container.querySelector('[data-slot="ds-list-row"]')).toBeNull();
+  });
+});
