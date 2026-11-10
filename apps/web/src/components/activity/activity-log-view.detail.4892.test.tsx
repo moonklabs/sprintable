@@ -274,3 +274,34 @@ describe('ActivityLogView — 행의 구조: 단추 안에 블록이 없다 (489
   });
 });
 
+describe('ActivityLogView — 상세의 «행위자» 줄이 사람과 에이전트를 가른다 (4892, PO)', () => {
+  async function mountOne(over: Record<string, unknown>) {
+    fetchWithAuthMock.mockImplementation(async (url: string) => {
+      if (url.includes('/api/members')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      const items = [row('one', '2026-11-10T08:00:00Z', over)];
+      return { ok: true, status: 200, json: async () => ({ data: { items, total: 1, limit: 30, offset: 0 } }) };
+    });
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC">
+          <TopBarProvider><ActivityLogView projectId="p1" /></TopBarProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+    await click(rows()[0]!);
+  }
+  const actorLine = () => [...detail()!.querySelectorAll('dt')].find((d) => d.textContent === koMessages.activityLog.detailActor)!.nextElementSibling!.textContent;
+
+  it('⭐an agent row\'s actor line carries «에이전트» (the avatar tooltip\'s distinction, now reachable)', async () => {
+    await mountOne({ actor_type: 'agent', actor_name: '디버거', actor_id: 'a1' });
+    expect(actorLine()).toBe(`디버거 · ${koMessages.chats.agent}`);
+  });
+
+  it('a human row\'s actor line is the name only — no «에이전트»', async () => {
+    await mountOne({ actor_type: 'human', actor_name: '안나' });
+    expect(actorLine()).toBe('안나');
+    expect(detail()!.textContent).not.toContain(koMessages.chats.agent);
+  });
+});
+

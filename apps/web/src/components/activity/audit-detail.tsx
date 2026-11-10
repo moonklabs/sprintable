@@ -25,10 +25,13 @@ interface AuditDetailProps {
  */
 export const AuditDetail = forwardRef<HTMLElement, AuditDetailProps>(function AuditDetail({ item, actorLabel, id, claim, onClose }, ref) {
   const t = useTranslations('activityLog');
+  // the avatar's hover tooltip said «이름 / 에이전트» (key chats.agent); the row's visible layer is inert now, so the actor row of the details carries that distinction
+  const tChats = useTranslations('chats');
   const locale = useLocale();
   // the same fallback as the day grouping (UTC while the viewer's zone is unknown) — a row grouped under a day must show a date on that day
   const tz = useViewerTimeZone() ?? 'UTC';
   const headingId = useId();
+  const actorText = item.actor_type === 'agent' ? [actorLabel, tChats('agent')].filter(Boolean).join(' · ') : actorLabel;
   const context = item.context ? Object.entries(item.context) : [];
   const target = item.entity_title
     ? (item.entity_type ? `${item.entity_type} · ${item.entity_title}` : item.entity_title)
@@ -44,7 +47,7 @@ export const AuditDetail = forwardRef<HTMLElement, AuditDetailProps>(function Au
         <dt className="text-ds-ink-3">{t('detailAction')}</dt>
         <dd className="m-0 break-all font-mono text-ds-mono-md text-ds-ink">{item.action}</dd>
         {target ? (<><dt className="text-ds-ink-3">{t('detailTarget')}</dt><dd className="m-0 break-words text-ds-ink">{target}</dd></>) : null}
-        {actorLabel ? (<><dt className="text-ds-ink-3">{t('detailActor')}</dt><dd className="m-0 break-words text-ds-ink">{actorLabel}</dd></>) : null}
+        {actorText ? (<><dt className="text-ds-ink-3">{t('detailActor')}</dt><dd className="m-0 break-words text-ds-ink">{actorText}</dd></>) : null}
         <dt className="text-ds-ink-3">{t('detailWhen')}</dt>
         <dd className="m-0 text-ds-ink">{when} <span className="text-ds-ink-3">· {formatViewerRelativeTime(item.created_at, locale, tz)}</span></dd>
       </dl>
