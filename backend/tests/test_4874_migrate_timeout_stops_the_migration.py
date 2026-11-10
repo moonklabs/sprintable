@@ -284,6 +284,7 @@ def test_a_running_migration_statement_is_cancelled_and_its_lock_freed_and_the_s
         time.sleep(0.5)
         lines = real.deployer_sql(_NAME_B)
         assert lines[0] == "1", lines                                                      # one session cancelled
+        assert lines[-1] == "0", lines                                                     # …and the cancel was enough while its client was alive: nothing was left to terminate
         assert real.wait_gone(_NAME_B), "…and, whatever the cancel left, the session is gone after the call"
         assert not real.reader_waits(), "the lock is free"
         t.join()
