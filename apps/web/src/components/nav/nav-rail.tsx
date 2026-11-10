@@ -87,7 +87,7 @@ export function NavRail({ orgSlug, projectSlug, account, listColumn, navV3Flags 
   // 아이콘 한 칸(40px). 켜짐 = action-soft 바탕 + action-text 글(선택 표시는 action 계열), 꺼짐 = ink-3. 호버 바탕은 링크 쪽(RAIL_LINK)이 입힌다.
   const railIcon = (id: string, active: boolean) => (
     <span className={cn('flex size-10 items-center justify-center rounded-ds-control transition-colors', active ? 'bg-ds-action-soft text-ds-action-text' : 'text-ds-ink-3')}>
-      <Icon name={RAIL_ICON_BY_ITEM_ID[id]!} size={20} />
+      <Icon name={RAIL_ICON_BY_ITEM_ID[id]!} size={20} className="size-5" />
     </span>
   );
   // 건수 배지 한 모양 · 색은 뜻 둘(UI-3 §4 #6): 읽지 않음 = action 바탕 / 내 손 필요(오늘 아이콘) = needs-hand 계열. needs-hand-bar 바탕 위 글자 토큰이 아직 없어

@@ -37,7 +37,7 @@ export function RailAccount({ orgId, orgMemberships, projectId, projectMembershi
         data-rail-item="account"
       >
         <span className="flex size-10 items-center justify-center rounded-ds-control text-ds-ink-3 transition-colors">
-          <Icon name={RAIL_ICON_BY_ITEM_ID.account!} size={20} />
+          <Icon name={RAIL_ICON_BY_ITEM_ID.account!} size={20} className="size-5" />
         </span>
       </PopoverTrigger>
       <PopoverContent side="right" align="end" sideOffset={8} className="flex w-72 flex-col gap-1 p-2" data-testid="rail-account-panel" aria-label={label}>

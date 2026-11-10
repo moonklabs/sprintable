@@ -46,3 +46,37 @@ describe('막대는 ds 이름만 쓴다', () => {
     expect(code('rail-account.tsx')).not.toContain('lucide-react');
   });
 });
+
+// 막대에 쓴 `ds-*` Tailwind 클래스는 전부 design-system.css의 @theme 이름과 맞아야 한다 — 오타(rounded-ds-controll 등)는 조용히 «아무것도 안 그리기» 때문에 눈으로 못 잡는다(codex 권고).
+describe('막대의 ds-* 클래스는 @theme에 실제로 있다', () => {
+  const css = readFileSync(join(__dirname, '../../styles/design-system.css'), 'utf8');
+  const theme = new Set([...css.matchAll(/--((?:color|radius|text)-ds-[\w-]+)\s*:/g)].map((m) => m[1]));
+  const used = (file: string) => {
+    const src = code(file);
+    const out = new Set<string>();
+    for (const m of src.matchAll(/(?<![\w-])(?:[\w-]+:)*(bg|text|border|ring|rounded)-(ds-[\w-]+?)(?:\/\d+)?(?=[\s'"`])/g)) {
+      const kind = m[1]!; const name = m[2]!;
+      out.add(kind === 'rounded' ? `radius-${name}` : kind === 'text' && /^ds-(title|card-title|body|small|mono-(lg|md|sm))$/.test(name) ? `text-${name}` : `color-${name}`);
+    }
+    return [...out];
+  };
+  for (const f of ['nav-rail.tsx', 'rail-account.tsx']) {
+    it(`${f}: 쓴 ds 클래스 이름이 전부 정의돼 있다`, () => {
+      const names = used(f);
+      expect(names.length).toBeGreaterThan(0);
+      expect(names.filter((n) => !theme.has(n))).toEqual([]);
+    });
+  }
+  it('(양성 대조) 이 검사는 없는 이름을 실제로 잡는다', () => {
+    expect(theme.has('radius-ds-control')).toBe(true);
+    expect(theme.has('radius-ds-controll')).toBe(false);
+    expect(theme.has('color-ds-surface-hight')).toBe(false);
+  });
+});
+
+describe('막대 아이콘 크기', () => {
+  it('Button 안의 아이콘은 Button의 «svg 크기 규칙»에 줄지 않게 size-5 클래스를 단다(codex 권고)', () => {
+    expect(code('nav-rail.tsx')).toContain('className="size-5"');
+    expect(code('rail-account.tsx')).toContain('className="size-5"');
+  });
+});
