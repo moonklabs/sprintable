@@ -5,7 +5,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { DocsIndex } from './docs-index';
 import { useDocsLayout } from './docs-context';
 import { fetchWithAuth } from '@/lib/db/client';
-import { previewTarget } from '@/components/docs/lib/doc-link-target';
+import { previewTarget, type Preview } from '@/components/docs/lib/doc-link-target';
 
 // story 4892 (UI-9 §5 #2) — `/docs?id=<doc id>` is the link form that chat cards, the sprint report link and the intent-suggestion card carry
 // (proxy.ts sends it on to `/{ws}/{proj}/docs?id=…`). Nothing in the docs area read `id`, so such a link landed on the index. The id is

@@ -20,8 +20,9 @@ describe('previewTarget', () => {
     expect(t({ slug: 'runbook', projectId: 'proj-x', orgSlug: 'moonklabs', projectSlug: '' })).toBeNull();
   });
   it('the current project id is not known (layout without one) → only a named project slug works', () => {
-    expect(t({ slug: 'a', projectId: cur, orgSlug: 'moonklabs', projectSlug: null }, undefined)).toBeNull();
-    expect(t({ slug: 'a', projectId: cur, orgSlug: 'moonklabs', projectSlug: 'named' }, undefined)).toBe('/moonklabs/named/docs/a');
+    // (not through `t`: its default would turn an explicit undefined back into the current id)
+    expect(previewTarget({ slug: 'a', projectId: cur, orgSlug: 'moonklabs', projectSlug: null }, 'moonklabs', 'sprintable', undefined)).toBeNull();
+    expect(previewTarget({ slug: 'a', projectId: cur, orgSlug: 'moonklabs', projectSlug: 'named' }, 'moonklabs', 'sprintable', undefined)).toBe('/moonklabs/named/docs/a');
   });
   it('org / project values that are not slugs are refused (path injection · open redirect shapes)', () => {
     for (const bad of ['../x', 'a/b', '//evil', 'a\\b', '.', '..', ' x', 'a b', 'a?b', 'a#b', '%2e%2e', '-lead']) {
