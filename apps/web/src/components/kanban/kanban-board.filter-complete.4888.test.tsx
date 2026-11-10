@@ -203,8 +203,12 @@ function stubPagedFetch(rows: Row[], opts: { failCursorRequests?: { n: number };
       const offset = Number(sp.get('cursor') ?? '0');
       const forProject = opts.smallProject && sp.get('project_id') === opts.smallProject ? withStage.slice(0, 5) : withStage;
       const all = forProject.filter((s) => s.status === status && (!epic || s.epic_id === epic));
-      const page = all.slice(offset, offset + limit);
-      const next = offset + limit < all.length ? String(offset + limit) : null;
+      // like the route + the backend board query: ask for limit + 1 to learn whether a next page exists, and the backend serves at most 20 `done` cards per request
+      const asked = status === 'done' ? Math.min(limit + 1, 20) : limit + 1;
+      const fetched = all.slice(offset, offset + asked);
+      const hasMore = fetched.length > limit;
+      const page = fetched.slice(0, limit);
+      const next = hasMore ? String(offset + limit) : null;
       const response = { ok: true, json: async () => ({ data: page, meta: { nextCursor: next, hasMore: next !== null } }) };
       if (sp.get('cursor') && opts.hold && !opts.hold.held) {
         opts.hold.held = true;
@@ -415,5 +419,16 @@ describe('KanbanBoard 4888 — 코덱스 검수에서 나온 칸들', () => {
     const stillLoading = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === '불러오는 중…');
     expect(stillLoading?.disabled).toBe(true);
   });
-});
 
+  it('완료(done) 열도 검색이 켜지면 끝까지 읽는다 — 백엔드가 한 번에 20건만 주는 상태이므로 쪽 크기를 19로', async () => {
+    const rows = Array.from({ length: 45 }, (_, i) => ({ id: `d${i + 1}`, status: 'done', title: i === 44 ? '오래된 완료 보고서' : `완료-${i + 1}`, position: i + 1 }));
+    const urls = stubPagedFetch(rows);
+    await mount();
+    expect(container.textContent).not.toContain('오래된 완료 보고서');
+    await openSearchAndType('오래된');
+    await act(async () => { for (let i = 0; i < 20; i += 1) await Promise.resolve(); });
+    expect(container.textContent).toContain('오래된 완료 보고서');
+    expect(urls.some((u) => u.includes('status=done') && u.includes('limit=19'))).toBe(true);
+    expect(urls.some((u) => u.includes('status=done') && u.includes('limit=100'))).toBe(false);
+  });
+});

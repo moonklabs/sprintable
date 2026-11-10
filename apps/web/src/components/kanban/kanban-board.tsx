@@ -110,6 +110,9 @@ function loadWipLimit(projectId: string | undefined, status: string): number | n
 
 /** story #4888 — a column read to its end while a browser-side filter is on: page size (the route's maximum) and the most pages one column is read for (2,500 cards) */
 const COMPLETE_PAGE_SIZE = 100;
+// The board query of the backend serves at most 20 `done` cards per request, and the route asks for one more than `limit` to know whether a next page exists — so a `done` page of 100 came back as 20 with no cursor
+// (the rest silently missing). 19 + 1 = 20 keeps the cursor honest.
+const COMPLETE_PAGE_SIZE_DONE = 19;
 const COMPLETE_MAX_PAGES = 25;
 
 function saveWipLimit(projectId: string | undefined, status: string, limit: number | null): void {
@@ -357,7 +360,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     let cursor: string | undefined;
     let next: string | null = null;
     for (let page = 0; page < COMPLETE_MAX_PAGES; page++) {
-      const r = await fetchStoriesByStatus(status, cursor, COMPLETE_PAGE_SIZE);
+      const r = await fetchStoriesByStatus(status, cursor, status === 'done' ? COMPLETE_PAGE_SIZE_DONE : COMPLETE_PAGE_SIZE);
       if (!r.ok) return { stories: all, total: all.length, nextCursor: next, ok: false };
       all.push(...r.stories);
       next = r.nextCursor;
