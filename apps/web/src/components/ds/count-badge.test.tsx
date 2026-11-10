@@ -44,4 +44,12 @@ describe('ds CountBadge', () => {
     await act(async () => { root.render(<CountBadge count={3} />); });
     expect(el().querySelector('.sr-only')).toBeNull();
   });
+
+  it('⭐atLeast: 읽다 만 수는 «N+»로 그려 정확한 수처럼 보이지 않게 한다(기본은 정확한 수)', async () => {
+    await act(async () => { root.render(<CountBadge kind="needs-hand" label="결재 대기" count={3} atLeast />); });
+    expect(el().textContent).toContain('3+');
+    await act(async () => { root.render(<CountBadge kind="needs-hand" label="결재 대기" count={3} />); });
+    expect(el().textContent).not.toContain('+');
+  });
 });
+

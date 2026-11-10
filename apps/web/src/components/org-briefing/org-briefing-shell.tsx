@@ -6,12 +6,14 @@ import { useTranslations } from 'next-intl';
 import { ViewerDate } from '@/components/viewer-time-zone';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { EMPTY_TODAY_SNAPSHOT, useTodaySnapshot } from './use-today-snapshot';
-import { AgentProgressSection, NeedsMeSection, PublishedSection } from './today-sections';
+import { PublishedSection } from './today-sections';
+import { CountBadge } from '@/components/ds/count-badge';
+import { ActivationChecklistBanner } from '@/components/dashboard/activation-checklist-banner';
+import { HomeList } from '@/components/home/home-list';
+import { useHomeModel } from '@/components/home/home-model-provider';
 import { AgentStateSection } from './agent-state-section';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { findSoleAgentDm, sendInstruction } from '@/lib/today-instruct';
@@ -117,8 +119,9 @@ export function OrgBriefingShell() {
   // session restore puts there (`/org-briefing?next=/glance?_prRetry=1`, AC8 lap 10-24) with the project already chosen (`?p=` on the page, every flat link carrying it): a line that sent the person
   // looking for a choice already made. With no project to pick (none yet) «pick» cannot be done either — Chats says «no project yet» for that.
   const showPickBanner = Boolean(nextTarget) && !projectId && projectMemberships.length > 0;
-  const { data, loadError, retry } = useTodaySnapshot();
-  const snapshot = data ?? EMPTY_TODAY_SNAPSHOT;
+  // story #4888 — the home reads the SAME model the navigation bar's badge reads (components/home/home-model-provider)
+  const { model, sources, loadError, partial, retry } = useHomeModel();
+  const th = useTranslations('home');
 
   // story #3831 후속(페드루 PO 確定, 2026-09-13 14:22Z) — `?focus=compose` 딥링크(컴패니언
   // 단축키, story #3832)는 소비 뒤 URL에서 지운다(뒤로가기·새로고침마다 재포커스되면
@@ -154,32 +157,40 @@ export function OrgBriefingShell() {
           <h1 className="text-lg font-semibold tracking-tight text-foreground">{t('title')}</h1>
           <p className="mt-1 text-sm text-muted-foreground"><ViewerDate value={today} options={{ month: 'long', day: 'numeric', weekday: 'long' }} /></p>
         </div>
-        {data && snapshot.needsMeCount > 0 ? (
-          // story #3853(§③ 토큰 표 「사람 손 필요=경고 amber」) — 하드코딩 bg-primary/10
-          // (파랑)을 캐노니컬 Badge variant="warning"으로 교체(badge.tsx 기존 변형, 새
-          // 토큰 발명 0). data-testid는 org-briefing-shell.test.tsx가 그대로 쓴다.
-          <Badge variant="warning" data-testid="needs-me-header-badge" className="shrink-0">
-            {t('needsMeBadge', { count: snapshot.needsMeCount })}
-          </Badge>
+        {model && model.badge > 0 ? (
+          // story #4888 — the number is the model's one number: the rows in «내 손이 필요해요» (= the bar's badge)
+          <CountBadge kind="needs-hand" label={th('needsHandLabel')} count={model.badge} data-testid="needs-me-header-badge" />
         ) : null}
       </div>
 
-      {loadError ? (
+      {/* story #4888 — the start checklist is a card at the top of the home list (it used to stand over /chats and every other page as a band). It stands here, outside the data branch below: it draws its
+          own skeleton while it loads, so it does not arrive late and push the list down */}
+      <div className="empty:hidden" data-testid="home-checklist-slot">
+        <ActivationChecklistBanner placement="home" />
+      </div>
+
+      {loadError && !model ? (
         <div className="flex flex-col items-center gap-3 py-10 text-center">
           <p role="alert" className="text-sm text-destructive">{t('loadErrorTitle')}</p>
           <Button size="sm" variant="outline" onClick={retry}>{tc('retry')}</Button>
         </div>
-      ) : !data ? (
+      ) : !model || !sources ? (
         <div className="space-y-3" aria-hidden="true">
           <Card className="h-24 animate-pulse bg-muted/30" />
           <Card className="h-24 animate-pulse bg-muted/30" />
         </div>
       ) : (
         <div className="space-y-6">
-          <NeedsMeSection items={snapshot.needsMe} count={snapshot.needsMeCount} />
-          <AgentProgressSection items={snapshot.agentProgress} />
+          {loadError || partial ? (
+            // the last read failed, or part of it could not be read: the list below is what WAS read — said, with a way to read again (never passed off as complete)
+            <div role="status" className="flex items-center justify-between gap-3 text-sm text-muted-foreground" data-testid="home-incomplete-notice">
+              <span>{loadError ? t('loadErrorTitle') : th('partialNotice')}</span>
+              <Button size="sm" variant="outline" onClick={retry}>{tc('retry')}</Button>
+            </div>
+          ) : null}
+          <HomeList model={model} sources={sources} partial={partial || loadError} />
           <AgentStateSection />
-          <PublishedSection published={snapshot.published} usage={snapshot.usage} />
+          <PublishedSection published={sources.snapshot.published} usage={sources.snapshot.usage} />
         </div>
       )}
 

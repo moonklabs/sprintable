@@ -29,7 +29,7 @@ export interface HomeActor {
 }
 
 export interface HomeRow {
-  /** stable key (`gate:<id>` · `notification:<id>` · `run:<id>` · `story:<id>` · `done:<id>`) */
+  /** stable key (`gate|hitl|workflow_step:<id>` · `notification:<id>` · `run:<id>` · `story:<id>` · `done:<id>`) */
   key: string;
   section: HomeSection;
   kind: HomeRowKind;
@@ -103,8 +103,6 @@ export const HOME_NEEDS_HAND_NOTIFICATION_TYPES: Readonly<Record<string, HomeRow
   'agent.limit_paused': 'limit-paused',
 };
 
-/** the in-progress agent run statuses — the SAME set the backend uses for `agent_progress` (`today_service._AGENT_RUN_IN_PROGRESS_STATUSES`): `cancel_requested` is not terminal yet (the stop is waiting for its ack) */
-export const AGENT_RUN_IN_PROGRESS_STATUSES: ReadonlySet<string> = new Set(['queued', 'held', 'running', 'hitl_pending', 'cancel_requested']);
 
 function byWait(a: HomeRow, b: HomeRow): number {
   return a.since < b.since ? -1 : a.since > b.since ? 1 : a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
@@ -112,7 +110,8 @@ function byWait(a: HomeRow, b: HomeRow): number {
 
 function needsMeRow(item: TodayNeedsMeItem): HomeRow {
   return {
-    key: `gate:${item.id}`,
+    // the source is part of the key: gate · hitl · workflow-step ids are three separate id spaces, and two of them may meet
+    key: `${item.source}:${item.id}`,
     section: 'needs-hand',
     kind: item.state,
     title: item.workItemTitle,
@@ -176,7 +175,9 @@ export function deriveHome(input: HomeInput): HomeModel {
   needsHand.sort(byWait);
 
   const working: HomeRow[] = [
-    ...input.snapshot.agentProgress.filter((r) => AGENT_RUN_IN_PROGRESS_STATUSES.has(r.status)).map(agentRunRow),
+    // `agent_progress` IS the backend's list of runs in progress (today_service filters it by its in-progress statuses): every run in it is a working row. The screen does not re-filter it by a status list of its own
+    // (a status the backend adds later must not make a run vanish from the home) — it only names the statuses it knows.
+    ...input.snapshot.agentProgress.map(agentRunRow),
     ...input.stories.map((s) => storyRow(s, input.viewerMemberId)).filter((r): r is HomeRow => r !== null),
   ].sort(byWait);
 

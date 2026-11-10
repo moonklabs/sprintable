@@ -28,13 +28,15 @@ export type CountBadgeProps = Omit<HTMLAttributes<HTMLSpanElement>, 'children'> 
   count: number;
   /** 이 수를 넘으면 «{max}+»로 줄인다. 기본 99. */
   max?: number;
+  /** the number is a minimum (part of what feeds it could not be read): drawn «N+» and not as an exact count */
+  atLeast?: boolean;
 } & CountBadgeKind;
 
-export function CountBadge({ count, max = 99, kind = 'unread', label, className, ...props }: CountBadgeProps) {
+export function CountBadge({ count, max = 99, atLeast = false, kind = 'unread', label, className, ...props }: CountBadgeProps) {
   return (
     <span data-slot="ds-count-badge" data-kind={kind} className={cn(countBadgeVariants({ kind }), className)} {...props}>
       {label ? <span className="sr-only">{label} </span> : null}
-      {count > max ? `${max}+` : count}
+      {count > max ? `${max}+` : atLeast ? `${count}+` : count}
     </span>
   );
 }

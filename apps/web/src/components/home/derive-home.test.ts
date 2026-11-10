@@ -2,7 +2,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TodayAgentProgressItem, TodayNeedsMeItem } from '../org-briefing/derive-today';
 import {
-  AGENT_RUN_IN_PROGRESS_STATUSES,
   deriveHome,
   HOME_NEEDS_HAND_NOTIFICATION_TYPES,
   NEEDS_HAND_VISIBLE,
@@ -190,7 +189,7 @@ describe('rule 3 — ties across sources', () => {
 });
 
 describe('rule 4 — «일하는 중»', () => {
-  it('holds the active agent runs and the in-progress stories of mine or of an agent — not other people\'s, not other statuses', () => {
+  it('holds the runs of the backend\'s in-progress list and the in-progress stories of mine or of an agent — not other people\'s, not other statuses', () => {
     const m = deriveHome(
       base({
         snapshot: { needsMe: [], agentProgress: [run('r1', 'running', '2026-11-10T01:00:00Z'), run('r2', 'finished', '2026-11-10T02:00:00Z')] },
@@ -203,21 +202,38 @@ describe('rule 4 — «일하는 중»', () => {
         ],
       }),
     );
-    expect(m.working.map((r) => r.key).sort()).toEqual(['run:r1', 'story:agent', 'story:mine']);
-    expect(m.header.working).toBe(3);
+    // agent_progress is the backend's list of runs in progress: both runs are rows (the screen does not second-guess it by a status list); stories: mine + the agent's in-progress ones only
+    expect(m.working.map((r) => r.key).sort()).toEqual(['run:r1', 'run:r2', 'story:agent', 'story:mine']);
+    expect(m.header.working).toBe(4);
   });
 
-  it('the agent-run statuses are the backend\'s in-progress set: hitl_pending and cancel_requested stay, finished ones go', () => {
-    expect([...AGENT_RUN_IN_PROGRESS_STATUSES].sort()).toEqual(['cancel_requested', 'held', 'hitl_pending', 'queued', 'running']);
+  it('agent_progress is the backend\'s list of runs in progress: every run in it is a working row — also a status the screen does not know yet', () => {
     const m = deriveHome(
       base({
         snapshot: {
           needsMe: [],
-          agentProgress: ['queued', 'held', 'running', 'hitl_pending', 'cancel_requested', 'completed', 'failed', 'abandoned'].map((s, i) => run(`r${i}`, s, `2026-11-10T0${i}:00:00Z`)),
+          agentProgress: ['queued', 'held', 'running', 'hitl_pending', 'cancel_requested', 'a_status_added_later'].map((s, i) => run(`r${i}`, s, `2026-11-10T0${i}:00:00Z`)),
         },
       }),
     );
-    expect(m.working.map((r) => r.key)).toEqual(['run:r0', 'run:r1', 'run:r2', 'run:r3', 'run:r4']);
+    expect(m.working.map((r) => r.key)).toEqual(['run:r0', 'run:r1', 'run:r2', 'run:r3', 'run:r4', 'run:r5']);
+  });
+
+  it('a gate, a hitl and a workflow step with the SAME id are three rows with three keys (the id spaces are separate)', () => {
+    const m = deriveHome(
+      base({
+        snapshot: {
+          needsMe: [
+            needsMe('x', '2026-11-10T01:00:00Z', { source: 'gate' }),
+            needsMe('x', '2026-11-10T02:00:00Z', { source: 'hitl' }),
+            needsMe('x', '2026-11-10T03:00:00Z', { source: 'workflow_step' }),
+          ],
+          agentProgress: [],
+        },
+      }),
+    );
+    expect(m.needsHand.map((r) => r.key)).toEqual(['gate:x', 'hitl:x', 'workflow_step:x']);
+    expect(new Set(m.needsHand.map((r) => r.key)).size).toBe(3);
   });
 
   it('nobody signed in (viewerMemberId null) → only the agents\' stories, never a human assignee\'s', () => {

@@ -68,8 +68,17 @@ function stubToday(payload: unknown) {
 
 async function mount() {
   const { OrgBriefingShell } = await import('./org-briefing-shell');
-  await act(async () => { root.render(wrap(<OrgBriefingShell />)); });
+  // story #4888 — the home reads the shared home model (the shell mounts the provider; this test mounts it itself, with no member and no project: only the today snapshot is read)
+  const { HomeModelProvider } = await import('@/components/home/home-model-provider');
+  await act(async () => { root.render(wrap(<HomeModelProvider viewerMemberId={null} projectId={undefined}><OrgBriefingShell /></HomeModelProvider>)); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+}
+
+async function openFolded(label: string) {
+  const section = container.querySelector(`section[aria-label="${label}"]`);
+  const toggle = section?.querySelector('button[aria-expanded="false"]') as HTMLButtonElement | null;
+  expect(toggle, `«${label}» 구역은 처음엔 접혀 있다`).toBeTruthy();
+  await act(async () => { toggle!.click(); });
 }
 
 const EMPTY_TODAY = {
@@ -87,11 +96,18 @@ describe('OrgBriefingShell — story #3831 헤더(옛 조직 브리핑 낱말 0)
     expect(container.textContent).not.toContain('오늘 조직의 지금');
   });
 
-  it('사람 손이 필요한 일이 있으면 헤더 배지가 뜬다', async () => {
-    stubToday({ ...EMPTY_TODAY, needs_me_count: 3 });
+  it('사람 손이 필요한 일이 있으면 헤더 배지가 뜬다 — 수는 «내 손이 필요해요» 구역의 행 수(= 막대 배지)다', async () => {
+    const rows = ['g1', 'g2', 'g3'].map((id) => ({
+      kind: 'approval', risk: 'low', source: 'gate', source_id: id,
+      work_item: { type: 'story', id: `s-${id}`, title: `결재 ${id}` },
+      requested_by: null, reason: null, created_at: '2026-09-13T05:00:00Z', actions: ['approve'],
+    }));
+    stubToday({ ...EMPTY_TODAY, needs_me: rows, needs_me_count: 3 });
     await mount();
     const badge = container.querySelector('[data-testid="needs-me-header-badge"]');
-    expect(badge?.textContent).toBe('사람 손이 필요한 일 3');
+    expect(badge?.getAttribute('data-kind')).toBe('needs-hand');
+    expect(badge?.textContent).toContain('3');
+    expect(container.querySelector('[data-testid="home-header-line"]')?.textContent).toBe('손 필요 3 · 진행 0 · 마침 0');
   });
 
   // 페드루 PO CHANGES(2026-09-14 00:32Z, PR #4256) — 헤더 배지와 구역 제목이 같은 낱말로
@@ -151,15 +167,11 @@ describe('OrgBriefingShell — 프로젝트 안내 배너(story #2212, story #38
 
 describe('OrgBriefingShell — story #3831 AC1(3구역, 3823 route 단일 소비)', () => {
   it('오늘 내 결정 항목이 있으면 제목·상태·행동 버튼이 뜬다', async () => {
-    stubToday({
-      ...EMPTY_TODAY,
-      needs_me: [{
+    stubToday({ ...EMPTY_TODAY, needs_me: [{
         kind: 'signature', risk: 'high', source: 'gate', source_id: 'g1',
         work_item: { type: 'story', id: 's1', title: 'Threads에 글 발행' },
         requested_by: null, reason: null, created_at: '2026-09-13T05:00:00Z', actions: ['approve'],
-      }],
-      needs_me_count: 1,
-    });
+      }], needs_me_count: 1 });
     await mount();
     expect(container.textContent).toContain('Threads에 글 발행');
     expect(container.textContent).toContain('서명 대기');
@@ -169,55 +181,49 @@ describe('OrgBriefingShell — story #3831 AC1(3구역, 3823 route 단일 소비
     expect(link?.getAttribute('href')).toBe('/gates/g1');
   });
 
-  // story #3853(customer-zero·오늘·토큰, 페드루 PO 確定 2026-09-14) — §③ 토큰 표 「사람 손
-  // 필요=경고 amber」. 3831 착지분이 variant="info"(파랑)를 썼던 결함의 회귀가드 — 상태
-  // pill이 badge.tsx의 warning 변형(border-warning-border·bg-warning-tint) 클래스를 쓰는지
-  // 직접 대조한다(info/기본 클래스가 안 섞여 있어야 함).
-  it('사람 손 필요 행 상태 pill은 amber(warning) 변형이다(info 아님)', async () => {
-    stubToday({
-      ...EMPTY_TODAY,
-      needs_me: [{
+  // story #4888 — the old pill / button class checks (amber `bg-warning-tint`, `bg-primary`) belonged to the old Badge / Button. The home now draws the row with the new list row:
+  // «needs a hand» is the row's own marker (+ a name for screen readers, never colour alone) and its action is the primary Button of the new set.
+  it('손 필요 행은 «내 손이 필요» 표지(data-needs-hand + 화면에 안 보이는 이름)를 달고, 주 행동은 주 단추다', async () => {
+    stubToday({ ...EMPTY_TODAY, needs_me: [{
         kind: 'signature', risk: 'high', source: 'gate', source_id: 'g1',
         work_item: { type: 'story', id: 's1', title: 'Threads에 글 발행' },
         requested_by: null, reason: null, created_at: '2026-09-13T05:00:00Z', actions: ['approve'],
-      }],
-      needs_me_count: 1,
-    });
+      }], needs_me_count: 1 });
     await mount();
-    const pill = [...container.querySelectorAll('span')].find((s) => s.textContent === '서명 대기');
-    expect(pill).toBeTruthy();
-    expect(pill!.className).toContain('bg-warning-tint');
-    expect(pill!.className).not.toContain('bg-info-tint');
-  });
-
-  // 같은 스토리 §②-1 — 행 주 액션(승인/승인하고 서명/답하기)은 캐노니컬 Button(기본
-  // variant="default"=주 색 filled)이어야 한다. 3831 착지분은 outline 흰색 링크 스타일
-  // (border border-border)이었다 — bg-primary 존재+border-border 부재로 대조한다.
-  it('행 주 액션 버튼은 Button 기본 variant(주 색 filled)다(outline 아님)', async () => {
-    stubToday({
-      ...EMPTY_TODAY,
-      needs_me: [{
-        kind: 'signature', risk: 'high', source: 'gate', source_id: 'g1',
-        work_item: { type: 'story', id: 's1', title: 'Threads에 글 발행' },
-        requested_by: null, reason: null, created_at: '2026-09-13T05:00:00Z', actions: ['approve'],
-      }],
-      needs_me_count: 1,
-    });
-    await mount();
+    const row = container.querySelector('[data-row-key="gate:g1"] [data-slot="ds-list-row"]');
+    expect(row?.getAttribute('data-needs-hand')).toBe('true');
+    expect(row?.querySelector('.sr-only')?.textContent).toBe('내 손이 필요');
     const link = [...container.querySelectorAll('a')].find((a) => a.textContent === '승인하고 서명');
-    expect(link).toBeTruthy();
-    expect(link!.className).toContain('bg-primary');
-    expect(link!.className).not.toContain('border-border');
+    expect(link?.className).toContain('bg-ds-action');
   });
 
-  // 헤더 배지도 같은 §③ 축 — 3831 착지분은 bg-primary/10(파랑 알파) 하드코딩이었다.
-  it('헤더 「사람 손이 필요한 일 N」 배지도 amber(warning) 변형이다(파랑 하드코딩 아님)', async () => {
-    stubToday({ ...EMPTY_TODAY, needs_me_count: 2 });
+  it('헤더 배지는 «내 손이 필요» 뜻의 배지다(색 하나에만 뜻을 싣지 않는다 — 안 보이는 이름이 같이 있다)', async () => {
+    stubToday({ ...EMPTY_TODAY, needs_me: [{
+        kind: 'signature', risk: 'high', source: 'gate', source_id: 'g1',
+        work_item: { type: 'story', id: 's1', title: 'Threads에 글 발행' },
+        requested_by: null, reason: null, created_at: '2026-09-13T05:00:00Z', actions: ['approve'],
+      }], needs_me_count: 1 });
     await mount();
     const badge = container.querySelector('[data-testid="needs-me-header-badge"]');
     expect(badge).toBeTruthy();
-    expect(badge!.className).toContain('bg-warning-tint');
-    expect(badge!.className).not.toContain('bg-primary/10');
+    expect(badge!.getAttribute('data-kind')).toBe('needs-hand');
+    expect(badge!.textContent).toContain('내 손이 필요');
+  });
+
+  it('결재 행이 있으면 구역 머리 옆에 «돈·외부 발송은 하나씩 서명해요» 안내가 있고, 행이 없으면 없다', async () => {
+    stubToday({ ...EMPTY_TODAY, needs_me: [{
+      kind: 'approval', risk: 'low', source: 'gate', source_id: 'g1',
+      work_item: { type: 'story', id: 's1', title: '블로그 글 발행' },
+      requested_by: null, reason: null, created_at: '2026-09-13T05:00:00Z', actions: ['approve'],
+    }], needs_me_count: 1 });
+    await mount();
+    expect(container.querySelector('[data-testid="home-needs-hand-hint"]')?.textContent).toBe('돈·외부 발송은 하나씩 서명해요');
+  });
+
+  it('결재 행이 없으면 그 안내가 없다', async () => {
+    stubToday(EMPTY_TODAY);
+    await mount();
+    expect(container.querySelector('[data-testid="home-needs-hand-hint"]')).toBeNull();
   });
 
   it('오늘 내 결정이 0건이면 「모두 확인했어요」', async () => {
@@ -250,7 +256,7 @@ describe('OrgBriefingShell — story #3831 AC1(3구역, 3823 route 단일 소비
     expect(container.textContent).not.toContain('모두 확인했어요');
   });
 
-  it('에이전트 진행 항목이 있으면 이름·상태가 뜬다', async () => {
+  it('에이전트 진행 항목이 있으면 이름·상태가 뜬다 — «일하는 중» 구역은 처음엔 접혀 있고 머리에 수가 있다', async () => {
     stubToday({
       ...EMPTY_TODAY,
       agent_progress: [{
@@ -260,20 +266,24 @@ describe('OrgBriefingShell — story #3831 AC1(3구역, 3823 route 단일 소비
       }],
     });
     await mount();
+    expect(container.textContent).not.toContain('YouTube 영상 올리기'); // folded
+    expect(container.querySelector('section[aria-label="일하는 중"] [data-slot="ds-count-badge"]')?.textContent).toBe('1');
+    await openFolded('일하는 중');
     expect(container.textContent).toContain('YouTube 영상 올리기');
     expect(container.textContent).toContain('미르코');
-    expect(container.textContent).toContain('진행 중 1');
+    expect(container.textContent).toContain('진행 중'); // the status word the old row had
   });
 
-  it('에이전트 진행이 0건이면 「진행 중인 위임이 없어요」', async () => {
+  it('에이전트 진행이 0건이면 «지금 하는 일이 없어요»', async () => {
     stubToday(EMPTY_TODAY);
     await mount();
-    expect(container.textContent).toContain('진행 중인 위임이 없어요');
+    await openFolded('일하는 중');
+    expect(container.textContent).toContain('지금 하는 일이 없어요');
   });
 
-  // 페드루 PO CHANGES(2026-09-14 00:32Z, PR #4256) — AGENT_STATUS_KEY 표에 없는 status를
-  // 「진행 중」으로 단정하면 지어내는 것(no-fiction). 상태 낱말 자체가 없어야 한다.
-  it('agent_progress.status가 표에 없는 값이면 상태 낱말을 지어내지 않는다(에이전트 이름만)', async () => {
+  // 페드루 PO CHANGES(2026-09-14 00:32Z, PR #4256) — a status the table does not know must not be said as «진행 중» (no-fiction): the run stays on the home (it is in the backend's list of
+  // runs in progress — a status added later must not make it vanish), with its name and NO status word.
+  it('agent_progress.status가 표에 없는 값이면 행은 남고 상태 낱말만 없다(「진행 중」으로 단정하지 않는다)', async () => {
     stubToday({
       ...EMPTY_TODAY,
       agent_progress: [{
@@ -283,10 +293,28 @@ describe('OrgBriefingShell — story #3831 AC1(3구역, 3823 route 단일 소비
       }],
     });
     await mount();
-    // 섹션 헤더 배지("진행 중 1")는 건수 낱말이라 무관 — 행 자신의 부제(agentName·status)만
-    // 검사한다: status 인식 실패면 그 줄이 에이전트 이름 하나로 끝나야 한다("· 진행 중" 0).
-    const nameSpan = [...container.querySelectorAll('span')].find((s) => s.textContent === '미르코');
-    expect(nameSpan).toBeTruthy();
+    expect(container.querySelector('section[aria-label="일하는 중"] [data-slot="ds-count-badge"]')?.textContent).toBe('1');
+    await openFolded('일하는 중');
+    const row = container.querySelector('[data-row-key="run:r1"]');
+    expect(row?.textContent).toContain('YouTube 영상 올리기');
+    expect(row?.textContent).toContain('미르코');
+    for (const word of [koMessages.orgBriefing.agentStatusRunning, koMessages.orgBriefing.agentStatusQueued, koMessages.orgBriefing.agentStatusHeld, koMessages.orgBriefing.agentStatusHitlPending]) {
+      expect(row?.textContent).not.toContain(word);
+    }
+  });
+
+  it('상태 낱말은 표에 있는 status에만 붙는다: 답 대기 중인 실행은 그 낱말을 단다', async () => {
+    stubToday({
+      ...EMPTY_TODAY,
+      agent_progress: [{
+        run_id: 'r2', agent: { id: 'a1', name: '미르코' },
+        work_item: { type: 'story', id: 's1', title: '영상 올리기' },
+        status: 'hitl_pending', current_step: null, started_at: '2026-09-13T03:00:00Z',
+      }],
+    });
+    await mount();
+    await openFolded('일하는 중');
+    expect(container.querySelector('[data-row-key="run:r2"]')?.textContent).toContain(koMessages.orgBriefing.agentStatusHitlPending);
   });
 
   it('오늘 나간 것이 있으면 채널별 수가 뜬다(표시명, raw channel_kind 아님)', async () => {
@@ -574,7 +602,8 @@ describe('OrgBriefingShell — story #4762 AC1 한 번 누름 = 서버에 메시
     for (let i = 0; i < 6 && !release; i += 1) await act(async () => { await Promise.resolve(); });
     useDashboardContextMock.mockReturnValue({ projectId: 'p2', currentTeamMemberId: ME, projectMemberships: [], orgMemberships: [] });
     const { OrgBriefingShell } = await import('./org-briefing-shell');
-    await act(async () => { root.render(wrap(<OrgBriefingShell />)); });
+    const { HomeModelProvider } = await import('@/components/home/home-model-provider');
+    await act(async () => { root.render(wrap(<HomeModelProvider viewerMemberId={null} projectId={undefined}><OrgBriefingShell /></HomeModelProvider>)); });
     await act(async () => { release(null); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
     expect(pushMock).not.toHaveBeenCalled();
@@ -601,7 +630,8 @@ describe('OrgBriefingShell — story #4762 AC1 한 번 누름 = 서버에 메시
     await act(async () => { input.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
     useDashboardContextMock.mockReturnValue({ projectId: 'p2', currentTeamMemberId: ME, projectMemberships: [], orgMemberships: [] });
     const { OrgBriefingShell } = await import('./org-briefing-shell');
-    await act(async () => { root.render(wrap(<OrgBriefingShell />)); }); // the same screen, re-rendered: the dashboard context now says project p2
+    const { HomeModelProvider } = await import('@/components/home/home-model-provider');
+    await act(async () => { root.render(wrap(<HomeModelProvider viewerMemberId={null} projectId={undefined}><OrgBriefingShell /></HomeModelProvider>)); }); // the same screen, re-rendered: the dashboard context now says project p2
     await act(async () => { release(null); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
     expect(pushMock).not.toHaveBeenCalled();
