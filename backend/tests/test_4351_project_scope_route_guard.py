@@ -85,7 +85,6 @@ _KNOWN = {
     "app/routers/event_notifications.py::mark_all_read",
     "app/routers/event_notifications.py::mark_read",
     "app/routers/events.py::agent_event_stream",
-    "app/routers/events.py::create_event",
     "app/routers/events.py::get_event_publish_history",
     "app/routers/events.py::get_my_channel_connection_status",
     "app/routers/events.py::get_my_generation_connector",
