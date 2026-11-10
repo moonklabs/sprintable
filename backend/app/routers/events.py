@@ -423,6 +423,31 @@ def _backfill_frame_data(event: "Event", stream_org_id: "uuid.UUID | None" = Non
 
 # ─── Pydantic schemas ─────────────────────────────────────────────────────────
 
+# story #4896 — the payload of `POST /api/v2/events` is free JSON chosen by the caller, stored once and then sent on to the recipient (bell, SSE, agent gateway). No size or depth bound meant one
+# request of a few MB was stored and read back from every list. Measured on production: the largest normal payloads are a few KB (p99 about 5.5 KB), so 64 KiB leaves room. This bounds the PUBLIC route's
+# body only — what the server's own publisher writes does not pass through here.
+EVENT_PAYLOAD_MAX_BYTES = 64 * 1024
+EVENT_PAYLOAD_MAX_DEPTH = 8
+
+
+def _json_depth(value: object) -> int:
+    """how many levels of dict/list the value nests (a flat dict is 1, a scalar 0) — counted with a stack, so a deep body cannot exhaust the recursion limit here"""
+    deepest = 0
+    stack: list[tuple[object, int]] = [(value, 0)]
+    while stack:
+        node, level = stack.pop()
+        if isinstance(node, dict):
+            children = node.values()
+        elif isinstance(node, list):
+            children = node
+        else:
+            continue
+        level += 1
+        deepest = max(deepest, level)
+        stack.extend((child, level) for child in children)
+    return deepest
+
+
 class CreateEventRequest(BaseModel):
     project_id: uuid.UUID
     event_type: str
@@ -432,6 +457,21 @@ class CreateEventRequest(BaseModel):
     recipient_id: uuid.UUID
     recipient_type: str
     payload: dict = {}
+
+    @field_validator("payload")
+    @classmethod
+    def _payload_is_bounded(cls, v: dict) -> dict:
+        depth = _json_depth(v)
+        if depth > EVENT_PAYLOAD_MAX_DEPTH:
+            raise ValueError(f"payload is nested {depth} levels deep; the limit is {EVENT_PAYLOAD_MAX_DEPTH}")
+        try:
+            # `allow_nan=False`: the request parser accepts the non-standard NaN / Infinity tokens, but the stored JSON column does not — they would pass here and end as a server error at the write
+            size = len(json.dumps(v, separators=(",", ":"), ensure_ascii=False, allow_nan=False, default=str).encode("utf-8"))
+        except ValueError:
+            raise ValueError("payload must be plain JSON: NaN and Infinity are not allowed") from None
+        if size > EVENT_PAYLOAD_MAX_BYTES:
+            raise ValueError(f"payload is {size} bytes; the limit is {EVENT_PAYLOAD_MAX_BYTES} bytes")
+        return v
 
     @field_validator("event_type")
     @classmethod

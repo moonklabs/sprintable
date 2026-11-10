@@ -363,7 +363,13 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             )
     # story #4733 (S5 · P2): what a person typed into a clock edit is never sent back in a refusal — FastAPI's default 422 carries each error's `input` (for a body-level error, the WHOLE body). On the phone's
     # clock route no error carries it; the rest of the answer is the default's, and every other route's answer is untouched.
-    if _CLOCK_PRESS_PATH.fullmatch(request.url.path) or (settings.is_embedded and request.url.path.startswith(_AUTH_PATH_PREFIX)):
+    # story #4896: the same for the body of `POST /api/v2/events` — a refusal for a payload over the bound would otherwise carry the whole payload back (megabytes), and one holding NaN / Infinity could not be
+    # written out as JSON at all (a server error in place of the 422).
+    if (
+        _CLOCK_PRESS_PATH.fullmatch(request.url.path)
+        or (settings.is_embedded and request.url.path.startswith(_AUTH_PATH_PREFIX))
+        or (request.method == "POST" and request.url.path.rstrip("/") == "/api/v2/events")
+    ):
         exc = RequestValidationError([{k: v for k, v in err.items() if k != "input"} for err in exc.errors()])
     return await request_validation_exception_handler(request, exc)
 
