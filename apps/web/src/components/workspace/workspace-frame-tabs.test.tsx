@@ -186,23 +186,32 @@ describe('WorkspaceFrameTabs — story #2930 I3', () => {
     });
   });
 
-  // story #4277(유나 판단 ① 필수) — 줄이 가로 스크롤이라 켜진 탭이 화면 밖일 수 있다 → 그릴 때 · 탭이 바뀔 때 켜진 탭을 줄 안으로(nearest).
-  it('⭐켜진 탭을 그릴 때 · 바뀔 때 scrollIntoView(nearest) — 다른 탭은 부르지 않는다', async () => {
-    const calls: Array<{ text: string | null; opts: unknown }> = [];
-    const orig = HTMLElement.prototype.scrollIntoView;
-    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement, opts?: unknown) { calls.push({ text: this.textContent, opts }); } as typeof orig;
+  // story #4277(유나 판단 ① 필수) — 줄이 가로 스크롤이라 켜진 탭이 화면 밖일 수 있다 → 켜진 탭을 줄 안으로. story #4888 — 이 일은 이제 ds TabNav가 쥔다(UI-3 wave 2b: 줄의 scrollLeft만 맞추고
+  // 페이지 스크롤(scrollIntoView)은 안 건드린다; 상세 규칙은 tab-nav.test.tsx). 여기서는 «일감 탭줄이 그 약속을 실제로 받는다»만 못박는다.
+  it('⭐켜진 탭(가설)이 줄 오른쪽 밖이면 줄의 scrollLeft만 당긴다 · 이미 보이는 탭이 켜지면 안 움직인다 · scrollIntoView 안 부른다', async () => {
+    const spy = vi.fn();
+    const origSIV = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = spy as unknown as typeof origSIV;
+    const rect = (l: number, r: number) => ({ left: l, right: r, top: 0, bottom: 32, width: r - l, height: 32, x: l, y: 0, toJSON: () => ({}) }) as DOMRect;
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute('data-slot') === 'ds-tab-nav') return rect(0, 300); // 줄: 폭 300
+      if (this.getAttribute('data-slot') === 'ds-tab-nav-link') return this.textContent === '가설' ? rect(500, 560) : rect(10, 50); // 가설만 줄 밖
+      return rect(0, 0);
+    });
     try {
       const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
-      await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="hypothesis" />)); });
-      expect(calls).toHaveLength(1);
-      expect(calls[0]!.opts).toEqual({ block: 'nearest', inline: 'nearest' });
-      const selected = container.querySelector('[aria-current="page"]');
-      expect(calls[0]!.text).toBe(selected?.textContent);
       await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
-      expect(calls).toHaveLength(2);
-      expect(calls[1]!.text).toBe(container.querySelector('[aria-current="page"]')?.textContent);
+      const nav = container.querySelector<HTMLElement>('nav[data-slot="ds-tab-nav"]')!;
+      expect(nav.scrollLeft).toBe(0); // 보드는 이미 보인다
+      await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="hypothesis" />)); });
+      expect(nav.scrollLeft).toBe(560 - (300 - 24)); // 오른쪽 흐림(24px) 안쪽까지 당김
+      expect(spy).not.toHaveBeenCalled();
+      const before = nav.scrollLeft;
+      await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
+      expect(nav.scrollLeft).toBe(before); // 이미 보이는 탭이 켜져도 안 움직인다
     } finally {
-      HTMLElement.prototype.scrollIntoView = orig;
+      rectSpy.mockRestore();
+      Element.prototype.scrollIntoView = origSIV;
     }
   });
 });
