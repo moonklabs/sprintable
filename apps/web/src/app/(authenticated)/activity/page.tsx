@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { ActivityLogView } from '@/components/activity/activity-log-view';
 import { TeamActivityView } from '@/components/activity/team-activity-view';
-import { cn } from '@/lib/utils';
+import { Button } from '@/components/ds/button';
 
 type ActivityTab = 'audit' | 'team';
 
@@ -29,26 +29,23 @@ export default function ActivityPage() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* 하위 2탭 — 감사 로그(기존 그대로·무변경·AC①) | 팀 활동(신규). 시각 형식 대비:
-          audit=테이블 / 팀활동=피드형 리스트. */}
-      <div className="flex shrink-0 items-center gap-1 border-b border-border/80 px-6 pt-2">
-        {TABS.map(({ value, labelKey }) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => setTab(value)}
-            className={cn(
-              'relative px-3 py-2 text-sm font-medium transition',
-              tab === value ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
-            )}
-            aria-current={tab === value ? 'page' : undefined}
-          >
-            {t(labelKey)}
-            {tab === value ? (
-              <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-foreground" />
-            ) : null}
-          </button>
-        ))}
+      {/* story 4892 (UI-9 활동) — the two views (감사 로그 | 팀 활동) are one ds switch in the page header (was two underline tabs): a named group of two ds buttons,
+          the open one `aria-current`. Each view keeps its own data / API. */}
+      <div className="flex shrink-0 items-center border-b border-ds-line px-6 py-2">
+        <div role="group" aria-label={t('tabsLabel')} className="inline-flex gap-0.5 rounded-ds-control border border-ds-line bg-ds-surface-sunk p-0.5">
+          {TABS.map(({ value, labelKey }) => (
+            <Button
+              key={value}
+              type="button"
+              variant={tab === value ? 'secondary' : 'quiet'}
+              onClick={() => setTab(value)}
+              aria-current={tab === value ? 'page' : undefined}
+              className="h-6 px-3"
+            >
+              {t(labelKey)}
+            </Button>
+          ))}
+        </div>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col">
