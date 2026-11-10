@@ -144,3 +144,38 @@ describe('ActivityLogView — 행을 고르면 상세가 보인다 (4892)', () =
     expect(document.activeElement).toBe(rows()[3]);
   });
 });
+
+describe('ActivityLogView — 목록이 바뀌면 고른 행이 풀린다 (4892)', () => {
+  it('⭐a new list (the filter changed) that no longer holds the chosen row clears the choice and the details', async () => {
+    let call = 0;
+    fetchWithAuthMock.mockImplementation(async (url: string) => {
+      if (url.includes('/api/members')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      call += 1;
+      const items = call === 1 ? ITEMS : [row('z9', '2026-11-10T09:00:00Z')];
+      return { ok: true, status: 200, json: async () => ({ data: { items, total: items.length, limit: 30, offset: 0 } }) };
+    });
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC">
+          <TopBarProvider><ActivityLogView projectId="p1" /></TopBarProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+    await click(rows()[0]!);
+    expect(detail()).toBeTruthy();
+    // the person changes the end date → a new first page (without r1) is asked for
+    const to = container.querySelector(`input[aria-label="${koMessages.activityLog.toDate}"]`) as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(to, '2026-11-09');
+      to.dispatchEvent(new Event('input', { bubbles: true }));
+      to.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]!.getAttribute('aria-expanded')).toBe('false');
+    expect(detail()).toBeNull();
+    expect(container.textContent).toContain(koMessages.activityLog.detailPickRow);
+  });
+});
+

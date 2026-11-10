@@ -465,13 +465,14 @@ function ActivityRow({ item, rowLabel, selected, controlsId, onToggle, buttonRef
   const { human, agent } = auditActorProps(item, tc, rowLabel);
   // story 4892 — the row is a button that opens its details (aria-expanded + aria-controls): the hover-only `title` tooltip it replaces was invisible to touch and keyboard.
   return (
-    <button
+    <Button
       ref={buttonRef}
       type="button"
+      variant="ghost"
       aria-expanded={selected}
       aria-controls={controlsId}
       onClick={onToggle}
-      className="block w-full rounded-ds-panel text-left outline-none transition-colors hover:bg-ds-surface-high focus-visible:ring-2 focus-visible:ring-ds-action data-[selected=true]:bg-ds-surface-high"
+      className="block h-auto min-h-0 w-full min-w-0 justify-start whitespace-normal rounded-ds-panel p-0 text-left font-normal transition-colors hover:bg-ds-surface-high aria-expanded:bg-ds-surface-high"
       data-selected={selected}
     >
       <ProofCapsule
@@ -483,6 +484,6 @@ function ActivityRow({ item, rowLabel, selected, controlsId, onToggle, buttonRef
         human={human}
         agent={agent}
       />
-    </button>
+    </Button>
   );
 }
