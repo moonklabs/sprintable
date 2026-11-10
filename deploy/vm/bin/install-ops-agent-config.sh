@@ -54,6 +54,7 @@ if ! mkdir "$lockdir" 2> /dev/null; then
   mkdir "$lockdir" 2> /dev/null || { echo "OPS AGENT CONFIG FAILED: cannot take the lock $lockdir" >&2; exit 1; }
 fi
 if ! echo "$$" > "$lockdir/pid"; then
+  rm -f "$lockdir/pid" 2> /dev/null # a pid file that was created and then not written is still a file in the directory
   rmdir "$lockdir" 2> /dev/null
   echo "OPS AGENT CONFIG FAILED: cannot write the pid file of the lock $lockdir — nothing was changed" >&2
   exit 1

@@ -155,6 +155,71 @@ def test_url_host_never_raises_on_what_a_log_argument_can_be() -> None:
     assert url_host("https://host.example:notaport/x") == "(unparseable-url)"
 
 
+OLD_ROW_ERROR = f"Client error '404 Not Found' for url '{URL}'"  # what the code BEFORE this story stored in `last_error`
+
+
+@pytest.mark.asyncio
+async def test_an_old_row_with_a_url_in_last_error_does_not_put_it_into_the_a2a_failure_text(monkeypatch) -> None:
+    """a `failed` delivery row written before the retry text was scrubbed still holds the whole request URL; the text of the A2A task failure — which the caller sees — is built from it"""
+    import uuid
+
+    from app.services import a2a_task_lifecycle
+    from app.services import conversation_webhook as cw
+
+    row = SimpleNamespace(status="failed", attempt_count=3, last_error=OLD_ROW_ERROR, updated_at=1)
+    results = iter([SimpleNamespace(scalar_one_or_none=lambda: SimpleNamespace(id=uuid.uuid4())),
+                    SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [row]))])
+
+    class _Db:
+        async def execute(self, *_a, **_k):
+            return next(results)
+
+    seen: list[str] = []
+
+    async def _fail(db, task_id, message):
+        seen.append(message)
+
+    monkeypatch.setattr(a2a_task_lifecycle, "fail_task_if_still_working", _fail)
+    await cw._fail_linked_a2a_task_if_all_deliveries_failed(_Db(), uuid.uuid4())
+    assert len(seen) == 1 and "webhook delivery failed on all 1 channel(s) after 3 attempts" in seen[0]
+    assert PATH_CANARY not in seen[0] and QUERY_CANARY not in seen[0] and "hooks.example.test:8443" in seen[0], seen[0]
+
+
+def _delivery_last_error_reads() -> list[tuple[str, int, bool]]:
+    """every READ of `.last_error` in a file that handles ConversationWebhookDelivery rows: (file, line, inside a redact_urls(...) call)"""
+    out: list[tuple[str, int, bool]] = []
+    for path in sorted(_APP.rglob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        if "ConversationWebhookDelivery" not in text or path.name == "conversation_webhook_delivery.py":
+            continue
+        tree = ast.parse(text)
+        parents: dict[ast.AST, ast.AST] = {}
+        for node in ast.walk(tree):
+            for child in ast.iter_child_nodes(node):
+                parents[child] = node
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and node.attr == "last_error" and isinstance(node.ctx, ast.Load):
+                cur, wrapped = node, False
+                while cur in parents:
+                    cur = parents[cur]
+                    if isinstance(cur, ast.Call) and getattr(cur.func, "id", getattr(cur.func, "attr", "")) == "redact_urls":
+                        wrapped = True
+                        break
+                out.append((str(path.relative_to(_APP)), node.lineno, wrapped))
+    return out
+
+
+def test_every_read_of_a_delivery_rows_last_error_goes_through_redact_urls() -> None:
+    reads = _delivery_last_error_reads()
+    assert reads, reads
+    assert not [r for r in reads if not r[2]], f"a delivery row's last_error is read without redact_urls: {[r for r in reads if not r[2]]}"
+
+
+def test_the_last_error_scan_sees_the_three_readers_so_it_is_not_vacuous() -> None:
+    files = {f for f, _, _ in _delivery_last_error_reads()}
+    assert {"routers/a2a.py", "routers/webhooks.py", "services/conversation_webhook.py"} <= files, files
+
+
 # ───────────────────────── nothing in backend/app prints «url=» without the helper ─────────────────────────
 
 _LOG_METHODS = {"debug", "info", "warning", "error", "exception", "critical", "log"}

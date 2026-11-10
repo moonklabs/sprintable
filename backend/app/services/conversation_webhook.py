@@ -462,7 +462,7 @@ async def _fail_linked_a2a_task_if_all_deliveries_failed(db, message_id: uuid.UU
     await fail_task_if_still_working(
         db, task.id,
         f"webhook delivery failed on all {len(deliveries)} channel(s) after "
-        f"{latest.attempt_count} attempts: {latest.last_error or 'unknown error'}",
+        f"{latest.attempt_count} attempts: {redact_urls(latest.last_error or 'unknown error')}",  # story 4869: a row written before the retry text was scrubbed may still hold a request URL
     )
 
 

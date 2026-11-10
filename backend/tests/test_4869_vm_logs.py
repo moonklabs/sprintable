@@ -427,8 +427,9 @@ def test_a_lock_that_is_still_being_made_is_waited_for_not_taken_over(box, tmp_p
         sleeper.wait()
 
 
-def test_a_lock_whose_pid_cannot_be_written_stops_the_run_and_leaves_no_lock(box, tmp_path: Path) -> None:
-    """mkdir succeeded but the pid file cannot be written (a stand-in `mkdir` makes the lock directory read-only): nothing is installed, no lock is left behind"""
+@pytest.mark.parametrize("how", ["directory_read_only", "pid_file_created_but_not_writable"])
+def test_a_lock_whose_pid_cannot_be_written_stops_the_run_and_leaves_no_lock(box, tmp_path: Path, how: str) -> None:
+    """mkdir succeeded but the pid cannot be written — the lock directory is read-only, or the pid file was created and then cannot be written (a disk that fills up): nothing is installed, no lock is left behind"""
     import shutil
 
     if os.geteuid() == 0:
@@ -436,7 +437,8 @@ def test_a_lock_whose_pid_cannot_be_written_stops_the_run_and_leaves_no_lock(box
     run, target, new = box
     real_mkdir = shutil.which("mkdir")
     fake = tmp_path / "bin" / "mkdir"
-    fake.write_text(f'#!/bin/sh\n"{real_mkdir}" "$@" || exit $?\nfor last; do :; done\ncase "$last" in *.lock.d) chmod 555 "$last" ;; esac\n')
+    after = 'chmod 555 "$last"' if how == "directory_read_only" else ': > "$last/pid"; chmod 444 "$last/pid"'
+    fake.write_text(f'#!/bin/sh\n"{real_mkdir}" "$@" || exit $?\nfor last; do :; done\ncase "$last" in *.lock.d) {after} ;; esac\n')
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
     p, log = run()
     assert p.returncode == 1 and "cannot write the pid file of the lock" in p.stderr
