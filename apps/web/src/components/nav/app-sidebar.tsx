@@ -311,6 +311,7 @@ export function AppSidebar({
     <div className="mx-2.5 mt-2">
       <Link
         href={flatHref(chatCenterItem.path)}
+        data-nav-id={chatCenterItem.id}
         // story #3054(2984-S6) — GATE_BUTTON_TONE.primary(proof-capsule.tsx)와 동형으로
         // 헤어라인+elev 채택, bg-proof-blue-soft 채움 폐지. hover는 이제 solid 전환 대신
         // bg-sidebar-accent(기존 다른 nav 항목의 hover 관례와 정합) — AA 대비 이슈였던
@@ -424,6 +425,7 @@ export function AppSidebar({
                   return (
                     <NavRow
                       key={item.id}
+                      navId={item.id}
                       href={link.href}
                       label={label}
                       Icon={Icon}

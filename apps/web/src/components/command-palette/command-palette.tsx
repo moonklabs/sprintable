@@ -13,6 +13,7 @@ import {
   FolderKanban,
   Gauge,
   GitPullRequest,
+  LayoutGrid,
   Lightbulb,
   List,
   Search,
@@ -26,7 +27,7 @@ import { buildActionCommands, type ActionCommand } from './command-palette-actio
 import { isRealShortcut } from '@/lib/keyboard-shortcuts';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { fetchWithAuth } from '@/lib/db/client';
-import { NAV_GROUPS, CHAT_CENTER_ITEM, OTHER_NAV_ITEMS } from '@/lib/nav-config';
+import { ALL_SCREENS_ITEM, NAV_GROUPS, CHAT_CENTER_ITEM, OTHER_NAV_ITEMS, type NavItemConfig } from '@/lib/nav-config';
 import { pickEuroJosa } from '@/lib/korean-particle';
 
 interface CommandItem {
@@ -109,7 +110,11 @@ export interface DerivedNavItem {
 // 워크스페이스 없는 항목(isWorkspaceless=true)은 이 콜백을 아예 안 부른다 — 그래서 어떤
 // 더미를 넣어도 실제 href(navItem.path 그대로)가 그대로 나온다.
 export function deriveNavigateItems(resolveResourceHref: (resource: string) => string): DerivedNavItem[] {
-  const navItems = [...NAV_GROUPS.flatMap((group) => group.items), ...OTHER_NAV_ITEMS, CHAT_CENTER_ITEM];
+  // story #4885(AC3 §5) — «이동» 목록은 길잡이와 같은 순서로 선다: 홈 · 대화 · 일감(+ 그 탭 앵커) · 팀 · 지식 · 조직 · 설정 · 전체 · 그 밖.
+  // 예전엔 대화가 목록 맨 끝, 일감 탭 앵커가 그 뒤에 따로 붙어 «매일 쓰는 길»이 위에 없었다. 목적지는 늘리지 않는다 — «전체»(/more)만 길잡이에 있고 여기 없던 입구라 더한다.
+  const groupItems = NAV_GROUPS.flatMap((group) => group.items);
+  const afterHome = NAV_GROUPS[0]?.items.length ?? 0;
+  const navItems: NavItemConfig[] = [...groupItems.slice(0, afterHome), CHAT_CENTER_ITEM, ...groupItems.slice(afterHome), ...OTHER_NAV_ITEMS];
   const fromNav: DerivedNavItem[] = navItems.map((navItem) => {
     // story #2224(선생님 정정 2026-07-30) — 'board'는 `/flow?view=list`로 흡수, 'docs'도
     // resourceHref 재계산 대상(둘 다 kind='static'이어도 워크스페이스 있는 경로로 오버라이드
@@ -140,7 +145,15 @@ export function deriveNavigateItems(resolveResourceHref: (resource: string) => s
     id: anchor.id, icon: anchor.icon, labelKey: anchor.labelKey, href: resolveResourceHref(anchor.href.replace(/^\//, '')),
     labelSource: 'anchor', isWorkspaceless: false,
   }));
-  return [...fromNav, ...fromAnchors];
+  // 일감 탭 앵커는 «일감» 바로 뒤에(길잡이에서 일감 항목이 여는 탭줄과 같은 자리).
+  const boardIndex = fromNav.findIndex((item) => item.id === 'board');
+  const ordered = boardIndex < 0 ? [...fromNav, ...fromAnchors] : [...fromNav.slice(0, boardIndex + 1), ...fromAnchors, ...fromNav.slice(boardIndex + 1)];
+  // 길잡이 맨 아래 «전체»(폰 «전체» 탭과 같은 목록) — «그 밖» 앞, 설정 뒤.
+  const allScreens: DerivedNavItem = {
+    id: ALL_SCREENS_ITEM.id, icon: LayoutGrid, labelKey: ALL_SCREENS_ITEM.labelKey, href: ALL_SCREENS_ITEM.path, labelSource: 'nav', isWorkspaceless: true,
+  };
+  const settingsIndex = ordered.findIndex((item) => item.id === 'settings');
+  return settingsIndex < 0 ? [...ordered, allScreens] : [...ordered.slice(0, settingsIndex + 1), allScreens, ...ordered.slice(settingsIndex + 1)];
 }
 
 // 명령(action)당 아이콘 — command-palette-actions.ts는 순수 데이터만 다뤄 lucide 컴포넌트를

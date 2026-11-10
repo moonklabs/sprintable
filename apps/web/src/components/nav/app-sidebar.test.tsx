@@ -661,3 +661,23 @@ describe('AppSidebar — 오프캔버스로 접힌 상태에서 ⌘K · 레일([
   });
 });
 
+
+// story #4885 (AC3 §5) — ⌘K 팔레트의 «이동» 순서는 길잡이가 실제로 그린 순서와 같다. 기대 순서를 손으로도 설정 파생으로도 적지 않고, 길잡이 DOM이 그린 줄 순서를 직접 읽어 비교한다.
+// 길잡이에만 있는 항목(데스크톱 앱 — 팔레트엔 안 싣는 것이 4524로 고정)과 팔레트에만 있는 항목(일감 탭 앵커 · 그 밖)은 비교에서 뺀다.
+describe('AppSidebar — 줄 순서가 ⌘K 팔레트 «이동» 순서와 같다(story #4885)', () => {
+  it('⭐길잡이가 그린 [data-nav-id] 순서 = 팔레트 이동 목록에서 길잡이에 있는 항목만 거른 순서', async () => {
+    expandAllGroups();
+    await mount();
+    const { deriveNavigateItems } = await import('@/components/command-palette/command-palette');
+    const sidebarIds = [...container.querySelectorAll('[data-nav-id]')].map((el) => el.getAttribute('data-nav-id')!);
+    expect(sidebarIds.length).toBeGreaterThan(10);
+    const paletteIds = deriveNavigateItems((resource) => `/ws/proj/${resource}`).map((item) => item.id);
+    const inSidebar = new Set(sidebarIds);
+    expect(paletteIds.filter((id) => inSidebar.has(id))).toEqual(sidebarIds.filter((id) => paletteIds.includes(id)));
+    // 길잡이에 있는 건 전부 팔레트에도 있다(데스크톱 앱만 예외 — 켜진 곳에서만 길잡이에 선다).
+    expect(sidebarIds.filter((id) => !paletteIds.includes(id)).filter((id) => id !== 'desktop-app')).toEqual([]);
+    // 대화 카드는 첫 구역(홈 · 결재) 바로 뒤, 일감보다 앞이다.
+    expect(sidebarIds.indexOf('chats')).toBe(sidebarIds.indexOf('inbox') + 1);
+    expect(sidebarIds.indexOf('chats')).toBeLessThan(sidebarIds.indexOf('board'));
+  });
+});
