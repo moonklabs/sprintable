@@ -21,7 +21,7 @@ import { CountBadge } from '@/components/ui/count-badge';
 import { NowStrip } from './now-strip';
 import { PulseCard } from './pulse-card';
 import { useChatRailOptional } from '@/app/(authenticated)/chats/chat-rail-context';
-import { isNoProjectAtAll } from '@/app/(authenticated)/chats/no-project';
+import { isNoProjectAtAll, projectsUnknownBecauseFailed } from '@/app/(authenticated)/chats/no-project';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { participantDisplayLabel } from '@/lib/member-display';
@@ -140,6 +140,16 @@ function getOtherParticipants(participants: Participant[], currentMemberId: stri
 
 function hasAgentParticipant(participants: Participant[]): boolean {
   return participants.some((p) => p.type === 'agent');
+}
+
+/** story 4887 (UI-4 P2-d) — «we couldn't load your projects» + [Try again] (reload — the same way the Recruit tab does it, story 4891); a failure is not «no project» */
+function ProjectsLoadFailed({ t }: { t: (key: string) => string }) {
+  return (
+    <div className="flex flex-col items-center gap-3" data-testid="chats-projects-failed">
+      <p className="text-sm text-muted-foreground">{t('projectsLoadFailed')}</p>
+      <Button type="button" size="sm" variant="outline" onClick={() => window.location.reload()} data-testid="chats-retry-projects">{t('projectsRetry')}</Button>
+    </div>
+  );
 }
 
 function ConversationRow({
@@ -399,6 +409,8 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const dashboardCtx = useDashboardContext();
   const { orgId, orgMemberships, projectMemberships } = dashboardCtx;
   const noProjectAtAll = isNoProjectAtAll(dashboardCtx);
+  // story 4887 (UI-4 P2-d) — the request for the person's projects FAILED (story 4891 `projectMembershipsFailed`): that is not «no project» — the person may have projects. Say so, with a way to try again.
+  const projectsFailed = projectsUnknownBecauseFailed(dashboardCtx);
   // story 4847 — the admin's «agents» tab reads the CURRENT project's agent-only rooms (`include_agent_conversations`), so it needs a current project.
   // The server gives that view to a person only as an organization owner/admin — the ORGANIZATION role (`org_members.role`, the list `/api/v2/organizations` carries into
   // `orgMemberships`), not the shell's «role» (/me: the larger of the project role and the organization role — a project admin would see a tab the server then refuses with 403).
@@ -793,7 +805,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     // story 4887 (UI-4 P2-a) — a person with ONE project has nothing to tell apart: every row of that project would carry the same name (9 of 9 on the dev capture) and a fourth line of the row for nothing.
     // The line is spared only when it is KNOWN that the person has exactly one project and the room is that project's: an empty or not-yet-loaded membership list (unknown — `[]`), two or more projects, or a room of
     // ANOTHER project (a person who lost access to a project can still read its rooms) keep the name — it is information there.
-    if (projectMemberships.length === 1 && projectMemberships[0]!.projectId === c.project_id) return undefined;
+    if (!dashboardCtx.projectMembershipsFailed && projectMemberships.length === 1 && projectMemberships[0]!.projectId === c.project_id) return undefined; // (a failed read can leave ONE project synthesized from /me — the person may have more: then the name stays)
     return c.project_name ?? projectMemberships.find((m) => m.projectId === c.project_id)?.projectName ?? undefined;
   };
 
@@ -882,7 +894,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     // A person with no project but rooms never gets here — they see their rooms. On an org-wide server a room can be made with no project, so there is somewhere to start: the ordinary empty state.
     noProjectAtAll && !roomsAreOrgWide ? (
       <div className="flex h-full items-center justify-center px-6 text-center" data-testid="chats-no-project">
-        <p className="text-sm text-muted-foreground">{t('noProjectYet')}</p>
+        {projectsFailed ? <ProjectsLoadFailed t={t} /> : <p className="text-sm text-muted-foreground">{t('noProjectYet')}</p>}
       </div>
     ) : (
       <div className="flex h-full items-center justify-center">
@@ -1006,7 +1018,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   if (needsProject) {
     return (
       <div className="flex h-64 items-center justify-center px-6 text-center" data-testid="chats-no-project">
-        <p className="text-sm text-muted-foreground">{projectMemberships.length === 0 ? t('noProjectYet') : t('pickProject')}</p>
+        {projectsFailed ? <ProjectsLoadFailed t={t} /> : <p className="text-sm text-muted-foreground">{projectMemberships.length === 0 ? t('noProjectYet') : t('pickProject')}</p>}
       </div>
     );
   }
