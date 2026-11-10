@@ -36,8 +36,6 @@ app/repositories/workflow_trigger_type.py::메모 답신
 app/repositories/workflow_trigger_type.py::배포 요청
 app/repositories/workflow_trigger_type.py::스토리 담당자 변경
 app/repositories/workflow_trigger_type.py::스토리 상태 전이
-app/repositories/workflow_trigger_type.py::스프린트 또는 에픽 킥오프
-app/repositories/workflow_trigger_type.py::스프린트 또는 목표 킥오프
 app/repositories/workflow_trigger_type.py::코드 리뷰 요청
 app/routers/a2a.py::---\n[A2A] 이 task의 완료 신호는 이 메시지 스레드에 대한 답신입니다.\nreply_thread_id:
 app/routers/a2a.py::/rpc 호출은 그 에이전트의 org에 소속된 Sprintable 발급 자격증명이 필요(외부 파트너 발급 경로는 미구현 — E-A2A-EXTERNAL 후속)

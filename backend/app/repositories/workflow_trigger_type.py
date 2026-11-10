@@ -6,12 +6,15 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.workflow_trigger_type import WorkflowTriggerType
+from app.services.i18n_catalog import LEGACY_SYSTEM_TEXTS, t
 
 # story #4888 — the system «kickoff» description said «에픽» before it said «목표» (migration 0473 corrects the rows that exist). The migration runs BEFORE the old backend is swapped out,
 # so during that window the old release can still seed a brand-new organization with the old text (`ON CONFLICT DO NOTHING` then keeps it). `list()` therefore corrects, with the
-# same exact-text rule as the migration (system row · description exactly this text), any row that still carries it — a description a person edited is never touched.
-_LEGACY_KICKOFF_DESCRIPTION = "스프린트 또는 에픽 킥오프"
-_KICKOFF_DESCRIPTION = "스프린트 또는 목표 킥오프"
+# same exact-text rule as the migration (system row · description exactly the old text), any row that still carries it — a description a person edited is never touched.
+# Both wordings come from the catalog (`app/services/i18n_catalog.py`), the one file the Korean-sentence guard exempts — this file holds no sentence of them.
+_KICKOFF_KEY = "workflow_trigger.kickoff.description"
+_LEGACY_KICKOFF_DESCRIPTION = LEGACY_SYSTEM_TEXTS[_KICKOFF_KEY]
+_KICKOFF_DESCRIPTION = t(_KICKOFF_KEY, "ko")
 
 SYSTEM_TRIGGER_TYPES = [
     {"slug": "kickoff", "label": "Kickoff", "description": _KICKOFF_DESCRIPTION},
