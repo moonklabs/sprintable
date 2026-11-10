@@ -135,6 +135,10 @@ describe('NavRail — B 셸 초안(아이콘 막대)', () => {
     const flyout = () => container.querySelector('[data-rail-group="dev"] [data-testid="rail-flyout"]') as HTMLElement;
     expect(flyout().getAttribute('data-open')).toBe('false');
     expect(flyout().className).toContain('hidden');
+    // 아이콘과 목록 사이 빈틈 0(codex P1): 바깥 상자가 왼쪽 padding으로 틈을 메우고 margin은 없다 — 마우스가 건너는 동안 그룹 mouseleave가 안 난다
+    expect(flyout().className).toContain('pl-1');
+    expect(flyout().className).not.toMatch(/(^|\s)ml-/);
+    expect(flyout().closest('[data-rail-group="dev"]')).not.toBeNull();
     await act(async () => { (container.querySelector('[data-rail-item="board"]') as HTMLAnchorElement).focus(); });
     expect(flyout().getAttribute('data-open')).toBe('true');
     expect(flyout().className).not.toContain('hidden');
@@ -154,5 +158,26 @@ describe('NavRail — B 셸 초안(아이콘 막대)', () => {
   it('account를 안 넘기면 «계정» 아이콘은 없다(단독 사용)', async () => {
     await mount();
     expect(container.querySelector('[data-rail-item="account"]')).toBeNull();
+  });
+
+  it('⭐목록 칸 단추: listColumn을 넘기면 접기·펴기 단추가 서고(aria-expanded = 열림) 누르면 onToggle — 가장자리 손잡이가 막대 뒤에 가려져도 목록 칸을 다시 펼 길', async () => {
+    const onToggle = vi.fn();
+    await mount({ listColumn: { open: false, onToggle } });
+    const btn = container.querySelector('[data-rail-item="list-column-toggle"]') as HTMLButtonElement;
+    expect(btn.getAttribute('aria-label')).toBe('사이드바 접기·펼치기');
+    expect(btn.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => { btn.click(); });
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it('listColumn을 안 넘기면 목록 칸 단추는 없다', async () => {
+    await mount();
+    expect(container.querySelector('[data-rail-item="list-column-toggle"]')).toBeNull();
+  });
+
+  it('«계정» 팝오버 상자에 접근 이름(계정)이 있다(codex P2)', async () => {
+    await mount({ account: { orgId: 'o1', orgMemberships: [], projectId: 'p1', projectMemberships: [], userName: '디디' } });
+    await act(async () => { (container.querySelector('[data-rail-item="account"]') as HTMLElement).click(); });
+    expect(document.querySelector('[data-testid="rail-account-panel"]')?.getAttribute('aria-label')).toBe('계정');
   });
 });

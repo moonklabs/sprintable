@@ -28,7 +28,7 @@ import { resolveChatsHref, resolveConnectRulesHref, type NavV3Flags, livePathPro
 import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
 import { TopBar } from '@/components/nav/top-bar';
 import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
-import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
+import { SidebarProvider, SidebarInset, useSidebar } from '@/components/ui/sidebar';
 import { ContextualPanelLayout, useContextualPanelState } from '@/components/ui/contextual-panel-layout';
 import { TeamPresencePanel } from '@/components/presence/team-presence-panel';
 import { useTeamPresence } from '@/components/presence/use-team-presence';
@@ -208,6 +208,7 @@ function ShellBody({
   // 막대의 slug · 팔레트는 AppSidebar와 같은 출처. 「오늘」 배지 숫자는 UI-5(오늘 화면)가 정하는 값이라 여기선 아직 안 넘긴다(NavRail의 todayCount 이음새 = 0).
   const railOrgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
   const { setOpen: setPaletteOpen } = useCommandPalette();
+  const { open: listColumnOpen, toggleSidebar } = useSidebar();
   const openPalette = useCallback(() => setPaletteOpen(true), [setPaletteOpen]);
   return (
     <>
@@ -218,6 +219,7 @@ function ShellBody({
         navV3Flags={navV3Flags}
         chatUnreadTotal={chatUnreadTotal}
         onOpenPalette={openPalette}
+        listColumn={{ open: listColumnOpen, onToggle: toggleSidebar }}
       />
       <AppSidebar
         projectId={projectId}

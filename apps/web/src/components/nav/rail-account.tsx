@@ -39,7 +39,7 @@ export function RailAccount({ orgId, orgMemberships, projectId, projectMembershi
           <CircleUserRound className="size-5" aria-hidden="true" />
         </span>
       </PopoverTrigger>
-      <PopoverContent side="right" align="end" sideOffset={8} className="flex w-72 flex-col gap-1 p-2" data-testid="rail-account-panel">
+      <PopoverContent side="right" align="end" sideOffset={8} className="flex w-72 flex-col gap-1 p-2" data-testid="rail-account-panel" aria-label={label}>
         <UnifiedSwitcher orgs={orgMemberships} currentOrgId={orgId} projects={projectMemberships} currentProjectId={projectId} className="w-full" />
         <NewProjectEntry className="h-8 min-h-0 w-full justify-start gap-2 px-2.5 text-sm text-muted-foreground" />
         <MoveAgentsEntry className="h-8 min-h-0 w-full justify-start gap-2 px-2.5 text-sm text-muted-foreground" />

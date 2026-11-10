@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Building2, LayoutGrid, MessageSquare, Search, type LucideIcon } from 'lucide-react';
+import { Building2, LayoutGrid, MessageSquare, PanelLeft, Search, type LucideIcon } from 'lucide-react';
 import { ALL_SCREENS_ITEM, CHAT_CENTER_ITEM, resolveNavGroups, type NavGroupConfig, type NavItemConfig } from '@/lib/nav-config';
 import { findActiveStaticItemId, isResourceItemActive } from '@/lib/nav-active';
 import { DEFAULT_NAV_V3_FLAGS, scopedResourceHref, type NavV3Flags } from '@/lib/nav-v3-destinations';
@@ -37,11 +37,13 @@ interface NavRailProps {
   todayCount?: number;
   chatUnreadTotal?: number;
   onOpenPalette?: () => void;
+  /** 목록 칸(왼쪽 길잡이) 접기·펴기 — 목록 칸의 가장자리 손잡이(SidebarRail)가 막대 뒤에 가려지므로 막대가 자기 단추를 갖는다(codex P1). 안 넘기면 단추 없음. */
+  listColumn?: { open: boolean; onToggle: () => void };
 }
 
 const DAILY_GROUP_IDS = ['now', 'dev', 'team', 'knowledge'] as const;
 
-export function NavRail({ orgSlug, projectSlug, account, navV3Flags = DEFAULT_NAV_V3_FLAGS, todayCount = 0, chatUnreadTotal = 0, onOpenPalette }: NavRailProps) {
+export function NavRail({ orgSlug, projectSlug, account, listColumn, navV3Flags = DEFAULT_NAV_V3_FLAGS, todayCount = 0, chatUnreadTotal = 0, onOpenPalette }: NavRailProps) {
   const t = useTranslations('nav');
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -110,6 +112,11 @@ export function NavRail({ orgSlug, projectSlug, account, navV3Flags = DEFAULT_NA
             ) : null}
           </div>
         ) : null}
+        {listColumn ? (
+          <Button type="button" variant="ghost" aria-label={t('toggleSidebar')} title={t('toggleSidebar')} aria-expanded={listColumn.open} onClick={listColumn.onToggle} className="block h-auto min-h-0 min-w-0 rounded-md p-0 hover:bg-transparent focus-visible:ring-2 focus-visible:ring-ring" data-rail-item="list-column-toggle">
+            {railIcon(PanelLeft, false)}
+          </Button>
+        ) : null}
         {account ? <RailAccount {...account} /> : null}
         <Button type="button" variant="ghost" aria-label={t('search')} title={`${t('search')} ⌘K`} onClick={onOpenPalette} className="block h-auto min-h-0 min-w-0 rounded-md p-0 hover:bg-transparent focus-visible:ring-2 focus-visible:ring-ring" data-rail-item="search">
           {railIcon(Search, false)}
@@ -159,9 +166,12 @@ function DailyEntry({ group, link, label, groupLabel, icon, badge, count }: {
         {badge(count)}
       </Link>
       {rest.length > 0 ? (
-        <ul role="list" className={cn('absolute left-full top-0 z-30 ml-1 min-w-44 flex-col gap-0.5 rounded-md border border-border bg-card p-1 shadow-md', open ? 'flex' : 'hidden')} data-testid="rail-flyout" data-open={open}>
-          {group.items.map((item) => <FlyoutLink key={item.id} item={item} href={link(item).href} active={link(item).isActive} label={label(item)} count={0} />)}
-        </ul>
+        // 아이콘과 목록 사이에 빈틈이 없어야 한다(codex P1): 바깥 상자의 왼쪽 padding이 그 틈을 «목록의 일부»로 메워, 마우스가 아이콘에서 목록으로 건너가는 동안 그룹의 mouseleave가 안 난다.
+        <div className={cn('absolute left-full top-0 z-30 pl-1', open ? 'block' : 'hidden')} data-testid="rail-flyout" data-open={open}>
+          <ul role="list" className="flex min-w-44 flex-col gap-0.5 rounded-md border border-border bg-card p-1 shadow-md">
+            {group.items.map((item) => <FlyoutLink key={item.id} item={item} href={link(item).href} active={link(item).isActive} label={label(item)} count={0} />)}
+          </ul>
+        </div>
       ) : null}
     </div>
   );

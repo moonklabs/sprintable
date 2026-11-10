@@ -8,7 +8,7 @@ import { ChevronDown, LayoutGrid, Search, MessageSquare } from 'lucide-react';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
-import { findActiveStaticItemId } from '@/lib/nav-active';
+import { findActiveStaticItemId, isResourceItemActive } from '@/lib/nav-active';
 import { useCommandPalette } from '@/components/command-palette/command-palette-context';
 import { ProfileMenu } from '@/components/nav/profile-menu';
 import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosure';
@@ -158,9 +158,7 @@ export function AppSidebar({
   // 하나 늘리면 이 판정도 자동으로 늘어난다. href는 여전히 resource(주 진입점) 기준.
   function resourceLink(resource: string, extraActivePaths: readonly string[] = []): { href: string; isActive: boolean } {
     const href = scopedResourceHref(resource, orgSlug, currentProjectSlug, flatHref);
-    const isActivePath = (p: string) => pathname === `/${p}` || pathname.startsWith(`/${p}/`)
-      || Boolean(orgSlug && currentProjectSlug && pathname.startsWith(`/${orgSlug}/${currentProjectSlug}/${p}`));
-    const isActive = [resource, ...extraActivePaths].some(isActivePath);
+    const isActive = isResourceItemActive(pathname, resource, orgSlug, currentProjectSlug, extraActivePaths);
     return { href, isActive };
   }
   // story #2224(IA v2.2 §7-3, AC12) — 기본 진입은 /flow, 사이드바가 통합뷰를 가리킨다.
