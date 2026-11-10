@@ -323,5 +323,21 @@ describe('홈 모델 — 정직 규칙 (story #4888)', () => {
     expect(text('badge')).toBe('2'); // not 2 → fewer → 2 again
     expect(text('flags')).toBe('full|error');
   });
+
+  it('⭐완전했던 읽기가 «첫 쪽 알림 읽기 실패»에도 0건으로 덮이지 않는다 — 막대 수는 그대로', async () => {
+    let failNotifications = false;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/today') return ok(todayOf([need('g1', '2026-09-13T05:00:00Z')]));
+      if (url.startsWith('/api/notifications')) return failNotifications ? bad() : { ok: true, status: 200, json: async () => ({ data: [mention('n1')], meta: { hasMore: false, nextCursor: null } }) };
+      return ok(null);
+    }));
+    await mount(undefined);
+    expect(text('badge')).toBe('2');
+    failNotifications = true;
+    await act(async () => { (container.querySelector('[data-testid="retry"]') as HTMLButtonElement).click(); });
+    await settle();
+    expect(text('badge')).toBe('2');
+    expect(text('flags')).toBe('full|error');
+  });
 });
 

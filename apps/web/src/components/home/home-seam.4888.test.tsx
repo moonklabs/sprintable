@@ -166,5 +166,16 @@ describe('홈 이음새 — 막대 «홈» 배지 = 홈 본문의 수 (story #48
     expect(container.querySelector('[data-testid="home-incomplete-notice"]')?.textContent).toContain('일부를 불러오지 못했어요');
     expect(container.textContent).not.toContain('모두 확인했어요');
   });
+
+  it('⭐읽다 만 수는 막대에서도 «N+»다 — 정확한 수처럼 보이지 않는다(링크 이름도 «1+»)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/today') return { ok: true, status: 200, json: async () => ({ data: { needs_me: [need('g1', '2026-09-13T05:00:00Z')], needs_me_count: 1, agent_progress: [], completed_today: [], published_today: { count: 0, by_channel: [] }, usage: { platform: [], ad_spend: { measured: false } } } }) };
+      if (url.startsWith('/api/notifications')) return { ok: false, status: 500, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    }));
+    await mountBarAndHome();
+    expect(railBadge()).toContain('1+');
+    expect(container.querySelector('[data-rail-item="org-briefing"]')?.getAttribute('aria-label')).toMatch(/1\+$/);
+  });
 });
 

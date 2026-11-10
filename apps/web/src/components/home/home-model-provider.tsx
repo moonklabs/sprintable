@@ -182,7 +182,8 @@ export function HomeModelProvider({ viewerMemberId, projectId, orgId, children }
       if (!alive || mySeq !== seq.current) return; // a newer load owns the state now
       // a complete read of this very identity must not be replaced by one that broke off in the middle (the badge would drop and come back): the earlier one stays and the screen says the last read failed
       const prev = lastRead.current;
-      if (todayJson !== null && notifRead?.failed && prev && prev.forOrg === orgId && prev.forViewer === viewerMemberId && !prev.partial) {
+      const degraded = notifRead === null || notifRead.failed || (projectId !== undefined && (storiesJson === null || membersJson === null));
+      if (todayJson !== null && degraded && prev && prev.forOrg === orgId && prev.forViewer === viewerMemberId && prev.storiesFor === projectId && !prev.partial) {
         setErrorFor(`${orgId ?? ''}|${viewerMemberId ?? ''}`);
         return;
       }

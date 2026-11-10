@@ -38,6 +38,8 @@ export interface NavRailProps {
    * (UI-1 §6 ① — 웹 길잡이 · 폰 하단 탭 · 이 막대의 «오늘» 배지가 한 숫자). 이음새는 이 prop 하나뿐이라 셈이 바뀌어도 이 파일은 안 바뀐다.
    */
   todayCount?: number;
+  /** the «홈» number is a minimum (part of what feeds it could not be read): the badge is drawn «N+» */
+  todayCountAtLeast?: boolean;
   chatUnreadTotal?: number;
   onOpenPalette?: () => void;
   /** 목록 칸(왼쪽 길잡이) 접기·펴기 — 목록 칸의 가장자리 손잡이(SidebarRail)가 막대 뒤에 가려지므로 막대가 자기 단추를 갖는다(codex P1). 안 넘기면 단추 없음. */
@@ -52,7 +54,7 @@ const RAIL_BUTTON = 'relative block h-auto min-h-0 min-w-0 rounded-ds-control p-
 // 옆으로 뜨는 목록 상자: 한 단계 올린 면 + 헤어라인 · 모서리 panel 8 · 그림자 0(UI-3 §1 카드).
 const FLYOUT_PANEL = 'absolute z-30 flex flex-col gap-0.5 rounded-ds-panel border border-ds-line bg-ds-surface-raised p-1';
 
-export function NavRail({ orgSlug, projectSlug, account, listColumn, navV3Flags = DEFAULT_NAV_V3_FLAGS, todayCount = 0, chatUnreadTotal = 0, onOpenPalette }: NavRailProps) {
+export function NavRail({ orgSlug, projectSlug, account, listColumn, navV3Flags = DEFAULT_NAV_V3_FLAGS, todayCount = 0, todayCountAtLeast = false, chatUnreadTotal = 0, onOpenPalette }: NavRailProps) {
   const t = useTranslations('nav');
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -95,10 +97,10 @@ export function NavRail({ orgSlug, projectSlug, account, listColumn, navV3Flags 
   // 링크의 aria-label이 이름을 덮으므로 건수 > 0이면 링크 이름에 «이름 · 건수 뜻 N»을 싣는다(ariaName) — 배지 안 sr-only 글만으로는 스크린리더가 못 읽는다.
   const badge = (n: number, tone: 'unread' | 'needs-hand') => (n > 0 ? (
     tone === 'needs-hand'
-      ? <CountBadge kind="needs-hand" label={t('railNeedsHand')} count={n} className="absolute -right-0.5 -top-0.5" data-testid="rail-badge" />
+      ? <CountBadge kind="needs-hand" label={t('railNeedsHand')} count={n} atLeast={todayCountAtLeast} className="absolute -right-0.5 -top-0.5" data-testid="rail-badge" />
       : <CountBadge kind="unread" label={t('railUnread')} count={n} className="absolute -right-0.5 -top-0.5" data-testid="rail-badge" />
   ) : null);
-  const ariaName = (base: string, n: number, tone: 'unread' | 'needs-hand') => (n > 0 ? `${base} · ${t(tone === 'needs-hand' ? 'railNeedsHand' : 'railUnread')} ${n}` : base);
+  const ariaName = (base: string, n: number, tone: 'unread' | 'needs-hand') => (n > 0 ? `${base} · ${t(tone === 'needs-hand' ? 'railNeedsHand' : 'railUnread')} ${n}${tone === 'needs-hand' && todayCountAtLeast ? '+' : ''}` : base);
 
   const dailyEntry = (group: NavGroupConfig) => (
     <DailyEntry key={group.id} group={group} link={link} label={(item) => t(item.labelKey)} groupLabel={group.labelKey ? t(group.labelKey) : undefined} icon={railIcon} badge={badge} ariaName={ariaName} count={group.id === 'now' ? todayCount : 0} tone="needs-hand" />
