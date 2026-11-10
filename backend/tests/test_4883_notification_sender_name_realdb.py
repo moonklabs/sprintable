@@ -110,7 +110,7 @@ async def test_the_copy_withheld_from_a_person_who_left_the_room_keeps_the_serve
         r = await _list(Session, w, "lost_project")
         rows = [n for n in _rows_of(r, w.r_human) if n["type"] == "conversation.message"]
         assert rows and marker not in r.text and FORGED not in r.text, "the words and the forged name are both out of the copy"
-        assert all(n["event"] == {"sender_name": real, "content_withheld": True} for n in rows), [n["event"] for n in rows]
+        assert all(n["event"] == {"sender_name": real} for n in rows), [n["event"] for n in rows]
     finally:
         await engine.dispose()
 
