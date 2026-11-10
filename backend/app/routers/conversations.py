@@ -3564,12 +3564,17 @@ async def send_message_core(
         # PR 셀프게이트 뮤테이션 체크(테스트 파일 참조) 중 발견해 즉시 보강.
         async with db.begin_nested():
             participant_rows = (await db.execute(
-                select(ConversationParticipant.member_id)
+                select(ConversationParticipant.member_id, ConversationParticipant.muted_at)
                 .where(ConversationParticipant.conversation_id == conversation_id)
             )).all()
+            # story 4890 — whoever asked not to be told about this message is not pushed, noted or given a bell copy either: the people the channel router left out of this message's decisions
+            # (they muted the room by preference, or are on «mentions» and were not mentioned — `preference_excluded_ids`) and the people who muted the room with the toggle (participant `muted_at`,
+            # the one the bell's mute rule reads). Before, only the message's own Event honoured that; this notification (inbox row · bell copy · push / personal-webhook jobs) went to them per message.
+            room_muted_ids = {r[0] for r in participant_rows if r[1] is not None}
             candidate_targets = (
                 {r[0] for r in participant_rows}
                 - {sender.id} - discord_exclude_ids - blocked_agent_ids - user_blocker_ids - set(msg.mentioned_ids or [])
+                - preference_excluded_ids - room_muted_ids
             )
             if candidate_targets:
                 # story #3629(3627 클래스) — 위 mention 블록과 동형(filter_human_member_ids).
