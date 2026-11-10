@@ -52,7 +52,7 @@ export function Chip({ tone = 'neutral', dot = false, icon, className, children,
   );
 }
 
-/** 고정폭 꼬리표(mono-sm 10px) — 중립. 색을 입히지 않는다(에이전트 구분은 모양 + 이 꼬리표). */
+/** 고정폭 꼬리표(mono-sm 11px) — 중립. 색을 입히지 않는다(에이전트 구분은 모양 + 이 꼬리표). */
 export function Tag({ className, children, ...props }: HTMLAttributes<HTMLSpanElement> & { children: ReactNode }) {
   return (
     <span
