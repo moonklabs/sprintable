@@ -89,8 +89,13 @@ export function fetchDesignatedPendingCount(opts?: { fresh?: boolean }): Promise
   return promise;
 }
 
-/** story #4263 — 결재 대기 수를 바꿀 수 있는 게이트 SSE 이벤트(승인 · 반려 · 위임 · 토스). 사이드바와 그 밖의 구독자가 같은 목록 · 같은 판정을 쓴다. */
-export const DESIGNATED_PENDING_COUNT_EVENTS = ['conversation.gate_resolved', 'conversation.gate_delegated', 'conversation.gate_tossed'] as const;
+/**
+ * story #4263 — 결재 대기 수를 바꿀 수 있는 게이트 SSE 이벤트(승인 · 반려 · 위임 · 토스). 사이드바와 그 밖의 구독자가 같은 목록 · 같은 판정을 쓴다.
+ * story #4885 — **`conversation.gate_created`**(결재가 새로 생김 · 서버가 결재자에게 보내는 순수 SSE — backend approval_delivery.py notify_gate_created_to_recipients ·
+ * 결재함 목록 approvals-queue.tsx가 이미 듣는 그 이벤트)를 목록에 더했다: 빠져 있어서 «새 결재»는 사이드바 수 · 폰 탭 · 웹 막대 배지에 60초 폴로만 닿았다
+ * (dev 실측 11-10: 상신 뒤 폰 37.9초 · 웹 42.2초). 서버는 안 바뀐다 — 듣는 목록 한 줄.
+ */
+export const DESIGNATED_PENDING_COUNT_EVENTS = ['conversation.gate_created', 'conversation.gate_resolved', 'conversation.gate_delegated', 'conversation.gate_tossed'] as const;
 
 /** story #4612 — the server's transient SSE name for a permission request's later change (backend services/agent_permissions.py) */
 export const PERMISSION_REQUEST_CHANGED_EVENT = 'agent.permission_request.changed';
