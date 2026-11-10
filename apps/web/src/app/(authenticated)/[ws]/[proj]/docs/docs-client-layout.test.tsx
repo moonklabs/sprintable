@@ -644,7 +644,7 @@ describe('DocsClientLayout — 목록 열 머리 · 토글 · 틀 (4892)', () =>
     await mount();
     const topBarBtn = () => [...container.querySelectorAll('button')].find((b) => !columnHeader()?.contains(b) && b.getAttribute('aria-label') === '새 문서') as HTMLButtonElement;
     expect(topBarBtn().parentElement!.className.split(/\s+/)).toContain('lg:hidden');          // rail open → the header has them
-    const hide = [...container.querySelectorAll('button')].find((b) => b.getAttribute('title') === '사이드바 숨기기') as HTMLButtonElement;
+    const hide = [...container.querySelectorAll('button')].find((b) => b.getAttribute('title') === '문서 트리 숨기기') as HTMLButtonElement;
     expect(hide, 'the collapse button').toBeTruthy();
     await act(async () => { hide.click(); });
     expect(container.querySelector('aside')).toBeNull();                                           // rail gone
