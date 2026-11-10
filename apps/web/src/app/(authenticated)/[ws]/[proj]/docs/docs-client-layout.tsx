@@ -433,7 +433,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     () => (
       // story #4277(민 기기 #5) — 402폭에서 «새 폴더» · «새 문서» 글자 버튼이 셸 TopBar의 shrink-0 액션 칸을 넓혀 알림 벨을 화면 밖으로
       // 밀었다. 스프린트 상단바와 같은 관례: 폰(sm 미만)은 아이콘만 · 글자는 sm 이상 · 접근 이름은 aria-label로 늘 유지.
-      <div className="flex items-center gap-1.5 lg:hidden">
+      <div className={cn('flex items-center gap-1.5', !sidebarCollapsed && 'lg:hidden')}>
         <Button size="sm" variant="ghost" onClick={handleNewFolder} disabled={folderSubmitting} aria-label={t('newFolder')}>
           <FolderPlus className="h-3.5 w-3.5 sm:mr-1.5" />
           <span className="hidden sm:inline">{t('newFolder')}</span>
@@ -444,14 +444,14 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         </Button>
       </div>
     ),
-    [handleNewDoc, isCreating, handleNewFolder, folderSubmitting, t]
+    [handleNewDoc, isCreating, handleNewFolder, folderSubmitting, t, sidebarCollapsed]
   );
 
   const sidebarContent = (
     <>
       {/* story 4892 (UI-9 목록 열) — 열 머리: 제목 + 새 폴더 · 새 문서(ds). 예전 에디토리얼 마스트헤드(kicker · 큰 제목 · 시그니처 선)는 걷었다.
           두 동작은 lg(레일이 보일 때)에만 여기 있고, lg 미만은 상단 바가 같은 두 동작을 갖는다 — 한 동작이 한 화면에 한 자리. */}
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-ds-line px-3">
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-ds-line px-3 lg:pr-11">
         <h2 className="m-0 min-w-0 flex-1 truncate text-ds-card-title font-semibold text-ds-ink">{t('title')}</h2>
         <IconButton icon="create_new_folder" label={t('newFolder')} onClick={handleNewFolder} disabled={folderSubmitting} className="hidden lg:inline-flex" />
         <DsButton
@@ -515,7 +515,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           숨긴다(서버 전문검색 결과가 이미 답이라 그룹/트리 뷰 자체가 무의미 — sortMode
           토글과 동일한 판단). */}
       {!isSearching && (
-        <div className="flex gap-1 border-b border-ds-line px-3 py-2">
+        <div role="group" aria-label={t('viewModeLabel')} className="flex gap-1 border-b border-ds-line px-3 py-2">
           {(['grouped', 'folders'] as const).map((mode) => (
             <DsButton
               key={mode}

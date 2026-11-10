@@ -639,6 +639,35 @@ describe('DocsClientLayout — 목록 열 머리 · 토글 · 틀 (4892)', () =>
     expect(buttons.filter((b) => b.getAttribute('aria-pressed') === 'true').length).toBe(1);
   });
 
+  it('⭐레일을 접어도 새 문서 · 새 폴더는 닿는다 — 접히면 상단 바의 두 동작이 lg에서도 보인다', async () => {
+    stubFetch();
+    await mount();
+    const topBarBtn = () => [...container.querySelectorAll('button')].find((b) => !columnHeader()?.contains(b) && b.getAttribute('aria-label') === '새 문서') as HTMLButtonElement;
+    expect(topBarBtn().parentElement!.className.split(/\s+/)).toContain('lg:hidden');          // rail open → the header has them
+    const hide = [...container.querySelectorAll('button')].find((b) => b.getAttribute('title') === '사이드바 숨기기') as HTMLButtonElement;
+    expect(hide, 'the collapse button').toBeTruthy();
+    await act(async () => { hide.click(); });
+    expect(container.querySelector('aside')).toBeNull();                                           // rail gone
+    expect(topBarBtn().parentElement!.className.split(/\s+/)).not.toContain('lg:hidden');       // → the top bar must carry them
+  });
+
+  it('머리 오른쪽은 접기 단추 자리를 비워 둔다(lg:pr-11) — 단추가 새 문서 위에 겹치지 않는다', async () => {
+    stubFetch();
+    await mount();
+    expect(columnHeader().className.split(/\s+/)).toContain('lg:pr-11');
+  });
+
+  it('보기 전환 둘은 이름 있는 그룹(«보기 방식») 안에 있다 · 새 폴더 IconButton은 title과 aria-label을 갖는다', async () => {
+    stubFetch();
+    await mount();
+    const group = container.querySelector('[role="group"][aria-label="보기 방식"]')!;
+    expect(group).toBeTruthy();
+    expect([...group.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['자동 묶음', '내 폴더']);
+    const folder = inHeader('새 폴더')!;
+    expect(folder.getAttribute('title')).toBe('새 폴더');
+    expect(folder.getAttribute('aria-label')).toBe('새 폴더');
+  });
+
   it('틀 — 레일은 300px · ds 선과 바탕을 쓴다(옛 236px · border-border 아님)', async () => {
     stubFetch();
     await mount();

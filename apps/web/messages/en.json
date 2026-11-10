@@ -3817,6 +3817,7 @@
     "sortModeManual": "Manual order",
     "sortModeTitle": "By name",
     "sortModeUpdatedAt": "By last updated",
+    "viewModeLabel": "View",
     "viewModeGrouped": "Auto groups",
     "viewModeFolders": "My folders",
     "groupInFolder": "In a folder",
