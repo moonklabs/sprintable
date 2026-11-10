@@ -55,8 +55,7 @@ export interface TabHrefScope { orgSlug?: string; projectSlug?: string }
 // story #3824 CHANGES②(페드루 PO 確定, 2026-09-13 09:01Z) — "같은 사실=같은 낱말": 「채팅」
 // 탭과 데스크톱 사이드바 「대화」는 같은 화면(/chats)을 가리키는데 각자 다른 i18n 키
 // (mobileTabBar.chat vs nav.chats)를 써서 문구가 갈라져 있었다 — 값이 아니라 **labelKey
-// 자체**를 공유해 한쪽이 바뀌면 다른 쪽도 자동으로 같이 바뀌게 한다(재발 방지). 「결재」는
-// 모바일 IA 통합이 후속 카드 스코프라 자기 키(mobileTabBar.approvals) 그대로 둔다.
+// 자체**를 공유해 한쪽이 바뀌면 다른 쪽도 자동으로 같이 바뀌게 한다(재발 방지). 「결재」 탭은 story #4885(폰 탭 넷)에서 없어졌다 — 그 키(mobileTabBar.approvals)도 걷혔다.
 //
 // story #4020(페드루 PO 확定 2026-09-17, 유나 PR 4399 design 관찰) — "now" 탭의 labelKey는
 // 원래(3824) `zoneNow`(「오늘」)였으나, 그 판정은 "탭 바 「지금」과 사이드바 「오늘」은 같은
@@ -102,7 +101,7 @@ const TAB_DEST_NAV_ITEM_ID: Record<TabDef['destKey'], string | null> = {
   work: 'board', chats: 'chats', today: 'org-briefing', more: null,
 };
 
-export function tabDestinationNavIds(navV3Flags: NavV3Flags): Set<string> {
+export function tabDestinationNavIds(_navV3Flags?: NavV3Flags): Set<string> {
   return new Set(
     PHONE_TABS
       .map((tab) => TAB_DEST_NAV_ITEM_ID[tab.destKey])
@@ -111,7 +110,7 @@ export function tabDestinationNavIds(navV3Flags: NavV3Flags): Set<string> {
 }
 
 /** story #4278 — 탭바가 지금 그리는 탭(«전체» 빼고 · 탭바 순서)의 라벨 키. «전체» 메뉴 머리 안내가 이 이름을 그대로 쓴다. */
-export function visibleTabLabels(navV3Flags: NavV3Flags): Array<{ namespace: 'nav' | 'mobileTabBar'; labelKey: string }> {
+export function visibleTabLabels(_navV3Flags?: NavV3Flags): Array<{ namespace: 'nav' | 'mobileTabBar'; labelKey: string }> {
   return PHONE_TABS
     .filter((tab) => tab.key !== 'more')
     .map((tab) => ({ namespace: tab.namespace, labelKey: tab.labelKey }));

@@ -34,7 +34,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function mount(pendingCount: number, chatUnreadTotal: number, locale: 'ko' | 'en' = 'ko') {
+async function mount(pendingCount: number, chatUnreadTotal: number, locale: 'ko' | 'en' = 'ko', flags?: import('@/lib/nav-v3-destinations').NavV3Flags) {
   // MobileTabBar의 pendingCount effect는 window.innerWidth < MOBILE_BREAKPOINT(1024)일
   // 때만 fetch한다(유나 지적 #2249 — 데스크톱에서 불필요한 왕복 금지). jsdom 기본값(1024)은
   // 그 조건을 안 타므로 모바일 폭으로 명시 고정한다(390 — 이 레포 라이브픽셀 관례 폭).
@@ -51,7 +51,7 @@ async function mount(pendingCount: number, chatUnreadTotal: number, locale: 'ko'
   document.body.appendChild(container);
   root = createRoot(container);
   const { MobileTabBar } = await import('./mobile-tab-bar');
-  await act(async () => { root.render(wrap(<MobileTabBar chatUnreadTotal={chatUnreadTotal} />, locale)); });
+  await act(async () => { root.render(wrap(<MobileTabBar chatUnreadTotal={chatUnreadTotal} navV3Flags={flags} />, locale)); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 }
 
@@ -171,5 +171,14 @@ describe('MobileTabBar — 탭 접근성 이름에 카운트 포함(story #3518)
     const chatLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/chats')!;
     // story #3824 CHANGES② — chat 탭 라벨이 nav.chats 공유로 "Chat"→"Chats".
     expect(approxAccessibleName(chatLink)).toBe('Chats 1 unread');
+  });
+
+  // 폰 탭 넷(story #4885) — 탭 세트는 플래그로 갈리지 않는다: v3 «오늘» 화면이 켜져 있으면 «홈» 탭이 /today에 착지하고 배지 · 접근 이름은 그대로다(codex 권고).
+  it('⭐v3 오늘 화면 ON(/today) — «홈» 탭이 /today에 착지하고 같은 서명 대기 배지 · 접근 이름', async () => {
+    await mount(5, 0, 'ko', { todayV3Enabled: true, chatV3Enabled: false, connectRulesV3Enabled: false });
+    const home = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/today')!;
+    expect(home).toBeDefined();
+    expect(approxAccessibleName(home)).toBe('홈 결재 대기 5건');
+    expect([...container.querySelectorAll('a')].some((a) => a.getAttribute('href') === '/org-briefing')).toBe(false);
   });
 });

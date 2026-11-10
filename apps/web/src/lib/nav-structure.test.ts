@@ -87,11 +87,12 @@ describe('정보 구조 한 벌 — 구역 · 순서 · 이름', () => {
     expect(ALL_SCREENS_ITEM.path).toBe('/more');
   });
 
-  it('⭐같은 사실 = 같은 낱말: 결재 항목은 폰 하단 «결재» 탭과 같은 이름 · 같은 착지(게이트 탭)', () => {
+  it('⭐결재 항목은 «결재» · 착지는 게이트 탭(폰 하단의 «결재» 탭은 폰 탭 넷에서 «홈»이 품어 없어졌다 — story #4885)', () => {
     const inbox = NAV_GROUPS.flatMap((g) => g.items).find((i) => i.id === 'inbox')!;
     expect(inbox.labelKey).toBe('approvals');
     expect(inbox.path).toBe('/inbox?tab=gates');
-    expect(koMessages.nav.approvals).toBe(koMessages.mobileTabBar.approvals);
+    expect(koMessages.nav.approvals).toBe('결재');
+    expect((koMessages.mobileTabBar as Record<string, unknown>).approvals, '쓰는 곳이 없어진 mobileTabBar.approvals 키는 걷혔다').toBeUndefined();
   });
 });
 
