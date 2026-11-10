@@ -116,3 +116,38 @@ async def test_an_agent_that_lost_the_rooms_project_still_does_not_see_the_rooms
         assert words not in await _org_wide_stream(Session, w, "agent_participant")
     finally:
         await engine.dispose()
+
+
+async def test_a_participant_with_no_project_access_at_all_still_reads_the_rooms_activity_of_both_kinds():
+    """the lens's cell: `lost_project` still holds one project (P2) in the world, so the empty-set path of the project filter was never walked. Here the person has NONE: the stream's
+    «no accessible project → nothing» early return and a bypass narrowed to one kind of room row would each show nothing. Both kinds of room row: the message (`conversation_message`)
+    and the room's bell row (`conversation`, the `dispatched` event whose source is the room)."""
+    from sqlalchemy import text as sql
+
+    from app.models.event import Event
+    from app.services.activity_stream import upsert_activity_from_events
+
+    engine, Session, w = await _world()
+    try:
+        message_words = f"ac4-nomember-msg-{uuid.uuid4().hex[:8]}"
+        bell_words = f"ac4-nomember-bell-{uuid.uuid4().hex[:8]}"
+        await _say(Session, w, "participant", w.r_human, f"a line {message_words}")
+        async with Session() as s:
+            ev = Event(
+                project_id=w.p1, org_id=w.org, event_type="dispatched", source_entity_type="conversation", source_entity_id=w.r_human, sender_id=None,
+                recipient_id=w.h_b, recipient_type="human", status="delivered",
+                payload={"title": "someone's new message", "body": f"a preview {bell_words}", "event_type": "conversation.message"},
+            )
+            s.add(ev)
+            await s.flush()
+            await upsert_activity_from_events(s, [ev.id])
+            await s.execute(sql("DELETE FROM project_access WHERE member_id = :m"), {"m": w.h_d})        # the person has no project at all now
+            await s.commit()
+        stream = await _org_wide_stream(Session, w, "lost_project")
+        assert message_words in stream, "the room's message disappeared for a person with no project access"
+        assert bell_words in stream, "the room's bell row (object_type conversation) disappeared for a person with no project access"
+        log = await _org_wide_log(Session, w, "lost_project")
+        assert "content_withheld" not in log                                                          # the log answers (200) with the person's own view; nothing breaks on an empty project set
+        assert message_words not in await _org_wide_stream(Session, w, "member_outside")              # control: a member who is not in the room still reads none of it
+    finally:
+        await engine.dispose()
