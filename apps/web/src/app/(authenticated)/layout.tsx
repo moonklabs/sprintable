@@ -112,6 +112,8 @@ async function AuthenticatedLayoutBody({
   }
   const memberships: { projectId: string; projectName: string; projectSlug?: string | null; orgId?: string | null }[] =
     membershipsRes?.ok ? ((await membershipsRes.json()) as { projectId: string; projectName: string; projectSlug?: string | null; orgId?: string | null }[]) : [];
+  // story 4891 — a failed request is not «no projects»: the list above is `[]` for both, so the failure is told on its own.
+  const projectMembershipsFailed = !membershipsRes?.ok;
   // story #2885 — sentinel(0-프로젝트 org) 오염 가드, 근거는 resolve-project-memberships.ts 참고.
   let projectMemberships = resolveProjectMemberships(memberships, me);
 
@@ -233,6 +235,7 @@ async function AuthenticatedLayoutBody({
         role={me?.role}
         currentMemberType={me?.type}
         projectMemberships={projectMemberships}
+        projectMembershipsFailed={projectMembershipsFailed}
         orgMemberships={orgMemberships}
         pathOrgId={pathOrgId}
         pathProjectId={pathProjectId}

@@ -14,8 +14,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchMe } from '@/lib/me-client';
 import { AgentsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
-import { RecruitNoProject } from '@/components/agents/recruit-no-project';
-import { isNoProjectAtAll } from '@/app/(authenticated)/chats/no-project';
+import { RecruitNoProject, recruitNoProjectState } from '@/components/agents/recruit-no-project';
 import { useFlatHref } from '@/hooks/use-flat-href';
 
 type AgentsTab = 'stats' | 'manage' | 'recruit' | 'access';
@@ -109,7 +108,7 @@ export function AgentsPageTabs() {
 
         <TabsContent value="recruit">
           {!projectId ? (
-            <RecruitNoProject noProjectAtAll={isNoProjectAtAll(dashboardCtx)} createHref={flatHref('/settings?tab=projects')} />
+            <RecruitNoProject state={recruitNoProjectState(dashboardCtx, { known: meLoaded, isAdmin })} createHref={flatHref('/settings?tab=projects')} onRetry={() => window.location.reload()} />
           ) : (
             <RecruiterClient
               projectId={projectId}

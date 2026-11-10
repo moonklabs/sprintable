@@ -75,6 +75,9 @@ interface DashboardContext {
   // 별도 override가 필요 없다 — 항상 서버 me.type 그대로.
   currentMemberType?: 'human' | 'agent';
   projectMemberships: DashboardProjectOption[];
+  // story 4891 — the server's request for the person's projects FAILED (network · 5xx): `projectMemberships` is `[]` then, and that must not read as «no project» (the Add-agent pane would tell a person
+  // who has projects that they have none). Optional like the other layout-only values.
+  projectMembershipsFailed?: boolean;
   orgMemberships: OrgSwitcherItem[];
   // story #2587 AC3 — 「진짜 권한없음 403」을 정직하게 끝내려면 소비 화면이 "org-sync가
   // 아직 이 경로에 대해 성립할 여지가 있는가"를 알아야 한다(있으면 403이 stale일 수 있어
@@ -432,6 +435,7 @@ export function DashboardShell({
   role,
   currentMemberType,
   projectMemberships,
+  projectMembershipsFailed,
   orgMemberships,
   pathOrgId,
   pathProjectId,
@@ -580,7 +584,7 @@ export function DashboardShell({
     <ToastProvider>
     <CommandPaletteProvider>
     <EmbeddedServerProvider embedded={embedded}>
-    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug: scopedProjectSlug, projectPathUnresolved: pathUnresolved, userName, role, currentMemberType, projectMemberships, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete, activationSeedFromHint, activationOrgId, initialActivationCollapsed, navV3Flags, inShell: true }}>
+    <DashboardCtx.Provider value={{ currentTeamMemberId, orgId: effectiveOrgId, orgTimezone, projectId: effectiveProjectId, projectName: effectiveProjectName, currentProjectSlug: scopedProjectSlug, projectPathUnresolved: pathUnresolved, userName, role, currentMemberType, projectMemberships, projectMembershipsFailed, orgMemberships, orgSyncPending, bottomDockBannerSlot, setBottomDockBannerSlot, initialActivationComplete, activationSeedFromHint, activationOrgId, initialActivationCollapsed, navV3Flags, inShell: true }}>
       <RefreshProvider>
       <RealtimeProvider currentTeamMemberId={currentTeamMemberId}>
         <TopBarProvider>
