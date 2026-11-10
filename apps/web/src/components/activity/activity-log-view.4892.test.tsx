@@ -110,6 +110,7 @@ describe('ActivityLogView — «더 보기» failure (4892 §5 item 6)', () => {
     await act(async () => { moreButton()!.click(); });
     const busy = container.querySelector('button[data-slot="ds-button"][aria-busy="true"]') as HTMLButtonElement | null;
     expect(busy).not.toBeNull();
+    expect(busy!.textContent!.trim()).toBe(ko.activityLog.loadMore);   // the words stay while it asks (the ds loading state adds the spinner only)
     await act(async () => { busy!.click(); });
     expect(secondPageCalls()).toBe(1);   // a press while it is asking does nothing
     await act(async () => { release(page(['b1'], 100, 30)); await Promise.resolve(); });

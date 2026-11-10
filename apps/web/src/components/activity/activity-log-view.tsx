@@ -256,6 +256,14 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
     else rowRefs.current.get(focusRequest.id)?.focus();
     setFocusRequest(null);
   }, [focusRequest]);
+  // Crossing 1024 while a row is chosen swaps where the details are drawn (under the row ↔ in the column): the old element is unmounted, so a focus that was inside it
+  // falls to <body>. Hand it back to the chosen row (which stays mounted) instead of letting it vanish.
+  const prevWide = useRef(isWide);
+  useEffect(() => {
+    if (prevWide.current === isWide) return;
+    prevWide.current = isWide;
+    if (selectedId && (!document.activeElement || document.activeElement === document.body)) setFocusRequest({ kind: 'row', id: selectedId });
+  }, [isWide, selectedId]);
   const toggleRow = (id: string, viaKeyboard: boolean) => {
     setSelectedId((cur) => (cur === id ? null : id));
     if (!isWide && viaKeyboard && selectedId !== id) setFocusRequest({ kind: 'detail', id });
@@ -393,7 +401,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
               {offset + PAGE_SIZE < total && (
                 <div className="pt-3 text-center">
                   <DsButton onClick={loadMore} loading={loadingMore}>
-                    {loadingMore ? tc('loading') : t('loadMore')}
+                    {t('loadMore')}
                   </DsButton>
                 </div>
               )}

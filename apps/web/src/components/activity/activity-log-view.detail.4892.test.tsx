@@ -275,6 +275,26 @@ describe('ActivityLogView — lg 구간 상세 칸은 고른 뒤에만 선다 (4
     expect(document.activeElement).toBe(rows()[0]);
   });
 
+  it('⭐crossing 1024 while the details are focused (narrow → wide) does not drop the focus to the page: it goes to the chosen row', async () => {
+    mq.wide = false;
+    mq.xl = false;
+    await mount();
+    rows()[0]!.focus();
+    await click(rows()[0]!);                      // a keyboard activation at narrow width moves the focus into the details under the row
+    expect(detail()!.contains(document.activeElement)).toBe(true);
+    mq.wide = true;                                // the viewport grows past 1024: the details are drawn in the column instead (a new element)
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC">
+          <TopBarProvider><ActivityLogView projectId="p1" /></TopBarProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { vi.advanceTimersByTime(5); });
+    expect(document.activeElement).toBe(rows()[0]);
+    expect(detail()).not.toBeNull();
+  });
+
   it('xl keeps the column open with its «pick a row» line before anything is chosen', async () => {
     mq.xl = true;
     await mount();
