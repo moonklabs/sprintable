@@ -22,6 +22,9 @@ function classesFromSource() {
     // story 4887 (UI-4 P4-a): the column also carries `relative` now (it anchors the hover time beside a continuation bubble)
     column: pick(/<div (?:data-chat-content="" )?className=\{`((?:relative )?flex min-w-0 max-w-\[72%\] flex-col gap-0\.5 )\$\{isMine/, 'the message column'),
     text: pick(/<div data-testid="chat-bubble-text" className=\{`([^$`]+)\$\{/, 'the bubble text box').trim(),
+    // story 4887 (UI-4 P4-b): the fill · rounding · padding moved into per-sender variants — a person's bubble (mine / another's) is the geometry the «⋯» button must not cover; an agent's plain text has its own spec (chat-bubble-plain.4887)
+    textMine: pick(/isMine\s*\?\s*'([^']+)'\s*:\s*isAgent\s*\?\s*'([^']+)'\s*:\s*'([^']+)'\s*\}`\}\s*data-bubble=/, 'the bubble variant (mine)'),
+    textPerson: ((m) => { if (!m) throw new Error('the bubble variant (person) not found'); return m[3]!; })(/isMine\s*\?\s*'([^']+)'\s*:\s*isAgent\s*\?\s*'([^']+)'\s*:\s*'([^']+)'\s*\}`\}\s*data-bubble=/.exec(src)),
     // the time of the META line under the bubble (the head of a run has its own `<time … data-testid="bubble-head-time">` earlier in the file — not this one)
     time: pick(/<time className="([^"]+)" dateTime=\{message\.created_at\}><ViewerDate/, 'the time'),
     // the meta cell's base class: where a mouse can hover the first message of a run has no time line at all (its head carries the time), so this measures the cell as touch and as a continuation see it — the base class — in both modes
@@ -41,7 +44,8 @@ type Box = { x: number; y: number; width: number; height: number };
 
 async function measure(browser: Browser, width: number, touch: boolean, mine: boolean) {
   const c = classesFromSource();
-  const classes = [c.column, 'items-end', 'items-start', c.text, c.time, c.wrap, c.buttonBase, c.mine, c.theirs, 'flex gap-2 flex-row-reverse flex-row', 'h-7 w-7 flex-shrink-0 rounded-full bg-info/15']
+  const textCls = `${c.text} ${mine ? c.textMine : c.textPerson}`;
+  const classes = [c.column, 'items-end', 'items-start', textCls, c.time, c.wrap, c.buttonBase, c.mine, c.theirs, 'flex gap-2 flex-row-reverse flex-row', 'h-7 w-7 flex-shrink-0 rounded-full bg-info/15']
     .join(' ').split(/\s+/).filter(Boolean);
   const context = await browser.newContext(touch ? { viewport: { width, height: 800 }, hasTouch: true, isMobile: true } : { viewport: { width, height: 800 } });
   const page = await context.newPage();
@@ -51,7 +55,7 @@ async function measure(browser: Browser, width: number, touch: boolean, mine: bo
       <div id="row" class="flex gap-2 ${mine ? 'flex-row-reverse' : 'flex-row'}">
         <div id="avatar" class="h-7 w-7 flex-shrink-0 rounded-full bg-info/15"></div>
         <div id="col" class="${c.column}${mine ? 'items-end' : 'items-start'}">
-          <div id="text" class="${c.text}">짧은 글</div>
+          <div id="text" class="${textCls}">짧은 글</div>
           <span class="${c.wrap}"><time id="time" class="${c.time}">오전 07:32</time><button id="menu" type="button" class="${c.buttonBase} ${side}">⋯</button></span>
         </div>
       </div>

@@ -842,11 +842,14 @@ export function ChatBubble({
                bg-primary(solid 채색)+text-primary-foreground(흰 글자)를 proof-blue-soft
                (밝은 틴트)+text-foreground(어두운 ink)로 — Proof Capsule과 같은 어휘(옅은
                배경 위 ink, 색은 아이콘/배지가 진다는 #2420 규율과 동형). */
-            <div data-testid="chat-bubble-text" className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm leading-relaxed text-foreground [overflow-wrap:anywhere] ${
+            // story 4887 (UI-4 P4-b · AC3 B3) — an AGENT's message has no bubble: the head line above (name · tag · time) says who, and the text sits on the page. A person's message (mine or another person's) keeps its bubble — it is the bubble that tells the two kinds apart at a glance (B3: «에이전트 글만 말풍선 없는 평문»).
+            <div data-testid="chat-bubble-text" className={`min-w-0 max-w-full text-sm leading-relaxed text-foreground [overflow-wrap:anywhere] ${
               isMine
-                ? 'rounded-tr-sm bg-proof-blue-soft'
-                : 'rounded-tl-sm bg-proof-panel'
-            }`}>
+                ? 'rounded-xl rounded-tr-sm bg-proof-blue-soft px-3.5 py-2'
+                : isAgent
+                  ? 'py-0.5'
+                  : 'rounded-xl rounded-tl-sm bg-proof-panel px-3.5 py-2'
+            }`} data-bubble={isAgent && !isMine ? 'plain' : 'filled'}>
               {/* story #ec57c80c(v2 3호) — report성 밀도 재설계는 에이전트 메시지에만
                   적용한다(진단·처방 전부 "에이전트 report성 메시지" 범위, human 메시지는
                   무변경). ReportMessageSummary 내부가 발동 조건(computeReportDensity) 미충족

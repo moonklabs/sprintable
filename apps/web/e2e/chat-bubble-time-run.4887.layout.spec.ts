@@ -21,6 +21,9 @@ function classesFromSource() {
     row: pick(/className=\{`(group\/bubble flex scroll-mt-4 gap-2 transition-shadow )\$\{isMine/, 'the row'),
     column: pick(/<div (?:data-chat-content="" )?className=\{`((?:relative )?flex min-w-0 max-w-\[72%\] flex-col gap-0\.5 )\$\{isMine/, 'the message column'),
     text: pick(/<div data-testid="chat-bubble-text" className=\{`([^$`]+)\$\{/, 'the bubble text box').trim(),
+    // story 4887 (UI-4 P4-b): the fill · rounding · padding are per-sender variants now — measure a person's bubble (mine / another's), the geometry the time rules were written against
+    textMine: pick(/isMine\s*\?\s*'([^']+)'\s*:\s*isAgent\s*\?\s*'([^']+)'\s*:\s*'([^']+)'\s*\}`\}\s*data-bubble=/, 'the bubble variant (mine)'),
+    textPerson: ((m) => { if (!m) throw new Error('the bubble variant (person) not found'); return m[3]!; })(/isMine\s*\?\s*'([^']+)'\s*:\s*isAgent\s*\?\s*'([^']+)'\s*:\s*'([^']+)'\s*\}`\}\s*data-bubble=/.exec(src)),
     headTime: pick(/<time className="([^"]+)" dateTime=\{message\.created_at\} data-testid="bubble-head-time">/, 'the head time'),
     metaTime: pick(/<time className="([^"]+)" dateTime=\{message\.created_at\}><ViewerDate/, 'the meta time'),
     contMine: cont[1]!,
@@ -41,7 +44,8 @@ async function scene(browser: Browser, o: { touch: boolean; mine: boolean; start
   const c = classesFromSource();
   const side = o.mine ? 'items-end' : 'items-start';
   const meta = o.startsRun ? c.first : (o.mine ? c.contMine : c.contTheirs);
-  const all = [c.row, c.column, c.text, c.headTime, c.metaTime, meta, 'flex-row-reverse flex-row', 'items-end items-start', 'flex items-center gap-1.5 text-micro', 'h-7 w-7 flex-shrink-0 rounded-full bg-info/15']
+  const textCls = `${c.text} ${o.mine ? c.textMine : c.textPerson}`;
+  const all = [c.row, c.column, textCls, c.headTime, c.metaTime, meta, 'flex-row-reverse flex-row', 'items-end items-start', 'flex items-center gap-1.5 text-micro', 'h-7 w-7 flex-shrink-0 rounded-full bg-info/15']
     .join(' ').split(/\s+/).filter(Boolean);
   const context = await browser.newContext(o.touch ? { viewport: { width: 700, height: 600 }, hasTouch: true, isMobile: true } : { viewport: { width: 700, height: 600 } });
   const page = await context.newPage();
@@ -51,7 +55,7 @@ async function scene(browser: Browser, o: { touch: boolean; mine: boolean; start
         ${o.startsRun ? '<div id="avatar" class="h-7 w-7 flex-shrink-0 rounded-full bg-info/15"></div>' : '<div class="w-7 flex-shrink-0"></div>'}
         <div id="col" class="${c.column}${side}">
           ${o.startsRun ? `<div id="headline" class="flex items-center gap-1.5"><span>이름</span><time id="head-time" class="${c.headTime}">오전 07:32</time></div>` : ''}
-          <div id="text" class="${c.text}">짧은 글 <a id="link" href="#x">링크</a></div>
+          <div id="text" class="${textCls}">짧은 글 <a id="link" href="#x">링크</a></div>
           <span id="meta" class="${meta}"><time id="time" class="${c.metaTime}">오전 07:33</time></span>
         </div>
       </div>
