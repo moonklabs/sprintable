@@ -806,7 +806,11 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // story 4847 (AC1) — what the row says about its project: the name the list gives, else the person's own project list, «프로젝트 없음» for a room that has none, nothing in the project-only list
   const projectLabelOf = (c: ConversationItem): string | undefined => {
     if (c.project_id === undefined) return undefined;
-    if (c.project_id === null) return t('roomNoProject');
+    if (c.project_id === null) return t('roomNoProject'); // a room without a project is the odd one: it always says so
+    // story 4887 (UI-4 P2-a) — a person with ONE project has nothing to tell apart: every row of that project would carry the same name (9 of 9 on the dev capture) and a fourth line of the row for nothing.
+    // The line is spared only when it is KNOWN that the person has exactly one project and the room is that project's: an empty or not-yet-loaded membership list (unknown — `[]`), two or more projects, or a room of
+    // ANOTHER project (a person who lost access to a project can still read its rooms) keep the name — it is information there.
+    if (projectMemberships.length === 1 && projectMemberships[0]!.projectId === c.project_id) return undefined;
     return c.project_name ?? projectMemberships.find((m) => m.projectId === c.project_id)?.projectName ?? undefined;
   };
 
