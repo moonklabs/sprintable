@@ -62,6 +62,7 @@ describe('[SID:4891] LoginPage — what stands above · inside the card and what
     const terms = bottom().querySelector('[data-testid="login-terms-line"]') as HTMLElement;
     // the consent line is still there, with its two links (reverted — dropped — the Google login would accept terms nobody was told about)
     expect(terms.textContent).toContain(koMessages.login.termsPrefix);
+    expect(terms.hasAttribute('hidden') || terms.closest('[hidden]') !== null, 'the consent line is drawn, not hidden').toBe(false);
     expect(offer.compareDocumentPosition(terms) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 

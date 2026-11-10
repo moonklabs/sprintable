@@ -259,7 +259,7 @@ export default function LoginPage() {
       </div>
       {/* story 4891 (UI-8 U8): what used to stand above and inside the login card now stands under it — the Mac app's way in and the web sign-up (one line of links), and the line that says continuing with Google accepts the terms.
           Same words, same links; the card keeps the login · Google · «forgot» · «sign up». */}
-      <div className="w-full max-w-sm space-y-3 px-4" data-testid="login-bottom">
+      <div className="w-full max-w-sm space-y-3 px-4 empty:hidden" data-testid="login-bottom">
         <MacAppOffer suppressed={Boolean(nextParam) || sessionExpired} />
         {process.env.NEXT_PUBLIC_OAUTH_ENABLED === 'true' && (
           <p className="text-center text-xs text-muted-foreground" data-testid="login-terms-line">
