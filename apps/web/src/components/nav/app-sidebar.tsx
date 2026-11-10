@@ -4,7 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ChevronDown, LayoutGrid, Search, MessageSquare } from 'lucide-react';
+import { LayoutGrid, Search, MessageSquare } from 'lucide-react';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
@@ -15,8 +15,8 @@ import { ProfileMenu } from '@/components/nav/profile-menu';
 import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosure';
 import { MoveAgentsEntry, NewProjectEntry } from '@/components/nav/new-project-entry';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
+import { NavGroupHeader, NavRow } from '@/components/nav/sidebar-nav-parts';
 import { fetchDesignatedPendingCount, subscribeDesignatedPendingCount } from '@/lib/designated-pending-count-client';
-import { cn } from '@/lib/utils';
 import {
   ALL_SCREENS_ITEM,
   CHAT_CENTER_ITEM,
@@ -32,12 +32,8 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuBadge,
-  SidebarMenuButton,
-  SidebarMenuItem,
   SidebarRail,
   useSidebar,
 } from '@/components/ui/sidebar';
@@ -100,36 +96,6 @@ function mergeStoredCollapsedOverrides(
     else next.delete(groupId);
   }
   return next;
-}
-
-function KbdHint({ children }: { children: React.ReactNode }) {
-  return (
-    // 3826-pre — text-sidebar-foreground/60(알파 합성)이 v3 ink 재조정 후 실 브라우저
-    // 대비 미달(#767573/#fbfaf9 = 4.43:1)로 바뀌었다. solid text-muted-foreground(=
-    // --proof-ink-3, AA 조정 済)로 교체 — active 상태는 알파 대신 solid 전체 강조.
-    <kbd className="hidden rounded border border-sidebar-border/60 bg-sidebar-accent/40 px-1.5 py-0 font-mono text-micro font-medium text-muted-foreground group-data-[active=true]/menu-button:text-sidebar-foreground sm:inline-flex">
-      {children}
-    </kbd>
-  );
-}
-
-// story #9c5e82dc(IA·S3, 유나 § 確定 2026-09-08) — 「이 항목은 프로젝트 것」이라는 «성질»
-// 표식. 칩/배지 모양(테두리·배경) 금지 — 칩은 "누를 수 있는 것"으로 읽히는데 이건 행위가
-// 아니라 성질이다. 라틴 약어("PJ")·아이콘 단독+sr-only 둘 다 기각(유나 § 그대로 — 약어는
-// 배워야 하는 어휘, sr-only는 시각 사용자에게 아무 말도 안 함). kbd(#KbdHint)와 같은
-// 자리·비슷한 크기(10px)지만 mono가 아니라 본문 폰트(한글이라). 순서는 라벨→표식→kbd
-// (성질이 이름에 붙고 행위가 끝에 간다).
-//
-// ⛔️무표식 = 조직 범위가 아니다(유나 § 명시) — org 11항목 + 애매 4항목(inbox·settings·
-// org-briefing·org-workforce, 카디르 QA 재감사로 2→4 정정) 둘 다 무표식이다. 이 표식은
-// "project임을 말한다"만 하지 "무표식=org"를 말하지 않는다.
-function ScopeMark({ children }: { children: React.ReactNode }) {
-  return (
-    // 3826-pre — KbdHint와 동일 사유(알파 합성 → solid muted 교체).
-    <span className="text-micro font-medium text-muted-foreground group-data-[active=true]/menu-button:text-sidebar-foreground">
-      {children}
-    </span>
-  );
 }
 
 export function AppSidebar({
@@ -436,20 +402,12 @@ export function AppSidebar({
           <Fragment key={group.id}>
           <SidebarGroup>
             {group.labelKey ? (
-              <SidebarGroupLabel
-                render={
-                  <button
-                    type="button"
-                    onClick={() => toggleGroupCollapsed(group.id)}
-                    aria-expanded={!isCollapsed}
-                    aria-label={toggleAriaLabel}
-                  />
-                }
-                className="w-full cursor-pointer justify-between hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              >
-                <span>{groupLabel}</span>
-                <ChevronDown className={cn('size-3.5 shrink-0 transition-transform duration-150', isCollapsed && '-rotate-90')} />
-              </SidebarGroupLabel>
+              <NavGroupHeader
+                label={groupLabel}
+                collapsed={isCollapsed}
+                onToggle={() => toggleGroupCollapsed(group.id)}
+                ariaLabel={toggleAriaLabel}
+              />
             ) : null}
             {!isCollapsed ? (
             <SidebarGroupContent>
@@ -471,27 +429,18 @@ export function AppSidebar({
                   const badgeCap = item.badgeKey === 'inbox' ? 9 : 99;
                   const label = t(item.labelKey);
                   return (
-                    <SidebarMenuItem key={item.id}>
-                      <SidebarMenuButton
-                        render={<Link href={link.href} ref={link.isActive ? activeMenuItemRef : undefined} />}
-                        isActive={link.isActive}
-                        tooltip={label}
-                      >
-                        <Icon />
-                        <span data-nav-label>{label}</span>
-                        {item.scope === 'project' || (item.kbdHint && isRealShortcut([item.kbdHint])) ? (
-                          <span className="ml-auto flex shrink-0 items-center gap-1.5">
-                            {item.scope === 'project' ? <ScopeMark>{t('scopeProject')}</ScopeMark> : null}
-                            {item.kbdHint && isRealShortcut([item.kbdHint]) ? <KbdHint>{item.kbdHint}</KbdHint> : null}
-                          </span>
-                        ) : null}
-                        {item.badgeKey && badgeCount > 0 ? (
-                          <SidebarMenuBadge>
-                            {badgeCount > badgeCap ? `${badgeCap}+` : badgeCount}
-                          </SidebarMenuBadge>
-                        ) : null}
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
+                    <NavRow
+                      key={item.id}
+                      href={link.href}
+                      label={label}
+                      Icon={Icon}
+                      isActive={link.isActive}
+                      activeRef={link.isActive ? activeMenuItemRef : undefined}
+                      scopeMark={item.scope === 'project' ? t('scopeProject') : null}
+                      kbd={item.kbdHint && isRealShortcut([item.kbdHint]) ? item.kbdHint : null}
+                      badgeCount={item.badgeKey ? badgeCount : 0}
+                      badgeCap={badgeCap}
+                    />
                   );
                 })}
               </SidebarMenu>
@@ -509,16 +458,14 @@ export function AppSidebar({
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link href={flatHref(ALL_SCREENS_ITEM.path)} ref={activeStaticItemId === ALL_SCREENS_ITEM.id ? activeMenuItemRef : undefined} data-nav-id="all-screens" />}
-                  isActive={activeStaticItemId === ALL_SCREENS_ITEM.id}
-                  tooltip={t(ALL_SCREENS_ITEM.labelKey)}
-                >
-                  <LayoutGrid />
-                  <span data-nav-label>{t(ALL_SCREENS_ITEM.labelKey)}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+              <NavRow
+                href={flatHref(ALL_SCREENS_ITEM.path)}
+                label={t(ALL_SCREENS_ITEM.labelKey)}
+                Icon={LayoutGrid}
+                isActive={activeStaticItemId === ALL_SCREENS_ITEM.id}
+                activeRef={activeStaticItemId === ALL_SCREENS_ITEM.id ? activeMenuItemRef : undefined}
+                navId="all-screens"
+              />
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
