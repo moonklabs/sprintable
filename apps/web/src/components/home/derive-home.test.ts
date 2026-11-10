@@ -73,7 +73,22 @@ describe('rule 1 — one number', () => {
     const m = deriveHome(base({ snapshot: { needsMe: many, agentProgress: [] } }));
     expect(m.badge).toBe(9);
     expect(m.needsHandVisible).toHaveLength(NEEDS_HAND_VISIBLE);
+    expect(m.needsHandVisible.map((r) => r.key)).toEqual(['gate:g0', 'gate:g1', 'gate:g2', 'gate:g3', 'gate:g4']); // the FIRST five by wait, not a shifted slice
     expect(m.needsHandHidden).toBe(4);
+  });
+
+  it('fewer rows than the fold: all of them are visible and nothing is hidden', () => {
+    const few = Array.from({ length: 3 }, (_, i) => needsMe(`g${i}`, `2026-11-10T0${i}:00:00Z`));
+    const m = deriveHome(base({ snapshot: { needsMe: few, agentProgress: [] } }));
+    expect(m.needsHandVisible.map((r) => r.key)).toEqual(['gate:g0', 'gate:g1', 'gate:g2']);
+    expect(m.needsHandHidden).toBe(0);
+  });
+
+  it('exactly the fold size: nothing hidden', () => {
+    const five = Array.from({ length: NEEDS_HAND_VISIBLE }, (_, i) => needsMe(`g${i}`, `2026-11-10T0${i}:00:00Z`));
+    const m = deriveHome(base({ snapshot: { needsMe: five, agentProgress: [] } }));
+    expect(m.needsHandVisible).toHaveLength(NEEDS_HAND_VISIBLE);
+    expect(m.needsHandHidden).toBe(0);
   });
 });
 
@@ -162,6 +177,15 @@ describe('rule 3 — ties', () => {
     const b = deriveHome(base({ snapshot: { needsMe: [needsMe('c', same), needsMe('b', same), needsMe('a', same)], agentProgress: [] } }));
     expect(a.needsHand.map((r) => r.key)).toEqual(['gate:a', 'gate:b', 'gate:c']);
     expect(b.needsHand.map((r) => r.key)).toEqual(['gate:a', 'gate:b', 'gate:c']);
+  });
+});
+
+describe('rule 3 — ties across sources', () => {
+  it('an approval and a notification with the same time: ordered by key (gate: before notification:), whatever the input order', () => {
+    const same = '2026-11-10T01:00:00Z';
+    const m = deriveHome(base({ snapshot: { needsMe: [needsMe('a', same)], agentProgress: [] }, notifications: [note('n1', 'conversation.mention', same)] }));
+    expect(m.needsHand.map((r) => r.key)).toEqual(['gate:a', 'notification:n1']);
+    expect(m.initialSelection).toBe('gate:a');
   });
 });
 
