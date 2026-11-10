@@ -240,7 +240,8 @@ describe('[SID:4715] AC2 · AC3 — one screen in place of the fork and the down
     expect(byTestId('onboarding-first-open-app')?.getAttribute('href')).toMatch(/^ai\.sprintable(\.dev)?:\/desktop\/setup$/);
     expect(byTestId('onboarding-first-connect')).toBeNull(); // the link into the wizard is gone
     expect(container.querySelector('input[type="radio"]')).toBeNull(); // reverted (the fork back) → radios
-    expect(byTestId('onboarding-first-finish')?.textContent).toBe(koMessages.onboarding.desktopFinishToToday);
+    // story 4891: the way out names its landing — this form is mounted with the Today flag off (it lands on «대화»), so it is the dashboard word (first-screen.finish-label.4891.test.tsx pins both flag states)
+    expect(byTestId('onboarding-first-finish')?.textContent).toBe(koMessages.onboarding.dashboardCta);
   });
 
   it('T4 not a Mac: «지금은 Mac 앱만 있어요» first · the web way is the button · no download card', async () => {

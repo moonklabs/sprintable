@@ -59,6 +59,9 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
   useEffect(() => { if (inMacApp && !wentToSetup.current) { wentToSetup.current = true; window.location.replace(flatHref('/desktop/setup')); } }, [inMacApp]);
   if (elsewhere === null || inMacApp === null) return null;
   if (inMacApp) return null; // the page is going to the setup page
+  // story 4891: the way out's word follows where it lands (resolveOnboardingLandingHref: flag ON → Today, OFF → «대화»), as the three other onboarding exits already do
+  // (advanced-connect · connect-step · phone-start-page). It said «Go to Today» always, and on a build with the flag off it landed on the chats page.
+  const finishLabel = todayV3Enabled ? to('desktopFinishToToday') : to('dashboardCta');
 
   // story 4714 (AC1 · Yuna 4714-copy-1017): inside the phone app the Mac-or-not fork is not drawn — the phone's own screen takes its place
   // (a phone pairs with a Mac and starts its agents from it; «지금은 Mac 앱만 있어요» would say the opposite). Other non-Mac browsers keep theirs.
@@ -69,7 +72,7 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
         <p className="break-keep border-t border-border pt-4 text-xs text-muted-foreground" data-testid="onboarding-first-later">
           {to('download.laterNote')}{' '}
           <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={finish} disabled={advancedBusy} data-testid="onboarding-first-finish">
-            {to('desktopFinishToToday')}
+            {finishLabel}
           </Button>
         </p>
       </div>
@@ -126,7 +129,7 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
       <p className="break-keep border-t border-border pt-4 text-xs text-muted-foreground" data-testid="onboarding-first-later">
         {to('download.laterNote')}{' '}
         <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={finish} disabled={advancedBusy} data-testid="onboarding-first-finish">
-          {to('desktopFinishToToday')}
+          {finishLabel}
         </Button>
       </p>
     </div>
