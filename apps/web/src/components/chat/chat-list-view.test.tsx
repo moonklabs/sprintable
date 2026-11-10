@@ -366,6 +366,68 @@ describe('ChatListView — story #3888 이벤트 메시지 미리보기(raw slug
     expect(container.textContent).not.toContain('**');
   });
 
+  // story 4887 (UI-4 P2-b) — the B3 row: title · time · unread count on the first line, the preview below it on the whole width; a group's people are one line of text; the avatar/icon are the UI-3 ds parts
+  const PEOPLE = [
+    { member_id: 'me-1', name: '나', type: 'human' as const },
+    { member_id: 'm-2', name: '지우', type: 'human' as const },
+    { member_id: 'm-3', name: '민서', type: 'human' as const },
+    { member_id: 'm-4', name: '하준', type: 'human' as const },
+    { member_id: 'm-5', name: '서연', type: 'human' as const },
+  ];
+  const ROOM = (over: Record<string, unknown> = {}) => ({
+    id: 'conv-b3', type: 'group', title: '결제 연동 점검', participants: PEOPLE,
+    latest_message: { content: '내일 오전에 보자', created_at: '2026-11-10T01:00:00Z', event: null },
+    updated_at: '2026-11-10T01:00:00Z', unread_count: 0, ...over,
+  });
+  const rowOf = () => container.querySelector('[data-testid="room-unread"]')?.closest('button') ?? container.querySelector('button');
+
+  it('4887 ⭐ the unread count sits on the title line with the time — not on the preview line', async () => {
+    stubFetchWithConversations([ROOM({ unread_count: 3 })]);
+    await mount();
+    const badge = container.querySelector('[data-testid="room-unread"]') as HTMLElement;
+    expect(badge.textContent).toBe('3');
+    const preview = [...container.querySelectorAll('p')].find((p) => p.textContent === '내일 오전에 보자') as HTMLElement;
+    expect(preview).toBeTruthy();
+    expect(preview.contains(badge)).toBe(false);
+    const titleSpan = [...container.querySelectorAll('span')].find((s) => s.textContent === '결제 연동 점검') as HTMLElement;
+    expect(titleSpan.parentElement!.contains(badge)).toBe(true); // the badge shares the title row
+    expect(rowOf()).toBeTruthy();
+  });
+
+  it('4887 ⭐ the unread count caps at 99+ and a room with nothing unread has no badge', async () => {
+    stubFetchWithConversations([ROOM({ id: 'a', title: '많이 안 읽음', unread_count: 150 }), ROOM({ id: 'b', title: '다 읽음', unread_count: 0 })]);
+    await mount();
+    const badges = [...container.querySelectorAll('[data-testid="room-unread"]')].map((e) => e.textContent);
+    expect(badges).toEqual(['99+']);
+  });
+
+  it('4887 ⭐ a group row names its people in one line of text — no overlapping initials stack', async () => {
+    stubFetchWithConversations([ROOM()]);
+    await mount();
+    expect(container.textContent).toContain('5명 · 지우, 민서 외 2명');
+    expect(container.querySelector('.-space-x-1\\.5')).toBeNull();
+  });
+
+  it('4887 ⭐ a room with no participants list uses the ds icon disc (group = «groups», DM = «chat_bubble»)', async () => {
+    stubFetchWithConversations([
+      { id: 'g', type: 'group', title: '그룹 빈 참여자', participants: [], latest_message: null, updated_at: '2026-11-10T01:00:00Z', unread_count: 0 },
+      { id: 'd', type: 'dm', title: 'DM 빈 참여자', participants: [], latest_message: null, updated_at: '2026-11-10T00:00:00Z', unread_count: 0 },
+    ]);
+    await mount();
+    const glyphs = [...container.querySelectorAll('[data-testid="room-row-glyph"] [data-icon]')].map((e) => e.getAttribute('data-icon'));
+    expect(glyphs.sort()).toEqual(['chat_bubble', 'groups']);
+  });
+
+  it('4887 ⭐ a DM row draws the other person with the ds avatar — an agent is a circle, a person a rounded square', async () => {
+    stubFetchWithConversations([
+      { id: 'dm-agent', type: 'dm', title: null, participants: [{ member_id: 'me-1', name: '나', type: 'human' }, { member_id: 'ag-1', name: '개발 에이전트', type: 'agent', runtime_type: 'claude-code' }], latest_message: null, updated_at: '2026-11-10T02:00:00Z', unread_count: 0 },
+      { id: 'dm-human', type: 'dm', title: null, participants: [{ member_id: 'me-1', name: '나', type: 'human' }, { member_id: 'hu-1', name: '지우', type: 'human' }], latest_message: null, updated_at: '2026-11-10T01:00:00Z', unread_count: 0 },
+    ]);
+    await mount();
+    const shapes = [...container.querySelectorAll('[data-actor] [data-shape]')].map((e) => e.getAttribute('data-shape'));
+    expect(shapes).toEqual(['circle', 'square']);
+  });
+
   // 무관 PR no-op — event 필드가 없는(구버전 캐시·일반 메시지) 대화는 회귀 없이 기존
   // content 그대로 렌더한다(이 카드가 안 건드리는 자리).
   it('음성대조 — latest_message.event가 없으면 기존 content를 그대로 쓴다(일반 메시지, 회귀 0)', async () => {
@@ -565,7 +627,8 @@ describe('ChatListView — story #3106 참가자 runtime_type → Avatar 배선'
       ],
     }]);
     await mount();
-    const disk = container.querySelector('.rounded-full.ring-2.ring-background');
+    // story 4887 (UI-4 P2-b) — the row's avatar is the UI-3 ds Avatar: the same connector disk, its ring in the ds colour
+    const disk = container.querySelector('.rounded-full.ring-2.ring-ds-background');
     expect(disk?.querySelector('img')?.getAttribute('src')).toBe('/connector-icons/claude-code.jpg');
   });
 
