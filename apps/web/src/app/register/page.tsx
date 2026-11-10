@@ -1,11 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
-import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { LegalFooter } from '@/components/legal/legal-footer';
@@ -38,17 +37,10 @@ export default function RegisterPage() {
   const [tosAccepted, setTosAccepted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  // story 4669 (U6 · Yuna A-5): with Google on, the e-mail form is folded under [이메일로 가입] — Google is the way with no mail
-  // round trip (email-verify-gate treats a social sign-in as verified). A build with no OAuth keeps the form open as before.
+  // story 4669 (U6 · Yuna A-5): with Google on, Google leads — the way with no mail round trip (email-verify-gate treats a social sign-in as verified).
+  // story 4891 (UI-8 U1 · PO 11-10): the e-mail form is NOT folded behind a second press any more — one screen: the terms line, Google, the three fields, [가입]. The terms
+  // checkbox (unticked by default, AUTH-07) still gates BOTH ways: Google goes nowhere until it is ticked and [가입] stays off; the server still refuses `tos_accepted=false`.
   const googleEnabled = process.env.NEXT_PUBLIC_OAUTH_ENABLED === 'true';
-  const [emailOpen, setEmailOpen] = useState(false);
-  const emailFormOpen = !googleEnabled || emailOpen;
-  // Yuna (5064 design · 4723's class): the fold button goes away when pressed, so the keyboard focus must not fall to the body —
-  // it moves to the form's first field. One-way: the form never folds again (no aria-expanded — there is no «collapsed» state after).
-  const nameInputRef = useRef<HTMLInputElement | null>(null);
-  useEffect(() => {
-    if (emailOpen) nameInputRef.current?.focus();
-  }, [emailOpen]);
 
   const rules = checkPasswordRules(password);
   const categoriesMet = countCategories(rules);
@@ -120,7 +112,7 @@ export default function RegisterPage() {
           <p className="text-sm text-muted-foreground">{t('subtitle')}</p>
         </div>
 
-        {/* story 4669: the terms line first (both ways need it), then Google as the main button, then the folded e-mail form */}
+        {/* story 4669: the terms line first (both ways need it), then Google as the main button; story 4891: then the e-mail form, on the same screen */}
         <label className="flex items-start gap-2 cursor-pointer select-none">
           <Checkbox
             checked={tosAccepted}
@@ -154,6 +146,8 @@ export default function RegisterPage() {
             <a
               href={tosAccepted ? `/auth/login?provider=google&tos_accepted=true${nextParam ? `&next=${encodeURIComponent(nextParam)}` : ''}` : undefined}
               onClick={!tosAccepted ? (e) => { e.preventDefault(); setError(t('tosRequiredError')); } : undefined}
+              // without an href an anchor is not reachable by keyboard — until the terms are ticked it is a focusable, announced-as-unavailable link that says why (Enter / Space, like a press)
+              {...(!tosAccepted ? { role: 'link', tabIndex: 0, 'aria-disabled': true, onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setError(t('tosRequiredError')); } } } : {})}
               data-testid="register-google"
               className={`flex w-full min-h-[44px] items-center justify-center gap-3 rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90 ${!tosAccepted ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
@@ -172,25 +166,11 @@ export default function RegisterPage() {
               <div className="flex-grow border-t border-border/50" />
             </div>
 
-            {!emailOpen && (
-              <Button
-                type="button"
-                variant="outline"
-                size="lg"
-                onClick={() => setEmailOpen(true)}
-                data-testid="register-email-open"
-                className="w-full min-h-[44px] rounded-lg text-sm font-medium"
-              >
-                {t('emailSignUp')}
-              </Button>
-            )}
           </div>
         )}
 
-        {emailFormOpen && (
         <div className="space-y-3" data-testid="register-email-form">
           <Input
-            ref={nameInputRef}
             type="text"
             placeholder={t('namePlaceholder')}
             autoComplete="name"
@@ -243,7 +223,6 @@ export default function RegisterPage() {
             {loading ? t('creatingAccount') : t('submit')}
           </button>
         </div>
-        )}
 
         <p className="text-center text-sm text-muted-foreground">
           {t('alreadyHaveAccount')}{' '}
