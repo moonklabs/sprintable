@@ -28,8 +28,8 @@ afterEach(async () => { await act(async () => { root.unmount(); }); container.re
 const ME = { member_id: 'me-1', name: '나', type: 'human' as const };
 const AGENT = { member_id: 'a-1', name: '개발 에이전트', type: 'agent' as const, runtime_type: 'claude-code', device_name: 'AC4 isolated daemon on a very long computer name' };
 const HUMAN = { member_id: 'h-1', name: '지우', type: 'human' as const };
-const conv = (id: string, participants: object[]) => ({
-  id, type: 'dm', title: null, latest_message: { content: '안녕', created_at: '2026-10-13T09:00:00Z' }, updated_at: '2026-10-13T09:00:00Z', unread_count: 0, participants,
+const conv = (id: string, participants: object[], title: string | null = null) => ({
+  id, type: 'dm', title, latest_message: { content: '안녕', created_at: '2026-10-13T09:00:00Z' }, updated_at: '2026-10-13T09:00:00Z', unread_count: 0, participants,
 });
 
 async function mount(convs: object[]) {
@@ -44,15 +44,34 @@ async function mount(convs: object[]) {
 const lines = () => [...container.querySelectorAll('[data-testid="room-dm-line"]')] as HTMLElement[];
 
 describe('[SID:4887] ChatListView — the DM line (P2-c)', () => {
-  it('⭐ «나 ↔ 상대» is ONE plain text segment — no pills, no separate arrow — and it is the part that truncates', async () => {
+  it('⭐ a person\'s DM titled with the other\'s own name has NO participant line at all — the title and the avatar already say who it is with', async () => {
     await mount([conv('c1', [ME, HUMAN])]);
+    expect(lines()).toHaveLength(0); // reverted → the line is back with «나 ↔ 지우»
+    expect(container.textContent).toContain('지우'); // the title still says it
+    expect(container.textContent).not.toContain('나 ↔');
+  });
+
+  it('⭐ a DM the people NAMED keeps the other\'s name on the line — without «나 ↔» — so «who is this with» never disappears', async () => {
+    await mount([conv('c1', [ME, HUMAN], '점심 약속')]);
+    const other = container.querySelector('[data-testid="room-dm-other"]') as HTMLElement;
+    expect(other.textContent).toBe('지우'); // reverted (always dropped) → null
+    expect(other.className).toContain('min-w-0');
+    expect(other.className).toContain('truncate');
+    expect(other.className).not.toContain('bg-muted'); // no pill
+    expect(container.textContent).not.toContain('나 ↔');
+  });
+
+  it('⭐ an agent DM titled with the agent\'s name shows NO name segment — the line is the «에이전트» chip and the computer chip, and they get the width', async () => {
+    await mount([conv('c1', [ME, AGENT])]);
     const line = lines()[0]!;
-    const seg = line.firstElementChild as HTMLElement;
-    expect(seg.textContent).toBe('나 ↔ 지우');
-    expect(seg.className).toContain('min-w-0');
-    expect(seg.className).toContain('truncate');
-    expect(seg.className).not.toContain('bg-muted'); // reverted → the old pill
-    expect(line.children).toHaveLength(1); // a person: nothing else on the line
+    expect(line.querySelector('[data-testid="room-dm-other"]')).toBeNull();
+    expect(line.firstElementChild!.textContent).toBe(koMessages.chats.agent); // the agent chip leads
+    expect(line.querySelector('[data-testid="device-chip"]')).not.toBeNull();
+  });
+
+  it('⭐ an agent DM the people named keeps the agent\'s name before its chips', async () => {
+    await mount([conv('c1', [ME, AGENT], '배포 도우미')]);
+    expect((lines()[0]!.querySelector('[data-testid="room-dm-other"]') as HTMLElement).textContent).toBe('개발 에이전트');
   });
 
   it('⭐ the line cannot run past the column — it clips at its own edge and never lets a child push it wider', async () => {
@@ -78,14 +97,13 @@ describe('[SID:4887] ChatListView — the DM line (P2-c)', () => {
     const line = lines()[0]!;
     const agentChip = [...line.querySelectorAll('span')].find((s) => s.textContent === koMessages.chats.agent) as HTMLElement;
     expect(agentChip.className).toContain('flex-shrink-0');
-    expect(line.firstElementChild!.textContent).toBe('나 ↔ 개발 에이전트');
     const chip = line.querySelector('[data-testid="device-chip"]')!;
     expect(agentChip.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('⭐ the row is a little tighter (py-2) — the room list shows more rooms per screen', async () => {
     await mount([conv('c1', [ME, HUMAN])]);
-    const row = lines()[0]!.closest('button') as HTMLElement;
+    const row = container.querySelector('button') as HTMLElement;
     expect(row.className).toContain('py-2 ');
     expect(row.className).not.toContain('py-2.5'); // reverted → the old padding
   });
