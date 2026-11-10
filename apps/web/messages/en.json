@@ -91,8 +91,8 @@
   "mobileTabBar": {
     "navLabel": "Mobile tab navigation",
     "more": "More",
-    "approvalsPendingSr": "{count, plural, one {# pending approval} other {# pending approvals}}",
-    "approvalsPendingSrCapped": "9 or more pending approvals",
+    "homeNeedsHandSr": "{count, plural, one {# thing needs your hand} other {# things need your hand}}",
+    "homeNeedsHandSrAtLeast": "{count} or more things need your hand",
     "chatUnreadSr": "{count} unread",
     "chatUnreadSrCapped": "99 or more unread"
   },

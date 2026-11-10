@@ -265,7 +265,7 @@ export function AppSidebar({
         // 결재자로 지정된 미해소 건이 몇 개인가", room 추론 0)로 교체. #3001부터 카드가
         // 지정 라인 전용으로만 발행되므로 이 좁은 쿼리가 GNB "미확認" 뱃지의 정확한 SSOT다
         // (BE 문서 gates.py::get_designated_pending_count — "AC1이 이 층에서 닫히는 근거").
-        // story #4171 — 하단 탭바와 진행 중 요청 공유(모바일 첫 화면 중복 1건 제거).
+        // story #4171 — 진행 중 요청 공유(모바일 첫 화면 중복 1건 제거 — 폰 탭바는 story #4885부터 이 수를 따로 안 센다).
         const count = await fetchDesignatedPendingCount();
         if (count !== null && !cancelled) setInboxPendingCount(count);
       } catch { /* noop */ }
@@ -290,7 +290,7 @@ export function AppSidebar({
   // 이 뱃지가 세는 집합(designated_approver_id=me AND status=pending)을 바꿀 수 있는 3
   // 이벤트 전부에서 즉시 재조회(30초 폴링은 mux 미연결/이벤트 유실 대비 안전망으로 유지).
   // story #4245 — 연결 직후 백필 중 **마지막 수에 이미 보였던** 이벤트는 다시 묻지 않는다(dev 배포 21 · 기동마다 designated-pending-count
-  // 2번째 요청의 발신 지점이 이 자리였다). story #4263 — 그 구독 · 판정을 모바일 탭바와 공유하는 한 곳(subscribeDesignatedPendingCount)으로.
+  // 2번째 요청의 발신 지점이 이 자리였다). story #4263 — 그 구독 · 판정을 한 곳(subscribeDesignatedPendingCount)으로.
   // 실패는 null — 다음 정상 이벤트나 30초 폴링으로 자연 회복.
   useEffect(() => {
     if (!mux) return;
