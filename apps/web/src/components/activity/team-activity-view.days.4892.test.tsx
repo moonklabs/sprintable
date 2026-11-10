@@ -15,7 +15,8 @@ vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: Parameters<typeof f
 const dashCtx = vi.hoisted(() => ({ value: {} as { orgId?: string } }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => dashCtx.value }));
 // the viewer's zone decides which day a row is on — pin it so the test does not depend on the machine's zone
-vi.mock('@/components/viewer-time-zone', () => ({ useViewerTimeZone: () => 'UTC' }));
+const viewerZone = vi.hoisted(() => ({ value: 'UTC' as string | null }));
+vi.mock('@/components/viewer-time-zone', () => ({ useViewerTimeZone: () => viewerZone.value }));
 import { resetOrgMembersCacheForTests } from '@/hooks/use-member-name-fallback';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -39,6 +40,7 @@ beforeEach(() => {
   root = createRoot(container);
   fetchWithAuthMock.mockReset();
   resetOrgMembersCacheForTests();
+  viewerZone.value = 'UTC';
 });
 afterEach(async () => {
   await act(async () => { root.unmount(); });
@@ -86,6 +88,24 @@ describe('TeamActivityView — 일 단위 묶음 (4892)', () => {
     const more = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.teamActivity.loadMore);
     expect(more).toBeTruthy();
     expect(groups().some((g) => g.contains(more!))).toBe(false);
+  });
+
+  it("the day is the viewer's day: 20:00Z on the 9th is already «오늘» (the 10th) in Seoul, but «어제» in UTC", async () => {
+    viewerZone.value = 'Asia/Seoul';
+    await mount([item(3, '2026-11-09T20:00:00Z')]);
+    expect(groups().map((g) => g.querySelector('h2')?.textContent)).toEqual(['오늘']);
+  });
+
+  it('a viewer whose zone is not known yet falls back to UTC (no crash, still grouped)', async () => {
+    viewerZone.value = null;
+    await mount([item(3, '2026-11-09T20:00:00Z')]);
+    expect(groups().map((g) => g.querySelector('h2')?.textContent)).toEqual(['어제']);
+  });
+
+  it('each day section is named by its own header (a landmark a screen reader can list)', async () => {
+    await mount(ITEMS);
+    expect(groups().map((g) => g.getAttribute('aria-label'))).toEqual(groups().map((g) => g.querySelector('h2')?.textContent));
+    expect(groups().every((g) => !!g.getAttribute('aria-label'))).toBe(true);
   });
 
   it('a real empty answer is still the empty state — no day header', async () => {
