@@ -3,7 +3,7 @@
 // story 4892 (UI-9 §5 #4) — a failed delete was swallowed by an empty catch (nothing happened, nothing said). It is an error toast now and the
 // document stays; a delete that worked still removes the row from the tree and goes to the list; «cancel» in the confirm does nothing.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
@@ -24,11 +24,14 @@ const setTree = vi.fn();
 const fetchMock = vi.fn();
 const confirmMock = vi.fn();
 
-function Probe({ docId = 'doc-1', projectId = 'proj-1' as string | undefined }: { docId?: string; projectId?: string }) {
-  run = useDocDelete({ docId, projectId, wsSlug: 'ws', projSlug: 'proj', router: { replace }, setTree });
+type ProbeProps = { docId: string | undefined; projectId: string | undefined };
+function Probe({ docId, projectId }: ProbeProps) {
+  const handler = useDocDelete({ docId, projectId, wsSlug: 'ws', projSlug: 'proj', router: { replace }, setTree });
+  useEffect(() => { run = handler; });
   return null;
 }
-async function mount(props: Parameters<typeof Probe>[0] = {}) {
+// both are passed explicitly: a default parameter would turn an explicit `undefined` back into a value
+async function mount(props: ProbeProps = { docId: 'doc-1', projectId: 'proj-1' }) {
   await act(async () => {
     root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><Probe {...props} /></NextIntlClientProvider>);
   });
@@ -87,9 +90,9 @@ describe('useDocDelete — a failed delete is shown (4892 §5 #4)', () => {
   });
 
   it('without a document or a project nothing is asked and nothing is sent', async () => {
-    await mount({ docId: '' });
+    await mount({ docId: '', projectId: 'proj-1' });
     await deleteIt();
-    await mount({ projectId: undefined });
+    await mount({ docId: 'doc-1', projectId: undefined });
     await deleteIt();
     expect(confirmMock).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
