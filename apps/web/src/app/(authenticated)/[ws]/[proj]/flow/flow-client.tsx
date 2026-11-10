@@ -249,17 +249,11 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
             층 = 묻는 질문 전환」을 탭 전환마다 같은 자리에서 보인다. story #3112 — 클릭
             배선(렌즈 전환·목표 이동·작업 비활성)은 컴포넌트 자체가 갖는다(scale-ladder.tsx). */}
         {view !== 'hypothesis' ? (
-          // story #4222 — `compact={isMobile}`는 useIsMobile()이 서버·첫 렌더에서 false라 390에서 서버가 전체판(120.5px)을 그리고
-          // 하이드레이션 뒤 칩열(34.5px)로 줄어 그 아래가 밀렸다(배너 0에서 CLS 0.36). 두 판을 다 그리고 CSS 중단점(lg = 훅의 1024)으로
-          // 가른다 — 서버 출력이 곧 최종 높이. 숨은 판은 display:none이라 포커스·스크린리더에서 빠지고, 래더는 데이터 요청이 없다.
-          <>
-            <div className="lg:hidden" data-testid="scale-ladder-compact-slot">
-              <ScaleLadder activeLevel={view === 'flow' ? 'city' : 'street'} compact />
-            </div>
-            <div className="hidden lg:block" data-testid="scale-ladder-full-slot">
-              <ScaleLadder activeLevel={view === 'flow' ? 'city' : 'street'} />
-            </div>
-          </>
+          // story #4888 — 래더는 모든 폭에서 칩 한 줄 하나뿐이다. story #4222의 «두 판을 CSS 중단점으로 가름»은 판이 하나가 되며 필요 없어졌다
+          // (서버 출력 = 최종 높이 → 하이드레이션 뒤 흔들림 0은 그대로, 요청 수 0도 그대로).
+          <div data-testid="scale-ladder-slot">
+            <ScaleLadder activeLevel={view === 'flow' ? 'city' : 'street'} />
+          </div>
         ) : null}
 
         {view === 'hypothesis' ? (
