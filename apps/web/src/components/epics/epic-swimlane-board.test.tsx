@@ -1058,3 +1058,25 @@ describe('EpicSwimlaneBoard — 페이지 h1 1개(story #3946)', () => {
     expect(container.querySelectorAll('h1')).toHaveLength(1);
   });
 });
+
+// story #4888(UI-5 목표 화면 첫 조각) — 목표 화면(/goals)의 «스윔레인» 보기로 열릴 땐 `embedded`: 그 화면이 이미 h1(마스트헤드) · 상단바 슬롯을 쥐고 있어
+// 보드가 자기 상단바 슬롯(= h1)을 또 그리면 상단바가 «목표 스윔레인»으로 덮이고 화면 h1이 둘이 된다. 나머지(h2 소제목 · 축 전환 · 레인)는 그대로.
+describe('EpicSwimlaneBoard — embedded(story #4888)', () => {
+  async function mountEmbedded(stub: FetchStub) {
+    stubFetch(stub);
+    await act(async () => { root.render(withIntl(<EpicSwimlaneBoard projectId="p1" embedded />)); });
+    await act(async () => { await waitForCondition(() => container.textContent?.includes('5단계 클래식') ?? false, 'embedded 로딩 完了'); });
+  }
+
+  it('⭐embedded면 자기 상단바 슬롯(= h1)을 안 그린다 — h1 0개(화면 h1은 바깥 마스트헤드 몫) · h2 소제목과 축 전환은 그대로', async () => {
+    await mountEmbedded({ epics: [], stories: [] });
+    expect(container.querySelectorAll('h1')).toHaveLength(0);
+    expect(container.querySelector('h2')?.textContent).toBe('목표 스윔레인');
+    expect(container.textContent).toContain('5단계 클래식');
+  });
+
+  it('embedded가 아니면(= /epics 탭 화면) 예전 그대로 h1 하나', async () => {
+    await mount({ epics: [], stories: [] });
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
+  });
+});

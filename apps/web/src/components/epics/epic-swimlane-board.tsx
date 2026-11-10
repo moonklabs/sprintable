@@ -246,7 +246,12 @@ function SwimlaneRow({ laneId, title, subtitle, columns, stories, axisMode, memb
   );
 }
 
-export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
+/**
+ * `embedded` — story #4888(UI-5 목표 화면 첫 조각): 목표 화면(/goals) 안 «스윔레인» 보기로 열 때. 그 화면이 이미 h1(마스트헤드) · 상단바 슬롯(목표 제목 + «새 목표»)을 쥐고 있어,
+ * 여기서 자기 상단바 슬롯을 또 그리면 상단바가 갈리고(제목 «목표 스윔레인»으로 덮임) 화면 h1 불변식(정확히 1개)이 깨진다. 그래서 embedded면 상단바 슬롯만 안 그린다
+ * (h2 소제목 · 축 전환 · 레인 · 상세 서랍은 그대로). `/epics`(탭) 화면은 embedded 없이 예전 그대로.
+ */
+export function EpicSwimlaneBoard({ projectId, embedded = false }: { projectId: string; embedded?: boolean }) {
   const t = useTranslations('board');
   // story #3289 — kanban-board.tsx와 동형(useOrgDomainLabels 배선). story #3299(3687/3694
   // 후속) — 그때 StoryDetailPanel에만 물렸던 domainLabels를 이제 인라인 StoryCard 배지
@@ -550,7 +555,7 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
 
   return (
     <>
-      <TopBarSlot title={<h1 className="text-sm font-medium">{t('epicSwimlaneTitle')}</h1>} showContextChip />
+      {embedded ? null : <TopBarSlot title={<h1 className="text-sm font-medium">{t('epicSwimlaneTitle')}</h1>} showContextChip />}
       <div className="space-y-3 p-4">
 
         {loading ? (
