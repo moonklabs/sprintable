@@ -134,8 +134,6 @@ export default function LoginPage() {
           <p className="text-sm text-muted-foreground">{t('subtitle')}</p>
         </div>
 
-        <MacAppOffer suppressed={Boolean(nextParam) || sessionExpired} />
-
         {sessionExpired && (
           <Alert variant="warning">
             <AlertDescription>{t('sessionExpired')}</AlertDescription>
@@ -238,12 +236,6 @@ export default function LoginPage() {
               {t('google')}
             </a>
 
-            <p className="text-center text-xs text-muted-foreground">
-              {t('termsPrefix')}{' '}
-              <a href="/terms" target="_blank" className="underline hover:text-foreground/60">{t('termsOfService')}</a>
-              {' '}{t('and')}{' '}
-              <a href="/privacy" target="_blank" className="underline hover:text-foreground/60">{t('privacyPolicy')}</a>
-            </p>
           </div>
         )}
 
@@ -264,6 +256,19 @@ export default function LoginPage() {
             {t('signUp')}
           </Link>
         </p>
+      </div>
+      {/* story 4891 (UI-8 U8): what used to stand above and inside the login card now stands under it — the Mac app's way in and the web sign-up (one line of links), and the line that says continuing with Google accepts the terms.
+          Same words, same links; the card keeps the login · Google · «forgot» · «sign up». */}
+      <div className="w-full max-w-sm space-y-3 px-4" data-testid="login-bottom">
+        <MacAppOffer suppressed={Boolean(nextParam) || sessionExpired} />
+        {process.env.NEXT_PUBLIC_OAUTH_ENABLED === 'true' && (
+          <p className="text-center text-xs text-muted-foreground" data-testid="login-terms-line">
+            {t('termsPrefix')}{' '}
+            <a href="/terms" target="_blank" className="underline hover:text-foreground/60">{t('termsOfService')}</a>
+            {' '}{t('and')}{' '}
+            <a href="/privacy" target="_blank" className="underline hover:text-foreground/60">{t('privacyPolicy')}</a>
+          </p>
+        )}
       </div>
       <LegalFooter />
     </div>
