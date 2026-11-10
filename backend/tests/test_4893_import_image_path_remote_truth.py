@@ -29,7 +29,8 @@ async def test_a_path_the_server_cannot_see_is_refused_with_the_reason_and_the_o
     text = out[0].text
     assert text.startswith("Error:")
     assert "일반 파일" in text, "the old wording stays (existing callers · tests)"
-    assert "원격" in text and "이 서버의 디스크" in text, "it says the server looked on ITS disk"
+    assert "돌고 있는 컴퓨터의 디스크" in text and "호스팅" in text, "it says WHICH disk it looked on, and that a hosted server cannot see the agent's computer"
+    assert "이 MCP 서버는 원격이라" not in text, "never an unconditional «remote»: a server run on the agent's own computer is not remote (stdio · uvx · local HTTP)"
     assert "맥 앱" in text and "image_base64" in text and "/api/v2/visual-artifacts/import-image" in text, "and what to do instead"
     client.post.assert_not_called()
 
@@ -37,7 +38,8 @@ async def test_a_path_the_server_cannot_see_is_refused_with_the_reason_and_the_o
 def test_the_import_tool_description_no_longer_promises_that_the_server_reads_the_agents_file():
     desc = _DESC["sprintable_import_image_artifact"]
     assert "서버가 직접 읽어" not in desc, "the false promise"
-    assert "맥 앱" in desc and "원격" in desc, "who may use image_path, and why the others cannot"
+    assert "맥 앱" in desc and "호스팅" in desc, "who may use image_path, and why the others cannot"
+    assert "uvx" in desc and "stdio" in desc, "and that an MCP run on the agent's own computer reads image_path as before"
     assert "image_base64" in desc
 
 
@@ -71,3 +73,12 @@ def test_the_description_covers_the_case_of_an_old_app_that_does_not_convert_yet
     """the server may be deployed before every app: the description must stay true then too"""
     desc = _DESC["sprintable_import_image_artifact"]
     assert "낡은 앱" in desc and "거절" in desc
+
+
+def test_the_docs_do_not_call_every_server_remote():
+    """lens (Kadir): the server's default transport is stdio — a process on the agent's computer — so «this server is remote» is true only of the HOSTED one"""
+    assert "이 서버는 원격이라" not in _DESC["sprintable_import_image_artifact"]
+    doc = va.ImportImageArtifactInput.__doc__ or ""
+    assert "호스팅" in doc and "uvx" in doc
+    agents = (_REPO / "AGENTS.md").read_text(encoding="utf-8")
+    assert "uvx sprintable" in agents and "The hosted MCP server is remote" not in agents

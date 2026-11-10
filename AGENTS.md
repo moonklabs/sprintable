@@ -99,8 +99,10 @@ in one call, not a bare URL).
 - If the agent is connected through the Mac app (Sprintable Desktop) and the picture is a file on that
   computer: call `sprintable_import_image_artifact` with `image_path` (absolute path · a picture file ·
   max 20 MB) — the app's host reads the file on that computer and sends the bytes (byte-exact, no
-  re-typing). The hosted MCP server is remote and looks on ITS OWN disk, so `image_path` from any
-  other connection (and from an app version that does not convert yet) is refused with the reason.
+  re-typing). The HOSTED (remote) MCP server looks on ITS OWN disk, so `image_path` over a connection that
+  does not go through the app (and from an app version that does not convert yet) is refused with the reason.
+  When the MCP runs on the agent's own computer (`uvx sprintable` · stdio · local HTTP) the server IS that
+  computer and `image_path` is read as it always was.
 - If the agent has Bash/HTTP access and wants to skip the MCP round-trip for a large
   image, curl the same endpoint directly instead of the MCP tool:
   ```

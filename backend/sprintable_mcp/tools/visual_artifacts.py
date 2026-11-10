@@ -149,11 +149,13 @@ class ImportImageArtifactInput(SprintableInput):
     붕괴로 저장). 모델 출력 없이 바이트 그대로 보내려고 image_path를 추가 — 파일을 읽어
     base64 인코딩까지 자체 처리한다(open().read(), 모델 출력 0).
 
-    story 4893 — **이 서버는 원격 HTTP라 자기 디스크만 본다**(위 3753 설명은 «이 MCP 서버가
-    에이전트 머신의 로컬 프로세스»라고 가정했으나 우리 fleet은 원격이다). 그래서 맥 앱(Sprintable
+    story 4893 — **image_path는 «이 MCP 서버 프로세스가 돌고 있는 컴퓨터»의 디스크에서 읽는다.**
+    에이전트 컴퓨터에서 직접 돌리는 모드(`uvx sprintable` · stdio · 로컬 HTTP)에서는 서버가 곧 그
+    컴퓨터라 image_path가 그대로 읽히지만, **호스팅(원격 HTTP) 서버는 자기 디스크만 본다**(위 3753
+    설명이 가정한 «로컬 프로세스»는 호스팅 서버에선 사실이 아니었다). 그래서 맥 앱(Sprintable
     데스크톱)으로 붙은 에이전트는 앱의 호스트가 image_path를 그 컴퓨터에서 읽어 image_base64 +
-    content_type으로 바꿔 이 서버에 보내고(바이트 그대로 · 그림 파일만 · 20MB), 앱을 거치지 않은
-    직접 연결의 image_path는 이 서버 디스크에서 찾다가 거절된다(오류 글이 까닭을 말한다).
+    content_type으로 바꿔 호스팅 서버에 보내고(바이트 그대로 · 그림 파일만 · 20MB), 앱을 거치지 않은
+    호스팅 서버 연결의 image_path는 서버 디스크에서 찾다가 거절된다(오류 글이 까닭을 말한다).
     image_base64/image_path는 상호 배타(둘 다 지정·둘 다 미지정 모두 오류)."""
     title: str
     image_base64: str | None = None
@@ -246,10 +248,11 @@ async def import_image_artifact(args: ImportImageArtifactInput) -> list[TextCont
             path = Path(args.image_path)
             if not path.is_file():
                 return err(
-                    f"image_path가 존재하는 일반 파일이 아닙니다: {args.image_path} — 이 MCP 서버는 원격이라 "
-                    "에이전트 컴퓨터의 파일을 볼 수 없습니다(이 서버의 디스크에서 찾은 결과입니다). 맥 앱(Sprintable "
-                    "데스크톱)으로 붙은 에이전트는 앱이 image_path를 대신 읽어 보내므로, 이 글이 보이면 앱이 낡았거나 "
-                    "앱을 거치지 않고 직접 연결된 것입니다 — 그때는 image_base64(작은 그림)나 원시 엔드포인트 "
+                    f"image_path가 존재하는 일반 파일이 아닙니다: {args.image_path} — 이 MCP 서버가 돌고 있는 컴퓨터의 "
+                    "디스크에서 찾은 결과입니다. 경로가 틀렸을 수 있고, 이 서버가 호스팅(원격) 서버라면 에이전트 컴퓨터의 "
+                    "파일은 애초에 보이지 않습니다. 맥 앱(Sprintable 데스크톱)으로 붙은 에이전트는 앱이 image_path를 "
+                    "대신 읽어 보내므로, 호스팅 서버에서 이 글이 보이면 앱이 낡았거나 앱을 거치지 않고 직접 연결된 것입니다 — "
+                    "그때는 image_base64(작은 그림)나 원시 엔드포인트 "
                     "`POST $SPRINTABLE_API_URL/api/v2/visual-artifacts/import-image`를 쓰세요."
                 )
             data = path.read_bytes()
