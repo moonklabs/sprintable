@@ -89,6 +89,8 @@ describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 
   // story #3845 §④ — go-retro 신규(retro가 OTHER_NAV_ITEMS에서 빠지며 이 앵커로 이관).
   // story #3989 — go-hypotheses 신규(가설 탭도 WorkspaceFrameTabs 전용 진입점).
   const GUARD_ANCHOR_IDS = new Set(['go-sprints', 'go-epics', 'go-retro', 'go-work-list', 'go-hypotheses']);
+  // story #4885 — «전체»(/more)는 길잡이 맨 아래 입구인데 NAV_GROUPS 항목이 아니라(ALL_SCREENS_ITEM) 팔레트가 따로 더한다 — 문서화된 예외(순서·집합은 command-palette.order.4885.test.tsx가 잠근다).
+  const ALL_SCREENS_ID = 'all-screens';
 
   it('팔레트 navigate id 집합이 정확히 NAV_GROUPS+OTHER_NAV_ITEMS 전 항목 + CHAT_CENTER_ITEM과 같다(앵커 2개는 문서화된 예외로 제외)', async () => {
     await mount();
@@ -96,7 +98,7 @@ describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 
       [...document.querySelectorAll('[data-command-group="navigate"] [data-command-id]')]
         .map((el) => el.getAttribute('data-command-id')!),
     );
-    const renderedNavIds = new Set([...renderedIds].filter((id) => !GUARD_ANCHOR_IDS.has(id)));
+    const renderedNavIds = new Set([...renderedIds].filter((id) => !GUARD_ANCHOR_IDS.has(id) && id !== ALL_SCREENS_ID));
     const expectedNavIds = new Set([
       ...NAV_GROUPS.flatMap((g) => g.items.map((i) => i.id)),
       ...OTHER_NAV_ITEMS.map((i) => i.id),
@@ -108,6 +110,7 @@ describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 
     expect(renderedNavIds).toEqual(expectedNavIds);
     // 앵커 2개는 여전히 렌더되지만(아래 별도 테스트) 이 집합 밖(문서화된 예외).
     expect([...GUARD_ANCHOR_IDS].every((id) => renderedIds.has(id))).toBe(true);
+    expect(renderedIds.has(ALL_SCREENS_ID)).toBe(true);
   });
 
   // story #3824 조건①(페드루 PO 確定 2026-09-13) — 「나브 밖 항목」의 목록은 한 자리
@@ -125,7 +128,7 @@ describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 
     );
     const navGroupIds = new Set(NAV_GROUPS.flatMap((g) => g.items.map((i) => i.id)));
     const paletteLegacyIds = new Set(
-      [...paletteAllIds].filter((id) => id !== CHAT_CENTER_ITEM.id && !navGroupIds.has(id) && !GUARD_ANCHOR_IDS.has(id)),
+      [...paletteAllIds].filter((id) => id !== CHAT_CENTER_ITEM.id && !navGroupIds.has(id) && !GUARD_ANCHOR_IDS.has(id) && id !== ALL_SCREENS_ID),
     );
 
     const moreContainer = document.createElement('div');
