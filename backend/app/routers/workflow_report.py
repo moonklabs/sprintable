@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.log_safe import url_host
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.gate import Gate, set_gate_evidence_status
@@ -42,7 +43,7 @@ def _fire_webhook(url: str, content: str, title: str, memo_url: str, memo_id: st
             payload = {"text": full_content}
         httpx.post(url, json=payload, timeout=10)
     except Exception:  # noqa: BLE001
-        logger.warning("reply webhook fire failed url=%s", url, exc_info=True)
+        logger.warning("reply webhook fire failed url=%s", url_host(url), exc_info=True)  # story 4869: the host only
 
 router = APIRouter(prefix="/api/v2/workflow", tags=["workflow", "Work"])
 
