@@ -5,7 +5,11 @@ import Link from 'next/link';
 import { Search } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { Card, CardHeader } from '@/components/ui/card';
+import { Card } from '@/components/ds/card';
+import { Icon } from '@/components/ds/icon';
+import { ListRow } from '@/components/ds/list-row';
+import { SectionHeader } from '@/components/ds/section-header';
+import { RAIL_ICON_BY_ITEM_ID } from '@/components/nav/rail-icons';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { MOBILE_HUB_GROUP_ORDER, OTHER_NAV_ITEMS, resolveNavGroups } from '@/lib/nav-config';
@@ -18,7 +22,7 @@ import { MoreTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 import { useCommandPaletteOpener } from '@/components/command-palette/command-palette-context';
 
 // story #2682(모바일 IA S2, doc mobile-ia-full-completion-2678 §2.3) — 임시 평면 stub(#1958·
-// #1965)을 데스크톱 GNB(app-sidebar.tsx) 5 zones를 그대로 미러하는 그룹형 허브로 재건한다.
+// #1965)을 그룹형 허브로 재건한다. 구역·항목의 «종류»는 데스크톱 길잡이(app-sidebar.tsx)와 같은 한 정의(NAV_GROUPS)이고, «순서»는 폰 탭에 맞춰 따로 정한다(MOBILE_HUB_GROUP_ORDER — 사이드바 순서와 다르다).
 // 목적지 목록 자체는 새로 만들지 않는다 — S1이 추출한 NAV_GROUPS(nav-config.ts)를 그대로
 // 소비해 데스크톱과 drift 없이 항상 정합한다(SSOT). 그룹 순서·제외 목록도 story #2684(S4)에서
 // nav-config.ts로 옮겨 depth 가드가 이 페이지 내부를 몰라도 SSOT 하나만 보고 판정할 수 있다.
@@ -140,25 +144,21 @@ export default function MorePage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filteredGroups.map((group) => {
+            // story #4885 — 줄은 ds ListRow(asChild · 기본 높이 · 폰 누름 영역 44 이상) + 항목 아이콘 표(막대 · 길잡이와 같은 rail-icons). 설명은 잘리지 않게 줄바꿈을 허용한다(ListRow 둘째 줄은 한 줄 고정폭이라 안 쓴다).
             const renderItemRow = (item: (typeof group.items)[number]) => {
               const href = item.kind === 'static' ? flatHref(item.path) : scopedResourceHref(item.path, orgSlug, currentProjectSlug, flatHref);
-              const Icon = item.icon;
+              const glyph = RAIL_ICON_BY_ITEM_ID[item.id];
               return (
-                <Link
-                  key={item.id}
-                  href={href}
-                  className="flex min-h-12 items-start gap-3 px-5 py-3 text-sm text-foreground hover:bg-muted sm:px-6"
-                  data-testid="more-menu-link"
-                >
-                  <Icon className="mt-0.5 size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.8} />
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm">{t(item.labelKey)}</span>
-                    {/* 페드루 PO CHANGES①(2026-09-09, 캡처 리뷰) — 설명은 잘리면 정보가
-                        조용히 버려진다(EN 긴 문안이 390px·sm 2열에서 「…」로 죽음). 제목
-                        줄만 truncate, 설명은 줄바꿈 허용. */}
-                    <span className="block text-xs text-muted-foreground">{t(item.descriptionKey)}</span>
-                  </span>
-                </Link>
+                <ListRow key={item.id} asChild className="items-start last:border-b-0">
+                  <Link href={href} data-testid="more-menu-link">
+                    {glyph ? <Icon name={glyph} size={20} className="mt-0.5 text-ds-ink-3" /> : null}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-ds-body font-semibold text-ds-ink">{t(item.labelKey)}</span>
+                      {/* 페드루 PO CHANGES①(2026-09-09, 캡처 리뷰) — 설명은 잘리면 정보가 조용히 버려진다(EN 긴 문안이 390px·sm 2열에서 「…」로 죽음). 제목 줄만 truncate, 설명은 줄바꿈 허용. */}
+                      <span className="block text-ds-small text-ds-ink-3">{t(item.descriptionKey)}</span>
+                    </span>
+                  </Link>
+                </ListRow>
               );
             };
             // story #4292 — 머리 규칙은 구역 조립 한 곳(sectionHeader): 한 항목 이름과 같은 글자의 머리는 그리지 않는다(사이드바와 같은 모양).
@@ -172,15 +172,10 @@ export default function MorePage() {
                 data-testid="more-section-card"
               >
                 {headerKey ? (
-                  <CardHeader>
-                    {/* story #3824 → #4292 — 머리 없는 구역이 여러 항목이면 첫 항목 이름을 머리로 쓴다. 한 항목 구역은 머리 자체가
-                        없다(sectionHeader — 예전엔 그 항목 이름을 끌어와 «결과 › 결과»로 두 번 보였다). */}
-                    <h2 className="flex items-baseline gap-2 text-sm font-semibold text-foreground">
-                      <span data-testid="more-section-header">{t(headerKey)}</span>
-                    </h2>
-                  </CardHeader>
+                  // story #3824 → #4292 — 머리 없는 구역이 여러 항목이면 첫 항목 이름을 머리로 쓴다. 한 항목 구역은 머리 자체가 없다(sectionHeader — 예전엔 «결과 › 결과»로 두 번 보였다).
+                  <SectionHeader title={t(headerKey)} level={2} />
                 ) : null}
-                <div className="divide-y divide-border">{group.items.map(renderItemRow)}</div>
+                <div>{group.items.map(renderItemRow)}</div>
               </Card>
             );
           })}

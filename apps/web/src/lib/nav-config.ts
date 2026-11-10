@@ -170,9 +170,10 @@ export const OTHER_NAV_ITEMS: NavItemConfig[] = [
   { id: 'channel-chat', labelKey: 'channelChat', descriptionKey: 'descChannelChat', icon: MessagesSquare, kind: 'static', path: '/channel' },
 ];
 
-// 모바일 «전체»의 구역 순서(story #4885 · 폰 탭 넷): 하단 탭이 홈 · 대화 · 일감을 덮으니 탭에 없는 매일 구역 **팀 · 지식이 맨 위 두 구역**, 그 뒤 홈 · 일감 쪽에 남은 항목(결재 · 목표 · 실행) · 조직 · 설정(사이드바 순서와 다르다 — 사이드바는 탭이 없어 홈 · 일감이 위).
+// 모바일 «전체»의 구역 순서(story #4885 · 폰 탭 넷): 하단 탭이 홈 · 대화 · 일감을 덮으니 탭에 없는 매일 구역 **팀 · 지식이 맨 위 두 구역**, 그 다음 **설정**, 그 뒤에 홈 · 일감 쪽에 남은 항목(결재 · 목표 · 실행) · 조직(사이드바 순서와 다르다 — 사이드바는 탭이 없어 홈 · 일감이 위).
+// 설정이 조직 뒤(맨 아래 근처)이던 때는 폰 390에서 설정 줄이 y 1819(보이는 높이 780)라 쓸기 3번이었다 — 조직이 줄 10개(약 700px)다. 설정을 지식 바로 뒤로 올려 짧게 한 번(문서는 첫 화면 그대로 — 문서보다 위로는 안 올린다).
 // 탭바가 이미 depth 1로 커버하는 목적지(홈 · 대화 · 일감)는 허브에서 뺀다(탭바가 지금 그리는 탭 기준, mobile-tab-bar.tsx) — 결재 화면은 이제 탭이 아니라 «전체» 목록(+ 홈 본문 · 알림 종)에서 열린다.
-export const MOBILE_HUB_GROUP_ORDER = ['team', 'knowledge', 'now', 'dev', 'org', 'settings'];
+export const MOBILE_HUB_GROUP_ORDER = ['team', 'knowledge', 'settings', 'now', 'dev', 'org'];
 export const MOBILE_HUB_EXCLUDE_IDS = new Set(['org-briefing', 'board', 'chats']);
 
 // 사이드바 맨 아래 «전체» 항목(→ /more)과 챗 center. 챗은 구역 밖 1급 카드(story #2930 I2)로 «오늘» 바로 뒤에 선다 — NAV_GROUPS에는 실리지 않는다.

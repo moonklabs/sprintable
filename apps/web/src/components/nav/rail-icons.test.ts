@@ -3,14 +3,14 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ICON_PATHS } from '@/components/ds/icon-paths';
-import { ALL_SCREENS_ITEM, CHAT_CENTER_ITEM, resolveNavGroups } from '@/lib/nav-config';
+import { ALL_SCREENS_ITEM, CHAT_CENTER_ITEM, OTHER_NAV_ITEMS, resolveNavGroups } from '@/lib/nav-config';
 import { DEFAULT_NAV_V3_FLAGS } from '@/lib/nav-v3-destinations';
 import { RAIL_ICON_BY_ITEM_ID } from './rail-icons';
 
-// 막대가 그리는 항목 = 구역 항목(데스크톱 앱 포함) + 대화 카드 + 전체. 새 항목이 생겼는데 표에 줄이 없으면 아이콘이 «undefined»라 여기서 빨개진다.
+// 막대가 그리는 항목 = 구역 항목(데스크톱 앱 포함) + 대화 카드 + 전체 + «그 밖»(폰 «전체» 맨 아래 구역이 같은 표로 그린다). 새 항목이 생겼는데 표에 줄이 없으면 아이콘이 «undefined»라 여기서 빨개진다.
 const railItemIds = () => {
   const flags = { ...DEFAULT_NAV_V3_FLAGS, desktopDownloadEnabled: true };
-  return [...resolveNavGroups(flags).flatMap((g) => g.items.map((i) => i.id)), CHAT_CENTER_ITEM.id, ALL_SCREENS_ITEM.id];
+  return [...resolveNavGroups(flags).flatMap((g) => g.items.map((i) => i.id)), CHAT_CENTER_ITEM.id, ALL_SCREENS_ITEM.id, ...OTHER_NAV_ITEMS.map((i) => i.id)];
 };
 
 describe('막대 아이콘 표', () => {

@@ -5,7 +5,7 @@
  * ("폐기 신호는 수렴을 잴 수 있어야" — doc §0 취지의 CI판).
  *
  * ── depth 모델(doc §2.2/§2.4) ──────────────────────────────────────────────
- *   depth 1     — MOBILE_HUB_EXCLUDE_IDS(바텀 탭 직행: flow·inbox·chats). 탭 1회.
+ *   depth 1     — MOBILE_HUB_EXCLUDE_IDS(바텀 탭 직행: org-briefing·board·chats — 홈 · 일감 · 대화). 탭 1회.
  *   depth 2     — 그 외 항목 중 그룹이 MOBILE_HUB_GROUP_ORDER에 있다. 「전체」 탭 1회 +
  *                 허브 안 항목 선택 1회. 전제: /more 허브가 아코디언 없는 단일 평면
  *                 목록이라는 것(그 전제 자체는 이 가드가 아니라 more/page.test.tsx의 실
