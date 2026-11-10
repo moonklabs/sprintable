@@ -96,6 +96,13 @@ describe('ActivityLogView — «더 보기» failure (4892 §5 item 6)', () => {
     expect(container.querySelectorAll('[aria-label]').length).toBeGreaterThan(before);
   });
 
+  it('a 403 on the second page is the «접근 불가» state, not a «try again» toast', async () => {
+    await mount(() => ({ ok: false, status: 403, json: async () => ({}) }));
+    await press();
+    expect(addToastMock).not.toHaveBeenCalled();
+    expect(container.textContent).toContain(koMessages.activityLog.forbiddenTitle);
+  });
+
   it('a good second page shows no toast', async () => {
     await mount(() => page(['b1'], 100, 30));
     await press();

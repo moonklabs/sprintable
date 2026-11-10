@@ -141,9 +141,9 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   );
 
   const fetchLogs = useCallback(
-    async (nextOffset = 0) => {
+    async (nextOffset = 0, onForbidden?: () => void) => {
       const res = await fetchWithAuth(`/api/activity-logs?${buildParams(nextOffset)}`);
-      if (res.status === 403) { setForbidden(true); return null; }
+      if (res.status === 403) { setForbidden(true); onForbidden?.(); return null; }
       if (!res.ok) return null;
       const json = await res.json() as { data?: ActivityLogResponse };
       return json.data ?? null;
@@ -181,15 +181,16 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   const loadMore = async () => {
     const nextOffset = offset + PAGE_SIZE;
     setLoadingMore(true);
+    let forbidden403 = false;
     try {
-      const result = await fetchLogs(nextOffset);
+      const result = await fetchLogs(nextOffset, () => { forbidden403 = true; });
       if (result) {
         setItems((prev) => [...prev, ...result.items]);
         setOffset(nextOffset);
         setTotal(result.total);
-      } else {
+      } else if (!forbidden403) {
         // story 4892 — a refused answer used to do nothing at all. The button stays (offset unchanged) so pressing it again asks again;
-        // the same shared line the team activity feed uses.
+        // the same shared line the team activity feed uses. A 403 is not this: the page already turns into the «접근 불가» state.
         addToast({ title: tc('loadMoreFailed'), type: 'error' });
       }
     } catch {
