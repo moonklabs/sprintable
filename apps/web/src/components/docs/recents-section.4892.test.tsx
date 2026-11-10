@@ -116,5 +116,6 @@ describe('RecentsSection — ds SectionHeader + ListRow (4892)', () => {
     expect(rows()[0]!.querySelector('[data-icon="description"]')).not.toBeNull();   // no icon → the ds document glyph
     expect(rows()[1]!.textContent).toContain('📘');                                  // an emoji icon stays
     expect(rows()[0]!.querySelector('span.rounded-full')).not.toBeNull();            // the status dot
+    expect(rows()[0]!.querySelector('span.truncate.min-w-0')?.textContent).toBe('제목-1');   // a long title is cut, not wrapped
   });
 });
