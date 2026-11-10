@@ -98,6 +98,10 @@ async def test_list_projects_empty_when_no_access():
 async def test_create_project_201():
     client, session, app = await _client()
     try:
+        # story 4897: the creator is looked up as an agent first (not one: a person), then given a seat
+        not_an_agent = MagicMock()
+        not_an_agent.scalar_one_or_none.return_value = None
+        session.execute = AsyncMock(return_value=not_an_agent)
         with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
                 patch("app.services.org_project_create.ensure_human_member", new_callable=AsyncMock), \
                 patch("app.services.org_project_create.resolve_unique_project_slug", new=AsyncMock(return_value="sprintable")):

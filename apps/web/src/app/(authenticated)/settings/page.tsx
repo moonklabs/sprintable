@@ -1346,27 +1346,23 @@ export default function SettingsPage() {
                     </Alert>
                   ) : null}
 
-                  {isAdmin ? (
-                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-                      <OperatorInput
-                        value={newProjectName}
-                        onChange={(event) => setNewProjectName(event.target.value)}
-                        placeholder={t('projectNamePlaceholder')}
-                      />
-                      <OperatorInput
-                        value={newProjectDescription}
-                        onChange={(event) => setNewProjectDescription(event.target.value)}
-                        placeholder={t('projectDescriptionPlaceholder')}
-                      />
-                      <Button variant="hero" size="lg" onClick={handleCreateProject} disabled={!newProjectName.trim() || creatingProject}>
-                        {creatingProject ? '...' : t('createProjectAction')}
-                      </Button>
-                    </div>
-                  ) : adminChecked ? (
-                    <Alert variant="warning">
-                      <AlertDescription>{t('projectAdminRequired')}</AlertDescription>
-                    </Alert>
-                  ) : null}
+                  {/* story #4897 — any member of the organization may create a project (the API has always allowed it: POST /api/v2/projects checks the organization and the plan limit, not the role).
+                      The form used to be drawn for org owner/admin only, with a line saying only admins can; the screen now follows the API. Renaming and deleting stay with the admins (the API guards them). */}
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                    <OperatorInput
+                      value={newProjectName}
+                      onChange={(event) => setNewProjectName(event.target.value)}
+                      placeholder={t('projectNamePlaceholder')}
+                    />
+                    <OperatorInput
+                      value={newProjectDescription}
+                      onChange={(event) => setNewProjectDescription(event.target.value)}
+                      placeholder={t('projectDescriptionPlaceholder')}
+                    />
+                    <Button variant="hero" size="lg" onClick={handleCreateProject} disabled={!newProjectName.trim() || creatingProject}>
+                      {creatingProject ? '...' : t('createProjectAction')}
+                    </Button>
+                  </div>
                 </SectionCardBody>
               </SectionCard>
 

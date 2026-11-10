@@ -2113,7 +2113,6 @@
     "createProjectAction": "프로젝트 만들기",
     "projectCreateFailed": "프로젝트 생성에 실패했어요",
     "projectCreated": "{name} 프로젝트를 만들고 작업 공간에 바로 반영했어요.",
-    "projectAdminRequired": "설정에서 프로젝트를 만드는 건 조직 관리자만 가능해요.",
     "projectCreateOrgMissing": "조직 컨텍스트를 찾지 못했어요. 새로고침 후 다시 시도해주세요.",
     "webhooks": "웹훅 설정",
     "defaultWebhook": "기본",

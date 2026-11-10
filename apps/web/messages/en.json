@@ -2113,7 +2113,6 @@
     "createProjectAction": "Create project",
     "projectCreateFailed": "Failed to create project",
     "projectCreated": "Project {name} created and added to your workspace.",
-    "projectAdminRequired": "Only organization admins can create projects from Settings.",
     "projectCreateOrgMissing": "Organization context is missing. Refresh and try again.",
     "webhooks": "Webhook Settings",
     "defaultWebhook": "Default",

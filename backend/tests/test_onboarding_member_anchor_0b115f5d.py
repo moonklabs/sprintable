@@ -121,8 +121,10 @@ async def test_create_project_ensures_human_member():
     session = AsyncMock()
     session.execute = AsyncMock(
         side_effect=[
+            _scalar_result(None),   # story 4897: is the creator an agent? (no — a person)
             MagicMock(),            # org_members INSERT
             _scalar_result(om_id),  # om_id 재조회(캡처)
+            MagicMock(),            # story 4897: the creator's seat on the new project
         ]
     )
     session.commit = AsyncMock()
