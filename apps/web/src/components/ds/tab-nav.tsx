@@ -32,7 +32,7 @@ type TabNavLinkBase = Omit<ComponentProps<'a'>, 'children'> & {
 /** `asChild`면 자식은 링크 요소 하나(예: next/link — Fragment · 글 · 여럿 불가), 아니면 보통 `a`의 내용. */
 export type TabNavLinkProps = TabNavLinkBase & ({ asChild: true; children: ReactElement } | { asChild?: false; children?: ReactNode });
 
-/** 탭줄의 한 칸. 켜진 칸은 줄이 가로 스크롤이어도 화면 안으로 가져온다(이미 보이면 안 움직인다 · 페이지 세로 스크롤은 건드리지 않는다 — story #4277). */
+/** 탭줄의 한 칸. 켜진 칸은 줄이 가로 스크롤이어도 줄 «안»으로 가져온다(줄의 scrollLeft만 — 페이지 세로 스크롤은 건드리지 않는다, story #4277). */
 export function TabNavLink({ active = false, asChild = false, className, children, ref: externalRef, ...props }: TabNavLinkProps) {
   const innerRef = useRef<HTMLAnchorElement | null>(null);
   // 바깥에서 준 ref와 안쪽 ref(scrollIntoView용)를 함께 건다 — 바깥 ref가 안쪽을 덮어쓰면 켜진 탭이 안 보이는 쪽으로 가도 안 따라온다.
@@ -45,7 +45,17 @@ export function TabNavLink({ active = false, asChild = false, className, childre
     [externalRef],
   );
   useEffect(() => {
-    if (active) innerRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    if (!active) return;
+    const link = innerRef.current;
+    const strip = link?.closest<HTMLElement>('[data-slot="ds-tab-nav"]');
+    if (!link || !strip) return;
+    // 줄(스크롤 부모)의 가로 위치만 맞춘다 — scrollIntoView는 줄이 화면 위아래로 일부 가려진 레이아웃에서 «페이지» 세로 스크롤까지 움직일 수 있다.
+    // 이미 보이면 안 움직인다. 오른쪽 흐림(mask) 24px 안쪽에 걸리면 그 폭만큼 더 당겨 완전히 보이게 한다.
+    const l = link.getBoundingClientRect();
+    const s = strip.getBoundingClientRect();
+    const FADE = 24;
+    if (l.left < s.left) strip.scrollLeft -= s.left - l.left;
+    else if (l.right > s.right - FADE) strip.scrollLeft += l.right - (s.right - FADE);
   }, [active]);
   // Fragment · 글 · 여럿은 Slot이 props를 못 입혀 모양 · 접근성이 샌다 — 그리지 않는다(타입도 요소 하나만 받는다).
   if (asChild && (!isValidElement(children) || children.type === Fragment)) return null;
