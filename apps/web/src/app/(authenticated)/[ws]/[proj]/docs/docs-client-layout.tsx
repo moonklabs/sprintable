@@ -16,6 +16,9 @@ import { TreeSearchInput } from '@/components/docs/tree-search-input';
 import { DocSearchResults, type DocSearchResult } from '@/components/docs/doc-search-results';
 import { useTreeExpanded } from '@/components/docs/use-tree-expanded';
 import { Button } from '@/components/ui/button';
+import { Button as DsButton } from '@/components/ds/button';
+import { IconButton } from '@/components/ds/icon-button';
+import { Icon } from '@/components/ds/icon';
 import { Input } from '@/components/ui/input';
 import { CountBadge } from '@/components/ui/count-badge';
 import { SectionHeader } from '@/components/ds/section-header';
@@ -430,7 +433,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     () => (
       // story #4277(민 기기 #5) — 402폭에서 «새 폴더» · «새 문서» 글자 버튼이 셸 TopBar의 shrink-0 액션 칸을 넓혀 알림 벨을 화면 밖으로
       // 밀었다. 스프린트 상단바와 같은 관례: 폰(sm 미만)은 아이콘만 · 글자는 sm 이상 · 접근 이름은 aria-label로 늘 유지.
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5 lg:hidden">
         <Button size="sm" variant="ghost" onClick={handleNewFolder} disabled={folderSubmitting} aria-label={t('newFolder')}>
           <FolderPlus className="h-3.5 w-3.5 sm:mr-1.5" />
           <span className="hidden sm:inline">{t('newFolder')}</span>
@@ -446,23 +449,22 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
 
   const sidebarContent = (
     <>
-      {/* story #2963 §2 — 에디토리얼 마스트헤드(1호 인덱스 축소판). 상태·핸들러 무접촉,
-          형태만 승격 — 6 능력 어디에도 속하지 않는 순수 헤더 삽입.
-          rebase 발견(2026-08-23, #2973/#3391 rebase 중) — railKicker 값이 "지식 · INDEX"
-          (한글+라틴 혼합)인데 font-mono uppercase tracking을 걸어 "지식"까지 mono로
-          흐려지고 있었다(2967 교훈과 동일 결함 클래스, 이 파일의 정렬 토글 라벨과 같은
-          이유로 그때 이미 한 번 고쳐졌던 것을 이 자리는 놓쳤음). sans로 통일 — 계열 대문자
-          표기("INDEX")는 카피 자체가 이미 담당. */}
-      <div className="px-3 pb-1.5 pt-3">
-        <div className="text-micro font-semibold text-muted-foreground">
-          {t('railKicker')}
-        </div>
-        <div className="mt-0.5 font-editorial-heading text-xl leading-none tracking-[-0.03em] text-foreground">
-          {t('title')}
-        </div>
-        {/* story #2983(유나 확定) — 정적 장식 citron 퇴출(citron=live pulse 신호 전용).
-            시그니처는 무채 두께(3px)·길이로 유지. */}
-        <hr className="mt-2 h-[3px] w-8 border-0 bg-proof-line-strong" />
+      {/* story 4892 (UI-9 목록 열) — 열 머리: 제목 + 새 폴더 · 새 문서(ds). 예전 에디토리얼 마스트헤드(kicker · 큰 제목 · 시그니처 선)는 걷었다.
+          두 동작은 lg(레일이 보일 때)에만 여기 있고, lg 미만은 상단 바가 같은 두 동작을 갖는다 — 한 동작이 한 화면에 한 자리. */}
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-ds-line px-3">
+        <h2 className="m-0 min-w-0 flex-1 truncate text-ds-card-title font-semibold text-ds-ink">{t('title')}</h2>
+        <IconButton icon="create_new_folder" label={t('newFolder')} onClick={handleNewFolder} disabled={folderSubmitting} className="hidden lg:inline-flex" />
+        <DsButton
+          type="button"
+          variant="secondary"
+          iconStart={<Icon name="add" size={14} />}
+          onClick={handleNewDoc}
+          disabled={isCreating}
+          aria-label={isCreating ? t('loading') : t('newDoc')}
+          className="hidden lg:inline-flex"
+        >
+          {isCreating ? t('loading') : t('newDoc')}
+        </DsButton>
       </div>
       <TreeSearchInput
         value={searchQuery}
@@ -513,24 +515,18 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           숨긴다(서버 전문검색 결과가 이미 답이라 그룹/트리 뷰 자체가 무의미 — sortMode
           토글과 동일한 판단). */}
       {!isSearching && (
-        <div className="flex border-b border-border/60 px-2 pt-1.5">
+        <div className="flex gap-1 border-b border-ds-line px-3 py-2">
           {(['grouped', 'folders'] as const).map((mode) => (
-            <button
+            <DsButton
               key={mode}
               type="button"
               aria-pressed={viewMode === mode}
               onClick={() => setViewMode(mode)}
-              className={cn(
-                // story #2963 §2 — 언더라인 탭(I3 정본, docs-index.tsx 카테고리 탭과 동일 클래스
-                // 조합: border-b-2 border-proof-citron). setViewMode 호출·localStorage 저장은 무변경.
-                'flex-1 border-b-2 px-2 pb-1.5 text-editorial-meta font-semibold transition-colors',
-                viewMode === mode
-                  ? 'border-proof-citron text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
+              variant={viewMode === mode ? 'secondary' : 'quiet'}
+              className="flex-1"
             >
               {mode === 'grouped' ? t('viewModeGrouped') : t('viewModeFolders')}
-            </button>
+            </DsButton>
           ))}
         </div>
       )}
@@ -546,21 +542,18 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           영문 라벨("Manual order" 등)이 한 줄 flex로 넘칠 구조였다 — flex-wrap 추가.
           #2967 교훈(mono+한글=흐림)도 반영해 font-mono 제거(이 라벨도 한글). */}
       {!isSearching && viewMode === 'folders' && (
-        <div role="group" aria-label={t('sortModeLabel')} className="flex flex-wrap items-center gap-x-2.5 gap-y-1 border-b border-border/60 px-3 py-1.5 text-editorial-meta">
-          <span className="text-muted-foreground">{t('sortModeLabel')}</span>
+        <div role="group" aria-label={t('sortModeLabel')} className="flex flex-wrap items-center gap-1 border-b border-ds-line px-3 py-2">
+          <span className="mr-1 text-ds-small text-ds-ink-3">{t('sortModeLabel')}</span>
           {(['manual', 'title', 'updated_at'] as const).map((mode) => (
-            <button
+            <DsButton
               key={mode}
               type="button"
               aria-pressed={sortMode === mode}
               onClick={() => setSortMode(mode)}
-              className={cn(
-                'transition-colors',
-                sortMode === mode ? 'font-bold text-foreground' : 'text-muted-foreground hover:text-foreground',
-              )}
+              variant={sortMode === mode ? 'secondary' : 'quiet'}
             >
               {mode === 'manual' ? t('sortModeManual') : mode === 'title' ? t('sortModeTitle') : t('sortModeUpdatedAt')}
-            </button>
+            </DsButton>
           ))}
         </div>
       )}
@@ -673,9 +666,9 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
                 {docsTotal !== null && (
                   <p className="px-2 pb-1 text-center text-editorial-meta text-muted-foreground">{t('treeLoadedOfTotal', { loaded: tree.length, total: docsTotal })}</p>
                 )}
-                <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground" disabled={docsLoadingMore} onClick={() => { if (!docsNextCursor || docsLoadingMore) return; setDocsLoadingMore(true); void fetchTree(selectedTags.length ? selectedTags : undefined, docsNextCursor); }}>
+                <DsButton variant="quiet" className="w-full" disabled={docsLoadingMore} onClick={() => { if (!docsNextCursor || docsLoadingMore) return; setDocsLoadingMore(true); void fetchTree(selectedTags.length ? selectedTags : undefined, docsNextCursor); }}>
                   {docsLoadingMore ? tc('loading') : tc('loadMore')}
-                </Button>
+                </DsButton>
               </div>
             )}
           </>
@@ -711,7 +704,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             flex-wrap으로 고쳤지만, 236px 고정폭 레일 전체에 대한 방어로 overflow-x-hidden도
             동반(다른 미래 콘텐츠의 동일 결함 클래스 재발 방지). */}
         {!sidebarCollapsed && (
-          <aside className="focus-inset relative hidden w-[236px] flex-shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r border-border/80 bg-background lg:flex">
+          <aside className="focus-inset relative hidden w-[300px] flex-shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r border-ds-line bg-ds-background lg:flex">
             <button
               type="button"
               onClick={handleToggleSidebar} aria-expanded={!sidebarCollapsed}
