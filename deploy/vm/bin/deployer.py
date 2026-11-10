@@ -842,7 +842,7 @@ class Deployer:
         name = migrate_name(cand.release)
         cleared = self._stop_migrate(cand, MIGRATE_NAME_PREFIX, "before the migration")   # what an earlier, cut-off run left behind (a crashed deployer) must not hold the locks of this one
         if not cleared.containers:
-            raise DeployError("an earlier migration's container could not be removed (see the log): the new one would meet its name and its locks", "pre-swap")
+            raise DeployError("an earlier migration's container could not be listed or removed (see the log): the new one would meet its name and its locks", "pre-swap")
         rc, out = self._compose(cand.release, cand.env, "run", "--rm", "--name", name, "-e", f"PGAPPNAME={name}", "migrate", profile="migrate", timeout=T_MIGRATE)
         if rc == 124 and out.startswith("timed out after"):   # Runner.run's own answer for a call that ran out of time (a container that exits with 124 by itself is an ordinary failure)
             stopped = self._stop_migrate(cand, name, "after the timeout")
@@ -880,13 +880,17 @@ class Deployer:
                     self.log(f"migrate container removal failed {when}: {self._scrub(out)[-200:]}")
                 else:
                     self.log(f"removed {len(ids)} migrate container(s) {when}")
+        except Exception as e:  # noqa: BLE001
+            containers = False
+            self.log(f"stopping the migration's containers failed {when}: {type(e).__name__}")
+        try:   # a separate stage: a failure here says nothing about the containers
             rc, out = self._compose(cand.release, cand.env, "exec", "-T", "db", "sh", "-c", MIGRATE_SQL_SHELL, "sh", *migrate_sessions_sql(name + "%"), timeout=60)
             if rc != 0:
                 sessions = False
                 self.log(f"ending the migration's database sessions failed {when}: {out[-200:]}")
         except Exception as e:  # noqa: BLE001
-            self.log(f"stopping the migration failed {when}: {type(e).__name__}")
-            return Stopped(False, False)
+            sessions = False
+            self.log(f"ending the migration's database sessions failed {when}: {type(e).__name__}")
         return Stopped(containers, sessions)
 
     def _rollback(self, current: Mapping | None) -> str:

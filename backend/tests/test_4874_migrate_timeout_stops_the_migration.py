@@ -11,7 +11,6 @@ The first group runs the deployer against a fake docker that REMEMBERS what is r
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -20,9 +19,8 @@ import uuid
 from pathlib import Path
 
 import pytest
-import yaml
 
-from tests.test_4796_vm_deployer import BUCKET, D, FakeRunner, _state, world  # noqa: F401 — `world` is a fixture used by name
+from tests.test_4796_vm_deployer import D, FakeRunner, _state, world  # noqa: F401 — `world` is a fixture used by name
 
 _VM = Path(__file__).resolve().parents[2] / "deploy/vm"
 _CID = "c0ffee" + "0" * 58     # a container id as `docker ps -aq --no-trunc` prints it
@@ -39,6 +37,7 @@ class DaemonRunner(FakeRunner):
         self.session_alive = False
         self.timeout_next_migrate = False
         self.rm_rc = 0
+        self.sessions_raise = False
         self.container_name = _NAME_B
         self.log_of_effects: list[str] = []
 
@@ -57,6 +56,8 @@ class DaemonRunner(FakeRunner):
             return self.rm_rc, "" if self.rm_rc == 0 else "Error response from daemon: cannot remove"
         if a[:2] == ["docker", "compose"] and "pg_terminate_backend" in joined:
             self.calls.append({"args": a, "env": dict(env), "stdin": stdin, "whole": whole, "timeout": timeout})
+            if self.sessions_raise:
+                raise OSError("docker compose exec could not start")
             self.session_alive = False
             self.log_of_effects.append("sessions ended")
             return 0, "1\n"
@@ -158,8 +159,7 @@ def test_a_container_that_cannot_be_removed_is_said_so_and_the_swap_still_does_n
 
 def test_a_migration_that_fails_on_its_own_is_not_treated_as_a_timeout(world) -> None:
     runner = _deploy_b_over_a(world, timeout_b=False)
-    runner.fail_on["run --rm migrate"] = 1
-    # FakeRunner's marker applies to calls DaemonRunner does not handle itself: make the migration fail by its own exit code
+    # make the migration fail by its own exit code
     orig = runner.run
 
     def failing(args, env, **kw):
@@ -200,8 +200,25 @@ def test_an_earlier_container_that_cannot_be_removed_stops_the_deploy_before_a_n
     assert world.dep.run_once() == "failed"
     assert "run" not in runner.verbs() and "up:all" not in runner.verbs()
     failed = _state(world, "failed.json")
-    assert failed["phase"] == "pre-swap" and "earlier migration's container could not be removed" in failed["detail"]
+    assert failed["phase"] == "pre-swap" and "earlier migration's container could not be listed or removed" in failed["detail"]
     assert _state(world, "current.json")["sha"] == "a" * 40
+
+
+def test_a_failure_of_the_sessions_statement_is_not_taken_for_a_container_that_cannot_be_removed(world) -> None:
+    """the two stages are told apart: the containers were removed, only the database statement could not run — the deploy goes on to the migration (a session left over makes it fail on the lock timeout, a clean pre-swap failure)"""
+    runner = _deploy_b_over_a(world, timeout_b=False)
+    runner.container_alive = True
+    runner.sessions_raise = True
+    assert world.dep.run_once() == "deployed"
+    assert runner.container_alive is False and any("ending the migration's database sessions failed" in m for m in world.logs)
+
+
+def test_a_timeout_whose_sessions_statement_cannot_run_says_it_could_not_stop_everything(world) -> None:
+    runner = _deploy_b_over_a(world)
+    runner.sessions_raise = True
+    assert world.dep.run_once() == "failed"
+    failed = _state(world, "failed.json")
+    assert "migrate timed out" in failed["detail"] and "could NOT be stopped" in failed["detail"] and "up:all" not in runner.verbs()
 
 
 def test_the_names_are_per_release_and_the_backend_never_has_one() -> None:
