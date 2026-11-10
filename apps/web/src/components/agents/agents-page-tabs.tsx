@@ -47,7 +47,22 @@ export function AgentsPageTabs() {
   const dashboardCtx = useDashboardContext();
   const { projectId, orgId } = dashboardCtx;
   const flatHref = useFlatHref();
-  const [activeTab, setActiveTab] = useState<AgentsTab>(() => resolveTab(searchParams.get('tab')));
+  // story #4885 («팀» 탭줄) — 바깥 «팀» 줄의 «채용» 링크(?tab=recruit)는 같은 화면의 쿼리만 바꿔 이 컴포넌트를 다시 마운트하지 않는다 → 주소가 바뀌면 안쪽 탭도 따라가야 하고(아래 «렌더 중 이전 값 비교»),
+  // 안쪽 탭을 누르면 주소도 같이 바꿔(selectTab) 바깥 줄의 «지금 여기»와 어긋나지 않는다. 주소 쓰기는 history.replaceState(Next가 useSearchParams와 이어 줌 · 서버 왕복 0).
+  const urlTab = resolveTab(searchParams.get('tab'));
+  const [activeTab, setActiveTab] = useState<AgentsTab>(urlTab);
+  const [seenUrlTab, setSeenUrlTab] = useState<AgentsTab>(urlTab);
+  if (seenUrlTab !== urlTab) {
+    setSeenUrlTab(urlTab);
+    setActiveTab(urlTab);
+  }
+  const selectTab = (tab: AgentsTab) => {
+    setActiveTab(tab);
+    if (typeof window === 'undefined') return;
+    const sp = new URLSearchParams(window.location.search);
+    sp.set('tab', tab);
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}?${sp.toString()}${window.location.hash}`);
+  };
   // story 4891 — the person's role belongs to ONE organization (an organization switch re-renders this page without remounting it): the answer is kept with the organization it was asked for,
   // and only an answer for the CURRENT organization counts (the Access tab must not stay open for an organization where the person is no admin). The Recruit pane does not use the role.
   const [me, setMe] = useState<{ org: string | null; isAdmin: boolean } | null>(null);
@@ -79,7 +94,7 @@ export function AgentsPageTabs() {
   return (
     <>
       <TopBarSlot title={<AgentsTopBarTitle />} showContextChip />
-      <Tabs value={effectiveTab} onValueChange={(v) => setActiveTab(v as AgentsTab)}>
+      <Tabs value={effectiveTab} onValueChange={(v) => selectTab(v as AgentsTab)}>
         <div className="border-b border-border px-6">
           <TabsList variant="line">
             <TabsTrigger value="stats">
@@ -111,7 +126,7 @@ export function AgentsPageTabs() {
         </TabsContent>
 
         <TabsContent value="manage">
-          <AgentManagementTab onAddAgent={() => setActiveTab('recruit')} />
+          <AgentManagementTab onAddAgent={() => selectTab('recruit')} />
         </TabsContent>
 
         <TabsContent value="recruit">
@@ -122,7 +137,7 @@ export function AgentsPageTabs() {
               projectId={projectId}
               orgId={orgId}
               showTopBar={false}
-              onExit={() => setActiveTab('manage')}
+              onExit={() => selectTab('manage')}
             />
           )}
         </TabsContent>
