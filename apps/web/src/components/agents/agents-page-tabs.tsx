@@ -61,7 +61,8 @@ export function AgentsPageTabs() {
     if (typeof window === 'undefined') return;
     const sp = new URLSearchParams(window.location.search);
     sp.set('tab', tab);
-    window.history.replaceState(window.history.state, '', `${window.location.pathname}?${sp.toString()}${window.location.hash}`);
+    // ⚠️state 인자는 null이어야 한다 — Next는 자기 라우터 상태(`__NA` 등)를 든 호출을 «이미 처리된 것»으로 보고 useSearchParams에 안 알린다(바깥 «팀» 줄이 «채용»을 못 따라가던 실측 결함 · dev 11-11).
+    window.history.replaceState(null, '', `${window.location.pathname}?${sp.toString()}${window.location.hash}`);
   };
   // story 4891 — the person's role belongs to ONE organization (an organization switch re-renders this page without remounting it): the answer is kept with the organization it was asked for,
   // and only an answer for the CURRENT organization counts (the Access tab must not stay open for an organization where the person is no admin). The Recruit pane does not use the role.
