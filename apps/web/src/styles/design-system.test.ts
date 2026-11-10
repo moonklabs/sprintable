@@ -63,7 +63,7 @@ describe('design-system.css — 새 뜻 이름 토큰(--ds-*)', () => {
 
   const TEXT_PAIRS: Array<[string, string]> = [
     ['ds-ink', 'ds-surface'], ['ds-ink', 'ds-background'], ['ds-ink', 'ds-surface-high'],
-    ['ds-ink-2', 'ds-surface'], ['ds-ink-3', 'ds-surface'], ['ds-ink-3', 'ds-surface-sunk'], ['ds-ink-3', 'ds-surface-high'],
+    ['ds-ink-2', 'ds-surface'], ['ds-ink-3', 'ds-surface'], ['ds-ink-3', 'ds-surface-sunk'], ['ds-ink-3', 'ds-surface-high'], ['ds-ink-3', 'ds-background'], ['ds-action-text', 'ds-background'],
     ['ds-on-action', 'ds-action'], ['ds-action-text', 'ds-surface'], ['ds-action-text', 'ds-action-soft'],
     ['ds-needs-hand', 'ds-surface'], ['ds-needs-hand', 'ds-needs-hand-soft'], ['ds-on-needs-hand', 'ds-needs-hand-bar'],
     ['ds-done', 'ds-surface'], ['ds-done', 'ds-done-soft'],
