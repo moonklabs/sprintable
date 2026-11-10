@@ -1,5 +1,5 @@
 """story 4893 — the hosted MCP server is REMOTE: it looks for `image_path` on its own disk. The tool said «if the file is local, use image_path (the server reads it)»,
-which led every Mac-app agent into «not a regular file». The Mac app's host now reads the file and sends `image_base64` (a separate change in the desktop repo); what this
+which led every Mac-app agent into «not a regular file». A Mac app version that converts it reads the file in its host and sends `image_base64` (a separate change in the desktop repo; an older app does not); what this
 server owes the agent is the truth: the refusal text says WHY (the server is remote and looked on ITS disk) and what to do, and the tool descriptions no longer promise that
 the server reads the agent's file."""
 from __future__ import annotations
@@ -134,3 +134,11 @@ async def test_the_refusal_puts_the_app_condition_in_the_sentence_that_promises_
     text = out[0].text
     assert "이 변환을 하는 버전의 맥 앱" in text
     assert "맥 앱(Sprintable 데스크톱)으로 붙은 에이전트는 앱이 image_path를" not in text
+
+
+def test_the_large_image_advice_and_the_user_facing_text_have_no_unconditional_app_claim_or_hanja():
+    """self-QA (codex, 2nd round): the «too big for base64 → image_path» advice names the condition; no hanja in the description text"""
+    import_desc = _DESC["sprintable_import_image_artifact"]
+    assert "그보다 크면 (image_path가 읽히는 경우면) image_path를" in import_desc
+    assert "(맥 앱이면)" not in import_desc
+    assert "確" not in import_desc and "認" not in import_desc

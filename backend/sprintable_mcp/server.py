@@ -888,7 +888,7 @@ _TOOL_DEFS: list[tuple] = [
      " 직접 돌리면(uvx · stdio · 로컬 HTTP) 서버가 곧 그 컴퓨터라 image_path가 그대로 읽힌다. image_base64는 그 밖의 에이전트용 대안이다 — 도구 호출 인자"
      " 텍스트로 그대로 실리므로 호출하는 에이전트 자신이 그 base64 문자열을 «다시 타이핑»해야"
      " 하고, 그 재타이핑 과정에서 오탈자 몇 자만 생겨도 이미지가 깨진 채로 저장된다(실사고"
-     " 확認·story #3753) — 대략 수백 KB 이하의 작은 이미지에만 쓰고, 그보다 크면 (image_path가 읽히는 경우면) image_path를"
+     " 확인·story #3753) — 대략 수백 KB 이하의 작은 이미지에만 쓰고, 그보다 크면 (image_path가 읽히는 경우면) image_path를"
      " 쓰거나, Bash/HTTP 클라이언트가 있는 에이전트는 이 원콜과 같은 계약의 원시 엔드포인트"
      " `POST $SPRINTABLE_API_URL/api/v2/visual-artifacts/import-image`를 직접 curl해도 된다"
      "(JSON body, 헤더 Authorization: Bearer $AGENT_API_KEY, BE 자체 상한 20MB)."
