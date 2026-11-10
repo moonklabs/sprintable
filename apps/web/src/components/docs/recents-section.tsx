@@ -56,8 +56,8 @@ export function RecentsSection({ recentSlugs, docs, selectedSlug, onSelect, labe
           <ul>
             {recentDocs.map((doc) => (
               <li key={doc.id}>
-                {/* 36px: the rail is 236px wide and the old row was ~32px — the ds default 56px would push the tree down by ~80px for four recents. A compact ListRow variant is a question to design (UI-3), not decided here. */}
-                <ListRow asChild selected={selectedSlug === doc.slug} className="min-h-9 py-1.5">
+                {/* a narrow list (the 236px rail): the ds compact density (36px; 44px on a coarse pointer), not the default 56 */}
+                <ListRow asChild selected={selectedSlug === doc.slug} density="compact">
                   <button
                     type="button"
                     onClick={() => onSelect(doc.slug)}

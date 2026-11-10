@@ -50,11 +50,12 @@ describe('RecentsSection — ds SectionHeader + ListRow (4892)', () => {
     expect(header()!.querySelector('h2')).not.toBeNull();
   });
 
-  it('the heading is level 2 (the sidebar sits before the page h1) and the rows stay compact (36px, not the ds 56px) in the 236px rail', async () => {
+  it('the heading is level 2 (the sidebar sits before the page h1) and the rows use the ds compact density (36px, not the default 56) in the narrow rail', async () => {
     await mount();
     expect(header()!.querySelector('h2')).not.toBeNull();
     expect(header()!.querySelector('h3')).toBeNull();
     for (const r of rows()) {
+      expect(r.getAttribute('data-density')).toBe('compact');
       const cls = r.className.split(/\s+/);
       expect(cls).toContain('min-h-9');
       expect(cls).not.toContain('min-h-14');
