@@ -106,6 +106,24 @@ export function isPermissionRequestNotice(data: string): boolean {
 }
 
 /**
+ * story #4885 — the events that can move the approvals a person has to decide (the gate events, an agent's permission-request notice sent to me, a request's later change): ONE list, read by
+ * both the sidebar's live count (`subscribeDesignatedPendingCount`) and the home model (which re-reads when one comes). Returns the unsubscribe.
+ */
+export function subscribeApprovalEvents(
+  mux: { subscribe: (eventName: string, handler: (data: string) => void) => () => void },
+  onEvent: (data: string) => void,
+): () => void {
+  const unsubs = DESIGNATED_PENDING_COUNT_EVENTS.map((name) => mux.subscribe(name, onEvent));
+  // story #4533 — an agent's permission request sent to me counts too (the server adds it): its bell notice recounts.
+  // story #4612: by the name the server really writes — a person's notice is the NAMED frame `event: dispatched` (backend
+  // routers/events.py); the `event_notification` this listened to is a name no server code sends, so the count never moved on it
+  unsubs.push(mux.subscribe('dispatched', (data) => { if (isPermissionRequestNotice(data)) onEvent(data); }));
+  // story #4612: a request's later change (answered · withdrawn · rejected · back to pending) moves the count too
+  unsubs.push(mux.subscribe(PERMISSION_REQUEST_CHANGED_EVENT, onEvent));
+  return () => { for (const unsub of unsubs) unsub(); };
+}
+
+/**
  * story #4263 AC2 — 결재 대기 수의 라이브 갱신 한 곳(예전엔 app-sidebar에만 있었다). 위 이벤트마다 다시 묻되, 연결 직후 백필 중 마지막 수에
  * 이미 보였던 이벤트는 건너뛴다(#4245 워터마크 · isEventReflectedInLastCount). 반환 = 구독 해지.
  */
@@ -113,17 +131,9 @@ export function subscribeDesignatedPendingCount(
   mux: { subscribe: (eventName: string, handler: (data: string) => void) => () => void },
   onCount: (count: number) => void,
 ): () => void {
-  const refetch = (data: string) => {
+  return subscribeApprovalEvents(mux, (data) => {
     if (isEventReflectedInLastCount(data)) return;
     // story #4263 ① — 이벤트가 부른 재조회는 이벤트 전에 뜬 요청에 합류하지 않는다(fresh).
     void fetchDesignatedPendingCount({ fresh: true }).then((count) => { if (count !== null) onCount(count); });
-  };
-  const unsubs = DESIGNATED_PENDING_COUNT_EVENTS.map((name) => mux.subscribe(name, refetch));
-  // story #4533 — an agent's permission request sent to me counts too (the server adds it): its bell notice recounts.
-  // story #4612: by the name the server really writes — a person's notice is the NAMED frame `event: dispatched` (backend
-  // routers/events.py); the `event_notification` this listened to is a name no server code sends, so the count never moved on it
-  unsubs.push(mux.subscribe('dispatched', (data) => { if (isPermissionRequestNotice(data)) refetch(data); }));
-  // story #4612: a request's later change (answered · withdrawn · rejected · back to pending) moves the count too
-  unsubs.push(mux.subscribe(PERMISSION_REQUEST_CHANGED_EVENT, refetch));
-  return () => { for (const unsub of unsubs) unsub(); };
+  });
 }

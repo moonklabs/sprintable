@@ -2,6 +2,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { fetchWithAuth } from '@/lib/db/client';
+import { useSseMultiplexerContext } from '@/components/realtime-provider';
+import { subscribeApprovalEvents } from '@/lib/designated-pending-count-client';
 import { parseCursorMeta } from '@/lib/pagination';
 import { EMPTY_TODAY_SNAPSHOT, parseToday, type TodayCompletedItem, type TodaySnapshot } from '@/components/org-briefing/derive-today';
 import {
@@ -32,6 +34,10 @@ import {
  */
 
 export const HOME_POLL_MS = 60_000;
+/** events that arrive together (a reconnect's backfill, a gate resolved + its notice) are ONE re-read: the first event starts this wait, the read happens when it ends */
+export const HOME_EVENT_COALESCE_MS = 300;
+/** any notice sent to me (chat messages are notices too) re-reads at most this often — an approval event does not wait for it */
+export const HOME_NOTICE_MIN_INTERVAL_MS = 10_000;
 /** unread notifications are read in pages of 50: the newest ones first, up to this many pages (250) — most unread ones are approvals and chat messages, so an actionable one can be far down */
 export const NOTIFICATION_PAGES = 5;
 
@@ -165,6 +171,9 @@ export function HomeModelProvider({ viewerMemberId, projectId, orgId, children }
   // a load is on its way: the 60-second tick does not start a second one beside it (the «tab is back» read and a retry still do — the newest wins)
   const inFlight = useRef(false);
   const lastRead = useRef<Read | null>(null);
+  // when the newest read was committed — with the live stream up, coming back to the tab does not re-read a read younger than the poll interval (the stream moves the approvals · notices; the poll bounds the rest)
+  const lastReadAt = useRef(0);
+  const mux = useSseMultiplexerContext();
 
   useEffect(() => {
     let alive = true;
@@ -201,14 +210,38 @@ export function HomeModelProvider({ viewerMemberId, projectId, orgId, children }
           || (projectId !== undefined && (storiesJson === null || membersJson === null || !pageIsLast(storiesJson.meta, (storiesJson.data ?? []).length, STORIES_PAGE_SIZE, 'home/stories').last)),
       };
       lastRead.current = next;
+      lastReadAt.current = Date.now();
       setRead(next);
     };
     void load();
     const timer = setInterval(() => { void load(true); }, HOME_POLL_MS);
-    const onVisible = () => { if (document.visibilityState === 'visible') void load(); };
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (mux?.isAlive() && Date.now() - lastReadAt.current < HOME_POLL_MS) return;
+      void load();
+    };
     document.addEventListener('visibilitychange', onVisible);
-    return () => { alive = false; clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
-  }, [projectId, viewerMemberId, orgId, nonce]);
+    // story #4885 — live: an approval event (gate resolved · delegated · tossed · a permission request or its change) or any notice sent to me moves what the home model counts, so it re-reads
+    // at once (one read for a burst of events) instead of waiting for the next poll. This is where the phone tab bar's own live count went when its badge became the home model's number (4263 AC2).
+    let coalesce: ReturnType<typeof setTimeout> | null = null;
+    // an approval event preempts a notice's longer wait (a person waiting on an approval must not wait out the notice throttle)
+    const schedule = (wait: number, preempt: boolean) => {
+      if (coalesce !== null) { if (!preempt) return; clearTimeout(coalesce); }
+      coalesce = setTimeout(() => { coalesce = null; void load(); }, wait);
+    };
+    const onApprovalEvent = () => schedule(HOME_EVENT_COALESCE_MS, true);
+    const onNotice = () => schedule(Math.max(HOME_EVENT_COALESCE_MS, lastReadAt.current + HOME_NOTICE_MIN_INTERVAL_MS - Date.now()), false);
+    const unsubs: Array<() => void> = [];
+    if (mux) {
+      unsubs.push(subscribeApprovalEvents(mux, onApprovalEvent));
+      unsubs.push(mux.subscribe('dispatched', onNotice));
+    }
+    return () => {
+      alive = false; clearInterval(timer); document.removeEventListener('visibilitychange', onVisible);
+      if (coalesce !== null) clearTimeout(coalesce);
+      for (const unsub of unsubs) unsub();
+    };
+  }, [projectId, viewerMemberId, orgId, nonce, mux]);
 
   const retry = useCallback(() => setNonce((n) => n + 1), []);
   const value = useMemo<HomeModelState>(() => {

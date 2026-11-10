@@ -27,7 +27,8 @@ const pass = ({ children }: { children?: ReactNode }) => <>{children}</>;
 const none = () => null;
 const sidebar = { slug: undefined as string | undefined };
 const rail = { slug: undefined as string | undefined, listColumn: undefined as { open: boolean; onToggle: () => void } | undefined };
-vi.mock('@/components/realtime-provider', () => ({ RealtimeProvider: pass }));
+// story #4885 — the home model provider (inside the shell) reads the live stream handle; this test has none
+vi.mock('@/components/realtime-provider', () => ({ RealtimeProvider: pass, useSseMultiplexerContext: () => null }));
 vi.mock('@/components/auth/session-expired-dialog', () => ({ SessionExpiredDialog: none }));
 vi.mock('@/components/ui/toast', () => ({ ToastProvider: pass }));
 vi.mock('@/components/nav/bottom-dock', () => ({ BottomDock: none }));
