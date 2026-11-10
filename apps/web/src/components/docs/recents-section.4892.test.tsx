@@ -71,6 +71,17 @@ describe('RecentsSection — ds SectionHeader + ListRow (4892)', () => {
     expect(rows().map((r) => r.getAttribute('aria-current'))).toEqual([null, null]);
   });
 
+  it('the open row is drawn selected (ds ListRow selected) and the others are not', async () => {
+    await mount({ selectedSlug: 'policy-b' });
+    expect(rows().map((r) => r.className.split(/\s+/).includes('bg-ds-surface-high'))).toEqual([false, true]);
+  });
+
+  it('slugs that match no doc at all give no count, not «0»', async () => {
+    await mount({ recentSlugs: ['gone', 'also-gone'] });
+    expect(header()!.textContent).toBe('최근');
+    expect(rows().length).toBe(0);
+  });
+
   it('the heading collapses and opens the list (aria-expanded follows)', async () => {
     await mount();
     expect(toggle()!.getAttribute('aria-expanded')).toBe('true');
