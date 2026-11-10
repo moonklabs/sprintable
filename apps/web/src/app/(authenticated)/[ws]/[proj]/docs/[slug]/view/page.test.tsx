@@ -241,7 +241,7 @@ describe('DocViewPage — 상세 열 읽기 화면이 ds 부품을 입는다 (48
     await mount();
     const root = [...container.querySelectorAll('a')].find((a) => a.textContent === '지식') as HTMLAnchorElement;
     expect(root.getAttribute('href')).toBe('/ws1/proj1/docs');
-    const bar = root.parentElement!;
+    const bar = root.parentElement!.parentElement!;   // breadcrumb block → header bar
     const cls = bar.className.split(/\s+/);
     expect(cls).toContain('border-ds-line');
     expect(cls).toContain('bg-ds-background');
@@ -251,9 +251,47 @@ describe('DocViewPage — 상세 열 읽기 화면이 ds 부품을 입는다 (48
     expect(cls).not.toContain('h-10');
   });
 
+  it('⭐머리는 줄바꿈 구조 — 빵부스러기 한 덩어리(바닥 폭)와 오른쪽 동작 무리가 따로이고, 좁으면 동작이 둘째 줄로 내려간다(320 · 360 · 390)', async () => {
+    await mount();
+    const root = [...container.querySelectorAll('a')].find((a) => a.textContent === '지식') as HTMLAnchorElement;
+    const crumbs = root.parentElement!;
+    const bar = crumbs.parentElement!;
+    expect(bar.className.split(/\s+/)).toContain('flex-wrap');
+    expect(crumbs.className.split(/\s+/)).toContain('basis-[11rem]');
+    expect(crumbs.className.split(/\s+/)).toContain('min-w-0');
+    const actions = [...bar.children].find((c) => c !== crumbs) as HTMLElement;
+    expect(actions.className.split(/\s+/)).toContain('ml-auto');
+    expect(actions.className.split(/\s+/)).toContain('shrink-0');
+    // the breadcrumb pieces are still direct children of one row (the 4356 e2e measures root → category → title as siblings)
+    expect([...crumbs.children].map((c) => c.textContent)).toEqual(['지식', '/', '제품 스펙', '/', '결제 스펙 v2'].filter((x) => x !== undefined));
+  });
+
   it('오른쪽 레일의 선도 ds 선이다', async () => {
     await mount();
     const aside = container.querySelector('aside')!;
     expect(aside.className.split(/\s+/)).toContain('lg:border-ds-line');
+  });
+});
+
+describe('DocViewPage — 읽기 전용 문서(스프린트 리포트)는 고치기 · 삭제를 내놓지 않는다 (4892)', () => {
+  const REPORT = { ...DOC, doc_type: 'sprint_report' };
+
+  it('⭐스프린트 리포트: «읽기 | 고치기» 한 쌍이 없고, 공유와 ⋯ 메뉴는 있되 메뉴에 삭제가 없다', async () => {
+    await mount(REPORT as unknown as typeof DOC);
+    expect(container.querySelector('[data-slot="doc-mode-switch"]')).toBeNull();
+    expect([...container.querySelectorAll('a')].some((a) => a.textContent === '고치기')).toBe(false);
+    expect(container.querySelector('[data-testid="docs-reader-share"]')).toBeTruthy();
+    const trigger = container.ownerDocument.querySelector(`button[aria-label="${koMessages.docs.moreActions}"]`) as HTMLElement;
+    await act(async () => {
+      trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+      trigger.click();
+    });
+    expect(container.ownerDocument.querySelector('[data-testid="docs-reader-menu-share"]')).toBeTruthy();
+    expect(container.ownerDocument.querySelector('[data-testid="docs-reader-menu-delete"]')).toBeNull();
+  });
+
+  it('보통 문서는 한 쌍도 삭제도 있다(위 가드가 일반 문서까지 지우지 않는다)', async () => {
+    await mount();
+    expect(container.querySelector('[data-slot="doc-mode-switch"]')).toBeTruthy();
   });
 });

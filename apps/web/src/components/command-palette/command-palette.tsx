@@ -328,7 +328,7 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   }
 
   function handleSelectDoc(doc: DocResult) {
-    router.push(`${docsHref}/${doc.slug}`);
+    router.push(`${docsHref}/${doc.slug}/view`);   // story 4892 (D1): a document picked from the palette opens to read
     handleOpenChange(false);
   }
 

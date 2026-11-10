@@ -34,6 +34,8 @@ interface DocDetail {
   // 이미 이 필드들을 slug-query 단건 경로에서 내려주고 있었다(doc-payload enrich) — 이
   // 옛 최소 타입엔 없었을 뿐(fetchTree/Doc 타입과 동형 갭).
   status?: string;
+  // story 4892 — a sprint report is read-only (the editor page opens it non-editable and hides «삭제»); the reading screen must not offer what the editor hides.
+  doc_type?: string;
   parent_id?: string | null;
   updated_at?: string;
   assignee?: { id: string; name: string } | null;
@@ -130,6 +132,7 @@ export default function DocViewPage() {
   }
 
   const readMinutes = estimateReadMinutes(doc.content);
+  const readOnlyDoc = doc.doc_type === 'sprint_report';
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -139,21 +142,27 @@ export default function DocViewPage() {
           한글 경로는 sans 본문체로 — 위계는 크기/weight/citron rule로만 낸다. */}
       {/* story 4892 (UI-9 상세 열, 읽기) — 머리 한 줄이 ds 면 · 선 · 글자색을 입는다. «고치기»는 머리 오른쪽의 ds 보조 단추(주 단추 아님 — 읽는 화면의 주 동작은 읽기).
           [SID:4356] 좁은 폭에서 «지식»이 꺾이지 않게: 뿌리 · 구분은 줄지 않고(shrink-0 · nowrap), 분류 · 제목은 한 줄 말줄임(제목은 남는 자리만 · 바닥 3rem). */}
-      <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-ds-line bg-ds-background px-4 py-1 text-ds-small text-ds-ink-3 lg:px-8">
-        <Link href={docsListUrl(wsSlug, projSlug)} className="shrink-0 whitespace-nowrap hover:text-ds-ink hover:underline">{t('breadcrumbKnowledgeRoot')}</Link>
-        {categoryLabel ? (<><span className="shrink-0">/</span><span className="min-w-0 truncate">{categoryLabel}</span></>) : null}
-        <span className="shrink-0">/</span>
-        <span className="min-w-[3rem] flex-1 truncate text-ds-ink">{doc.title}</span>
+      {/* The header wraps: the breadcrumb (root / category / title) is one block with a floor width (basis 11rem), the actions sit at its right and drop to a second
+          line right-aligned when the row is too narrow (320 / 360 / 390) — so the actions can never push the breadcrumb out. */}
+      <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-ds-line bg-ds-background px-4 py-1 text-ds-small text-ds-ink-3 lg:px-8">
+        <div className="flex min-w-0 flex-1 basis-[11rem] items-center gap-2">
+          <Link href={docsListUrl(wsSlug, projSlug)} className="shrink-0 whitespace-nowrap hover:text-ds-ink hover:underline">{t('breadcrumbKnowledgeRoot')}</Link>
+          {categoryLabel ? (<><span className="shrink-0">/</span><span className="min-w-0 truncate">{categoryLabel}</span></>) : null}
+          <span className="shrink-0">/</span>
+          <span className="min-w-[3rem] flex-1 truncate text-ds-ink">{doc.title}</span>
+        </div>
         <span className="ml-auto flex shrink-0 items-center gap-1">
           <DocToc headings={headings} onHeadingClick={scrollToHeading} />
-          <DocModeSwitch
-            mode="read"
-            readHref={`${docUrl(wsSlug, projSlug, slug)}/view`}
-            editHref={docUrl(wsSlug, projSlug, slug)}
-            readLabel={t('modeRead')}
-            editLabel={t('editDoc')}
-            groupLabel={t('modeSwitchLabel')}
-          />
+          {readOnlyDoc ? null : (
+            <DocModeSwitch
+              mode="read"
+              readHref={`${docUrl(wsSlug, projSlug, slug)}/view`}
+              editHref={docUrl(wsSlug, projSlug, slug)}
+              readLabel={t('modeRead')}
+              editLabel={t('editDoc')}
+              groupLabel={t('modeSwitchLabel')}
+            />
+          )}
           {/* story 4892 — share and the ⋯ menu are on the reading screen too (they used to exist only on the editing screen). Below lg «공유» is inside the menu. */}
           <IconButton icon="share" label={ts('share')} onClick={() => setShareDialogOpen(true)} className="hidden lg:inline-flex" data-testid="docs-reader-share" />
           <DropdownMenu>
@@ -165,13 +174,18 @@ export default function DocViewPage() {
                 <Icon name="share" size={16} className="mr-2" />
                 {ts('share')}
               </DropdownMenuItem>
-              <DropdownMenuSeparator className="lg:hidden" />
-              <HumanOnlyAction>
-                <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive" data-testid="docs-reader-menu-delete">
-                  <Icon name="delete" size={16} className="mr-2" />
-                  {t('deleteDoc')}
-                </DropdownMenuItem>
-              </HumanOnlyAction>
+              {/* story 4892 — a sprint report is read-only: no «고치기» above and no «삭제» here (the editor page hides it too; the server only lets humans delete). */}
+              {readOnlyDoc ? null : (
+                <>
+                  <DropdownMenuSeparator className="lg:hidden" />
+                  <HumanOnlyAction>
+                    <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive" data-testid="docs-reader-menu-delete">
+                      <Icon name="delete" size={16} className="mr-2" />
+                      {t('deleteDoc')}
+                    </DropdownMenuItem>
+                  </HumanOnlyAction>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </span>
