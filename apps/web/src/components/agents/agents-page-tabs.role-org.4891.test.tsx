@@ -9,13 +9,13 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 
-const { useDashboardContextMock, fetchMeMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn(), fetchMeMock: vi.fn() }));
+const { useDashboardContextMock, fetchMeMock, tabRef } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn(), fetchMeMock: vi.fn(), tabRef: { current: 'recruit' } }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => useDashboardContextMock() }));
 vi.mock('@/lib/me-client', () => ({ fetchMe: () => fetchMeMock() }));
-vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams('tab=recruit') }));
-vi.mock('@/components/agents/agent-performance-panel', () => ({ AgentPerformancePanel: () => null }));
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(`tab=${tabRef.current}`), useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
+vi.mock('@/components/agents/agent-performance-panel', () => ({ AgentPerformancePanel: () => <div data-testid="stats-panel" /> }));
 vi.mock('@/components/agents/agent-management-tab', () => ({ AgentManagementTab: () => null }));
-vi.mock('@/components/agents/access-matrix-tab', () => ({ AccessMatrixTab: () => null }));
+vi.mock('@/components/agents/access-matrix-tab', () => ({ AccessMatrixTab: () => <div data-testid="access-panel" /> }));
 vi.mock('@/app/(authenticated)/organization/workforce/recruiter/recruiter-client', () => ({ RecruiterClient: () => null }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -23,6 +23,7 @@ vi.mock('@/app/(authenticated)/organization/workforce/recruiter/recruiter-client
 let container: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
+  tabRef.current = 'recruit';
   fetchMeMock.mockReset();
   useDashboardContextMock.mockReturnValue(ctxFor('org-A'));
   container = document.createElement('div');
@@ -45,7 +46,8 @@ async function mount() {
     rerender: async () => { await act(async () => { root.render(tree()); }); },
     flush,
     pane: () => ({ state: container.querySelector('[data-testid="recruit-no-project"]')?.getAttribute('data-state') ?? null, hasCreate: !!container.querySelector('[data-testid="recruit-create-project"]') }),
-    accessTab: () => [...container.querySelectorAll('[role="tab"]')].some((t) => (t.textContent ?? '').trim() === koMessages.agents.accessTab),
+    // story 4889 — the tab line moved into the «팀» strip; what the admin-only deep link opens is the Access PANEL (a non-admin reads the Statistics panel instead)
+    accessTab: () => !!container.querySelector('[data-testid="access-panel"]'),
   };
 }
 
@@ -61,6 +63,7 @@ describe('Recruit without a project — the create link for every member, whatev
 
 describe('the role follows the organization (story 4891, codex round 3)', () => {
   it('⭐admin in org A → the Access tab is there · switch to org B (member): gone, and never org A\'s tab while B\'s answer is out · then org C (owner): back', async () => {
+    tabRef.current = 'access';
     let answerB: (v: unknown) => void = () => {};
     fetchMeMock.mockResolvedValueOnce(answer('admin')).mockImplementationOnce(() => new Promise((r) => { answerB = r; })).mockResolvedValueOnce(answer('owner'));
     const m = await mount();
@@ -77,6 +80,7 @@ describe('the role follows the organization (story 4891, codex round 3)', () => 
   });
 
   it('⭐a late answer for the organization the person already left never replaces the current organization\'s role (B is an admin, A\'s late answer says member → B keeps its Access tab)', async () => {
+    tabRef.current = 'access';
     let lateA: (v: unknown) => void = () => {};
     fetchMeMock.mockImplementationOnce(() => new Promise((r) => { lateA = r; })).mockResolvedValueOnce(answer('admin'));
     const m = await mount();

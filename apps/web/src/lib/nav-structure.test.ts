@@ -123,7 +123,10 @@ describe('⭐메뉴 이름 = 그 화면을 부르는 글 (선생님 11-10: 맨 �
 
 describe('⭐«팀» 탭줄 데이터(TEAM_TABS)', () => {
   it('순서 · 이름 키: 에이전트 · 구성원 · 실행 기록 · API 키 · 채용 — ko · en 모두 있다', () => {
-    expect(TEAM_TABS.map((t) => t.id)).toEqual(['agents', 'people', 'runs', 'keys', 'recruit']);
+    expect(TEAM_TABS.map((t) => t.id)).toEqual(['agents', 'people', 'runs', 'keys', 'recruit', 'stats', 'access']);
+    // story 4889 — 관리자만 보는 «접근권한»은 맨 끝(PO 11-10): 관리자와 일반 구성원 사이에 다른 탭 자리가 밀리지 않는다
+    expect(TEAM_TABS.filter((t) => t.adminOnly).map((t) => t.id)).toEqual(['access']);
+    expect(TEAM_TABS[TEAM_TABS.length - 1]!.adminOnly).toBe(true);
     for (const t of TEAM_TABS) {
       for (const [lang, m] of [['ko', koMessages], ['en', enMessages]] as const) {
         const ns = (m as unknown as Record<string, Record<string, string>>)[t.ns]!;
