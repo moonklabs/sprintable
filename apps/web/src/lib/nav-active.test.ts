@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findActiveStaticItemId, isResourceItemActive } from './nav-active';
+import { findActiveStaticItemId, isResourceItemActive, screenOwnsListColumn } from './nav-active';
 
 const items = [
   { id: 'inbox', kind: 'static', path: '/inbox?tab=gates' },
@@ -35,5 +35,15 @@ describe('isResourceItemActive', () => {
     expect(isResourceItemActive('/ws/p/flow/x', 'flow', 'ws', 'p')).toBe(true);
     expect(isResourceItemActive('/ws/p/sprints', 'flow', 'ws', 'p', ['sprints'])).toBe(true);
     expect(isResourceItemActive('/ws/p/docs', 'flow', 'ws', 'p', ['sprints'])).toBe(false);
+  });
+});
+
+describe('screenOwnsListColumn — 자기 목록 칸을 가진 화면은 셸의 목록 칸을 접는다', () => {
+  it('/chats와 그 하위만 (경계를 지킨다)', () => {
+    expect(screenOwnsListColumn('/chats')).toBe(true);
+    expect(screenOwnsListColumn('/chats/7256d5cc')).toBe(true);
+    expect(screenOwnsListColumn('/chatsx')).toBe(false);
+    expect(screenOwnsListColumn('/flow')).toBe(false);
+    expect(screenOwnsListColumn('/org-briefing')).toBe(false);
   });
 });

@@ -21,7 +21,9 @@ import { SessionExpiredDialog } from '@/components/auth/session-expired-dialog';
 import { ToastProvider } from '@/components/ui/toast';
 import { BottomDock } from '@/components/nav/bottom-dock';
 import { AppSidebar } from '@/components/nav/app-sidebar';
-import { CommandPaletteProvider } from '@/components/command-palette/command-palette-context';
+import { NavRail } from '@/components/nav/nav-rail';
+import { screenOwnsListColumn } from '@/lib/nav-active';
+import { CommandPaletteProvider, useCommandPalette } from '@/components/command-palette/command-palette-context';
 import { resolveChatsHref, resolveConnectRulesHref, type NavV3Flags, livePathProject, navProjectSlug } from '@/lib/nav-v3-destinations';
 import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
 import { TopBar } from '@/components/nav/top-bar';
@@ -202,8 +204,20 @@ function ShellBody({
   children: React.ReactNode;
 }) {
   const chatUnreadTotal = useChatUnreadTotal(currentTeamMemberId);
+  // story #4885 (B 셸) — 막대 · 목록 · 상세: 막대(NavRail)는 목록 칸(AppSidebar) 왼쪽에 서고, 둘 다 같은 nav-config를 읽는다.
+  // 막대의 slug · 팔레트는 AppSidebar와 같은 출처. 「오늘」 배지 숫자는 UI-5(오늘 화면)가 정하는 값이라 여기선 아직 안 넘긴다(NavRail의 todayCount 이음새 = 0).
+  const railOrgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
+  const { setOpen: setPaletteOpen } = useCommandPalette();
+  const openPalette = useCallback(() => setPaletteOpen(true), [setPaletteOpen]);
   return (
     <>
+      <NavRail
+        orgSlug={railOrgSlug}
+        projectSlug={currentProjectSlug}
+        navV3Flags={navV3Flags}
+        chatUnreadTotal={chatUnreadTotal}
+        onOpenPalette={openPalette}
+      />
       <AppSidebar
         projectId={projectId}
         currentProjectSlug={currentProjectSlug}
@@ -496,6 +510,15 @@ export function DashboardShell({
   }, [pathOrgId, actualTokenOrgId, router]);
   // story #4217 — 경로 프로젝트는 서버 prop이 아니라 **현재 pathname**에서(클라이언트 이동 뒤에도 최신 · lib 주석 참고).
   const shellPathname = usePathname();
+  // story #4885 (B 셸) — 목록 칸(왼쪽 길잡이) 열림: 자기 목록 칸을 가진 화면(/chats)에 들어오면 접고, 나가면 들어오기 전 상태로 되돌린다. 그 화면 안에서 사람이 다시 펴는 건 막지 않는다.
+  const ownsListColumn = screenOwnsListColumn(shellPathname);
+  const [listColumnOpen, setListColumnOpen] = useState(() => !ownsListColumn);
+  // 렌더 중 «이전 값과 비교해 상태를 맞추는» 꼴(React 권장 — effect 안 setState 아님): 들어올 때 지금 상태를 적어 두고 접고, 나갈 때 적어 둔 상태로 되돌린다.
+  const [listColumnSeen, setListColumnSeen] = useState({ owns: ownsListColumn, before: true });
+  if (listColumnSeen.owns !== ownsListColumn) {
+    setListColumnSeen({ owns: ownsListColumn, before: ownsListColumn ? listColumnOpen : listColumnSeen.before });
+    setListColumnOpen(ownsListColumn ? false : listColumnSeen.before);
+  }
   const currentOrgSlug = orgMemberships.find((o) => o.orgId === effectiveOrgId)?.orgSlug;
   const livePath = livePathProject({
     pathname: shellPathname, currentOrgSlug, currentOrgId: effectiveOrgId, memberships: projectMemberships,
@@ -565,7 +588,7 @@ export function DashboardShell({
               불리언(showTopBar)이라 CSS 미디어 쿼리로 못 읽는다 — data 속성으로 다리를
               놓는다(globals.css가 `[data-topbar-hidden]`로 분기, JS 측정 없이 CSS만으로
               --shell-chrome-h를 계산하기 위한 유일한 JS 개입). */}
-          <SidebarProvider className="h-svh dashboard-shell-root" data-topbar-hidden={showTopBar ? undefined : ''}>
+          <SidebarProvider open={listColumnOpen} onOpenChange={setListColumnOpen} className="h-svh dashboard-shell-root" data-topbar-hidden={showTopBar ? undefined : ''}>
             <ShellBody
               currentTeamMemberId={currentTeamMemberId}
               showTopBar={showTopBar}

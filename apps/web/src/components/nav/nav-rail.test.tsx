@@ -120,4 +120,15 @@ describe('NavRail — B 셸 초안(아이콘 막대)', () => {
     expect(container.querySelector('[data-rail-item="settings"]')).not.toBeNull();
     expect(container.querySelector('[data-rail-item="desktop-app"]')).toBeNull();
   });
+  it('⭐옆 목록은 CSS 호버가 아니라 상태로 연다: 닫힘 → 초점 들어오면 열림 → Esc로 닫힘 (터치 · 키보드에서도 닿는다)', async () => {
+    await mount();
+    const flyout = () => container.querySelector('[data-rail-group="dev"] [data-testid="rail-flyout"]') as HTMLElement;
+    expect(flyout().getAttribute('data-open')).toBe('false');
+    expect(flyout().className).toContain('hidden');
+    await act(async () => { (container.querySelector('[data-rail-item="board"]') as HTMLAnchorElement).focus(); });
+    expect(flyout().getAttribute('data-open')).toBe('true');
+    expect(flyout().className).not.toContain('hidden');
+    await act(async () => { (container.querySelector('[data-rail-item="board"]') as HTMLAnchorElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    expect(flyout().getAttribute('data-open')).toBe('false');
+  });
 });

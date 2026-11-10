@@ -380,7 +380,12 @@ export function AppSidebar({
 
   return (
     <>
-    <Sidebar variant="inset" collapsible="offcanvas">
+    {/* story #4885 B 셸 — 이 칸은 «목록» 칸이다: 왼쪽 끝은 아이콘 막대(nav-rail · w-14 = 3.5rem)가 쥐고, 이 칸은 그 오른쪽에 선다(접히면 막대 뒤로 들어감). */}
+    <Sidebar
+      variant="inset"
+      collapsible="offcanvas"
+      className="data-[side=left]:left-14 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(3.5rem-var(--sidebar-width))]"
+    >
       <SidebarHeader className="py-3">
         <UnifiedSwitcher
           orgs={orgMemberships}
