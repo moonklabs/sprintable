@@ -142,6 +142,27 @@ export function KanbanTrustColumn({
     }
   };
 
+  // story #4888(UI-5 보드 머리 첫 조각, AC3 §4-3 «잠긴 두 열은 비어 있을 때 좁은 띠로») — 잠긴(파생) 열이 비어 있으면 280px 칸 대신 띠 하나(40px)로 접는다.
+  // 열이 «있다»는 사실은 그대로(이름 · 자물쇠 · 0건이 띠에 남음 · 드롭 불가 안내는 title · 스크린리더 글자로) — 지우는 게 아니라 좁히는 것.
+  // 카드가 1장이라도 생기거나 더 불러올 쪽(hasMore · N+)이 있으면 곧바로 원래 칸으로 선다. 끌기 중에도 띠는 띠 그대로다(칸 폭이 끌기 도중 바뀌면 놓을 자리 판정이 흔들린다) — 대신 흐려진다.
+  if (locked && stories.length === 0 && !hasMore && !composing) {
+    return (
+      <div
+        ref={setNodeRef}
+        data-testid={`trust-column-strip-${id}`}
+        data-trust-column={id}
+        title={`${label} · ${t('trustLockedDropHint')}`}
+        className={`flex h-full w-10 min-w-10 shrink-0 flex-col items-center gap-2 rounded-xl bg-muted/20 py-3 transition ${closedDuringDrag ? 'opacity-45' : ''}`}
+      >
+        <span className={`size-1.5 shrink-0 rounded-full ${dotClass}`} aria-hidden="true" />
+        <Lock className="size-3 text-muted-foreground" aria-hidden="true" />
+        <span className="text-xs font-extrabold text-foreground [writing-mode:vertical-rl]">{label}</span>
+        <span className="text-xs tabular-nums text-muted-foreground">0</span>
+        <span className="sr-only">{t('trustLockedDropHint')}</span>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={setNodeRef}

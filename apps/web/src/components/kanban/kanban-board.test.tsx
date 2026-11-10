@@ -1297,6 +1297,26 @@ describe('KanbanBoard — 6단계 신뢰축 뷰(story #2933 H4)', () => {
     expect(lockedCardIsSortable).toBe(false);
   });
 
+  // story #4888(UI-5 보드 머리 첫 조각, AC3 §4-3) — 비어 있는 잠긴 열은 띠로. 기본 화면에서 «빈 잠긴 칸 3개 × 280px»이 가로를 먹던 것을 좁힌다.
+  // 카드가 있는 잠긴 열은 칸 그대로 · 빈 settable 열(대기 · 실행 중 · 주장 완료 · 완료)은 띠가 아니다(거기서 일감을 만든다).
+  it('⭐잠긴 열 3개(입력 필요 · 검증·잔존 · 머지 준비)가 비어 있으면 띠 3개로 선다 — 열 이름은 띠에 남는다', async () => {
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', trust_stage: 'queued' }]);
+    await mount();
+    const strips = [...container.querySelectorAll<HTMLElement>('[data-testid^="trust-column-strip-"]')];
+    expect(strips.map((e) => e.getAttribute('data-trust-column')).sort()).toEqual(['merge_ready', 'needs_input', 'verified']);
+    for (const label of ['입력 필요', '검증·잔존', '머지 준비']) expect(container.textContent).toContain(label);
+    // 비어 있는 settable 열은 띠가 아니다 — 칸(280px)으로 선다.
+    expect(container.querySelectorAll('[class*="w-\\[280px\\]"]').length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('⭐잠긴 열에 카드가 있으면 그 열만 칸으로 서고 나머지 빈 잠긴 열은 띠다', async () => {
+    stubFetch([{ id: 's-locked', title: '잠긴카드', status: 'in-progress', priority: 'medium', trust_stage: 'needs_input' }]);
+    await mount();
+    const stripIds = [...container.querySelectorAll<HTMLElement>('[data-testid^="trust-column-strip-"]')].map((e) => e.getAttribute('data-trust-column')).sort();
+    expect(stripIds).toEqual(['merge_ready', 'verified']);
+    expect(container.textContent).toContain('잠긴카드');
+  });
+
   it('trust_stage=null이어도 status="in-progress"(running, settable)면 정상적으로 드래그 wiring이 붙는다', async () => {
     stubFetch([
       { id: 's-running', title: '실행중카드', status: 'in-progress', priority: 'medium', trust_stage: 'running' },

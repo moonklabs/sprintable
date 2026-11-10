@@ -343,7 +343,7 @@ describe('FlowPageClient — story #2531→#3101 기본 랜딩 변천(현재=lis
   // 그 클릭 동작을 흡수했으므로, 아래 3개 테스트는 이제 ScaleLadder의 가설/갈래/스토리
   // rung을 대상으로 같은 계약(view= 쿼리 조립)을 잰다.
   function findLadderRung(name: string): HTMLElement | undefined {
-    return Array.from(container.querySelector('.flex.overflow-hidden')?.children ?? []).find(
+    return Array.from(container.querySelectorAll('[data-testid="scale-ladder-chips"] > *')).find(
       (el) => el.textContent?.includes(name),
     ) as HTMLElement | undefined;
   }
@@ -476,9 +476,9 @@ describe('FlowPageClient — story #3043→#3101 기본값=list(칸반), 모바�
     expect(pushedUrl).toContain('view=flow');
   });
 
-  // ⭐story #4222 — 래더는 뷰포트 훅이 아니라 CSS 중단점으로 가른다: 두 판을 다 그리고 compact는 lg:hidden · 전체판은 hidden lg:block.
-  // useIsMobile()이 서버·첫 렌더에서 false라 390에서 서버가 전체판(120.5px)을 그렸다가 칩열(34.5px)로 줄던 흔들림(CLS 0.36) 0.
-  it('⭐래더 두 판이 뷰포트 판정과 무관하게 같은 DOM으로 그려진다(서버 = 최종) · id 중복 0 · 요청 수 같음', async () => {
+  // ⭐story #4222 → #4888 — 래더는 모든 폭에서 칩 한 줄 하나다(옛 두 판 + CSS 중단점 가름은 판이 하나가 되며 없어짐).
+  // 서버 출력 = 최종 높이라 하이드레이션 뒤 흔들림(CLS) 0은 그대로: 뷰포트 판정(isMobile)과 무관하게 같은 DOM · id 중복 0 · 요청 수 같음.
+  it('⭐래더는 뷰포트 판정과 무관하게 칩 한 줄 하나로 같은 DOM이 그려진다(서버 = 최종) · 카드열 없음 · id 중복 0 · 요청 수 같음', async () => {
     const counts: number[] = [];
     const snapshots: string[] = [];
     for (const mobile of [false, true]) {
@@ -486,11 +486,11 @@ describe('FlowPageClient — story #3043→#3101 기본값=list(칸반), 모바�
       const fetchSpy = vi.fn(async () => new Response('{}', { status: 200 }));
       vi.stubGlobal('fetch', fetchSpy);
       await renderFlowClient();
-      const compactSlot = container.querySelector('[data-testid="scale-ladder-compact-slot"]');
-      const fullSlot = container.querySelector('[data-testid="scale-ladder-full-slot"]');
-      expect(compactSlot?.className.split(/\s+/)).toEqual(['lg:hidden']);
-      expect(fullSlot?.className.split(/\s+/).sort()).toEqual(['hidden', 'lg:block']);
-      snapshots.push(`${compactSlot?.innerHTML}|${fullSlot?.innerHTML}`);
+      expect(container.querySelectorAll('[data-testid="scale-ladder-slot"]')).toHaveLength(1);
+      expect(container.querySelector('[data-testid="scale-ladder-compact-slot"]')).toBeNull();
+      expect(container.querySelector('[data-testid="scale-ladder-full-slot"]')).toBeNull();
+      expect(container.querySelectorAll('[data-testid="scale-ladder-chips"]')).toHaveLength(1);
+      snapshots.push(container.querySelector('[data-testid="scale-ladder-slot"]')!.innerHTML);
       const ids = [...container.querySelectorAll('[id]')].map((e) => e.id);
       expect(new Set(ids).size, 'id 중복').toBe(ids.length);
       counts.push(fetchSpy.mock.calls.length);
@@ -498,6 +498,31 @@ describe('FlowPageClient — story #3043→#3101 기본값=list(칸반), 모바�
     }
     expect(snapshots[0]).toBe(snapshots[1]);
     expect(counts[0]).toBe(counts[1]);
+  });
+
+  // PO 5543 ① — 예약 칩(작업)의 «눌러서 여는 설명 창»은 폰 터치 · 키보드로 설명을 볼 유일한 길이다. 화면(페이지) 단위로 못박는다:
+  // 칩을 누르면 설명 창(role=tooltip · body 포털)이 열리고, 칩의 aria-describedby가 그 창을 가리킨다. 창을 걷으면(title만 남기면) RED.
+  const ladderChip = (name: string) =>
+    Array.from(container.querySelectorAll('[data-testid="scale-ladder-chips"] > *')).find((el) => el.textContent?.includes(name)) as HTMLElement | undefined;
+
+  it.each([['데스크톱', false], ['모바일', true]])('⭐%s: 예약 칩(작업)을 누르면 설명 창이 열린다 — 터치 · 키보드로 설명을 볼 길(되돌리면 RED)', async (_l, mobile) => {
+    isMobileMock = mobile;
+    await renderFlowClient();
+    const chip = ladderChip(koMessages.flow.ladderName_building)!.querySelector('button')!;
+    expect(document.body.textContent).not.toContain(koMessages.flow.ladderReservedInfo);
+    await act(async () => { chip.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const pop = document.body.querySelector<HTMLElement>('[role="tooltip"]');
+    expect(pop?.textContent).toBe(koMessages.flow.ladderReservedInfo);
+    expect(chip.getAttribute('aria-describedby')?.split(/\s+/)).toContain(pop!.id);
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it('렌즈 칩의 접근 가능한 설명 = 질문 문구(페이지 단위) — 갈래 칩 aria-describedby가 sr-only 질문 글을 가리킨다', async () => {
+    await renderFlowClient();
+    const chip = ladderChip(koMessages.flow.ladderName_city)!;
+    const target = document.getElementById(chip.getAttribute('aria-describedby')!);
+    expect(target?.textContent).toBe(koMessages.flow.ladderQuestion_city);
+    expect(target?.closest('.sr-only')).not.toBeNull();
   });
 
   it('모바일이라도 ?view=flow가 명시돼 있으면 그 값을 그대로 존중한다(주소로 갈래 진입 회귀 없음)', async () => {
@@ -651,22 +676,22 @@ describe('FlowPageClient — story #2535 지구→대륙→도시 드릴다운',
     currentSearch = 'view=flow';
     await renderFlowClient();
 
-    const rungs = Array.from(container.querySelector('.flex.overflow-hidden')?.children ?? []);
+    const rungs = Array.from(container.querySelectorAll('[data-testid="scale-ladder-chips"] > *'));
     const cityRung = rungs.find((d) => d.textContent?.includes(koMessages.flow.ladderName_city));
-    expect(cityRung?.className).toContain('bg-gradient-to-b');
-    expect(rungs.filter((d) => d.className.includes('bg-gradient-to-b'))).toHaveLength(1);
+    expect(cityRung?.className).toContain('text-brand-text');
+    expect(rungs.filter((d) => d.className.includes('text-brand-text'))).toHaveLength(1);
   });
 
   it('목록(view=list) 뷰에서는 축척 브레드크럼이 "스토리"를 활성으로 보인다 — 이전엔 "건물"(작업)로 오매핑됐다(#3111)', async () => {
     currentSearch = 'view=list';
     await renderFlowClient();
 
-    const rungs = Array.from(container.querySelector('.flex.overflow-hidden')?.children ?? []);
+    const rungs = Array.from(container.querySelectorAll('[data-testid="scale-ladder-chips"] > *'));
     const streetRung = rungs.find((d) => d.textContent?.includes(koMessages.flow.ladderName_street));
     const buildingRung = rungs.find((d) => d.textContent?.includes(koMessages.flow.ladderName_building));
-    expect(streetRung?.className).toContain('bg-gradient-to-b');
-    expect(buildingRung?.className).not.toContain('bg-gradient-to-b');
-    expect(rungs.filter((d) => d.className.includes('bg-gradient-to-b'))).toHaveLength(1);
+    expect(streetRung?.className).toContain('text-brand-text');
+    expect(buildingRung?.className).not.toContain('text-brand-text');
+    expect(rungs.filter((d) => d.className.includes('text-brand-text'))).toHaveLength(1);
   });
 });
 
