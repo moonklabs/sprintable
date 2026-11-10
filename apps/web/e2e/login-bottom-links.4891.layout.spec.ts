@@ -1,7 +1,7 @@
 /**
  * story 4891 (UI-8 U8 · «로그인 바닥 링크») — the login page measured in Chromium: the real `LoginPage` + the Mac app block (bundled with esbuild, not copied) and the real Tailwind build of globals.css, Google ON, a Mac user agent.
  * Before (dev, AC1): 10 presses on the first screen — the card's own six plus the Mac app card above it (2) and the terms · privacy links inside it (2).
- * The rule under test: the card holds six presses (two fields · [로그인] · [Google] · «비밀번호 찾기» · «가입»); the Mac app's way in, the web sign-up and the terms line stand UNDER it; nothing runs sideways.
+ * The rule under test: the card holds six actions (two fields · [로그인] · [Google] · «비밀번호 찾기» · «가입») and the terms notice stays right under Google (PO 11-10: the Google click is a sign-up road that records the consent); the Mac app's way in and the web sign-up stand UNDER the card; nothing runs sideways.
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -83,7 +83,8 @@ const where = (page: Page) => page.evaluate(() => {
   const presses = (el: Element) => [...el.querySelectorAll('input, button, a[href]')].filter(vis);
   const cr = card.getBoundingClientRect(); const br = bottom.getBoundingClientRect();
   return {
-    cardPresses: presses(card).length, bottomPresses: presses(bottom).length,
+    cardPresses: presses(card).filter((e) => !e.closest('[data-testid="login-terms-line"]')).length, noticeLinks: presses(card).filter((e) => !!e.closest('[data-testid="login-terms-line"]')).length, bottomPresses: presses(bottom).length,
+    noticeNextToGoogle: (document.querySelector('a[href^="/auth/login?provider=google"]') as HTMLElement | null)?.nextElementSibling?.getAttribute('data-testid') === 'login-terms-line',
     cardBottom: Math.round(cr.bottom + scrollY), bottomTop: Math.round(br.top + scrollY),
     docH: document.documentElement.scrollHeight, vh: innerHeight, overflowX: document.documentElement.scrollWidth > innerWidth + 1,
     macOfferTop: Math.round(((document.querySelector('[data-testid="login-mac-app-offer"]') as HTMLElement).getBoundingClientRect().top) + scrollY),
@@ -95,12 +96,14 @@ const MAC_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 
 test.describe('on a phone (390 × 844) · a Mac user agent', () => {
   test.use({ hasTouch: true, isMobile: true, userAgent: MAC_UA });
 
-  test('[SID:4891] the card has six presses; the Mac app block and the terms line are under it; nothing runs sideways', async ({ page }) => {
+  test('[SID:4891] the card has six actions with the terms notice under Google; the Mac app block is under the card; nothing runs sideways', async ({ page }) => {
     await open(page, 390, 844);
     const m = await where(page);
     // reverted (the Mac app card above the fields · the terms line inside the card) → more than six in the card
-    expect(m.cardPresses, 'presses inside the card').toBe(6);
-    expect(m.bottomPresses, 'the Mac app (2) + the terms and privacy (2)').toBe(4);
+    expect(m.cardPresses, 'actions inside the card').toBe(6);
+    expect(m.noticeLinks, 'the notice\'s terms and privacy links stay in the card, under Google').toBe(2);
+    expect(m.noticeNextToGoogle, 'the terms notice is the next sibling of the Google button').toBe(true);
+    expect(m.bottomPresses, 'under the card: the Mac app file + the web sign-up').toBe(2);
     expect(m.macOfferTop, 'the Mac app block starts below the card').toBeGreaterThanOrEqual(m.cardBottom);
     expect(m.bottomTop).toBeGreaterThanOrEqual(m.cardBottom - 1);
     expect(m.overflowX).toBe(false);
@@ -112,7 +115,7 @@ test.describe('on a desktop width · a Mac user agent', () => {
   test('[SID:4891] the same: six in the card, the side paths under it', async ({ page }) => {
     await open(page, 1440, 900);
     const m = await where(page);
-    expect(m.cardPresses).toBe(6);
+    expect(m.cardPresses).toBe(6); expect(m.noticeNextToGoogle).toBe(true);
     expect(m.macOfferTop).toBeGreaterThanOrEqual(m.cardBottom);
   });
 });

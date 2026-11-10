@@ -40,33 +40,42 @@ const bottom = () => container.querySelector('[data-testid="login-bottom"]') as 
 const presses = (el: ParentNode) => [...el.querySelectorAll('input, button, a[href]')];
 const hrefs = (el: ParentNode) => [...el.querySelectorAll('a[href]')].map((a) => a.getAttribute('href'));
 
-describe('[SID:4891] LoginPage — what stands above · inside the card and what stands under it', () => {
-  it('⭐the card has six presses — two fields · [로그인] · [Google] · «비밀번호 찾기» · «가입» — and none of the side paths (no Mac app · no terms · no privacy)', async () => {
+describe('[SID:4891] LoginPage — what stands above the card, in it, and under it', () => {
+  it('⭐the card has six ACTIONS — two fields · [로그인] · [Google] · «비밀번호 찾기» · «가입» — plus the terms notice right under Google; none of the Mac app paths', async () => {
     await mount(true);
-    // reverted (the Mac app card above · the terms line inside) → 8+ presses here
-    expect(presses(card())).toHaveLength(6);
+    const notice = card().querySelector('[data-testid="login-terms-line"]') as HTMLElement;
+    const actions = presses(card()).filter((el) => !notice.contains(el));
+    // reverted (the Mac app card above the fields) → 8 actions here
+    expect(actions).toHaveLength(6);
     const h = hrefs(card());
-    for (const side of ['/desktop/get/macos', '/terms', '/privacy']) expect(h).not.toContain(side);
+    expect(h).not.toContain('/desktop/get/macos');
     expect(h).toContain('/forgot-password');
     expect(h.some((x) => x?.startsWith('/register'))).toBe(true);
     expect(h.some((x) => x?.startsWith('/auth/login?provider=google'))).toBe(true);
+    // the notice's two links are the card's only /terms and /privacy
+    expect(hrefs(notice)).toEqual(['/terms', '/privacy']);
   });
 
-  it('⭐the side paths are under the card, in this order: the Mac app block (the file · the web sign-up) then the terms line — same links as before', async () => {
+  it('⭐the terms notice is the NEXT SIBLING of the Google button — nothing stands between the button that records the consent and the sentence that tells it (PO 11-10)', async () => {
+    await mount(true);
+    const google = container.querySelector('a[href^="/auth/login?provider=google"]') as HTMLAnchorElement;
+    const notice = card().querySelector('[data-testid="login-terms-line"]') as HTMLElement;
+    // reverted (the notice moved under the card, or anything put between) → not the next sibling
+    expect(google.nextElementSibling).toBe(notice);
+    expect(notice.textContent).toContain(koMessages.login.termsPrefix);
+    expect(notice.hasAttribute('hidden') || notice.closest('[hidden]') !== null, 'the notice is drawn, not hidden').toBe(false);
+  });
+
+  it('under the card: only the Mac app block (the pitch · the file · the web sign-up · the hint), after the card', async () => {
     await mount(true);
     expect(card().compareDocumentPosition(bottom()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    const h = hrefs(bottom());
-    expect(h).toEqual(['/desktop/get/macos', '/register', '/terms', '/privacy']);
+    expect(hrefs(bottom())).toEqual(['/desktop/get/macos', '/register']);
     const offer = bottom().querySelector('[data-testid="login-mac-app-offer"]') as HTMLElement;
     expect(offer.textContent).toContain(koMessages.login.macAppPitch);
-    const terms = bottom().querySelector('[data-testid="login-terms-line"]') as HTMLElement;
-    // the consent line is still there, with its two links (reverted — dropped — the Google login would accept terms nobody was told about)
-    expect(terms.textContent).toContain(koMessages.login.termsPrefix);
-    expect(terms.hasAttribute('hidden') || terms.closest('[hidden]') !== null, 'the consent line is drawn, not hidden').toBe(false);
-    expect(offer.compareDocumentPosition(terms) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(bottom().querySelector('[data-testid="login-terms-line"]')).toBeNull();
   });
 
-  it('Google still carries tos_accepted=true (the terms line is the notice) · a build with no OAuth has no Google and no terms line, and the Mac app block still stands under the card', async () => {
+  it('Google carries tos_accepted=true · a build with no OAuth has no Google and no notice, and the Mac app block still stands under the card', async () => {
     await mount(true);
     expect((container.querySelector('a[href^="/auth/login?provider=google"]') as HTMLAnchorElement).getAttribute('href')).toContain('tos_accepted=true');
     root.unmount(); root = createRoot(container);
