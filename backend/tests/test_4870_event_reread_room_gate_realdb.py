@@ -63,14 +63,16 @@ async def _stored_copy(Session, w, *, recipient, recipient_type, room, words, ev
 
 
 async def _bell_copy(Session, w, *, recipient, room, words) -> uuid.UUID:
-    """the bell's `dispatched` event about the ROOM (source = the conversation), made as `dispatch_notification` makes it: the message preview is `body`."""
+    """the bell's `dispatched` event about the ROOM (source = the conversation), made as `dispatch_notification` makes it: the message preview is `body`.
+    story 4890: the copy of a plain chat MESSAGE (`conversation.message`) no longer reaches the bell at all (its message_created row is the line) — so this stand-in is the copy of a MENTION
+    (`conversation.mention`), which still does (a person with no mention Event keeps it as their one bell item, 4519). The room gate treats every `dispatched` copy of a room the same way."""
     from app.models.event import Event
 
     async with Session() as s:
         ev = Event(
             project_id=w.p1, org_id=w.org, event_type="dispatched", source_entity_type="conversation", source_entity_id=room, sender_id=None,
             recipient_id=recipient, recipient_type="human", status="delivered",
-            payload={"title": "a new message", "body": f"preview {words}", "event_type": "conversation.message"},
+            payload={"title": "a new message", "body": f"preview {words}", "event_type": "conversation.mention"},
         )
         s.add(ev)
         await s.commit()

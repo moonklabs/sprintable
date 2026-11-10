@@ -19,7 +19,7 @@ from app.models.team import TeamMember
 
 router = APIRouter(prefix="/api/v2/event-notifications", tags=["event-notifications", "Organization"])
 
-# 대화 이벤트 종류(휴먼 알림 정책 분기 대상). 비-대화 이벤트(dispatched 등)는 항상 노출.
+# 대화 이벤트 종류(휴먼 알림 정책 분기 대상). 비-대화 이벤트(dispatched 등)는 노출(단 채팅 새 메시지의 dispatched 사본은 아래 4890 — 같은 글의 message_created 줄과 겹쳐 뺀다).
 _CONVERSATION_EVENT_TYPES = ("conversation.message_created", "conversation:mention")
 # story #4520 (Yuna 03:57Z · PO) — the approvals inbox's own signals (approval_delivery: a new gate · decided · delegated · tossed).
 # «No new message, a pure SSE signal» there: they redraw an open approvals inbox, and the reconnect backfill rebuilds them from
@@ -29,6 +29,11 @@ _CONVERSATION_EVENT_TYPES = ("conversation.message_created", "conversation:menti
 _APPROVALS_INBOX_SIGNAL_TYPES = (
     "conversation.gate_created", "conversation.gate_resolved", "conversation.gate_delegated", "conversation.gate_tossed",
 )
+# story 4890 (UI-7 · PO 11-10) — one chat message made TWO bell rows for a person who is in the room: the `conversation.message_created` Event (summary «보낸 이: 미리보기» · sender · room id — the row the
+# bell links to the room from) and the `dispatched` Event that `dispatch_notification` writes for story 1934 («every human in the thread gets an in-app notification + Expo push for a new message»),
+# whose payload.event_type is `conversation.message`. Measured on dev: 2 messages → 4 lines and a badge of 4. The `dispatched` row also carries the push / personal-webhook delivery (outbox) — that
+# stays; only the BELL READ leaves the row out, and the hiding rules below (mute · spectator) decide on the message_created row alone — so for every account «lines = messages, unread = messages».
+_CHAT_MESSAGE_DISPATCHED = "conversation.message"
 
 
 def _is_hidden_notification(member_id: uuid.UUID):
@@ -41,6 +46,10 @@ def _is_hidden_notification(member_id: uuid.UUID):
        없음** → 관전 동석 알림이라 숨김. ⇄ **carve-out**(270c87e6 ②): 발화한 적 있으면 노출.
 
     3. **결재함 신호**(story #4520): `_APPROVALS_INBOX_SIGNAL_TYPES` — 결재함을 새로 그리는 SSE 신호라 사람 알림 줄이 아님.
+    4. **채팅 새 메시지의 dispatched 사본**(story 4890): 같은 글의 message_created 줄이 이미 벨 줄이다 — 이 사본은 벨 목록 · 읽지 않음 수에서 뺀다(행은 그대로 · 푸시/웹훅 배달은 이 행을 만든 같은
+       호출이 outbox로 하므로 무관). mute · 관전 가림은 message_created에만 걸리므로 «가릴 건 같이 가려지고 보일 건 한 줄만»이 된다. 사람 수신자만(에이전트는 그 사본이 유일한 알림일 수 있다).
+       ⚠️ 의도된 결과 하나: 채널 라우터(`route_message`)가 음소거 · «멘션만» 수신자를 결정에서 빼 message_created를 안 만든 참여자(`conversation.py`의 `preference_excluded_ids`)는 사본 쪽에만
+       줄이 있었다 — 그 사람들은 «멘션 아닌 글은 알리지 말라»고 한 사람이라 이 사본이 그 설정을 무시한 것이었다(벨에 «새 메시지»가 매 글마다). 이제 그 줄도 사라진다 = 설정대로. (푸시 쪽은 이 PR 밖.)
 
     노출(직접 필요): DM 메시지·@mention(별도 type)·발화한 그룹 대화·dispatched 등 비-대화 이벤트.
     ⚠️ Event/SSE/에이전트 주입 경로 불변 — 휴먼 알림 읽기 단에만 적용.
@@ -75,6 +84,9 @@ def _is_hidden_notification(member_id: uuid.UUID):
         and_(Event.event_type.in_(_CONVERSATION_EVENT_TYPES), muted),         # mute: 대화 전체 무음
         and_(Event.event_type == "conversation.message_created", is_group, ~spoke),  # 미발화 그룹 관전
         Event.event_type.in_(_APPROVALS_INBOX_SIGNAL_TYPES),                        # story #4520 — 결재함 신호
+        # coalesce: a dispatched row whose payload has no `event_type` key would make this term NULL, and `NOT (… OR NULL)` is NULL — the row would drop out of the bell (SQL three-valued logic)
+        and_(Event.event_type == "dispatched", Event.recipient_type == "human",
+             func.coalesce(Event.payload["event_type"].astext, "") == _CHAT_MESSAGE_DISPATCHED),  # story 4890 — 같은 글의 두 번째 줄(사람 몫만 — 에이전트가 받은 dispatched는 그 에이전트의 유일한 알림일 수 있다)
     )
 
 
@@ -116,7 +128,24 @@ async def sync_notification_read_on_chat_read(
         .values(read_at=datetime.now(timezone.utc))
     )
     result = await db.execute(stmt)
-    return result.rowcount
+    cleared = result.rowcount
+    # story 4890 — the `dispatched` copy of a chat message (hidden from the bell read above) names the ROOM (source_entity_id = the conversation), not a message; reading the room clears the copies that came
+    # up to `up_to` as well, so they never wait as «unread» rows that a later change of the bell rule could bring back
+    copies = await db.execute(
+        update(Event)
+        .where(
+            Event.org_id == org_id,
+            Event.recipient_id == member_id,
+            Event.event_type == "dispatched",
+            Event.payload["event_type"].astext == _CHAT_MESSAGE_DISPATCHED,
+            Event.source_entity_type == "conversation",
+            Event.source_entity_id == conversation_id,
+            Event.read_at.is_(None),
+            Event.created_at <= up_to,
+        )
+        .values(read_at=datetime.now(timezone.utc))
+    )
+    return cleared + copies.rowcount
 
 
 # ─── Helper ───────────────────────────────────────────────────────────────────
