@@ -82,7 +82,8 @@ def _is_hidden_notification(member_id: uuid.UUID):
         and_(Event.event_type.in_(_CONVERSATION_EVENT_TYPES), muted),         # mute: 대화 전체 무음
         and_(Event.event_type == "conversation.message_created", is_group, ~spoke),  # 미발화 그룹 관전
         Event.event_type.in_(_APPROVALS_INBOX_SIGNAL_TYPES),                        # story #4520 — 결재함 신호
-        and_(Event.event_type == "dispatched", Event.payload["event_type"].astext == _CHAT_MESSAGE_DISPATCHED),  # story 4890 — 같은 글의 두 번째 줄
+        and_(Event.event_type == "dispatched", Event.recipient_type == "human",
+             Event.payload["event_type"].astext == _CHAT_MESSAGE_DISPATCHED),  # story 4890 — 같은 글의 두 번째 줄(사람 몫만 — 에이전트가 받은 dispatched는 그 에이전트의 유일한 알림일 수 있다)
     )
 
 
@@ -124,7 +125,24 @@ async def sync_notification_read_on_chat_read(
         .values(read_at=datetime.now(timezone.utc))
     )
     result = await db.execute(stmt)
-    return result.rowcount
+    cleared = result.rowcount
+    # story 4890 — the `dispatched` copy of a chat message (hidden from the bell read above) names the ROOM (source_entity_id = the conversation), not a message; reading the room clears the copies that came
+    # up to `up_to` as well, so they never wait as «unread» rows that a later change of the bell rule could bring back
+    copies = await db.execute(
+        update(Event)
+        .where(
+            Event.org_id == org_id,
+            Event.recipient_id == member_id,
+            Event.event_type == "dispatched",
+            Event.payload["event_type"].astext == _CHAT_MESSAGE_DISPATCHED,
+            Event.source_entity_type == "conversation",
+            Event.source_entity_id == conversation_id,
+            Event.read_at.is_(None),
+            Event.created_at <= up_to,
+        )
+        .values(read_at=datetime.now(timezone.utc))
+    )
+    return cleared + copies.rowcount
 
 
 # ─── Helper ───────────────────────────────────────────────────────────────────

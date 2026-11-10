@@ -189,3 +189,60 @@ async def test_other_dispatched_notifications_are_still_on_the_bell():
         assert unread == 1, unread
     finally:
         await engine.dispose()
+
+
+async def test_an_agents_dispatched_chat_notification_is_not_hidden_from_the_agent():
+    """The copy is hidden for HUMAN recipients only (their message_created row is the line). An agent that was sent a `conversation.message` notification has no such row — that one is its only notification."""
+    from sqlalchemy import select
+
+    from app.models.event import Event
+    from app.routers.event_notifications import _is_hidden_notification
+    from tests.test_1994_backlink_api_realdb import _make_agent_member
+
+    engine, Session, org_id, project_id, _sender, _reader = await _world()
+    try:
+        async with Session() as s:
+            agent = await _make_agent_member(s, org_id, project_id)
+            agent_id = agent[0] if isinstance(agent, tuple) else agent
+            for rtype, rid in (("agent", agent_id),):
+                s.add(Event(project_id=project_id, org_id=org_id, event_type="dispatched", source_entity_type="conversation", source_entity_id=uuid.uuid4(), sender_id=None,
+                            recipient_id=rid, recipient_type=rtype, status="pending", payload={"title": "x", "body": "y", "event_type": "conversation.message"}))
+            await s.commit()
+            visible = (await s.execute(select(Event.id).where(Event.recipient_id == agent_id, ~_is_hidden_notification(agent_id)))).scalars().all()
+        assert len(visible) == 1, visible
+    finally:
+        await engine.dispose()
+
+
+async def test_reading_the_room_also_clears_the_hidden_copies():
+    """The copies are off the bell, but they must not sit as «unread» rows (a later change of the rule would bring them back): reading the room marks them read like the message_created rows."""
+    from sqlalchemy import select
+
+    from app.main import app
+    from app.models.event import Event
+
+    engine, Session, org_id, project_id, (sender, sender_user), (reader, reader_user) = await _world()
+    try:
+        async with Session() as s:
+            conv_id = await _make_conversation(s, org_id, project_id, [sender, reader], sender, conv_type="dm")
+        for text in ("one", "two"):
+            await _send(Session, org_id, sender_user, conv_id, text)
+
+        async def unread_kinds():
+            async with Session() as s:
+                rows = (await s.execute(select(Event.event_type, Event.payload).where(Event.recipient_id == reader, Event.read_at.is_(None)))).all()
+            return sorted("copy" if t == "dispatched" and (p or {}).get("event_type") == "conversation.message" else t for t, p in rows)
+
+        assert await unread_kinds() == ["conversation.message_created"] * 2 + ["copy"] * 2
+        await _setup_app_human(app, Session, reader_user, org_id)
+        try:
+            async with _client_for(app) as client:
+                r = await client.post(f"/api/v2/conversations/{conv_id}/read", json={})
+        finally:
+            app.dependency_overrides.clear()
+        assert r.status_code == 200, r.text
+        assert await unread_kinds() == []  # before: the two copies stayed unread
+        rows, unread = await _bell(Session, org_id, reader_user)
+        assert unread == 0 and _chat_lines(rows) and all(r.get("read_at") for r in _chat_lines(rows))
+    finally:
+        await engine.dispose()
