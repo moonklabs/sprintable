@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
  * 새 기능이 아니다 — 같은 동작(`handleCreateStory` → POST /api/stories, 상태 backlog)을 부르는 같은 모양의 입력칸(열 머리 «+»가 여는 것과 같은 글 · Enter 만들기 · Esc 닫기)을
  * 목록 맨 위에 한 줄로 둘 뿐이다. 만들어진 스토리는 보드와 같은 `stories` 상태에 붙어 «대기/백로그» 묶음에 바로 선다.
  */
-export function ListStoryComposer({ onCreate }: { onCreate: (title: string) => Promise<void> | void }) {
+export function ListStoryComposer({ onCreate }: { onCreate: (title: string) => Promise<boolean | void> | boolean | void }) {
   const t = useTranslations('board');
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -28,8 +28,9 @@ export function ListStoryComposer({ onCreate }: { onCreate: (title: string) => P
     if (!title || submitting) return;
     setSubmitting(true);
     try {
-      await onCreate(title);
-      close();
+      // false = 만들기 실패(오류는 보드가 이미 띄웠다) — 입력칸과 제목을 그대로 남겨 다시 누르게 한다. 지우면 쓴 글이 사라진다.
+      const result = await onCreate(title);
+      if (result !== false) close();
     } finally {
       setSubmitting(false);
     }

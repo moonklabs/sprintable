@@ -95,6 +95,23 @@ describe('ListStoryComposer', () => {
     await act(async () => { release(); });
   });
 
+  // codex 5543-2 BLOCKING — 만들기가 실패해도(보드가 오류를 띄우고 false를 돌려준다) 입력칸이 닫히고 제목이 지워지면 쓴 글이 사라진다.
+  it('⭐만들기가 실패(false)하면 입력칸과 제목이 그대로 남는다 — 다시 눌러 재시도할 수 있다(되돌리면 RED)', async () => {
+    const onCreate = vi.fn(async () => false);
+    await act(async () => { root.render(wrap(<ListStoryComposer onCreate={onCreate} />)); });
+    await act(async () => { entry()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await type('실패해도 남을 글');
+    await key('Enter');
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    expect(input()).not.toBeNull();
+    expect(input()!.value).toBe('실패해도 남을 글');
+    // 재시도: 이번엔 성공 → 닫힘
+    onCreate.mockResolvedValueOnce(true as never);
+    await key('Enter');
+    expect(onCreate).toHaveBeenCalledTimes(2);
+    expect(input()).toBeNull();
+  });
+
   it('취소 단추도 닫기만 한다', async () => {
     const onCreate = vi.fn();
     await act(async () => { root.render(wrap(<ListStoryComposer onCreate={onCreate} />)); });

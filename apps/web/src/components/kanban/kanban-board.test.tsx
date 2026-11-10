@@ -1594,6 +1594,32 @@ describe('KanbanBoard — 목록 보기의 «스토리 추가» 입구(story #48
     expect(container.textContent).toContain('있던 카드');
   });
 
+  it('⭐서버가 거절해도(POST 실패) 입력칸과 쓴 제목은 그대로 · 오류가 뜬다 · 목록에 가짜 카드 없음 (codex 5543-2)', async () => {
+    isMobileMock = true;
+    stubFetch([{ id: 's-existing', title: '있던 카드', status: 'backlog', priority: 'medium' }]);
+    const baseFetch = vi.mocked(fetch);
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url === '/api/stories' && init?.method === 'POST') return { ok: false, status: 500, json: async () => null };
+      return baseFetch(url, init);
+    }));
+    await mount();
+    await act(async () => { addEntry()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const input = container.querySelector('[data-testid="list-story-composer"] input') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, '거절당할 일감');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+    const still = container.querySelector('[data-testid="list-story-composer"] input') as HTMLInputElement | null;
+    expect(still).not.toBeNull();
+    expect(still!.value).toBe('거절당할 일감');
+    const alertEl = await waitForAlert();
+    expect(alertEl?.textContent).toContain('스토리 추가에 실패했어요');
+    expect(container.querySelectorAll('[title="거절당할 일감"]')).toHaveLength(0);
+    expect(container.textContent).toContain('있던 카드');
+  });
+
   it('⭐입구는 목록 맨 위(상태 묶음들보다 앞)에 있다', async () => {
     isMobileMock = true;
     stubFetch([{ id: 's1', title: '카드1', status: 'backlog', priority: 'medium' }]);

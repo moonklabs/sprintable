@@ -30,7 +30,7 @@ interface KanbanListViewProps {
    * 기존 t(col.i18nKey) 그대로(회귀 0). 그룹 헤더+카드 내부 배지 둘 다에 쓰인다. */
   getStatusLabel?: (canonicalSlug: string) => string | undefined;
   /** story #4888 — 목록 보기에도 «스토리 추가» 입구 한 자리(같은 동작: 상태 backlog로 만든다). 없으면 입구도 없다(옛 호출부 무변). */
-  onCreateStory?: (title: string) => Promise<void> | void;
+  onCreateStory?: (title: string) => Promise<boolean | void> | boolean | void;
 }
 
 interface StatusGroupProps {
