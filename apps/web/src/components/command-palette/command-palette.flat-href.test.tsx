@@ -54,3 +54,38 @@ describe('CommandPalette — 앵커 목적지는 현재 프로젝트(?p=)를 싣
     expect(pushMock).toHaveBeenCalledWith(href);
   });
 });
+
+// story 4892 (D1) — a document picked from the palette opens to READ; when the workspace/project slugs are not known yet the address is the FLAT form, whose project query
+// comes AFTER the path (`/docs/{slug}/view?p=…`) — never inside it (`/docs?p=…/{slug}/view` was a broken address).
+describe('CommandPalette — 문서 결과(flat 폴백)는 경로 뒤에 ?p=를 싣는다 (story 4892)', () => {
+  it('⭐slug를 모를 때: /docs/{slug}/view?p=proj-1', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('fetch', vi.fn(async (url: string) => (url.includes('/api/docs?')
+        ? { ok: true, status: 200, json: async () => ({ data: [{ id: 'd1', title: '결제 스펙 v2', slug: 'payments-v2' }] }) }
+        : { ok: true, status: 200, json: async () => ({ data: [] }) })));
+      const { CommandPalette } = await import('./command-palette');
+      await act(async () => {
+        root.render(
+          <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+            <CommandPalette open onOpenChange={vi.fn()} projectId="proj-1" />
+          </NextIntlClientProvider>,
+        );
+      });
+      const input = document.querySelector('input') as HTMLInputElement;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '결제');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      const opt = [...document.querySelectorAll('[role="option"]')].find((o) => o.textContent?.includes('결제 스펙 v2'));
+      expect(opt, 'the document result').toBeTruthy();
+      await act(async () => { opt!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(pushMock).toHaveBeenCalledTimes(1);
+      expect(pushMock).toHaveBeenCalledWith('/docs/payments-v2/view?p=proj-1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

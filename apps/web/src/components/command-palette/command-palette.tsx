@@ -191,7 +191,6 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   function resourceHref(resource: string): string {
     return scopedResourceHref(resource, orgSlug, currentProjectSlug, flatHref);
   }
-  const docsHref = resourceHref('docs');
   // story #2224(선생님 정정 2026-07-30, 진입점 전수 스윕) — `/board` 라우트가 삭제되고
   // `/flow?view=list`로 흡수됐다(PR#2698). "보드로 이동" 라벨은 목적지 콘텐츠(칸반)가
   // 그대로라 안 바꿨지만, href는 최종 주소를 직접 가리켜야 한다(리다이렉트 경유는 "은퇴한
@@ -328,7 +327,9 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   }
 
   function handleSelectDoc(doc: DocResult) {
-    router.push(`${docsHref}/${doc.slug}/view`);   // story 4892 (D1): a document picked from the palette opens to read
+    // story 4892 (D1): a document picked from the palette opens to read. Built as ONE resource path through the same helper as every palette destination, so the
+    // flat fallback (slugs not known yet) puts `?p=` AFTER the path (`/docs/{slug}/view?p=…`), never inside it.
+    router.push(resourceHref(`docs/${encodeURIComponent(doc.slug)}/view`));
     handleOpenChange(false);
   }
 
