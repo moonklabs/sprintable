@@ -6,7 +6,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
-import { LEGACY_NAV_ITEMS } from '@/lib/nav-config';
+import { NAV_GROUPS } from '@/lib/nav-config';
 import { DEFAULT_NAV_V3_FLAGS } from '@/lib/nav-v3-destinations';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -51,7 +51,7 @@ describe('내비 설정 경로 소비처가 flat 목적지를 감싼다(story #4
   });
 
   it('커맨드 팔레트 — flat(static) 탐색 항목은 `?p=proj-A`를 싣고 이동', async () => {
-    const staticItem = LEGACY_NAV_ITEMS.find((i) => i.kind === 'static' && i.path.startsWith('/organization/'))!;
+    const staticItem = NAV_GROUPS.flatMap((g) => g.items).find((i) => i.kind === 'static' && i.path.startsWith('/organization/'))!;
     const { CommandPalette } = await import('@/components/command-palette/command-palette');
     await render(<CommandPalette open onOpenChange={vi.fn()} />);
     const btn = document.querySelector(`[data-command-id="${staticItem.id}"]`) as HTMLButtonElement;

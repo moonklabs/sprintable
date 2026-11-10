@@ -8,8 +8,8 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Card, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { groupVisibleLegacyByTarget, LEGACY_NAV_ITEMS, MOBILE_HUB_GROUP_ORDER, resolveNavGroups } from '@/lib/nav-config';
-import { buildMobileHubGroups, MOBILE_LEGACY_CARD_ID, sectionHeader } from '@/lib/mobile-hub-groups';
+import { MOBILE_HUB_GROUP_ORDER, OTHER_NAV_ITEMS, resolveNavGroups } from '@/lib/nav-config';
+import { buildMobileHubGroups, sectionHeader } from '@/lib/mobile-hub-groups';
 import { DEFAULT_NAV_V3_FLAGS, scopedResourceHref } from '@/lib/nav-v3-destinations';
 import { tabDestinationNavIds, visibleTabLabels } from '@/components/nav/mobile-tab-bar';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -36,16 +36,8 @@ export default function MorePage() {
   const tMore = useTranslations('mobileTabBar');
   const [query, setQuery] = useState('');
 
-  // story #3855(customer-zero·셸, 선생님 07:07Z 지적 → 페드루 PO 판정 2026-09-14 07:34Z,
-  // 유나 시안 77731332) — 「그 밖의 화면」은 단일 카드로 유지하되(카드 자체를 쪼개지
-  // 않는다), 카드 안을 §② 흡수 지도 머리말별 소묶음(sub-heading+개수 pill+구분선)으로
-  // 나눈다 — groupVisibleLegacyByTarget()이 데스크톱 「더보기」와 같은 묶음·같은
-  // 머리말을 낸다(nav-config.ts SSOT, AC3). 흡수 화면이 착지해 어느 머리말의 항목이
-  // 0이 되면 그 소묶음만 안 뜬다(빈 묶음 렌더 0, AC4 — groupVisibleLegacyByTarget이
-  // 이미 빈 그룹을 걸러 낸다). 카드 자체가 비면(전 소묶음 0) 카드도 안 뜬다.
-  // story #4278(유나 결정 ①②) — 구역 · 빼는 항목 · 머리 안내의 탭 이름이 모두 «지금 탭바가 그리는 탭»(플래그)에서 나온다
-  // (nav-config.ts buildMobileHubGroups · mobile-tab-bar.tsx tabDestinationNavIds · visibleTabLabels).
-  const LEGACY_CARD_ID = MOBILE_LEGACY_CARD_ID;
+  // story #4885(UI-2 AC4 PR 1) — 구역 · 항목은 사이드바와 같은 한 정의(nav-config.ts)에서, 빼는 항목 · 머리 안내의 탭 이름은 «지금 탭바가 그리는 탭»에서 나온다
+  // (nav-config.ts buildMobileHubGroups · mobile-tab-bar.tsx tabDestinationNavIds · visibleTabLabels). 맨 아래 «그 밖의 화면»은 메뉴 입구를 따로 안 만드는 화면들.
   const { navV3Flags, orgId, orgMemberships, currentProjectSlug } = useDashboardContext();
   // story #4274(유나 실측 · PO) — resource 항목(목표 · 문서 · 루프 · 산출물 · 스토리지 · 보드)은 사이드바 · 탭바와 같은 scopedResourceHref로
   // `/{ws}/{proj}/{자원}` 직접 주소를 만든다. 예전엔 bare `/goals`라 proxy의 legacyResourceRedirect(307) 동안 로딩 경계가 설 자리가 없어
@@ -55,8 +47,7 @@ export default function MorePage() {
   const hubGroups = useMemo(() => buildMobileHubGroups({
     groups: resolveNavGroups(flags),
     groupOrder: MOBILE_HUB_GROUP_ORDER,
-    legacyGroups: groupVisibleLegacyByTarget(),
-    legacyItems: LEGACY_NAV_ITEMS,
+    otherItems: OTHER_NAV_ITEMS,
     excludeIds: tabDestinationNavIds(flags),
   }), [flags]);
 
@@ -83,13 +74,7 @@ export default function MorePage() {
       return label.includes(normalizedQuery) || description.includes(normalizedQuery);
     };
     return hubGroups
-      .map((g) => ({
-        ...g,
-        items: g.items.filter(matches),
-        subgroups: g.subgroups
-          ?.map((sg) => ({ ...sg, items: sg.items.filter(matches) }))
-          .filter((sg) => sg.items.length > 0),
-      }))
+      .map((g) => ({ ...g, items: g.items.filter(matches) }))
       .filter((g) => g.items.length > 0);
   }, [hubGroups, normalizedQuery, t]);
 
@@ -155,7 +140,6 @@ export default function MorePage() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filteredGroups.map((group) => {
-            const isLegacy = group.id === LEGACY_CARD_ID;
             const renderItemRow = (item: (typeof group.items)[number]) => {
               const href = item.kind === 'static' ? flatHref(item.path) : scopedResourceHref(item.path, orgSlug, currentProjectSlug, flatHref);
               const Icon = item.icon;
@@ -193,38 +177,10 @@ export default function MorePage() {
                         없다(sectionHeader — 예전엔 그 항목 이름을 끌어와 «결과 › 결과»로 두 번 보였다). */}
                     <h2 className="flex items-baseline gap-2 text-sm font-semibold text-foreground">
                       <span data-testid="more-section-header">{t(headerKey)}</span>
-                      {/* story #3855(픽셀 커밋, 페드루 PO 판정 2026-09-14 07:34Z ⑥) — 카드
-                          헤더 옆 작은 캡션(§⑤ 해요체) — 데스크톱 「더보기」 캡션과 같은
-                          낱말, 여기선 카드 헤더에 붙는다(별도 페이지 줄이 아님). */}
-                      {isLegacy ? (
-                        <span
-                          className="text-[10.5px] font-medium text-muted-foreground"
-                          data-testid="legacy-moving-caption"
-                        >
-                          {t('moreLegacyMovingCaptionInline')}
-                        </span>
-                      ) : null}
                     </h2>
                   </CardHeader>
                 ) : null}
-                {isLegacy && group.subgroups ? (
-                  <div>
-                    {group.subgroups.map((sg, i) => (
-                      <div key={sg.target} data-legacy-group={sg.target}>
-                        {i > 0 ? <div className="mx-5 my-1.5 h-px bg-border sm:mx-6" /> : null}
-                        <p className="flex items-baseline gap-1.5 px-5 pt-1 pb-0.5 sm:px-6">
-                          <span className="text-[11px] font-bold text-muted-foreground">{t(sg.labelKey)}</span>
-                          <span className="rounded-full bg-muted px-1.5 text-[10px] font-bold leading-[15px] text-muted-foreground">
-                            {sg.items.length}
-                          </span>
-                        </p>
-                        <div className="divide-y divide-border">{sg.items.map(renderItemRow)}</div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="divide-y divide-border">{group.items.map(renderItemRow)}</div>
-                )}
+                <div className="divide-y divide-border">{group.items.map(renderItemRow)}</div>
               </Card>
             );
           })}

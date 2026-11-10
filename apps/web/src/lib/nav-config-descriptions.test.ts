@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LEGACY_NAV_ITEMS, NAV_GROUPS } from './nav-config';
+import { OTHER_NAV_ITEMS, NAV_GROUPS } from './nav-config';
 import koMessages from '../../messages/ko.json';
 import enMessages from '../../messages/en.json';
 
@@ -18,24 +18,25 @@ import enMessages from '../../messages/en.json';
 // 여전히 맞는 자리 — 두 가드는 같은 것을 두 번 보는 게 아니라 서로 다른 축(리터럴 호출
 // vs 데이터 카탈로그)을 나눠 본다. 그래서 이 실존 대조를 되살린다.
 // story #3824(UX-v3·FE 1, 2026-09-13) — 5항목 축소 뒤에도 more/page.tsx(모바일 허브)가
-// LEGACY_NAV_ITEMS 17개를 「그 밖의 화면」 카드로 그대로 `t(item.descriptionKey)`
+// OTHER_NAV_ITEMS 17개를 「그 밖의 화면」 카드로 그대로 `t(item.descriptionKey)`
 // 소비한다 — 이 가드가 메우려던 사각(변수 인자 t() 호출이라 전 화면 AST 가드가 못 보는
-// 축)은 자리 이동과 무관하게 그대로 유효하므로 NAV_GROUPS만이 아니라 LEGACY_NAV_ITEMS도
+// 축)은 자리 이동과 무관하게 그대로 유효하므로 NAV_GROUPS만이 아니라 OTHER_NAV_ITEMS도
 // 합쳐서 본다(23개 총량 자체는 변함없음 — 이동만 있었지 항목 증감은 없었다).
 function allNavGroupItems() {
-  return [...NAV_GROUPS.flatMap((g) => g.items), ...LEGACY_NAV_ITEMS];
+  return [...NAV_GROUPS.flatMap((g) => g.items), ...OTHER_NAV_ITEMS];
 }
 
 describe('NAV_GROUPS descriptionKey 완전성 — story #fddd0e6b AC2', () => {
   // ⭐되돌리면 RED — 항목을 추가하며 descriptionKey를 빠뜨리면(또는 22개가 아니게 늘거나
   // 줄면) 이 수부터 어긋난다. story #3845(§①④, 2026-09-14) — retro·standup이 「일감」
-  // 탭으로 흡수되며 LEGACY_NAV_ITEMS 18→16, 총량 23→21(항목이 사라진 것 — 자리 이동이
+  // 탭으로 흡수되며 OTHER_NAV_ITEMS 18→16, 총량 23→21(항목이 사라진 것 — 자리 이동이
   // 아니라 진짜 감소, story #3824의 "이동만 있었지 증감 없었다"와는 다른 클래스).
   // story #4116(2026-09-21) — org-generation-connectors 신설(연결·규칙 그룹, 채널 연결의
   // 형제 화면)로 21→22. 가드가 신규 항목을 설계대로 잡은 것(파서 결함 아님).
   // story #4183(2026-09-23, 유나 확認) — «준비 중» 화면뿐이던 org-memory를 걷어 22→21.
-  it('항목이 정확히 21개다(NAV_GROUPS 5 + LEGACY_NAV_ITEMS 15, story #4183 org-memory 제거로 22→21)', () => {
-    expect(allNavGroupItems()).toHaveLength(21);
+  // story #4885(UI-2 AC4 PR 1) — 새 구조: NAV_GROUPS 23 + 그 밖 2 = 25(서랍이 걷혀 17개가 사이드바 묶음으로 올라오고, 결재 · 목표 · 실행 기록 · API 키 · 실행이 입구를 얻음).
+  it('항목이 정확히 25개다(NAV_GROUPS 23 + OTHER_NAV_ITEMS 2)', () => {
+    expect(allNavGroupItems()).toHaveLength(25);
   });
 
   it('⭐23개 전부가 descriptionKey를 갖는다(빈 문자열 아님) — board·inbox도 예약값을 가진다', () => {

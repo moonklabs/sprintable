@@ -4,7 +4,7 @@
  * 왜: loading.tsx가 없는 목적지는 누른 뒤 서버 응답(RSC 450~670ms)을 다 받을 때까지 화면이 안 바뀐다(«전체» · «일감» 탭→주소 536~1000ms ·
  * 있는 «결재» · «대화»는 44~193ms).
  *
- * 목적지: nav-config(`resolveNavGroups` · `resolveChatCenterItem` · `LEGACY_NAV_ITEMS`)와 탭 목적지(`resolveNavV3Destinations`)를 **v3 플래그
+ * 목적지: nav-config(`resolveNavGroups` · `resolveChatCenterItem` · `OTHER_NAV_ITEMS`)와 탭 목적지(`resolveNavV3Destinations`)를 **v3 플래그
  * 전부 OFF · 전부 ON 두 판에서** 읽어 모은다(플래그를 켜면 «오늘» /today · «대화» /chat · «연결·규칙» /connect-rules · «일감» work-list로 바뀐다).
  * 모은 목록은 판마다 **따로** EXPECTED_OFF · EXPECTED_ON과 정확히 대조한다 — 늘거나 빠지거나 OFF/ON이 뒤바뀌면 RED(총량 하한 · 합집합 대조는
  * 하나 빠져도 · 방향이 바뀌어도 초록이었다 · 까디르 검수 P2).
@@ -28,7 +28,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { LEGACY_NAV_ITEMS, resolveChatCenterItem, resolveNavGroups } from '@/lib/nav-config';
+import { CHAT_CENTER_ITEM, OTHER_NAV_ITEMS, resolveNavGroups } from '@/lib/nav-config';
 import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations, type NavV3Flags } from '@/lib/nav-v3-destinations';
 import { WORKSPACE_FRAME_TABS } from '@/components/workspace/workspace-frame-tabs';
 
@@ -43,10 +43,10 @@ function collectDestinationsFor(flags: NavV3Flags): Map<string, Dest> {
   {
     const dest = resolveNavV3Destinations(flags);
     const items: Dest[] = [
-      dest.work, dest.approvals, dest.chats, dest.more,
+      dest.today, dest.work, dest.approvals, dest.chats, dest.more,
       ...resolveNavGroups(flags).flatMap((g) => g.items),
-      resolveChatCenterItem(flags),
-      ...LEGACY_NAV_ITEMS,
+      CHAT_CENTER_ITEM,
+      ...OTHER_NAV_ITEMS,
     ];
     for (const item of items) {
       const path = item.path.split('?')[0]!;
@@ -145,17 +145,20 @@ function announcesStatus(loadingFile: string): boolean {
 }
 
 // 판마다 따로 대조한다(까디르 검수 P2 — 합집합 하나로 대조하면 OFF/ON이 뒤바뀌어도 통과했다). 늘거나 빠지면 여기 고치고 loading.tsx를 같이 확인.
+// story #4885(UI-2 AC4 PR 1) — 새 사이드바는 플래그 없이 하나라 두 판의 차이는 탭바의 v3 목적지(/today · /chat · work-list)뿐이다(/connect-rules는 꺼진 시안으로 더는 메뉴 목적지가 아니다).
 const EXPECTED_OFF = [
-  '/activity', '/chats', '/content', '/content/channel-posts', '/inbox', '/more', '/org-briefing',
-  '/organization/channels', '/organization/content-rules', '/organization/events', '/organization/generation-connectors',
-  '/organization/insights-board', '/organization/members', '/organization/roles', '/organization/trust', '/organization/workforce',
-  '/settings', 'resource:artifacts', 'resource:docs', 'resource:flow', 'resource:goals', 'resource:loops', 'resource:storage',
+  '/activity', '/channel', '/chats', '/content', '/content/channel-posts', '/inbox', '/more', '/org-briefing', '/organization/channels',
+  '/organization/content-rules', '/organization/events', '/organization/generation-connectors', '/organization/insights-board',
+  '/organization/members', '/organization/roles', '/organization/trust', '/organization/workforce', '/organization/workforce/api-keys',
+  '/organization/workforce/runs', '/rewards', '/settings', 'resource:artifacts', 'resource:docs', 'resource:flow', 'resource:goals',
+  'resource:loops', 'resource:storage',
 ].sort();
 const EXPECTED_ON = [
-  '/activity', '/chat', '/connect-rules', '/content', '/content/channel-posts', '/inbox', '/more',
-  '/organization/channels', '/organization/content-rules', '/organization/events', '/organization/generation-connectors',
-  '/organization/insights-board', '/organization/members', '/organization/roles', '/organization/trust', '/organization/workforce',
-  '/settings', '/today', 'resource:artifacts', 'resource:docs', 'resource:goals', 'resource:loops', 'resource:storage', 'resource:work-list',
+  '/activity', '/channel', '/chats', '/content', '/content/channel-posts', '/inbox', '/more', '/org-briefing', '/organization/channels',
+  '/organization/content-rules', '/organization/events', '/organization/generation-connectors', '/organization/insights-board',
+  '/organization/members', '/organization/roles', '/organization/trust', '/organization/workforce', '/organization/workforce/api-keys',
+  '/organization/workforce/runs', '/rewards', '/settings', 'resource:artifacts', 'resource:docs', 'resource:flow', 'resource:goals',
+  'resource:loops', 'resource:storage', '/chat', '/today', 'resource:work-list',
 ].sort();
 
 // 목적지 전수의 «페이지 컨테이너» 표(유나 «스켈레톤 = 페이지 컨테이너» · 까디르 검수 P2 — 첫 className만 · 조상 loader 건너뜀 · 하한 8 대신 목록 대조).
@@ -175,7 +178,6 @@ const EXPECTED_CONTAINERS: Record<string, { source: string; container: string }>
   '/org-briefing': { source: '../components/org-briefing/org-briefing-shell.tsx', container: 'mx-auto w-full max-w-4xl space-y-6 p-4 lg:p-6' },
   '/more': { source: '(authenticated)/more/page.tsx', container: 'flex flex-col p-4' },
   '/today': { source: '../components/today-v3/today-v3-screen.tsx', container: 'min-h-0 w-full shrink-0 overflow-auto border-r border-border p-5 lg:w-[392px]' },
-  '/connect-rules': { source: '../components/connect-rules-v3/connect-rules-v3-screen.tsx', container: 'mx-auto max-w-[720px] space-y-8' },
   '/chat': { source: '../components/chat-v3/chat-v3-screen.tsx', container: 'flex flex-1 flex-col gap-3 p-5' },
 };
 // 폭 · 여백 컨테이너가 없는(전폭 · 자체 레이아웃) 목적지 — 기본 PageSkeleton(`space-y-6 p-6`) 또는 전용 스켈레톤.
@@ -184,6 +186,10 @@ const NO_CONTAINER: Record<string, string> = {
   '/chats': '대화 목록 전폭 · 전용 스켈레톤(chats/loading.tsx)',
   '/inbox': '결재함 전폭 목록',
   '/organization/workforce': '에이전트 화면 전폭',
+  '/organization/workforce/runs': '에이전트 실행 기록 전폭 목록(story #4885 새 입구 — 화면 자체는 그대로)',
+  '/organization/workforce/api-keys': '에이전트 키 관리 화면(story #4885 새 입구 — 화면 자체는 그대로)',
+  '/rewards': '리워드 화면(story #4885 «그 밖» — 화면 자체는 그대로)',
+  '/channel': '채널 채팅 전폭(story #4885 «그 밖» — 화면 자체는 그대로)',
   'resource:artifacts': '산출물 갤러리 전폭',
   'resource:docs': '문서 트리 · 편집기 전폭',
   'resource:flow': '일감 프레임 — 몸 스켈레톤 WorkspaceFrameLoading · 탭 줄은 레이아웃 띠(별 단언)',
@@ -271,14 +277,14 @@ describe('story #4274 — 탭 · 메뉴 목적지 loading.tsx 전수(v3 플래�
     expect(problems).toEqual([]);
   });
 
-  it('⭐v3 목적지(/today · /chat · /connect-rules) loading은 v3 셸 뼈대(V3ShellLoading · v3-shell-root) 안에 그린다', () => {
+  it('⭐v3 목적지(/today · /chat) loading은 v3 셸 뼈대(V3ShellLoading · v3-shell-root) 안에 그린다', () => {
     // 까디르 델타 — 표의 컨테이너 토큰만 보면 셸 감싸개(V3ShellLoading)를 빼도 초록이었다. 감싸개 사용 + 그 감싸개가 v3 셸 뿌리 클래스를 쓰는지.
     const shell = codeOnly(readFileSync(join(APP_ROOT, '../components/nav/v3-shell-loading.tsx'), 'utf8'));
     expect(shell).toMatch(/className="v3-shell-root\b/);
     // 유나 판정(4643) — v3 화면은 하단 탭바를 스스로 그린다 → 셸 loading에도(없으면 390에서 탭바가 사라졌다 돌아온다).
     expect(shell).toMatch(/<MobileTabBar\b/);
     const problems: string[] = [];
-    for (const k of ['/today', '/chat', '/connect-rules']) {
+    for (const k of ['/today', '/chat']) {
       const dir = routeDirOf(destinations.get(k)!);
       const own = dir ? join(dir, 'loading.tsx') : null;
       if (!own || !existsSync(own)) { problems.push(`${k}: 자기 loading.tsx 없음`); continue; }

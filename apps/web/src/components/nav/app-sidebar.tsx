@@ -4,7 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ChevronDown, Search, MessageSquare } from 'lucide-react';
+import { ChevronDown, LayoutGrid, Search, MessageSquare } from 'lucide-react';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
@@ -13,14 +13,13 @@ import { ProfileMenu } from '@/components/nav/profile-menu';
 import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosure';
 import { MoveAgentsEntry, NewProjectEntry } from '@/components/nav/new-project-entry';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
-import { Button } from '@/components/ui/button';
 import { fetchDesignatedPendingCount, subscribeDesignatedPendingCount } from '@/lib/designated-pending-count-client';
 import { cn } from '@/lib/utils';
 import {
+  ALL_SCREENS_ITEM,
+  CHAT_CENTER_ITEM,
   NAV_GROUPS,
-  groupVisibleLegacyByTarget,
   resolveNavGroups,
-  resolveChatCenterItem,
 } from '@/lib/nav-config';
 import { DEFAULT_NAV_V3_FLAGS, type NavV3Flags, scopedResourceHref } from '@/lib/nav-v3-destinations';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
@@ -71,12 +70,8 @@ interface AppSidebarProps {
 // 없는 그룹은 위 동적 기본값을 따른다(AC3 "기억이 없을 때도 기본값으로 온전히 선다").
 const SIDEBAR_GROUP_COLLAPSED_STORAGE_KEY = 'sidebar_group_collapsed';
 
-// story #3836(UX-v3·셸 후속, 선생님 지적 2026-09-14) — NAV_GROUPS 밖의 새 접힘 절(「더보기」,
-// LEGACY_NAV_ITEMS 17개). id는 모바일 /more의 legacyGroup.id('legacy')와 맞춰(같은 개념,
-// 두 화면에서 같은 이름) collapsedOverrides가 이 그룹도 NAV_GROUPS와 동일한 «사람별 기억»
-// 경로를 그대로 탄다(아래 mergeStoredCollapsedOverrides가 group id 목록을 인자로 받도록
-// 넓혀 NAV_GROUPS 밖 이 id도 포함시킨다 — 전용 코드 경로 0).
-const LEGACY_GROUP_ID = 'legacy';
+// story #4885(UI-2 AC4 PR 1) — 「더보기」 서랍은 걷혔다. 조직 항목은 NAV_GROUPS의 'org' 묶음 안에 있고 그 묶음만 기본 접힘이다(사람이 펼치면 기억 · 지금 화면이 그 안이면 열려 있다).
+const DEFAULT_COLLAPSED_GROUP_IDS: readonly string[] = ['org'];
 
 function readStoredCollapsedOverrides(): Record<string, boolean> {
   if (typeof window === 'undefined') return {};
@@ -147,11 +142,11 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  // story #4003 — nav-v3-destinations.ts 결정 함수를 그대로 재사용(복붙 규칙 0, AC2).
+  // story #4885 — 새 셸은 플래그 없이 하나: 버전 플래그는 안 읽고, `desktopDownloadEnabled`(화면 존재 플래그)만 설정 묶음의 항목 유무를 정한다.
   const navGroups = useMemo(() => resolveNavGroups(navV3Flags), [navV3Flags]);
   // story #4226 — static(flat) 항목 링크는 `?p=`를 싣는다(use-flat-href · 셸의 착지 정규화 router.replace 0).
   const flatHref = useFlatHref();
-  const chatCenterItem = useMemo(() => resolveChatCenterItem(navV3Flags), [navV3Flags]);
+  const chatCenterItem = CHAT_CENTER_ITEM;
   // story a539c649(S2 최초·S3 리소스 확장) — 실 ws/proj slug 있으면 직접 path(리다이렉트 홉
   // 절약) — 없으면 bare `/{resource}`(미들웨어의 bare→쿠키 default 해소 301 안전망이 받는다).
   const orgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
@@ -175,9 +170,22 @@ export function AppSidebar({
   // story #d986fd6c(IA·S4) — 정적 항목 active 판정. 원래 렌더 루프 바로 앞(구 위치)에
   // 있었으나, 활성 구역 계산(아래)이 접힘 state보다 먼저 알아야 해 이 자리로 옮겼다 —
   // pathname/href만의 순수 함수라 위치 이동에 따른 의미 변화 없음.
-  function isActive(href: string) {
-    return pathname === href || (href !== '/' && pathname.startsWith(href));
-  }
+  // story #4885 (codex 1판) — 정적 항목의 «지금 여기» 판정 한 곳. 예전 isActive(href)는 쿼리 달린 경로(`/inbox?tab=gates`)를 pathname과 글자 그대로 비교해 영영 켜지지 않았고,
+  // 접두 비교라 `/organization/workforce/runs`가 «에이전트»와 «실행 기록»을 함께 켜고 `/content/channel-posts`가 «블로그 포스트»와 «채널 포스트»를 함께 켰다.
+  // 이제 ① 쿼리는 경로와 따로 보고(항목 경로가 `?tab=gates`를 가지면 지금 주소의 같은 키가 같은 값일 때만) ② 맞는 항목이 여럿이면 **가장 구체적인(경로 가장 긴 · 쿼리 있는) 하나**만 켠다.
+  const activeStaticItemId = (() => {
+    let best: { id: string; weight: number } | null = null;
+    const candidates = [...navGroups.flatMap((g) => g.items.filter((i) => i.kind === 'static')), ALL_SCREENS_ITEM];
+    for (const item of candidates) {
+      const [route, query = ''] = item.path.split('?') as [string, string | undefined];
+      if (!(pathname === route || (route !== '/' && pathname.startsWith(`${route}/`)))) continue;
+      const wanted = new URLSearchParams(query);
+      if ([...wanted].some(([key, value]) => searchParams.get(key) !== value)) continue;
+      const weight = route.length * 2 + (query ? 1 : 0);
+      if (!best || weight > best.weight) best = { id: item.id, weight };
+    }
+    return best?.id ?? null;
+  })();
   const t = useTranslations('nav');
   const { isMobile, setOpenMobile } = useSidebar();
   // ⌘K 액션 확장(story 4f991165) — 스토리 상세(`/flow?view=list&story={id}`)에서 열렸을
@@ -224,11 +232,8 @@ export function AppSidebar({
   // 만들던 계산(activeGroupId·viewportHeight)도 이제 이 자리에선 쓸모가 없다 — 기본값은
   // 뷰포트/활성 구역과 무관한 빈 Set(전부 펼침). 아래 collapsedOverrides(사람별 기억)가
   // 유일한 접힘 경로다.
-  // story #3836 — 위 f81657f8 규칙(NAV_GROUPS는 기본 전부 펼침)은 그대로 두되, 「더보기」
-  // (LEGACY_GROUP_ID)만 이 카드의 명시 AC1대로 기본 접힘이다 — 서로 다른 두 그룹 «종류»의
-  // 기본값이 다른 것이지 f81657f8 결정을 뒤집는 게 아니다(그 결정은 NAV_GROUPS 대상으로
-  // 그대로 유효).
-  const defaultCollapsedGroupIds = useMemo(() => new Set<string>([LEGACY_GROUP_ID]), []);
+  // story #4885 — 기본은 전부 펼침(f81657f8)이되 조직 묶음만 접힘(위 DEFAULT_COLLAPSED_GROUP_IDS).
+  const defaultCollapsedGroupIds = useMemo(() => new Set<string>(DEFAULT_COLLAPSED_GROUP_IDS), []);
 
   // story #d986fd6c(IA·S4) — 그룹별 접힘 «기억». 서버 렌더는 항상 빈 overrides({})로
   // 시작해(하이드레이션 불일치 방지, sidebar_width의 SIDEBAR_WIDTH_STORAGE_KEY 마운트-후
@@ -257,7 +262,7 @@ export function AppSidebar({
     }
   }, []);
   const collapsibleGroupIds = useMemo(
-    () => [...NAV_GROUPS.map((g) => g.id), LEGACY_GROUP_ID],
+    () => NAV_GROUPS.map((g) => g.id),
     [],
   );
   const collapsedGroupIds = useMemo(
@@ -421,7 +426,11 @@ export function AppSidebar({
           // 1개뿐이라 접어 봤자 얻는 게 없고, ia-4zone 확定이 이미 "라벨 없는 유틸 그룹"
           // 으로 못박아 뒀다 — 헤더 자체가 없으니 토글할 자리도 없다).
           const isCollapsible = Boolean(group.labelKey);
-          const isCollapsed = isCollapsible && collapsedGroupIds.has(group.id);
+          // story #4885 — 접힌 묶음이어도 지금 화면이 그 안이면 열어 둔다(현재 위치가 사라지지 않게; 접힘 기억은 건드리지 않는다).
+          const groupHasActiveItem = group.items.some((item) => (
+            item.kind === 'static' ? item.id === activeStaticItemId : resourceLink(item.path, item.id === 'board' ? WORKSPACE_FRAME_TAB_PATHS : []).isActive
+          ));
+          const isCollapsed = isCollapsible && collapsedGroupIds.has(group.id) && !groupHasActiveItem;
           const groupLabel = group.labelKey ? t(group.labelKey) : '';
           // 카디르 QA(a11y, §22-18 가드) — render prop이 넘기는 버튼 요소는 SidebarGroupLabel의
           // children(그룹명 텍스트+쉐브론 아이콘)을 감싸기만 할 뿐 버튼 자체에 접근가능한
@@ -462,7 +471,7 @@ export function AppSidebar({
                   // retro/flow 탭에서도 사이드바가 계속 활성으로 뜬다(story #3844
                   // 선례와 동일 계약 — 탭 커버리지 무변, 1차 href만 갱신).
                   const link = item.kind === 'static'
-                    ? { href: flatHref(item.path), isActive: isActive(item.path) }
+                    ? { href: flatHref(item.path), isActive: item.id === activeStaticItemId }
                     : resourceLink(item.path, item.id === 'board' ? WORKSPACE_FRAME_TAB_PATHS : []);
                   const Icon = item.icon;
                   const badgeCount = item.badgeKey === 'inbox' ? inboxPendingCount : 0;
@@ -503,122 +512,23 @@ export function AppSidebar({
           </Fragment>
           );
         })}
-        {/* story #3836(UX-v3·셸 후속, 선생님 지적 2026-09-14) — 3824가 5항목으로 줄이며
-            사이드바에서 빠진 LEGACY_NAV_ITEMS 17개(⌘K 팔레트·모바일 /more가 이미 그 1급
-            진입점)를 이 접힘 절로 되돌린다. 항목 자체는 VISIBLE_LEGACY_NAV_ITEMS(nav-
-            config.ts SSOT, 모바일 /more와 정확히 같은 정의) 그대로 순회 — 이 파일이
-            자기만의 목록을 다시 짓지 않는다(AC2/AC3). 기본 접힘(AC1) — 위 f81657f8은
-            NAV_GROUPS(전부 펼침)만의 결정이라 이 새 그룹엔 안 걸린다. */}
-        {(() => {
-          // story #3855(customer-zero·셸) — 「더보기」 안 항목을 §② 흡수 지도 머리말별로
-          // 묶는다(groupVisibleLegacyByTarget, nav-config.ts SSOT — more/page.tsx와 같은
-          // 함수 재사용). 링크 계산 자체는 3836과 동일(static/resource 링크, 새 축 0) —
-          // 그룹마다 반복하지 않고 전 항목을 한 번에 링크로 만든 뒤 그룹별로 다시 읽는다.
-          const legacyGroups = groupVisibleLegacyByTarget();
-          const legacyLinkByItemId = new Map(
-            legacyGroups.flatMap((group) => group.items).map((item) => [
-              item.id,
-              item.kind === 'static' ? { href: flatHref(item.path), isActive: isActive(item.path) } : resourceLink(item.path),
-            ]),
-          );
-          const legacyHasActiveItem = [...legacyLinkByItemId.values()].some((link) => link.isActive);
-          const legacyIsCollapsed = collapsedGroupIds.has(LEGACY_GROUP_ID) && !legacyHasActiveItem;
-          const legacyGroupLabel = t('navMore');
-          const legacyToggleAriaLabel = legacyIsCollapsed
-            ? t('groupExpand', { group: legacyGroupLabel })
-            : t('groupCollapse', { group: legacyGroupLabel });
-          return (
-            <SidebarGroup>
-              <SidebarGroupLabel
-                render={
-                  // story #3164(DS 게이트 키스톤) 가드 — raw-button-baseline.json이 이
-                  // 파일에 고정한 2건(기존 NAV_GROUPS 토글·⌘K 검색)은 grandfather라
-                  // 그대로 두지만, 이 신규 토글은 소문자 버튼 태그를 새로 추가하는
-                  // 자리라 baseline 초과로 걸린다(2026-09-14 CI 실측 — verify-no-new-
-                  // raw-button.ts는 소스 텍스트를 문자 그대로 스캔해 주석 속 예시
-                  // 표기까지 태그로 오인하므로 이 코멘트에도 그 표기를 쓰지 않는다).
-                  // 캐노니컬 Button(@/components/ui/button)으로 — variant="ghost"의
-                  // 부가 스타일(aria-expanded 틴트·citron 포커스 링)은 아래 className
-                  // 에서 명시로 되돌려 기존 그룹 토글과 시각 동일(실 브라우저 재캡처로
-                  // 확認, AC5 캡처 2 갱신).
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => toggleGroupCollapsed(LEGACY_GROUP_ID)}
-                    aria-expanded={!legacyIsCollapsed}
-                    aria-label={legacyToggleAriaLabel}
-                  />
-                }
-                // 유나 QA 코드리뷰 지적(2026-09-14, 페드루 전달) — mergeProps(Base UI, 일반
-                // React prop 병합)는 이 저장소 cn()의 tailwind-merge와 다른 함수라 Button
-                // size="default"의 `min-h-11`(44px)이 `h-8`(32px, min-height가 아닌 height라
-                // twMerge 충돌군이 애초에 다름)과 절대 충돌하지 않고 살아남는다 — min-height가
-                // 선언된 height보다 크면 렌더 높이는 min-height를 따른다(CSS 규격). `min-h-8`
-                // 명시로 그 최소치를 형제 라벨과 맞춘다(min-w-11도 동형 이유로 함께 되돌림).
-                className="w-full min-h-8 min-w-0 cursor-pointer justify-between rounded-md border-0 bg-transparent aria-expanded:bg-transparent hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:border-transparent"
-              >
-                <span>{legacyGroupLabel}</span>
-                <ChevronDown className={cn('size-3.5 shrink-0 transition-transform duration-150', legacyIsCollapsed && '-rotate-90')} />
-              </SidebarGroupLabel>
-              {!legacyIsCollapsed ? (
-                <SidebarGroupContent>
-                  {/* story #3855 AC2 — 캡션 1줄(§⑤ 해요체·「이사 안내판」 취지). 링크·머리말
-                      둘 다 아닌 순수 안내문이라 SidebarMenu 밖, 첫 그룹 위에 한 번만. */}
-                  <p className="px-2 pt-px pb-1 text-editorial-meta text-muted-foreground" data-testid="legacy-moving-caption">
-                    {t('moreLegacyMovingCaption')}
-                  </p>
-                  {legacyGroups.map((group, groupIndex) => (
-                    <div key={group.target} className="space-y-0.5" data-legacy-group={group.target}>
-                      {/* 픽셀 커밋(페드루 PO 판정 2026-09-14 07:34Z, 유나 시안 77731332
-                          getComputedStyle 대조) — 묶음 사이 구분선(border 토큰) 1px·margin
-                          4px 8px 4px(story 4831: 위 5px를 눈금의 4px로), 첫 그룹 앞엔 없음. */}
-                      {groupIndex > 0 ? <div className="mx-2 mt-1 mb-1 h-px bg-border" /> : null}
-                      {/* AC2 — 머리말은 링크·버튼이 아니다(순수 텍스트, 클릭 불가). 시안이
-                          지정한 안내 문구(머리말 옆 회색 note, 예: 「만드는 곳(일)…」)는 PO가
-                          §⑤ 내부 낱말·사이드바 폭 이유로 명시 제외했다 — 이름+개수 pill만. */}
-                      <p className="flex items-baseline gap-1.5 px-2 pt-0.5 pb-px text-editorial-meta font-bold tracking-[.03em] text-muted-foreground">
-                        <span>{t(group.labelKey)}</span>
-                        <span className="rounded-full bg-muted px-1.5 text-micro font-bold leading-[15px] text-muted-foreground">
-                          {group.items.length}
-                        </span>
-                      </p>
-                      <SidebarMenu>
-                        {group.items.map((item) => {
-                          const link = legacyLinkByItemId.get(item.id)!;
-                          const Icon = item.icon;
-                          const label = t(item.labelKey);
-                          return (
-                            <SidebarMenuItem key={item.id}>
-                              <SidebarMenuButton
-                                render={
-                                  <Link
-                                    href={link.href}
-                                    ref={link.isActive ? activeMenuItemRef : undefined}
-                                    data-legacy-nav-id={item.id}
-                                  />
-                                }
-                                isActive={link.isActive}
-                                tooltip={label}
-                              >
-                                <Icon />
-                                <span data-nav-label>{label}</span>
-                                {item.scope === 'project' ? (
-                                  <span className="ml-auto flex shrink-0 items-center gap-1.5">
-                                    <ScopeMark>{t('scopeProject')}</ScopeMark>
-                                  </span>
-                                ) : null}
-                              </SidebarMenuButton>
-                            </SidebarMenuItem>
-                          );
-                        })}
-                      </SidebarMenu>
-                    </div>
-                  ))}
-                </SidebarGroupContent>
-              ) : null}
-            </SidebarGroup>
-          );
-        })()}
+        {/* story #4885(UI-2 AC4 PR 1) — «전체»: 위 구역 전부 + «그 밖»의 평평한 목록(폰 하단 탭 «전체»와 같은 화면, 같은 이름). 구역이 아니라 입구 하나. */}
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link href={flatHref(ALL_SCREENS_ITEM.path)} ref={activeStaticItemId === ALL_SCREENS_ITEM.id ? activeMenuItemRef : undefined} data-nav-id="all-screens" />}
+                  isActive={activeStaticItemId === ALL_SCREENS_ITEM.id}
+                  tooltip={t(ALL_SCREENS_ITEM.labelKey)}
+                >
+                  <LayoutGrid />
+                  <span data-nav-label>{t(ALL_SCREENS_ITEM.labelKey)}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter className="space-y-2 p-2">

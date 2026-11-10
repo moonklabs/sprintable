@@ -25,7 +25,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { buildActionCommands, type ActionCommand } from './command-palette-actions';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { fetchWithAuth } from '@/lib/db/client';
-import { NAV_GROUPS, CHAT_CENTER_ITEM, LEGACY_NAV_ITEMS } from '@/lib/nav-config';
+import { NAV_GROUPS, CHAT_CENTER_ITEM, OTHER_NAV_ITEMS } from '@/lib/nav-config';
 import { pickEuroJosa } from '@/lib/korean-particle';
 
 interface CommandItem {
@@ -112,7 +112,7 @@ export interface DerivedNavItem {
 // 워크스페이스 없는 항목(isWorkspaceless=true)은 이 콜백을 아예 안 부른다 — 그래서 어떤
 // 더미를 넣어도 실제 href(navItem.path 그대로)가 그대로 나온다.
 export function deriveNavigateItems(resolveResourceHref: (resource: string) => string): DerivedNavItem[] {
-  const navItems = [...NAV_GROUPS.flatMap((group) => group.items), ...LEGACY_NAV_ITEMS, CHAT_CENTER_ITEM];
+  const navItems = [...NAV_GROUPS.flatMap((group) => group.items), ...OTHER_NAV_ITEMS, CHAT_CENTER_ITEM];
   const fromNav: DerivedNavItem[] = navItems.map((navItem) => {
     // story #2224(선생님 정정 2026-07-30) — 'board'는 `/flow?view=list`로 흡수, 'docs'도
     // resourceHref 재계산 대상(둘 다 kind='static'이어도 워크스페이스 있는 경로로 오버라이드

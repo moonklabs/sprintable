@@ -52,16 +52,16 @@ describe('findDepthViolations — story #2684 AC1(양성대조)', () => {
 });
 
 // story #3824(UX-v3·FE 1, 페드루 PO 確定 2026-09-13 CI fail 처방) — 5항목 축소로 대부분의
-// 관리면(구 19항목 중 17개)이 NAV_GROUPS 밖 LEGACY_NAV_ITEMS로 옮겨갔다. 판별자를
-// «삭제»가 아니라 **«확장»**한다(PO 명시 문구) — NAV_GROUPS ∪ LEGACY_NAV_ITEMS를 대상으로
-// "모바일에서 모든 관리 항목 depth ≤2" 불변식을 그대로 유지한다. LEGACY_NAV_ITEMS는
+// 관리면(구 19항목 중 17개)이 NAV_GROUPS 밖 OTHER_NAV_ITEMS로 옮겨갔다. 판별자를
+// «삭제»가 아니라 **«확장»**한다(PO 명시 문구) — NAV_GROUPS ∪ OTHER_NAV_ITEMS를 대상으로
+// "모바일에서 모든 관리 항목 depth ≤2" 불변식을 그대로 유지한다. OTHER_NAV_ITEMS는
 // more/page.tsx가 "그 밖의 화면" 카드 하나로 항상 렌더(MOBILE_HUB_GROUP_ORDER 조회 대상이
 // 아니라 무조건 추가)하므로 합성 legacy 그룹으로 모델링(buildMobileNavUniverse() 참고) —
 // 이 합성 그룹이 hubGroupIds에서 빠지면 여전히 도달불가(∞)로 RED 난다(완화 아님).
-describe('실 NAV_GROUPS ∪ LEGACY_NAV_ITEMS — story #2684 AC3 판별자, story #3824로 확장(이벤트 포함 전 관리면 depth ≤2)', () => {
+describe('실 NAV_GROUPS ∪ OTHER_NAV_ITEMS — story #2684 AC3 판별자, story #3824 확장 → story #4885 새 구조(전 화면 입구 depth ≤2)', () => {
   const { groups, hubGroupIds } = buildMobileNavUniverse();
 
-  // story #3824 — NAV_GROUPS(5) + LEGACY_NAV_ITEMS(18) = 23항목(nav-config-descriptions.
+  // story #3824 — NAV_GROUPS(5) + OTHER_NAV_ITEMS(18) = 23항목(nav-config-descriptions.
   // test.ts의 "정확히 23개다" 판정과 동일 총량 — 재분배만 있었지 증감 없음을 이 축에서도
   // 재확認). 챗 center(CHAT_CENTER_ITEM)는 여전히 이 스캔 대상 밖(story #2930 I2, 상단
   // ㉥ 참고 — nav-config.ts 어느 배열에도 없어 원래도 시야 밖).
@@ -69,19 +69,20 @@ describe('실 NAV_GROUPS ∪ LEGACY_NAV_ITEMS — story #2684 AC3 판별자, sto
   // ITEMS 18→16, 총량 23→21(nav-config-descriptions.test.ts와 동일 축, 동일 사유).
   // story #4116(2026-09-21) — org-generation-connectors 신설로 21→22(동일 축 동일 사유).
   // story #4183(2026-09-23) — org-memory 걷힘으로 22→21(동일 축 동일 사유).
-  it('전 21항목(챗 center 제외)이 depth ≤2다(회귀 0 — 도달불가 0건 포함)', () => {
+  // story #4885(UI-2 AC4 PR 1) — 새 구조: NAV_GROUPS 23항목(오늘 2 · 일감 3 · 에이전트 3 · 지식 3 · 조직 11 · 설정 1) + 그 밖 2 = 25항목. 서랍이 걷혀 «그 밖» 2쪽이 «전체» 맨 아래로 간 것 외에 전부 사이드바 1단.
+  it('전 25항목(챗 center 제외)이 depth ≤2다(회귀 0 — 도달불가 0건 포함)', () => {
     const entries = computeMobileDepths(groups, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
-    expect(entries).toHaveLength(21);
+    expect(entries).toHaveLength(25);
     expect(findDepthViolations(entries, MAX_MOBILE_DEPTH)).toEqual([]);
   });
 
-  it('이벤트(판별자 자체, 이제 LEGACY_NAV_ITEMS 소속)는 depth 2다 — /more 「그 밖의 화면」 경유', () => {
+  it('이벤트(판별자 자체)는 depth 2다 — /more 「조직」 구역 경유', () => {
     const entries = computeMobileDepths(groups, MOBILE_HUB_EXCLUDE_IDS, hubGroupIds);
     const events = entries.find((e) => e.id === 'org-events');
     expect(events?.depth).toBe(2);
   });
 
-  // story #3824 — inbox는 이제 LEGACY_NAV_ITEMS 소속이지만 MOBILE_HUB_EXCLUDE_IDS엔 여전히
+  // story #3824 — inbox는 이제 OTHER_NAV_ITEMS 소속이지만 MOBILE_HUB_EXCLUDE_IDS엔 여전히
   // 있어(바텀 탭 「결재」가 이미 depth 1로 커버) 어느 배열에 살든 depth 1 그대로다. board도
   // NAV_GROUPS 소속인 채 동일 취급 — "바텀 탭 커버 축"은 소속 배열과 무관하다는 것 자체가
   // 이 판별자의 핵심 불변식.
