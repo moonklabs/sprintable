@@ -214,6 +214,7 @@ function ShellBody({
       <NavRail
         orgSlug={railOrgSlug}
         projectSlug={currentProjectSlug}
+        account={{ orgId, orgMemberships, projectId, projectMemberships, userName }}
         navV3Flags={navV3Flags}
         chatUnreadTotal={chatUnreadTotal}
         onOpenPalette={openPalette}

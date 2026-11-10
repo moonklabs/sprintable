@@ -12,6 +12,9 @@ import { WORKSPACE_FRAME_TAB_PATHS } from '@/components/workspace/workspace-fram
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { RailAccount } from './rail-account';
+import type { OrgSwitcherItem } from './unified-switcher';
+import type { DashboardProjectOption } from '@/app/dashboard/dashboard-shell';
 
 // story #4885 (UI-2) — **B 셸 초안**: 안 B «프로토콜»(아이콘 막대 + 목록 + 상세)의 아이콘 막대. 유나 UI-1 §6 B 줄: 매일 다섯 = 막대 위쪽 아이콘 · 조직 묶음 = 막대의 «조직» 아이콘을 누르면 옆으로 펼침 · 설정 · 전체 = 막대 맨 아래.
 // 이 파일은 **그리는 쪽만**이다: 무엇이 있는지(구역 · 항목 · 이름 · 경로 · 배지 종류)는 nav-config.ts, «지금 여기»는 nav-active.ts — 왼쪽 길잡이(app-sidebar.tsx)와 같은 데이터 · 같은 판정을 읽는다.
@@ -24,6 +27,8 @@ import { cn } from '@/lib/utils';
 interface NavRailProps {
   orgSlug?: string;
   projectSlug?: string;
+  /** «계정» 팝오버(길잡이 머리 · 바닥의 쪽이 아닌 입구)에 넘기는 값 — 길잡이와 같은 출처. 안 넘기면 «계정» 아이콘은 그리지 않는다(시험 · 단독 사용). */
+  account?: { orgId?: string; orgMemberships: OrgSwitcherItem[]; projectId?: string; projectMemberships: DashboardProjectOption[]; userName?: string };
   navV3Flags?: NavV3Flags;
   /**
    * «오늘» 아이콘의 건수 — **받아서 그리기만 한다**. 무엇을 세는지(결재 · 답 · 멘션 · 알림의 합 = 오늘 화면 «내 손이 필요해요» 구역 건수)는 담롱군 UI-5(오늘 화면)가 정하고, 호출부가 그 값을 넘긴다
@@ -36,7 +41,7 @@ interface NavRailProps {
 
 const DAILY_GROUP_IDS = ['now', 'dev', 'team', 'knowledge'] as const;
 
-export function NavRail({ orgSlug, projectSlug, navV3Flags = DEFAULT_NAV_V3_FLAGS, todayCount = 0, chatUnreadTotal = 0, onOpenPalette }: NavRailProps) {
+export function NavRail({ orgSlug, projectSlug, account, navV3Flags = DEFAULT_NAV_V3_FLAGS, todayCount = 0, chatUnreadTotal = 0, onOpenPalette }: NavRailProps) {
   const t = useTranslations('nav');
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -77,7 +82,7 @@ export function NavRail({ orgSlug, projectSlug, navV3Flags = DEFAULT_NAV_V3_FLAG
   ) : null);
 
   const dailyEntry = (group: NavGroupConfig) => (
-    <DailyEntry key={group.id} group={group} link={link} label={(item) => t(item.labelKey)} icon={railIcon} badge={badge} count={group.id === 'now' ? todayCount : 0} />
+    <DailyEntry key={group.id} group={group} link={link} label={(item) => t(item.labelKey)} groupLabel={group.labelKey ? t(group.labelKey) : undefined} icon={railIcon} badge={badge} count={group.id === 'now' ? todayCount : 0} />
   );
 
   const chatLink = link(CHAT_CENTER_ITEM);
@@ -105,6 +110,7 @@ export function NavRail({ orgSlug, projectSlug, navV3Flags = DEFAULT_NAV_V3_FLAG
             ) : null}
           </div>
         ) : null}
+        {account ? <RailAccount {...account} /> : null}
         <Button type="button" variant="ghost" aria-label={t('search')} title={`${t('search')} ⌘K`} onClick={onOpenPalette} className="block h-auto min-h-0 min-w-0 rounded-md p-0 hover:bg-transparent focus-visible:ring-2 focus-visible:ring-ring" data-rail-item="search">
           {railIcon(Search, false)}
         </Button>
@@ -123,10 +129,12 @@ export function NavRail({ orgSlug, projectSlug, navV3Flags = DEFAULT_NAV_V3_FLAG
 
 // 매일 구역 하나 = 아이콘 링크 하나(구역 첫 항목) + 항목이 더 있으면 옆에 뜨는 목록. 목록은 호버 · 키보드 초점 · (Esc로 닫힘)이 상태로 열고 닫는다 —
 // CSS 호버만으로 열면(group-hover) 터치에서는 닿지 않는 조작 요소 부류(hover-reveal 가드)가 되므로, 열림을 상태로 쥐고 `hidden`은 닫힘일 때만 쓴다.
-function DailyEntry({ group, link, label, icon, badge, count }: {
+function DailyEntry({ group, link, label, groupLabel, icon, badge, count }: {
   group: NavGroupConfig;
   link: (item: Pick<NavItemConfig, 'id' | 'kind' | 'path'>) => { href: string; isActive: boolean };
   label: (item: NavItemConfig) => string;
+  /** 머리글 있는 구역(팀 · 지식)의 아이콘은 첫 항목 이름(구성원 · 문서)이 아니라 구역 이름으로 부른다 */
+  groupLabel?: string;
   icon: (Icon: LucideIcon, active: boolean) => ReactNode;
   badge: (n: number) => ReactNode;
   count: number;
@@ -146,7 +154,7 @@ function DailyEntry({ group, link, label, icon, badge, count }: {
       onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOpen(false); }}
       onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}
     >
-      <Link href={firstLink.href} aria-label={label(first)} title={label(first)} aria-current={anyActive ? 'page' : undefined} className="relative block rounded-md focus-visible:ring-2 focus-visible:ring-ring" data-rail-item={first.id}>
+      <Link href={firstLink.href} aria-label={groupLabel ?? label(first)} title={groupLabel ?? label(first)} aria-current={anyActive ? 'page' : undefined} className="relative block rounded-md focus-visible:ring-2 focus-visible:ring-ring" data-rail-item={first.id}>
         {icon(first.icon, anyActive)}
         {badge(count)}
       </Link>

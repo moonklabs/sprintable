@@ -14,6 +14,16 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(queryRef.current),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
 }));
+// «계정» 팝오버가 옮겨 싣는 길잡이 부품들 — 부품 자체의 동작은 각자의 시험 몫이라 여기선 «막대의 팝오버 안에 모두 있다»만 본다.
+function part(name: string) {
+  return function Part() { return <div data-part={name} />; };
+}
+vi.mock('@/components/nav/unified-switcher', () => ({ UnifiedSwitcher: part('switcher') }));
+vi.mock('@/components/nav/new-project-entry', () => ({ NewProjectEntry: part('new-project'), MoveAgentsEntry: part('move-agents') }));
+vi.mock('@/components/nav/profile-menu', () => ({ ProfileMenu: part('profile') }));
+vi.mock('@/components/locale-switcher', () => ({ LocaleSwitcher: part('locale') }));
+vi.mock('@/components/nav/theme-toggle', () => ({ ThemeToggle: part('theme') }));
+vi.mock('@/components/nav/business-info-disclosure', () => ({ BusinessInfoDisclosure: part('business-info') }));
 const { NavRail } = await import('./nav-rail');
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -31,29 +41,29 @@ const names = () => [...container.querySelectorAll('[data-testid="nav-rail"] > a
   .map((el) => el.getAttribute('aria-label'));
 
 describe('NavRail — B 셸 초안(아이콘 막대)', () => {
-  it('⭐위에서 아래 순서: 오늘 → 대화 → 일감 → 에이전트 → 지식 · 맨 아래 조직 → 찾기 → 설정 → 전체', async () => {
+  it('⭐위에서 아래 순서: 오늘 → 대화 → 일감 → 팀 → 지식 · 맨 아래 조직 → 찾기 → 설정 → 전체', async () => {
     await mount();
-    expect(names()).toEqual(['오늘', '대화', '일감', '에이전트', '문서', '조직', '검색…', '설정', '전체']);
+    expect(names()).toEqual(['오늘', '대화', '일감', '팀', '지식', '조직', '검색…', '설정', '전체']);
   });
 
-  it('구역의 첫 항목이 아이콘의 링크다(오늘 = /org-briefing · 일감 = /flow · 에이전트 = /organization/workforce · 지식 = /docs)', async () => {
+  it('구역의 첫 항목이 아이콘의 링크다(오늘 = /org-briefing · 일감 = /flow · 팀 = /organization/members(구역 첫 항목 구성원) · 지식 = /docs)', async () => {
     await mount();
     const href = (id: string) => container.querySelector(`[data-rail-item="${id}"]`)?.getAttribute('href');
     expect(href('org-briefing')).toBe('/org-briefing');
     expect(href('chats')).toBe('/chats');
     expect(href('board')).toBe('/flow');
-    expect(href('org-workforce')).toBe('/organization/workforce');
+    expect(href('org-members')).toBe('/organization/members');
     expect(href('docs')).toBe('/docs');
     expect(href('settings')).toBe('/settings');
     expect(href('all-screens')).toBe('/more');
   });
 
-  it('⭐항목이 더 있는 구역은 옆 목록에 전부 싣는다(오늘 = 오늘 · 결재 · 일감 = 일감 · 목표 · 실행 · 에이전트 = 에이전트 · 실행 기록 · API 키 · 지식 = 문서 · 산출물 · 스토리지)', async () => {
+  it('⭐항목이 더 있는 구역은 옆 목록에 전부 싣는다(오늘 = 오늘 · 결재 · 일감 = 일감 · 목표 · 실행 · 팀 = 구성원 · 에이전트 · 실행 기록 · API 키 · 지식 = 문서 · 산출물 · 스토리지)', async () => {
     await mount();
     const flyout = (group: string) => [...container.querySelectorAll(`[data-rail-group="${group}"] [data-flyout-item]`)].map((a) => a.getAttribute('data-flyout-item'));
     expect(flyout('now')).toEqual(['org-briefing', 'inbox']);
     expect(flyout('dev')).toEqual(['board', 'goals', 'loops']);
-    expect(flyout('team')).toEqual(['org-workforce', 'org-workforce-runs', 'org-workforce-api-keys']);
+    expect(flyout('team')).toEqual(['org-members', 'org-workforce', 'org-workforce-runs', 'org-workforce-api-keys']);
     expect(flyout('knowledge')).toEqual(['docs', 'artifacts', 'storage']);
   });
 
@@ -64,7 +74,7 @@ describe('NavRail — B 셸 초안(아이콘 막대)', () => {
     expect(button.getAttribute('aria-expanded')).toBe('false');
     await act(async () => { button.click(); });
     const items = [...container.querySelectorAll('[data-testid="rail-org-panel"] [data-flyout-item]')].map((a) => a.getAttribute('data-flyout-item'));
-    expect(items).toEqual(['org-insights-board', 'org-channels', 'org-generation-connectors', 'org-content-rules', 'org-events', 'org-trust', 'org-roles', 'org-members', 'activity', 'content', 'channel-posts']);
+    expect(items).toEqual(['org-insights-board', 'org-channels', 'org-generation-connectors', 'org-content-rules', 'org-events', 'org-trust', 'org-roles', 'activity', 'content', 'channel-posts']);
     expect(button.getAttribute('aria-expanded')).toBe('true');
     await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
     expect(container.querySelector('[data-testid="rail-org-panel"]')).toBeNull();
@@ -85,10 +95,10 @@ describe('NavRail — B 셸 초안(아이콘 막대)', () => {
     expect(container.querySelector('[data-testid="rail-badge"]')).toBeNull();
   });
 
-  it('⭐«지금 여기»는 사이드바와 같은 판정이다: /organization/workforce/runs에서 «에이전트» 아이콘이 켜지고(구역 안) 옆 목록에선 «실행 기록»만 켜진다', async () => {
+  it('⭐«지금 여기»는 사이드바와 같은 판정이다: /organization/workforce/runs에서 «팀» 아이콘이 켜지고(구역 안) 옆 목록에선 «실행 기록»만 켜진다', async () => {
     pathnameRef.current = '/organization/workforce/runs';
     await mount();
-    expect(container.querySelector('[data-rail-item="org-workforce"]')?.getAttribute('aria-current')).toBe('page');
+    expect(container.querySelector('[data-rail-item="org-members"]')?.getAttribute('aria-current')).toBe('page');
     const current = [...container.querySelectorAll('[data-flyout-item][aria-current="page"]')].map((a) => a.getAttribute('data-flyout-item'));
     expect(current).toEqual(['org-workforce-runs']);
   });
@@ -130,5 +140,19 @@ describe('NavRail — B 셸 초안(아이콘 막대)', () => {
     expect(flyout().className).not.toContain('hidden');
     await act(async () => { (container.querySelector('[data-rail-item="board"]') as HTMLAnchorElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
     expect(flyout().getAttribute('data-open')).toBe('false');
+  });
+
+  it('⭐«계정» 팝오버: 길잡이 머리 · 바닥에만 있던 쪽이 아닌 입구가 막대에서도 닿는다(전환 · 새 프로젝트 · 에이전트 옮기기 · 프로필 · 언어 · 테마 · 사업자 정보)', async () => {
+    await mount({ account: { orgId: 'o1', orgMemberships: [], projectId: 'p1', projectMemberships: [], userName: '디디' } });
+    expect(names()).toEqual(['오늘', '대화', '일감', '팀', '지식', '조직', '계정', '검색…', '설정', '전체']);
+    expect(document.querySelector('[data-testid="rail-account-panel"]')).toBeNull();
+    await act(async () => { (container.querySelector('[data-rail-item="account"]') as HTMLElement).click(); });
+    const parts = [...document.querySelectorAll('[data-testid="rail-account-panel"] [data-part]')].map((el) => el.getAttribute('data-part'));
+    expect(parts).toEqual(['switcher', 'new-project', 'move-agents', 'profile', 'locale', 'theme', 'business-info']);
+  });
+
+  it('account를 안 넘기면 «계정» 아이콘은 없다(단독 사용)', async () => {
+    await mount();
+    expect(container.querySelector('[data-rail-item="account"]')).toBeNull();
   });
 });
