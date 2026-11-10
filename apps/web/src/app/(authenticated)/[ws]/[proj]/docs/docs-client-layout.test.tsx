@@ -642,7 +642,8 @@ describe('DocsClientLayout — 목록 열 머리 · 토글 · 틀 (4892)', () =>
   it('⭐레일을 접어도 새 문서 · 새 폴더는 닿는다 — 접히면 상단 바의 두 동작이 lg에서도 보인다', async () => {
     stubFetch();
     await mount();
-    const topBarBtn = () => [...container.querySelectorAll('button')].find((b) => !columnHeader()?.contains(b) && b.getAttribute('aria-label') === '새 문서') as HTMLButtonElement;
+    // the rail may be gone (collapsed) — look the header up without assuming it exists
+    const topBarBtn = () => [...container.querySelectorAll('button')].find((b) => !container.querySelector('aside')?.contains(b) && b.getAttribute('aria-label') === '새 문서') as HTMLButtonElement;
     expect(topBarBtn().parentElement!.className.split(/\s+/)).toContain('lg:hidden');          // rail open → the header has them
     const hide = [...container.querySelectorAll('button')].find((b) => b.getAttribute('title') === '문서 트리 숨기기') as HTMLButtonElement;
     expect(hide, 'the collapse button').toBeTruthy();
