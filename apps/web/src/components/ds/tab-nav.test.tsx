@@ -67,16 +67,51 @@ describe('ds TabNav', () => {
     expect(onEnter).toHaveBeenCalledTimes(1);
   });
 
-  it('⭐켜진 탭이 바뀌면 그 탭을 줄 안으로 가져온다(scrollIntoView nearest) · 꺼진 탭은 안 움직인다', async () => {
+  // jsdom은 레이아웃이 없다 — 줄과 링크의 사각형을 직접 준다.
+  function rect(left: number, right: number): DOMRect {
+    return { left, right, top: 0, bottom: 32, width: right - left, height: 32, x: left, y: 0, toJSON: () => ({}) } as DOMRect;
+  }
+  function stripFrame(linkRects: Record<string, [number, number]>, stripRect: [number, number]) {
+    const nav = container.querySelector('nav') as HTMLElement;
+    nav.getBoundingClientRect = () => rect(stripRect[0], stripRect[1]);
+    for (const a of links()) {
+      const r = linkRects[a.getAttribute('data-k')!];
+      if (r) a.getBoundingClientRect = () => rect(r[0], r[1]);
+    }
+    return nav;
+  }
+
+  it('⭐켜진 탭이 줄 오른쪽 밖이면 줄의 scrollLeft만 당긴다 — 페이지(scrollIntoView · window 스크롤)는 안 건드린다', async () => {
     const spy = vi.fn();
     Element.prototype.scrollIntoView = spy;
+    const winSpy = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
     await render(<Strip active="members" />);
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect(spy).toHaveBeenLastCalledWith({ block: 'nearest', inline: 'nearest' });
+    const nav = stripFrame({ runs: [380, 460] }, [0, 300]);
+    nav.scrollLeft = 10;
     await render(<Strip active="runs" />);
-    expect(spy).toHaveBeenCalledTimes(2);
-    await render(<Strip active="runs" />);
-    expect(spy).toHaveBeenCalledTimes(2);
+    // 링크 오른쪽 460 − (줄 오른쪽 300 − 흐림 24) = 184만큼 더 당긴다
+    expect(nav.scrollLeft).toBe(10 + 184);
+    expect(spy).not.toHaveBeenCalled();
+    expect(winSpy).not.toHaveBeenCalled();
+  });
+
+  it('⭐켜진 탭이 줄 왼쪽 밖이면 왼쪽으로 당긴다', async () => {
+    await render(<Strip active="agents" />);
+    const nav = stripFrame({ members: [-60, 20] }, [0, 300]);
+    nav.scrollLeft = 100;
+    await render(<Strip active="members" />);
+    expect(nav.scrollLeft).toBe(100 - 60);
+  });
+
+  it('이미 보이면 줄을 움직이지 않는다 · 켜짐이 안 바뀌면(같은 탭 다시 그림) 건드리지 않는다', async () => {
+    await render(<Strip active="members" />);
+    const nav = stripFrame({ agents: [40, 120] }, [0, 300]);
+    nav.scrollLeft = 7;
+    await render(<Strip active="agents" />);
+    expect(nav.scrollLeft).toBe(7);
+    nav.scrollLeft = 50;
+    await render(<Strip active="agents" />);
+    expect(nav.scrollLeft).toBe(50);
   });
 
   it('줄은 가로 스크롤 · 아래 선은 바깥 래퍼 · 폰 누름 44', async () => {
@@ -90,12 +125,16 @@ describe('ds TabNav', () => {
   });
 
   it('⭐바깥에서 준 ref도 받고 scrollIntoView도 여전히 된다(ref 합성)', async () => {
-    const spy = vi.fn();
-    Element.prototype.scrollIntoView = spy;
     let got: HTMLAnchorElement | null = null;
-    await render(<TabNav aria-label="x"><TabNavLink asChild active ref={(n) => { got = n; }}><a href="https://example.com/a">a</a></TabNavLink></TabNav>);
+    await render(<TabNav aria-label="x"><TabNavLink asChild ref={(n) => { got = n; }}><a href="https://example.com/a">a</a></TabNavLink></TabNav>);
     expect(got).toBe(links()[0]);
-    expect(spy).toHaveBeenCalledTimes(1);
+    // 안쪽 ref도 살아 있다 — 켜진 탭을 줄 안으로 당기는 일이 된다(바깥 ref가 안쪽을 덮어쓰면 안 된다).
+    const nav = container.querySelector('nav') as HTMLElement;
+    nav.getBoundingClientRect = () => rect(0, 300);
+    links()[0]!.getBoundingClientRect = () => rect(500, 560);
+    nav.scrollLeft = 0;
+    await render(<TabNav aria-label="x"><TabNavLink asChild active ref={(n) => { got = n; }}><a href="https://example.com/a">a</a></TabNavLink></TabNav>);
+    expect(nav.scrollLeft).toBeGreaterThan(0);
   });
 
   it('⭐asChild에 Fragment · 글을 주면 그리지 않는다(모양 · 접근성을 새게 하지 않는다)', async () => {
