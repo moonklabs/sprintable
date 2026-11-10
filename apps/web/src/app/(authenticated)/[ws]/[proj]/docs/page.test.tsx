@@ -97,6 +97,22 @@ describe('/docs?id=<doc id>', () => {
     expect(container.querySelector('[data-testid="docs-index"]')).not.toBeNull();
   });
 
+  it('a network error is handled inside the page: no unhandled rejection leaves it', async () => {
+    searchState.qs = 'id=0a1b2c3d-0000-4000-8000-000000000007';
+    const unhandled: unknown[] = [];
+    const onUnhandled = (e: unknown) => { unhandled.push(e); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      fetchMock.mockRejectedValue(new Error('network down'));
+      await render();
+      await new Promise((r) => setImmediate(r)); // a rejection nobody handles is reported on the next turn of the event loop
+      expect(unhandled).toEqual([]);
+      expect(replaceMock).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
   it('without an id nothing is fetched and nothing moves', async () => {
     await render();
     expect(fetchMock).not.toHaveBeenCalled();
