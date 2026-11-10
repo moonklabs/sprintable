@@ -500,6 +500,31 @@ describe('FlowPageClient — story #3043→#3101 기본값=list(칸반), 모바�
     expect(counts[0]).toBe(counts[1]);
   });
 
+  // PO 5543 ① — 예약 칩(작업)의 «눌러서 여는 설명 창»은 폰 터치 · 키보드로 설명을 볼 유일한 길이다. 화면(페이지) 단위로 못박는다:
+  // 칩을 누르면 설명 창(role=tooltip · body 포털)이 열리고, 칩의 aria-describedby가 그 창을 가리킨다. 창을 걷으면(title만 남기면) RED.
+  const ladderChip = (name: string) =>
+    Array.from(container.querySelectorAll('[data-testid="scale-ladder-chips"] > *')).find((el) => el.textContent?.includes(name)) as HTMLElement | undefined;
+
+  it.each([['데스크톱', false], ['모바일', true]])('⭐%s: 예약 칩(작업)을 누르면 설명 창이 열린다 — 터치 · 키보드로 설명을 볼 길(되돌리면 RED)', async (_l, mobile) => {
+    isMobileMock = mobile;
+    await renderFlowClient();
+    const chip = ladderChip(koMessages.flow.ladderName_building)!.querySelector('button')!;
+    expect(document.body.textContent).not.toContain(koMessages.flow.ladderReservedInfo);
+    await act(async () => { chip.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const pop = document.body.querySelector<HTMLElement>('[role="tooltip"]');
+    expect(pop?.textContent).toBe(koMessages.flow.ladderReservedInfo);
+    expect(chip.getAttribute('aria-describedby')?.split(/\s+/)).toContain(pop!.id);
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it('렌즈 칩의 접근 가능한 설명 = 질문 문구(페이지 단위) — 갈래 칩 aria-describedby가 sr-only 질문 글을 가리킨다', async () => {
+    await renderFlowClient();
+    const chip = ladderChip(koMessages.flow.ladderName_city)!;
+    const target = document.getElementById(chip.getAttribute('aria-describedby')!);
+    expect(target?.textContent).toBe(koMessages.flow.ladderQuestion_city);
+    expect(target?.closest('.sr-only')).not.toBeNull();
+  });
+
   it('모바일이라도 ?view=flow가 명시돼 있으면 그 값을 그대로 존중한다(주소로 갈래 진입 회귀 없음)', async () => {
     isMobileMock = true;
     currentSearch = 'view=flow';

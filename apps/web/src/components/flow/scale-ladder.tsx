@@ -102,82 +102,95 @@ export function ScaleLadder({ activeLevel = 'earth' }: { activeLevel?: LadderLev
   }, [openReservedLevel]);
 
   // story #3043(PO+유나 IA 확定 ⓐ) · story #4888 — 래더는 보드의 렌즈/필터(지금 보는 층 표시)일 뿐이라 칩 한 줄로 그린다.
-  // 질문 문구(ladderQuestion_*)는 칩 `title`로 — 눈에는 이름만, 필요하면 올려 본다.
+  // 질문 문구(ladderQuestion_*)는 눈에는 안 보이고 — 마우스는 칩 `title`로, 화면 읽기 프로그램은 칩마다 이어진 sr-only 설명(aria-describedby)으로 읽는다.
   //
   // story #3112 — 칩도 클릭 배선된다(모바일은 옛 3버튼 세그가 없어 이 칩 줄이 유일한 렌즈 전환 경로).
   return (
-    <div className="flex items-center gap-1 overflow-x-auto rounded-lg border border-border bg-card px-1.5 py-1" data-testid="scale-ladder-chips">
-      {LADDER_LEVELS.map((level) => {
-        const active = level === activeLevel;
-        const behavior = RUNG_BEHAVIOR[level];
-        const question = t(`ladderQuestion_${level}`);
-        const chipClassName = cn(
-          'shrink-0 rounded-full px-2 py-0.5 text-editorial-meta font-medium transition',
-          active ? 'bg-brand/10 text-brand-text' : 'text-muted-foreground',
-          behavior.kind === 'dead' && 'cursor-not-allowed opacity-60',
-          behavior.kind === 'reserved' && 'cursor-help',
-        );
-        if (behavior.kind === 'lens') {
-          return (
-            <button
-              key={level}
-              type="button"
-              title={question}
-              aria-current={active ? 'true' : undefined}
-              onClick={() => goToLens(behavior.view)}
-              className={chipClassName}
-            >
-              {t(`ladderName_${level}`)}
-            </button>
+    <div>
+      <div className="flex items-center gap-1 overflow-x-auto rounded-lg border border-border bg-card px-1.5 py-1" data-testid="scale-ladder-chips">
+        {LADDER_LEVELS.map((level) => {
+          const active = level === activeLevel;
+          const behavior = RUNG_BEHAVIOR[level];
+          const question = t(`ladderQuestion_${level}`);
+          const questionId = `ladder-question-${level}`;
+          const chipClassName = cn(
+            'shrink-0 rounded-full px-2 py-0.5 text-editorial-meta font-medium transition',
+            active ? 'bg-brand/10 text-brand-text' : 'text-muted-foreground',
+            behavior.kind === 'dead' && 'cursor-not-allowed opacity-60',
+            behavior.kind === 'reserved' && 'cursor-help',
           );
-        }
-        if (behavior.kind === 'move') {
-          // 이동 칸(목표)만 ↗ — 렌즈 칸은 같은 화면 안 전환이라 ↗ 없음(조건①).
-          return (
-            <Link key={level} href={goalsHref} title={question} className={chipClassName}>
-              {t(`ladderName_${level}`)}
-              <span aria-hidden="true" className="ml-0.5 font-bold text-brand">↗</span>
-            </Link>
-          );
-        }
-        if (behavior.kind === 'reserved') {
-          // (i)+클릭 팝오버로 "예약/안내"임을 전달한다. 터치 기기는 hover가 없어 이 클릭 팝오버가 유일한 안내 경로다(doc 명시).
-          const open = openReservedLevel === level;
-          const infoId = `ladder-reserved-info-${level}`;
-          return (
-            <div key={level} ref={open ? reservedWrapperRef : undefined} className="relative shrink-0">
+          if (behavior.kind === 'lens') {
+            return (
               <button
+                key={level}
                 type="button"
                 title={question}
-                aria-describedby={open ? infoId : undefined}
-                onClick={() => setOpenReservedLevel(open ? null : level)}
-                className={cn(chipClassName, 'inline-flex items-center gap-1')}
+                aria-describedby={questionId}
+                aria-current={active ? 'true' : undefined}
+                onClick={() => goToLens(behavior.view)}
+                className={chipClassName}
               >
                 {t(`ladderName_${level}`)}
-                <Info aria-hidden="true" className="size-3" />
               </button>
-              {/* story #4349 — 칩 줄(overflow-x-auto · 세로도 auto)이 absolute 팝오버를 통째로 잘랐다 → body로 포털(칩 줄 가로 스크롤은 그대로). */}
-              {open && (
-                <AnchoredPopover
-                  anchorRef={reservedWrapperRef}
-                  popoverRef={infoPopoverRef}
-                  id={infoId}
-                  role="tooltip"
-                  data-dropdown-panel="scale-ladder-info"
-                  className="z-50 w-56 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-[var(--elev-overlay)]"
+            );
+          }
+          if (behavior.kind === 'move') {
+            // 이동 칸(목표)만 ↗ — 렌즈 칸은 같은 화면 안 전환이라 ↗ 없음(조건①).
+            return (
+              <Link key={level} href={goalsHref} title={question} aria-describedby={questionId} className={chipClassName}>
+                {t(`ladderName_${level}`)}
+                <span aria-hidden="true" className="ml-0.5 font-bold text-brand">↗</span>
+              </Link>
+            );
+          }
+          if (behavior.kind === 'reserved') {
+            // (i)+클릭 팝오버로 "예약/안내"임을 전달한다. 터치 기기는 hover가 없어 이 클릭 팝오버가 유일한 안내 경로다(doc 명시).
+            const open = openReservedLevel === level;
+            const infoId = `ladder-reserved-info-${level}`;
+            return (
+              <div key={level} ref={open ? reservedWrapperRef : undefined} className="relative shrink-0">
+                <button
+                  type="button"
+                  title={question}
+                  aria-describedby={open ? `${questionId} ${infoId}` : questionId}
+                  onClick={() => setOpenReservedLevel(open ? null : level)}
+                  className={cn(chipClassName, 'inline-flex items-center gap-1')}
                 >
-                  {t('ladderReservedInfo')}
-                </AnchoredPopover>
-              )}
-            </div>
+                  {t(`ladderName_${level}`)}
+                  <Info aria-hidden="true" className="size-3" />
+                </button>
+                {/* story #4349 — 칩 줄(overflow-x-auto · 세로도 auto)이 absolute 팝오버를 통째로 잘랐다 → body로 포털(칩 줄 가로 스크롤은 그대로). */}
+                {open && (
+                  <AnchoredPopover
+                    anchorRef={reservedWrapperRef}
+                    popoverRef={infoPopoverRef}
+                    id={infoId}
+                    role="tooltip"
+                    data-dropdown-panel="scale-ladder-info"
+                    className="z-50 w-56 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover p-3 text-xs text-popover-foreground shadow-[var(--elev-overlay)]"
+                  >
+                    {t('ladderReservedInfo')}
+                  </AnchoredPopover>
+                )}
+              </div>
+            );
+          }
+          return (
+            <span key={level} title={question} aria-describedby={questionId} className={chipClassName} aria-disabled="true">
+              {t(`ladderName_${level}`)}
+            </span>
           );
-        }
-        return (
-          <span key={level} title={question} className={chipClassName} aria-disabled="true">
-            {t(`ladderName_${level}`)}
+        })}
+      </div>
+      {/* story #4888 — 질문 문구는 화면에서 빠졌지만(설계) 지워진 게 아니다: 칩마다 aria-describedby로 이어진 sr-only 글이 접근 가능한 설명이다
+          (title은 마우스 올림에만 보이고 화면 읽기 프로그램이 일정하게 안 읽는다). 칩 «안»이 아니라 옆에 둔다 — 안에 두면 칩의 접근 가능한 이름이 «가설 무엇을 검증하는가»로 길어진다. */}
+      <div className="sr-only" data-testid="scale-ladder-questions">
+        {LADDER_LEVELS.map((level) => (
+          <span key={level} id={`ladder-question-${level}`}>
+            {t(`ladderQuestion_${level}`)}
           </span>
-        );
-      })}
+        ))}
+      </div>
     </div>
   );
 }

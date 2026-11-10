@@ -69,15 +69,45 @@ describe('ScaleLadder — 칩 한 줄(story #4888)', () => {
     for (const l of LEVELS) expect(container.textContent).toContain(koMessages.flow[`ladderName_${l}` as const]);
   });
 
-  // 되돌리면 RED: 카드열(질문 줄을 글자로 그리는 판)이 되살아나면 질문 문구가 본문에 나타난다.
-  it('질문 문구는 본문 글자로 그리지 않는다 — 칩 title로만(카드열이 돌아오면 RED)', () => {
+  // 되돌리면 RED: 카드열(질문 줄을 글자로 그리는 판)이 되살아나면 질문 문구가 «보이는» 본문에 나타난다. sr-only 설명 글은 보이는 글이 아니다.
+  it('질문 문구는 보이는 본문에 없다 — 칩 title(마우스) + sr-only 설명(읽기 프로그램)으로만(카드열이 돌아오면 RED)', () => {
     act(() => { root.render(wrap(<ScaleLadder />)); });
+    const visible = container.cloneNode(true) as HTMLElement;
+    visible.querySelectorAll('.sr-only').forEach((e) => e.remove());
     for (const l of LEVELS) {
       const q = koMessages.flow[`ladderQuestion_${l}` as const];
-      expect(container.textContent).not.toContain(q);
+      expect(visible.textContent).not.toContain(q);
       expect(chips().find((c) => c.getAttribute('title') === q || c.querySelector(`[title="${q}"]`)), `${l} title`).toBeTruthy();
     }
     expect(container.querySelector('.overflow-hidden.rounded-xl')).toBeNull();
+  });
+
+  // PO 5543 ② — title만으로는 화면 읽기 프로그램이 일정하게 안 읽는다: 칩마다 aria-describedby → 질문 문구 sr-only 글.
+  // 칩 «안»에 두면 접근 가능한 이름이 길어지니 칩 밖(옆)에 둔다.
+  it('⭐렌즈 칩의 접근 가능한 설명 = 질문 문구 — 칩마다 aria-describedby가 sr-only 질문 글을 가리키고, 칩 이름은 이름만이다', () => {
+    act(() => { root.render(wrap(<ScaleLadder />)); });
+    for (const l of LEVELS) {
+      const name = koMessages.flow[`ladderName_${l}` as const];
+      const q = koMessages.flow[`ladderQuestion_${l}` as const];
+      const chip = findChip(name)!;
+      const target = (chip.tagName === 'DIV' ? chip.querySelector('button')! : chip);
+      const ids = (target.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
+      const desc = ids.map((id) => document.getElementById(id)).filter(Boolean) as HTMLElement[];
+      expect(desc.map((d) => d.textContent), `${l} 설명`).toContain(q);
+      const qEl = desc.find((d) => d.textContent === q)!;
+      expect(qEl.closest('.sr-only'), `${l} sr-only`).not.toBeNull();
+      expect(chip.contains(qEl), `${l} 설명은 칩 밖`).toBe(false);
+      // 접근 가능한 이름(칩 글자)에는 질문이 섞이지 않는다.
+      expect(target.textContent).not.toContain(q);
+    }
+    expect(container.querySelectorAll('[id^="ladder-question-"]')).toHaveLength(5);
+  });
+
+  it('렌즈 칩 설명 연결은 활성 층이 바뀌어도 유지된다(activeLevel과 무관)', () => {
+    act(() => { root.render(wrap(<ScaleLadder activeLevel="city" />)); });
+    const chip = findChip(koMessages.flow.ladderName_city)!;
+    expect(chip.getAttribute('aria-describedby')).toBe('ladder-question-city');
+    expect(document.getElementById('ladder-question-city')?.textContent).toBe(koMessages.flow.ladderQuestion_city);
   });
 
   it('legend 줄("지구"류 행성 이름표)은 렌더되지 않는다', () => {
@@ -174,13 +204,15 @@ describe('ScaleLadder — 칩 한 줄(story #4888)', () => {
       expect(koMessages.flow.ladderReservedInfo).toContain('고장이 아니라');
     });
 
-    it('열렸을 때만 aria-describedby가 팝오버 id를 가리킨다', () => {
+    it('열렸을 때만 aria-describedby가 팝오버 id까지 가리킨다 — 닫힌 동안은 질문 글 하나(PO 5543 ②)', () => {
       act(() => { root.render(wrap(<ScaleLadder />)); });
-      expect(trigger().getAttribute('aria-describedby')).toBeNull();
+      expect(trigger().getAttribute('aria-describedby')).toBe('ladder-question-building');
       act(() => { trigger().dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-      const describedBy = trigger().getAttribute('aria-describedby');
-      expect(describedBy).toBeTruthy();
-      expect(document.body.querySelector(`#${describedBy}`)?.textContent).toBe(koMessages.flow.ladderReservedInfo);
+      const ids = (trigger().getAttribute('aria-describedby') ?? '').split(/\s+/);
+      expect(ids).toHaveLength(2);
+      expect(ids[0]).toBe('ladder-question-building');
+      expect(document.getElementById(ids[1]!)?.textContent).toBe(koMessages.flow.ladderReservedInfo);
+      expect(document.getElementById(ids[1]!)?.getAttribute('role')).toBe('tooltip');
     });
 
     it('다시 클릭하면(토글) 닫힌다', () => {
@@ -248,7 +280,7 @@ describe('ScaleLadder — 칩 한 줄(story #4888)', () => {
         expect(pop.style.left).toBe('300px');
         expect(pop.style.transform).toBe('');
         expect(pop.className).not.toMatch(/(^|\s)(absolute|top-full)(\s|$)/);
-        expect(trigger().getAttribute('aria-describedby')).toBe(pop.id);
+        expect(trigger().getAttribute('aria-describedby')?.split(/\s+/)).toContain(pop.id);
         act(() => { root.render(wrap(<ScaleLadder activeLevel="city" />)); });
         const again = document.body.querySelector<HTMLElement>('[data-dropdown-panel="scale-ladder-info"]')!;
         expect(again.parentElement).toBe(document.body);
