@@ -126,6 +126,37 @@ describe('ChatListView — 조직 안 모든 방 한 목록(story 4847 AC1)', ()
     expect(labels).toEqual(expect.arrayContaining([A.projectName, B.projectName, koMessages.chats.roomNoProject]));
   });
 
+  // story 4887 (UI-4 P2-a) — with ONE known project every row of that project would say the same name; the line (the row's fourth) is spared there. Everything else keeps the name: it is information.
+  it('4887 ⭐ a person with ONE project gets no project line on a room of that project — the project-less room still says «프로젝트 없음»', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [A], role: 'member', projectId: undefined });
+    stubOrgServer([N1, A1]);
+    await mount();
+    const labels = [...container.querySelectorAll('[data-testid="room-project"]')].map((e) => e.textContent);
+    expect(labels).toEqual([koMessages.chats.roomNoProject]);
+    expect(container.textContent).toContain('에이 방');
+  });
+
+  it('4887 ⭐ a room of ANOTHER project than the person\'s only one keeps its name (a person who lost access can still read it)', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [A], role: 'member', projectId: undefined });
+    stubOrgServer([A1, B1]);
+    await mount();
+    expect([...container.querySelectorAll('[data-testid="room-project"]')].map((e) => e.textContent)).toEqual([B.projectName]);
+  });
+
+  it('4887 ⭐ an EMPTY (not yet known) membership list keeps the name — «unknown» is not «one project»', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'member', projectId: undefined });
+    stubOrgServer([A1, B1]);
+    await mount();
+    expect([...container.querySelectorAll('[data-testid="room-project"]')].map((e) => e.textContent).sort()).toEqual([A.projectName, B.projectName].sort());
+  });
+
+  it('4887 ⭐ with TWO projects the name shows on a room that has a project (the line is the way to tell the rooms apart)', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [A, B], role: 'member', projectId: undefined });
+    stubOrgServer([A1]);
+    await mount();
+    expect([...container.querySelectorAll('[data-testid="room-project"]')].map((e) => e.textContent)).toEqual([A.projectName]);
+  });
+
   it('줄이 이름을 안 주면(project_name 없음) 내 프로젝트 목록에서 이름을 찾아 붙인다', async () => {
     stubOrgServer([{ ...B1, project_name: null }]);
     await mount();
