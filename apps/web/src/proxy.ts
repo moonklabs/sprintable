@@ -67,7 +67,9 @@ const PUBLIC_PREFIX = [
   // UI public routes
   '/share/',
   '/login',
-  '/signup',
+  // story 4891 — `/signup` is not listed any more: next.config.ts redirects it to `/register` before this proxy runs, and a public `/signup` prefix made the workspace pages of any
+  // organization with the slug `signup` (or `signup-2`) public. `signup` is NOT a reserved workspace slug: with the prefix gone it is an ordinary slug, and reserving it would break the
+  // organizations that already have it (looksLikeWorkspaceSegment would stop resolving their pages).
   '/register',
   '/forgot-password',
   '/reset-password',
@@ -118,6 +120,17 @@ const PUBLIC_PREFIX = [
   // (route.ts §desktop/updates/macos.json, 본문 desktop-updates.ts).
   '/desktop/updates/',
 ];
+
+/**
+ * story 4891 — a public prefix without a trailing «/» names a PAGE and what is under it (`/login`, `/login/…`), not every path that merely starts with those letters. It was a plain
+ * `startsWith`, so `/login-2/…` was public too — and a reserved workspace slug gets the suffix `-2` (an organization named «login» or «signup» becomes `login-2` / `signup-2`):
+ * its workspace pages would skip the session check here. A prefix that ends with «/» (`/api/auth/`, `/.well-known/`) still matches by `startsWith`. (No real route started with a
+ * public prefix without a «/» after it — checked against `app/` when this changed.)
+ */
+export function matchesPublicPrefix(pathname: string, prefix: string): boolean {
+  if (prefix.endsWith('/')) return pathname.startsWith(prefix);
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
 
 export const SP_AT_COOKIE = 'sp_at';
 export const SP_RT_COOKIE = 'sp_rt';
@@ -893,7 +906,7 @@ async function proxyImpl(incoming: NextRequest) {
 
   const isPublicPath =
     PUBLIC_EXACT.includes(pathname) ||
-    PUBLIC_PREFIX.some((prefix) => pathname.startsWith(prefix));
+    PUBLIC_PREFIX.some((prefix) => matchesPublicPrefix(pathname, prefix));
 
   if (isPublicPath) {
     const response = NextResponse.next({ request });

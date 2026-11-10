@@ -69,7 +69,7 @@
     "collapsedChipLocal": "시작하기 {completed}/{total}",
     "stepSignedUp": "가입하기",
     "stepEmailVerified": "이메일 인증하기",
-    "stepOrgCreated": "조직 만들기",
+    "stepOrgCreated": "조직이 만들어졌어요",
     "stepAgentConnected": "에이전트 연결하기",
     "stepFirstRoundtrip": "첫 지시 보내고 회신 받기",
     "firstInstructionStartFailed": "대화를 시작하지 못했어요. 다시 시도해 주세요.",
