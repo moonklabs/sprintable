@@ -53,6 +53,8 @@ import { HIDDEN_SETTINGS_TABS, resolveSettingsTab as resolveTab } from './settin
 import { settingsNavGroups } from './settings-nav';
 import { SettingsNav } from './settings-nav-list';
 import { IconButton } from '@/components/ds/icon-button';
+import { Banner } from '@/components/ds/banner';
+import { Button as DsButton } from '@/components/ds/button';
 import { SupportSettingsTabPanel } from '@/components/settings/support-tab-panel';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import dynamic from 'next/dynamic';
@@ -764,14 +766,9 @@ export default function SettingsPage() {
             <TabsContent value="profile">
               <div className="space-y-6">
                 {profileLoadFailed && (
-                  <Alert variant="destructive">
-                    <AlertDescription className="flex items-center justify-between gap-3">
-                      <span>{t('accountInfoLoadError')}</span>
-                      <Button size="sm" variant="outline" onClick={handleProfileTabRetry}>
-                        {tc('retry')}
-                      </Button>
-                    </AlertDescription>
-                  </Alert>
+                  <Banner tone="failed" action={<DsButton onClick={handleProfileTabRetry}>{tc('retry')}</DsButton>}>
+                    {t('accountInfoLoadError')}
+                  </Banner>
                 )}
                 {/* story #3772 — key=retryNonce로 넷을 통째 리마운트해 재-fetch(상세페이지
                     key-remount 정본). 섹션 각자의 onLoadError가 처음 하나만 배너를 올리면

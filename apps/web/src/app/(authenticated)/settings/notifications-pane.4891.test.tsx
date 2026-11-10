@@ -77,6 +77,12 @@ describe('[SID:4891] NotificationsPane', () => {
     await draw(props({ loading: true }));
     expect(container.querySelector('[data-testid="notifications-pane-loading"]')).not.toBeNull();
     expect(container.querySelector('[role="switch"]')).toBeNull();
+    // a ds SkeletonGroup: one spoken name, the bars decorative (a hand-drawn pulse block says nothing to a screen reader)
+    const g = container.querySelector('[data-testid="notifications-pane-loading"]')!;
+    expect(g.getAttribute('data-slot')).toBe('ds-skeleton-group');
+    expect(g.getAttribute('role')).toBe('status');
+    expect(g.getAttribute('aria-label')).toBe(koMessages.common.loading);
+    expect(g.querySelectorAll('[data-slot="ds-skeleton"][aria-hidden="true"]')).toHaveLength(3);
   });
 
   it('the «coming soon» columns are for a desktop width only: drawn hidden-below-lg when the build has them, not drawn when it does not', async () => {

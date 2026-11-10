@@ -47,6 +47,17 @@ const press = async (el: Element | undefined) => { expect(el).toBeTruthy(); awai
 const pressedIn = (g: Element) => [...g.querySelectorAll('button')].filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.textContent?.trim());
 
 describe('[SID:4891] GateLevelMatrix on ds parts — what it does', () => {
+  it('while the table is being read it draws a ds SkeletonGroup named «불러오는 중…» (one voice, decorative bars) and no level buttons', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {}))); // the read never answers → the loading branch stays
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><GateLevelMatrix surface="project" projectId="p1" canEdit /></NextIntlClientProvider>); });
+    const g = container.querySelector('[data-slot="ds-skeleton-group"]');
+    expect(g?.getAttribute('role')).toBe('status');
+    expect(g?.getAttribute('aria-label')).toBe(koMessages.common.loading);
+    expect(g?.querySelectorAll('[data-slot="ds-skeleton"]').length).toBe(8);
+    expect(g?.querySelectorAll('[data-slot="ds-skeleton"][aria-hidden="true"]').length).toBe(8);
+    expect(container.querySelector('[role="group"] button')).toBeNull();
+  });
+
   it('reads the four cells into four ds list rows; the pressed level of each row is its level; an overridden cell shows its tag and ↺', async () => {
     await draw({ canEdit: true });
     expect(rowsOf()).toHaveLength(4);
