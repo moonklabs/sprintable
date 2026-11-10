@@ -1555,6 +1555,25 @@ class SendMessageRequest(BaseModel):
         return v
 
 
+class HttpSendMessageRequest(SendMessageRequest):
+    """story 4894 — the body of the PUBLIC `POST /conversations/{id}/messages`.
+
+    `event_context` is the card of a message the SERVER published (`publish_registry_event` builds a `SendMessageRequest` and hands it to `send_message_core` in-process — no HTTP). On the
+    public route it used to be accepted from anyone in the room, so a participant (a person or an agent) could stamp a message with the card of an event the server never published (a gate
+    verdict, an assignment — `event_key` · `payload` · `refs` with names and links of their choosing) and that card was stored, delivered to the readers of the room and copied into the other
+    participants' notification rows. A caller of the public route may not set it: any value is a 422. The in-process callers keep `SendMessageRequest` (this subclass only narrows the HTTP
+    input), so nothing the server publishes changes."""
+
+    event_context: None = Field(default=None, description="Set by the server only (the card of an event the server published). Sending a value is refused with 422.")
+
+    @field_validator("event_context", mode="before")
+    @classmethod
+    def _event_context_is_server_only(cls, v: object) -> None:
+        if v is not None:
+            raise ValueError("event_context is set by the server only (it is the card of an event the server published); it cannot be sent to this endpoint")
+        return None
+
+
 class UploadConversationAttachmentRequest(BaseModel):
     """E-MCP-OPT S2: MCP(비-브라우저)용 JSON/base64 첨부 업로드 요청."""
 
@@ -2790,7 +2809,7 @@ async def add_participant(
 @router.post("/{conversation_id}/messages", status_code=201)
 async def send_message(
     conversation_id: uuid.UUID,
-    body: SendMessageRequest,
+    body: HttpSendMessageRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
