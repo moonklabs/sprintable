@@ -9,6 +9,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { pickIGaJosa } from '@/lib/korean-particle';
 import { ChatBubble } from './chat-bubble';
+import { continuesRun } from './timeline-grouping';
 import { ConnectionLostBanner } from './connection-lost-banner';
 import type { PresenceStatus } from './presence-dot';
 import { CommandHintNotice, type BlockedHint } from './command-hint-notice';
@@ -1062,7 +1063,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
                     {group.messages.map((msg, idx) => {
                       const prev = group.messages[idx - 1];
-                      const isGrouped = Boolean(prev && prev.created_by === msg.created_by);
+                      // story 4887 (UI-4 P4-a) — one run = the same sender with no gap over five minutes (timeline-grouping.ts)
+                      const isGrouped = continuesRun(prev, msg);
                       return (
                         <Fragment key={msg.id}>
                           {/* story #1977: "여기부터 안읽음" — info 톤(안내), 빨강 0(시안 768e89b5 v2). */}

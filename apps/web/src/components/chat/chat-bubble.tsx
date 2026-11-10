@@ -681,7 +681,7 @@ export function ChatBubble({
           e.preventDefault();
           e.stopPropagation();
         }}
-        className={`flex scroll-mt-4 gap-2 transition-shadow ${isMine ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-0.5' : 'mt-2'} ${highlight ? 'rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-background' : ''} ${(isCiteAnchor || isCiteInRange) ? 'border-l-[3px] border-l-primary pl-1' : ''}`}
+        className={`group/bubble flex scroll-mt-4 gap-2 transition-shadow ${isMine ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-0.5' : 'mt-2'} ${highlight ? 'rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-background' : ''} ${(isCiteAnchor || isCiteInRange) ? 'border-l-[3px] border-l-primary pl-1' : ''}`}
         onContextMenu={handleContextMenu}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
@@ -724,7 +724,7 @@ export function ChatBubble({
             a long unbreakable code line/URL's min-content overrides max-w-[72%] and overflows
             the row → page. With it, the column respects max-w and the inner content contains
             itself — whitespace-pre-wrap code wraps, <pre> scrolls (overflow-x-auto), URLs break. */}
-        <div data-chat-content="" className={`flex min-w-0 max-w-[72%] flex-col gap-0.5 ${isMine ? 'items-end' : 'items-start'}`}>
+        <div data-chat-content="" className={`relative flex min-w-0 max-w-[72%] flex-col gap-0.5 ${isMine ? 'items-end' : 'items-start'}`}>
           {/* Sender name — hidden when grouped */}
           {!isGrouped && (
             <div data-chat-meta="" className="flex items-center gap-1.5">
@@ -742,6 +742,8 @@ export function ChatBubble({
                 // dot) 채택, soft-fill 폐지.
                 <AgentIdentity />
               )}
+              {/* story 4887 (UI-4 P4-a) — the run's time, once, beside the name (fine pointers). A touch screen keeps the time line under each bubble: it is where the touch «⋯» menu button sits (story 4855) and there is no hover to reveal a time */}
+              <time className="hidden text-micro text-muted-foreground [@media(pointer:fine)_and_(hover:hover)]:inline" dateTime={message.created_at} data-testid="bubble-head-time"><ViewerDate value={message.created_at} options={VIEWER_TIME_OPTIONS} /></time>
             </div>
           )}
 
@@ -955,7 +957,16 @@ export function ChatBubble({
           {/* story 4855 — touch-only «⋯» opens the menu (a long press on the text is the platform's selection).
               Shown where the primary pointer is coarse OR nothing can hover (a device that reports a fine primary pointer — a stylus source, a tablet with a mouse — but cannot hover would otherwise never show it).
               Absolutely placed beside the time (never over it, never pushing it) and out of the way of the text. */}
-          <span data-chat-meta="" className="relative inline-block">
+          <span
+            data-chat-meta=""
+            data-testid="bubble-meta-line"
+            // story 4887 (UI-4 P4-a) — where a mouse can hover (fine pointer + hover): the first message of a run has no time line (its head has the time); a continuation keeps its time for screen readers (sr-only) and shows it beside the bubble while the row is hovered OR holds the keyboard focus (WCAG 1.4.13: what hover reveals, focus reveals too — a link or button inside the bubble). Everywhere else (touch · a stylus that cannot hover) the line stays under the bubble as before — the touch «⋯» button sits on it (story 4855)
+            className={isGrouped
+              ? (isMine
+                ? 'relative inline-block [@media(pointer:fine)_and_(hover:hover)]:sr-only [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:not-sr-only [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:absolute [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:bottom-0 [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:right-full [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:mr-2 [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:whitespace-nowrap [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:not-sr-only [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:absolute [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:bottom-0 [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:right-full [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:mr-2 [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:whitespace-nowrap'
+                : 'relative inline-block [@media(pointer:fine)_and_(hover:hover)]:sr-only [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:not-sr-only [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:absolute [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:bottom-0 [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:left-full [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:ml-2 [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:whitespace-nowrap [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:not-sr-only [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:absolute [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:bottom-0 [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:left-full [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:ml-2 [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:whitespace-nowrap')
+              : 'relative inline-block [@media(pointer:fine)_and_(hover:hover)]:hidden'}
+          >
             <time className="text-micro text-muted-foreground" dateTime={message.created_at}><ViewerDate value={message.created_at} options={VIEWER_TIME_OPTIONS} /></time>
             <Button
               type="button"
