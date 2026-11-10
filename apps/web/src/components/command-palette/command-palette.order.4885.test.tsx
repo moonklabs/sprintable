@@ -7,7 +7,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { CommandPalette, deriveNavigateItems } from './command-palette';
-import { NAV_GROUPS, OTHER_NAV_ITEMS, CHAT_CENTER_ITEM } from '@/lib/nav-config';
+import { ALL_SCREENS_ITEM, NAV_GROUPS, OTHER_NAV_ITEMS, CHAT_CENTER_ITEM } from '@/lib/nav-config';
 import koMessagesRaw from '../../../messages/ko.json';
 
 type LooseMessages = { [key: string]: string | LooseMessages };
@@ -19,12 +19,25 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 const ids = () => deriveNavigateItems((resource) => `/ws/proj/${resource}`).map((item) => item.id);
 
 describe('⌘K 이동 목록 순서 = 길잡이 순서 (story #4885)', () => {
-  it('⭐홈 · 결재 다음이 대화, 그 다음이 일감과 일감 탭 앵커다(대화가 맨 끝으로 밀리지 않는다)', () => {
-    const list = ids();
-    expect(list.slice(0, 9)).toEqual([
-      'org-briefing', 'inbox', 'chats', 'board',
-      'go-sprints', 'go-epics', 'go-retro', 'go-work-list', 'go-hypotheses',
-    ]);
+  // 순서를 손으로 적지 않는다 — 길잡이 설정(nav-config)에서 읽어, 길잡이가 바뀌면 이 시험의 기대도 같이 바뀐다(팔레트만 옛 순서로 남으면 RED).
+  // 길잡이(app-sidebar)의 줄 순서 = 첫 구역(홈) → 챗 center → 나머지 구역 → «전체»(ALL_SCREENS_ITEM) → 그 밖(OTHER_NAV_ITEMS). 일감 탭 앵커는 일감 바로 뒤.
+  function sidebarOrder(): string[] {
+    const [first, ...rest] = NAV_GROUPS;
+    const order = [
+      ...first!.items.map((i) => i.id),
+      CHAT_CENTER_ITEM.id,
+      ...rest.flatMap((g) => g.items.map((i) => i.id)),
+      ALL_SCREENS_ITEM.id,
+      ...OTHER_NAV_ITEMS.map((i) => i.id),
+    ];
+    const board = order.indexOf('board');
+    return [...order.slice(0, board + 1), ...ANCHORS, ...order.slice(board + 1)];
+  }
+  const ANCHORS = ['go-sprints', 'go-epics', 'go-retro', 'go-work-list', 'go-hypotheses'];
+
+  it('⭐팔레트 «이동» 순서 전체가 길잡이 설정(nav-config)에서 읽은 순서와 같다 — 대화는 홈·결재 바로 다음', () => {
+    expect(ids()).toEqual(sidebarOrder());
+    expect(ids().indexOf('chats')).toBe(NAV_GROUPS[0]!.items.length);
   });
 
   it('길잡이 구역 순서(팀 → 지식 → 조직 → 설정)를 그대로 따르고, «전체»는 설정 바로 뒤 · «그 밖»보다 앞이다', () => {
