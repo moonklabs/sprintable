@@ -81,7 +81,7 @@ describe('DocSlugPage — 읽기 | 고치기 전환 (4892)', () => {
 
   it('옛 아이콘만 있던 «미리보기» 눈 링크는 더 없다(한 쌍으로 합쳐짐)', async () => {
     await mount();
-    expect(container.querySelector(`a[aria-label="${koMessages.docs.preview}"]`)).toBeNull();
+    expect(container.querySelector(`a[aria-label="미리보기"]`)).toBeNull();
     expect(container.querySelector('svg.lucide-eye')).toBeNull();
   });
 
