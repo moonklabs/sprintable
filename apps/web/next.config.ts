@@ -178,6 +178,8 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       { source: '/memos', destination: '/inbox', permanent: true },
+      // story 4891 — a first-time person (and every link that says «sign up») tries /signup; the sign-up page lives at /register. A temporary redirect (the address is not settled for good); the query is merged by Next.
+      { source: '/signup', destination: '/register', permanent: false },
       { source: '/memos/:path*', destination: '/inbox', permanent: true },
       // 문서 단일화(2026-08-10 선생님 지시): 에이전트 공개 문서(llms.txt·llms-full.txt·
       // connect-guide.txt·onboarding-guide.txt)의 유일 canonical 은 «앱 안»(apps/web/public)이다.
