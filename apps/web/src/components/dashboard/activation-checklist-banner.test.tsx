@@ -23,10 +23,13 @@ let mockInitialActivationComplete: boolean | undefined;
 let mockInitialActivationCollapsed: boolean | undefined;
 // story #4219 F1(PO 리뷰) — 컨텍스트 org(지금 보는 org)와 레이아웃이 시드를 조회한 org(activationOrgId)를 따로 바꿀 수 있게.
 const mockOrg = { orgId: 'org-1', activationOrgId: 'org-1' as string | undefined, seedFromHint: false };
+// story #4888 — the v3 flags the dashboard context carries (all off by default, as in production today)
+const mockFlags: { current: { todayV3Enabled: boolean; chatV3Enabled: boolean; connectRulesV3Enabled: boolean } | undefined } = { current: undefined };
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => ({
     projectId: 'proj-1', orgId: mockOrg.orgId, activationOrgId: mockOrg.activationOrgId, activationSeedFromHint: mockOrg.seedFromHint,
     initialActivationComplete: mockInitialActivationComplete, initialActivationCollapsed: mockInitialActivationCollapsed,
+    navV3Flags: mockFlags.current,
   }),
 }));
 const routerPushMock = vi.fn();
@@ -73,6 +76,7 @@ beforeEach(() => {
   mockInitialActivationComplete = undefined;
   mockInitialActivationCollapsed = undefined;
   mockOrg.orgId = 'org-1'; mockOrg.activationOrgId = 'org-1'; mockOrg.seedFromHint = false;
+  mockFlags.current = undefined;
   document.cookie = 'sp_activation_hint=; Path=/; Max-Age=0';
   document.cookie = 'sp_activation_collapsed=; Path=/; Max-Age=0';
   container = document.createElement('div');
@@ -722,6 +726,32 @@ describe('ActivationChecklistBanner — placement (story #4888)', () => {
     expect(await run('/org-briefing', 'shell')).toBe(0); // stepped aside: the home's copy ticks
     expect(await run('/org-briefing', 'home')).toBeGreaterThan(0);
     expect(await run('/flow', 'shell')).toBeGreaterThan(0);
+  });
+
+  // the home screen (and its own card) is at the same place whatever the v3 flags point the rail at: with the today flag on, the rail goes to the flagged screen, but the home list is still
+  // reachable directly — it must not get two cards. The flagged screen does not draw the home list, so it keeps the shell band.
+  it('with the today v3 flag on: the home route still has no shell copy (the home draws its own) — and the flagged screen keeps the shell band', async () => {
+    mockFlags.current = { todayV3Enabled: true, chatV3Enabled: false, connectRulesV3Enabled: false };
+    mockPath.current = '/org-briefing';
+    stubChecklist(PARTIAL);
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(container.innerHTML).toBe('');
+    mockPath.current = '/today';
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(container.textContent).toContain('가입을 마무리해 볼까요?');
+  });
+
+  it('with the chat v3 flag on: neither chat route (/chats or /chat) has the band', async () => {
+    mockFlags.current = { todayV3Enabled: false, chatV3Enabled: true, connectRulesV3Enabled: false };
+    for (const path of ['/chats', '/chats/abc', '/chat', '/chat/abc']) {
+      mockPath.current = path;
+      stubChecklist(PARTIAL);
+      await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+      await flush();
+      expect(container.innerHTML, path).toBe('');
+    }
   });
 });
 

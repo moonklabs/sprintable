@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { fetchWithAuth } from '@/lib/db/client';
+import { parseCursorMeta } from '@/lib/pagination';
 import { EMPTY_TODAY_SNAPSHOT, parseToday, type TodayCompletedItem, type TodaySnapshot } from '@/components/org-briefing/derive-today';
 import {
   deriveHome,
@@ -24,10 +25,15 @@ import {
  *  - what is project-scoped (the stories) belongs to the project it was read for — after a project switch the OLD project's stories are not shown for the new one (the approvals · notifications
  *    · today's results are the person's, not the project's, so they stay while the new project's stories are on their way);
  *  - what was read belongs to the person AND organization it was read for: after an organization (or member) switch nothing of the old one is shown while the new answer is on its way;
+ *  - what is read is read to its end or said to be cut: unread notifications are read page by page (50 each, up to `NOTIFICATION_PAGES`), the stories in one page of 100 — when the server says there is
+ *    more than was read, the model is `partial` (its number is «at least»), never a silent cut;
+ *  - a load error belongs to the organization / member it happened for (a new identity starts clean);
  *  - the snapshot decides success; when notifications · stories · members fail, the model is still built from what was read but is `partial` (the screen never calls an empty partial list «all caught up»).
  */
 
 export const HOME_POLL_MS = 60_000;
+/** unread notifications are read in pages of 50: the newest ones first, up to this many pages (250) — most unread ones are approvals and chat messages, so an actionable one can be far down */
+export const NOTIFICATION_PAGES = 5;
 
 export interface HomeSources {
   /** what the rows were built from — the screen builds each row's link and action from these (it owns the project rules for links) */
@@ -55,6 +61,7 @@ export function useHomeModel(): HomeModelState {
   return useContext(HomeModelContext);
 }
 
+interface Page<T> { data?: T[]; meta?: unknown }
 interface RawNotification extends HomeNotificationInput { href?: string | null }
 interface RawStory { id: string; title: string; status: string; assignee_id?: string | null; assignee_ids?: string[] | null; updated_at?: string | null; project_id?: string | null }
 interface RawMember { id: string; name?: string | null; type?: string | null }
@@ -67,6 +74,26 @@ async function readJson<T>(path: string): Promise<T | null> {
   } catch {
     return null;
   }
+}
+
+/** the unread notifications, newest first, page by page; `complete` is false when the server still had more after the last page read (or a page failed) */
+async function readUnreadNotifications(): Promise<{ items: RawNotification[]; complete: boolean } | null> {
+  const items: RawNotification[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < NOTIFICATION_PAGES; page += 1) {
+    const params = new URLSearchParams({ unread: 'true' });
+    if (cursor) params.set('cursor', cursor);
+    const json: Page<RawNotification> | null = await readJson<Page<RawNotification>>(`/api/notifications?${params}`);
+    if (json === null) return page === 0 ? null : { items, complete: false };
+    items.push(...(json.data ?? []));
+    // the page meta is read by the one reader the codebase has (an answer with no meta at all is a single page; one with a meta in no known shape cannot be called complete)
+    if (!json.meta) return { items, complete: true };
+    const pageInfo = parseCursorMeta(json.meta, 'home/notifications');
+    if (pageInfo.malformed) return { items, complete: false };
+    cursor = pageInfo.nextCursor;
+    if (!pageInfo.hasMore || !cursor) return { items, complete: true };
+  }
+  return { items, complete: false };
 }
 
 function toStoryInputs(stories: RawStory[], members: RawMember[]): HomeStoryInput[] {
@@ -110,7 +137,10 @@ interface Read {
 
 export function HomeModelProvider({ viewerMemberId, projectId, orgId, children }: { viewerMemberId: string | null; projectId: string | undefined; orgId?: string; children: ReactNode }) {
   const [readAny, setRead] = useState<Read | null>(null);
-  const [loadError, setLoadError] = useState(false);
+  // the identity a load error happened for (`org|member`): an error of the old identity is not the new one's
+  const [errorFor, setErrorFor] = useState<string | null>(null);
+  const identity = `${orgId ?? ''}|${viewerMemberId ?? ''}`;
+  const loadError = errorFor === identity;
   const [nonce, setNonce] = useState(0);
   // every load that starts takes the next number; only the newest one may commit (an older answer that arrives late — a poll overlapping a «tab is back» read, a project switch — is dropped)
   const seq = useRef(0);
@@ -119,24 +149,25 @@ export function HomeModelProvider({ viewerMemberId, projectId, orgId, children }
     let alive = true;
     const load = async () => {
       const mySeq = ++seq.current;
-      const [todayJson, notifJson, storiesJson, membersJson] = await Promise.all([
+      const [todayJson, notifRead, storiesJson, membersJson] = await Promise.all([
         readJson<unknown>('/api/today'),
-        readJson<{ data?: RawNotification[] }>('/api/notifications?unread=true'),
-        projectId ? readJson<{ data?: RawStory[] }>(`/api/stories?${new URLSearchParams({ project_id: projectId, status: 'in-progress', limit: '100' })}`) : Promise.resolve(null),
+        readUnreadNotifications(),
+        projectId ? readJson<Page<RawStory>>(`/api/stories?${new URLSearchParams({ project_id: projectId, status: 'in-progress', limit: '100' })}`) : Promise.resolve(null),
         projectId ? readJson<{ data?: RawMember[] }>(`/api/members?project_id=${encodeURIComponent(projectId)}`) : Promise.resolve(null),
       ]);
       if (!alive || mySeq !== seq.current) return; // a newer load owns the state now
-      if (todayJson === null) { setLoadError(true); return; } // the snapshot decides success; the last model (if any) stays, and the screen says it is the last one
-      setLoadError(false);
+      if (todayJson === null) { setErrorFor(`${orgId ?? ''}|${viewerMemberId ?? ''}`); return; } // the snapshot decides success; the last model (if any) stays, and the screen says it is the last one
+      setErrorFor(null);
       setRead({
         snapshot: parseToday(todayJson) ?? EMPTY_TODAY_SNAPSHOT,
-        notifications: notifJson?.data ?? [],
+        notifications: notifRead?.items ?? [],
         stories: toStoryInputs(storiesJson?.data ?? [], membersJson?.data ?? []),
         storiesFor: projectId,
         forOrg: orgId,
         forViewer: viewerMemberId,
         // the other reads only add rows: a failed one leaves the model honest but incomplete
-        partial: notifJson === null || (projectId !== undefined && (storiesJson === null || membersJson === null)),
+        partial: notifRead === null || !notifRead.complete
+          || (projectId !== undefined && (storiesJson === null || membersJson === null || (storiesJson.meta ? parseCursorMeta(storiesJson.meta, 'home/stories').hasMore : false))),
       });
     };
     void load();

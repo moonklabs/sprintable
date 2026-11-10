@@ -178,5 +178,77 @@ describe('홈 모델 — 정직 규칙 (story #4888)', () => {
     await settle();
     expect(text('badge')).toBe('0');
   });
+
+  const mention = (id: string) => ({ id, type: 'conversation.mention', title: `멘션 ${id}`, is_read: false, reference_type: null, reference_id: null, created_at: '2026-09-13T05:00:00Z', href: null });
+  const chatMessage = (id: string) => ({ id, type: 'conversation.message', title: `대화 ${id}`, is_read: false, reference_type: null, reference_id: null, created_at: '2026-09-13T05:00:00Z', href: null });
+  const notifPages = (pages: unknown[][]) => vi.fn(async (url: string) => {
+    if (url === '/api/today') return ok(todayOf([]));
+    if (url.startsWith('/api/notifications')) {
+      const cursor = new URL(url, 'http://x').searchParams.get('cursor');
+      const i = cursor ? Number(cursor) : 0;
+      return { ok: true, status: 200, json: async () => ({ data: pages[i] ?? [], meta: { hasMore: i < pages.length - 1, nextCursor: i < pages.length - 1 ? String(i + 1) : null } }) };
+    }
+    return ok(null);
+  });
+
+  it('⭐안 읽은 알림은 첫 50건에서 끊지 않고 쪽을 넘겨 읽는다 — 둘째 쪽에 있는 멘션도 수에 든다', async () => {
+    vi.stubGlobal('fetch', notifPages([[chatMessage('m1'), chatMessage('m2')], [mention('n1')]]));
+    await mount(undefined);
+    expect(text('badge')).toBe('1');
+    expect(text('flags')).toBe('full|ok');
+  });
+
+  it('⭐쪽 상한(5쪽)까지 읽고도 더 있으면 «부분»이라고 말한다 — 조용히 자르지 않는다', async () => {
+    vi.stubGlobal('fetch', notifPages(Array.from({ length: 8 }, (_, i) => [chatMessage(`m${i}`)])));
+    await mount(undefined);
+    const calls = (fetch as unknown as { mock: { calls: Array<[string]> } }).mock.calls.filter((c) => c[0].startsWith('/api/notifications'));
+    expect(calls).toHaveLength(5);
+    expect(text('flags')).toBe('partial|ok');
+  });
+
+  it('둘째 쪽 읽기가 실패해도 첫 쪽에서 읽은 것은 남고 «부분»이다', async () => {
+    let n = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/today') return ok(todayOf([]));
+      if (url.startsWith('/api/notifications')) {
+        if (n++ === 0) return { ok: true, status: 200, json: async () => ({ data: [mention('n1')], meta: { hasMore: true, nextCursor: '1' } }) };
+        return bad();
+      }
+      return ok(null);
+    }));
+    await mount(undefined);
+    expect(text('badge')).toBe('1');
+    expect(text('flags')).toBe('partial|ok');
+  });
+
+  it('스토리가 한 쪽(100)보다 많다고 서버가 말하면 «부분»이다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/today') return ok(todayOf([]));
+      if (url.startsWith('/api/notifications')) return ok([]);
+      if (url.startsWith('/api/stories')) return { ok: true, status: 200, json: async () => ({ data: [agentStory('sa', 'A')], meta: { hasMore: true, nextCursor: 'x' } }) };
+      if (url.startsWith('/api/members')) return ok(MEMBERS);
+      return ok(null);
+    }));
+    await mount('p1');
+    expect(text('flags')).toBe('partial|ok');
+  });
+
+  it('읽기 실패는 그 조직 · 구성원의 것이다 — 조직을 바꾸면 새 조직은 «불러오지 못했어요»가 아니라 읽는 중에서 시작한다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === '/api/today' ? bad() : ok([]))));
+    const m = await mount(undefined, null, 'org-a');
+    expect(text('flags')).toBe('full|error');
+    let release!: () => void;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/today') { await new Promise<void>((r) => { release = r; }); return ok(todayOf([])); }
+      return ok([]);
+    }));
+    await m.rerenderOrg('org-b');
+    await settle();
+    expect(text('flags')).toBe('full|ok'); // no error carried over from org A, no model yet
+    expect(text('badge')).toBe('none');
+    await act(async () => { release(); });
+    await settle();
+    expect(text('badge')).toBe('0');
+  });
 });
 

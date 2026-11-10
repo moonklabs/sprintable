@@ -53,14 +53,14 @@ import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations } from '@/lib/nav-v3-des
 
 // story #4432 — the desktop setup page is itself the checklist's «에이전트 연결하기» step: the banner there would say the same
 // thing twice (and at 360 it pushed the setup card half a screen down). Not shown on that page; everywhere else unchanged.
-function isHiddenOn(pathname: string | null, placement: ActivationPlacement, dest: { home: string; chats: string }): boolean {
+function isHiddenOn(pathname: string | null, placement: ActivationPlacement, dest: { home: string; chats: readonly string[] }): boolean {
   // a comparison, not a link (the flat-link ratchet reads it that way too)
   if (!pathname) return false;
   if (pathname === '/desktop/setup' || pathname.startsWith('/desktop/setup/')) return true;
   // story #4888 (UI-5 home) — the checklist has its place INSIDE the home (a card at the top of its list): the shell's copy steps aside there, and it no longer stands over the chat
   // screens (on a phone it was 24% of the first screen of `/chats`). Every other page keeps the shell's copy exactly as before (UI-8 decides about those).
   if (placement === 'shell') {
-    return pathname === dest.home || pathname === dest.chats || pathname.startsWith(`${dest.chats}/`);
+    return pathname === dest.home || dest.chats.some((c) => pathname === c || pathname.startsWith(`${c}/`));
   }
   return false;
 }
@@ -107,9 +107,12 @@ export function ActivationChecklistBanner({ placement = 'shell' }: { placement?:
   // the home and the chat screen are named by the one destination module (not typed here): with the v3 flags off they are the home list and `/chats`
   const { navV3Flags } = useDashboardContext();
   const destinations = resolveNavV3Destinations(navV3Flags ?? DEFAULT_NAV_V3_FLAGS);
-  const hidden = isHiddenOn(pathname, placement, { home: destinations.today.path, chats: destinations.chats.path });
+  // the screen that DRAWS the home list (and its own copy of this card) is the default destination's home — whatever the v3 flags point the rail at; both chat routes keep no band either
+  const baseline = resolveNavV3Destinations(DEFAULT_NAV_V3_FLAGS);
+  const homeScreen = baseline.today.path;
+  const hidden = isHiddenOn(pathname, placement, { home: homeScreen, chats: [baseline.chats.path, destinations.chats.path] });
   // on the home the shell's copy steps aside and the home's own copy is the one that ticks: two copies must not run two refresh loops for one checklist
-  const shellCopyBesideHome = placement === 'shell' && pathname === destinations.today.path;
+  const shellCopyBesideHome = placement === 'shell' && pathname === homeScreen;
   // 서버 시드·힌트 시드는 레이아웃이 조회한 org(activationOrgId)의 것 — 지금 org와 다르면(flat 경로·org 전환) 훅이 버리고 이 org를
   // 새로 조회한다(inActivationScope · A의 «완주»가 B 배너를 숨기던 자리).
   const { state, stateOrgId, allComplete } = useActivationStatus(initialActivationComplete, {
