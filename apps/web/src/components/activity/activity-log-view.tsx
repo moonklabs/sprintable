@@ -489,6 +489,7 @@ function ActivityRow({ item, rowLabel, selected, controlsId, onToggle, buttonRef
         type="button"
         variant="ghost"
         aria-label={rowName}
+        title={rowName}   // the overlay covers the row, so the truncated-claim hover tooltip now lives here (the whole words of the row)
         aria-expanded={selected}
         aria-controls={selected ? controlsId : undefined}
         onClick={(e) => onToggle(e.detail === 0)}

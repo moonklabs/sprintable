@@ -269,6 +269,7 @@ describe('ActivityLogView — 행의 구조: 단추 안에 블록이 없다 (489
     expect(name).toContain('디버거');                                                // who
     expect(name).toContain('story');                                                  // what (the claim)
     expect(name).toContain('일감 ag');
+    expect(button.getAttribute('title')).toBe(name);                               // the overlay covers the row — the hover tooltip with the row's whole words lives on it
   });
 });
 
