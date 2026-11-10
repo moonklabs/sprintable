@@ -165,10 +165,12 @@ for (const width of [1440, 390]) {
       await expect(primaries).toHaveCount(1);
       await expect(primaries.first()).toHaveAttribute('data-testid', 'desktop-download-button');
       await expect(primaries.first()).toHaveText('Mac 앱 받기');
-      await expect(page.getByTestId('onboarding-first-org')).toHaveText('송윤재의 조직에서 시작해요 · 이름은 설정에서 바꿀 수 있어요');
+      // story 4891: which organization the app attaches to stays — as «시작 조직 [이름 칩]», not a sentence
+      await expect(page.getByTestId('onboarding-first-org')).toHaveText('시작 조직 송윤재의 조직');
+      await expect(page.getByTestId('onboarding-first-org').locator('[data-slot="ds-chip"]')).toHaveText('송윤재의 조직');
       await expect(page.locator('input[type="radio"]')).toHaveCount(0);
       await expect(page.getByTestId('onboarding-first-advanced')).toHaveJSProperty('open', false);
-      await expect(page.getByTestId('onboarding-first-advanced-summary')).toHaveText('고급 — 앱 없이, 이미 쓰는 Claude Code · Codex 연결');
+      await expect(page.getByTestId('onboarding-first-advanced-summary')).toHaveText('고급');
       await expect(page.getByTestId('onboarding-first-open-app')).toHaveText('앱 열기');
       await fitsViewport(page, width);
       await shot(page, card(page), `4715-1-first-mac-${tag}`);
