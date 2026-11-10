@@ -49,24 +49,22 @@ export function AgentsPageTabs() {
   const flatHref = useFlatHref();
   const [activeTab, setActiveTab] = useState<AgentsTab>(() => resolveTab(searchParams.get('tab')));
   // story 4891 — the person's role belongs to ONE organization (an organization switch re-renders this page without remounting it): the answer is kept with the organization it was asked for,
-  // and only an answer for the CURRENT organization counts. The role is KNOWN only when /api/me answered with one: a failed request (or an answer with no role) leaves isAdmin false,
-  // which must not read as «not an admin».
-  const [me, setMe] = useState<{ org: string | null; isAdmin: boolean; known: boolean } | null>(null);
+  // and only an answer for the CURRENT organization counts (the Access tab must not stay open for an organization where the person is no admin). The Recruit pane does not use the role.
+  const [me, setMe] = useState<{ org: string | null; isAdmin: boolean } | null>(null);
   const mine = me && me.org === (orgId ?? null) ? me : null;
   const isAdmin = mine?.isAdmin ?? false;
   const meLoaded = mine !== null;
-  const roleKnown = mine?.known ?? false;
 
   useEffect(() => {
     let cancelled = false;
     const org = orgId ?? null;
     void (async () => {
       const res = await fetchMe();
-      let next = { org, isAdmin: false, known: false };
+      let next = { org, isAdmin: false };
       if (res.ok) {
         const json = await res.json() as { data?: { role?: string } };
         const role = json.data?.role ?? 'member';
-        next = { org, isAdmin: role === 'admin' || role === 'owner', known: typeof json.data?.role === 'string' };
+        next = { org, isAdmin: role === 'admin' || role === 'owner' };
       }
       if (!cancelled) setMe(next);
     })();
@@ -118,7 +116,7 @@ export function AgentsPageTabs() {
 
         <TabsContent value="recruit">
           {!projectId ? (
-            <RecruitNoProject state={recruitNoProjectState(dashboardCtx, { known: roleKnown, isAdmin })} createHref={flatHref('/settings?tab=projects')} onRetry={() => window.location.reload()} />
+            <RecruitNoProject state={recruitNoProjectState(dashboardCtx)} createHref={flatHref('/settings?tab=projects')} onRetry={() => window.location.reload()} />
           ) : (
             <RecruiterClient
               projectId={projectId}

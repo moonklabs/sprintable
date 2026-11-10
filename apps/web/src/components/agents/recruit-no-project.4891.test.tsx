@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 //
 // story 4891 — «Add agent» (the Recruit tab) in an organization with NO project: a first person's first agent used to stop at «Please select a project.» with nothing to select.
-// PR 5490 pointed it at Settings › Projects; Kadir's notes on it (this follow-up): that page has no create form for a person who is not an admin → they are asked to turn to an admin instead (no button);
-// and a FAILED projects request is not «no project» → «we couldn't load them» + [Try again]. The state is decided by `recruitNoProjectState` from the real context values (the state tests below go
-// through every one of them) — reverting any condition turns a state test red; the component tests pin what each state says and draws.
+// PR 5490 pointed it at Settings › Projects; a FAILED projects request is not «no project» → «we couldn't load them» + [Try again] (PR 5507). EVERY member may create a project in Settings (story 4897 —
+// the API always allowed it and the form is open to everyone), so the pane never looks at the person's role: an earlier head told non-admins to «ask an admin», which stopped being true. The state is decided
+// by `recruitNoProjectState` from the real context values (the state tests below go through every one of them) — reverting any condition turns a state test red; the component tests pin what each state says and draws.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -34,26 +34,13 @@ async function render(state: RecruitNoProjectState, locale: 'en' | 'ko' = 'en', 
 const q = (id: string) => container.querySelector(`[data-testid="${id}"]`);
 
 describe('what each state says and draws (story 4891)', () => {
-  it('⭐create (admin · no project at all): the line + a link to Settings › Projects', async () => {
+  it('⭐create (no project at all — any member): the line + a link to Settings › Projects', async () => {
     await render('create');
     expect(container.textContent).toContain(rec(enMessages).noProjectYet);
     const link = q('recruit-create-project')?.closest('a') ?? q('recruit-create-project');
     expect(link?.getAttribute('href')).toBe('/settings?tab=projects');
     expect(link?.textContent?.trim()).toBe(rec(enMessages).createProject);
     expect(q('recruit-retry-projects')).toBeNull();
-  });
-
-  it('⭐ask-admin (not an admin · no project at all): asked to turn to an admin — no button to a screen with nothing to do', async () => {
-    await render('ask-admin');
-    expect(container.textContent).toContain(rec(enMessages).noProjectAsk);
-    expect(q('recruit-create-project')).toBeNull();
-    expect(q('recruit-retry-projects')).toBeNull();
-  });
-
-  it('none (no project at all, role not known yet): the line only — no button either way', async () => {
-    await render('none');
-    expect(container.textContent).toContain(rec(enMessages).noProjectYet);
-    expect(q('recruit-create-project')).toBeNull();
   });
 
   it('⭐failed: «we couldn\'t load your projects» + [Try again] that calls onRetry — never «you have none»', async () => {
@@ -74,7 +61,7 @@ describe('what each state says and draws (story 4891)', () => {
   });
 
   it('Korean copy exists for every new key (a missing key would render its name)', async () => {
-    for (const [state, key] of [['create', 'noProjectYet'], ['ask-admin', 'noProjectAsk'], ['failed', 'projectsLoadFailed']] as const) {
+    for (const [state, key] of [['create', 'noProjectYet'], ['failed', 'projectsLoadFailed']] as const) {
       await render(state, 'ko');
       expect(container.textContent).toContain(rec(koMessages)[key]);
     }
@@ -85,38 +72,38 @@ describe('what each state says and draws (story 4891)', () => {
 
 describe('recruitNoProjectState — through the real states the layout and the shell give (story 4891)', () => {
   const base = { projectId: null as string | null, projectMemberships: [] as unknown[], projectPathUnresolved: false, orgSyncPending: false, projectMembershipsFailed: false };
-  const admin = { known: true, isAdmin: true };
-  const member = { known: true, isAdmin: false };
-
-  it('no project at all: an admin may create (create) · a member is told to ask (ask-admin) · an unknown role gets the line only (none)', () => {
-    expect(recruitNoProjectState(base, admin)).toBe('create');
-    expect(recruitNoProjectState(base, member)).toBe('ask-admin');
-    expect(recruitNoProjectState(base, { known: false, isAdmin: true })).toBe('none');
+  it('⭐no project at all: create — for everyone (the role is not an input at all: the function takes the context only)', () => {
+    expect(recruitNoProjectState(base)).toBe('create');
+    expect(recruitNoProjectState.length).toBe(1);
   });
 
-  it('⭐a failed projects request is failed for everyone — not «none», not «ask an admin»', () => {
-    expect(recruitNoProjectState({ ...base, projectMembershipsFailed: true }, admin)).toBe('failed');
-    expect(recruitNoProjectState({ ...base, projectMembershipsFailed: true }, member)).toBe('failed');
+  it('⭐a failed projects request is failed — not «none» (create)', () => {
+    expect(recruitNoProjectState({ ...base, projectMembershipsFailed: true })).toBe('failed');
   });
 
   it('⭐a moment the shell has not told the projects yet (the address\'s project resolving · the organization of the address not yet the token\'s) is not «none»', () => {
-    expect(recruitNoProjectState({ ...base, projectPathUnresolved: true }, admin)).toBe('pick');
-    expect(recruitNoProjectState({ ...base, orgSyncPending: true }, admin)).toBe('pick');
+    expect(recruitNoProjectState({ ...base, projectPathUnresolved: true })).toBe('pick');
+    expect(recruitNoProjectState({ ...base, orgSyncPending: true })).toBe('pick');
   });
 
   it('projects exist (or one is chosen): pick — even if an earlier request had failed', () => {
-    expect(recruitNoProjectState({ ...base, projectMemberships: [{ projectId: 'p1' }] }, admin)).toBe('pick');
-    expect(recruitNoProjectState({ ...base, projectId: 'p1' }, admin)).toBe('pick');
-    expect(recruitNoProjectState({ ...base, projectMemberships: [{ projectId: 'p1' }], projectMembershipsFailed: true }, admin)).toBe('pick');
-    expect(recruitNoProjectState({ ...base, projectId: 'p1', projectMembershipsFailed: true }, admin)).toBe('pick');
+    expect(recruitNoProjectState({ ...base, projectMemberships: [{ projectId: 'p1' }] })).toBe('pick');
+    expect(recruitNoProjectState({ ...base, projectId: 'p1' })).toBe('pick');
+    expect(recruitNoProjectState({ ...base, projectMemberships: [{ projectId: 'p1' }], projectMembershipsFailed: true })).toBe('pick');
+    expect(recruitNoProjectState({ ...base, projectId: 'p1', projectMembershipsFailed: true })).toBe('pick');
   });
 });
 
 describe('the wiring (story 4891)', () => {
   const read = (p: string) => readFileSync(resolve(__dirname, p), 'utf8');
-  it('the tabs hand the component the real state (the dashboard context + the person\'s role) and the Settings › Projects address', () => {
+  it('⭐no «ask an admin» state or copy is left (a member may create a project)', () => {
+    expect(read('recruit-no-project.tsx')).not.toMatch(/ask-admin|noProjectAsk|role\.isAdmin/);
+    expect((enMessages as unknown as { recruiter: Record<string, string> }).recruiter.noProjectAsk).toBeUndefined();
+    expect((koMessages as unknown as { recruiter: Record<string, string> }).recruiter.noProjectAsk).toBeUndefined();
+  });
+  it('the tabs hand the component the real state (the dashboard context only — no role) and the Settings › Projects address', () => {
     const src = read('agents-page-tabs.tsx');
-    expect(src).toContain("state={recruitNoProjectState(dashboardCtx, { known: roleKnown, isAdmin })}");
+    expect(src).toContain("state={recruitNoProjectState(dashboardCtx)}");
     expect(src).toContain("createHref={flatHref('/settings?tab=projects')}");
     expect(src).toContain('onRetry={() => window.location.reload()}'); // the request is the layout's (server): a reload asks it again
   });

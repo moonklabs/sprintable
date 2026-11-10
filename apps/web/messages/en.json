@@ -6450,7 +6450,6 @@
     "noProject": "Please select a project.",
     "noProjectYet": "You don't have a project yet — an agent works inside a project, so create one first.",
     "createProject": "Create a project",
-    "noProjectAsk": "You don't have a project yet — an agent works inside a project. Ask an organization admin to create one.",
     "projectsLoadFailed": "We couldn't load your projects.",
     "projectsRetry": "Try again",
     "stepRole": "Role",
