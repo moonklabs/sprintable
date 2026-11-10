@@ -80,8 +80,22 @@ def _is_hidden_notification(member_id: uuid.UUID):
         .join(my_msg, my_msg.conversation_id == evt_msg.conversation_id)
         .where(evt_msg.id == Event.source_entity_id, my_msg.sender_id == member_id)
     )
+    # story 4890 — a message that MENTIONS the person writes two bell rows for them: their `conversation:mention` (the more specific line) and the room's `conversation.message_created`, both with this message as source.
+    # The message_created row leaves the read when the same person has the mention row for the same message → «lines = messages · unread = messages». The mention row stays whatever happens (it is the one the person asked for).
+    mention_evt = aliased(Event)
+    mentioned_too = exists(
+        select(1)
+        .select_from(mention_evt)
+        .where(
+            mention_evt.event_type == "conversation:mention",
+            mention_evt.org_id == Event.org_id,
+            mention_evt.recipient_id == Event.recipient_id,
+            mention_evt.source_entity_id == Event.source_entity_id,
+        )
+    )
     return or_(
         and_(Event.event_type.in_(_CONVERSATION_EVENT_TYPES), muted),         # mute: 대화 전체 무음
+        and_(Event.event_type == "conversation.message_created", Event.recipient_type == "human", mentioned_too),  # story 4890 — 멘션 글의 둘째 줄(멘션 줄이 이 글의 줄 · 사람 몫만: 에이전트는 두 줄을 각각 쓴다)
         and_(Event.event_type == "conversation.message_created", is_group, ~spoke),  # 미발화 그룹 관전
         Event.event_type.in_(_APPROVALS_INBOX_SIGNAL_TYPES),                        # story #4520 — 결재함 신호
         # coalesce: a dispatched row whose payload has no `event_type` key would make this term NULL, and `NOT (… OR NULL)` is NULL — the row would drop out of the bell (SQL three-valued logic)

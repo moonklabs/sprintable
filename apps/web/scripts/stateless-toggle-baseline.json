@@ -61,8 +61,8 @@
       "why": "«비활성화» ↔ «활성화»"
     },
     {
-      "file": "app/(authenticated)/settings/page.tsx",
-      "match": "toggleCategory(",
+      "file": "app/(authenticated)/settings/notifications-pane.tsx",
+      "match": "onToggleCategory(",
       "count": 1,
       "why": "«모두 켜기» ↔ «모두 끄기»"
     },

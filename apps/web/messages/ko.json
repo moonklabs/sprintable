@@ -2063,6 +2063,7 @@
     "refresh5min": "5분",
     "surfaceDescription": "알림, 웹훅, 초대, 구독, AI 설정을 공통 운영 표면으로 관리해요.",
     "notificationDescription": "운영 이벤트별 웹 알림을 켜고 꺼요.",
+    "notificationCategoryToggleAria": "{category} {action}",
     "notificationDefaultLevel": "기본 알림 레벨",
     "notificationLevel_all": "전체",
     "notificationLevel_mentions": "멘션만",

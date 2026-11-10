@@ -90,7 +90,8 @@ const labelOf = (eventType: string) => (koMessages.settings as Record<string, st
 // 행 이름(이벤트 글) 옆의 «앱 내» 토글 — 역할 속성에 기대지 않고 행 구조로 찾는다(옛 코드에서도 찾아 RED가 나게).
 function inAppToggle(eventType: string): HTMLButtonElement {
   const label = [...container.querySelectorAll('span')].find((s) => s.textContent?.trim() === labelOf(eventType));
-  const btn = label?.parentElement?.querySelector('button');
+  // story 4891: the row is a ds ListRow now — the event's name is in its title, the switch is in its trailing part (same row element)
+  const btn = label?.closest('[data-slot="ds-list-row"]')?.querySelector('button');
   if (!btn) throw new Error(`«앱 내» 토글을 못 찾음: ${eventType}`);
   return btn;
 }
@@ -120,8 +121,8 @@ describe('설정 알림 «앱 내» 토글 = 스위치([SID:4379])', () => {
     expect(on.getAttribute('role')).toBe('switch');
     expect(on.getAttribute('aria-checked')).toBe('true');
     // 보이는 켜짐(손잡이 색)과 읽히는 값이 같은 행 값에서 나온다.
-    expect(on.className).toContain('bg-primary');
-    expect(off.className).not.toContain('bg-primary');
+    expect(on.querySelector('span.rounded-full')!.className).toContain('bg-ds-action');
+    expect(off.querySelector('span.rounded-full')!.className).not.toContain('bg-ds-action');
   });
 
   it('누르면 aria-checked가 뒤집히고 저장 값도 같다', async () => {
