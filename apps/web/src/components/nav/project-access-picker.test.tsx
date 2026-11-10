@@ -73,11 +73,11 @@ describe('[SID:4681] ProjectAccessPicker', () => {
     expect(host.querySelectorAll('[data-testid="project-access-checkbox"]').length).toBe(0);
   });
 
-  it('the list cannot be read: says so with [다시 시도] (the project can still be made · access later in settings › 접근 권한)', async () => {
+  it('the list cannot be read: says so with [다시 시도] (the project can still be made · access later in settings › 구성원과 접근)', async () => {
     fetchWithAuth.mockResolvedValue({ ok: false, json: async () => ({}) });
     await draw([]);
     const line = host.querySelector('[data-testid="project-access-load-error"]');
-    expect(line?.querySelector('span')?.textContent).toBe('에이전트 목록을 읽지 못했어요 — 팀은 나중에 프로젝트 설정 › 접근 권한에서 넣을 수 있어요.'); // §G-3
+    expect(line?.querySelector('span')?.textContent).toBe('에이전트 목록을 읽지 못했어요 — 팀은 나중에 프로젝트 설정 › 구성원과 접근에서 넣을 수 있어요.'); // §G-3
     expect(host.querySelectorAll('[data-testid="project-access-checkbox"]').length).toBe(0);
     // Yuna §F (non-blocking): [다시 시도] reads once more — and the list comes
     fetchWithAuth.mockResolvedValue({ ok: true, json: async () => ({ data: AGENTS }) });
