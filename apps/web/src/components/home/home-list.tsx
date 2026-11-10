@@ -64,7 +64,7 @@ function useRowLink(sources: HomeSources): (row: HomeRow) => { action: RowAction
       case 'approval':
       case 'signature':
       case 'answer': {
-        const item = sources.snapshot.needsMe.find((i) => `gate:${i.id}` === row.key);
+        const item = sources.snapshot.needsMe.find((i) => `${i.source}:${i.id}` === row.key);
         if (!item) return null;
         return { action: NEEDS_ACTION[row.kind] ?? 'open', href: hrefForNeedsMeItem(item, flatHref) };
       }
@@ -93,7 +93,7 @@ function HomeRowView({ row, sources, needsHand }: { row: HomeRow; sources: HomeS
   const linkFor = useRowLink(sources);
   const link = linkFor(row);
   // what the old rows also said: an approval's reason (or who asked), the status word of an agent run, and — on an approval that needs a signature — the notice that it cannot be undone
-  const need = needsHand && (row.kind === 'approval' || row.kind === 'signature' || row.kind === 'answer') ? sources.snapshot.needsMe.find((i) => `gate:${i.id}` === row.key) ?? null : null;
+  const need = needsHand && (row.kind === 'approval' || row.kind === 'signature' || row.kind === 'answer') ? sources.snapshot.needsMe.find((i) => `${i.source}:${i.id}` === row.key) ?? null : null;
   const run = row.kind === 'agent-run' ? sources.snapshot.agentProgress.find((r) => r.runId === row.ref.id) ?? null : null;
   const statusKey = run ? AGENT_STATUS_KEY[run.status] : undefined;
   const conversationHref = need?.conversationId
@@ -137,7 +137,7 @@ function FoldableSection({ title, rows, sources, defaultCollapsed, emptyText }: 
   );
 }
 
-export function HomeList({ model, sources }: { model: HomeModel; sources: HomeSources }) {
+export function HomeList({ model, sources, partial = false }: { model: HomeModel; sources: HomeSources; partial?: boolean }) {
   const t = useTranslations('home');
   const tb = useTranslations('orgBriefing');
   const [showAll, setShowAll] = useState(false);
@@ -158,7 +158,10 @@ export function HomeList({ model, sources }: { model: HomeModel; sources: HomeSo
           // the old section said it beside its title when there were rows: money and outbound sends are signed one at a time
           trailing={model.needsHand.length > 0 ? <span data-testid="home-needs-hand-hint">{tb('needsMeHint')}</span> : undefined}
         />
-        {model.needsHand.length === 0 && hiddenNeedsMe === 0 ? (
+        {model.needsHand.length === 0 && hiddenNeedsMe === 0 && partial ? (
+          // some of what feeds this list could not be read: an empty list is not «all caught up»
+          <p className="m-0 px-4 py-6 text-center text-ds-small text-ds-ink-2" data-testid="home-partial-empty">{tb('loadErrorTitle')}</p>
+        ) : model.needsHand.length === 0 && hiddenNeedsMe === 0 ? (
           <EmptyState icon="check_circle" title={t('emptyAllTitle')} description={t('emptyAllDescription')} />
         ) : model.needsHand.length === 0 ? (
           <p className="m-0 px-4 py-6 text-center text-ds-small text-ds-ink-2" data-testid="home-hidden-notice">{tb('needsMeHiddenCountNotice', { count: hiddenNeedsMe })}</p>

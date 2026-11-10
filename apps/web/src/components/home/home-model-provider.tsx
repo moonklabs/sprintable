@@ -18,6 +18,12 @@ import {
  * No new route: the snapshot is `GET /api/today` (the same single call the old screen made), unread notifications are `GET /api/notifications?unread=true` (the bell's list), and the
  * person's in-progress stories are `GET /api/stories?status=in-progress` of the current project with `GET /api/members` for who is an agent.
  * It re-reads every `POLL_MS` and when the tab comes back, so the bar does not keep a stale number.
+ *
+ * Honesty rules (each has a test):
+ *  - the newest load wins: an older answer that arrives late (a poll overlapping a «tab is back» read) is dropped;
+ *  - what is project-scoped (the stories) belongs to the project it was read for — after a project switch the OLD project's stories are not shown for the new one (the approvals · notifications
+ *    · today's results are the person's, not the project's, so they stay while the new project's stories are on their way);
+ *  - the snapshot decides success; when notifications · stories · members fail, the model is still built from what was read but is `partial` (the screen never calls an empty partial list «all caught up»).
  */
 
 export const HOME_POLL_MS = 60_000;
@@ -30,14 +36,17 @@ export interface HomeSources {
 }
 
 export interface HomeModelState {
-  /** null until the first answer (or when it failed and nothing was ever read) */
+  /** null until the first answer */
   model: HomeModel | null;
   sources: HomeSources | null;
+  /** the last read failed (the model, if any, is the last one that was read — the screen says so) */
   loadError: boolean;
+  /** the model is built from an incomplete read (notifications · stories · members failed): its number is «at least», and an empty list must not be called «all caught up» */
+  partial: boolean;
   retry: () => void;
 }
 
-const NONE: HomeModelState = { model: null, sources: null, loadError: false, retry: () => {} };
+const NONE: HomeModelState = { model: null, sources: null, loadError: false, partial: false, retry: () => {} };
 const HomeModelContext = createContext<HomeModelState>(NONE);
 
 /** the model the navigation bar and the home screen share (an empty state when no provider is mounted) */
@@ -86,41 +95,42 @@ function toDoneInputs(items: TodayCompletedItem[]): HomeDoneInput[] {
   }));
 }
 
+interface Read {
+  snapshot: TodaySnapshot;
+  notifications: RawNotification[];
+  stories: HomeStoryInput[];
+  /** the project the stories were read for */
+  storiesFor: string | undefined;
+  partial: boolean;
+}
+
 export function HomeModelProvider({ viewerMemberId, projectId, children }: { viewerMemberId: string | null; projectId: string | undefined; children: ReactNode }) {
-  const [state, setState] = useState<{ model: HomeModel | null; sources: HomeSources | null; loadError: boolean }>({ model: null, sources: null, loadError: false });
+  const [read, setRead] = useState<Read | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [nonce, setNonce] = useState(0);
-  const run = useRef(0);
+  // every load that starts takes the next number; only the newest one may commit (an older answer that arrives late — a poll overlapping a «tab is back» read, a project switch — is dropped)
+  const seq = useRef(0);
 
   useEffect(() => {
-    const myRun = ++run.current;
     let alive = true;
     const load = async () => {
-      // the snapshot decides success: without it there is no home. The other two reads only add rows — a failed one adds none (an empty list, not a wrong number).
+      const mySeq = ++seq.current;
       const [todayJson, notifJson, storiesJson, membersJson] = await Promise.all([
         readJson<unknown>('/api/today'),
         readJson<{ data?: RawNotification[] }>('/api/notifications?unread=true'),
         projectId ? readJson<{ data?: RawStory[] }>(`/api/stories?${new URLSearchParams({ project_id: projectId, status: 'in-progress', limit: '100' })}`) : Promise.resolve(null),
         projectId ? readJson<{ data?: RawMember[] }>(`/api/members?project_id=${encodeURIComponent(projectId)}`) : Promise.resolve(null),
       ]);
-      if (!alive || myRun !== run.current) return; // a later run (project change · retry) owns the state now
-      if (todayJson === null) { setState((prev) => ({ ...prev, loadError: true })); return; }
-      const snapshot = parseToday(todayJson) ?? EMPTY_TODAY_SNAPSHOT;
-      const notifications = notifJson?.data ?? [];
-      const model = deriveHome({
-        snapshot,
-        notifications,
+      if (!alive || mySeq !== seq.current) return; // a newer load owns the state now
+      if (todayJson === null) { setLoadError(true); return; } // the snapshot decides success; the last model (if any) stays, and the screen says it is the last one
+      setLoadError(false);
+      setRead({
+        snapshot: parseToday(todayJson) ?? EMPTY_TODAY_SNAPSHOT,
+        notifications: notifJson?.data ?? [],
         stories: toStoryInputs(storiesJson?.data ?? [], membersJson?.data ?? []),
-        completedToday: toDoneInputs(snapshot.completedToday ?? []),
-        viewerMemberId,
-      });
-      setState({
-        model,
-        loadError: false,
-        sources: {
-          snapshot,
-          notificationHrefById: Object.fromEntries(notifications.map((n) => [n.id, n.href ?? null])),
-          runConversationById: Object.fromEntries((snapshot.completedToday ?? []).map((d) => [d.runId, d.conversationId])),
-        },
+        storiesFor: projectId,
+        // the other reads only add rows: a failed one leaves the model honest but incomplete
+        partial: notifJson === null || (projectId !== undefined && (storiesJson === null || membersJson === null)),
       });
     };
     void load();
@@ -131,6 +141,28 @@ export function HomeModelProvider({ viewerMemberId, projectId, children }: { vie
   }, [projectId, viewerMemberId, nonce]);
 
   const retry = useCallback(() => setNonce((n) => n + 1), []);
-  const value = useMemo<HomeModelState>(() => ({ ...state, retry }), [state, retry]);
+  const value = useMemo<HomeModelState>(() => {
+    if (!read) return { model: null, sources: null, loadError, partial: false, retry };
+    const model = deriveHome({
+      snapshot: read.snapshot,
+      notifications: read.notifications,
+      // the stories belong to the project they were read for
+      stories: read.storiesFor === projectId ? read.stories : [],
+      completedToday: toDoneInputs(read.snapshot.completedToday ?? []),
+      viewerMemberId,
+    });
+    return {
+      model,
+      loadError,
+      // the stories of another project than the current one are as good as unread, until the new project's answer comes
+      partial: read.partial || read.storiesFor !== projectId,
+      retry,
+      sources: {
+        snapshot: read.snapshot,
+        notificationHrefById: Object.fromEntries(read.notifications.map((n) => [n.id, n.href ?? null])),
+        runConversationById: Object.fromEntries((read.snapshot.completedToday ?? []).map((d) => [d.runId, d.conversationId])),
+      },
+    };
+  }, [read, loadError, projectId, viewerMemberId, retry]);
   return <HomeModelContext.Provider value={value}>{children}</HomeModelContext.Provider>;
 }

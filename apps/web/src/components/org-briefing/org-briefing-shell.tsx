@@ -120,7 +120,7 @@ export function OrgBriefingShell() {
   // looking for a choice already made. With no project to pick (none yet) «pick» cannot be done either — Chats says «no project yet» for that.
   const showPickBanner = Boolean(nextTarget) && !projectId && projectMemberships.length > 0;
   // story #4888 — the home reads the SAME model the navigation bar's badge reads (components/home/home-model-provider)
-  const { model, sources, loadError, retry } = useHomeModel();
+  const { model, sources, loadError, partial, retry } = useHomeModel();
   const th = useTranslations('home');
 
   // story #3831 후속(페드루 PO 確定, 2026-09-13 14:22Z) — `?focus=compose` 딥링크(컴패니언
@@ -179,7 +179,14 @@ export function OrgBriefingShell() {
           <div className="empty:hidden" data-testid="home-checklist-slot">
             <ActivationChecklistBanner placement="home" />
           </div>
-          <HomeList model={model} sources={sources} />
+          {loadError || partial ? (
+            // the last read failed, or part of it could not be read: the list below is what WAS read — said, with a way to read again (never passed off as complete)
+            <div role="status" className="flex items-center justify-between gap-3 text-sm text-muted-foreground" data-testid="home-incomplete-notice">
+              <span>{t('loadErrorTitle')}</span>
+              <Button size="sm" variant="outline" onClick={retry}>{tc('retry')}</Button>
+            </div>
+          ) : null}
+          <HomeList model={model} sources={sources} partial={partial || loadError} />
           <AgentStateSection />
           <PublishedSection published={sources.snapshot.published} usage={sources.snapshot.usage} />
         </div>

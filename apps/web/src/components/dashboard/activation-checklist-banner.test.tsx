@@ -701,4 +701,27 @@ describe('ActivationChecklistBanner — placement (story #4888)', () => {
       expect(container.textContent, path).toContain('가입을 마무리해 볼까요?');
     }
   });
+
+  // two copies of the banner on the home (the shell's, stepped aside, and the home's own) must not run two refresh loops for one checklist
+  it('the shell copy that steps aside on the home does not read again on its own timer; the home copy does; elsewhere the shell copy reads as before', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const reads = () => (fetch as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
+    const run = async (path: string, placement: 'shell' | 'home') => {
+      _resetActivationStatusCacheForTests();
+      mockPath.current = path;
+      stubChecklist(PARTIAL);
+      await act(async () => { root.render(wrap(<ActivationChecklistBanner placement={placement} />)); });
+      await flush();
+      const first = reads();
+      await act(async () => { vi.advanceTimersByTime(ACTIVATION_REFRESH_MS * 2 + 1); });
+      await flush();
+      const later = reads() - first;
+      await act(async () => { root.render(wrap(<div />)); });
+      return later;
+    };
+    expect(await run('/org-briefing', 'shell')).toBe(0); // stepped aside: the home's copy ticks
+    expect(await run('/org-briefing', 'home')).toBeGreaterThan(0);
+    expect(await run('/flow', 'shell')).toBeGreaterThan(0);
+  });
 });
+

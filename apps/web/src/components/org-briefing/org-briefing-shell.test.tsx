@@ -281,9 +281,9 @@ describe('OrgBriefingShell — story #3831 AC1(3구역, 3823 route 단일 소비
     expect(container.textContent).toContain('지금 하는 일이 없어요');
   });
 
-  // 페드루 PO CHANGES(2026-09-14 00:32Z, PR #4256) — a status the table does not know must not be said as «진행 중» (no-fiction). In the home the rule is stronger: deriveHome only lists
-  // the statuses the backend itself counts as in progress, so an unknown one is not a «working» row at all (and no word is invented for a known one that has none).
-  it('agent_progress.status가 표에 없는 값이면 «하는 중»으로 단정하지 않는다(행으로 올리지 않는다)', async () => {
+  // 페드루 PO CHANGES(2026-09-14 00:32Z, PR #4256) — a status the table does not know must not be said as «진행 중» (no-fiction): the run stays on the home (it is in the backend's list of
+  // runs in progress — a status added later must not make it vanish), with its name and NO status word.
+  it('agent_progress.status가 표에 없는 값이면 행은 남고 상태 낱말만 없다(「진행 중」으로 단정하지 않는다)', async () => {
     stubToday({
       ...EMPTY_TODAY,
       agent_progress: [{
@@ -293,10 +293,14 @@ describe('OrgBriefingShell — story #3831 AC1(3구역, 3823 route 단일 소비
       }],
     });
     await mount();
-    expect(container.querySelector('section[aria-label="일하는 중"] [data-slot="ds-count-badge"]')?.textContent).toBe('0');
+    expect(container.querySelector('section[aria-label="일하는 중"] [data-slot="ds-count-badge"]')?.textContent).toBe('1');
     await openFolded('일하는 중');
-    expect(container.querySelector('[data-row-key="run:r1"]')).toBeNull();
-    expect(container.textContent).not.toContain('YouTube 영상 올리기');
+    const row = container.querySelector('[data-row-key="run:r1"]');
+    expect(row?.textContent).toContain('YouTube 영상 올리기');
+    expect(row?.textContent).toContain('미르코');
+    for (const word of [koMessages.orgBriefing.agentStatusRunning, koMessages.orgBriefing.agentStatusQueued, koMessages.orgBriefing.agentStatusHeld, koMessages.orgBriefing.agentStatusHitlPending]) {
+      expect(row?.textContent).not.toContain(word);
+    }
   });
 
   it('상태 낱말은 표에 있는 status에만 붙는다: 답 대기 중인 실행은 그 낱말을 단다', async () => {
