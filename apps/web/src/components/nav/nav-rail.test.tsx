@@ -96,6 +96,19 @@ describe('NavRail — B 셸 초안(아이콘 막대)', () => {
     expect(container.querySelector('[data-flyout-item="inbox"] [data-testid="rail-badge"]')).toBeNull();
   });
 
+  // story #4885 — 숫자 배지 글자가 11px로 커져(5536) «99+»가 약 28px 폭이 된다. dev 실측(막대 56 · 아이콘 상자 y 18~38): 배지 y 6~22 → 아이콘 위 4px 띠와 한 자리 수 6×4 · «99+» 15.8×4px 겹침.
+  // 배지를 4px 올려(-top-1.5 → y 2~18) 아이콘 상자와 세로로 안 겹치게 했다 — 가로 폭과 상관없다. 실제 겹침 px는 dev에서 다시 잰다.
+  it('⭐막대 배지는 아이콘 위로 4px 올라 앉는다(-top-1.5) — 홈 · 대화 둘 다, 예전 자리(-top-0.5)로 되돌리면 빨갛다', async () => {
+    await mount({ todayCount: 120, chatUnreadTotal: 5 });
+    for (const id of ['org-briefing', 'chats']) {
+      const b = container.querySelector(`[data-rail-item="${id}"] [data-testid="rail-badge"]`) as HTMLElement;
+      const classes = b.className.split(/\s+/);
+      expect(classes, id).toContain('-top-1.5');
+      expect(classes, id).not.toContain('-top-0.5');
+      expect(classes, id).toContain('-right-0.5');
+    }
+  });
+
   it('값이 0이면 배지가 없다', async () => {
     await mount({ todayCount: 0, chatUnreadTotal: 0 });
     expect(container.querySelector('[data-testid="rail-badge"]')).toBeNull();

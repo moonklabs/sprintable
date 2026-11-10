@@ -95,6 +95,22 @@ describe('«팀» 탭줄', () => {
     expect(current()).toEqual(['recruit']);
   });
 
+  // story #4885 — 줄은 ds TabNav(UI-3 5545)로 짓는다: 손코딩 줄을 되돌리면 RED.
+  it('⭐줄은 ds TabNav · 탭은 ds TabNavLink — 켜진 탭만 aria-current=page 밑줄 문법(ds action 밑줄)', async () => {
+    queryRef.current = 'tab=recruit';
+    await mount();
+    expect(container.querySelector('[data-slot="ds-tab-nav"]')).not.toBeNull();
+    expect(container.querySelector('[data-slot="ds-tab-nav-rule"]')).not.toBeNull();
+    const links = [...container.querySelectorAll('[data-slot="ds-tab-nav-link"]')];
+    expect(links.map((a) => a.getAttribute('data-team-tab'))).toEqual(['agents', 'people', 'runs', 'keys', 'recruit']);
+    const on = links.filter((a) => a.getAttribute('aria-current') === 'page');
+    expect(on.map((a) => a.getAttribute('data-team-tab'))).toEqual(['recruit']);
+    expect(on[0]!.className).toContain('border-ds-action');
+    expect(links.filter((a) => a !== on[0]).every((a) => !a.className.includes('border-ds-action'))).toBe(true);
+    // 옛 손코딩 줄의 색 문법은 남지 않는다
+    expect(container.innerHTML).not.toContain('border-primary');
+  });
+
   it('줄에 접근 이름(팀)이 있다', async () => {
     await mount();
     expect(container.querySelector('nav')?.getAttribute('aria-label')).toBe('팀');

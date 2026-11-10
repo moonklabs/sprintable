@@ -95,10 +95,13 @@ export function NavRail({ orgSlug, projectSlug, account, listColumn, navV3Flags 
   );
   // 건수 배지 = ds CountBadge(UI-3 §4 #6 · 한 모양 · 색은 뜻 둘): 읽지 않음(대화) = action / 내 손 필요(홈) = needs-hand-bar + on-needs-hand 글자. 손 필요는 «안 보이는 이름»이 필수(색만으로 뜻을 싣지 않는다).
   // 링크의 aria-label이 이름을 덮으므로 건수 > 0이면 링크 이름에 «이름 · 건수 뜻 N»을 싣는다(ariaName) — 배지 안 sr-only 글만으로는 스크린리더가 못 읽는다.
+  // 배지 자리: 오른쪽 위에 얹되 **배지 아래가 아이콘 위(아이콘 상자 y 18)를 넘지 않게** — 배지 높이 16이라 `-top-1.5`(−6px → 배지가 y 2~18)가 아이콘 상자와 세로로 겹치지 않는 가장 낮은 자리다.
+  // «99+»(11px 글자 · 폭 약 28px)가 와도 가로 폭과 상관없이 아이콘을 안 가린다(전엔 `-top-0.5` = y 6~22라 아이콘 위 4px 띠를 한 자리 수는 6×4 · «99+»는 15.8×4px 덮었다 — dev 실측 11-10).
+  const BADGE_PLACE = 'absolute -right-0.5 -top-1.5';
   const badge = (n: number, tone: 'unread' | 'needs-hand') => (n > 0 ? (
     tone === 'needs-hand'
-      ? <CountBadge kind="needs-hand" label={t('railNeedsHand')} count={n} atLeast={todayCountAtLeast} className="absolute -right-0.5 -top-0.5" data-testid="rail-badge" />
-      : <CountBadge kind="unread" label={t('railUnread')} count={n} className="absolute -right-0.5 -top-0.5" data-testid="rail-badge" />
+      ? <CountBadge kind="needs-hand" label={t('railNeedsHand')} count={n} atLeast={todayCountAtLeast} className={BADGE_PLACE} data-testid="rail-badge" />
+      : <CountBadge kind="unread" label={t('railUnread')} count={n} className={BADGE_PLACE} data-testid="rail-badge" />
   ) : null);
   const ariaName = (base: string, n: number, tone: 'unread' | 'needs-hand') => (n > 0 ? `${base} · ${t(tone === 'needs-hand' ? 'railNeedsHand' : 'railUnread')} ${n}${tone === 'needs-hand' && todayCountAtLeast ? '+' : ''}` : base);
 
