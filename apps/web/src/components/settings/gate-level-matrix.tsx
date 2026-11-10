@@ -3,11 +3,11 @@
 import { useEffect, useState } from 'react';
 import { Lock, RotateCcw, Check, Pause, Ban, type LucideIcon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { ListRow } from '@/components/ds/list-row';
 import { cn } from '@/lib/utils';
+import { SettingsSection } from './settings-section';
 
 /**
  * HITL 게이트 레벨 매트릭스 (S-GATE-4). (work_type done·merge) × (actor agent·human) → level
@@ -35,11 +35,11 @@ const ACTOR_TYPES: ActorType[] = ['agent', 'human'];
 const LEVELS: Level[] = ['auto', 'ask', 'block'];
 
 // GateEvidence DECISION_META 미러: auto→success Check / ask→warning Pause / block→destructive Ban (글리프→lucide).
-const LEVEL_META: Record<Level, { selected: string; badge: 'success' | 'warning' | 'destructive'; mark: LucideIcon; labelKey: string }> = {
-  // story #2590(TIER1 ask·TIER3 auto/block) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
-  auto: { selected: 'border-success-border bg-success-tint text-foreground', badge: 'success', mark: Check, labelKey: 'levelAuto' },
-  ask: { selected: 'border-warning-border bg-warning-tint text-foreground', badge: 'warning', mark: Pause, labelKey: 'levelAsk' },
-  block: { selected: 'border-destructive-border bg-destructive-tint text-foreground', badge: 'destructive', mark: Ban, labelKey: 'levelBlock' },
+const LEVEL_META: Record<Level, { selected: string; tone: 'done' | 'needs-hand' | 'failed'; mark: LucideIcon; labelKey: string }> = {
+  // story 4891: the ds meaning tokens — auto = done (green) · ask = needs-hand (amber) · block = failed (red); the picked button is the soft tint of its meaning with the meaning's text color (never colour alone: the mark + the word stay)
+  auto: { selected: 'border-ds-done bg-ds-done-soft text-ds-done', tone: 'done', mark: Check, labelKey: 'levelAuto' },
+  ask: { selected: 'border-ds-needs-hand bg-ds-needs-hand-soft text-ds-needs-hand', tone: 'needs-hand', mark: Pause, labelKey: 'levelAsk' },
+  block: { selected: 'border-ds-failed bg-ds-failed-soft text-ds-failed', tone: 'failed', mark: Ban, labelKey: 'levelBlock' },
 };
 
 // LEVEL_META.mark(lucide) 렌더 — 글리프 span 대체.
@@ -53,6 +53,17 @@ const isLevelDisabled = (workType: WorkType, level: Level): boolean => workType 
 
 const cellKey = (w: string, a: string) => `${w}:${a}`;
 const toSource = (s?: string): Source => (s === 'override' ? 'override' : 'org_default');
+
+/** a small status tag on the ds meaning tokens, at 12 px (the ds Chip is the 11 px mono kind — a phone reads nothing under 12 here) */
+function Tag({ tone, children }: { tone: 'done' | 'needs-hand' | 'failed' | 'action'; children: React.ReactNode }) {
+  const TONE = {
+    done: 'bg-ds-done-soft text-ds-done',
+    'needs-hand': 'bg-ds-needs-hand-soft text-ds-needs-hand',
+    failed: 'bg-ds-failed-soft text-ds-failed',
+    action: 'bg-ds-action-soft text-ds-action-text',
+  } as const;
+  return <span className={cn('inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded-ds-tag border border-ds-line px-1.5 text-ds-small font-semibold', TONE[tone])}>{children}</span>;
+}
 
 interface GateLevelMatrixProps {
   surface: 'org' | 'project';
@@ -167,71 +178,58 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
   };
 
   return (
-    <SectionCard>
-      <SectionCardHeader>
-        <div className="space-y-1">
-          <h2 className="text-base font-semibold text-foreground">{surface === 'org' ? t('titleOrg') : t('title')}</h2>
-          <p className="text-sm text-muted-foreground">{surface === 'org' ? t('descriptionOrg') : t('description')}</p>
-        </div>
-      </SectionCardHeader>
-      <SectionCardBody className="space-y-4">
-        {message && (
-          // story #2105 2차 — handleSet/handleRevert가 재시도 전 setMessage(null)을 먼저 호출해(위
-          // 정의) 매 시도마다 언마운트→리마운트된다. 에러=alert/assertive, 성공=status/polite.
-          <Alert
-            variant={message.type === 'success' ? 'success' : 'destructive'}
-            role={message.type === 'success' ? 'status' : 'alert'}
-            aria-live={message.type === 'success' ? 'polite' : 'assertive'}
-            aria-atomic="true"
-          >
-            <AlertDescription>{message.text}</AlertDescription>
-          </Alert>
-        )}
+    <SettingsSection title={surface === 'org' ? t('titleOrg') : t('title')} description={surface === 'org' ? t('descriptionOrg') : t('description')}>
+      {message && (
+        // story #2105 2차 — handleSet/handleRevert가 재시도 전 setMessage(null)을 먼저 호출해 매 시도마다 언마운트→리마운트된다. 에러=alert/assertive(ds Banner failed), 성공=status/polite(ds Banner info).
+        <Banner tone={message.type === 'success' ? 'info' : 'failed'}>{message.text}</Banner>
+      )}
 
-        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-          {LEVELS.map((lv) => (
-            <span key={lv} className="inline-flex items-center gap-1">
-              <LevelMark level={lv} className="mr-0.5 inline size-3" />{t(LEVEL_META[lv].labelKey)}
-            </span>
+      <div className="flex flex-wrap items-center gap-3 text-ds-small text-ds-ink-3">
+        {LEVELS.map((lv) => (
+          <span key={lv} className="inline-flex items-center gap-1">
+            <LevelMark level={lv} className="mr-0.5 inline size-3" />{t(LEVEL_META[lv].labelKey)}
+          </span>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="space-y-1">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="flex items-center justify-between gap-3 px-3 py-3">
+              <div className="h-4 w-20 animate-pulse rounded bg-ds-surface-high" />
+              <div className="h-7 w-48 animate-pulse rounded bg-ds-surface-high" />
+            </div>
           ))}
         </div>
-
-        {loading ? (
-          <div className="space-y-1 divide-y divide-border">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="flex items-center justify-between gap-3 px-3 py-3">
-                <div className="h-4 w-20 animate-pulse rounded bg-muted" />
-                <div className="h-7 w-48 animate-pulse rounded bg-muted" />
-              </div>
-            ))}
-          </div>
-        ) : (
-          WORK_TYPES.map((wt) => (
-            <div key={wt} className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="text-sm font-semibold text-foreground">{t(`work_${wt}`)}</p>
-                {wt === 'merge' ? (
-                  <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                    <Lock className="h-3 w-3" />
-                    {t('mergeFloorNote')}
-                  </span>
-                ) : null}
-              </div>
-              <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
-                {ACTOR_TYPES.map((at) => {
-                  const key = cellKey(wt, at);
-                  const cell = cells[key];
-                  const busy = busyCell === key;
-                  const isOverride = surface === 'project' && cell?.source === 'override';
-                  return (
-                    <div key={at} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2.5 text-sm">
-                      <span className="font-medium text-foreground">{t(`actor_${at}`)}</span>
-                      <div className="flex shrink-0 items-center gap-2">
+      ) : (
+        WORK_TYPES.map((wt) => (
+          <div key={wt} className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-ds-body font-semibold text-ds-ink">{t(`work_${wt}`)}</p>
+              {wt === 'merge' ? (
+                <span className="inline-flex items-center gap-1 text-ds-small text-ds-ink-3">
+                  <Lock className="h-3 w-3" />
+                  {t('mergeFloorNote')}
+                </span>
+              ) : null}
+            </div>
+            <div className="overflow-hidden rounded-ds-control border border-ds-line">
+              {ACTOR_TYPES.map((at) => {
+                const key = cellKey(wt, at);
+                const cell = cells[key];
+                const busy = busyCell === key;
+                const isOverride = surface === 'project' && cell?.source === 'override';
+                return (
+                  // story 4891: one ds ListRow per actor — drawn with asChild so the row's own flex-wrap lets the controls drop UNDER the name when the width is short (ListRow's `trailing` slot never shrinks and would clip them at 390 px)
+                  <ListRow key={at} asChild className="flex-wrap gap-y-2 last:border-b-0">
+                    <div>
+                      <span className="min-w-0 flex-1 text-ds-body font-semibold text-ds-ink">{t(`actor_${at}`)}</span>
+                      <div className="flex flex-wrap items-center justify-end gap-2">
                         {/* project surface: 상속/재정의 source 표시(+ override 면 ↺ 복귀). org surface: 없음. */}
                         {surface === 'project' && cell ? (
                           isOverride ? (
                             <span className="inline-flex items-center gap-1">
-                              <Badge variant="outline" className="border-primary/40 text-primary">{t('sourceOverride')}</Badge>
+                              <Tag tone="action">{t('sourceOverride')}</Tag>
                               {canWrite ? (
                                 <button
                                   type="button"
@@ -239,15 +237,15 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
                                   disabled={busy}
                                   title={t('revertToDefault')}
                                   aria-label={t('revertToDefault')}
-                                  // story 4891: a 14 px icon press — on a touch screen the press area is 44 × 44 (the picture stays small)
-                                  className="inline-flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-50 pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+                                  // a 14 px icon press — on a touch screen the press area is 44 × 44 (the picture stays small)
+                                  className="inline-flex items-center justify-center text-ds-ink-3 hover:text-ds-ink disabled:opacity-50 pointer-coarse:min-h-11 pointer-coarse:min-w-11"
                                 >
                                   <RotateCcw className="h-3.5 w-3.5" />
                                 </button>
                               ) : null}
                             </span>
                           ) : (
-                            <span className="text-xs text-muted-foreground">{t('sourceInherited')}</span>
+                            <span className="text-ds-small text-ds-ink-3">{t('sourceInherited')}</span>
                           )
                         ) : null}
                         {canWrite ? (
@@ -259,18 +257,12 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
                                 <Button
                                   key={lv}
                                   type="button"
-                                  variant="glass"
-                                  size="sm"
+                                  variant="secondary"
                                   disabled={floorDisabled || busy}
                                   title={floorDisabled ? t('floorDisabledHint') : undefined}
                                   onClick={() => void handleSet(wt, at, lv)}
                                   aria-pressed={selected}
-                                  className={cn(
-                                    // story 4891: «sm» is 28 px high — a touch screen presses ≥ 44 (same buttons, same values; the desktop look is unchanged)
-                                    'min-w-[60px] gap-1 transition-colors pointer-coarse:min-h-11',
-                                    selected ? LEVEL_META[lv].selected : 'border-border text-muted-foreground hover:bg-muted/40',
-                                    floorDisabled && 'opacity-40',
-                                  )}
+                                  className={cn('min-w-[60px] gap-1', selected && LEVEL_META[lv].selected, floorDisabled && 'opacity-40')}
                                 >
                                   <LevelMark level={lv} className="mr-0.5 inline size-3" />{t(LEVEL_META[lv].labelKey)}
                                 </Button>
@@ -278,22 +270,22 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
                             })}
                           </div>
                         ) : cell ? (
-                          <Badge variant={LEVEL_META[cell.level].badge} className="shrink-0">
+                          <Tag tone={LEVEL_META[cell.level].tone}>
                             <LevelMark level={cell.level} className="mr-0.5 inline size-3" />
                             {t(LEVEL_META[cell.level].labelKey)}
-                          </Badge>
+                          </Tag>
                         ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
+                          <span className="text-ds-small text-ds-ink-3">—</span>
                         )}
                       </div>
                     </div>
-                  );
-                })}
-              </div>
+                  </ListRow>
+                );
+              })}
             </div>
-          ))
-        )}
-      </SectionCardBody>
-    </SectionCard>
+          </div>
+        ))
+      )}
+    </SettingsSection>
   );
 }

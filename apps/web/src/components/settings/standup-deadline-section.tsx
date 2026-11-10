@@ -3,8 +3,10 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Check } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { Button } from '@/components/ds/button';
+import { Field } from '@/components/ds/field';
+import { Input } from '@/components/ds/input';
+import { SettingsSection } from './settings-section';
 import { fetchWithAuth } from '@/lib/db/client';
 
 interface Props {
@@ -43,31 +45,17 @@ export function StandupDeadlineSection({ projectId }: Props) {
 
   return (
     <section id="standup-settings">
-      <SectionCard>
-        <SectionCardHeader>
-          <div className="space-y-1">
-            <h2 className="text-base font-semibold text-foreground">{t('standupSettings')}</h2>
-            <p className="text-sm text-muted-foreground">{t('standupSettingsDesc')}</p>
-          </div>
-        </SectionCardHeader>
-        <SectionCardBody>
-          <div className="flex items-center gap-4">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">{t('standupDeadline')}</label>
-              <input
-                type="time"
-                value={deadline}
-                onChange={(e) => setDeadline(e.target.value)}
-                className="min-h-11 rounded-md border border-border bg-muted/30 px-3 py-2 text-base lg:min-h-0 lg:text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-            </div>
-            {/* story 4891: a phone press is ≥ 44 (the ui Button's default size carries the floor; «sm» was 28) */}
-            <Button className="mt-4" onClick={handleSave} disabled={saving || !projectId}>
-              {saved ? <><Check className="size-4" />{tc('saved')}</> : saving ? tc('saving') : t('save')}
-            </Button>
-          </div>
-        </SectionCardBody>
-      </SectionCard>
+      <SettingsSection title={t('standupSettings')} description={t('standupSettingsDesc')}>
+        {/* story 4891: the deadline is a ds Field + Input (a phone press ≥ 44: the field is 44 on touch), the save is the ds Button — same value, same PATCH, same «saved» word */}
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label={t('standupDeadline')} className="w-40">
+            {(control) => <Input {...control} type="time" value={deadline} onChange={(e) => setDeadline(e.target.value)} className="pointer-coarse:h-11" />}
+          </Field>
+          <Button variant="primary" size="lg" onClick={handleSave} disabled={saving || !projectId}>
+            {saved ? <><Check className="size-4" />{tc('saved')}</> : saving ? tc('saving') : t('save')}
+          </Button>
+        </div>
+      </SettingsSection>
     </section>
   );
 }
