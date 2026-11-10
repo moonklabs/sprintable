@@ -301,7 +301,8 @@ export default function DocSlugPage() {
   }, [selectedDoc, title, handleDocSaved]);
 
   const handleNavigate = useCallback((targetSlug: string) => {
-    router.push(docUrl(wsSlug, projSlug, targetSlug));
+    // story 4892 (D1) — a [[wiki link]] / page embed clicked inside the editor opens the target to READ, like every other document link
+    router.push(`${docUrl(wsSlug, projSlug, targetSlug)}/view`);
   }, [router, wsSlug, projSlug]);
 
   if (docLoading) {

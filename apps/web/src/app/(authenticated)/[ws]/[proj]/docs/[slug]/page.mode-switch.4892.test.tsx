@@ -19,7 +19,11 @@ vi.mock('@/components/docs/use-doc-sync', () => ({
   useDocSync: () => ({ status: 'idle' as const, isDirty: false, save: () => Promise.resolve(), clearSyncAlerts: () => {} }),
   unwrapDocResponse: (json: unknown) => { const r = (json ?? {}) as { data?: unknown }; return { doc: r.data ?? r, updatedAt: undefined }; },
 }));
-vi.mock('@/components/docs/doc-editor', () => ({ DocEditor: (props: { actions?: React.ReactNode }) => <div>{props.actions}</div> }));
+vi.mock('@/components/docs/doc-editor', () => ({
+  DocEditor: (props: { actions?: React.ReactNode; onNavigate?: (slug: string) => void }) => (
+    <div>{props.actions}<button type="button" data-testid="editor-wiki-link" onClick={() => props.onNavigate?.('target-doc')} /></div>
+  ),
+}));
 vi.mock('@/components/docs/doc-gate-section', () => ({ DocGateSection: () => null }));
 vi.mock('@/components/docs/doc-assignee-control', () => ({ DocAssigneeControl: () => null }));
 vi.mock('@/components/docs/doc-url-chip', () => ({ DocUrlChip: () => null }));
@@ -88,5 +92,13 @@ describe('DocSlugPage — 읽기 | 고치기 전환 (4892)', () => {
   it('⋯ 메뉴 단추에 이름이 있다', async () => {
     await mount();
     expect(container.querySelector(`button[aria-label="${koMessages.docs.moreActions}"]`)).toBeTruthy();
+  });
+
+  it('⭐편집기 안에서 [[위키 링크]] · 페이지 임베드를 누르면 대상 문서를 읽기 화면(/view)으로 연다', async () => {
+    routerMock.push.mockClear();
+    await mount();
+    await act(async () => { (container.querySelector('[data-testid="editor-wiki-link"]') as HTMLButtonElement).click(); });
+    expect(routerMock.push).toHaveBeenCalledTimes(1);
+    expect(routerMock.push).toHaveBeenCalledWith('/moonklabs/sprintable/docs/target-doc/view');
   });
 });
