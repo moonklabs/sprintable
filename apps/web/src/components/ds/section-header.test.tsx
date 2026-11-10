@@ -48,4 +48,29 @@ describe('ds SectionHeader', () => {
     expect(container.querySelector('[data-testid="c"]')).not.toBeNull();
     expect(container.textContent).toContain('오래 기다린 순');
   });
+
+  it('⭐접는 머리글은 줄의 남는 폭 전체가 접기 단추다 — 가로 여백은 줄이 아니라 단추 안에 있다(글 폭만 눌리면 안 된다)', async () => {
+    const onToggle = vi.fn();
+    await act(async () => { root.render(<SectionHeader title="최근" collapsed={false} onToggle={onToggle} trailing="3" />); });
+    const row = container.querySelector('[data-slot="ds-section-header"]') as HTMLElement;
+    const b = container.querySelector('button')!;
+    // 줄 자신에는 가로 여백이 없다 — 있으면 단추가 줄 끝까지 못 닿는다.
+    expect(row.className).not.toMatch(/(^|\s)px-\d/);
+    expect(b.className).toContain('w-full');
+    expect(b.className).toContain('flex-1');
+    expect(b.className).toContain('px-3');
+    expect(row.className).toContain('items-stretch');
+    // 오른쪽 보조는 단추 «밖»이라 따로 눌린다(접기가 같이 안 눌린다).
+    const trailing = [...row.children].find((c) => c.textContent === '3') as HTMLElement;
+    expect(b.contains(trailing)).toBe(false);
+    await act(async () => { trailing.click(); });
+    expect(onToggle).not.toHaveBeenCalled();
+    await act(async () => { b.click(); });
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it('폰(coarse 포인터)은 줄 높이가 44 이상이다', async () => {
+    await act(async () => { root.render(<SectionHeader title="구역" collapsed={false} onToggle={() => {}} />); });
+    expect((container.querySelector('[data-slot="ds-section-header"]') as HTMLElement).className).toContain('pointer-coarse:min-h-11');
+  });
 });

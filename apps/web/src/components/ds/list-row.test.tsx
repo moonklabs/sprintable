@@ -80,4 +80,23 @@ describe('ds ListRow', () => {
     await act(async () => { root.render(<ListRow asChild>{text}</ListRow>); });
     expect(container.querySelector('[data-slot="ds-list-row"]')).toBeNull();
   });
+
+  it('⭐density=compact: 높이 36 · 폰 누름 44 이상 · 기본은 56', async () => {
+    await act(async () => { root.render(<ListRow title="줄" />); });
+    expect(row().className).toContain('min-h-14');
+    expect(row().getAttribute('data-density')).toBe('default');
+    expect(row().className).not.toContain('min-h-9');
+    await act(async () => { root.render(<ListRow title="줄" density="compact" />); });
+    expect(row().className).toContain('min-h-9');
+    expect(row().className).toContain('pointer-coarse:min-h-11');
+    expect(row().className).not.toContain('min-h-14');
+    expect(row().getAttribute('data-density')).toBe('compact');
+  });
+
+  it('compact도 asChild · 손 필요 · 선택과 함께 쓰인다', async () => {
+    await act(async () => { root.render(<ListRow asChild density="compact" selected><a href="https://example.com/x">줄</a></ListRow>); });
+    const a = container.querySelector('a')!;
+    expect(a.className).toContain('min-h-9');
+    expect(a.getAttribute('aria-current')).toBe('true');
+  });
 });
