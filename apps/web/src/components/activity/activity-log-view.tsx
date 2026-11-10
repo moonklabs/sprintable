@@ -467,28 +467,34 @@ function ActivityRow({ item, rowLabel, selected, controlsId, onToggle, buttonRef
   const time = formatViewerRelativeTime(item.created_at, locale, useViewerTimeZone());
   const tc = useTranslations('common');
   const { human, agent } = auditActorProps(item, tc, rowLabel);
-  // story 4892 — the row is a button that opens its details (aria-expanded + aria-controls): the hover-only `title` tooltip it replaces was invisible to touch and keyboard.
+  // story 4892 — a row opens its details (aria-expanded + aria-controls). The visible row is a ProofCapsule — `<div>`s, and for an agent a focusable avatar — which may not sit inside a
+  // `<button>`; so the row is two layers: the visible capsule (inert: no tab stop, not read twice) and a transparent button laid over it whose accessible name is the row's own words.
+  const actor = rowLabel ?? item.actor_name ?? '';
+  const rowName = [actor, auditClaim(item), time].filter(Boolean).join(' · ');
   return (
-    <Button
-      ref={buttonRef}
-      type="button"
-      variant="ghost"
-      aria-expanded={selected}
-      aria-controls={selected ? controlsId : undefined}
-      onClick={(e) => onToggle(e.detail === 0)}
-      data-audit-row
-      className="block h-auto min-h-0 w-full min-w-0 justify-start whitespace-normal rounded-ds-panel p-0 text-left font-normal transition-colors hover:bg-ds-surface-high aria-expanded:bg-ds-surface-high"
-      data-selected={selected}
-    >
-      <ProofCapsule
-        density="audit"
-        proofState={deriveAuditProofState(item.action)}
-        stateLabel={item.action}
-        claim={auditClaim(item)}
-        now={time}
-        human={human}
-        agent={agent}
+    <div data-selected={selected} className="group/row relative rounded-ds-panel transition-colors hover:bg-ds-surface-high data-[selected=true]:bg-ds-surface-high">
+      <div inert aria-hidden="true">
+        <ProofCapsule
+          density="audit"
+          proofState={deriveAuditProofState(item.action)}
+          stateLabel={item.action}
+          claim={auditClaim(item)}
+          now={time}
+          human={human}
+          agent={agent}
+        />
+      </div>
+      <Button
+        ref={buttonRef}
+        type="button"
+        variant="ghost"
+        aria-label={rowName}
+        aria-expanded={selected}
+        aria-controls={selected ? controlsId : undefined}
+        onClick={(e) => onToggle(e.detail === 0)}
+        data-audit-row
+        className="absolute inset-0 h-auto min-h-0 w-full min-w-0 rounded-ds-panel p-0 hover:bg-transparent aria-expanded:bg-transparent"
       />
-    </Button>
+    </div>
   );
 }

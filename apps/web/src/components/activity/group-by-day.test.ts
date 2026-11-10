@@ -38,6 +38,20 @@ describe('groupByDay (4892)', () => {
     ]);
   });
 
+  it('⭐a zone whose clock changes at midnight (America/Santiago, DST ends 2026-04-05 00:00 → 2026-04-04 23:00) still labels the day before as yesterday', () => {
+    const now = new Date('2026-04-05T16:00:00Z');   // Santiago 2026-04-05 12:00 (UTC-4 after the change)
+    const rows = [row('a', '2026-04-05T15:00:00Z'), row('b', '2026-04-04T15:00:00Z'), row('c', '2026-04-03T15:00:00Z')];
+    expect(groupByDay(rows, 'America/Santiago', now).map((g) => [g.key, g.kind])).toEqual([
+      ['2026-04-05', 'today'],
+      ['2026-04-04', 'yesterday'],
+      ['2026-04-03', 'date'],
+    ]);
+  });
+
+  it('the day before the 1st of a month / the year is computed on the calendar, not by hours', () => {
+    expect(groupByDay([row('a', '2026-12-31T10:00:00Z')], 'UTC', new Date('2027-01-01T05:00:00Z')).map((g) => [g.key, g.kind])).toEqual([['2026-12-31', 'yesterday']]);
+  });
+
   it('no rows → no groups (no empty headers)', () => {
     expect(groupByDay([], 'UTC', NOW)).toEqual([]);
   });

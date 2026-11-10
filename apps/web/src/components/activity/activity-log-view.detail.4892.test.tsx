@@ -245,3 +245,30 @@ describe('ActivityLogView — 시간대를 모를 때(null)도 묶음과 상세�
   });
 });
 
+describe('ActivityLogView — 행의 구조: 단추 안에 블록이 없다 (4892, codex)', () => {
+  it('⭐the visible capsule is an inert layer and the row button is an empty overlay named with the row\'s own words — agent rows included (no focusable avatar inside a button)', async () => {
+    fetchWithAuthMock.mockImplementation(async (url: string) => {
+      if (url.includes('/api/members')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      const items = [row('ag', '2026-11-10T08:00:00Z', { actor_type: 'agent', actor_name: '디버거', actor_id: 'a1' })];
+      return { ok: true, status: 200, json: async () => ({ data: { items, total: 1, limit: 30, offset: 0 } }) };
+    });
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC">
+          <TopBarProvider><ActivityLogView projectId="p1" /></TopBarProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+    const button = rows()[0]!;
+    expect(button.querySelector('*')).toBeNull();                                  // nothing nested inside the button (no div, no focusable avatar)
+    const layer = button.previousElementSibling as HTMLElement;
+    expect(layer.hasAttribute('inert')).toBe(true);                                  // the visible capsule is not a tab stop and is not read twice
+    expect(layer.getAttribute('aria-hidden')).toBe('true');
+    const name = button.getAttribute('aria-label')!;
+    expect(name).toContain('디버거');                                                // who
+    expect(name).toContain('story');                                                  // what (the claim)
+    expect(name).toContain('일감 ag');
+  });
+});
+
