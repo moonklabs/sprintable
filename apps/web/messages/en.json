@@ -105,8 +105,6 @@
     "standup": "Standup",
     "retro": "Retro",
     "scopeProject": "Project",
-    "groupExpand": "Expand {group}",
-    "groupCollapse": "Collapse {group}",
     "docs": "Docs",
     "artifacts": "Artifacts",
     "rewards": "Rewards",

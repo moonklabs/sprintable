@@ -55,11 +55,17 @@ describe('AgentsPageTabs — 주소와 안쪽 탭이 같이 움직인다(story #
   });
 
   it('⭐안쪽 탭을 누르면 주소도 바뀐다(바깥 «팀» 줄의 «지금 여기»와 어긋나지 않게) · 다른 쿼리(p)는 그대로', async () => {
-    window.history.replaceState(null, '', '/organization/workforce?p=proj-1');
+    // 실제 Next에선 history.state가 라우터 상태(`__NA` 등)를 들고 있다 — 코드가 그걸 그대로 넘기면 Next가 동기를 건너뛴다. 시험도 그 모양으로 시작한다.
+    window.history.replaceState({ __NA: true, tree: ['', {}] }, '', '/organization/workforce?p=proj-1');
     await render();
     const recruitTab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent?.includes('채용')) as HTMLElement;
     expect(recruitTab).toBeTruthy();
+    // Next는 state 인자에 자기 라우터 상태를 든 replaceState를 useSearchParams에 알리지 않는다 → 반드시 null(실제 dev에서 바깥 줄이 안 따라온 결함 · jsdom에선 통합이 없어 인자만 단언한다)
+    const spy = vi.spyOn(window.history, 'replaceState');
     await act(async () => { recruitTab.click(); });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]![0], 'replaceState의 state 인자').toBeNull();
+    spy.mockRestore();
     const sp = new URLSearchParams(window.location.search);
     expect(sp.get('tab')).toBe('recruit');
     expect(sp.get('p')).toBe('proj-1');
