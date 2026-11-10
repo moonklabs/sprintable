@@ -7,7 +7,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { CommandPalette } from './command-palette';
-import { NAV_GROUPS, LEGACY_NAV_ITEMS, CHAT_CENTER_ITEM } from '@/lib/nav-config';
+import { NAV_GROUPS, OTHER_NAV_ITEMS, CHAT_CENTER_ITEM } from '@/lib/nav-config';
 import koMessagesRaw from '../../../messages/ko.json';
 
 type LooseMessages = { [key: string]: string | LooseMessages };
@@ -58,10 +58,12 @@ async function mount(props: Partial<React.ComponentProps<typeof CommandPalette>>
 describe('CommandPalette — existing navigate/search behavior (regression guard)', () => {
   it('renders navigate destinations with correct 으로/로 조사(회귀 — story #3698 실측으로 잡힌 "알림로" 오생성)', async () => {
     await mount();
-    expect(document.body.textContent).toContain('알림으로 이동'); // 림=ㅁ받침
+    // story #4885 — «알림» 항목은 «결재»(받침없음)로 이름이 바뀌어(폰 탭과 같은 이름) ㅁ받침 표본은 «구성원»(원=ㄴ받침)·«활동 로그»(로그=ㄱ받침)로 교체.
+    expect(document.body.textContent).toContain('활동 로그로 이동'); // 그=받침없음 (로그: 마지막 글자 그)
+    expect(document.body.textContent).toContain('구성원으로 이동'); // 원=ㄴ받침
     // story #3824 — 'board' 항목 라벨이 「보드」→「일감」(zoneDev)로 개명돼 "보드로 이동"
     // 문구 자체가 더는 안 뜬다(항목·라우팅은 불변, 표시 낱말만 교체) — 받침없음 표본을
-    // 여전히 팔레트에 남아 있는 다른 항목(목표=goals, LEGACY_NAV_ITEMS)으로 교체.
+    // 여전히 팔레트에 남아 있는 다른 항목(목표=goals, OTHER_NAV_ITEMS)으로 교체.
     expect(document.body.textContent).toContain('목표로 이동'); // 표=받침없음
     expect(document.body.textContent).toContain('문서로 이동'); // 서=받침없음
   });
@@ -79,16 +81,16 @@ describe('CommandPalette — existing navigate/search behavior (regression guard
 // 밖의 문서화된 예외(#2376 orphan-route 가드 앵커)라 집합에서 뺀 뒤 대조한다.
 //
 // story #3824(UX-v3·FE 1, 페드루 PO 確定 2026-09-13) — 사이드바가 5항목으로 줄며 팔레트
-// navigate 목적지는 NAV_GROUPS만이 아니라 LEGACY_NAV_ITEMS(사이드바 밖 17개, 조건① "한
+// navigate 목적지는 NAV_GROUPS만이 아니라 OTHER_NAV_ITEMS(사이드바 밖 17개, 조건① "한
 // 자리에서만 정의")까지 합친 것과 같아야 한다 — 이 대조 자체가 조건①("팔레트 항목 집합
 // == 모바일 legacy 집합")의 절반(팔레트 쪽)을 잠근다. 나머지 절반(모바일 쪽과의 등치)은
 // 바로 아래 별도 테스트로.
 describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 AC1·AC3)', () => {
-  // story #3845 §④ — go-retro 신규(retro가 LEGACY_NAV_ITEMS에서 빠지며 이 앵커로 이관).
+  // story #3845 §④ — go-retro 신규(retro가 OTHER_NAV_ITEMS에서 빠지며 이 앵커로 이관).
   // story #3989 — go-hypotheses 신규(가설 탭도 WorkspaceFrameTabs 전용 진입점).
   const GUARD_ANCHOR_IDS = new Set(['go-sprints', 'go-epics', 'go-retro', 'go-work-list', 'go-hypotheses']);
 
-  it('팔레트 navigate id 집합이 정확히 NAV_GROUPS+LEGACY_NAV_ITEMS 전 항목 + CHAT_CENTER_ITEM과 같다(앵커 2개는 문서화된 예외로 제외)', async () => {
+  it('팔레트 navigate id 집합이 정확히 NAV_GROUPS+OTHER_NAV_ITEMS 전 항목 + CHAT_CENTER_ITEM과 같다(앵커 2개는 문서화된 예외로 제외)', async () => {
     await mount();
     const renderedIds = new Set(
       [...document.querySelectorAll('[data-command-group="navigate"] [data-command-id]')]
@@ -97,7 +99,7 @@ describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 
     const renderedNavIds = new Set([...renderedIds].filter((id) => !GUARD_ANCHOR_IDS.has(id)));
     const expectedNavIds = new Set([
       ...NAV_GROUPS.flatMap((g) => g.items.map((i) => i.id)),
-      ...LEGACY_NAV_ITEMS.map((i) => i.id),
+      ...OTHER_NAV_ITEMS.map((i) => i.id),
       CHAT_CENTER_ITEM.id,
     ]);
     // 집합 대조(수 고정 아님) — nav가 늘어도 이 두 집합은 같은 소스(NAV_GROUPS+LEGACY_
@@ -109,11 +111,11 @@ describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 
   });
 
   // story #3824 조건①(페드루 PO 確定 2026-09-13) — 「나브 밖 항목」의 목록은 한 자리
-  // (LEGACY_NAV_ITEMS)에서만 정의하고 팔레트와 모바일 `/more`가 둘 다 그 한 목록을
+  // (OTHER_NAV_ITEMS)에서만 정의하고 팔레트와 모바일 `/more`가 둘 다 그 한 목록을
   // 소비 — 두 소비처가 다른 목록을 보면 "한쪽만 사라지는" 클래스가 생긴다. import
   // 소스 대조만으로는 각 컴포넌트가 실제로 그 배열을 렌더 경로에 배선했는지까지는 못
   // 잡으므로(예: command-palette.tsx가 하드코딩 목록으로 되돌아가도 이 파일이 import한
-  // LEGACY_NAV_ITEMS 자체는 안 바뀜), 팔레트와 /more 둘 다 실제로 렌더해 DOM에서 나온
+  // OTHER_NAV_ITEMS 자체는 안 바뀜), 팔레트와 /more 둘 다 실제로 렌더해 DOM에서 나온
   // id 집합끼리 직접 대조한다.
   it('팔레트의 legacy 항목 렌더 집합이 모바일 /more 「그 밖의 화면」 렌더 집합과 정확히 같다(조건① 실렌더 대조)', async () => {
     await mount();
@@ -138,7 +140,7 @@ describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 
         </NextIntlClientProvider>,
       );
     });
-    const hrefToId = new Map(LEGACY_NAV_ITEMS.map((item) => [item.kind === 'static' ? item.path : `/${item.path}`, item.id]));
+    const hrefToId = new Map(OTHER_NAV_ITEMS.map((item) => [item.kind === 'static' ? item.path : `/${item.path}`, item.id]));
     const moreLegacyIds = new Set(
       [...moreContainer.querySelectorAll('a')]
         .map((a) => hrefToId.get(a.getAttribute('href')!))
@@ -147,7 +149,7 @@ describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 
     await act(async () => { moreRoot.unmount(); });
     moreContainer.remove();
 
-    // 팔레트는 LEGACY_NAV_ITEMS 전부를 보여준다(⌘K는 폭 제약이 없어 배제할 이유가 없다)
+    // 팔레트는 OTHER_NAV_ITEMS 전부를 보여준다(⌘K는 폭 제약이 없어 배제할 이유가 없다)
     // — 반면 모바일 허브는 바텀 탭이 이미 depth 1로 커버하는 항목(MOBILE_HUB_EXCLUDE_IDS,
     // 예: inbox)을 한 겹 더 거른다. 이건 "다른 목록을 본다"가 아니라 같은 원천에서 각
     // 소비처가 자기 문맥에 맞는 필터를 얹는 정상 분기라, 그 필터를 적용한 뒤 대조한다.
@@ -181,7 +183,7 @@ describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 
     await mount();
     expect(document.body.textContent).toContain('스프린트로 이동');
     expect(document.body.textContent).toContain('에픽으로 이동');
-    // story #3845 §④ — retro가 LEGACY_NAV_ITEMS에서 빠지며 신규.
+    // story #3845 §④ — retro가 OTHER_NAV_ITEMS에서 빠지며 신규.
     expect(document.body.textContent).toContain('회고로 이동');
   });
 

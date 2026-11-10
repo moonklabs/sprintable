@@ -31,27 +31,19 @@ describe('inbox tab labels (#2164)', () => {
       expect((messages.inbox as Record<string, unknown>).title).toBeUndefined();
     });
 
-    // 파울로 정정(2026-07-25): 사이드바/커맨드팔레트 진입점이 전부 bare `/inbox`
-    // (=알림 탭)로 착지하는데 라벨은 "결재함"이었다 — "가장 많이 눌리는 그 이름"이 여전히
-    // 어긋나 있으면 반쪽. 진입점 라벨은 착지하는 탭 이름과 일치해야 한다(area 진입점 원칙).
-    it(`${locale}: /inbox(bare) 진입점 라벨(GNB·커맨드팔레트·인박스내 뒤로가기)이 착지 탭과 일치한다`, () => {
-      const approvalsWord = locale === 'ko' ? '결재함' : 'Approvals';
+    // 파울로 정정(2026-07-25) → story #4885(UI-2 AC4 PR 1): 진입점 라벨은 착지하는 탭 이름과 일치해야 한다(area 진입점 원칙). 예전엔 사이드바/커맨드팔레트가 bare `/inbox`(=알림 탭)에 착지하며
+    // 라벨 `nav.inbox`(=알림)를 썼으나, 새 구조의 사이드바 · 팔레트 «결재» 항목은 폰 탭과 같은 게이트 탭(`/inbox?tab=gates`)에 착지하므로 라벨도 폰 탭과 같은 «결재»(nav.approvals)다.
+    // bare `/inbox`(알림 탭)로 가는 길은 알림 종 · 인박스 내 뒤로가기뿐이라 `nav.inbox` 키는 걷혔다(재도입 금지).
+    it(`${locale}: 사이드바·커맨드팔레트 «결재» 진입점은 게이트 탭에 착지하므로 폰 탭과 같은 이름이고 알림 라벨이 아니다`, () => {
       const notificationsLabel = messages.inbox.notificationsTabLabel;
-
-      // app-sidebar.tsx: <Link href="/inbox" /> 라벨
-      expect(messages.nav.inbox).toBe(notificationsLabel);
-      // story #3698(IA·후속) — command-palette.tsx가 이제 nav.inbox를 goDestination의
-      // {label}에 그대로 꿰어 렌더한다(전용 goInbox 키 폐기, 사본 0). nav.inbox가 위에서
-      // 이미 notificationsLabel과 같다고 확認됐고, goDestination이 {label}을 그대로
-      // 감싸는 템플릿이면 렌더 결과가 notificationsLabel을 포함한다는 게 구조로 보장된다
-      // (실제 렌더 대조는 command-palette.test.tsx가 DOM으로 잰다).
+      expect(messages.nav.approvals).toBe(messages.mobileTabBar.approvals);
+      expect(messages.nav.approvals).not.toBe(notificationsLabel);
+      expect((messages.nav as Record<string, unknown>).inbox).toBeUndefined();
+      // command-palette.tsx가 nav 항목 라벨을 goDestination의 {label}에 그대로 꿰어 렌더한다(전용 키 없음, 사본 0).
       expect(messages.commandPalette.goDestination).toContain('{label}');
-      // inbox/page.tsx 모바일 상세뷰 "목록으로" — 알림 목록으로 돌아가는 것이므로 동일
+      // inbox/page.tsx 모바일 상세뷰 "목록으로" — 알림 목록으로 돌아가는 것이므로 알림 탭 이름과 동일
       expect(messages.inbox.backToList).toBe(notificationsLabel);
-
-      // 이 셋 중 어느 것도 "결재함"/"Approvals"를 자칭하지 않는다(진짜 게이트 탭 전용 이름).
-      expect(messages.nav.inbox).not.toBe(approvalsWord);
-      expect(messages.inbox.backToList).not.toBe(approvalsWord);
+      expect(messages.inbox.backToList).not.toBe(locale === 'ko' ? '결재함' : 'Approvals');
     });
 
     // story #2279(PO 판정, 2026-07-29): 모바일 탭바의 이 진입점만은 «다른 그룹»이다 —

@@ -22,9 +22,10 @@ describe('story #4524 — the «데스크톱 앱» sidebar entry', () => {
     else process.env.DESKTOP_DOWNLOAD_ENABLED = saved;
   });
 
-  it('on: the last item of «연결·규칙» — /desktop · org · Monitor · Yuna’s label and description keys', () => {
+  // story #4885 — the entry lives in the headerless settings group now (the «연결·규칙» group is gone from the sidebar): settings, then «데스크톱 앱».
+  it('on: the last item of the settings group — /desktop · org · Monitor · Yuna’s label and description keys', () => {
     const groups = resolveNavGroups({ ...DEFAULT_NAV_V3_FLAGS, desktopDownloadEnabled: true });
-    const items = groups.find((g) => g.id === 'connect-rules')!.items;
+    const items = groups.find((g) => g.id === 'settings')!.items;
     const item = items[items.length - 1];
     expect(item).toMatchObject({
       id: 'desktop-app', labelKey: 'desktopApp', descriptionKey: 'descDesktopApp', kind: 'static', path: '/desktop', scope: 'org',
@@ -38,11 +39,9 @@ describe('story #4524 — the «데스크톱 앱» sidebar entry', () => {
     }
   });
 
-  it('beside the v3 overview: overview first, the existing three, then «데스크톱 앱»', () => {
-    const groups = resolveNavGroups({ ...DEFAULT_NAV_V3_FLAGS, connectRulesV3Enabled: true, desktopDownloadEnabled: true });
-    expect(ids(groups, 'connect-rules')).toEqual([
-      'connect-rules-v3', 'org-channels', 'org-generation-connectors', 'org-content-rules', 'desktop-app',
-    ]);
+  it('settings first, then «데스크톱 앱»', () => {
+    const groups = resolveNavGroups({ ...DEFAULT_NAV_V3_FLAGS, desktopDownloadEnabled: true });
+    expect(ids(groups, 'settings')).toEqual(['settings', 'desktop-app']);
   });
 
   it('never in NAV_GROUPS itself — the command palette reads that list as is, with no flag', () => {

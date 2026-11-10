@@ -78,28 +78,29 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
   // 산다. h2 레벨엔 데스크톱 미러 3개(오늘·결과·연결·규칙) + legacy 카드 1개(그 밖의
   // 화면)뿐 — 소묶음 자체는 nav-config-legacy-grouping.test.ts·legacy-nav-ssot.test.tsx가
   // 전담(별도 축, 이 파일 관심사 아님).
-  it('섹션(h2) 순서가 확定대로다(오늘/결과/연결·규칙[NAV_GROUPS]/그 밖의 화면[legacy 단일 카드] — 일감[NAV_GROUPS]은 유일 항목이 바텀탭 배제 대상이라 빈 채 안 뜬다)', async () => {
+  // story #4885(UI-2 AC4 PR 1) — 새 구조: 구역은 사이드바와 같은 한 정의(오늘 · 일감 · 에이전트 · 지식 · 조직 · 설정) + 맨 아래 «그 밖의 화면». 일감의 보드(탭 «일감»)와 오늘의 결재(탭 «결재»)는
+  // 바텀 탭이 depth 1로 커버해 빠진다. 「더보기」 서랍과 그 소묶음 · 캡션은 걷혔다.
+  it('섹션(h2) 순서가 확定대로다(목표[일감] / 팀 / 지식 / 조직 / 그 밖의 화면 — 한 항목 구역은 머리 없이 항목 줄 하나)', async () => {
     await mount();
-    // story #4292(유나 1안) — 한 항목 구역(오늘 · 결과)은 머리 없이 항목 줄 하나. 카드(구역)는 넷 그대로 · 순서도 그대로.
+    // story #4292(유나 1안) — 한 항목 구역(오늘 · 설정)은 머리 없이 항목 줄 하나. 카드(구역)는 일곱 · 순서는 사이드바 순서.
     const sectionLabels = [...container.querySelectorAll('h2')].map((el) => el.textContent?.trim());
-    expect(sectionLabels).toEqual(['연결·규칙', '그 밖의 화면새 자리로 옮기는 중이에요']);
+    expect(sectionLabels).toEqual(['목표', '팀', '지식', '조직', '그 밖의 화면']);
     const cards = [...container.querySelectorAll('[data-testid="more-section-card"]')];
-    expect(cards).toHaveLength(4);
+    expect(cards).toHaveLength(7);
     expect(cards.map((c) => c.querySelector('[data-testid="more-menu-link"] span span')?.textContent)).toEqual(
-      ['오늘', '결과', expect.any(String), expect.any(String)],
+      ['오늘', '목표', '구성원', '문서', '결과', '설정', '리워드'],
     );
     // story #4291(PO) — 머리 없는 카드에 group 이름을 붙이지 않는다(구역 이름 = 그 한 항목 이름이라 화면 읽기가 같은 낱말을 두 번 읽음).
-    expect(cards.map((c) => [c.getAttribute('role'), c.getAttribute('aria-label')])).toEqual([[null, null], [null, null], [null, null], [null, null]]);
+    expect(cards.map((c) => [c.getAttribute('role'), c.getAttribute('aria-label')])).toEqual(cards.map(() => [null, null]));
     // 같은 낱말이 한 카드에 두 번(머리 · 항목) 보이지 않는다.
     for (const card of cards) {
       const header = card.querySelector('[data-testid="more-section-header"]')?.textContent;
       const rows = card.querySelectorAll('[data-testid="more-menu-link"]');
       if (header && rows.length === 1) expect(rows[0]!.querySelector('span span')?.textContent).not.toBe(header);
     }
-    // h2 안 캡션은 "그 밖의 화면" 라벨과 별도 span(§⑤ 해요체 인라인 캡션, moreLegacyMovingCaptionInline)
-    // — 위 concat 문자열이 그 둘의 합임을 명시로도 확認(텍스트 원문이 바뀌면 이 assert가 RED).
-    const legacyH2 = [...container.querySelectorAll('h2')].find((h) => h.textContent?.startsWith('그 밖의 화면'));
-    expect(legacyH2?.querySelector('[data-testid="legacy-moving-caption"]')?.textContent).toBe('새 자리로 옮기는 중이에요');
+    // 서랍의 «새 자리로 옮기는 중이에요» 캡션은 서랍과 함께 걷혔다.
+    expect(container.querySelector('[data-testid="legacy-moving-caption"]')).toBeNull();
+    expect([...container.querySelectorAll('[data-legacy-group]')]).toHaveLength(0);
   });
 
   it('「그 밖의 화면」 묶음(레시피·구성원·에이전트)과 오늘(=옛 조직브리핑)이 포함된다(AC1 — 기존 stub의 핵심 결함 수복)', async () => {
@@ -154,18 +155,14 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
     expect(insightsBoardLink?.textContent).toContain('결과');
   });
 
-  // story #3855(customer-zero·셸, 페드루 PO 판정 2026-09-14 07:34Z 픽셀 커밋) — AC1 갈 곳
-  // 표가 settings를 "묶음 없이 맨 아래 단독(머리말 「설정」)"으로 못박았지만, 픽셀 커밋이
-  // legacy를 단일 카드로 되돌리며 그 머리말은 이제 h2(카드 헤더)가 아니라 카드 «안»의
-  // 소묶음(data-legacy-group="settings")이다 — 데스크톱 사이드바와 동형(app-sidebar.tsx도
-  // 소묶음, h2 아님).
-  it('설정은 legacy 카드 안 자기 소묶음(머리말+개수 pill)을 갖는다(story #3855 §② 흡수 지도 — settings 전용 축)', async () => {
+  // story #4885 — «설정»은 머리 없는 자기 구역(카드)이고 «그 밖의 화면» 맨 아래엔 메뉴 입구를 따로 안 만드는 화면들이 선다(리워드 · 채널 채팅).
+  it('설정은 자기 구역이고, «그 밖의 화면»에는 리워드 · 채널 채팅이 있다(막다른 곳을 안 만든다)', async () => {
     await mount();
-    const settingsGroup = container.querySelector('[data-legacy-group="settings"]');
-    expect(settingsGroup).toBeDefined();
-    expect(settingsGroup?.textContent).toContain('설정');
     const settingsLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/settings');
     expect(settingsLink).toBeDefined();
+    const links = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href'));
+    expect(links).toContain('/rewards');
+    expect(links).toContain('/channel');
   });
 });
 
@@ -219,10 +216,10 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
   // 설명과 안 겹침).
   it('⭐찾기 — 입력값이 이름에 매치하면 그 행만 남고 나머지 구역은 숨는다', async () => {
     await mount();
-    await typeQuery('실행');
+    await typeQuery('레시피');
     const links = [...container.querySelectorAll('a')];
     expect(links).toHaveLength(1);
-    expect(links[0]?.textContent).toContain('실행');
+    expect(links[0]?.textContent).toContain('레시피');
   });
 
   it('⭐찾기 — 입력값이 설명에만 매치해도 걸린다(이름+설명 둘 다 부분일치)', async () => {
@@ -246,7 +243,7 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
 
   it('⭐찾기 — 지우면 전량 복귀한다(story #3824로 총 링크 수 변동, 리터럴 수 대신 >1로 검증)', async () => {
     await mount();
-    await typeQuery('실행');
+    await typeQuery('레시피');
     expect(container.querySelectorAll('a')).toHaveLength(1);
     await typeQuery('');
     expect(container.querySelectorAll('a').length).toBeGreaterThan(1);

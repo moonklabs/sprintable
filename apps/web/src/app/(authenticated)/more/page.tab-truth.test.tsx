@@ -54,21 +54,24 @@ describe('전체 메뉴 — 플래그 ON에서 실제 탭과 한 세계(story #4
       .toBe(`Screens in the tabs below ("${enMessages.nav.zoneNow}", "${enMessages.nav.chats}", and "${enMessages.nav.zoneDev}") aren't listed here`);
   });
 
-  it('⭐결재함은 «오늘» 구역에 · «오늘» 항목(org-briefing)은 탭에 있으니 메뉴에 없음', async () => {
+  // story #4885 — 탭이 «오늘»을 그리는 판(ON)에서도 메뉴는 탭에 없는 목적지를 반드시 갖는다: «오늘»(org-briefing)은 탭에 있어 메뉴에 없고, «결재»(inbox)는 탭에 없어 메뉴에 남는다.
+  it('⭐결재는 메뉴에 남고 · «오늘» 항목(org-briefing)은 탭에 있으니 메뉴에 없음', async () => {
     await mount('ko');
-    const cards = [...container.querySelectorAll('h2')].map((h) => h.closest('div.overflow-hidden, [class*="overflow-hidden"]') ?? h.parentElement!);
-    const todayCard = cards.find((c) => c!.querySelector('h2')?.textContent?.startsWith(koMessages.nav.zoneNow));
-    expect(todayCard?.textContent).toContain(koMessages.nav.inbox);
+    const hrefs = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href'));
+    expect(hrefs).toContain('/inbox?tab=gates');
+    expect(hrefs).not.toContain('/org-briefing');
     expect(container.textContent).not.toContain(koMessages.nav.descOrgBriefing);
   });
 
-  it('⭐«연결·규칙» 머리 한 번 · 첫 항목 «모아 보기» · 에이전트 · 신뢰 센터 · 레시피가 같은 구역', async () => {
+  it('⭐새 구조 — «조직» 머리 한 번 · 연결 · 규칙 항목들이 그 안 · «팀» 구역에 구성원 · 에이전트 · 실행 기록 · API 키', async () => {
     await mount('ko');
-    const headings = [...container.querySelectorAll('h2, [data-legacy-group] p span:first-child')].map((el) => el.textContent?.trim());
-    expect(headings.filter((h) => h === koMessages.nav.zoneConnectRules)).toHaveLength(1);
-    const connectCard = [...container.querySelectorAll('h2')].find((h) => h.textContent?.startsWith(koMessages.nav.zoneConnectRules))!.closest('[class*="overflow-hidden"]')!;
-    const names = [...connectCard.querySelectorAll('a span.block.truncate')].map((el) => el.textContent);
-    expect(names[0]).toBe(koMessages.nav.connectRulesOverview);
-    expect(names.slice(-3)).toEqual([koMessages.nav.workforce, koMessages.nav.orgTrust, koMessages.nav.orgEvents]);
+    const headings = [...container.querySelectorAll('h2')].map((el) => el.textContent?.trim());
+    expect(headings.filter((h) => h === koMessages.nav.zoneOrganization)).toHaveLength(1);
+    const orgCard = [...container.querySelectorAll('h2')].find((h) => h.textContent?.startsWith(koMessages.nav.zoneOrganization))!.closest('[class*="overflow-hidden"]')!;
+    const orgNames = [...orgCard.querySelectorAll('a span.block.truncate')].map((el) => el.textContent);
+    expect(orgNames).toEqual(expect.arrayContaining([koMessages.nav.orgChannels, koMessages.nav.orgGenerationConnectors, koMessages.nav.orgContentRules, koMessages.nav.orgEvents, koMessages.nav.orgTrust]));
+    const teamCard = [...container.querySelectorAll('h2')].find((h) => h.textContent?.startsWith(koMessages.nav.zoneTeam))!.closest('[class*="overflow-hidden"]')!;
+    expect([...teamCard.querySelectorAll('a span.block.truncate')].map((el) => el.textContent))
+      .toEqual([koMessages.nav.orgMembers, koMessages.nav.workforce, koMessages.nav.workforceRuns, koMessages.nav.workforceApiKeys]);
   });
 });
