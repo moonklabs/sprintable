@@ -87,14 +87,15 @@ describe('DocViewPage — 에디토리얼 리더 배선(§3)', () => {
     expect(container.textContent).toContain('v3');
   });
 
-  // story #2974 §1/§3(PR-D0) — 리더 마스트헤드 h1이 font-display 토큰 경유(D0=Pretendard,
-  // 시각 무변화). delta(PO/유나 지적 2026-08-24) — font-editorial-heading(무게 유틸, 820)도
-  // 같이 있어야 한다(family-only 치환이 무게 820→400을 조용히 지웠던 회귀 재발 방지).
-  it('마스트헤드 h1이 font-display+font-editorial-heading 둘 다 경유한다(#2974 D0 배선)', async () => {
+  // story 4892 (UI-9 상세 열) — 리더의 제목은 옛 에디토리얼 글자(font-display · font-editorial-heading)가 아니라 ds 제목 글자(text-ds-title)다.
+  it('마스트헤드 h1은 ds 제목 글자를 입고, 페이지에 h1은 정확히 하나다', async () => {
     await mount();
-    const h1 = container.querySelector('h1');
-    expect(h1?.className).toContain('font-display');
-    expect(h1?.className).toContain('font-editorial-heading');
+    const h1s = container.querySelectorAll('h1');
+    expect(h1s.length).toBe(1);
+    const cls = h1s[0]!.className.split(/\s+/);
+    expect(cls).toContain('text-ds-title');
+    expect(cls).toContain('text-ds-ink');
+    expect(cls).not.toContain('font-editorial-heading');
   });
 
   it('상태 헤더와 증거 레일에 문서 status가 그대로 배선된다', async () => {
@@ -184,3 +185,34 @@ describe('DocViewPage — 빵부스러기 좁은 폭(4356)', () => {
   });
 });
 
+describe('DocViewPage — 상세 열 읽기 화면이 ds 부품을 입는다 (4892)', () => {
+  const editLink = () => [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('고치기')) as HTMLAnchorElement | undefined;
+
+  it('⭐«고치기»는 머리 오른쪽의 ds 보조 단추(링크)이고 편집기 주소로 간다', async () => {
+    await mount();
+    const link = editLink();
+    expect(link, 'the 고치기 link').toBeTruthy();
+    expect(link!.getAttribute('data-slot')).toBe('ds-button');
+    expect(link!.getAttribute('href')).toBe('/ws1/proj1/docs/payments-v2');
+    expect(link!.className.split(/\s+/)).toContain('border-ds-line-control');          // secondary, not the primary action
+    expect(link!.className.split(/\s+/)).not.toContain('bg-ds-action');
+    expect(link!.querySelector('[data-icon="edit"]')).not.toBeNull();
+  });
+
+  it('머리 한 줄은 ds 선 · 바탕이고 뿌리 «지식» 링크는 목록으로 간다', async () => {
+    await mount();
+    const root = [...container.querySelectorAll('a')].find((a) => a.textContent === '지식') as HTMLAnchorElement;
+    expect(root.getAttribute('href')).toBe('/ws1/proj1/docs');
+    const bar = root.parentElement!;
+    const cls = bar.className.split(/\s+/);
+    expect(cls).toContain('border-ds-line');
+    expect(cls).toContain('bg-ds-background');
+    expect(cls).not.toContain('bg-muted/20');
+  });
+
+  it('오른쪽 레일의 선도 ds 선이다', async () => {
+    await mount();
+    const aside = container.querySelector('aside')!;
+    expect(aside.className.split(/\s+/)).toContain('lg:border-ds-line');
+  });
+});
