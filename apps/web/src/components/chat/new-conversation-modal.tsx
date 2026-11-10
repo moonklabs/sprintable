@@ -15,7 +15,7 @@ import { memberDisplayLabel, memberRowLabels } from '@/lib/member-display';
 import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { Select } from '@/components/ui/select';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { isNoProjectAtAll } from '@/app/(authenticated)/chats/no-project';
+import { isNoProjectAtAll, projectsUnknownBecauseFailed } from '@/app/(authenticated)/chats/no-project';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -63,13 +63,18 @@ export function NewConversationModal({ projectId, allowNoProject = false, onClos
   const { projectMemberships, currentTeamMemberId } = dashboardCtx;
   // the default is worked out on every render (not frozen at first render): it must be one of the person's projects (an unknown one is no default), and it follows the given one while the window is open
   const onlyProject = projectMemberships.length === 1 ? projectMemberships[0]!.projectId : '';
-  const defaultRoomProject = projectId === NO_ROOM_PROJECT
-    ? (allowNoProject ? NO_ROOM_PROJECT : onlyProject)
-    : allowNoProject && isNoProjectAtAll(dashboardCtx)
-      ? NO_ROOM_PROJECT // a person KNOWN to have no project of their own can still start a room — with none; whatever default was handed in (a stale filter) is not theirs
-      : projectId && (projectMemberships.length === 0 || projectMemberships.some((m) => m.projectId === projectId))
-        ? projectId
-        : onlyProject;
+  // story 4887 (UI-4 P2-d) — the request for the person's projects FAILED: «no project at all» would be a guess (they may have projects) and would file the room under none — so no default is taken and the window says why
+  const projectsFailed = projectsUnknownBecauseFailed(dashboardCtx);
+  // when the read FAILED nothing is known about the person's projects: no default at all — not the handed-in one either (a persisted «no project» filter or a stale project id would file the room unscoped / under a project that may not be theirs)
+  const defaultRoomProject = projectsFailed
+    ? ''
+    : projectId === NO_ROOM_PROJECT
+      ? (allowNoProject ? NO_ROOM_PROJECT : onlyProject)
+      : allowNoProject && isNoProjectAtAll(dashboardCtx)
+        ? NO_ROOM_PROJECT // a person KNOWN to have no project of their own can still start a room — with none; whatever default was handed in (a stale filter) is not theirs
+        : projectId && (projectMemberships.length === 0 || projectMemberships.some((m) => m.projectId === projectId))
+          ? projectId
+          : onlyProject;
   const [chosenProject, setChosenProject] = useState<string | null>(null);
   // a choice counts only while it is still one of the drawn options: «no project» while the server allows it (the list can fall back to an older server with the window open),
   // a project while it is still the person's (the list of projects can change under an open window)
@@ -218,6 +223,13 @@ export function NewConversationModal({ projectId, allowNoProject = false, onClos
               ))}
             </ul>
           )}
+
+          {projectsFailed ? (
+            <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground" role="alert" data-testid="new-room-projects-failed">
+              <span>{t('projectsLoadFailed')}</span>
+              <Button type="button" size="sm" variant="outline" onClick={() => window.location.reload()} data-testid="new-room-retry-projects">{t('projectsRetry')}</Button>
+            </div>
+          ) : null}
 
           {/* story 4847 — which project the new room is filed under (only asked when there is a real choice) */}
           {projectMemberships.length + (allowNoProject ? 1 : 0) > 1 && (

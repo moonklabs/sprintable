@@ -5323,6 +5323,8 @@
     "authFailureTooltipInvalid": "API 키 인식 불가 · 최근 5분 {n}회"
   },
   "chats": {
+    "projectsLoadFailed": "프로젝트를 불러오지 못했어요.",
+    "projectsRetry": "다시 시도",
     "noProjectYet": "보여 줄 프로젝트가 아직 없어요. 위쪽 전환기에서 만들어 주세요(이미 있다면 새로고침).",
     "pickProject": "위쪽 전환기에서 프로젝트를 고르면 그 대화가 보여요.",
     "agentsPaused": {

@@ -157,6 +157,13 @@ describe('ChatListView — 조직 안 모든 방 한 목록(story 4847 AC1)', ()
     expect([...container.querySelectorAll('[data-testid="room-project"]')].map((e) => e.textContent)).toEqual([A.projectName]);
   });
 
+  it('4887 ⭐ a FAILED project read that left ONE project (synthesized from /me) keeps the name on that project\'s rooms — the person may have more', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [A], role: 'member', projectId: undefined, projectMembershipsFailed: true });
+    stubOrgServer([A1]);
+    await mount();
+    expect([...container.querySelectorAll('[data-testid="room-project"]')].map((e) => e.textContent)).toEqual([A.projectName]); // reverted → hidden
+  });
+
   it('줄이 이름을 안 주면(project_name 없음) 내 프로젝트 목록에서 이름을 찾아 붙인다', async () => {
     stubOrgServer([{ ...B1, project_name: null }]);
     await mount();
@@ -645,6 +652,44 @@ describe('ChatListView — 옛 서버(422)에서는 지금 화면과 같다 (sto
     expect(container.querySelector('[data-testid="chats-no-project"]')).toBeNull();
     expect(container.textContent).toContain('회의방');
     expect(listCalls(fetchMock).at(-1)).toBe('/api/conversations?limit=30&offset=0&project_id=proj-a');
+  });
+
+  // story 4887 (UI-4 P2-d) — the request for the person's projects FAILED (story 4891 `projectMembershipsFailed`): that is not «none» (they may have projects) — the line says so and offers [다시 시도]
+  it('4887 ⭐ a FAILED project read shows «프로젝트를 불러오지 못했어요» + [다시 시도] — not «프로젝트가 아직 없어요»', async () => {
+    oldServer(); ctx({ projectId: undefined, projectMemberships: [], projectMembershipsFailed: true });
+    await mount({ projectId: null });
+    const box = container.querySelector('[data-testid="chats-no-project"]')!;
+    expect(box.textContent).toContain(koMessages.chats.projectsLoadFailed);
+    expect(box.textContent).not.toContain(koMessages.chats.noProjectYet); // reverted → the failure is read as «none»
+    expect(container.querySelector('[data-testid="chats-retry-projects"]')?.textContent).toBe(koMessages.chats.projectsRetry);
+  });
+
+  it('4887 ⭐ the same screen WITHOUT a failure (really no project) keeps the old line and has no retry', async () => {
+    oldServer(); ctx({ projectId: undefined, projectMemberships: [], projectMembershipsFailed: false });
+    await mount({ projectId: null });
+    expect(container.querySelector('[data-testid="chats-no-project"]')?.textContent).toBe(koMessages.chats.noProjectYet);
+    expect(container.querySelector('[data-testid="chats-retry-projects"]')).toBeNull();
+  });
+
+  it('4887 ⭐ a failure flag with the projects KNOWN (a stale flag · projects in hand) is not «unknown» — the ordinary «프로젝트를 고르세요» line, no failure block', async () => {
+    oldServer(); ctx({ projectId: undefined, projectMembershipsFailed: true }); // [A, B] in hand
+    await mount({ projectId: null });
+    expect(container.querySelector('[data-testid="chats-no-project"]')?.textContent).toBe(koMessages.chats.pickProject); // reverted (flag alone) → the failure block
+    expect(container.querySelector('[data-testid="chats-projects-failed"]')).toBeNull();
+  });
+
+  it('4887 ⭐ [다시 시도] reloads the page (the way the Recruit tab does it)', async () => {
+    const reload = vi.fn();
+    const real = window.location;
+    Object.defineProperty(window, 'location', { configurable: true, value: { ...real, reload } });
+    try {
+      oldServer(); ctx({ projectId: undefined, projectMemberships: [], projectMembershipsFailed: true });
+      await mount({ projectId: null });
+      await act(async () => { (container.querySelector('[data-testid="chats-retry-projects"]') as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(reload).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(window, 'location', { configurable: true, value: real });
+    }
   });
 
   it('⭐옛 서버의 프로젝트 단위 목록을 보다가 현재 프로젝트를 잃으면 오류가 아니라 «프로젝트를 고르세요» 한 줄이다', async () => {
