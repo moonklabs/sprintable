@@ -171,3 +171,60 @@ async def test_a_dm_message_that_mentions_the_person_is_one_line_too():
         assert _kinds(rows) == ["conversation:mention"] and unread == 1, rows
     finally:
         await engine.dispose()
+
+
+async def test_a_mention_row_of_another_organization_for_the_same_message_id_hides_nothing():
+    """the lookup is scoped to the row's own organization: a stand-in mention row in ANOTHER org (same recipient · same source id) must not take the line away"""
+    import uuid
+
+    from app.models.event import Event
+
+    engine, Session, org_id, conv_id, (_s, sender_user), (reader, reader_user), (_o, other_user) = await _world()
+    try:
+        await _speak_first(Session, org_id, reader_user, conv_id)
+        await _speak_first(Session, org_id, other_user, conv_id)
+        before, unread0 = await _bell(Session, org_id, reader_user)
+        seen = _ids(before)
+        await _send(Session, org_id, sender_user, conv_id, "plain, no mention")
+        rows, unread = await _bell(Session, org_id, reader_user)
+        line = next(r for r in rows if r["id"] not in seen and r["event_type"] == "conversation.message_created")
+        async with Session() as s:
+            org2 = await _make_org(s)
+            s.add(Event(project_id=None, org_id=org2.id, event_type="conversation:mention", source_entity_type="conversation_message", source_entity_id=uuid.UUID(str(line["source_entity_id"])),
+                        sender_id=None, recipient_id=reader, recipient_type="human", payload={"summary": "x"}, status="delivered"))
+            await s.commit()
+        rows, unread = await _bell(Session, org_id, reader_user)
+        # reverted (the lookup not scoped by organization) → the line is gone
+        assert _kinds(rows, seen) == ["conversation.message_created"] and unread == unread0 + 1, rows
+    finally:
+        await engine.dispose()
+
+
+async def test_only_a_human_recipient_has_the_rooms_row_hidden_an_agent_keeps_both_rows():
+    """the dedupe is for the bell a PERSON reads: the same predicate for an agent recipient (an agent reads its events through the same endpoints) hides nothing"""
+    import uuid
+
+    from sqlalchemy import select
+
+    from app.models.event import Event
+    from app.routers.event_notifications import _is_hidden_notification
+
+    engine, Session, org_id, conv_id, (_s, _su), (reader, _ru), (other, _ou) = await _world()
+    try:
+        src = uuid.uuid4()
+        async with Session() as s:
+            ids = {}
+            for who, kind in ((reader, "human"), (other, "agent")):
+                for et in ("conversation.message_created", "conversation:mention"):
+                    ev = Event(project_id=None, org_id=org_id, event_type=et, source_entity_type="conversation_message", source_entity_id=src, sender_id=None, recipient_id=who, recipient_type=kind,
+                               payload={"summary": "x"}, status="delivered")
+                    s.add(ev)
+                    await s.flush()
+                    ids[(kind, et)] = ev.id
+            await s.commit()
+            hidden_for_human = set((await s.execute(select(Event.id).where(Event.recipient_id == reader, _is_hidden_notification(reader)))).scalars())
+            hidden_for_agent = set((await s.execute(select(Event.id).where(Event.recipient_id == other, _is_hidden_notification(other)))).scalars())
+        assert ids[("human", "conversation.message_created")] in hidden_for_human and ids[("human", "conversation:mention")] not in hidden_for_human
+        assert hidden_for_agent == set()  # reverted (no human-only term) → the agent's message_created row is hidden
+    finally:
+        await engine.dispose()

@@ -88,13 +88,14 @@ def _is_hidden_notification(member_id: uuid.UUID):
         .select_from(mention_evt)
         .where(
             mention_evt.event_type == "conversation:mention",
+            mention_evt.org_id == Event.org_id,
             mention_evt.recipient_id == Event.recipient_id,
             mention_evt.source_entity_id == Event.source_entity_id,
         )
     )
     return or_(
         and_(Event.event_type.in_(_CONVERSATION_EVENT_TYPES), muted),         # mute: 대화 전체 무음
-        and_(Event.event_type == "conversation.message_created", mentioned_too),  # story 4890 — 멘션 글의 둘째 줄(멘션 줄이 이 글의 줄)
+        and_(Event.event_type == "conversation.message_created", Event.recipient_type == "human", mentioned_too),  # story 4890 — 멘션 글의 둘째 줄(멘션 줄이 이 글의 줄 · 사람 몫만: 에이전트는 두 줄을 각각 쓴다)
         and_(Event.event_type == "conversation.message_created", is_group, ~spoke),  # 미발화 그룹 관전
         Event.event_type.in_(_APPROVALS_INBOX_SIGNAL_TYPES),                        # story #4520 — 결재함 신호
         # coalesce: a dispatched row whose payload has no `event_type` key would make this term NULL, and `NOT (… OR NULL)` is NULL — the row would drop out of the bell (SQL three-valued logic)

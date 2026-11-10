@@ -71,7 +71,7 @@ export function NotificationsPane({ loading, categories, globalLevel, savingLeve
             </div>
 
             {/* the column heads: «앱 내» is the one every row has (the switches' names read it: aria-labelledby); webhook / e-mail are the «soon» ones — a desktop width only */}
-            <div className="flex items-center justify-end gap-6 px-3 text-center text-ds-small font-semibold text-ds-ink-3">
+            <div className="flex items-center justify-end gap-2 px-4 text-center text-ds-small font-semibold text-ds-ink-3">
               <span id="notif-col-in-app" className="w-14">{t('notification_channel_in_app')}</span>
               {showSoonColumns ? <span className="hidden w-14 opacity-60 lg:block">{t('notification_channel_webhook')}</span> : null}
               {showSoonColumns ? <span className="hidden w-14 opacity-60 lg:block">{t('notification_channel_email')}</span> : null}
