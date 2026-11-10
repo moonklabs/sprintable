@@ -8,7 +8,7 @@ import { ListRow } from '@/components/ds/list-row';
 import { SectionHeader } from '@/components/ds/section-header';
 import { translateEntityStatus } from '@/components/chat/entity-status-labels';
 import { cn } from '@/lib/utils';
-import { UNASSIGNED_GOAL_ID, type WorkListGoalGroup, type WorkListRowState, type WorkListStoryGroup } from './derive-work-list';
+import { UNASSIGNED_GOAL_ID, UNLISTED_GOAL_ID, type WorkListGoalGroup, type WorkListRowState, type WorkListStoryGroup } from './derive-work-list';
 import { WorkListRowView } from './work-list-row';
 
 /**
@@ -78,7 +78,7 @@ function StoryRowView({ story, selectedRowId, onSelect }: { story: WorkListStory
 export function GoalGroupView({ group, selectedRowId, onSelect }: { group: WorkListGoalGroup; selectedRowId: string | null; onSelect: (rowId: string) => void }) {
   const t = useTranslations('workList');
   const [collapsed, setCollapsed] = useState(false);
-  const title = group.goalId === UNASSIGNED_GOAL_ID ? t('unassignedGoalTitle') : group.title;
+  const title = group.goalId === UNASSIGNED_GOAL_ID ? t('unassignedGoalTitle') : group.goalId === UNLISTED_GOAL_ID ? t('unlistedGoalTitle') : group.title;
   return (
     <section aria-label={title} data-goal-id={group.goalId} className="overflow-hidden rounded-ds-control border border-ds-line bg-ds-surface">
       <SectionHeader
@@ -93,6 +93,7 @@ export function GoalGroupView({ group, selectedRowId, onSelect }: { group: WorkL
       {collapsed ? null : (
         <>
           {group.goalId === UNASSIGNED_GOAL_ID ? <p className="m-0 px-4 pt-2 text-ds-small text-ds-ink-3">{t('unassignedGoalHint')}</p> : null}
+          {group.goalId === UNLISTED_GOAL_ID ? <p className="m-0 px-4 pt-2 text-ds-small text-ds-ink-3" data-testid="unlisted-goal-hint">{t('unlistedGoalHint')}</p> : null}
           <p className="m-0 px-4 py-2 text-ds-small text-ds-ink-3" data-testid="goal-summary">
             {t('goalSummaryLabel', { assigned: group.assignedCount, delegated: group.delegatedCount, hypotheses: group.hypothesisCount })}
           </p>

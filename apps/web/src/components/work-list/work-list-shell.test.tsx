@@ -163,6 +163,16 @@ describe('WorkListShell — 일이 없는 스토리도 행이다(story #3934 재
     expect(container.querySelector('[data-testid="story-work-rows"]')).toBeNull();
   });
 
+  it('⭐목록 밖 목표의 스토리 구역은 «목록에 없는 목표의 스토리»라는 이름과 안내를 달고 그려진다', async () => {
+    const payload = unassignedOnlyPayload();
+    payload.workList.groups[0]!.goalId = '__unlisted_goal__';
+    fetchWorkListMock.mockResolvedValue(payload);
+    await mount();
+    expect(container.querySelector('section[data-goal-id="__unlisted_goal__"] h2')?.textContent).toContain('목록에 없는 목표의 스토리');
+    expect(container.querySelector('[data-testid="unlisted-goal-hint"]')?.textContent).toContain('불러온 목표 목록에 아직 없는');
+    expect(container.textContent).toContain('미할당 스토리'); // the story itself is on screen
+  });
+
   it('⭐스토리 행도 산출물 · 저위험 칩을 단다(일이 없는 스토리라도)', async () => {
     const payload = unassignedOnlyPayload();
     const story = payload.workList.groups[0]!.stories[0]!;

@@ -68,6 +68,10 @@ export const GOAL_STATUS_ACTIVE = 'active';
 // UNCATEGORIZED 선례와 동형(하드코딩 한글 가드는 apps/web도 BE와 같은 계약, 새 기전 발명 금지).
 export const UNASSIGNED_GOAL_ID = '__unassigned_goal__';
 
+// story #4888 — stories that name a goal (`epic_id`) which is NOT among the loaded goals (the goals are read page by page): no story is dropped silently, they stand together in this synthetic group
+// (the render layer names it with t('unlistedGoalTitle') — «목록에 없는 목표의 스토리»). Its id cannot clash with a real goal id (a UUID).
+export const UNLISTED_GOAL_ID = '__unlisted_goal__';
+
 // today_service.py::_AGENT_RUN_IN_PROGRESS_STATUSES와 동일 SSOT(agent_runs.py
 // _AGENT_RUN_STATUS_VALUES: queued|held|running|hitl_pending|completed|failed|abandoned 중
 // completed만 종결로 세고, failed/abandoned는 §①에 대응 낱말이 없어 null로 둔다 — 지어내지 않음).
@@ -413,6 +417,15 @@ export function deriveWorkList(input: WorkListInput): WorkList {
     const g = storyGroups.get(story.id);
     if (g) unassignedStories.push(g);
   }
+  // story #4888 — a story whose goal is not among the loaded goals matched neither loop above and used to vanish: say it, in its own group (never silently dropped)
+  const goalIds = new Set(input.goals.items.map((g) => g.id));
+  const unlistedStories: WorkListStoryGroup[] = [];
+  const unlistedEpicIds = new Set<string>();
+  for (const story of uniqueStories) {
+    if (story.epic_id === null || goalIds.has(story.epic_id)) continue;
+    const g = storyGroups.get(story.id);
+    if (g) { unlistedStories.push(g); unlistedEpicIds.add(story.epic_id); }
+  }
   if (unassignedStories.length > 0) {
     const totals = goalTotals.get(UNASSIGNED_GOAL_ID) ?? { done: 0, total: 0, assigned: 0, delegated: 0 };
     const hypothesisIds = new Set<string>();
@@ -427,6 +440,23 @@ export function deriveWorkList(input: WorkListInput): WorkList {
       delegatedCount: totals.delegated,
       hypothesisCount: hypothesisIds.size,
       stories: unassignedStories,
+    });
+  }
+  if (unlistedStories.length > 0) {
+    let assigned = 0; let delegated = 0;
+    for (const epicId of unlistedEpicIds) { const t = goalTotals.get(epicId); if (t) { assigned += t.assigned; delegated += t.delegated; } }
+    const hypothesisIds = new Set<string>();
+    for (const s of unlistedStories) for (const id of s.hypothesisIds) hypothesisIds.add(id);
+    groups.push({
+      goalId: UNLISTED_GOAL_ID,
+      title: '', // the render layer names it (t('unlistedGoalTitle'))
+      isActive: false,
+      doneCount: unlistedStories.filter((st) => st.status === 'done').length,
+      totalCount: unlistedStories.length,
+      assignedCount: assigned,
+      delegatedCount: delegated,
+      hypothesisCount: hypothesisIds.size,
+      stories: unlistedStories,
     });
   }
 

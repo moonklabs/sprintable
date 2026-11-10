@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveWorkList, UNASSIGNED_GOAL_ID, type WorkListInput } from './derive-work-list';
+import { deriveWorkList, UNASSIGNED_GOAL_ID, UNLISTED_GOAL_ID, type WorkListInput } from './derive-work-list';
 
 function page<T>(items: T[], hasMore: boolean | null = false) {
   return { items, hasMore };
@@ -38,6 +38,36 @@ describe('deriveWorkList — 목표/스토리 그룹핑', () => {
   it('totalStoryCount는 필터 무관 원본 스토리 수 그대로', () => {
     expect(deriveWorkList(baseInput()).totalStoryCount).toBe(1);
     expect(deriveWorkList(baseInput({ stories: page([{ id: 's1', title: 'a', epic_id: 'g1', status: 'backlog' }, { id: 's2', title: 'b', epic_id: null, status: 'backlog' }]) })).totalStoryCount).toBe(2);
+  });
+
+  // story #4888 (PO 병합 前 요청) — no story may vanish silently: one whose goal is not among the loaded goals (they are read page by page) stands in its own group
+  it('⭐목표가 불러온 목록에 없는 스토리도 사라지지 않는다 — UNLISTED 구역에 모인다(목표 루프에도 미분류 루프에도 안 걸리던 것)', () => {
+    const result = deriveWorkList(baseInput({
+      stories: page([
+        { id: 's1', title: '목록 안 목표', epic_id: 'g1', status: 'in-progress' },
+        { id: 's2', title: '목록 밖 목표', epic_id: 'g-not-loaded', status: 'done' },
+        { id: 's3', title: '미분류', epic_id: null, status: 'backlog' },
+      ]),
+      tasks: page([{ id: 't1', story_id: 's2', assignee_id: 'm-agent', title: '일', status: 'todo' }]),
+    }));
+    const all = result.groups.flatMap((g) => g.stories.map((st) => st.storyId)).sort();
+    expect(all).toEqual(['s1', 's2', 's3']); // none silently dropped
+    const unlisted = result.groups.find((g) => g.goalId === UNLISTED_GOAL_ID)!;
+    expect(unlisted.stories.map((st) => st.storyId)).toEqual(['s2']);
+    expect(unlisted.totalCount).toBe(1);
+    expect(unlisted.doneCount).toBe(1);
+    expect(unlisted.delegatedCount).toBe(1); // its work still counts
+    expect(unlisted.title).toBe(''); // named by the render layer
+    expect(unlisted.isActive).toBe(false);
+  });
+
+  it('목록 밖 목표가 둘이어도 한 구역 하나(스토리는 전부)이고, 모두 목록 안이면 이 구역은 없다', () => {
+    const two = deriveWorkList(baseInput({
+      stories: page([{ id: 's2', title: 'a', epic_id: 'x1', status: 'backlog' }, { id: 's3', title: 'b', epic_id: 'x2', status: 'backlog' }]),
+    }));
+    expect(two.groups.filter((g) => g.goalId === UNLISTED_GOAL_ID)).toHaveLength(1);
+    expect(two.groups.find((g) => g.goalId === UNLISTED_GOAL_ID)!.stories).toHaveLength(2);
+    expect(deriveWorkList(baseInput()).groups.some((g) => g.goalId === UNLISTED_GOAL_ID)).toBe(false);
   });
 
   it('스토리 자체가 0개(진짜 빈 프로젝트)면 totalStoryCount도 0이다', () => {

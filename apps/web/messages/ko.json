@@ -665,7 +665,9 @@
     "emptyStateFilteredTitle": "조건에 맞는 일감이 없어요",
     "emptyStateFilteredHint": "필터를 바꾸거나 풀어 보세요",
     "storyWorkCounts": "일 {count}개 · 위임 {delegated}개",
-    "storyNeedsHand": "내 손이 필요"
+    "storyNeedsHand": "내 손이 필요",
+    "unlistedGoalTitle": "목록에 없는 목표의 스토리",
+    "unlistedGoalHint": "불러온 목표 목록에 아직 없는 목표에 걸린 스토리예요 · 목표가 많으면 일부만 불러와요"
   },
   "organization": {
     "rolesTitle": "권한",

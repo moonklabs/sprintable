@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { fetchWorkList, type FetchedWorkList } from './fetch-work-list';
 import { filterWorkList, EMPTY_WORK_LIST_FILTERS, type WorkListFilters } from './filter-work-list';
-import { UNASSIGNED_GOAL_ID } from './derive-work-list';
+import { UNASSIGNED_GOAL_ID, UNLISTED_GOAL_ID } from './derive-work-list';
 import { GoalGroupView } from './work-list-goal-group';
 import { EmptyState } from '@/components/ds/empty-state';
 import { useWorkListSelection } from './use-work-list-selection';
@@ -149,7 +149,7 @@ export function WorkListShell({ projectId }: { projectId: string }) {
   // 필터 후보(목표/가설 옵션)는 필터링 «전» 전체 목록에서 뽑는다 — 필터를 걸수록 자기
   // 자신을 고를 옵션이 사라지는 lock-out을 막는다.
   const goalOptions = useMemo(
-    () => data?.groups.map((g) => ({ id: g.goalId, label: g.goalId === UNASSIGNED_GOAL_ID ? t('unassignedGoalTitle') : g.title })) ?? [],
+    () => data?.groups.map((g) => ({ id: g.goalId, label: g.goalId === UNASSIGNED_GOAL_ID ? t('unassignedGoalTitle') : g.goalId === UNLISTED_GOAL_ID ? t('unlistedGoalTitle') : g.title })) ?? [],
     [data, t],
   );
   const hypothesisIdsInView = useMemo(() => {

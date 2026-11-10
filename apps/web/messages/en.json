@@ -665,7 +665,9 @@
     "emptyStateFilteredTitle": "Nothing matches the filters",
     "emptyStateFilteredHint": "Change or clear the filters",
     "storyWorkCounts": "{count, plural, one {# work item} other {# work items}} · {delegated} delegated",
-    "storyNeedsHand": "Needs my hand"
+    "storyNeedsHand": "Needs my hand",
+    "unlistedGoalTitle": "Stories of goals not in the list",
+    "unlistedGoalHint": "These stories belong to a goal that is not among the goals loaded so far · only part of a long goal list is loaded at a time"
   },
   "organization": {
     "rolesTitle": "Permissions",
