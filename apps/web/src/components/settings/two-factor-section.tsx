@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ShieldCheck } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { Button } from '@/components/ds/button';
+import { Input } from '@/components/ds/input';
+import { SettingsSection } from './settings-section';
 import { fetchMe } from '@/lib/me-client';
 
 // story #3768 — 'unknown'은 'loading'과 렌더는 같지만(둘 다 null) 의미가 다르다: 'loading'은
@@ -151,116 +153,103 @@ export function TwoFactorSection({ onLoadError }: TwoFactorSectionProps = {}) {
   if (state === 'loading' || state === 'unknown') return null;
 
   return (
-    <SectionCard>
-      <SectionCardHeader>
-        <div className="space-y-1">
-          <h2 className="flex items-center gap-1.5 text-base font-semibold text-foreground"><ShieldCheck className="size-4" />{t('twoFactorTitle')}</h2>
-          <p className="text-sm text-muted-foreground">
-            {state === 'enabled' ? t('twoFactorActive') : t('twoFactorDescription')}
-          </p>
-        </div>
-      </SectionCardHeader>
-      <SectionCardBody className="space-y-4">
-        {message && (
-          // story #2105 2차 — handleSetup/handleVerify/handleDisable이 재시도 전 setMessage(null)을
-          // 먼저 호출해(위 정의) 매 시도마다 언마운트→리마운트된다. 에러=alert/assertive,
-          // 성공=status/polite.
-          <p
-            role={message.type === 'success' ? 'status' : 'alert'}
-            aria-live={message.type === 'success' ? 'polite' : 'assertive'}
-            aria-atomic="true"
-            className={`text-sm ${message.type === 'success' ? 'text-success' : 'text-destructive'}`}
-          >{message.text}</p>
-        )}
+    <SettingsSection
+      title={<span className="inline-flex items-center gap-1.5"><ShieldCheck className="size-4" />{t('twoFactorTitle')}</span>}
+      description={state === 'enabled' ? t('twoFactorActive') : t('twoFactorDescription')}
+    >
+      {message && (
+        // story #2105 2차 — handleSetup/handleVerify/handleDisable이 재시도 전 setMessage(null)을 먼저 호출해(위 정의) 매 시도마다 언마운트→리마운트된다. 에러=alert/assertive, 성공=status/polite.
+        <p
+          role={message.type === 'success' ? 'status' : 'alert'}
+          aria-live={message.type === 'success' ? 'polite' : 'assertive'}
+          aria-atomic="true"
+          className={`text-ds-body ${message.type === 'success' ? 'text-ds-done' : 'text-ds-failed'}`}
+        >{message.text}</p>
+      )}
 
-        {state === 'disabled' && (
-          <button
-            onClick={handleSetup}
-            disabled={busy}
-            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-          >
-            {busy ? '...' : t('twoFactorEnable')}
-          </button>
-        )}
+      {state === 'disabled' && (
+        <Button variant="primary" size="lg" onClick={handleSetup} disabled={busy}>
+          {busy ? '...' : t('twoFactorEnable')}
+        </Button>
+      )}
 
-        {state === 'enrolling' && provUri && (
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">{t('twoFactorEnrollHint')}</p>
-            <div className="flex justify-center">
-              <div className="rounded-lg bg-white p-3">
-                <QRCodeSVG value={provUri} size={220} bgColor="#ffffff" fgColor="#000000" level="M" />
-              </div>
+      {state === 'enrolling' && provUri && (
+        <div className="space-y-4">
+          <p className="text-ds-body text-ds-ink-3">{t('twoFactorEnrollHint')}</p>
+          <div className="flex justify-center">
+            <div className="rounded-ds-control bg-white p-3">
+              <QRCodeSVG value={provUri} size={220} bgColor="#ffffff" fgColor="#000000" level="M" />
             </div>
-            {secret && (
-              <p className="text-center text-xs text-muted-foreground">
-                {t('twoFactorManualKey')} <span className="font-mono text-foreground">{secret}</span>
-              </p>
-            )}
-            <input
+          </div>
+          {secret && (
+            <p className="text-center text-ds-small text-ds-ink-3">
+              {t('twoFactorManualKey')} <span className="font-mono text-ds-ink">{secret}</span>
+            </p>
+          )}
+          <Input
+            type="text"
+            inputMode="numeric"
+            maxLength={6}
+            placeholder="000000"
+            aria-label={t('twoFactorActivate')}
+            className="text-center font-mono tracking-widest pointer-coarse:h-11"
+            value={otpCode}
+            onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+          />
+          <Button variant="primary" size="lg" className="w-full" onClick={handleVerify} disabled={busy || otpCode.length !== 6}>
+            {busy ? '...' : t('twoFactorActivate')}
+          </Button>
+        </div>
+      )}
+
+      {state === 'enabled' && (
+        <div className="space-y-3">
+          <p className="text-ds-body text-ds-ink-3">
+            {disableWithPassword ? t('twoFactorDisableWithPasswordHint') : t('twoFactorDisableHint')}
+          </p>
+          {disableWithPassword ? (
+            <Input
+              type="password"
+              placeholder={t('twoFactorPasswordPlaceholder')}
+              aria-label={t('twoFactorPasswordPlaceholder')}
+              className="pointer-coarse:h-11"
+              value={disablePassword}
+              onChange={(e) => setDisablePassword(e.target.value)}
+            />
+          ) : (
+            <Input
               type="text"
               inputMode="numeric"
               maxLength={6}
               placeholder="000000"
-              className="w-full rounded-lg border border-border bg-background px-4 py-2 text-center font-mono text-base tracking-widest text-foreground lg:text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              aria-label={t('twoFactorDisable')}
+              className="text-center font-mono tracking-widest pointer-coarse:h-11"
               value={otpCode}
               onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
             />
-            <button
-              onClick={handleVerify}
-              disabled={busy || otpCode.length !== 6}
-              className="w-full rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          )}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Button
+              variant="danger"
+              size="lg"
+              onClick={handleDisable}
+              disabled={busy || (disableWithPassword ? disablePassword.length === 0 : otpCode.length !== 6)}
             >
-              {busy ? '...' : t('twoFactorActivate')}
-            </button>
+              {busy ? '...' : t('twoFactorDisable')}
+            </Button>
+            <Button
+              type="button"
+              variant="quiet"
+              onClick={() => {
+                setDisableWithPassword((v) => !v);
+                setMessage(null);
+              }}
+            >
+              {disableWithPassword ? t('twoFactorUseCodeInstead') : t('twoFactorLostDeviceLink')}
+            </Button>
           </div>
-        )}
-
-        {state === 'enabled' && (
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              {disableWithPassword ? t('twoFactorDisableWithPasswordHint') : t('twoFactorDisableHint')}
-            </p>
-            {disableWithPassword ? (
-              <input
-                type="password"
-                placeholder={t('twoFactorPasswordPlaceholder')}
-                className="w-full rounded-lg border border-border bg-background px-4 py-2 text-base text-foreground lg:text-sm focus:outline-none focus:ring-2 focus:ring-destructive"
-                value={disablePassword}
-                onChange={(e) => setDisablePassword(e.target.value)}
-              />
-            ) : (
-              <input
-                type="text"
-                inputMode="numeric"
-                maxLength={6}
-                placeholder="000000"
-                className="w-full rounded-lg border border-border bg-background px-4 py-2 text-center font-mono text-base tracking-widest text-foreground lg:text-sm focus:outline-none focus:ring-2 focus:ring-destructive"
-                value={otpCode}
-                onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-              />
-            )}
-            <div className="flex items-center justify-between gap-2">
-              <button
-                onClick={handleDisable}
-                disabled={busy || (disableWithPassword ? disablePassword.length === 0 : otpCode.length !== 6)}
-                className="rounded-lg border border-destructive px-4 py-2 text-sm font-medium text-destructive hover:border-destructive hover:text-destructive disabled:opacity-50"
-              >
-                {busy ? '...' : t('twoFactorDisable')}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setDisableWithPassword((v) => !v);
-                  setMessage(null);
-                }}
-                className="text-xs text-muted-foreground underline hover:text-foreground"
-              >
-                {disableWithPassword ? t('twoFactorUseCodeInstead') : t('twoFactorLostDeviceLink')}
-              </button>
-            </div>
-          </div>
-        )}
-      </SectionCardBody>
-    </SectionCard>
+        </div>
+      )}
+    </SettingsSection>
   );
 }

@@ -1915,6 +1915,8 @@
     "linkedAccountsNotConnected": "연결 안 됨",
     "linkedAccountsConnect": "연결",
     "linkedAccountsDisconnect": "연결 해제",
+    "linkedAccountsDisconnectAria": "{provider} 연결 해제",
+    "linkedAccountsConnectAria": "{provider} 연결",
     "linkedAccountsDisconnecting": "해제 중…",
     "linkedAccountsOnlyMethodTitle": "현재 유일한 로그인 수단이에요",
     "linkedAccountsLinkedSuccess": "{provider} 계정이 연결됐어요.",

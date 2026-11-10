@@ -1915,6 +1915,8 @@
     "linkedAccountsNotConnected": "Not connected",
     "linkedAccountsConnect": "Connect",
     "linkedAccountsDisconnect": "Disconnect",
+    "linkedAccountsDisconnectAria": "Disconnect {provider}",
+    "linkedAccountsConnectAria": "Connect {provider}",
     "linkedAccountsDisconnecting": "Disconnecting…",
     "linkedAccountsOnlyMethodTitle": "This is your only sign-in method",
     "linkedAccountsLinkedSuccess": "{provider} account connected.",
