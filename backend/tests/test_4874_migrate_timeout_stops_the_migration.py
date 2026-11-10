@@ -135,15 +135,21 @@ def test_the_next_turn_retries_from_a_clean_place_and_deploys(world) -> None:
 
 
 def test_what_an_earlier_cut_off_run_left_behind_is_cleared_before_the_next_migration_starts(world) -> None:
-    """a deployer that died (killed unit, reboot of the unit) leaves the container and the session: the next run must not start its migration behind them"""
+    """a deployer that died (killed unit, reboot of the unit) leaves the container and the session — of ITS release, not necessarily the one now deployed: the clean-up before a migration goes by the
+    PREFIX, so release b's migration does not start behind what release a left (the container, and the session with its locks)"""
     runner = _deploy_b_over_a(world, timeout_b=False)
     runner.container_alive = runner.session_alive = True
+    runner.container_name = _NAME_A                                                # a leftover of ANOTHER release's name
     assert world.dep.run_once() == "deployed"
     assert runner.log_of_effects[:2] == ["container removed", "sessions ended"], runner.log_of_effects
     verbs = runner.verbs()
     assert verbs.index("rm") < verbs.index("run")
+    ps = next(c for c in runner.calls if c["args"][:2] == ["docker", "ps"])
+    assert f"name={D.MIGRATE_NAME_PREFIX}" in ps["args"] and f"name={_NAME_B}" not in ps["args"], "the look before the run is for the prefix"
+    rm = next(c for c in runner.calls if c["args"][:3] == ["docker", "rm", "-f"])
+    assert rm["args"][3:] == [_CID]
     before = next(c for c in runner.calls if "pg_terminate_backend" in " ".join(c["args"]))
-    assert f"application_name like '{D.MIGRATE_NAME_PREFIX}bbbbbbbbbbbb%'" in " ".join(before["args"]) or D.MIGRATE_NAME_PREFIX in " ".join(before["args"])
+    assert " ".join(before["args"]).count(f"application_name like '{D.MIGRATE_NAME_PREFIX}%'") == 2, "…and so are the sessions"
 
 
 def test_a_container_that_cannot_be_removed_is_said_so_and_the_swap_still_does_not_happen(world) -> None:
