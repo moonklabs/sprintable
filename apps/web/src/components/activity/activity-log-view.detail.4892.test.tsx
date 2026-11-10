@@ -130,7 +130,7 @@ describe('ActivityLogView — 행을 고르면 상세가 보인다 (4892)', () =
     const d = detail()!;
     expect(d).toBeTruthy();
     expect(d.closest('aside')).toBeNull();
-    expect(rows()[2]!.parentElement!.contains(d)).toBe(true);           // inside the same list item, under the row button
+    expect(rows()[2]!.parentElement!.parentElement!.contains(d)).toBe(true);   // inside the same list item (row layer + overlay button, then the details)
     expect(container.querySelectorAll('#audit-detail')).toHaveLength(1);
     expect(document.activeElement).toBe(d);                              // focus continues into the details
     expect(d.getAttribute('aria-labelledby')).toBeTruthy();

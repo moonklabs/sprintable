@@ -54,7 +54,8 @@ async function mount(items: unknown[]) {
   for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
 }
 
-const actorNames = () => [...container.querySelectorAll('[aria-label]')]
+// story 4892 — the row's own button (data-audit-row) is named with the whole row's words (actor · claim · time); this test reads the ACTOR labels of the avatars, so it leaves the buttons out
+const actorNames = () => [...container.querySelectorAll('[aria-label]:not([data-audit-row])')]
   .map((el) => el.getAttribute('aria-label') ?? '')
   .filter((label) => label.includes('송윤재') || label.includes('안나') || label.includes(koMessages.common.memberUnnamed));
 
