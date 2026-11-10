@@ -75,11 +75,12 @@ def _repo_listing(rows):
 
 
 @pytest.mark.anyio
-async def test_list_writes_nothing_when_no_row_carries_the_old_text():
-    """Only the SELECT runs: no UPDATE statement, no re-read (the real-database test of the repair itself is in test_4888_trigger_kickoff_wording_migration.py)."""
+async def test_list_writes_nothing_when_no_system_row_carries_the_old_text():
+    """No SYSTEM row has the old text (a custom row with the same words is not one): only the SELECT runs — no UPDATE, no re-read, no flush of any ORM change (the real-database test of
+    the repair itself is in test_4888_trigger_kickoff_wording_migration.py)."""
     repo, session = _repo_listing([_row("kickoff", "스프린트 또는 목표 킥오프", True), _row("mine", "스프린트 또는 에픽 킥오프", False)])
     await repo.list()
-    assert session.execute.await_count == 1
+    assert session.execute.await_count == 1 and session.refresh.await_count == 0 and session.flush.await_count == 0
 
 
 @pytest.mark.anyio

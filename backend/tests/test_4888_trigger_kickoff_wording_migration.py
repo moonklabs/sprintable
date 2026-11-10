@@ -109,7 +109,8 @@ def test_the_migration_corrects_only_system_rows_with_exactly_the_old_seed_text_
 def test_list_repairs_a_row_the_old_release_seeded_in_the_deploy_window_without_overwriting_a_concurrent_edit():
     """The migration runs BEFORE the old backend is swapped out, so the old release can still seed a new organization with the old text in that window. `list()` repairs it with ONE
     conditional UPDATE (system row · description exactly the old text). Here a person edits row A between `list()`'s read and its UPDATE (the race): A stays as the person left it
-    (the old ORM «set attribute + flush» wrote by primary key and overwrote it), row B is repaired, a person-edited row and a custom row with the old words are never touched."""
+    (the old ORM «set attribute + flush» wrote by primary key and overwrote it); row D stops being a system row in the same window and is not repaired either (the `is_system` condition
+    of the UPDATE); row B is repaired; a person-edited row and a custom row with the old words are never touched."""
     import asyncio
 
     import psycopg2
@@ -133,13 +134,13 @@ def test_list_repairs_a_row_the_old_release_seeded_in_the_deploy_window_without_
         assert built.returncode == 0, (built.stdout + built.stderr)[-1500:]
 
         org = uuid.uuid4()
-        a, b, edited, custom = (uuid.uuid4() for _ in range(4))
+        a, b, edited, custom, flipped = (uuid.uuid4() for _ in range(5))
         conn = psycopg2.connect(fresh_dsn, connect_timeout=15)
         try:
             with conn, conn.cursor() as cur:
                 cur.execute("INSERT INTO organizations (id, name, slug) VALUES (%s, %s, %s)", (str(org), "t4888r", f"t4888r-{uuid.uuid4().hex[:8]}"))
                 for rid, slug, desc, system in (
-                    (a, "kickoff", OLD, True), (b, "kickoff_b", OLD, True), (edited, "kickoff_c", EDITED, True), (custom, "mine", OLD, False),
+                    (a, "kickoff", OLD, True), (b, "kickoff_b", OLD, True), (edited, "kickoff_c", EDITED, True), (custom, "mine", OLD, False), (flipped, "kickoff_d", OLD, True),
                 ):
                     cur.execute(
                         "INSERT INTO workflow_trigger_types (id, org_id, slug, label, description, is_system) VALUES (%s, %s, %s, %s, %s, %s)",
@@ -151,10 +152,12 @@ def test_list_repairs_a_row_the_old_release_seeded_in_the_deploy_window_without_
         person = "사람이 방금 고친 글"
 
         def person_edits_a():
+            """the race: row A's description is edited and row D stops being a system row — both after list()'s read, before its UPDATE"""
             c = psycopg2.connect(fresh_dsn, connect_timeout=15)
             try:
                 with c, c.cursor() as cur:
                     cur.execute("UPDATE workflow_trigger_types SET description = %s WHERE id = %s", (person, str(a)))
+                    cur.execute("UPDATE workflow_trigger_types SET is_system = false WHERE id = %s", (str(flipped),))
             finally:
                 c.close()
 
@@ -192,7 +195,8 @@ def test_list_repairs_a_row_the_old_release_seeded_in_the_deploy_window_without_
         assert db[str(a)] == person, "the person's concurrent edit was overwritten by the repair"
         assert db[str(b)] == NEW, "the stuck row was not repaired"
         assert db[str(edited)] == EDITED and db[str(custom)] == OLD
-        assert returned[a] == person and returned[b] == NEW, "list() returns the rows as the database has them"
+        assert db[str(flipped)] == OLD, "a row that stopped being a system row between the read and the UPDATE was repaired anyway (the is_system condition is missing from the UPDATE)"
+        assert returned[a] == person and returned[b] == NEW and returned[flipped] == OLD, "list() returns the rows as the database has them"
     finally:
         with admin.cursor() as cur:
             cur.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s AND pid <> pg_backend_pid()", (name,))
