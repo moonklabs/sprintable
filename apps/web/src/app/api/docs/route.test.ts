@@ -12,15 +12,20 @@ const listMock = vi.fn();
 const searchMock = vi.fn();
 const getDocMock = vi.fn();
 const listByIdsMock = vi.fn();
+const createDocMock = vi.fn();
+const { checkResourceLimit } = vi.hoisted(() => ({ checkResourceLimit: vi.fn() }));
 
 vi.mock('@/lib/db/server', () => ({ createDbServerClient }));
 vi.mock('@/lib/db/admin', () => ({ createAdminClient }));
 vi.mock('@/lib/auth-helpers', () => ({ getAuthContext, getOrgProjectAuthContext: getAuthContext }));
 vi.mock('@/services/docs', () => ({
-  DocsService: class { list = listMock; search = searchMock; getDoc = getDocMock; listByIds = listByIdsMock; },
+  DocsService: class { list = listMock; search = searchMock; getDoc = getDocMock; listByIds = listByIdsMock; createDoc = createDocMock; },
 }));
+vi.mock('@/lib/check-feature', () => ({ checkResourceLimit }));
+vi.mock('@/lib/storage/factory', () => ({ createDocRepository: vi.fn(async () => ({})) }));
 
-import { GET } from './route';
+import { GET, POST } from './route';
+import { isUntitledSlug } from '@/components/docs/lib/doc-slug';
 
 const mockAuth = {
   id: 'team-member-1',
@@ -186,5 +191,56 @@ describe('GET /api/docs — ids 배치 lookup 분기(#2262 PR②)', () => {
     const res = await GET(new Request('http://localhost/api/docs'));
     expect(res.status).toBe(400);
     expect(listByIdsMock).not.toHaveBeenCalled();
+  });
+});
+
+
+// story 6185e437 (UI-9): a create without a slug must not reach the store with '' — the first one took '' and every later one broke the unique index (a 500)
+describe('POST /api/docs — slug', () => {
+  beforeEach(() => {
+    getAuthContext.mockReset(); createDocMock.mockReset(); checkResourceLimit.mockReset();
+    getAuthContext.mockResolvedValue(mockAuth);
+    checkResourceLimit.mockResolvedValue({ allowed: true });
+    createDocMock.mockImplementation(async (input: Record<string, unknown>) => ({ id: 'doc-new', ...input }));
+  });
+  const post = (body: Record<string, unknown>) => POST(new Request('http://localhost/api/docs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }));
+
+  it('no slug → an «untitled-<digits>» slug the editor recognises (never an empty one)', async () => {
+    const a = await post({ title: '기획' });
+    const b = await post({ title: '회의록' });
+    expect(a.status).toBe(201); expect(b.status).toBe(201);
+    const slugs = createDocMock.mock.calls.map((c) => (c[0] as { slug: string }).slug);
+    expect(slugs[0]).toMatch(/^untitled-\d+$/);
+    expect(slugs[1]).toMatch(/^untitled-\d+$/);
+    expect(isUntitledSlug(slugs[0]!)).toBe(true); // the editor treats it as an automatic slug (renames it from the title), like the ones the screen makes
+    // no «the two differ» claim here: two creates in the same millisecond draw the same 3 digits once in 900 — that case is written down on the PR, not asserted away
+  });
+
+  it('two creates in different milliseconds never get the same slug (the clock is fixed so the test cannot flake)', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_700_000_000_000);
+      await post({ title: '기획' });
+      vi.setSystemTime(1_700_000_000_001);
+      await post({ title: '회의록' });
+    } finally {
+      vi.useRealTimers();
+    }
+    const slugs = createDocMock.mock.calls.map((c) => (c[0] as { slug: string }).slug);
+    expect(slugs).toHaveLength(2);
+    expect(slugs[0]).toMatch(/^untitled-1700000000000\d{3}$/);
+    expect(slugs[1]).toMatch(/^untitled-1700000000001\d{3}$/);
+    expect(slugs[0]).not.toBe(slugs[1]);
+  });
+
+  it('a blank slug (empty · spaces) is treated as no slug', async () => {
+    await post({ title: 'x', slug: '' });
+    await post({ title: 'y', slug: '   ' });
+    for (const c of createDocMock.mock.calls) expect((c[0] as { slug: string }).slug).toMatch(/^untitled-/);
+  });
+
+  it('a slug the caller gave goes through as it is (trimmed)', async () => {
+    await post({ title: 'x', slug: ' prd-v2 ' });
+    expect((createDocMock.mock.calls[0]![0] as { slug: string }).slug).toBe('prd-v2');
   });
 });

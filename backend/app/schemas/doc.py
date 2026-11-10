@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, computed_field
+from pydantic import BaseModel, ConfigDict, computed_field, field_validator
 from app.core.datetime_query import OffsetDatetime
 from app.schemas.not_null_fields import RejectsExplicitNull
 
@@ -11,6 +11,14 @@ class DocCreate(BaseModel):
     org_id: uuid.UUID
     title: str
     slug: str
+
+    @field_validator("slug")
+    @classmethod
+    def _slug_must_not_be_blank(cls, v: str) -> str:
+        # story 6185e437 (UI-9): '' is a slug to the unique (project_id, slug) index — the first doc of a project took it and every later blank one was a 500. A caller error is a 422.
+        if not v.strip():
+            raise ValueError("slug must not be blank")
+        return v
     content: str = ""
     parent_id: uuid.UUID | None = None
     created_by: uuid.UUID | None = None
