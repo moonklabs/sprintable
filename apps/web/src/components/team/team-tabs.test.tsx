@@ -10,7 +10,9 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
 
-const { pathnameRef, queryRef } = vi.hoisted(() => ({ pathnameRef: { current: '/organization/workforce' }, queryRef: { current: '' } }));
+const { pathnameRef, queryRef, ctxRef } = vi.hoisted(() => ({ pathnameRef: { current: '/organization/workforce' }, queryRef: { current: '' }, ctxRef: { current: {} as { projectId?: string; inShell?: boolean } } }));
+// 프로젝트가 정해진 셸 안이면 flat 링크가 `?p=`를 싣는다(use-flat-href) — 그 문맥을 시험에서 켜고 끈다.
+vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ctxRef.current }));
 vi.mock('next/navigation', () => ({
   usePathname: () => pathnameRef.current,
   useSearchParams: () => new URLSearchParams(queryRef.current),
@@ -21,7 +23,7 @@ const { TeamTabs } = await import('./team-tabs');
 
 let container: HTMLDivElement;
 let root: Root;
-beforeEach(() => { pathnameRef.current = '/organization/workforce'; queryRef.current = ''; container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
+beforeEach(() => { pathnameRef.current = '/organization/workforce'; queryRef.current = ''; ctxRef.current = {}; container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); });
 
 async function mount(locale: 'ko' | 'en' = 'ko') {
@@ -60,6 +62,10 @@ describe('«팀» 탭줄', () => {
       ['/organization/workforce', '', 'agents'],
       ['/organization/workforce', 'tab=stats', 'agents'],
       ['/organization/workforce', 'tab=manage', 'agents'],
+      ['/organization/workforce', 'tab=access', 'agents'],
+      ['/organization/workforce', 'tab=bogus', 'agents'],
+      ['/organization/workforce', 'p=proj-1', 'agents'],
+      ['/organization/workforce', 'tab=recruit&p=proj-1', 'recruit'],
       ['/organization/workforce', 'tab=recruit', 'recruit'],
       ['/organization/workforce/0010f90a-d765', '', 'agents'],
       ['/organization/workforce/runs', '', 'runs'],
@@ -78,6 +84,17 @@ describe('«팀» 탭줄', () => {
     }
   });
 
+  it('⭐프로젝트가 정해진 셸 안: 링크가 ?p=를 싣고(채용은 ?tab=recruit&p=) 그래도 «지금 여기»는 그대로', async () => {
+    ctxRef.current = { projectId: 'proj-1', inShell: true };
+    queryRef.current = 'tab=recruit&p=proj-1';
+    await mount();
+    const href = (id: string) => container.querySelector(`[data-team-tab="${id}"]`)?.getAttribute('href');
+    expect(href('agents')).toBe('/organization/workforce?p=proj-1');
+    expect(href('people')).toBe('/organization/members?p=proj-1');
+    expect(href('recruit')).toBe('/organization/workforce?tab=recruit&p=proj-1');
+    expect(current()).toEqual(['recruit']);
+  });
+
   it('줄에 접근 이름(팀)이 있다', async () => {
     await mount();
     expect(container.querySelector('nav')?.getAttribute('aria-label')).toBe('팀');
@@ -93,6 +110,7 @@ describe('레이아웃이 «팀» 탭줄을 싣는다', () => {
       expect(src).toContain("from '@/components/team/team-tabs'");
       expect(src).toContain('<TeamTabs />');
       expect(src).toContain('{children}');
+      expect(src.indexOf('<TeamTabs />'), '줄이 화면 위에').toBeLessThan(src.indexOf('{children}'));
     });
   }
 });
