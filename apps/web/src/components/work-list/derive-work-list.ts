@@ -46,7 +46,8 @@
 import { deriveGateState } from './work-list-detail-actions';
 import type { HypothesisStatus } from '@sprintable/core-storage';
 
-export type WorkListRowKind = 'task' | 'agent_run';
+// story #4888 (UI-5, 일감 목록) — `story`: the row that stands for the STORY itself (the list's unit is the story; tasks and agent runs are its children)
+export type WorkListRowKind = 'task' | 'agent_run' | 'story';
 export type WorkListRowState = 'awaiting_approval' | 'awaiting_signature' | 'awaiting_answer' | 'in_progress' | 'done' | null;
 
 // 정본 소스: backend/sprintable_mcp/schemas.py::TaskStatus(Enum) — DB tasks_status_check와
@@ -66,6 +67,10 @@ export const GOAL_STATUS_ACTIVE = 'active';
 // 순수 파생 함수가 아니라 렌더 계층(work-list-shell.tsx)에서 t()로 채운다 — docs-index.tsx의
 // UNCATEGORIZED 선례와 동형(하드코딩 한글 가드는 apps/web도 BE와 같은 계약, 새 기전 발명 금지).
 export const UNASSIGNED_GOAL_ID = '__unassigned_goal__';
+
+// story #4888 — stories that name a goal (`epic_id`) which is NOT among the loaded goals (the goals are read page by page): no story is dropped silently, they stand together in this synthetic group
+// (the render layer names it with t('unlistedGoalTitle') — «목록에 없는 목표의 스토리»). Its id cannot clash with a real goal id (a UUID).
+export const UNLISTED_GOAL_ID = '__unlisted_goal__';
 
 // today_service.py::_AGENT_RUN_IN_PROGRESS_STATUSES와 동일 SSOT(agent_runs.py
 // _AGENT_RUN_STATUS_VALUES: queued|held|running|hitl_pending|completed|failed|abandoned 중
@@ -152,11 +157,15 @@ export interface WorkListRow {
    * 실 개수("산출물 N")를 보인다. */
   artifactCount: number;
   state: WorkListRowState;
+  /** story #4888 — the state above came from a gate on the STORY (not on this task / run): the story's own row says it, so the child row does not say it again */
+  stateFromStory?: boolean;
 }
 
 export interface WorkListStoryGroup {
   storyId: string;
   title: string;
+  /** story #4888 — the row that stands for the story itself (selectable: the detail panel opens on the story). A story with no task and no agent run is still a row of the list. */
+  selfRow: WorkListRow;
   /** story #3976 — Story.status SSOT(위 WorkListStoryInput 주석 참고). */
   status: string;
   rows: WorkListRow[];
@@ -266,11 +275,15 @@ function deriveAgentRunState(run: WorkListAgentRunInput): WorkListRowState {
 }
 
 export function deriveWorkList(input: WorkListInput): WorkList {
-  const storyById = new Map(input.stories.items.map((s) => [s.id, s]));
+  // a story listed twice (the same id) is one story: the first one counts
+  const seenStoryIds = new Set<string>();
+  const uniqueStories = input.stories.items.filter((s) => (seenStoryIds.has(s.id) ? false : (seenStoryIds.add(s.id), true)));
+  const storyById = new Map(uniqueStories.map((s) => [s.id, s]));
   const memberTypeById = new Map(input.teamMembers.map((m) => [m.id, m.type]));
   const memberNameById = new Map(input.teamMembers.map((m) => [m.id, m.name]));
 
   const storyGroups = new Map<string, WorkListStoryGroup>();
+  // the list's unit is the STORY: a goal's «done / total» counts stories (done = status `done`); the assigned / delegated counts below still count the work (tasks · agent runs) under them
   const goalTotals = new Map<string, { done: number; total: number; assigned: number; delegated: number }>();
 
   function hypothesisIdsForStory(story: WorkListStoryInput): string[] {
@@ -281,7 +294,29 @@ export function deriveWorkList(input: WorkListInput): WorkList {
 
   function ensureStoryGroup(story: WorkListStoryInput): WorkListStoryGroup {
     let g = storyGroups.get(story.id);
-    if (!g) { g = { storyId: story.id, title: story.title, status: story.status, rows: [], hypothesisIds: hypothesisIdsForStory(story) }; storyGroups.set(story.id, g); }
+    if (!g) {
+      const inboxItem = findPendingInbox(input.inbox, 'story', story.id);
+      g = {
+        storyId: story.id,
+        title: story.title,
+        selfRow: {
+          id: `story:${story.id}`,
+          kind: 'story',
+          workItemType: 'story',
+          workItemId: story.id,
+          title: story.title,
+          ownerName: null,
+          isDelegated: false,
+          lowRisk: lowRiskFromInboxItem(inboxItem),
+          artifactCount: input.artifactCountByStoryId.get(story.id) ?? 0,
+          state: inboxItem ? stateFromInboxItem(inboxItem) : null,
+        },
+        status: story.status,
+        rows: [],
+        hypothesisIds: hypothesisIdsForStory(story),
+      };
+      storyGroups.set(story.id, g);
+    }
     return g;
   }
 
@@ -290,8 +325,6 @@ export function deriveWorkList(input: WorkListInput): WorkList {
     // return해 미할당 스토리의 일이 어떤 총량에도 안 잡히고 화면에서도 통째로 사라졌다).
     const key = goalId ?? UNASSIGNED_GOAL_ID;
     const t = goalTotals.get(key) ?? { done: 0, total: 0, assigned: 0, delegated: 0 };
-    t.total += 1;
-    if (row.state === 'done') t.done += 1;
     if (row.isDelegated) t.delegated += 1; else t.assigned += 1;
     goalTotals.set(key, t);
   }
@@ -300,7 +333,8 @@ export function deriveWorkList(input: WorkListInput): WorkList {
     const story = storyById.get(task.story_id);
     if (!story) continue; // 부모 스토리를 못 찾으면(다른 project 페이지 등) 짓지 않고 생략.
     const group = ensureStoryGroup(story);
-    const inboxItem = findPendingInbox(input.inbox, 'task', task.id) ?? findPendingInbox(input.inbox, 'story', story.id);
+    const ownGate = findPendingInbox(input.inbox, 'task', task.id);
+    const inboxItem = ownGate ?? findPendingInbox(input.inbox, 'story', story.id);
     const memberType = task.assignee_id ? memberTypeById.get(task.assignee_id) : null;
     const isDelegated = memberType === 'agent';
     const row: WorkListRow = {
@@ -314,6 +348,7 @@ export function deriveWorkList(input: WorkListInput): WorkList {
       lowRisk: lowRiskFromInboxItem(inboxItem),
       artifactCount: input.artifactCountByStoryId.get(story.id) ?? 0,
       state: deriveTaskState(task, inboxItem),
+      stateFromStory: !ownGate && inboxItem !== null ? true : undefined,
     };
     group.rows.push(row);
     bumpGoalTotals(story.epic_id, row);
@@ -338,20 +373,24 @@ export function deriveWorkList(input: WorkListInput): WorkList {
       lowRisk: lowRiskFromInboxItem(inboxItem),
       artifactCount: input.artifactCountByStoryId.get(story.id) ?? 0,
       state: inboxItem ? stateFromInboxItem(inboxItem) : deriveAgentRunState(run),
+      stateFromStory: inboxItem ? true : undefined,
     };
     group.rows.push(row);
     bumpGoalTotals(story.epic_id, row);
   }
 
+  // story #4888 — every story is a row of the list, whether or not it has been split into tasks (before, a story with no task and no agent run was dropped — 20 stories could read as an empty list)
+  for (const story of uniqueStories) ensureStoryGroup(story);
+
   const groups: WorkListGoalGroup[] = [];
   for (const goal of input.goals.items) {
     const stories: WorkListStoryGroup[] = [];
-    for (const story of input.stories.items) {
+    for (const story of uniqueStories) {
       if (story.epic_id !== goal.id) continue;
       const g = storyGroups.get(story.id);
-      if (g && g.rows.length > 0) stories.push(g);
+      if (g) stories.push(g);
     }
-    if (stories.length === 0) continue; // 일이 하나도 없는 목표는 이 화면에서 안 그린다(빈 목표는 목표 화면 몫).
+    if (stories.length === 0) continue; // 스토리가 하나도 없는 목표는 이 화면에서 안 그린다(빈 목표는 목표 화면 몫).
     const totals = goalTotals.get(goal.id) ?? { done: 0, total: 0, assigned: 0, delegated: 0 };
     const hypothesisIds = new Set<string>();
     for (const s of stories) for (const id of s.hypothesisIds) hypothesisIds.add(id);
@@ -359,8 +398,8 @@ export function deriveWorkList(input: WorkListInput): WorkList {
       goalId: goal.id,
       title: goal.title,
       isActive: goal.status === GOAL_STATUS_ACTIVE,
-      doneCount: totals.done,
-      totalCount: totals.total,
+      doneCount: stories.filter((st) => st.status === 'done').length,
+      totalCount: stories.length,
       assignedCount: totals.assigned,
       delegatedCount: totals.delegated,
       hypothesisCount: hypothesisIds.size,
@@ -373,10 +412,19 @@ export function deriveWorkList(input: WorkListInput): WorkList {
   // 통째로 비어 "표시할 일이 없어요"로 오독됐다 — docs-index.tsx UNCATEGORIZED·doc-groups.ts
   // {groups, ungrouped} 선례와 동형으로 "미분류" 합성 그룹을 붙인다(걷어내지 않는다).
   const unassignedStories: WorkListStoryGroup[] = [];
-  for (const story of input.stories.items) {
+  for (const story of uniqueStories) {
     if (story.epic_id !== null) continue;
     const g = storyGroups.get(story.id);
-    if (g && g.rows.length > 0) unassignedStories.push(g);
+    if (g) unassignedStories.push(g);
+  }
+  // story #4888 — a story whose goal is not among the loaded goals matched neither loop above and used to vanish: say it, in its own group (never silently dropped)
+  const goalIds = new Set(input.goals.items.map((g) => g.id));
+  const unlistedStories: WorkListStoryGroup[] = [];
+  const unlistedEpicIds = new Set<string>();
+  for (const story of uniqueStories) {
+    if (story.epic_id === null || goalIds.has(story.epic_id)) continue;
+    const g = storyGroups.get(story.id);
+    if (g) { unlistedStories.push(g); unlistedEpicIds.add(story.epic_id); }
   }
   if (unassignedStories.length > 0) {
     const totals = goalTotals.get(UNASSIGNED_GOAL_ID) ?? { done: 0, total: 0, assigned: 0, delegated: 0 };
@@ -386,18 +434,35 @@ export function deriveWorkList(input: WorkListInput): WorkList {
       goalId: UNASSIGNED_GOAL_ID,
       title: '', // 렌더 계층이 UNASSIGNED_GOAL_ID를 보고 t('unassignedGoalTitle')로 채운다.
       isActive: false, // 실 goal이 아니라 GoalStatus 개념 자체가 없다 — 지어내지 않는다.
-      doneCount: totals.done,
-      totalCount: totals.total,
+      doneCount: unassignedStories.filter((st) => st.status === 'done').length,
+      totalCount: unassignedStories.length,
       assignedCount: totals.assigned,
       delegatedCount: totals.delegated,
       hypothesisCount: hypothesisIds.size,
       stories: unassignedStories,
     });
   }
+  if (unlistedStories.length > 0) {
+    let assigned = 0; let delegated = 0;
+    for (const epicId of unlistedEpicIds) { const t = goalTotals.get(epicId); if (t) { assigned += t.assigned; delegated += t.delegated; } }
+    const hypothesisIds = new Set<string>();
+    for (const s of unlistedStories) for (const id of s.hypothesisIds) hypothesisIds.add(id);
+    groups.push({
+      goalId: UNLISTED_GOAL_ID,
+      title: '', // the render layer names it (t('unlistedGoalTitle'))
+      isActive: false,
+      doneCount: unlistedStories.filter((st) => st.status === 'done').length,
+      totalCount: unlistedStories.length,
+      assignedCount: assigned,
+      delegatedCount: delegated,
+      hypothesisCount: hypothesisIds.size,
+      stories: unlistedStories,
+    });
+  }
 
   return {
     groups,
     partial: isPartial(input.goals, input.stories, input.tasks, input.agentRuns),
-    totalStoryCount: input.stories.items.length,
+    totalStoryCount: uniqueStories.length,
   };
 }

@@ -30,9 +30,11 @@ export const STATE_TEXT: Partial<Record<NonNullable<WorkListRowState>, { key: st
 };
 
 export function WorkListRowView({
-  row, isSelected = false, onSelect,
+  row, isSelected = false, onSelect, hideStoryLevelChips = false,
 }: {
   row: WorkListRow;
+  /** story #4888 — the artifact count and the «저위험» chip belong to the STORY (they come from the story's artifacts / gate): the story's own row shows them, so the work rows under it do not repeat them */
+  hideStoryLevelChips?: boolean;
   /** story #3845 — 우패널 행 선택 하이라이트(있을 때만, 기본 false — 기존 소비처(테스트
    * 등)는 onSelect/isSelected 없이도 무변 렌더). */
   isSelected?: boolean;
@@ -66,14 +68,15 @@ export function WorkListRowView({
         {row.ownerName ? <div className="truncate text-xs text-muted-foreground">{row.ownerName}</div> : null}
       </div>
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-        {row.artifactCount > 0 ? <Badge variant="chip">{t('chipArtifacts', { count: row.artifactCount })}</Badge> : null}
-        {row.lowRisk ? <Badge variant="chip">{t('chipLowRisk')}</Badge> : null}
+        {row.artifactCount > 0 && !hideStoryLevelChips ? <Badge variant="chip">{t('chipArtifacts', { count: row.artifactCount })}</Badge> : null}
+        {row.lowRisk && !(hideStoryLevelChips && row.stateFromStory) ? <Badge variant="chip">{t('chipLowRisk')}</Badge> : null}
         {row.isDelegated ? (
           <Badge variant="chip">{t('chipDelegated')}</Badge>
         ) : row.ownerName ? (
           <Badge variant="chip">{t('chipAssigned')}</Badge>
         ) : null}
-        {stateText ? <span className={cn('text-xs font-medium', stateText.className)}>{t(stateText.key)}</span> : null}
+        {/* a state that comes from a gate on the STORY is said once, on the story's own row (story #4888) — not again on every piece of work under it */}
+        {stateText && !row.stateFromStory ? <span className={cn('text-xs font-medium', stateText.className)}>{t(stateText.key)}</span> : null}
       </div>
     </div>
   );

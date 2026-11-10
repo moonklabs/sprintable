@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveWorkList, UNASSIGNED_GOAL_ID, type WorkListInput } from './derive-work-list';
+import { deriveWorkList, UNASSIGNED_GOAL_ID, UNLISTED_GOAL_ID, type WorkListInput } from './derive-work-list';
 
 function page<T>(items: T[], hasMore: boolean | null = false) {
   return { items, hasMore };
@@ -20,25 +20,54 @@ function baseInput(overrides: Partial<WorkListInput> = {}): WorkListInput {
 }
 
 describe('deriveWorkList — 목표/스토리 그룹핑', () => {
-  it('일이 하나도 없는 목표는 groups에서 빠진다', () => {
+  // story #4888 (UI-5, 일감 목록) — the list's unit is the STORY: a story with no task and no agent run is still a row (it used to be dropped, so 20 stories could read as an empty list)
+  it('⭐일이 하나도 없는 스토리도 목표 아래 행으로 남는다 — selfRow(스토리 자신) 하나, 아래 일은 0', () => {
     const result = deriveWorkList(baseInput());
+    expect(result.groups).toHaveLength(1);
+    const story = result.groups[0].stories[0];
+    expect(story.storyId).toBe('s1');
+    expect(story.rows).toHaveLength(0);
+    expect(story.selfRow).toMatchObject({ id: 'story:s1', kind: 'story', workItemType: 'story', workItemId: 's1', title: '스토리1' });
+  });
+
+  it('스토리가 하나도 없는 목표는 groups에서 빠진다(빈 목표는 목표 화면 몫)', () => {
+    const result = deriveWorkList(baseInput({ stories: page([]) }));
     expect(result.groups).toHaveLength(0);
   });
 
-  // story #3934(재판정 — PO Test Org deploy92 실사고) — groups가 0개인 이유를 렌더 계층이
-  // 가르려면 totalStoryCount(필터 무관 원본 스토리 수)가 필요하다. AC3(ii)/(iii) 고정.
-  it('스토리는 있지만(task 0개) groups가 0개일 때 totalStoryCount는 실제 스토리 수를 그대로 보고한다', () => {
-    const result = deriveWorkList(baseInput());
-    expect(result.groups).toHaveLength(0);
-    expect(result.totalStoryCount).toBe(1); // baseInput()의 s1(목표 있음·task 0개)
+  it('totalStoryCount는 필터 무관 원본 스토리 수 그대로', () => {
+    expect(deriveWorkList(baseInput()).totalStoryCount).toBe(1);
+    expect(deriveWorkList(baseInput({ stories: page([{ id: 's1', title: 'a', epic_id: 'g1', status: 'backlog' }, { id: 's2', title: 'b', epic_id: null, status: 'backlog' }]) })).totalStoryCount).toBe(2);
   });
 
-  it('목표 있는 스토리라도 task/agent_run이 0개면 목표 유무와 무관하게 groups에서 빠진다', () => {
+  // story #4888 (PO 병합 前 요청) — no story may vanish silently: one whose goal is not among the loaded goals (they are read page by page) stands in its own group
+  it('⭐목표가 불러온 목록에 없는 스토리도 사라지지 않는다 — UNLISTED 구역에 모인다(목표 루프에도 미분류 루프에도 안 걸리던 것)', () => {
     const result = deriveWorkList(baseInput({
-      stories: page([{ id: 's1', title: '목표 있음·일 없음', epic_id: 'g1', status: 'backlog' }]),
+      stories: page([
+        { id: 's1', title: '목록 안 목표', epic_id: 'g1', status: 'in-progress' },
+        { id: 's2', title: '목록 밖 목표', epic_id: 'g-not-loaded', status: 'done' },
+        { id: 's3', title: '미분류', epic_id: null, status: 'backlog' },
+      ]),
+      tasks: page([{ id: 't1', story_id: 's2', assignee_id: 'm-agent', title: '일', status: 'todo' }]),
     }));
-    expect(result.groups).toHaveLength(0);
-    expect(result.totalStoryCount).toBe(1);
+    const all = result.groups.flatMap((g) => g.stories.map((st) => st.storyId)).sort();
+    expect(all).toEqual(['s1', 's2', 's3']); // none silently dropped
+    const unlisted = result.groups.find((g) => g.goalId === UNLISTED_GOAL_ID)!;
+    expect(unlisted.stories.map((st) => st.storyId)).toEqual(['s2']);
+    expect(unlisted.totalCount).toBe(1);
+    expect(unlisted.doneCount).toBe(1);
+    expect(unlisted.delegatedCount).toBe(1); // its work still counts
+    expect(unlisted.title).toBe(''); // named by the render layer
+    expect(unlisted.isActive).toBe(false);
+  });
+
+  it('목록 밖 목표가 둘이어도 한 구역 하나(스토리는 전부)이고, 모두 목록 안이면 이 구역은 없다', () => {
+    const two = deriveWorkList(baseInput({
+      stories: page([{ id: 's2', title: 'a', epic_id: 'x1', status: 'backlog' }, { id: 's3', title: 'b', epic_id: 'x2', status: 'backlog' }]),
+    }));
+    expect(two.groups.filter((g) => g.goalId === UNLISTED_GOAL_ID)).toHaveLength(1);
+    expect(two.groups.find((g) => g.goalId === UNLISTED_GOAL_ID)!.stories).toHaveLength(2);
+    expect(deriveWorkList(baseInput()).groups.some((g) => g.goalId === UNLISTED_GOAL_ID)).toBe(false);
   });
 
   it('스토리 자체가 0개(진짜 빈 프로젝트)면 totalStoryCount도 0이다', () => {
@@ -47,7 +76,7 @@ describe('deriveWorkList — 목표/스토리 그룹핑', () => {
     expect(result.totalStoryCount).toBe(0);
   });
 
-  it('task가 있는 스토리만 goal 아래 남는다', () => {
+  it('일이 있는 스토리는 그 일을 rows(자식)로 단다', () => {
     const result = deriveWorkList(baseInput({
       tasks: page([{ id: 't1', story_id: 's1', assignee_id: null, title: '할일1', status: 'todo' }]),
     }));
@@ -58,12 +87,14 @@ describe('deriveWorkList — 목표/스토리 그룹핑', () => {
     expect(result.groups[0].stories[0].rows).toHaveLength(1);
   });
 
-  it('부모 스토리를 못 찾는 task/agent_run은 조용히 생략(짓지 않는다)', () => {
+  it('부모 스토리를 못 찾는 task/agent_run은 조용히 생략(짓지 않는다) — 스토리 행은 그대로', () => {
     const result = deriveWorkList(baseInput({
       tasks: page([{ id: 't1', story_id: 's-unknown', assignee_id: null, title: '할일1', status: 'todo' }]),
       agentRuns: page([{ id: 'r1', story_id: 's-unknown', agent_id: 'a1', agent_name: '미르코', status: 'running' }]),
     }));
-    expect(result.groups).toHaveLength(0);
+    expect(result.groups).toHaveLength(1);
+    expect(result.groups[0].stories).toHaveLength(1);
+    expect(result.groups[0].stories[0].rows).toHaveLength(0); // the orphan work was not invented a parent
   });
 
   // story #3934(실사고 — 3928 라이브 실측) — 목표(epic_id) 미할당 스토리가 예전엔 어떤
@@ -259,20 +290,67 @@ describe('deriveWorkList — 배정/위임(team_members 교차대조)', () => {
   });
 });
 
-describe('deriveWorkList — 목표 헤더 집계(일 단위, PO 確定)', () => {
-  it('doneCount/totalCount는 task+agent_run 합산 일 단위(스토리 단위 아님)', () => {
+describe('deriveWorkList — 목표 헤더 집계(스토리 단위 · story #4888 / 배정 · 위임은 일 기준)', () => {
+  it('⭐doneCount/totalCount는 스토리 단위(done 상태 스토리 / 전체 스토리) — 일(task) 수가 아니다', () => {
     const result = deriveWorkList(baseInput({
+      stories: page([
+        { id: 's1', title: 'a', epic_id: 'g1', status: 'done' },
+        { id: 's2', title: 'b', epic_id: 'g1', status: 'in-progress' },
+        { id: 's3', title: 'c', epic_id: 'g1', status: 'backlog' },
+      ]),
       tasks: page([
         { id: 't1', story_id: 's1', assignee_id: 'm-human', title: 'a', status: 'done' },
-        { id: 't2', story_id: 's1', assignee_id: 'm-agent', title: 'b', status: 'todo' },
+        { id: 't2', story_id: 's2', assignee_id: 'm-agent', title: 'b', status: 'todo' },
       ]),
-      agentRuns: page([{ id: 'r1', story_id: 's1', agent_id: 'a1', agent_name: null, status: 'completed' }]),
+      agentRuns: page([{ id: 'r1', story_id: 's2', agent_id: 'a1', agent_name: null, status: 'completed' }]),
     }));
     const group = result.groups[0];
-    expect(group.totalCount).toBe(3);
-    expect(group.doneCount).toBe(2);
+    expect(group.totalCount).toBe(3); // three stories (not the 3 pieces of work)
+    expect(group.doneCount).toBe(1); // one story is done (not the 2 done pieces of work)
     expect(group.assignedCount).toBe(1);
-    expect(group.delegatedCount).toBe(2); // t2(agent) + r1(agent_run은 항상 위임)
+    expect(group.delegatedCount).toBe(2); // t2(agent) + r1(agent_run은 항상 위임) — still counted by work
+  });
+
+  it('⭐같은 id의 스토리가 둘 들어와도 한 스토리다(행 · 건수가 부풀지 않는다)', () => {
+    const result = deriveWorkList(baseInput({
+      stories: page([
+        { id: 's1', title: '스토리1', epic_id: 'g1', status: 'done' },
+        { id: 's1', title: '스토리1(중복)', epic_id: 'g1', status: 'done' },
+      ]),
+    }));
+    expect(result.groups[0].stories).toHaveLength(1);
+    expect(result.groups[0].totalCount).toBe(1);
+    expect(result.groups[0].stories[0].title).toBe('스토리1'); // the first one counts
+    expect(result.totalStoryCount).toBe(1);
+  });
+
+  it('⭐스토리에 걸린 결재 상태는 스토리 행이 말하고, 그 밑 일 · 실행 행은 stateFromStory로 «이미 위에서 말했다»고 표시한다(자기 결재가 있으면 표시 안 함)', () => {
+    const result = deriveWorkList(baseInput({
+      tasks: page([
+        { id: 't1', story_id: 's1', assignee_id: null, title: '자기 결재 없음', status: 'todo' },
+        { id: 't2', story_id: 's1', assignee_id: null, title: '자기 결재 있음', status: 'todo' },
+      ]),
+      agentRuns: page([{ id: 'r1', story_id: 's1', agent_id: 'a1', agent_name: '미르코', status: 'running' }]),
+      inbox: [
+        { source: 'gate', id: 'g-story', work_item_id: 's1', work_item_type: 'story', status: 'pending', gate_type: 'approval', risk_grade: 'low' },
+        { source: 'gate', id: 'g-t2', work_item_id: 't2', work_item_type: 'task', status: 'pending', gate_type: 'external_publish', risk_grade: 'high' },
+      ],
+    }));
+    const story = result.groups[0].stories[0];
+    expect(story.selfRow.state).toBe('awaiting_approval');
+    const byId = Object.fromEntries(story.rows.map((r) => [r.id, r]));
+    expect(byId['t1']!.stateFromStory).toBe(true); // inherits the story's gate: said once, on the story row
+    expect(byId['r1']!.stateFromStory).toBe(true);
+    expect(byId['t2']!.state).toBe('awaiting_signature'); // its OWN gate
+    expect(byId['t2']!.stateFromStory).toBeUndefined();
+  });
+
+  it('스토리 행(selfRow)은 그 스토리에 걸린 pending 결재가 있으면 상태를 단다(승인 대기 등)', () => {
+    const result = deriveWorkList(baseInput({
+      inbox: [{ source: 'gate', id: 'g-1', work_item_id: 's1', work_item_type: 'story', status: 'pending', gate_type: 'approval', risk_grade: 'low' }],
+    }));
+    expect(result.groups[0].stories[0].selfRow.state).toBe('awaiting_approval');
+    expect(result.groups[0].stories[0].selfRow.lowRisk).toBe(true);
   });
 
   it('hypothesisCount는 그 목표 아래 스토리들의 hypothesisIds 합집합 크기(중복 제거)', () => {

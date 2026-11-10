@@ -4,6 +4,7 @@ import {
   riskBadgeVariant, riskSentenceKey, type WorkListGate,
 } from './work-list-detail-actions';
 import type { WorkList, WorkListRow } from './derive-work-list';
+import { storySelfRow } from './work-list-test-fixtures';
 
 function gate(overrides: Partial<WorkListGate> = {}): WorkListGate {
   return {
@@ -96,7 +97,7 @@ function workList(rowIds: string[]): WorkList {
     groups: [{
       goalId: 'goal-1', title: '목표 A', isActive: true, doneCount: 0, totalCount: rowIds.length,
       assignedCount: 0, delegatedCount: 0, hypothesisCount: 0,
-      stories: [{ storyId: 'story-1', title: '스토리 A', status: 'in-progress', hypothesisIds: [], rows: rowIds.map(row) }],
+      stories: [{ storyId: 'story-1', title: '스토리 A', status: 'in-progress', hypothesisIds: [], selfRow: storySelfRow('story-1', '스토리 A'), rows: rowIds.map(row) }],
     }],
   };
 }
@@ -134,3 +135,16 @@ describe('isRowVisibleInFiltered — filtered(화면에 보이는 목록)에도 
     expect(isRowVisibleInFiltered(null, 'r1')).toBe(false);
   });
 });
+
+describe('스토리 행(selfRow)도 선택 대상이다(story #4888)', () => {
+  it('findSelectedRowContext가 story:<id>를 찾아 스토리 맥락을 돌려준다', () => {
+    const ctx = findSelectedRowContext(workList(['a']), 'story:story-1');
+    expect(ctx).toMatchObject({ storyId: 'story-1', storyTitle: '스토리 A', goalTitle: '목표 A' });
+    expect(ctx?.row.kind).toBe('story');
+  });
+  it('isRowVisibleInFiltered도 스토리 행을 본다', () => {
+    expect(isRowVisibleInFiltered(workList(['a']), 'story:story-1')).toBe(true);
+    expect(isRowVisibleInFiltered(workList(['a']), 'story:other')).toBe(false);
+  });
+});
+

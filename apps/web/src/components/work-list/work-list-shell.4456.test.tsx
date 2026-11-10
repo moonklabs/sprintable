@@ -12,6 +12,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { TopBarProvider } from '@/components/nav/top-bar-context';
 import type { FetchedWorkList } from './fetch-work-list';
+import { storySelfRow } from './work-list-test-fixtures';
 
 const { fetchWorkListMock, replaceMock, mobileRef, searchRef, gateReads } = vi.hoisted(() => ({
   fetchWorkListMock: vi.fn<(projectId: string) => Promise<FetchedWorkList>>(),
@@ -57,7 +58,7 @@ function payload(): FetchedWorkList {
       groups: [{
         goalId: 'g1', title: '목표', isActive: true, doneCount: 0, totalCount: 1, assignedCount: 1, delegatedCount: 0, hypothesisCount: 0,
         stories: [{
-          storyId: 's1', title: '스토리', status: 'in-progress', hypothesisIds: [],
+          storyId: 's1', title: '스토리', status: 'in-progress', hypothesisIds: [], selfRow: storySelfRow('s1', '스토리'),
           rows: [{ id: 't1', kind: 'task', workItemType: 'task', workItemId: 't1', title: '할일1', ownerName: null, isDelegated: false, lowRisk: false, artifactCount: 0, state: 'awaiting_signature' }],
         }],
       }],
@@ -138,7 +139,7 @@ describe('[SID:4456] the sheet keeps its focus handling (PO 07:18Z)', () => {
     mobileRef.current = true;
     searchRef.current = '';
     await render();
-    const row = q('[role="button"][aria-pressed]')!;
+    const row = q('[data-testid="story-work-rows"] [role="button"][aria-pressed]')!;
     await act(async () => { row.focus(); row.click(); });
     expect(replaceMock).toHaveBeenCalledWith('/work-list?row=t1');
     searchRef.current = 'row=t1'; await render();
@@ -150,6 +151,6 @@ describe('[SID:4456] the sheet keeps its focus handling (PO 07:18Z)', () => {
     searchRef.current = ''; await render();
     await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
     expect(q('[data-slot="sheet-content"]')).toBeNull();
-    expect(document.activeElement).toBe(q('[role="button"][aria-pressed]'));
+    expect(document.activeElement).toBe(q('[data-testid="story-work-rows"] [role="button"][aria-pressed]'));
   });
 });
