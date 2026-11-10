@@ -250,5 +250,78 @@ describe('홈 모델 — 정직 규칙 (story #4888)', () => {
     await settle();
     expect(text('badge')).toBe('0');
   });
+
+  it('⭐페이지 정보가 없는 답: 50건 꽉 찬 쪽은 «끝»이라 말할 수 없다(부분), 짧은 쪽은 끝이다', async () => {
+    const page = (n: number) => Array.from({ length: n }, (_, i) => chatMessage(`m${i}`));
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === '/api/today' ? ok(todayOf([])) : url.startsWith('/api/notifications') ? ok(page(50)) : ok(null))));
+    await mount(undefined);
+    expect(text('flags')).toBe('partial|ok');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === '/api/today' ? ok(todayOf([])) : url.startsWith('/api/notifications') ? ok(page(3)) : ok(null))));
+    await mount(undefined);
+    expect(text('flags')).toBe('full|ok');
+  });
+
+  it('«더 있다»는데 이어 물을 커서가 없으면 끝이 아니다(부분) — 스토리의 모양 없는 페이지 정보도 마찬가지', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/today') return ok(todayOf([]));
+      if (url.startsWith('/api/notifications')) return { ok: true, status: 200, json: async () => ({ data: [chatMessage('m1')], meta: { hasMore: true, nextCursor: null } }) };
+      return ok(null);
+    }));
+    await mount(undefined);
+    expect(text('flags')).toBe('partial|ok');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/today') return ok(todayOf([]));
+      if (url.startsWith('/api/notifications')) return ok([]);
+      if (url.startsWith('/api/stories')) return { ok: true, status: 200, json: async () => ({ data: [agentStory('sa', 'A')], meta: { something: 'else' } }) };
+      if (url.startsWith('/api/members')) return ok(MEMBERS);
+      return ok(null);
+    }));
+    await mount('p1');
+    expect(text('flags')).toBe('partial|ok');
+  });
+
+  it('⭐60초 틱은 이미 도는 읽기 옆에 둘째 읽기를 시작하지 않는다 — 탭이 돌아오는 읽기는 시작한다(가장 새것이 이긴다)', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      let todayCalls = 0;
+      vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+        if (url === '/api/today') { todayCalls += 1; await new Promise<void>(() => {}); }
+        return ok([]);
+      }));
+      const { HOME_POLL_MS } = await import('./home-model-provider');
+      await mount(undefined);
+      expect(todayCalls).toBe(1); // the first read, held for good
+      await act(async () => { vi.advanceTimersByTime(HOME_POLL_MS * 3); });
+      expect(todayCalls).toBe(1); // three ticks later: still one
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+      expect(todayCalls).toBe(2); // the tab coming back starts a new one
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('⭐완전했던 읽기가 둘째 쪽 실패로 쪼그라들지 않는다 — 막대 수는 그대로, 화면은 «불러오지 못했어요»를 말한다', async () => {
+    let failSecondPage = false;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/today') return ok(todayOf([need('g1', '2026-09-13T05:00:00Z')]));
+      if (url.startsWith('/api/notifications')) {
+        const cursor = new URL(url, 'http://x').searchParams.get('cursor');
+        if (!cursor) return { ok: true, status: 200, json: async () => ({ data: [mention('n1')], meta: { hasMore: failSecondPage, nextCursor: failSecondPage ? '1' : null } }) };
+        return bad();
+      }
+      return ok(null);
+    }));
+    await mount(undefined);
+    expect(text('badge')).toBe('2'); // the approval + the mention
+    expect(text('flags')).toBe('full|ok');
+    failSecondPage = true;
+    await act(async () => { (container.querySelector('[data-testid="retry"]') as HTMLButtonElement).click(); });
+    await settle();
+    expect(text('badge')).toBe('2'); // not 2 → fewer → 2 again
+    expect(text('flags')).toBe('full|error');
+  });
 });
 

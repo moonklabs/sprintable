@@ -76,24 +76,42 @@ async function readJson<T>(path: string): Promise<T | null> {
   }
 }
 
-/** the unread notifications, newest first, page by page; `complete` is false when the server still had more after the last page read (or a page failed) */
-async function readUnreadNotifications(): Promise<{ items: RawNotification[]; complete: boolean } | null> {
+/** the page sizes the two routes use (the notification list route reads 50 · the stories read asks for 100): a page shorter than its size cannot have a next one */
+const NOTIFICATION_PAGE_SIZE = 50;
+const STORIES_PAGE_SIZE = 100;
+
+/**
+ * Is there nothing more after this page? The answer's own page meta is read by the codebase's one reader (`parseCursorMeta`). No meta at all → only a SHORT page is known to be the last; a meta in no known
+ * shape, or «more» without a cursor to ask with → not complete (never «complete» by default).
+ */
+function pageIsLast(meta: unknown, got: number, pageSize: number, source: string): { last: boolean; cursor: string | null } {
+  if (meta === undefined || meta === null) return { last: got < pageSize, cursor: null };
+  const pageInfo = parseCursorMeta(meta, source);
+  if (pageInfo.malformed) return { last: false, cursor: null };
+  if (!pageInfo.hasMore) return { last: true, cursor: null };
+  return { last: false, cursor: pageInfo.nextCursor };
+}
+
+/**
+ * The unread notifications, newest first, page by page. `complete` = the server has no more after the last page read. `failed` = a page after the first one failed to read (the items of the pages
+ * before it are kept, but the read is not trustworthy as a replacement of a complete earlier one); `null` = the first page failed.
+ */
+async function readUnreadNotifications(): Promise<{ items: RawNotification[]; complete: boolean; failed: boolean } | null> {
   const items: RawNotification[] = [];
   let cursor: string | null = null;
   for (let page = 0; page < NOTIFICATION_PAGES; page += 1) {
     const params = new URLSearchParams({ unread: 'true' });
     if (cursor) params.set('cursor', cursor);
     const json: Page<RawNotification> | null = await readJson<Page<RawNotification>>(`/api/notifications?${params}`);
-    if (json === null) return page === 0 ? null : { items, complete: false };
-    items.push(...(json.data ?? []));
-    // the page meta is read by the one reader the codebase has (an answer with no meta at all is a single page; one with a meta in no known shape cannot be called complete)
-    if (!json.meta) return { items, complete: true };
-    const pageInfo = parseCursorMeta(json.meta, 'home/notifications');
-    if (pageInfo.malformed) return { items, complete: false };
-    cursor = pageInfo.nextCursor;
-    if (!pageInfo.hasMore || !cursor) return { items, complete: true };
+    if (json === null) return page === 0 ? null : { items, complete: false, failed: true };
+    const got = json.data ?? [];
+    items.push(...got);
+    const next = pageIsLast(json.meta, got.length, NOTIFICATION_PAGE_SIZE, 'home/notifications');
+    if (next.last) return { items, complete: true, failed: false };
+    if (!next.cursor) return { items, complete: false, failed: false }; // «more», but nothing to ask for it with
+    cursor = next.cursor;
   }
-  return { items, complete: false };
+  return { items, complete: false, failed: false }; // the page cap: there is more than was read
 }
 
 function toStoryInputs(stories: RawStory[], members: RawMember[]): HomeStoryInput[] {
@@ -144,21 +162,33 @@ export function HomeModelProvider({ viewerMemberId, projectId, orgId, children }
   const [nonce, setNonce] = useState(0);
   // every load that starts takes the next number; only the newest one may commit (an older answer that arrives late — a poll overlapping a «tab is back» read, a project switch — is dropped)
   const seq = useRef(0);
+  // a load is on its way: the 60-second tick does not start a second one beside it (the «tab is back» read and a retry still do — the newest wins)
+  const inFlight = useRef(false);
+  const lastRead = useRef<Read | null>(null);
 
   useEffect(() => {
     let alive = true;
-    const load = async () => {
+    const load = async (fromTick = false) => {
+      if (fromTick && inFlight.current) return;
       const mySeq = ++seq.current;
+      inFlight.current = true;
       const [todayJson, notifRead, storiesJson, membersJson] = await Promise.all([
         readJson<unknown>('/api/today'),
         readUnreadNotifications(),
         projectId ? readJson<Page<RawStory>>(`/api/stories?${new URLSearchParams({ project_id: projectId, status: 'in-progress', limit: '100' })}`) : Promise.resolve(null),
         projectId ? readJson<{ data?: RawMember[] }>(`/api/members?project_id=${encodeURIComponent(projectId)}`) : Promise.resolve(null),
       ]);
+      if (mySeq === seq.current) inFlight.current = false;
       if (!alive || mySeq !== seq.current) return; // a newer load owns the state now
+      // a complete read of this very identity must not be replaced by one that broke off in the middle (the badge would drop and come back): the earlier one stays and the screen says the last read failed
+      const prev = lastRead.current;
+      if (todayJson !== null && notifRead?.failed && prev && prev.forOrg === orgId && prev.forViewer === viewerMemberId && !prev.partial) {
+        setErrorFor(`${orgId ?? ''}|${viewerMemberId ?? ''}`);
+        return;
+      }
       if (todayJson === null) { setErrorFor(`${orgId ?? ''}|${viewerMemberId ?? ''}`); return; } // the snapshot decides success; the last model (if any) stays, and the screen says it is the last one
       setErrorFor(null);
-      setRead({
+      const next: Read = {
         snapshot: parseToday(todayJson) ?? EMPTY_TODAY_SNAPSHOT,
         notifications: notifRead?.items ?? [],
         stories: toStoryInputs(storiesJson?.data ?? [], membersJson?.data ?? []),
@@ -167,11 +197,13 @@ export function HomeModelProvider({ viewerMemberId, projectId, orgId, children }
         forViewer: viewerMemberId,
         // the other reads only add rows: a failed one leaves the model honest but incomplete
         partial: notifRead === null || !notifRead.complete
-          || (projectId !== undefined && (storiesJson === null || membersJson === null || (storiesJson.meta ? parseCursorMeta(storiesJson.meta, 'home/stories').hasMore : false))),
-      });
+          || (projectId !== undefined && (storiesJson === null || membersJson === null || !pageIsLast(storiesJson.meta, (storiesJson.data ?? []).length, STORIES_PAGE_SIZE, 'home/stories').last)),
+      };
+      lastRead.current = next;
+      setRead(next);
     };
     void load();
-    const timer = setInterval(() => { void load(); }, HOME_POLL_MS);
+    const timer = setInterval(() => { void load(true); }, HOME_POLL_MS);
     const onVisible = () => { if (document.visibilityState === 'visible') void load(); };
     document.addEventListener('visibilitychange', onVisible);
     return () => { alive = false; clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };

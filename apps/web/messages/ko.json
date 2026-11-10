@@ -457,7 +457,8 @@
     "rowApprove": "승인",
     "rowApproveAndSign": "승인하고 서명",
     "actionAnswer": "답하기",
-    "actionOpen": "열기"
+    "actionOpen": "열기",
+    "partialNotice": "일부를 불러오지 못했어요 — 보이는 수는 최소 수예요"
   },
   "orgBriefing": {
     "title": "홈",

@@ -730,7 +730,8 @@ describe('ActivationChecklistBanner — placement (story #4888)', () => {
 
   // the home screen (and its own card) is at the same place whatever the v3 flags point the rail at: with the today flag on, the rail goes to the flagged screen, but the home list is still
   // reachable directly — it must not get two cards. The flagged screen does not draw the home list, so it keeps the shell band.
-  it('with the today v3 flag on: the home route still has no shell copy (the home draws its own) — and the flagged screen keeps the shell band', async () => {
+  // (the flagged /today screen sits outside the dashboard shell, so in production nothing mounts the shell band there at all — this only pins that the band does not hide itself by the FLAGGED route name)
+  it('with the today v3 flag on: the home route still has no shell copy (the home draws its own) — and the banner does not hide by the flagged route name', async () => {
     mockFlags.current = { todayV3Enabled: true, chatV3Enabled: false, connectRulesV3Enabled: false };
     mockPath.current = '/org-briefing';
     stubChecklist(PARTIAL);

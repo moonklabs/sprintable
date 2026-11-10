@@ -184,7 +184,7 @@ export function OrgBriefingShell() {
           {loadError || partial ? (
             // the last read failed, or part of it could not be read: the list below is what WAS read — said, with a way to read again (never passed off as complete)
             <div role="status" className="flex items-center justify-between gap-3 text-sm text-muted-foreground" data-testid="home-incomplete-notice">
-              <span>{t('loadErrorTitle')}</span>
+              <span>{loadError ? t('loadErrorTitle') : th('partialNotice')}</span>
               <Button size="sm" variant="outline" onClick={retry}>{tc('retry')}</Button>
             </div>
           ) : null}

@@ -457,7 +457,8 @@
     "rowApprove": "Approve",
     "rowApproveAndSign": "Approve and sign",
     "actionAnswer": "Answer",
-    "actionOpen": "Open"
+    "actionOpen": "Open",
+    "partialNotice": "Part of this could not be loaded — the number shown is a minimum"
   },
   "orgBriefing": {
     "title": "Home",

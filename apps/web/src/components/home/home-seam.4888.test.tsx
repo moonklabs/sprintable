@@ -155,5 +155,16 @@ describe('홈 이음새 — 막대 «홈» 배지 = 홈 본문의 수 (story #48
     expect(container.querySelector('[data-testid="home-list"]')).toBeNull(); // still loading
     expect(container.querySelector('[data-testid="home-checklist-slot"] [data-testid="activation-banner-stub"]')).not.toBeNull();
   });
+
+  it('일부를 못 읽었으면(알림 읽기 실패) 홈은 그 말을 하고 «모두 확인했어요»라 하지 않는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/today') return { ok: true, status: 200, json: async () => ({ data: { needs_me: [], needs_me_count: 0, agent_progress: [], completed_today: [], published_today: { count: 0, by_channel: [] }, usage: { platform: [], ad_spend: { measured: false } } } }) };
+      if (url.startsWith('/api/notifications')) return { ok: false, status: 500, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    }));
+    await mountBarAndHome();
+    expect(container.querySelector('[data-testid="home-incomplete-notice"]')?.textContent).toContain('일부를 불러오지 못했어요');
+    expect(container.textContent).not.toContain('모두 확인했어요');
+  });
 });
 
