@@ -39,6 +39,7 @@ class DaemonRunner(FakeRunner):
         self.session_alive = False
         self.timeout_next_migrate = False
         self.rm_rc = 0
+        self.container_name = _NAME_B
         self.log_of_effects: list[str] = []
 
     def run(self, args, env, cwd=None, timeout=900, stdin=None, whole=False):
@@ -46,7 +47,8 @@ class DaemonRunner(FakeRunner):
         joined = " ".join(a)
         if a[:2] == ["docker", "ps"]:
             self.calls.append({"args": a, "env": dict(env), "stdin": stdin, "whole": whole, "timeout": timeout})
-            return 0, (_CID + "\n") if self.container_alive else ""
+            out = (f"{_CID} {self.container_name}\n" if self.container_alive else "") + (f"{'f' * 64} other-container-{self.container_name}\n" if self.container_alive else "")
+            return 0, out
         if a[:3] == ["docker", "rm", "-f"]:
             self.calls.append({"args": a, "env": dict(env), "stdin": stdin, "whole": whole, "timeout": timeout})
             if self.rm_rc == 0 and _CID in a:
@@ -94,7 +96,9 @@ def test_a_migration_that_runs_out_of_time_is_removed_and_its_database_sessions_
     run = next(c for c in runner.calls if c["args"][:2] == ["docker", "compose"] and "run" in c["args"])
     assert run["args"][run["args"].index("--name") + 1] == _NAME_B and f"PGAPPNAME={_NAME_B}" in run["args"], "the container and its database connections carry the same, per-release name"
     ps = [c for c in runner.calls if c["args"][:2] == ["docker", "ps"]][-1]
-    assert f"name=^{_NAME_B}" in ps["args"]
+    assert f"name={_NAME_B}" in ps["args"]
+    rm = next(c for c in runner.calls if c["args"][:3] == ["docker", "rm", "-f"])
+    assert rm["args"][3:] == [_CID], "a container whose name only CONTAINS the name (docker's filter is a substring match) is not removed"
     # the sessions: cancel, wait, terminate — each only for THAT name (a LIKE on the name, not on a role / a state / a database)
     term = [c for c in runner.calls if "pg_terminate_backend" in " ".join(c["args"])][-1]
     sql = " ".join(term["args"])

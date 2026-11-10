@@ -853,8 +853,13 @@ class Deployer:
         done). Never raises: it runs on the way to a failure that is reported anyway."""
         done = True
         try:
-            rc, out = self.runner.run(["docker", "ps", "-aq", "--no-trunc", "--filter", f"name=^{name}"], cand.env, timeout=60)
-            ids = [t for t in out.split() if re.fullmatch(r"[0-9a-f]{12,64}", t)] if rc == 0 else []
+            # docker's name filter is a regular expression on the name (a substring match unless anchored); the names are checked again here, so only a container whose name STARTS with `name` is ever removed
+            rc, out = self.runner.run(["docker", "ps", "-a", "--no-trunc", "--filter", f"name={name}", "--format", "{{.ID}} {{.Names}}"], cand.env, timeout=60)
+            ids = []
+            for line in out.splitlines() if rc == 0 else []:
+                parts = line.split()
+                if len(parts) == 2 and re.fullmatch(r"[0-9a-f]{12,64}", parts[0]) and any(n.lstrip("/").startswith(name) for n in parts[1].split(",")):
+                    ids.append(parts[0])
             if rc != 0:
                 done = False
                 self.log(f"migrate container listing failed {when}: rc={rc}")
