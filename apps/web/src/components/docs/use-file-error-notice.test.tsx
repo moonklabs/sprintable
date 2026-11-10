@@ -10,6 +10,8 @@ const { addToastMock } = vi.hoisted(() => ({ addToastMock: vi.fn() }));
 vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast: addToastMock }) }));
 
 import { FILE_ERROR_EVENT, useFileErrorNotice } from './use-file-error-notice';
+// the upload code's own source (vite `?raw`): the name in the hook must be the name that code dispatches
+import uploadSource from './extensions/image-upload.ts?raw';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -25,9 +27,8 @@ beforeEach(() => { container = document.createElement('div'); document.body.appe
 afterEach(() => { act(() => root.unmount()); container.remove(); });
 
 describe('useFileErrorNotice', () => {
-  it('the event name is the one the upload code dispatches', async () => {
-    const src = (await import('node:fs')).readFileSync(new URL('./extensions/image-upload.ts', import.meta.url), 'utf8');
-    expect(src).toContain(`'${FILE_ERROR_EVENT}'`);
+  it('the event name is the one the upload code dispatches', () => {
+    expect(uploadSource).toContain(`'${FILE_ERROR_EVENT}'`);
   });
 
   it('with no handler the message is shown as an error toast', () => {
