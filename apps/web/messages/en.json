@@ -69,7 +69,7 @@
     "collapsedChipLocal": "Getting started {completed}/{total}",
     "stepSignedUp": "Sign up",
     "stepEmailVerified": "Verify your email",
-    "stepOrgCreated": "Create an organization",
+    "stepOrgCreated": "Your organization is created",
     "stepAgentConnected": "Connect an agent",
     "stepFirstRoundtrip": "Send an instruction and get a reply",
     "firstInstructionStartFailed": "Couldn't start the conversation. Please try again.",
