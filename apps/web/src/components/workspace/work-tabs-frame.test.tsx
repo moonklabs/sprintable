@@ -56,7 +56,7 @@ afterEach(async () => {
 
 describe('WorkTabsFrame — 일감 탭 줄 한 자리(story #4291)', () => {
   it.each([
-    ['work-list', '목록'], ['flow', '보드'], ['sprints', '스프린트'], ['epics', '에픽'], ['retro', '회고'], ['hypotheses', '가설'],
+    ['work-list', '목록'], ['flow', '보드'], ['sprints', '스프린트'], ['epics', '목표'], ['retro', '회고'], ['hypotheses', '가설'],
   ])('⭐/%s — sticky 띠(px-4 pt-3) · 켜진 탭 %s · 탭은 a[href]', async (segment, label) => {
     nav.segments = [segment];
     await render();

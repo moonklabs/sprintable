@@ -51,11 +51,11 @@ afterEach(async () => {
 });
 
 describe('WorkspaceFrameTabs — story #2930 I3', () => {
-  it('보드·스프린트·에픽·회고·목록·가설 6탭이 렌더한다(story #2931 에픽·#3845 회고·#3844 목록·#3989 가설 합류)', async () => {
+  it('보드·스프린트·목표·회고·목록·가설 6탭이 렌더한다(story #2931 에픽→#4888 목표·#3845 회고·#3844 목록·#3989 가설 합류)', async () => {
     const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
     await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
     const tabs = [...container.querySelectorAll('[role="tab"]')];
-    expect(tabs.map((t) => t.textContent)).toEqual(['목록', '보드', '스프린트', '에픽', '회고', '가설']);
+    expect(tabs.map((t) => t.textContent)).toEqual(['목록', '보드', '스프린트', '목표', '회고', '가설']);
   });
 
   it('active="board"면 보드 탭에 aria-selected=true가 붙는다', async () => {
@@ -85,10 +85,10 @@ describe('WorkspaceFrameTabs — story #2930 I3', () => {
     expect(boardTab!.getAttribute('href')).toBe('/my-ws/my-proj/flow');
   });
 
-  it('story #2931 — 에픽 탭 링크가 /{ws}/{proj}/epics로 이동한다', async () => {
+  it('story #2931 — 목표 탭(경로 epics) 링크가 /{ws}/{proj}/epics로 이동한다', async () => {
     const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
     await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
-    const epicTab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '에픽');
+    const epicTab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '목표');
     // story #4291 — 탭은 프리패치되는 <Link>(a[href]) — 예전 router.push 버튼은 프리패치가 없었다.
     expect(epicTab!.tagName).toBe('A');
     expect(epicTab!.getAttribute('href')).toBe('/my-ws/my-proj/epics');
@@ -98,7 +98,7 @@ describe('WorkspaceFrameTabs — story #2930 I3', () => {
     const { WorkspaceFrameTabs } = await import('./workspace-frame-tabs');
     await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />, enMessages)); });
     const tabs = [...container.querySelectorAll('[role="tab"]')];
-    expect(tabs.map((t) => t.textContent)).toEqual(['List', 'Board', 'Sprints', 'Epic', 'Retro', 'Hypothesis']);
+    expect(tabs.map((t) => t.textContent)).toEqual(['List', 'Board', 'Sprints', 'Goal', 'Retro', 'Hypothesis']);
   });
 
   it('story #3989 — 가설 탭 링크가 /{ws}/{proj}/hypotheses로 이동하고 active="hypothesis"면 선택 표시된다', async () => {

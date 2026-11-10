@@ -264,7 +264,7 @@ async def _apply_epic_transition(
     if epic.assignee_id is not None:
         wake_payload = await _schedule_member_dispatch(
             session, sr.org_id, epic.assignee_id,
-            title=epic.title or "epic", content=f"[epic {sr.to_status}] {epic.title or ''}".strip(),
+            title=epic.title or "goal", content=f"[goal {sr.to_status}] {epic.title or ''}".strip(),
             source_entity_type="epic", source_entity_id=epic.id, project_id=epic.project_id,
             trigger_metadata={"source": "workflow_line", "reason": f"epic_{sr.to_status}"},
         )

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from app.services.agent_onboarding_config import SUPPORTED_LOCALES, resolve_locale
 
-__all__ = ["MessageCatalog", "TIMEZONE_DISPLAY_NAMES", "UnknownMessageKeyError", "t"]
+__all__ = ["LEGACY_SYSTEM_TEXTS", "MessageCatalog", "TIMEZONE_DISPLAY_NAMES", "UnknownMessageKeyError", "t"]
 
 
 class UnknownMessageKeyError(KeyError):
@@ -47,12 +47,22 @@ TIMEZONE_DISPLAY_NAMES: dict[str, dict[str, str]] = {
 }
 
 
+# story #4888 — a system text this catalog CHANGED: the OLD text a database row may still carry, by catalog key. Migration 0473 corrects the rows that exist; the repository
+# that owns the rows corrects (exact match, never a pattern) what the old release seeded after the migration ran. Kept here — the one file the scanner exempts — so the old
+# and the new wording of a system text are read from one place and no other file holds a user sentence for them.
+LEGACY_SYSTEM_TEXTS: dict[str, str] = {
+    "workflow_trigger.kickoff.description": "스프린트 또는 에픽 킥오프",
+}
+
+
 # key → {locale: template}. `.format(**params)`로 렌더 — 지금 슬라이스 1의 모든 문자열은
 # 파라미터가 없는 plain literal이라 params 없이도 그대로 반환된다(향후 슬라이스가 f-string
 # 동적 값이 섞인 문장을 옮길 때 이 메커니즘을 그대로 재사용).
 ## en 문장 = 유나 定(2026-09-10, 카드 코멘트 착지) — 이 레포 404/409/422 detail 관례
 ## (`<Noun> not found`·`<Noun> already exists`·거절 문장형) 실측 대조 근거로 확定됨.
 _CATALOG: dict[str, dict[str, str]] = {
+    # story #4888 — the system workflow trigger «kickoff»: its description (seeded into `workflow_trigger_types`; «goal», not «epic» — the one name a person sees)
+    "workflow_trigger.kickoff.description": {"ko": "스프린트 또는 목표 킥오프", "en": "Sprint or goal kickoff"},
     # story #4533 — an agent's permission request notice (명세 모음 B-2 «폰 알림»: the agent and the tool only — no command,
     # no path; a lock screen and a notice history keep them)
     "agent_permission.notice_title": {"ko": "권한 대기 · {agent}", "en": "Waiting for permission · {agent}"},

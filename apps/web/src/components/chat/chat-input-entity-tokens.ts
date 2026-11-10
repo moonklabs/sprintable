@@ -75,7 +75,7 @@ export function applyEntity(
 // 원문 종류 문자열을 그대로 쓴다(공백/대문자 처리 없이도 "sprint"·"hypothesis"처럼 읽을 수
 // 있는 값이라 그 자체로 충분히 "정상"이다. 빈 문자열·물음표·아이콘만 남기는 실패 대신).
 const ENTITY_TYPE_LABELS: Record<string, string> = {
-  story: '스토리', doc: '문서', epic: '에픽', task: '작업',
+  story: '스토리', doc: '문서', epic: '목표', task: '작업',
 };
 
 // story #3884(AC2, PO 확定 2026-09-14) — entityTypeLabel의 ko 고정 상수는 en 로케일 사용자

@@ -182,7 +182,7 @@ describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 
   it('go-sprints·go-epics·go-retro 가드 앵커는 그대로 남아 있다(#2376 orphan-route 가드용, 지우면 안 됨)', async () => {
     await mount();
     expect(document.body.textContent).toContain('스프린트로 이동');
-    expect(document.body.textContent).toContain('에픽으로 이동');
+    expect(document.body.textContent).toContain('목표로 이동');
     // story #3845 §④ — retro가 OTHER_NAV_ITEMS에서 빠지며 신규.
     expect(document.body.textContent).toContain('회고로 이동');
   });

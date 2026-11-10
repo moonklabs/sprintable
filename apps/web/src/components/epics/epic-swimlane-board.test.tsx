@@ -373,7 +373,7 @@ describe('EpicSwimlaneBoard — 행 구성(story #2931)', () => {
     });
     for (const n of [1, 2, 3]) expect(container.textContent).toContain(`에픽${n}`);
     expect(container.textContent).not.toContain('에픽4');
-    expect(container.textContent).toContain('에픽 2개 더 보기');
+    expect(container.textContent).toContain('목표 2개 더 보기');
 
     const toggle = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('더 보기'));
     await act(async () => { toggle!.click(); });
