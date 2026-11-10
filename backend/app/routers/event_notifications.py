@@ -84,8 +84,9 @@ def _is_hidden_notification(member_id: uuid.UUID):
         and_(Event.event_type.in_(_CONVERSATION_EVENT_TYPES), muted),         # mute: 대화 전체 무음
         and_(Event.event_type == "conversation.message_created", is_group, ~spoke),  # 미발화 그룹 관전
         Event.event_type.in_(_APPROVALS_INBOX_SIGNAL_TYPES),                        # story #4520 — 결재함 신호
-        and_(Event.event_type == "dispatched", Event.recipient_type == "human",
-             Event.payload["event_type"].astext == _CHAT_MESSAGE_DISPATCHED),  # story 4890 — 같은 글의 두 번째 줄(사람 몫만 — 에이전트가 받은 dispatched는 그 에이전트의 유일한 알림일 수 있다)
+        # coalesce: a dispatched row whose payload has no `event_type` key (or no recipient_type) would make this term NULL, and `NOT (… OR NULL)` is NULL — the row would drop out of the bell (SQL three-valued logic)
+        and_(Event.event_type == "dispatched", func.coalesce(Event.recipient_type, "") == "human",
+             func.coalesce(Event.payload["event_type"].astext, "") == _CHAT_MESSAGE_DISPATCHED),  # story 4890 — 같은 글의 두 번째 줄(사람 몫만 — 에이전트가 받은 dispatched는 그 에이전트의 유일한 알림일 수 있다)
     )
 
 
