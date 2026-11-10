@@ -65,6 +65,14 @@ describe('/docs?id=<doc id>', () => {
     expect(container.querySelector('[data-testid="docs-index"]')).not.toBeNull();
   });
 
+  it('an id that is a SLUG (not a uuid) is asked the same way and opens', async () => {
+    searchState.qs = 'id=prd-v2';
+    fetchMock.mockResolvedValue(ok({ id: 'd-1', slug: 'prd-v2', ...here }));
+    await render();
+    expect(String(fetchMock.mock.calls[0]![0])).toBe('/api/docs/preview?q=prd-v2');
+    expect(replaceMock).toHaveBeenCalledWith('/moonklabs/sprintable/docs/prd-v2');
+  });
+
   it("a document of another project opens in ITS project (the answer's own slug)", async () => {
     searchState.qs = `id=${ID}02`;
     fetchMock.mockResolvedValue(ok({ slug: 'runbook', projectId: 'proj-x', orgSlug: 'moonklabs', projectSlug: 'other-proj' }));

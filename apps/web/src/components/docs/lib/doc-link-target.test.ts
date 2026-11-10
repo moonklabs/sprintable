@@ -43,6 +43,9 @@ describe('previewTarget', () => {
   it('a document slug: Korean passes as the tree passes it · / ? # % are escaped · "." and ".." are refused · blank is refused', () => {
     expect(t({ slug: '측정용-문서-id-링크-2', projectId: cur })).toBe('/moonklabs/sprintable/docs/측정용-문서-id-링크-2');
     expect(t({ slug: 'a/b?c#d%e', projectId: cur })).toBe('/moonklabs/sprintable/docs/a%2Fb%3Fc%23d%25e');
+    // a backslash is read as «/» by URL parsing (`..\\x` would climb out of the docs route) — it goes escaped too
+    expect(t({ slug: '..\\flow', projectId: cur })).toBe('/moonklabs/sprintable/docs/..%5Cflow');
+    expect(t({ slug: 'a\\b', projectId: cur })).toBe('/moonklabs/sprintable/docs/a%5Cb');
     for (const bad of ['.', '..', '', '   ', null, undefined]) expect(t({ slug: bad as never, projectId: cur }), String(bad)).toBeNull();
   });
   it('Korean org / project slugs are slugs', () => {
