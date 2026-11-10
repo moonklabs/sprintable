@@ -355,6 +355,17 @@ describe('ChatListView — story #3888 이벤트 메시지 미리보기(raw slug
     expect(container.textContent).not.toContain('preset.work.status_changed');
   });
 
+  it('4887 ⭐ an ordinary message shows its text without markdown markers', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-md-1', type: 'group', title: '오늘 할 일',
+      latest_message: { content: '**주간 요약**\n- 완료 12건\n- 진행 4건', created_at: '2026-11-10T01:00:00Z', event: null },
+      updated_at: '2026-11-10T01:00:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('주간 요약 완료 12건 진행 4건');
+    expect(container.textContent).not.toContain('**');
+  });
+
   // 무관 PR no-op — event 필드가 없는(구버전 캐시·일반 메시지) 대화는 회귀 없이 기존
   // content 그대로 렌더한다(이 카드가 안 건드리는 자리).
   it('음성대조 — latest_message.event가 없으면 기존 content를 그대로 쓴다(일반 메시지, 회귀 0)', async () => {
