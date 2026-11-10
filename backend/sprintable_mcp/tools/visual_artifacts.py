@@ -146,9 +146,16 @@ class ImportImageArtifactInput(SprintableInput):
 
     story #3753 — image_base64의 근본 결함: 모델이 base64 문자열을 «다시 타이핑»해
     싣는 통로라 바이트 정확 전송 보장이 없다(실사고: artifact b3f60ca8, 청크 프레이밍
-    붕괴로 저장). Bash 없이도 **로컬 파일시스템**은 있는 에이전트(이 MCP 서버 자체가
-    에이전트 머신의 로컬 프로세스, api_client.py로 HTTP만)를 위해 image_path를 추가 —
-    서버가 파일을 직접 읽어(open().read(), 모델 출력 0) base64 인코딩까지 자체 처리한다.
+    붕괴로 저장). 모델 출력 없이 바이트 그대로 보내려고 image_path를 추가 — 파일을 읽어
+    base64 인코딩까지 자체 처리한다(open().read(), 모델 출력 0).
+
+    story 4893 — **image_path는 «이 MCP 서버 프로세스가 돌고 있는 컴퓨터»의 디스크에서 읽는다.**
+    에이전트 컴퓨터에서 직접 돌리는 모드(`uvx sprintable` · stdio · 로컬 HTTP)에서는 서버가 곧 그
+    컴퓨터라 image_path가 그대로 읽히지만, **호스팅(원격 HTTP) 서버는 자기 디스크만 본다**(위 3753
+    설명이 가정한 «로컬 프로세스»는 호스팅 서버에선 사실이 아니었다). 그래서 맥 앱(Sprintable
+    데스크톱)으로 붙은 에이전트는(이 변환을 하는 앱 버전이면) 앱의 호스트가 image_path를 그 컴퓨터에서 읽어 image_base64 +
+    content_type으로 바꿔 호스팅 서버에 보내고(바이트 그대로 · 그림 파일만 · 20MB), 앱을 거치지 않은
+    호스팅 서버 연결의 image_path는 서버 디스크에서 찾다가 거절된다(오류 글이 까닭을 말한다).
     image_base64/image_path는 상호 배타(둘 다 지정·둘 다 미지정 모두 오류)."""
     title: str
     image_base64: str | None = None
@@ -228,7 +235,8 @@ async def import_image_artifact(args: ImportImageArtifactInput) -> list[TextCont
     내부에서 전부 처리, 반환은 get_artifact/list_artifacts와 동형 artifact 상세
     (FE-import(source="imported")와 동일 렌더).
 
-    story #3753 — image_path(권장, 바이트 정확)와 image_base64(파일시스템 없는 에이전트용,
+    story #3753 — image_path(바이트 정확 — 이 MCP 서버가 에이전트 컴퓨터에서 돌면 서버가, 맥 앱으로 붙고 앱이
+    이 변환을 하는 버전이면 앱이 그 컴퓨터에서 파일을 읽는다, story 4893)와 image_base64(그 밖의 경우용,
     모델이 문자열을 리타이핑하는 통로라 손상 가능)는 상호 배타."""
     try:
         if bool(args.image_base64) == bool(args.image_path):
@@ -239,7 +247,14 @@ async def import_image_artifact(args: ImportImageArtifactInput) -> list[TextCont
 
             path = Path(args.image_path)
             if not path.is_file():
-                return err(f"image_path가 존재하는 일반 파일이 아닙니다: {args.image_path}")
+                return err(
+                    f"image_path가 존재하는 일반 파일이 아닙니다: {args.image_path} — 이 MCP 서버가 돌고 있는 컴퓨터의 "
+                    "디스크에서 찾은 결과입니다. 경로가 틀렸을 수 있고, 이 서버가 호스팅(원격) 서버라면 에이전트 컴퓨터의 "
+                    "파일은 애초에 보이지 않습니다. 이 변환을 하는 버전의 맥 앱(Sprintable 데스크톱)은 앱이 image_path를 "
+                    "대신 읽어 보냅니다. 호스팅 서버에서 이 글이 보인다면 가능한 까닭 중 하나는 앱이 아직 변환을 하지 않는 낡은 버전이거나 앱을 거치지 않고 직접 연결된 것입니다 — "
+                    "그때는 image_base64(작은 그림)나 원시 엔드포인트 "
+                    "`POST $SPRINTABLE_API_URL/api/v2/visual-artifacts/import-image`를 쓰세요."
+                )
             data = path.read_bytes()
             if len(data) > _MAX_IMPORT_IMAGE_BYTES:
                 return err(

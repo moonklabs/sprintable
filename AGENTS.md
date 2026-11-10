@@ -96,8 +96,13 @@ backend endpoint reachable with an agent API key is
 `/api/v2/visual-artifacts/import-image`, and it's JSON base64-in, **full artifact**-out
 in one call, not a bare URL).
 
-- If the file is local to the agent's filesystem: call `sprintable_import_image_artifact`
-  with `image_path` — the server reads the bytes directly (no re-typing, byte-exact).
+- If the picture is a file on the agent's computer: call `sprintable_import_image_artifact` with `image_path`
+  (absolute path · a picture file · max 20 MB) — when the agent is connected through a Mac app (Sprintable
+  Desktop) version that converts it, the app's host reads the file on that computer and sends the bytes
+  (byte-exact, no re-typing); when the MCP runs on the agent's own computer the server itself reads it. The HOSTED (remote) MCP server looks on ITS OWN disk, so `image_path` over a connection that
+  does not go through the app (and from an app version that does not convert yet) is refused with the reason.
+  When the MCP runs on the agent's own computer (`uvx sprintable` · stdio · local HTTP) the server IS that
+  computer and `image_path` is read as it always was.
 - If the agent has Bash/HTTP access and wants to skip the MCP round-trip for a large
   image, curl the same endpoint directly instead of the MCP tool:
   ```
@@ -111,5 +116,6 @@ in one call, not a bare URL).
   also call `sprintable_create_artifact` afterward, there's nothing left to do.
 - Only use `image_base64` (either via the MCP tool or curl above) for small images —
   the base64 string is typed/re-typed as text, and a single wrong character silently
-  corrupts the stored image (real incident, story #3753). Prefer `image_path`/a local
-  file whenever the agent has filesystem access.
+  corrupts the stored image (real incident, story #3753). Prefer `image_path` whenever it
+  can be read (the MCP runs on the agent's computer, or the Mac app is a version that converts it — see
+  above).
