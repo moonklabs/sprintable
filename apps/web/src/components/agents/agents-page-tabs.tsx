@@ -14,6 +14,9 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchMe } from '@/lib/me-client';
 import { AgentsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { RecruitNoProject } from '@/components/agents/recruit-no-project';
+import { isNoProjectAtAll } from '@/app/(authenticated)/chats/no-project';
+import { useFlatHref } from '@/hooks/use-flat-href';
 
 type AgentsTab = 'stats' | 'manage' | 'recruit' | 'access';
 const VALID_TABS = new Set<AgentsTab>(['stats', 'manage', 'recruit', 'access']);
@@ -41,9 +44,10 @@ export function resolveTab(tab: string | null): AgentsTab {
  */
 export function AgentsPageTabs() {
   const t = useTranslations('agents');
-  const tRecruiter = useTranslations('recruiter');
   const searchParams = useSearchParams();
-  const { projectId, orgId } = useDashboardContext();
+  const dashboardCtx = useDashboardContext();
+  const { projectId, orgId } = dashboardCtx;
+  const flatHref = useFlatHref();
   const [activeTab, setActiveTab] = useState<AgentsTab>(() => resolveTab(searchParams.get('tab')));
   const [isAdmin, setIsAdmin] = useState(false);
   const [meLoaded, setMeLoaded] = useState(false);
@@ -105,9 +109,7 @@ export function AgentsPageTabs() {
 
         <TabsContent value="recruit">
           {!projectId ? (
-            <div className="flex h-64 items-center justify-center">
-              <p className="text-sm text-muted-foreground">{tRecruiter('noProject')}</p>
-            </div>
+            <RecruitNoProject noProjectAtAll={isNoProjectAtAll(dashboardCtx)} createHref={flatHref('/settings?tab=projects')} />
           ) : (
             <RecruiterClient
               projectId={projectId}

@@ -6445,6 +6445,8 @@
   "recruiter": {
     "title": "채용관",
     "noProject": "프로젝트를 선택해 주세요.",
+    "noProjectYet": "아직 프로젝트가 없어요 — 에이전트는 프로젝트 안에서 일하니 먼저 하나 만들어 주세요.",
+    "createProject": "프로젝트 만들기",
     "stepRole": "직무",
     "stepScope": "권한",
     "stepRuntime": "실행 환경",
