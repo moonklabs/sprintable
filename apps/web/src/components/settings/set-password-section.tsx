@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Check, Circle } from 'lucide-react';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { Button } from '@/components/ds/button';
+import { Input } from '@/components/ds/input';
+import { SettingsSection } from './settings-section';
 import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
 
@@ -145,123 +147,104 @@ export function SetPasswordSection({ onLoadError }: SetPasswordSectionProps = {}
   };
 
   return (
-    <SectionCard>
-      <SectionCardHeader>
-        <div className="space-y-1">
-          <h2 className="text-base font-semibold text-foreground">{t('setPasswordTitle')}</h2>
-          <p className="text-sm text-muted-foreground">{t('setPasswordDescription')}</p>
+    <SettingsSection title={t('setPasswordTitle')} description={t('setPasswordDescription')}>
+      {done ? (
+        <div className="space-y-2">
+          <p role="status" aria-live="polite" aria-atomic="true" className="text-ds-body text-ds-done">
+            {t('setPasswordSuccess')}
+          </p>
+          <Link href="/login" className="inline-flex min-h-11 items-center text-ds-body font-medium text-brand-text hover:text-brand-text/85 lg:min-h-0">
+            {tCommon('goToLogin')}
+          </Link>
         </div>
-      </SectionCardHeader>
-      <SectionCardBody className="space-y-4">
-        {done ? (
-          <div className="space-y-2">
-            <p role="status" aria-live="polite" aria-atomic="true" className="text-sm text-success">
-              {t('setPasswordSuccess')}
+      ) : requested ? (
+        <div className="space-y-2">
+          <p role="status" aria-live="polite" aria-atomic="true" className="text-ds-body text-ds-done">
+            {t('setPasswordRequestSuccessDelivered')}
+          </p>
+          {/* 유나 design:changes(PR#3688) ② — 「메일 안 왔나요? 재발송」. */}
+          <p className="flex flex-wrap items-center gap-x-2 text-ds-small text-ds-ink-3">
+            {t('setPasswordResendPrompt')}{' '}
+            <Button variant="quiet" onClick={() => void handleResend()} disabled={resending}>
+              {resending ? t('setPasswordResending') : t('setPasswordResendButton')}
+            </Button>
+          </p>
+          {resent && (
+            <p role="status" aria-live="polite" aria-atomic="true" className="text-ds-small text-ds-done">
+              {t('setPasswordResentConfirmation')}
             </p>
-            <Link href="/login" className="text-sm font-medium text-brand-text hover:text-brand-text/85">
-              {tCommon('goToLogin')}
-            </Link>
-          </div>
-        ) : requested ? (
-          <div className="space-y-2">
-            <p role="status" aria-live="polite" aria-atomic="true" className="text-sm text-success">
-              {t('setPasswordRequestSuccessDelivered')}
+          )}
+        </div>
+      ) : (
+        <>
+          {message && (
+            // story #2105 2차 — handleSubmit이 재시도 전 setMessage(null)을 먼저 호출해(위 정의) 매 시도마다 언마운트→리마운트된다. 에러=alert/assertive, 성공/neutral=status/polite
+            // (유나 design:changes(PR#3688) ③ — ALREADY_HAS_PASSWORD는 실패가 아니라 「이미 완료」라 neutral은 success와 같은 role/aria지만 색만 중립).
+            <p
+              role={message.type === 'error' ? 'alert' : 'status'}
+              aria-live={message.type === 'error' ? 'assertive' : 'polite'}
+              aria-atomic="true"
+              className={`text-ds-body ${
+                message.type === 'success' ? 'text-ds-done'
+                : message.type === 'neutral' ? 'text-ds-ink'
+                : 'text-ds-failed'
+              }`}
+            >
+              {message.text}
             </p>
-            {/* 유나 design:changes(PR#3688) ② — 「메일 안 왔나요? 재발송」. */}
-            <p className="text-xs text-muted-foreground">
-              {t('setPasswordResendPrompt')}{' '}
-              <button
-                type="button"
-                onClick={() => void handleResend()}
-                disabled={resending}
-                className="font-medium text-brand-text hover:text-brand-text/85 disabled:opacity-50"
-              >
-                {resending ? t('setPasswordResending') : t('setPasswordResendButton')}
-              </button>
-            </p>
-            {resent && (
-              <p role="status" aria-live="polite" aria-atomic="true" className="text-xs text-success">
-                {t('setPasswordResentConfirmation')}
-              </p>
+          )}
+
+          <div className="max-w-sm space-y-3">
+            <Input
+              type="password"
+              placeholder={t('setPasswordPlaceholderNew')}
+              aria-label={t('setPasswordPlaceholderNew')}
+              autoComplete="new-password"
+              aria-invalid={showRules && !isPasswordValid ? true : undefined}
+              className="pointer-coarse:h-11"
+              value={password}
+              onChange={(e) => { setPassword(e.target.value); setTouched(true); }}
+              disabled={busy}
+            />
+            <Input
+              type="password"
+              placeholder={t('setPasswordPlaceholderConfirm')}
+              aria-label={t('setPasswordPlaceholderConfirm')}
+              autoComplete="new-password"
+              aria-invalid={touched && confirm && !isConfirmValid ? true : undefined}
+              className="pointer-coarse:h-11"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              disabled={busy}
+            />
+
+            {showRules && (
+              <ul className="divide-y divide-ds-line text-ds-small">
+                <PasswordRuleItem met={rules.length} label={t('setPasswordRuleLength')} />
+                <li className={`flex items-center gap-1.5 py-1.5 ${categoriesMet >= 3 ? 'text-ds-done' : 'text-ds-ink-3'}`}>
+                  {categoriesMet >= 3 ? <Check className="size-3.5 shrink-0" /> : <Circle className="size-3.5 shrink-0" />}
+                  <span>{t('setPasswordRuleCategories', { count: categoriesMet })}</span>
+                </li>
+              </ul>
             )}
-          </div>
-        ) : (
-          <>
-            {message && (
-              // story #2105 2차 — handleSubmit이 재시도 전 setMessage(null)을 먼저 호출해(위 정의) 매
-              // 시도마다 언마운트→리마운트된다. 에러=alert/assertive, 성공/neutral=status/polite
-              // (유나 design:changes(PR#3688) ③ — ALREADY_HAS_PASSWORD는 실패가 아니라 「이미
-              // 완료」라 neutral은 success와 같은 role/aria지만 색만 text-foreground로 중립화).
-              <p
-                role={message.type === 'error' ? 'alert' : 'status'}
-                aria-live={message.type === 'error' ? 'assertive' : 'polite'}
-                aria-atomic="true"
-                className={`text-sm ${
-                  message.type === 'success' ? 'text-success'
-                  : message.type === 'neutral' ? 'text-foreground'
-                  : 'text-destructive'
-                }`}
-              >
-                {message.text}
-              </p>
+
+            {touched && confirm && !isConfirmValid && (
+              <p className="text-ds-small text-ds-failed">{t('setPasswordMismatch')}</p>
             )}
 
-            <div className="space-y-3 max-w-sm">
-              <input
-                type="password"
-                placeholder={t('setPasswordPlaceholderNew')}
-                autoComplete="new-password"
-                className={`w-full rounded-lg border px-4 py-2 text-base lg:text-sm text-foreground bg-background focus:outline-none focus:ring-2 focus:ring-primary ${
-                  showRules && !isPasswordValid ? 'border-destructive' : 'border-border'
-                }`}
-                value={password}
-                onChange={(e) => { setPassword(e.target.value); setTouched(true); }}
-                disabled={busy}
-              />
-              <input
-                type="password"
-                placeholder={t('setPasswordPlaceholderConfirm')}
-                autoComplete="new-password"
-                className={`w-full rounded-lg border px-4 py-2 text-base lg:text-sm text-foreground bg-background focus:outline-none focus:ring-2 focus:ring-primary ${
-                  touched && confirm && !isConfirmValid ? 'border-destructive' : 'border-border'
-                }`}
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
-                disabled={busy}
-              />
-
-              {showRules && (
-                <ul className="divide-y divide-border text-xs">
-                  <PasswordRuleItem met={rules.length} label={t('setPasswordRuleLength')} />
-                  <li className={`flex items-center gap-1.5 py-1.5 ${categoriesMet >= 3 ? 'text-success' : 'text-muted-foreground'}`}>
-                    {categoriesMet >= 3 ? <Check className="size-3.5 shrink-0" /> : <Circle className="size-3.5 shrink-0" />}
-                    <span>{t('setPasswordRuleCategories', { count: categoriesMet })}</span>
-                  </li>
-                </ul>
-              )}
-
-              {touched && confirm && !isConfirmValid && (
-                <p className="text-xs text-destructive">{t('setPasswordMismatch')}</p>
-              )}
-
-              <button
-                onClick={() => void handleSubmit()}
-                disabled={busy || !password || !confirm}
-                className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-              >
-                {busy ? t('setPasswordSubmitting') : t('setPasswordSubmit')}
-              </button>
-            </div>
-          </>
-        )}
-      </SectionCardBody>
-    </SectionCard>
+            <Button variant="primary" size="lg" onClick={() => void handleSubmit()} disabled={busy || !password || !confirm}>
+              {busy ? t('setPasswordSubmitting') : t('setPasswordSubmit')}
+            </Button>
+          </div>
+        </>
+      )}
+    </SettingsSection>
   );
 }
 
 function PasswordRuleItem({ met, label }: { met: boolean; label: string }) {
   return (
-    <li className={`flex items-center gap-1.5 py-1.5 ${met ? 'text-success' : 'text-muted-foreground'}`}>
+    <li className={`flex items-center gap-1.5 py-1.5 ${met ? 'text-ds-done' : 'text-ds-ink-3'}`}>
       {met ? <Check className="size-3.5 shrink-0" /> : <Circle className="size-3.5 shrink-0" />}
       <span>{label}</span>
     </li>

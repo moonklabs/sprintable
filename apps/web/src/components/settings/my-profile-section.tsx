@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Button } from '@/components/ui/button';
-import { OperatorInput } from '@/components/ui/operator-control';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { Button } from '@/components/ds/button';
+import { Input } from '@/components/ds/input';
+import { SettingsSection } from './settings-section';
 import { TrustScoreCard } from '@/components/cage/trust-score-card';
 import { AvatarEditCard } from '@/components/shared/avatar-edit-card';
 
@@ -99,73 +99,68 @@ export function MyProfileSection({ onLoadError }: MyProfileSectionProps = {}) {
 
   if (!profile) {
     if (loadFailed) return null;
-    return <div className="text-sm text-muted-foreground">{tc('loading')}</div>;
+    return <div className="text-ds-body text-ds-ink-3">{tc('loading')}</div>;
   }
 
+  // story 4891 (UI-8 · settings › profile · piece ①): the card stands on the ds frame (SettingsSection) with ds Input / Button — a phone press is ≥ 44 (the ds Button's touch floor; the field is 44 on touch),
+  // the rows read as «name · value» lines on ds tokens. Same fields, same PATCH, same words.
+  const rowCls = 'flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-ds-line py-2.5 text-ds-body last:border-b-0';
   return (
-    <SectionCard>
-      <SectionCardHeader>
-        <div className="space-y-1">
-          <h2 className="text-base font-semibold">{t('profileTitle')}</h2>
-          <p className="text-sm text-muted-foreground">{t('profileDescription')}</p>
-        </div>
-      </SectionCardHeader>
-      <SectionCardBody className="space-y-4">
-        <AvatarEditCard
-          memberId={profile.id}
-          name={profile.name}
-          label={memberDisplayLabel(profile.name, tc)}
-          avatarUrl={avatarUrl}
-          actorType="human"
-          onUpdated={setAvatarUrl}
-        />
+    <SettingsSection title={t('profileTitle')} description={t('profileDescription')}>
+      <AvatarEditCard
+        memberId={profile.id}
+        name={profile.name}
+        label={memberDisplayLabel(profile.name, tc)}
+        avatarUrl={avatarUrl}
+        actorType="human"
+        onUpdated={setAvatarUrl}
+      />
 
-        <div className="divide-y divide-border text-sm">
-          <div className="flex items-center gap-4 py-2.5">
-            <span className="w-20 shrink-0 text-muted-foreground">{t('profileName')}</span>
-            {editing ? (
-              <div className="flex items-center gap-2">
-                <OperatorInput
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  className="h-8"
-                  autoFocus
-                />
-                <Button size="sm" disabled={saving} onClick={() => void handleSave()}>
-                  {saving ? tc('loading') : tc('save')}
-                </Button>
-                <Button size="sm" variant="ghost" disabled={saving} onClick={() => { setEditing(false); setEditName(profile.name ?? ''); }}>
-                  {tc('cancel')}
-                </Button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <span>{memberDisplayLabel(profile.name, tc)}</span>
-                <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => setEditing(true)}>
-                  {t('profileEdit')}
-                </Button>
-              </div>
-            )}
-          </div>
-          {/* story #2105 2차 — handleSave가 재시도 전 setError(null)을 먼저 호출해(위 정의) 매
-              시도마다 언마운트→리마운트된다. */}
-          {error && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-destructive">{error}</p>}
-          <div className="flex items-center gap-4 py-2.5">
-            <span className="w-20 shrink-0 text-muted-foreground">{t('profileEmail')}</span>
-            <span className="text-muted-foreground">{profile.email ?? '—'}</span>
-          </div>
-          <div className="flex items-center gap-4 py-2.5">
-            <span className="w-20 shrink-0 text-muted-foreground">{t('profileRole')}</span>
-            <span>{orgRoleLabel(profile.role, t)}</span>
-          </div>
+      <div>
+        <div className={rowCls}>
+          <span className="w-20 shrink-0 text-ds-ink-3">{t('profileName')}</span>
+          {editing ? (
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+              <Input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="min-w-0 flex-1 pointer-coarse:h-11"
+                aria-label={t('profileName')}
+                autoFocus
+              />
+              <Button variant="primary" disabled={saving} onClick={() => void handleSave()}>
+                {saving ? tc('loading') : tc('save')}
+              </Button>
+              <Button variant="quiet" disabled={saving} onClick={() => { setEditing(false); setEditName(profile.name ?? ''); }}>
+                {tc('cancel')}
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="text-ds-ink">{memberDisplayLabel(profile.name, tc)}</span>
+              <Button variant="quiet" onClick={() => setEditing(true)}>
+                {t('profileEdit')}
+              </Button>
+            </div>
+          )}
         </div>
+        {/* story #2105 2차 — handleSave가 재시도 전 setError(null)을 먼저 호출해(위 정의) 매 시도마다 언마운트→리마운트된다. */}
+        {error && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-ds-small text-ds-failed">{error}</p>}
+        <div className={rowCls}>
+          <span className="w-20 shrink-0 text-ds-ink-3">{t('profileEmail')}</span>
+          <span className="min-w-0 break-all text-ds-ink-2">{profile.email ?? '—'}</span>
+        </div>
+        <div className={rowCls}>
+          <span className="w-20 shrink-0 text-ds-ink-3">{t('profileRole')}</span>
+          <span className="text-ds-ink">{orgRoleLabel(profile.role, t)}</span>
+        </div>
+      </div>
 
-        {/* 신뢰점수 카드 */}
-        <div className="pt-2">
-          <p className="mb-2 text-xs font-medium text-muted-foreground">{t('profileTrustScore')}</p>
-          <TrustScoreCard memberId={profile.id} />
-        </div>
-      </SectionCardBody>
-    </SectionCard>
+      {/* 신뢰점수 카드 */}
+      <div>
+        <p className="mb-2 text-ds-small font-semibold text-ds-ink-3">{t('profileTrustScore')}</p>
+        <TrustScoreCard memberId={profile.id} />
+      </div>
+    </SettingsSection>
   );
 }
