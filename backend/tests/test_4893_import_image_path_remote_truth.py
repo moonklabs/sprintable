@@ -112,3 +112,25 @@ async def test_the_refusal_does_not_diagnose_it_only_names_a_possible_cause(tmp_
     assert "이 글이 보이면 앱이 낡았" not in text, "stated as a diagnosis"
     assert "가능한 까닭 중 하나" in text
     assert "경로가 틀렸을 수 있고" in text, "a typo stays the first cause named"
+
+
+def test_no_sentence_names_the_mac_app_as_the_unconditional_reader():
+    """self-QA (codex, final head): the condition has to be IN the sentence that promises the read, not only in the next one"""
+    import_desc = _DESC["sprintable_import_image_artifact"]
+    assert "앱이 그 파일을 그 컴퓨터에서 읽어 바이트 그대로 보낸다" in import_desc
+    assert "그 앱이 이 변환을 하는 버전이면 앱이" in import_desc
+    assert "맥 앱(Sprintable 데스크톱)으로 붙은 에이전트가 컴퓨터 안의 그림 파일을 올릴 때는 image_path를" not in import_desc
+    agents = (_REPO / "AGENTS.md").read_text(encoding="utf-8")
+    assert "If the agent is connected through the Mac app (Sprintable Desktop) and the picture is a file on that" not in agents
+    assert "version that converts it, the app's host reads the file" in agents
+
+
+@pytest.mark.anyio
+async def test_the_refusal_puts_the_app_condition_in_the_sentence_that_promises_the_read(tmp_path):
+    client = MagicMock()
+    client.post = AsyncMock()
+    with patch.object(va, "client", client):
+        out = await va.import_image_artifact(va.ImportImageArtifactInput(title="Shot", image_path=str(tmp_path / "typo.png")))
+    text = out[0].text
+    assert "이 변환을 하는 버전의 맥 앱" in text
+    assert "맥 앱(Sprintable 데스크톱)으로 붙은 에이전트는 앱이 image_path를" not in text

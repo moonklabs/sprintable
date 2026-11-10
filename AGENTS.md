@@ -96,10 +96,10 @@ backend endpoint reachable with an agent API key is
 `/api/v2/visual-artifacts/import-image`, and it's JSON base64-in, **full artifact**-out
 in one call, not a bare URL).
 
-- If the agent is connected through the Mac app (Sprintable Desktop) and the picture is a file on that
-  computer: call `sprintable_import_image_artifact` with `image_path` (absolute path · a picture file ·
-  max 20 MB) — the app's host reads the file on that computer and sends the bytes (byte-exact, no
-  re-typing). The HOSTED (remote) MCP server looks on ITS OWN disk, so `image_path` over a connection that
+- If the picture is a file on the agent's computer: call `sprintable_import_image_artifact` with `image_path`
+  (absolute path · a picture file · max 20 MB) — when the agent is connected through a Mac app (Sprintable
+  Desktop) version that converts it, the app's host reads the file on that computer and sends the bytes
+  (byte-exact, no re-typing); when the MCP runs on the agent's own computer the server itself reads it. The HOSTED (remote) MCP server looks on ITS OWN disk, so `image_path` over a connection that
   does not go through the app (and from an app version that does not convert yet) is refused with the reason.
   When the MCP runs on the agent's own computer (`uvx sprintable` · stdio · local HTTP) the server IS that
   computer and `image_path` is read as it always was.

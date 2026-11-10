@@ -250,8 +250,8 @@ async def import_image_artifact(args: ImportImageArtifactInput) -> list[TextCont
                 return err(
                     f"image_path가 존재하는 일반 파일이 아닙니다: {args.image_path} — 이 MCP 서버가 돌고 있는 컴퓨터의 "
                     "디스크에서 찾은 결과입니다. 경로가 틀렸을 수 있고, 이 서버가 호스팅(원격) 서버라면 에이전트 컴퓨터의 "
-                    "파일은 애초에 보이지 않습니다. 맥 앱(Sprintable 데스크톱)으로 붙은 에이전트는 앱이 image_path를 "
-                    "대신 읽어 보내므로, 호스팅 서버에서 이 글이 보인다면 가능한 까닭 중 하나는 앱이 낡았거나 앱을 거치지 않고 직접 연결된 것입니다 — "
+                    "파일은 애초에 보이지 않습니다. 이 변환을 하는 버전의 맥 앱(Sprintable 데스크톱)은 앱이 image_path를 "
+                    "대신 읽어 보냅니다. 호스팅 서버에서 이 글이 보인다면 가능한 까닭 중 하나는 앱이 아직 변환을 하지 않는 낡은 버전이거나 앱을 거치지 않고 직접 연결된 것입니다 — "
                     "그때는 image_base64(작은 그림)나 원시 엔드포인트 "
                     "`POST $SPRINTABLE_API_URL/api/v2/visual-artifacts/import-image`를 쓰세요."
                 )
