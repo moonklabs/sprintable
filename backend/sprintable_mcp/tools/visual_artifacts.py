@@ -233,7 +233,8 @@ async def import_image_artifact(args: ImportImageArtifactInput) -> list[TextCont
     내부에서 전부 처리, 반환은 get_artifact/list_artifacts와 동형 artifact 상세
     (FE-import(source="imported")와 동일 렌더).
 
-    story #3753 — image_path(권장, 바이트 정확)와 image_base64(파일시스템 없는 에이전트용,
+    story #3753 — image_path(맥 앱으로 붙은 에이전트에 권장, 바이트 정확 — 앱이 그 컴퓨터에서 파일을 읽어
+    image_base64로 바꿔 보낸다, story 4893)와 image_base64(그 밖의 에이전트용,
     모델이 문자열을 리타이핑하는 통로라 손상 가능)는 상호 배타."""
     try:
         if bool(args.image_base64) == bool(args.image_path):
