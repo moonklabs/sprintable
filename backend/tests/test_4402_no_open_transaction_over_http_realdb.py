@@ -37,6 +37,31 @@ async def _dispose_global_engines_after_test():
     await read_engine.dispose()
 
 
+# story #4879 - the probe counts only THIS test's connections. The code under test runs on the app's global engines, so for the whole test every connection checked out
+# of any engine carries a unique application_name (tests/own_connection_probe.py); a neighbour under another name sits idle in a transaction on purpose (the shared CI database
+# holds such connections at times - CI run 42639791595 - and counting the whole database failed a sibling test with 1).
+_OWN: dict = {"tag": None}
+
+
+@pytest.fixture(autouse=True)
+async def _own_connections():
+    from tests.own_connection_probe import dispose_app_engines, tag_every_checkout, unique_tag
+
+    with tag_every_checkout(unique_tag("t4879-4402")) as tag:
+        _OWN["tag"] = tag
+        yield tag
+    _OWN["tag"] = None
+    await dispose_app_engines()  # the pooled connections still carry this test's tag: empty the app's pools (write, read, worker)
+
+
+@pytest.fixture(autouse=True)
+async def _noisy_neighbour(_own_connections):
+    from tests.own_connection_probe import neighbour_transaction
+
+    async with neighbour_transaction(_REAL_DB_URL, _own_connections + "-neighbour"):
+        yield
+
+
 def _async_url() -> str:
     url = _REAL_DB_URL
     for prefix in ("postgresql+psycopg2://", "postgresql+asyncpg://", "postgresql://"):
@@ -46,19 +71,28 @@ def _async_url() -> str:
 
 
 class _Probe:
-    """Counts this database's idle-in-transaction backends from a separate autocommit connection."""
+    """Counts THIS test's idle-in-transaction backends (its application_name tag) from a separate autocommit connection - and notes that the neighbour's transaction was
+    visible database-wide at the same moment (the noisy condition is on purpose)."""
 
     def __init__(self):
         from sqlalchemy.ext.asyncio import create_async_engine
         self.engine = create_async_engine(_async_url(), isolation_level="AUTOCOMMIT")
+        self.neighbour_seen: list[bool] = []
+
+    @property
+    def saw_the_neighbour(self) -> bool:
+        return bool(self.neighbour_seen) and all(self.neighbour_seen)
 
     async def idle_in_transaction(self) -> int:
         from sqlalchemy import text
+        # ONE statement: own / the fixture's neighbour / everyone are one snapshot
         async with self.engine.connect() as conn:
-            return (await conn.execute(text(
-                "SELECT count(*) FROM pg_stat_activity "
+            own, neighbour, everyone = (await conn.execute(text(
+                "SELECT count(*) FILTER (WHERE application_name = :own), count(*) FILTER (WHERE application_name = :nb), count(*) FROM pg_stat_activity "
                 "WHERE datname = current_database() AND state LIKE 'idle in transaction%' AND pid <> pg_backend_pid()"
-            ))).scalar_one()
+            ), {"own": _OWN["tag"], "nb": _OWN["tag"] + "-neighbour"})).one()
+        self.neighbour_seen.append(neighbour == 1 and everyone >= 1)  # the fixture's neighbour itself, idle in its transaction
+        return own
 
     async def close(self):
         await self.engine.dispose()
@@ -145,6 +179,7 @@ async def test_commit_then_read_leaves_no_transaction_open_during_background_wor
         assert resp.status_code == 200, resp.text
         assert seen["in_transaction"] is False
         assert seen["idle_in_tx"] == 0
+        assert probe.saw_the_neighbour, "the neighbour's open transaction must be visible database-wide: the noisy condition is on purpose"
         assert seen["org_name"] == "O4402"
     finally:
         await _cleanup_org(seen.get("org_id"))
@@ -158,6 +193,7 @@ async def test_read_session_transaction_ends_too():
         assert resp.status_code == 200
         assert seen["in_transaction"] is False
         assert seen["idle_in_tx"] == 0
+        assert probe.saw_the_neighbour, "the neighbour's open transaction must be visible database-wide: the noisy condition is on purpose"
     finally:
         await probe.close()
 
@@ -169,6 +205,7 @@ async def test_streaming_body_completes_before_the_transaction_ends():
         assert resp.status_code == 200
         assert resp.text in ("[0]", "[1]")  # the body read the DB while streaming
         assert seen["idle_in_tx"] == 0
+        assert probe.saw_the_neighbour, "the neighbour's open transaction must be visible database-wide: the noisy condition is on purpose"
     finally:
         await probe.close()
 
@@ -274,6 +311,7 @@ async def test_dispatch_posts_with_no_transaction_open_and_falls_back_to_sse(mon
         assert seen["url"] == "https://hooks.example.com/4402"
         assert seen["in_transaction"] is False
         assert seen["idle_in_tx"] == 0
+        assert probe.saw_the_neighbour, "the neighbour's open transaction must be visible database-wide: the noisy condition is on purpose"
         assert pushed == [str(agent_id)]  # SSE fallback unchanged
     finally:
         async with async_session_factory() as s:
@@ -305,6 +343,25 @@ async def test_dispatch_without_a_webhook_still_goes_to_sse(monkeypatch):
         async with async_session_factory() as s:
             await s.execute(delete(Organization).where(Organization.id == org_id))
             await s.commit()
+
+
+async def test_the_global_engine_tag_counts_a_transaction_the_app_engine_holds_open():
+    """Positive control (story #4879): the application_name tag really lands on the app engine's connections - a probe that always reads 0 would prove nothing."""
+    from sqlalchemy import text
+
+    from app.core.database import async_session_factory
+
+    probe = _Probe()
+    try:
+        async with async_session_factory() as s:
+            await s.execute(text("SELECT 1"))  # autobegin: idle in transaction, ours
+            own = await probe.idle_in_transaction()
+            await s.rollback()
+        assert own == 1, own
+        assert await probe.idle_in_transaction() == 0  # rolled back: gone again
+        assert probe.saw_the_neighbour
+    finally:
+        await probe.close()
 
 
 # ── the helper's conditions, one by one (no DB) ─────────────────────────────────────────────────────────────────────
