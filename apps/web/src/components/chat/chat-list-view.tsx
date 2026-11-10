@@ -27,7 +27,7 @@ import { isNoProjectAtAll } from '@/app/(authenticated)/chats/no-project';
 import { fetchWithAuth } from '@/lib/db/client';
 import { participantDisplayLabel } from '@/lib/member-display';
 import { composeEventPreviewLine } from './event-block-card';
-import { toPlainPreview } from './entity-ref';
+import { toListPreview } from './list-preview';
 import { useOrgDomainLabels, type OrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
@@ -189,9 +189,11 @@ function ConversationRow({
     conv.latest_message?.event?.refs,
   );
   // story #3949 — 이벤트 조립이 없으면(위 null 폴백) 남는 건 «보통» 메시지 원문 —
-  // 마크다운 링크/entity 참조 토큰이 그대로 샐 수 있어 평문화(toPlainPreview)한다.
+  // 마크다운 링크/entity 참조 토큰이 그대로 샐 수 있어 평문화(toPlainPreview → 4887: list-preview.ts의 toListPreview)한다.
+  // story 4887 (UI-4 P1) — an ordinary message goes through toListPreview (no markdown markers on a one-line summary). An event with an unsupported key or a short payload still falls to
+  // its content on purpose (the story #3888 / #3893 contract, locked by its tests) — that is not changed here.
   const preview = eventPreview
-    ?? (conv.latest_message?.content ? toPlainPreview(conv.latest_message.content) : null)
+    ?? (conv.latest_message?.content ? toListPreview(conv.latest_message.content) : null)
     ?? (conv.latest_message?.has_attachments ? t('latestAttachmentOnly') : null) // story #4442 (Yuna)
     ?? t('noMessages');
   const time = conv.latest_message?.created_at ?? conv.updated_at;
