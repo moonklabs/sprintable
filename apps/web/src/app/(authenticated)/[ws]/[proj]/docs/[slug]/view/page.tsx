@@ -176,15 +176,14 @@ export default function DocViewPage() {
               </DropdownMenuItem>
               {/* story 4892 — a sprint report is read-only: no «고치기» above and no «삭제» here (the editor page hides it too; the server only lets humans delete). */}
               {readOnlyDoc ? null : (
-                <>
+                <HumanOnlyAction>
+                  {/* the divider belongs with «삭제»: an agent (who gets no delete) must not see a divider with nothing under it */}
                   <DropdownMenuSeparator className="lg:hidden" />
-                  <HumanOnlyAction>
-                    <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive" data-testid="docs-reader-menu-delete">
-                      <Icon name="delete" size={16} className="mr-2" />
-                      {t('deleteDoc')}
-                    </DropdownMenuItem>
-                  </HumanOnlyAction>
-                </>
+                  <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive" data-testid="docs-reader-menu-delete">
+                    <Icon name="delete" size={16} className="mr-2" />
+                    {t('deleteDoc')}
+                  </DropdownMenuItem>
+                </HumanOnlyAction>
               )}
             </DropdownMenuContent>
           </DropdownMenu>

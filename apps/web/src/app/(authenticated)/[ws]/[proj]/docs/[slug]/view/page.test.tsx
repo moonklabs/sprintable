@@ -17,7 +17,8 @@ const { useDocsLayoutMock, fetchWithAuthMock } = vi.hoisted(() => ({
 
 const { deleteMock } = vi.hoisted(() => ({ deleteMock: vi.fn() }));
 vi.mock('next/navigation', () => ({ useParams: () => ({ slug: 'payments-v2' }), useRouter: () => ({ replace: vi.fn(), push: vi.fn() }) }));
-vi.mock('@/components/ui/human-only-action', () => ({ HumanOnlyAction: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
+const { humanOnly } = vi.hoisted(() => ({ humanOnly: { current: true } }));
+vi.mock('@/components/ui/human-only-action', () => ({ HumanOnlyAction: ({ children }: { children: React.ReactNode }) => (humanOnly.current ? <>{children}</> : null) }));
 vi.mock('@/components/docs/use-doc-delete', () => ({ useDocDelete: () => deleteMock }));
 vi.mock('@/components/docs/doc-share-dialog', () => ({
   DocShareDialog: ({ open, docId }: { open: boolean; docId: string }) => (open ? <div data-testid="share-dialog" data-doc-id={docId} /> : null),
@@ -293,5 +294,33 @@ describe('DocViewPage — 읽기 전용 문서(스프린트 리포트)는 고치
   it('보통 문서는 한 쌍도 삭제도 있다(위 가드가 일반 문서까지 지우지 않는다)', async () => {
     await mount();
     expect(container.querySelector('[data-slot="doc-mode-switch"]')).toBeTruthy();
+  });
+});
+
+describe('DocViewPage — 에이전트가 ⋯ 메뉴를 열면 (4892)', () => {
+  async function openMenu() {
+    const trigger = container.ownerDocument.querySelector(`button[aria-label="${koMessages.docs.moreActions}"]`) as HTMLElement;
+    await act(async () => {
+      trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+      trigger.click();
+    });
+  }
+  afterEach(() => { humanOnly.current = true; });
+
+  it('⭐사람: 공유 아래에 구분선과 삭제가 있다', async () => {
+    humanOnly.current = true;
+    await mount();
+    await openMenu();
+    expect(container.ownerDocument.querySelectorAll('[role="separator"]').length).toBe(1);
+    expect(container.ownerDocument.querySelector('[data-testid="docs-reader-menu-delete"]')).toBeTruthy();
+  });
+
+  it('⭐에이전트: 삭제가 없으면 구분선도 없다(밑에 아무것도 없는 구분선 0)', async () => {
+    humanOnly.current = false;
+    await mount();
+    await openMenu();
+    expect(container.ownerDocument.querySelector('[data-testid="docs-reader-menu-share"]')).toBeTruthy();
+    expect(container.ownerDocument.querySelector('[data-testid="docs-reader-menu-delete"]')).toBeNull();
+    expect(container.ownerDocument.querySelectorAll('[role="separator"]').length).toBe(0);
   });
 });
