@@ -173,6 +173,7 @@ export function getDispatchedHeadline(
  * story 4890 — the `dispatched` COPY of a chat message (payload.event_type `conversation.message`, written for story 1934's «every human in the thread» notification + push). The same message already has its
  * own `conversation.message_created` bell row (summary «보낸 이: 미리보기» · sender · room id), so the copy was a second line and a second unread for one message (measured on dev: 2 messages → 4 lines, badge 4).
  * The server leaves it out of the bell list and the unread count; the bell leaves it out too (rows it already holds from an older server · the live SSE feed) so the two never disagree.
+ * The web bell is the signed-in PERSON's: it only ever holds that person's rows, so the server's «human recipients only» scope (an agent's copy can be its only notification) needs no second check here.
  */
 export function isChatMessageBellCopy(
   eventType: string,

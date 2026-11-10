@@ -47,7 +47,9 @@ def _is_hidden_notification(member_id: uuid.UUID):
 
     3. **결재함 신호**(story #4520): `_APPROVALS_INBOX_SIGNAL_TYPES` — 결재함을 새로 그리는 SSE 신호라 사람 알림 줄이 아님.
     4. **채팅 새 메시지의 dispatched 사본**(story 4890): 같은 글의 message_created 줄이 이미 벨 줄이다 — 이 사본은 벨 목록 · 읽지 않음 수에서 뺀다(행은 그대로 · 푸시/웹훅 배달은 이 행을 만든 같은
-       호출이 outbox로 하므로 무관). mute · 관전 가림은 message_created에만 걸리므로 «가릴 건 같이 가려지고 보일 건 한 줄만»이 된다.
+       호출이 outbox로 하므로 무관). mute · 관전 가림은 message_created에만 걸리므로 «가릴 건 같이 가려지고 보일 건 한 줄만»이 된다. 사람 수신자만(에이전트는 그 사본이 유일한 알림일 수 있다).
+       ⚠️ 의도된 결과 하나: 채널 라우터(`route_message`)가 음소거 · «멘션만» 수신자를 결정에서 빼 message_created를 안 만든 참여자(`conversation.py`의 `preference_excluded_ids`)는 사본 쪽에만
+       줄이 있었다 — 그 사람들은 «멘션 아닌 글은 알리지 말라»고 한 사람이라 이 사본이 그 설정을 무시한 것이었다(벨에 «새 메시지»가 매 글마다). 이제 그 줄도 사라진다 = 설정대로. (푸시 쪽은 이 PR 밖.)
 
     노출(직접 필요): DM 메시지·@mention(별도 type)·발화한 그룹 대화·dispatched 등 비-대화 이벤트.
     ⚠️ Event/SSE/에이전트 주입 경로 불변 — 휴먼 알림 읽기 단에만 적용.
