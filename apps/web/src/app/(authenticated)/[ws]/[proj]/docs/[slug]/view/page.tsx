@@ -129,7 +129,7 @@ export default function DocViewPage() {
           한글 경로는 sans 본문체로 — 위계는 크기/weight/citron rule로만 낸다. */}
       {/* story 4892 (UI-9 상세 열, 읽기) — 머리 한 줄이 ds 면 · 선 · 글자색을 입는다. «고치기»는 머리 오른쪽의 ds 보조 단추(주 단추 아님 — 읽는 화면의 주 동작은 읽기).
           [SID:4356] 좁은 폭에서 «지식»이 꺾이지 않게: 뿌리 · 구분은 줄지 않고(shrink-0 · nowrap), 분류 · 제목은 한 줄 말줄임(제목은 남는 자리만 · 바닥 3rem). */}
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-ds-line bg-ds-background px-4 text-ds-small text-ds-ink-3 lg:px-8">
+      <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-ds-line bg-ds-background px-4 py-1 text-ds-small text-ds-ink-3 lg:px-8">
         <Link href={docsListUrl(wsSlug, projSlug)} className="shrink-0 whitespace-nowrap hover:text-ds-ink hover:underline">{t('breadcrumbKnowledgeRoot')}</Link>
         {categoryLabel ? (<><span className="shrink-0">/</span><span className="min-w-0 truncate">{categoryLabel}</span></>) : null}
         <span className="shrink-0">/</span>

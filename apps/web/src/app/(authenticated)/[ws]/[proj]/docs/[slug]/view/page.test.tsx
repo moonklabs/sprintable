@@ -208,6 +208,9 @@ describe('DocViewPage — 상세 열 읽기 화면이 ds 부품을 입는다 (48
     expect(cls).toContain('border-ds-line');
     expect(cls).toContain('bg-ds-background');
     expect(cls).not.toContain('bg-muted/20');
+    // min-h (not h): on a coarse pointer the ds Button is 44px tall — a fixed 40px bar would be poked through
+    expect(cls).toContain('min-h-10');
+    expect(cls).not.toContain('h-10');
   });
 
   it('오른쪽 레일의 선도 ds 선이다', async () => {
