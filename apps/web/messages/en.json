@@ -5325,6 +5325,7 @@
   "chats": {
     "projectsLoadFailed": "We couldn't load your projects.",
     "projectsRetry": "Try again",
+    "roomMoreActions": "Room menu",
     "noProjectYet": "No project to show yet — create one from the switcher at the top (already have one? reload this page).",
     "pickProject": "Pick a project from the switcher at the top to see its chats.",
     "agentsPaused": {

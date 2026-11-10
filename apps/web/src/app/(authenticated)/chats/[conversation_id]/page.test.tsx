@@ -280,6 +280,17 @@ describe('ConversationPage — 헤더 타이틀 Claim 무게(story #2969 PR-5)',
   });
 });
 
+// story 4887 (UI-4 P3-a) — mute and notification settings live in the room head's «⋯» menu now: open it, then take the item
+async function openHeadMenuItem(testId: string): Promise<HTMLElement> {
+  const trigger = container.querySelector('[data-testid="room-head-menu"]') as HTMLElement | null;
+  expect(trigger, 'the room head «⋯» menu').not.toBeNull();
+  await act(async () => { trigger!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); trigger!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  const item = document.querySelector(`[data-testid="${testId}"]`) as HTMLElement | null;
+  expect(item, `the «⋯» menu item ${testId}`).not.toBeNull();
+  return item!;
+}
+
 // story #4179(E-PROD-ESC) — free_response가 단건 GET에 없어서 켜 둔 방을 새로 열면 「전달
 // 설정」 토글이 off로 보였다(그대로 저장하면 꺼짐). BE가 이제 싣는 값으로 토글이 초기화되는지
 // 실 마운트로 고정 — 「새로고침」 = 이 페이지를 새로 마운트해 단건 GET을 다시 읽는 것.
@@ -303,11 +314,9 @@ describe('ConversationPage — 전달 설정 free_response 초기값(story #4179
     }));
     await mount();
 
-    const settingsBtn = [...container.querySelectorAll('button')].find(
-      (b) => b.getAttribute('title') === koMessages.chats.deliveryContractTitle,
-    );
-    expect(settingsBtn).not.toBeUndefined();
-    await act(async () => { settingsBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const settingsItem = await openHeadMenuItem('room-head-settings');
+    expect(settingsItem.textContent).toContain(koMessages.chats.deliveryContractTitle);
+    await act(async () => { settingsItem.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
     const sw = document.querySelector(
