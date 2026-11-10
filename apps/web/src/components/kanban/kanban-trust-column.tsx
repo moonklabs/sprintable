@@ -80,6 +80,8 @@ interface KanbanTrustColumnProps {
   hasMore?: boolean;
   loadingMore?: boolean;
   onLoadMore?: () => void;
+  /** hasMore, but this column has no button: its cards arrive with the page of the settable column that shares the status (derived columns). Only the «N+» shows. */
+  moreViaFeeder?: boolean;
 }
 
 /**
@@ -103,7 +105,7 @@ export function KanbanTrustColumn({
   id, label, locked, stories, epicMap, memberMap, onStoryClick, onEditStory, onChangeStatus, onDeleteStory,
   projectId, onKickoffStory, executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap,
   onCreateStory, autoComposeSignal, isDragging = false, getStatusLabel,
-  hasMore = false, loadingMore = false, onLoadMore,
+  hasMore = false, loadingMore = false, onLoadMore, moreViaFeeder = false,
 }: KanbanTrustColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id, disabled: locked });
   const t = useTranslations('board');
@@ -247,7 +249,7 @@ export function KanbanTrustColumn({
               getStatusLabel={getStatusLabel}
             />
           ))}
-          {hasMore && onLoadMore ? (
+          {hasMore && !moreViaFeeder && onLoadMore ? (
             <button
               type="button"
               onClick={onLoadMore}

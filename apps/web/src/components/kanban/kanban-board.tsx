@@ -184,7 +184,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const [columnTotals, setColumnTotals] = useState<Record<string, number>>({});
   const [columnCursors, setColumnCursors] = useState<Record<string, string | null>>({});
   // story #4888 — set once a browser-side filter is used while a column still has more: from then on the columns are read to their end (see fetchAllPagesOfStatus)
-  const [loadAllPages, setLoadAllPages] = useState(false);
+  // The project that read-to-the-end was switched on for: `loadAllPages` is false at once when the project changes (no full read of the new project before a reset effect runs).
+  const [loadAllFor, setLoadAllFor] = useState<string | null | undefined>(null);
+  const loadAllPages = loadAllFor === projectId;
   const [loadingMoreColumns, setLoadingMoreColumns] = useState<Record<string, boolean>>({});
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [epicsNextCursor, setEpicsNextCursor] = useState<string | null>(null);
@@ -653,8 +655,13 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     const cursor = columnCursors[status];
     if (!cursor) return;
     setLoadingMoreColumns((prev) => ({ ...prev, [status]: true }));
+    const runId = fetchRunRef.current;
     try {
       const result = await fetchStoriesByStatus(status, cursor);
+      // story #4888 — a page that answers after the board was loaded again (goal / sprint / assignee / project changed) belongs to the old set: drop it.
+      if (runId !== fetchRunRef.current) return;
+      // A failed page must keep the cursor (a null cursor would say «nothing more» and hide the rest); the button stays and can be pressed again.
+      if (!result.ok) return;
       setStories((prev) => [...prev, ...result.stories]);
       setColumnCursors((prev) => ({ ...prev, [status]: result.nextCursor }));
     } finally {
@@ -839,9 +846,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // (fetchData then re-runs with `loadAllPages`). Switching a filter off does not undo it: what is loaded stays complete. A new project starts again from the first page.
   const someColumnHasMore = Object.values(columnCursors).some(Boolean);
   useEffect(() => {
-    if (clientFilterActive && someColumnHasMore && !loadAllPages && !loading) setLoadAllPages(true);
-  }, [clientFilterActive, someColumnHasMore, loadAllPages, loading]);
-  useEffect(() => { setLoadAllPages(false); }, [projectId]);
+    if (clientFilterActive && someColumnHasMore && !loadAllPages && !loading) setLoadAllFor(projectId);
+  }, [clientFilterActive, someColumnHasMore, loadAllPages, loading, projectId]);
 
   // position 기준으로 정렬
   const storiesByColumn = (columnId: string): KanbanStory[] => {
@@ -1857,9 +1863,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     onCreateStory={handleCreateStoryTrust}
                     autoComposeSignal={col.id === 'queued' ? autoComposeNonce : 0}
                     getStatusLabel={domainLabels.statusLabel}
-                    // The derived columns (locked) share their status with a settable column (needs_input ← in-progress, verified / merge_ready ← in-review): they get no «더 보기» of their own — their cards
-                    // appear as the settable column's pages are loaded (an empty derived column showing «0+» and a second button for the same page would only mislead).
-                    hasMore={!col.locked && TRUST_COLUMN_FEEDER_STATUSES[col.id].some((st) => !!columnCursors[st])}
+                    // The derived columns (locked) share their status with a settable column (needs_input ← in-progress, verified / merge_ready ← in-review): they show «N+» (there may be more) but no «더 보기» of their own —
+                    // their cards appear as the settable column's pages are loaded (a second button for the same page would only mislead).
+                    hasMore={TRUST_COLUMN_FEEDER_STATUSES[col.id].some((st) => !!columnCursors[st])}
+                    moreViaFeeder={col.locked}
                     loadingMore={TRUST_COLUMN_FEEDER_STATUSES[col.id].some((st) => !!loadingMoreColumns[st])}
                     onLoadMore={() => handleLoadMoreTrust(col.id)}
                   />
@@ -1929,7 +1936,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     storyLabelsMap={storyLabelsMap}
                     storyGatesMap={storyGatesMap}
                     storyLineMap={storyLineMap}
-                    totalCount={filterActive ? colStories.length : columnCursors[col.id] ? Math.max(colStories.length, columnTotals[col.id] ?? 0) : columnTotals[col.id]}
+                    totalCount={filterActive ? colStories.length : Math.max(colStories.length, columnTotals[col.id] ?? 0)}
                     hasMore={!!columnCursors[col.id]}
                     loadingMore={loadingMoreColumns[col.id] ?? false}
                     onLoadMore={() => handleLoadMore(col.id)}

@@ -181,13 +181,17 @@ async function mount() {
 
 // ── fake paginated list API: `limit`, `cursor` (offset), `status`, `epic_id` are honoured like the real route ──────────────────────────────────────────────────────────────────────────────
 type Row = Record<string, unknown> & { id: string; status: string; title: string };
-function stubPagedFetch(rows: Row[]): string[] {
+function stubPagedFetch(rows: Row[], opts: { failCursorRequests?: { n: number } } = {}): string[] {
   const urls: string[] = [];
-  const withStage: Row[] = rows.map((s) => ({ ...s, trust_stage: deriveDefaultTrustStage(s.status) }));
+  const withStage: Row[] = rows.map((s) => ('trust_stage' in s ? s : { ...s, trust_stage: deriveDefaultTrustStage(s.status) }));
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (typeof url === 'string' && url.startsWith('/api/stories?')) {
       urls.push(url);
       const sp = new URL(url, 'http://localhost').searchParams;
+      if (sp.get('cursor') && opts.failCursorRequests && opts.failCursorRequests.n > 0) {
+        opts.failCursorRequests.n -= 1;
+        return { ok: false, json: async () => null };
+      }
       const status = sp.get('status');
       const epic = sp.get('epic_id');
       const limit = Number(sp.get('limit') ?? '50');
@@ -209,7 +213,11 @@ const inProgress = (n: number, extra: Partial<Row> = {}): Row[] =>
 /** the header number of a trust column, found by its label */
 function headerOf(label: string): string {
   const h3 = [...container.querySelectorAll('h3')].find((h) => h.textContent?.includes(label));
-  return (h3?.parentElement?.querySelector('span.tabular-nums')?.textContent ?? '').trim();
+  for (let el: HTMLElement | null | undefined = h3?.parentElement, i = 0; el && i < 3; el = el.parentElement, i += 1) {
+    const n = el.querySelector('span.tabular-nums');
+    if (n) return (n.textContent ?? '').trim();
+  }
+  return '';
 }
 const loadMoreButtons = () => [...container.querySelectorAll('button')].filter((b) => b.textContent?.trim() === '더 보기');
 
@@ -289,3 +297,42 @@ describe('KanbanBoard 4888 — 브라우저에서 거르는 필터는 첫 쪽 �
     expect(headerOf('실행 중')).toBe('22');
   });
 });
+
+describe('KanbanBoard 4888 — 코덱스 검수에서 나온 칸들', () => {
+  it('5단계 클래식: 마지막 쪽까지 불러온 뒤 머리가 첫 쪽 수(20)로 되돌아가지 않는다', async () => {
+    localStorage.setItem('board_axis_mode_proj-1', 'status');
+    stubPagedFetch(inProgress(25));
+    await mount();
+    expect(headerOf('진행 중')).toBe('20+');
+    await act(async () => { loadMoreButtons()[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); });
+    expect(container.textContent).toContain('카드-25');
+    expect(headerOf('진행 중')).toBe('25');
+  });
+
+  it('«더 보기» 쪽 요청이 실패하면 커서가 남아 버튼이 그대로 있고, 다시 누르면 이어서 불러온다', async () => {
+    const fail = { n: 1 };
+    stubPagedFetch(inProgress(25), { failCursorRequests: fail });
+    await mount();
+    await act(async () => { loadMoreButtons()[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); });
+    expect(fail.n).toBe(0); // the failing page was really asked
+    expect(container.textContent).not.toContain('카드-25');
+    expect(headerOf('실행 중')).toBe('20+');
+    expect(loadMoreButtons()).toHaveLength(1);
+
+    await act(async () => { loadMoreButtons()[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); });
+    expect(container.textContent).toContain('카드-25');
+    expect(headerOf('실행 중')).toBe('25');
+  });
+
+  it('파생 열(입력 필요): 같은 상태에 더 있으면 «N+»만 보이고 «더 보기»는 실행 중 열 하나뿐이다', async () => {
+    const rows = inProgress(25).map((r) => (r.id === 's3' ? { ...r, trust_stage: 'needs_input' } : r));
+    stubPagedFetch(rows);
+    await mount();
+    expect(headerOf('입력 필요')).toBe('1+');
+    expect(loadMoreButtons()).toHaveLength(1);
+  });
+});
+
