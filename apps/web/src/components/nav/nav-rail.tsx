@@ -27,7 +27,7 @@ import type { DashboardProjectOption } from '@/app/dashboard/dashboard-shell';
 //  · 매일 구역(오늘 · 일감 · 에이전트/팀 · 지식)마다 아이콘 하나 = 그 구역 첫 항목으로 가는 링크. 구역에 항목이 더 있으면(오늘의 결재 · 일감의 목표 · 실행 · 에이전트의 실행 기록 · API 키 · 지식의 산출물 · 스토리지) 아이콘에 올리거나 초점을 주면 옆에 목록이 뜬다.
 //  · «대화» 카드(구역 밖 1급)는 «오늘» 바로 뒤. «조직» 아이콘은 막대 아래쪽 — 누르면 조직 항목 전부가 옆으로 펼쳐지고 Esc · 바깥 누름으로 닫힌다.
 //  · 맨 아래: 찾기(⌘K) · 설정 · 전체. 건수 배지: «오늘» 아이콘 = 호출부가 넘기는 todayCount(셈은 UI-5), «대화» 아이콘 = 안 읽은 수.
-interface NavRailProps {
+export interface NavRailProps {
   orgSlug?: string;
   projectSlug?: string;
   /** «계정» 팝오버(길잡이 머리 · 바닥의 쪽이 아닌 입구)에 넘기는 값 — 길잡이와 같은 출처. 안 넘기면 «계정» 아이콘은 그리지 않는다(시험 · 단독 사용). */

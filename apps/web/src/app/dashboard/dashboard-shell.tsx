@@ -21,7 +21,6 @@ import { SessionExpiredDialog } from '@/components/auth/session-expired-dialog';
 import { ToastProvider } from '@/components/ui/toast';
 import { BottomDock } from '@/components/nav/bottom-dock';
 import { AppSidebar } from '@/components/nav/app-sidebar';
-import { NavRail } from '@/components/nav/nav-rail';
 import { screenOwnsListColumn } from '@/lib/nav-active';
 import { CommandPaletteProvider, useCommandPalette } from '@/components/command-palette/command-palette-context';
 import { resolveChatsHref, resolveConnectRulesHref, type NavV3Flags, livePathProject, navProjectSlug } from '@/lib/nav-v3-destinations';
@@ -38,6 +37,8 @@ import { ReleaseNotesProvider } from '@/components/release-notes/release-notes-g
 import { RefreshProvider } from '@/contexts/refresh-context';
 import { TeamPresenceToggleProvider } from '@/components/presence/team-presence-toggle';
 import { ActivationChecklistBanner } from '@/components/dashboard/activation-checklist-banner';
+import { HomeModelProvider } from '@/components/home/home-model-provider';
+import { NavRailWithHomeBadge } from '@/components/home/home-nav-rail';
 import { useShellListScrollMemory } from '@/hooks/use-shell-list-scroll-memory';
 import { OrgHintBanner } from '@/components/nav/org-hint-banner';
 import { ReclaimNoticeAlert } from '@/components/auth/reclaim-notice';
@@ -208,14 +209,15 @@ function ShellBody({
 }) {
   const chatUnreadTotal = useChatUnreadTotal(currentTeamMemberId);
   // story #4885 (B 셸) — 막대 · 목록 · 상세: 막대(NavRail)는 목록 칸(AppSidebar) 왼쪽에 서고, 둘 다 같은 nav-config를 읽는다.
-  // 막대의 slug · 팔레트는 AppSidebar와 같은 출처. 「오늘」 배지 숫자는 UI-5(오늘 화면)가 정하는 값이라 여기선 아직 안 넘긴다(NavRail의 todayCount 이음새 = 0).
+  // 막대의 slug · 팔레트는 AppSidebar와 같은 출처. 「홈」 배지 숫자는 홈 모델(components/home)의 한 숫자 — 홈 본문이 그리는 것과 같은 모델에서 읽는다(story #4888).
   const railOrgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
   const { setOpen: setPaletteOpen } = useCommandPalette();
   const { open: listColumnOpen, toggleSidebar } = useSidebar();
   const openPalette = useCallback(() => setPaletteOpen(true), [setPaletteOpen]);
   return (
-    <>
-      <NavRail
+    // story #4888 — the navigation bar's «홈» badge and the home screen read ONE model (the number of rows in «내 손이 필요해요»)
+    <HomeModelProvider viewerMemberId={currentTeamMemberId ?? null} projectId={projectId}>
+      <NavRailWithHomeBadge
         orgSlug={railOrgSlug}
         projectSlug={currentProjectSlug}
         account={{ orgId, orgMemberships, projectId, projectMemberships, userName }}
@@ -246,7 +248,7 @@ function ShellBody({
       >
         {children}
       </ScrollShell>
-    </>
+    </HomeModelProvider>
   );
 }
 

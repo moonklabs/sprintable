@@ -654,3 +654,51 @@ describe('[SID:4832] ActivationChecklistBanner — the local server\'s two count
     expect(container.textContent).not.toContain('가입 완료');
   });
 });
+
+// story #4888 (UI-5 home) — the checklist has its place inside the home (a card at the top of its list); the shell's band steps aside there and no longer stands over the chat screens.
+describe('ActivationChecklistBanner — placement (story #4888)', () => {
+  afterEach(() => { mockPath.current = '/dashboard'; });
+
+  it('the shell band is not drawn over /chats or a chat room — not while loading either (no empty box above the chat list)', async () => {
+    for (const path of ['/chats', '/chats/abc-123']) {
+      mockPath.current = path;
+      deferredChecklistResponse();
+      await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+      expect(container.innerHTML, `${path} while loading`).toBe('');
+      stubChecklist(PARTIAL);
+      await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+      await flush();
+      expect(container.innerHTML, path).toBe('');
+    }
+  });
+
+  it('a path that only starts with the same letters as /chats keeps the band', async () => {
+    mockPath.current = '/chatsettings';
+    stubChecklist(PARTIAL);
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(container.textContent).toContain('가입을 마무리해 볼까요?');
+  });
+
+  it('on the home the shell band steps aside, and the home\'s own copy (placement="home") draws the checklist there', async () => {
+    mockPath.current = '/org-briefing';
+    stubChecklist(PARTIAL);
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    expect(container.innerHTML).toBe('');
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner placement="home" />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="activation-banner"]')).not.toBeNull();
+    expect(container.textContent).toContain('가입을 마무리해 볼까요?');
+  });
+
+  it('every other page keeps the shell band exactly as before', async () => {
+    for (const path of ['/flow', '/inbox', '/glance', '/today']) {
+      mockPath.current = path;
+      stubChecklist(PARTIAL);
+      await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+      await flush();
+      expect(container.textContent, path).toContain('가입을 마무리해 볼까요?');
+    }
+  });
+});

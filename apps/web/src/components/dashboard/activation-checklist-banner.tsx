@@ -17,6 +17,7 @@ import { createFirstInstructionConversation } from '@/lib/onboarding/first-instr
 import { cn } from '@/lib/utils';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { withProjectParam } from '@/lib/with-project-param';
+import { DEFAULT_NAV_V3_FLAGS, resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 
 // story #4032(실측 — Lighthouse CI 인증화면 6곳 전부 CLS>0.1, layout-shift-elements 감사
 // 상위 기여요소가 6곳 모두 이 배너 바로 아래 그리드였다) — 진짜 원인은 `useActivationStatus`
@@ -52,10 +53,21 @@ import { withProjectParam } from '@/lib/with-project-param';
 
 // story #4432 — the desktop setup page is itself the checklist's «에이전트 연결하기» step: the banner there would say the same
 // thing twice (and at 360 it pushed the setup card half a screen down). Not shown on that page; everywhere else unchanged.
-function isHiddenOn(pathname: string | null): boolean {
+function isHiddenOn(pathname: string | null, placement: ActivationPlacement, dest: { home: string; chats: string }): boolean {
   // a comparison, not a link (the flat-link ratchet reads it that way too)
-  return !!pathname && (pathname === '/desktop/setup' || pathname.startsWith('/desktop/setup/'));
+  if (!pathname) return false;
+  if (pathname === '/desktop/setup' || pathname.startsWith('/desktop/setup/')) return true;
+  // story #4888 (UI-5 home) — the checklist has its place INSIDE the home (a card at the top of its list): the shell's copy steps aside there, and it no longer stands over the chat
+  // screens (on a phone it was 24% of the first screen of `/chats`). Every other page keeps the shell's copy exactly as before (UI-8 decides about those).
+  if (placement === 'shell') {
+    return pathname === dest.home || pathname === dest.chats || pathname.startsWith(`${dest.chats}/`);
+  }
+  return false;
 }
+
+/** story #4888 — where this copy of the checklist stands: `shell` = the band over the page content (the shell mounts it) · `home` = the card inside the home list */
+export type ActivationPlacement = 'shell' | 'home';
+
 
 // story 4780 (AC4) — the checklist finishes, and the person gets to SEE it finish. The last step («첫 지시 보내고 회신 받기») ends in the chat, where the reply comes: when the person is back on a page with this banner,
 // it was simply gone — completion was never shown. This browser remembers that it showed an OPEN checklist for the organization (`sprintable_activation_seen_open:<org>`); when the checklist is complete and
@@ -84,7 +96,7 @@ function clearMark(key: string): void {
 /** story 4832: the two steps that are the person's own on the app's own server — what the skeleton is sized by before the server's answer (`applicable_steps`) arrives */
 const LOCAL_STEP_KEYS: (keyof ActivationState['steps'])[] = ['agent_connected', 'first_roundtrip'];
 
-export function ActivationChecklistBanner() {
+export function ActivationChecklistBanner({ placement = 'shell' }: { placement?: ActivationPlacement } = {}) {
   const pathname = usePathname();
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('activation');
@@ -111,7 +123,10 @@ export function ActivationChecklistBanner() {
   // story 4780 (AC4): remember an open checklist was shown (the banner or its chip — not on a page that hides it) · show the finish once. `doneFor` = the organization whose finish line is up: the line
   // is DERIVED from it (the same organization, complete, not hidden), so an organization switch or a page that hides the banner never leaves a stale line; the mark is read and cleared once, and a
   // StrictMode second run of the effect finds the state already set.
-  const hidden = isHiddenOn(pathname);
+  // the home and the chat screen are named by the one destination module (not typed here): with the v3 flags off they are the home list and `/chats`
+  const { navV3Flags } = useDashboardContext();
+  const destinations = resolveNavV3Destinations(navV3Flags ?? DEFAULT_NAV_V3_FLAGS);
+  const hidden = isHiddenOn(pathname, placement, { home: destinations.today.path, chats: destinations.chats.path });
   const seenOpenKey = orgId ? `${SEEN_OPEN_KEY}:${orgId}` : null;
   const [doneFor, setDoneFor] = useState<string | null>(null);
   const pageVisible = useSyncExternalStore(subscribeVisibility, readVisible, () => true);
