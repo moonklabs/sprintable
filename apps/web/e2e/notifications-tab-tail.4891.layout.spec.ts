@@ -71,6 +71,13 @@ async function open(page: Page, width: number, height: number) {
     if (url.pathname === '/') {
       return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body class="bg-background text-foreground"><div id="root"></div></body></html>` });
     }
+    // the gate table's cells (one of them overridden → its tag and the ↺ revert press are drawn too)
+    if (url.pathname === '/api/projects/p1/gate-config') {
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [
+        { work_type: 'done', actor_type: 'agent', level: 'ask', source: 'org_default' }, { work_type: 'done', actor_type: 'human', level: 'auto', source: 'override' },
+        { work_type: 'merge', actor_type: 'agent', level: 'block', source: 'org_default' }, { work_type: 'merge', actor_type: 'human', level: 'ask', source: 'override' },
+      ] }) });
+    }
     return route.fulfill({ status: 404, body: '{}' });
   });
   await page.addInitScript(() => { (window as unknown as { process: unknown }).process = { env: {} }; });
@@ -79,6 +86,7 @@ async function open(page: Page, width: number, height: number) {
   await page.addScriptTag({ content: js });
   await page.evaluate(() => (window as unknown as { __mount: () => void }).__mount());
   await page.getByTestId('refresh-settings').waitFor();
+  await page.locator('[role=group] button').first().waitFor();
 }
 
 
@@ -88,7 +96,9 @@ const measure = (page: Page) => page.evaluate(() => {
   const small = presses.filter((e) => { const r = e.getBoundingClientRect(); return r.width < 43.5 || r.height < 43.5; }).map((e) => `${(e.getAttribute('aria-label') || e.textContent || e.tagName).trim().slice(0, 14)} ${Math.round(e.getBoundingClientRect().width)}x${Math.round(e.getBoundingClientRect().height)}`);
   const leaves = [...document.querySelectorAll('body *')].filter((e) => e.children.length === 0 && (e.textContent || '').trim() && vis(e));
   const tiny = leaves.filter((e) => parseFloat(getComputedStyle(e).fontSize) < 12).map((e) => `${(e.textContent || '').trim().slice(0, 14)} ${getComputedStyle(e).fontSize}`);
-  return { presses: presses.length, small, tiny, overflowX: document.documentElement.scrollWidth > innerWidth + 1,
+  // a gate row whose controls run past its own right edge (clipped) — the trailing part must wrap UNDER the name when the width is short
+  const clipped = [...document.querySelectorAll('[data-slot="ds-list-row"]')].filter((row) => { const rr = row.getBoundingClientRect(); return [...row.querySelectorAll('*')].some((c) => c.getBoundingClientRect().right > rr.right + 1); }).length;
+  return { presses: presses.length, small, tiny, clipped, reverts: document.querySelectorAll('button[aria-label]').length, overflowX: document.documentElement.scrollWidth > innerWidth + 1,
     chips: document.querySelectorAll('[data-testid="refresh-settings"] button').length, levelButtons: document.querySelectorAll('[role=group] button').length };
 });
 
@@ -104,6 +114,7 @@ test.describe('on a touch phone (390 × 844)', () => {
     expect(m.small, `presses under 44 px: ${m.small.join(' · ')}`).toEqual([]);
     expect(m.tiny, `text under 12 px: ${m.tiny.join(' · ')}`).toEqual([]);
     expect(m.overflowX).toBe(false);
+    expect(m.clipped, 'gate rows whose controls run past the row (override tag + ↺ + three level buttons must wrap, not clip)').toBe(0);
   });
 
   test('[SID:4891] the chips still pick one (aria-pressed follows the press) and the level buttons keep their pressed state', async ({ page }) => {

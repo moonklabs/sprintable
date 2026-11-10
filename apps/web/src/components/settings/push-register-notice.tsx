@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from 'react';
 import { useTranslations } from 'next-intl';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ds/button';
 import { isSupportWidgetEnabled } from '@/lib/support-widget-flag';
 import { pickEuroJosa } from '@/lib/korean-particle';
 import {
@@ -31,16 +31,16 @@ export function PushRegisterNotice() {
 
   if (!view) return null;
   return (
-    <div role="status" className="mb-4 rounded-md border border-border bg-muted/20 px-3 py-2.5" data-testid="push-register-notice">
-      <p className="break-keep text-sm text-foreground">{view.cause === 'permission' ? t('pushRegisterOff') : t('pushRegisterFailed')}</p>
+    <div role="status" className="mb-4 rounded-ds-control border border-ds-line bg-ds-surface-sunk px-3 py-2.5" data-testid="push-register-notice">
+      <p className="break-keep text-ds-body text-ds-ink">{view.cause === 'permission' ? t('pushRegisterOff') : t('pushRegisterFailed')}</p>
       {view.cause === 'other' && view.retried ? (
-        <p className="mt-1 break-keep text-sm text-muted-foreground">
+        <p className="mt-1 break-keep text-ds-body text-ds-ink-3">
           {t('pushRegisterStillFailed')}
           {/* the «Contact & Support» tab exists only where the support widget is on (production has it off) — never point at a tab that is not there */}
           {isSupportWidgetEnabled() ? ` ${t('pushRegisterContactSupport', { support: t('tabSupport'), josa: pickEuroJosa(t('tabSupport')) })}` : ''}
         </p>
       ) : null}
-      <Button type="button" variant="outline" className="mt-2 whitespace-nowrap" disabled={busy} onClick={requestPushRetry}>
+      <Button type="button" variant="secondary" size="lg" className="mt-2" disabled={busy} onClick={requestPushRetry}>
         {busy ? t('pushRegisterBusy') : tc('retry')}
       </Button>
     </div>

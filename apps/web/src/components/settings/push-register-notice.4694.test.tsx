@@ -86,12 +86,16 @@ describe('PushRegisterNotice — drawn only when the phone says it failed', () =
     expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(button()?.textContent).toBe(koMessages.common.retry);
     // quiet outline button, normal text colour — not red and not the primary (the section's own primary, if any, stays the primary)
-    expect(button()!.className).toContain('border-border');
-    expect(button()!.className).toContain('min-h-11'); // default size = 44px touch target (the line's only action; shown only in the phone app)
+    // story 4891: the ds Button's secondary look (the quiet outline on the line-control border) — not the primary, not red
+    expect(button()!.className).toContain('border-ds-line-control');
+    expect(button()!.className).not.toContain('bg-ds-action');
+    // the 44px touch target (the line's only action; shown only in the phone app): the ds Button carries the touch floor (pointer-coarse) — the big size, not the 28px one
+    expect(button()!.className).toContain('pointer-coarse:min-h-11');
+    expect(button()!.className).toContain('h-9');
     expect(button()!.className).not.toContain('h-7');
     expect(button()!.className).not.toContain('bg-primary');
-    expect(container.querySelector('p')!.className).toContain('text-foreground');
-    expect(button()!.className).not.toContain('bg-destructive-tint');
+    expect(container.querySelector('p')!.className).toContain('text-ds-ink');
+    expect(button()!.className).not.toContain('bg-ds-failed');
     expect(container.firstElementChild!.className).not.toMatch(/destructive|red/); // the block itself is not red
   });
 

@@ -37,7 +37,9 @@ const buttonByText = (text: string, within: ParentNode = container) => [...withi
 describe('[SID:4891] NotificationsPane', () => {
   it('draws a heading per category and one ds list row per event, each with a switch named «event + 앱 내» and its on / off', async () => {
     await draw(props());
-    expect([...container.querySelectorAll('[data-slot="ds-section-header"]')]).toHaveLength(2);
+    // the frame's own header (story 4891 SettingsSection) + one heading per category
+    expect([...container.querySelectorAll('[data-slot="ds-section-header"]')]).toHaveLength(3);
+    expect([...container.querySelectorAll('[data-testid^="notifications-category-"] [data-slot="ds-section-header"]')]).toHaveLength(2);
     const rows = [...container.querySelectorAll('[data-slot="ds-list-row"]')];
     expect(rows).toHaveLength(4);
     const sw = [...container.querySelectorAll('[role="switch"]')];

@@ -9,7 +9,7 @@ import { PushRegisterNotice } from '@/components/settings/push-register-notice';
 import { Button } from '@/components/ds/button';
 import { ListRow } from '@/components/ds/list-row';
 import { SectionHeader } from '@/components/ds/section-header';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { SettingsSection } from '@/components/settings/settings-section';
 import { cn } from '@/lib/utils';
 
 export type NotificationLevel = 'all' | 'mentions' | 'mute';
@@ -42,14 +42,7 @@ export function NotificationsPane({ loading, categories, globalLevel, savingLeve
   const t = useTranslations('settings');
   const tc = useTranslations('common');
   return (
-    <SectionCard>
-      <SectionCardHeader>
-        <div className="space-y-1">
-          <h2 className="text-base font-semibold text-foreground">{t('notifications')}</h2>
-          <p className="text-sm text-muted-foreground">{t('notificationDescription')}</p>
-        </div>
-      </SectionCardHeader>
-      <SectionCardBody>
+    <SettingsSection title={t('notifications')} description={t('notificationDescription')}>
         {/* story #4694 AC2 ② — the phone's «could not register for notifications» line (phone app only · nothing when fine) */}
         <PushRegisterNotice />
         {loading ? (
@@ -132,7 +125,6 @@ export function NotificationsPane({ loading, categories, globalLevel, savingLeve
             })}
           </div>
         )}
-      </SectionCardBody>
-    </SectionCard>
+    </SettingsSection>
   );
 }
