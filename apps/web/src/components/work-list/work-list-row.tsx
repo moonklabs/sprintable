@@ -73,7 +73,8 @@ export function WorkListRowView({
         ) : row.ownerName ? (
           <Badge variant="chip">{t('chipAssigned')}</Badge>
         ) : null}
-        {stateText ? <span className={cn('text-xs font-medium', stateText.className)}>{t(stateText.key)}</span> : null}
+        {/* a state that comes from a gate on the STORY is said once, on the story's own row (story #4888) — not again on every piece of work under it */}
+        {stateText && !row.stateFromStory ? <span className={cn('text-xs font-medium', stateText.className)}>{t(stateText.key)}</span> : null}
       </div>
     </div>
   );

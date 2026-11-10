@@ -153,6 +153,8 @@ export interface WorkListRow {
    * 실 개수("산출물 N")를 보인다. */
   artifactCount: number;
   state: WorkListRowState;
+  /** story #4888 — the state above came from a gate on the STORY (not on this task / run): the story's own row says it, so the child row does not say it again */
+  stateFromStory?: boolean;
 }
 
 export interface WorkListStoryGroup {
@@ -269,7 +271,10 @@ function deriveAgentRunState(run: WorkListAgentRunInput): WorkListRowState {
 }
 
 export function deriveWorkList(input: WorkListInput): WorkList {
-  const storyById = new Map(input.stories.items.map((s) => [s.id, s]));
+  // a story listed twice (the same id) is one story: the first one counts
+  const seenStoryIds = new Set<string>();
+  const uniqueStories = input.stories.items.filter((s) => (seenStoryIds.has(s.id) ? false : (seenStoryIds.add(s.id), true)));
+  const storyById = new Map(uniqueStories.map((s) => [s.id, s]));
   const memberTypeById = new Map(input.teamMembers.map((m) => [m.id, m.type]));
   const memberNameById = new Map(input.teamMembers.map((m) => [m.id, m.name]));
 
@@ -324,7 +329,8 @@ export function deriveWorkList(input: WorkListInput): WorkList {
     const story = storyById.get(task.story_id);
     if (!story) continue; // 부모 스토리를 못 찾으면(다른 project 페이지 등) 짓지 않고 생략.
     const group = ensureStoryGroup(story);
-    const inboxItem = findPendingInbox(input.inbox, 'task', task.id) ?? findPendingInbox(input.inbox, 'story', story.id);
+    const ownGate = findPendingInbox(input.inbox, 'task', task.id);
+    const inboxItem = ownGate ?? findPendingInbox(input.inbox, 'story', story.id);
     const memberType = task.assignee_id ? memberTypeById.get(task.assignee_id) : null;
     const isDelegated = memberType === 'agent';
     const row: WorkListRow = {
@@ -338,6 +344,7 @@ export function deriveWorkList(input: WorkListInput): WorkList {
       lowRisk: lowRiskFromInboxItem(inboxItem),
       artifactCount: input.artifactCountByStoryId.get(story.id) ?? 0,
       state: deriveTaskState(task, inboxItem),
+      stateFromStory: !ownGate && inboxItem !== null ? true : undefined,
     };
     group.rows.push(row);
     bumpGoalTotals(story.epic_id, row);
@@ -362,18 +369,19 @@ export function deriveWorkList(input: WorkListInput): WorkList {
       lowRisk: lowRiskFromInboxItem(inboxItem),
       artifactCount: input.artifactCountByStoryId.get(story.id) ?? 0,
       state: inboxItem ? stateFromInboxItem(inboxItem) : deriveAgentRunState(run),
+      stateFromStory: inboxItem ? true : undefined,
     };
     group.rows.push(row);
     bumpGoalTotals(story.epic_id, row);
   }
 
   // story #4888 — every story is a row of the list, whether or not it has been split into tasks (before, a story with no task and no agent run was dropped — 20 stories could read as an empty list)
-  for (const story of input.stories.items) ensureStoryGroup(story);
+  for (const story of uniqueStories) ensureStoryGroup(story);
 
   const groups: WorkListGoalGroup[] = [];
   for (const goal of input.goals.items) {
     const stories: WorkListStoryGroup[] = [];
-    for (const story of input.stories.items) {
+    for (const story of uniqueStories) {
       if (story.epic_id !== goal.id) continue;
       const g = storyGroups.get(story.id);
       if (g) stories.push(g);
@@ -400,7 +408,7 @@ export function deriveWorkList(input: WorkListInput): WorkList {
   // 통째로 비어 "표시할 일이 없어요"로 오독됐다 — docs-index.tsx UNCATEGORIZED·doc-groups.ts
   // {groups, ungrouped} 선례와 동형으로 "미분류" 합성 그룹을 붙인다(걷어내지 않는다).
   const unassignedStories: WorkListStoryGroup[] = [];
-  for (const story of input.stories.items) {
+  for (const story of uniqueStories) {
     if (story.epic_id !== null) continue;
     const g = storyGroups.get(story.id);
     if (g) unassignedStories.push(g);
@@ -425,6 +433,6 @@ export function deriveWorkList(input: WorkListInput): WorkList {
   return {
     groups,
     partial: isPartial(input.goals, input.stories, input.tasks, input.agentRuns),
-    totalStoryCount: input.stories.items.length,
+    totalStoryCount: uniqueStories.length,
   };
 }

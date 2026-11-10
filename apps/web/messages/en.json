@@ -664,7 +664,7 @@
     "hypothesesStatusFilterAriaLabel": "Filter by {label}",
     "emptyStateFilteredTitle": "Nothing matches the filters",
     "emptyStateFilteredHint": "Change or clear the filters",
-    "storyWorkCounts": "{count, plural, one {# task} other {# tasks}} · {delegated} delegated",
+    "storyWorkCounts": "{count, plural, one {# work item} other {# work items}} · {delegated} delegated",
     "storyNeedsHand": "Needs my hand"
   },
   "organization": {

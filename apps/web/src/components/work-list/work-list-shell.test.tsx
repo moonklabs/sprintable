@@ -163,6 +163,18 @@ describe('WorkListShell — 일이 없는 스토리도 행이다(story #3934 재
     expect(container.querySelector('[data-testid="story-work-rows"]')).toBeNull();
   });
 
+  it('⭐스토리 행도 산출물 · 저위험 칩을 단다(일이 없는 스토리라도)', async () => {
+    const payload = unassignedOnlyPayload();
+    const story = payload.workList.groups[0]!.stories[0]!;
+    story.rows = [];
+    story.selfRow = { ...story.selfRow, artifactCount: 2, lowRisk: true };
+    fetchWorkListMock.mockResolvedValue(payload);
+    await mount();
+    const text = container.querySelector('[data-story-id="s1"]')!.textContent ?? '';
+    expect(text).toContain('산출물 2');
+    expect(text).toContain('저위험');
+  });
+
   it('일이 있는 스토리는 «일 N개 · 위임 M개» 부제를 달고, 일은 스토리 밑에 들여 쓴다', async () => {
     fetchWorkListMock.mockResolvedValue(unassignedOnlyPayload());
     await mount();

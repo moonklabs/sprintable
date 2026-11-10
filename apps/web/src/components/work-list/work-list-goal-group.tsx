@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { Chip } from '@/components/ds/chip';
 import { CountBadge } from '@/components/ds/count-badge';
 import { ListRow } from '@/components/ds/list-row';
 import { SectionHeader } from '@/components/ds/section-header';
@@ -45,6 +46,8 @@ function StoryRowView({ story, selectedRowId, onSelect }: { story: WorkListStory
     subtitle,
     trailing: (
       <>
+        {story.selfRow.artifactCount > 0 ? <Chip>{t('chipArtifacts', { count: story.selfRow.artifactCount })}</Chip> : null}
+        {story.selfRow.lowRisk ? <Chip>{t('chipLowRisk')}</Chip> : null}
         <StateWord state={story.selfRow.state} />
         {statusLabel ? (
           <span className={cn('text-ds-small', story.status === 'done' ? 'font-semibold text-ds-done' : 'text-ds-ink-3')} data-testid="story-status-badge">{statusLabel}</span>

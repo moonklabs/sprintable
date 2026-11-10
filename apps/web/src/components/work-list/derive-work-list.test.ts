@@ -281,6 +281,40 @@ describe('deriveWorkList — 목표 헤더 집계(스토리 단위 · story #488
     expect(group.delegatedCount).toBe(2); // t2(agent) + r1(agent_run은 항상 위임) — still counted by work
   });
 
+  it('⭐같은 id의 스토리가 둘 들어와도 한 스토리다(행 · 건수가 부풀지 않는다)', () => {
+    const result = deriveWorkList(baseInput({
+      stories: page([
+        { id: 's1', title: '스토리1', epic_id: 'g1', status: 'done' },
+        { id: 's1', title: '스토리1(중복)', epic_id: 'g1', status: 'done' },
+      ]),
+    }));
+    expect(result.groups[0].stories).toHaveLength(1);
+    expect(result.groups[0].totalCount).toBe(1);
+    expect(result.groups[0].stories[0].title).toBe('스토리1'); // the first one counts
+    expect(result.totalStoryCount).toBe(1);
+  });
+
+  it('⭐스토리에 걸린 결재 상태는 스토리 행이 말하고, 그 밑 일 · 실행 행은 stateFromStory로 «이미 위에서 말했다»고 표시한다(자기 결재가 있으면 표시 안 함)', () => {
+    const result = deriveWorkList(baseInput({
+      tasks: page([
+        { id: 't1', story_id: 's1', assignee_id: null, title: '자기 결재 없음', status: 'todo' },
+        { id: 't2', story_id: 's1', assignee_id: null, title: '자기 결재 있음', status: 'todo' },
+      ]),
+      agentRuns: page([{ id: 'r1', story_id: 's1', agent_id: 'a1', agent_name: '미르코', status: 'running' }]),
+      inbox: [
+        { source: 'gate', id: 'g-story', work_item_id: 's1', work_item_type: 'story', status: 'pending', gate_type: 'approval', risk_grade: 'low' },
+        { source: 'gate', id: 'g-t2', work_item_id: 't2', work_item_type: 'task', status: 'pending', gate_type: 'external_publish', risk_grade: 'high' },
+      ],
+    }));
+    const story = result.groups[0].stories[0];
+    expect(story.selfRow.state).toBe('awaiting_approval');
+    const byId = Object.fromEntries(story.rows.map((r) => [r.id, r]));
+    expect(byId['t1']!.stateFromStory).toBe(true); // inherits the story's gate: said once, on the story row
+    expect(byId['r1']!.stateFromStory).toBe(true);
+    expect(byId['t2']!.state).toBe('awaiting_signature'); // its OWN gate
+    expect(byId['t2']!.stateFromStory).toBeUndefined();
+  });
+
   it('스토리 행(selfRow)은 그 스토리에 걸린 pending 결재가 있으면 상태를 단다(승인 대기 등)', () => {
     const result = deriveWorkList(baseInput({
       inbox: [{ source: 'gate', id: 'g-1', work_item_id: 's1', work_item_type: 'story', status: 'pending', gate_type: 'approval', risk_grade: 'low' }],
