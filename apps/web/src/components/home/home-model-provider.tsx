@@ -237,7 +237,7 @@ export function HomeModelProvider({ viewerMemberId, projectId, orgId, children }
     };
     document.addEventListener('visibilitychange', onBack);
     window.addEventListener('focus', onBack);
-    // story #4885 — live: an approval event (gate resolved · delegated · tossed · a permission request or its change) or any notice sent to me moves what the home model counts, so it re-reads
+    // story #4885 — live: an approval event (gate created · resolved · delegated · tossed · a permission request or its change) or any notice sent to me moves what the home model counts, so it re-reads
     // at once (one read for a burst of events) instead of waiting for the next poll. This is where the phone tab bar's own live count went when its badge became the home model's number (4263 AC2).
     let coalesce: ReturnType<typeof setTimeout> | null = null;
     // an approval event preempts a notice's longer wait (a person waiting on an approval must not wait out the notice throttle)
