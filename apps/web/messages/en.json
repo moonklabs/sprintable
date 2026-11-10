@@ -2063,6 +2063,7 @@
     "refresh5min": "5 min",
     "surfaceDescription": "Manage notifications, webhooks, invitations, subscriptions, and AI settings from one shared operator surface.",
     "notificationDescription": "Toggle web notifications for each operating event.",
+    "notificationCategoryToggleAria": "{category}: {action}",
     "notificationDefaultLevel": "Default notification level",
     "notificationLevel_all": "All",
     "notificationLevel_mentions": "Mentions only",

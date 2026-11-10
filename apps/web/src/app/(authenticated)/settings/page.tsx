@@ -852,6 +852,37 @@ export default function SettingsPage() {
                 onToggleCategory={(key, enable) => void toggleCategory(key as NotificationCategoryKey, enable)}
                 showSoonColumns={isEEEnabled()}
               />
+              {currentProjectId ? (
+                <div className="mt-6">
+                  <StandupDeadlineSection projectId={currentProjectId} />
+                </div>
+              ) : null}
+              {/* S-GATE-4: 프로젝트 게이트 정책 매트릭스. canEdit = org admin/owner OR **이 프로젝트의 owner**
+                  — BE gate_config(PUT/DELETE scope='project')가 project owner 도 허용하므로 정합(RC①). project
+                  admin 은 BE 비허용이라 제외(meRole==='owner'만 — over-permission 0). cross-project 인 #1562
+                  grant 와 달리 자기 프로젝트 편집이라 보수적 org-admin-only 가 오히려 under-permissive 였음. */}
+              {currentProjectId ? (
+                <div className="mt-6">
+                  <GateLevelMatrix
+                    surface="project"
+                    projectId={currentProjectId}
+                    canEdit={currentOrgRole === 'owner' || currentOrgRole === 'admin' || currentProjectRole === 'owner'}
+                  />
+                </div>
+              ) : null}
+              <div className="mt-6">
+                <SectionCard>
+                  <SectionCardHeader>
+                    <div className="space-y-1">
+                      <h2 className="text-base font-semibold text-foreground">{t('autoRefresh')}</h2>
+                      <p className="text-sm text-muted-foreground">{t('autoRefreshDescription')}</p>
+                    </div>
+                  </SectionCardHeader>
+                  <SectionCardBody>
+                    <RefreshSettings />
+                  </SectionCardBody>
+                </SectionCard>
+              </div>
             </TabsContent>
 
             <TabsContent value="organization">

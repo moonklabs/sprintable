@@ -121,8 +121,8 @@ describe('설정 알림 «앱 내» 토글 = 스위치([SID:4379])', () => {
     expect(on.getAttribute('role')).toBe('switch');
     expect(on.getAttribute('aria-checked')).toBe('true');
     // 보이는 켜짐(손잡이 색)과 읽히는 값이 같은 행 값에서 나온다.
-    expect(on.querySelector('span')!.className).toContain('bg-ds-action');
-    expect(off.querySelector('span')!.className).not.toContain('bg-ds-action');
+    expect(on.querySelector('span.rounded-full')!.className).toContain('bg-ds-action');
+    expect(off.querySelector('span.rounded-full')!.className).not.toContain('bg-ds-action');
   });
 
   it('누르면 aria-checked가 뒤집히고 저장 값도 같다', async () => {

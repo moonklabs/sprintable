@@ -13,7 +13,6 @@ import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui
 import { cn } from '@/lib/utils';
 
 export type NotificationLevel = 'all' | 'mentions' | 'mute';
-const LEVELS: readonly NotificationLevel[] = ['all', 'mentions', 'mute'];
 
 export interface NotificationsPaneProps {
   loading: boolean;
@@ -27,6 +26,16 @@ export interface NotificationsPaneProps {
   onToggleCategory: (categoryKey: string, enable: boolean) => void;
   /** EE builds draw the two «coming soon» channel columns (desktop widths only) */
   showSoonColumns: boolean;
+}
+
+/** one of the three default levels — a press that picks it (aria-pressed says which is picked) */
+function LevelButton({ level, current, disabled, onSetLevel }: { level: NotificationLevel; current: NotificationLevel; disabled: boolean; onSetLevel: (level: NotificationLevel) => void }) {
+  const t = useTranslations('settings');
+  return (
+    <Button type="button" variant={current === level ? 'primary' : 'secondary'} disabled={disabled} onClick={() => onSetLevel(level)} aria-pressed={current === level}>
+      {t(`notificationLevel_${level}`)}
+    </Button>
+  );
 }
 
 export function NotificationsPane({ loading, categories, globalLevel, savingLevel, onSetLevel, getEnabled, onToggle, isCategoryAllEnabled, onToggleCategory, showSoonColumns }: NotificationsPaneProps) {
@@ -55,18 +64,9 @@ export function NotificationsPane({ loading, categories, globalLevel, savingLeve
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-ds-control border border-ds-line bg-ds-surface px-3 py-2" data-testid="notifications-default-level">
               <span className="text-ds-body text-ds-ink">{t('notificationDefaultLevel')}</span>
               <div className="flex shrink-0 gap-1">
-                {LEVELS.map((level) => (
-                  <Button
-                    key={level}
-                    type="button"
-                    variant={globalLevel === level ? 'primary' : 'secondary'}
-                    disabled={savingLevel}
-                    onClick={() => onSetLevel(level)}
-                    aria-pressed={globalLevel === level}
-                  >
-                    {t(`notificationLevel_${level}`)}
-                  </Button>
-                ))}
+                <LevelButton level="all" current={globalLevel} disabled={savingLevel} onSetLevel={onSetLevel} />
+                <LevelButton level="mentions" current={globalLevel} disabled={savingLevel} onSetLevel={onSetLevel} />
+                <LevelButton level="mute" current={globalLevel} disabled={savingLevel} onSetLevel={onSetLevel} />
               </div>
             </div>
 
@@ -85,7 +85,13 @@ export function NotificationsPane({ loading, categories, globalLevel, savingLeve
                     title={t(`notification_category_${category.key}`)}
                     level={3}
                     trailing={
-                      <Button type="button" variant="quiet" onClick={() => onToggleCategory(category.key, !allEnabled)}>
+                      <Button
+                        type="button"
+                        variant="quiet"
+                        // «Disable all» ×4 would read the same four times: the name carries the category it acts on (§22-18)
+                        aria-label={t('notificationCategoryToggleAria', { category: t(`notification_category_${category.key}`), action: allEnabled ? tc('disable_all') : tc('enable_all') })}
+                        onClick={() => onToggleCategory(category.key, !allEnabled)}
+                      >
                         {allEnabled ? tc('disable_all') : tc('enable_all')}
                       </Button>
                     }
@@ -105,6 +111,8 @@ export function NotificationsPane({ loading, categories, globalLevel, savingLeve
                               role="switch"
                               aria-checked={enabled}
                               aria-labelledby={`notif-event-${eventType} notif-col-in-app`}
+                              // the labelledby pair is the name read («event 앱 내»); this one says the same event for the row-action scan and for a tool that reads aria-label only (§22-18)
+                              aria-label={t(`event_${eventType}`)}
                               onClick={() => onToggle(eventType, enabled)}
                               className="h-11 w-14 border-transparent p-0"
                             >
