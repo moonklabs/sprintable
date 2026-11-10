@@ -134,8 +134,6 @@ export default function LoginPage() {
           <p className="text-sm text-muted-foreground">{t('subtitle')}</p>
         </div>
 
-        <MacAppOffer suppressed={Boolean(nextParam) || sessionExpired} />
-
         {sessionExpired && (
           <Alert variant="warning">
             <AlertDescription>{t('sessionExpired')}</AlertDescription>
@@ -238,12 +236,14 @@ export default function LoginPage() {
               {t('google')}
             </a>
 
-            <p className="text-center text-xs text-muted-foreground">
+            {/* the notice for the button above: continuing with Google (or Apple) on a first visit makes the account and records the terms (tos_accepted=true) — it stays the next sibling of those buttons */}
+            <p className="text-center text-xs text-muted-foreground" data-testid="login-terms-line">
               {t('termsPrefix')}{' '}
               <a href="/terms" target="_blank" className="underline hover:text-foreground/60">{t('termsOfService')}</a>
               {' '}{t('and')}{' '}
               <a href="/privacy" target="_blank" className="underline hover:text-foreground/60">{t('privacyPolicy')}</a>
             </p>
+
           </div>
         )}
 
@@ -264,6 +264,12 @@ export default function LoginPage() {
             {t('signUp')}
           </Link>
         </p>
+      </div>
+      {/* story 4891 (UI-8 U8): what used to stand ABOVE the login card — the Mac app's way in and the web sign-up (one line of links) — now stands under it. Same words, same links.
+          The terms sentence is NOT here: the Google button is a sign-up road for a person who has no account (the server writes tos_accepted_at from its click), so the one sentence that tells them
+          stays right under that button, inside the card (PO 11-10 21:07Z — «a notice next to the button that records the consent»). */}
+      <div className="w-full max-w-sm space-y-3 px-4 empty:hidden" data-testid="login-bottom">
+        <MacAppOffer suppressed={Boolean(nextParam) || sessionExpired} />
       </div>
       <LegalFooter />
     </div>

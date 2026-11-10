@@ -11,8 +11,6 @@
 import { createContext, useContext, useSyncExternalStore, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { Card } from '@/components/ui/card';
-import { buttonVariants } from '@/components/ui/button';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { notAMac } from '@/components/desktop/desktop-download-card';
 
@@ -31,17 +29,22 @@ export function MacAppOffer({ suppressed }: { suppressed: boolean }) {
   const { inPhoneApp } = usePhoneBridge();
   const onAMac = useSyncExternalStore(subscribeToNothing, () => !notAMac(navigator.userAgent, inPhoneApp), () => false);
   if (!enabled || suppressed || !onAMac) return null;
+  // story 4891 (UI-8 U8 · PO 11-10): not a card ABOVE the login — a quiet block UNDER it. The login card keeps one main action and a few helpers; the Mac app's way in (the file itself, no sign-up in between) and
+  // the web sign-up for a person who would rather start there are still here, as two plain links on one line (the same links, the same places they go) with the one sentence on what this is.
   return (
-    <Card className="space-y-2 p-3 text-center" data-testid="login-mac-app-offer">
-      <p className="break-keep text-sm text-foreground">{t('macAppPitch')}</p>
-      {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a file download (a route handler that redirects to the file), not a page: <Link> would try a client navigation to it */}
-      <a href="/desktop/get/macos" className={`${buttonVariants({ variant: 'outline' })} w-full min-h-[44px]`}>
-        {t('macAppGet')}
-      </a>
+    <div className="space-y-1 text-center" data-testid="login-mac-app-offer">
+      <p className="break-keep text-xs text-muted-foreground">{t('macAppPitch')}</p>
+      <p className="flex flex-wrap items-center justify-center gap-x-3 text-sm">
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a file download (a route handler that redirects to the file), not a page: <Link> would try a client navigation to it */}
+        <a href="/desktop/get/macos" className="inline-flex min-h-[44px] items-center font-medium text-brand-text underline-offset-2 hover:underline">
+          {t('macAppGet')}
+        </a>
+        <span aria-hidden className="text-muted-foreground">·</span>
+        <Link href="/register" className="inline-flex min-h-[44px] items-center break-keep text-muted-foreground underline underline-offset-2">
+          {t('macAppWebSignup')}
+        </Link>
+      </p>
       <p className="break-keep text-xs text-muted-foreground">{t('macAppGetHint')}</p>
-      <Link href="/register" className="inline-block min-h-[44px] break-keep px-2 text-xs text-muted-foreground underline underline-offset-2">
-        {t('macAppWebSignup')}
-      </Link>
-    </Card>
+    </div>
   );
 }
