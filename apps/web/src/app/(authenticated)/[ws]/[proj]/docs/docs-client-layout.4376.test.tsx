@@ -149,6 +149,7 @@ describe('DocsClientLayout — 문서 트리는 한 번에 받는다(story #4376
     expect(container.textContent).toContain('3개 중 2개 표시 중');
     const more = [...container.querySelectorAll('button')].find((b) => b.textContent === '더 보기');
     expect(more).toBeTruthy();
+    expect(more!.getAttribute('data-slot')).toBe('ds-button');   // story 4892 — the load-more button is the ds Button
     await act(async () => { more!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     const next = new URL(calls.at(-1)!, 'http://t').searchParams;
