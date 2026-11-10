@@ -45,11 +45,11 @@ describe('buildMobileHubGroups(story #4885)', () => {
     expect(g.flatMap(ids)).not.toContain('org-briefing');
   });
 
-  it('⭐서랍이 걷혔다 — 예전 소묶음(subgroups)도 «연결·규칙» 구역도 없다 · 에이전트 · 실행 기록 · API 키는 한 구역', () => {
+  it('⭐서랍이 걷혔다 — 예전 소묶음(subgroups)도 «연결·규칙» 구역도 없다 · «팀» 한 구역에 구성원 · 에이전트 · 실행 기록 · API 키', () => {
     const g = hub(DEFAULT_NAV_V3_FLAGS);
     expect(g.every((x) => !('subgroups' in x))).toBe(true);
     expect(g.map((x) => x.id)).not.toContain('connect-rules');
-    expect(ids(g.find((x) => x.id === 'team'))).toEqual(['org-workforce', 'org-workforce-runs', 'org-workforce-api-keys']);
+    expect(ids(g.find((x) => x.id === 'team'))).toEqual(['org-members', 'org-workforce', 'org-workforce-runs', 'org-workforce-api-keys']);
   });
 
   it('모든 목적지는 탭이나 메뉴 어딘가에 — 플래그 둘 다(NAV_GROUPS 전부 + 그 밖 전부)', () => {

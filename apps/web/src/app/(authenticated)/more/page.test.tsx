@@ -80,15 +80,15 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
   // 전담(별도 축, 이 파일 관심사 아님).
   // story #4885(UI-2 AC4 PR 1) — 새 구조: 구역은 사이드바와 같은 한 정의(오늘 · 일감 · 에이전트 · 지식 · 조직 · 설정) + 맨 아래 «그 밖의 화면». 일감의 보드(탭 «일감»)와 오늘의 결재(탭 «결재»)는
   // 바텀 탭이 depth 1로 커버해 빠진다. 「더보기」 서랍과 그 소묶음 · 캡션은 걷혔다.
-  it('섹션(h2) 순서가 확定대로다(목표[일감] / 에이전트 / 지식 / 조직 / 그 밖의 화면 — 한 항목 구역은 머리 없이 항목 줄 하나)', async () => {
+  it('섹션(h2) 순서가 확定대로다(목표[일감] / 팀 / 지식 / 조직 / 그 밖의 화면 — 한 항목 구역은 머리 없이 항목 줄 하나)', async () => {
     await mount();
     // story #4292(유나 1안) — 한 항목 구역(오늘 · 설정)은 머리 없이 항목 줄 하나. 카드(구역)는 일곱 · 순서는 사이드바 순서.
     const sectionLabels = [...container.querySelectorAll('h2')].map((el) => el.textContent?.trim());
-    expect(sectionLabels).toEqual(['목표', '에이전트', '지식', '조직', '그 밖의 화면']);
+    expect(sectionLabels).toEqual(['목표', '팀', '지식', '조직', '그 밖의 화면']);
     const cards = [...container.querySelectorAll('[data-testid="more-section-card"]')];
     expect(cards).toHaveLength(7);
     expect(cards.map((c) => c.querySelector('[data-testid="more-menu-link"] span span')?.textContent)).toEqual(
-      ['오늘', '목표', '에이전트', '문서', '결과', '설정', '리워드'],
+      ['오늘', '목표', '구성원', '문서', '결과', '설정', '리워드'],
     );
     // story #4291(PO) — 머리 없는 카드에 group 이름을 붙이지 않는다(구역 이름 = 그 한 항목 이름이라 화면 읽기가 같은 낱말을 두 번 읽음).
     expect(cards.map((c) => [c.getAttribute('role'), c.getAttribute('aria-label')])).toEqual(cards.map(() => [null, null]));

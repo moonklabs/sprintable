@@ -77,9 +77,9 @@ export interface NavGroupConfig {
 // v3 쪽(/today · /chat · /work-list · /connect-rules)은 켜지도 떼지도 않는다(이 파일이 더는 가리키지 않을 뿐, 옮기지 않는 것으로 자연도태 — 라우트 정리는 화면 주인과 화면이 선 뒤).
 // 설계 근거: doc ui2-4885-ac3-ia-draft-v0(AC3 v1) §2·§3 — 매일 다섯(오늘 · 대화 · 일감 · 팀/에이전트 · 지식)이 위에 1단으로, 조직 항목은 접힌 «조직» 안에, 설정, 그리고 «전체».
 //
-// «팀» ↔ «에이전트»(선생님 결정 칸): 아래 TEAM_VARIANT 한 줄이 이름 · 묶음 · 구성원 항목의 자리를 함께 정한다 — 결정이 나면 이 한 줄만 바꾼다(시험이 두 꼴 다 선다).
+// «팀» ↔ «에이전트»: 아래 TEAM_VARIANT 한 줄이 이름 · 묶음 · 구성원 항목의 자리를 함께 정한다. 선생님 결정(11-10) = «팀». 대안 꼴(«에이전트»)도 시험이 서 있어 한 줄로 되돌릴 수 있다.
 export type TeamVariant = 'agent' | 'team';
-export const TEAM_VARIANT: TeamVariant = 'agent';
+export const TEAM_VARIANT: TeamVariant = 'team';
 
 const ITEM_ORG_BRIEFING: NavItemConfig = { id: 'org-briefing', labelKey: 'zoneNow', descriptionKey: 'descOrgBriefing', icon: Newspaper, kind: 'static', path: '/org-briefing' };
 // 결재: «오늘» 화면이 받은 함 하나로 합쳐지기 전(오늘 화면 주인 UI-5 몫)까지 결재의 입구다 — 폰 하단 «결재» 탭과 같은 이름 · 같은 착지(게이트 탭) · 같은 배지(내가 지정된 대기 결재 수). 알림 목록은 알림 종과 같은 화면의 다른 탭.

@@ -30,19 +30,23 @@ describe('정보 구조 한 벌 — 구역 · 순서 · 이름', () => {
     expect(MOBILE_HUB_GROUP_ORDER).toEqual(NAV_GROUPS.map((g) => g.id));
   });
 
-  it('⭐구역별 항목과 순서(에이전트 꼴 = 지금 기본)', () => {
-    const g = buildNavGroups('agent');
+  it('⭐맨 위 이름 = «팀»(선생님 결정 11-10): 기본 꼴이 «팀»이다', () => {
+    expect(TEAM_VARIANT).toBe('team');
+  });
+
+  it('⭐구역별 항목과 순서(«팀» 꼴 = 기본 · 구성원이 팀 안으로 올라와 조직에는 없다)', () => {
+    const g = buildNavGroups('team');
     expect(ids(g, 'now')).toEqual(['org-briefing', 'inbox']);
     expect(ids(g, 'dev')).toEqual(['board', 'goals', 'loops']);
-    expect(ids(g, 'team')).toEqual(['org-workforce', 'org-workforce-runs', 'org-workforce-api-keys']);
+    expect(ids(g, 'team')).toEqual(['org-members', 'org-workforce', 'org-workforce-runs', 'org-workforce-api-keys']);
     expect(ids(g, 'knowledge')).toEqual(['docs', 'artifacts', 'storage']);
     expect(ids(g, 'org')).toEqual([
-      'org-insights-board', 'org-channels', 'org-generation-connectors', 'org-content-rules', 'org-events', 'org-trust', 'org-roles', 'org-members', 'activity', 'content', 'channel-posts',
+      'org-insights-board', 'org-channels', 'org-generation-connectors', 'org-content-rules', 'org-events', 'org-trust', 'org-roles', 'activity', 'content', 'channel-posts',
     ]);
     expect(ids(g, 'settings')).toEqual(['settings']);
   });
 
-  it('⭐«팀» 꼴 = 선생님 결정 칸: 한 줄(TEAM_VARIANT)로 이름 · 묶음이 바뀌고 구성원이 조직에서 팀으로 올라온다 — 두 꼴 다 같은 규칙을 지킨다', () => {
+  it('⭐«팀» ↔ «에이전트» 두 꼴: 한 줄(TEAM_VARIANT)로 이름 · 묶음이 바뀌고 구성원이 조직 ↔ 팀을 오간다 — 두 꼴 다 같은 규칙을 지킨다(결정은 «팀»이지만 대안 꼴도 시험이 선다)', () => {
     const team = buildNavGroups('team');
     expect(team.find((g) => g.id === 'team')?.labelKey).toBe('zoneTeam');
     expect(ids(team, 'team')).toEqual(['org-members', 'org-workforce', 'org-workforce-runs', 'org-workforce-api-keys']);
@@ -59,8 +63,8 @@ describe('정보 구조 한 벌 — 구역 · 순서 · 이름', () => {
     expect(NAV_GROUPS).toEqual(buildNavGroups(TEAM_VARIANT));
   });
 
-  it('머리글(접힘 가능한 구역)은 지식 · 조직(+ «팀» 꼴의 팀)뿐이고 나머지는 머리 없는 구역이다', () => {
-    expect(NAV_GROUPS.filter((g) => g.labelKey).map((g) => g.labelKey)).toEqual(['zoneKnowledge', 'zoneOrganization']);
+  it('머리글(접힘 가능한 구역)은 «팀»(선생님 결정 11-10) · 지식 · 조직이고 오늘 · 일감 · 설정은 머리 없는 구역이다', () => {
+    expect(NAV_GROUPS.filter((g) => g.labelKey).map((g) => g.labelKey)).toEqual(['zoneTeam', 'zoneKnowledge', 'zoneOrganization']);
   });
 
   it('⭐모든 항목은 ko · en 이름과 설명이 있다(키가 빠지면 RED)', () => {

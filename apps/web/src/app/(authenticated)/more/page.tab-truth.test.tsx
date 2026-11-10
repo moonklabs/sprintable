@@ -63,15 +63,15 @@ describe('전체 메뉴 — 플래그 ON에서 실제 탭과 한 세계(story #4
     expect(container.textContent).not.toContain(koMessages.nav.descOrgBriefing);
   });
 
-  it('⭐새 구조 — «조직» 머리 한 번 · 연결 · 규칙 항목들이 그 안 · 에이전트 구역에 실행 기록 · API 키', async () => {
+  it('⭐새 구조 — «조직» 머리 한 번 · 연결 · 규칙 항목들이 그 안 · «팀» 구역에 구성원 · 에이전트 · 실행 기록 · API 키', async () => {
     await mount('ko');
     const headings = [...container.querySelectorAll('h2')].map((el) => el.textContent?.trim());
     expect(headings.filter((h) => h === koMessages.nav.zoneOrganization)).toHaveLength(1);
     const orgCard = [...container.querySelectorAll('h2')].find((h) => h.textContent?.startsWith(koMessages.nav.zoneOrganization))!.closest('[class*="overflow-hidden"]')!;
     const orgNames = [...orgCard.querySelectorAll('a span.block.truncate')].map((el) => el.textContent);
     expect(orgNames).toEqual(expect.arrayContaining([koMessages.nav.orgChannels, koMessages.nav.orgGenerationConnectors, koMessages.nav.orgContentRules, koMessages.nav.orgEvents, koMessages.nav.orgTrust]));
-    const teamCard = [...container.querySelectorAll('h2')].find((h) => h.textContent?.startsWith(koMessages.nav.workforce))!.closest('[class*="overflow-hidden"]')!;
+    const teamCard = [...container.querySelectorAll('h2')].find((h) => h.textContent?.startsWith(koMessages.nav.zoneTeam))!.closest('[class*="overflow-hidden"]')!;
     expect([...teamCard.querySelectorAll('a span.block.truncate')].map((el) => el.textContent))
-      .toEqual([koMessages.nav.workforce, koMessages.nav.workforceRuns, koMessages.nav.workforceApiKeys]);
+      .toEqual([koMessages.nav.orgMembers, koMessages.nav.workforce, koMessages.nav.workforceRuns, koMessages.nav.workforceApiKeys]);
   });
 });

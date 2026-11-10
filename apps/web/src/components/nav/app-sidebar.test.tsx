@@ -119,9 +119,9 @@ async function mount(userName?: string, navV3Flags?: NavV3Flags) {
 const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
   { labelKey: null, labels: ['오늘', '결재'] },
   { labelKey: null, labels: ['일감', '목표', '실행'] },
-  { labelKey: null, labels: ['에이전트', '실행 기록', 'API 키'] },
+  { labelKey: 'zoneTeam', labels: ['구성원', '에이전트', '실행 기록', 'API 키'] },
   { labelKey: 'zoneKnowledge', labels: ['문서', '산출물', '스토리지'] },
-  { labelKey: 'zoneOrganization', labels: ['결과', '채널 연결', '연산 커넥터', '콘텐츠 규칙', '레시피', '신뢰 센터', '권한', '구성원', '활동 로그', '블로그 포스트', '채널 포스트'] },
+  { labelKey: 'zoneOrganization', labels: ['결과', '채널 연결', '연산 커넥터', '콘텐츠 규칙', '레시피', '신뢰 센터', '권한', '활동 로그', '블로그 포스트', '채널 포스트'] },
   { labelKey: null, labels: ['설정'] },
   { labelKey: null, labels: ['전체'] },
 ];
@@ -136,6 +136,7 @@ const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '오늘': '/org-briefing',
   '결재': '/inbox?tab=gates',
   '일감': '/flow',
+  '구성원': '/organization/members',
   '에이전트': '/organization/workforce',
   '실행 기록': '/organization/workforce/runs',
   'API 키': '/organization/workforce/api-keys',
@@ -149,12 +150,12 @@ const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
 };
 
 describe('AppSidebar — story #3824 → #4885 새 구조 렌더 회귀가드(매일 다섯 + 조직 + 설정 + 전체)', () => {
-  it('그룹 순서·라벨·항목 순서·라벨이 확定대로다(오늘 → 일감 → 에이전트 → 지식 → 조직 → 설정 → 전체)', async () => {
+  it('그룹 순서·라벨·항목 순서·라벨이 확定대로다(오늘 → 일감 → 팀 → 지식 → 조직 → 설정 → 전체)', async () => {
     expandAllGroups();
     await mount();
-    // 헤더리스 그룹(오늘·일감·에이전트·설정·전체)은 sidebar-group-label 자체가 없다 — 라벨 그룹은 「지식」 「조직」.
+    // 헤더리스 그룹(오늘·일감·설정·전체)은 sidebar-group-label 자체가 없다 — 라벨 그룹은 「팀」 「지식」 「조직」.
     const groupLabels = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')].map((el) => el.textContent);
-    expect(groupLabels).toEqual(['지식', '조직']);
+    expect(groupLabels).toEqual(['팀', '지식', '조직']);
 
     const groups = [...container.querySelectorAll('[data-slot="sidebar-group"]')];
     expect(groups.length).toBe(EXPECTED_GROUPS.length);
