@@ -150,7 +150,7 @@ function DailyEntry({ group, link, label, groupLabel, icon, badge, count }: {
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLAnchorElement | null>(null);
-  // Esc가 초점을 아이콘으로 돌려 놓을 때 그 초점이 목록을 다시 열지 않게 한 번만 건너뛴다.
+  // Esc가 목록 안 링크에서 초점을 아이콘으로 «옮길» 때만, 그 초점이 목록을 다시 열지 않게 한 번 건너뛴다(아이콘에서 Esc면 초점이 안 움직이므로 표지를 세우지 않는다).
   const escapedRef = useRef(false);
   const [first, ...rest] = group.items;
   if (!first) return null;
@@ -164,7 +164,7 @@ function DailyEntry({ group, link, label, groupLabel, icon, badge, count }: {
       onMouseLeave={() => setOpen(false)}
       onFocus={() => { if (escapedRef.current) { escapedRef.current = false; return; } setOpen(true); }}
       onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOpen(false); }}
-      onKeyDown={(e) => { if (e.key === 'Escape') { escapedRef.current = true; setOpen(false); triggerRef.current?.focus(); } }}
+      onKeyDown={(e) => { if (e.key === 'Escape') { setOpen(false); const trigger = triggerRef.current; if (trigger && document.activeElement !== trigger) { escapedRef.current = true; trigger.focus(); } } }}
     >
       <Link ref={triggerRef} href={firstLink.href} aria-label={groupLabel ?? label(first)} title={groupLabel ?? label(first)} aria-current={anyActive ? 'page' : undefined} className="relative block rounded-md focus-visible:ring-2 focus-visible:ring-ring" data-rail-item={first.id}>
         {icon(first.icon, anyActive)}

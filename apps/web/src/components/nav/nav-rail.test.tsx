@@ -198,4 +198,30 @@ describe('NavRail — B 셸 초안(아이콘 막대)', () => {
     await mount({ navV3Flags: { todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: false, desktopDownloadEnabled: true } });
     expect(container.querySelector('[data-rail-item="settings"]')?.getAttribute('aria-current')).toBe('page');
   });
+
+  it('⭐아이콘에서 Esc: 목록은 닫히지만 초점은 그대로라 표지가 남지 않는다 — 나갔다 다시 들어오면 목록이 다시 열린다(codex 3판)', async () => {
+    await mount();
+    const board = container.querySelector('[data-rail-item="board"]') as HTMLAnchorElement;
+    const flyout = () => container.querySelector('[data-rail-group="dev"] [data-testid="rail-flyout"]')?.getAttribute('data-open');
+    await act(async () => { board.focus(); });
+    expect(flyout()).toBe('true');
+    await act(async () => { board.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    expect(flyout()).toBe('false');
+    await act(async () => { board.blur(); });
+    await act(async () => { board.focus(); });
+    expect(flyout(), 'Esc 뒤 다시 들어온 초점은 목록을 연다').toBe('true');
+  });
+
+  it('Tab 흐름: 아이콘 초점 → 목록 안 링크로 옮겨도 열린 채 · 목록 밖으로 나가면 닫힌다', async () => {
+    await mount();
+    const board = container.querySelector('[data-rail-item="board"]') as HTMLAnchorElement;
+    const goals = container.querySelector('[data-flyout-item="goals"]') as HTMLAnchorElement;
+    const chats = container.querySelector('[data-rail-item="chats"]') as HTMLAnchorElement;
+    const flyout = () => container.querySelector('[data-rail-group="dev"] [data-testid="rail-flyout"]')?.getAttribute('data-open');
+    await act(async () => { board.focus(); });
+    await act(async () => { goals.focus(); });
+    expect(flyout(), '목록 안 링크로 초점이 옮겨도 열림').toBe('true');
+    await act(async () => { chats.focus(); });
+    expect(flyout(), '다른 구역으로 나가면 닫힘').toBe('false');
+  });
 });
