@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
@@ -84,6 +85,7 @@ interface ActivityLogViewProps {
 export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   const t = useTranslations('activityLog');
   const tc = useTranslations('common');
+  const { addToast } = useToast();
 
   const [items, setItems] = useState<ActivityLogItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -185,9 +187,14 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
         setItems((prev) => [...prev, ...result.items]);
         setOffset(nextOffset);
         setTotal(result.total);
+      } else {
+        // story 4892 — a refused answer used to do nothing at all. The button stays (offset unchanged) so pressing it again asks again;
+        // the same shared line the team activity feed uses.
+        addToast({ title: tc('loadMoreFailed'), type: 'error' });
       }
     } catch {
-      // 더보기 실패는 조용히 두고 버튼을 그대로 남겨(재클릭으로 재시도 가능).
+      // story 4892 — the same for a network error: say so, keep the button (a second press retries).
+      addToast({ title: tc('loadMoreFailed'), type: 'error' });
     } finally {
       setLoadingMore(false);
     }
