@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { whenFirstScreenQuiet } from '@/lib/first-screen-quiet';
-import { cn } from '@/lib/utils';
+import { TabNav, TabNavLink } from '@/components/ds/tab-nav';
 
 const TABS = [
   // story #3844(UX-v3·FE 4·일감 1, PO 지적 2026-09-14 07:32Z — 시안 06d2d61c 재대조: 탭
@@ -56,12 +56,6 @@ export const WORKSPACE_FRAME_TABS: ReadonlyArray<{ key: WorkspaceFrameTabKey; pa
  * (epic-swimlane-board.tsx, /epics)으로 실체가 생겨 3번째 탭으로 합류한다.
  */
 export function WorkspaceFrameTabs({ active }: { active: WorkspaceFrameTabKey }) {
-  // story #4277(유나 판단 ① 필수) — 줄이 가로 스크롤이 되면서 켜진 탭이 화면 밖일 수 있다(«가설»로 들어온 경우 등) — 그릴 때 · 탭이 바뀔 때
-  // 켜진 탭을 줄 안으로(block/inline 'nearest' — 이미 보이면 안 움직인다 · 페이지 세로 스크롤은 건드리지 않는다).
-  const activeRef = useRef<HTMLAnchorElement | null>(null);
-  useEffect(() => {
-    activeRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
-  }, [active]);
   const t = useTranslations('nav');
   const params = useParams<{ ws: string; proj: string }>();
   const router = useRouter();
@@ -82,48 +76,26 @@ export function WorkspaceFrameTabs({ active }: { active: WorkspaceFrameTabKey })
   // <lg에서만 이 underline 계열 안에서 텍스트·인디케이터 두께를 키운다).
 
   return (
-    // 유나 QA 블로커(PR#3358, 2026-08-22) — flow-client 내부 3탭(가설/갈래/칸반)과 스타일이
-    // byte-identical(둘 다 rounded pill+bg-muted active)이라 스택되면 «동일 탭 행 2개」로
-    // 위계 구분이 안 됐다. 처방(유나 확定): 상위 프레임은 text-sm+하단 인디케이터(underline)로
-    // — 페이지-크롬(notification-bell.tsx 필터 탭과 동형 패턴, 신규 발명 아님). 내부 뷰 탭의
-    // rounded pill과 kind 자체가 달라 한눈에 "이건 다른 층"으로 읽힌다.
-    // story #4277 — 402폭에서 상위 프레임 탭(보드 · 목록 · 스프린트 · 에픽 · 회고 · 가설 · text-base)이 줄 폭(370)을 넘어 셸 스크롤러가 가로로
-    // 넘쳤다(423/402). 줄 자체를 가로 스크롤(스크롤바 숨김)로 — 탭은 줄바꿈 · 축소 없이 제 폭. overflow-y-hidden은 버튼의 -mb-px(아래 선과 겹침)가
-    // 1px 세로 스크롤을 만들지 않게.
-    // 아래 선은 바깥 래퍼에 둔다(유나 관찰 · PO 4639) — 오른쪽 끝 흐림 mask가 줄 요소 전체(테두리 포함)에 걸려 선도 오른쪽 24px에서 옅어졌다.
-    // 켜진 탭 밑줄은 전과 같다: 스크롤러의 overflow 클립은 안쪽 경계라 버튼의 -mb-px 1px은 예전에도 잘려 밑줄이 선 바로 위에서 끝났다.
-    <div className="border-b border-border" data-testid="workspace-frame-tabs-rule">
-      <div
-        className="focus-inset flex items-center gap-4 overflow-x-auto overflow-y-hidden pr-6 [mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-        role="tablist"
-        aria-label={t('workspace')}
-      >
-        {TABS.map((tab) => (
-          // story #4291 — 탭 = 프리패치되는 <Link>(예전 router.push 버튼은 프리패치가 없어 형제 탭 이동이 응답까지 ~600ms 무반응).
-          // [SID:4299] 보일 때 자동 프리패치는 끄고(prefetch={false}) 위 훅(이웃 둘 · 첫 화면 뒤)과 누르려는 기색 때 router.prefetch로.
-          // 탭 줄은 이제 `[ws]/[proj]` 레이아웃(WorkTabsFrame)에 살아 전환 때 다시 그려지지 않는다 — 두 가지는 한 묶음이다(카드 처방).
+    // story #4888(UI-5 보드 · 목록 화면, PO 11-10 — 유나 5545 TabNav가 develop에 들어온 뒤) — 이 줄은 링크로 다른 화면(주소)에 가는 줄이다.
+    // 예전엔 링크에 role=tab / aria-selected를 얹고 줄에 role=tablist를 걸었지만 탭 패널이 없는 줄이 «탭 패널을 가진 척»하는 꼴이었다.
+    // 이제 ds `TabNav`(nav 랜드마크) + 켜진 링크의 aria-current="page". 모양(밑줄 · 굵기 · 폰 누름 영역 44 · 가로 스크롤 + 오른쪽 흐림 · 켜진 탭 화면 안으로)은
+    // TabNav가 쥔다(story #4277 · #4222의 뜻 그대로 — 서버 출력이 곧 최종 높이).
+    // [SID:4299] 탭 = 프리패치되는 <Link>가 아니라 «보일 때 자동 프리패치 끈» <Link>(prefetch={false}) + 위 훅(이웃 둘 · 첫 화면 뒤) + 누르려는 기색 때 router.prefetch.
+    // 탭 줄은 `[ws]/[proj]` 레이아웃(WorkTabsFrame)에 살아 전환 때 다시 그려지지 않는다 — story #4291.
+    <TabNav aria-label={t('workspace')} data-testid="workspace-frame-tabs">
+      {TABS.map((tab) => (
+        <TabNavLink key={tab.key} asChild active={active === tab.key}>
           <Link
-            key={tab.key}
-            ref={active === tab.key ? activeRef : undefined}
             href={hrefOf(tab.path)}
             prefetch={false}
             onPointerEnter={() => router.prefetch(hrefOf(tab.path))}
             onFocus={() => router.prefetch(hrefOf(tab.path))}
             onTouchStart={() => router.prefetch(hrefOf(tab.path))}
-            role="tab"
-            aria-selected={active === tab.key}
-            className={cn(
-              'shrink-0 whitespace-nowrap font-semibold transition',
-              // story #4222 — 예전엔 useIsMobile()로 클래스를 갈라 서버·첫 렌더(=데스크톱 클래스 · 30px)와 하이드레이션 뒤(모바일 · 37px)
-              // 높이가 달라 390에서 밀렸다. 모바일 기본 + lg:(훅의 1024) 덮어쓰기로 서버 출력이 곧 최종.
-              '-mb-px border-b-[3px] px-1 pb-2.5 text-base lg:border-b-2 lg:pb-2 lg:text-sm',
-              active === tab.key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
           >
             {t(tab.labelKey)}
           </Link>
-        ))}
-      </div>
-    </div>
+        </TabNavLink>
+      ))}
+    </TabNav>
   );
 }

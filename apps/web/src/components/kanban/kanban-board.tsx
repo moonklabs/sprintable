@@ -1831,6 +1831,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               storyLineMap={storyLineMap}
               projectId={projectId}
               getStatusLabel={domainLabels.statusLabel}
+              onCreateStory={(title) => handleCreateStory('backlog', title)}
             />
           </div>
         ) : axisMode === 'trust' ? (
