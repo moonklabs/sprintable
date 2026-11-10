@@ -19,8 +19,9 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 const ids = () => deriveNavigateItems((resource) => `/ws/proj/${resource}`).map((item) => item.id);
 
 describe('⌘K 이동 목록 순서 = 길잡이 순서 (story #4885)', () => {
-  // 순서를 손으로 적지 않는다 — 길잡이 설정(nav-config)에서 읽어, 길잡이가 바뀌면 이 시험의 기대도 같이 바뀐다(팔레트만 옛 순서로 남으면 RED).
-  // 길잡이(app-sidebar)의 줄 순서 = 첫 구역(홈) → 챗 center → 나머지 구역 → «전체»(ALL_SCREENS_ITEM) → 그 밖(OTHER_NAV_ITEMS). 일감 탭 앵커는 일감 바로 뒤.
+  // 순서를 손으로 적지 않는다 — 길잡이 설정(nav-config)에서 읽어, 설정이 바뀌면 이 시험의 기대도 같이 바뀐다.
+  // 길잡이 JSX가 설정과 따로 순서를 바꾸는 경우는 여기서 못 잡는다 — 그건 app-sidebar.test.tsx의 «길잡이가 실제로 그린 [data-nav-id] 순서 = 팔레트 순서» 시험이 맡는다.
+  // 설정 파생 순서 = 첫 구역(홈) → 챗 center → 나머지 구역 → «전체»(ALL_SCREENS_ITEM) → 그 밖(OTHER_NAV_ITEMS, 길잡이엔 안 그려지고 팔레트에만 있음). 일감 탭 앵커는 일감 바로 뒤.
   function sidebarOrder(): string[] {
     const [first, ...rest] = NAV_GROUPS;
     const order = [

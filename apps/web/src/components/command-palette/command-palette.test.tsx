@@ -92,7 +92,7 @@ describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 
   // story #4885 — «전체»(/more)는 길잡이 맨 아래 입구인데 NAV_GROUPS 항목이 아니라(ALL_SCREENS_ITEM) 팔레트가 따로 더한다 — 문서화된 예외(순서·집합은 command-palette.order.4885.test.tsx가 잠근다).
   const ALL_SCREENS_ID = 'all-screens';
 
-  it('팔레트 navigate id 집합이 정확히 NAV_GROUPS+OTHER_NAV_ITEMS 전 항목 + CHAT_CENTER_ITEM과 같다(앵커 2개는 문서화된 예외로 제외)', async () => {
+  it('팔레트 navigate id 집합이 정확히 NAV_GROUPS+OTHER_NAV_ITEMS 전 항목 + CHAT_CENTER_ITEM과 같다(앵커 5개 · 전체는 문서화된 예외로 제외)', async () => {
     await mount();
     const renderedIds = new Set(
       [...document.querySelectorAll('[data-command-group="navigate"] [data-command-id]')]
@@ -108,7 +108,7 @@ describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 
     // NAV_ITEMS)에서 나오므로 항상 같이 늘어난다. 파생이 깨져(예: 하드코딩으로 되돌아가)
     // 어떤 nav 항목이 팔레트서 빠지면 이 대조가 그 즉시 RED가 된다.
     expect(renderedNavIds).toEqual(expectedNavIds);
-    // 앵커 2개는 여전히 렌더되지만(아래 별도 테스트) 이 집합 밖(문서화된 예외).
+    // 앵커 5개는 여전히 렌더되지만(아래 별도 테스트) 이 집합 밖(문서화된 예외).
     expect([...GUARD_ANCHOR_IDS].every((id) => renderedIds.has(id))).toBe(true);
     expect(renderedIds.has(ALL_SCREENS_ID)).toBe(true);
   });
