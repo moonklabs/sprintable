@@ -10,8 +10,8 @@ import { DocMiniToc } from '@/components/docs/doc-mini-toc';
 import { useActiveDocHeading } from '@/components/docs/doc-active-heading';
 import { extractDocHeadings } from '@/components/docs/doc-heading-utils';
 import { DocStatusHeader, DocEvidenceRail } from '@/components/docs/doc-status-rail';
-import { Button } from '@/components/ui/button';
-import { Edit2 } from 'lucide-react';
+import { Button } from '@/components/ds/button';
+import { Icon } from '@/components/ds/icon';
 import { useDocsLayout } from '../../docs-context';
 import { docUrl, docsListUrl } from '@/components/docs/lib/doc-project-url';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
@@ -105,7 +105,7 @@ export default function DocViewPage() {
     return (
       <div className="flex h-full items-center justify-center">
         <h1 className="sr-only">{t('title')}</h1>
-        <p className="text-sm text-muted-foreground">{t('loading')}</p>
+        <p className="text-ds-small text-ds-ink-3">{t('loading')}</p>
       </div>
     );
   }
@@ -114,7 +114,7 @@ export default function DocViewPage() {
     return (
       <div className="flex h-full items-center justify-center">
         <h1 className="sr-only">{t('title')}</h1>
-        <p className="text-sm text-muted-foreground">{t('notFound')}</p>
+        <p className="text-ds-small text-ds-ink-3">{t('notFound')}</p>
       </div>
     );
   }
@@ -127,20 +127,18 @@ export default function DocViewPage() {
           story #2967(선생님 실사용 판정) — font-mono가 한글에서 가늘고 흐리다(에디토리얼
           mono 문법은 라틴 고정폭 전제라 한글엔 안 맞음). meta-caps는 라틴 전용으로 한정하고
           한글 경로는 sans 본문체로 — 위계는 크기/weight/citron rule로만 낸다. */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/20 px-4 py-2.5 text-xs text-muted-foreground lg:px-8">
-        {/* [SID:4356] 좁은 폭(390/360)에서 이 줄이 nowrap flex라 «지식»이 한 글자 폭(10~12px)까지 줄어 «지 / 식»으로 꺾였다(한글 최소 폭 = 한 글자).
-            뿌리 «지식» · 구분 «/»는 줄지 않고 안 꺾임 · 분류 · 제목은 한 줄로 줄되 말줄임(낱말 중간에서 안 꺾임). 넓으면 예전과 같다.
-            유나 CR(PR 4747) — 분류 · 제목이 같은 규칙(바탕 = 글자 폭)이면 글자 폭 비례로 줄어 짧은 분류(«기획»)가 5.8~10.6px로 눌려
-            «기»만 남고 «…»도 안 보였다 → 제목은 남는 자리만(flex-1 · 바탕 0 · 바닥 3rem), 분류는 제 폭을 먼저 받고 모자랄 때만 말줄임. */}
-        <Link href={docsListUrl(wsSlug, projSlug)} className="shrink-0 whitespace-nowrap hover:text-foreground hover:underline">{t('breadcrumbKnowledgeRoot')}</Link>
-        {categoryLabel ? (<><span className="shrink-0 text-muted-foreground">/</span><span className="min-w-0 truncate">{categoryLabel}</span></>) : null}
-        <span className="shrink-0 text-muted-foreground">/</span>
-        <span className="min-w-[3rem] flex-1 truncate text-foreground">{doc.title}</span>
+      {/* story 4892 (UI-9 상세 열, 읽기) — 머리 한 줄이 ds 면 · 선 · 글자색을 입는다. «고치기»는 머리 오른쪽의 ds 보조 단추(주 단추 아님 — 읽는 화면의 주 동작은 읽기).
+          [SID:4356] 좁은 폭에서 «지식»이 꺾이지 않게: 뿌리 · 구분은 줄지 않고(shrink-0 · nowrap), 분류 · 제목은 한 줄 말줄임(제목은 남는 자리만 · 바닥 3rem). */}
+      <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-ds-line bg-ds-background px-4 py-1 text-ds-small text-ds-ink-3 lg:px-8">
+        <Link href={docsListUrl(wsSlug, projSlug)} className="shrink-0 whitespace-nowrap hover:text-ds-ink hover:underline">{t('breadcrumbKnowledgeRoot')}</Link>
+        {categoryLabel ? (<><span className="shrink-0">/</span><span className="min-w-0 truncate">{categoryLabel}</span></>) : null}
+        <span className="shrink-0">/</span>
+        <span className="min-w-[3rem] flex-1 truncate text-ds-ink">{doc.title}</span>
         <span className="ml-auto flex shrink-0 items-center gap-1">
           <DocToc headings={headings} onHeadingClick={scrollToHeading} />
-          <Button asChild size="sm" variant="ghost">
+          <Button asChild variant="secondary">
             <Link href={docUrl(wsSlug, projSlug, slug)}>
-              <Edit2 className="mr-1.5 h-3.5 w-3.5" />
+              <Icon name="edit" size={14} />
               {t('editDoc')}
             </Link>
           </Button>
@@ -154,18 +152,18 @@ export default function DocViewPage() {
             {/* story #2967 — kicker/byline은 한글 콘텐츠(카테고리명·작성자명)라 mono+uppercase+
                 wide tracking을 걷는다(«처방도 언어 축을 탄다» — 라틴 전용 문법을 한글에
                 강제하지 않는다). 위계는 색(citron 라인 계열 blue)+굵기로만 유지. */}
-            <div className="text-editorial-ui font-semibold text-proof-blue">
+            <div className="text-ds-small font-semibold text-ds-ink-3">
               {categoryLabel ?? t('indexCategoryUncategorized')}
             </div>
             {/* story #2974(PR-D0) delta — font-display(페이스)+font-editorial-heading(무게 유틸,
                 --font-weight-editorial-heading:820) 병기. docs-index.tsx 마스트헤드 주석 참고. */}
-            <h1 className="mt-2 font-display font-editorial-heading text-display leading-[1.1] tracking-[-0.03em] text-foreground">{doc.title}</h1>
-            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-editorial-ui text-muted-foreground">
-              {doc.assignee ? (<><span>{doc.assignee.name}</span><span className="text-border">|</span></>) : null}
+            <h1 className="mt-2 text-ds-title font-semibold tracking-[-0.02em] text-ds-ink">{doc.title}</h1>
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-ds-small text-ds-ink-3">
+              {doc.assignee ? (<><span>{doc.assignee.name}</span><span className="text-ds-line-strong">|</span></>) : null}
               <span>{doc.updated_at ? formatViewerRelativeTime(doc.updated_at, locale, displayTimezone) : ''}</span>
-              <span className="text-border">|</span>
+              <span className="text-ds-line-strong">|</span>
               <span>{t('readMinutes', { minutes: readMinutes })}</span>
-              {doc.revisions?.count ? (<><span className="text-border">|</span><span>v{doc.revisions.count}</span></>) : null}
+              {doc.revisions?.count ? (<><span className="text-ds-line-strong">|</span><span className="font-mono text-ds-mono-md">v{doc.revisions.count}</span></>) : null}
             </div>
 
             <div className="mt-6">
@@ -199,7 +197,7 @@ export default function DocViewPage() {
           </article>
 
           {/* 수직 증거 레일(§3/§6) — 접힌 gate 박스를 상시 공간으로 승격. */}
-          <aside className="lg:border-l lg:border-border lg:pl-6">
+          <aside className="lg:border-l lg:border-ds-line lg:pl-6">
             {/* story #f546601e(v2 5호) — 긴 문서(N헤딩↑)만 자동 노출, 짧은 문서는 무변경
                 (MINI_TOC_MIN_HEADINGS 가드는 컴포넌트 내부). */}
             <DocMiniToc headings={headings} activeId={activeHeadingId} onHeadingClick={scrollToHeading} className="mb-6" />
