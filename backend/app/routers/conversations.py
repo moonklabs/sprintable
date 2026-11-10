@@ -803,6 +803,14 @@ def _event_payload(msg: "ConversationMessage") -> dict:
     return {"event": event if isinstance(event, dict) else None}
 
 
+def _notification_event(msg: "ConversationMessage", sender_name: str) -> dict:
+    """story #4883 — the `event` of a notification row: the message's own card (`event_key`, `payload`, `refs` — whatever the sender put in `event_context`) with the sender's name the SERVER worked
+    out. The name is written LAST: it was written first and the card spread after it, so a sender that put `sender_name` in its `event_context` replaced it (and 4875's withheld copy, which keeps only
+    the name, kept the forged one). Every other key is as the sender sent it."""
+    card = _event_payload(msg).get("event") or {}
+    return {**card, "sender_name": sender_name}
+
+
 def _server_command_payload(msg: "ConversationMessage") -> dict:
     """story #3143(9a5abc24) PO 리뷰 델타 — msg_metadata['server_command'] → payload
     top-level(없으면 None). _approval_payload/_event_payload와 동형(additive·__dict__
@@ -3516,10 +3524,7 @@ async def send_message_core(
                             # 구조 그대로, _event_payload 재사용)까지 같이 싣는다. FE가 event
                             # 있으면 eventCard 조합(신규 낱말 0)으로 제목·요약을 짓고, 없으면
                             # 위 title/body로 폴백.
-                            event={
-                                "sender_name": sender.name or UNNAMED_MEMBER_LABEL,
-                                **(_event_payload(msg).get("event") or {}),
-                            },
+                            event=_notification_event(msg, sender.name or UNNAMED_MEMBER_LABEL),
                             # story #2460(§6 봉합②): 개인 webhook·Expo push 실배달을 요청 트랜잭션 밖으로.
                             via_outbox=True,
                             human_event_recorded_for=mention_evented,  # story #4519 — their bell item is the conversation:mention above
@@ -3563,10 +3568,7 @@ async def send_message_core(
                         reference_type="conversation", reference_id=conversation_id,
                         source_project_id=conv.project_id,
                         # story #3903(migration 0378) — 위 mention 블록과 동형.
-                        event={
-                            "sender_name": sender.name or UNNAMED_MEMBER_LABEL,
-                            **(_event_payload(msg).get("event") or {}),
-                        },
+                        event=_notification_event(msg, sender.name or UNNAMED_MEMBER_LABEL),
                         # story #2460(§6 봉합②): 개인 webhook·Expo push 실배달을 요청 트랜잭션 밖으로.
                         via_outbox=True,
                     )
