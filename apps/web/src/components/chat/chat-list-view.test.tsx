@@ -408,6 +408,34 @@ describe('ChatListView — story #3888 이벤트 메시지 미리보기(raw slug
     expect(container.querySelector('.-space-x-1\\.5')).toBeNull();
   });
 
+  it('4887 ⭐ a group WITH agents also names its people — the agents\' count leads, then the first two names and «외 N명» (a count alone would name nobody)', async () => {
+    stubFetchWithConversations([ROOM({
+      id: 'g-agents', title: '에이전트가 낀 방',
+      participants: [
+        { member_id: 'me-1', name: '나', type: 'human' },
+        { member_id: 'ag-1', name: '개발 에이전트', type: 'agent', runtime_type: 'claude-code' },
+        { member_id: 'ag-2', name: '검수 에이전트', type: 'agent', runtime_type: 'claude-code' },
+        { member_id: 'h-1', name: '디디', type: 'human' },
+      ],
+    })]);
+    await mount();
+    expect(container.textContent).toContain('나 + 2명의 에이전트 · 개발 에이전트, 검수 에이전트 외 1명');
+  });
+
+  it('4887 ⭐ a group with agents and only two others has no «외 N명» tail', async () => {
+    stubFetchWithConversations([ROOM({
+      id: 'g-agents-2', title: '둘뿐인 방',
+      participants: [
+        { member_id: 'me-1', name: '나', type: 'human' },
+        { member_id: 'ag-1', name: '개발 에이전트', type: 'agent', runtime_type: 'claude-code' },
+        { member_id: 'h-1', name: '디디', type: 'human' },
+      ],
+    })]);
+    await mount();
+    expect(container.textContent).toContain('나 + 1명의 에이전트 · 개발 에이전트, 디디');
+    expect(container.textContent).not.toContain('개발 에이전트, 디디 외');
+  });
+
   it('4887 ⭐ a room with no participants list uses the ds icon disc (group = «groups», DM = «chat_bubble»)', async () => {
     stubFetchWithConversations([
       { id: 'g', type: 'group', title: '그룹 빈 참여자', participants: [], latest_message: null, updated_at: '2026-11-10T01:00:00Z', unread_count: 0 },

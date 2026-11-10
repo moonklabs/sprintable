@@ -211,6 +211,8 @@ function ConversationRow({
   // — isAgentConv는 이름/actorType 폴백에서만 쓴다(agent탭 DM의 상대가 실제 에이전트임을
   // 보강하는 용도, group 판정에는 관여하지 않는다).
   const oneOnOneParticipant = conv.type === 'dm' ? others[0] : null;
+  // story 4887 (UI-4 P2-b) — who is in a group, in words: the first two names and «외 N명» (the same for a people-only group and one with agents — the agents' count leads the line, the names follow)
+  const groupNames = `${others.slice(0, 2).map((p) => participantDisplayLabel(p, tc)).join(', ')}${others.length > 2 ? ` ${t('participantsOthers', { count: others.length - 2 })}` : ''}`;
 
   const participantLayer = conv.participants && conv.participants.length > 0 ? (
     conv.type === 'dm' ? (
@@ -234,12 +236,10 @@ function ConversationRow({
       </div>
     ) : (
       <div className="mt-0.5 flex items-center gap-1.5 text-editorial-meta text-muted-foreground">
-        {/* story 4887 (UI-4 P2-b) — the group's participants are one line of text (B3 row): the 18 px overlapping initials were unreadable beyond two people (AC1 10); the text already names the first two / counts the agents */}
+        {/* story 4887 (UI-4 P2-b) — the group's participants are one line of text (B3 row): the 18 px overlapping initials were unreadable beyond two people (AC1 10). The line says how many (the agents' count when there are agents, else the people's)
+            AND who: the first two names + «외 N명» — for a group with agents too (the old stack showed three initials + an agent dot; a count alone would name nobody) */}
         <span className="truncate">
-          {isAgentInConv && agentCount > 0
-            ? t('agentCount', { count: agentCount })
-            : `${t('personCount', { count: others.length + 1 })} · ${others.slice(0, 2).map((p) => participantDisplayLabel(p, tc)).join(', ')}${others.length > 2 ? ` ${t('participantsOthers', { count: others.length - 2 })}` : ''}`
-          }
+          {`${isAgentInConv && agentCount > 0 ? t('agentCount', { count: agentCount }) : t('personCount', { count: others.length + 1 })} · ${groupNames}`}
         </span>
       </div>
     )
