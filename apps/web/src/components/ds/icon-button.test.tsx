@@ -32,4 +32,33 @@ describe('ds IconButton', () => {
     await act(async () => { root.render(<IconButton label="더보기" icon="more_horiz" size="lg" />); });
     expect(container.querySelector('button')!.className).toContain('size-9');
   });
+
+  it('⭐주 모양 primary: action 면 · 글 on-action · 비활성은 점선 윤곽 · 이름(label)은 그대로 필수', async () => {
+    await act(async () => { root.render(<IconButton label="새 대화" icon="add" variant="primary" size="xl" />); });
+    const b = container.querySelector('button')!;
+    expect(b.className).toMatch(/(^|\s)bg-ds-action(\s|$)/);
+    expect(b.className).toMatch(/(^|\s)text-ds-on-action(\s|$)/);
+    expect(b.className).toContain('disabled:border-dashed');
+    expect(b.getAttribute('aria-label')).toBe('새 대화');
+  });
+
+  it('⭐크기 xl 48(떠 있는 단추) · 폰 누름 44 이상 · 기본 변형은 quiet(면 없음)', async () => {
+    await act(async () => { root.render(<IconButton label="새 대화" icon="add" size="xl" />); });
+    const b = container.querySelector('button')!;
+    expect(b.className).toContain('size-12');
+    expect(b.className).toContain('pointer-coarse:min-h-11');
+    expect(b.className).not.toMatch(/(^|\s)bg-ds-action(\s|$)/);
+    expect(b.querySelector('svg')!.getAttribute('width')).toBe('22');
+  });
+
+  it('⭐비활성 primary는 native disabled · aria-disabled(focusableWhenDisabled) 둘 다 활성 색을 잃는다', async () => {
+    await act(async () => { root.render(<IconButton label="새 대화" icon="add" variant="primary" disabled />); });
+    const cls = container.querySelector('button')!.className;
+    for (const p of ['disabled', 'aria-disabled']) {
+      expect(cls, p).toContain(`${p}:bg-transparent`);
+      expect(cls, p).toContain(`${p}:border-dashed`);
+      expect(cls, p).toContain(`${p}:brightness-100`);
+      expect(cls, p).toContain(`${p}:pointer-events-none`);
+    }
+  });
 });
