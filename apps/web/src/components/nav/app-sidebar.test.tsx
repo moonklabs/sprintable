@@ -154,13 +154,13 @@ describe('AppSidebar — story #3824 → #4885 새 구조 렌더 회귀가드(�
     expandAllGroups();
     await mount();
     // 헤더리스 그룹(오늘·일감·설정·전체)은 sidebar-group-label 자체가 없다 — 라벨 그룹은 「팀」 「지식」 「조직」.
-    const groupLabels = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')].map((el) => el.textContent);
+    const groupLabels = [...container.querySelectorAll('[data-slot="ds-section-header"] button')].map((el) => el.textContent);
     expect(groupLabels).toEqual(['팀', '지식', '조직']);
 
     const groups = [...container.querySelectorAll('[data-slot="sidebar-group"]')];
     expect(groups.length).toBe(EXPECTED_GROUPS.length);
     groups.forEach((groupEl, i) => {
-      const itemLabels = [...groupEl.querySelectorAll('[data-slot="sidebar-menu-button"] span[data-nav-label]')].map((el) => el.textContent);
+      const itemLabels = [...groupEl.querySelectorAll('[data-slot="ds-list-row"] span[data-nav-label]')].map((el) => el.textContent);
       expect(itemLabels).toEqual(EXPECTED_GROUPS[i]!.labels);
     });
   });
@@ -263,10 +263,10 @@ describe('AppSidebar — story #3824 → #4885 새 구조 렌더 회귀가드(�
     pathnameRef.current = '/organization/channels';
     expandAllGroups();
     await mount();
-    const channelsBtn = [...container.querySelectorAll('[data-slot="sidebar-menu-button"]')].find((b) => b.textContent?.includes('채널 연결'));
-    expect(channelsBtn?.hasAttribute('data-active')).toBe(true);
-    const rulesBtn = [...container.querySelectorAll('[data-slot="sidebar-menu-button"]')].find((b) => b.textContent?.includes('콘텐츠 규칙'));
-    expect(rulesBtn?.hasAttribute('data-active')).toBe(false);
+    const channelsBtn = [...container.querySelectorAll('[data-slot="ds-list-row"]')].find((b) => b.textContent?.includes('채널 연결'));
+    expect(channelsBtn?.getAttribute('aria-current')).toBe('page');
+    const rulesBtn = [...container.querySelectorAll('[data-slot="ds-list-row"]')].find((b) => b.textContent?.includes('콘텐츠 규칙'));
+    expect(rulesBtn?.getAttribute('aria-current')).toBeNull();
   });
 
   // story #1981/#3084 배지 축 — story #4885에서 'inbox' 항목이 «결재»라는 이름으로 사이드바에 돌아왔다(폰 «결재» 탭과 같은 이름 · 같은 착지 · 같은 배지: 내가 지정된 대기 결재 수).
@@ -276,7 +276,7 @@ describe('AppSidebar — story #3824 → #4885 새 구조 렌더 회귀가드(�
       status: 200, headers: { 'content-type': 'application/json' },
     })));
     await mount();
-    const badges = [...container.querySelectorAll('[data-slot="sidebar-menu-badge"]')];
+    const badges = [...container.querySelectorAll('[data-slot="ds-count-badge"]')];
     expect(badges).toHaveLength(1);
     expect(badges[0]!.closest('[data-slot="sidebar-menu-item"]')?.textContent).toContain('결재');
   });
@@ -342,7 +342,7 @@ describe('AppSidebar — story #3824 → #4885 새 구조 렌더 회귀가드(�
     // 구역 토글 버튼만 좁혀서 잰다 — 컨테이너 전체 button[aria-expanded]는 다른 컴포넌트
     // (드롭다운·스위처 등)의 닫힌 트리거도 걸려 오탐한다. story #4885 — 「조직」은
     // 이 f81657f8 규칙 밖의 별도 기본값(기본 접힘)이라 이 대조에서 뺀다(아래 전용 케이스가 따로 잠근다).
-    const toggles = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')]
+    const toggles = [...container.querySelectorAll('[data-slot="ds-section-header"] button')]
       .filter((b) => b.textContent !== '조직');
     expect(toggles.length).toBeGreaterThan(0);
     expect(toggles.every((b) => b.getAttribute('aria-expanded') === 'true')).toBe(true);
@@ -351,7 +351,7 @@ describe('AppSidebar — story #3824 → #4885 새 구조 렌더 회귀가드(�
   it('⭐«조직»은 기본 접힘이다(항목이 DOM에 없음 · aria-expanded=false) — 사람이 펼치면 기억되고, 지금 화면이 그 안이면 열려 있다', async () => {
     await mount();
     expect([...container.querySelectorAll('a')].find((a) => a.textContent?.includes('채널 연결'))).toBeUndefined();
-    const orgHeader = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')].find((b) => b.textContent === '조직');
+    const orgHeader = [...container.querySelectorAll('[data-slot="ds-section-header"] button')].find((b) => b.textContent === '조직');
     expect(orgHeader?.getAttribute('aria-expanded')).toBe('false');
     // 지금 화면이 «조직» 안(채널 연결)이면 기억이 접힘이어도 열려 있다 — 현재 위치가 사라지지 않는다.
     await act(async () => { root.unmount(); });
@@ -377,7 +377,7 @@ describe('AppSidebar — story #3824 → #4885 새 구조 렌더 회귀가드(�
       stubViewportHeight(height);
       await mount();
       // story #4885 — 「조직」은 이 회귀가드 밖(별도 기본값: 접힘), 위 테스트와 동일 이유로 제외.
-      const toggles = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')]
+      const toggles = [...container.querySelectorAll('[data-slot="ds-section-header"] button')]
         .filter((b) => b.textContent !== '조직');
       expect(toggles.every((b) => b.getAttribute('aria-expanded') === 'true')).toBe(true);
       await act(async () => { root.unmount(); });
@@ -402,17 +402,16 @@ describe('AppSidebar — story #3824 → #4885 새 구조 렌더 회귀가드(�
     expect([...container.querySelectorAll('a')].find((a) => a.textContent?.includes('산출물'))).toBeDefined();
   });
 
-  // 카디르 QA(a11y, §22-18 가드) — render prop 버튼이 SidebarGroupLabel의 children(그룹명
-  // 텍스트+쉐브론)을 감싸긴 하지만, 접근성 트리에서 버튼 자체의 이름은 aria-label로
-  // 명시해야 스크린리더가 구역 토글을 구별한다(textContent만으론 landmark 목록 등에서
-  // 이름이 안 실리는 경우가 있다) — aria-label에 그룹명+접힘상태를 담는다.
-  it('구역 토글 버튼의 aria-label이 그룹명+접힘상태를 담는다(카디르 QA a11y 처방)', async () => {
+  // 접힘 상태는 aria-expanded로, 접근 가능한 이름은 그룹명 그대로(SectionHeader 단추 — 이름에 «접기/펼치기»를 또 싣지 않는다).
+  it('구역 토글 단추: 이름 = 그룹명, 접힘 상태는 aria-expanded', async () => {
     await mount();
     const header = () => [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('지식'));
-    expect(header()?.getAttribute('aria-label')).toBe('지식 접기');
+    expect(header()?.getAttribute('aria-expanded')).toBe('true');
+    expect(header()?.getAttribute('aria-label')).toBeNull();
+    expect(header()?.textContent?.trim()).toBe('지식');
 
     await act(async () => { header()!.click(); });
-    expect(header()?.getAttribute('aria-label')).toBe('지식 펼치기');
+    expect(header()?.getAttribute('aria-expanded')).toBe('false');
   });
 
   it('접힘 상태가 localStorage에 사람별로 기억된다(AC3)', async () => {
@@ -475,12 +474,12 @@ describe('AppSidebar — 「일감」 활성 판정은 WorkspaceFrameTabs 경로
     expect(WORKSPACE_FRAME_TAB_PATHS).toEqual(EXPECTED_WORKSPACE_FRAME_TAB_PATHS);
   });
 
-  it.each(EXPECTED_WORKSPACE_FRAME_TAB_PATHS)('/%s 에서 「일감」이 활성(data-active=true)이다', async (path) => {
+  it.each(EXPECTED_WORKSPACE_FRAME_TAB_PATHS)('/%s 에서 「일감」이 활성(aria-current=page)이다', async (path) => {
     pathnameRef.current = `/${path}`;
     expandAllGroups();
     await mount();
     const workLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
-    expect(workLink?.hasAttribute('data-active')).toBe(true);
+    expect(workLink?.getAttribute('aria-current')).toBe('page');
   });
 
   it('/chats(일감 밖 화면)에서는 「일감」이 비활성이다', async () => {
@@ -488,13 +487,13 @@ describe('AppSidebar — 「일감」 활성 판정은 WorkspaceFrameTabs 경로
     expandAllGroups();
     await mount();
     const workLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
-    expect(workLink?.hasAttribute('data-active')).toBe(false);
+    expect(workLink?.getAttribute('aria-current')).toBeNull();
   });
 });
 
 // story #4885 (codex 1판) — 정적 항목의 «지금 여기»는 가장 구체적인 하나만 켠다 · 항목 경로의 쿼리(?tab=gates)는 지금 주소의 쿼리와 맞아야 켠다.
 describe('AppSidebar — 지금 여기 판정(story #4885)', () => {
-  const activeLabels = () => [...container.querySelectorAll('[data-slot="sidebar-menu-button"][data-active]')].map((b) => b.querySelector('span[data-nav-label]')?.textContent);
+  const activeLabels = () => [...container.querySelectorAll('[data-slot="ds-list-row"][aria-current="page"]')].map((b) => b.querySelector('span[data-nav-label]')?.textContent);
 
   it('⭐쿼리 달린 항목: /inbox?tab=gates에서 «결재»가 켜지고, 같은 /inbox의 알림 탭에서는 꺼진다', async () => {
     expandAllGroups();

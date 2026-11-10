@@ -391,13 +391,7 @@ export function AppSidebar({
           ));
           const isCollapsed = isCollapsible && collapsedGroupIds.has(group.id) && !groupHasActiveItem;
           const groupLabel = group.labelKey ? t(group.labelKey) : '';
-          // 카디르 QA(a11y, §22-18 가드) — render prop이 넘기는 버튼 요소는 SidebarGroupLabel의
-          // children(그룹명 텍스트+쉐브론 아이콘)을 감싸기만 할 뿐 버튼 자체에 접근가능한
-          // 이름이 안 실린다(스크린리더가 7구역 토글을 구별 못 함) — aria-label에 그룹명+
-          // 접힘상태를 명시로 채워 넣는다.
-          const toggleAriaLabel = isCollapsed
-            ? t('groupExpand', { group: groupLabel })
-            : t('groupCollapse', { group: groupLabel });
+          // 접힘 상태는 aria-expanded, 접근 가능한 이름은 그룹명(SectionHeader 단추) — 이름에 «접기/펼치기»를 또 싣지 않는다.
           return (
           <Fragment key={group.id}>
           <SidebarGroup>
@@ -406,7 +400,6 @@ export function AppSidebar({
                 label={groupLabel}
                 collapsed={isCollapsed}
                 onToggle={() => toggleGroupCollapsed(group.id)}
-                ariaLabel={toggleAriaLabel}
               />
             ) : null}
             {!isCollapsed ? (
@@ -440,6 +433,7 @@ export function AppSidebar({
                       kbd={item.kbdHint && isRealShortcut([item.kbdHint]) ? item.kbdHint : null}
                       badgeCount={item.badgeKey ? badgeCount : 0}
                       badgeCap={badgeCap}
+                      badgeLabel={item.badgeKey === 'inbox' ? t('railNeedsHand') : undefined}
                     />
                   );
                 })}
