@@ -80,7 +80,7 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
   // 전담(별도 축, 이 파일 관심사 아님).
   // story #4885(UI-2 AC4 PR 1) — 새 구조: 구역은 사이드바와 같은 한 정의(오늘 · 일감 · 에이전트 · 지식 · 조직 · 설정) + 맨 아래 «그 밖의 화면». 일감의 보드(탭 «일감»)와 오늘의 결재(탭 «결재»)는
   // 바텀 탭이 depth 1로 커버해 빠진다. 「더보기」 서랍과 그 소묶음 · 캡션은 걷혔다.
-  it('⭐섹션(h2) 순서(폰 탭 넷): 팀 · 지식이 맨 위 두 구역 → 목표[일감 쪽 남은 항목] → 조직 → 그 밖의 화면 — 한 항목 구역(결재 · 설정)은 머리 없이 항목 줄 하나', async () => {
+  it('⭐섹션(h2) 순서(폰 탭 넷): 팀 · 지식이 맨 위 두 구역 → 설정 → 목표[일감 쪽 남은 항목] → 조직 → 그 밖의 화면 — 한 항목 구역(결재 · 설정)은 머리 없이 항목 줄 하나', async () => {
     await mount();
     // story #4292(유나 1안) — 한 항목 구역(오늘 · 설정)은 머리 없이 항목 줄 하나. 카드(구역)는 일곱 · 순서는 사이드바 순서.
     const sectionLabels = [...container.querySelectorAll('h2')].map((el) => el.textContent?.trim());
@@ -88,13 +88,13 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
     const cards = [...container.querySelectorAll('[data-testid="more-section-card"]')];
     expect(cards).toHaveLength(7);
     expect(cards.map((c) => c.querySelector('[data-testid="more-menu-link"] span span')?.textContent)).toEqual(
-      ['구성원', '문서', '결재', '목표', '결과', '설정', '리워드'],
+      ['구성원', '문서', '설정', '결재', '목표', '결과', '리워드'],
     );
     // story #4291(PO) — 머리 없는 카드에 group 이름을 붙이지 않는다(구역 이름 = 그 한 항목 이름이라 화면 읽기가 같은 낱말을 두 번 읽음).
     expect(cards.map((c) => [c.getAttribute('role'), c.getAttribute('aria-label')])).toEqual(cards.map(() => [null, null]));
     // 같은 낱말이 한 카드에 두 번(머리 · 항목) 보이지 않는다.
     for (const card of cards) {
-      const header = card.querySelector('[data-testid="more-section-header"]')?.textContent;
+      const header = card.querySelector('[data-slot="ds-section-header"]')?.textContent;
       const rows = card.querySelectorAll('[data-testid="more-menu-link"]');
       if (header && rows.length === 1) expect(rows[0]!.querySelector('span span')?.textContent).not.toBe(header);
     }
@@ -256,11 +256,32 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
     expect(searchInput().getAttribute('placeholder')).not.toContain('⌘');
   });
 
-  it('구역은 Card 프리미티브다(data-slot="card")·행은 min-h-12 터치 타깃을 유지한다(AC4)', async () => {
+  // story #4885 — 구역 = ds Card · 머리 = ds SectionHeader(h2) · 줄 = ds ListRow(asChild · 기본 높이 56 · 폰 누름 영역 44 이상). 손코딩 Link(min-h-12)는 걷었다.
+  it('구역은 ds Card · 머리는 ds SectionHeader · 줄은 ds ListRow(기본 높이)다', async () => {
     await mount();
-    expect(container.querySelectorAll('[data-slot="card"]').length).toBeGreaterThan(0);
+    expect(container.querySelectorAll('[data-slot="ds-card"]').length).toBeGreaterThan(0);
+    expect(container.querySelectorAll('[data-slot="ds-section-header"]').length).toBeGreaterThan(0);
     const membersLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('구성원'));
-    expect(membersLink?.className).toContain('min-h-12');
+    expect(membersLink?.getAttribute('data-slot')).toBe('ds-list-row');
+    expect(membersLink?.getAttribute('data-density')).toBe('default');
+    expect(membersLink?.className).toContain('min-h-14');
+    // 모든 메뉴 줄이 같은 부품이다(손코딩 줄이 섞이지 않는다).
+    const links = [...container.querySelectorAll('[data-testid="more-menu-link"]')];
+    expect(links.length).toBeGreaterThan(10);
+    expect(links.every((a) => a.getAttribute('data-slot') === 'ds-list-row')).toBe(true);
+    // 아이콘은 막대 · 길잡이와 같은 표(rail-icons)의 ds 글리프 — 모든 줄에 있다.
+    expect(links.every((a) => a.querySelector('svg[data-icon]'))).toBe(true);
+  });
+
+  // story #4885 — 설정은 조직(줄 10개 · 약 700px) 뒤가 아니라 지식 바로 뒤다: 폰 390에서 설정 줄이 쓸기 3번 아래(y 1819)이던 것을 짧게 한 번으로. 문서보다 위로는 올리지 않는다(문서 찾기 0 유지).
+  it('⭐설정 줄은 문서 줄 뒤 · 목표 · 조직 줄들보다 앞이다(조직 10줄 뒤로 밀리지 않는다)', async () => {
+    await mount();
+    const labels = [...container.querySelectorAll('[data-testid="more-menu-link"]')].map((a) => a.querySelector('span span')?.textContent);
+    const at = (name: string) => labels.indexOf(name);
+    expect(at('문서')).toBeGreaterThan(-1);
+    expect(at('문서')).toBeLessThan(at('설정'));
+    expect(at('설정')).toBeLessThan(at('목표'));
+    expect(at('설정')).toBeLessThan(at('채널 연결'));
   });
 });
 

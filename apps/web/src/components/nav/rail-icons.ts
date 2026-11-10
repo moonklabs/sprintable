@@ -29,6 +29,9 @@ export const RAIL_ICON_BY_ITEM_ID: Record<string, IconName> = {
   settings: 'settings',
   'desktop-app': 'desktop_windows',
   'all-screens': 'grid_view',
+  // 그 밖의 화면(OTHER_NAV_ITEMS) — 폰 «전체» 맨 아래 구역이 같은 표로 그린다
+  rewards: 'emoji_events',
+  'channel-chat': 'forum',
   // 막대에만 있는 단추(항목이 아니다)
   org: 'domain',
   search: 'search',

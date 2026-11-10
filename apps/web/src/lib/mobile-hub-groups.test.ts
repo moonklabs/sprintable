@@ -22,9 +22,9 @@ function hub(flags: NavV3Flags) {
 const ids = (g: ReturnType<typeof hub>[number] | undefined) => (g?.items ?? []).map((i) => i.id);
 
 describe('buildMobileHubGroups(story #4885)', () => {
-  it('⭐구역 순서(폰 탭 넷): 탭에 없는 매일 구역 팀 · 지식이 맨 위 두 구역 → 홈 · 일감 쪽 남은 항목 → 조직 · 설정 → 맨 아래 «그 밖의 화면» 카드', () => {
+  it('⭐구역 순서(폰 탭 넷): 탭에 없는 매일 구역 팀 · 지식이 맨 위 두 구역 → 설정 → 홈 · 일감 쪽 남은 항목 → 조직 → 맨 아래 «그 밖의 화면» 카드', () => {
     const g = hub(DEFAULT_NAV_V3_FLAGS);
-    expect(g.map((x) => x.id)).toEqual(['team', 'knowledge', 'now', 'dev', 'org', 'settings', MOBILE_OTHER_CARD_ID]);
+    expect(g.map((x) => x.id)).toEqual(['team', 'knowledge', 'settings', 'now', 'dev', 'org', MOBILE_OTHER_CARD_ID]);
     // 구역 종류는 사이드바와 같은 한 정의(NAV_GROUPS) — 순서만 다르다(사이드바에는 탭이 없어 홈 · 일감이 위)
     expect([...MOBILE_HUB_GROUP_ORDER].sort()).toEqual(NAV_GROUPS.map((x) => x.id).sort());
     expect(g[g.length - 1]).toMatchObject({ id: MOBILE_OTHER_CARD_ID, labelKey: 'moreOtherScreens' });
