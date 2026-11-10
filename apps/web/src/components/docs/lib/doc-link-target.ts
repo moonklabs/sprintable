@@ -19,12 +19,10 @@ export interface Preview {
 export function previewTarget(d: Preview, wsSlug: string, projSlug: string, currentProjectId: string | undefined): string | null {
   const slug = d.slug?.trim();
   if (!slug || slug === '.' || slug === '..') return null;
-  const org = d.orgSlug == null || d.orgSlug === '' ? wsSlug : d.orgSlug;
-  if (!isSlugSegment(org)) return null;
-  let proj: string;
-  if (d.projectId && currentProjectId && d.projectId === currentProjectId) proj = projSlug;
-  else if (isSlugSegment(d.projectSlug)) proj = d.projectSlug;
-  else return null;
+  const sameProject = !!(d.projectId && currentProjectId && d.projectId === currentProjectId);
+  // the current workspace / project (route parameters) are used only for the project the answer confirms IS the current one — and even then they must look like slugs
+  let org: string | null = d.orgSlug ? d.orgSlug : sameProject ? wsSlug : null;
+  let proj: string | null = sameProject ? projSlug : (d.projectSlug ?? null);
+  if (!isSlugSegment(org) || !isSlugSegment(proj)) return null;
   return docUrl(org, proj, pathSafe(slug));
 }
-

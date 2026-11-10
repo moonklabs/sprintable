@@ -24,6 +24,16 @@ describe('previewTarget', () => {
     expect(previewTarget({ slug: 'a', projectId: cur, orgSlug: 'moonklabs', projectSlug: null }, 'moonklabs', 'sprintable', undefined)).toBeNull();
     expect(previewTarget({ slug: 'a', projectId: cur, orgSlug: 'moonklabs', projectSlug: 'named' }, 'moonklabs', 'sprintable', undefined)).toBe('/moonklabs/named/docs/a');
   });
+  it("another project's answer that names a project slug but no org slug fails closed (the current workspace is not assumed for it)", () => {
+    expect(t({ slug: 'd', projectId: 'proj-x', orgSlug: null, projectSlug: 'other-proj' })).toBeNull();
+    expect(t({ slug: 'd', projectId: 'proj-x', orgSlug: '', projectSlug: 'other-proj' })).toBeNull();
+  });
+  it('the current workspace / project (route parameters) must look like slugs too, also for the current project', () => {
+    for (const bad of ['a?b', 'a/b', '..', '//x', '']) {
+      expect(previewTarget({ slug: 'd', projectId: cur }, bad, 'sprintable', cur), `ws ${bad}`).toBeNull();
+      expect(previewTarget({ slug: 'd', projectId: cur }, 'moonklabs', bad, cur), `proj ${bad}`).toBeNull();
+    }
+  });
   it('org / project values that are not slugs are refused (path injection · open redirect shapes)', () => {
     for (const bad of ['../x', 'a/b', '//evil', 'a\\b', '.', '..', ' x', 'a b', 'a?b', 'a#b', '%2e%2e', '-lead']) {
       expect(t({ slug: 'd', projectId: 'p', orgSlug: bad, projectSlug: 'ok' }), `org ${bad}`).toBeNull();
