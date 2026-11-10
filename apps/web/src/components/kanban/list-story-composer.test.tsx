@@ -112,6 +112,25 @@ describe('ListStoryComposer', () => {
     expect(input()).toBeNull();
   });
 
+  // PO 5553 — 이 입구는 폰 390에서 일감을 만들라고 둔 것이다. 폰에서 누르는 단추(입구 · 만들기 · 취소)와 입력칸이 44 미만이면 결함이다(민 설정 «후»와 같은 자).
+  // jsdom에는 배치가 없어 «높이 ≥44»를 px로 못 잰다 — 폰(coarse)에서 44를 쥐는 ds 부품(`data-slot=ds-button` · `pointer-coarse:min-h-11`)을 쓰는지로 못박고,
+  // 실제 390 터치 창의 px는 dev 판 위 Playwright로 따로 잰다(PR 본문 «실측»).
+  it('⭐입구 · 만들기 · 취소는 ds Button(폰 누름 영역 44)이고 입력칸도 폰 44 — 옛 ui/button(h-7 = 28px, coarse 크기 없음)으로 되돌리면 RED', async () => {
+    await act(async () => { root.render(wrap(<ListStoryComposer onCreate={vi.fn()} />)); });
+    const opener = entry()!;
+    expect(opener.getAttribute('data-slot')).toBe('ds-button');
+    expect(opener.className.split(/\s+/)).toEqual(expect.arrayContaining(['pointer-coarse:min-h-11', 'pointer-coarse:min-w-11']));
+    await act(async () => { opener.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const buttons = [...container.querySelectorAll('[data-testid="list-story-composer"] button')];
+    expect(buttons.map((b) => b.textContent)).toEqual([koMessages.board.addStorySubmit, koMessages.board.addStoryCancel]);
+    for (const b of buttons) {
+      expect(b.getAttribute('data-slot'), b.textContent ?? '').toBe('ds-button');
+      expect(b.className.split(/\s+/), b.textContent ?? '').toContain('pointer-coarse:min-h-11');
+    }
+    expect(input()!.getAttribute('data-slot')).toBe('ds-input');
+    expect(input()!.className.split(/\s+/)).toContain('pointer-coarse:min-h-11');
+  });
+
   it('취소 단추도 닫기만 한다', async () => {
     const onCreate = vi.fn();
     await act(async () => { root.render(wrap(<ListStoryComposer onCreate={onCreate} />)); });
