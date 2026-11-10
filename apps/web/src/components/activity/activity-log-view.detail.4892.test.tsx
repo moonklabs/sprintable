@@ -151,7 +151,7 @@ describe('ActivityLogView — 목록이 바뀌면 고른 행이 풀린다 (4892)
     fetchWithAuthMock.mockImplementation(async (url: string) => {
       if (url.includes('/api/members')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
       call += 1;
-      const items = call === 1 ? ITEMS : [row('z9', '2026-11-10T09:00:00Z')];
+      const items = call === 2 ? [row('z9', '2026-11-10T09:00:00Z')] : ITEMS;   // 1st list: all · 2nd: without r1 · 3rd: all again (r1 is back)
       return { ok: true, status: 200, json: async () => ({ data: { items, total: items.length, limit: 30, offset: 0 } }) };
     });
     await act(async () => {
@@ -176,6 +176,16 @@ describe('ActivityLogView — 목록이 바뀌면 고른 행이 풀린다 (4892)
     expect(rows()[0]!.getAttribute('aria-expanded')).toBe('false');
     expect(detail()).toBeNull();
     expect(container.textContent).toContain(koMessages.activityLog.detailPickRow);
+    // the row comes back in a later list: it must NOT re-open by itself (the stale choice was cleared, not just hidden)
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(to, '2026-11-08');
+      to.dispatchEvent(new Event('input', { bubbles: true }));
+      to.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(rows()).toHaveLength(4);
+    expect(rows().every((r) => r.getAttribute('aria-expanded') === 'false')).toBe(true);
+    expect(detail()).toBeNull();
   });
 });
 
