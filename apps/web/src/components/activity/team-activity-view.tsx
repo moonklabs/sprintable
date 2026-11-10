@@ -85,6 +85,7 @@ function objectLabel(item: ActivityStreamItem): string | null {
 
 function relativeTime(iso: string, locale: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(diffMs)) return '—';   // an empty or broken time must not throw inside render (Intl.RelativeTimeFormat rejects NaN)
   const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
   const sec = Math.round(diffMs / 1000);
   const min = Math.round(sec / 60);
@@ -201,7 +202,7 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   const viewerTz = useViewerTimeZone() ?? 'UTC';
   const locale =
     typeof document !== 'undefined' ? document.documentElement.lang || 'en' : 'en';
-  const dayLabel = (g: { key: string; kind: 'today' | 'yesterday' | 'date' }) => (g.kind === 'today' ? tDay('dayToday') : g.kind === 'yesterday' ? tDay('dayYesterday') : formatDayHeader(g.key, locale));
+  const dayLabel = (g: { key: string; kind: 'today' | 'yesterday' | 'date' | 'undated' }) => (g.kind === 'today' ? tDay('dayToday') : g.kind === 'yesterday' ? tDay('dayYesterday') : g.kind === 'undated' ? tDay('dayUndated') : formatDayHeader(g.key, locale));
 
   const [items, setItems] = useState<ActivityStreamItem[] | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);

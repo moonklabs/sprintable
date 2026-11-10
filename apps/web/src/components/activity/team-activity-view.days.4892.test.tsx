@@ -104,8 +104,36 @@ describe('TeamActivityView — 일 단위 묶음 (4892)', () => {
 
   it('each day section is named by its own header (a landmark a screen reader can list)', async () => {
     await mount(ITEMS);
+    expect(groups().length).toBe(3);
     expect(groups().map((g) => g.getAttribute('aria-label'))).toEqual(groups().map((g) => g.querySelector('h2')?.textContent));
     expect(groups().every((g) => !!g.getAttribute('aria-label'))).toBe(true);
+  });
+
+  it('⭐a row whose time is empty or broken is shown in a last «날짜 모름» group — the feed does not crash and the row is not lost', async () => {
+    await mount([item(5, '2026-11-10T09:00:00Z'), item(4, ''), item(3, 'not-a-date')]);
+    expect(groups().map((g) => g.querySelector('h2')?.textContent)).toEqual(['오늘', koMessages.activityLog.dayUndated]);
+    expect(groups().map((g) => [...g.querySelectorAll('li')].map((li) => li.textContent?.match(/#(\d+)/)?.[1]))).toEqual([['5'], ['4', '3']]);
+  });
+
+  it('«더 보기» adds the next page: a row of a day already shown joins that day (one header), an older day gets its own', async () => {
+    fetchWithAuthMock.mockImplementation(async (url: string) => {
+      if (url.includes('/api/members')) return answer(true, 200, []);
+      if (url.includes('before_seq')) return answer(true, 200, { items: [item(3, '2026-11-10T02:00:00Z'), item(2, '2026-11-02T10:00:00Z')], next_after_seq: null, next_before_seq: null });
+      return answer(true, 200, { items: [item(5, '2026-11-10T09:00:00Z'), item(4, '2026-11-10T08:00:00Z')], next_after_seq: null, next_before_seq: 4 });
+    });
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC">
+          <TopBarProvider><TeamActivityView projectId="p1" /></TopBarProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const more = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.teamActivity.loadMore)!;
+    await act(async () => { more.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(groups().map((g) => g.querySelector('h2')?.textContent)).toEqual(['오늘', expect.stringContaining('11월')]);
+    expect(groups().map((g) => [...g.querySelectorAll('li')].map((li) => li.textContent?.match(/#(\d+)/)?.[1]))).toEqual([['5', '4', '3'], ['2']]);
   });
 
   it('a real empty answer is still the empty state — no day header', async () => {

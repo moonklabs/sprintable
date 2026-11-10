@@ -264,7 +264,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   const displayTz = useViewerTimeZone() ?? 'UTC';
   const locale = useLocale();
   const dayGroups = groupByDay(items, displayTz);
-  const auditHeading = (g: { key: string; kind: 'today' | 'yesterday' | 'date' }) => (g.kind === 'today' ? t('dayToday') : g.kind === 'yesterday' ? t('dayYesterday') : formatDayHeader(g.key, locale));
+  const auditHeading = (g: { key: string; kind: 'today' | 'yesterday' | 'date' | 'undated' }) => (g.kind === 'today' ? t('dayToday') : g.kind === 'yesterday' ? t('dayYesterday') : g.kind === 'undated' ? t('dayUndated') : formatDayHeader(g.key, locale));
   const DETAIL_ID = 'audit-detail';
 
   const entityTypeOptions: SelectOption[] = [
