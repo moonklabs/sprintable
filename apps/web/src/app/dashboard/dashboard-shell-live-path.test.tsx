@@ -26,6 +26,7 @@ vi.mock('@/lib/hard-reload', () => ({ reopenCurrentUrlOnce: reopenMock, clearReo
 const pass = ({ children }: { children?: ReactNode }) => <>{children}</>;
 const none = () => null;
 const sidebar = { slug: undefined as string | undefined };
+const rail = { slug: undefined as string | undefined, listColumn: undefined as { open: boolean; onToggle: () => void } | undefined };
 vi.mock('@/components/realtime-provider', () => ({ RealtimeProvider: pass }));
 vi.mock('@/components/auth/session-expired-dialog', () => ({ SessionExpiredDialog: none }));
 vi.mock('@/components/ui/toast', () => ({ ToastProvider: pass }));
@@ -33,10 +34,22 @@ vi.mock('@/components/nav/bottom-dock', () => ({ BottomDock: none }));
 vi.mock('@/components/nav/app-sidebar', () => ({
   AppSidebar: (p: { currentProjectSlug?: string }) => { sidebar.slug = p.currentProjectSlug; return null; },
 }));
+// story #4885 B 셸 — 아이콘 막대도 같은 slug를 받는다(못 푼 경로면 막대도 못 연 프로젝트로 다시 안 보냄).
+vi.mock('@/components/nav/nav-rail', () => ({
+  NavRail: (p: { projectSlug?: string; listColumn?: { open: boolean; onToggle: () => void } }) => { rail.slug = p.projectSlug; rail.listColumn = p.listColumn; return null; },
+}));
 vi.mock('@/components/nav/mobile-tab-bar', () => ({ MobileTabBar: none }));
 vi.mock('@/components/nav/top-bar', () => ({ TopBar: none }));
 vi.mock('@/components/nav/top-bar-context', () => ({ TopBarProvider: pass, useTopBar: () => ({ setScrollContainer: () => {} }) }));
-vi.mock('@/components/ui/sidebar', () => ({ SidebarProvider: pass, SidebarInset: pass }));
+// story #4885 B 셸 — 목록 칸(길잡이) 열림은 셸이 쥔다: SidebarProvider가 받은 open / onOpenChange를 기록한다.
+const listColumn = { open: undefined as boolean | undefined, setOpen: undefined as ((v: boolean) => void) | undefined };
+vi.mock('@/components/ui/sidebar', () => ({
+  SidebarProvider: ({ children, open, onOpenChange }: { children?: ReactNode; open?: boolean; onOpenChange?: (v: boolean) => void }) => {
+    listColumn.open = open; listColumn.setOpen = onOpenChange; return <>{children}</>;
+  },
+  SidebarInset: pass,
+  useSidebar: () => ({ open: listColumn.open ?? true, toggleSidebar: () => listColumn.setOpen?.(!(listColumn.open ?? true)) }),
+}));
 vi.mock('@/components/ui/contextual-panel-layout', () => ({
   ContextualPanelLayout: ({ children }: { children?: ReactNode }) => <>{children}</>,
   useContextualPanelState: () => ({ inlinePanelOpen: false, drawerOpen: false, togglePanel: () => {} }),
@@ -125,6 +138,7 @@ describe('셸 현재 프로젝트 = 현재 pathname · 인터셉터 ref = 셸 �
     await renderShellAt('/repro/charlie/flow');
     expect(seen.at(-1)).toEqual({ name: 'Project Charlie', projectId: C });
     expect(sidebar.slug).toBe('charlie');
+    expect(rail.slug, '막대도 같은 프로젝트 slug').toBe('charlie');
     const after = since(mark);
     expect(after.length).toBeGreaterThanOrEqual(2);
     for (const r of after) expect(r.project, r.url).toBe(C);
@@ -227,9 +241,45 @@ describe('셸 현재 프로젝트 = 현재 pathname · 인터셉터 ref = 셸 �
     expect(container.querySelector('div.min-h-\\[50vh\\].px-4'), '오류 카드 좌우 여백(compact 자체 · 이중 래퍼 0)').toBeTruthy();
     expect(container.querySelector('div.px-4 > div.min-h-\\[50vh\\]'), '호출부 이중 여백 래퍼 없음').toBeNull();
     expect(sidebar.slug).toBeUndefined();
+    expect(rail.slug, '막대도 slug 없음').toBeUndefined();
     expect(since(mark).filter((r) => r.url.startsWith('/api/stories'))).toEqual([]);
     retryMock.mockClear();
     await act(async () => { retry!.click(); });
     expect(retryMock).toHaveBeenCalledTimes(1); // 무조건 전체 이동(lib/hard-reload 단위 테스트가 저장소 막힘까지 잰다)
+  });
+});
+
+describe('목록 칸 — 자기 목록 칸을 가진 화면(/chats)에서는 길잡이가 접힌다(story #4885 B 셸)', () => {
+  it('/flow 열림 → /chats 접힘 → 다시 /flow 들어오기 전 상태(열림)로 · 하드 로드 /chats도 접힌 채 시작', async () => {
+    await renderShellAt('/repro/beta/flow');
+    expect(listColumn.open).toBe(true);
+    await renderShellAt('/chats');
+    expect(listColumn.open, '/chats에서는 접힘 — 방 목록이 그 자리').toBe(false);
+    await renderShellAt('/repro/beta/flow');
+    expect(listColumn.open, '나가면 들어오기 전 상태').toBe(true);
+  });
+
+  it('사람이 미리 접어 둔 상태로 /chats에 갔다 와도 접힌 채 돌아온다 · /chats 안에서 사람이 펴는 건 막지 않는다', async () => {
+    await renderShellAt('/repro/beta/flow');
+    await act(async () => { listColumn.setOpen?.(false); });
+    expect(listColumn.open).toBe(false);
+    await renderShellAt('/chats');
+    expect(listColumn.open).toBe(false);
+    await act(async () => { listColumn.setOpen?.(true); });
+    expect(listColumn.open, '화면 안에서 펴기').toBe(true);
+    await renderShellAt('/repro/beta/flow');
+    expect(listColumn.open, '들어오기 전(접힘)으로').toBe(false);
+  });
+});
+
+describe('막대의 목록 칸 단추 — 접힌 목록 칸을 다시 펼 길(story #4885 · codex P1)', () => {
+  it('막대가 목록 칸의 열림 상태를 받고 단추로 접고 편다(가장자리 손잡이는 막대 뒤에 가려져 /chats 자동 접힘 뒤 이 단추가 유일한 길)', async () => {
+    await renderShellAt('/chats');
+    expect(rail.listColumn?.open).toBe(false);
+    await act(async () => { rail.listColumn?.onToggle(); });
+    await act(async () => { for (let i = 0; i < 2; i++) await Promise.resolve(); });
+    expect(listColumn.open, '단추로 펼침').toBe(true);
+    expect(rail.listColumn?.open).toBe(true);
+    await renderShellAt('/repro/beta/flow');
   });
 });

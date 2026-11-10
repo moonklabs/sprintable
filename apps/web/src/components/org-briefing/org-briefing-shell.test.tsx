@@ -82,7 +82,7 @@ describe('OrgBriefingShell — story #3831 헤더(옛 조직 브리핑 낱말 0)
     stubToday(EMPTY_TODAY);
     await mount();
     const h1 = container.querySelector('h1');
-    expect(h1?.textContent).toBe('오늘');
+    expect(h1?.textContent).toBe('홈');
     expect(container.textContent).not.toContain('조직 브리핑');
     expect(container.textContent).not.toContain('오늘 조직의 지금');
   });

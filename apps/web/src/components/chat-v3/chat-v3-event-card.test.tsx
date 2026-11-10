@@ -60,7 +60,7 @@ describe('ChatV3EventCard', () => {
     await mount(vi.fn(), true);
     const link = container.querySelector('a[href="/today"]');
     expect(link).not.toBeNull();
-    expect(link?.textContent).toBe('「오늘」에서 서명');
+    expect(link?.textContent).toBe('「홈」에서 서명');
   });
 
   // 막다른 길 방지(페드루 PO) — 이 게이트가 보는 사람의 오늘 큐에 없으면 서명 버튼

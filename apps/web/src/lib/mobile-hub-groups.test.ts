@@ -2,7 +2,7 @@
 // 빼는 항목은 탭바가 실제로 그리는 탭의 목적지 · 탭에 없는 목적지는 메뉴에 반드시. (story #4278의 «연결·규칙 소묶음 합치기» · 「더보기」 소묶음은 서랍이 걷히며 사라졌다.)
 // 뮤테이션: ① 제외를 빼면 탭 목적지가 메뉴에 또 나온다 ② 구역 순서 목록에서 구역을 빼면 그 구역 항목이 «도달불가»가 된다 ③ 그 밖 카드를 빼면 그 밖 화면이 사라진다.
 import { describe, expect, it } from 'vitest';
-import { MOBILE_HUB_GROUP_ORDER, NAV_GROUPS, OTHER_NAV_ITEMS, resolveNavGroups } from '@/lib/nav-config';
+import { MOBILE_HUB_EXCLUDE_IDS, MOBILE_HUB_GROUP_ORDER, NAV_GROUPS, OTHER_NAV_ITEMS, resolveNavGroups } from '@/lib/nav-config';
 import { DEFAULT_NAV_V3_FLAGS, type NavV3Flags } from '@/lib/nav-v3-destinations';
 import { tabDestinationNavIds } from '@/components/nav/mobile-tab-bar';
 import koMessages from '../../messages/ko.json';
@@ -50,6 +50,11 @@ describe('buildMobileHubGroups(story #4885)', () => {
     expect(g.every((x) => !('subgroups' in x))).toBe(true);
     expect(g.map((x) => x.id)).not.toContain('connect-rules');
     expect(ids(g.find((x) => x.id === 'team'))).toEqual(['org-members', 'org-workforce', 'org-workforce-runs', 'org-workforce-api-keys']);
+  });
+
+  it('⭐MOBILE_HUB_EXCLUDE_IDS(깊이 가드가 «탭 직행 1회»로 세는 항목)는 폰 하단 탭이 실제로 덮는 목적지와 같다 — 결재가 빠지면 가드가 결재를 허브 2탭으로 세어 거짓이 된다(codex 단서 ②)', () => {
+    expect([...MOBILE_HUB_EXCLUDE_IDS].sort()).toEqual([...tabDestinationNavIds(DEFAULT_NAV_V3_FLAGS)].sort());
+    expect([...MOBILE_HUB_EXCLUDE_IDS].sort()).toEqual(['board', 'chats', 'inbox']);
   });
 
   it('모든 목적지는 탭이나 메뉴 어딘가에 — 플래그 둘 다(NAV_GROUPS 전부 + 그 밖 전부)', () => {

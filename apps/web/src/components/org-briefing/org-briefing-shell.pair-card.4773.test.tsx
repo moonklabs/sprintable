@@ -100,7 +100,7 @@ describe('[SID:4773] Today — the pairing card is the top band', () => {
     await mount({ inPhoneApp: false, call });
     expect(q('today-pair-card')).toBeNull();
     expect(call).not.toHaveBeenCalled();
-    expect(container.querySelector('h1')?.textContent).toBe('오늘');
+    expect(container.querySelector('h1')?.textContent).toBe('홈');
   });
 
   it('a paired phone: Today has no card (and the read did run — the phone app was asked, so this is not «never looked»)', async () => {

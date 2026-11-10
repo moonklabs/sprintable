@@ -88,7 +88,7 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
     const cards = [...container.querySelectorAll('[data-testid="more-section-card"]')];
     expect(cards).toHaveLength(7);
     expect(cards.map((c) => c.querySelector('[data-testid="more-menu-link"] span span')?.textContent)).toEqual(
-      ['오늘', '목표', '구성원', '문서', '결과', '설정', '리워드'],
+      ['홈', '목표', '구성원', '문서', '결과', '설정', '리워드'],
     );
     // story #4291(PO) — 머리 없는 카드에 group 이름을 붙이지 않는다(구역 이름 = 그 한 항목 이름이라 화면 읽기가 같은 낱말을 두 번 읽음).
     expect(cards.map((c) => [c.getAttribute('role'), c.getAttribute('aria-label')])).toEqual(cards.map(() => [null, null]));
@@ -110,7 +110,7 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
     expect(container.textContent).toContain('에이전트');
     const todayLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/org-briefing');
     expect(todayLink).toBeDefined();
-    expect(todayLink?.textContent).toContain('오늘');
+    expect(todayLink?.textContent).toContain('홈');
   });
 
   it('flow·inbox·chats는 안 뜬다(바텀 탭이 이미 depth 1로 커버 — 중복 진입점 방지)', async () => {

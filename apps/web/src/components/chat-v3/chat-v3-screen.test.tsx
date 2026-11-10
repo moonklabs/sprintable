@@ -265,14 +265,14 @@ describe('ChatV3Screen — TODAY_V3_ENABLED OFF(story #3972 CHANGES)', () => {
   it('⭐ON이면 nav 「오늘」이 /today로 간다', async () => {
     stub();
     await mount(true);
-    const navLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
+    const navLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '홈');
     expect(navLink?.getAttribute('href')).toBe('/today');
   });
 
   it('⭐OFF면 nav 「오늘」이 /org-briefing으로 간다(nav-config.ts zoneNow 정본, 404 방지)', async () => {
     stub();
     await mount(false);
-    const navLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
+    const navLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '홈');
     expect(navLink?.getAttribute('href')).toBe('/org-briefing');
   });
 });

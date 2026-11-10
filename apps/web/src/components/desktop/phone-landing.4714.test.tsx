@@ -380,7 +380,7 @@ describe('[4714] /phone-start — the start screen at its own address, with a wa
     await page();
     expect(byId('onboarding-phone-start')?.textContent).toContain('윤재의 맥북에서 에이전트를 시작할까요?');
     const out = byId('phone-start-finish');
-    expect(out?.textContent).toBe('오늘로 가기');
+    expect(out?.textContent).toBe('홈으로 가기');
     await act(async () => { out?.click(); });
     expect(assign).toHaveBeenCalledWith('/today'); // the onboarding's own finish address — never back to the landing
   });

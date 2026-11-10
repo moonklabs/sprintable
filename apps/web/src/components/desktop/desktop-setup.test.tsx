@@ -1284,7 +1284,7 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
   const polls = () => calls.filter((c) => c.url.includes('/api/desktop/setups/')).length;
   const resultButton = () => [...container.querySelectorAll('a, button')].find((b) => b.textContent === '결과 보기') as HTMLElement;
   // story 4492 — «오늘로 가기»: its destination comes from the one destination module (no literal path)
-  const wayOut = () => [...container.querySelectorAll('a')].find((b) => b.textContent === '오늘로 가기') ?? null;
+  const wayOut = () => [...container.querySelectorAll('a')].find((b) => b.textContent === '홈으로 가기') ?? null;
   // flat links carry the tab's project (useFlatHref) — the same as the page's other flat links
   const TODAY_HREF = `${resolveNavV3Destinations(DEFAULT_NAV_V3_FLAGS).today.path}?p=p-1`;
 
@@ -1662,7 +1662,7 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(text()).toContain('떠나도 설정은 이 컴퓨터에서 이어져요 — 첫 결과는 일감에서 볼 수 있어요.');
     // the way out stays next to «결과 보기» (that one is the main button, first)
     const row = container.querySelector('[data-testid=setup-way-out]');
-    expect([...(row?.querySelectorAll('a, button') ?? [])].map((b) => b.textContent)).toEqual(['결과 보기', '오늘로 가기']);
+    expect([...(row?.querySelectorAll('a, button') ?? [])].map((b) => b.textContent)).toEqual(['결과 보기', '홈으로 가기']);
     const n = polls();
     await tick(10_000);
     expect(polls()).toBe(n); // stops once the result is in
@@ -1687,7 +1687,7 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(pair?.getAttribute('href')).toBe('ai.sprintable:/desktop/setup?intent=pair');
     expect(card?.querySelector('[data-testid=setup-phone-member]')).toBeNull();
     // the way out stays as it was, the card after it
-    expect([...(container.querySelector('[data-testid=setup-way-out]')?.querySelectorAll('a, button') ?? [])].map((b) => b.textContent)).toEqual(['결과 보기', '오늘로 가기']);
+    expect([...(container.querySelector('[data-testid=setup-way-out]')?.querySelectorAll('a, button') ?? [])].map((b) => b.textContent)).toEqual(['결과 보기', '홈으로 가기']);
     // a member: the QR block and the band line — no button
     act(() => root.unmount()); root = createRoot(container);
     await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />, 'member');

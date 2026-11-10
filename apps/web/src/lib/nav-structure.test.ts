@@ -93,6 +93,30 @@ describe('정보 구조 한 벌 — 구역 · 순서 · 이름', () => {
   });
 });
 
+describe('⭐메뉴 이름 = 그 화면을 부르는 글 (선생님 11-10: 맨 위 «오늘» → «홈»)', () => {
+  // 맨 위 메뉴 이름(nav.zoneNow)이 정본이다 — 화면 제목 · 그 화면으로 보내는 길 이름(온보딩 «홈으로 가기» · 대화의 «홈 › 내 결정» · «홈»에서 서명)은 같은 낱말을 쓴다.
+  // 날짜 뜻의 «오늘»(오늘 결과 · 오늘 사용량 · 스탠드업 · 날짜 묶음)은 이 단언 밖이다. 선생님이 다른 이름을 고르면 messages 값만 바꾸면 이 시험이 같이 따라온다.
+  for (const [lang, m] of [['ko', koMessages], ['en', enMessages]] as const) {
+    const msg = m as unknown as Record<string, Record<string, unknown>>;
+    const name = msg.nav!.zoneNow as string;
+    it(`${lang}: 화면 제목 · 가는 길 이름이 메뉴 이름 «${name}»과 같다`, () => {
+      expect(msg.orgBriefing!.title, 'orgBriefing.title').toBe(name);
+      expect(msg.todayV3!.title, 'todayV3.title(켜지지 않은 같은 이름의 시안)').toBe(name);
+      expect(msg.onboarding!.desktopFinishToToday as string, 'onboarding.desktopFinishToToday').toContain(name);
+      expect((msg.desktop!.setup as Record<string, string>).goToday, 'desktop.setup.goToday').toContain(name);
+      expect(msg.chatV3!.contextRelatedTodayLink as string, 'chatV3.contextRelatedTodayLink').toContain(name);
+      expect(msg.chatV3!.eventCardSignAction as string, 'chatV3.eventCardSignAction').toContain(name);
+      // 같은 «오늘» 화면의 주의 큐 — 알림함의 탭 이름 · 주의 큐 화면의 머리 글(UI-5가 홈으로 접기 전까지 같은 낱말)
+      expect(msg.inbox!.attentionTabLabel as string, 'inbox.attentionTabLabel').toContain(name);
+      expect(msg.attentionQueue!.kicker as string, 'attentionQueue.kicker').toContain(name);
+    });
+  }
+  it('정해진 이름: ko «홈» · en «Home»', () => {
+    expect(koMessages.nav.zoneNow).toBe('홈');
+    expect(enMessages.nav.zoneNow).toBe('Home');
+  });
+});
+
 // ─── 모든 화면이 한 입구 이상 ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 function pageRoutes(dir: string, out: string[] = []): string[] {
@@ -128,7 +152,7 @@ const DOCUMENTED_EXCEPTIONS: Record<string, string> = {
   '/organization/memory': '«아직 준비 중인 화면이에요» 뿐이라 story #4183(유나 확認)이 일부러 메뉴에서 걷음',
   '/docs/design-tokens': '개발자용 참고 쪽(영어 고정 제목 · 로딩 경계 없음) — 사용자 메뉴에 올리지 않음',
   // 아직 입구가 없는 화면 — 후속 칸의 몫(숨기지 않고 적는다)
-  '/loop-queue': '«오늘»의 주의 큐로 합쳐질 화면 — «오늘» 화면 주인(UI-5)의 칸. 지금은 알림 종 · 오늘 화면 안 링크로만 닿는다',
+  '/loop-queue': '«오늘»의 주의 큐로 합쳐질 화면 — «오늘» 화면 주인(UI-5)의 칸. 지금은 주소로만 닿는다(제품 코드 안에 이 주소로 가는 링크 0 — 시험 · 예약 세그먼트 표 제외)',
 };
 
 describe('⭐모든 화면이 한 입구 이상(orphan 0) — 의도된 예외는 이유와 함께 한 표에', () => {
