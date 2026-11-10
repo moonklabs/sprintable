@@ -200,6 +200,9 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   const [items, setItems] = useState<ActivityStreamItem[] | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [forbidden, setForbidden] = useState(false);
+  // story 4892 (UI-9 §5 #1) — a first page that failed to load is NOT an empty feed: it is an error with a retry (reloadTick asks again).
+  const [loadError, setLoadError] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
   // story #4297 — «더 보기» 커서: 지금까지 받은 가장 오래된 활동의 activity_seq(서버가 준 next_before_seq). null이면 더 없음.
   const [nextBeforeSeq, setNextBeforeSeq] = useState<number | null>(null);
   // story #4297(까디르 판정) — 필터 · 날짜 · 프로젝트가 바뀌어 첫 쪽을 다시 받을 때마다 세대를 올린다. 그 전에 출발한 «더 보기» 응답이
@@ -296,11 +299,13 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
     async function load() {
       setItems(null);
       setForbidden(false);
+      setLoadError(false);
       setNextBeforeSeq(null);
       setLoadingMore(false); // 옛 조건의 «더 보기»가 걸려 있어도 새 목록의 버튼은 막히지 않게(그 응답은 세대가 달라 버려진다)
       const result = await fetchPage(rangeFrom, rangeTo, null);
       if (cancelled || generation !== generationRef.current) return;
       if (result.kind === 'forbidden') setForbidden(true);
+      if (result.kind === 'error') setLoadError(true);
       const page = result.kind === 'ok' ? result.page : null;
       setItems(page?.items ?? []);
       setNextBeforeSeq(page?.nextBeforeSeq ?? null);
@@ -309,7 +314,7 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [fetchPage, rangeFrom, rangeTo]);
+  }, [fetchPage, rangeFrom, rangeTo, reloadTick]);
 
   // 더 보기 = 같은 경계 안에서 지금까지 받은 가장 오래된 활동보다 이전 쪽(before_seq). 실패하면 커서를 그대로 둬 다시 누르면 다시 시도.
   const loadMore = async () => {
@@ -439,6 +444,18 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
               {Array.from({ length: 3 }).map((_, i) => (
                 <RowSkeleton key={i} />
               ))}
+            </div>
+          ) : loadError ? (
+            <div className="flex h-64 items-center justify-center" role="alert">
+              <EmptyState
+                title={tc('error')}
+                description={tc('errorDescription')}
+                action={(
+                  <Button variant="glass" size="sm" onClick={() => setReloadTick((n) => n + 1)}>
+                    {tc('retry')}
+                  </Button>
+                )}
+              />
             </div>
           ) : items.length === 0 ? (
             <div className="flex h-64 items-center justify-center">
