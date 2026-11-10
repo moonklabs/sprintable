@@ -34,7 +34,7 @@ import { KanbanListView } from './kanban-list-view';
 import { KanbanColumnsSkeleton, KanbanListRowsSkeleton, KanbanSkeleton } from './kanban-skeleton';
 import { StoryDetailPanel } from './story-detail-panel';
 import { StoryCard } from './story-card';
-import { COLUMNS, TRUST_COLUMNS, TRUST_COLUMN_TO_STATUS, normalizeAssigneePatch, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type TrustColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
+import { COLUMNS, TRUST_COLUMNS, TRUST_COLUMN_TO_STATUS, TRUST_COLUMN_FEEDER_STATUSES, normalizeAssigneePatch, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type TrustColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
 import type { LabelData } from '@/components/ui/label-chip';
 import { fetchWithAuth } from '@/lib/db/client';
 import { memberDisplayLabel, memberNameById, memberRowLabels } from '@/lib/member-display';
@@ -108,6 +108,10 @@ function loadWipLimit(projectId: string | undefined, status: string): number | n
   return isNaN(n) ? null : n;
 }
 
+/** story #4888 — a column read to its end while a browser-side filter is on: page size (the route's maximum) and the most pages one column is read for (2,500 cards) */
+const COMPLETE_PAGE_SIZE = 100;
+const COMPLETE_MAX_PAGES = 25;
+
 function saveWipLimit(projectId: string | undefined, status: string, limit: number | null): void {
   if (typeof window === 'undefined') return;
   if (limit === null) {
@@ -179,6 +183,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // CB-S4: status별 total count + cursor
   const [columnTotals, setColumnTotals] = useState<Record<string, number>>({});
   const [columnCursors, setColumnCursors] = useState<Record<string, string | null>>({});
+  // story #4888 — set once a browser-side filter is used while a column still has more: from then on the columns are read to their end (see fetchAllPagesOfStatus)
+  const [loadAllPages, setLoadAllPages] = useState(false);
   const [loadingMoreColumns, setLoadingMoreColumns] = useState<Record<string, boolean>>({});
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [epicsNextCursor, setEpicsNextCursor] = useState<string | null>(null);
@@ -314,13 +320,15 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   }
 
   // CB-S4: status별 stories fetch helper
-  const fetchStoriesByStatus = useCallback(async (status: string, cursor?: string): Promise<{ stories: KanbanStory[]; total: number; nextCursor: string | null; ok: boolean }> => {
+  const fetchStoriesByStatus = useCallback(async (status: string, cursor?: string, pageSize?: number): Promise<{ stories: KanbanStory[]; total: number; nextCursor: string | null; ok: boolean }> => {
     const params = new URLSearchParams();
     if (projectId) params.set('project_id', projectId);
     if (selectedSprintId) params.set('sprint_id', selectedSprintId);
     if (selectedAssigneeId) params.set('assignee_id', selectedAssigneeId);
+    // story #4888 — the list API already filters by goal (epic) on the server: send it, so the cursor pages are the filtered set (no read-to-end needed for this filter).
+    if (selectedEpicId) params.set('epic_id', selectedEpicId);
     params.set('status', status);
-    params.set('limit', status === 'done' ? '10' : '20');
+    params.set('limit', String(pageSize ?? (status === 'done' ? 10 : 20)));
     if (cursor) params.set('cursor', cursor);
     const res = await fetchWithAuth(`/api/stories?${params}`);
     if (!res.ok) return { stories: [], total: 0, nextCursor: null, ok: false };
@@ -335,7 +343,25 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     const nextCursor = json.meta?.nextCursor ?? null;
     const total = json.meta?.totalCount ?? stories.length;
     return { stories, total, nextCursor, ok: true };
-  }, [projectId, selectedSprintId, selectedAssigneeId]);
+  }, [projectId, selectedSprintId, selectedAssigneeId, selectedEpicId]);
+
+  // story #4888 (UI-5 «하다 나온 결함») — a filter that runs in the browser (목표 · 종류 · 라벨 · 검색) only sees the stories that are loaded: the first page of a column is 20 cards
+  // (done: 10), so with such a filter on, card 21 onward silently dropped out of the result and the column number was the loaded count. While one of those filters is on, a column is
+  // read to its end (pages of 100 — the most the route gives — up to COMPLETE_MAX_PAGES); a column that still has more after that keeps its cursor, so its number says «N+».
+  const fetchAllPagesOfStatus = useCallback(async (status: string): Promise<{ stories: KanbanStory[]; total: number; nextCursor: string | null; ok: boolean }> => {
+    const all: KanbanStory[] = [];
+    let cursor: string | undefined;
+    let next: string | null = null;
+    for (let page = 0; page < COMPLETE_MAX_PAGES; page++) {
+      const r = await fetchStoriesByStatus(status, cursor, COMPLETE_PAGE_SIZE);
+      if (!r.ok) return { stories: all, total: all.length, nextCursor: next, ok: false };
+      all.push(...r.stories);
+      next = r.nextCursor;
+      if (!next) break;
+      cursor = next;
+    }
+    return { stories: all, total: all.length, nextCursor: next, ok: true };
+  }, [fetchStoriesByStatus]);
 
   // E-POLISH (story 23ea0e1d): columnTotals는 fetchData에서 단 1회 세팅되므로
   // optimistic mutation이 setStories만 갱신하면 카운트 배지가 stale해진다.
@@ -532,7 +558,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       const statuses = COLUMNS.map((c) => c.id);
       const [storyResults, epicsRes, membersRes] = await Promise.all([
         // story #4307 — 망 오류(throw)도 실패로 모은다(예전엔 그대로 새어 옛 카드가 남았다).
-        Promise.all(statuses.map((s) => fetchStoriesByStatus(s))).catch(() => null),
+        Promise.all(statuses.map((s) => (loadAllPages ? fetchAllPagesOfStatus(s) : fetchStoriesByStatus(s)))).catch(() => null),
         fetchWithAuth(`/api/goals?${epicParams.toString()}`).catch(() => null),
         fetchWithAuth(`/api/members${memberParams}`).catch(() => null),
       ]);
@@ -620,7 +646,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       if (gates) setStoryGatesMap(gates);
     }
     await sprintsLeg;
-  }, [projectId, fetchStoriesByStatus]);
+  }, [projectId, fetchStoriesByStatus, fetchAllPagesOfStatus, loadAllPages]);
 
   // CB-S4: 컬럼별 "더 보기" 핸들러
   const handleLoadMore = useCallback(async (status: string) => {
@@ -635,6 +661,11 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       setLoadingMoreColumns((prev) => ({ ...prev, [status]: false }));
     }
   }, [columnCursors, fetchStoriesByStatus]);
+
+  // story #4888 — «더 보기» of a trust column: next page of every status that feeds it and still has one.
+  const handleLoadMoreTrust = useCallback(async (columnId: TrustColumnId) => {
+    await Promise.all(TRUST_COLUMN_FEEDER_STATUSES[columnId].filter((st) => !!columnCursors[st]).map((st) => handleLoadMore(st)));
+  }, [columnCursors, handleLoadMore]);
 
   useEffect(() => { void fetchData(); }, [fetchData, orgSyncVersion]);
 
@@ -798,11 +829,19 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const filterActive = Boolean(
     selectedEpicId || selectedAssigneeId || assigneeTypeFilter || selectedLabelIds.length > 0 || searchQuery,
   );
-  // 9f25e74a AC1/AC2: assignee/sprint은 서버필터(cursor 페이지네이션)라 '더보기' 억제 대상서 제외 —
-  // 클라필터(epic/type/labels/search)만 hasMore 억제. assignee 필터 done이 10+ 여도 필터집합 cursor로 페이지네이션(누락 0).
+  // 9f25e74a AC1/AC2: assignee/sprint은 서버필터(cursor 페이지네이션) — 필터집합 cursor로 페이지네이션(누락 0).
+  // 클라필터(epic/type/labels/search)는 불러온 것만 거르므로 story #4888부터 켜지는 순간 열을 끝까지 읽는다(아래 loadAllPages) — hasMore를 끄던 옛 방식은 21번째부터 조용히 뺐다.
   const clientFilterActive = Boolean(
-    selectedEpicId || assigneeTypeFilter || selectedLabelIds.length > 0 || searchQuery,
+    assigneeTypeFilter || selectedLabelIds.length > 0 || searchQuery,
   );
+
+  // story #4888 — the first time a browser-side filter is on while some column still has more cards than were loaded, switch to reading the columns to their end
+  // (fetchData then re-runs with `loadAllPages`). Switching a filter off does not undo it: what is loaded stays complete. A new project starts again from the first page.
+  const someColumnHasMore = Object.values(columnCursors).some(Boolean);
+  useEffect(() => {
+    if (clientFilterActive && someColumnHasMore && !loadAllPages && !loading) setLoadAllPages(true);
+  }, [clientFilterActive, someColumnHasMore, loadAllPages, loading]);
+  useEffect(() => { setLoadAllPages(false); }, [projectId]);
 
   // position 기준으로 정렬
   const storiesByColumn = (columnId: string): KanbanStory[] => {
@@ -1818,6 +1857,11 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     onCreateStory={handleCreateStoryTrust}
                     autoComposeSignal={col.id === 'queued' ? autoComposeNonce : 0}
                     getStatusLabel={domainLabels.statusLabel}
+                    // The derived columns (locked) share their status with a settable column (needs_input ← in-progress, verified / merge_ready ← in-review): they get no «더 보기» of their own — their cards
+                    // appear as the settable column's pages are loaded (an empty derived column showing «0+» and a second button for the same page would only mislead).
+                    hasMore={!col.locked && TRUST_COLUMN_FEEDER_STATUSES[col.id].some((st) => !!columnCursors[st])}
+                    loadingMore={TRUST_COLUMN_FEEDER_STATUSES[col.id].some((st) => !!loadingMoreColumns[st])}
+                    onLoadMore={() => handleLoadMoreTrust(col.id)}
                   />
                 );
               })}
@@ -1885,8 +1929,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     storyLabelsMap={storyLabelsMap}
                     storyGatesMap={storyGatesMap}
                     storyLineMap={storyLineMap}
-                    totalCount={filterActive ? colStories.length : columnTotals[col.id]}
-                    hasMore={clientFilterActive ? false : !!columnCursors[col.id]}
+                    totalCount={filterActive ? colStories.length : columnCursors[col.id] ? Math.max(colStories.length, columnTotals[col.id] ?? 0) : columnTotals[col.id]}
+                    hasMore={!!columnCursors[col.id]}
                     loadingMore={loadingMoreColumns[col.id] ?? false}
                     onLoadMore={() => handleLoadMore(col.id)}
                     collapsed={col.id === 'done' ? doneCollapsed : undefined}

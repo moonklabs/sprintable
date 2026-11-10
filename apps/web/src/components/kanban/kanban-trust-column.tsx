@@ -75,6 +75,11 @@ interface KanbanTrustColumnProps {
    * `label` prop) 자체는 별개 어휘(TRUST_COLUMNS)라 여긴 안 건드림 — kanban-board.tsx가
    * TRUST_COLUMNS엔 이 override를 안 씀. */
   getStatusLabel?: (canonicalSlug: string) => string | undefined;
+  // story #4888 — same «N+» and «더 보기» as the classic column (KanbanColumn): the cards of a status are loaded a page at a time, and without these the cards past the first page of the
+  // default view could not be reached. hasMore = some status that feeds this column still has a page to load; onLoadMore loads the next page of each of those statuses.
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }
 
 /**
@@ -98,6 +103,7 @@ export function KanbanTrustColumn({
   id, label, locked, stories, epicMap, memberMap, onStoryClick, onEditStory, onChangeStatus, onDeleteStory,
   projectId, onKickoffStory, executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap,
   onCreateStory, autoComposeSignal, isDragging = false, getStatusLabel,
+  hasMore = false, loadingMore = false, onLoadMore,
 }: KanbanTrustColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id, disabled: locked });
   const t = useTranslations('board');
@@ -151,7 +157,7 @@ export function KanbanTrustColumn({
           {locked && <Lock className="size-3 text-muted-foreground" aria-hidden="true" />}
         </h3>
         <div className="flex items-center gap-1.5">
-          <span className="text-xs tabular-nums text-muted-foreground">{stories.length}</span>
+          <span className="text-xs tabular-nums text-muted-foreground">{hasMore ? `${stories.length}+` : stories.length}</span>
           {!locked && onCreateStory ? (
             <button
               type="button"
@@ -241,6 +247,16 @@ export function KanbanTrustColumn({
               getStatusLabel={getStatusLabel}
             />
           ))}
+          {hasMore && onLoadMore ? (
+            <button
+              type="button"
+              onClick={onLoadMore}
+              disabled={loadingMore}
+              className="w-full rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
+            >
+              {loadingMore ? t('loading') : t('loadMore')}
+            </button>
+          ) : null}
         </div>
       </SortableContextCompat>
     </div>
