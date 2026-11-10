@@ -81,13 +81,14 @@ describe('ActivityLogView — 일 단위 묶음 (4892)', () => {
 });
 
 describe('ActivityLogView — 행을 고르면 상세가 보인다 (4892)', () => {
-  it('⭐every row is a button: aria-expanded=false, no aria-controls while collapsed (nothing to point at), and no hover-only title tooltip', async () => {
+  it('⭐every row is a button: aria-expanded=false, no aria-controls while collapsed (nothing to point at), and no hover-only context tooltip', async () => {
     await mount();
     expect(rows()).toHaveLength(4);
     for (const r of rows()) {
       expect(r.getAttribute('aria-expanded')).toBe('false');
       expect(r.getAttribute('aria-controls')).toBeNull();
-      expect(r.getAttribute('title')).toBeNull();
+      expect(r.getAttribute('title')).toBe(r.getAttribute('aria-label'));   // the hover title only repeats the row's own words — the old tooltip's hidden facts (context) are in the details now
+      expect(r.getAttribute('title')).not.toContain('field');                // …the context key/values are NOT in a tooltip
       expect(r.parentElement?.getAttribute('title')).toBeNull();
     }
     expect(detail()).toBeNull();
