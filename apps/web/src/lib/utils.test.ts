@@ -46,3 +46,16 @@ describe('cn() — 커스텀 font-weight/text 테마 값이 다른 축과 병기
     expect(cn('text-editorial-body', 'text-editorial-ui')).toBe('text-editorial-ui');
   });
 });
+
+// UI-3(a9d56577) — 새 글자 눈금(text-ds-*)도 크기 축으로 등록돼 있어야 글자색(text-ds-ink 등)과 공존한다.
+describe('cn() — ds 글자 눈금이 text-color와 공존한다', () => {
+  it('text-ds-small · text-ds-title 등이 text-ds-ink / text-muted-foreground를 안 지운다', () => {
+    expect(cn('text-ds-ink', 'text-ds-small')).toBe('text-ds-ink text-ds-small');
+    expect(cn('text-ds-title', 'text-ds-ink-2')).toBe('text-ds-title text-ds-ink-2');
+    expect(cn('text-muted-foreground', 'text-ds-mono-md')).toBe('text-muted-foreground text-ds-mono-md');
+  });
+
+  it('ds 글자 단끼리는 크기 축으로 충돌한다(뒤가 이김)', () => {
+    expect(cn('text-ds-small', 'text-ds-body')).toBe('text-ds-body');
+  });
+});

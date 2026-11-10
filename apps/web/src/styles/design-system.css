@@ -1,0 +1,115 @@
+/*
+ * UI-3 design system tokens (story a9d56577 · doc ui3-token-names-and-component-list-v0, 11-10 PO 결정).
+ *
+ * 새 뜻 이름 토큰을 «따로» 세운다 — 옛 변수(--background · --foreground · --proof-* …)와 이름이 겹치지 않게 `--ds-` 접두를 두고,
+ * 옛 이름을 이 값의 별칭으로 잇지 않는다(잇는 순간 아직 안 다시 지은 화면의 색이 흔들린다). 새 부품(`components/ds/`) · 새 화면만 쓰고
+ * 옛 변수는 그대로 둔다(자연도태).
+ *
+ * 값은 어둠 / 밝음. 앱의 테마 스위치는 `.dark` 클래스(globals.css `@custom-variant dark`)라 밝음이 :root · 어둠이 .dark.
+ * 대비는 design-system.test.ts가 이 파일의 값을 읽어 계산한다(글자 조합 4.5:1 · 누를 수 있는 경계 3:1 아래로 내려가면 빨개진다).
+ */
+:root {
+  --ds-surface-sunk: #e6eaf1;
+  --ds-background: #f3f5f9;
+  --ds-surface: #ffffff;
+  --ds-surface-raised: #f7f8fb;
+  --ds-surface-high: #eaeef4;
+  --ds-surface-highest: #dde3ec;
+  --ds-line: #d8dee8;
+  --ds-line-strong: #b7bfcc;
+  --ds-line-control: #7c8596;
+  --ds-ink: #0f1420;
+  --ds-ink-2: #3f4859;
+  --ds-ink-3: #586274;
+  --ds-action: #5b4be0;
+  --ds-on-action: #ffffff;
+  --ds-action-text: #4a3bc8;
+  --ds-action-soft: #efedfc;
+  --ds-needs-hand: #9a4b00;
+  --ds-needs-hand-bar: #d6791c;
+  --ds-needs-hand-soft: #ffefe0;
+  --ds-done: #0b7a5e;
+  --ds-done-soft: #e7f2ef;
+  --ds-failed: #c42b45;
+  --ds-failed-soft: #faeef0;
+  --ds-info: #1f5fbf;
+  --ds-info-soft: #edf2fa;
+}
+
+.dark {
+  --ds-surface-sunk: #0a0e15;
+  --ds-background: #0f141a;
+  --ds-surface: #181c23;
+  --ds-surface-raised: #1c2027;
+  --ds-surface-high: #262a32;
+  --ds-surface-highest: #31353d;
+  --ds-line: #343541;
+  --ds-line-strong: #474554;
+  --ds-line-control: #7a7788;
+  --ds-ink: #dfe2ec;
+  --ds-ink-2: #c8c4d6;
+  --ds-ink-3: #928f9f;
+  --ds-action: #8e7fff;
+  --ds-on-action: #24008c;
+  --ds-action-text: #c7bfff;
+  --ds-action-soft: #2b2c46;
+  --ds-needs-hand: #ffb77d;
+  --ds-needs-hand-bar: #d6791c;
+  --ds-needs-hand-soft: #342f2e;
+  --ds-done: #46deb2;
+  --ds-done-soft: #1e3334;
+  --ds-failed: #ffb4ab;
+  --ds-failed-soft: #342e33;
+  --ds-info: #7db4ff;
+  --ds-info-soft: #242e3d;
+}
+
+@theme inline {
+  --color-ds-surface-sunk: var(--ds-surface-sunk);
+  --color-ds-background: var(--ds-background);
+  --color-ds-surface: var(--ds-surface);
+  --color-ds-surface-raised: var(--ds-surface-raised);
+  --color-ds-surface-high: var(--ds-surface-high);
+  --color-ds-surface-highest: var(--ds-surface-highest);
+  --color-ds-line: var(--ds-line);
+  --color-ds-line-strong: var(--ds-line-strong);
+  --color-ds-line-control: var(--ds-line-control);
+  --color-ds-ink: var(--ds-ink);
+  --color-ds-ink-2: var(--ds-ink-2);
+  --color-ds-ink-3: var(--ds-ink-3);
+  --color-ds-action: var(--ds-action);
+  --color-ds-on-action: var(--ds-on-action);
+  --color-ds-action-text: var(--ds-action-text);
+  --color-ds-action-soft: var(--ds-action-soft);
+  --color-ds-needs-hand: var(--ds-needs-hand);
+  --color-ds-needs-hand-bar: var(--ds-needs-hand-bar);
+  --color-ds-needs-hand-soft: var(--ds-needs-hand-soft);
+  --color-ds-done: var(--ds-done);
+  --color-ds-done-soft: var(--ds-done-soft);
+  --color-ds-failed: var(--ds-failed);
+  --color-ds-failed-soft: var(--ds-failed-soft);
+  --color-ds-info: var(--ds-info);
+  --color-ds-info-soft: var(--ds-info-soft);
+
+  /* 글자 눈금(굵기는 400 · 600 두 가지만 — 호출부가 font-normal / font-semibold) */
+  --text-ds-title: 18px;
+  --text-ds-title--line-height: 24px;
+  --text-ds-card-title: 14px;
+  --text-ds-card-title--line-height: 20px;
+  --text-ds-body: 13px;
+  --text-ds-body--line-height: 20px;
+  --text-ds-small: 12px;
+  --text-ds-small--line-height: 16px;
+  --text-ds-mono-lg: 13px;
+  --text-ds-mono-lg--line-height: 18px;
+  --text-ds-mono-md: 11px;
+  --text-ds-mono-md--line-height: 16px;
+  --text-ds-mono-sm: 10px;
+  --text-ds-mono-sm--line-height: 14px;
+
+  /* 모서리 */
+  --radius-ds-tag: 2px;
+  --radius-ds-control: 4px;
+  --radius-ds-panel: 8px;
+  --radius-ds-pill: 12px;
+}

@@ -17,7 +17,11 @@ const twMerge = extendTailwindMerge({
     theme: {
       'font-weight': ['editorial-heading', 'editorial-claim'],
       // story 4831: 글자 눈금의 빈 두 단 micro(10px) · display(32px)도 크기 축으로 알려준다 — 안 그러면 `cn('text-muted-foreground', 'text-micro')`가 글자색을 지운다.
-      'text': ['editorial-body', 'editorial-ui', 'editorial-meta', 'editorial-claim', 'micro', 'display'],
+      'text': [
+        'editorial-body', 'editorial-ui', 'editorial-meta', 'editorial-claim', 'micro', 'display',
+        // UI-3(a9d56577) 새 글자 눈금 — 같은 이유로 크기 축에 알려준다(안 그러면 `cn('text-ds-ink', 'text-ds-small')`가 글자색을 지운다).
+        'ds-title', 'ds-card-title', 'ds-body', 'ds-small', 'ds-mono-lg', 'ds-mono-md', 'ds-mono-sm',
+      ],
     },
   },
 })
