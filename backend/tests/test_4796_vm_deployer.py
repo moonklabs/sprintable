@@ -115,6 +115,8 @@ class FakeRunner:
             self._probes += 1
             return (0, "") if self._probes > self.healthy_after else (1, "not ready")
         for marker, rc in self.fail_on.items():
+            if marker == "migrate" and not (args[:2] == ["docker", "compose"] and "run" in args):
+                continue   # «the migration fails» means the migration RUN (story 4874: the clean-up around it names itself `…migrate…` too and is a different call)
             if marker in joined:
                 return rc, f"{marker} failed{self.out_suffix}"
         return 0, ""

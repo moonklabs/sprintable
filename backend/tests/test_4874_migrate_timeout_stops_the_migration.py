@@ -26,8 +26,8 @@ from tests.test_4796_vm_deployer import BUCKET, D, FakeRunner, _state, world  # 
 
 _VM = Path(__file__).resolve().parents[2] / "deploy/vm"
 _CID = "c0ffee" + "0" * 58     # a container id as `docker ps -aq --no-trunc` prints it
-_NAME_B = D.MIGRATE_NAME_PREFIX + "b" * 12      # the migration of release b…
-_NAME_A = D.MIGRATE_NAME_PREFIX + "a" * 12
+_NAME_B = D.MIGRATE_NAME_PREFIX + "b" * 40      # the migration of release b (the whole sha)…
+_NAME_A = D.MIGRATE_NAME_PREFIX + "a" * 40
 
 
 class DaemonRunner(FakeRunner):
@@ -172,11 +172,40 @@ def test_a_migration_that_fails_on_its_own_is_not_treated_as_a_timeout(world) ->
     assert world.dep.run_once() == "failed"
     failed = _state(world, "failed.json")
     assert failed["detail"].startswith("migrate failed:") and "timed out" not in failed["detail"]
-    assert not any("pg_terminate_backend" in " ".join(c["args"]) and runner.verbs().index("run") > i for i, c in enumerate(runner.calls) if False)
+    after_run = runner.verbs()[runner.verbs().index("run") + 1:]
+    assert not [v for v in after_run if v in ("ps", "rm") or v.startswith("exec:migrate")], f"an ordinary failure does no timeout clean-up: {after_run}"
+
+
+def test_a_migration_that_itself_exits_with_124_is_an_ordinary_failure_not_a_timeout(world) -> None:
+    runner = _deploy_b_over_a(world, timeout_b=False)
+    orig = runner.run
+
+    def exits_124(args, env, **kw):
+        if list(args)[:2] == ["docker", "compose"] and "run" in args and "migrate" in args:
+            runner.calls.append({"args": list(args), "env": dict(env), "stdin": None, "whole": False, "timeout": kw.get("timeout")})
+            return 124, "alembic: the script itself exited 124"
+        return orig(args, env, **kw)
+
+    runner.run = exits_124                                                        # type: ignore[method-assign]
+    assert world.dep.run_once() == "failed"
+    failed = _state(world, "failed.json")
+    assert failed["detail"].startswith("migrate failed:") and "timed out" not in failed["detail"]
+
+
+def test_an_earlier_container_that_cannot_be_removed_stops_the_deploy_before_a_new_migration_starts(world) -> None:
+    """the new `run --name` would meet the old name (and the old locks): better to say so than to start"""
+    runner = _deploy_b_over_a(world, timeout_b=False)
+    runner.container_alive = runner.session_alive = True
+    runner.rm_rc = 1
+    assert world.dep.run_once() == "failed"
+    assert "run" not in runner.verbs() and "up:all" not in runner.verbs()
+    failed = _state(world, "failed.json")
+    assert failed["phase"] == "pre-swap" and "earlier migration's container could not be removed" in failed["detail"]
+    assert _state(world, "current.json")["sha"] == "a" * 40
 
 
 def test_the_names_are_per_release_and_the_backend_never_has_one() -> None:
-    assert D.migrate_name(Path("/opt/releases/" + "c" * 40)) == D.MIGRATE_NAME_PREFIX + "c" * 12
+    assert D.migrate_name(Path("/opt/releases/" + "c" * 40)) == D.MIGRATE_NAME_PREFIX + "c" * 40, "the whole sha: two releases never share a name"
     assert len(D.migrate_name(Path("/x/" + "c" * 40))) <= 63, "a Postgres application_name is cut at 63 characters"
     # the backend's own connections are named `K_SERVICE:K_REVISION[:suffix]` (app/core/database.py) — never with this prefix; and the migration's own engine (alembic/env.py) sets no name that would replace PGAPPNAME
     from app.core.database import db_application_name
@@ -202,6 +231,10 @@ class _Real:
         self.children: list[subprocess.Popen] = []
         self.adm = self.connect()
         with self.adm.cursor() as cur:
+            cur.execute("SELECT rolsuper OR pg_has_role(current_user, 'pg_signal_backend', 'member') FROM pg_roles WHERE rolname = current_user")
+            if not cur.fetchone()[0]:
+                self.adm.close()
+                pytest.skip("the test role may not cancel / terminate other sessions (pg_signal_backend)")
             cur.execute(f"CREATE TABLE {self.table}(id int)")
 
     def connect(self):
@@ -268,6 +301,7 @@ _needs_real = pytest.mark.skipif(not _REAL_DB_URL or not shutil.which("psql"), r
 def test_a_running_migration_statement_is_cancelled_and_its_lock_freed_and_the_serving_session_is_not_touched(monkeypatch) -> None:
     monkeypatch.setattr(D, "CANCEL_GRACE_SECONDS", 1)
     real = _Real()
+    t = None
     try:
         migration = real.session(_NAME_B, "SELECT pg_sleep(120)")                          # the slow migration: ACCESS EXCLUSIVE lock, then a long statement
         assert real.named(_NAME_B) == 1 and real.reader_waits(), "the lock holds the old release's reads"
@@ -285,7 +319,10 @@ def test_a_running_migration_statement_is_cancelled_and_its_lock_freed_and_the_s
                 errors.append(e)
         t = threading.Thread(target=serve)
         t.start()
-        time.sleep(0.5)
+        deadline = time.time() + 10
+        while not real.named("local:dev") and time.time() < deadline:   # the serving statement is running before the clean-up looks
+            time.sleep(0.05)
+        assert real.named("local:dev") == 1
         lines = real.deployer_sql(_NAME_B)
         assert lines[0] == "1", lines                                                      # one session cancelled
         assert lines[-1] == "0", lines                                                     # …and the cancel was enough while its client was alive: nothing was left to terminate
@@ -298,6 +335,8 @@ def test_a_running_migration_statement_is_cancelled_and_its_lock_freed_and_the_s
             assert cur.fetchone()[0] == 0, "the migration's transaction was rolled back, not left half-done"
         serving.close()
     finally:
+        if t is not None:
+            t.join(timeout=20)
         real.close()
 
 
