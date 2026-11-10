@@ -1,11 +1,9 @@
 'use client';
 
-import { firstGraphemes } from '@/lib/first-graphemes';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { MessageSquare, Users } from 'lucide-react';
-import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { useLocale, useTranslations } from 'next-intl';
 import { EmptyState } from '@/components/ui/empty-state';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
@@ -16,7 +14,8 @@ import { ConnectionLostBanner } from './connection-lost-banner';
 import { isOwnMessage, useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { queuePendingToast } from './cross-project-toast-provider';
-import { Avatar } from '@/components/shared/avatar';
+import { Avatar } from '@/components/ds/avatar';
+import { Icon } from '@/components/ds/icon';
 import { Button } from '@/components/ui/button';
 import { CountBadge } from '@/components/ui/count-badge';
 import { NowStrip } from './now-strip';
@@ -212,6 +211,8 @@ function ConversationRow({
   // — isAgentConv는 이름/actorType 폴백에서만 쓴다(agent탭 DM의 상대가 실제 에이전트임을
   // 보강하는 용도, group 판정에는 관여하지 않는다).
   const oneOnOneParticipant = conv.type === 'dm' ? others[0] : null;
+  // story 4887 (UI-4 P2-b) — who is in a group, in words: the first two names and «외 N명» (the same for a people-only group and one with agents — the agents' count leads the line, the names follow)
+  const groupNames = `${others.slice(0, 2).map((p) => participantDisplayLabel(p, tc)).join(', ')}${others.length > 2 ? ` ${t('participantsOthers', { count: others.length - 2 })}` : ''}`;
 
   const participantLayer = conv.participants && conv.participants.length > 0 ? (
     conv.type === 'dm' ? (
@@ -235,31 +236,10 @@ function ConversationRow({
       </div>
     ) : (
       <div className="mt-0.5 flex items-center gap-1.5 text-editorial-meta text-muted-foreground">
-        <div className="flex -space-x-1.5">
-          {others.slice(0, 3).map((p) => (
-            <div
-              key={p.member_id}
-              className="relative flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full bg-muted text-micro font-medium text-muted-foreground ring-1 ring-background"
-            >
-              {/* [SID:4286 · 유나 결정 2] 이름이 없으면 날것 «?» 대신 아이콘 — 4646 공용 표식(UnnamedMemberIcon · 에이전트 Bot · 사람 User). */}
-              {p.name ? firstGraphemes(p.name, 1) : <UnnamedMemberIcon type={p.type} className="h-3 w-3" aria-hidden />}
-              {/* story #2023 ⓑ: 죽은 클래스(bg-brand-strong 미매핑)이면서 L5 위반 — info로 교체해 둘 다 닫음 */}
-              {p.type === 'agent' && (
-                <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-info ring-1 ring-background" />
-              )}
-            </div>
-          ))}
-          {others.length > 3 && (
-            <div className="flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full bg-muted text-micro font-medium text-muted-foreground ring-1 ring-background">
-              +{others.length - 3}
-            </div>
-          )}
-        </div>
+        {/* story 4887 (UI-4 P2-b) — the group's participants are one line of text (B3 row): the 18 px overlapping initials were unreadable beyond two people (AC1 10). The line says how many (the agents' count when there are agents, else the people's)
+            AND who: the first two names + «외 N명» — for a group with agents too (the old stack showed three initials + an agent dot; a count alone would name nobody) */}
         <span className="truncate">
-          {isAgentInConv && agentCount > 0
-            ? t('agentCount', { count: agentCount })
-            : `${t('personCount', { count: others.length + 1 })} · ${others.slice(0, 2).map((p) => participantDisplayLabel(p, tc)).join(', ')}${others.length > 2 ? ` ${t('participantsOthers', { count: others.length - 2 })}` : ''}`
-          }
+          {`${isAgentInConv && agentCount > 0 ? t('agentCount', { count: agentCount }) : t('personCount', { count: others.length + 1 })} · ${groupNames}`}
         </span>
       </div>
     )
@@ -292,8 +272,8 @@ function ConversationRow({
           runtimeType={(isAgentConv || oneOnOneParticipant.type === 'agent') ? (oneOnOneParticipant.runtime_type ?? null) : null}
         />
       ) : (
-        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-info/15 text-foreground">
-          {conv.type === 'dm' ? <MessageSquare className="h-4 w-4" /> : <Users className="h-4 w-4" />}
+        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-ds-surface-high text-ds-ink-2" data-testid="room-row-glyph">
+          <Icon name={conv.type === 'dm' ? 'chat_bubble' : 'groups'} size={18} />
         </div>
       )}
 
@@ -304,18 +284,19 @@ function ConversationRow({
               재분류(구조·크기 불변). preview는 이미 text-xs+muted+기본무게(400)라 Body-small
               규칙에 이미 부합 — 무편집. */}
           <span className="truncate text-sm font-semibold text-foreground">{displayName}</span>
-          <span className="flex-shrink-0 text-micro text-muted-foreground">{formatTime(time, locale, displayTimezone)}</span>
+          {/* story 4887 (UI-4 P2-b) — the time and the unread count share the title line (B3 row); the preview below keeps the whole width */}
+          <span className="flex flex-shrink-0 items-center gap-1.5">
+            <span className="text-micro text-muted-foreground">{formatTime(time, locale, displayTimezone)}</span>
+            {unread > 0 && (
+              <span className="rounded-full bg-primary px-1.5 py-0.5 text-micro font-semibold text-primary-foreground" data-testid="room-unread">
+                {unread > 99 ? '99+' : unread}
+              </span>
+            )}
+          </span>
         </div>
         {projectLabel ? <p className="truncate text-micro text-muted-foreground" data-testid="room-project">{projectLabel}</p> : null}
         {participantLayer}
-        <div className="flex items-center justify-between gap-1">
-          <p className="truncate text-xs text-muted-foreground">{preview}</p>
-          {unread > 0 && (
-            <span className="flex-shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-micro font-semibold text-primary-foreground">
-              {unread > 99 ? '99+' : unread}
-            </span>
-          )}
-        </div>
+        <p className="truncate text-xs text-muted-foreground">{preview}</p>
       </div>
     </Button>
   );
