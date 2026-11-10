@@ -677,5 +677,20 @@ describe('DocsClientLayout — 목록 열 머리 · 토글 · 틀 (4892)', () =>
     expect(cls).toContain('border-ds-line');
     expect(cls).toContain('bg-ds-background');
     expect(cls).not.toContain('w-[236px]');
+
+// story 4892 (UI-9 D1) — choosing a document from the list opens it to READ (the reading screen), not the editor. «고치기» in the detail header is the
+// way into the editor. (A NEW doc still opens the editor — the new-doc test above.)
+describe('DocsClientLayout — 목록에서 문서를 고르면 읽기로 연다 (4892 D1)', () => {
+  it('⭐문서 행을 누르면 /view(읽기 화면) 주소로 간다 — 편집기 주소가 아니다', async () => {
+    pushMock.mockClear();
+    stubFetch();
+    await mount();
+    const foldersTab = [...container.querySelectorAll('button')].find((b) => b.textContent === '내 폴더') as HTMLButtonElement;
+    await act(async () => { foldersTab.click(); });
+    const row = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('문서A')) as HTMLButtonElement;
+    expect(row, 'the doc row').toBeTruthy();
+    await act(async () => { row.click(); });
+    expect(pushMock).toHaveBeenCalledTimes(1);
+    expect(String(pushMock.mock.calls[0]![0])).toMatch(/\/docs\/doc-a\/view$/);
   });
 });

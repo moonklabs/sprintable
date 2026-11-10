@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { DocContentRenderer } from '@/components/docs/doc-content-renderer';
@@ -10,8 +10,13 @@ import { DocMiniToc } from '@/components/docs/doc-mini-toc';
 import { useActiveDocHeading } from '@/components/docs/doc-active-heading';
 import { extractDocHeadings } from '@/components/docs/doc-heading-utils';
 import { DocStatusHeader, DocEvidenceRail } from '@/components/docs/doc-status-rail';
-import { Button } from '@/components/ds/button';
+import { IconButton } from '@/components/ds/icon-button';
 import { Icon } from '@/components/ds/icon';
+import { DocModeSwitch } from '@/components/docs/doc-mode-switch';
+import { DocShareDialog } from '@/components/docs/doc-share-dialog';
+import { useDocDelete } from '@/components/docs/use-doc-delete';
+import { HumanOnlyAction } from '@/components/ui/human-only-action';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useDocsLayout } from '../../docs-context';
 import { docUrl, docsListUrl } from '@/components/docs/lib/doc-project-url';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
@@ -52,11 +57,16 @@ export default function DocViewPage() {
   const params = useParams();
   const slug = typeof params.slug === 'string' ? params.slug : '';
   const t = useTranslations('docs');
+  const ts = useTranslations('share');
+  const router = useRouter();
   const locale = useLocale();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
-  const { wsSlug, projSlug, projectId, tree } = useDocsLayout();
+  const { wsSlug, projSlug, projectId, tree, setTree } = useDocsLayout();
 
   const [doc, setDoc] = useState<DocState>(null);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  // story 4892 — the same delete as the editor page (confirm → DELETE → toast on failure / leave the page on success).
+  const handleDelete = useDocDelete({ docId: doc ? doc.id : undefined, projectId, wsSlug, projSlug, router, setTree });
   const contentRef = useRef<HTMLDivElement | null>(null);
   const scrollRootRef = useRef<HTMLDivElement | null>(null);
 
@@ -136,12 +146,34 @@ export default function DocViewPage() {
         <span className="min-w-[3rem] flex-1 truncate text-ds-ink">{doc.title}</span>
         <span className="ml-auto flex shrink-0 items-center gap-1">
           <DocToc headings={headings} onHeadingClick={scrollToHeading} />
-          <Button asChild variant="secondary">
-            <Link href={docUrl(wsSlug, projSlug, slug)}>
-              <Icon name="edit" size={14} />
-              {t('editDoc')}
-            </Link>
-          </Button>
+          <DocModeSwitch
+            mode="read"
+            readHref={`${docUrl(wsSlug, projSlug, slug)}/view`}
+            editHref={docUrl(wsSlug, projSlug, slug)}
+            readLabel={t('modeRead')}
+            editLabel={t('editDoc')}
+            groupLabel={t('modeSwitchLabel')}
+          />
+          {/* story 4892 — share and the ⋯ menu are on the reading screen too (they used to exist only on the editing screen). Below lg «공유» is inside the menu. */}
+          <IconButton icon="share" label={ts('share')} onClick={() => setShareDialogOpen(true)} className="hidden lg:inline-flex" data-testid="docs-reader-share" />
+          <DropdownMenu>
+            <DropdownMenuTrigger aria-label={t('moreActions')} className="inline-flex size-7 items-center justify-center rounded-ds-control text-ds-ink-2 transition-colors hover:bg-ds-surface-high hover:text-ds-ink pointer-coarse:size-11">
+              <Icon name="more_horiz" size={16} />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem className="lg:hidden" onClick={() => setShareDialogOpen(true)} data-testid="docs-reader-menu-share">
+                <Icon name="share" size={16} className="mr-2" />
+                {ts('share')}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator className="lg:hidden" />
+              <HumanOnlyAction>
+                <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive" data-testid="docs-reader-menu-delete">
+                  <Icon name="delete" size={16} className="mr-2" />
+                  {t('deleteDoc')}
+                </DropdownMenuItem>
+              </HumanOnlyAction>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </span>
       </div>
 
@@ -205,6 +237,21 @@ export default function DocViewPage() {
           </aside>
         </div>
       </div>
+      <DocShareDialog
+        open={shareDialogOpen}
+        onClose={() => setShareDialogOpen(false)}
+        docId={doc.id}
+        labels={{
+          share: ts('share'),
+          shareToWeb: ts('shareToWeb'),
+          shareToWebDesc: ts('shareToWebDesc'),
+          copyLink: ts('copyLink'),
+          linkCopied: ts('linkCopied'),
+          stopSharing: ts('stopSharing'),
+          regenerateLink: ts('regenerateLink'),
+          shareSingleDocNote: ts('shareSingleDocNote'),
+        }}
+      />
     </div>
   );
 }

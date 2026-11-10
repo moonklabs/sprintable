@@ -8,11 +8,11 @@ const t = (d: Parameters<typeof previewTarget>[0], current: string | undefined =
 
 describe('previewTarget', () => {
   it('the current project (same project id) → the current slugs', () => {
-    expect(t({ slug: 'prd', projectId: cur, orgSlug: 'moonklabs', projectSlug: 'sprintable' })).toBe('/moonklabs/sprintable/docs/prd');
-    expect(t({ slug: 'prd', projectId: cur, orgSlug: null, projectSlug: null })).toBe('/moonklabs/sprintable/docs/prd');
+    expect(t({ slug: 'prd', projectId: cur, orgSlug: 'moonklabs', projectSlug: 'sprintable' })).toBe('/moonklabs/sprintable/docs/prd/view');
+    expect(t({ slug: 'prd', projectId: cur, orgSlug: null, projectSlug: null })).toBe('/moonklabs/sprintable/docs/prd/view');
   });
   it("another project → its OWN slug (the document's project, not the current one)", () => {
-    expect(t({ slug: 'runbook', projectId: 'proj-x', orgSlug: 'moonklabs', projectSlug: 'other-proj' })).toBe('/moonklabs/other-proj/docs/runbook');
+    expect(t({ slug: 'runbook', projectId: 'proj-x', orgSlug: 'moonklabs', projectSlug: 'other-proj' })).toBe('/moonklabs/other-proj/docs/runbook/view');
   });
   it('another project WITHOUT a slug → null (no guess, no 404 and no same-name document of the current project)', () => {
     expect(t({ slug: 'runbook', projectId: 'proj-x', orgSlug: 'moonklabs', projectSlug: null })).toBeNull();
@@ -22,7 +22,7 @@ describe('previewTarget', () => {
   it('the current project id is not known (layout without one) → only a named project slug works', () => {
     // (not through `t`: its default would turn an explicit undefined back into the current id)
     expect(previewTarget({ slug: 'a', projectId: cur, orgSlug: 'moonklabs', projectSlug: null }, 'moonklabs', 'sprintable', undefined)).toBeNull();
-    expect(previewTarget({ slug: 'a', projectId: cur, orgSlug: 'moonklabs', projectSlug: 'named' }, 'moonklabs', 'sprintable', undefined)).toBe('/moonklabs/named/docs/a');
+    expect(previewTarget({ slug: 'a', projectId: cur, orgSlug: 'moonklabs', projectSlug: 'named' }, 'moonklabs', 'sprintable', undefined)).toBe('/moonklabs/named/docs/a/view');
   });
   it("another project's answer that names a project slug but no org slug fails closed (the current workspace is not assumed for it)", () => {
     expect(t({ slug: 'd', projectId: 'proj-x', orgSlug: null, projectSlug: 'other-proj' })).toBeNull();
@@ -41,14 +41,14 @@ describe('previewTarget', () => {
     }
   });
   it('a document slug: Korean passes as the tree passes it · / ? # % are escaped · "." and ".." are refused · blank is refused', () => {
-    expect(t({ slug: '측정용-문서-id-링크-2', projectId: cur })).toBe('/moonklabs/sprintable/docs/측정용-문서-id-링크-2');
-    expect(t({ slug: 'a/b?c#d%e', projectId: cur })).toBe('/moonklabs/sprintable/docs/a%2Fb%3Fc%23d%25e');
+    expect(t({ slug: '측정용-문서-id-링크-2', projectId: cur })).toBe('/moonklabs/sprintable/docs/측정용-문서-id-링크-2/view');
+    expect(t({ slug: 'a/b?c#d%e', projectId: cur })).toBe('/moonklabs/sprintable/docs/a%2Fb%3Fc%23d%25e/view');
     // a backslash is read as «/» by URL parsing (`..\\x` would climb out of the docs route) — it goes escaped too
-    expect(t({ slug: '..\\flow', projectId: cur })).toBe('/moonklabs/sprintable/docs/..%5Cflow');
-    expect(t({ slug: 'a\\b', projectId: cur })).toBe('/moonklabs/sprintable/docs/a%5Cb');
+    expect(t({ slug: '..\\flow', projectId: cur })).toBe('/moonklabs/sprintable/docs/..%5Cflow/view');
+    expect(t({ slug: 'a\\b', projectId: cur })).toBe('/moonklabs/sprintable/docs/a%5Cb/view');
     for (const bad of ['.', '..', '', '   ', null, undefined]) expect(t({ slug: bad as never, projectId: cur }), String(bad)).toBeNull();
   });
   it('Korean org / project slugs are slugs', () => {
-    expect(t({ slug: 'd', projectId: 'p', orgSlug: '문서팀', projectSlug: '프로젝트-1' })).toBe('/문서팀/프로젝트-1/docs/d');
+    expect(t({ slug: 'd', projectId: 'p', orgSlug: '문서팀', projectSlug: '프로젝트-1' })).toBe('/문서팀/프로젝트-1/docs/d/view');
   });
 });

@@ -61,7 +61,7 @@ describe('/docs?id=<doc id>', () => {
     await render();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0]![0])).toBe(`/api/docs/preview?q=${ID}01`);
-    expect(replaceMock).toHaveBeenCalledWith('/moonklabs/sprintable/docs/prd-v2');
+    expect(replaceMock).toHaveBeenCalledWith('/moonklabs/sprintable/docs/prd-v2/view');
     expect(container.querySelector('[data-testid="docs-index"]')).not.toBeNull();
   });
 
@@ -70,14 +70,14 @@ describe('/docs?id=<doc id>', () => {
     fetchMock.mockResolvedValue(ok({ id: 'd-1', slug: 'prd-v2', ...here }));
     await render();
     expect(String(fetchMock.mock.calls[0]![0])).toBe('/api/docs/preview?q=prd-v2');
-    expect(replaceMock).toHaveBeenCalledWith('/moonklabs/sprintable/docs/prd-v2');
+    expect(replaceMock).toHaveBeenCalledWith('/moonklabs/sprintable/docs/prd-v2/view');
   });
 
   it("a document of another project opens in ITS project (the answer's own slug)", async () => {
     searchState.qs = `id=${ID}02`;
     fetchMock.mockResolvedValue(ok({ slug: 'runbook', projectId: 'proj-x', orgSlug: 'moonklabs', projectSlug: 'other-proj' }));
     await render();
-    expect(replaceMock).toHaveBeenCalledWith('/moonklabs/other-proj/docs/runbook');
+    expect(replaceMock).toHaveBeenCalledWith('/moonklabs/other-proj/docs/runbook/view');
   });
 
   it('another project that has no slug is NOT guessed as the current one — the index stays', async () => {
@@ -164,7 +164,7 @@ describe('/docs?id=<doc id>', () => {
     expect(signals[0]!.aborted).toBe(true);
     expect(signals[1]!.aborted).toBe(false);
     expect(replaceMock).toHaveBeenCalledTimes(1);
-    expect(replaceMock).toHaveBeenCalledWith('/moonklabs/sprintable/docs/once');
+    expect(replaceMock).toHaveBeenCalledWith('/moonklabs/sprintable/docs/once/view');
   });
 
   it('a changed id while the page stays mounted: the old request is cancelled, only the new document opens', async () => {
@@ -179,6 +179,6 @@ describe('/docs?id=<doc id>', () => {
     expect(first.aborted).toBe(true);
     await act(async () => { releaseFirst(ok({ slug: 'first', ...here })); await Promise.resolve(); });
     expect(replaceMock).toHaveBeenCalledTimes(1);
-    expect(replaceMock).toHaveBeenCalledWith('/moonklabs/sprintable/docs/second');
+    expect(replaceMock).toHaveBeenCalledWith('/moonklabs/sprintable/docs/second/view');
   });
 });

@@ -24,5 +24,6 @@ export function previewTarget(d: Preview, wsSlug: string, projSlug: string, curr
   const org: string | null = d.orgSlug ? d.orgSlug : sameProject ? wsSlug : null;
   const proj: string | null = sameProject ? projSlug : (d.projectSlug ?? null);
   if (!isSlugSegment(org) || !isSlugSegment(proj)) return null;
-  return docUrl(org, proj, pathSafe(slug));
+  // story 4892 (D1) — a link to a document (chat cards, reports) opens it to read, like choosing it from the list
+  return `${docUrl(org, proj, pathSafe(slug))}/view`;
 }

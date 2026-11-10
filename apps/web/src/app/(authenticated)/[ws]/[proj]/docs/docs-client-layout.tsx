@@ -234,7 +234,9 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     pushRecent(slug);
     // story a539c649 S2: wsSlug/projSlug 는 layout.tsx 가 항상 보장(notFound() 미보장 시 차단)
     // — #2154 폴백 분기 자체가 불필요해졌다(구조적 소거).
-    router.push(docUrl(wsSlug, projSlug, slug));
+    // story 4892 (UI-9 D1, PO 11-10) — choosing a doc from the list opens it to READ (people open documents to read; 141 of the last 30 days'
+    // documents were made by agents, 0 by people). «고치기» in the detail header is the way to the editor. A NEW doc still opens the editor (handleNewDoc).
+    router.push(`${docUrl(wsSlug, projSlug, slug)}/view`);
     setTreeDrawerOpen(false);
   }, [router, pushRecent, wsSlug, projSlug]);
 

@@ -15,7 +15,13 @@ const { useDocsLayoutMock, fetchWithAuthMock } = vi.hoisted(() => ({
   fetchWithAuthMock: vi.fn(),
 }));
 
-vi.mock('next/navigation', () => ({ useParams: () => ({ slug: 'payments-v2' }) }));
+const { deleteMock } = vi.hoisted(() => ({ deleteMock: vi.fn() }));
+vi.mock('next/navigation', () => ({ useParams: () => ({ slug: 'payments-v2' }), useRouter: () => ({ replace: vi.fn(), push: vi.fn() }) }));
+vi.mock('@/components/ui/human-only-action', () => ({ HumanOnlyAction: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
+vi.mock('@/components/docs/use-doc-delete', () => ({ useDocDelete: () => deleteMock }));
+vi.mock('@/components/docs/doc-share-dialog', () => ({
+  DocShareDialog: ({ open, docId }: { open: boolean; docId: string }) => (open ? <div data-testid="share-dialog" data-doc-id={docId} /> : null),
+}));
 vi.mock('../../docs-context', () => ({ useDocsLayout: () => useDocsLayoutMock() }));
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
 vi.mock('@/components/docs/doc-status-rail', () => ({
@@ -64,7 +70,7 @@ const DOC = {
 };
 
 async function mount(doc: typeof DOC & { wiki_link_targets?: Record<string, string> } = DOC) {
-  useDocsLayoutMock.mockReturnValue({ wsSlug: 'ws1', projSlug: 'proj1', projectId: 'proj-id', tree: TREE });
+  useDocsLayoutMock.mockReturnValue({ wsSlug: 'ws1', projSlug: 'proj1', projectId: 'proj-id', tree: TREE, setTree: vi.fn() });
   fetchWithAuthMock.mockResolvedValue(new Response(JSON.stringify({ data: doc }), { status: 200 }));
   const { default: DocViewPage } = await import('./page');
   await act(async () => { root.render(wrap(<DocViewPage />)); });
@@ -119,7 +125,7 @@ describe('DocViewPage — 에디토리얼 리더 배선(§3)', () => {
   });
 
   it('문서를 못 찾으면(404) notFound 문구를 보여준다', async () => {
-    useDocsLayoutMock.mockReturnValue({ wsSlug: 'ws1', projSlug: 'proj1', projectId: 'proj-id', tree: TREE });
+    useDocsLayoutMock.mockReturnValue({ wsSlug: 'ws1', projSlug: 'proj1', projectId: 'proj-id', tree: TREE, setTree: vi.fn() });
     fetchWithAuthMock.mockResolvedValue(new Response(JSON.stringify({}), { status: 404 }));
     const { default: DocViewPage } = await import('./page');
     await act(async () => { root.render(wrap(<DocViewPage />)); });
@@ -141,7 +147,7 @@ describe('DocViewPage — 페이지 h1 1개(story #3946)', () => {
   });
 
   it('⭐로딩 상태(fetch 미해결)에도 h1이 정확히 1개다(sr-only 자리표시자)', async () => {
-    useDocsLayoutMock.mockReturnValue({ wsSlug: 'ws1', projSlug: 'proj1', projectId: 'proj-id', tree: TREE });
+    useDocsLayoutMock.mockReturnValue({ wsSlug: 'ws1', projSlug: 'proj1', projectId: 'proj-id', tree: TREE, setTree: vi.fn() });
     fetchWithAuthMock.mockReturnValue(new Promise(() => {}));
     const { default: DocViewPage } = await import('./page');
     await act(async () => { root.render(wrap(<DocViewPage />)); });
@@ -151,7 +157,7 @@ describe('DocViewPage — 페이지 h1 1개(story #3946)', () => {
   });
 
   it('⭐404 상태에도 h1이 정확히 1개다(sr-only 자리표시자)', async () => {
-    useDocsLayoutMock.mockReturnValue({ wsSlug: 'ws1', projSlug: 'proj1', projectId: 'proj-id', tree: TREE });
+    useDocsLayoutMock.mockReturnValue({ wsSlug: 'ws1', projSlug: 'proj1', projectId: 'proj-id', tree: TREE, setTree: vi.fn() });
     fetchWithAuthMock.mockResolvedValue(new Response(JSON.stringify({}), { status: 404 }));
     const { default: DocViewPage } = await import('./page');
     await act(async () => { root.render(wrap(<DocViewPage />)); });
@@ -188,15 +194,47 @@ describe('DocViewPage — 빵부스러기 좁은 폭(4356)', () => {
 describe('DocViewPage — 상세 열 읽기 화면이 ds 부품을 입는다 (4892)', () => {
   const editLink = () => [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('고치기')) as HTMLAnchorElement | undefined;
 
-  it('⭐«고치기»는 머리 오른쪽의 ds 보조 단추(링크)이고 편집기 주소로 간다', async () => {
+  it('⭐«고치기»는 «읽기 | 고치기» 한 쌍의 한쪽이고 편집기 주소로 간다 — 읽기 쪽이 지금 쪽(aria-current)', async () => {
     await mount();
-    const link = editLink();
-    expect(link, 'the 고치기 link').toBeTruthy();
-    expect(link!.getAttribute('data-slot')).toBe('ds-button');
-    expect(link!.getAttribute('href')).toBe('/ws1/proj1/docs/payments-v2');
-    expect(link!.className.split(/\s+/)).toContain('border-ds-line-control');          // secondary, not the primary action
-    expect(link!.className.split(/\s+/)).not.toContain('bg-ds-action');
-    expect(link!.querySelector('[data-icon="edit"]')).not.toBeNull();
+    const group = container.querySelector('[data-slot="doc-mode-switch"]')!;
+    expect(group.getAttribute('aria-label')).toBe(koMessages.docs.modeSwitchLabel);
+    const [read, edit] = [...group.querySelectorAll('a')] as HTMLAnchorElement[];
+    expect(read!.textContent).toBe('읽기');
+    expect(edit!.textContent).toBe('고치기');
+    expect(read!.getAttribute('href')).toBe('/ws1/proj1/docs/payments-v2/view');
+    expect(edit!.getAttribute('href')).toBe('/ws1/proj1/docs/payments-v2');
+    expect(read!.getAttribute('aria-current')).toBe('page');
+    expect(edit!.getAttribute('aria-current')).toBeNull();
+    expect(edit!.getAttribute('data-slot')).toBe('ds-button');
+  });
+
+  it('⭐읽기 화면에도 공유가 있다 — 공유 단추를 누르면 이 문서의 공유 창이 열린다', async () => {
+    await mount();
+    expect(container.querySelector('[data-testid="share-dialog"]')).toBeNull();
+    const share = container.querySelector('[data-testid="docs-reader-share"]') as HTMLButtonElement;
+    expect(share, 'the share button on the reading screen').toBeTruthy();
+    expect(share.getAttribute('data-slot')).toBe('ds-icon-button');
+    expect(share.className.split(/\s+/)).toContain('hidden');
+    expect(share.className.split(/\s+/)).toContain('lg:inline-flex');
+    await act(async () => { share.click(); });
+    expect(container.querySelector('[data-testid="share-dialog"]')?.getAttribute('data-doc-id')).toBe('d1');
+  });
+
+  it('⭐읽기 화면에도 ⋯ 메뉴가 있다 — 안에 공유(lg 미만 전용)와 삭제, 삭제는 같은 훅으로 간다', async () => {
+    await mount();
+    const trigger = container.ownerDocument.querySelector(`button[aria-label="${koMessages.docs.moreActions}"]`) as HTMLElement;
+    expect(trigger, 'the ⋯ menu trigger').toBeTruthy();
+    await act(async () => {
+      trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }));
+      trigger.click();
+    });
+    const doc = container.ownerDocument;
+    const menuShare = doc.querySelector('[data-testid="docs-reader-menu-share"]') as HTMLElement;
+    expect(menuShare.className.split(/\s+/)).toContain('lg:hidden');
+    const del = doc.querySelector('[data-testid="docs-reader-menu-delete"]') as HTMLElement;
+    expect(del.textContent).toContain('삭제');
+    await act(async () => { del.click(); });
+    expect(deleteMock).toHaveBeenCalledTimes(1);
   });
 
   it('머리 한 줄은 ds 선 · 바탕이고 뿌리 «지식» 링크는 목록으로 간다', async () => {
