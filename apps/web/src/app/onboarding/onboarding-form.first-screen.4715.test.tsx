@@ -115,7 +115,9 @@ describe('[SID:4715] AC1 — no organization-name step: the organization is made
     expect(orgPosts()[0]!.body).toEqual({ name: '김지우의 조직' });
     expect(container.querySelector('input[type="text"]')).toBeNull();
     expect(h1()).toBe(first.macTitle);
-    expect(byTestId('onboarding-first-org')?.textContent).toBe('김지우의 조직에서 시작해요 · 이름은 설정에서 바꿀 수 있어요');
+    // story 4891: which organization the app attaches to stays — as «시작 조직 [이름]» (one chip), not a sentence
+    expect(byTestId('onboarding-first-org')?.textContent).toBe(`${first.orgLead} 김지우의 조직`);
+    expect(byTestId('onboarding-first-org')?.querySelector('[data-slot="ds-chip"], span')?.textContent).toBe('김지우의 조직');
   });
 
   it('T1b no display name → «내 조직» · already a member → nothing made and no organization line (the name is not known here)', async () => {
@@ -213,7 +215,16 @@ describe('[SID:4715] self-QA — the phone app card stays on the first screen (s
     await mount();
     // reverted (the card dropped from the Mac branch) → null here
     expect(byTestId('onboarding-first-mac')).not.toBeNull();
+    // story 4891 (PO 11-10): on a Mac the phone app is ONE row — «폰에서도 쓰기 ›» — and the card (QR · store links) opens in place on a press
+    expect(byTestId('phone-app-row')).not.toBeNull();
+    expect(byTestId('phone-app-card')).toBeNull();
+    expect(byTestId('phone-app-row-toggle')?.textContent).toBe(koMessages.phonePairing.useOnPhone);
+    expect(byTestId('phone-app-row-toggle')?.getAttribute('aria-expanded')).toBe('false');
+    await click(byTestId('phone-app-row-toggle'));
     expect(byTestId('phone-app-card')).not.toBeNull();
+    expect(byTestId('phone-app-row-toggle')?.getAttribute('aria-expanded')).toBe('true');
+    await click(byTestId('phone-app-row-toggle'));
+    expect(byTestId('phone-app-card')).toBeNull();
     await act(async () => { root.render(wrap(<div />)); });
 
     setUserAgent(PHONE_UA);

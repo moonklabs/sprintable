@@ -1808,15 +1808,16 @@
     "sessionExpiredCta": "Sign in again",
     "first": {
       "macTitle": "Your agents run on your Mac",
-      "macLead": "Download the Mac app, open it and continue with the same account — then choose a folder and your agent starts right away. Needs Claude Code or Codex on this Mac.",
+      "macLead": "Get the app, continue with this account. Needs Claude Code or Codex.",
       "macCta": "Get the Mac app",
       "notMacTitle": "There's only a Mac app for now",
       "notMacLead": "Sign in with this account on a Mac and get the app to start an agent. An agent already running somewhere else can be connected right now.",
-      "advancedSummary": "Advanced — connect the Claude Code or Codex you already use, no app",
-      "openAppLead": "Already have the app?",
+      "advancedSummary": "Advanced",
+      "openAppLead": "Already installed?",
       "openApp": "Open the app",
       "advancedTitleNotMac": "Connect an agent you already use",
-      "orgLine": "Starting in {org} · You can rename it in settings"
+      "orgLead": "Starting in",
+    "laterShort": "Not now — reopen it in Settings."
     },
     "phone": {
       "off": {
@@ -7820,6 +7821,7 @@
     "notInApp": "Open this screen in the Sprintable app on your phone",
     "getApp": "Get the phone app",
     "macAppAux": "The Mac app is downloaded on a Mac.",
+    "useOnPhone": "Use it on your phone",
     "needPhoneAppBody": "To reply to this computer's agents, or stop or instruct them, from your phone, you need the phone app.",
     "getAppAndroid": "Android · Google Play",
     "getAppIos": "iPhone · App Store",
