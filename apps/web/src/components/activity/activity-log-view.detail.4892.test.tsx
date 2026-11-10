@@ -11,10 +11,10 @@ import { ActivityLogView } from './activity-log-view';
 import { TopBarProvider } from '@/components/nav/top-bar-context';
 import koMessages from '../../../messages/ko.json';
 
-const { mq } = vi.hoisted(() => ({ mq: { wide: true } }));
+const { mq, tzMock } = vi.hoisted(() => ({ mq: { wide: true }, tzMock: { value: 'UTC' as string | null } }));
 vi.mock('@/lib/use-media-query', () => ({ useMediaQuery: () => mq.wide }));
 // the viewer's zone decides which day a row is on — pin it so the test does not depend on the machine's zone
-vi.mock('@/components/viewer-time-zone', () => ({ useViewerTimeZone: () => 'UTC' }));
+vi.mock('@/components/viewer-time-zone', () => ({ useViewerTimeZone: () => tzMock.value }));
 const fetchWithAuthMock = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: Parameters<typeof fetchWithAuthMock>) => fetchWithAuthMock(...args) }));
 
@@ -39,6 +39,7 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
   vi.setSystemTime(NOW);
   mq.wide = true;
+  tzMock.value = 'UTC';
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -217,6 +218,30 @@ describe('ActivityLogView — 초점은 키보드 활성에서만 옮긴다 (489
     rows()[0]!.focus();
     await click(rows()[0]!);
     expect(document.activeElement).toBe(rows()[0]);
+  });
+});
+
+describe('ActivityLogView — 시간대를 모를 때(null)도 묶음과 상세가 같은 날을 가리킨다 (4892, codex)', () => {
+  it('⭐viewer zone unknown → both fall back to UTC: a row at 23:30 UTC on the 10th is under the 10th and its details say the 10th', async () => {
+    tzMock.value = null;
+    vi.setSystemTime(new Date('2026-11-12T12:00:00Z'));   // so the row's day is an older date header, not 오늘 / 어제
+    fetchWithAuthMock.mockImplementation(async (url: string) => {
+      if (url.includes('/api/members')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      const items = [row('late', '2026-11-10T23:30:00Z')];
+      return { ok: true, status: 200, json: async () => ({ data: { items, total: 1, limit: 30, offset: 0 } }) };
+    });
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <TopBarProvider><ActivityLogView projectId="p1" /></TopBarProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="audit-day-group"] h2')?.textContent).toContain('10일');
+    await click(rows()[0]!);
+    expect(detail()!.querySelector('dl')!.textContent).toContain('10.');   // «2026. 11. 10.» — not the 11th (what a non-UTC runtime zone would show)
+    expect(detail()!.querySelector('dl')!.textContent).not.toContain('11. 11.');
   });
 });
 
