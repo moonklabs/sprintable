@@ -110,9 +110,9 @@ function loadWipLimit(projectId: string | undefined, status: string): number | n
 
 /** story #4888 — a column read to its end while a browser-side filter is on: page size (the route's maximum) and the most pages one column is read for (2,500 cards) */
 const COMPLETE_PAGE_SIZE = 100;
-// The board query of the backend serves at most 20 `done` cards per request, and the route asks for one more than `limit` to know whether a next page exists — so a `done` page of 100 came back as 20 with no cursor
-// (the rest silently missing). 19 + 1 = 20 keeps the cursor honest.
-const COMPLETE_PAGE_SIZE_DONE = 19;
+// `done` page size, for every `done` request (first page, «더 보기», read-to-the-end). The backend board query (repositories/story.py list_board) serves at most 10 `done` cards per request and only those of the last 7 days,
+// and the route asks for one more than `limit` to learn whether a next page exists: with limit 10 (or 100) it got 10 rows back, concluded «no next page» and sent no cursor — `done` could never page. 9 + 1 = 10 keeps the cursor honest.
+const DONE_PAGE_SIZE = 9;
 const COMPLETE_MAX_PAGES = 25;
 
 function saveWipLimit(projectId: string | undefined, status: string, limit: number | null): void {
@@ -335,7 +335,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     // story #4888 — the list API already filters by goal (epic) on the server: send it, so the cursor pages are the filtered set (no read-to-end needed for this filter).
     if (selectedEpicId) params.set('epic_id', selectedEpicId);
     params.set('status', status);
-    params.set('limit', String(pageSize ?? (status === 'done' ? 10 : 20)));
+    params.set('limit', String(status === 'done' ? DONE_PAGE_SIZE : (pageSize ?? 20)));
     if (cursor) params.set('cursor', cursor);
     const res = await fetchWithAuth(`/api/stories?${params}`);
     if (!res.ok) return { stories: [], total: 0, nextCursor: null, ok: false };
@@ -360,7 +360,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     let cursor: string | undefined;
     let next: string | null = null;
     for (let page = 0; page < COMPLETE_MAX_PAGES; page++) {
-      const r = await fetchStoriesByStatus(status, cursor, status === 'done' ? COMPLETE_PAGE_SIZE_DONE : COMPLETE_PAGE_SIZE);
+      const r = await fetchStoriesByStatus(status, cursor, COMPLETE_PAGE_SIZE);
       if (!r.ok) return { stories: all, total: all.length, nextCursor: next, ok: false };
       all.push(...r.stories);
       next = r.nextCursor;

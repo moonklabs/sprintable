@@ -203,8 +203,8 @@ function stubPagedFetch(rows: Row[], opts: { failCursorRequests?: { n: number };
       const offset = Number(sp.get('cursor') ?? '0');
       const forProject = opts.smallProject && sp.get('project_id') === opts.smallProject ? withStage.slice(0, 5) : withStage;
       const all = forProject.filter((s) => s.status === status && (!epic || s.epic_id === epic));
-      // like the route + the backend board query: ask for limit + 1 to learn whether a next page exists, and the backend serves at most 20 `done` cards per request
-      const asked = status === 'done' ? Math.min(limit + 1, 20) : limit + 1;
+      // like the route + the backend board query: ask for limit + 1 to learn whether a next page exists, and the backend serves at most 10 `done` cards per request
+      const asked = status === 'done' ? Math.min(limit + 1, 10) : limit + 1;
       const fetched = all.slice(offset, offset + asked);
       const hasMore = fetched.length > limit;
       const page = fetched.slice(0, limit);
@@ -227,7 +227,8 @@ const inProgress = (n: number, extra: Partial<Row> = {}): Row[] =>
 
 /** the header number of a trust column, found by its label */
 function headerOf(label: string): string {
-  const h3 = [...container.querySelectorAll('h3')].find((h) => h.textContent?.includes(label));
+  const h3s = [...container.querySelectorAll('h3')];
+  const h3 = h3s.find((h) => h.textContent?.trim() === label) ?? h3s.find((h) => h.textContent?.includes(label));
   for (let el: HTMLElement | null | undefined = h3?.parentElement, i = 0; el && i < 3; el = el.parentElement, i += 1) {
     const n = el.querySelector('span.tabular-nums');
     if (n) return (n.textContent ?? '').trim();
@@ -420,7 +421,7 @@ describe('KanbanBoard 4888 — 코덱스 검수에서 나온 칸들', () => {
     expect(stillLoading?.disabled).toBe(true);
   });
 
-  it('완료(done) 열도 검색이 켜지면 끝까지 읽는다 — 백엔드가 한 번에 20건만 주는 상태이므로 쪽 크기를 19로', async () => {
+  it('완료(done) 열도 검색이 켜지면 끝까지 읽는다 — 백엔드가 한 번에 10건만 주므로 쪽 크기는 9', async () => {
     const rows = Array.from({ length: 45 }, (_, i) => ({ id: `d${i + 1}`, status: 'done', title: i === 44 ? '오래된 완료 보고서' : `완료-${i + 1}`, position: i + 1 }));
     const urls = stubPagedFetch(rows);
     await mount();
@@ -428,7 +429,20 @@ describe('KanbanBoard 4888 — 코덱스 검수에서 나온 칸들', () => {
     await openSearchAndType('오래된');
     await act(async () => { for (let i = 0; i < 20; i += 1) await Promise.resolve(); });
     expect(container.textContent).toContain('오래된 완료 보고서');
-    expect(urls.some((u) => u.includes('status=done') && u.includes('limit=19'))).toBe(true);
-    expect(urls.some((u) => u.includes('status=done') && u.includes('limit=100'))).toBe(false);
+    expect(urls.filter((u) => u.includes('status=done')).every((u) => u.includes('limit=9'))).toBe(true);
+  });
+
+  it('완료(done) 열 첫 쪽: 10건을 넘으면 «9+»와 «더 보기»가 서고, 마지막 카드까지 닿는다', async () => {
+    const rows = Array.from({ length: 15 }, (_, i) => ({ id: `d${i + 1}`, status: 'done', title: `완료-${i + 1}`, position: i + 1 }));
+    stubPagedFetch(rows);
+    await mount();
+    expect(headerOf('완료')).toBe('9+');
+    expect(container.textContent).not.toContain('완료-10');
+    expect(loadMoreButtons()).toHaveLength(1);
+    await act(async () => { loadMoreButtons()[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); });
+    expect(container.textContent).toContain('완료-15');
+    expect(headerOf('완료')).toBe('15');
   });
 });
+
