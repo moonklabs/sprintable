@@ -413,6 +413,11 @@ export function findMemberSynonymCollisions(
 // 낀 세 쌍(3402 2·3575 1) 전부 그래서 삭제(양성대조: 제외 로직을 끄면 다시 RED가 되어야
 // 한다).
 export const EXEMPT_PAIRS = new Set<string>([
+  // story 4892 (UI-9 상세 열 — the «읽기 | 고치기» pair) — `docs.modeRead` («읽기») is the exact label of one side of the mode switch in the reading screen's header; `docs.readMinutes`
+  // («읽기 {minutes}분») is the byline's reading time. Not the shape this guard is for (#2352/#2365: two COUNTED phrases read as one another): the label counts nothing — it names a
+  // side of a switch — and the byline's number is its whole point; they sit in different places (header switch / article byline) and tests find the switch by role + name.
+  // Look again if the label ever carries a number («읽기 · {n}»).
+  'docs.modeRead <-> docs.readMinutes',
   // story #4733 (S4b · Yuna 4733 sheet §2/§4/§5 — «세션 관리» on the phone) — three pairs that are the sheet's own words on purpose:
   //  · `startOne` («세션 시작», the row button) inside `out.alone` («이 중 {k}개는 먼저 따로 종료했어요 — 모든 세션 시작을 누르면 함께 시작해요.») and `startAll`
   //    («모든 세션 시작») inside it: the sentence POINTS at the card's own button by its label, so the label's words are the point. The row button is drawn only in the

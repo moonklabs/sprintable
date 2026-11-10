@@ -102,7 +102,9 @@ export function DocsIndex() {
   // (에디터 직행)와 목적지가 갈려 편집까지 2스텝(인덱스→리더→편집)이 됐다. 트리와 동선을
   // 통일해 에디터 직행 1스텝으로 되돌린다 — 리더는 에디터 상단의 opt-in "읽기 보기" 링크로만
   // 진입(삭제 아님, default만 이동).
-  const goToDoc = (slug: string) => router.push(docUrl(wsSlug, projSlug, slug));
+  // story 4892 (UI-9 D1, PO 11-10) reverses the #2967 judgement above: a document opened from the index now opens to READ (people open documents to read);
+  // «고치기» in the detail header is the way into the editor.
+  const goToDoc = (slug: string) => router.push(`${docUrl(wsSlug, projSlug, slug)}/view`);
 
   // story #3784 — "아직 안 옴"·"실패"·"정말 0건"을 가른다. 로딩 中엔 조용히 아무것도
   // 그리지 않는다(사이드바가 이미 로딩 중 신호를 그린다 — 이 존까지 스켈레톤을 겹칠 이유 0).

@@ -49,7 +49,7 @@ function WikiLinkView({ node, editor }: ReactNodeViewProps) {
   const handleClick = useCallback(() => {
     if (!slug) return;
     if (onNavigate) { onNavigate(slug); return; }
-    window.location.href = flatHref(`/docs/${slug}`);
+    window.location.href = flatHref(`/docs/${slug}/view`);   // story 4892 (D1): reads first
   }, [slug, onNavigate, flatHref]);
 
   const isNotFound = exists === false;

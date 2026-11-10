@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { DocContentRenderer } from '@/components/docs/doc-content-renderer';
@@ -10,8 +10,13 @@ import { DocMiniToc } from '@/components/docs/doc-mini-toc';
 import { useActiveDocHeading } from '@/components/docs/doc-active-heading';
 import { extractDocHeadings } from '@/components/docs/doc-heading-utils';
 import { DocStatusHeader, DocEvidenceRail } from '@/components/docs/doc-status-rail';
-import { Button } from '@/components/ds/button';
+import { IconButton } from '@/components/ds/icon-button';
 import { Icon } from '@/components/ds/icon';
+import { DocModeSwitch } from '@/components/docs/doc-mode-switch';
+import { DocShareDialog } from '@/components/docs/doc-share-dialog';
+import { useDocDelete } from '@/components/docs/use-doc-delete';
+import { HumanOnlyAction } from '@/components/ui/human-only-action';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useDocsLayout } from '../../docs-context';
 import { docUrl, docsListUrl } from '@/components/docs/lib/doc-project-url';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
@@ -29,6 +34,8 @@ interface DocDetail {
   // 이미 이 필드들을 slug-query 단건 경로에서 내려주고 있었다(doc-payload enrich) — 이
   // 옛 최소 타입엔 없었을 뿐(fetchTree/Doc 타입과 동형 갭).
   status?: string;
+  // story 4892 — a sprint report is read-only (the editor page opens it non-editable and hides «삭제»); the reading screen must not offer what the editor hides.
+  doc_type?: string;
   parent_id?: string | null;
   updated_at?: string;
   assignee?: { id: string; name: string } | null;
@@ -52,11 +59,16 @@ export default function DocViewPage() {
   const params = useParams();
   const slug = typeof params.slug === 'string' ? params.slug : '';
   const t = useTranslations('docs');
+  const ts = useTranslations('share');
+  const router = useRouter();
   const locale = useLocale();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
-  const { wsSlug, projSlug, projectId, tree } = useDocsLayout();
+  const { wsSlug, projSlug, projectId, tree, setTree } = useDocsLayout();
 
   const [doc, setDoc] = useState<DocState>(null);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  // story 4892 — the same delete as the editor page (confirm → DELETE → toast on failure / leave the page on success).
+  const handleDelete = useDocDelete({ docId: doc ? doc.id : undefined, projectId, wsSlug, projSlug, router, setTree });
   const contentRef = useRef<HTMLDivElement | null>(null);
   const scrollRootRef = useRef<HTMLDivElement | null>(null);
 
@@ -120,6 +132,7 @@ export default function DocViewPage() {
   }
 
   const readMinutes = estimateReadMinutes(doc.content);
+  const readOnlyDoc = doc.doc_type === 'sprint_report';
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -129,19 +142,51 @@ export default function DocViewPage() {
           한글 경로는 sans 본문체로 — 위계는 크기/weight/citron rule로만 낸다. */}
       {/* story 4892 (UI-9 상세 열, 읽기) — 머리 한 줄이 ds 면 · 선 · 글자색을 입는다. «고치기»는 머리 오른쪽의 ds 보조 단추(주 단추 아님 — 읽는 화면의 주 동작은 읽기).
           [SID:4356] 좁은 폭에서 «지식»이 꺾이지 않게: 뿌리 · 구분은 줄지 않고(shrink-0 · nowrap), 분류 · 제목은 한 줄 말줄임(제목은 남는 자리만 · 바닥 3rem). */}
-      <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-ds-line bg-ds-background px-4 py-1 text-ds-small text-ds-ink-3 lg:px-8">
-        <Link href={docsListUrl(wsSlug, projSlug)} className="shrink-0 whitespace-nowrap hover:text-ds-ink hover:underline">{t('breadcrumbKnowledgeRoot')}</Link>
-        {categoryLabel ? (<><span className="shrink-0">/</span><span className="min-w-0 truncate">{categoryLabel}</span></>) : null}
-        <span className="shrink-0">/</span>
-        <span className="min-w-[3rem] flex-1 truncate text-ds-ink">{doc.title}</span>
+      {/* The header wraps: the breadcrumb (root / category / title) is one block with a floor width (basis 11rem), the actions sit at its right and drop to a second
+          line right-aligned when the row is too narrow (320 / 360 / 390) — so the actions can never push the breadcrumb out. */}
+      <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-ds-line bg-ds-background px-4 py-1 text-ds-small text-ds-ink-3 lg:px-8">
+        <div className="flex min-w-0 flex-1 basis-[11rem] items-center gap-2">
+          <Link href={docsListUrl(wsSlug, projSlug)} className="shrink-0 whitespace-nowrap hover:text-ds-ink hover:underline">{t('breadcrumbKnowledgeRoot')}</Link>
+          {categoryLabel ? (<><span className="shrink-0">/</span><span className="min-w-0 truncate">{categoryLabel}</span></>) : null}
+          <span className="shrink-0">/</span>
+          <span className="min-w-[3rem] flex-1 truncate text-ds-ink">{doc.title}</span>
+        </div>
         <span className="ml-auto flex shrink-0 items-center gap-1">
           <DocToc headings={headings} onHeadingClick={scrollToHeading} />
-          <Button asChild variant="secondary">
-            <Link href={docUrl(wsSlug, projSlug, slug)}>
-              <Icon name="edit" size={14} />
-              {t('editDoc')}
-            </Link>
-          </Button>
+          {readOnlyDoc ? null : (
+            <DocModeSwitch
+              mode="read"
+              readHref={`${docUrl(wsSlug, projSlug, slug)}/view`}
+              editHref={docUrl(wsSlug, projSlug, slug)}
+              readLabel={t('modeRead')}
+              editLabel={t('editDoc')}
+              groupLabel={t('modeSwitchLabel')}
+            />
+          )}
+          {/* story 4892 — share and the ⋯ menu are on the reading screen too (they used to exist only on the editing screen). Below lg «공유» is inside the menu. */}
+          <IconButton icon="share" label={ts('share')} onClick={() => setShareDialogOpen(true)} className="hidden lg:inline-flex" data-testid="docs-reader-share" />
+          <DropdownMenu>
+            <DropdownMenuTrigger aria-label={t('moreActions')} className="inline-flex size-7 items-center justify-center rounded-ds-control text-ds-ink-2 transition-colors hover:bg-ds-surface-high hover:text-ds-ink pointer-coarse:size-11">
+              <Icon name="more_horiz" size={16} />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem className="lg:hidden" onClick={() => setShareDialogOpen(true)} data-testid="docs-reader-menu-share">
+                <Icon name="share" size={16} className="mr-2" />
+                {ts('share')}
+              </DropdownMenuItem>
+              {/* story 4892 — a sprint report is read-only: no «고치기» above and no «삭제» here (the editor page hides it too; the server only lets humans delete). */}
+              {readOnlyDoc ? null : (
+                <HumanOnlyAction>
+                  {/* the divider belongs with «삭제»: an agent (who gets no delete) must not see a divider with nothing under it */}
+                  <DropdownMenuSeparator className="lg:hidden" />
+                  <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive" data-testid="docs-reader-menu-delete">
+                    <Icon name="delete" size={16} className="mr-2" />
+                    {t('deleteDoc')}
+                  </DropdownMenuItem>
+                </HumanOnlyAction>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </span>
       </div>
 
@@ -205,6 +250,21 @@ export default function DocViewPage() {
           </aside>
         </div>
       </div>
+      <DocShareDialog
+        open={shareDialogOpen}
+        onClose={() => setShareDialogOpen(false)}
+        docId={doc.id}
+        labels={{
+          share: ts('share'),
+          shareToWeb: ts('shareToWeb'),
+          shareToWebDesc: ts('shareToWebDesc'),
+          copyLink: ts('copyLink'),
+          linkCopied: ts('linkCopied'),
+          stopSharing: ts('stopSharing'),
+          regenerateLink: ts('regenerateLink'),
+          shareSingleDocNote: ts('shareSingleDocNote'),
+        }}
+      />
     </div>
   );
 }

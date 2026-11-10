@@ -11,10 +11,10 @@ import { slugifyDocTitle, isUntitledSlug } from '@/components/docs/lib/doc-slug'
 import { docsListUrl, docUrl } from '@/components/docs/lib/doc-project-url';
 import { useDocSync, unwrapDocResponse } from '@/components/docs/use-doc-sync';
 import { htmlToMarkdown } from '@/components/docs/lib/content-converter';
-import Link from 'next/link';
-import { Check, Copy, Eye, Link2, MoreHorizontal, Share2, Trash2 } from 'lucide-react';
+import { Check, Copy, Link2, MoreHorizontal, Share2, Trash2 } from 'lucide-react';
 import { InlineSaveIndicator } from './inline-save-indicator';
 import { DocShareDialog } from '@/components/docs/doc-share-dialog';
+import { DocModeSwitch } from '@/components/docs/doc-mode-switch';
 import { DocSyncBanner } from '@/components/docs/doc-sync-banner';
 import {
   DropdownMenu,
@@ -301,7 +301,8 @@ export default function DocSlugPage() {
   }, [selectedDoc, title, handleDocSaved]);
 
   const handleNavigate = useCallback((targetSlug: string) => {
-    router.push(docUrl(wsSlug, projSlug, targetSlug));
+    // story 4892 (D1) — a [[wiki link]] / page embed clicked inside the editor opens the target to READ, like every other document link
+    router.push(`${docUrl(wsSlug, projSlug, targetSlug)}/view`);
   }, [router, wsSlug, projSlug]);
 
   if (docLoading) {
@@ -365,17 +366,16 @@ export default function DocSlugPage() {
           </div>
         ) : null}
       </div>
-      {/* story #2967(선생님 실사용 판정 ⑤) — 인덱스 클릭 목적지를 리더→에디터로 되돌리며
-          리더 진입점이 사라지면 안 되니 opt-in 명시 링크를 "..." 드롭다운에서 상단 아이콘
-          버튼으로 승격(발견성). 목적지·라벨(t('preview'))은 기존 그대로 — 위치만 이동. */}
-      <Link
-        href={`${docUrl(wsSlug, projSlug, slug)}/view`}
-        title={t('preview')}
-        aria-label={t('preview')}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-      >
-        <Eye className="h-4 w-4" />
-      </Link>
+      {/* story 4892 (UI-9 상세 열) — the icon-only «미리보기» eye (and the reader's separate «편집» link) is now ONE labelled pair «읽기 | 고치기»,
+          in the same header place on both screens. The old story-#2967 note: the reader entry must stay discoverable — it is now a visible word. */}
+      <DocModeSwitch
+        mode="edit"
+        readHref={`${docUrl(wsSlug, projSlug, slug)}/view`}
+        editHref={docUrl(wsSlug, projSlug, slug)}
+        readLabel={t('modeRead')}
+        editLabel={t('editDoc')}
+        groupLabel={t('modeSwitchLabel')}
+      />
       <button
         type="button"
         onClick={() => setShareDialogOpen(true)}
@@ -387,7 +387,7 @@ export default function DocSlugPage() {
         <Share2 className="h-4 w-4" />
       </button>
       <DropdownMenu>
-        <DropdownMenuTrigger className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground">
+        <DropdownMenuTrigger aria-label={t('moreActions')} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground">
           <MoreHorizontal className="h-4 w-4" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">

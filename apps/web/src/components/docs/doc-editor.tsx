@@ -6,7 +6,7 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import { usePortalMenuKeys } from '@/components/shared/anchored-popover';
 import { BubbleMenu } from '@tiptap/react/menus';
 import { registerDocIdProvider } from './extensions/image-upload';
-import { Bold, Italic, Strikethrough, Code, Link2, Highlighter, Undo2, Redo2, PanelLeft, Plus, ImageIcon, Paperclip } from 'lucide-react';
+import { Bold, Italic, Strikethrough, Code, Link2, Highlighter, Undo2, Redo2, Plus, ImageIcon, Paperclip } from 'lucide-react';
 import { pickAndUpload } from './extensions/slash-command';
 import { type SlashMenuStrings } from './extensions/slash-command';
 import { DocToc } from './doc-toc';
@@ -18,6 +18,8 @@ import { computeHeadingAnchors } from './extensions/heading-ids';
 import { MobileSelectionMenu } from './mobile-selection-menu';
 import { shouldShowDesktopBubbleMenu } from './bubble-menu-visibility';
 import { useTranslations } from 'next-intl';
+import { Button as DsButton } from '@/components/ds/button';
+import { IconButton } from '@/components/ds/icon-button';
 
 type ContentFormat = 'markdown' | 'html';
 type ViewMode = 'preview' | 'markdown';
@@ -389,21 +391,14 @@ export function DocEditor({
   }, [title, autoResizeTitle]);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border bg-card max-md:h-[100dvh]">
+    <div className="flex h-full flex-col overflow-hidden rounded-ds-panel border border-ds-line bg-ds-background max-md:h-[100dvh]">
       {/* 수직 밀도 재설계: 12+ 밴드 → 슬림 sticky 헤더 1줄 통합(breadcrumb·제목·메타·url·탭·TOC·액션·
           자동저장·저장). 영구 툴바·별도 저장바·중복 헤더 밴드 제거(기능 위치만 이동·제거 0). content dominant(~74%).
           포맷=BubbleMenu(선택)·slash(/)·단축키·모바일 하단 툴바로 도달. */}
-      <header className="sticky top-0 z-10 flex flex-shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-card px-3 py-1.5">
+      <header className="sticky top-0 z-10 flex flex-shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-ds-line bg-ds-background px-3 py-1.5">
         {/* 박스1: 모바일 트리 아이콘(칩 띠 대체·lg:hidden·드로어 트리거·데스크는 사이드바 트리) */}
         {onOpenTree ? (
-          <button
-            type="button"
-            onClick={onOpenTree}
-            aria-label={tEditor('openDocTree')}
-            className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:hidden"
-          >
-            <PanelLeft className="size-4" />
-          </button>
+          <IconButton icon="left_panel_open" label={tEditor('openDocTree')} onClick={onOpenTree} className="lg:hidden" />
         ) : null}
         {breadcrumb ? <div className="hidden shrink-0 items-center lg:flex">{breadcrumb}</div> : null}
         {title !== undefined ? (
@@ -429,21 +424,18 @@ export function DocEditor({
             조작을 더 숨기지 않고 전부 카드 안 · 누를 수 있게(가로 스크롤 줄 아님). `lg` 이상은 예전 한 줄 그대로. */}
         <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1.5 lg:max-w-none lg:flex-nowrap" data-testid="doc-editor-toolbar-actions">
           {/* compact 탭 세그먼트 */}
-          <div className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
+          <div className="inline-flex gap-0.5 rounded-ds-control border border-ds-line bg-ds-surface-sunk p-0.5">
             {(['preview', 'markdown'] as const).map((mode) => (
-              <button
+              <DsButton
                 key={mode}
                 type="button"
                 aria-pressed={viewMode === mode}
                 onClick={() => setViewMode(mode)}
-                className={`rounded-md px-2 py-0.5 text-xs font-medium transition-colors ${
-                  viewMode === mode
-                    ? 'bg-card text-foreground'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
+                variant={viewMode === mode ? 'secondary' : 'quiet'}
+                className="h-6 px-2"
               >
                 {mode === 'preview' ? labels.preview : labels.markdown}
-              </button>
+              </DsButton>
             ))}
           </div>
           {/* TOC — ≥3 headings */}
@@ -474,14 +466,9 @@ export function DocEditor({
           ) : null}
           {/* 저장 버튼(별도 저장바서 헤더로 이동) */}
           {onSave ? (
-            <button
-              type="button"
-              onClick={() => void onSave()}
-              disabled={!isDirty}
-              className="shrink-0 rounded-lg bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
-            >
+            <DsButton type="button" variant="primary" onClick={() => void onSave()} disabled={!isDirty}>
               {labels.save}
-            </button>
+            </DsButton>
           ) : null}
           {/* 박스1: 담당자 아바타+popover(glanceable owner·Dispatch 밴드 대체) */}
           {dispatchSlot}
