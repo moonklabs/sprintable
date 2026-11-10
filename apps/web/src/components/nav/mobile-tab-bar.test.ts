@@ -1,42 +1,41 @@
+// story #4885(폰 탭 넷) — 하단 탭은 플래그 없이 하나: 홈(today) · 대화(chat) · 일감(work) · 전체(more). «결재» 탭은 없고 결재 경로는 «홈»이 품는다.
 // story #1991(navigate 불안정 1차 근원 B) — 하단 4탭 active 판정 회귀가드. 기존 isTabActive는
 // 4탭 href 자체+직계 하위만 인식해 gate/doc/story 상세·프로젝트/org 영역(board/goals/loops/
 // organization/settings 등, #1958 "전체" 스텁 목록 그대로)이 전부 회색이었다. getActiveTabKey가
 // #1951 매니페스트 SSOT(상세→parentTab)를 그대로 재사용해 정확히 판정하는지 고정.
 import { describe, expect, it } from 'vitest';
 import { NAV_GROUPS, CHAT_CENTER_ITEM } from '@/lib/nav-config';
-import { getActiveTabKey, TABS } from './mobile-tab-bar';
+import { getActiveTabKey, PHONE_TABS } from './mobile-tab-bar';
 import { WORKSPACE_FRAME_TAB_PATHS } from '@/components/workspace/workspace-frame-tabs';
 
 describe('getActiveTabKey', () => {
-  it('/{ws}/{proj}/flow 및 하위 경로는 now — story #2224, "지금" 탭의 새 목적지', () => {
-    expect(getActiveTabKey('/qa-org/qa-proj/flow')).toBe('now');
-    expect(getActiveTabKey('/qa-org/qa-proj/flow/anything')).toBe('now');
+  it('/{ws}/{proj}/flow 및 하위 경로는 work(일감) — story #2224, 일감 탭의 목적지', () => {
+    expect(getActiveTabKey('/qa-org/qa-proj/flow')).toBe('work');
+    expect(getActiveTabKey('/qa-org/qa-proj/flow/anything')).toBe('work');
   });
 
-  it('bare /flow(+하위)도 now — 결함 fix(선생님 실측 2026-07-30): TABS.now.href 자체가 bare라 탭을 누른 순간(proxy.ts 301 착지 前)엔 pathname이 이 형태다', () => {
-    expect(getActiveTabKey('/flow')).toBe('now');
-    expect(getActiveTabKey('/flow/anything')).toBe('now');
+  it('bare /flow(+하위)도 work — 탭을 누른 순간(proxy.ts 301 착지 前)엔 pathname이 이 형태다', () => {
+    expect(getActiveTabKey('/flow')).toBe('work');
+    expect(getActiveTabKey('/flow/anything')).toBe('work');
   });
 
-  it('/glance 및 하위 경로도 계속 now(옛 라우트 — 리다이렉트 경유 도착 대비)', () => {
-    expect(getActiveTabKey('/glance')).toBe('now');
-    expect(getActiveTabKey('/glance/foo')).toBe('now');
+  it('/glance 및 하위 경로도 계속 work(옛 라우트 — 리다이렉트 경유 도착 대비)', () => {
+    expect(getActiveTabKey('/glance')).toBe('work');
+    expect(getActiveTabKey('/glance/foo')).toBe('work');
   });
 
-  it('/inbox 정확일치는 approvals', () => {
-    expect(getActiveTabKey('/inbox')).toBe('approvals');
+  it('⭐/org-briefing(홈 화면)은 today', () => {
+    expect(getActiveTabKey('/org-briefing')).toBe('today');
   });
 
-  // story #4016 CHANGES(페드루 PO 지적, 2026-09-17 14:46Z) — /inbox 하위 경로는 옛
-  // 코드부터 approvals가 아니었다(정확일치만, alert/알림 상세 같은 /inbox/x는
-  // "전체" 소관). 대칭 리팩터 도중 dest.chats처럼 하위까지 인식하는 헬퍼를 잘못
-  // 재사용해 이 계약이 조용히 넓어질 뻔했다 — 정확일치로 되돌린 것을 고정.
-  it('/inbox 하위 경로(/inbox/x)는 approvals가 아니라 more다', () => {
+  it('⭐«결재» 탭이 없어졌다 — /inbox 정확일치와 게이트 상세(/gates/{id})는 «홈»이 품는다(#1951 parentTab=/inbox 매핑은 그대로 · 결재 열기 손 수 3 → 2)', () => {
+    expect(getActiveTabKey('/inbox')).toBe('today');
+    expect(getActiveTabKey('/gates/7d0fc67b-d6c2-4767-a156-1bcf7c786ad0')).toBe('today');
+  });
+
+  // story #4016 CHANGES — /inbox 하위 경로(/inbox/x)는 정확일치만 인식한다(알림 상세 같은 /inbox/x는 «전체» 소관). 하위까지 넓히는 헬퍼 오용 방지.
+  it('/inbox 하위 경로(/inbox/x)는 today가 아니라 more다', () => {
     expect(getActiveTabKey('/inbox/x')).toBe('more');
-  });
-
-  it('게이트 canonical 상세(/gates/{id})는 approvals — #1951 parentTab=/inbox 매핑 그대로', () => {
-    expect(getActiveTabKey('/gates/7d0fc67b-d6c2-4767-a156-1bcf7c786ad0')).toBe('approvals');
   });
 
   it('/chats 및 대화 상세(/chats/{id})는 chat', () => {
@@ -44,7 +43,7 @@ describe('getActiveTabKey', () => {
     expect(getActiveTabKey('/chats/abc123')).toBe('chat');
   });
 
-  it('프로젝트/org 영역(board·goals·loops·organization·settings 등)은 more — #1958 "전체" 스텁 목록과 정합', () => {
+  it('프로젝트/org 영역(board·goals·loops·organization·settings 등)은 more — «전체» 목록과 정합', () => {
     expect(getActiveTabKey('/board')).toBe('more');
     expect(getActiveTabKey('/qa-org/qa-proj/board')).toBe('more');
     expect(getActiveTabKey('/qa-org/qa-proj/goals/abc')).toBe('more');
@@ -62,28 +61,23 @@ describe('getActiveTabKey', () => {
   });
 });
 
-// story #2279(PO 판정, 2026-07-29): 라벨("결재")·배지(게이트 대기 수)·착지(href)가 한 줄로
-// 서야 한다 — bare `/inbox`(알림 탭 착지)로 되돌아가면 라벨과 다시 어긋난다.
-describe('TABS — story #2279 회귀가드', () => {
-  it('approvals 탭은 게이트 탭(/inbox?tab=gates)에 착지한다 — 알림 탭(bare /inbox)이 아니다', () => {
-    const approvalsTab = TABS.find((t) => t.key === 'approvals');
-    expect(approvalsTab?.href).toBe('/inbox?tab=gates');
+// story #4885 — 탭 세트의 모양 한 곳: 홈 · 대화 · 일감 · 전체, 결재 탭 0. 되돌리면(결재 탭을 다시 넣거나 순서를 바꾸면) RED.
+describe('PHONE_TABS — story #4885 (폰 탭 넷)', () => {
+  it('⭐키와 순서: 홈(today) · 대화(chat) · 일감(work) · 전체(more) — 결재(approvals) 탭 없음', () => {
+    expect(PHONE_TABS.map((t) => t.key)).toEqual(['today', 'chat', 'work', 'more']);
   });
 
-  it('now 탭은 /flow에 착지한다 — story #2224, 옛 /glance(삭제됨)로 조용히 되돌아가지 않는다', () => {
-    const nowTab = TABS.find((t) => t.key === 'now');
-    expect(nowTab?.href).toBe('/flow');
+  it('각 탭은 지금 서 있는 화면에 착지한다(플래그 OFF): 홈 /org-briefing · 대화 /chats · 일감 /flow · 전체 /more', () => {
+    const href = (key: string) => PHONE_TABS.find((t) => t.key === key)?.href;
+    expect(href('today')).toBe('/org-briefing');
+    expect(href('chat')).toBe('/chats');
+    expect(href('work')).toBe('/flow');
+    expect(href('more')).toBe('/more');
   });
 
-  // 선생님 지적(2026-07-30) — 위 두 시험(href 값 하드코딩 + getActiveTabKey 값 하드코딩)은
-  // 각자 맞아도 "서로 안 만나서" 어긋날 수 있다(isFlowPath가 3-세그먼트만 인식하고 TABS의
-  // now.href가 bare였던 실제 사례). 탭 자신의 href를 판정기에 직접 먹이는 왕복 시험으로
-  // 고정 — href를 나중에 또 바꿔도 이 시험이 자동으로 재검증한다(값을 또 하드코딩하지 않음).
+  // 위 값 하드코딩 + getActiveTabKey 값 하드코딩이 «서로 안 만나서» 어긋나지 않게 — 탭 자신의 href를 판정기에 되먹이는 왕복(값을 또 하드코딩하지 않음).
   it('각 탭의 href는 getActiveTabKey를 다시 먹였을 때 자기 자신의 key로 돌아온다 — 왕복 회귀가드', () => {
-    // usePathname()은 쿼리스트링을 안 싣는다(Next.js가 pathname/searchParams를 분리) — 실
-    // 런타임과 같은 입력을 주기 위해 href의 쿼리 부분을 떼고 pathname만 넣는다(approvals
-    // 탭의 `/inbox?tab=gates`가 대상).
-    for (const tab of TABS) {
+    for (const tab of PHONE_TABS) {
       const pathnameOnly = tab.href.split('?')[0]!;
       expect(getActiveTabKey(pathnameOnly)).toBe(tab.key);
     }
@@ -96,18 +90,16 @@ describe('TABS — story #2279 회귀가드', () => {
 // mobileTabBar.now/chat로 되돌려도 그 파일의 27개 테스트가 그대로 GREEN이었다 — 렌더
 // 텍스트 대조가 실은 이 축을 안 지나가는 경로로도 통과할 여지가 있었다는 뜻). 이 스위트는
 // TABS 데이터 자체의 namespace·labelKey 필드를 직접 잠가 "같은 키를 쓴다"를 구조로 고정한다.
-describe('TABS — story #3824 CHANGES② labelKey 공유 회귀가드(재발 방지, 카디르 QA 후속)', () => {
-  it('⭐chat 탭은 nav 네임스페이스의 chats를 그대로 공유한다(문구 값이 아니라 labelKey 자체)', () => {
-    const chatTab = TABS.find((t) => t.key === 'chat');
-    expect(chatTab?.namespace).toBe('nav');
-    expect(chatTab?.labelKey).toBe('chats');
+describe('PHONE_TABS — story #3824 CHANGES② labelKey 공유 회귀가드(재발 방지, 카디르 QA 후속)', () => {
+  it('⭐홈 · 대화 · 일감 탭은 nav 네임스페이스의 zoneNow · chats · zoneDev를 그대로 공유한다(문구 값이 아니라 labelKey 자체 — 사이드바와 한 낱말)', () => {
+    const tab = (key: string) => PHONE_TABS.find((t) => t.key === key)!;
+    expect([tab('today').namespace, tab('today').labelKey]).toEqual(['nav', 'zoneNow']);
+    expect([tab('chat').namespace, tab('chat').labelKey]).toEqual(['nav', 'chats']);
+    expect([tab('work').namespace, tab('work').labelKey]).toEqual(['nav', 'zoneDev']);
   });
 
-  it('approvals·more 탭은 그대로 mobileTabBar 자기 네임스페이스다(「결재」는 모바일 IA 통합 후속 카드 스코프)', () => {
-    const approvalsTab = TABS.find((t) => t.key === 'approvals');
-    const moreTab = TABS.find((t) => t.key === 'more');
-    expect(approvalsTab?.namespace).toBe('mobileTabBar');
-    expect(approvalsTab?.labelKey).toBe('approvals');
+  it('전체 탭은 mobileTabBar 자기 네임스페이스(more)다', () => {
+    const moreTab = PHONE_TABS.find((t) => t.key === 'more');
     expect(moreTab?.namespace).toBe('mobileTabBar');
     expect(moreTab?.labelKey).toBe('more');
   });
@@ -125,17 +117,16 @@ function normalizeResourcePath(path: string): string {
 
 const SIDEBAR_STATIC_ITEMS = [...NAV_GROUPS.flatMap((g) => g.items), CHAT_CENTER_ITEM];
 
-describe('TABS — story #4020 AC2 목적지 기준 labelKey 대조(같은 화면=같은 이름, 다르면 같이 두지 않는다)', () => {
-  it.each(TABS)('$key 탭 — 사이드바에 같은 목적지 항목이 있으면 labelKey가 같다(없으면 결재·더보기만 허용)', (tab) => {
+describe('PHONE_TABS — story #4020 AC2 목적지 기준 labelKey 대조(같은 화면=같은 이름, 다르면 같이 두지 않는다)', () => {
+  it.each([...PHONE_TABS])('$key 탭 — 사이드바에 같은 목적지 항목이 있으면 labelKey가 같다(없으면 전체만 허용)', (tab) => {
     const tabResource = normalizeResourcePath(tab.href.split('?')[0]!);
     const matching = SIDEBAR_STATIC_ITEMS.find((item) => {
       const itemResource = item.kind === 'resource' ? item.path : normalizeResourcePath(item.path);
       return itemResource === tabResource;
     });
     if (!matching) {
-      // 결재(/inbox?tab=gates)·더보기(/more)는 그라운딩 확認 — app-sidebar.tsx·
-      // nav-config.ts에 이 두 주소가 리터럴로도 없다(사이드바에 대응 항목 자체가 없음).
-      expect(['approvals', 'more'], `${tab.key} 탭이 사이드바 어느 항목과도 목적지가 안 겹침(예상 밖) — 그라운딩 재확認 필요`).toContain(tab.key);
+      // 전체(/more)는 사이드바 맨 아래 «전체»(ALL_SCREENS_ITEM)가 따로 가진다 — NAV_GROUPS 항목은 아니다.
+      expect(['more'], `${tab.key} 탭이 사이드바 어느 항목과도 목적지가 안 겹침(예상 밖) — 그라운딩 재확認 필요`).toContain(tab.key);
       return;
     }
     expect(
@@ -153,9 +144,9 @@ describe('TABS — story #4020 AC2 목적지 기준 labelKey 대조(같은 화�
 describe('경로 → 탭 — 「일감」 위 줄 전부(story #4278)', () => {
   const V3_ON = { todayV3Enabled: true, chatV3Enabled: true, connectRulesV3Enabled: true };
 
-  it.each(WORKSPACE_FRAME_TAB_PATHS.map((p) => [p]))('⭐/{ws}/{proj}/%s(+하위) — 플래그 OFF «일감»(now) · v3 ON «일감»(work)', (path) => {
+  it.each(WORKSPACE_FRAME_TAB_PATHS.map((p) => [p]))('⭐/{ws}/{proj}/%s(+하위) — 플래그와 무관하게 «일감»(work)', (path) => {
     for (const pathname of [`/qa-org/qa-proj/${path}`, `/qa-org/qa-proj/${path}/abc`, `/${path}`]) {
-      expect(getActiveTabKey(pathname), pathname).toBe('now');
+      expect(getActiveTabKey(pathname), pathname).toBe('work');
       expect(getActiveTabKey(pathname, V3_ON), pathname).toBe('work');
     }
   });

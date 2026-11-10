@@ -22,23 +22,25 @@ function hub(flags: NavV3Flags) {
 const ids = (g: ReturnType<typeof hub>[number] | undefined) => (g?.items ?? []).map((i) => i.id);
 
 describe('buildMobileHubGroups(story #4885)', () => {
-  it('구역은 사이드바와 같은 순서 · 맨 아래 «그 밖의 화면» 카드', () => {
+  it('⭐구역 순서(폰 탭 넷): 탭에 없는 매일 구역 팀 · 지식이 맨 위 두 구역 → 홈 · 일감 쪽 남은 항목 → 조직 · 설정 → 맨 아래 «그 밖의 화면» 카드', () => {
     const g = hub(DEFAULT_NAV_V3_FLAGS);
-    expect(g.map((x) => x.id)).toEqual([...NAV_GROUPS.map((x) => x.id), MOBILE_OTHER_CARD_ID]);
+    expect(g.map((x) => x.id)).toEqual(['team', 'knowledge', 'now', 'dev', 'org', 'settings', MOBILE_OTHER_CARD_ID]);
+    // 구역 종류는 사이드바와 같은 한 정의(NAV_GROUPS) — 순서만 다르다(사이드바에는 탭이 없어 홈 · 일감이 위)
+    expect([...MOBILE_HUB_GROUP_ORDER].sort()).toEqual(NAV_GROUPS.map((x) => x.id).sort());
     expect(g[g.length - 1]).toMatchObject({ id: MOBILE_OTHER_CARD_ID, labelKey: 'moreOtherScreens' });
     expect(ids(g[g.length - 1])).toEqual(OTHER_NAV_ITEMS.map((i) => i.id));
   });
 
-  it('탭 목적지만 뺀다 — OFF(일감 · 결재 · 대화): 보드 · 결재 빠짐 · «오늘»은 메뉴에', () => {
-    expect(tabDestinationNavIds(DEFAULT_NAV_V3_FLAGS)).toEqual(new Set(['board', 'inbox', 'chats']));
+  it('⭐탭 목적지만 뺀다 — 홈 · 대화 · 일감(플래그와 무관): 홈 · 보드 빠짐 · «결재 탭»은 없어 결재(inbox)는 메뉴에 남는다', () => {
+    expect(tabDestinationNavIds(DEFAULT_NAV_V3_FLAGS)).toEqual(new Set(['org-briefing', 'chats', 'board']));
     const g = hub(DEFAULT_NAV_V3_FLAGS);
     const all = g.flatMap(ids);
     expect(all).not.toContain('board');
-    expect(all).not.toContain('inbox');
-    expect(ids(g.find((x) => x.id === 'now'))).toEqual(['org-briefing']);
+    expect(all).not.toContain('org-briefing');
+    expect(ids(g.find((x) => x.id === 'now'))).toEqual(['inbox']);
   });
 
-  it('탭에 없는 목적지는 메뉴에 반드시 — 탭이 «오늘»을 그리는 판(ON)에선 결재가 «오늘» 구역에 남는다', () => {
+  it('탭 세트는 플래그로 갈리지 않는다 — 켜져도(ON) 같은 세 목적지를 빼고 결재가 «홈» 구역 자리에 남는다', () => {
     expect(tabDestinationNavIds(ON)).toEqual(new Set(['org-briefing', 'chats', 'board']));
     const g = hub(ON);
     expect(ids(g.find((x) => x.id === 'now'))).toEqual(['inbox']);
@@ -52,9 +54,9 @@ describe('buildMobileHubGroups(story #4885)', () => {
     expect(ids(g.find((x) => x.id === 'team'))).toEqual(['org-members', 'org-workforce', 'org-workforce-runs', 'org-workforce-api-keys']);
   });
 
-  it('⭐MOBILE_HUB_EXCLUDE_IDS(깊이 가드가 «탭 직행 1회»로 세는 항목)는 폰 하단 탭이 실제로 덮는 목적지와 같다 — 결재가 빠지면 가드가 결재를 허브 2탭으로 세어 거짓이 된다(codex 단서 ②)', () => {
+  it('⭐MOBILE_HUB_EXCLUDE_IDS(깊이 가드가 «탭 직행 1회»로 세는 항목)는 폰 하단 탭이 실제로 덮는 목적지와 같다 — 집합이 어긋나면 가드가 탭 직행 항목을 허브 2탭으로(또는 허브 항목을 1탭으로) 세어 거짓이 된다(codex 단서 ②)', () => {
     expect([...MOBILE_HUB_EXCLUDE_IDS].sort()).toEqual([...tabDestinationNavIds(DEFAULT_NAV_V3_FLAGS)].sort());
-    expect([...MOBILE_HUB_EXCLUDE_IDS].sort()).toEqual(['board', 'chats', 'inbox']);
+    expect([...MOBILE_HUB_EXCLUDE_IDS].sort()).toEqual(['board', 'chats', 'org-briefing']);
   });
 
   it('모든 목적지는 탭이나 메뉴 어딘가에 — 플래그 둘 다(NAV_GROUPS 전부 + 그 밖 전부)', () => {
@@ -82,10 +84,10 @@ const LOCALES = [['ko', translator(koMessages)], ['en', translator(enMessages)]]
 describe.each(LOCALES)('sectionHeader(story #4292) — %s', (_locale, t) => {
   const byId = (flags: NavV3Flags, id: string) => hub(flags).find((x) => x.id === id)!;
 
-  it('⭐OFF «오늘»(브리핑 하나 · 머리와 같은 글자) — 머리 없음 · 이름은 그대로(접근 이름)', () => {
+  it('⭐«홈» 구역은 홈이 하단 탭으로 빠져 결재 하나만 남는다(머리 없는 한 항목 구역) — 머리 없음 · 이름은 그대로(접근 이름)', () => {
     const now = byId(DEFAULT_NAV_V3_FLAGS, 'now');
-    expect(ids(now)).toEqual(['org-briefing']);
-    expect(sectionHeader(now, t)).toEqual({ headerKey: null, name: t('zoneNow') });
+    expect(ids(now)).toEqual(['inbox']);
+    expect(sectionHeader(now, t)).toEqual({ headerKey: null, name: t('approvals') });
   });
 
   it('⭐«설정»(머리 없는 한 항목 구역) — 예전엔 항목 이름을 머리로 끌어와 «설정 › 설정», 이제 머리 없음', () => {
@@ -96,7 +98,7 @@ describe.each(LOCALES)('sectionHeader(story #4292) — %s', (_locale, t) => {
 
   it('검색으로 한 항목만 남아 그 이름이 머리와 같아도 — 머리 없음(거른 뒤에도 같은 함수)', () => {
     const now = byId(DEFAULT_NAV_V3_FLAGS, 'now');
-    expect(sectionHeader({ ...now, items: now.items.filter((i) => i.labelKey === 'zoneNow') }, t).headerKey).toBeNull();
+    expect(sectionHeader({ ...now, items: now.items.filter((i) => i.labelKey === 'approvals') }, t).headerKey).toBeNull();
   });
 
   it('남은 한 항목 이름이 머리와 다르면 머리 유지 — «지식 › 문서» · 검색으로 한 항목만 남아도', () => {

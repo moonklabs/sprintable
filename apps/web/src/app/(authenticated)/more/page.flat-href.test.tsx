@@ -32,17 +32,17 @@ describe('MorePage — flat 링크 `?p=`(story #4226)', () => {
     return [...container.querySelectorAll('a')].map((a) => a.getAttribute('href') ?? '');
   }
 
-  it('⭐static 항목(/org-briefing · /settings · /organization/…)은 `?p=`', async () => {
+  it('⭐static 항목(결재 /inbox?tab=gates · /settings · /organization/…)은 `?p=` — 홈(/org-briefing)은 하단 탭이 덮어 «전체»에는 없다(폰 탭 넷)', async () => {
     const { default: MorePage } = await import('./page');
     const { TopBarProvider } = await import('@/components/nav/top-bar-context');
     await act(async () => {
       root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><TopBarProvider><MorePage /></TopBarProvider></NextIntlClientProvider>);
     });
     const hrefs = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href') ?? '');
-    expect(hrefs).toContain('/org-briefing?p=P');
+    expect(hrefs).toContain('/inbox?tab=gates&p=P'); // 기존 쿼리 보존
     expect(hrefs).toContain('/settings?p=P');
     expect(hrefs.filter((h) => h.startsWith('/organization/')).every((h) => h.endsWith('p=P'))).toBe(true);
-    expect(hrefs.some((h) => h === '/org-briefing' || h === '/settings')).toBe(false);
+    expect(hrefs.some((h) => h === '/inbox?tab=gates' || h === '/settings')).toBe(false);
   });
 
   // story #4274(유나 실측 · PO) — resource 항목이 bare `/goals`면 proxy 307 동안 로딩 경계가 설 자리가 없어 «전체» 화면이 1.5초 그대로였다.

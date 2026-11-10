@@ -27,7 +27,9 @@ const ids = (groups: NavGroupConfig[], id: string) => groups.find((g) => g.id ==
 describe('정보 구조 한 벌 — 구역 · 순서 · 이름', () => {
   it('⭐구역 순서: 오늘 → 일감 → 팀/에이전트 → 지식 → 조직 → 설정 (사이드바 · 전체 · 모바일 허브가 같은 순서)', () => {
     expect(NAV_GROUPS.map((g) => g.id)).toEqual(['now', 'dev', 'team', 'knowledge', 'org', 'settings']);
-    expect(MOBILE_HUB_GROUP_ORDER).toEqual(NAV_GROUPS.map((g) => g.id));
+    // 폰 «전체»는 구역 종류가 사이드바와 같고(한 정의) 순서만 다르다 — 탭이 홈 · 일감을 덮으니 탭에 없는 매일 구역 팀 · 지식이 맨 위 두 구역(story #4885 폰 탭 넷)
+    expect([...MOBILE_HUB_GROUP_ORDER].sort()).toEqual(NAV_GROUPS.map((g) => g.id).sort());
+    expect(MOBILE_HUB_GROUP_ORDER.slice(0, 2)).toEqual(['team', 'knowledge']);
   });
 
   it('⭐맨 위 이름 = «팀»(선생님 결정 11-10): 기본 꼴이 «팀»이다', () => {

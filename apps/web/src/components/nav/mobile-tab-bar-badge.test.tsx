@@ -122,10 +122,11 @@ describe('MobileTabBar — 탭 접근성 이름에 카운트 포함(story #3518)
     expect(chatLink.getAttribute('aria-label')).toBeNull(); // 접근성 이름을 통째로 안 갈아치운다(WCAG 2.5.3).
   });
 
-  it('결재 대기 5건 — 접근성 이름이 «보이는 라벨+수»(라벨을 안 지운다)', async () => {
+  // story #4885(폰 탭 넷) — «결재» 탭이 없어졌고 서명 대기 수는 «홈» 탭 배지가 된다(새 fetch 0). 접근성 이름 = 보이는 라벨 «홈» + 수 문장.
+  it('결재 대기 5건 — «홈» 탭의 접근성 이름이 «보이는 라벨+수»(라벨을 안 지운다)', async () => {
     await mount(5, 0);
-    const approvalsLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/inbox?tab=gates')!;
-    expect(approxAccessibleName(approvalsLink)).toBe('결재 대기 5건');
+    const approvalsLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/org-briefing')!;
+    expect(approxAccessibleName(approvalsLink)).toBe('홈 결재 대기 5건');
   });
 
   it('채팅 unread 3건 — 접근성 이름이 «보이는 라벨+수»', async () => {
@@ -136,8 +137,8 @@ describe('MobileTabBar — 탭 접근성 이름에 카운트 포함(story #3518)
 
   it('결재 대기 12건(시각 9+ 표기) — 접근성 이름엔 "9건 이상"(캡을 말로 반영, 시각 캡과 같은 뜻)', async () => {
     await mount(12, 0);
-    const approvalsLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/inbox?tab=gates')!;
-    expect(approxAccessibleName(approvalsLink)).toBe('결재 대기 9건 이상');
+    const approvalsLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/org-briefing')!;
+    expect(approxAccessibleName(approvalsLink)).toBe('홈 결재 대기 9건 이상');
     const badge = container.querySelector('span[aria-hidden]');
     expect(badge?.textContent).toBe('9+'); // 시각 배지는 그대로 '9+'.
   });
@@ -155,14 +156,14 @@ describe('MobileTabBar — 탭 접근성 이름에 카운트 포함(story #3518)
   // 형용사성이라 단수·복수 형태 차이가 없다(그래도 count=1 경계값은 확인).
   it('[en] 결재 대기 1건 — ICU plural one 갈래("1 pending approval", 단수)', async () => {
     await mount(1, 0, 'en');
-    const approvalsLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/inbox?tab=gates')!;
-    expect(approxAccessibleName(approvalsLink)).toBe('Approvals 1 pending approval');
+    const approvalsLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/org-briefing')!;
+    expect(approxAccessibleName(approvalsLink)).toBe('Home 1 pending approval');
   });
 
   it('[en] 결재 대기 5건 — ICU plural other 갈래("5 pending approvals", 복수)', async () => {
     await mount(5, 0, 'en');
-    const approvalsLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/inbox?tab=gates')!;
-    expect(approxAccessibleName(approvalsLink)).toBe('Approvals 5 pending approvals');
+    const approvalsLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/org-briefing')!;
+    expect(approxAccessibleName(approvalsLink)).toBe('Home 5 pending approvals');
   });
 
   it('[en] 채팅 unread 1건 — "1 unread"(형태 안 갈림, count=1 경계값 확인)', async () => {
