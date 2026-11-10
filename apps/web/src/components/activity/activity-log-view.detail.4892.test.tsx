@@ -13,6 +13,8 @@ import koMessages from '../../../messages/ko.json';
 
 const { mq } = vi.hoisted(() => ({ mq: { wide: true } }));
 vi.mock('@/lib/use-media-query', () => ({ useMediaQuery: () => mq.wide }));
+// the viewer's zone decides which day a row is on — pin it so the test does not depend on the machine's zone
+vi.mock('@/components/viewer-time-zone', () => ({ useViewerTimeZone: () => 'UTC' }));
 const fetchWithAuthMock = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: Parameters<typeof fetchWithAuthMock>) => fetchWithAuthMock(...args) }));
 
