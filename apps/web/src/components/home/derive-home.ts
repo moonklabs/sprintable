@@ -103,8 +103,8 @@ export const HOME_NEEDS_HAND_NOTIFICATION_TYPES: Readonly<Record<string, HomeRow
   'agent.limit_paused': 'limit-paused',
 };
 
-/** the in-progress agent run statuses of the existing today screen (a row of «에이전트가 하는 일») */
-const AGENT_RUN_ACTIVE = new Set(['queued', 'pending', 'running', 'in_progress', 'in-progress', 'held', 'waiting_answer', 'awaiting_answer']);
+/** the in-progress agent run statuses — the SAME set the backend uses for `agent_progress` (`today_service._AGENT_RUN_IN_PROGRESS_STATUSES`): `cancel_requested` is not terminal yet (the stop is waiting for its ack) */
+export const AGENT_RUN_IN_PROGRESS_STATUSES: ReadonlySet<string> = new Set(['queued', 'held', 'running', 'hitl_pending', 'cancel_requested']);
 
 function byWait(a: HomeRow, b: HomeRow): number {
   return a.since < b.since ? -1 : a.since > b.since ? 1 : a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
@@ -176,7 +176,7 @@ export function deriveHome(input: HomeInput): HomeModel {
   needsHand.sort(byWait);
 
   const working: HomeRow[] = [
-    ...input.snapshot.agentProgress.filter((r) => AGENT_RUN_ACTIVE.has(r.status)).map(agentRunRow),
+    ...input.snapshot.agentProgress.filter((r) => AGENT_RUN_IN_PROGRESS_STATUSES.has(r.status)).map(agentRunRow),
     ...input.stories.map((s) => storyRow(s, input.viewerMemberId)).filter((r): r is HomeRow => r !== null),
   ].sort(byWait);
 

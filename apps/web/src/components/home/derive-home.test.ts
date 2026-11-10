@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TodayAgentProgressItem, TodayNeedsMeItem } from '../org-briefing/derive-today';
 import {
+  AGENT_RUN_IN_PROGRESS_STATUSES,
   deriveHome,
   HOME_NEEDS_HAND_NOTIFICATION_TYPES,
   NEEDS_HAND_VISIBLE,
@@ -97,11 +98,29 @@ describe('rule 2 — what counts as «my hand is needed»', () => {
     expect(m.badge).toBe(0);
   });
 
-  it('what needs a person: mention · assignment · permission request · stopped · limit paused — each its own kind', () => {
-    const types = Object.keys(HOME_NEEDS_HAND_NOTIFICATION_TYPES);
-    const m = deriveHome(base({ notifications: types.map((t, i) => note(`n${i}`, t, `2026-11-10T0${i}:00:00Z`)) }));
-    expect(m.badge).toBe(types.length);
-    expect(new Set(m.needsHand.map((r) => r.kind))).toEqual(new Set(['mention', 'assigned', 'permission', 'stopped', 'limit-paused']));
+  it('what needs a person: the exact strings the backend publishes (spelled out here, not read back from the module) — each its own kind', () => {
+    const published: Array<[string, string]> = [
+      ['conversation.mention', 'mention'],
+      ['story_assigned', 'assigned'],
+      ['task_assigned', 'assigned'],
+      ['agent.permission_request', 'permission'],
+      ['agent.restart_stopped', 'stopped'],
+      ['agent.limit_paused', 'limit-paused'],
+    ];
+    const m = deriveHome(base({ notifications: published.map(([type], i) => note(`n${i}`, type, `2026-11-10T0${i}:00:00Z`)) }));
+    expect(m.badge).toBe(published.length);
+    expect(m.needsHand.map((r) => r.kind)).toEqual(published.map(([, kind]) => kind));
+    expect(Object.keys(HOME_NEEDS_HAND_NOTIFICATION_TYPES).sort()).toEqual(published.map(([type]) => type).sort());
+  });
+
+  it('a mention about a work item whose approval is already listed is its own row (two different asks)', () => {
+    const m = deriveHome(
+      base({
+        snapshot: { needsMe: [needsMe('a', '2026-11-10T01:00:00Z', { workItemId: 'wi-a' })], agentProgress: [] },
+        notifications: [note('n1', 'conversation.mention', '2026-11-10T02:00:00Z', { reference_id: 'wi-a' })],
+      }),
+    );
+    expect(m.badge).toBe(2);
   });
 
   it('only UNREAD notifications count', () => {
@@ -136,6 +155,16 @@ describe('rule 3 — longest wait first', () => {
   });
 });
 
+describe('rule 3 — ties', () => {
+  it('rows with the same time keep a stable order by key (not input order)', () => {
+    const same = '2026-11-10T01:00:00Z';
+    const a = deriveHome(base({ snapshot: { needsMe: [needsMe('b', same), needsMe('a', same), needsMe('c', same)], agentProgress: [] } }));
+    const b = deriveHome(base({ snapshot: { needsMe: [needsMe('c', same), needsMe('b', same), needsMe('a', same)], agentProgress: [] } }));
+    expect(a.needsHand.map((r) => r.key)).toEqual(['gate:a', 'gate:b', 'gate:c']);
+    expect(b.needsHand.map((r) => r.key)).toEqual(['gate:a', 'gate:b', 'gate:c']);
+  });
+});
+
 describe('rule 4 — «일하는 중»', () => {
   it('holds the active agent runs and the in-progress stories of mine or of an agent — not other people\'s, not other statuses', () => {
     const m = deriveHome(
@@ -152,6 +181,43 @@ describe('rule 4 — «일하는 중»', () => {
     );
     expect(m.working.map((r) => r.key).sort()).toEqual(['run:r1', 'story:agent', 'story:mine']);
     expect(m.header.working).toBe(3);
+  });
+
+  it('the agent-run statuses are the backend\'s in-progress set: hitl_pending and cancel_requested stay, finished ones go', () => {
+    expect([...AGENT_RUN_IN_PROGRESS_STATUSES].sort()).toEqual(['cancel_requested', 'held', 'hitl_pending', 'queued', 'running']);
+    const m = deriveHome(
+      base({
+        snapshot: {
+          needsMe: [],
+          agentProgress: ['queued', 'held', 'running', 'hitl_pending', 'cancel_requested', 'completed', 'failed', 'abandoned'].map((s, i) => run(`r${i}`, s, `2026-11-10T0${i}:00:00Z`)),
+        },
+      }),
+    );
+    expect(m.working.map((r) => r.key)).toEqual(['run:r0', 'run:r1', 'run:r2', 'run:r3', 'run:r4']);
+  });
+
+  it('nobody signed in (viewerMemberId null) → only the agents\' stories, never a human assignee\'s', () => {
+    const m = deriveHome(
+      base({
+        viewerMemberId: null,
+        stories: [story('h', 'in-progress', [{ id: ME, type: 'human', name: '나' }]), story('a', 'in-progress', [{ id: 'ag-1', type: 'agent', name: '개발 에이전트' }])],
+      }),
+    );
+    expect(m.working.map((r) => r.key)).toEqual(['story:a']);
+  });
+
+  it('a story with several assignees: an agent among them makes the actor the agent; me + another human → me', () => {
+    const m = deriveHome(
+      base({
+        stories: [
+          story('both', 'in-progress', [{ id: ME, type: 'human', name: '나' }, { id: 'ag-1', type: 'agent', name: '개발 에이전트' }]),
+          story('two-humans', 'in-progress', [{ id: 'other', type: 'human', name: '남' }, { id: ME, type: 'human', name: '나' }]),
+        ],
+      }),
+    );
+    const by = Object.fromEntries(m.working.map((r) => [r.key, r.actor]));
+    expect(by['story:both']).toEqual({ type: 'agent', name: '개발 에이전트' });
+    expect(by['story:two-humans']).toEqual({ type: 'human', name: '나' });
   });
 
   it('the old screen showed 0 of 14 stories: an in-progress story assigned to an agent is on the screen with an agent actor', () => {
