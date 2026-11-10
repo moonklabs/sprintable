@@ -706,7 +706,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             flex-wrap으로 고쳤지만, 236px 고정폭 레일 전체에 대한 방어로 overflow-x-hidden도
             동반(다른 미래 콘텐츠의 동일 결함 클래스 재발 방지). */}
         {!sidebarCollapsed && (
-          {/* story 4892 (5533 정정, PO 11-10) — 236px at lg (1024~1279: the reading column keeps its width — 544 at 1100), 300px from xl (≥1280, where 300 still leaves the body 820 at 1440) */}
+          /* story 4892 (5533 정정, PO 11-10) — 236px at lg (1024~1279: the reading column keeps its width — 544 at 1100), 300px from xl (≥1280, where 300 still leaves the body 820 at 1440) */
           <aside className="focus-inset relative hidden w-[236px] flex-shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r border-ds-line bg-ds-background lg:flex xl:w-[300px]">
             <button
               type="button"
