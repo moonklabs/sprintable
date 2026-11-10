@@ -276,9 +276,13 @@ describe('words and place', () => {
   });
 
   it('the settings page draws it inside the notifications tab (a revert of the page wiring fails here)', () => {
-    const src = readFileSync(join(__dirname, '../../app/(authenticated)/settings/page.tsx'), 'utf8');
+    // story 4891: the notifications tab's body is the NotificationsPane (notifications-pane.tsx) — the page draws the pane inside the tab, and the pane draws the notice
+    const dir = join(__dirname, '../../app/(authenticated)/settings');
+    const src = readFileSync(join(dir, 'page.tsx'), 'utf8');
     const tab = src.slice(src.indexOf('<TabsContent value="notifications">'));
-    expect(tab.slice(0, 1500)).toContain('<PushRegisterNotice />');
-    expect(src).toContain("from '@/components/settings/push-register-notice'");
+    expect(tab.slice(0, 400)).toContain('<NotificationsPane');
+    const pane = readFileSync(join(dir, 'notifications-pane.tsx'), 'utf8');
+    expect(pane).toContain('<PushRegisterNotice />');
+    expect(pane).toContain("from '@/components/settings/push-register-notice'");
   });
 });

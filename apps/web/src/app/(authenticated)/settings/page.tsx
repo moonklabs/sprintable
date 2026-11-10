@@ -33,7 +33,7 @@ import { TwoFactorSection } from '@/components/settings/two-factor-section';
 import { OtherSessionsSection } from '@/components/settings/other-sessions-section';
 import { SetPasswordSection } from '@/components/settings/set-password-section';
 import { LinkedAccountsSection } from '@/components/settings/linked-accounts-section';
-import { PushRegisterNotice } from '@/components/settings/push-register-notice';
+import { NotificationsPane } from './notifications-pane';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { canSubmitOrgDelete } from './org-delete-gate';
 import { Badge } from '@/components/ui/badge';
@@ -840,155 +840,18 @@ export default function SettingsPage() {
             </TabsContent>
 
             <TabsContent value="notifications">
-              <SectionCard>
-                <SectionCardHeader>
-                  <div className="space-y-1">
-                    <h2 className="text-base font-semibold text-foreground">{t('notifications')}</h2>
-                    <p className="text-sm text-muted-foreground">{t('notificationDescription')}</p>
-                  </div>
-                </SectionCardHeader>
-                <SectionCardBody>
-                  {/* story #4694 AC2 ② — the phone's «could not register for notifications» line (phone app only · nothing when fine) */}
-                  <PushRegisterNotice />
-                  {loading ? (
-                    <div className="space-y-3">
-                      {[1, 2, 3].map((i) => (
-                        <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />
-                      ))}
-                    </div>
-                  ) : (
-                    <div>
-                      {/* 채널 헤더 */}
-                      <div className="mb-3 flex items-center overflow-x-auto border-b pb-2">
-                        <span className="min-w-0 flex-1 text-xs text-muted-foreground">{t('notifications')}</span>
-                        <div className="ml-auto flex shrink-0 gap-6 pl-4 text-center text-xs font-medium text-muted-foreground">
-                          {/* [SID:4375] 행마다 «앱 내» 토글의 이름 = 행 이름(이벤트) + 이 열 머리(aria-labelledby) */}
-                          <span id="notif-col-in-app" className="w-14">{t('notification_channel_in_app')}</span>
-                          <span className="w-14 opacity-40">{t('notification_channel_webhook')}</span>
-                          <span className="w-14 opacity-40">{t('notification_channel_email')}</span>
-                        </div>
-                      </div>
-
-                      {/* story #2272 — 형제(notification-preferences)와 같은 자리: 기본 알림 레벨 */}
-                      <div className="mb-4 flex items-center justify-between rounded-md border border-border bg-muted/20 px-3 py-2.5">
-                        <span className="text-sm text-foreground">{t('notificationDefaultLevel')}</span>
-                        <div className="flex shrink-0 gap-1">
-                          {(['all', 'mentions', 'mute'] as const).map((level) => (
-                            <button
-                              key={level}
-                              type="button"
-                              disabled={savingPreferenceLevel}
-                              onClick={() => void handleSetGlobalPreferenceLevel(level)}
-                              aria-pressed={globalPreferenceLevel === level}
-                              className={`rounded px-2 py-1 text-xs font-medium transition disabled:opacity-50 ${globalPreferenceLevel === level ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
-                            >
-                              {t(`notificationLevel_${level}`)}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* 카테고리 그룹 */}
-                      <div className="space-y-4">
-                        {NOTIFICATION_CATEGORIES.map((category) => {
-                          const allEnabled = isCategoryAllEnabled(category.key);
-                          return (
-                            <div key={category.key}>
-                              {/* 카테고리 헤더 */}
-                              <div className="mb-1 flex items-center justify-between">
-                                <span className="text-xs font-semibold text-muted-foreground">
-                                  {t(`notification_category_${category.key}`)}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => void toggleCategory(category.key, !allEnabled)}
-                                  className="text-xs text-muted-foreground transition hover:text-foreground"
-                                >
-                                  {allEnabled ? tc('disable_all') : tc('enable_all')}
-                                </button>
-                              </div>
-
-                              {/* 이벤트 행 */}
-                              <div className="space-y-1 rounded-md border border-border bg-muted/20">
-                                {category.types.map((eventType) => {
-                                  const enabled = getEnabled(eventType);
-                                  return (
-                                    <div
-                                      key={eventType}
-                                      className="flex items-center px-3 py-2.5"
-                                    >
-                                      <span id={`notif-event-${eventType}`} className="min-w-0 flex-1 text-sm text-foreground">
-                                        {t(`event_${eventType}`)}
-                                      </span>
-                                      <div className="ml-auto flex shrink-0 items-center gap-6">
-                                        {/* in_app 토글 */}
-                                        <div className="flex w-14 justify-center">
-                                          {/* [SID:4379] 스위치 모양 켜고 끄기 — 화면 읽기가 «스위치 · 켬/끔»으로 읽게(예전엔 «단추»만 · 켜짐 모름). */}
-                                          <button
-                                            type="button"
-                                            role="switch"
-                                            aria-checked={enabled}
-                                            onClick={() => void toggleSetting(eventType, enabled)}
-                                            aria-labelledby={`notif-event-${eventType} notif-col-in-app`}
-                                            className={`relative h-6 w-11 rounded-full transition ${enabled ? 'bg-primary' : 'bg-muted'}`}
-                                          >
-                                            <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${enabled ? 'left-[22px]' : 'left-0.5'}`} />
-                                          </button>
-                                        </div>
-                                        {isEEEnabled() && (
-                                          <div className="flex w-14 justify-center">
-                                            <span className="text-[11px] text-muted-foreground opacity-40">{t('notification_coming_soon')}</span>
-                                          </div>
-                                        )}
-                                        {isEEEnabled() && (
-                                          <div className="flex w-14 justify-center">
-                                            <span className="text-[11px] text-muted-foreground opacity-40">{t('notification_coming_soon')}</span>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </SectionCardBody>
-              </SectionCard>
-              {currentProjectId ? (
-                <div className="mt-6">
-                  <StandupDeadlineSection projectId={currentProjectId} />
-                </div>
-              ) : null}
-              {/* S-GATE-4: 프로젝트 게이트 정책 매트릭스. canEdit = org admin/owner OR **이 프로젝트의 owner**
-                  — BE gate_config(PUT/DELETE scope='project')가 project owner 도 허용하므로 정합(RC①). project
-                  admin 은 BE 비허용이라 제외(meRole==='owner'만 — over-permission 0). cross-project 인 #1562
-                  grant 와 달리 자기 프로젝트 편집이라 보수적 org-admin-only 가 오히려 under-permissive 였음. */}
-              {currentProjectId ? (
-                <div className="mt-6">
-                  <GateLevelMatrix
-                    surface="project"
-                    projectId={currentProjectId}
-                    canEdit={currentOrgRole === 'owner' || currentOrgRole === 'admin' || currentProjectRole === 'owner'}
-                  />
-                </div>
-              ) : null}
-              <div className="mt-6">
-                <SectionCard>
-                  <SectionCardHeader>
-                    <div className="space-y-1">
-                      <h2 className="text-base font-semibold text-foreground">{t('autoRefresh')}</h2>
-                      <p className="text-sm text-muted-foreground">{t('autoRefreshDescription')}</p>
-                    </div>
-                  </SectionCardHeader>
-                  <SectionCardBody>
-                    <RefreshSettings />
-                  </SectionCardBody>
-                </SectionCard>
-              </div>
+              <NotificationsPane
+                loading={loading}
+                categories={NOTIFICATION_CATEGORIES}
+                globalLevel={globalPreferenceLevel}
+                savingLevel={savingPreferenceLevel}
+                onSetLevel={(level) => void handleSetGlobalPreferenceLevel(level)}
+                getEnabled={getEnabled}
+                onToggle={(eventType, current) => void toggleSetting(eventType, current)}
+                isCategoryAllEnabled={(key) => isCategoryAllEnabled(key as NotificationCategoryKey)}
+                onToggleCategory={(key, enable) => void toggleCategory(key as NotificationCategoryKey, enable)}
+                showSoonColumns={isEEEnabled()}
+              />
             </TabsContent>
 
             <TabsContent value="organization">
