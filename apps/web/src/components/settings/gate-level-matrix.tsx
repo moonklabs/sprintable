@@ -239,7 +239,8 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
                                   disabled={busy}
                                   title={t('revertToDefault')}
                                   aria-label={t('revertToDefault')}
-                                  className="inline-flex items-center text-muted-foreground hover:text-foreground disabled:opacity-50"
+                                  // story 4891: a 14 px icon press — on a touch screen the press area is 44 × 44 (the picture stays small)
+                                  className="inline-flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-50 pointer-coarse:min-h-11 pointer-coarse:min-w-11"
                                 >
                                   <RotateCcw className="h-3.5 w-3.5" />
                                 </button>
@@ -265,7 +266,8 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
                                   onClick={() => void handleSet(wt, at, lv)}
                                   aria-pressed={selected}
                                   className={cn(
-                                    'min-w-[60px] gap-1 transition-colors',
+                                    // story 4891: «sm» is 28 px high — a touch screen presses ≥ 44 (same buttons, same values; the desktop look is unchanged)
+                                    'min-w-[60px] gap-1 transition-colors pointer-coarse:min-h-11',
                                     selected ? LEVEL_META[lv].selected : 'border-border text-muted-foreground hover:bg-muted/40',
                                     floorDisabled && 'opacity-40',
                                   )}
