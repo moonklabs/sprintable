@@ -199,9 +199,9 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   const tDay = useTranslations('activityLog'); // «오늘» / «어제» — the same two words the audit log's day headers use
   const { addToast } = useToast();
   const viewerTz = useViewerTimeZone() ?? 'UTC';
-  const dayLabel = (g: { key: string; kind: 'today' | 'yesterday' | 'date' }) => (g.kind === 'today' ? tDay('dayToday') : g.kind === 'yesterday' ? tDay('dayYesterday') : formatDayHeader(g.key, locale));
   const locale =
     typeof document !== 'undefined' ? document.documentElement.lang || 'en' : 'en';
+  const dayLabel = (g: { key: string; kind: 'today' | 'yesterday' | 'date' }) => (g.kind === 'today' ? tDay('dayToday') : g.kind === 'yesterday' ? tDay('dayYesterday') : formatDayHeader(g.key, locale));
 
   const [items, setItems] = useState<ActivityStreamItem[] | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
