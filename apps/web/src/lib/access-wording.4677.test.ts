@@ -1,7 +1,7 @@
 // story 4677 (UX-1 · P4) AC2 — one thing for «an agent being in a project» (유나 §L ④ ⑤): «프로젝트 팀에 들어가 있어요 / 프로젝트 팀 n곳» (ko) ·
 // «On … team» (en). The old words — the «접근 허용 / 접근 차단» counters, «프로젝트에 추가해 주세요», «# project(s) granted» — are gone from
 // the messages. The guard reads EVERY string of both message files (not one key): a counter that comes back anywhere turns this RED.
-// 유나 §L ⑥ rule: a screen's or tab's NAME «접근 권한» / "Access" stays (the way-finding line must equal the real tab) — what changes is the words
+// 유나 §L ⑥ rule: a way-finding line must equal the real tab's name (the project-settings tab was «접근 권한» / "Access"; PO renamed it «구성원과 접근» / "Members & access" on 11-10 — the Workforce «Access» tab keeps its name) — what changes is the words
 // for going on / off a project's team («허용 · 차단 · 부여 · grant»); and no such toast is hard-coded in a .tsx any more (the settings section's
 // four toasts used to be Korean-only «…습니다» strings).
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -163,13 +163,18 @@ describe('[SID:4677] AC2 — the copy of 유나 §L ⑥, key by key (ko · en); 
     expect(e('agentScopeAllProjectsHint', { count: 3 })).toBe('Joins all 3 project teams.');
   });
 
-  it('the tab names are left alone: the way-finding lines still say «프로젝트 설정 › 접근 권한» / "Access" (the real tab)', () => {
+  it('the project-settings tab is named «구성원과 접근» / "Members & access" (PO 11-10, story 4891; ko uses 「구성원」 — the story #3758 canon, 「멤버」 is phased out) and the way-finding lines + the section title say exactly that real tab name', () => {
     const byKey = (all: { path: string; value: string }[], key: string) => all.filter((x) => x.path.endsWith(`.${key}`)).map((x) => x.value);
-    for (const v of byKey(koStrings, 'switcherAccessLoadError')) expect(v).toContain('프로젝트 설정 › 접근 권한');
-    for (const v of byKey(koStrings, 'switcherAccessPartial')) expect(v).toContain('프로젝트 설정 › 접근 권한');
-    expect(byKey(koStrings, 'switcherAccessLoadError').length).toBeGreaterThan(0); // the lines exist — the loop above is not empty
-    for (const v of byKey(enStrings, 'switcherAccessLoadError')) expect(v).toContain('Access');
-    expect(at(ko, 'settings', 'projectAccessTitle')).toBe('접근 권한');
-    expect(at(en, 'settings', 'projectAccessTitle')).toBe('Access');
+    const koTab = at(ko, 'settings', 'tabMembers');
+    const enTab = at(en, 'settings', 'tabMembers');
+    expect(koTab).toBe('구성원과 접근');
+    expect(enTab).toBe('Members & access');
+    for (const v of byKey(koStrings, 'switcherAccessLoadError')) expect(v).toContain(`프로젝트 설정 › ${koTab}`);
+    for (const v of byKey(koStrings, 'switcherAccessPartial')) expect(v).toContain(`프로젝트 설정 › ${koTab}`);
+    for (const all of [koStrings, enStrings]) for (const key of ['switcherAccessLoadError', 'switcherAccessPartial']) expect(byKey(all, key).length, `${key} exists in both languages`).toBeGreaterThan(0); // the lines exist — the loops are not empty
+    for (const v of byKey(enStrings, 'switcherAccessLoadError')) expect(v).toContain(`settings › ${enTab}`);
+    for (const v of byKey(enStrings, 'switcherAccessPartial')) expect(v).toContain(`settings › ${enTab}`);
+    expect(at(ko, 'settings', 'projectAccessTitle')).toBe(koTab);
+    expect(at(en, 'settings', 'projectAccessTitle')).toBe(enTab);
   });
 });
