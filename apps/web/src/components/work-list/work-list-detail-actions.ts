@@ -100,7 +100,7 @@ export function findSelectedRowContext(data: WorkList | null, selectedRowId: str
   if (!selectedRowId || !data) return null;
   for (const group of data.groups) {
     for (const story of group.stories) {
-      const row = story.rows.find((r) => r.id === selectedRowId);
+      const row = story.selfRow.id === selectedRowId ? story.selfRow : story.rows.find((r) => r.id === selectedRowId);
       if (row) return { row, goalTitle: group.title, storyId: story.storyId, storyTitle: story.title };
     }
   }
@@ -110,5 +110,5 @@ export function findSelectedRowContext(data: WorkList | null, selectedRowId: str
 /** 그 행이 "지금 필터가 걸린 화면"에도 보이는가 — false면 패널에 안내 배너를 띄운다. */
 export function isRowVisibleInFiltered(filtered: WorkList | null, rowId: string): boolean {
   if (!filtered) return false;
-  return filtered.groups.some((g) => g.stories.some((s) => s.rows.some((r) => r.id === rowId)));
+  return filtered.groups.some((g) => g.stories.some((s) => s.selfRow.id === rowId || s.rows.some((r) => r.id === rowId)));
 }

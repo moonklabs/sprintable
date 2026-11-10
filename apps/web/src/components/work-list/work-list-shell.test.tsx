@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // story #3934(실사고 — 3928 라이브 실측, 유나) — 목표(epic_id) 미할당 스토리가 「목록」 탭
-// 그룹핑에서 통째로 빠져 실제로 스토리가 있어도 "표시할 일이 없어요"로 오독됐다. 소스
+// 그룹핑에서 통째로 빠져 실제로 스토리가 있어도 "표시할 일감이 없어요"로 오독됐다. 소스
 // 텍스트/순수함수 가드만으로는 렌더 결함을 못 잡는다(memory feedback-render-test-over-
 // source-grep) — org-briefing-shell.test.tsx 선례를 따라 실제로 mount해 헤더 문구를 본다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,8 +11,10 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
 import type { FetchedWorkList } from './fetch-work-list';
+import { storySelfRow } from './work-list-test-fixtures';
 
-const { fetchWorkListMock, searchParamsValueRef } = vi.hoisted(() => ({
+const { fetchWorkListMock, searchParamsValueRef, replaceMock } = vi.hoisted(() => ({
+  replaceMock: vi.fn(),
   fetchWorkListMock: vi.fn<(projectId: string) => Promise<FetchedWorkList>>(),
   searchParamsValueRef: { current: '' as string },
 }));
@@ -24,7 +26,7 @@ vi.mock('./fetch-work-list', () => ({
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(searchParamsValueRef.current),
   usePathname: () => '/work-list',
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: replaceMock }),
   useParams: () => ({ ws: 'moonklabs', proj: 'sprintable' }),
 }));
 
@@ -70,6 +72,7 @@ function unassignedOnlyPayload(): FetchedWorkList {
         hypothesisCount: 0,
         stories: [{
           storyId: 's1',
+          selfRow: storySelfRow('s1', '미할당 스토리'),
           title: '미할당 스토리',
           status: 'backlog',
           hypothesisIds: [],
@@ -95,7 +98,7 @@ describe('WorkListShell — 목표 미할당 스토리(story #3934)', () => {
   it('미할당 스토리만 있어도 빈 상태가 아니라 「미분류」 그룹으로 그려진다', async () => {
     fetchWorkListMock.mockResolvedValue(unassignedOnlyPayload());
     await mount();
-    expect(container.textContent).not.toContain('표시할 일이 없어요');
+    expect(container.textContent).not.toContain('표시할 일감이 없어요');
     expect(container.textContent).toContain('미분류');
     expect(container.textContent).toContain('미할당 스토리');
   });
@@ -103,7 +106,7 @@ describe('WorkListShell — 목표 미할당 스토리(story #3934)', () => {
   it('그룹이 정말 0개면(실제로 일이 없으면) 여전히 빈 상태를 보인다', async () => {
     fetchWorkListMock.mockResolvedValue({ workList: { groups: [], partial: false, totalStoryCount: 0 }, hypotheses: [] });
     await mount();
-    expect(container.textContent).toContain('표시할 일이 없어요');
+    expect(container.textContent).toContain('표시할 일감이 없어요');
   });
 
   // story #3976(AC3, PO 확定) — 「목표 없음」 그룹에만 안내 문장(그 외 목표는 문장 0).
@@ -136,33 +139,74 @@ describe('WorkListShell — 스토리 카드 상태 배지(Story.status SSOT, st
 
 // story #3976(AC4, PO 확定) — 진행률 분수는 기존 일+실행 개수 그대로(SP 기준 새 콜 0),
 // 단위 낱말만 붙여 무엇을 센 것인지 보이게 한다.
-describe('WorkListShell — 목표 진행률 단위 낱말(story #3976)', () => {
-  it('⭐진행률 문구에 단위 낱말("일")이 함께 있다', async () => {
+describe('WorkListShell — 목표 진행률 단위 낱말(story #3976 · 4888: 단위는 스토리)', () => {
+  it('⭐진행률 문구에 단위 낱말("스토리")이 함께 있다', async () => {
     fetchWorkListMock.mockResolvedValue(unassignedOnlyPayload());
     await mount();
-    expect(container.textContent).toContain('일 0/1개 완료');
+    expect(container.textContent).toContain('스토리 0/1개 완료');
   });
 });
 
 // story #3934(재판정 — PO Test Org deploy92 실사고, 페드루 PO AC2(b) 2026-09-16 03:47Z) —
-// "표시할 일이 없어요"(전체 부정)가 스토리는 있지만(totalStoryCount>0) task로 안 쪼개진
+// "표시할 일감이 없어요"(전체 부정)가 스토리는 있지만(totalStoryCount>0) task로 안 쪼개진
 // 경우에도 그대로 떠서 "프로젝트에 일이 없다"고 오독시켰다. 필터 없이 groups가 0개인데
 // totalStoryCount>0이면 사실대로 정정된 문구를 보여야 한다.
-describe('WorkListShell — task 0개(목표 유무 무관, story #3934 재판정)', () => {
-  it('스토리는 있지만(task 0개) groups가 0개면 "일로 안 쪼개짐" 문구를 보인다(전체 부정 문구 아님)', async () => {
-    fetchWorkListMock.mockResolvedValue({ workList: { groups: [], partial: false, totalStoryCount: 20 }, hypotheses: [] });
+describe('WorkListShell — 일이 없는 스토리도 행이다(story #3934 재판정 → #4888 스토리 단위)', () => {
+  it('⭐일(task · 실행)이 하나도 없는 스토리도 목록에 보이고, «일 N개» 부제는 없다', async () => {
+    const payload = unassignedOnlyPayload();
+    payload.workList.groups[0]!.stories[0]!.rows = [];
+    fetchWorkListMock.mockResolvedValue(payload);
     await mount();
-    expect(container.textContent).not.toContain('표시할 일이 없어요');
-    expect(container.textContent).toContain('아직 일로 나뉜 작업이 없어요');
-    expect(container.textContent).toContain('보드');
+    expect(container.textContent).toContain('미할당 스토리');
+    expect(container.textContent).not.toContain('아직 일로 나뉜 작업이 없어요'); // the old line that hid stories is gone
+    expect(container.querySelector('[data-story-id="s1"]')?.textContent).not.toContain('일 0개');
+    expect(container.querySelector('[data-testid="story-work-rows"]')).toBeNull();
   });
 
-  it('필터가 걸려 groups가 0개일 때는(totalStoryCount>0이어도) 기존 빈 상태 문구를 유지한다', async () => {
+  it('일이 있는 스토리는 «일 N개 · 위임 M개» 부제를 달고, 일은 스토리 밑에 들여 쓴다', async () => {
+    fetchWorkListMock.mockResolvedValue(unassignedOnlyPayload());
+    await mount();
+    const story = container.querySelector('[data-story-id="s1"]')!;
+    expect(story.textContent).toContain('일 1개 · 위임 0개');
+    expect(story.querySelector('[data-testid="story-work-rows"]')?.textContent).toContain('할일1');
+  });
+
+  it('필터가 걸려 groups가 0개일 때는 «조건에 맞는 일감이 없어요» + 필터 안내를 보인다', async () => {
     searchParamsValueRef.current = 'goal=some-goal-id';
     fetchWorkListMock.mockResolvedValue({ workList: { groups: [], partial: false, totalStoryCount: 20 }, hypotheses: [] });
     await mount();
-    expect(container.textContent).toContain('표시할 일이 없어요');
-    expect(container.textContent).not.toContain('아직 일로 나뉜 작업이 없어요');
+    expect(container.textContent).toContain('조건에 맞는 일감이 없어요');
+    expect(container.textContent).toContain('필터를 바꾸거나 풀어 보세요');
+  });
+
+  it('목표 구역은 구역 머리(건수 배지 + 접힘)로 그려지고, 접으면 스토리가 숨는다', async () => {
+    fetchWorkListMock.mockResolvedValue(unassignedOnlyPayload());
+    await mount();
+    const section = container.querySelector('section[data-goal-id]')!;
+    expect(section.querySelector('[data-slot="ds-section-header"] [data-slot="ds-count-badge"]')?.textContent).toBe('1');
+    const toggle = section.querySelector('button[aria-expanded="true"]') as HTMLButtonElement;
+    await act(async () => { toggle.click(); });
+    expect(section.querySelector('[data-story-id]')).toBeNull();
+  });
+
+  it('스토리 행을 누르면 선택(URL ?row=)이 그 스토리(story:<id>)가 되고, 선택돼 있으면 행이 눌림 표시를 하며 다시 누르면 풀린다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404, json: async () => ({}) }))); // the detail panel opens on the story and reads its own data: nothing answers here
+    fetchWorkListMock.mockResolvedValue(unassignedOnlyPayload());
+    await mount();
+    const row = () => container.querySelector('[data-story-id="s1"] > [data-slot="ds-list-row"]') as HTMLElement;
+    expect(row().getAttribute('aria-pressed')).toBe('false');
+    replaceMock.mockClear();
+    await act(async () => { row().click(); });
+    expect(replaceMock).toHaveBeenCalledWith('/work-list?row=story%3As1');
+    // the selection lives in the URL: once it says so, the row shows pressed; a second press clears it
+    searchParamsValueRef.current = 'row=story:s1';
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await mount();
+    expect(row().getAttribute('aria-pressed')).toBe('true');
+    replaceMock.mockClear();
+    await act(async () => { row().click(); });
+    expect(replaceMock).toHaveBeenCalledWith('/work-list');
   });
 });
 

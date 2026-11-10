@@ -596,11 +596,9 @@
     "title": "Work",
     "subtitle": "Goals lead to stories, stories to tasks. Work you take on and work you delegate are kept apart.",
     "loadErrorTitle": "Couldn't load",
-    "emptyStateTitle": "Nothing to show",
-    "emptyStateNoTasksTitle": "No work has been broken into tasks yet",
-    "emptyStateNoTasksHint": "You can check stories on the Board tab",
+    "emptyStateTitle": "No work items to show",
     "partialNotice": "Couldn't load everything. There's more.",
-    "goalProgressLabel": "{done}/{total, plural, one {# task} other {# tasks}} done",
+    "goalProgressLabel": "{done}/{total, plural, one {# story} other {# stories}} done",
     "goalSummaryLabel": "Assigned {assigned} · Delegated {delegated} · Hypotheses {hypotheses}",
     "unassignedGoalTitle": "Unassigned",
     "unassignedGoalHint": "Not linked to a goal · You can move it to one",
@@ -663,7 +661,11 @@
     "hypothesesLinkedWorkCta": "View linked work",
     "hypothesesGoToDetailAriaLabel": "{label}, {n}",
     "hypothesesGoToLinkedWorkAriaLabel": "{n} {label}",
-    "hypothesesStatusFilterAriaLabel": "Filter by {label}"
+    "hypothesesStatusFilterAriaLabel": "Filter by {label}",
+    "emptyStateFilteredTitle": "Nothing matches the filters",
+    "emptyStateFilteredHint": "Change or clear the filters",
+    "storyWorkCounts": "{count, plural, one {# task} other {# tasks}} · {delegated} delegated",
+    "storyNeedsHand": "Needs my hand"
   },
   "organization": {
     "rolesTitle": "Permissions",

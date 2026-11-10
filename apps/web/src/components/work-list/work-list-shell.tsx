@@ -18,8 +18,8 @@ import {
 import { fetchWorkList, type FetchedWorkList } from './fetch-work-list';
 import { filterWorkList, EMPTY_WORK_LIST_FILTERS, type WorkListFilters } from './filter-work-list';
 import { UNASSIGNED_GOAL_ID } from './derive-work-list';
-import { WorkListRowView } from './work-list-row';
-import { translateEntityStatus } from '@/components/chat/entity-status-labels';
+import { GoalGroupView } from './work-list-goal-group';
+import { EmptyState } from '@/components/ds/empty-state';
 import { useWorkListSelection } from './use-work-list-selection';
 import { WorkListDetailPanel } from './work-list-detail-panel';
 import { findSelectedRowContext, isRowVisibleInFiltered } from './work-list-detail-actions';
@@ -70,18 +70,6 @@ function FilterDropdown({
   );
 }
 
-// story #3976(PO 확定) — 스토리 카드 배지 색. Story.status는 work-list-row.tsx의
-// STATE_TEXT(일/실행 파생 실행상태)와 다른 축이라 그 맵을 재사용하지 않고 별도로 둔다
-// (섞지 않는다). 낱말 자체는 entity-status-labels.ts::translateEntityStatus('story',…)
-// (SSOT, 새 번역 0) — 여기선 색 클래스만. 색 규칙은 STATE_TEXT와 동형(대기류=muted·
-// 검토=warning-strong·완료=success).
-const STORY_STATUS_CLASS: Record<string, string> = {
-  backlog: 'text-muted-foreground',
-  'ready-for-dev': 'text-muted-foreground',
-  'in-progress': 'text-muted-foreground',
-  'in-review': 'text-warning-strong',
-  done: 'text-success',
-};
 
 /**
  * story #3844(UX-v3·FE 4·일감 1) — 「일감」 목록 탭 쉘. fetch(fetch-work-list.ts) →
@@ -282,84 +270,20 @@ export function WorkListShell({ projectId }: { projectId: string }) {
             ) : null}
 
             {filtered.groups.length === 0 ? (
-              <Card className="p-6 text-center text-sm text-muted-foreground">
-                {/* story #3934 AC2(b) — "표시할 일이 없어요"(전체 부정)는 스토리가 있지만
-                    아직 task로 안 쪼개진 경우에도 떴다(PO Test Org 실사고, deploy92). 필터가
-                    안 걸린 채 스토리는 있는데(totalStoryCount>0) groups가 0개면 사실대로
-                    "일로 안 쪼개짐"을 말한다 — 스토리 자체가 0개인 진짜 빈 프로젝트는
-                    기존 문구 그대로 유지(과교정 금지). */}
-                {!hasActiveFilters && filtered.totalStoryCount > 0 ? (
-                  <>
-                    <p>{t('emptyStateNoTasksTitle')}</p>
-                    <p className="mt-1 text-xs">{t('emptyStateNoTasksHint')}</p>
-                  </>
-                ) : (
-                  t('emptyStateTitle')
-                )}
-              </Card>
+              <EmptyState
+                icon="inbox"
+                title={hasActiveFilters ? t('emptyStateFilteredTitle') : t('emptyStateTitle')}
+                description={hasActiveFilters ? t('emptyStateFilteredHint') : undefined}
+              />
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-4" data-testid="work-list-groups">
                 {filtered.groups.map((group) => (
-                  <Card key={group.goalId} className="space-y-1 p-3">
-                    <div className="flex items-center justify-between gap-2 px-1">
-                      <h2 className="text-sm font-semibold text-foreground">
-                        {group.goalId === UNASSIGNED_GOAL_ID ? t('unassignedGoalTitle') : group.title}
-                      </h2>
-                      <span className="text-xs text-muted-foreground">
-                        {/* PO 지적(2026-09-14, 시안 재대조) — 「진행 중」 낱말은 GoalStatus==='active'
-                            일 때만(데이터 없으면 지어내지 않는다). 기간 pill(예: 「이번 주」)은
-                            target_date 기반 설계가 스코프 밖이라 PO 승인으로 생략. */}
-                        {group.isActive ? `${t('stateInProgress')} · ` : ''}
-                        {/* story #3976(PO 확定) — 분수는 기존 일+실행 개수 그대로(SP 기준 새 콜 0),
-                            단위 낱말("일")만 붙여 무엇을 센 것인지 보이게 한다. */}
-                        {t('goalProgressLabel', { done: group.doneCount, total: group.totalCount })}
-                      </span>
-                    </div>
-                    {/* story #3976(PO 확定) — 「목표 없음」 그룹에만 안내 문장(그 외 목표는
-                        제목만으로 충분해 문장 0, 지어내지 않는다). */}
-                    {group.goalId === UNASSIGNED_GOAL_ID ? (
-                      <p className="px-1 text-xs text-muted-foreground">{t('unassignedGoalHint')}</p>
-                    ) : null}
-                    <div className="px-1 text-xs text-muted-foreground">
-                      {t('goalSummaryLabel', { assigned: group.assignedCount, delegated: group.delegatedCount, hypotheses: group.hypothesisCount })}
-                    </div>
-                    {/* PO 지적(2026-09-14 08:12Z→08:28Z, 유나 픽셀 판정 — 시안 06d2d61c 재대조) —
-                        스토리 절 머리는 회색 띠(bg-muted/30)가 아니라 굵은 제목 + 왼쪽 accent
-                        border로: 목표→스토리→일 3단 위계가 회색 띠에서 눌렸다. per-story Card를
-                        걷고 목표 Card 하나 안에서 세로 선으로 스토리 구간을 나눈다(새 토큰 0).
-                        08:28Z 정정: 세로 선은 primary(파랑)가 아니라 중립 border-border — 파랑은
-                        「사람 손 필요/주 액션」 전용 자리라 순수 구조선엔 안 쓴다. */}
-                    <div className="space-y-4 pt-1">
-                      {group.stories.map((story) => {
-                        // story #3976(PO 확定) — 스토리 카드 배지는 Story.status(SSOT) 축.
-                        // work-list-row.tsx의 STATE_TEXT(일/실행 파생 실행상태)와 별개라 섞지
-                        // 않는다 — 시안 06d2d61c가 "완료/검토 中/진행 中/대기" 배지를 스토리
-                        // 줄에 그린 것은 이 축을 가리킨다(그라운딩 3975 부재⑤ 판정).
-                        const storyStatusLabel = translateEntityStatus('story', story.status);
-                        const storyStatusClass = STORY_STATUS_CLASS[story.status] ?? 'text-muted-foreground';
-                        return (
-                        <div key={story.storyId} className="border-l-2 border-border pl-3">
-                          <div className="flex items-baseline gap-2 pb-1">
-                            <span className="truncate text-sm font-semibold text-foreground">{story.title}</span>
-                            {storyStatusLabel ? (
-                              <span className={cn('shrink-0 text-xs font-medium', storyStatusClass)} data-testid="story-status-badge">
-                                {storyStatusLabel}
-                              </span>
-                            ) : null}
-                          </div>
-                          {story.rows.map((row) => (
-                            <WorkListRowView
-                              key={row.id}
-                              row={row}
-                              isSelected={selectedRowId === row.id}
-                              onSelect={(rowId) => setSelectedRowId(selectedRowId === rowId ? null : rowId)}
-                            />
-                          ))}
-                        </div>
-                        );
-                      })}
-                    </div>
-                  </Card>
+                  <GoalGroupView
+                    key={group.goalId}
+                    group={group}
+                    selectedRowId={selectedRowId}
+                    onSelect={(rowId) => setSelectedRowId(selectedRowId === rowId ? null : rowId)}
+                  />
                 ))}
               </div>
             )}
