@@ -289,7 +289,7 @@ async def list_webhook_deliveries(
             webhook_config_id=str(r.webhook_config_id) if r.webhook_config_id else None,
             status=r.status,
             attempt_count=r.attempt_count,
-            last_error=redact_urls(r.last_error) if r.last_error else None,  # story 4869: a row written before the retry text was scrubbed may still hold a request URL
+            last_error=redact_urls(r.last_error or "") or None,  # story 4869: a row written before the retry text was scrubbed may still hold a request URL
             created_at=r.created_at.isoformat(),
             updated_at=r.updated_at.isoformat() if r.updated_at else None,
         )
