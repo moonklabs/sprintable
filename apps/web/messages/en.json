@@ -133,7 +133,7 @@
     "storage": "Storage",
     "content": "Blog posts",
     "channelPosts": "Channel Posts",
-    "zoneNow": "Today",
+    "zoneNow": "Home",
     "zoneDev": "Work",
     "zoneMarketing": "Content & Channels",
     "zoneTrust": "Trust",
@@ -430,7 +430,7 @@
     }
   },
   "orgBriefing": {
-    "title": "Today",
+    "title": "Home",
     "projectRequiredBannerNext": "Pick a project and we'll take you back to what you were viewing.",
     "loadErrorTitle": "Couldn't load this",
     "needsMeBadge": "{count} need your input",
@@ -515,7 +515,7 @@
     "workforceTrustClaimed": "Agent-reported · awaiting review"
   },
   "todayV3": {
-    "title": "Today",
+    "title": "Home",
     "headerSummary": "{decisions, plural, one {# decision needs your call} other {# decisions need your call}} · {agents, plural, one {# agent is working on your tasks.} other {# agents are working on your tasks.}}",
     "loadErrorTitle": "Couldn't load this",
     "decisionsSectionTitle": "My decisions {count}",
@@ -571,7 +571,7 @@
     "contextHistoryLabel": "History",
     "contextRelatedLabel": "Related",
     "contextEmptySection": "Nothing yet",
-    "contextRelatedTodayLink": "Today › My decisions — decide here",
+    "contextRelatedTodayLink": "Home › My decisions — decide here",
     "contextNoLinkedWorkItem": "No work item is linked to this conversation",
     "contextWorkItemScopeLabel": "Based on {title}",
     "contextOpenLinkedWorkItem": "Open linked work",
@@ -587,7 +587,7 @@
     "historyOtherChange": "made another change",
     "historyUnknownActor": "Someone",
     "eventCardBadge": "Awaiting approval",
-    "eventCardSignAction": "Sign from Today",
+    "eventCardSignAction": "Sign from Home",
     "eventCardRequestChangesAction": "Request changes",
     "eventCardActionFailed": "Couldn't process this",
     "reasonDialogRequestChangesTitle": "Request changes reason",
@@ -1682,7 +1682,7 @@
     "desktopHandoffSubtitle": "Download and open it to finish setup in the desktop app.",
     "webConnectSecondaryLabel": "Or continue on the web",
     "desktopOpenAppNote": "Open the app and continue with this account",
-    "desktopFinishToToday": "Go to Today",
+    "desktopFinishToToday": "Go to Home",
     "restartAfterConfig": "Once you've saved the config, restart Claude Code — the new connection only takes effect after a restart.",
     "verifyWaiting": "Checking the connection… retrying automatically.",
     "verifyTimeoutTitle": "Not connected yet",
@@ -7306,7 +7306,7 @@
       "workdirFallback": "We couldn't use the folder you chose, so we started in the default folder (~/Sprintable/{recipe}) — the working folder needs to be a folder inside your home folder",
       "trustHint": "In «Agents on this computer» at the bottom of the window, click the «Started» row and answer what the terminal asks — it carries on from there.",
       "seeResult": "See the result",
-      "goToday": "Go to Today",
+      "goToday": "Go to Home",
       "wayOutNote": "You can leave — setup continues on this computer, and the first result will be in Work.",
       "phoneControl": {
         "label": "Handle agents from your phone too",

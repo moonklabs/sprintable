@@ -43,7 +43,7 @@ const names = () => [...container.querySelectorAll('[data-testid="nav-rail"] > a
 describe('NavRail — B 셸 초안(아이콘 막대)', () => {
   it('⭐위에서 아래 순서: 오늘 → 대화 → 일감 → 팀 → 지식 · 맨 아래 조직 → 찾기 → 설정 → 전체', async () => {
     await mount();
-    expect(names()).toEqual(['오늘', '대화', '일감', '팀', '지식', '조직', '검색…', '설정', '전체']);
+    expect(names()).toEqual(['홈', '대화', '일감', '팀', '지식', '조직', '검색…', '설정', '전체']);
   });
 
   it('구역의 첫 항목이 아이콘의 링크다(오늘 = /org-briefing · 일감 = /flow · 팀 = /organization/members(구역 첫 항목 구성원) · 지식 = /docs)', async () => {
@@ -148,7 +148,7 @@ describe('NavRail — B 셸 초안(아이콘 막대)', () => {
 
   it('⭐«계정» 팝오버: 길잡이 머리 · 바닥에만 있던 쪽이 아닌 입구가 막대에서도 닿는다(전환 · 새 프로젝트 · 에이전트 옮기기 · 프로필 · 언어 · 테마 · 사업자 정보)', async () => {
     await mount({ account: { orgId: 'o1', orgMemberships: [], projectId: 'p1', projectMemberships: [], userName: '디디' } });
-    expect(names()).toEqual(['오늘', '대화', '일감', '팀', '지식', '조직', '계정', '검색…', '설정', '전체']);
+    expect(names()).toEqual(['홈', '대화', '일감', '팀', '지식', '조직', '계정', '검색…', '설정', '전체']);
     expect(document.querySelector('[data-testid="rail-account-panel"]')).toBeNull();
     await act(async () => { (container.querySelector('[data-rail-item="account"]') as HTMLElement).click(); });
     const parts = [...document.querySelectorAll('[data-testid="rail-account-panel"] [data-part]')].map((el) => el.getAttribute('data-part'));

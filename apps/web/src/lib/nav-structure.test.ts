@@ -93,6 +93,27 @@ describe('정보 구조 한 벌 — 구역 · 순서 · 이름', () => {
   });
 });
 
+describe('⭐메뉴 이름 = 그 화면을 부르는 글 (선생님 11-10: 맨 위 «오늘» → «홈»)', () => {
+  // 맨 위 메뉴 이름(nav.zoneNow)이 정본이다 — 화면 제목 · 그 화면으로 보내는 길 이름(온보딩 «홈으로 가기» · 대화의 «홈 › 내 결정» · «홈»에서 서명)은 같은 낱말을 쓴다.
+  // 날짜 뜻의 «오늘»(오늘 결과 · 오늘 사용량 · 스탠드업 · 날짜 묶음)은 이 단언 밖이다. 선생님이 다른 이름을 고르면 messages 값만 바꾸면 이 시험이 같이 따라온다.
+  for (const [lang, m] of [['ko', koMessages], ['en', enMessages]] as const) {
+    const msg = m as unknown as Record<string, Record<string, unknown>>;
+    const name = msg.nav!.zoneNow as string;
+    it(`${lang}: 화면 제목 · 가는 길 이름이 메뉴 이름 «${name}»과 같다`, () => {
+      expect(msg.orgBriefing!.title, 'orgBriefing.title').toBe(name);
+      expect(msg.todayV3!.title, 'todayV3.title(켜지지 않은 같은 이름의 시안)').toBe(name);
+      expect(msg.onboarding!.desktopFinishToToday as string, 'onboarding.desktopFinishToToday').toContain(name);
+      expect((msg.desktop!.setup as Record<string, string>).goToday, 'desktop.setup.goToday').toContain(name);
+      expect(msg.chatV3!.contextRelatedTodayLink as string, 'chatV3.contextRelatedTodayLink').toContain(name);
+      expect(msg.chatV3!.eventCardSignAction as string, 'chatV3.eventCardSignAction').toContain(name);
+    });
+  }
+  it('정해진 이름: ko «홈» · en «Home»', () => {
+    expect(koMessages.nav.zoneNow).toBe('홈');
+    expect(enMessages.nav.zoneNow).toBe('Home');
+  });
+});
+
 // ─── 모든 화면이 한 입구 이상 ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 function pageRoutes(dir: string, out: string[] = []): string[] {

@@ -46,7 +46,7 @@ async function mount(locale: 'ko' | 'en') {
 describe('전체 메뉴 — 플래그 ON에서 실제 탭과 한 세계(story #4278)', () => {
   it('⭐머리 안내 ko: 「오늘」·「대화」·「일감」 · en: "Today", "Chats", and "Work"', async () => {
     await mount('ko');
-    expect(container.querySelector('[data-testid="more-tab-hint"]')?.textContent).toBe('아래 탭(「오늘」·「대화」·「일감」)에 있는 화면은 여기엔 없어요');
+    expect(container.querySelector('[data-testid="more-tab-hint"]')?.textContent).toBe('아래 탭(「홈」·「대화」·「일감」)에 있는 화면은 여기엔 없어요');
     await act(async () => { root.unmount(); });
     root = createRoot(container);
     await mount('en');

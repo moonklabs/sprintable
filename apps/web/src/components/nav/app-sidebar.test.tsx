@@ -117,7 +117,7 @@ async function mount(userName?: string, navV3Flags?: NavV3Flags) {
 // story #4885(UI-2 AC4 PR 1) — 새 구조: 매일 다섯 + 접힌 «조직» + 설정 + «전체». 「더보기」 서랍은 걷혔고 «연결·규칙» 구역도 없다(채널 연결 · 연산 커넥터 · 콘텐츠 규칙은 «조직» 안).
 // 이 테스트는 expandAllGroups로 «조직»을 펴고 잰다(기본은 접힘 — 전용 케이스가 따로 잠근다).
 const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
-  { labelKey: null, labels: ['오늘', '결재'] },
+  { labelKey: null, labels: ['홈', '결재'] },
   { labelKey: null, labels: ['일감', '목표', '실행'] },
   { labelKey: 'zoneTeam', labels: ['구성원', '에이전트', '실행 기록', 'API 키'] },
   { labelKey: 'zoneKnowledge', labels: ['문서', '산출물', '스토리지'] },
@@ -133,7 +133,7 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
 // 전부 지금 develop과 바이트 동일(회귀 0). 「일감」의 flag-aware work-list 전환은
 // 별도 describe(하단 "v3 nav 단일 소스" 스위트)가 ON 케이스로 검증.
 const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
-  '오늘': '/org-briefing',
+  '홈': '/org-briefing',
   '결재': '/inbox?tab=gates',
   '일감': '/flow',
   '구성원': '/organization/members',
@@ -174,7 +174,7 @@ describe('AppSidebar — story #3824 → #4885 새 구조 렌더 회귀가드(�
     expandAllGroups();
     await mount();
     const links = [...container.querySelectorAll('a')];
-    const todayIndex = links.findIndex((a) => a.textContent?.includes('오늘'));
+    const todayIndex = links.findIndex((a) => a.textContent?.includes('홈'));
     const chatsIndex = links.findIndex((a) => a.textContent?.includes('대화'));
     const workIndex = links.findIndex((a) => a.textContent?.includes('일감'));
     expect(todayIndex).toBeGreaterThanOrEqual(0);
@@ -236,7 +236,7 @@ describe('AppSidebar — story #3824 → #4885 새 구조 렌더 회귀가드(�
   it('애매 항목(오늘)엔 「프로젝트」 표식이 안 붙는다', async () => {
     expandAllGroups();
     await mount();
-    const todayBtn = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
+    const todayBtn = [...container.querySelectorAll('a')].find((a) => a.textContent === '홈');
     expect(todayBtn?.textContent).not.toContain('프로젝트');
   });
 
@@ -286,10 +286,10 @@ describe('AppSidebar — story #3824 → #4885 새 구조 렌더 회귀가드(�
 
   it('헤더리스 그룹(오늘·일감·설정)엔 접기 토글이 없다(옛 설정 그룹과 동형 관례)', async () => {
     await mount();
-    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
+    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '홈');
     expect(todayLink).toBeDefined();
     const toggles = [...container.querySelectorAll('button[aria-expanded]')];
-    expect(toggles.some((b) => b.textContent?.includes('오늘'))).toBe(false);
+    expect(toggles.some((b) => b.textContent?.includes('홈'))).toBe(false);
     expect(toggles.some((b) => b.textContent?.includes('일감'))).toBe(false);
     expect(toggles.some((b) => b.textContent?.includes('설정'))).toBe(false);
   });
@@ -338,7 +338,7 @@ describe('AppSidebar — story #3824 → #4885 새 구조 렌더 회귀가드(�
   it('기억 없는 새 브라우저 — 활성 구역이 없어도(경로=/dashboard) 전 구역이 펼쳐진다(옛 규칙이면 전부 접혔어야 함)', async () => {
     stubViewportHeight(700);
     await mount();
-    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
+    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '홈');
     expect(todayLink).toBeDefined();
     const workLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
     expect(workLink).toBeDefined();
@@ -610,7 +610,7 @@ describe('AppSidebar — 새 셸은 플래그 없이 하나(story #4885)', () =>
     expandAllGroups();
     await mount(undefined, { todayV3Enabled: true, chatV3Enabled: true, connectRulesV3Enabled: true });
     const links = [...container.querySelectorAll('a')];
-    expect(links.find((a) => a.textContent === '오늘')?.getAttribute('href')).toBe('/org-briefing');
+    expect(links.find((a) => a.textContent === '홈')?.getAttribute('href')).toBe('/org-briefing');
     expect(links.find((a) => a.textContent?.startsWith('일감'))?.getAttribute('href')).toBe('/flow');
     expect(links.find((a) => a.textContent?.includes('대화'))?.getAttribute('href')).toBe('/chats');
     expect(links.some((a) => a.getAttribute('href') === '/connect-rules' || a.getAttribute('href') === '/today' || a.getAttribute('href') === '/work-list')).toBe(false);

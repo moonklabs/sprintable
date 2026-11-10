@@ -38,7 +38,7 @@ describe('NavV3ItemList — story #4004 AC1(목적지 5항목·라벨)', () => {
   it('플래그 전부 OFF — connectRules 제외 4항목만 렌더, 라벨은 레거시 사이드바와 동일한 낱말', async () => {
     await mount(DEFAULT_NAV_V3_FLAGS, 'today');
     const links = [...container.querySelectorAll('a')];
-    expect(links.map((a) => a.textContent?.replace(/\d+$/, '').trim())).toEqual(['오늘', '대화', '일감', '결과']);
+    expect(links.map((a) => a.textContent?.replace(/\d+$/, '').trim())).toEqual(['홈', '대화', '일감', '결과']);
     expect(links.map((a) => a.getAttribute('href'))).toEqual(['/org-briefing', '/chats', '/flow', '/organization/insights-board']);
   });
 
@@ -71,7 +71,7 @@ describe('NavV3ItemList — story #4006 §6 역전 활성 표시(레거시 sideb
 
   it('비활성 항목 — text-muted-foreground·hover:bg-muted(중립)·border-l-transparent(자리 예약)·activefill 미포함·aria-current 없음', async () => {
     await mount(DEFAULT_NAV_V3_FLAGS, 'chats');
-    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘')!;
+    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '홈')!;
     expect(todayLink.className).toContain('text-muted-foreground');
     expect(todayLink.className).toContain('hover:bg-muted');
     expect(todayLink.className).toContain('border-l-transparent');
@@ -104,13 +104,13 @@ describe('NavV3ItemList — story #4006 §6 역전 활성 표시(레거시 sideb
 describe('NavV3ItemList — 「오늘」 배지(story #4004, today-v3-screen.tsx 기존 동작 이관)', () => {
   it('todayBadgeCount=0이면 배지 없음', async () => {
     await mount(DEFAULT_NAV_V3_FLAGS, 'today', 0);
-    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('오늘'))!;
+    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('홈'))!;
     expect(todayLink.querySelector('span.bg-primary')).toBeNull();
   });
 
   it('todayBadgeCount=3이면 「오늘」 항목에만 배지, 다른 항목엔 없음', async () => {
     await mount(DEFAULT_NAV_V3_FLAGS, 'today', 3);
-    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('오늘'))!;
+    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('홈'))!;
     expect(todayLink.querySelector('span.bg-primary')?.textContent).toBe('3');
     const chatsLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '대화')!;
     expect(chatsLink.querySelector('span.bg-primary')).toBeNull();
