@@ -83,8 +83,14 @@ describe('NavRail — B 셸 초안(아이콘 막대)', () => {
   it('⭐건수 배지: «오늘» 아이콘은 넘겨받은 todayCount를 그대로 그린다(셈은 UI-5 몫 — 막대는 값을 받아 그리기만) · «대화»는 안 읽은 수', async () => {
     await mount({ todayCount: 3, chatUnreadTotal: 120 });
     const badgeOf = (id: string) => container.querySelector(`[data-rail-item="${id}"] [data-testid="rail-badge"]`)?.textContent;
-    expect(badgeOf('org-briefing')).toBe('3');
-    expect(badgeOf('chats')).toBe('99+');
+    // 보이는 수 = sr-only 이름을 뺀 글(안 보이는 이름 + 공백 + 수) — 정확히 비교
+    const visible = (id: string) => {
+      const b = container.querySelector(`[data-rail-item="${id}"] [data-testid="rail-badge"]`);
+      return b ? [...b.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join('') : undefined;
+    };
+    expect(visible('org-briefing')).toBe('3');
+    expect(visible('chats')).toBe('99+');
+    expect(badgeOf('org-briefing')).toContain('사람 손이 필요한 일');
     expect(badgeOf('board')).toBeUndefined();
     // 옆 목록의 «결재» 줄에는 따로 숫자가 없다 — 숫자는 «오늘» 하나(결재만 세는 두 번째 셈을 두지 않는다)
     expect(container.querySelector('[data-flyout-item="inbox"] [data-testid="rail-badge"]')).toBeNull();
@@ -225,16 +231,33 @@ describe('NavRail — B 셸 초안(아이콘 막대)', () => {
     expect(flyout(), '다른 구역으로 나가면 닫힘').toBe('false');
   });
 
-  it('⭐배지 색은 뜻 둘: 홈(손 필요) = needs-hand 계열 · 대화(읽지 않음) = action 바탕 (UI-3 §4 #6)', async () => {
+  it('⭐배지는 ds CountBadge: 홈(손 필요) = needs-hand-bar 바탕 + on-needs-hand 글자 + 안 보이는 이름 · 대화(읽지 않음) = action 바탕 (UI-3 §4 #6)', async () => {
     await mount({ todayCount: 3, chatUnreadTotal: 2 });
     const home = container.querySelector('[data-rail-item="org-briefing"] [data-testid="rail-badge"]') as HTMLElement;
     const chat = container.querySelector('[data-rail-item="chats"] [data-testid="rail-badge"]') as HTMLElement;
-    expect(home.getAttribute('data-tone')).toBe('needs-hand');
-    expect(home.className).toContain('text-ds-needs-hand');
-    expect(home.className).toContain('bg-ds-needs-hand-soft');
-    expect(chat.getAttribute('data-tone')).toBe('unread');
+    expect(home.getAttribute('data-slot')).toBe('ds-count-badge');
+    expect(home.getAttribute('data-kind')).toBe('needs-hand');
+    expect(home.className).toContain('bg-ds-needs-hand-bar');
+    expect(home.className).toContain('text-ds-on-needs-hand');
+    expect(home.querySelector('.sr-only')?.textContent?.trim()).toBe('사람 손이 필요한 일');
+    expect(chat.querySelector('.sr-only')?.textContent?.trim()).toBe('안 읽은 글');
+    expect(chat.getAttribute('data-kind')).toBe('unread');
     expect(chat.className).toContain('bg-ds-action');
     expect(chat.className).toContain('text-ds-on-action');
+  });
+
+  it('⭐건수가 있으면 링크 접근 이름에 뜻과 수가 실린다(링크 aria-label이 안쪽 sr-only를 덮으므로) · 0이면 이름만', async () => {
+    await mount({ todayCount: 3, chatUnreadTotal: 2 });
+    expect(container.querySelector('[data-rail-item="org-briefing"]')?.getAttribute('aria-label')).toBe('홈 · 사람 손이 필요한 일 3');
+    expect(container.querySelector('[data-rail-item="chats"]')?.getAttribute('aria-label')).toBe('대화 · 안 읽은 글 2');
+    await act(async () => { root.unmount(); });
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await mount({ todayCount: 0, chatUnreadTotal: 0 });
+    expect(container.querySelector('[data-rail-item="org-briefing"]')?.getAttribute('aria-label')).toBe('홈');
+    expect(container.querySelector('[data-rail-item="chats"]')?.getAttribute('aria-label')).toBe('대화');
   });
 
   it('⭐아이콘은 Material Symbols(ds Icon): 막대 · 옆 목록 · 조직 상자 모든 아이콘이 data-icon을 가지고 lucide(svg.lucide)는 0', async () => {

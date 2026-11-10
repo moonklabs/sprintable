@@ -12,6 +12,7 @@ import { useFlatHref } from '@/hooks/use-flat-href';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Icon } from '@/components/ds/icon';
+import { CountBadge } from '@/components/ds/count-badge';
 import { RAIL_ICON_BY_ITEM_ID } from './rail-icons';
 import { RailAccount } from './rail-account';
 import type { OrgSwitcherItem } from './unified-switcher';
@@ -90,19 +91,17 @@ export function NavRail({ orgSlug, projectSlug, account, listColumn, navV3Flags 
       <Icon name={RAIL_ICON_BY_ITEM_ID[id]!} size={20} className="size-5" />
     </span>
   );
-  // 건수 배지 한 모양 · 색은 뜻 둘(UI-3 §4 #6): 읽지 않음 = action 바탕 / 내 손 필요(오늘 아이콘) = needs-hand 계열. needs-hand-bar 바탕 위 글자 토큰이 아직 없어
-  // (흰/검정 어느 쪽도 4.5:1을 못 맞춘다) 손 필요 배지는 doc이 대비를 계산해 둔 needs-hand 글 + needs-hand-soft 바탕 + needs-hand-bar 테두리로 그린다 — 유나군께 «빠진 줄»로 알림.
+  // 건수 배지 = ds CountBadge(UI-3 §4 #6 · 한 모양 · 색은 뜻 둘): 읽지 않음(대화) = action / 내 손 필요(홈) = needs-hand-bar + on-needs-hand 글자. 손 필요는 «안 보이는 이름»이 필수(색만으로 뜻을 싣지 않는다).
+  // 링크의 aria-label이 이름을 덮으므로 건수 > 0이면 링크 이름에 «이름 · 건수 뜻 N»을 싣는다(ariaName) — 배지 안 sr-only 글만으로는 스크린리더가 못 읽는다.
   const badge = (n: number, tone: 'unread' | 'needs-hand') => (n > 0 ? (
-    <span
-      className={cn('absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-ds-pill px-1 text-ds-mono-sm font-semibold',
-        tone === 'unread' ? 'bg-ds-action text-ds-on-action' : 'border border-ds-needs-hand-bar bg-ds-needs-hand-soft text-ds-needs-hand')}
-      data-testid="rail-badge"
-      data-tone={tone}
-    >{n > 99 ? '99+' : n}</span>
+    tone === 'needs-hand'
+      ? <CountBadge kind="needs-hand" label={t('railNeedsHand')} count={n} className="absolute -right-0.5 -top-0.5" data-testid="rail-badge" />
+      : <CountBadge kind="unread" label={t('railUnread')} count={n} className="absolute -right-0.5 -top-0.5" data-testid="rail-badge" />
   ) : null);
+  const ariaName = (base: string, n: number, tone: 'unread' | 'needs-hand') => (n > 0 ? `${base} · ${t(tone === 'needs-hand' ? 'railNeedsHand' : 'railUnread')} ${n}` : base);
 
   const dailyEntry = (group: NavGroupConfig) => (
-    <DailyEntry key={group.id} group={group} link={link} label={(item) => t(item.labelKey)} groupLabel={group.labelKey ? t(group.labelKey) : undefined} icon={railIcon} badge={badge} count={group.id === 'now' ? todayCount : 0} tone="needs-hand" />
+    <DailyEntry key={group.id} group={group} link={link} label={(item) => t(item.labelKey)} groupLabel={group.labelKey ? t(group.labelKey) : undefined} icon={railIcon} badge={badge} ariaName={ariaName} count={group.id === 'now' ? todayCount : 0} tone="needs-hand" />
   );
 
   const chatLink = link(CHAT_CENTER_ITEM);
@@ -111,7 +110,7 @@ export function NavRail({ orgSlug, projectSlug, account, listColumn, navV3Flags 
   return (
     <nav aria-label={t('workspace')} className="sticky top-0 z-20 hidden h-svh w-14 shrink-0 flex-col items-center gap-1 border-r border-ds-line bg-ds-surface py-2 lg:flex" data-testid="nav-rail">
       {dailyGroups.slice(0, 1).map(dailyEntry)}
-      <Link href={chatLink.href} aria-label={t(CHAT_CENTER_ITEM.labelKey)} title={t(CHAT_CENTER_ITEM.labelKey)} aria-current={chatLink.isActive ? 'page' : undefined} className={RAIL_LINK} data-rail-item={CHAT_CENTER_ITEM.id}>
+      <Link href={chatLink.href} aria-label={ariaName(t(CHAT_CENTER_ITEM.labelKey), chatUnreadTotal, 'unread')} title={t(CHAT_CENTER_ITEM.labelKey)} aria-current={chatLink.isActive ? 'page' : undefined} className={RAIL_LINK} data-rail-item={CHAT_CENTER_ITEM.id}>
         {railIcon(CHAT_CENTER_ITEM.id, chatLink.isActive)}
         {badge(chatUnreadTotal, 'unread')}
       </Link>
@@ -125,7 +124,7 @@ export function NavRail({ orgSlug, projectSlug, account, listColumn, navV3Flags 
             </Button>
             {orgOpen ? (
               <ul role="list" className={cn(FLYOUT_PANEL, 'bottom-0 left-full ml-1 min-w-52')} data-testid="rail-org-panel">
-                {orgGroup.items.map((item) => <FlyoutLink key={item.id} item={item} href={link(item).href} active={link(item).isActive} label={t(item.labelKey)} count={0} onNavigate={() => setOrgOpen(false)} />)}
+                {orgGroup.items.map((item) => <FlyoutLink key={item.id} item={item} href={link(item).href} active={link(item).isActive} label={t(item.labelKey)} onNavigate={() => setOrgOpen(false)} />)}
               </ul>
             ) : null}
           </div>
@@ -154,7 +153,7 @@ export function NavRail({ orgSlug, projectSlug, account, listColumn, navV3Flags 
 
 // 매일 구역 하나 = 아이콘 링크 하나(구역 첫 항목) + 항목이 더 있으면 옆에 뜨는 목록. 목록은 호버 · 키보드 초점 · (Esc로 닫힘)이 상태로 열고 닫는다 —
 // CSS 호버만으로 열면(group-hover) 터치에서는 닿지 않는 조작 요소 부류(hover-reveal 가드)가 되므로, 열림을 상태로 쥐고 `hidden`은 닫힘일 때만 쓴다.
-function DailyEntry({ group, link, label, groupLabel, icon, badge, count, tone }: {
+function DailyEntry({ group, link, label, groupLabel, icon, badge, ariaName, count, tone }: {
   group: NavGroupConfig;
   link: (item: Pick<NavItemConfig, 'id' | 'kind' | 'path'>) => { href: string; isActive: boolean };
   label: (item: NavItemConfig) => string;
@@ -162,6 +161,7 @@ function DailyEntry({ group, link, label, groupLabel, icon, badge, count, tone }
   groupLabel?: string;
   icon: (id: string, active: boolean) => ReactNode;
   badge: (n: number, tone: 'unread' | 'needs-hand') => ReactNode;
+  ariaName: (base: string, n: number, tone: 'unread' | 'needs-hand') => string;
   count: number;
   tone: 'unread' | 'needs-hand';
 }) {
@@ -183,7 +183,7 @@ function DailyEntry({ group, link, label, groupLabel, icon, badge, count, tone }
       onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOpen(false); }}
       onKeyDown={(e) => { if (e.key === 'Escape') { setOpen(false); const trigger = triggerRef.current; if (trigger && document.activeElement !== trigger) { escapedRef.current = true; trigger.focus(); } } }}
     >
-      <Link ref={triggerRef} href={firstLink.href} aria-label={groupLabel ?? label(first)} title={groupLabel ?? label(first)} aria-current={anyActive ? 'page' : undefined} className={RAIL_LINK} data-rail-item={first.id}>
+      <Link ref={triggerRef} href={firstLink.href} aria-label={ariaName(groupLabel ?? label(first), count, tone)} title={groupLabel ?? label(first)} aria-current={anyActive ? 'page' : undefined} className={RAIL_LINK} data-rail-item={first.id}>
         {icon(first.id, anyActive)}
         {badge(count, tone)}
       </Link>
@@ -191,7 +191,7 @@ function DailyEntry({ group, link, label, groupLabel, icon, badge, count, tone }
         // 아이콘과 목록 사이에 빈틈이 없어야 한다(codex P1): 바깥 상자의 왼쪽 padding이 그 틈을 «목록의 일부»로 메워, 마우스가 아이콘에서 목록으로 건너가는 동안 그룹의 mouseleave가 안 난다.
         <div className={cn('absolute left-full top-0 z-30 pl-1', open ? 'block' : 'hidden')} data-testid="rail-flyout" data-open={open}>
           <ul role="list" className="flex min-w-44 flex-col gap-0.5 rounded-ds-panel border border-ds-line bg-ds-surface-raised p-1">
-            {group.items.map((item) => <FlyoutLink key={item.id} item={item} href={link(item).href} active={link(item).isActive} label={label(item)} count={0} />)}
+            {group.items.map((item) => <FlyoutLink key={item.id} item={item} href={link(item).href} active={link(item).isActive} label={label(item)} />)}
           </ul>
         </div>
       ) : null}
@@ -199,13 +199,12 @@ function DailyEntry({ group, link, label, groupLabel, icon, badge, count, tone }
   );
 }
 
-function FlyoutLink({ item, href, active, label, count, onNavigate }: { item: NavItemConfig; href: string; active: boolean; label: string; count: number; onNavigate?: () => void }) {
+function FlyoutLink({ item, href, active, label, onNavigate }: { item: NavItemConfig; href: string; active: boolean; label: string; onNavigate?: () => void }) {
   return (
     <li>
       <Link href={href} onClick={onNavigate} aria-current={active ? 'page' : undefined} className={cn('flex items-center gap-2 rounded-ds-control px-2 py-1.5 text-ds-body hover:bg-ds-surface-high hover:text-ds-ink focus-visible:ring-2 focus-visible:ring-ds-action', active ? 'bg-ds-action-soft font-semibold text-ds-action-text' : 'text-ds-ink-2')} data-flyout-item={item.id}>
         <Icon name={RAIL_ICON_BY_ITEM_ID[item.id]!} className="shrink-0" />
         <span className="min-w-0 flex-1 truncate">{label}</span>
-        {count > 0 ? <span className="rounded-ds-pill border border-ds-needs-hand-bar bg-ds-needs-hand-soft px-1.5 text-ds-mono-sm font-semibold text-ds-needs-hand">{count > 99 ? '99+' : count}</span> : null}
       </Link>
     </li>
   );
