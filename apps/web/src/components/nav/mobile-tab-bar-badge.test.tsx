@@ -87,7 +87,7 @@ describe('MobileTabBar — 결재/채팅 카운트 배지(story #3431 CornerCoun
 
 // story #3518(유나 사전 스티어, 2026-09-05) — 배지는 aria-hidden이라 그 수를 보조
 // 기술에 전하는 책임은 탭 링크에 있다. aria-label(접근성 이름 통째 교체)은 안 쓴다 —
-// 이 탭은 보이는 텍스트 라벨("대화"·"결재")이 있어서 aria-label로 갈아치우면 WCAG
+// 이 탭은 보이는 텍스트 라벨("대화"·"홈")이 있어서 aria-label로 갈아치우면 WCAG
 // 2.5.3(Label in Name) 위반이다. 대신 보이는 라벨 뒤에 sr-only 텍스트를 "덧붙인다" —
 // 접근성 이름은 여전히 라벨+children 텍스트 전체(배지의 aria-hidden 텍스트는 accname
 // 계산에서 제외)로 계산된다. jsdom엔 실 accname 알고리즘이 없어 아래 헬퍼로 근사한다
