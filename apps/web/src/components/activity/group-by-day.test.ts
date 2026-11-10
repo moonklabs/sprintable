@@ -30,6 +30,14 @@ describe('groupByDay (4892)', () => {
     expect(groups[0]!.items.map((i) => i.id)).toEqual(['a', 'b', 'c']);
   });
 
+  it('⭐a row at exactly local midnight belongs to the NEW day, one second earlier to the day before', () => {
+    const rows = [row('a', '2026-11-09T15:00:00Z'), row('b', '2026-11-09T14:59:59Z')];   // Seoul: 11-10 00:00:00 and 11-09 23:59:59
+    expect(groupByDay(rows, 'Asia/Seoul', new Date('2026-11-10T03:00:00Z')).map((g) => [g.key, g.items.map((i) => i.id)])).toEqual([
+      ['2026-11-10', ['a']],
+      ['2026-11-09', ['b']],
+    ]);
+  });
+
   it('no rows → no groups (no empty headers)', () => {
     expect(groupByDay([], 'UTC', NOW)).toEqual([]);
   });

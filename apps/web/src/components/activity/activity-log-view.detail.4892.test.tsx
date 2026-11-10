@@ -64,25 +64,28 @@ async function mount() {
   });
   for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
 }
-const rows = () => [...container.querySelectorAll('button[aria-controls="audit-detail"]')] as HTMLButtonElement[];
+const rows = () => [...container.querySelectorAll('button[data-audit-row]')] as HTMLButtonElement[];
 const detail = () => document.getElementById('audit-detail');
+// `.click()` fires a click with detail 0 — what Enter / Space on a button produce (a keyboard activation); a mouse or touch click has detail >= 1
 const click = async (el: Element) => { await act(async () => { (el as HTMLElement).click(); }); await act(async () => { vi.advanceTimersByTime(5); }); };
+const pointerClick = async (el: Element) => { await act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); }); await act(async () => { vi.advanceTimersByTime(5); }); };
 
 describe('ActivityLogView — 일 단위 묶음 (4892)', () => {
   it('⭐rows sit under day headers: 오늘 · 어제 · the date — each header is a heading with its rows', async () => {
     await mount();
     const groups = [...container.querySelectorAll('[data-testid="audit-day-group"]')];
     expect(groups.map((g) => g.querySelector('h2')?.textContent)).toEqual(['오늘', '어제', expect.stringContaining('11월')]);
-    expect(groups.map((g) => g.querySelectorAll('button[aria-controls]').length)).toEqual([2, 1, 1]);
+    expect(groups.map((g) => g.querySelectorAll('button[data-audit-row]').length)).toEqual([2, 1, 1]);
   });
 });
 
 describe('ActivityLogView — 행을 고르면 상세가 보인다 (4892)', () => {
-  it('⭐every row is a button: aria-expanded=false, aria-controls=audit-detail, and no hover-only title tooltip', async () => {
+  it('⭐every row is a button: aria-expanded=false, no aria-controls while collapsed (nothing to point at), and no hover-only title tooltip', async () => {
     await mount();
     expect(rows()).toHaveLength(4);
     for (const r of rows()) {
       expect(r.getAttribute('aria-expanded')).toBe('false');
+      expect(r.getAttribute('aria-controls')).toBeNull();
       expect(r.getAttribute('title')).toBeNull();
       expect(r.parentElement?.getAttribute('title')).toBeNull();
     }
@@ -94,6 +97,7 @@ describe('ActivityLogView — 행을 고르면 상세가 보인다 (4892)', () =
     expect(container.textContent).toContain(koMessages.activityLog.detailPickRow);
     await click(rows()[0]!);
     expect(rows()[0]!.getAttribute('aria-expanded')).toBe('true');
+    expect(rows()[0]!.getAttribute('aria-controls')).toBe('audit-detail');   // …and once expanded it points at the region that exists
     const d = detail()!;
     expect(d).toBeTruthy();
     expect(d.closest('aside')).not.toBeNull();                 // the column beside the list
@@ -186,6 +190,33 @@ describe('ActivityLogView — 목록이 바뀌면 고른 행이 풀린다 (4892)
     expect(rows()).toHaveLength(4);
     expect(rows().every((r) => r.getAttribute('aria-expanded') === 'false')).toBe(true);
     expect(detail()).toBeNull();
+  });
+});
+
+describe('ActivityLogView — 초점은 키보드 활성에서만 옮긴다 (4892, codex)', () => {
+  it('⭐narrow + a MOUSE / touch click: the details open but the focus stays where the pointer put it (no stolen focus)', async () => {
+    mq.wide = false;
+    await mount();
+    rows()[1]!.focus();
+    await pointerClick(rows()[1]!);
+    expect(detail()).toBeTruthy();
+    expect(document.activeElement).toBe(rows()[1]);
+    expect(document.activeElement).not.toBe(detail());
+  });
+
+  it('⭐narrow + a KEYBOARD activation (Enter / Space → click detail 0): the focus moves into the details', async () => {
+    mq.wide = false;
+    await mount();
+    rows()[1]!.focus();
+    await click(rows()[1]!);
+    expect(document.activeElement).toBe(detail());
+  });
+
+  it('wide: a keyboard activation keeps the focus on the row (the details column is beside it, not in the way)', async () => {
+    await mount();
+    rows()[0]!.focus();
+    await click(rows()[0]!);
+    expect(document.activeElement).toBe(rows()[0]);
   });
 });
 

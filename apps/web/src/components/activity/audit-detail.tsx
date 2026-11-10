@@ -26,13 +26,14 @@ interface AuditDetailProps {
 export const AuditDetail = forwardRef<HTMLElement, AuditDetailProps>(function AuditDetail({ item, actorLabel, id, claim, onClose }, ref) {
   const t = useTranslations('activityLog');
   const locale = useLocale();
-  const tz = useViewerTimeZone();
+  // the same fallback as the day grouping (UTC while the viewer's zone is unknown) — a row grouped under a day must show a date on that day
+  const tz = useViewerTimeZone() ?? 'UTC';
   const headingId = useId();
   const context = item.context ? Object.entries(item.context) : [];
   const target = item.entity_title
     ? (item.entity_type ? `${item.entity_type} · ${item.entity_title}` : item.entity_title)
     : item.entity_type;
-  const when = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short', ...(tz ? { timeZone: tz } : {}) }).format(new Date(item.created_at));
+  const when = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short', timeZone: tz }).format(new Date(item.created_at));
   return (
     <section ref={ref} id={id} tabIndex={-1} aria-labelledby={headingId} data-testid="audit-detail" className="rounded-ds-panel border border-ds-line bg-ds-surface p-4 outline-none focus-visible:ring-2 focus-visible:ring-ds-action">
       <div className="flex items-start gap-2">

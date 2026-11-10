@@ -243,14 +243,23 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
     // a new list (filter change, reload) that no longer holds the chosen row clears the choice
     if (selectedId && !items.some((i) => i.id === selectedId)) setSelectedId(null);
   }, [items, selectedId]);
-  const toggleRow = (id: string) => {
+  // Focus moves only on a KEYBOARD activation (Enter / Space fire `click` with detail 0; a mouse or touch click has detail >= 1 and must not steal the focus), and it is
+  // done by an effect after the commit — the details element exists by then, and a pending timer can never fire after an unmount.
+  const [focusRequest, setFocusRequest] = useState<{ kind: 'detail' | 'row'; id: string } | null>(null);
+  useEffect(() => {
+    if (!focusRequest) return;
+    if (focusRequest.kind === 'detail') detailRef.current?.focus();
+    else rowRefs.current.get(focusRequest.id)?.focus();
+    setFocusRequest(null);
+  }, [focusRequest]);
+  const toggleRow = (id: string, viaKeyboard: boolean) => {
     setSelectedId((cur) => (cur === id ? null : id));
-    if (!isWide && selectedId !== id) setTimeout(() => detailRef.current?.focus(), 0);
+    if (!isWide && viaKeyboard && selectedId !== id) setFocusRequest({ kind: 'detail', id });
   };
   const closeDetail = () => {
     const id = selectedId;
     setSelectedId(null);
-    if (id) setTimeout(() => rowRefs.current.get(id)?.focus(), 0);
+    if (id) setFocusRequest({ kind: 'row', id });   // the close button disappears with the details — hand the focus back to the row that opened them
   };
   const displayTz = useViewerTimeZone() ?? 'UTC';
   const locale = useLocale();
@@ -366,7 +375,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
                           rowLabel={item.actor_id ? actorLabels.get(item.actor_id) : undefined}
                           selected={isSelected}
                           controlsId={DETAIL_ID}
-                          onToggle={() => toggleRow(item.id)}
+                          onToggle={(viaKeyboard) => toggleRow(item.id, viaKeyboard)}
                           buttonRef={(el) => { if (el) rowRefs.current.set(item.id, el); else rowRefs.current.delete(item.id); }}
                         />
                         {isSelected && !isWide ? (
@@ -411,11 +420,6 @@ export function auditClaim(item: ActivityLogItem): string {
   return item.action;
 }
 
-export function auditContextTooltip(item: ActivityLogItem): string | undefined {
-  const entries = item.context ? Object.entries(item.context) : [];
-  const lines = [`action: ${item.action}`, ...entries.map(([k, v]) => `${k}: ${String(v)}`)];
-  return lines.join('\n');
-}
 
 // story #2923(P0-E AQ4, 그라운딩 발견) — actor_type 무관하게 항상 human prop으로만 넘겨(agent
 // prop 미사용) 시안의 "아바타 shape로 human/agent 구분"이 이 표면에서 안 걸렸다. AuditRow가
@@ -451,7 +455,7 @@ function ActivityRow({ item, rowLabel, selected, controlsId, onToggle, buttonRef
   rowLabel?: string;
   selected: boolean;
   controlsId: string;
-  onToggle: () => void;
+  onToggle: (viaKeyboard: boolean) => void;
   buttonRef: (el: HTMLButtonElement | null) => void;
 }) {
   // story #3493 — 감사로그 created_at은 "기록" — 3436 묶음 8 정본(formatRelativeTime)
@@ -470,8 +474,9 @@ function ActivityRow({ item, rowLabel, selected, controlsId, onToggle, buttonRef
       type="button"
       variant="ghost"
       aria-expanded={selected}
-      aria-controls={controlsId}
-      onClick={onToggle}
+      aria-controls={selected ? controlsId : undefined}
+      onClick={(e) => onToggle(e.detail === 0)}
+      data-audit-row
       className="block h-auto min-h-0 w-full min-w-0 justify-start whitespace-normal rounded-ds-panel p-0 text-left font-normal transition-colors hover:bg-ds-surface-high aria-expanded:bg-ds-surface-high"
       data-selected={selected}
     >
