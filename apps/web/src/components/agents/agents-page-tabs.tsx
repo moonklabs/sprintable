@@ -14,8 +14,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchMe } from '@/lib/me-client';
 import { AgentsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
-import { RecruitNoProject } from '@/components/agents/recruit-no-project';
-import { isNoProjectAtAll } from '@/app/(authenticated)/chats/no-project';
+import { RecruitNoProject, recruitNoProjectState } from '@/components/agents/recruit-no-project';
 import { useFlatHref } from '@/hooks/use-flat-href';
 
 type AgentsTab = 'stats' | 'manage' | 'recruit' | 'access';
@@ -49,20 +48,30 @@ export function AgentsPageTabs() {
   const { projectId, orgId } = dashboardCtx;
   const flatHref = useFlatHref();
   const [activeTab, setActiveTab] = useState<AgentsTab>(() => resolveTab(searchParams.get('tab')));
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [meLoaded, setMeLoaded] = useState(false);
+  // story 4891 — the person's role belongs to ONE organization (an organization switch re-renders this page without remounting it): the answer is kept with the organization it was asked for,
+  // and only an answer for the CURRENT organization counts. The role is KNOWN only when /api/me answered with one: a failed request (or an answer with no role) leaves isAdmin false,
+  // which must not read as «not an admin».
+  const [me, setMe] = useState<{ org: string | null; isAdmin: boolean; known: boolean } | null>(null);
+  const mine = me && me.org === (orgId ?? null) ? me : null;
+  const isAdmin = mine?.isAdmin ?? false;
+  const meLoaded = mine !== null;
+  const roleKnown = mine?.known ?? false;
 
   useEffect(() => {
+    let cancelled = false;
+    const org = orgId ?? null;
     void (async () => {
       const res = await fetchMe();
+      let next = { org, isAdmin: false, known: false };
       if (res.ok) {
         const json = await res.json() as { data?: { role?: string } };
         const role = json.data?.role ?? 'member';
-        setIsAdmin(role === 'admin' || role === 'owner');
+        next = { org, isAdmin: role === 'admin' || role === 'owner', known: typeof json.data?.role === 'string' };
       }
-      setMeLoaded(true);
+      if (!cancelled) setMe(next);
     })();
-  }, []);
+    return () => { cancelled = true; };
+  }, [orgId]);
 
   // 비-admin이 ?tab=access로 딥링크하면 통계로 폴백 — role 확정 前(meLoaded=false)엔
   // activeTab을 그대로 보여줘 실제 admin 사용자의 깜빡임을 방지한다. effect가 아닌
@@ -109,7 +118,7 @@ export function AgentsPageTabs() {
 
         <TabsContent value="recruit">
           {!projectId ? (
-            <RecruitNoProject noProjectAtAll={isNoProjectAtAll(dashboardCtx)} createHref={flatHref('/settings?tab=projects')} />
+            <RecruitNoProject state={recruitNoProjectState(dashboardCtx, { known: roleKnown, isAdmin })} createHref={flatHref('/settings?tab=projects')} onRetry={() => window.location.reload()} />
           ) : (
             <RecruiterClient
               projectId={projectId}

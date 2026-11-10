@@ -8,6 +8,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import enMessages from '../../../messages/en.json';
 
 vi.mock('./advanced-connect', () => ({ AdvancedConnect: () => <div /> }));
 
@@ -48,4 +49,19 @@ describe('FirstScreen — the way out names its landing (story 4891)', () => {
     expect(labels.length).toBeGreaterThan(0);
     for (const l of labels) expect(l).toBe(onboarding.desktopFinishToToday);
   });
+});
+
+// The word is the landing screen's MENU NAME (story 4891, PO): flag OFF lands on «대화»/«Chats», so the label carries that nav word in both languages and never the old
+// «dashboard» word (there is no such screen in the menu). Land somewhere else without changing the label — or the reverse — and this goes red.
+describe('the flag-off way-out word is the landing screen\'s menu name, in both languages', () => {
+  const pairs = [['ko', koMessages], ['en', enMessages]] as const;
+  for (const [lang, msgs] of pairs) {
+    it(`${lang}: onboarding.dashboardCta and recruiter.finish (the recruiter's last step lands on the chats page too) contain nav.chats and not nav.dashboard`, () => {
+      const m = msgs as unknown as { nav: Record<string, string>; onboarding: Record<string, string>; recruiter: Record<string, string> };
+      for (const word of [m.onboarding.dashboardCta, m.recruiter.finish]) {
+        expect(word).toContain(m.nav.chats);
+        expect(word).not.toContain(m.nav.dashboard);
+      }
+    });
+  }
 });
