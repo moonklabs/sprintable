@@ -18,6 +18,7 @@ import { useTreeExpanded } from '@/components/docs/use-tree-expanded';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { CountBadge } from '@/components/ui/count-badge';
+import { SectionHeader } from '@/components/ds/section-header';
 import { useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { ChevronDown, ChevronLeft, ChevronRight, FileText, FolderPlus, Plus, X } from 'lucide-react';
@@ -568,17 +569,13 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         if (allTags.length === 0) return null;
         return (
           <div className="border-b border-border">
-            <button type="button" onClick={() => setTagsCollapsed((v) => !v)} aria-expanded={!tagsCollapsed} className="flex w-full items-center justify-between px-4 py-1 text-editorial-meta text-muted-foreground hover:text-foreground">
-              <span className="flex items-center gap-1.5">
-                {tagsCollapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
-                {t('tagFilter')}
-                {/* story #3053(2984-S5) — CountBadge(S1, mono+엠보스 inset) 채택,
-                    bg-proof-blue-soft 채움 폐지. */}
-                {tagsCollapsed && selectedTags.length > 0 && (
-                  <CountBadge count={selectedTags.length} />
-                )}
-              </span>
-            </button>
+            {/* story 4892 (UI-9 목록 열) — 머리글이 ds SectionHeader: 접기 단추(`aria-expanded`) + 제목 + (접혔고 고른 태그가 있으면) 건수. 접기 상태 · 태그 고르기는 무변경. */}
+            <SectionHeader
+              title={t('tagFilter')}
+              count={tagsCollapsed && selectedTags.length > 0 ? <CountBadge count={selectedTags.length} /> : undefined}
+              collapsed={tagsCollapsed}
+              onToggle={() => setTagsCollapsed((v) => !v)}
+            />
             {/* story #2963 §2 — collapsible pill 칩. selectedTags state·toggle 로직은 완전
                 무변경. story #7d7634ee(P0) — proof-cut-xs(컷코너) 폐지, proof-surface-press
                 (재질 언어) 채택. */}
