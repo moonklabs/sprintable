@@ -129,13 +129,57 @@ describe('홈 모델 — 결재 SSE 라이브(story #4885 · 4263 AC2 이사)', 
   });
 
   it('⭐스트림이 살아 있으면 탭 복귀 때 폴 간격보다 어린 읽기를 다시 읽지 않는다 · 죽었으면 다시 읽는다', async () => {
+    const { HOME_BACK_DEDUPE_MS } = await import('./home-model-provider');
     await mount();
+    await advance(HOME_BACK_DEDUPE_MS + 1);
     todayCalls = 0; muxState.alive = true;
     await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
     await flush();
     expect(todayCalls).toBe(0);
     muxState.alive = false;
     await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    await flush();
+    expect(todayCalls).toBe(1);
+  });
+
+  // codex round 3 — the throttle counts from when a read STARTED: a slow (never-answering) read must not let continuous notices start a new read every few hundred ms.
+  it('⭐읽기가 느려 끝나지 않아도 알림이 계속 와도 10초에 읽기 하나보다 많이 시작하지 않는다', async () => {
+    await mount();
+    todayCalls = 0;
+    // from now on the home snapshot never answers (a slow read)
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/today') { todayCalls += 1; return new Promise(() => {}); }
+      if (url.startsWith('/api/notifications')) return ok([]);
+      return ok(null);
+    }));
+    // 60 notices over 18 s while no read ever finishes: reads may START at most once per 10 s (counted from the previous start) — the first is already due ~10 s after the mount's read started
+    for (let i = 0; i < 60; i += 1) {
+      await emit('dispatched', JSON.stringify({ event_type: 'dispatched', payload: { event_type: 'conversation.message' } }));
+      await advance(300);
+    }
+    expect(todayCalls).toBeLessThanOrEqual(2); // counted from the committed read (which never comes) it would be ~25
+  });
+
+  it('⭐창 포커스만 돌아와도(visibilitychange 없이) 스트림이 죽었으면 다시 읽고, 살아 있고 읽기가 어리면 건너뛴다', async () => {
+    const { HOME_BACK_DEDUPE_MS } = await import('./home-model-provider');
+    await mount();
+    await advance(HOME_BACK_DEDUPE_MS + 1);
+    todayCalls = 0; muxState.alive = true;
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await flush();
+    expect(todayCalls).toBe(0);
+    muxState.alive = false;
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    await flush();
+    expect(todayCalls).toBe(1);
+  });
+
+  it('돌아올 때 visibilitychange와 focus가 같이 와도 읽기는 한 번이다', async () => {
+    const { HOME_BACK_DEDUPE_MS } = await import('./home-model-provider');
+    await mount();
+    await advance(HOME_BACK_DEDUPE_MS + 1);
+    todayCalls = 0; muxState.alive = false;
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); window.dispatchEvent(new Event('focus')); });
     await flush();
     expect(todayCalls).toBe(1);
   });

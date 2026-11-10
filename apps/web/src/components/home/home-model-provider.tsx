@@ -36,8 +36,10 @@ import {
 export const HOME_POLL_MS = 60_000;
 /** events that arrive together (a reconnect's backfill, a gate resolved + its notice) are ONE re-read: the first event starts this wait, the read happens when it ends */
 export const HOME_EVENT_COALESCE_MS = 300;
-/** any notice sent to me (chat messages are notices too) re-reads at most this often — an approval event does not wait for it */
+/** any notice sent to me (chat messages are notices too) starts a read at most this often, counted from when the last read STARTED — an approval event does not wait for it */
 export const HOME_NOTICE_MIN_INTERVAL_MS = 10_000;
+/** a return to the tab fires `visibilitychange` and `focus` together: a second one within this is the same return */
+export const HOME_BACK_DEDUPE_MS = 1_000;
 /** unread notifications are read in pages of 50: the newest ones first, up to this many pages (250) — most unread ones are approvals and chat messages, so an actionable one can be far down */
 export const NOTIFICATION_PAGES = 5;
 
@@ -173,14 +175,23 @@ export function HomeModelProvider({ viewerMemberId, projectId, orgId, children }
   const lastRead = useRef<Read | null>(null);
   // when the newest read was committed — with the live stream up, coming back to the tab does not re-read a read younger than the poll interval (the stream moves the approvals · notices; the poll bounds the rest)
   const lastReadAt = useRef(0);
+  // when the newest load was STARTED (committed or not): the notice throttle counts from here, so a slow or failed read does not let continuous notices start a read every few hundred ms
+  const lastLoadStartedAt = useRef(0);
+  // when a read was last started by a return to the tab / window (visibility + focus fire together on a return: the second one is the same return)
+  const lastBackAt = useRef(0);
   const mux = useSseMultiplexerContext();
 
   useEffect(() => {
     let alive = true;
+    // a new identity (org · member · project · retry) is a new read: the previous one's clocks do not apply to it
+    lastReadAt.current = 0;
+    lastLoadStartedAt.current = 0;
+    lastBackAt.current = 0;
     const load = async (fromTick = false) => {
       if (fromTick && inFlight.current) return;
       const mySeq = ++seq.current;
       inFlight.current = true;
+      lastLoadStartedAt.current = Date.now();
       const [todayJson, notifRead, storiesJson, membersJson] = await Promise.all([
         readJson<unknown>('/api/today'),
         readUnreadNotifications(),
@@ -215,12 +226,17 @@ export function HomeModelProvider({ viewerMemberId, projectId, orgId, children }
     };
     void load();
     const timer = setInterval(() => { void load(true); }, HOME_POLL_MS);
-    const onVisible = () => {
+    // coming back to the tab (visibility) or the window (focus): with the live stream up and a read younger than the poll interval there is nothing to catch up on; otherwise read.
+    // Both events fire on a return, so a return that already started a read (< HOME_BACK_DEDUPE_MS ago) is not counted twice.
+    const onBack = () => {
       if (document.visibilityState !== 'visible') return;
       if (mux?.isAlive() && Date.now() - lastReadAt.current < HOME_POLL_MS) return;
+      if (Date.now() - lastBackAt.current < HOME_BACK_DEDUPE_MS) return;
+      lastBackAt.current = Date.now();
       void load();
     };
-    document.addEventListener('visibilitychange', onVisible);
+    document.addEventListener('visibilitychange', onBack);
+    window.addEventListener('focus', onBack);
     // story #4885 — live: an approval event (gate resolved · delegated · tossed · a permission request or its change) or any notice sent to me moves what the home model counts, so it re-reads
     // at once (one read for a burst of events) instead of waiting for the next poll. This is where the phone tab bar's own live count went when its badge became the home model's number (4263 AC2).
     let coalesce: ReturnType<typeof setTimeout> | null = null;
@@ -230,14 +246,14 @@ export function HomeModelProvider({ viewerMemberId, projectId, orgId, children }
       coalesce = setTimeout(() => { coalesce = null; void load(); }, wait);
     };
     const onApprovalEvent = () => schedule(HOME_EVENT_COALESCE_MS, true);
-    const onNotice = () => schedule(Math.max(HOME_EVENT_COALESCE_MS, lastReadAt.current + HOME_NOTICE_MIN_INTERVAL_MS - Date.now()), false);
+    const onNotice = () => schedule(Math.max(HOME_EVENT_COALESCE_MS, lastLoadStartedAt.current + HOME_NOTICE_MIN_INTERVAL_MS - Date.now()), false);
     const unsubs: Array<() => void> = [];
     if (mux) {
       unsubs.push(subscribeApprovalEvents(mux, onApprovalEvent));
       unsubs.push(mux.subscribe('dispatched', onNotice));
     }
     return () => {
-      alive = false; clearInterval(timer); document.removeEventListener('visibilitychange', onVisible);
+      alive = false; clearInterval(timer); document.removeEventListener('visibilitychange', onBack); window.removeEventListener('focus', onBack);
       if (coalesce !== null) clearTimeout(coalesce);
       for (const unsub of unsubs) unsub();
     };
