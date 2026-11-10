@@ -26,7 +26,7 @@ function ratio(a: string, b: string): number {
 describe('design-system.css — 새 뜻 이름 토큰(--ds-*)', () => {
   it('밝음 · 어둠이 같은 이름 집합을 정의한다(한쪽만 있으면 한 테마가 비어 렌더된다)', () => {
     expect(Object.keys(light).sort()).toEqual(Object.keys(dark).sort());
-    expect(Object.keys(light).length).toBe(26);
+    expect(Object.keys(light).length).toBe(27);
   });
 
   it('모든 뜻 이름이 @theme inline으로 Tailwind 색 `ds-*`에 이어진다', () => {
