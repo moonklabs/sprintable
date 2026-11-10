@@ -965,7 +965,6 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'cage.pendingSummary <-> cage.trustScorePending',
   'chats.agentCount <-> chats.agentSection',
   'chats.agentCount <-> chats.personCount',
-  'chats.agentCount <-> chats.you',
   'chats.participantsOthers <-> chats.personCount',
   'docs.searchResultCount <-> docs.title',
   'goals.fieldPriority <-> goals.steerCappedNote',

@@ -224,17 +224,22 @@ function ConversationRow({
   // story 4887 (UI-4 P2-b) — who is in a group, in words: the first two names and «외 N명» (the same for a people-only group and one with agents — the agents' count leads the line, the names follow)
   const groupNames = `${others.slice(0, 2).map((p) => participantDisplayLabel(p, tc)).join(', ')}${others.length > 2 ? ` ${t('participantsOthers', { count: others.length - 2 })}` : ''}`;
 
+  // story 4887 (UI-4 P2-e) — who a DM is with: the title already says it (a DM with no name of its own is titled with the other person's display name) and so does the avatar. The line repeats it only when the title is something else
+  // (a DM the people named · an other whose name did not resolve): then the other's NAME is kept (never «나 ↔» — the viewer is always the other side), so «who is this room with» never disappears from the row.
+  const dmOtherLabel = conv.type === 'dm' ? participantDisplayLabel(others[0] ?? { name: null, resolved: false }, tc) : '';
+  const dmNameRepeatsTitle = dmOtherLabel !== '' && dmOtherLabel === displayName;
+  const showDmOtherName = conv.type === 'dm' && !dmNameRepeatsTitle;
+
   const participantLayer = conv.participants && conv.participants.length > 0 ? (
     conv.type === 'dm' ? (
-      // story 4887 (UI-4 P2-c) — the DM line is ONE line that never runs past the column: «나 ↔ 상대» is one plain text segment (it was two pills + an arrow, ~35 px more) that gives way first, the «에이전트» chip keeps its size,
-      // and the computer chip may shrink to an ellipsis (it carried `shrink-0` and was cut mid-word at 320 px — AC1 10). Nothing is dropped.
+      !showDmOtherName && !isAgentInConv ? null : // a person's DM whose title already says who it is with: no line at all
+      // story 4887 (UI-4 P2-c) — the DM line is ONE line that never runs past the column: the other's name is one plain text segment that gives way first, the «에이전트» chip keeps its size,
+      // and the computer chip may shrink to an ellipsis (it carried `shrink-0` and was cut mid-word at 320 px — AC1 10). Nothing is dropped. (P2-e: the segment is there only when the title does not already say it.)
       <div className="mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden text-editorial-meta text-muted-foreground" data-testid="room-dm-line">
-        <span className="min-w-0 truncate font-medium">
-          {t('you')} ↔{' '}
-          {/* story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, formatParticipantNames와
-              동일 사람언어 폴백으로 통일('...'는 비인간어). story #3758(9번째) — resolved 비트. */}
-          {participantDisplayLabel(others[0] ?? { name: null, resolved: false }, tc)}
-        </span>
+        {showDmOtherName ? (
+          // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, formatParticipantNames와 동일 사람언어 폴백으로 통일('...'는 비인간어). story #3758(9번째) — resolved 비트.
+          <span className="min-w-0 truncate font-medium" data-testid="room-dm-other">{dmOtherLabel}</span>
+        ) : null}
         {/* story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
         {isAgentInConv && (
           // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
