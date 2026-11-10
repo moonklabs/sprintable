@@ -591,7 +591,8 @@ export function DashboardShell({
               불리언(showTopBar)이라 CSS 미디어 쿼리로 못 읽는다 — data 속성으로 다리를
               놓는다(globals.css가 `[data-topbar-hidden]`로 분기, JS 측정 없이 CSS만으로
               --shell-chrome-h를 계산하기 위한 유일한 JS 개입). */}
-          <SidebarProvider open={listColumnOpen} onOpenChange={setListColumnOpen} className="h-svh dashboard-shell-root" data-topbar-hidden={showTopBar ? undefined : ''}>
+          {/* e2e/shell-chrome-overflow.4534.layout.spec.ts가 이 className을 소스에서 정규식으로 읽는다 — `className`이 `<SidebarProvider ` 바로 뒤여야 한다(다른 prop은 그 뒤). */}
+          <SidebarProvider className="h-svh dashboard-shell-root" open={listColumnOpen} onOpenChange={setListColumnOpen} data-topbar-hidden={showTopBar ? undefined : ''}>
             <ShellBody
               currentTeamMemberId={currentTeamMemberId}
               showTopBar={showTopBar}
