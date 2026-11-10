@@ -11,13 +11,19 @@ export interface DayGroup<T> {
   items: T[];
 }
 
-export function groupByDay<T extends { created_at: string }>(items: readonly T[], tz: string, now: Date = new Date()): DayGroup<T>[] {
+/** `at` says where a row keeps its time — the audit log's rows have `created_at`, the team feed's `occurred_at`. */
+export function groupByDay<T>(
+  items: readonly T[],
+  tz: string,
+  now: Date = new Date(),
+  at: (item: T) => string = (item) => (item as unknown as { created_at: string }).created_at,
+): DayGroup<T>[] {
   const today = todayDateKey(tz, now);
   const yesterday = addCalendarDays(today, -1);   // calendar arithmetic on the date key — a zone whose clock changes at midnight (DST) cannot skip or repeat a day
   const groups: DayGroup<T>[] = [];
   const index = new Map<string, DayGroup<T>>();
   for (const item of items) {
-    const key = toDateKey(item.created_at, tz);
+    const key = toDateKey(at(item), tz);
     let group = index.get(key);
     if (!group) {
       group = { key, kind: key === today ? 'today' : key === yesterday ? 'yesterday' : 'date', items: [] };

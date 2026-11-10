@@ -52,6 +52,11 @@ describe('groupByDay (4892)', () => {
     expect(groupByDay([row('a', '2026-12-31T10:00:00Z')], 'UTC', new Date('2027-01-01T05:00:00Z')).map((g) => [g.key, g.kind])).toEqual([['2026-12-31', 'yesterday']]);
   });
 
+  it('⭐a row can keep its time under another name (the team feed uses `occurred_at`)', () => {
+    const rows = [{ id: 'x', occurred_at: '2026-11-10T09:00:00Z' }, { id: 'y', occurred_at: '2026-11-09T09:00:00Z' }];
+    expect(groupByDay(rows, 'UTC', NOW, (r) => r.occurred_at).map((g) => [g.kind, g.items.map((i) => i.id)])).toEqual([['today', ['x']], ['yesterday', ['y']]]);
+  });
+
   it('no rows → no groups (no empty headers)', () => {
     expect(groupByDay([], 'UTC', NOW)).toEqual([]);
   });
