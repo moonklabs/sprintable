@@ -1,7 +1,7 @@
 """story 4894 — `event_context` (the card of a message the SERVER published) cannot be sent to the public message route.
 
 Before: `POST /api/v2/conversations/{id}/messages` took `event_context` from anyone in the room — a person or an agent could stamp a message with the card of an event the server never
-published (`preset.gate.verdict` with names and links of their choosing in `refs`); it was stored in `msg_metadata`, delivered to the readers of the room and copied into the other
+published (`preset.gate.verdict` with names and links of their choosing in `refs`); it was stored in the message's `metadata`, delivered to the readers of the room and copied into the other
 participants' notification rows. Reproduced first (these tests were red on develop), then the public route's body model refuses any value (422).
 
 Real Postgres, real HTTP routes. The server's own publisher is not touched: it builds the request in-process and hands it to the message function (`tests/_server_card.py` takes that road).
