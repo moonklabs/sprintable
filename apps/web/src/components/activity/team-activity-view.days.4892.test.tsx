@@ -33,6 +33,7 @@ const answer = (ok: boolean, status: number, data?: unknown): Answer => ({ ok, s
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(NOW);
+  document.documentElement.lang = 'ko';   // this view reads its locale from the document (jsdom has none)
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -42,6 +43,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
+  document.documentElement.lang = '';
   vi.useRealTimers();
 });
 
