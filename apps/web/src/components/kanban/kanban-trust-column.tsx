@@ -250,14 +250,15 @@ export function KanbanTrustColumn({
             />
           ))}
           {hasMore && !moreViaFeeder && onLoadMore ? (
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={onLoadMore}
               disabled={loadingMore}
-              className="w-full rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
+              className="h-7 min-h-0 w-full px-3 text-xs text-muted-foreground disabled:opacity-50"
             >
               {loadingMore ? t('loading') : t('loadMore')}
-            </button>
+            </Button>
           ) : null}
         </div>
       </SortableContextCompat>
