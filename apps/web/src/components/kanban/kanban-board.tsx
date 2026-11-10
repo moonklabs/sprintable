@@ -187,6 +187,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // The project that read-to-the-end was switched on for: `loadAllPages` is false at once when the project changes (no full read of the new project before a reset effect runs).
   const [loadAllFor, setLoadAllFor] = useState<string | null | undefined>(null);
   const loadAllPages = loadAllFor === projectId;
+  // The project the cursors in `columnCursors` were read for — right after a project switch they are still the old project's, and must not switch read-to-the-end on for the new one.
+  const [cursorsFor, setCursorsFor] = useState<string | null | undefined>(null);
   const [loadingMoreColumns, setLoadingMoreColumns] = useState<Record<string, boolean>>({});
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [epicsNextCursor, setEpicsNextCursor] = useState<string | null>(null);
@@ -583,6 +585,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       setStories(allStories);
       setColumnTotals(newTotals);
       setColumnCursors(newCursors);
+      setCursorsFor(projectId);
       storyIds = allStories.map((s) => s.id);
 
       // 본문 파싱도 await라 그 사이 새 실행(프로젝트·org 전환)이 시작될 수 있다 — 파싱 뒤에도 가드.
@@ -846,8 +849,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // (fetchData then re-runs with `loadAllPages`). Switching a filter off does not undo it: what is loaded stays complete. A new project starts again from the first page.
   const someColumnHasMore = Object.values(columnCursors).some(Boolean);
   useEffect(() => {
-    if (clientFilterActive && someColumnHasMore && !loadAllPages && !loading) setLoadAllFor(projectId);
-  }, [clientFilterActive, someColumnHasMore, loadAllPages, loading, projectId]);
+    if (clientFilterActive && someColumnHasMore && !loadAllPages && !loading && cursorsFor === projectId) setLoadAllFor(projectId);
+  }, [clientFilterActive, someColumnHasMore, loadAllPages, loading, projectId, cursorsFor]);
 
   // position 기준으로 정렬
   const storiesByColumn = (columnId: string): KanbanStory[] => {

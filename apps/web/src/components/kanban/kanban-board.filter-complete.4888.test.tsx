@@ -59,6 +59,11 @@ vi.mock('@dnd-kit/core', async (importOriginal) => {
   };
 });
 
+// The project-switch test below reads a 2,600-card status to its 2,500 cap; the card body is not what these tests look at, so a title-only stand-in keeps that cheap.
+vi.mock('./story-card', () => ({
+  StoryCard: ({ story }: { story: { title: string } }) => <div>{story.title}</div>,
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -181,7 +186,7 @@ async function mount() {
 
 // ── fake paginated list API: `limit`, `cursor` (offset), `status`, `epic_id` are honoured like the real route ──────────────────────────────────────────────────────────────────────────────
 type Row = Record<string, unknown> & { id: string; status: string; title: string };
-function stubPagedFetch(rows: Row[], opts: { failCursorRequests?: { n: number } } = {}): string[] {
+function stubPagedFetch(rows: Row[], opts: { failCursorRequests?: { n: number }; smallProject?: string; hold?: { release?: () => void; held?: boolean } } = {}): string[] {
   const urls: string[] = [];
   const withStage: Row[] = rows.map((s) => ('trust_stage' in s ? s : { ...s, trust_stage: deriveDefaultTrustStage(s.status) }));
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -196,10 +201,16 @@ function stubPagedFetch(rows: Row[], opts: { failCursorRequests?: { n: number } 
       const epic = sp.get('epic_id');
       const limit = Number(sp.get('limit') ?? '50');
       const offset = Number(sp.get('cursor') ?? '0');
-      const all = withStage.filter((s) => s.status === status && (!epic || s.epic_id === epic));
+      const forProject = opts.smallProject && sp.get('project_id') === opts.smallProject ? withStage.slice(0, 5) : withStage;
+      const all = forProject.filter((s) => s.status === status && (!epic || s.epic_id === epic));
       const page = all.slice(offset, offset + limit);
       const next = offset + limit < all.length ? String(offset + limit) : null;
-      return { ok: true, json: async () => ({ data: page, meta: { nextCursor: next, hasMore: next !== null } }) };
+      const response = { ok: true, json: async () => ({ data: page, meta: { nextCursor: next, hasMore: next !== null } }) };
+      if (sp.get('cursor') && opts.hold && !opts.hold.held) {
+        opts.hold.held = true;
+        return new Promise((resolve) => { opts.hold!.release = () => resolve(response); });
+      }
+      return response;
     }
     if (typeof url === 'string' && url.startsWith('/api/members')) return { ok: true, json: async () => ({ data: [] }) };
     return { ok: false, json: async () => null };
@@ -334,5 +345,49 @@ describe('KanbanBoard 4888 — 코덱스 검수에서 나온 칸들', () => {
     expect(headerOf('입력 필요')).toBe('1+');
     expect(loadMoreButtons()).toHaveLength(1);
   });
-});
 
+  // re-render the already mounted board for another project (same component instance, as when the project is switched in the app)
+  async function switchProject(projectId: string) {
+    const { KanbanBoard } = await import('./kanban-board');
+    const { ToastProvider } = await import('@/components/ui/toast');
+    const { RealtimeProvider } = await import('@/components/realtime-provider');
+    await act(async () => {
+      root.render(wrap(
+        <RealtimeProvider currentTeamMemberId="me-1">
+          <ToastProvider>
+            <KanbanBoard projectId={projectId} wsSlug="ws-1" projSlug={projectId} />
+          </ToastProvider>
+        </RealtimeProvider>,
+      ));
+    });
+    await act(async () => { for (let i = 0; i < 10; i += 1) await Promise.resolve(); });
+  }
+
+  it('프로젝트를 바꾸면, 옛 프로젝트에 남은 커서(2,500건 한도 밖)로 새 프로젝트를 100건 단위로 읽지 않는다', async () => {
+    const urls = stubPagedFetch(inProgress(2600), { smallProject: 'proj-2' });
+    await mount();
+    await openSearchAndType('카드'); // browser-side filter on → proj-1 read to its cap: 25 pages of 100, a cursor is left
+    await act(async () => { for (let i = 0; i < 60; i += 1) await Promise.resolve(); });
+    expect(urls.filter((u) => u.includes('project_id=proj-1') && u.includes('status=in-progress') && u.includes('limit=100'))).toHaveLength(25);
+    expect(headerOf('실행 중')).toBe('2500+');
+
+    await switchProject('proj-2');
+    expect(urls.some((u) => u.includes('project_id=proj-2'))).toBe(true);
+    expect(urls.filter((u) => u.includes('project_id=proj-2')).some((u) => u.includes('limit=100'))).toBe(false);
+  });
+
+  it('프로젝트가 바뀐 뒤에 도착한 옛 프로젝트의 «더 보기» 쪽은 버려진다', async () => {
+    const hold: { release?: () => void; held?: boolean } = {};
+    stubPagedFetch(inProgress(25), { smallProject: 'proj-2', hold });
+    await mount();
+    await act(async () => { loadMoreButtons()[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(hold.held).toBe(true); // the page of proj-1 is on its way
+
+    await switchProject('proj-2');
+    await act(async () => { hold.release!(); });
+    await act(async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); });
+
+    expect(container.textContent).not.toContain('카드-25'); // proj-1's late page did not land in proj-2's board
+    expect(container.textContent).toContain('카드-5');
+  });
+});
