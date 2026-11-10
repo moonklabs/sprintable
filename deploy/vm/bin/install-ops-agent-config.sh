@@ -88,7 +88,7 @@ give_up() {
 wait_for_units() {
   local attempt=1
   while :; do
-    sleep "$wait_s"
+    sleep "$wait_s" 9>&- # a `sleep` that outlives a killed installer must not keep the lock
     units_up && return 0
     [ "$attempt" -ge "$tries" ] && return 1
     attempt=$((attempt + 1))

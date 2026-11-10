@@ -441,6 +441,38 @@ def test_the_lock_is_not_passed_on_to_systemctl(box) -> None:
     assert "FD9-LEAK" not in log
 
 
+def test_a_sleep_left_behind_by_a_killed_installer_does_not_keep_the_lock(box) -> None:
+    """the installer is killed with SIGKILL while it waits for the agent (its `sleep` child outlives it): the next run must not be refused because of that orphan"""
+    import time
+
+    run, target, new = box
+    log = target.parent.parent / "log"
+    env = {**os.environ, "PATH": os.environ["PATH"], "OPS_AGENT_CONFIG": str(target), "OPS_AGENT_WAIT": "30", "OPS_AGENT_TRIES": "3",
+           "FAKE_ACTIVE": "0", "FAKE_LOG": str(log), "HOME": str(target.parent.parent)}
+    env["PATH"] = f"{target.parent.parent / 'bin'}:{env['PATH']}"
+    inst = subprocess.Popen(["bash", str(_INSTALLER), str(new)], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    orphan = None
+    try:
+        for _ in range(100):
+            out = subprocess.run(["pgrep", "-P", str(inst.pid), "sleep"], capture_output=True, text=True).stdout.split()
+            if out:
+                orphan = int(out[0])
+                break
+            time.sleep(0.1)
+        assert orphan, "precondition: the installer is sleeping while it waits for the agent"
+        inst.kill()  # SIGKILL: no trap, no cleanup
+        inst.wait()
+        p, _ = run(FAKE_ACTIVE="1")
+        assert p.returncode == 0 and "another run" not in p.stderr, p.stderr
+    finally:
+        inst.kill()
+        if orphan:
+            try:
+                os.kill(orphan, 9)
+            except ProcessLookupError:
+                pass
+
+
 def test_the_installer_needs_flock_and_says_so_when_it_is_missing(tmp_path: Path) -> None:
     tools = tmp_path / "tools"
     tools.mkdir()
