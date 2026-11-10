@@ -70,27 +70,16 @@ def _repo_listing(rows):
     from app.repositories.workflow_trigger_type import WorkflowTriggerTypeRepository
 
     result = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: list(rows)))
-    session = SimpleNamespace(execute=AsyncMock(return_value=result), flush=AsyncMock())
+    session = SimpleNamespace(execute=AsyncMock(return_value=result), flush=AsyncMock(), refresh=AsyncMock())
     return WorkflowTriggerTypeRepository(session, uuid.uuid4()), session
 
 
 @pytest.mark.anyio
-async def test_list_corrects_a_system_row_that_still_carries_the_old_text_and_only_that_row():
-    """The migration runs BEFORE the old backend is swapped out: in that window the old release can seed a new organization with the old text. `list()` closes it with the
-    migration's own rule — a system row whose description is EXACTLY the old seed text; a description a person edited and a custom row with the same words stay."""
-    old = "스프린트 또는 에픽 킥오프"
-    stuck, edited, custom, other = _row("kickoff", old, True), _row("kickoff2", "우리 팀 킥오프(에픽 포함)", True), _row("mine", old, False), _row("review_request", "코드 리뷰 요청", True)
-    repo, session = _repo_listing([stuck, edited, custom, other])
-    items = await repo.list()
-    assert [i.description for i in items] == ["스프린트 또는 목표 킥오프", "우리 팀 킥오프(에픽 포함)", old, "코드 리뷰 요청"]
-    assert session.flush.await_count == 1
-
-
-@pytest.mark.anyio
 async def test_list_writes_nothing_when_no_row_carries_the_old_text():
-    repo, session = _repo_listing([_row("kickoff", "스프린트 또는 목표 킥오프", True)])
+    """Only the SELECT runs: no UPDATE statement, no re-read (the real-database test of the repair itself is in test_4888_trigger_kickoff_wording_migration.py)."""
+    repo, session = _repo_listing([_row("kickoff", "스프린트 또는 목표 킥오프", True), _row("mine", "스프린트 또는 에픽 킥오프", False)])
     await repo.list()
-    assert session.flush.await_count == 0
+    assert session.execute.await_count == 1
 
 
 @pytest.mark.anyio

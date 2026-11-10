@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -62,13 +62,21 @@ class WorkflowTriggerTypeRepository:
                 .order_by(WorkflowTriggerType.is_system.desc(), WorkflowTriggerType.created_at.asc(), WorkflowTriggerType.id)
             )
             items = list(result2.scalars().all())
-        healed = False
-        for it in items:
-            if it.is_system and it.description == _LEGACY_KICKOFF_DESCRIPTION:
-                it.description = _KICKOFF_DESCRIPTION
-                healed = True
-        if healed:
-            await self.session.flush()
+        stuck = [it for it in items if it.is_system and it.description == _LEGACY_KICKOFF_DESCRIPTION]
+        if stuck:
+            # one atomic UPDATE whose WHERE repeats the rule (system row · description exactly the old text): a description a person edited between the read above and this
+            # statement no longer matches, so it is never overwritten (an ORM attribute change + flush would write by primary key only). The rows are then read back as they are.
+            await self.session.execute(
+                update(WorkflowTriggerType)
+                .where(
+                    WorkflowTriggerType.id.in_([it.id for it in stuck]),
+                    WorkflowTriggerType.is_system.is_(True),
+                    WorkflowTriggerType.description == _LEGACY_KICKOFF_DESCRIPTION,
+                )
+                .values(description=_KICKOFF_DESCRIPTION)
+            )
+            for it in stuck:
+                await self.session.refresh(it)
         return items
 
     async def get(self, id: uuid.UUID) -> WorkflowTriggerType | None:
