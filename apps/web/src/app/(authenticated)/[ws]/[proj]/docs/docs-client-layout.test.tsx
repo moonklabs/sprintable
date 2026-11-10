@@ -677,6 +677,8 @@ describe('DocsClientLayout — 목록 열 머리 · 토글 · 틀 (4892)', () =>
     expect(cls).toContain('border-ds-line');
     expect(cls).toContain('bg-ds-background');
     expect(cls).not.toContain('w-[236px]');
+  });
+});
 
 // story 4892 (UI-9 D1) — choosing a document from the list opens it to READ (the reading screen), not the editor. «고치기» in the detail header is the
 // way into the editor. (A NEW doc still opens the editor — the new-doc test above.)
