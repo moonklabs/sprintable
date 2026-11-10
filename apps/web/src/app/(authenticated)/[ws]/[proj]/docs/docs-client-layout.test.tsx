@@ -669,14 +669,15 @@ describe('DocsClientLayout — 목록 열 머리 · 토글 · 틀 (4892)', () =>
     expect(folder.getAttribute('aria-label')).toBe('새 폴더');
   });
 
-  it('틀 — 레일은 300px · ds 선과 바탕을 쓴다(옛 236px · border-border 아님)', async () => {
+  it('⭐틀 — 레일은 lg(1024~1279)에선 236px, xl(≥1280)부터 300px · ds 선과 바탕을 쓴다', async () => {
     stubFetch();
     await mount();
     const cls = container.querySelector('aside')!.className.split(/\s+/);
-    expect(cls).toContain('w-[300px]');
+    expect(cls).toContain('w-[236px]');        // lg: the reading column keeps its width (544 at 1100)
+    expect(cls).toContain('xl:w-[300px]');     // xl and up: the wider list column
+    expect(cls).not.toContain('w-[300px]');    // never 300 below xl
     expect(cls).toContain('border-ds-line');
     expect(cls).toContain('bg-ds-background');
-    expect(cls).not.toContain('w-[236px]');
   });
 });
 
