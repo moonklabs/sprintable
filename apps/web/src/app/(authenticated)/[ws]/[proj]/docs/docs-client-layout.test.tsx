@@ -178,7 +178,7 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     expect(container.textContent).toContain('문서B');
   });
 
-  // story 4892 (UI-9 목록 열) — «태그 필터» 머리글이 ds SectionHeader: 접기 단추(aria-expanded)가 펼침 상태를 말하고, 제목은 머리글(h3) 안에 있다.
+  // story 4892 (UI-9 목록 열) — «태그 필터» 머리글이 ds SectionHeader: 접기 단추(aria-expanded)가 펼침 상태를 말하고, 제목은 머리글(h2) 안에 있다.
   it('4892 ⭐태그 필터 머리글은 ds SectionHeader — 접힘 상태가 aria-expanded로 말해지고 누르면 태그 칩이 열린다', async () => {
     stubFetch();
     await mount();
