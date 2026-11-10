@@ -26,6 +26,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useDocsLayout } from '../docs-context';
+import { useDocDelete } from '@/components/docs/use-doc-delete';
 import { DocAssigneeControl } from '@/components/docs/doc-assignee-control';
 import { DocBreadcrumb } from '@/components/docs/doc-breadcrumb';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
@@ -246,16 +247,8 @@ export default function DocSlugPage() {
     };
   }, [mdCopyFailedRaw]);
 
-  const handleDelete = useCallback(async () => {
-    if (!selectedDoc || !projectId) return;
-    if (!confirm(t('confirmDelete'))) return;
-    try {
-      const res = await fetch(`/api/docs/${selectedDoc.id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed to delete doc');
-      setTree((prev) => prev.filter((d) => d.id !== selectedDoc.id));
-      router.replace(docsListUrl(wsSlug, projSlug));
-    } catch { /* delete failed */ }
-  }, [selectedDoc, projectId, router, setTree, t, wsSlug, projSlug]);
+  // story 4892 (UI-9 §5 #4) — a failed delete is an error toast (it was swallowed by an empty catch).
+  const handleDelete = useDocDelete({ docId: selectedDoc?.id, projectId, wsSlug, projSlug, router, setTree });
 
   // AC2: explicit slug edit. Locks the slug (slug_locked: true) so auto-derivation
   // stops, and surfaces BE conflicts (409 → suggested -N) / format errors (422).
