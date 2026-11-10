@@ -25,6 +25,7 @@ vi.mock('@/lib/check-feature', () => ({ checkResourceLimit }));
 vi.mock('@/lib/storage/factory', () => ({ createDocRepository: vi.fn(async () => ({})) }));
 
 import { GET, POST } from './route';
+import { isUntitledSlug } from '@/components/docs/lib/doc-slug';
 
 const mockAuth = {
   id: 'team-member-1',
@@ -204,13 +205,14 @@ describe('POST /api/docs — slug', () => {
   });
   const post = (body: Record<string, unknown>) => POST(new Request('http://localhost/api/docs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }));
 
-  it('no slug → an «untitled-…» slug (never an empty one) · two creates get two different slugs', async () => {
+  it('no slug → an «untitled-<digits>» slug the editor recognises (never an empty one) · two creates get two different slugs', async () => {
     const a = await post({ title: '기획' });
     const b = await post({ title: '회의록' });
     expect(a.status).toBe(201); expect(b.status).toBe(201);
     const slugs = createDocMock.mock.calls.map((c) => (c[0] as { slug: string }).slug);
-    expect(slugs[0]).toMatch(/^untitled-[0-9a-f]{8}$/);
-    expect(slugs[1]).toMatch(/^untitled-[0-9a-f]{8}$/);
+    expect(slugs[0]).toMatch(/^untitled-\d+$/);
+    expect(slugs[1]).toMatch(/^untitled-\d+$/);
+    expect(isUntitledSlug(slugs[0]!)).toBe(true); // the editor treats it as an automatic slug (renames it from the title), like the ones the screen makes
     expect(slugs[0]).not.toBe(slugs[1]);
   });
 

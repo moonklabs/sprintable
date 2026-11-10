@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomInt } from 'node:crypto';
 import { parseBody, createDocSchema } from '@sprintable/shared';
 import { DocsService } from '@/services/docs';
 import { handleApiError } from '@/lib/api-error';
@@ -85,8 +85,8 @@ export async function POST(request: Request) {
       org_id: me.org_id, project_id: me.project_id,
       title: body.title,
       // story 6185e437 (UI-9): `slug` is optional in the schema, and an EMPTY slug is a slug — the first doc/folder of a project took '' and every later one broke the unique
-      // (project_id, slug) index with a 500. The screen always sends one; without it, take the same «untitled-…» family the screen uses (an automatic slug, not locked — migration 0107).
-      slug: body.slug?.trim() || `untitled-${randomUUID().slice(0, 8)}`,
+      // (project_id, slug) index with a 500. The screen always sends one; without it, take the same «untitled-<digits>» family the screen uses (an automatic slug, not locked — migration 0107; digits only: `isUntitledSlug` is /^untitled-\d+$/ and the editor renames it from the title) — a millisecond clock plus three random digits.
+      slug: body.slug?.trim() || `untitled-${Date.now()}${randomInt(100, 1000)}`,
       content: body.content ?? '', content_format: body.content_format ?? 'markdown',
       icon: body.icon ?? null, tags: body.tags ?? [],
       parent_id: body.parent_id ?? undefined, is_folder: body.is_folder ?? false, created_by: me.id,
