@@ -298,6 +298,18 @@ describe('ActivityLogView — 상세의 «행위자» 줄이 사람과 에이전
     expect(actorLine()).toBe(`디버거 · ${koMessages.chats.agent}`);
   });
 
+  it('⭐a row whose time is empty or null lands in «날짜 모름»; opening its details shows a dash for the time and does not throw', async () => {
+    for (const bad of ['', null as unknown as string, 'not-a-date']) {
+      await mountOne({ created_at: bad });
+      expect(detail()).not.toBeNull();
+      const timeLine = [...detail()!.querySelectorAll('dt')].find((d) => d.textContent === koMessages.activityLog.detailWhen)!.nextElementSibling!.textContent;
+      expect(timeLine).toBe('—');
+      expect(container.textContent).toContain(koMessages.activityLog.dayUndated);
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+    }
+  });
+
   it('a human row\'s actor line is the name only — no «에이전트»', async () => {
     await mountOne({ actor_type: 'human', actor_name: '안나' });
     expect(actorLine()).toBe('안나');

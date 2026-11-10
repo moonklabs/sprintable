@@ -22,7 +22,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { RowName } from '@/components/shared/row-name';
 import { SectionHeader } from '@/components/ds/section-header';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
-import { formatDayHeader, groupByDay } from './group-by-day';
+import { formatDayHeader, groupByDay, isValidTime } from './group-by-day';
 
 // ─── Types (BE ActivityStreamItem flat 실측 — doc §10 정정 정합) ──────────────
 interface ActivityStreamItem {
@@ -84,8 +84,8 @@ function objectLabel(item: ActivityStreamItem): string | null {
 }
 
 function relativeTime(iso: string, locale: string): string {
+  if (!isValidTime(iso)) return '—';   // an empty, null or broken time must not throw inside render (Intl.RelativeTimeFormat rejects NaN) nor read as 1970
   const diffMs = Date.now() - new Date(iso).getTime();
-  if (Number.isNaN(diffMs)) return '—';   // an empty or broken time must not throw inside render (Intl.RelativeTimeFormat rejects NaN)
   const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
   const sec = Math.round(diffMs / 1000);
   const min = Math.round(sec / 60);

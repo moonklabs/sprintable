@@ -87,7 +87,25 @@ describe('TeamActivityView — 일 단위 묶음 (4892)', () => {
     await mount(ITEMS, { next_before_seq: 2 });
     const more = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.teamActivity.loadMore);
     expect(more).toBeTruthy();
+    expect(groups().length).toBe(3);
     expect(groups().some((g) => g.contains(more!))).toBe(false);
+    expect(more!.compareDocumentPosition(groups()[2]!) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();   // the button follows the last day
+  });
+
+  it('the end line (no more pages) also sits after the last day, not inside one', async () => {
+    await mount(ITEMS);
+    const end = [...container.querySelectorAll('li')].find((li) => li.textContent === koMessages.teamActivity.endOfAll || li.textContent === koMessages.teamActivity.endOfRange);   // which one depends on whether the default range has a start date
+    expect(end).toBeTruthy();
+    expect(groups().length).toBe(3);
+    expect(groups().some((g) => g.contains(end!))).toBe(false);
+    expect(end!.compareDocumentPosition(groups()[2]!) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  });
+
+  it('a null time is «날짜 모름» with a dash — not 1970 and not an exception', async () => {
+    await mount([item(5, '2026-11-10T09:00:00Z'), item(4, null as unknown as string)]);
+    expect(groups().map((g) => g.querySelector('h2')?.textContent)).toEqual(['오늘', koMessages.activityLog.dayUndated]);
+    expect(groups()[1]!.textContent).toContain('—');
+    expect(container.textContent).not.toMatch(/1970|50년|56년/);
   });
 
   it("the day is the viewer's day: 20:00Z on the 9th is already «오늘» (the 10th) in Seoul, but «어제» in UTC", async () => {

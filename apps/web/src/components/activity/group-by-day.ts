@@ -42,9 +42,14 @@ export function groupByDay<T>(
 const UNDATED_KEY = '';
 
 /** a time that is empty, null or not a date would make Intl throw (RangeError) or land on 1970 — those rows get the «undated» key instead. */
-function safeDateKey(iso: string | null | undefined, tz: string): string {
-  if (!iso || Number.isNaN(new Date(iso).getTime())) return UNDATED_KEY;
+function safeDateKey(iso: unknown, tz: string): string {
+  if (!isValidTime(iso)) return UNDATED_KEY;
   try { return toDateKey(iso, tz); } catch { return UNDATED_KEY; }
+}
+
+/** a usable time: a non-empty string that parses to a date. (`new Date(null)` is 1970 and `new Date('')` is invalid — neither is a time a row may be shown with.) */
+export function isValidTime(value: unknown): value is string {
+  return typeof value === 'string' && value !== '' && !Number.isNaN(new Date(value).getTime());
 }
 
 /** the date header text for a `date` group (the zone's calendar day, written in the viewer's locale). */
