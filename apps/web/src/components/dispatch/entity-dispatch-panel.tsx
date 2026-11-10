@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { MoreHorizontal, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/components/ui/toast';
+import { Select } from '@/components/ui/select';
 import { normalizeAssigneePatch } from '@/components/kanban/types';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -152,10 +153,10 @@ export function EntityDispatchPanel({
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
-        <select
+        <Select
           value={assigneeId}
           onChange={(e) => setAssigneeId(e.target.value)}
-          className="min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+          className="h-auto min-w-0 flex-1 px-2.5 py-1.5 bg-background dark:bg-background"
         >
           <option value="">{t('assigneeSelectPlaceholder')}</option>
           {members.map((m) => (
@@ -163,7 +164,7 @@ export function EntityDispatchPanel({
               {rowLabels.get(m.id)}
             </option>
           ))}
-        </select>
+        </Select>
         <button
           type="button"
           disabled={dispatching}
@@ -220,7 +221,7 @@ export function EntityDispatchPanel({
                 </button>
                 {needsAssignee && (
                   // 까디르(4761 비차단 ②) — role=menu 안의 자식은 menuitem · group · separator뿐 → 까닭 줄은 role="none"(읽기는 describedby로).
-                  <p id={menuReasonId} role="none" className="mt-1 break-keep border-t border-border px-3 pb-1 pt-1.5 text-[11px] text-muted-foreground">{t('dispatchNeedsAssignee')}</p>
+                  <p id={menuReasonId} role="none" className="mt-1 break-keep border-t border-border px-3 pb-1 pt-1.5 text-editorial-meta text-muted-foreground">{t('dispatchNeedsAssignee')}</p>
                 )}
               </AnchoredPopover>
             )}

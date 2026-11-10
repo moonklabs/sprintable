@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
@@ -189,7 +190,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
     const notice = stageActionNotice[c.key];
     let body: React.ReactNode = null;
     if (advancedFrom[c.key] && advancedFrom[c.key] === c.current_stage) {
-      body = <p className="break-keep text-[11px] text-muted-foreground" data-testid="recipe-stage-advanced">{t('recipeCompletedStage')}</p>;
+      body = <p className="break-keep text-editorial-meta text-muted-foreground" data-testid="recipe-stage-advanced">{t('recipeCompletedStage')}</p>;
     } else if (mine && c.current_completion === 'complete' && c.next_stage) {
       const nextLabel = recipeStageLabel(c.next_stage, tOrg);
       const question = nextLabel === c.next_stage
@@ -211,9 +212,9 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
         </Button>
       );
     } else if (mine && c.current_completion === 'last_stage') {
-      body = <p className="break-keep text-[11px] text-muted-foreground" data-testid="recipe-last-stage-hint">{t('recipeLastStageHint')}</p>;
+      body = <p className="break-keep text-editorial-meta text-muted-foreground" data-testid="recipe-last-stage-hint">{t('recipeLastStageHint')}</p>;
     } else if (mine && c.current_completion === 'needs_fields') {
-      body = <p className="break-keep text-[11px] text-muted-foreground" data-testid="recipe-needs-fields-hint">{t('recipeNeedsFieldsHint')}</p>;
+      body = <p className="break-keep text-editorial-meta text-muted-foreground" data-testid="recipe-needs-fields-hint">{t('recipeNeedsFieldsHint')}</p>;
     } else if (nextMine && c.current_completion === 'gate_approval') {
       body = c.current_gate_status === 'approved' ? (
         <Button type="button" size="sm" className="self-start" disabled={busy}
@@ -221,7 +222,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
           {busy ? t('recipeStarting') : t('recipeStartMyStage')}
         </Button>
       ) : (
-        <p className="break-keep text-[11px] text-muted-foreground" data-testid="recipe-start-my-stage-waiting">{t('recipeStartMyStageWaiting')}</p>
+        <p className="break-keep text-editorial-meta text-muted-foreground" data-testid="recipe-start-my-stage-waiting">{t('recipeStartMyStageWaiting')}</p>
       );
     }
     if (!body && !notice) return null;
@@ -231,7 +232,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
         {notice ? (
           <p
             role={notice.tone === 'error' ? 'alert' : 'status'}
-            className={notice.tone === 'error' ? 'break-keep text-xs text-destructive' : 'break-keep text-[11px] text-muted-foreground'}
+            className={notice.tone === 'error' ? 'break-keep text-xs text-destructive' : 'break-keep text-editorial-meta text-muted-foreground'}
             data-testid="recipe-stage-action-notice"
           >
             {notice.text}
@@ -263,7 +264,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
           : t('recipeNoNextStage')}
       </p>
       {c.last_published_at && (
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-editorial-meta text-muted-foreground">
           {t('recipeLastPublishedLabel')}: {formatViewerRelativeTime(c.last_published_at, locale, displayTimezone)}
         </p>
       )}
@@ -287,23 +288,15 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
         </div>
       )}
       {notStarted.length > 1 && (
-        <div className="mb-2 flex flex-col gap-1">
+        <RadioGroup name={`recipe-start-${storyId}`} className="mb-2 gap-1" value={selectedKey} onValueChange={(v) => setSelectedKey(v)}>
           {notStarted.map((c) => (
             <label key={c.key} className="flex items-center gap-2 text-sm text-foreground">
-              <input
-                type="radio"
-                name={`recipe-start-${storyId}`}
-                checked={selectedKey === c.key}
-                onChange={() => setSelectedKey(c.key)}
-                // story #4075(유나 design CHANGES) — 다크에서 브라우저 기본 accent가 뜨던
-                // 것을 토큰으로(globals.css .tiptap-content 체크박스의 accent-color: var(...)
-                // 관례와 동형, 여긴 Tailwind arbitrary-value 유틸).
-                className="accent-[var(--primary)]"
-              />
+              {/* story #4075 · 4831 — 켜진 색은 부품의 primary 면(전에는 브라우저 기본 accent를 토큰으로 덮던 자리) */}
+              <RadioGroupItem value={c.key} />
               {presetName(c, tPreset)}
             </label>
           ))}
-        </div>
+        </RadioGroup>
       )}
       {/* story #4273(유나 처방) — 시작 전 후보는 하나여도 이름을 단다(여럿일 때 라디오 라벨과 같은 presetName · 같은 text-sm). 하나면 자동
           선택돼 버튼만 남아, 바로 위 다른 레시피의 진행 줄과 붙어 «그 레시피를 다시 시작»으로 읽혔다. 버튼 문구는 그대로. */}
@@ -318,7 +311,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
         notStarted.length > 1 && <p className="text-xs text-muted-foreground">{t('recipeStartChooseRecipe')}</p>
       )}
       {publishError && (
-        <p role="alert" aria-live="assertive" className="mt-1 break-keep text-[11px] text-destructive">
+        <p role="alert" aria-live="assertive" className="mt-1 break-keep text-editorial-meta text-destructive">
           {publishError}
         </p>
       )}

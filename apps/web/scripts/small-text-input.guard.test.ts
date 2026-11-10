@@ -38,6 +38,16 @@ describe('scanSource — 셀프테스트', () => {
     expect(r.inherits).toBe(1);
   });
 
+  it('⭐프로젝트 글자 눈금(globals.css)의 이름 크기를 px로 읽는다 — editorial-meta 11 · editorial-ui 13 · micro 10 (4831: 이게 없어 lg:text-editorial-meta가 «크기 없음»으로 읽혔다)', () => {
+    expect([baseFontPx('text-editorial-meta'), baseFontPx('text-editorial-ui'), baseFontPx('text-micro')]).toEqual([11, 13, 10]);
+    expect(desktopFontPx('text-base lg:text-editorial-meta')).toBe(11);
+    expect(belowLgFontPx('text-base lg:text-editorial-meta')).toBe(16);
+    // 공용 부품(text-base lg:text-sm)에 호출부가 lg:text-editorial-meta를 얹어도 데스크톱 11px 그대로 — 가짜 «14 → 16» 바뀜이 없다
+    const r = scanSource('export const S = () => <Select className="h-auto w-auto lg:text-editorial-meta" />;', 's.tsx',
+      new Map([['Select', { inner: '', classes: 'h-9 w-full text-base lg:text-sm', px: 16 }]]));
+    expect([r.sites, r.drift]).toEqual([[], []]);
+  });
+
   it('상태에 따라 붙는 클래스(삼항)는 크기 판정에 안 섞는다', () => {
     const src = `export const C = ({ bad }) => <input className={\`w-full text-base lg:text-sm \${bad ? 'border-destructive text-xs' : 'border-border'}\`} />;`;
     expect(scanSource(src, 'c.tsx').sites).toEqual([]);
@@ -127,6 +137,29 @@ describe('scanSource — 셀프테스트', () => {
       ['EntityAwareTextarea', '', null],
     ]);
     expect(() => wrapperSizes(() => 'export const Nothing = 1;')).toThrow(/정의가/);
+  });
+
+  it('⭐래퍼가 공용 Select 위에 얹혀도 밑단 클래스까지 읽는다 — OperatorSelect가 Select를 그림(4831) · 글자를 작게 주면 잡는다(양성 대조)', () => {
+    const selectDef = `function Select({ className }) { return <select data-slot="select" className={cn('h-9 text-base lg:text-sm', className)} />; }`;
+    const inputDef = `function Input({ className }) { return <InputPrimitive className={cn('h-9 text-base md:text-sm', className)} />; }`;
+    const entity = `export function EntityAwareTextarea({ className }) { return <div className="relative"><textarea className={className} /></div>; }`;
+    const operator = (selectClasses: string) => `const cls = 'px-3 text-base'; export function OperatorInput(p) { return <Input className={cn(cls, p.className)} />; }
+        export function OperatorTextarea(p) { return <Textarea className={cn(cls, 'min-h-24')} />; }
+        export function OperatorSelect(p) { return <Select className={cn(cls, '${selectClasses}', p.className)} />; }`;
+    const read = (op: string) => (rel: string) => ({
+      'components/ui/operator-control.tsx': op,
+      'components/ui/select.tsx': selectDef,
+      'components/ui/input.tsx': inputDef,
+      'components/ui/textarea.tsx': `function Textarea({ className }) { return <textarea data-slot="textarea" className={cn('min-h-16 text-base lg:text-sm', className)} />; }`,
+      'components/shared/entity-aware-textarea.tsx': entity,
+    } as Record<string, string>)[rel]!;
+    const ok = wrapperSizes(read(operator('h-10')));
+    expect(ok.get('OperatorSelect')).toMatchObject({ inner: 'h-9 text-base lg:text-sm', px: 16 });
+    // 양성 대조: 래퍼가 글자를 작게 주면(접두사 없는 text-xs) 모바일 12px로 잡힌다 — 호출부 검사도 그 값으로 이어진다
+    const small = wrapperSizes(read(operator('text-xs')));
+    expect(small.get('OperatorSelect')?.px).toBe(12);
+    expect(scanSource('export const A = () => <OperatorSelect className="text-xs" />;', 'a.tsx', ok).sites.map((x) => x.px)).toEqual([12]);
+    expect(scanSource('export const A = () => <OperatorSelect />;', 'a.tsx', ok).sites).toEqual([]);
   });
 
   it('belowLgFontPx — lg 미만 세 구간(폰 · sm · md) 중 가장 작은 실제 크기: sm: · md: 접두 14px도 잡는다(까디르 4821 · 아이패드 세로)', () => {

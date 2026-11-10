@@ -56,6 +56,10 @@ from unittest.mock import AsyncMock, MagicMock
 # 환경을 따로 넘기므로 이 기본값의 영향을 안 받는다.
 os.environ.setdefault("SANDBOX_CHANNEL_ENABLED", "true")
 
+# story 4826 — the app's own server starts its in-app timers with the lifespan when `is_embedded`; no test wants a loop of 15 jobs running behind it (and a loop that
+# crosses the tests' event loops would mix their futures into the shared pool). The test configuration turns the setting off; the lifespan test turns it on by patching.
+os.environ.setdefault("EMBEDDED_TIMERS_ENABLED", "false")
+
 # PO 2026-10-07 22:51Z (Minh's catch_test_host · «사람 손 없이»): no test looks for cloud credentials on a metadata server — google-auth
 # (google.auth.default() — embedding · firebase · admin auth) and boto (the S3 storage provider) each asked 169.254.169.254, a sandbox
 # network question every run. Set before anything imports them: google-auth reads NO_GCE_CHECK once, when its metadata module loads.
@@ -1442,3 +1446,37 @@ async def grant_org_projects(session, org_id, *, user_id=None, agent_member_id=N
             if pid not in have:
                 session.add(ProjectAccess(id=uuid.uuid4(), project_id=pid, member_id=agent_member_id, permission="granted", role="member"))
     await session.commit()
+
+
+# ─── story #4846 (PR B) — the `members` anchor behind a `team_members` row, on the create_all schema too ────────────────────────────────────────────────────
+# In production and on a migrated database `team_members` is a VIEW over `members` (⋈ project_access), so every `team_members` row has its `members` anchor. A
+# `destructive_schema` test builds its own schema with `create_all()`, where `team_members` is a plain table and `members` stays empty — and the room code now resolves an
+# api-key caller through the anchor (an agent that lost its last project is gone from the view, not from the room). This hook restores the invariant for the plain-table
+# schema: a `TeamMember` inserted there gets its anchor in the same flush. On a migrated schema the view's own insert path has already made the row, so it does nothing.
+#
+# OPT-IN, not for every test: a test that counts the `members` of an organization (notification recipients, owner floors, the SSE backfill …) must not see rows it did not seed.
+# A module that sends a room message as a `TeamMember` it seeded on the create_all schema asks for it: `pytestmark = pytest.mark.usefixtures("team_member_has_members_anchor")`.
+@pytest.fixture
+def team_member_has_members_anchor():
+    import sqlalchemy as sa
+    from sqlalchemy import event
+
+    from app.models.member import Member
+    from app.models.team import TeamMember
+
+    def _mirror_into_members(mapper, connection, target):
+        if not sa.inspect(connection).has_table("members"):
+            return
+        t = Member.__table__
+        if connection.execute(sa.select(t.c.id).where(t.c.id == target.id)).first() is not None:
+            return
+        connection.execute(t.insert().values(
+            id=target.id, org_id=target.org_id, type=target.type, user_id=None, name=target.name,
+            is_active=True if getattr(target, "is_active", None) is None else target.is_active,
+        ))
+
+    event.listen(TeamMember, "after_insert", _mirror_into_members)
+    try:
+        yield
+    finally:
+        event.remove(TeamMember, "after_insert", _mirror_into_members)

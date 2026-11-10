@@ -113,7 +113,7 @@ describe('RegisterPage — error.code 분기 (story #2484)', () => {
     const nameInput = container.querySelector('input[type="text"]') as HTMLInputElement;
     const emailInput = container.querySelector('input[type="email"]') as HTMLInputElement;
     const pwInput = container.querySelector('input[type="password"]') as HTMLInputElement;
-    const tosCheckbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    const tosCheckbox = container.querySelector('[data-slot="checkbox"]') as HTMLElement;
     await act(async () => {
       setNativeValue(nameInput, 'Test User');
       setNativeValue(emailInput, 'a@b.com');
@@ -166,7 +166,7 @@ describe('RegisterPage — sign_up 이벤트 발화 신호(story #3204)', () => 
     const nameInput = container.querySelector('input[type="text"]') as HTMLInputElement;
     const emailInput = container.querySelector('input[type="email"]') as HTMLInputElement;
     const pwInput = container.querySelector('input[type="password"]') as HTMLInputElement;
-    const tosCheckbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    const tosCheckbox = container.querySelector('[data-slot="checkbox"]') as HTMLElement;
     await act(async () => {
       setNativeValue(nameInput, 'Test User');
       setNativeValue(emailInput, 'a@b.com');
@@ -216,7 +216,7 @@ describe('RegisterPage — next 우선 복귀(story #3220, 초대수락 여정 �
     const nameInput = container.querySelector('input[type="text"]') as HTMLInputElement;
     const emailInput = container.querySelector('input[type="email"]') as HTMLInputElement;
     const pwInput = container.querySelector('input[type="password"]') as HTMLInputElement;
-    const tosCheckbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    const tosCheckbox = container.querySelector('[data-slot="checkbox"]') as HTMLElement;
     await act(async () => {
       setNativeValue(nameInput, 'Test User');
       setNativeValue(emailInput, 'a@b.com');
@@ -283,7 +283,7 @@ describe('RegisterPage — Google OAuth 링크 next 전파(story #3220)', () => 
       `next=${encodeURIComponent('/invite/accept?token=abc123')}`
     );
     await mount('ko');
-    const tosCheckbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    const tosCheckbox = container.querySelector('[data-slot="checkbox"]') as HTMLElement;
     await act(async () => { tosCheckbox.click(); });
     const googleLink = [...container.querySelectorAll('a')].find((a) => a.href.includes('provider=google'));
     expect(googleLink?.getAttribute('href')).toBe(

@@ -8,6 +8,8 @@ import { pickIGaJosa } from '@/lib/korean-particle';
 import { AnchorPin } from './anchor-pin';
 import type { MemberRef } from '@/services/canvas';
 import type { CommentThread } from '@/services/canvas-comments';
+import { Input } from '@/components/ui/input';
+import { isImeComposing } from '@/lib/ime-composition';
 
 const ROLLUP_LABEL_KEY: Record<CommentThread['rollup'], string> = {
   open: 'rollupOpen',
@@ -66,7 +68,7 @@ export function CommentThreadCard({
           onClick={onSelectPin ? () => onSelectPin(thread.id) : undefined}
         />
         {thread.element_label ? <span className="text-xs font-semibold text-foreground">{thread.element_label}</span> : null}
-        <span className={cn('ml-auto rounded px-1.5 py-0.5 text-[9px] font-bold', rollupTone)}>
+        <span className={cn('ml-auto rounded px-1.5 py-0.5 text-micro font-bold', rollupTone)}>
           {t(ROLLUP_LABEL_KEY[thread.rollup])}
         </span>
       </div>
@@ -74,7 +76,7 @@ export function CommentThreadCard({
       <div className="space-y-2 px-3 py-2.5">
         {thread.comments.map((c) => (
           <div key={c.id}>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-editorial-meta text-muted-foreground">
               <strong className="text-foreground">{nameOf(c.author_id)}</strong>
             </p>
             <p className="mt-0.5 text-xs leading-relaxed text-foreground">{c.body}</p>
@@ -82,27 +84,28 @@ export function CommentThreadCard({
         ))}
 
         {thread.resultVersion != null ? (
-          <p className="text-[10px] font-semibold text-info">{t('resultLinkNote', { version: thread.resultVersion })}</p>
+          <p className="text-micro font-semibold text-info">{t('resultLinkNote', { version: thread.resultVersion })}</p>
         ) : null}
 
         {resolved && thread.resolved_by ? (
-          <p className="text-[10px] text-muted-foreground">{t('resolvedByNote', { name: nameOf(thread.resolved_by), josa: pickIGaJosa(nameOf(thread.resolved_by)) })}</p>
+          <p className="text-micro text-muted-foreground">{t('resolvedByNote', { name: nameOf(thread.resolved_by), josa: pickIGaJosa(nameOf(thread.resolved_by)) })}</p>
         ) : null}
 
         {!resolved ? (
           <div className="flex items-center gap-1.5 pt-1">
-            <input
+            <Input
               type="text"
               value={replyDraft}
               onChange={(e) => setReplyDraft(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleReply(); }}
+              // 조합 중의 엔터는 글자 확정 키 — 보내기로 읽으면 반쯤 쓴 답글이 나가고 칸이 비워져 확정된 글자가 다음 답글로 또 나간다(4831 측정 중 발견).
+              onKeyDown={(e) => { if (isImeComposing(e)) return; if (e.key === 'Enter') handleReply(); }}
               placeholder={t('replyPlaceholder')}
-              className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-base lg:text-[11px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              className="h-auto min-w-0 flex-1 px-2 py-1 lg:text-editorial-meta text-foreground bg-background dark:bg-background"
             />
             <button
               type="button"
               onClick={() => onResolve?.(thread.id)}
-              className="shrink-0 rounded-md border border-border px-2 py-1 text-[10px] font-semibold text-muted-foreground hover:bg-muted"
+              className="shrink-0 rounded-md border border-border px-2 py-1 text-micro font-semibold text-muted-foreground hover:bg-muted"
             >
               {t('resolveAction')}
             </button>

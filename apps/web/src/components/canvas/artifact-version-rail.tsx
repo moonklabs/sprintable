@@ -38,7 +38,7 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
   // 390(쌓임)은 상한 없음.
   return (
     <div className="flex flex-col border-l border-border p-3 sm:h-0 sm:min-h-full">
-      <p className="mb-3 shrink-0 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{t('versionLineage')}</p>
+      <p className="mb-3 shrink-0 text-micro font-bold uppercase tracking-wide text-muted-foreground">{t('versionLineage')}</p>
       <ul data-version-list="" className="focus-inset scrollbar-visible space-y-3 sm:min-h-0 sm:flex-1 sm:overflow-y-auto">
         {sorted.map((v) => {
           const isCurrent = v.version === artifact.current_version;
@@ -71,15 +71,15 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
                     v{v.version}
                     {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
                     {isCurrent ? (
-                      <span className="rounded bg-info/10 px-1 py-0.5 text-[9px] font-bold text-foreground">{t('versionCurrentTag')}</span>
+                      <span className="rounded bg-info/10 px-1 py-0.5 text-micro font-bold text-foreground">{t('versionCurrentTag')}</span>
                     ) : null}
                     {isAnchor ? (
-                      <span className="rounded bg-success/10 px-1 py-0.5 text-[9px] font-bold text-foreground">{t('versionAnchorTag')}</span>
+                      <span className="rounded bg-success/10 px-1 py-0.5 text-micro font-bold text-foreground">{t('versionAnchorTag')}</span>
                     ) : null}
                   </p>
                   {/* [SID:4311 PR 3 · 유나 1440 실측] «이름 · 꼬리 · 요약» 한 줄 — 요약 → 이름 순으로 잘리고 꼬리는 늘 보인다(예전 한 덩어리 truncate는
                       13자 이상 이름에서 꼬리가 말줄임에 먹혔다). 요약은 `flex-1`(바탕 0 · 남는 폭만 차지) · 앞 « · »는 줄바꿈 없는 공백. */}
-                  <p className="mt-0.5 flex min-w-0 items-baseline text-[11px] text-muted-foreground">
+                  <p className="mt-0.5 flex min-w-0 items-baseline text-editorial-meta text-muted-foreground">
                     <RowName label={authorName} id={v.created_by} />
                     {v.summary ? <span className="min-w-0 flex-1 truncate">{`\u00a0· ${v.summary}`}</span> : null}
                   </p>
@@ -93,13 +93,13 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
       <button
         type="button"
         onClick={() => setDescOpen((v) => !v)} aria-expanded={descOpen}
-        className="mt-3 flex w-full shrink-0 items-center gap-1 border-t border-border pt-3 text-left text-[11px] text-muted-foreground hover:text-foreground"
+        className="mt-3 flex w-full shrink-0 items-center gap-1 border-t border-border pt-3 text-left text-editorial-meta text-muted-foreground hover:text-foreground"
       >
         {t('descriptionPaneToggle')}
         {descOpen ? <ChevronUp className="h-3 w-3" aria-hidden /> : <ChevronDown className="h-3 w-3" aria-hidden />}
       </button>
       {descOpen ? (
-        descriptionSlot ?? <p className="mt-1.5 text-[11px] text-muted-foreground">{t('descriptionPaneComingSoon')}</p>
+        descriptionSlot ?? <p className="mt-1.5 text-editorial-meta text-muted-foreground">{t('descriptionPaneComingSoon')}</p>
       ) : null}
     </div>
   );

@@ -144,7 +144,7 @@ describe('ProofCapsule (안티패턴 자체 체크 — 도크트린 준수 회�
     const gateButtonMatch = markup.match(/<a class="([^"]*)"/);
     expect(gateButtonMatch).not.toBeNull();
     expect(gateButtonMatch![1]).not.toContain('rounded-full');
-    expect(gateButtonMatch![1]).toContain('rounded-[8px]');
+    expect(gateButtonMatch![1]).toContain('rounded-xl'); // story 4831: 8px → 눈금의 xl
   });
 
   it('supports a human/agent avatar + tone-varied gate button in row density (Attention Queue 재사용, 5f25c615)', () => {
@@ -465,7 +465,7 @@ describe('ProofCapsule — story #32dcc294 headerAside/cardHeader(card 밀도 �
   it('headerAside를 안 넘기면 wrapper div 자체가 렌더되지 않는다 — StateHeader가 옛 구조 그대로 outer div의 직계 자식(byte-identical, 고정 문자열 대조)', () => {
     const markup = renderWithIntl(<ProofCapsule {...BASE} density="card" />);
     expect(markup).toContain(
-      '<div class="min-w-0 flex-1 px-3 py-2.5"><span class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-proof-ink">',
+      '<div class="min-w-0 flex-1 px-3 py-2.5"><span class="inline-flex items-center gap-1.5 text-editorial-meta font-semibold text-proof-ink">',
     );
     // 새 wrapper(headerAside 전용)는 아예 없어야 한다.
     expect(markup).not.toContain('class="flex items-center justify-between gap-2"');
@@ -474,7 +474,7 @@ describe('ProofCapsule — story #32dcc294 headerAside/cardHeader(card 밀도 �
   it('양성대조 — headerAside를 주면 위 "직계 자식" 단언이 실제로 깨진다(가드가 진짜 실패할 수 있음을 증명)', () => {
     const markup = renderWithIntl(<ProofCapsule {...BASE} density="card" headerAside={<span>x</span>} />);
     expect(markup).not.toContain(
-      '<div class="min-w-0 flex-1 px-3 py-2.5"><span class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-proof-ink">',
+      '<div class="min-w-0 flex-1 px-3 py-2.5"><span class="inline-flex items-center gap-1.5 text-editorial-meta font-semibold text-proof-ink">',
     );
     expect(markup).toContain('class="flex items-center justify-between gap-2"');
   });
@@ -482,7 +482,7 @@ describe('ProofCapsule — story #32dcc294 headerAside/cardHeader(card 밀도 �
   it('cardHeader를 안 넘기면 claim div가 옛 구조 그대로 StateHeader 바로 다음에 온다(byte-identical, 고정 문자열 대조)', () => {
     const markup = renderWithIntl(<ProofCapsule {...BASE} density="card" />);
     expect(markup).toContain(
-      '</span><div class="mt-1.5 line-clamp-2 text-[12.5px] font-semibold leading-snug text-proof-ink">',
+      '</span><div class="mt-1.5 line-clamp-2 text-xs font-semibold leading-snug text-proof-ink">',
     );
   });
 

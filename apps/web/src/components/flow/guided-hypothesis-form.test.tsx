@@ -61,7 +61,7 @@ describe('GuidedHypothesisForm', () => {
       chip!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    const statementEl = container.querySelector('textarea') as HTMLTextAreaElement;
+    const statementEl = container.querySelector('textarea[data-slot="textarea"]') as HTMLTextAreaElement;
     expect(statementEl.value).toBe(koMessages.flow.guidedExampleReviewAgentStatement);
 
     const submitBtn = findButtonByText(koMessages.flow.guidedSubmit) as HTMLButtonElement;

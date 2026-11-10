@@ -68,7 +68,7 @@ def _skip_agent_policy(monkeypatch):
 
 async def _make_client(session=None):
     from app.main import app
-    from app.dependencies.auth import get_current_user, get_verified_org_id
+    from app.dependencies.auth import get_current_user, get_verified_org_id, get_verified_org_id_no_project_gate
     from app.dependencies.database import get_db
 
     if session is None:
@@ -98,6 +98,7 @@ async def _make_client(session=None):
     app.dependency_overrides[get_db] = _db
     app.dependency_overrides[get_current_user] = _auth
     app.dependency_overrides[get_verified_org_id] = _org
+    app.dependency_overrides[get_verified_org_id_no_project_gate] = _org
 
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test"), session, app
 
@@ -344,6 +345,13 @@ async def test_create_dm_no_dedup_creates_new_session():
 
 # ─── AC5: GET /conversations — 목록 ─────────────────────────────────────────
 
+def _project_names_result():
+    """story #4846: the list reads the listed rooms' project names in one batch (a row = (project id, name)); none here."""
+    r = MagicMock()
+    r.all.return_value = []
+    return r
+
+
 @pytest.mark.anyio
 async def test_list_conversations():
     """GET /api/v2/conversations → data 배열 반환."""
@@ -386,7 +394,7 @@ async def test_list_conversations():
 
         session.execute = AsyncMock(side_effect=[
             member_result, conv_ids_result, total_result,
-            convs_result, p_rows_result, unread_result, approval_rows_result, latest_msg_result,
+            convs_result, p_rows_result, unread_result, approval_rows_result, _project_names_result(), latest_msg_result,  # story #4846: + the rooms' project names
         ])
 
         async with client as c:
@@ -440,7 +448,7 @@ async def test_list_conversations_latest_message_exposes_event_field():
 
         session.execute = AsyncMock(side_effect=[
             member_result, conv_ids_result, total_result,
-            convs_result, p_rows_result, unread_result, approval_rows_result, latest_msg_result,
+            convs_result, p_rows_result, unread_result, approval_rows_result, _project_names_result(), latest_msg_result,  # story #4846: + the rooms' project names
         ])
 
         async with client as c:
@@ -486,7 +494,7 @@ async def test_list_conversations_latest_message_event_null_when_absent():
 
         session.execute = AsyncMock(side_effect=[
             member_result, conv_ids_result, total_result,
-            convs_result, p_rows_result, unread_result, approval_rows_result, latest_msg_result,
+            convs_result, p_rows_result, unread_result, approval_rows_result, _project_names_result(), latest_msg_result,  # story #4846: + the rooms' project names
         ])
 
         async with client as c:
@@ -512,7 +520,7 @@ async def test_list_messages_response_shape():
         mock_msg = _make_msg()
 
         conv_project_result = MagicMock()
-        conv_project_result.scalar_one_or_none.return_value = PROJECT_ID
+        conv_project_result.first.return_value = (uuid.uuid4(), PROJECT_ID)  # story #4846: (exists, project_id) — a room may have no project
 
         member_result = MagicMock()
         member_result.scalars.return_value.first.return_value = mock_member
@@ -556,7 +564,8 @@ async def test_list_messages_response_shape():
         viewer_blocks_result.scalars.return_value.all.return_value = []
 
         session.execute = AsyncMock(side_effect=[
-            conv_project_result, member_result, pids_result, agents_result, msgs_result, sender_result,
+            # story #4846: one query fewer than before — the project-access read (`has_project_access`) is gone from the room-read check
+            conv_project_result, member_result, pids_result, msgs_result, sender_result,
             runtime_type_result, refs_result, blocked_sender_result, viewer_blocks_result,
         ])
 
@@ -784,15 +793,18 @@ async def test_send_message_filters_cross_org_mentions_group():
 
         mention_calls = {}
         async def _capture_mention(db, conversation, msg, org_id, sender, mention_targets,
-                                   webhook_covered_ids=None, references=None):
+                                   webhook_covered_ids=None, references=None, content_withheld_ids=None):
             mention_calls["targets"] = set(mention_targets)
             return []
 
         # story #4505: mentions resolve through member_resolver.org_mention_ids (alias → canonical, then the org filter)
+        # story #4846 (AC9): putting a mentioned outsider in the room is its own helper with its own real-database tests (test_4846_ac9_*); this test is about the cross-org filter
         with patch("app.services.member_resolver.canonicalize_member_ids",
                    new=AsyncMock(side_effect=lambda ids, *a, **kw: {i: i for i in ids})), \
              patch("app.services.member_resolver.filter_org_member_ids",
                    new=AsyncMock(return_value={valid_id})), \
+             patch("app.routers.conversations._admit_mentioned_non_participants",
+                   new=AsyncMock(return_value=set())), \
              patch("app.services.conversation_webhook.resolve_conversation_webhook_targets",
                    new=AsyncMock(return_value=[])), \
              patch("app.routers.conversations._dispatch_conversation_event",
@@ -849,7 +861,7 @@ async def test_list_conversations_latest_message_has_attachments_true():
 
         session.execute = AsyncMock(side_effect=[
             member_result, conv_ids_result, total_result,
-            convs_result, p_rows_result, unread_result, approval_rows_result, latest_msg_result,
+            convs_result, p_rows_result, unread_result, approval_rows_result, _project_names_result(), latest_msg_result,  # story #4846: + the rooms' project names
         ])
 
         async with client as c:
@@ -892,7 +904,7 @@ async def test_list_conversations_latest_message_has_attachments_false_when_empt
 
         session.execute = AsyncMock(side_effect=[
             member_result, conv_ids_result, total_result,
-            convs_result, p_rows_result, unread_result, approval_rows_result, latest_msg_result,
+            convs_result, p_rows_result, unread_result, approval_rows_result, _project_names_result(), latest_msg_result,  # story #4846: + the rooms' project names
         ])
 
         async with client as c:
@@ -936,7 +948,7 @@ async def test_list_conversations_latest_message_has_attachments_false_when_tomb
 
         session.execute = AsyncMock(side_effect=[
             member_result, conv_ids_result, total_result,
-            convs_result, p_rows_result, unread_result, approval_rows_result, latest_msg_result,
+            convs_result, p_rows_result, unread_result, approval_rows_result, _project_names_result(), latest_msg_result,  # story #4846: + the rooms' project names
         ])
 
         async with client as c:

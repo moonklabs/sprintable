@@ -45,12 +45,12 @@ function ApproverRow({ status, blocking, name, memberId }: ApproverRowProps) {
   // 크기가 3.0 문턱을 통과해 계열색 그대로 둔다(#2420 doc "확認·비-결함" 아이콘 규칙).
   const labelCls = view.cls === 'text-muted-foreground' ? view.cls : 'text-foreground';
   return (
-    <div className="flex items-center gap-1.5 text-[11px]">
+    <div className="flex items-center gap-1.5 text-editorial-meta">
       <Icon className={`size-3 shrink-0 ${view.cls}`} />
       <RowName className="text-foreground/90" label={name} id={memberId} />
       {blocking ? (
         // story #2590(TIER1) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
-        <span className="shrink-0 rounded-sm bg-warning-tint px-1 text-[9px] font-medium uppercase text-foreground">
+        <span className="shrink-0 rounded-sm bg-warning-tint px-1 text-micro font-medium uppercase text-foreground">
           {t('lineApproverBlocking')}
         </span>
       ) : null}
@@ -74,7 +74,7 @@ export function GateLineContext({ step, resolveName, className }: GateLineContex
   return (
     <div className={`space-y-1.5 rounded-lg bg-muted/45 px-2.5 py-2 ${className ?? ''}`}>
       {/* step label: from → to 파생(갭2 v1) */}
-      <div className="flex items-center gap-1.5 text-[11px]">
+      <div className="flex items-center gap-1.5 text-editorial-meta">
         {step.from_status ? (
           <span className="text-muted-foreground">{step.from_status}</span>
         ) : null}
@@ -84,13 +84,13 @@ export function GateLineContext({ step, resolveName, className }: GateLineContex
 
       {/* route reason */}
       {step.routing_reason ? (
-        <p className="text-[11px] text-muted-foreground">{step.routing_reason}</p>
+        <p className="text-editorial-meta text-muted-foreground">{step.routing_reason}</p>
       ) : null}
 
       {/* SLA: 정시 muted / overdue warning */}
       {sla ? (
         <div
-          className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] ${
+          className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-micro ${
             sla.overdue
               ? 'border border-warning-border bg-warning-tint text-foreground'
               : 'text-muted-foreground'
@@ -118,7 +118,7 @@ export function GateLineContext({ step, resolveName, className }: GateLineContex
 
       {/* ⑤ engine_degraded/grandfathered: BE observability_note 렌더(하드코딩X)·null/빈값=중립 폴백 */}
       {step.engine_degraded || step.grandfathered ? (
-        <p className="flex items-start gap-1 pt-0.5 text-[10px] text-muted-foreground">
+        <p className="flex items-start gap-1 pt-0.5 text-micro text-muted-foreground">
           <EyeOff className="mt-0.5 size-3 shrink-0" />
           <span>{step.observability_note?.trim() || t('lineObservabilityFallback')}</span>
         </p>

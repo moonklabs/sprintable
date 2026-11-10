@@ -4,8 +4,9 @@ import { resolveAppUrl } from '@/services/app-url';
 import { oauthCookieOptions } from '@/lib/auth/oauth-cookies';
 import { SP_AT_COOKIE } from '@/lib/db/server';
 import { backendFetch } from '@/lib/backend-fetch';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
-const FASTAPI_BASE = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_BASE = fastapiBaseUrl();
 
 // story #3376 — app/auth/link/route.ts와 동형 레일(그라운딩 §3·§10, 새 패턴 발명 0).
 // 다른 점 하나: 로그인 rail은 provider 하나뿐이라 콜백이 "누구 계정에 붙일지"를 세션의

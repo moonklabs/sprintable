@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
+import { Input } from '@/components/ui/input';
 
 interface MfaClientProps {
   // story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:44Z/15:56Z) — 이 컴포넌트는
@@ -68,12 +69,12 @@ export function MfaClient({ chatsHref }: MfaClientProps) {
           <p className="text-sm text-muted-foreground">{t('description')}</p>
         </div>
         <div className="space-y-3">
-          <input
+          <Input
             type="text"
             inputMode="numeric"
             maxLength={6}
             placeholder="000000"
-            className="w-full rounded-lg border border-border px-4 py-3 text-center text-xl font-mono tracking-widest text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+            className="h-auto px-4 py-3 text-center text-xl font-mono tracking-widest lg:text-xl"
             value={code}
             onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
             onKeyDown={(e) => e.key === 'Enter' && handleVerify()}

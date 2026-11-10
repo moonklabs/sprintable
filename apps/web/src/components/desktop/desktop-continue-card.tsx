@@ -16,9 +16,11 @@ interface Props {
   here: string;
   /** the form route came back with a failure (the code could not be made): say so, the button is there again */
   failed?: boolean;
+  /** the account's e-mail is not verified yet (read by the page with the person's own session): one line says where the mail is; [열기] works as before */
+  emailUnverified?: boolean;
 }
 
-export function DesktopContinueCard({ account, start, here, failed = false }: Props) {
+export function DesktopContinueCard({ account, start, here, failed = false, emailUnverified = false }: Props) {
   const t = useTranslations('desktopContinue');
   const [opening, setOpening] = useState(false);
   // a page restored from the back/forward cache must not stay on «여는 중…»
@@ -38,6 +40,7 @@ export function DesktopContinueCard({ account, start, here, failed = false }: Pr
       <h1 className="mb-2 text-lg font-semibold text-foreground">{t('title')}</h1>
       <p className="mb-1 break-keep text-sm text-foreground" data-testid="continue-account">{t('account', { account })}</p>
       <p className="mb-6 break-keep text-sm text-muted-foreground">{t('body')}</p>
+      {emailUnverified && <p className="mb-6 break-keep rounded-md bg-muted px-3 py-2 text-sm text-foreground" data-testid="continue-unverified">{t('emailUnverified')}</p>}
       <form method="post" action="/native/continue/open" onSubmit={(e) => { if (opening) { e.preventDefault(); return; } setOpening(true); }} data-testid="continue-form">
         <input type="hidden" name="code_challenge" value={start.challenge} />
         <input type="hidden" name="cc_method" value="S256" />

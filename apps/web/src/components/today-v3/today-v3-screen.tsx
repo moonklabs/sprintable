@@ -11,6 +11,7 @@ import { useTodaySnapshot } from '@/components/org-briefing/use-today-snapshot';
 import { EMPTY_TODAY_SNAPSHOT, type TodayCount, type TodaySnapshot } from '@/components/org-briefing/derive-today';
 import { TodayV3Decisions } from './today-v3-decisions';
 import { TodayV3AgentProgress } from './today-v3-agent-progress';
+import { AgentStateSection } from '@/components/org-briefing/agent-state-section';
 import { useMyOrgRole } from './use-my-org-role';
 import { NavV3Sidebar } from '@/components/nav/nav-v3-item-list';
 import { MobileTabBar } from '@/components/nav/mobile-tab-bar';
@@ -136,6 +137,8 @@ export function TodayV3Screen({ flags = DEFAULT_NAV_V3_FLAGS }: { flags?: NavV3F
                     isAdminOrOwner={isAdminOrOwner} onActionSuccess={retry}
                   />
                   <TodayV3AgentProgress items={snapshot.agentProgress} onActionSuccess={retry} />
+                  {/* story #4833 — every agent's state, looks only (the same section as the org-briefing Today; this layout has no realtime mux, so it re-reads every 30 s) */}
+                  <AgentStateSection />
                   <TodayResultsSummary snapshot={snapshot} />
                 </div>
               )}

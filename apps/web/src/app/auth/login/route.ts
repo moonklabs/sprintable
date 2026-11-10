@@ -4,8 +4,9 @@ import { resolveAppUrl } from '@/services/app-url';
 import { oauthCookieOptions } from '@/lib/auth/oauth-cookies';
 import { isOAuthCallbackMode } from '@/lib/auth/oauth-callback-mode';
 import { nativeReturnApp } from '@/lib/auth/native-return-app';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
-const FASTAPI_BASE = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_BASE = fastapiBaseUrl();
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);

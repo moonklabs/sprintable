@@ -41,7 +41,7 @@ _REPORT_HOLDERS = 5
 def _app_frame_text(frame: Any) -> "str | None":
     """«app/…py:123 func» for a frame under the app tree (not a library), else None."""
     fn = frame.f_code.co_filename
-    if "site-packages" in fn:
+    if "site-packages" in fn or fn == __file__:  # a library, or THIS module's own frames (the diagnostic is not the code that was running)
         return None
     i = fn.rfind(_APP_MARK)
     return f"{fn[i + 1:]}:{frame.f_lineno} {frame.f_code.co_name}" if i >= 0 else None
@@ -58,7 +58,7 @@ def _checkout_chain(limit: int = 5) -> list[str]:
         import greenlet
 
         g = greenlet.getcurrent()
-        frame = g.parent.gr_frame if getattr(g, "parent", None) is not None else sys._getframe()
+        frame = g.parent.gr_frame if getattr(g, "parent", None) is not None else sys._getframe(1)
         for _ in range(250):
             if frame is None:
                 break
@@ -70,6 +70,17 @@ def _checkout_chain(limit: int = 5) -> list[str]:
         pass
     out.reverse()  # outermost first; the last ones are the innermost
     return out[-limit:]
+
+
+def _inside_db_greenlet() -> bool:
+    """True when the caller runs inside SQLAlchemy's greenlet bridge (an awaited database call). An invalidation reached from a garbage-collector / finalizer, or from sync code, does not:
+    its «stack» is whatever code happened to trigger the collection — not the code that was interrupted."""
+    try:
+        import greenlet
+
+        return getattr(greenlet.getcurrent(), "parent", None) is not None
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _suspended_frames(task: "asyncio.Task | None") -> list[Any]:
@@ -96,7 +107,7 @@ _APP_MARK = "/app/"  # only frames under this path segment are kept in an await 
 
 
 class _Holder:
-    __slots__ = ("since", "task", "had_task", "scope", "record", "chain", "conn_id", "conn_ids")
+    __slots__ = ("since", "task", "had_task", "scope", "record", "chain", "conn_id", "conn_ids", "long_lived")
 
     def __init__(self, record: Any, task: "asyncio.Task | None", scope: Any, conn_id: int, extra_ids: tuple = ()) -> None:
         self.since = time.monotonic()
@@ -106,14 +117,14 @@ class _Holder:
         self.record = weakref.ref(record)
         self.chain = _checkout_chain()  # where it was checked out — text only, no reference to the task or the frames
         self.conn_id = conn_id
+        self.long_lived = False  # a connection that is MEANT to be held for the process's life (mark_long_lived): never «held too long»
         self.conn_ids = (conn_id, *extra_ids)  # SQLAlchemy's GC line prints the DRIVER connection inside the pooled one (its address), so both are keys
 
 
 class _Pool:
-    def __init__(self, name: str, engine: Any, age_rule: bool = True) -> None:
+    def __init__(self, name: str, engine: Any) -> None:
         self.name = name
         self.engine = engine
-        self.age_rule = age_rule  # False: a connection held for long is NORMAL here (the worker pool's advisory-lock connection) — only «nearly full» is worth a line
         self.holders: dict[int, _Holder] = {}
         self.by_conn: dict[int, _Holder] = {}  # id(dbapi connection) → holder, for the garbage-collector line (the log argument is the connection object)
 
@@ -142,17 +153,14 @@ class PoolHolderScopeMiddleware:
                 pass
 
 
-def install(engine: Any, name: str, *, age_rule: bool = True) -> None:
-    """Listen to this engine's pool. Idempotent per engine name. Fail-open.
-
-    `age_rule=False` for a pool whose connections are MEANT to be held long (the worker pool: the L2 trigger worker's advisory-lock connection stays for the process's life): the
-    «held longer than pool_holder_warn_sec» rule is left out for it, so it does not write a line every poll forever; it still reports when it is nearly full."""
+def install(engine: Any, name: str) -> None:
+    """Listen to this engine's pool. Idempotent per engine name. Fail-open."""
     try:
         from app.core.config import settings
 
         if not settings.pool_holder_watch_enabled or name in _pools:
             return
-        pool = _Pool(name, engine, age_rule)
+        pool = _Pool(name, engine)
         _pools[name] = pool
         sync_engine = engine.sync_engine
 
@@ -166,8 +174,7 @@ def install(engine: Any, name: str, *, age_rule: bool = True) -> None:
                 h = _Holder(connection_record, task, _scope_var.get(), id(dbapi_connection), (id(inner),) if inner is not None else ())
                 prev = pool.holders.get(id(connection_record))
                 if prev is not None:  # the record is being handed out again without a checkin in between (SQLAlchemy's GC path terminates the connection and reuses the record)
-                    for cid in prev.conn_ids:
-                        pool.by_conn.pop(cid, None)
+                    _forget(pool, prev)
                 pool.holders[id(connection_record)] = h
                 for cid in h.conn_ids:
                     pool.by_conn[cid] = h
@@ -175,8 +182,7 @@ def install(engine: Any, name: str, *, age_rule: bool = True) -> None:
                     for k in list(pool.holders)[: _MAX_TRACKED // 2]:
                         old = pool.holders.pop(k, None)
                         if old is not None:
-                            for cid in old.conn_ids:
-                                pool.by_conn.pop(cid, None)
+                            _forget(pool, old)
             except Exception:  # noqa: BLE001
                 pass
 
@@ -184,13 +190,16 @@ def install(engine: Any, name: str, *, age_rule: bool = True) -> None:
             try:
                 h = pool.holders.pop(id(connection_record), None)
                 if h is not None:
-                    for cid in h.conn_ids:
-                        pool.by_conn.pop(cid, None)
+                    _forget(pool, h)
             except Exception:  # noqa: BLE001
                 pass
 
+        def _invalidate(dbapi_connection, connection_record, exception):  # noqa: ANN001
+            _log_invalidation(pool, dbapi_connection, connection_record, exception)
+
         event.listen(sync_engine, "checkout", _checkout)
         event.listen(sync_engine, "checkin", _checkin)
+        event.listen(sync_engine, "invalidate", _invalidate)
         _attach_gc_filter(engine)
     except Exception:  # noqa: BLE001
         logger.warning("pool_holders.install failed for %s", name, exc_info=True)
@@ -236,6 +245,14 @@ def _attach_gc_filter(engine: Any) -> None:
         logging.getLogger(name).addFilter(_GcLineFilter())
 
 
+def _forget(pool: _Pool, h: "_Holder") -> None:
+    """Take a holder's connection ids out of by_conn — but only the entries that STILL POINT AT IT. An id() can be reused once an object is freed; without this check, forgetting an old
+    holder would delete the entry of a newer one that happens to share the id (and its garbage-collector line would lose its place)."""
+    for cid in h.conn_ids:
+        if pool.by_conn.get(cid) is h:
+            pool.by_conn.pop(cid, None)
+
+
 def _sweep_by_conn(pool: _Pool) -> None:
     """by_conn must never hold a holder that is no longer in `holders` (it would keep the scope and the chain alive for good)."""
     live = {id(h) for h in pool.holders.values()}
@@ -250,9 +267,79 @@ def _prune(pool: _Pool) -> None:
         rec = h.record()
         if rec is None or getattr(rec, "fairy_ref", True) is None:
             pool.holders.pop(key, None)
-            for cid in h.conn_ids:
-                pool.by_conn.pop(cid, None)
+            _forget(pool, h)
     _sweep_by_conn(pool)
+
+
+_INVALIDATION_LINES_PER_MIN = 20
+_INVAL_WINDOW_MAX_KEYS = 256  # hard bound of the per-pool-and-kind rate table
+_REASON_CHARS = 100
+_inval_window: dict[str, list[float]] = {}
+
+
+def _invalidation_budget(pool_name: str, cancelled: bool, now: float) -> bool:
+    """One budget per pool AND kind: a failover's pre-ping failures must not use up the 20 lines a minute before the first real cancellation (codex). The table is pruned of keys whose
+    newest line is more than a minute old once it has more than 64 keys (dynamically named engines in tests would otherwise grow it for ever)."""
+    key = f"{pool_name}:{'cancel' if cancelled else 'other'}"
+    window = [t for t in _inval_window.get(key, []) if now - t < 60.0]
+    if len(window) >= _INVALIDATION_LINES_PER_MIN:
+        _inval_window[key] = window
+        return False
+    window.append(now)
+    _inval_window[key] = window
+    if len(_inval_window) > 64:
+        for k, v in list(_inval_window.items()):
+            if not v or now - v[-1] >= 60.0:
+                _inval_window.pop(k, None)
+        if len(_inval_window) > _INVAL_WINDOW_MAX_KEYS:
+            # a hard bound too (codex): many uniquely named pools invalidating inside one minute leave nothing stale to prune - the oldest keys go, the newest (this one) stays
+            oldest_first = sorted(_inval_window.items(), key=lambda kv: kv[1][-1] if kv[1] else 0.0)
+            for k, _ in oldest_first[: len(_inval_window) - _INVAL_WINDOW_MAX_KEYS]:
+                _inval_window.pop(k, None)
+    return True
+
+
+def _log_invalidation(pool: _Pool, dbapi_connection: Any, connection_record: Any, exception: Any) -> None:
+    """story #4864 (prod 11-09 08:01Z): «Exception terminating connection … CancelledError: Cancelled via cancel scope … BaseHTTPMiddleware» 19 ms after a POST's 201, a garbage-collector
+    line 0.11 s later — and no «Exception during reset» line. SQLAlchemy invalidates (and terminates) a connection when a statement is interrupted by a BaseException such as CancelledError;
+    this says WHICH statement: one warning per hard invalidation (at most 20 a minute per pool and kind) with the exception, the route and age of the holder if it is still known, and the
+    call stack of the code that was running — the frames of the greenlet parent, i.e. the code that was awaiting the database when the cancellation hit (or, from a finalizer outside a
+    database call, a plain «unknown»). Never raises."""
+    try:
+        if exception is None:
+            return
+        now = time.monotonic()
+        cancelled = isinstance(exception, asyncio.CancelledError)
+        if not _invalidation_budget(pool.name, cancelled, now):
+            return
+        h = pool.by_conn.get(id(dbapi_connection)) or pool.holders.get(id(connection_record))
+        kind = type(exception).__name__
+        if not cancelled:
+            running = "n/a (not an interrupted statement)"  # a pre-ping failure or an explicit invalidate(): the stack there is the checkout code, NOT a cancelled statement
+        elif _inside_db_greenlet():
+            running = " ← ".join(reversed(_checkout_chain(8))) or "no app frame"
+        else:
+            running = "unknown (not inside a database call: a finalizer or garbage collector reached the invalidation)"
+        taken = (" ← ".join(reversed(h.chain)) if h and h.chain else "-")
+        where = (_route_of(h.scope) if h else "-", int(now - h.since) if h else -1, taken, running)
+        # story #4741: a log call hands an exception to the record as an OBJECT or through the redaction helper, never as str(exc). A cancellation's reason is a free text anybody can pass
+        # to Task.cancel(msg): it goes through safe_exception_text, one line, cut at _REASON_CHARS. Any other exception is named by class only.
+        if cancelled:
+            from app.core.db_error_redaction import safe_exception_text
+
+            # cut BEFORE any processing: a huge Task.cancel(msg) must not be split and joined whole inside the pool machinery (a few times the cap is enough to find 100 characters)
+            reason = " ".join(safe_exception_text(exception)[: _REASON_CHARS * 8].split())[:_REASON_CHARS]
+            logger.warning(
+                "pool_holders connection invalidated pool=%s exc=%s(%s) route=%s held_for=%ss checked out at: %s | running when interrupted: %s",
+                pool.name, kind, reason, *where,
+            )
+        else:
+            logger.warning(
+                "pool_holders connection invalidated pool=%s exc=%s route=%s held_for=%ss checked out at: %s | running when interrupted: %s",
+                pool.name, kind, *where,
+            )
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _route_of(scope: Any) -> str:
@@ -293,7 +380,7 @@ def snapshot(name: str = "request") -> list[dict]:
     for h in pool.holders.values():
         task = h.task() if h.task is not None else None
         gone = h.had_task and (task is None or task.done())
-        out.append({"age": now - h.since, "route": _route_of(h.scope), "at": _where(task, h.had_task), "from": " ← ".join(reversed(h.chain)) or "-", "leak": bool(gone)})
+        out.append({"age": now - h.since, "route": _route_of(h.scope), "at": _where(task, h.had_task), "from": " ← ".join(reversed(h.chain)) or "-", "leak": bool(gone), "long": h.long_lived})
     out.sort(key=lambda r: r["age"], reverse=True)
     return out
 
@@ -307,6 +394,25 @@ def _capacity(engine: Any) -> tuple[int, int]:
         return 0, 0
 
 
+_GATE_REPORT_WAIT_SEC = 1.0  # a gate whose longest waiter has waited this long gets the request pool's line out even when the pool itself is not near full
+_GATED_POOL = "request"  # the pool the concurrency gates (core/bounded_gate.py) protect
+
+
+def _gates_text() -> "tuple[str, bool]":
+    """«pg_notify running=4/4 waiting=37 oldest_wait=2.1s; au_metering …» for every named gate, and whether one of them is backed up (its longest waiter >= _GATE_REPORT_WAIT_SEC).
+    Story 4867 (Kadir's lens): a burst used to fail on the pool timeout and leave a log line; behind a gate it queues, and the queue must not be invisible."""
+    try:
+        from app.core.bounded_gate import gate_stats
+
+        stats = gate_stats()
+        text = "; ".join(
+            f"{s['name']} running={s['running']}/{s['limit'] if s['limit'] > 0 else 'off'} waiting={s['waiting']} oldest_wait={s['oldest_wait']:.1f}s" for s in stats
+        )
+        return text, any(s["oldest_wait"] >= _GATE_REPORT_WAIT_SEC for s in stats)
+    except Exception:  # noqa: BLE001
+        return "", False
+
+
 def report_lines(warn_sec: float) -> list[str]:
     """One line per pool that has something worth saying; [] when all is calm."""
     lines = []
@@ -314,14 +420,16 @@ def report_lines(warn_sec: float) -> list[str]:
         try:
             held = snapshot(name)
             out, cap = _capacity(pool.engine)
-            old = [r for r in held if r["age"] >= warn_sec] if pool.age_rule else []
+            old = [r for r in held if r["age"] >= warn_sec and not r["long"]]
             near_full = cap > 0 and out >= cap * _FULL_FRACTION
-            if not old and not near_full:
+            gates, backed_up = _gates_text() if name == _GATED_POOL else ("", False)
+            if not old and not near_full and not backed_up:
                 continue
             top = "; ".join(f"age={int(r['age'])}s {r['route']} now at {r['at']} (checked out at {r['from']})" for r in held[:_REPORT_HOLDERS])
             leaks = sum(1 for r in held if r["leak"])
             lines.append(
                 f"pool_holders pool={name} checked_out={out}/{cap} held_over_{int(warn_sec)}s={len(old)} leaked={leaks} oldest=[{top}]"
+                + (f" gates=[{gates}]" if gates else "")
             )
         except Exception:  # noqa: BLE001
             logger.warning("pool_holders report failed for %s", name, exc_info=True)
@@ -343,11 +451,33 @@ async def watch() -> None:
             logger.warning("pool_holders watch tick failed", exc_info=True)
 
 
-def start_watch() -> "asyncio.Task | None":
+async def mark_long_lived(async_connection: Any, name: str) -> None:
+    """Say that this AsyncConnection of pool `name` is MEANT to be held for the life of the process (the L2 trigger worker's advisory-lock connection): it is left out of the
+    «held longer than pool_holder_warn_sec» rule — every other connection of the pool is still judged by it. Fail-open: a failure here only means the connection is judged like any other."""
     try:
+        pool = _pools.get(name)
+        if pool is None:
+            return
+        raw = await async_connection.get_raw_connection()
+        dbapi = getattr(raw, "dbapi_connection", None)
+        for key in (id(dbapi), id(getattr(dbapi, "_connection", None))):
+            h = pool.by_conn.get(key)
+            if h is not None:
+                h.long_lived = True
+                return
+    except Exception:  # noqa: BLE001
+        logger.warning("pool_holders.mark_long_lived failed for %s", name, exc_info=True)
+
+
+def start_watch() -> "asyncio.Task | None":
+    """The watch loop as a Task for the lifespan to keep and cancel — or None: switched off, or running under pytest (the test suite starts and stops the app on a new loop per test
+    and must not leave a loop behind; a test that wants the loop calls `watch()` itself)."""
+    try:
+        import os
+
         from app.core.config import settings
 
-        if not settings.pool_holder_watch_enabled:
+        if not settings.pool_holder_watch_enabled or os.environ.get("PYTEST_CURRENT_TEST"):
             return None
         return asyncio.create_task(watch(), name="pool_holders_watch")
     except Exception:  # noqa: BLE001

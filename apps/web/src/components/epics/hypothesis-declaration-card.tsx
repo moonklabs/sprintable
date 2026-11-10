@@ -4,6 +4,9 @@ import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import type { Hypothesis, HypothesisDraft, MetricDefinition } from '@sprintable/core-storage';
 import {
@@ -127,7 +130,7 @@ export function HypothesisDeclarationCard({
   return (
     <div className="flex flex-col gap-2.5 rounded-xl border border-border bg-card p-3">
       <div className="flex items-center justify-between gap-2">
-        <div className="inline-flex overflow-hidden rounded-lg border border-border text-[10px] font-semibold">
+        <div className="inline-flex overflow-hidden rounded-lg border border-border text-micro font-semibold">
           <button
             type="button"
             aria-pressed={value.mode === 'new'}
@@ -146,7 +149,7 @@ export function HypothesisDeclarationCard({
           </button>
         </div>
         {onRemove ? (
-          <button type="button" onClick={onRemove} className="text-[10px] text-muted-foreground hover:text-foreground">
+          <button type="button" onClick={onRemove} className="text-micro text-muted-foreground hover:text-foreground">
             {t('declareRemove')}
           </button>
         ) : null}
@@ -168,46 +171,43 @@ export function HypothesisDeclarationCard({
               type="button"
               onClick={() => void handleDraft()}
               disabled={drafting}
-              className="inline-flex items-center gap-1 rounded-lg border border-dashed border-border px-2 py-0.5 text-[10.5px] font-medium text-muted-foreground transition hover:border-primary hover:text-primary disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-lg border border-dashed border-border px-2 py-0.5 text-micro font-medium text-muted-foreground transition hover:border-primary hover:text-primary disabled:opacity-50"
             >
               <Sparkles className="size-3" />
               {t('declareDraftCta')}
             </button>
           </div>
-          <textarea
+          <Textarea
             rows={2}
             value={value.statement}
             onChange={(e) => onChange({ ...value, statement: e.target.value, drafted: false })}
             onBlur={() => void fetchPrecedents()}
             placeholder={t('declareStatementPlaceholder')}
-            className={cn(
-              'w-full resize-y rounded-xl border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary',
-              value.drafted ? 'border-primary/40' : 'border-border',
-            )}
+            className={cn('min-h-0 bg-background dark:bg-background', value.drafted && 'border-primary/40')}
           />
           {value.drafted ? (
-            <p className="flex items-start gap-1.5 rounded-lg border border-dashed border-border bg-info-tint/20 px-2 py-1.5 text-[10px] text-muted-foreground">
+            <p className="flex items-start gap-1.5 rounded-lg border border-dashed border-border bg-info-tint/20 px-2 py-1.5 text-micro text-muted-foreground">
               <Sparkles className="mt-0.5 size-3 shrink-0 text-info" aria-hidden />
               <span><b className="text-foreground">{t('declareDraftNoteTitle')}</b> {t('declareDraftNoteBody')}</span>
             </p>
           ) : null}
 
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_auto_auto]">
-            <input
+            <Input
               value={metric?.metric ?? ''}
               onChange={(e) => setMetricPatch({ metric: e.target.value })}
               placeholder={th('metricPlaceholder')}
-              className="rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              className="h-auto bg-background dark:bg-background"
             />
-            <select
+            <Select
               value={metric?.source ?? 'internal_ops'}
               onChange={(e) => setMetricPatch({ source: e.target.value as 'internal_ops' | 'ga4' | 'manual' })}
-              className="rounded-xl border border-border bg-background px-2 py-2 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              className="h-auto px-2 bg-background dark:bg-background"
             >
               {SOURCES.map((s) => (
                 <option key={s} value={s}>{s === 'ga4' ? th('sourceGa4') : s === 'manual' ? th('sourceManual') : th('sourceInternal')}</option>
               ))}
-            </select>
+            </Select>
             <div className="flex overflow-hidden rounded-xl border border-border">
               {(['up', 'down'] as const).map((dir) => (
                 <button
@@ -223,50 +223,50 @@ export function HypothesisDeclarationCard({
                 </button>
               ))}
             </div>
-            <input
+            <Input
               type="number"
               inputMode="decimal"
               value={metric && !Number.isNaN(metric.target) ? metric.target : ''}
               onChange={(e) => setMetricPatch({ target: e.target.value === '' ? 0 : Number(e.target.value) })}
               placeholder={th('targetPlaceholder')}
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary sm:w-20"
+              className="h-auto tabular-nums bg-background dark:bg-background sm:w-20"
             />
           </div>
 
           {isGa4 ? (
             <div className="grid grid-cols-1 gap-2 rounded-lg border border-dashed border-border p-2 sm:grid-cols-3">
-              <input
+              <Input
                 value={metric?.property_id ?? ''}
                 onChange={(e) => setMetricPatch({ property_id: e.target.value })}
                 placeholder="GA4 property_id"
-                className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-base lg:text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="h-auto px-2.5 py-1.5 lg:text-xs bg-background dark:bg-background"
               />
-              <select
+              <Select
                 value={metric?.ga4_metric ?? ''}
                 onChange={(e) => setMetricPatch({ ga4_metric: e.target.value })}
-                className="rounded-lg border border-border bg-background px-2 py-1.5 text-base lg:text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="h-auto px-2 py-1.5 lg:text-xs bg-background dark:bg-background"
               >
                 <option value="">ga4_metric</option>
                 {GA4_METRICS.map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
-              <input
+              </Select>
+              <Input
                 type="number"
                 inputMode="numeric"
                 value={metric?.date_range_days ?? ''}
                 onChange={(e) => setMetricPatch({ date_range_days: e.target.value === '' ? undefined : Number(e.target.value) })}
                 placeholder={t('declareGa4DateRangePlaceholder')}
-                className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-base lg:text-xs tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="h-auto px-2.5 py-1.5 tabular-nums lg:text-xs bg-background dark:bg-background"
               />
             </div>
           ) : null}
 
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">{t('declareMeasureAfterLabel')}</label>
-            <input
+            <Input
               type="date"
               value={value.measureAfter}
               onChange={(e) => onChange({ ...value, measureAfter: e.target.value })}
-              className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              className="h-auto bg-background dark:bg-background"
             />
           </div>
 
@@ -277,23 +277,23 @@ export function HypothesisDeclarationCard({
           ) : null}
 
           {precedentsLoading ? (
-            <p className="text-[10px] text-muted-foreground">{t('declareL1Loading')}</p>
+            <p className="text-micro text-muted-foreground">{t('declareL1Loading')}</p>
           ) : precedentsFailed ? (
-            <p className="text-[10px] text-muted-foreground">{t('declareL1LoadError')}</p>
+            <p className="text-micro text-muted-foreground">{t('declareL1LoadError')}</p>
           ) : precedents && precedents.length > 0 ? (
             <div className="space-y-1.5 rounded-lg border border-border bg-muted/20 p-2">
-              <p className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground">
+              <p className="flex items-center gap-1.5 text-micro font-medium text-muted-foreground">
                 <Sparkles className="size-3 text-info" aria-hidden />
                 {t('declareL1Title')}
               </p>
               {precedents.map((p) => (
-                <div key={p.entity_id} className="flex items-start gap-2 text-[10.5px]">
+                <div key={p.entity_id} className="flex items-start gap-2 text-micro">
                   <span className="mt-0.5 shrink-0 tabular-nums text-muted-foreground">{p.similarity.toFixed(2)}</span>
                   <div className="min-w-0 flex-1 space-y-0.5">
                     <p className="truncate text-foreground">{p.embedding_text}</p>
                     {p.hypothesis_status ? (
                       <p className="flex items-center gap-1.5 text-muted-foreground">
-                        <Badge variant={p.hypothesis_status === 'verified' ? 'success' : 'info'} className="text-[9px]">
+                        <Badge variant={p.hypothesis_status === 'verified' ? 'success' : 'info'} className="text-micro">
                           {p.hypothesis_status === 'verified' ? t('declareL1Verified') : t('declareL1FalsifiedLearn')}
                         </Badge>
                         {p.outcome_summary ?? null}
@@ -307,11 +307,11 @@ export function HypothesisDeclarationCard({
         </>
       ) : (
         <div className="space-y-2">
-          <input
+          <Input
             value={linkSearch}
             onChange={(e) => setLinkSearch(e.target.value)}
             placeholder={th('pickerSearch')}
-            className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            className="h-auto bg-background dark:bg-background"
           />
           {linkableHypotheses === null ? (
             <p className="py-2 text-center text-xs text-muted-foreground">{t('loading')}</p>
@@ -340,7 +340,7 @@ export function HypothesisDeclarationCard({
             </div>
           )}
           {value.linkedPreview ? (
-            <div className="flex items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2 text-[11px]">
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2 text-editorial-meta">
               <span className="min-w-0 flex-1 truncate text-foreground">{value.linkedPreview.statement}</span>
               <Badge variant="chip">{hypothesisStatusLabel(value.linkedPreview.status)}</Badge>
             </div>

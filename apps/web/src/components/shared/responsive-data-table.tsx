@@ -212,7 +212,7 @@ export function ResponsiveDataTable<T>({
                     <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 border-t border-border pt-1.5">
                       {metricColumns.map((col) => (
                         <div key={col.key} className="space-y-0.5">
-                          <p className="text-[11px] text-muted-foreground">{col.header}</p>
+                          <p className="text-editorial-meta text-muted-foreground">{col.header}</p>
                           <div className="font-medium text-foreground">{(col.renderCard ?? col.renderCell)(row, index)}</div>
                         </div>
                       ))}

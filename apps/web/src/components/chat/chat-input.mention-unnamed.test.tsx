@@ -53,7 +53,7 @@ afterEach(async () => {
 });
 
 function textarea(): HTMLTextAreaElement {
-  return container.querySelector('textarea') as HTMLTextAreaElement;
+  return container.querySelector('textarea[data-slot="textarea"]') as HTMLTextAreaElement;
 }
 
 async function typeAt(value = '@') {

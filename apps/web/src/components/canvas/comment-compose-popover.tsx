@@ -5,6 +5,8 @@ import { useTranslations } from 'next-intl';
 import { AnchoredPopover, isOutsidePress } from '@/components/shared/anchored-popover';
 import { leaveMultilineFieldOnEsc } from '@/lib/inner-layer-esc';
 import { useFieldDraft } from '@/hooks/use-field-draft';
+import { Textarea } from '@/components/ui/textarea';
+import { isImeComposing } from '@/lib/ime-composition';
 
 interface CommentComposePopoverProps {
   /** 성공이면 true — 그때만 초안을 지운다. */
@@ -92,17 +94,19 @@ export function CommentComposePopover({ onSubmit, onCancel, style, className, dr
 
   const fields = (
     <>
-      <textarea
+      <Textarea
         ref={inputRef}
         value={body}
         onChange={(e) => setBody(e.target.value)}
         onKeyDown={(e) => {
+          // 한글 등 입력기 조합 중의 엔터는 «글자 확정 키»다 — 보내기로 읽으면 반쯤 쓴 코멘트가 나가고 칸이 비워져 확정된 글자가 다음 코멘트로 또 나간다(4831 측정 중 발견).
+          if (isImeComposing(e)) return;
           if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
         }}
         placeholder={t('newThreadComposePlaceholder')}
         rows={2}
         // story #4373 — 화면 크기 그대로 읽히게(모바일 16px · 확대 방지).
-        className="w-full resize-none rounded-md border border-border bg-background px-2 py-1 text-base text-foreground lg:text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        className="min-h-0 resize-none px-2 py-1 text-foreground bg-background dark:bg-background"
       />
       <div className="mt-1.5 flex items-center justify-end gap-1.5">
         <button

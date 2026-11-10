@@ -18,6 +18,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { useConnectRulesHref } from '@/app/dashboard/dashboard-shell';
+import { Checkbox } from '@/components/ui/checkbox';
 import { blockedByConnection, deriveFailureAction, type CommandStatus, type FailureAction } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
 import { StatusChip } from '@/components/content/status-chip';
@@ -175,9 +176,9 @@ export function NewsletterSendStatus({ gate, orgId, displayTimezone, onRetried }
             <span className="block" data-testid="channel-post-retry-confirm-reversible">{t('channelPostsRetryConfirmReversible')}</span>
             {isNeedsCheckGate ? (
               <label className="mt-2 flex items-center gap-2 text-sm text-foreground">
-                <input
-                  type="checkbox" checked={checklistConfirmed}
-                  onChange={(e) => setChecklistConfirmed(e.target.checked)}
+                <Checkbox
+                  checked={checklistConfirmed}
+                  onCheckedChange={(checked) => setChecklistConfirmed(checked)}
                   data-testid="channel-post-retry-confirm-checklist"
                 />
                 {t('channelPostsRetryConfirmChecklist')}

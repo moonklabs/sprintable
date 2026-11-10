@@ -120,4 +120,45 @@ describe('/api/storage/local/[...path]', () => {
     const body = Buffer.from(await getRes.arrayBuffer()).toString('utf8');
     expect(body).toBe('roundtrip content');
   });
+
+  // story 4860 — the local provider is the ONE path that serves an uploaded file from OUR OWN origin (self-hosting). An upload's type is whatever the uploader declared (a person or
+  // an agent can declare text/html or image/svg+xml with a script inside), so this route must never hand it back as that type: a browser that opens it as text/html would run the
+  // script in our origin. It answers every object as application/octet-stream (a browser downloads that instead of drawing it — measured in Chromium 2026-11-08: top-level open of an
+  // octet-stream response with `inline` started a download and ran nothing). Nothing held this before: the tests above check the status and the body only.
+  async function putThenGet(objectPath: string, content: string, readQuery: Record<string, string> = {}) {
+    const { GET, PUT } = await import('./route');
+    const exp = Date.now() + 60_000;
+    const params = { params: Promise.resolve({ path: [CONTAINER, ...objectPath.split('/')] }) };
+    const writeSig = signLocalObject(SECRET, CONTAINER, objectPath, exp, 'PUT');
+    const putRes = await PUT(new Request(url(`${CONTAINER}/${objectPath}`, { exp: String(exp), sig: writeSig }), { method: 'PUT', body: content }) as never, params);
+    expect(putRes.status).toBe(200);
+    const readSig = signLocalObject(SECRET, CONTAINER, objectPath, exp);
+    return GET(new Request(url(`${CONTAINER}/${objectPath}`, { exp: String(exp), sig: readSig, ...readQuery })) as never, params);
+  }
+
+  it.each([
+    ['page.html', '<!doctype html><script>document.title = "ran"</script>'],
+    ['pic.svg', '<svg xmlns="http://www.w3.org/2000/svg" onload="document.title = 1"><script>1</script></svg>'],
+    ['note.txt', 'plain'],
+  ])('GET: %s는 저장된 모양과 상관없이 application/octet-stream으로만 내려간다(우리 출처에서 그려지지 않음)', async (name, content) => {
+    const res = await putThenGet(`chat/p1/c1/${name}`, content);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/octet-stream');
+    expect(Buffer.from(await res.arrayBuffer()).toString('utf8')).toBe(content);   // the bytes themselves are untouched
+  });
+
+  it.each([
+    ['(없음)', {}, 'inline'],
+    ['attachment', { disposition: 'attachment' }, 'attachment'],
+    ['inline', { disposition: 'inline' }, 'inline'],
+    ['그 밖의 값', { disposition: 'whatever' }, 'inline'],
+  ])('GET: disposition=%s → content-disposition %s', async (_label, query, want) => {
+    const res = await putThenGet('chat/p1/c1/page.html', '<script>1</script>', query as Record<string, string>);
+    expect(res.headers.get('content-disposition')).toBe(want);
+  });
+
+  it('GET: 응답은 캐시되지 않는다(private, no-store)', async () => {
+    const res = await putThenGet('chat/p1/c1/hello.txt', 'x');
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
+  });
 });

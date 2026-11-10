@@ -97,8 +97,8 @@ export function PulseCard({ expanded: expandedProp, onExpandedChange }: PulseCar
         <span className="flex size-5.5 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
           <Gauge className="size-3" aria-hidden="true" />
         </span>
-        <span className="text-[12.5px] font-semibold text-foreground">{t('pulseLabel')}</span>
-        <span className="min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground">{epicSummary}</span>
+        <span className="text-xs font-semibold text-foreground">{t('pulseLabel')}</span>
+        <span className="min-w-0 flex-1 truncate text-editorial-meta text-muted-foreground">{epicSummary}</span>
         {expanded ? (
           <ChevronUp className="ml-auto size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         ) : (
@@ -109,7 +109,7 @@ export function PulseCard({ expanded: expandedProp, onExpandedChange }: PulseCar
         <div className="space-y-2.5 border-t border-border p-2.5 pt-2">
           {data.activeEpic && (
             <div className="rounded-lg bg-muted/40 p-2.5">
-              <div className="flex items-center justify-between gap-2 text-[11px]">
+              <div className="flex items-center justify-between gap-2 text-editorial-meta">
                 <span className="min-w-0 truncate text-foreground">{data.activeEpic.title}</span>
                 <span className="shrink-0 font-mono text-muted-foreground">{data.activeEpic.completionPct}%</span>
               </div>
@@ -121,13 +121,13 @@ export function PulseCard({ expanded: expandedProp, onExpandedChange }: PulseCar
           <div className="grid grid-cols-2 gap-2">
             {data.failedRuns !== null && (
               <div className="rounded-lg bg-muted/40 p-2.5">
-                <p className="text-[10.5px] text-muted-foreground">{tDashboard('ccRiskFailedRuns')}</p>
+                <p className="text-micro text-muted-foreground">{tDashboard('ccRiskFailedRuns')}</p>
                 <p className="font-mono text-sm font-semibold text-foreground">{data.failedRuns}</p>
               </div>
             )}
             {data.cycleTime !== null && (
               <div className="rounded-lg bg-muted/40 p-2.5">
-                <p className="text-[10.5px] text-muted-foreground">{tDashboard('ccCycleTitle')}</p>
+                <p className="text-micro text-muted-foreground">{tDashboard('ccCycleTitle')}</p>
                 <p className="text-sm font-semibold text-foreground">
                   {data.cycleTime.sample > 0 ? tDashboard('ccCycleValue', { days: data.cycleTime.avgDays ?? 0, n: data.cycleTime.sample }) : tDashboard('ccCycleEmpty')}
                 </p>
@@ -135,17 +135,17 @@ export function PulseCard({ expanded: expandedProp, onExpandedChange }: PulseCar
             )}
             {data.contribution !== null && (
               <div className="rounded-lg bg-muted/40 p-2.5">
-                <p className="text-[10.5px] text-muted-foreground">{tDashboard('ccContributionTitle')}</p>
-                <p className="text-[11px] font-semibold text-foreground">
+                <p className="text-micro text-muted-foreground">{tDashboard('ccContributionTitle')}</p>
+                <p className="text-editorial-meta font-semibold text-foreground">
                   {tDashboard('ccContributionValue', { agent: data.contribution.agent, human: data.contribution.human, unassigned: data.contribution.unassigned })}
                 </p>
               </div>
             )}
             {data.costTrend !== null && (
               <div className="rounded-lg bg-muted/40 p-2.5">
-                <p className="text-[10.5px] text-muted-foreground">{t('pulseCostTrendLabel')}</p>
+                <p className="text-micro text-muted-foreground">{t('pulseCostTrendLabel')}</p>
                 <p className="font-mono text-sm font-semibold text-foreground">
-                  {sparkline(data.costTrend.points)} <span className="text-[11px] text-muted-foreground">${data.costTrend.totalUsd.toFixed(0)}</span>
+                  {sparkline(data.costTrend.points)} <span className="text-editorial-meta text-muted-foreground">${data.costTrend.totalUsd.toFixed(0)}</span>
                 </p>
               </div>
             )}

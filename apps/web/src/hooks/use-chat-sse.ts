@@ -17,7 +17,11 @@ export interface SendAttachment {
 // Mirrors backend _to_chat_message: { id, thread_id, sender: { id, name, type }, ... }
 export interface ChatMessage {
   id: string;
-  memo_id: string;        // backend: thread_id (conversation_id for group chats)
+  memo_id: string;        // backend: thread_id (conversation_id for group chats) — for a THREAD REPLY this is the parent message's id, not the conversation's
+  /** story 4856 — the conversation the message belongs to (a thread reply included): what a signed-URL request for its attachments must name. `memo_id` cannot serve:
+   * for a thread reply it is the parent message's id, which the backend answers «conversation not found» (the picture in a thread never showed). Optional: fixtures and
+   * older shapes that carry only `memo_id` fall back to it where it is read. */
+  conversation_id?: string;
   created_by: string;     // backend: sender.id
   sender_name: string;    // backend: sender.name
   sender_type: string;    // backend: sender.type ('human' | 'agent')
@@ -120,6 +124,10 @@ export interface ChatMessage {
     outcome: 'executed' | 'denied' | 'not_found' | 'ambiguous' | 'invalid_args';
     candidates?: string[];
     target_story_number?: number;
+    /** story 4847 (AC-명령) — a machine reason the server adds ONLY to some cards (additive; other cards carry none). `ROOM_HAS_NO_PROJECT`: the command was
+     * typed in a room that has no project, so the server did not run it (a story number is per project) — `outcome` is `denied`, `content` is an English fallback
+     * line. A code this web does not know is ignored: the card is drawn as before. */
+    code?: string;
   } | null;
 }
 
@@ -202,10 +210,13 @@ export function sentMessageFromAnswer(raw: Record<string, unknown>): ChatMessage
 // Normalize backend _to_chat_message format → ChatMessage
 export function normalizeToMessage(raw: Record<string, unknown>): ChatMessage {
   const sender = raw.sender as { id?: string; name?: string; type?: string; avatar_url?: string | null; runtime_type?: string | null } | undefined;
+  // conversation:message uses conversation_id; chat:message uses thread_id or memo_id
+  const memoId = (raw.thread_id ?? raw.memo_id ?? raw.conversation_id ?? '') as string;
   return {
     id: (raw.id ?? '') as string,
-    // conversation:message uses conversation_id; chat:message uses thread_id or memo_id
-    memo_id: (raw.thread_id ?? raw.memo_id ?? raw.conversation_id ?? '') as string,
+    memo_id: memoId,
+    // story 4856 — the real conversation id when the message says it (every current read and SSE shape does); otherwise what `memo_id` was (the older shapes, where it IS the conversation)
+    conversation_id: typeof raw.conversation_id === 'string' && raw.conversation_id ? raw.conversation_id : memoId,
     created_by: (raw.created_by ?? sender?.id ?? '') as string,
     sender_name: (sender?.name ?? '') as string,
     sender_type: (sender?.type ?? 'human') as string,

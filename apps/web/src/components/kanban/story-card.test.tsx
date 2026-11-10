@@ -91,7 +91,7 @@ describe('StoryCard — story #32dcc294 제목 파싱(카테고리 칩+lead)', (
     expect(markup).toContain('Workcell·콘텐츠 ③');
     // claim(line-clamp-2) div는 lead만 담는다 — 카드 바깥 title 툴팁 속성은 접근성상 원문
     // 전체를 보존해야 하므로(별개 관심사) 거기까지 검사 범위를 넓히지 않는다.
-    const claimMatch = markup.match(/class="mt-1\.5 line-clamp-2 text-\[12\.5px\] font-semibold leading-snug text-proof-ink">([^<]*)</);
+    const claimMatch = markup.match(/class="mt-1\.5 line-clamp-2 text-xs font-semibold leading-snug text-proof-ink">([^<]*)</);
     expect(claimMatch).toBeTruthy();
     expect(claimMatch![1]).toBe('goal/DoD 구조화 소스 트랙');
   });

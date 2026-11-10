@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode, type SetStateAction } from 'react';
 import { cn } from '@/lib/utils';
-import { useFocusTrap } from '@/hooks/use-focus-trap';
+import { Sheet, SheetContent } from '@/components/ui/sheet';
 
 const INLINE_PANEL_MEDIA_QUERY = '(min-width: 1536px)';
 
@@ -163,10 +163,6 @@ export function ContextualPanelLayout({
   drawerWidthClassName = 'w-[min(92vw,24rem)]',
   drawerSide = 'left',
 }: ContextualPanelLayoutProps) {
-  // story #2061 — renderPanel이 inline/drawer 두 모드를 겸해 base-ui Dialog Popup으로 감쌀 수
-  // 없다(hard). 대신 최소 포커스 트랩(Tab 순환+Esc+포커스 반환)을 직접 배선한다.
-  const trapRef = useFocusTrap(drawerOpen, useCallback(() => onDrawerOpenChange(false), [onDrawerOpenChange]));
-
   return (
     <>
       <div className={cn('grid gap-4', inlinePanelOpen ? inlineColumnsClassName : 'grid-cols-1', className)}>
@@ -178,34 +174,23 @@ export function ContextualPanelLayout({
         <div className={cn('min-w-0', contentClassName)}>{children}</div>
       </div>
 
-      {drawerOpen ? (
-        <div
-          ref={trapRef}
-          tabIndex={-1}
-          className="fixed inset-0 z-50 outline-none 2xl:hidden"
-          role="dialog"
-          aria-modal="true"
+      {/* 서랍 가지 — story 4831: 손으로 지은 role=dialog + 가림막 단추 + useFocusTrap 대신 바탕 Sheet. 모달 · 가림막 · 초점(진입 · 가두기 · 반환) · Esc 한 층은 Sheet(Base UI)가 맡는다.
+          (옛 주석은 «renderPanel이 inline/drawer 겸용이라 Dialog로 못 감싼다»였지만, 서랍 가지에서만 renderPanel({ mode: 'drawer' })를 따로 부르므로 이 가지만 감싸면 된다.)
+          패널(GlassPanel 등)이 자기 카드 면을 가져서 Sheet는 «투명 껍데기»로만 쓴다(면 · 테두리는 같은 변형으로 덮어쓰고, 그림자는 !shadow-none — tailwind-merge가 shadow-[var(--elev-overlay)]와 shadow-none을 합치지 않아 두 클래스가 다 남으므로 CSS 순서에 기대지 않게 중요 표시로 못 박는다) — 카드 위에 카드가 겹치지 않는다.
+          폭과 안쪽 여백 12px는 같은 안쪽 칸이 가진다(옛 서랍과 같게: 폭에 여백이 «포함»돼 카드 = 폭 − 24px — 여백을 껍데기에 주면 카드가 24px 넓어진다. 실제 Chromium으로 재서 잡았다).
+          넓은 화면(2xl 이상)으로 넘어가면 서랍을 닫는 것은 useContextualPanelState가 한다 — 모달은 CSS로 숨겨도 열려 남으므로 2xl:hidden을 두지 않는다. */}
+      <Sheet open={drawerOpen} onOpenChange={(open) => onDrawerOpenChange(open)}>
+        <SheetContent
+          side={drawerSide}
+          showCloseButton={false}
           aria-label={drawerAriaLabel}
+          className="gap-0 bg-transparent !shadow-none data-[side=left]:w-auto data-[side=right]:w-auto data-[side=left]:border-r-0 data-[side=right]:border-l-0 data-[side=left]:sm:max-w-none data-[side=right]:sm:max-w-none"
         >
-          <button
-            type="button"
-            aria-label={drawerAriaLabel}
-            className="absolute inset-0 bg-black/55 backdrop-blur-[2px]"
-            onClick={() => onDrawerOpenChange(false)}
-          />
-          <div
-            className={cn(
-              'absolute inset-y-0 p-3',
-              drawerWidthClassName,
-              drawerSide === 'left' ? 'left-0' : 'right-0',
-            )}
-          >
-            <div className="flex h-full min-h-0 flex-col">
-              {renderPanel({ mode: 'drawer', closePanel: () => onDrawerOpenChange(false) })}
-            </div>
+          <div className={cn('flex h-full min-h-0 flex-col p-3', drawerWidthClassName)}>
+            {renderPanel({ mode: 'drawer', closePanel: () => onDrawerOpenChange(false) })}
           </div>
-        </div>
-      ) : null}
+        </SheetContent>
+      </Sheet>
     </>
   );
 }

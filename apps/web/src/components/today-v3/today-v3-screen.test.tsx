@@ -184,3 +184,18 @@ describe('TodayV3Screen — 1콜', () => {
     expect(todayCalls).toHaveLength(1);
   });
 });
+
+// story #4833 — the v3 Today shows «에이전트 상태» too (codex: it was wired only into the org-briefing shell)
+describe('TodayV3Screen — agent states (story #4833)', () => {
+  it('renders the «에이전트 상태» section', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/today') return { ok: true, status: 200, json: async () => ({ data: EMPTY_TODAY }) };
+      if (url === '/api/agents/desktop-sessions') return { ok: true, status: 200, json: async () => ({ data: [], meta: { totalCount: 0 } }) };
+      return { ok: true, status: 200, json: async () => ({ data: null }) };
+    });
+    await mount();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="agent-state-section"]')).toBeTruthy();
+    expect(container.textContent).toContain('에이전트 상태');
+  });
+});

@@ -15,6 +15,7 @@ import { useCallback, useRef, useState } from 'react';
 import { Check, Copy, KeyRound, Loader2, Terminal } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { cardVariants } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth, refreshSessionAfterChange } from '@/lib/db/client';
@@ -328,7 +329,7 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
 
       {made && !revoked ? (
         <div className="space-y-2" data-testid="advanced-ready">
-          <div className="flex gap-0 rounded-md border border-border bg-muted p-[3px]" role="group" aria-label={t('runtimeLabel')}>
+          <div className="flex gap-0 rounded-md border border-border bg-muted p-1" role="group" aria-label={t('runtimeLabel')}>
             {(['claude', 'codex'] as const).map((rt, i) => (
               <Button
                 key={rt}
@@ -368,16 +369,16 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
             {revokeFailed ? <p role="alert" className="w-full break-keep text-foreground" data-testid="advanced-revoke-failed">{t('revokeFailed')}</p> : null}
           </div>
 
-          {/* the clipboard refused: the real line is not drawn until the person asks for it — here, right under the key's warning */}
+          {/* the clipboard refused: the real line is not drawn until the person asks for it — here, right under the key's warning. The box is a destructive tint (bg-destructive-tint), so the textarea inside keeps an opaque face (the part is transparent · dark:bg-input/30) */}
           {copyFailedLine ? (
             <div className="space-y-1.5 rounded-md border border-destructive/30 bg-destructive-tint p-3">
               <p role="alert" className="break-keep text-xs text-foreground">{t('copyFailed')}</p>
               {rawShownFor === copyFailedLine ? (
-                <textarea
+                <Textarea
                   readOnly
                   value={copyFailedLine}
                   onFocus={(e) => e.currentTarget.select()}
-                  className="w-full resize-none rounded border border-border bg-background p-2 font-mono text-base text-foreground lg:text-xs"
+                  className="resize-none bg-background p-2 font-mono lg:text-xs dark:bg-background"
                   rows={4}
                   data-testid="advanced-copy-failed-raw"
                 />

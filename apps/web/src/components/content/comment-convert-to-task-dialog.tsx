@@ -13,6 +13,8 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { getEntityHref } from '@/components/chat/embed-card';
 import { CommentBodyText } from '@/components/content/comment-body-text';
 import type { CommentItem } from '@/components/content/comments-section';
@@ -112,12 +114,12 @@ export function CommentConvertToTaskDialog({ postTitle, comment, onClose, onSubm
               <label className="text-xs font-medium text-muted-foreground" htmlFor="comments-convert-title">
                 {t('commentsConvertTitleLabel')}
               </label>
-              <input
+              <Input
                 id="comments-convert-title"
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="h-auto bg-background dark:bg-background"
               />
             </div>
 
@@ -125,13 +127,13 @@ export function CommentConvertToTaskDialog({ postTitle, comment, onClose, onSubm
               <label className="text-xs font-medium text-muted-foreground" htmlFor="comments-convert-note">
                 {t('commentsConvertNoteLabel')}
               </label>
-              <textarea
+              <Textarea
                 id="comments-convert-note"
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 placeholder={t('commentsConvertNotePlaceholder')}
                 rows={3}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="min-h-0 bg-background dark:bg-background"
               />
             </div>
 

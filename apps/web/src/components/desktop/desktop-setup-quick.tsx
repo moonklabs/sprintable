@@ -1,11 +1,14 @@
 'use client';
 
+import { useEmbeddedServer } from '@/components/embedded-server-context';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { isEEEnabled } from '@/lib/ee';
@@ -45,7 +48,7 @@ function progressIdOf(fromAnswer: unknown, fromAddress: string | null): string |
   return fromAddress && SETUP_UUID.test(fromAddress) ? fromAddress : null;
 }
 
-export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { query: SetupQuery; onTeam: () => void; /** story 4711 (`agent=` branch): the recruiter's agent, already checked movable — the card's ① is that one agent (read-only) and «시작» is the MOVE confirmation, never a new agent */ agent?: AttachableAgent; /** the move could not be confirmed because the agent is no longer movable (left the project …): the wrapper falls to the recipe page with its reasons */ onNotMovable?: () => void }) {
+export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }: { query: SetupQuery; onTeam: () => void; /** story 4832: the app can take a move → a link under the card to the recipe page with «이미 있는 에이전트 옮기기» chosen (a person with agents already is not left to guess that the team link holds it) */ onMove?: () => void; /** story 4711 (`agent=` branch): the recruiter's agent, already checked movable — the card's ① is that one agent (read-only) and «시작» is the MOVE confirmation, never a new agent */ agent?: AttachableAgent; /** the move could not be confirmed because the agent is no longer movable (left the project …): the wrapper falls to the recipe page with its reasons */ onNotMovable?: () => void }) {
   const t = useTranslations('desktop.setup');
   const tNewOrg = useTranslations('desktopOnboarding');
   const tOnboarding = useTranslations('onboarding');
@@ -67,7 +70,8 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
   const [phoneControlPicked, setPhoneControl] = useState<boolean | null>(null);
   const phoneControl = phoneControlPicked ?? !remoteReadFailed;
   const [phoneControlFailed, setPhoneControlFailed] = useState(false);
-  const showPhoneControl = newOrg || (orgMode.kind === 'has-org' && (remoteReadFailed || (!!remoteState && remoteState.can_change && !remoteState.enabled)));
+  const embedded = useEmbeddedServer(); // story 4832: the app's own server has no phone relay — no tick, so no PUT either (`turnPhoneControlOn` gates on this)
+  const showPhoneControl = !embedded && (newOrg || (orgMode.kind === 'has-org' && (remoteReadFailed || (!!remoteState && remoteState.can_change && !remoteState.enabled))));
   const phoneOrgRef = useRef<string | null>(null);
   async function turnPhoneControlOn(phoneOrg: string | null | undefined) {
     if (!showPhoneControl || !phoneControl || !phoneOrg) return;
@@ -200,7 +204,7 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
         setMadeSetupId(made);
         if (!projectId && !(await joinNewOrg({ project_id: agentProject }))) { setView({ kind: 'done-reload' }); return; }
         await turnPhoneControlOn(orgId);
-        if (made) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(made)); // a reload goes back to the progress (as the solo start does)
+        if (made) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(made, query.canWorkdir === true)); // a reload goes back to the progress (as the solo start does)
         setView({ kind: 'started' });
         return;
       }
@@ -246,7 +250,7 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
         if ((newOrg || !projectId) && !(await joinNewOrg(newOrg ? okBody : { project_id: okBody?.project_id ?? useProject ?? matched?.projectId }))) { setView({ kind: 'done-reload' }); return; }
         await turnPhoneControlOn(newOrg ? okBody?.org_id ?? null : orgId); // story 4670 AC1: after the start went through — the one PUT, or none
         // a reload from here goes back to this setup's progress (the id is in the address the app opened), not to «앱에서 열어 주세요» — as the recipe page's reload does (4429 ①)
-        if (made) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(made));
+        if (made) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + PROGRESS_FRAGMENT(made, query.canWorkdir === true));
         setView({ kind: 'started' });
         return;
       }
@@ -296,8 +300,8 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
   const reloadKeepingSetup = () => { window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search + setupFragment(query)); window.location.reload(); };
   if (orgMode.kind === 'invited') return <InvitedInApp invites={orgMode.invites} onReload={reloadKeepingSetup} />;
   if (orgMode.kind === 'has-org' && !isAdmin) return <Failure failure="not-admin" onReloadPage={reloadKeepingSetup} />;
-  if (view.kind === 'done-reload') return <SetupDoneReload setupId={madeSetupId} />;
-  if (view.kind === 'started') return <SetupProgressView setupId={madeSetupId} recipeName="" phoneControlFailed={phoneControlFailed} onPhoneRetry={retryPhoneControl} />;
+  if (view.kind === 'done-reload') return <SetupDoneReload setupId={madeSetupId} canWorkdir={query.canWorkdir === true} />;
+  if (view.kind === 'started') return <SetupProgressView setupId={madeSetupId} recipeName="" phoneControlFailed={phoneControlFailed} onPhoneRetry={retryPhoneControl} canWorkdir={query.canWorkdir === true} />;
   if (view.kind === 'failed') {
     const onReloadPage = view.failure === 'has-org' || view.failure === 'not-admin' ? reloadKeepingSetup : undefined;
     return <Failure failure={view.failure} counts={view.counts ?? null} plan={view.plan ?? null} solo onRetry={view.failure === 'offline' ? () => void (agent ? startAgent() : start(limitAsk?.id)) : undefined} onReloadPage={onReloadPage} />;
@@ -346,15 +350,23 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
               <MovedAgentNote agent={agent} />
             </div>
           ) : usable.length > 1 ? (
-            <div role="radiogroup" aria-labelledby="quick-step-agent" className="flex flex-col gap-1">
+            <RadioGroup name="quick-runtime" aria-labelledby="quick-step-agent" className="gap-1" value={runtime ?? null} onValueChange={(v) => { const picked = usable.find((u) => u === v); if (picked) setPickedFor({ folderKey, runtime: picked }); }}
+              // onClick too: pressing the radio a folder's mark already picked fires no change event, yet it is the person's own choice (4713 · codex 01a151a1).
+              // The click reaches the visible control (a span) or, from a press on the label's text, its hidden input — both bubble here.
+              onClick={(e) => {
+                const t = e.target as Element;
+                const v = t instanceof HTMLInputElement && t.type === 'radio' ? t.value : t.closest('[role=radio]')?.getAttribute('data-runtime');
+                const picked = usable.find((u) => u === v);
+                if (picked) setPickedFor({ folderKey, runtime: picked });
+              }}>
               {usable.map((r) => (
                 <label key={r} className="flex items-center gap-2 text-sm">
-                  <input type="radio" name="quick-runtime" checked={runtime === r} onChange={() => setPickedFor({ folderKey, runtime: r })} onClick={() => setPickedFor({ folderKey, runtime: r })} /> {/* onClick too: pressing the radio a folder's mark already picked fires no change event, yet it is the person's own choice (4713 · codex 01a151a1) */}
+                  <RadioGroupItem value={r} data-runtime={r} />
                   <span>{RUNTIME_LABEL[r]}</span>
                   {withVersion(r) ? <span className="text-xs text-muted-foreground">{withVersion(r)}</span> : null}
                 </label>
               ))}
-            </div>
+            </RadioGroup>
           ) : (
             <p className="flex items-center gap-2 text-sm"><span>{runtime ? RUNTIME_LABEL[runtime] : ''}</span>{runtime && withVersion(runtime) ? <span className="text-xs text-muted-foreground">{withVersion(runtime)}</span> : null}</p>
           )}
@@ -449,7 +461,7 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
               {showPhoneControl ? (
                 // story 4670 AC1 (Yuna §M): a bordered box, the phone icon, a semibold label, a bigger tick — one line inside the third step, just above «시작»
                 <div className="flex gap-3 rounded-md border p-3" data-testid="setup-phone-control">
-                  <input type="checkbox" id="quick-phone-control" checked={phoneControl} onChange={(e) => setPhoneControl(e.target.checked)} disabled={starting} className="mt-0.5 size-5 shrink-0 self-start accent-primary" />
+                  <Checkbox id="quick-phone-control" checked={phoneControl} onCheckedChange={(checked) => setPhoneControl(checked === true)} disabled={starting} className="mt-0.5 size-5 self-start" />
                   <label htmlFor="quick-phone-control" className="block min-w-0 flex-1 cursor-pointer break-keep">
                     <span className="flex items-center gap-1.5 text-sm font-semibold"><Smartphone className="size-4 shrink-0 text-primary" aria-hidden />{t('phoneControl.label')}</span>
                     <span className="mt-0.5 block text-xs text-muted-foreground">{t('phoneControl.help')}</span>
@@ -473,7 +485,12 @@ export function DesktopSetupQuick({ query, onTeam, agent, onNotMovable }: { quer
           <p className="text-xs text-muted-foreground">{t('toolNote')}</p>
         </section>
       </Card>
-      {agent ? null : <p className="text-sm"><Button type="button" variant="link" className="h-auto p-0 underline underline-offset-2" disabled={starting} onClick={onTeam}>{t('quick.team')}</Button></p>}
+      {agent ? null : (
+        <p className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+          {onMove ? <Button type="button" variant="link" className="h-auto p-0 underline underline-offset-2" disabled={starting} onClick={onMove} data-testid="quick-move">{t('quick.move')}</Button> : null}
+          <Button type="button" variant="link" className="h-auto p-0 underline underline-offset-2" disabled={starting} onClick={onTeam}>{t('quick.team')}</Button>
+        </p>
+      )}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { FileText, AlertCircle, RefreshCw } from 'lucide-react';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
 
@@ -168,10 +169,10 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
       <NodeViewWrapper data-testid="page-embed-picker">
         <form
           onSubmit={handleSubmit}
-          className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/4 px-4 py-3"
+          className="flex items-center gap-2 rounded-xl border border-overlay-line-1 bg-overlay-fill-1 px-4 py-3"
         >
           <FileText className="size-4 shrink-0 text-muted-foreground" />
-          <input
+          <Input
             ref={inputRef}
             type="text"
             value={inputSlug}
@@ -179,7 +180,8 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
             placeholder={tDocs('pageEmbedPlaceholder')}
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? errorId : undefined}
-            className="flex-1 bg-transparent text-base lg:text-sm outline-none placeholder:text-muted-foreground"
+            // 겹침색 면(bg-overlay-fill-1) 안이라 흐린 안내 글자를 받치는 불투명 면을 남긴다(부품은 투명 · dark:bg-input/30).
+            className="min-w-0 flex-1 bg-card dark:bg-card"
             autoFocus
           />
           <button
@@ -204,7 +206,7 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
   if (loading) {
     return (
       <NodeViewWrapper data-testid="page-embed-loading">
-        <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/4 px-4 py-3 text-sm text-muted-foreground">
+        <div className="flex items-center gap-2 rounded-xl border border-overlay-line-1 bg-overlay-fill-1 px-4 py-3 text-sm text-muted-foreground">
           <RefreshCw className="size-4 shrink-0 animate-spin" />
           <span>{tDocs('pageEmbedLoading')}</span>
         </div>
@@ -216,7 +218,7 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
   if (error) {
     return (
       <NodeViewWrapper data-testid="page-embed-error">
-        <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/4 px-4 py-3">
+        <div className="flex items-center gap-2 rounded-xl border border-overlay-line-1 bg-overlay-fill-1 px-4 py-3">
           <AlertCircle className="size-4 shrink-0 text-muted-foreground" />
           {/* story #4371(유나 판) — 한국어 오류 문장이 낱말 중간(음절)에서 꺾이지 않게(입력칸 오류 줄과 같은 break-keep). */}
           <span className="min-w-0 flex-1 break-keep text-sm text-muted-foreground [overflow-wrap:anywhere]">{error}</span>
@@ -243,7 +245,7 @@ export function PageEmbedView({ node, updateAttributes, extension }: ReactNodeVi
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') onNavigate?.(doc.slug);
           }}
-          className="group flex cursor-pointer items-center gap-3 rounded-xl border border-white/8 bg-white/4 px-4 py-3 transition-colors hover:border-brand/30 hover:bg-brand/6"
+          className="group flex cursor-pointer items-center gap-3 rounded-xl border border-overlay-line-1 bg-overlay-fill-1 px-4 py-3 transition-colors hover:border-brand/30 hover:bg-brand/6"
         >
           {doc.icon ? (
             <span className="shrink-0 text-lg">{doc.icon}</span>

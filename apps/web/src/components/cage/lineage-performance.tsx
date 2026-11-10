@@ -46,7 +46,7 @@ function shortId(id: string): string {
 function DerivedRef({ edge }: { edge: MaterialLineageEdge }) {
   const t = useTranslations('cage');
   return (
-    <span className="font-mono text-[11px] text-muted-foreground">
+    <span className="font-mono text-editorial-meta text-muted-foreground">
       {t('lineageDerivedRef', { kind: edge.derived_kind, id: shortId(edge.derived_id) })}
     </span>
   );
@@ -58,7 +58,7 @@ function VariantDisplayName({ edge }: { edge: MaterialLineageEdge }) {
   // 예전 시그니처는 이 스토리가 은퇴시켰다(#4063이 3742보다 늦게 develop에 착지해
   // 옛 시그니처를 그대로 썼던 자리 — rebase 시점에 잡힘).
   const channelLabel = useChannelLabel();
-  if (edge.channel) return <span className="text-[11.5px] font-medium text-foreground">{channelLabel(edge.channel)}</span>;
+  if (edge.channel) return <span className="text-editorial-meta font-medium text-foreground">{channelLabel(edge.channel)}</span>;
   return <DerivedRef edge={edge} />;
 }
 
@@ -71,7 +71,7 @@ function LineageVariantRow({ edge, primaryValue, maxValue }: {
   return (
     <div className="flex flex-wrap items-center gap-1.5 rounded-lg px-2 py-1.5 hover:bg-muted">
       <Badge variant="secondary">{t(RELATION_KIND_LABEL_KEY[edge.relation_kind])}</Badge>
-      {edge.variant_axis ? <span className="text-[11px] text-muted-foreground">{edge.variant_axis}</span> : null}
+      {edge.variant_axis ? <span className="text-editorial-meta text-muted-foreground">{edge.variant_axis}</span> : null}
       {edge.hook_key ? <Badge variant="info">{t('lineageHookKeyRef')}</Badge> : null}
       <VariantDisplayName edge={edge} />
       {isPublished ? (
@@ -79,14 +79,14 @@ function LineageVariantRow({ edge, primaryValue, maxValue }: {
           <div className="h-1.5 w-[70px] shrink-0 overflow-hidden rounded-full bg-muted">
             <div className="h-full rounded-full bg-info" style={{ width: `${widthPct}%` }} />
           </div>
-          <span className="w-[70px] shrink-0 text-right text-[11px] font-semibold tabular-nums text-foreground">
+          <span className="w-[70px] shrink-0 text-right text-editorial-meta font-semibold tabular-nums text-foreground">
             {primaryValue !== null
               ? primaryValue.toLocaleString()
               : <span className="font-normal text-muted-foreground">{t('rankedHooksPending')}</span>}
           </span>
         </>
       ) : (
-        <span className="text-[11px] text-muted-foreground">{t('lineageVariantUnpublished')}</span>
+        <span className="text-editorial-meta text-muted-foreground">{t('lineageVariantUnpublished')}</span>
       )}
     </div>
   );
@@ -115,9 +115,9 @@ function LineageTree({ edges, snapshotsByDerivedId }: {
             <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-brand bg-transparent px-2 py-1.5">
               <Badge className="bg-brand/15 text-foreground">{t('lineageTreeMasterBadge')}</Badge>
               {masterTitle
-                ? <span className="text-[12px] font-semibold text-foreground">{masterTitle}</span>
-                : <span className="font-mono text-[11px] text-muted-foreground">{shortId(node.sourceEvidenceId)}</span>}
-              <span className="text-[11px] text-muted-foreground">{t('lineageVariantCountSuffix', { n: variants.length })}</span>
+                ? <span className="text-xs font-semibold text-foreground">{masterTitle}</span>
+                : <span className="font-mono text-editorial-meta text-muted-foreground">{shortId(node.sourceEvidenceId)}</span>}
+              <span className="text-editorial-meta text-muted-foreground">{t('lineageVariantCountSuffix', { n: variants.length })}</span>
             </div>
             <div className="space-y-0.5 pl-3">
               {variants.map((edge) => (
@@ -159,23 +159,23 @@ function RankedHookList({ hookKeys, summaries }: { hookKeys: string[]; summaries
         const widthPct = value !== null && maxValue > 0 ? Math.round((value / maxValue) * 100) : 0;
         return (
           <Card key={hookKey} className="flex items-center gap-3 px-3 py-2">
-            <span className={`flex size-6 shrink-0 items-center justify-center rounded-md text-[12px] font-bold ${i === 0 ? 'bg-info-tint text-foreground' : 'bg-muted text-muted-foreground'}`}>
+            <span className={`flex size-6 shrink-0 items-center justify-center rounded-md text-xs font-bold ${i === 0 ? 'bg-info-tint text-foreground' : 'bg-muted text-muted-foreground'}`}>
               {i + 1}
             </span>
-            <span className="flex-1 truncate text-[12.5px] font-medium text-foreground">{hookKey}</span>
+            <span className="flex-1 truncate text-xs font-medium text-foreground">{hookKey}</span>
             <div className="h-2 w-[120px] shrink-0 overflow-hidden rounded-full bg-muted">
               <div className="h-full rounded-full bg-info" style={{ width: `${widthPct}%` }} />
             </div>
-            <span className="w-[90px] shrink-0 text-right text-[12.5px] font-semibold tabular-nums text-foreground">
-              {value !== null ? value.toLocaleString() : <span className="text-[11px] font-normal text-muted-foreground">{t('rankedHooksPending')}</span>}
+            <span className="w-[90px] shrink-0 text-right text-xs font-semibold tabular-nums text-foreground">
+              {value !== null ? value.toLocaleString() : <span className="text-editorial-meta font-normal text-muted-foreground">{t('rankedHooksPending')}</span>}
             </span>
-            <span className="w-[64px] shrink-0 text-right text-[11px] text-muted-foreground">
+            <span className="w-[64px] shrink-0 text-right text-editorial-meta text-muted-foreground">
               {summary ? t('rankedHooksVariantCount', { n: summary.variant_count }) : null}
             </span>
           </Card>
         );
       })}
-      {sorted.length === 0 ? <p className="text-[11.5px] text-muted-foreground">{t('rankedHooksNoData')}</p> : null}
+      {sorted.length === 0 ? <p className="text-editorial-meta text-muted-foreground">{t('rankedHooksNoData')}</p> : null}
     </div>
   );
 }
@@ -191,14 +191,14 @@ function HookPerformanceSummaryStrip({ hookKeys, summaries }: { hookKeys: string
 
   return (
     <div className="space-y-1.5">
-      <p className="text-[11px] font-semibold text-muted-foreground">{t('hookPerformanceSummaryTitle')}</p>
+      <p className="text-editorial-meta font-semibold text-muted-foreground">{t('hookPerformanceSummaryTitle')}</p>
       <div className="flex flex-wrap gap-1.5">
         <Badge variant="outline">{t('hookPerformanceSummaryHooks', { n: present.length })}</Badge>
         <Badge variant="outline">{t('hookPerformanceSummaryVariants', { n: totalVariants })}</Badge>
         <Badge variant="outline">{t('hookPerformanceSummarySnapshots', { n: totalSnapshots })}</Badge>
         {totalViews !== null ? <Badge variant="info">{t('hookPerformanceSummaryViews', { n: totalViews.toLocaleString() })}</Badge> : null}
       </div>
-      <p className="text-[11px] text-muted-foreground">{t('hookPerformanceSummaryScopeNote')}</p>
+      <p className="text-editorial-meta text-muted-foreground">{t('hookPerformanceSummaryScopeNote')}</p>
     </div>
   );
 }
@@ -227,19 +227,19 @@ export function LineagePerformancePanel({ workItemId }: LineagePerformancePanelP
 
   return (
     <div className="space-y-4" data-testid="lineage-performance-panel">
-      <p className="text-[11px] font-semibold text-muted-foreground">{t('lineagePerformanceSectionTitle')}</p>
+      <p className="text-editorial-meta font-semibold text-muted-foreground">{t('lineagePerformanceSectionTitle')}</p>
       <Card className="space-y-2 p-3">
-        <p className="text-[11px] font-semibold text-muted-foreground">{t('lineageTreeTitle')}</p>
+        <p className="text-editorial-meta font-semibold text-muted-foreground">{t('lineageTreeTitle')}</p>
         {materialPerformancesLoadFailed ? (
-          <p className="text-[11px] text-muted-foreground" data-testid="lineage-material-performance-load-error">{t('lineagePerformanceLoadFailed')}</p>
+          <p className="text-editorial-meta text-muted-foreground" data-testid="lineage-material-performance-load-error">{t('lineagePerformanceLoadFailed')}</p>
         ) : null}
         <LineageTree edges={edges} snapshotsByDerivedId={snapshotsByDerivedId} />
       </Card>
       {hookKeys.length > 0 ? (
         <Card className="space-y-2 p-3">
-          <p className="text-[11px] font-semibold text-muted-foreground">{t('rankedHooksTitle')}</p>
+          <p className="text-editorial-meta font-semibold text-muted-foreground">{t('rankedHooksTitle')}</p>
           {hookPerformancesLoadFailed ? (
-            <p className="text-[11px] text-muted-foreground" data-testid="lineage-hook-performance-load-error">{t('lineagePerformanceLoadFailed')}</p>
+            <p className="text-editorial-meta text-muted-foreground" data-testid="lineage-hook-performance-load-error">{t('lineagePerformanceLoadFailed')}</p>
           ) : null}
           <RankedHookList hookKeys={hookKeys} summaries={summaries} />
           <HookPerformanceSummaryStrip hookKeys={hookKeys} summaries={summaries} />

@@ -366,7 +366,7 @@ describe('ThreadPanel — 발신자 동명이인([SID:4311 PR 3])', () => {
       root.render(wrap(<ThreadPanel parentMessage={parent} conversationId="conv-1" currentTeamMemberId="member-1" projectId="proj-1" onClose={() => {}} />));
     });
     await flush();
-    const names = [...container.querySelectorAll('span.text-\\[11px\\].font-medium')].map((el) => el.textContent).filter((n) => n !== koMessages.chats.you);
+    const names = [...container.querySelectorAll('span.text-editorial-meta.font-medium')].map((el) => el.textContent).filter((n) => n !== koMessages.chats.you);
     expect(names).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '송윤재 · e75ca548', '안나']);
   });
 });

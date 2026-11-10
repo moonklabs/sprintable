@@ -146,7 +146,7 @@ function PipelineStepper({ stage }: { stage: WorkcellPipelineStage }) {
           <span key={s} className="flex items-center" role="listitem">
             <span
               className={cn(
-                'flex items-center gap-1.5 pr-1.5 text-[9px] leading-none',
+                'flex items-center gap-1.5 pr-1.5 text-micro leading-none',
                 color ? TRUST_TEXT_CLASS[color] : 'text-proof-faint',
                 isCurrent && 'font-bold',
                 !isCurrent && 'font-semibold',
@@ -164,7 +164,7 @@ function PipelineStepper({ stage }: { stage: WorkcellPipelineStage }) {
               />
               {label[s]}
             </span>
-            {i < PIPELINE_STAGES.length - 1 ? <span className="px-1 text-[9px] text-proof-line" aria-hidden="true">›</span> : null}
+            {i < PIPELINE_STAGES.length - 1 ? <span className="px-1 text-micro text-proof-line" aria-hidden="true">›</span> : null}
           </span>
         );
       })}
@@ -206,7 +206,7 @@ function ConfidenceGauge({ stage }: { stage: WorkcellPipelineStage }) {
   return (
     <div className="mb-2.5" role="progressbar" aria-valuemin={0} aria-valuemax={PIPELINE_STAGES.length} aria-valuenow={reachedCount} aria-valuetext={`${reachedCount}/${PIPELINE_STAGES.length} · ${label[stage]}`}>
       <div className="flex items-center gap-2.5">
-        <div className="relative h-[22px] flex-1 overflow-hidden rounded-[4px] bg-proof-sunk">
+        <div className="relative h-[22px] flex-1 overflow-hidden rounded-md bg-proof-sunk">
           {/* story #2984 §3 — 물리량 채움. 두 톤 반복 눈금(색 신호 아님, --proof-sunk/--proof-ink-3
               에서 color-mix로 파생 — 신규 하드코딩 색 0, §7 규율). */}
           <div
@@ -228,11 +228,11 @@ function ConfidenceGauge({ stage }: { stage: WorkcellPipelineStage }) {
             />
           ))}
         </div>
-        <span className="whitespace-nowrap font-mono text-[10px] text-proof-ink-3">
+        <span className="whitespace-nowrap font-mono text-micro text-proof-ink-3">
           {t('confidenceCaption', { done: reachedCount, total: PIPELINE_STAGES.length })}
         </span>
       </div>
-      <p className="mt-1 text-[11px] font-semibold text-proof-ink-2" data-testid="workcell-current-stage">{label[stage]}</p>
+      <p className="mt-1 text-editorial-meta font-semibold text-proof-ink-2" data-testid="workcell-current-stage">{label[stage]}</p>
     </div>
   );
 }
@@ -266,14 +266,14 @@ export function Workcell({ title, pipelineStage, brief, run, evidence, conversat
               "파이프라인 범위 밖" 표시(합성 stage 금지, #2933 H1 조건②). */}
           {pipelineStage
             ? (bentoLayout ? <ConfidenceGauge stage={pipelineStage} /> : <PipelineStepper stage={pipelineStage} />)
-            : <p className="text-[11px] font-semibold text-proof-ink-3" data-testid="workcell-out-of-pipeline">{t('outOfPipeline')}</p>}
-          <span className="text-[17px] font-bold leading-tight tracking-[-0.012em] text-proof-ink">{title}</span>
+            : <p className="text-editorial-meta font-semibold text-proof-ink-3" data-testid="workcell-out-of-pipeline">{t('outOfPipeline')}</p>}
+          <span className="text-base font-bold leading-tight tracking-[-0.012em] text-proof-ink">{title}</span>
           {/* story #2922 W4 — 책임자/실행자를 헤더로 승격("10초 리트머스": 스크롤 없이 «누가»가
               보임). #3339(2921 아바타 단일통합)가 ProofAvatar를 폐기·Avatar로 수렴시켰다 —
               여기도 그 정본을 그대로 소비(신규 변형 0). Brief 구획의 중복 표기는 제거(SSOT=
               헤더 이 한 자리). story #2993(PO 확定①) — owner=null(에이전트 단독배정)이면
               지어내지 않고 "책임자 미지정" 정직 표시(muted). */}
-          <div className="mt-2 flex flex-wrap items-center gap-3.5 text-[11px] text-proof-ink-3">
+          <div className="mt-2 flex flex-wrap items-center gap-3.5 text-editorial-meta text-proof-ink-3">
             <span className="inline-flex items-center gap-1.5">
               {brief.owner ? (
                 <>
@@ -315,16 +315,16 @@ export function Workcell({ title, pipelineStage, brief, run, evidence, conversat
             {/* story #2990 §4 fast-follow(유나 확定) — elev-overlay(오버레이 전용)는 인라인
                 카드에 과한 "팝오버처럼 분리" 신호라 elev-card(인라인 카드 전용, 약한 강도)로
                 교체. */}
-            <div className="lg:col-start-1 lg:row-start-1 lg:row-span-2 overflow-hidden rounded-[10px] border border-proof-line-strong bg-proof-panel shadow-[var(--elev-card)]">
+            <div className="lg:col-start-1 lg:row-start-1 lg:row-span-2 overflow-hidden rounded-xl border border-proof-line-strong bg-proof-panel shadow-[var(--elev-card)]">
               <EvidenceLayer evidence={evidence} />
             </div>
-            <div className="lg:col-start-3 lg:row-start-1 overflow-hidden rounded-[10px] border border-proof-line bg-proof-panel shadow-[0_1px_0_var(--proof-line)]">
+            <div className="lg:col-start-3 lg:row-start-1 overflow-hidden rounded-xl border border-proof-line bg-proof-panel shadow-[0_1px_0_var(--proof-line)]">
               <RunLayer run={run} />
             </div>
-            <div className="lg:col-start-3 lg:row-start-2 overflow-hidden rounded-[10px] border border-proof-line bg-proof-panel shadow-[0_1px_0_var(--proof-line)]">
+            <div className="lg:col-start-3 lg:row-start-2 overflow-hidden rounded-xl border border-proof-line bg-proof-panel shadow-[0_1px_0_var(--proof-line)]">
               <BriefLayer brief={brief} />
             </div>
-            <div className="lg:col-span-3 lg:row-start-3 overflow-hidden rounded-[10px] border border-proof-line bg-proof-panel shadow-[0_1px_0_var(--proof-line)]">
+            <div className="lg:col-span-3 lg:row-start-3 overflow-hidden rounded-xl border border-proof-line bg-proof-panel shadow-[0_1px_0_var(--proof-line)]">
               <ConversationLayer conversation={conversation} />
             </div>
           </div>
@@ -349,9 +349,9 @@ function LayerLabel({ title, question, className }: { title: string; question: s
   // 글자 사이 줄바꿈(설명 span이 길어 title 텍스트 노드까지 같이 꺾임). title을 전용
   // span으로 감싸 shrink-0+whitespace-nowrap 고정 — 줄바꿈/압축 대상에서 제외.
   return (
-    <div className={cn('flex items-center gap-1.5 text-[8.5px] font-bold uppercase tracking-[0.12em] text-proof-faint', className)}>
+    <div className={cn('flex items-center gap-1.5 text-micro font-bold uppercase tracking-[0.12em] text-proof-faint', className)}>
       <span className="shrink-0 whitespace-nowrap">{title}</span>
-      <span className="text-[9.5px] font-semibold normal-case tracking-normal text-proof-ink-3">— {question}</span>
+      <span className="text-micro font-semibold normal-case tracking-normal text-proof-ink-3">— {question}</span>
     </div>
   );
 }
@@ -361,7 +361,7 @@ function BriefMoreLink({ onClick, children }: { onClick: () => void; children: R
     <button
       type="button"
       onClick={onClick}
-      className="mt-0.5 text-[11.5px] font-semibold text-proof-blue hover:underline"
+      className="mt-0.5 text-editorial-meta font-semibold text-proof-blue hover:underline"
     >
       {children}
     </button>
@@ -378,8 +378,8 @@ function BriefLayer({ brief }: { brief: WorkcellBrief }) {
   return (
     <div className="h-full px-4.5 py-3.5">
       <LayerLabel title={t('briefTitle')} question={t('briefQuestion')} className="mb-2.5" />
-      <div className="flex gap-2 text-[13px] leading-[1.5] text-proof-ink-2">
-        <span className="w-16 shrink-0 pt-px text-[11px] text-proof-faint">{t('briefGoal')}</span>
+      <div className="flex gap-2 text-editorial-ui leading-[1.5] text-proof-ink-2">
+        <span className="w-16 shrink-0 pt-px text-editorial-meta text-proof-faint">{t('briefGoal')}</span>
         {/* story 38f524e1(critical, 선생님 실사고 2026-08-24) — flex 자식 기본 min-width:auto가
             긴 무단절 토큰(인라인 코드·경로)의 min-content 폭을 그대로 요구해 축소를 거부하고
             셀(246px) 밖까지 뻗어 조상 overflow-hidden에 글자 중간이 잘렸다. min-w-0으로 축소
@@ -390,8 +390,8 @@ function BriefLayer({ brief }: { brief: WorkcellBrief }) {
           {brief.onGoalMore ? <BriefMoreLink onClick={brief.onGoalMore}>{t('briefMore')}</BriefMoreLink> : null}
         </div>
       </div>
-      <div className="mt-1.5 flex gap-2 text-[13px] leading-[1.5] text-proof-ink-2">
-        <span className="w-16 shrink-0 pt-px text-[11px] text-proof-faint">{t('briefDod')}</span>
+      <div className="mt-1.5 flex gap-2 text-editorial-ui leading-[1.5] text-proof-ink-2">
+        <span className="w-16 shrink-0 pt-px text-editorial-meta text-proof-faint">{t('briefDod')}</span>
         <div className="min-w-0">
           {dodLead != null ? (
             <>
@@ -416,9 +416,9 @@ function BriefLayer({ brief }: { brief: WorkcellBrief }) {
       {/* story #2922 W4 — owner/agent는 헤더로 승격됐다(위 Workcell 헤더 참조, SSOT 이동).
           scopes만 남아 briefRoles 라벨을 계승. */}
       {brief.scopes && brief.scopes.length > 0 ? (
-        <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[13px] leading-[1.5] text-proof-ink-2">
-          <span className="w-16 shrink-0 pt-px text-[11px] text-proof-faint">{t('briefRoles')}</span>
-          <span className="min-w-0 break-words font-mono text-[10.5px] text-proof-ink-3">{brief.scopes.join(' · ')}</span>
+        <div className="mt-1.5 flex flex-wrap items-center gap-2 text-editorial-ui leading-[1.5] text-proof-ink-2">
+          <span className="w-16 shrink-0 pt-px text-editorial-meta text-proof-faint">{t('briefRoles')}</span>
+          <span className="min-w-0 break-words font-mono text-micro text-proof-ink-3">{brief.scopes.join(' · ')}</span>
         </div>
       ) : null}
     </div>
@@ -430,15 +430,15 @@ function RunLayer({ run }: { run: WorkcellRun }) {
   return (
     <div className="h-full px-4.5 py-3.5">
       <LayerLabel title={t('runTitle')} question={t('runQuestion')} className="mb-2.5" />
-      <div className="mb-2 text-[13.5px] font-semibold text-proof-ink">{t('runNow')}: {run.now}</div>
-      <div className="mb-2.5 flex flex-wrap gap-3.5 text-[11px] text-proof-ink-3">
+      <div className="mb-2 text-editorial-ui font-semibold text-proof-ink">{t('runNow')}: {run.now}</div>
+      <div className="mb-2.5 flex flex-wrap gap-3.5 text-editorial-meta text-proof-ink-3">
         <span>{t('runStage')} <b className="font-semibold text-proof-ink-2">{run.stage}</b></span>
         {/* 38f524e1 동형 처방 — runScopes는 실제 파일경로 토큰(예: apps/web/src/…)이라
             동일 클리핑 소지, min-w-0 + break-words 선제 적용. */}
-        {run.tools.length > 0 ? <span className="min-w-0 break-words font-mono text-[10.5px]">{t('runTools')} {run.tools.join(', ')}</span> : null}
-        {run.scopes.length > 0 ? <span className="min-w-0 break-words font-mono text-[10.5px]">{t('runScopes')} {run.scopes.join(', ')}</span> : null}
+        {run.tools.length > 0 ? <span className="min-w-0 break-words font-mono text-micro">{t('runTools')} {run.tools.join(', ')}</span> : null}
+        {run.scopes.length > 0 ? <span className="min-w-0 break-words font-mono text-micro">{t('runScopes')} {run.scopes.join(', ')}</span> : null}
       </div>
-      <div className="mb-2 text-[11.5px] text-proof-ink-3">
+      <div className="mb-2 text-editorial-meta text-proof-ink-3">
         {/* story #3099(DS·AA 후속) — amber 소형텍스트(11.5px) AA 미달, text-proof-ink로 중립화
             (별도 dot 없는 자리라 "Blocked: {값}" 문구 자체가 이미 의미를 병기 — no-fiction). */}
         {t('runBlocked')}: <b className={cn('font-semibold', run.blocked ? 'text-proof-ink' : 'text-proof-ink-2')}>{run.blocked ?? t('none')}</b>
@@ -447,7 +447,7 @@ function RunLayer({ run }: { run: WorkcellRun }) {
           안 얹는다 — 이 콜아웃은 bentoLayout 여부와 무관하게 항상 렌더되는 공유 요소라
           (story #2990 §6 가역성 1급 회귀가드가 실측으로 적발) elev를 얹으면 bentoLayout=false
           "완전 복귀" 계약을 깬다. 순수 헤어라인만. */}
-      <div className="flex items-center gap-1.5 rounded-[6px] border border-proof-line bg-proof-panel px-2.5 py-1.5 text-[12.5px] text-foreground">
+      <div className="flex items-center gap-1.5 rounded-xl border border-proof-line bg-proof-panel px-2.5 py-1.5 text-xs text-foreground">
         → {t('runNextNeed')}: <b className="font-bold">{run.nextNeed}</b>
       </div>
     </div>
@@ -462,7 +462,7 @@ function EvidenceLayer({ evidence }: { evidence: ProofCapsuleProps | null }) {
       {evidence ? (
         <ProofCapsule {...evidence} />
       ) : (
-        <p className="rounded-[6px] border border-dashed border-proof-line bg-proof-sunk px-3 py-2.5 text-[11.5px] text-proof-faint">
+        <p className="rounded-xl border border-dashed border-proof-line bg-proof-sunk px-3 py-2.5 text-editorial-meta text-proof-faint">
           {t('evidenceEmpty')}
         </p>
       )}
@@ -481,12 +481,12 @@ function ChatProofSummaryRow({ summary }: { summary: WorkcellChatProofSummary | 
   // undefined = 아직 모름(로딩 중) — "없음"을 성급히 단정하지 않고 렌더 자체를 보류(no-fiction).
   if (summary === undefined) return null;
   if (summary.count === null || summary.count === 0) {
-    return <p className="text-[11.5px] text-proof-faint">{t('conversationNoThreads')}</p>;
+    return <p className="text-editorial-meta text-proof-faint">{t('conversationNoThreads')}</p>;
   }
   return (
     <a
       href={summary.href ?? undefined}
-      className="inline-flex items-center gap-1 text-[13px] font-medium text-proof-blue hover:underline"
+      className="inline-flex items-center gap-1 text-editorial-ui font-medium text-proof-blue hover:underline"
     >
       {t('conversationChatProofCount', { count: summary.count })}
       <ArrowRight className="size-3" aria-hidden="true" />
@@ -506,7 +506,7 @@ function ConversationLayer({ conversation }: { conversation: WorkcellConversatio
       <ChatProofSummaryRow summary={conversation.chatProof} />
       {conversation.messages.length > 0 ? (
         <details className="mt-2.5 group">
-          <summary className="cursor-pointer select-none text-[11px] font-medium text-proof-ink-3 marker:content-none">
+          <summary className="cursor-pointer select-none text-editorial-meta font-medium text-proof-ink-3 marker:content-none">
             <span className="inline-flex items-center gap-1">
               <ChevronRight className="size-3 transition-transform duration-[140ms] group-open:rotate-90" aria-hidden="true" />
               {t('conversationCommentsDisclosure', { count: conversation.messages.length })}
@@ -514,7 +514,7 @@ function ConversationLayer({ conversation }: { conversation: WorkcellConversatio
           </summary>
           <div className="mt-2 border-t border-proof-line-soft pt-2">
             <div className="mb-2 flex items-center justify-end">
-              <div className="inline-flex overflow-hidden rounded-[6px] border border-proof-line">
+              <div className="inline-flex overflow-hidden rounded-xl border border-proof-line">
                 {(['run', 'evidence', 'decision'] as const).map((v) => (
                   <button
                     key={v}
@@ -522,7 +522,7 @@ function ConversationLayer({ conversation }: { conversation: WorkcellConversatio
                     aria-pressed={v === view}
                     onClick={() => setView(v)}
                     className={cn(
-                      'px-2.5 py-1 text-[10px] transition-colors duration-[140ms]',
+                      'px-2.5 py-1 text-micro transition-colors duration-[140ms]',
                       v === view ? 'bg-proof-sunk font-semibold text-proof-ink' : 'text-proof-ink-3',
                     )}
                   >
@@ -533,18 +533,18 @@ function ConversationLayer({ conversation }: { conversation: WorkcellConversatio
             </div>
             <div className="space-y-1">
               {conversation.messages.map((m, i) => (
-                <div key={i} className="flex gap-2 py-0.5 text-[12.5px] leading-[1.5] text-proof-ink-2">
+                <div key={i} className="flex gap-2 py-0.5 text-xs leading-[1.5] text-proof-ink-2">
                   <span className="shrink-0 whitespace-nowrap font-semibold text-proof-ink">{m.author}</span>
                   {/* story 8df36496(high, 3011 동일 클래스 잔존) — min-w-0만 있고 break-words가
                       없었다. m.body는 자유텍스트라 URL·해시 등 무단절 토큰 실 위험군. */}
                   <span className="min-w-0 break-words">
                     {m.body}
-                    {m.resultLink ? <span className="ml-1.5 font-mono text-[10.5px] text-proof-blue">{m.resultLink}</span> : null}
+                    {m.resultLink ? <span className="ml-1.5 font-mono text-micro text-proof-blue">{m.resultLink}</span> : null}
                   </span>
                 </div>
               ))}
             </div>
-            <p className="mt-2 text-[10px] text-proof-faint">
+            <p className="mt-2 text-micro text-proof-faint">
               {t('conversationFooter')}
             </p>
           </div>

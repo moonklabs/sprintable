@@ -1,1 +1,0 @@
-{"file": "tests/test_4846_null_project_rows_old_release_realdb.py", "sec": 6.0, "source": "story-4846 — main hotfix: the release on main reads chat rows with no project (bell list, pending, delivered, room roads, SSE frame builders) — new file measured locally (uv run pytest)"}

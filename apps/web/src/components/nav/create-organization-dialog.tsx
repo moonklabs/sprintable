@@ -16,6 +16,7 @@ import { getPublicAppHost } from '@/lib/public-app-host';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { isEEEnabled } from '@/lib/ee';
 import { limitCopy } from '@/lib/plan-limit-copy';
+import { Input } from '@/components/ui/input';
 
 const SLUG_REGEX = /^[a-z0-9][a-z0-9-]{0,48}[a-z0-9]$|^[a-z0-9]$/;
 
@@ -189,9 +190,9 @@ export function CreateOrganizationDialog({
             <label className="text-sm font-medium" htmlFor="org-name">
               {t('createOrgNameLabel')} <span className="text-destructive">*</span>
             </label>
-            <input
+            <Input
               id="org-name"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              className="h-auto bg-background dark:bg-background"
               placeholder={t('createOrgNamePlaceholder')}
               value={name}
               onChange={(e) => handleNameChange(e.target.value)}
@@ -203,9 +204,9 @@ export function CreateOrganizationDialog({
             <label className="text-sm font-medium" htmlFor="org-slug">
               {t('createOrgSlugLabel')}{slugOptional ? null : <> <span className="text-destructive">*</span></>}
             </label>
-            <input
+            <Input
               id="org-slug"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              className="h-auto bg-background dark:bg-background"
               placeholder={t('createOrgSlugPlaceholder')}
               value={slug}
               onChange={(e) => handleSlugChange(e.target.value)}

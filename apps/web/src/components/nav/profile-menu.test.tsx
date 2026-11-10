@@ -10,6 +10,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ProfileMenu } from './profile-menu';
+import { EmbeddedServerProvider } from '@/components/embedded-server-context';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn(), prefetch: vi.fn() }),
@@ -174,5 +175,23 @@ describe('ProfileMenu — story #3146/#3147 훅 추출 후 무회귀 + triggerCl
     await act(async () => { (otherAccountItem as HTMLElement).click(); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(fetchSpy).toHaveBeenCalledWith('/api/auth/switch-account', expect.objectContaining({ method: 'POST' }));
+  });
+});
+
+describe('[SID:4832] the account line on the app\'s own server', () => {
+  const ACCOUNTS = [{ account_id: 'a1', name: '나', email: 'owner@local.sprintable', org_name: null, avatar_url: null, status: 'active' }];
+  const open = async (embedded: boolean) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === '/api/accounts' ? { ok: true, json: async () => ({ data: { accounts: ACCOUNTS } }) } : { ok: true, json: async () => ({}) })));
+    await mount(<EmbeddedServerProvider embedded={embedded}><ProfileMenu name="나" /></EmbeddedServerProvider>);
+    await openMenu();
+    return document.querySelector('[data-slot="dropdown-menu-content"]')?.textContent ?? '';
+  };
+  it('a local owner has an address that means nothing to the person (owner@local.sprintable): not shown under the name there; a hosted account still shows its address', async () => {
+    expect(await open(false)).toContain('owner@local.sprintable');
+    act(() => root.unmount()); root = createRoot(container);
+    document.querySelectorAll('[data-slot="dropdown-menu-content"]').forEach((el) => el.remove());
+    const local = await open(true);
+    expect(local).toContain('나');
+    expect(local).not.toContain('owner@local.sprintable');
   });
 });

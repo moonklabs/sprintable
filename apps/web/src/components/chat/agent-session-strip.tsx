@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { AlertTriangle, Check, Circle, CircleDashed, CircleDot, Loader2, SquareX, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
@@ -17,7 +18,7 @@ import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { readStartableKeyed } from '@/lib/phone-start';
 import { readClock } from '@/lib/phone-clock';
 import { checkCommand, commandOnPhone, type CommandDeps, type CommandOutcome, type Pending, type Verb } from '@/lib/phone-command';
-import { limitHeld, limitLine, limitLooksAgain, limitTime, type SessionLimit } from '@/lib/agent-session-limit';
+import { limitHeld, limitLine, limitLooksAgain, limitTime, type RestLineKey, type SessionLimit } from '@/lib/agent-session-limit';
 import { runInfoLine, type SessionRun } from '@/lib/agent-session-run';
 import { inboxStop, type SessionInbox } from '@/lib/agent-session-inbox';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
@@ -110,6 +111,18 @@ export function shownState(view: { state: string | null; activity?: string | nul
 
 /** story 4675 (F2 · Yuna §I Q-d): the one place the session's word is chosen — the strip and the workforce detail's «지금 도는
  *  컴퓨터» line say the same word for the same agent. Claude at a usage limit (or a limit the app held) wears «사용 한도». */
+/** story #4833: the sentence of a «rest» line (a limit · a pause · a wait) — one place for the DM strip and the Today list (each key read by its own
+ *  literal call: the dead-key guard's axis A) */
+export function restSentence(t: (key: string, values?: Record<string, string>) => string, key: RestLineKey, time: string): string {
+  return {
+    waitingInput: () => t('line.waitingInput'), error: () => t('line.error'),
+    paused: () => t('line.paused', { time }), pausedAgain: () => t('line.pausedAgain', { time }),
+    limitMaybe: () => t('line.limitMaybe'), limitNo: () => t('line.limitNo'), limitUnknown: () => t('line.limitUnknown'), limitLooking: () => t('line.limitLooking'),
+    limitErrorNoTime: () => t('line.limitErrorNoTime'), limitErrorAhead: () => t('line.limitErrorAhead', { time }), limitErrorPassed: () => t('line.limitErrorPassed'),
+    limitHeld: () => t('line.limitHeld'),
+  }[key]();
+}
+
 export function sessionStateLabel(view: { state: string | null; activity?: string | null; limit?: SessionLimit | null; first_screen?: { ask: FirstScreenAsk } | null }, t: (key: string) => string): string {
   const state = shownState(view);
   // story #4763 (AC4 · AC12): a session that waits on a question at its computer — before it has begun to run, or after an instruction went in (the CLI stands on the question) — says so, not
@@ -129,7 +142,9 @@ export function sessionStateLabel(view: { state: string | null; activity?: strin
               : state === 'error' ? t('state.error')
                 : state === 'paused_limit' ? t('state.paused_limit')
                   : state === 'waiting_system' ? t('state.waiting_system')
-                    : state === 'stopped' ? t('state.stopped') : t('state.unknown');
+                    : state === 'stopped' ? t('state.stopped')
+                      // story #4833: «연결 끊김 · 상태 모름» (the Mac app's word) says the computer was lost — a word this page does not know is not that
+                      : state === 'unknown' ? t('state.unknown') : t('state.unrecognized');
 }
 /** the daemon's cut (contracts/send-prompt-vectors.json text_max · UTF-16 units — a string's length) */
 const INSTRUCTION_MAX = 8000;
@@ -334,9 +349,9 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
             <DialogTitle>{t('sheet.title')}</DialogTitle>
             <DialogDescription className="break-keep">{t('sheet.note')}</DialogDescription>
           </DialogHeader>
-          <textarea
+          <Textarea
             aria-label={t('sheet.title')}
-            className="min-h-24 w-full rounded-md border border-border bg-background p-2 text-base"
+            className="min-h-24"
             value={draft}
             maxLength={INSTRUCTION_MAX}
             onChange={(e) => setDraft(e.target.value)}
@@ -507,14 +522,7 @@ function Line({ view, now, phone, href }: { view: View & { state: SessionState }
   const rest = limitLine(view.state, view.limit ?? null, now);
   if (rest) {
     const time = rest.at ? limitTime(rest.at, now, locale) : '';
-    const words = {
-      waitingInput: () => t('line.waitingInput'), error: () => t('line.error'),
-      paused: () => t('line.paused', { time }), pausedAgain: () => t('line.pausedAgain', { time }),
-      limitMaybe: () => t('line.limitMaybe'), limitNo: () => t('line.limitNo'), limitUnknown: () => t('line.limitUnknown'), limitLooking: () => t('line.limitLooking'),
-      limitErrorNoTime: () => t('line.limitErrorNoTime'), limitErrorAhead: () => t('line.limitErrorAhead', { time }), limitErrorPassed: () => t('line.limitErrorPassed'),
-      limitHeld: () => t('line.limitHeld'),
-    }[rest.key];
-    return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{words()}</p>;
+    return <p className="w-full break-keep text-muted-foreground" data-testid="agent-session-line">{restSentence(t, rest.key, time)}</p>;
   }
   if (view.state !== 'working' && view.state !== 'waiting_permission') return null; // idle · starting · stopped: no button place
   // remote control off wins over both (Yuna 17:27Z ②)

@@ -11,6 +11,7 @@ import {
   DialogClose,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 /**
  * story #2844(loop-closure P1 FE) — goal을 done으로 닫을 때의 outcome 판정 표면.
@@ -123,28 +124,27 @@ export function GoalOutcomeDialog({
               <label className="text-xs font-medium text-muted-foreground" htmlFor="goal-outcome-actual">
                 {t('outcomeActualLabel')} <span className="text-muted-foreground">*</span>
               </label>
-              <input
+              <Input
                 id="goal-outcome-actual"
                 type="number"
                 inputMode="decimal"
                 value={actual}
                 onChange={(e) => setActual(e.target.value)}
                 autoFocus
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm tabular-nums text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="tabular-nums"
               />
             </div>
             <div className="shrink-0 space-y-1">
               <label className="text-xs font-medium text-muted-foreground" htmlFor="goal-outcome-reason">
                 {t('outcomeReasonLabel')} <span className="text-muted-foreground">*</span>
               </label>
-              <input
+              <Input
                 id="goal-outcome-reason"
                 type="text"
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               />
-              <p className="text-[11px] text-muted-foreground">{t('outcomeReasonHint')}</p>
+              <p className="text-editorial-meta text-muted-foreground">{t('outcomeReasonHint')}</p>
             </div>
             <DialogFooter className="mt-auto shrink-0">
               <Button type="button" variant="ghost" disabled={submitting} onClick={() => setStep('choice')}>{t('cancel')}</Button>
@@ -162,14 +162,13 @@ export function GoalOutcomeDialog({
               <label className="text-xs font-medium text-muted-foreground" htmlFor="goal-outcome-unmeasurable-reason">
                 {t('outcomeReasonLabel')} <span className="text-muted-foreground">*</span>
               </label>
-              <input
+              <Input
                 id="goal-outcome-unmeasurable-reason"
                 type="text"
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
                 autoFocus
                 placeholder={t('outcomeUnmeasurableReasonHint')}
-                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
             <DialogFooter className="mt-auto shrink-0">

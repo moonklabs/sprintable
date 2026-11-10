@@ -252,7 +252,7 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
     return (
       <div className={className}>
         <div className="flex flex-col items-center gap-3 rounded-lg border border-border bg-card px-6 py-9 text-center">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          <div className="text-editorial-meta font-medium uppercase tracking-wide text-muted-foreground">
             {t('sectionLabel')}
           </div>
           <PenLine className="size-6 text-muted-foreground" aria-hidden="true" />

@@ -26,6 +26,19 @@ describe('cn() — 커스텀 font-weight/text 테마 값이 다른 축과 병기
     expect(cn('text-editorial-claim', 'text-foreground')).toBe('text-editorial-claim text-foreground');
   });
 
+  // story 4831 — 글자 눈금의 빈 두 단(micro 10px · display 32px)도 같은 처방 대상이다. 등록이 빠지면 text-color로 오분류돼 앞의 글자색이 조용히 지워진다.
+  it('⭐새 글자 단 text-micro · text-display가 text-color와 공존한다', () => {
+    expect(cn('text-muted-foreground', 'text-micro')).toBe('text-muted-foreground text-micro');
+    expect(cn('text-foreground', 'text-display')).toBe('text-foreground text-display');
+    expect(cn('text-micro', 'text-muted-foreground')).toBe('text-micro text-muted-foreground');
+  });
+
+  it('새 글자 단끼리 · 기존 크기와는 크기 축으로 충돌한다(뒤가 이김)', () => {
+    expect(cn('text-micro', 'text-display')).toBe('text-display');
+    expect(cn('text-sm', 'text-micro')).toBe('text-micro');
+    expect(cn('text-display', 'text-editorial-meta')).toBe('text-editorial-meta');
+  });
+
   it('같은 축끼리는 여전히 충돌한다(뒤가 이김 — 회귀 방지 처방이 충돌 판정 자체를 무력화하지 않았는지)', () => {
     expect(cn('font-editorial-heading', 'font-bold')).toBe('font-bold');
     expect(cn('font-sans', 'font-serif')).toBe('font-serif');

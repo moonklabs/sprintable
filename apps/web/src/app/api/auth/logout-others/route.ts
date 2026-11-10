@@ -4,8 +4,9 @@ import { SP_RT_COOKIE, getServerSession } from '@/lib/db/server';
 import { verifyCsrfOrigin } from '@/lib/auth/csrf';
 import { safeJsonParse } from '@/lib/api-response';
 import { backendFetch } from '@/lib/backend-fetch';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 /** POST /api/auth/logout-others — story #4630: every other signed-in device of this person ends, this browser stays */
 export async function POST(request: Request): Promise<Response> {

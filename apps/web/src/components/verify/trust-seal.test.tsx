@@ -73,3 +73,19 @@ describe('TrustSeal (verified — 인간 책임자 서명, spec §1.2)', () => {
     expect(markup.toLowerCase()).not.toContain('proof-amber');
   });
 });
+
+// story 4831 — 도장의 모서리와 글자는 바탕을 거친다. 모서리는 10px 임의 값에서 바탕의 compact 단계(rounded-xl, 5.6px)로 옮겼다(PR 5369에서 rounded-lg로 잘못 옮긴 것을 바로잡음).
+// 글자는 임의 text-[Npx] 대신 눈금 이름(micro · editorial-meta)이다. 되돌리면(rounded-lg · rounded-[10px] · text-[…px]) 빨강이다.
+describe('TrustSeal (바탕 한 벌 — 모서리 · 글자 눈금)', () => {
+  it.each([
+    ['claimed', { variant: 'claimed', agentInitial: '미' } as TrustSealProps],
+    ['verified', { variant: 'verified', humanName: '김민서', when: '2시간 전' } as TrustSealProps],
+  ])('%s — 컨테이너가 rounded-xl이고 임의 모서리 · 임의 글자 크기가 없다', (_name, props) => {
+    const markup = render(props);
+    expect(markup).toContain('rounded-xl');
+    expect(markup).not.toContain('rounded-[10px]');
+    expect(markup).not.toMatch(/rounded-lg/);
+    expect(markup).not.toMatch(/text-\[\d/);
+    expect(markup).toContain('text-editorial-meta');
+  });
+});

@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ArtifactStage } from './artifact-stage';
 import { newNodeId, type ArtifactNode } from '@/services/canvas-nodes';
 import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
+import { Textarea } from '@/components/ui/textarea';
 
 type ImportTab = 'image' | 'html';
 
@@ -104,8 +105,8 @@ export function ImportArtifactDialog({ open, onOpenChange, onImport, targetId }:
         <TabsContent value="image" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ring">
           <div className="space-y-2">
             <input type="file" accept="image/*" onChange={(e) => void handleFileChange(e)} disabled={uploading} className="text-xs text-muted-foreground" />
-            <p className="text-[11px] text-muted-foreground">{t('importFigmaHint')}</p>
-            {uploading ? <p className="text-[11px] text-muted-foreground">{t('importUploading')}</p> : null}
+            <p className="text-editorial-meta text-muted-foreground">{t('importFigmaHint')}</p>
+            {uploading ? <p className="text-editorial-meta text-muted-foreground">{t('importUploading')}</p> : null}
             {imageUrl ? (
               <div className="h-56 w-full overflow-hidden rounded-md border border-border">
                 <ArtifactStage format="image" content={imageUrl} title={t('importPreviewTitle')} />
@@ -115,12 +116,12 @@ export function ImportArtifactDialog({ open, onOpenChange, onImport, targetId }:
         </TabsContent>
         <TabsContent value="html" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ring">
           <div className="space-y-2">
-            <textarea
+            <Textarea
               value={htmlContent}
               onChange={(e) => setHtmlContent(e.target.value)}
               placeholder={t('importHtmlPlaceholder')}
               rows={5}
-              className="w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 font-mono text-base lg:text-[11px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              className="min-h-0 resize-none px-2 py-1.5 font-mono lg:text-editorial-meta text-foreground bg-background dark:bg-background"
             />
             {htmlContent.trim() ? (
               <div className="h-56 w-full overflow-hidden rounded-md border border-border">
@@ -131,7 +132,7 @@ export function ImportArtifactDialog({ open, onOpenChange, onImport, targetId }:
         </TabsContent>
         </Tabs>
 
-        {error ? <p className="text-[11px] text-muted-foreground">{t('importFailedNote')}</p> : null}
+        {error ? <p className="text-editorial-meta text-muted-foreground">{t('importFailedNote')}</p> : null}
 
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={() => { clearFormDraft(); setError(false); onOpenChange(false); }} disabled={importing}>

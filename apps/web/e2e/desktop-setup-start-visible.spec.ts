@@ -60,7 +60,7 @@ async function check(page: Page, mode: string) {
     await page.getByTestId('setup-recipe-chosen').getByRole('button').click();
     const list = page.getByTestId('setup-recipe-list');
     await expect(list).toBeVisible();
-    const n = await list.locator('input[name=recipe]').count();
+    const n = await list.getByRole('radio').count(); // the visible radios (the part's hidden native inputs are aria-hidden)
     expect(n, 'the real recipe list (a short one would hide the scroll this guards)').toBeGreaterThanOrEqual(8);
     const opened = await startInSight(page);
     expect(opened, `${label}: «시작» still in sight with the ${n}-recipe list open`).toMatchObject({ found: true, inSight: true });
@@ -87,16 +87,17 @@ test.describe('[SID:4446] desktop setup — «시작» in sight without scrollin
     await change.click();
     const list = page.getByTestId('setup-recipe-list');
     await expect(list).toBeVisible();
-    await expect(page.locator('input[name=recipe]:checked')).toBeFocused();
+    await expect(list.getByRole('radio', { checked: true })).toBeFocused(); // opening puts focus on the chosen card's visible radio
     // [바꾸기] stays while open and says so; what it controls is there (Qadir 4869)
     await expect(change).toHaveAttribute('aria-expanded', 'true');
     await expect(page.locator(`#${await change.getAttribute('aria-controls')}`)).toBeVisible();
-    const order = await list.locator('input[name=recipe]').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value));
+    const recipeIds = () => list.getByRole('radio').evaluateAll((els) => els.map((e) => e.getAttribute('data-recipe-id')));
+    const order = await recipeIds();
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('ArrowDown');
     await expect(list, 'arrows only choose — the list stays open').toBeVisible();
-    expect(await list.locator('input[name=recipe]').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value)), 'not re-sorted under the keyboard').toEqual(order);
-    await expect(list.locator('input[name=recipe]').nth(2)).toBeChecked();
+    expect(await recipeIds(), 'not re-sorted under the keyboard').toEqual(order);
+    await expect(list.getByRole('radio').nth(2)).toBeChecked();
     await page.keyboard.press('Enter');
     await expect(list).toHaveCount(0);
     await expect(page.getByTestId('setup-recipe-chosen').getByRole('button')).toBeFocused();

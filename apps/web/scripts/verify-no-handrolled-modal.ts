@@ -4,9 +4,10 @@
  *
  * 오늘 13→12곳(#2340에서 2곳 삭제)의 손수 모달을 발견해서 고쳤다 — 대부분은 공용
  * `<Dialog>`(base-ui, 포커스트랩+Esc+반환 내장)로 교체했고, 제스처/render-prop 등으로
- * Dialog 전면교체가 어려운 자리(contextual-panel-layout·docs-client-layout·story-detail-panel·
+ * Dialog 전면교체가 어려운 자리(docs-client-layout·story-detail-panel·
  * storage-view·notification-bell)는 `useFocusTrap` 훅으로 직접 트랩을 배선했다. 이 가드는
- * 그 규율이 다음에 또 깨지지 않게 지킨다.
+ * 그 규율이 다음에 또 깨지지 않게 지킨다. (contextual-panel-layout의 서랍도 한때 이 목록이었지만
+ * story 4831에서 바탕 Sheet로 옮겼다 — 서랍 가지에서만 renderPanel을 따로 부르므로 감쌀 수 있었다.)
  *
  * PO 지적(2026-07-21) 둘 다 반영:
  *  ① role="dialog" 리터럴 존재만 보면 base-ui Popup처럼 role을 컴포넌트 내부에서 붙이는

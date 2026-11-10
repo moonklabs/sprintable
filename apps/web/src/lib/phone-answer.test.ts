@@ -31,6 +31,7 @@ describe('[4532] answerOnPhone', () => {
     ['biometric_required', 'biometric_required'],
     ['no_screen_lock', 'no_screen_lock'],
     ['key_invalidated', 'key_invalidated'],
+    ['no_key', 'not_paired'], // [SID:4834] no key at all = never paired: «not paired», not «your lock settings changed · pair again»
     ['expired', 'expired'],
     ['not_pending', 'closed'],
     ['not_answerable', 'closed'],

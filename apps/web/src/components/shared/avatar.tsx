@@ -234,7 +234,7 @@ export function Avatar({
               반전 배경에서 그대로 쓰면 대비가 깨져(라이트/다크 실측 재계산: 8.49/7.11로
               AA는 통과하지만 톤 자체가 안 맞음) text-background/70(반전 배경용 동형 dim)로
               옮겨 적용 — 의도(2번째 줄=보조 정보)는 그대로, 토큰만 반전 표면에 맞게 보정. */}
-          <span className="text-[11px] text-background/70">{runtimeLbl ? `${t('agent')} · ${runtimeLbl}` : t('agent')}</span>
+          <span className="text-editorial-meta text-background/70">{runtimeLbl ? `${t('agent')} · ${runtimeLbl}` : t('agent')}</span>
         </div>
       </TooltipContent>
     </Tooltip>

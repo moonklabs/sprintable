@@ -10,8 +10,9 @@ import { isOAuthCallbackMode, expectedReturnUri } from '@/lib/auth/oauth-callbac
 import { nativeReturnApp, RETURN_APP_PARAM } from '@/lib/auth/native-return-app';
 import { backendSignal, BFF_BACKEND_EXTERNAL_CHAIN_TIMEOUT_MS } from '@/lib/backend-signal';
 import { backendFetch } from '@/lib/backend-fetch';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 // e-mobile-oauth-native-handoff-contract §2: returnUrl = 검증된 App Link. dev/prod 도메인·서명
 // association이 분리되므로(§10.2) env로 주입 — PO/인프라 lane이 prod 값 설정 책임.
 const APP_LINK_ORIGIN = () => process.env['MOBILE_APP_LINK_ORIGIN'] ?? 'https://dev-app.sprintable.ai';

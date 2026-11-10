@@ -121,7 +121,14 @@ if (process.env.SPRINTABLE_DEPLOY_BUILD === '1' && !process.env.NEXT_PUBLIC_APP_
   );
 }
 
+// story 4824 — the build the desktop app carries (SPRINTABLE_EMBEDDED_BUILD=1, set by its build step; no hosted build sets it):
+// - no build-time rewrite of /api/v2 to the backend: its destination is baked at build time (a stranger's server on the default port, or nothing), and the app's backend port
+//   is only known when the app starts — /api/v2 reaches the backend through proxy.ts at request time, or not at all (a spelling the proxy skips answers 404, not a baked address);
+// - the proxy may buffer request bodies up to the attachment limit (100 MB, as the backend and the upload routes): Next's default 10 MB made a larger forwarded body fail with 500.
+const EMBEDDED_BUILD = process.env['SPRINTABLE_EMBEDDED_BUILD'] === '1';
+
 const nextConfig: NextConfig = {
+  ...(EMBEDDED_BUILD ? { experimental: { proxyClientMaxBodySize: '100mb' } } : {}),
   // Allow dev server access from non-localhost origins (e.g. Tailscale, LAN)
   // Set NEXT_DEV_ALLOWED_ORIGINS=host1,host2 in .env.local to enable
   allowedDevOrigins: process.env['NEXT_DEV_ALLOWED_ORIGINS']?.split(',').map((s) => s.trim()).filter(Boolean) ?? [],
@@ -217,6 +224,7 @@ const nextConfig: NextConfig = {
     ];
   },
   async rewrites() {
+    if (EMBEDDED_BUILD) return [];
     const fastapiUrl = process.env.NEXT_PUBLIC_FASTAPI_URL ?? 'http://localhost:8000';
     return [
       {

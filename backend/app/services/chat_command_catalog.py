@@ -34,7 +34,7 @@ from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext
+from app.dependencies.auth import AuthContext, ServerIssuedAuth
 from app.models.chat_command_audit_log import ChatCommandAuditLog
 from app.models.conversation import Conversation, ConversationMessage
 from app.models.pm import Story
@@ -126,7 +126,7 @@ def _synthetic_auth_for_sender(sender, org_id: uuid.UUID) -> AuthContext:
     agent는 자기 team_member.id를 그대로 실으면 실제 인증 경로와 동일 권한이 재현된다."""
     sender_type = getattr(sender, "type", None)
     if sender_type == "agent":
-        return AuthContext(
+        return ServerIssuedAuth(
             user_id=str(sender.id), email=None,
             claims={"app_metadata": {"api_key_id": "chat-server-command"}}, org_id=str(org_id),
         )
@@ -175,6 +175,12 @@ class CommandOutcome:
     # CommandOutcome은 이미 target_id(story.id, UUID)를 갖고 있지만 사람이 타이핑하는
     # 형태(story_number)가 아니다. ambiguous 한정으로 그 값을 그대로 실어 보낸다.
     target_story_number: int | None = None
+    # story #4846 — a machine code the web translates into its own wording (a sentence in `reply_content` is only the fallback a person can read); set where there is no
+    # server-side Korean wording to point at. Goes into the card's `server_command` marker as `code`.
+    code: str | None = None
+
+
+ROOM_HAS_NO_PROJECT = "ROOM_HAS_NO_PROJECT"
 
 
 async def _execute_done(
@@ -282,36 +288,48 @@ CATALOG: dict[str, Callable] = {"done": _execute_done, "assign": _execute_assign
 
 async def try_execute_server_command(
     db: AsyncSession, *, org_id: uuid.UUID, conv: Conversation, msg: ConversationMessage, sender,
+    cards: list[ConversationMessage] | None = None,
 ) -> bool:
     """카탈로그 명중이면 집행+감사+결과카드까지 전부 처리하고 True. 미명중(카탈로그 밖
     커맨드·비-커맨드 메시지)이면 아무것도 안 하고 False — 호출자는 기존 경로(capability
     gate·에이전트-매개)를 그대로 진행한다(회귀 0). `_command_capability_gate`와 동형으로
     이 함수 자신이 `classify_command()`를 부른다(판정은 이 모듈이 새로 안 하고 그대로
-    재사용 — 호출부가 후보를 이중 스레딩할 필요 없음)."""
+    재사용 — 호출부가 후보를 이중 스레딩할 필요 없음).
+
+    story 4847 (AC-명령 실시간): `cards` — 넘기면 결과 카드를 이 함수가 직접 배달하지 않고 이 목록에 담아 호출부(send_message)에 넘긴다 — 호출부가 «그 명령을 친 줄과 같은 받는 사람 계산»
+    (같은 제외 집합 · commit 뒤 실시간 push · 친 사람 echo)으로 배달한다. 카드는 방의 글이라 보통 글과 같은 길을 가야 한다. 카드는 명령을 친 글과 **같은 스레드**에 들어가고
+    스레드의 reply_count · last_reply_at도 보통 전송과 같은 한 곳(`_bump_thread_counters`)으로 갱신한다. 기본 None = 예전 그대로(이 함수가 직접 배달)."""
     from app.services.command_classifier import classify_command
 
     candidate = classify_command(msg.content)
-    if candidate is None or candidate.name not in CATALOG or not conv.project_id:
+    if candidate is None or candidate.name not in CATALOG:
         return False
 
-    auth = _synthetic_auth_for_sender(sender, org_id)
-    handler = CATALOG[candidate.name]
-    try:
-        if candidate.name == "assign":
-            result = await handler(db, org_id=org_id, project_id=conv.project_id, auth=auth, candidate=candidate)
-        else:
-            result = await handler(db, org_id=org_id, auth=auth, candidate=candidate, project_id=conv.project_id)
-    except Exception:  # noqa: BLE001 — 집행 실패가 메시지 전송 자체를 막으면 안 된다(best-effort 회신).
-        logger.warning("서버 집행 커맨드 처리 중 예외 command=%s message=%s", candidate.name, msg.id, exc_info=True)
-        result = CommandOutcome("denied", f"'/{candidate.name}' 처리 중 오류가 발생했습니다.", reason="internal_error")
+    if not conv.project_id:
+        # story #4846: these commands act on a story of the ROOM's project, and a story number is only unique within a project (`UNIQUE(project_id, story_number)`),
+        # so in a room without a project there is nothing to act on. Say so with a result card — silence would look the same as a broken command. No execution, no audit row.
+        result = CommandOutcome(
+            "denied", "This command works in a room that has a project.", reason=ROOM_HAS_NO_PROJECT, code=ROOM_HAS_NO_PROJECT,
+        )
+    else:
+        auth = _synthetic_auth_for_sender(sender, org_id)
+        handler = CATALOG[candidate.name]
+        try:
+            if candidate.name == "assign":
+                result = await handler(db, org_id=org_id, project_id=conv.project_id, auth=auth, candidate=candidate)
+            else:
+                result = await handler(db, org_id=org_id, auth=auth, candidate=candidate, project_id=conv.project_id)
+        except Exception:  # noqa: BLE001 — 집행 실패가 메시지 전송 자체를 막으면 안 된다(best-effort 회신).
+            logger.warning("서버 집행 커맨드 처리 중 예외 command=%s message=%s", candidate.name, msg.id, exc_info=True)
+            result = CommandOutcome("denied", f"'/{candidate.name}' 처리 중 오류가 발생했습니다.", reason="internal_error")
 
-    db.add(ChatCommandAuditLog(
-        org_id=org_id, project_id=conv.project_id, conversation_id=conv.id, message_id=msg.id,
-        actor_id=sender.id, actor_type=getattr(sender, "type", "human") or "human",
-        command=candidate.name, raw_args=candidate.args,
-        target_type=result.target_type, target_id=result.target_id, outcome=result.outcome,
-        before_value=result.before_value, after_value=result.after_value, reason=result.reason,
-    ))
+        db.add(ChatCommandAuditLog(
+            org_id=org_id, project_id=conv.project_id, conversation_id=conv.id, message_id=msg.id,
+            actor_id=sender.id, actor_type=getattr(sender, "type", "human") or "human",
+            command=candidate.name, raw_args=candidate.args,
+            target_type=result.target_type, target_id=result.target_id, outcome=result.outcome,
+            before_value=result.before_value, after_value=result.after_value, reason=result.reason,
+        ))
 
     try:
         from app.routers.conversations import _dispatch_conversation_event
@@ -323,12 +341,15 @@ async def try_execute_server_command(
             # PO 리뷰 델타 2회차 — ambiguous일 때만. FE가 reply_content의 comma-join
             # 문장을 파싱하지 않고 이 배열로 클릭형 후보 행을 바로 그린다.
             _server_command_meta["candidates"] = result.candidates
+        if result.code is not None:
+            _server_command_meta["code"] = result.code     # story #4846 — the web shows its own wording for the code
         if result.target_story_number is not None:
             # PO 리뷰 델타 3회차 — ambiguous 후보 클릭이 "/assign #<번호> <이름>"으로
             # 해소된 명령을 채우려면 원 스토리 참조(사람이 타이핑하는 형태)가 필요하다.
             _server_command_meta["target_story_number"] = result.target_story_number
         reply = ConversationMessage(
             conversation_id=conv.id, sender_id=sender.id, content=result.reply_content,
+            thread_id=msg.thread_id,  # story 4847: the card answers the line that asked for it — in the same thread
             mentioned_ids=[sender.id],
             msg_metadata={
                 "activation": {"kind": "result", "audience": [str(sender.id)], "expects_response": False},
@@ -340,8 +361,14 @@ async def try_execute_server_command(
             },
         )
         db.add(reply)
+        if msg.thread_id is not None:
+            from app.routers.conversations import _bump_thread_counters
+
+            await _bump_thread_counters(db, msg.thread_id)  # the same rule as an ordinary reply into the thread
         await db.flush()
-        if sender_resolved is not None:
+        if cards is not None:
+            cards.append(reply)  # the caller delivers it (same recipients as the line that asked for it, live after the commit)
+        elif sender_resolved is not None:
             await _dispatch_conversation_event(db, conv, reply, org_id, sender_resolved)
     except Exception:  # noqa: BLE001 — 회신 배달 실패가 집행 자체(이미 위에서 끝남)를 되돌리지 않는다.
         logger.warning("서버 집행 커맨드 결과 카드 배달 실패(비차단) command=%s message=%s", candidate.name, msg.id, exc_info=True)

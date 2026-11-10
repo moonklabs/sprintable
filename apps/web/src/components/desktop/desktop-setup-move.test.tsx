@@ -3,6 +3,8 @@
 // story #4576 — «이미 있는 에이전트 옮기기» (Yuna «4576 셋업 첫 고르기» · doc b0713c54): the two ways on the setup page, the move
 // list, its confirm (no recipe · device and keys only), its refusals and its two-step progress.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
@@ -12,9 +14,10 @@ import enMessages from '../../../messages/en.json';
 const { ctx } = vi.hoisted(() => ({ ctx: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ctx() }));
 
-import { DesktopSetup } from './desktop-setup';
+import { EmbeddedServerProvider } from '@/components/embedded-server-context';
+import { DesktopSetup, PROGRESS_FRAGMENT, progressFromFragment, progressWorkdirFromFragment } from './desktop-setup';
 import { SetupProgressView } from './desktop-setup-progress';
-import { moveConfirmBody, moveListOrder, moveProgress, parseSetupQuery, setupFragment, parseSetupFragment, NOT_CONNECTED_AFTER_HANDOVER_MS, type AttachableAgent, type SetupStatus } from '@/lib/desktop-setup';
+import { moveConfirmBody, moveListOrder, moveRowState, moveProgress, parseSetupQuery, setupFragment, parseSetupFragment, NOT_CONNECTED_AFTER_HANDOVER_MS, type AttachableAgent, type SetupStatus } from '@/lib/desktop-setup';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -56,12 +59,16 @@ async function mount(node: React.ReactNode, locale: 'ko' | 'en' = 'ko', several 
 }
 const settle = async () => { for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); }); };
 const text = () => container.textContent ?? '';
+/** the visible radio/checkbox part (a span role=radio|checkbox): checked = aria-checked, off = data-disabled */
+const isOn = (el: Element | null | undefined) => el?.getAttribute('aria-checked') === 'true';
+const isOff = (el: Element | null | undefined) => el?.hasAttribute('data-disabled') === true;
+const kindRadio = (v: 'recipe' | 'move') => container.querySelectorAll('[data-testid=setup-kind] [role=radio]')[v === 'recipe' ? 0 : 1] as HTMLElement;
 const button = (label: string) => [...container.querySelectorAll('button')].find((b) => b.textContent === label) as HTMLButtonElement | undefined;
-const chooseMove = async () => { await act(async () => { (container.querySelector('input[name=setup-kind][value=move]') as HTMLInputElement).click(); }); };
+const chooseMove = async () => { await act(async () => { kindRadio('move').click(); }); };
 const rows = () => [...container.querySelectorAll('[data-testid=setup-move-row]')] as HTMLElement[];
 const tick = async (name: string) => {
   const row = rows().find((r) => r.textContent?.includes(name))!;
-  await act(async () => { (row.querySelector('input[type=checkbox]') as HTMLInputElement).click(); });
+  await act(async () => { (row.querySelector('[role=checkbox]') as HTMLElement).click(); });
 };
 const startRowLine = () => (container.querySelector('[data-testid=setup-start-row] p') as HTMLElement).textContent;
 
@@ -73,52 +80,64 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); sessionStorage.clear(); });
 
-// ── story 4678 (P1′-a · Yuna §J ①c): the move list's «not on this project's team» row gets [프로젝트 팀에 넣기] too ──
-describe('[SID:4678] the move list · a row not on the team', () => {
+// ── story 4832 (PO 11-03 «팀에 넣고 옮기기»): a row not on the project's team is tickable — moving it puts it on the team (one confirmation, `add_to_team`) ──
+describe('[SID:4832] the move list · a row not on the team', () => {
   const ZED: AttachableAgent = { id: 'a-zed', name: '제드', runtime: 'codex', live_keys: 0, last_used_at: null, in_project: false };
-  function stubGrant() {
-    stub(() => new Response('{}'));
-    const base = globalThis.fetch as unknown as (i: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-    let granted = false;
-    agentsNow = () => new Response(JSON.stringify({ agents: [{ ...DAMRONG, in_project: granted }, DAN, KADIR, ZED] }), { status: 200 });
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes('/api/projects/') && url.endsWith('/access')) {
-        calls.push({ url, method: init?.method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-        granted = true;
-        return new Response('{}', { status: 201 });
-      }
-      return base(input, init);
-    }));
-  }
   const rowOf = (name: string) => rows().find((r) => r.textContent?.includes(name))!;
+  const putButtons = () => container.querySelectorAll('[data-testid=setup-put-on-team]');
 
-  it('the row says it is not on the team and has the button; pressing it grants in place, reads the list again, and the row can be ticked (focus on its checkbox) · a runtime this computer lacks gets the runtime line, no button', async () => {
-    stubGrant();
+  it('the line is there BEFORE any tick, the row is tickable but not ticked, there is no separate «프로젝트 팀에 넣기» button here, and a program this computer lacks stays the blocker', async () => {
+    stub(() => new Response('{}'));
+    agentsNow = () => new Response(JSON.stringify({ agents: [DAMRONG, DAN, KADIR, ZED] }), { status: 200 });
     await mount(<DesktopSetup code={CODE} runtimes={['claude']} canMove />);
     await chooseMove();
     const row = rowOf('담롱');
-    expect(row.dataset.state).toBe('not-in-project');
-    expect(row.textContent).toContain('이 프로젝트 팀에 아직 없어요');
-    expect((row.querySelector('input') as HTMLInputElement).disabled).toBe(true);
-    const put = row.querySelector('[data-testid=setup-put-on-team]') as HTMLButtonElement;
-    expect([put.textContent, put.getAttribute('aria-label')]).toEqual(['프로젝트 팀에 넣기', '프로젝트 팀에 넣기 · 담롱']);
-    // Codex is not on this computer: the blocker is the runtime — said once, with no button next to it
-    expect(rowOf('제드').querySelector('[data-testid=setup-put-on-team]')).toBeNull();
-    expect(rowOf('제드').textContent).toContain('Codex가 이 컴퓨터에 없어요');
-    expect(rowOf('제드').textContent).not.toContain('이 프로젝트 팀에 아직 없어요');
+    expect(row.dataset.state).toBe('needs-team');
+    expect(row.textContent).toContain('Claude Code 에이전트 · 옮기면 프로젝트 팀에도 들어가요'); // line removed → fails
+    expect(isOff(row.querySelector('[role=checkbox]'))).toBe(false); // tickable
+    expect(isOn(row.querySelector('[role=checkbox]'))).toBe(false); // never pre-ticked
+    expect(putButtons()).toHaveLength(0); // the move list has one way, not two
+    // Codex is not on this computer: the blocker is the runtime — said once, whatever the team says
+    for (const name of ['제드', '까디르 QA']) {
+      expect(rowOf(name).dataset.state).toBe('runtime-missing');
+      expect(rowOf(name).textContent).toContain('Codex가 이 컴퓨터에 없어요');
+      expect(isOff(rowOf(name).querySelector('[role=checkbox]'))).toBe(true);
+    }
+    expect(rowOf('제드').textContent).not.toContain('팀에도 들어가요');
+  });
 
-    await act(async () => { put.click(); });
+  it('[옮기기] sends add_to_team for the ticked agent that is off the team — and only for that one', async () => {
+    stub(() => new Response(JSON.stringify({ setup_id: 's-1', work_item_id: null, members: [] }), { status: 200 }));
+    agentsNow = () => new Response(JSON.stringify({ agents: [DAMRONG, DAN] }), { status: 200 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} canMove setupId="s-1" />);
+    await chooseMove();
+    await tick('담롱');
+    await tick('댄 어윈');
+    expect(startRowLine()).toBe('에이전트 2개를 이 컴퓨터로 옮겨요');
+    calls = [];
+    await act(async () => { button('옮기기')!.click(); });
     await settle();
-    const posts = calls.filter((c) => c.url.endsWith('/access'));
+    const posts = calls.filter((c) => c.method === 'POST');
     expect(posts).toHaveLength(1);
-    expect(posts[0]).toMatchObject({ method: 'POST', body: { member_id: 'a-dam', org_member_id: null, permission: 'granted' } });
-    expect(rowOf('담롱').dataset.state).toBe('ok');
-    const box = rowOf('담롱').querySelector('input') as HTMLInputElement;
-    expect(box.disabled).toBe(false);
-    expect(box.checked).toBe(false); // not ticked for them
-    expect(document.activeElement).toBe(box); // the pressed button is gone — focus goes to the row's checkbox, not the page
-    expect(container.querySelector('[data-testid=setup-put-on-team-done]')).toBeNull(); // the recipe page's role fields are not here — no «위 역할 칸» line
+    expect(posts[0].url).toContain('/api/desktop/setup-codes/confirm');
+    expect(posts[0].body).toEqual({ code: CODE, project_id: 'p-1', roles: [{ role: 'move', agent_id: 'a-dam', add_to_team: true }, { role: 'move', agent_id: 'a-dan' }] }); // the ask on every ticked row → fails
+  });
+
+  it('an agent ticked and then unticked asks for nothing; one off the team alone is movable (the start button is on)', async () => {
+    stub(() => new Response(JSON.stringify({ setup_id: 's-1', work_item_id: null, members: [] }), { status: 200 }));
+    agentsNow = () => new Response(JSON.stringify({ agents: [DAMRONG] }), { status: 200 });
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} canMove setupId="s-1" />);
+    await chooseMove();
+    expect(button('옮기기')!.disabled).toBe(true);
+    await tick('담롱');
+    expect(button('옮기기')!.disabled).toBe(false);
+    await tick('담롱');
+    expect(button('옮기기')!.disabled).toBe(true);
+    await tick('담롱');
+    calls = [];
+    await act(async () => { button('옮기기')!.click(); });
+    await settle();
+    expect(calls.filter((c) => c.method === 'POST')[0]!.body).toEqual({ code: CODE, project_id: 'p-1', roles: [{ role: 'move', agent_id: 'a-dam', add_to_team: true }] });
   });
 });
 
@@ -139,7 +158,7 @@ describe('[SID:4576] the two ways · the move list', () => {
     expect(kinds.textContent).toContain('시작 방법');
     expect(kinds.textContent).toContain('레시피로 시작레시피의 역할을 에이전트에게 맡기고 첫 일감으로 바로 시작해요');
     expect(kinds.textContent).toContain('이미 있는 에이전트 옮기기이 조직에서 일하던 에이전트를 이 컴퓨터로 옮겨요');
-    expect((container.querySelector('input[name=setup-kind][value=recipe]') as HTMLInputElement).checked).toBe(true);
+    expect(isOn(kindRadio('recipe'))).toBe(true);
     // the recipe way's head line stays as it was
     expect(text()).toContain('레시피를 고르면 이 컴퓨터의 에이전트가 역할을 맡아 바로 첫 일감을 시작해요.');
     await chooseMove();
@@ -148,12 +167,13 @@ describe('[SID:4576] the two ways · the move list', () => {
     expect(container.querySelector('#setup-roles')).toBeNull();
     expect(container.querySelector('#setup-folder')).toBeNull();
     expect(text()).toContain('이 컴퓨터에서 찾은 에이전트: Claude Code · Codex');
-    expect(rows().map((r) => [r.querySelector('.font-medium')!.textContent, r.dataset.state])).toEqual([['댄 어윈', 'ok'], ['까디르 QA', 'ok'], ['담롱', 'not-in-project']]);
-    expect(rows()[0].textContent).toContain('Claude Code · 이 컴퓨터에 있음');
-    expect(rows()[2].textContent).toContain('이 프로젝트 팀에 아직 없어요'); // 4678: the line, then [프로젝트 팀에 넣기] (the button's own test: desktop-setup.4678.test)
-    expect(rows()[2].querySelector('[data-testid=setup-put-on-team]')?.textContent).toBe('프로젝트 팀에 넣기');
-    expect((rows()[2].querySelector('input') as HTMLInputElement).disabled).toBe(true);
-    expect(rows().every((r) => !(r.querySelector('input') as HTMLInputElement).checked)).toBe(true);
+    expect(rows().map((r) => [r.querySelector('.font-medium')!.textContent, r.dataset.state])).toEqual([['댄 어윈', 'ok'], ['까디르 QA', 'ok'], ['담롱', 'needs-team']]);
+    expect(rows()[0].textContent).toContain('Claude Code 에이전트 · 이 컴퓨터로 옮길 수 있어요'); // 4832: the tool being here is not the agent being here
+    expect(rows()[0].textContent).not.toContain('이 컴퓨터에 있음');
+    expect(rows()[2].textContent).toContain('옮기면 프로젝트 팀에도 들어가요'); // 4832: the line says it before any tick; no separate button
+    expect(rows()[2].querySelector('[data-testid=setup-put-on-team]')).toBeNull();
+    expect(isOff(rows()[2].querySelector('[role=checkbox]'))).toBe(false); // 4832: tickable (moving it puts it on the team)
+    expect(rows().every((r) => !isOn(r.querySelector('[role=checkbox]')))).toBe(true);
     expect(text()).toContain('작업 폴더는 옮긴 뒤 앱에서 에이전트마다 골라요 — 이 컴퓨터에서 일한 적이 있는 에이전트는 그 폴더를 그대로 써요');
     expect(button('옮기기')!.disabled).toBe(true);
     expect(startRowLine()).toBe('옮길 에이전트를 하나 이상 골라 주세요');
@@ -161,9 +181,9 @@ describe('[SID:4576] the two ways · the move list', () => {
   });
 
   it('only rows that cannot move → the start line says none can be moved (each row keeps its why)', async () => {
-    agentsNow = () => new Response(JSON.stringify({ agents: [DAMRONG] }), { status: 200 });
+    agentsNow = () => new Response(JSON.stringify({ agents: [KADIR] }), { status: 200 }); // a codex agent on a computer that has only claude (4832: an agent off the team is no longer a blocker by itself)
     stub(() => new Response('{}'));
-    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />);
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} canMove />);
     await chooseMove();
     expect(container.querySelector('[data-testid=setup-move-empty]')).toBeNull();
     expect(startRowLine()).toBe('옮길 수 있는 에이전트가 없어요');
@@ -178,7 +198,7 @@ describe('[SID:4576] the two ways · the move list', () => {
     const kadir = rows().find((r) => r.textContent?.includes('까디르 QA'))!;
     expect(kadir.dataset.state).toBe('runtime-missing');
     expect(kadir.textContent).toContain('Codex가 이 컴퓨터에 없어요');
-    expect((kadir.querySelector('input') as HTMLInputElement).disabled).toBe(true);
+    expect(isOff(kadir.querySelector('[role=checkbox]'))).toBe(true);
   });
 
   it('a tick shows the 4565 note under it (live key only) · [옮기기] = one confirm with no recipe, no folder, only the ticked agents', async () => {
@@ -204,11 +224,11 @@ describe('[SID:4576] the two ways · the move list', () => {
     stub(() => new Response('{}'));
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} />);
     const move = container.querySelector('[data-testid=setup-kind-move]') as HTMLElement;
-    expect((move.querySelector('input') as HTMLInputElement).disabled).toBe(true);
+    expect(isOff(move.querySelector('[role=radio]'))).toBe(true);
     expect(container.querySelector('[data-testid=setup-kind-move-why]')?.textContent).toBe('이 앱 판에서는 옮길 수 없어요 — 앱을 업데이트해 주세요');
     expect(move.textContent).not.toContain('이 조직에서 일하던 에이전트를 이 컴퓨터로 옮겨요');
     // a click on it changes nothing: still the recipe way, no move list, «시작»
-    await act(async () => { (move.querySelector('input') as HTMLInputElement).click(); (move as HTMLElement).click(); });
+    await act(async () => { (move.querySelector('[role=radio]') as HTMLElement).click(); (move as HTMLElement).click(); });
     expect(container.querySelector('[data-testid=setup-move-list]')).toBeNull();
     expect(button('시작')).toBeDefined();
     expect(button('옮기기')).toBeUndefined();
@@ -231,14 +251,14 @@ describe('[SID:4576] Kadir 4969 (2선) — no switching mid-start · no old tick
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />);
     await act(async () => { button('시작')!.click(); });
     await settle();
-    const radios = [...container.querySelectorAll('input[name=setup-kind]')] as HTMLInputElement[];
-    expect(radios.map((r) => r.disabled)).toEqual([true, true]);
+    const radios = [...container.querySelectorAll('[data-testid=setup-kind] [role=radio]')] as HTMLElement[];
+    expect(radios.map((r) => isOff(r))).toEqual([true, true]);
   });
 
   it('changing the project unticks at once — the old project\'s ticks never go with the new project id', async () => {
     stub(() => new Response('{}'));
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />, 'ko', true);
-    const pick = () => container.querySelector('[data-testid=setup-project-pick] select') as HTMLSelectElement;
+    const pick = () => container.querySelector('[data-testid=setup-project-pick] select[data-slot="select"]') as HTMLSelectElement;
     const choose = async (v: string) => { await act(async () => { const el = pick(); Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(el, v); el.dispatchEvent(new Event('change', { bubbles: true })); }); await settle(); };
     await choose('p-1');
     await chooseMove();
@@ -246,7 +266,7 @@ describe('[SID:4576] Kadir 4969 (2선) — no switching mid-start · no old tick
     expect(startRowLine()).toBe('에이전트 1개를 이 컴퓨터로 옮겨요');
     await choose('p-2'); // the same agents come back for B
     const dan = rows().find((r) => r.textContent?.includes('댄 어윈'))!;
-    expect((dan.querySelector('input') as HTMLInputElement).checked).toBe(false);
+    expect(isOn(dan.querySelector('[role=checkbox]'))).toBe(false);
     expect(startRowLine()).toBe('옮길 에이전트를 하나 이상 골라 주세요');
   });
 });
@@ -299,7 +319,7 @@ describe('[SID:4576] the move refused', () => {
     await act(async () => { button('목록 다시 불러오기')!.click(); });
     await settle();
     expect(container.querySelector('[data-testid=setup-move-empty]')?.textContent).toBe(koMessages.desktop.setup.move.listEmpty);
-    expect((container.querySelector('input[name=setup-kind][value=move]') as HTMLInputElement).checked).toBe(true);
+    expect(isOn(kindRadio('move'))).toBe(true);
     expect(container.querySelector('[data-testid=setup-recipe-chosen]')).toBeNull();
     expect(button('시작')).toBeUndefined();
     expect(button('옮기기')!.disabled).toBe(true);
@@ -321,7 +341,7 @@ describe('[SID:4576] the move refused', () => {
     await act(async () => { button('목록 다시 불러오기')!.click(); });
     await settle();
     const dan = rows().find((r) => r.textContent?.includes('댄 어윈'))!;
-    expect((dan.querySelector('input') as HTMLInputElement).checked).toBe(false);
+    expect(isOn(dan.querySelector('[role=checkbox]'))).toBe(false);
   });
 
   it('offline → the offline card with the move\'s body («고른 에이전트는 그대로») · «다시 시도» sends the same move again', async () => {
@@ -361,6 +381,115 @@ describe('[SID:4576] the move\'s progress — two steps, by name', () => {
     expect(text()).toContain('Sprintable에 연결해요'); // ② waiting
     expect(text()).not.toContain('첫 일감');
     expect(text()).not.toContain('결과 보기');
+  });
+
+  // story 4832: the progress page's [작업 폴더 고르기] for ONE agent — offered only to an app that said `caps=workdir` (an older app would read the link as «start a setup»),
+  // for the agents that wait for their folder, by member id (never by name), in `intent=workdir&member=` (never `agent=`: an older app would START that agent)
+  describe('[SID:4832] the per-agent folder link', () => {
+    const U1 = '11111111-1111-4111-8111-111111111111';
+    const U2 = '22222222-2222-4222-8222-222222222222';
+    const wait = (id: string) => ({ member_id: id, at: '2026-10-06T04:40:00Z', reason: 'workdir_needed', code: null, runtime: 'claude', limit: null, first_member_id: null });
+    const withIds = (signals: object, ids: [string, string] = [U1, U2]) => ({ ...base(signals), members: [
+      { stage: null, role: null, member_id: ids[0], kind: 'agent', runtime: 'claude', name: '댄 어윈' }, { stage: null, role: null, member_id: ids[1], kind: 'agent', runtime: 'codex', name: '까디르 QA' }] });
+    const links = () => [...container.querySelectorAll('[data-testid=setup-move-pick-folder]')] as HTMLAnchorElement[];
+    const POINTER = '창 아래 «이 컴퓨터의 에이전트» 알림에서 [작업 폴더 고르기]를 눌러 주세요';
+
+    it('an app with caps=workdir: one link per waiting agent — its own id in `intent=workdir&member=`, the name on the button, the pointer line gone', async () => {
+      statusNow = () => withIds({ agents_start_failed: [wait(U1), wait(U2)] });
+      stub(() => new Response('{}'));
+      await mount(<SetupProgressView setupId="s-1" recipeName="" canWorkdir />);
+      await read();
+      expect(links().map((a) => a.textContent)).toEqual(['작업 폴더 고르기 · 댄 어윈', '작업 폴더 고르기 · 까디르 QA']);
+      expect(links().map((a) => a.dataset.member)).toEqual([U1, U2]);
+      for (const [i, a] of links().entries()) {
+        const id = [U1, U2][i]!;
+        expect(a.getAttribute('href')).toMatch(new RegExp(`^ai\\.sprintable(\\.dev|\\.check)?:/desktop/setup\\?intent=workdir&member=${id}$`));
+        expect(a.getAttribute('href')).not.toContain('agent='); // an app that knew no `workdir` would START that agent
+        expect(a.getAttribute('href')).not.toContain('댄'); // by id, never by name
+      }
+      expect(container.querySelector('[data-testid=setup-move-folder-wait]')?.textContent).toContain('댄 어윈 · 까디르 QA는 작업 폴더를 고르면 시작해요 — 아래 버튼을 눌러 폴더를 골라 주세요');
+      expect(text()).not.toContain(POINTER);
+    });
+
+    it('an OLDER app (no caps=workdir) + this page: no link at all — the pointer to the window\'s notice, as before (the older app would read the link as «start a setup»)', async () => {
+      statusNow = () => withIds({ agents_start_failed: [wait(U1), wait(U2)] });
+      stub(() => new Response('{}'));
+      await mount(<SetupProgressView setupId="s-1" recipeName="" />);
+      await read();
+      expect(links()).toHaveLength(0);
+      expect(container.querySelector('a[href*="intent=workdir"]')).toBeNull();
+      expect(container.querySelector('[data-testid=setup-move-folder-wait]')?.textContent).toContain(POINTER);
+    });
+
+    it('only the agents that WAIT get a link — a connected one does not; an id that is not uuid-shaped gets none (and with none left, the pointer line stays)', async () => {
+      statusNow = () => withIds({ tools_connected: [{ member_id: U2, at: '2026-10-06T04:41:00Z' }], agents_start_failed: [wait(U1)] });
+      stub(() => new Response('{}'));
+      await mount(<SetupProgressView setupId="s-1" recipeName="" canWorkdir />);
+      await read();
+      expect(links().map((a) => a.dataset.member)).toEqual([U1]);
+      act(() => root.unmount()); root = createRoot(container);
+      statusNow = () => base({ agents_start_failed: [wait('m-dan')] }); // the old test ids
+      await mount(<SetupProgressView setupId="s-1" recipeName="" canWorkdir />);
+      await read();
+      expect(links()).toHaveLength(0);
+      expect(container.querySelector('[data-testid=setup-move-folder-wait]')?.textContent).toContain(POINTER);
+    });
+
+    it('some waiting agents have a button and some do not (an id the link cannot carry): the pointer line stays — it covers them all — and the buttons that exist are shown', async () => {
+      statusNow = () => withIds({ agents_start_failed: [wait(U1), wait('m-dan')] }, [U1, 'm-dan']);
+      stub(() => new Response('{}'));
+      await mount(<SetupProgressView setupId="s-1" recipeName="" canWorkdir />);
+      await read();
+      expect(links().map((a) => a.dataset.member)).toEqual([U1]);
+      expect(container.querySelector('[data-testid=setup-move-folder-wait]')?.textContent).toContain(POINTER);
+      expect(text()).not.toContain('아래 버튼을 눌러');
+    });
+
+    it('a reopened or reloaded progress keeps the mark: the entry\'s progress paths read `caps=workdir` from the progress address and hand it on (a dropped hand is a red test)', () => {
+      const src = readFileSync(path.resolve(__dirname, 'desktop-setup.tsx'), 'utf8');
+      const quick = readFileSync(path.resolve(__dirname, 'desktop-setup-quick.tsx'), 'utf8');
+      expect(src).toContain('<ResumeProgress setupId={entry.progress} canWorkdir={entry.progressWorkdir === true} />');
+      expect(src).toContain('<SetupProgressView setupId={id} recipeName="" canWorkdir={query.canWorkdir === true} />');
+      expect(src).toContain('PROGRESS_FRAGMENT(id, query.canWorkdir === true)');
+      expect(src).toContain('<SetupProgressView setupId={setupId} recipeName="" canWorkdir={canWorkdir} />');
+      expect(src).toContain('reloadToProgress(setupId, canWorkdir)');
+      expect(quick).toContain('canWorkdir={query.canWorkdir === true} />;');
+      expect(quick.match(/PROGRESS_FRAGMENT\(made, query\.canWorkdir === true\)/g)).toHaveLength(2);
+      expect(progressWorkdirFromFragment(PROGRESS_FRAGMENT('11111111-1111-4111-8111-111111111111', true))).toBe(true);
+      expect(progressWorkdirFromFragment(PROGRESS_FRAGMENT('11111111-1111-4111-8111-111111111111'))).toBe(false);
+      expect(progressFromFragment(PROGRESS_FRAGMENT('11111111-1111-4111-8111-111111111111', true))).toBe('11111111-1111-4111-8111-111111111111'); // the id still reads as before
+      expect(progressWorkdirFromFragment('#progress=x&caps=move,solo')).toBe(false);
+    });
+
+    it('the page that starts the move hands canWorkdir to its progress, and the entry hands the query\'s mark to the page (a dropped prop is a red test)', () => {
+      const src = readFileSync(path.resolve(__dirname, 'desktop-setup.tsx'), 'utf8');
+      expect(src).toContain('phoneControlFailed={phoneControlFailed} canWorkdir={canWorkdir} />;');
+      expect(src).toContain('canWorkdir={query.canWorkdir === true}');
+      expect(src).toContain("...(canWorkdir ? { canWorkdir: true as const } : {})"); // a reload keeps the mark
+    });
+  });
+
+  // story 4832: the app's own (local) server has no phone relay — the finished move's phone card (phone app · pairing · the remote-control line) says nothing there
+  it('[SID:4832] a finished move: the phone card on a hosted server, none on the app\'s own server (the rest of the end screen is the same)', async () => {
+    statusNow = () => base({ tools_connected: [{ member_id: 'm-dan', at: '2026-10-06T04:41:00Z' }, { member_id: 'm-kad', at: '2026-10-06T04:41:02Z' }] });
+    stub(() => new Response('{}'));
+    await mount(<EmbeddedServerProvider embedded={false}><SetupProgressView setupId="s-1" recipeName="" /></EmbeddedServerProvider>);
+    await read();
+    expect(container.querySelector('[data-testid=setup-phone-card]')).not.toBeNull();
+    act(() => root.unmount()); root = createRoot(container);
+    await mount(<EmbeddedServerProvider embedded><SetupProgressView setupId="s-1" recipeName="" /></EmbeddedServerProvider>);
+    await read();
+    expect(text()).toContain('에이전트를 옮겼어요');
+    expect(text()).toContain('이제 이 컴퓨터에서 일해요');
+    expect(container.querySelector('[data-testid=setup-phone-card]')).toBeNull();
+    expect(text()).not.toContain('폰 페어링 열기');
+  });
+
+  it('[SID:4832] the recipe setup\'s phone-control tick is gated on the same marker (a source pin: the tick, and so its PUT, are off on the local server)', () => {
+    const src = readFileSync(path.resolve(__dirname, 'desktop-setup.tsx'), 'utf8');
+    expect(src).toContain('const showPhoneControl = !embedded && (newOrg ||');
+    expect(src).toContain('const embedded = useEmbeddedServer();');
+    expect(src).toMatch(/async function turnPhoneControlOn\(phoneOrg: string \| null \| undefined\) \{\n\s*if \(!showPhoneControl \|\| !phoneControl \|\| !phoneOrg\) return;/);
   });
 
   it('every agent connected → «에이전트를 옮겼어요» · «{이름} · {런타임}» · only [오늘로 가기] and the done line', async () => {
@@ -410,7 +539,7 @@ describe('[SID:4576] the move\'s progress — two steps, by name', () => {
     expect(line()).toBeUndefined();
   });
 
-  it('one connected, one still on its way → ① done with the pairs · ② running with «{이름}은 아직 연결하고 있어요» · the leaving line', async () => {
+  it('one connected, one still on its way → ① done with the pairs · ② running with «{이름}은 시작했어요 — Sprintable에 첫 연결을 기다려요» · the leaving line', async () => {
     statusNow = () => base({ tools_connected: [{ member_id: 'm-dan', at: '2026-10-06T04:41:00Z' }] });
     stub(() => new Response('{}'));
     await mount(<SetupProgressView setupId="s-1" recipeName="" />);
@@ -418,7 +547,7 @@ describe('[SID:4576] the move\'s progress — two steps, by name', () => {
     // Yuna 05:20Z: ① is done (the app took them over, «{이름} · {런타임}»); the agent still on its way is ②'s line
     const steps = [...container.querySelectorAll('li[data-state]')] as HTMLElement[];
     expect(steps[0].textContent).toBe('에이전트를 준비했어요댄 어윈 · Claude Code, 까디르 QA · Codex');
-    expect(steps[1].querySelector('[data-testid=setup-still-preparing]')?.textContent).toBe('까디르 QA는 아직 연결하고 있어요'); // Yuna 05:39Z: ②'s word
+    expect(steps[1].querySelector('[data-testid=setup-still-preparing]')?.textContent).toBe('까디르 QA는 시작했어요 — Sprintable에 첫 연결을 기다려요'); // 4832: the same word the app's strip says («시작했어요»), then what is awaited
     expect(steps[0].querySelector('[data-testid=setup-still-preparing]')).toBeNull();
     expect(text()).toContain('Sprintable에 연결하고 있어요');
     expect(text()).toContain('떠나도 옮기기는 이 컴퓨터에서 이어져요.');
@@ -490,7 +619,17 @@ describe('[SID:4576] the address and the confirm body', () => {
 
   it('moveConfirmBody: each agent once, no recipe or folder · moveListOrder: movable first, server order kept inside each group', () => {
     expect(moveConfirmBody(CODE, 'p-1', ['a', 'b', 'a'])).toEqual({ code: CODE, project_id: 'p-1', roles: [{ role: 'move', agent_id: 'a' }, { role: 'move', agent_id: 'b' }] });
+    // 4832: an agent off the team whose program is here is movable too (the move puts it on the team) — after the ready ones; only a program this computer lacks sorts last
     expect(moveListOrder([DAMRONG, DAN, KADIR], ['claude']).map((a) => a.id)).toEqual(['a-dan', 'a-dam', 'a-kadir']);
+    expect(moveListOrder([KADIR, DAMRONG, DAN], ['claude']).map((a) => a.id)).toEqual(['a-dan', 'a-dam', 'a-kadir']);
+  });
+
+  it('[SID:4832] moveConfirmBody: add_to_team rides only on the agents asked for that are also in the move · moveRowState: only a missing program blocks', () => {
+    expect(moveConfirmBody(CODE, 'p-1', ['a', 'b'], ['b'])).toEqual({ code: CODE, project_id: 'p-1', roles: [{ role: 'move', agent_id: 'a' }, { role: 'move', agent_id: 'b', add_to_team: true }] });
+    expect(moveConfirmBody(CODE, 'p-1', ['a'], ['zzz'])).toEqual({ code: CODE, project_id: 'p-1', roles: [{ role: 'move', agent_id: 'a' }] }); // an id that is not in the move asks for nothing
+    expect(moveConfirmBody(CODE, 'p-1', ['a'])).toEqual({ code: CODE, project_id: 'p-1', roles: [{ role: 'move', agent_id: 'a' }] }); // no ask: the body an older server reads
+    expect([DAN, DAMRONG, KADIR].map((a) => moveRowState(a, ['claude']))).toEqual(['ok', 'needs-team', 'runtime-missing']);
+    expect(moveRowState({ ...KADIR, in_project: false }, ['claude'])).toBe('runtime-missing'); // the blocker stays whatever the team says
   });
 });
 
@@ -507,7 +646,7 @@ describe('[SID:4670] «폰으로도 에이전트 다루기» on the move road (t
     stub(confirmOk);
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove preselect="a-dan" />);
     await chooseMove();
-    expect((row()!.querySelector('input[type=checkbox]') as HTMLInputElement).checked).toBe(true);
+    expect(isOn(row()!.querySelector('[role=checkbox]'))).toBe(true);
     await pressMoveStart();
     expect(calls.map((c) => `${c.method ?? 'GET'} ${c.url}`).filter((u) => !u.includes('/api/desktop/setups/'))).toEqual([
       'POST /api/desktop/setup-codes/confirm', 'PUT /api/organizations/o-1/remote-control',
@@ -529,7 +668,7 @@ describe('[SID:4670] «폰으로도 에이전트 다루기» on the move road (t
     stub(confirmOk);
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />);
     await chooseMove();
-    await act(async () => { (row()!.querySelector('input[type=checkbox]') as HTMLInputElement).click(); });
+    await act(async () => { (row()!.querySelector('[role=checkbox]') as HTMLElement).click(); });
     await pressMoveStart();
     expect(calls.some((c) => c.url === '/api/desktop/setup-codes/confirm')).toBe(true);
     expect(puts()).toHaveLength(0);
@@ -565,7 +704,7 @@ describe('[SID:4670] «폰으로도 에이전트 다루기» on the move road (t
     stub(confirmOk);
     await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove />);
     await chooseMove();
-    expect((row()!.querySelector('input[type=checkbox]') as HTMLInputElement).checked).toBe(false);
+    expect(isOn(row()!.querySelector('[role=checkbox]'))).toBe(false);
     await pressMoveStart();
     expect(puts()).toHaveLength(0);
   });
@@ -580,3 +719,73 @@ describe('[SID:4670] «폰으로도 에이전트 다루기» on the move road (t
     expect(container.querySelector('[data-testid=setup-phone-control-failed]')?.textContent).toBe('폰 다루기는 켜지 못했어요 — 끝나면 아래 카드에서 다시 켤 수 있어요.'); // (no status read yet: the card before it carries the line too)
   });
 });
+
+describe('[SID:4831] the move list tick is the base Checkbox (a label press, Space, Enter)', () => {
+  it('pressing the row\'s name (the label) ticks it and again unticks it · Enter does not tick · Space does · a row whose program is missing stays off', async () => {
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} canMove />);
+    await chooseMove();
+    const row = rows().find((r) => r.textContent?.includes('댄 어윈'))!;
+    const box = () => row.querySelector('[role=checkbox]') as HTMLElement;
+    expect(box().getAttribute('data-slot')).toBe('checkbox');
+    expect(isOn(box())).toBe(false);
+    const name = row.querySelector('label') as HTMLElement;
+    await act(async () => { name.click(); });
+    expect(isOn(box())).toBe(true);
+    await act(async () => { name.click(); });
+    expect(isOn(box())).toBe(false);
+    await act(async () => { box().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+    expect(isOn(box())).toBe(false);
+    await act(async () => {
+      box().dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
+      box().dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true, cancelable: true }));
+    });
+    expect(isOn(box())).toBe(true);
+    const off = rows().find((r) => r.dataset.state === 'runtime-missing')!; // 4832: only a program this computer lacks blocks now (a codex agent here, claude only on the computer)
+    await act(async () => { (off.querySelector('label') as HTMLElement).click(); });
+    expect(isOn(off.querySelector('[role=checkbox]'))).toBe(false);
+  });
+});
+
+describe('[SID:4832] the page can open with «이미 있는 에이전트 옮기기» chosen', () => {
+  const kindOn = (v: 'recipe' | 'move') => isOn(kindRadio(v));
+
+  it('initialKind=move + an app that can move: the move radio is on at first sight and the agents are listed — nothing ticked', async () => {
+    agentsNow = () => new Response(JSON.stringify({ agents: [DAN, KADIR] }), { status: 200 });
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude', 'codex']} canMove initialKind="move" />);
+    expect(kindOn('move')).toBe(true); // initialKind unused → recipe is on → fails
+    expect(kindOn('recipe')).toBe(false);
+    expect(container.querySelector('[data-testid=setup-recipe-chosen]')).toBeNull();
+    expect(container.querySelectorAll('[data-testid=setup-move-row]').length).toBe(2);
+    expect([...container.querySelectorAll('[data-testid=setup-move-row] [role=checkbox]')].some((c) => isOn(c))).toBe(false); // choosing the way is not choosing the agents
+  });
+
+  it('without canMove the hint changes nothing (an app that cannot take a move keeps the recipe page)', async () => {
+    agentsNow = () => new Response(JSON.stringify({ agents: [DAN] }), { status: 200 });
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} initialKind="move" />);
+    expect(container.querySelector('[data-testid=setup-recipe-chosen]')).not.toBeNull();
+  });
+
+  it('without canMove and with nothing to move, the hint draws no choice at all (the kind choice is drawn for a move that was asked, so an unkept ask must not draw it)', async () => {
+    agentsNow = () => new Response(JSON.stringify({ agents: [] }), { status: 200 });
+    stub(() => new Response('{}'));
+    await mount(<DesktopSetup code={CODE} runtimes={['claude']} initialKind="move" />);
+    expect(container.querySelector('[data-testid=setup-kind]')).toBeNull(); // initialKind used without canMove → the choice is drawn → fails
+    expect(container.querySelector('[data-testid=setup-recipe-chosen]')).not.toBeNull();
+  });
+
+  it('the address: kind=move rides with caps=move only; any other value is dropped; the fragment keeps it across a reload', () => {
+    const base = `#code=${CODE}&runtimes=claude`;
+    expect(parseSetupFragment(`${base}&caps=move&kind=move`)!.kind).toBe('move');
+    expect(parseSetupFragment(`${base}&caps=move,solo&kind=move`)!.kind).toBe('move');
+    expect(parseSetupFragment(`${base}&kind=move`)!.kind).toBeUndefined(); // an app that cannot take a move
+    expect(parseSetupFragment(`${base}&caps=move&kind=recipe`)!.kind).toBeUndefined();
+    expect(parseSetupFragment(`${base}&caps=move`)!.kind).toBeUndefined();
+    const q = parseSetupFragment(`${base}&caps=move,solo&kind=move`)!;
+    expect(parseSetupFragment(setupFragment(q))!.kind).toBe('move');
+    expect(setupFragment(parseSetupFragment(`${base}&caps=move`)!)).not.toContain('kind=');
+  });
+});
+

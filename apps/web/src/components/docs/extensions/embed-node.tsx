@@ -7,6 +7,8 @@ import { ExternalLink, Link2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { safeHttpUrl } from '../lib/safe-content-url';
 import { cardVariants } from '@/components/ui/card';
+import { isImeComposing } from '@/lib/ime-composition';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
 // ─── URL Helpers ──────────────────────────────────────────────────────────────
@@ -76,6 +78,8 @@ export function EmbedView({ node, updateAttributes, selected }: ReactNodeViewPro
   }, [editUrl, updateAttributes]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // 한글 등 입력기 조합 중의 엔터(글자 확정) · 에스케이프(조합 취소)는 적용 · 되돌림으로 읽지 않는다 — 반쯤 쓴 URL이 그대로 적용되던 것(4831 측정 중 발견).
+    if (isImeComposing(e)) return;
     if (e.key === 'Enter') { e.preventDefault(); applyUrl(); }
     if (e.key === 'Escape') setEditUrl(url);
   }, [applyUrl, url]);
@@ -88,14 +92,15 @@ export function EmbedView({ node, updateAttributes, selected }: ReactNodeViewPro
       {selected && (
         <div className="mb-2 flex items-center gap-2 rounded-xl border border-brand/30 bg-brand/6 px-3 py-2">
           <Link2 className="size-3.5 flex-shrink-0 text-muted-foreground" />
-          <input
+          <Input
             ref={inputRef}
             value={editUrl}
             onChange={(e) => setEditUrl(e.target.value)}
             onKeyDown={handleKeyDown}
             onBlur={applyUrl}
             placeholder={t('embedUrlPlaceholder')}
-            className="flex-1 bg-transparent text-base lg:text-sm outline-none placeholder:text-muted-foreground"
+            // brand 색 면(bg-brand/6) 안이라 흐린 안내 글자를 받치는 불투명 면을 남긴다(부품은 투명 · dark:bg-input/30).
+            className="min-w-0 flex-1 bg-card dark:bg-card"
           />
         </div>
       )}

@@ -24,7 +24,8 @@ from fastapi import BackgroundTasks, HTTPException
 
 _REAL_DB_URL = __import__("os").getenv("PARITY_TEST_DATABASE_URL") or __import__("os").getenv("ALEMBIC_DATABASE_URL")
 
-pytestmark = pytest.mark.destructive_schema
+# story #4846: a TeamMember seeded on the create_all schema needs its `members` anchor (the room code resolves an api-key caller through it) — see conftest
+pytestmark = [pytest.mark.destructive_schema, pytest.mark.usefixtures("team_member_has_members_anchor")]
 
 
 @pytest.fixture
@@ -98,11 +99,13 @@ async def _seed_org_project(session, *, slug="axis2a"):
 
 async def _seed_agent(session, org_id, project_id, *, name="agent"):
     from app.models.team import TeamMember
+    from tests.conftest import grant_org_projects
 
     m = TeamMember(
         id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent", name=name, is_active=True,
     )
     session.add(m)
+    await grant_org_projects(session, org_id, agent_member_id=m.id)   # story #4846 AC12: a real agent has its project's grant (the story-4351 seed line)
     await session.commit()
     return m.id
 
@@ -432,6 +435,12 @@ async def test_apply_rejects_caller_without_project_access():
 
             # publisher는 project_a에만 소속(project_b엔 미소속·미권한).
             outsider_id = await _seed_agent(s, org_id, project_a, name="outsider")
+            from sqlalchemy import delete as _delete
+
+            from app.models.project_access import ProjectAccess as _PA
+
+            await s.execute(_delete(_PA).where(_PA.member_id == outsider_id, _PA.project_id == project_b.id))   # the outsider has project A only (the seed grants every project that exists)
+            await s.commit()
             definition = await _seed_cyclic_definition(s)
             target_agent = await _seed_agent(s, org_id, project_b.id, name="target")
 

@@ -55,11 +55,11 @@ export function OpenLoopCockpit({
             <div key={h.id} className={cn('rounded-lg border border-border bg-card p-2.5', isMeasuring && 'border-dashed')}>
               <div className="flex items-start justify-between gap-2">
                 <p className="flex-1 text-xs font-medium leading-snug text-foreground">{h.statement}</p>
-                <Badge variant={h.status === 'verified' ? 'success' : isMeasuring ? 'outline' : 'chip'} className={isMeasuring ? 'border-dashed text-[9.5px]' : 'text-[9.5px]'}>
+                <Badge variant={h.status === 'verified' ? 'success' : isMeasuring ? 'outline' : 'chip'} className={isMeasuring ? 'border-dashed text-micro' : 'text-micro'}>
                   {tr(VERDICT_KEY[h.status])}
                 </Badge>
               </div>
-              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground">
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-muted-foreground">
                 {h.metric ? <span className="rounded bg-muted/50 px-1.5 py-0.5 font-medium text-foreground">{h.metric}</span> : null}
                 {remaining != null ? (
                   <span className="flex items-center gap-1">
@@ -74,9 +74,9 @@ export function OpenLoopCockpit({
       </div>
       {storyTitles.length > 0 ? (
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[9.5px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{t('cockpitExperimentsLabel')}</span>
+          <span className="text-micro font-semibold uppercase tracking-[0.16em] text-muted-foreground">{t('cockpitExperimentsLabel')}</span>
           {storyTitles.map((title) => (
-            <span key={title} className="rounded-md border border-border bg-background px-1.5 py-0.5 text-[9.5px] text-muted-foreground">{title}</span>
+            <span key={title} className="rounded-md border border-border bg-background px-1.5 py-0.5 text-micro text-muted-foreground">{title}</span>
           ))}
         </div>
       ) : null}

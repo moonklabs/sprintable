@@ -29,10 +29,10 @@ export function DocMiniToc({ headings, activeId, onHeadingClick, className }: Do
       aria-label={t('tocOnThisDoc')}
       className={cn('sticky top-6 max-h-[calc(100vh-8rem)] overflow-y-auto', className)}
     >
-      <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+      <div className="mb-2 text-micro font-semibold uppercase tracking-[0.1em] text-muted-foreground">
         {t('tocOnThisDoc')}
       </div>
-      <ul className="flex flex-col gap-1.5 text-[12px] leading-tight">
+      <ul className="flex flex-col gap-1.5 text-xs leading-tight">
         {headings.map((heading) => {
           const active = heading.id === activeId;
           return (
@@ -43,7 +43,7 @@ export function DocMiniToc({ headings, activeId, onHeadingClick, className }: Do
                 aria-current={active ? 'location' : undefined}
                 className={cn(
                   'block w-full truncate border-l-2 py-0.5 text-left transition-colors',
-                  heading.level === 1 ? 'pl-2.5 font-medium' : heading.level === 2 ? 'pl-4' : 'pl-6 text-[11px]',
+                  heading.level === 1 ? 'pl-2.5 font-medium' : heading.level === 2 ? 'pl-4' : 'pl-6 text-editorial-meta',
                   active
                     ? 'border-proof-blue font-semibold text-proof-blue'
                     : 'border-transparent text-muted-foreground hover:text-foreground',

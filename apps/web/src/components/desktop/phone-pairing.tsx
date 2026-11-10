@@ -225,7 +225,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
           {/* Yuna 07:48Z ②: three lines in the one status — the lead (small) · the number alone on its line · what to do with it */}
           <Line focus>
             <span className="block text-xs" data-testid="pairing-number-lead">{t('numberLead')}</span>
-            <span className="block font-mono text-3xl font-semibold tracking-wider text-foreground" data-testid="pairing-number">{view.number}</span>
+            <span className="block font-mono text-display font-semibold tracking-wider text-foreground" data-testid="pairing-number">{view.number}</span>
             <span className="block" data-testid="pairing-number-hint">{t('numberHint')}</span>
           </Line>
           <Actions><Button variant="outline" onClick={cancel}>{t('cancel')}</Button></Actions>

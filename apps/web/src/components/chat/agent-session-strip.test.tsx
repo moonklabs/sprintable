@@ -53,7 +53,7 @@ describe('AgentSessionStrip (story #4534)', () => {
     ['idle', '다음 일 기다림', null],
     ['waiting_permission', '권한 대기', '권한 요청은 결재함에 있어요'],
     ['stopped', '끝', null],
-    ['unknown', '상태 모름', '그 컴퓨터와 연결이 끊겨 지금 상태를 몰라요 — 다시 연결되면 여기서 바로 바뀌어요'],
+    ['unknown', '연결 끊김 · 상태 모름', '그 컴퓨터와 연결이 끊겨 지금 상태를 몰라요 — 다시 연결되면 여기서 바로 바뀌어요'],
   ])('%s → «%s» and its line, no button', async (state, word, expected) => {
     fetchWithAuth.mockResolvedValueOnce(view({ state }));
     await render();
@@ -79,7 +79,7 @@ describe('AgentSessionStrip (story #4534)', () => {
     expect(container.innerHTML).toBe('');
   });
 
-  it('reads again on its own agent\'s nudge only, and the computer gone quiet shows «상태 모름»', async () => {
+  it('reads again on its own agent\'s nudge only, and the computer gone quiet shows «연결 끊김 · 상태 모름»', async () => {
     fetchWithAuth.mockResolvedValueOnce(view());
     await render();
     await act(async () => { onExtra?.('desktop.session_changed', JSON.stringify({ agent_member_id: 'other' })); });
@@ -88,7 +88,7 @@ describe('AgentSessionStrip (story #4534)', () => {
     await act(async () => { onExtra?.('desktop.session_changed', JSON.stringify({ agent_member_id: 'a-1' })); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     expect(fetchWithAuth).toHaveBeenCalledTimes(2);
-    expect(chip()).toBe('상태 모름');
+    expect(chip()).toBe('연결 끊김 · 상태 모름');
   });
 
   it('marks and tones are the desktop bar\'s: idle a filled muted dot · done a success check · working primary · waiting warning', async () => {
@@ -217,6 +217,7 @@ describe('AgentSessionStrip — a word it does not know', () => {
     root = createRoot(container);
     fetchWithAuth.mockResolvedValueOnce(view({ state: 'sleeping', activity: 'dreaming' }));
     await render();
+    // story #4833: «연결 끊김 · 상태 모름» says the computer was lost — a word this page does not know keeps the plain «상태 모름»
     expect(chip()).toBe('상태 모름');
     // Yuna 05:41Z: the page does not know the word — never the «computer lost» line
     expect(line()).toBe('이 페이지가 아직 모르는 상태예요 — 새로 고치면 보일 수 있어요');
@@ -482,8 +483,8 @@ describe('AgentSessionStrip — the first-screen question (story #4763 AC4 · AC
     expect(chip()).toBe('작업 중');
   });
 
-  it('a stopped or lost session keeps its own word: a stale question never covers «끝» / «상태 모름» (and a permission wait keeps «권한 대기»)', async () => {
-    for (const [state, word] of [['stopped', '끝'], ['unknown', '상태 모름'], ['waiting_permission', '권한 대기']] as const) {
+  it('a stopped or lost session keeps its own word: a stale question never covers «끝» / «연결 끊김 · 상태 모름» (and a permission wait keeps «권한 대기»)', async () => {
+    for (const [state, word] of [['stopped', '끝'], ['unknown', '연결 끊김 · 상태 모름'], ['waiting_permission', '권한 대기']] as const) {
       fetchWithAuth.mockResolvedValueOnce(view({ state, first_screen: { ask: 'trust' } }));
       root.unmount(); root = createRoot(container);
       await render();

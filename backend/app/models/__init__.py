@@ -91,6 +91,7 @@ from app.models.standup import StandupEntry, StandupFeedback
 from app.models.team import TeamMember
 from app.models.file_lock import FileLock
 from app.models.sse_lease import SseLease, SseLeaseTaken
+from app.models.embedded_timer_run import EmbeddedTimerRun
 from app.models.org_invite import OrgInvite
 from app.models.project_access import ProjectAccess
 from app.models.member import AgentProjectProfile, Member, MemberIdentityAlias

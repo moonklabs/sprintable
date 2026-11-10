@@ -7,6 +7,7 @@ import { ChevronRight, Plus } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import {
   Dialog,
@@ -300,13 +301,11 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
               {agents.map((agent, index) => (
                 <div key={agent.id} className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-sm">
                   {isAdmin && isDesktopRuntime(agent.runtime_type) ? (
-                    <input
-                      type="checkbox"
-                      className="size-4 shrink-0 accent-primary"
+                    <Checkbox
                       checked={chosen.has(agent.id)}
-                      onChange={(e) => setChosen((prev) => {
+                      onCheckedChange={(checked) => setChosen((prev) => {
                         const next = new Set(prev);
-                        if (e.target.checked) next.add(agent.id); else next.delete(agent.id);
+                        if (checked) next.add(agent.id); else next.delete(agent.id);
                         return next;
                       })}
                       aria-label={ta('runProfileChooseAria', { name: rowLabels.get(agent.id) ?? agent.name })}

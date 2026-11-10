@@ -39,7 +39,7 @@ export function AgentIdentity({ className }: { className?: string }) {
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded-sm border border-proof-line px-1 py-0.5 text-[9px] font-medium text-muted-foreground',
+        'inline-flex items-center gap-1 rounded-sm border border-proof-line px-1 py-0.5 text-micro font-medium text-muted-foreground',
         className,
       )}
     >

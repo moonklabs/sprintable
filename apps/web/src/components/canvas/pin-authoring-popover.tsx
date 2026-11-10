@@ -5,6 +5,7 @@ import { useFieldDraft } from '@/hooks/use-field-draft';
 import { useTranslations } from 'next-intl';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 
 interface PinAuthoringPopoverProps {
   open: boolean;
@@ -69,15 +70,15 @@ export function PinAuthoringPopover({ open, onOpenChange, initialDescription, on
           <DialogTitle>{t('specPinPopoverTitle')}</DialogTitle>
         </DialogHeader>
 
-        <textarea
+        <Textarea
           autoFocus
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder={t('specPinDescriptionPlaceholder')}
           rows={4}
-          className="w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 text-base lg:text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          className="min-h-0 resize-none px-2 py-1.5 lg:text-xs text-foreground bg-background dark:bg-background"
         />
-        {error ? <p className="mt-1 text-[10px] text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{t('saveFailedNote')}</p> : null}
+        {error ? <p className="mt-1 text-micro text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{t('saveFailedNote')}</p> : null}
 
         <DialogFooter className="flex items-center justify-between gap-2 sm:justify-between">
           {onDelete ? (

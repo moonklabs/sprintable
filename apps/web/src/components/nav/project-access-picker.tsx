@@ -9,6 +9,7 @@ import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/db/client';
+import { Checkbox } from '@/components/ui/checkbox';
 
 export interface OrgAgentOption {
   id: string;
@@ -71,12 +72,11 @@ export function ProjectAccessPicker({ selected, onChange, disabled = false, idPr
             const id = `${idPrefix}-agent-${a.id}`;
             return (
               <li key={a.id} className="flex items-center gap-2">
-                <input
+                <Checkbox
                   id={id}
-                  type="checkbox"
-                  className="size-4 accent-brand"
                   checked={selected.includes(a.id)}
-                  onChange={(e) => toggle(a.id, e.target.checked)}
+                  disabled={disabled}
+                  onCheckedChange={(checked) => toggle(a.id, checked)}
                   data-testid="project-access-checkbox"
                   data-agent-id={a.id}
                 />

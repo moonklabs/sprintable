@@ -57,6 +57,6 @@ describe('PresenceToggleButton — working-count 배지(story #3431 CornerCountB
     expect(badge?.textContent).toBe('4');
     expect(badge?.className).toContain('bg-info');
     expect(badge?.className).toContain('text-info-foreground');
-    expect(badge?.className).toContain('text-[10px]');
+    expect(badge?.className).toContain('text-micro');
   });
 });

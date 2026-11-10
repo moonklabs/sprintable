@@ -45,7 +45,7 @@ class GwRunner(S.FakeRunner):
         self.gateway_role_fails_for = 0   # how many times the question «does the application role own the database?» is answered «no»
         self.metadata_rc = 1
 
-    def run(self, args, env, cwd=None, timeout=900, stdin=None):
+    def run(self, args, env, cwd=None, timeout=900, stdin=None, whole=False):
         joined = " ".join(args)
         if args[:2] == ["docker", "compose"] and args[-1] == "gateway-db" and "up" in args:
             self.calls.append({"args": list(args), "env": dict(env), "stdin": stdin})
@@ -56,7 +56,7 @@ class GwRunner(S.FakeRunner):
                 self.gateway_role_fails_for -= 1
                 return (1, "")
             return (0, "") if self.gateway_db_probe_ok else (1, "no response")
-        return super().run(args, env, cwd=cwd, timeout=timeout, stdin=stdin)
+        return super().run(args, env, cwd=cwd, timeout=timeout, stdin=stdin, whole=whole)
 
 
 def _make_world(tmp_path: Path, private_ip=lambda: PRIVATE_IP, secret_overrides: dict | None = None, extra_bundle: dict | None = None):
@@ -114,7 +114,7 @@ def _without_block(tmp_path: Path) -> bytes:
 def test_the_gateway_database_comes_up_healthy_before_the_swap_and_is_checked_after_it(world) -> None:
     world.publish()
     assert world.dep.run_once() == "deployed"
-    assert world.runner.verbs() == ["iptables", "login", "pull", "logout", "up:db", "up:gwdb", "exec:gwdb-ready", "exec:gwdb-metadata", "run", "iptables", "up:all", "exec:reload", "exec:gwdb-reload", "exec:gwdb-metadata", "exec:health-be", "exec:health-fe", "exec:gwdb-ready"]
+    assert world.runner.verbs() == ["iptables", "login", "pull", "logout", "up:db", "up:gwdb", "exec:gwdb-ready", "exec:gwdb-metadata", "run", "iptables", "up:all", "exec:reload", "exec:gwdb-reload", "exec:gwdb-metadata", "exec:health-be", "exec:health-fe", "exec:gwdb-ready", "image"]
 
 
 def test_every_compose_call_of_such_a_release_sees_the_gateway_database_service(world) -> None:
@@ -189,7 +189,7 @@ def test_a_declaration_without_the_block_changes_nothing(tmp_path: Path) -> None
     w = _make_world(tmp_path)
     w.publish(bundle=_without_block(tmp_path))
     assert w.dep.run_once() == "deployed"
-    assert w.runner.verbs() == ["login", "pull", "logout", "up:db", "run", "up:all", "exec:reload", "exec:health-be", "exec:health-fe"]
+    assert w.runner.verbs() == ["login", "pull", "logout", "up:db", "run", "up:all", "exec:reload", "exec:health-be", "exec:health-fe", "image"]
     assert all(_profiles(c) == (["migrate"] if "migrate" in c["args"] else []) for c in _compose_calls(w))
     assert GW_SECRET_ID not in w.asked, "its secret is not read"
     up = next(c for c in _compose_calls(w) if "--wait-timeout" in c["args"])

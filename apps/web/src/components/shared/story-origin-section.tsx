@@ -164,11 +164,11 @@ export function StoryOriginSection({ storyId }: StoryOriginSectionProps) {
               <span className="min-w-0 flex-1">
                 <span className="[overflow-wrap:anywhere]">{label ?? origin.source_id}</span>
                 {!origin.still_exists && (
-                  <span className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+                  <span className="ml-1.5 rounded bg-muted px-1 py-0.5 text-micro text-muted-foreground">
                     {t('backlinksTargetGone')}
                   </span>
                 )}
-                <span className="block text-[10px] text-muted-foreground">
+                <span className="block text-micro text-muted-foreground">
                   {creatorName ? `${creatorName} · ` : ''}
                   {formatViewerRelativeTime(origin.created_at, locale, displayTimezone)}
                 </span>

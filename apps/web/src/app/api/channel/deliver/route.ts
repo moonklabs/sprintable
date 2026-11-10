@@ -2,8 +2,9 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from '@/lib/db/server';
 import { ApiErrors } from '@/lib/api-response';
 import { backendFetch } from '@/lib/backend-fetch';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 export async function POST(request: NextRequest): Promise<Response> {
   const session = await getServerSession();

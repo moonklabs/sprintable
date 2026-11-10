@@ -1,5 +1,6 @@
 'use client';
 
+import { useEmbeddedServer } from '@/components/embedded-server-context';
 import { Monitor } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
@@ -13,7 +14,8 @@ import { cn } from '@/lib/utils';
  */
 export function DeviceChip({ name, className }: { name: string | null | undefined; className?: string }) {
   const t = useTranslations('desktop');
-  if (!name) return null;
+  const embedded = useEmbeddedServer(); // story 4832: one computer — a chip that tells two apart says nothing there
+  if (!name || embedded) return null;
   return (
     <Badge
       variant="chip"

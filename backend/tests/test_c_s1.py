@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.login_row_mocks import answer_login_rows as _hash_reread
+
 
 @pytest.fixture
 def anyio_backend() -> str:
@@ -60,6 +62,7 @@ def _make_user(
     # 단락이 안 걸려 이 파일의 세션 무효화 무관 테스트들이 401로 오탐됐다.
     u.password_set_at = None
     return u
+
 
 
 # ─── security.py unit tests ───────────────────────────────────────────────────
@@ -154,6 +157,7 @@ async def test_totp_replay_rejected():
             mock_meta.return_value = {}
             session.execute = AsyncMock(return_value=MagicMock())
 
+            _hash_reread(session, user)
             async with client as c:
                 resp = await c.post("/api/v2/auth/token", json={
                     "email": "test@example.com",
@@ -183,6 +187,7 @@ async def test_totp_lockout_after_5_failures():
             mock_get_user.return_value = user
             session.execute = AsyncMock(return_value=MagicMock())
 
+            _hash_reread(session, user)
             async with client as c:
                 resp = await c.post("/api/v2/auth/token", json={
                     "email": "test@example.com",
@@ -211,6 +216,7 @@ async def test_totp_locked_user_returns_429():
         with patch("app.routers.auth._get_user_by_email", new_callable=AsyncMock) as mock_get_user:
             mock_get_user.return_value = user
 
+            _hash_reread(session, user)
             async with client as c:
                 code = pyotp.TOTP(secret).now()
                 resp = await c.post("/api/v2/auth/token", json={
@@ -273,12 +279,14 @@ async def test_login_success_200():
         result.scalar_one_or_none.return_value = user
         session.execute = AsyncMock(return_value=result)
         with patch.dict("os.environ", {"JWT_SECRET": "test-secret"}):
+            _hash_reread(session, user)
             async with client as c:
                 resp = await c.post("/api/v2/auth/token", json={"email": "test@example.com", "password": "correct-password"})
         assert resp.status_code == 200
         data = resp.json()["data"]
         assert "access_token" in data
         assert "refresh_token" in data
+        assert session.hash_rereads == 1  # story 4838: the session is stored after the account was read again under the person's session lock
     finally:
         app.dependency_overrides.clear()
 
@@ -291,6 +299,7 @@ async def test_login_wrong_password_401():
         result = MagicMock()
         result.scalar_one_or_none.return_value = user
         session.execute = AsyncMock(return_value=result)
+        _hash_reread(session, user)
         async with client as c:
             resp = await c.post("/api/v2/auth/token", json={"email": "test@example.com", "password": "wrong"})
         assert resp.status_code == 401
@@ -307,6 +316,7 @@ async def test_login_totp_required_403():
         result = MagicMock()
         result.scalar_one_or_none.return_value = user
         session.execute = AsyncMock(return_value=result)
+        _hash_reread(session, user)
         async with client as c:
             resp = await c.post("/api/v2/auth/token", json={"email": "test@example.com", "password": "correct-password"})
         assert resp.status_code == 403

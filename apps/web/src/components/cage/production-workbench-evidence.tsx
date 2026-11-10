@@ -49,19 +49,19 @@ function OutputCardHeader({ kindTitle, evidence, isCurrent }: { kindTitle: strin
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
-      <span className="text-[12.5px] font-bold text-foreground">{kindTitle}</span>
+      <span className="text-xs font-bold text-foreground">{kindTitle}</span>
       {/* story #4433 qa:changes 2차(카디르 ⓑ) — 같은 kind가 여러 건일 때만(재시도·재제출
           존재) "현재" 라벨을 얹는다. 유일한 버전이면 굳이 안 단다(잡음). */}
       {isCurrent ? <Badge variant="secondary" className="shrink-0">{t('productionWorkbenchCurrentBadge')}</Badge> : null}
       <Badge variant="info" className="shrink-0">{t('productionWorkbenchAiAttribution')}</Badge>
       {evidence.artifact_version_number !== null ? (
-        <span className="font-mono text-[10.5px] text-muted-foreground">
+        <span className="font-mono text-micro text-muted-foreground">
           {t('productionWorkbenchVersionRef', { v: evidence.artifact_version_number })}
         </span>
       ) : null}
       {/* story #3493 정본 — 게이트 evidence 카드는 "기록" 표기라 toLocaleString류가 아니라
           formatViewerRelativeTime(gate-evidence.tsx GateActivityHistory와 동형 관례). */}
-      <span className="ml-auto text-[10.5px] text-muted-foreground">
+      <span className="ml-auto text-micro text-muted-foreground">
         {formatViewerRelativeTime(evidence.created_at, locale, displayTimezone)}
       </span>
     </div>
@@ -83,7 +83,7 @@ function MaterialCollectionSheetCard({ evidence, isCurrent }: { evidence: Eviden
       <OutputCardHeader kindTitle={t(KIND_TITLE_KEY.material_collection_sheet)} evidence={evidence} isCurrent={isCurrent} />
       <ul className="space-y-1 p-3">
         {items.map((item, i) => (
-          <li key={i} className="flex flex-wrap items-center gap-1.5 text-[11.5px]">
+          <li key={i} className="flex flex-wrap items-center gap-1.5 text-editorial-meta">
             <Badge variant="outline" className="shrink-0">{item.tag}</Badge>
             <span className="text-foreground">{item.label}</span>
             {isLinkableRef(item.ref) ? (
@@ -105,7 +105,7 @@ function ConceptBriefCard({ evidence, isCurrent }: { evidence: EvidenceItem; isC
   return (
     <OutputCard>
       <OutputCardHeader kindTitle={t(KIND_TITLE_KEY.concept_brief)} evidence={evidence} isCurrent={isCurrent} />
-      <div className="space-y-1.5 p-3 text-[11.5px]">
+      <div className="space-y-1.5 p-3 text-editorial-meta">
         <p className="font-medium text-foreground">{brief.concept}</p>
         <p className="text-muted-foreground">{brief.rationale}</p>
         {brief.mood_refs?.length ? (
@@ -136,17 +136,17 @@ function StoryboardCard({ evidence, isCurrent }: { evidence: EvidenceItem; isCur
           {storyboard.shot_list.map((shot) => (
             <div key={shot.shot_no} className="overflow-hidden rounded-lg bg-muted">
               <div className="relative flex h-[74px] items-center justify-center bg-gradient-to-br from-info-tint to-muted text-muted-foreground">
-                <span className="absolute left-1.5 top-1.5 rounded bg-card px-1 text-[9.5px] font-bold text-foreground">
+                <span className="absolute left-1.5 top-1.5 rounded bg-card px-1 text-micro font-bold text-foreground">
                   {String(shot.shot_no).padStart(2, '0')}
                 </span>
               </div>
-              <p className="px-1.5 py-1 text-[10px] leading-tight text-foreground">{shot.desc}</p>
+              <p className="px-1.5 py-1 text-micro leading-tight text-foreground">{shot.desc}</p>
             </div>
           ))}
         </div>
-        <table className="w-full text-[11.5px]">
+        <table className="w-full text-editorial-meta">
           <thead>
-            <tr className="bg-muted text-left text-[10.5px] font-bold text-muted-foreground">
+            <tr className="bg-muted text-left text-micro font-bold text-muted-foreground">
               <th className="px-2 py-1">{t('productionWorkbenchShotNoLabel')}</th>
               <th className="px-2 py-1">{t('productionWorkbenchAngleLabel')}</th>
               <th className="px-2 py-1">{t('productionWorkbenchDurationLabel')}</th>
@@ -191,7 +191,7 @@ function AnimaticCard({ evidence, isCurrent }: { evidence: EvidenceItem; isCurre
             <Play className="size-4" fill="currentColor" />
           </span>
         </div>
-        <div className="flex flex-1 flex-col gap-1.5 text-[12px]">
+        <div className="flex flex-1 flex-col gap-1.5 text-xs">
           {/* story #4433 qa:changes(카디르, 2026-09-19) — cost_tier는 categorical
               값(no_charge/paid)이지 상태(성공/경고)가 아니다(§3 PR 설명이 "상태색은
               verification_sheet만"이라 해놓고 여기 warning을 쓴 자기모순). 둘 다
@@ -201,7 +201,7 @@ function AnimaticCard({ evidence, isCurrent }: { evidence: EvidenceItem; isCurre
             {animatic.cost_tier === 'no_charge' ? t('productionWorkbenchCostTierNoCharge') : t('productionWorkbenchCostTierPaid')}
           </Badge>
           <span className="text-muted-foreground">{t('productionWorkbenchDurationSeconds', { sec: animatic.duration_sec })}</span>
-          <span className="font-mono text-[10.5px] text-muted-foreground">{t('productionWorkbenchArtifactRef', { id: animatic.artifact_id.slice(0, 8) })}</span>
+          <span className="font-mono text-micro text-muted-foreground">{t('productionWorkbenchArtifactRef', { id: animatic.artifact_id.slice(0, 8) })}</span>
         </div>
       </div>
     </OutputCard>
@@ -229,12 +229,12 @@ function VerificationSheetCard({ evidence, isCurrent }: { evidence: EvidenceItem
           // (rounded+border엔 bg- 필요)이면서, no-handrolled-card(#3164)의 카드-표면 bg 목록
           // (card/background/muted/popover)엔 안 걸리게(이미 OutputCard 안 2층).
           return (
-            <li key={i} className="flex items-center gap-2 rounded-lg border border-border bg-transparent px-2.5 py-1.5 text-[12px]">
-              <span className={`flex size-[15px] shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-foreground ${dotClass}`}>
+            <li key={i} className="flex items-center gap-2 rounded-lg border border-border bg-transparent px-2.5 py-1.5 text-xs">
+              <span className={`flex size-[15px] shrink-0 items-center justify-center rounded-full text-micro font-bold text-foreground ${dotClass}`}>
                 {item.verdict === 'pass' ? '✓' : item.verdict === 'fail' ? '!' : '·'}
               </span>
               <span className="flex-1 text-foreground">{item.name}</span>
-              <span className="text-[11px] text-muted-foreground">
+              <span className="text-editorial-meta text-muted-foreground">
                 {item.verdict === 'pass' ? t('productionWorkbenchVerdictPass')
                   : item.verdict === 'fail' ? t('productionWorkbenchVerdictFail') : t('productionWorkbenchVerdictNa')}
               </span>
@@ -276,7 +276,7 @@ export function ProductionWorkbenchEvidencePanel({ workItemId, workItemType, cur
 
   return (
     <div className="space-y-2.5" data-testid="production-workbench-evidence">
-      <p className="text-[11px] font-semibold text-muted-foreground">{t('productionWorkbenchSectionTitle')}</p>
+      <p className="text-editorial-meta font-semibold text-muted-foreground">{t('productionWorkbenchSectionTitle')}</p>
       {kinds.map((kind) => {
         const Card = KIND_CARD[kind];
         const groupItems = grouped[kind] ?? [];
@@ -299,7 +299,7 @@ export function ProductionWorkbenchEvidencePanel({ workItemId, workItemType, cur
             <Card key={current.evidence.id} evidence={current.evidence} isCurrent={history.length > 0} />
             {history.length > 0 ? (
               <details className="rounded-lg border border-dashed border-border bg-transparent">
-                <summary className="cursor-pointer px-2.5 py-1.5 text-[10.5px] font-semibold text-muted-foreground">
+                <summary className="cursor-pointer px-2.5 py-1.5 text-micro font-semibold text-muted-foreground">
                   {t('productionWorkbenchHistorySectionTitle', { n: history.length })}
                 </summary>
                 {/* story #4433 design 재QA(유나, 2026-09-19) — opacity-70이 muted-foreground

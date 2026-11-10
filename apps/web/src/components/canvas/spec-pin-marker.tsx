@@ -22,7 +22,7 @@ export function SpecPinMarker({ active, onClick, className, style }: SpecPinMark
       onClick={onClick}
       style={style}
       className={cn(
-        'flex h-5 w-5 shrink-0 items-center justify-center rounded-full rounded-bl-none bg-info text-white transition-transform',
+        'flex h-5 w-5 shrink-0 items-center justify-center rounded-full rounded-bl-none bg-info text-on-scrim transition-transform',
         active && 'ring-2 ring-info/40',
         onClick && 'hover:scale-110',
         className,

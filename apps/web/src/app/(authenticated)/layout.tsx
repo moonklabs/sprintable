@@ -7,12 +7,14 @@ import { onboardingRedirect, staysForNewOrgSetup } from '@/lib/auth/onboarding-n
 import { ME_REASON_MEMBERSHIP_ELSEWHERE, readMe404Reason } from '@/lib/auth/me-reason';
 import { resolveProjectMemberships, resolveServerProjectId } from '@/lib/resolve-project-memberships';
 import { DashboardShell } from '../dashboard/dashboard-shell';
+import { isEmbeddedServer } from '@/lib/embedded-api-origin';
 import { StorageCapacityToastProvider } from '@/components/storage/storage-capacity-toast-provider';
 import { CrossProjectToastProvider } from '@/components/chat/cross-project-toast-provider';
 import { DesktopSetupDocWatch } from '@/components/desktop/desktop-setup-doc-watch';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { logServerTiming, withServerTiming } from '@/lib/server-timing';
 import { TabOwnerGate } from '@/components/auth/tab-owner-gate';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
 interface MemberContext {
   id: string;
@@ -68,7 +70,7 @@ async function AuthenticatedLayoutBody({
   const session = await getServerSession();
   if (!session) redirect(buildLoginRedirect(currentPath, navV3Flags));
 
-  const fastapiUrl = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+  const fastapiUrl = fastapiBaseUrl();
   const authHeader = { Authorization: `Bearer ${session.access_token}` };
 
   const [meRes, membershipsRes, orgsRes] = await Promise.all([
@@ -239,6 +241,8 @@ async function AuthenticatedLayoutBody({
         activationSeedFromHint={activationHint === 'complete'}
         activationOrgId={activationOrgId}
         initialActivationCollapsed={activationCollapsed}
+        // story 4832 — whether this is the desktop app's own server (read once per request); the shell hands it to every client component below (`useEmbeddedServer()`)
+        embedded={isEmbeddedServer()}
       >
         <StorageCapacityToastProvider>
           <CrossProjectToastProvider>

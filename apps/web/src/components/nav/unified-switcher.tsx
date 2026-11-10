@@ -1,6 +1,7 @@
 'use client';
 
 import { firstGraphemes } from '@/lib/first-graphemes';
+import { useEffect, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { Check, ChevronDown, Loader2, Plus, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -31,6 +32,10 @@ import { orgRoleLabel } from '@/lib/org-member-role';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { ProjectLimitBanner } from '@/components/nav/project-limit-banner';
 import { NewProjectMacBlock } from '@/components/nav/new-project-mac-block';
+import { NEW_PROJECT_PARAM, OPEN_NEW_PROJECT_EVENT } from '@/components/nav/new-project-entry';
+import { desktopApp } from '@/lib/desktop-app';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 
 // story #2076: 로직(withSwitchedSlugs 포함)이 hooks/use-unified-switcher.ts로 이동했다 —
 // 사이드바(UnifiedSwitcher, ≥1024)와 신규 ContextSwitcherChip(top-bar 칩+바텀시트, <1024)이
@@ -48,7 +53,7 @@ interface UnifiedSwitcherProps {
 
 function OrgInitial({ name }: { name: string }) {
   return (
-    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm bg-brand text-[9px] font-semibold text-brand-foreground">
+    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm bg-brand text-micro font-semibold text-brand-foreground">
       {firstGraphemes(name, 1).toUpperCase()}
     </span>
   );
@@ -68,6 +73,22 @@ export function UnifiedSwitcher({
   const tCommon = useTranslations('common');
   const tSettings = useTranslations('settings');
   const s = useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjectId });
+  // story 4832: the sidebar's «새 프로젝트» line (desktop app) opens this dialog — only THIS instance listens (the top-bar chip would open a second one)
+  const openCreateProject = useRef(s.setCreateProjectOpen);
+  useEffect(() => { openCreateProject.current = s.setCreateProjectOpen; }); // the hook's setter is a new function each render — the listener reads the latest (kept after render, never during it)
+  useEffect(() => {
+    if (!desktopApp()) return; // the line and the menu's flag are the desktop app's: a browser link carrying the flag opens nothing
+    const open = () => openCreateProject.current(true);
+    window.addEventListener(OPEN_NEW_PROJECT_EVENT, open);
+    // the app menu's ⌘N (story 4832): the flag on the page address — read once, then taken off (a reload must not open it again)
+    const here = new URL(window.location.href);
+    if (here.searchParams.get(NEW_PROJECT_PARAM) === '1') {
+      here.searchParams.delete(NEW_PROJECT_PARAM);
+      window.history.replaceState(window.history.state, '', `${here.pathname}${here.search}${here.hash}`);
+      open();
+    }
+    return () => window.removeEventListener(OPEN_NEW_PROJECT_EVENT, open);
+  }, []);
 
   return (
     <>
@@ -85,7 +106,7 @@ export function UnifiedSwitcher({
                 </span>
                 {/* 0746: 전환 중에는 옛 org의 프로젝트명을 숨겨 "새 org + 옛 프로젝트" 깜빡임(leak처럼 보임)을 차단 */}
                 {!s.pending && s.displayProject && (
-                  <span className="truncate text-[10px] font-medium text-muted-foreground leading-tight">
+                  <span className="truncate text-micro font-medium text-muted-foreground leading-tight">
                     {s.displayProject}
                   </span>
                 )}
@@ -98,7 +119,7 @@ export function UnifiedSwitcher({
           {/* 현재 조직 */}
           <DropdownMenuGroup>
             <div className="flex items-center justify-between px-2 py-1.5">
-              <DropdownMenuLabel className="p-0 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+              <DropdownMenuLabel className="p-0 text-editorial-meta font-semibold text-muted-foreground uppercase tracking-wide">
                 <span className="flex items-center gap-1.5">
                   <OrgInitial name={s.displayOrg} />
                   {s.displayOrg}
@@ -151,12 +172,12 @@ export function UnifiedSwitcher({
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
                   <div className="px-2 py-1.5">
-                    <DropdownMenuLabel className="p-0 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                    <DropdownMenuLabel className="p-0 text-editorial-meta font-semibold text-muted-foreground uppercase tracking-wide">
                       <span className="flex items-center gap-1.5">
                         <OrgInitial name={org.orgName} />
                         {org.orgName}
                         {org.role && (
-                          <span className="text-[9px] font-normal opacity-60">{orgRoleLabel(org.role, tSettings)}</span>
+                          <span className="text-micro font-normal opacity-60">{orgRoleLabel(org.role, tSettings)}</span>
                         )}
                       </span>
                     </DropdownMenuLabel>
@@ -224,9 +245,9 @@ export function UnifiedSwitcher({
               <label className="text-sm font-medium" htmlFor="unified-proj-name">
                 {t('switcherProjectNameLabel')} <span className="text-destructive">*</span>
               </label>
-              <input
+              <Input
                 id="unified-proj-name"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="h-auto bg-background dark:bg-background"
                 placeholder={t('switcherProjectNamePlaceholder')}
                 value={s.newProjectName}
                 onChange={(e) => s.setNewProjectName(e.target.value)}
@@ -238,9 +259,9 @@ export function UnifiedSwitcher({
               <label className="text-sm font-medium" htmlFor="unified-proj-desc">
                 {t('switcherDescriptionLabel')} <span className="text-muted-foreground text-xs">{t('switcherOptionalLabel')}</span>
               </label>
-              <textarea
+              <Textarea
                 id="unified-proj-desc"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="min-h-0 bg-background dark:bg-background"
                 placeholder={t('switcherProjectDescPlaceholder')}
                 rows={3}
                 value={s.newProjectDesc}

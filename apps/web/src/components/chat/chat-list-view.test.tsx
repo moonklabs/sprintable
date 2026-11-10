@@ -9,7 +9,10 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
-import { ChatListView } from './chat-list-view';
+import { ChatListView, CHAT_PROJECT_FILTER_KEY } from './chat-list-view';
+
+// story 4847 — the agents tab belongs to the organization's owner/admin: the ORGANIZATION role (orgMemberships), not the shell's «role» (/me: the larger of the project and organization roles)
+const ORG_ADMIN = { orgId: 'org-4847-admin', orgMemberships: [{ orgId: 'org-4847-admin', orgName: 'O', orgSlug: 'o', role: 'admin' }] }; // an org id no other test in this file uses (the domain-labels hook caches per organization)
 import { ChatRailProvider, useChatRailOptional } from '@/app/(authenticated)/chats/chat-rail-context';
 
 // story #3177(S3a) — ChatListView가 이제 NowStrip을 항상 마운트한다. 이 테스트의 관심사는
@@ -74,13 +77,14 @@ beforeEach(() => {
   replaceMock.mockClear();
   searchParamsValueRef.current = '';
   useChatSseMock.mockClear();
-  useDashboardContextMock.mockReturnValue({ role: 'member' });
+  useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'member' });
 });
 
 afterEach(async () => {
   await act(async () => { root.unmount(); });
   container.remove();
   vi.unstubAllGlobals();
+  window.sessionStorage.removeItem(CHAT_PROJECT_FILTER_KEY);
 });
 
 function stubFetch(outsideProject: unknown[]) {
@@ -89,10 +93,28 @@ function stubFetch(outsideProject: unknown[]) {
       return { ok: true, json: async () => ({ data: outsideProject }) };
     }
     if (url.includes('/api/conversations?')) {
+      // story 4847 — the organization-wide read (no project_id) is what the list asks first; an older server answers it 422 and the list falls back to the current project's
+      // rooms plus this «다른 프로젝트» block (kept, not removed). These tests are about that block, so they run on the older-server answer.
+      if (!url.includes('project_id=')) return { ok: false, status: 422, json: async () => null };
       return { ok: true, json: async () => ({ data: [], total: 0 }) };
     }
     return { ok: false, status: 404, json: async () => null };
   }));
+}
+
+// story 4847 — the list's question changes with the project FILTER now (it no longer follows the current project): the stale-drop tests below drive that change
+const TWO_PROJECTS = [{ projectId: 'proj-a', projectName: 'A' }, { projectId: 'proj-b', projectName: 'B' }];
+function startOnFilter(value: string) {
+  useDashboardContextMock.mockReturnValue({ projectMemberships: TWO_PROJECTS, role: 'member' });
+  window.sessionStorage.setItem(CHAT_PROJECT_FILTER_KEY, value);
+}
+async function chooseFilter(value: string) {
+  const select = container.querySelector('[data-testid="project-filter"]') as HTMLSelectElement;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, value);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    await Promise.resolve(); await Promise.resolve();
+  });
 }
 
 // story #1978 — /api/conversations? 호출 횟수만 센다(목록 백필 재fetch가 실제로 일어났는지).
@@ -258,7 +280,7 @@ describe('ChatListView — 리스트 아바타 실사진(story #2968)', () => {
   // 대표사진처럼" 보여주면 안 된다(PR 자신의 group 원칙 위반) — 기존 group 테스트는 일반탭만
   // 커버해 이 회귀를 놓쳤다. agent 탭을 실제로 열어(role="tab" 클릭) 검증한다.
   it('agent 탭의 group 대화도 임의 참가자 사진을 대표사진처럼 노출하지 않는다(회귀 재발 방지)', async () => {
-    useDashboardContextMock.mockReturnValue({ role: 'admin' });
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'admin', ...ORG_ADMIN });
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/conversations/recent-outside-project')) {
         return { ok: true, json: async () => ({ data: [] }) };
@@ -486,7 +508,7 @@ describe('ChatListView — story #3949 미리보기 평문화(entity 토큰·마
 // 직접 고정한다(합성 카운터, 실 데이터 아님 — 이 테스트의 목적 자체가 "몇 번 불렸나").
 describe('ChatListView — story #3888 CHANGES① domain-labels 요청 중복 제거', () => {
   it('⭐대화 3건(행 3개)이어도 domain-labels 요청은 정확히 1회만 나간다', async () => {
-    useDashboardContextMock.mockReturnValue({ role: 'member', orgId: 'org-1' });
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'member', orgId: 'org-1' });
     let domainLabelsCallCount = 0;
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/domain-labels')) {
@@ -732,7 +754,7 @@ describe('ChatListView — 참가자 name="" 폴백(story #3791, 카디르 재�
   });
 
   it('에이전트 탭 — name=""이면 아바타 aria-label이 "에이전트"로 뜬다(빈 문자열 아님)', async () => {
-    useDashboardContextMock.mockReturnValue({ role: 'admin' });
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'admin', ...ORG_ADMIN });
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/conversations/recent-outside-project')) {
         return { ok: true, json: async () => ({ data: [] }) };
@@ -875,7 +897,7 @@ const AGENT_ITEM = {
 
 describe('ChatListView — ChatRailContext 탭 게이트(story #3788 B-③ 후속)', () => {
   it('⭐「내 대화」 0건 + 에이전트 N건 + 에이전트 탭 활성 → conversationCount는 N(0 아님)', async () => {
-    useDashboardContextMock.mockReturnValue({ role: 'admin' }); // 탭 자체가 admin/owner 전용(677행)
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'admin', ...ORG_ADMIN }); // 탭 자체가 admin/owner 전용(677행)
     stubFetchByTab([], [AGENT_ITEM]);
     await act(async () => {
       root.render(wrap(
@@ -919,7 +941,7 @@ describe('ChatListView — ChatRailContext 탭 게이트(story #3788 B-③ 후�
   // 없이 me.role만 갱신) Tabs는 사라지는데 activeList가 'agent'에 남아 안 보이는 탭의 count를
   // 계속 공급했었다. 뮤테이션 대표: isAdminOrOwner 게이트/리셋 effect 둘 다 지워야 RED.
   it('⭐admin+에이전트 탭 활성 中 role이 member로 하향(리마운트 없음) → count는 my 것(0)·activeList는 my로 리셋', async () => {
-    useDashboardContextMock.mockReturnValue({ role: 'admin' });
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'admin', ...ORG_ADMIN });
     stubFetchByTab([], [AGENT_ITEM]);
     await act(async () => {
       root.render(wrap(
@@ -938,7 +960,7 @@ describe('ChatListView — ChatRailContext 탭 게이트(story #3788 B-③ 후�
 
     // 리마운트 없이 같은 root에 재렌더 — mock 반환값만 바뀐 채로 다음 렌더가 새 role을 읽는다
     // (실제로는 me.role SSE/폴 갱신이 만드는 상황, 여기선 mock 스왑으로 흉내).
-    useDashboardContextMock.mockReturnValue({ role: 'member' });
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'member' });
     await act(async () => {
       root.render(wrap(
         <ChatRailProvider>
@@ -995,7 +1017,7 @@ describe('ChatListView — 목록 fetch 실패 축(story #3790)', () => {
   });
 
   it('agent 탭 fetch 실패(my는 성공) → 에이전트 탭 활성 시 좌우가 모두 실패를 말한다(my N건 무관)', async () => {
-    useDashboardContextMock.mockReturnValue({ role: 'admin' });
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'admin', ...ORG_ADMIN });
     stubFetchWithFailure('agent');
     await act(async () => {
       root.render(wrap(
@@ -1019,6 +1041,7 @@ describe('ChatListView — 목록 fetch 실패 축(story #3790)', () => {
   });
 
   it('재시도 클릭 → 재조회 中 로딩(0건 아님)을 거쳐 성공하면 실패 문구가 사라진다', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [{ projectId: 'proj-current', projectName: 'A' }], role: 'member' }); // a person with a project: the empty list says «no conversations» (no project at all says «no project yet», story 4847)
     let attempt = 0;
     // 두 번째(재시도) 응답은 수동으로 붙들어 "아직 응답 전" 창을 결정적으로 관측한다
     // (마이크로태스크가 act() 한 틱 안에서 다 풀려버리면 로딩 창을 못 잡는 레이스 방지).
@@ -1066,6 +1089,7 @@ describe('ChatListView — 목록 fetch 실패 축(story #3790)', () => {
 
 describe('ChatListView — 실패 경로 stale-drop(story #3790 후속, 카디르 QA #4142)', () => {
   it('⭐project A pending 中 project B로 전환 → B 성공 렌더 뒤 A의 뒤늦은 실패가 B 화면을 안 덮는다', async () => {
+    startOnFilter('proj-a'); // story 4847: A → B is the project filter now
     let resolveAFailure: (() => void) | undefined;
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/conversations/recent-outside-project')) {
@@ -1094,14 +1118,7 @@ describe('ChatListView — 실패 경로 stale-drop(story #3790 후속, 카디�
     // A의 fetch가 아직 resolveAFailure에서 멈춰 있는 채로 — 프로젝트를 B로 전환.
     expect(resolveAFailure).not.toBeUndefined();
 
-    await act(async () => {
-      root.render(wrap(
-        <ChatRailProvider>
-          <RailCapture />
-          <ChatListView projectId="proj-b" currentTeamMemberId="me-1" />
-        </ChatRailProvider>,
-      ));
-    });
+    await chooseFilter('proj-b');
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     // B는 빠르게 성공 — 0건 화면이 정상적으로 섰다.
     expect(container.textContent).toContain(koMessages.chats.noConversations);
@@ -1116,6 +1133,7 @@ describe('ChatListView — 실패 경로 stale-drop(story #3790 후속, 카디�
 
 describe('ChatListView — my 탭 project 전환 즉시 클리어+로딩(story #3790 후속 2, 페드루 그라운딩 12:34Z)', () => {
   it('⭐project A(0건) → B로 전환 직후(B 응답 前) 우측이 "0건"으로 단정하지 않고 로딩을 말한다', async () => {
+    startOnFilter('proj-a'); // story 4847: A → B is the project filter now
     let resolveB: (() => void) | undefined;
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/conversations/recent-outside-project')) {
@@ -1143,14 +1161,7 @@ describe('ChatListView — my 탭 project 전환 즉시 클리어+로딩(story #
     expect(readRailCapture(container).loading).toBe('false');
     expect(readRailCapture(container).count).toBe('0');
 
-    await act(async () => {
-      root.render(wrap(
-        <ChatRailProvider>
-          <RailCapture />
-          <ChatListView projectId="proj-b" currentTeamMemberId="me-1" />
-        </ChatRailProvider>,
-      ));
-    });
+    await chooseFilter('proj-b');
     // B의 fetch가 아직 resolveB에서 멈춰 있는 채로 — 우측은 A의 0건을 그대로 우기면 안 된다.
     expect(resolveB).not.toBeUndefined();
     const midSwitch = readRailCapture(container);
@@ -1165,6 +1176,7 @@ describe('ChatListView — my 탭 project 전환 즉시 클리어+로딩(story #
 
 describe('ChatListView — my 탭 finally의 stale-drop(story #3790 후속 2, 페드루 그라운딩)', () => {
   it('⭐A pending 中 B로 전환(B도 pending) → A가 뒤늦게 성공해도 B의 로딩을 안 끈다', async () => {
+    startOnFilter('proj-a'); // story 4847: A → B is the project filter now
     let resolveA: (() => void) | undefined;
     let resolveB: (() => void) | undefined;
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -1193,14 +1205,7 @@ describe('ChatListView — my 탭 finally의 stale-drop(story #3790 후속 2, �
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(resolveA).not.toBeUndefined();
 
-    await act(async () => {
-      root.render(wrap(
-        <ChatRailProvider>
-          <RailCapture />
-          <ChatListView projectId="proj-b" currentTeamMemberId="me-1" />
-        </ChatRailProvider>,
-      ));
-    });
+    await chooseFilter('proj-b');
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(resolveB).not.toBeUndefined();
     expect(readRailCapture(container).loading).toBe('true');
@@ -1243,7 +1248,7 @@ describe('ChatListView — story #3831 지시 한 줄 compose 경유(새 API 0·
   });
 
   it('story #4231 — compose 경유 이동도 현재 프로젝트(`?p=`)를 싣는다', async () => {
-    useDashboardContextMock.mockReturnValue({ role: 'member', projectId: 'proj-A' });
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'member', projectId: 'proj-A' });
     searchParamsValueRef.current = 'compose=' + encodeURIComponent('지시');
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/conversations/recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
@@ -1263,6 +1268,7 @@ describe('ChatListView — story #3831 지시 한 줄 compose 경유(새 API 0·
   });
 
   it('대화가 0건이면 리다이렉트 대신 새 대화 모달을 연다(onOpenChange 호출)', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [{ projectId: 'proj-current', projectName: 'A' }], role: 'member', projectId: 'proj-current' }); // a person with a project (with none, story 4847: no window to open)
     searchParamsValueRef.current = 'compose=' + encodeURIComponent('유튜브 챕터 3개로 나눠줘');
     stubFetch([]);
     const onOpenChange = vi.fn();

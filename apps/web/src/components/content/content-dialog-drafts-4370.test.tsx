@@ -116,3 +116,16 @@ describe('인사이트 후속 창 폼 초안(story #4370)', () => {
     expect(textarea()!.value).toBe('');
   });
 });
+
+// story 4831 부품 교체(공용 부품 ④) — 후속 작업 창의 제목 · 메모 칸이 바탕 Input · Textarea가 되어도 본문색(text-foreground)과 3줄을 그대로 가진다.
+describe('FollowUpDialog — 바탕 부품(story 4831)', () => {
+  it('제목은 바탕 Input, 메모는 바탕 Textarea(3줄)이고 둘 다 본문색 낱말을 가진다', async () => {
+    await render(<FollowUpDialog orgId="org-1" publicationId="pub-1" originalTitle="가을 캠페인" onClose={() => {}} />);
+    const title = document.body.querySelector('#follow-up-title') as HTMLInputElement;
+    const note = document.body.querySelector('#follow-up-note') as HTMLTextAreaElement;
+    expect(title.dataset.slot).toBe('input');
+    expect(note.dataset.slot).toBe('textarea');
+    expect(note.rows).toBe(3);
+    for (const el of [title, note]) expect(el.className.split(/\s+/)).toContain('text-foreground');
+  });
+});

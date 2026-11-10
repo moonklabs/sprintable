@@ -65,6 +65,9 @@ async def lifespan(app: FastAPI):
     # 객체 자체를 재생성(shutdown.py의 reset_shutdown_event 참조 — 모듈 속성 접근으로 최신
     # 객체를 읽어야 하므로 아래도 `shutdown_module.shutdown_event`로 접근, 정적 import 금지).
     shutdown_module.reset_shutdown_event()
+    from app.core import bounded_gate as _bounded_gate_start
+
+    _bounded_gate_start.reset_all()  # story #4867 — gates are closed (limiting) while the app runs
     warn_if_webhook_secret_misconfigured()  # Bot-M.2 P3: 웹훅 secret misconfig 를 트래픽 前 경고.
     # E-ARCH S1: PG_LISTEN_ENABLED=false인 서비스(api)는 이 검증 자체가 무의미 — LISTEN을 절대
     # 안 켜므로 DB_PGBOUNCER/DATABASE_URL_DIRECT 정합을 강제할 이유가 없다(무해·불필요 fail 방지).
@@ -102,6 +105,8 @@ async def lifespan(app: FastAPI):
     assert_webhook_stub_not_registered_in_prod()  # story e4fc29fa 조각④: prod에 webhook 스텁 등재=기동 실패(fail-closed).
     from app.routers.dev_ghost_stub import assert_ghost_stub_not_registered_in_prod
     assert_ghost_stub_not_registered_in_prod()  # story #3816 PR1: prod에 Ghost 스텁 등재=기동 실패(fail-closed).
+    from app.routers.local_auth import assert_local_bootstrap_config
+    assert_local_bootstrap_config()  # story #4825: 로컬 부트스트랩 스위치·비밀은 짝으로만, Cloud Run엔 절대 없음(fail-closed).
     # story bea25062: cutover 존재-캐시는 의도적으로 startup에서 warm 안 함(자체 발견 —
     # TestClient(app)로 lifespan을 태우는 기존 SSE 테스트들이 라우트 전용으로 짜둔 유한한
     # mock db.execute() 순서-큐를 startup 시점의 이 캐시 조회가 몰래 하나 소비해 실패시켰다).
@@ -169,9 +174,13 @@ async def lifespan(app: FastAPI):
 
         lift_sweep_task = asyncio.create_task(lift_sweep_loop())
 
+    from app.services.embedded_timers import start_embedded_timers  # story 4826: the app's own server knocks on its own cron routes (None elsewhere)
+
+    embedded_timers_task = start_embedded_timers(app)
+
     from app.core import pool_holders as _pool_holders  # story #4864 — names whoever keeps a pooled connection too long (logs only; changes nothing)
 
-    pool_holders_task = None if _os.environ.get("PYTEST_CURRENT_TEST") else _pool_holders.start_watch()
+    pool_holders_task = _pool_holders.start_watch()  # None under pytest / when switched off (the guard lives in start_watch, so a test can see the lifespan call it)
     try:
         yield
     finally:
@@ -179,6 +188,11 @@ async def lifespan(app: FastAPI):
         # 이 신호를 구독해 강제 CancelledError를 기다리지 않고 스스로 정상 종료한다 — 다른
         # 정리 작업(태스크 cancel 등)보다 먼저 set해 SSE 스트림이 최대한 빨리 반응하게 한다.
         shutdown_module.shutdown_event.set()
+        # story #4867 — the pieces waiting at a concurrency gate (pg_notify · AU metering · tool-call recording) would be cancelled by the 5-second drain and their writes lost:
+        # open every gate now, so everything that waits goes through at once
+        from app.core import bounded_gate as _bounded_gate
+
+        _bounded_gate.open_all()
         if task is not None:
             task.cancel()
         if l2_task is not None:
@@ -191,8 +205,14 @@ async def lifespan(app: FastAPI):
             delivery_dispatcher_task.cancel()
         if lift_sweep_task is not None:
             lift_sweep_task.cancel()
+        if embedded_timers_task is not None:
+            embedded_timers_task.cancel()
         if pool_holders_task is not None:
             pool_holders_task.cancel()
+            try:
+                await pool_holders_task  # cancelled AND awaited: nothing is left running when the lifespan returns
+            except asyncio.CancelledError:
+                pass
         try:
             if task is not None:
                 try:
@@ -222,6 +242,11 @@ async def lifespan(app: FastAPI):
             if lift_sweep_task is not None:
                 try:
                     await lift_sweep_task
+                except asyncio.CancelledError:
+                    pass
+            if embedded_timers_task is not None:
+                try:
+                    await embedded_timers_task
                 except asyncio.CancelledError:
                     pass
         finally:
@@ -319,6 +344,9 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 
 
 _CLOCK_PRESS_PATH = re.compile(r"/api/v2/desktop/setups/[^/]+/clock")
+# story 4825 (AC6): on the desktop app's own server (embedded install) nothing under /api/v2/auth/ sends back what was typed — a password in any auth body (the owner's new password, a sign-in) is not echoed
+# by a refusal. Keyed on the embedded switch, so a hosted deployment's answers are exactly as before.
+_AUTH_PATH_PREFIX = "/api/v2/auth/"
 
 
 @app.exception_handler(RequestValidationError)
@@ -335,7 +363,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             )
     # story #4733 (S5 · P2): what a person typed into a clock edit is never sent back in a refusal — FastAPI's default 422 carries each error's `input` (for a body-level error, the WHOLE body). On the phone's
     # clock route no error carries it; the rest of the answer is the default's, and every other route's answer is untouched.
-    if _CLOCK_PRESS_PATH.fullmatch(request.url.path):
+    if _CLOCK_PRESS_PATH.fullmatch(request.url.path) or (settings.is_embedded and request.url.path.startswith(_AUTH_PATH_PREFIX)):
         exc = RequestValidationError([{k: v for k, v in err.items() if k != "input"} for err in exc.errors()])
     return await request_validation_exception_handler(request, exc)
 
@@ -646,6 +674,11 @@ from app.routers import dev_ghost_stub as _dev_ghost_stub  # noqa: E402
 
 if _dev_ghost_stub.ghost_stub_enabled():
     app.include_router(_dev_ghost_stub.router)
+# story #4825 — the desktop app's embedded server only (SPRINTABLE_EMBEDDED + a 32+ char secret, never Cloud Run): not registered anywhere else.
+from app.routers import local_auth as _local_auth  # noqa: E402
+
+_local_auth.register_local_auth_routes(app)
+_local_auth.apply_embedded_host_guard(app)
 app.include_router(resolve.router)
 app.include_router(org_invites.router)
 app.include_router(invite_accept.router)

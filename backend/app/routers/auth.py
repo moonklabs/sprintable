@@ -26,7 +26,7 @@ def _normalize_email(v: str) -> str:
         raise ValueError("Invalid email format")
     return v
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import delete, func, literal, or_, select, update
+from sqlalchemy import case, delete, func, literal, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -1254,6 +1254,9 @@ async def register(
     existing = await _get_user_by_email(session, body.email)
     if existing:
         return _err("EMAIL_TAKEN", "Email already registered", 409)
+    from app.routers.local_auth import is_reserved_owner_address
+    if is_reserved_owner_address(body.email):  # story 4825: embedded installs only (False on a hosted deployment) — the owner's address is made by local-bootstrap alone
+        return _err("EMAIL_TAKEN", "Email already registered", 409)
 
     from app.services.agent_onboarding_config import resolve_locale_from_request
     user = User(
@@ -1328,11 +1331,14 @@ async def register(
         if not delivered:
             # SPR-13: provider 미설정 설치에서 운영자가 로그로 인증을 완료할 수 있게 링크를 남긴다
             # (자기 인스턴스 로그 = 운영자 신뢰 경계 안. 실발송 성공 시에는 안 찍힘).
-            logger.warning(
-                "register: 인증 이메일 미발송(콘솔 폴백) user_id=%s email=%s — "
-                "RESEND_API_KEY/EMAIL_FROM 미설정 또는 발송 실패 추정. 인증 링크: %s",
-                user.id, user.email, verify_link,
-            )
+            if settings.is_embedded:  # story 4825 (AC6): the link is a token — the desktop app's server log never carries one
+                logger.warning("register: verification e-mail not sent (no provider in this install) user_id=%s", user.id)
+            else:
+                logger.warning(
+                    "register: 인증 이메일 미발송(콘솔 폴백) user_id=%s email=%s — "
+                    "RESEND_API_KEY/EMAIL_FROM 미설정 또는 발송 실패 추정. 인증 링크: %s",
+                    user.id, user.email, verify_link,
+                )
     except Exception:
         logger.exception(
             "register: 인증 이메일 발송 예외 user_id=%s email=%s (가입 자체는 완료)",
@@ -1358,24 +1364,32 @@ async def login(
         if user.login_locked_until > datetime.now(timezone.utc):
             remaining = int((user.login_locked_until - datetime.now(timezone.utc)).total_seconds())
             return _err("ACCOUNT_LOCKED", f"Account locked. Try again in {remaining} seconds", 429)
-        # 잠금 해제 시간 경과 — 카운터 초기화
-        await session.execute(
-            update(User).where(User.id == user.id).values(login_fail_count=0, login_locked_until=None)
-        )
+        # 잠금 해제 시간 경과 — story 4839: nothing is written here any more (the person's row was held through the password hashing below). A lock-out that has run out is cleared where the count is
+        # next written: the failure statement below, or the success reset.
 
     if not user or not verify_password(body.password, user.hashed_password):
-        # 실패 카운터 증가
+        # 실패 카운터 증가 — story 4839: ONE statement adds one and returns the new count; the answer is decided from that returned value, not from the row read at the start of the request
+        # (requests in flight together all read the same old count, so counting from the read let them overwrite each other and walk past the 5-failure lock-out).
+        # The 5th failure answers 401 and sets the lock; an attempt whose failure is counted after that (count > 5) finds the account already locked: 429.
+        _already_locked_remaining: int | None = None
         if user:
-            new_count = (user.login_fail_count or 0) + 1
-            locked_until = (
-                datetime.now(timezone.utc) + timedelta(minutes=5) if new_count >= 5 else None
-            )
+            # a lock-out that has run out is cleared first, judged on the CURRENT row (requests that read the same expired lock-out must not each clear the count the others have just added)
             await session.execute(
-                update(User).where(User.id == user.id).values(
-                    login_fail_count=new_count,
-                    login_locked_until=locked_until,
-                )
+                update(User).where(
+                    User.id == user.id, User.login_locked_until.is_not(None), User.login_locked_until <= func.clock_timestamp(),
+                ).values(login_fail_count=0, login_locked_until=None)
             )
+            _counted = (await session.execute(
+                update(User).where(User.id == user.id).values(
+                    login_fail_count=func.coalesce(User.login_fail_count, 0) + 1,
+                    login_locked_until=case(
+                        (func.coalesce(User.login_fail_count, 0) + 1 >= 5, func.clock_timestamp() + timedelta(minutes=5)),
+                        else_=User.login_locked_until,
+                    ),
+                ).returning(User.login_fail_count, User.login_locked_until)
+            )).one()
+            if _counted.login_fail_count > 5 and _counted.login_locked_until is not None:
+                _already_locked_remaining = max(0, int((_counted.login_locked_until - datetime.now(timezone.utc)).total_seconds()))
         _ip = request.client.host if request.client else None
         _ua = request.headers.get("user-agent")
         await _write_audit(
@@ -1384,12 +1398,37 @@ async def login(
             email=body.email,
             ip_address=_ip,
             user_agent=_ua,
+            detail="ACCOUNT_LOCKED" if _already_locked_remaining is not None else "INVALID_CREDENTIALS",
+        )
+        await session.commit()
+        if _already_locked_remaining is not None:
+            return _err("ACCOUNT_LOCKED", f"Account locked. Try again in {_already_locked_remaining} seconds", 429)
+        return _err("INVALID_CREDENTIALS", "Invalid email or password", 401)
+
+    # story 4838: the session stored below queues on the person's session lock like every other issuer (refresh · switch) — an all-device revoke (a password change · a reset…) either ran before
+    # (then the hash read again here is no longer the one just checked, or the account is closed: refused, nothing stored) or waits until this sign-in's session is committed and ends it. The (slow) hash check stays outside the lock.
+    await _lock_person_sessions(session, user.id, exclusive=False)
+    # story 4839: the row is taken here — a failure being counted (it holds the row until it commits) is waited for, so what is read here is the lock-out as it stands once that failure is in; the session lock is taken first, the row second (the order every revoke keeps)
+    # FOR NO KEY UPDATE (not FOR UPDATE): the same row lock a plain UPDATE of the row takes — it queues with the failure/reset statements but does not block a foreign-key check on the person's id (a member row being inserted for them)
+    _now = (await session.execute(
+        select(User.hashed_password, User.is_active, User.login_locked_until, User.totp_enabled, User.totp_secret).where(User.id == user.id).with_for_update(key_share=True)
+    )).one_or_none()
+    if _now is not None and _now.is_active and _now.hashed_password == user.hashed_password and _now.login_locked_until is not None and _now.login_locked_until > datetime.now(timezone.utc):
+        # story 4839: the account was locked by failures counted while this request was checking the password — a right password does not get past a lock-out that is already in force
+        await session.commit()
+        return _err("ACCOUNT_LOCKED", f"Account locked. Try again in {int((_now.login_locked_until - datetime.now(timezone.utc)).total_seconds())} seconds", 429)
+    if _now is None or not _now.is_active or _now.hashed_password != user.hashed_password:
+        await _write_audit(
+            session, "login_failure",
+            user_id=user.id, email=body.email,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
             detail="INVALID_CREDENTIALS",
         )
         await session.commit()
         return _err("INVALID_CREDENTIALS", "Invalid email or password", 401)
 
-    if user.totp_enabled:
+    if _now.totp_enabled:  # story 4839: the second step is judged on what the row says now (it may have been switched on while this request was running)
         if not body.totp_code:
             return _err("TOTP_REQUIRED", "TOTP code required", 403)
 
@@ -1400,38 +1439,54 @@ async def login(
             remaining = int((user.totp_locked_until - now).total_seconds())
             return _err("TOTP_LOCKED", f"Too many failures. Retry after {remaining}s", 429)
 
-        timestep = verify_totp_with_timestep(user.totp_secret or "", body.totp_code)
+        timestep = verify_totp_with_timestep(_now.totp_secret or "", body.totp_code)
 
         if timestep is None:
-            # 실패: 카운터 증가, 5회 도달 시 5분 lockout
-            fail_count = (getattr(user, "totp_fail_count", 0) or 0) + 1
-            updates: dict = {"totp_fail_count": fail_count}
-            if fail_count >= 5:
-                updates["totp_locked_until"] = now + timedelta(minutes=5)
-                updates["totp_fail_count"] = 0
-            await session.execute(update(User).where(User.id == user.id).values(**updates))
+            # 실패: 카운터 증가, 5회 도달 시 5분 lockout — story 4839: one statement reads the row's lock-out state under the row lock, counts and answers from what it returns
+            # (a failure counted after the lock-out is already in force changes nothing and is answered 429, like the password lock-out). The read under the person's session lock above already holds this row until the end of the request;
+            # the statement takes it again (FOR NO KEY UPDATE) so that it is correct on its own, whatever is above it.
+            _failed = (await session.execute(text(
+                "WITH old AS (SELECT id, totp_locked_until AS was_locked_until FROM users WHERE id = :uid FOR NO KEY UPDATE) "
+                "UPDATE users u SET "
+                "totp_fail_count = CASE WHEN old.was_locked_until > clock_timestamp() THEN u.totp_fail_count "
+                "WHEN COALESCE(u.totp_fail_count, 0) + 1 >= 5 THEN 0 ELSE COALESCE(u.totp_fail_count, 0) + 1 END, "
+                "totp_locked_until = CASE WHEN old.was_locked_until > clock_timestamp() THEN u.totp_locked_until "
+                "WHEN COALESCE(u.totp_fail_count, 0) + 1 >= 5 THEN clock_timestamp() + interval '5 minutes' ELSE u.totp_locked_until END "
+                "FROM old WHERE u.id = old.id RETURNING (old.was_locked_until > clock_timestamp()) AS already_locked, u.totp_locked_until AS locked_until"
+            ), {"uid": user.id})).one()
             await session.commit()
+            if _failed.already_locked:
+                _wait = max(0, int((_failed.locked_until - datetime.now(timezone.utc)).total_seconds()))
+                return _err("TOTP_LOCKED", f"Too many failures. Retry after {_wait}s", 429)
             return _err("INVALID_TOTP", "Invalid TOTP code", 403)
 
-        # replay 체크: 같은 timestep 재사용 거부
-        last_ts = getattr(user, "totp_last_timestep", None)
-        if last_ts is not None and timestep <= last_ts:
-            return _err("TOTP_REPLAYED", "TOTP code already used", 403)
-
-        # 성공: 카운터 리셋 + timestep 업데이트
-        await session.execute(
-            update(User).where(User.id == user.id).values(
+        # 성공 + replay 체크를 한 문장으로 — story 4839: the step is recorded only if it is later than the one already used, in the same statement that checks it
+        # (checking the row read at the start of the request let several requests with the same code all pass; the row lock makes the second one find the step recorded)
+        _recorded = (await session.execute(
+            update(User).where(
+                User.id == user.id,
+                or_(User.totp_last_timestep.is_(None), User.totp_last_timestep < timestep),
+                or_(User.totp_locked_until.is_(None), User.totp_locked_until <= func.clock_timestamp()),
+            ).values(
                 totp_last_timestep=timestep,
                 totp_fail_count=0,
                 totp_locked_until=None,
-            )
-        )
+            ).returning(User.id)
+        )).first()
+        if _recorded is None:
+            # nothing recorded: the step was already used — or a lock-out went on after the check at the top (failures counted while this request was running)
+            _locked_until = (await session.execute(select(User.totp_locked_until).where(User.id == user.id))).scalar_one_or_none()
+            if _locked_until is not None and _locked_until > datetime.now(timezone.utc):
+                return _err("TOTP_LOCKED", f"Too many failures. Retry after {max(0, int((_locked_until - datetime.now(timezone.utc)).total_seconds()))}s", 429)
+            return _err("TOTP_REPLAYED", "TOTP code already used", 403)
 
-    # 로그인 성공 — 실패 카운터 리셋
-    if user.login_fail_count or user.login_locked_until:
-        await session.execute(
-            update(User).where(User.id == user.id).values(login_fail_count=0, login_locked_until=None)
-        )
+    # 로그인 성공 — 실패 카운터 리셋 (story 4839: asks the current row, not the one read at the start — failures counted meanwhile are cleared too; a no-op statement when there is nothing to clear)
+    await session.execute(
+        update(User).where(
+            User.id == user.id,
+            or_(User.login_fail_count != 0, User.login_locked_until.is_not(None)),
+        ).values(login_fail_count=0, login_locked_until=None)
+    )
 
     _md = await _sign_in_session_context(user, session)  # story 4762 — a live org, as a refresh
     if settings.build_app_metadata_defallback:
@@ -2195,6 +2250,11 @@ async def oauth_callback(
                     ip_address=request.client.host if request.client else None,
                 )
             if reclaimed_epoch is None:
+                # story 4838: the link writes the person's row — under the session lock, on an account still open (a deletion that got the lock first closed it)
+                await _lock_person_sessions(session, user.id, exclusive=False)
+                if not (await session.execute(select(User.is_active).where(User.id == user.id))).scalar_one_or_none():
+                    await session.commit()
+                    return _err("INVALID_CREDENTIALS", "Sign-in is no longer valid for this account", 401)
                 await session.execute(
                     update(User).where(User.id == user.id).values(**{f"{provider}_id": oauth_id})
                 )
@@ -2243,6 +2303,14 @@ async def oauth_callback(
     # 4. JWT 발급
     from datetime import timedelta
     from app.core.security import ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS
+
+    # story 4838: as the password sign-in — the session below queues on the person's session lock, and what the provider's proof was matched to is read again under it (the account still open, the
+    # provider id still the one that matched): an all-device revoke (the account's deletion · a reclaim…) either ran before → refused, nothing stored, or waits until this session is committed and ends it.
+    await _lock_person_sessions(session, user.id, exclusive=False)
+    _live = (await session.execute(select(User.is_active, id_col).where(User.id == user.id))).one_or_none()
+    if _live is None or not _live[0] or _live[1] != oauth_id:
+        await session.commit()
+        return _err("INVALID_CREDENTIALS", "Sign-in is no longer valid for this account", 401)
 
     _md = await _sign_in_session_context(user, session)  # story 4762 — a live org, as a refresh
     if settings.build_app_metadata_defallback:
@@ -2572,6 +2640,10 @@ async def request_set_password(
     즉시 해시해 토큰에만 싣는다(평문 어디에도 안 남김) — 실제 DB write는 confirm이 한다."""
     if _requires_interactive_session(auth):
         return _err("REQUIRES_INTERACTIVE_SESSION", "이 작업은 브라우저 세션에서만 가능합니다", 403)
+    if settings.is_embedded:
+        # story 4825 (AC6) — the desktop app's own server has no e-mail: nothing is made or sent here (no token, no link); a signed-in owner sets the first
+        # password through POST /auth/local-set-password instead
+        return _err("EMAIL_NOT_CONFIGURED", "E-mail is not available in this install", 409)
 
     user = await _get_user_by_id(session, uuid.UUID(auth.user_id))
     if user is None:
@@ -2608,7 +2680,7 @@ async def request_set_password(
         logger.warning(
             "set-password/request: 확인 이메일 미발송(콘솔 폴백) user_id=%s email=%s 확인 링크: %s",
             user.id, user.email, confirm_link,
-        )
+        )  # (an embedded install never gets here: it is closed above with EMAIL_NOT_CONFIGURED before any token exists)
         return _ok({"message": "Confirmation email could not be delivered — check email configuration", "delivered": False})
     return _ok({"message": "Confirmation email sent", "delivered": True})
 
@@ -2729,10 +2801,13 @@ async def resend_verification(
     if not delivered:
         # 콘솔 폴백(미발송)을 "sent"로 거짓 보고하지 않는다(데모 디버깅 가시화).
         # SPR-13: 운영자가 로그로 인증을 완료할 수 있게 링크 포함(register 폴백과 동일).
-        logger.warning(
-            "resend-verification: 인증 이메일 미발송(콘솔 폴백) user_id=%s email=%s 인증 링크: %s",
-            user.id, user.email, verify_link,
-        )
+        if settings.is_embedded:  # story 4825 (AC6): the link is a token — the desktop app's server log never carries one
+            logger.warning("resend-verification: verification e-mail not sent (no provider in this install) user_id=%s", user.id)
+        else:
+            logger.warning(
+                "resend-verification: 인증 이메일 미발송(콘솔 폴백) user_id=%s email=%s 인증 링크: %s",
+                user.id, user.email, verify_link,
+            )
         return _ok({"message": "Verification email could not be delivered — check email configuration", "delivered": False})
     return _ok({"message": "Verification email sent", "delivered": True})
 

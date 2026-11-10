@@ -2,6 +2,7 @@
 //
 // story 4711 — 처음 셋업 세 걸음(에이전트 → 폴더 → 시작): one card · the folder comes back from the app's Mac window in the `#` ·
 // [시작] = one confirm-solo with the runtime and the folder's NAME (never a path) · the free plan's one project asks instead of 402.
+import { EmbeddedServerProvider } from '@/components/embedded-server-context';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StrictMode } from 'react';
 import { act } from 'react';
@@ -67,10 +68,11 @@ async function mount(hash: string, opts: { role?: string; projects?: { projectId
     orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: opts.role ?? 'owner' }], projectMemberships: opts.projects ?? [],
   });
   const query = parseSetupFragment(hash)!;
-  await act(async () => { root.render(<NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul"><DesktopSetupQuick query={query} onTeam={() => { teamPressed = true; }} /></NextIntlClientProvider>); });
+  await act(async () => { root.render(<EmbeddedServerProvider embedded={onEmbeddedServer}><NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul"><DesktopSetupQuick query={query} onTeam={() => { teamPressed = true; }} /></NextIntlClientProvider></EmbeddedServerProvider>); });
   for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
 }
 let teamPressed = false;
+let onEmbeddedServer = false; // story 4832: the page is served by the app's own (local) server
 const text = () => container.textContent ?? '';
 const buttonOf = (label: string) => [...container.querySelectorAll('button')].find((b) => b.textContent === label) as HTMLButtonElement | undefined;
 const linkOf = (label: string) => [...container.querySelectorAll('a')].find((a) => a.textContent === label) as HTMLAnchorElement | undefined;
@@ -79,7 +81,7 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   confirmNow = () => new Response(JSON.stringify({ project_id: PROJ, conversation_id: 'c-1', members: [] }), { status: 200 });
   invitesNow = () => new Response(JSON.stringify({ invites: [] }), { status: 200 });
-  recipesNow = () => new Response('{}', { status: 404 }); statusNow = () => ({}); __resetOrgRemoteControlForTest(); teamPressed = false; ee.on = false; sp.value = null; remoteGet = remoteOf({ enabled: true, can_change: true, enabled_at: 'now' }); remotePut = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 }); stub();
+  recipesNow = () => new Response('{}', { status: 404 }); statusNow = () => ({}); __resetOrgRemoteControlForTest(); teamPressed = false; onEmbeddedServer = false; ee.on = false; sp.value = null; remoteGet = remoteOf({ enabled: true, can_change: true, enabled_at: 'now' }); remotePut = () => new Response(JSON.stringify({ data: { enabled: true, can_change: true, enabled_at: 'now' } }), { status: 200 }); stub();
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); sessionStorage.clear(); });
 
@@ -87,7 +89,7 @@ describe('[SID:4711] the first setup in three steps', () => {
   it('opens with the program picked, the folder button, and [시작] off with its reason in view', async () => {
     await mount(frag(''), { projects: [] });
     expect(text()).toContain('에이전트 만들기');
-    expect((container.querySelector('input[name=quick-runtime]:checked')!.parentElement)!.textContent).toContain('Claude Code');
+    expect((container.querySelector('[role=radio][data-checked]')!.parentElement)!.textContent).toContain('Claude Code');
     expect(text()).toContain('2.1.289'); // the version after the name
     expect(linkOf('폴더 고르기')!.getAttribute('href')).toBe('ai.sprintable:/desktop/setup?intent=folder&pick=claude');
     expect(buttonOf('만들기')!.disabled).toBe(true);
@@ -97,7 +99,7 @@ describe('[SID:4711] the first setup in three steps', () => {
 
   it('the person\'s program pick goes to the folder window and comes back (the address is new)', async () => {
     await mount(frag('&pick=codex'));
-    expect((container.querySelector('input[name=quick-runtime]:checked')!.parentElement)!.textContent).toContain('Codex');
+    expect((container.querySelector('[role=radio][data-checked]')!.parentElement)!.textContent).toContain('Codex');
     expect(linkOf('폴더 고르기')!.getAttribute('href')).toBe('ai.sprintable:/desktop/setup?intent=folder&pick=codex');
   });
 
@@ -193,7 +195,7 @@ describe('[SID:4711] the first setup in three steps', () => {
 
   it('only one program found: no radio, the name and its version', async () => {
     await mount(`#code=${CODE}&runtimes=codex&caps=solo&rv=codex:0.159.3`);
-    expect(container.querySelector('input[name=quick-runtime]')).toBeNull();
+    expect(container.querySelector('[role=radio]')).toBeNull();
     expect(text()).toContain('Codex');
     expect(text()).toContain('0.159.3');
   });
@@ -378,9 +380,22 @@ describe('[SID:4670 AC1] «폰으로도 에이전트 다루기» on the three-st
     await mount(frag(FOLDER), { projectId: PROJ, projects: [{ projectId: PROJ, projectName: 'P', orgId: 'o-1' }] });
     expect(tick()?.checked).toBe(true);
     expect(container.querySelector('[data-testid=setup-phone-control]')!.textContent).toContain('폰으로도 에이전트 다루기');
-    expect(container.querySelectorAll('input[type=checkbox]')).toHaveLength(1);
+    expect(container.querySelectorAll('[role=checkbox]')).toHaveLength(1);
     const row = container.querySelector('[data-testid=setup-phone-control]')!;
     expect(row.nextElementSibling?.querySelector('button')?.textContent).toBe('만들기'); // just above «만들기»
+  });
+
+  it('[SID:4832] on the app\'s own (local) server there is no phone relay: no tick even for an owner whose remote control is off, and the start sends no PUT', async () => {
+    onEmbeddedServer = true;
+    remoteGet = remoteOf(OFF_OWNER);
+    await mount(frag(FOLDER), { projectId: PROJ, projects: [{ projectId: PROJ, projectName: 'P', orgId: 'o-1' }] });
+    expect(tick()).toBeNull();
+    expect(container.querySelector('[data-testid=setup-phone-control]')).toBeNull();
+    await press();
+    expect(calls.some((c) => c.url.endsWith('/confirm-solo'))).toBe(true);
+    expect(puts()).toHaveLength(0);
+    // a new organization («새 조직» — a maker is the owner-to-be, so hosted always shows it) draws none either
+    onEmbeddedServer = false;
   });
 
   it('already on · the person cannot change it → no row', async () => {
@@ -720,7 +735,7 @@ describe('[SID:4721] the member card on the first-setup page keeps the setup val
 });
 
 describe('[SID:4713 AC2] the card picks the program a folder\'s CLAUDE.md / AGENTS.md means, and says so once', () => {
-  const checked = () => container.querySelector('input[name=quick-runtime]:checked')!.parentElement!.textContent ?? '';
+  const checked = () => container.querySelector('[role=radio][data-checked]')!.parentElement!.textContent ?? '';
   const line = () => container.querySelector('[data-testid=quick-trace]')?.textContent ?? null;
   const F = '&fshown=~/code/my-app&fname=my-app';
 
@@ -756,7 +771,7 @@ describe('[SID:4713 AC2] the card picks the program a folder\'s CLAUDE.md / AGEN
 
   it('the person picks the other radio → the line is gone (it would be false); picking the marked one again brings it back', async () => {
     await mount(frag(`${F}&ftrace=AGENTS.md`));
-    const radios = () => [...container.querySelectorAll<HTMLInputElement>('input[name=quick-runtime]')];
+    const radios = () => [...container.querySelectorAll<HTMLElement>('[role=radio]')];
     await act(async () => { radios().find((r) => r.parentElement!.textContent!.includes('Claude Code'))!.click(); });
     expect(checked()).toContain('Claude Code');
     expect(line()).toBeNull();
@@ -769,7 +784,7 @@ describe('[SID:4713 AC2] the card picks the program a folder\'s CLAUDE.md / AGEN
     ctx.mockReturnValue({ projectId: undefined, currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }], projectMemberships: [] });
     const render = async (extra: string) => { await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopSetupQuick query={query(extra)} onTeam={() => undefined} /></NextIntlClientProvider>); }); for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); }); };
     await render(`${F}&ftrace=AGENTS.md`);
-    await act(async () => { [...container.querySelectorAll<HTMLInputElement>('input[name=quick-runtime]')].find((r) => r.parentElement!.textContent!.includes('Claude Code'))!.click(); });
+    await act(async () => { [...container.querySelectorAll<HTMLElement>('[role=radio]')].find((r) => r.parentElement!.textContent!.includes('Claude Code'))!.click(); });
     expect(checked()).toContain('Claude Code');
     await render('&fshown=~/code/other&fname=other&ftrace=AGENTS.md'); // another folder, same page
     expect(checked()).toContain('Codex');
@@ -797,7 +812,7 @@ describe('[SID:4713 AC2] the card picks the program a folder\'s CLAUDE.md / AGEN
     ctx.mockReturnValue({ projectId: undefined, currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }], projectMemberships: [] });
     const render = async (extra: string) => { await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopSetupQuick query={query(extra)} onTeam={() => undefined} /></NextIntlClientProvider>); }); for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); }); };
     await render(F); // a folder with no mark: Claude Code by default
-    await act(async () => { [...container.querySelectorAll<HTMLInputElement>('input[name=quick-runtime]')].find((r) => r.parentElement!.textContent!.includes('Codex'))!.click(); });
+    await act(async () => { [...container.querySelectorAll<HTMLElement>('[role=radio]')].find((r) => r.parentElement!.textContent!.includes('Codex'))!.click(); });
     expect(checked()).toContain('Codex');
     expect(pickOf('바꾸기')).toBe('codex'); // the person's choice goes to the folder window
     await render(`&fshown=~/code/other&fname=other&pick=${pickOf('바꾸기')}`);
@@ -812,7 +827,7 @@ describe('[SID:4713 AC2] the card picks the program a folder\'s CLAUDE.md / AGEN
     await render(`${F}&ftrace=AGENTS.md`);
     expect(checked()).toContain('Codex'); // the mark picked it
     expect(pickOf('바꾸기')).toBe('claude'); // not the person's choice yet
-    await act(async () => { [...container.querySelectorAll<HTMLInputElement>('input[name=quick-runtime]')].find((r) => r.parentElement!.textContent!.includes('Codex'))!.click(); }); // already checked: no change event, still a choice
+    await act(async () => { [...container.querySelectorAll<HTMLElement>('[role=radio]')].find((r) => r.parentElement!.textContent!.includes('Codex'))!.click(); }); // already checked: no change event, still a choice
     expect(pickOf('바꾸기')).toBe('codex');
     await render(`&fshown=~/code/other&fname=other&pick=${pickOf('바꾸기')}`);
     expect(checked()).toContain('Codex');
@@ -862,12 +877,12 @@ describe('[SID:4784] the card is the moment an agent is made — «에이전트 
 
   it('the name follows the tool until the person types one; what they typed and the role go to the server as they stand (trimmed)', async () => {
     await mount(frag(F4784), { projectId: PROJ });
-    await act(async () => { (container.querySelector('input[name=quick-runtime][type=radio]:not(:checked)') as HTMLInputElement).click(); });
+    await act(async () => { (container.querySelector('[role=radio]:not([data-checked])') as HTMLElement).click(); });
     expect(nameField().value).toBe('Codex');
     await typeInto(nameField(), '  Reviewer ');
     await typeInto(roleField(), ' 코드 리뷰어 ');
     expect(container.querySelector('[data-testid=quick-start-line]')!.textContent).toContain('이름 Reviewer · 도구 Codex'); // the line follows what is typed
-    await act(async () => { (container.querySelector('input[name=quick-runtime]:not(:checked)') as HTMLInputElement).click(); });
+    await act(async () => { (container.querySelector('[role=radio]:not([data-checked])') as HTMLElement).click(); });
     expect(nameField().value).toBe('  Reviewer '); // a typed name stays when the tool changes
     await act(async () => { buttonOf('만들기')!.click(); });
     await settle();
@@ -987,3 +1002,49 @@ describe('[SID:4784] the card is the moment an agent is made — «에이전트 
     expect(container.querySelector('[data-testid=quick-create-nothing]')!.textContent).toBe('No agent is created until you press it');
   });
 });
+
+describe('[SID:4832] the card has its own way to «이미 있는 에이전트 옮기기»', () => {
+  const kindOn = (v: 'recipe' | 'move') => container.querySelectorAll('[data-testid=setup-kind] [role=radio]')[v === 'recipe' ? 0 : 1]?.getAttribute('aria-checked') === 'true';
+  async function entry(hash: string) {
+    stub();
+    // the recipe page (where the move radio lives) reads the recipe list and the movable agents — the card's own stub answers neither
+    recipesNow = () => new Response(JSON.stringify({ recipes: [{ id: 'rec-1', key: 'org.research_one', name: '조사 한 명', roles: [{ role: '조사', kind: 'agent', stages: ['research'] }] }] }), { status: 200 });
+    const base = globalThis.fetch;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => (String(input).includes('/api/desktop/setup/agents') ? new Response(JSON.stringify({ agents: [] }), { status: 200 }) : base(input, init))));
+    hash = hash.replace(/&setup=[^&]*/, ''); // no setup id in the address: the entry does not ask the server whether it was already started (the stub answers that read 200 → the progress view)
+    ctx.mockReturnValue({ projectId: PROJ, currentProjectSlug: 'proj', userName: '김지우', orgId: 'o-1', orgMemberships: [{ orgId: 'o-1', orgName: 'O', orgSlug: 'o', role: 'owner' }], projectMemberships: [] });
+    window.location.hash = hash;
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DesktopSetupEntry /></NextIntlClientProvider>); });
+    for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); });
+  }
+
+  it('the card shows the move link beside the team link when the app can move; pressing it opens the recipe page with the move chosen', async () => {
+    await entry(frag(''));
+    expect(container.querySelector('[data-testid=quick-card]')).not.toBeNull();
+    const move = container.querySelector('[data-testid=quick-move]') as HTMLButtonElement;
+    expect(move.textContent).toBe('이미 있는 에이전트 옮기기 →'); // link removed → fails
+    await act(async () => { move.click(); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid=quick-card]')).toBeNull();
+    expect(kindOn('move')).toBe(true);
+  });
+
+  it('an app from before (no caps=move) has no move link on the card', async () => {
+    await entry(`#code=${CODE}&setup=11111111-1111-4111-8111-aaaaaaaaaaaa&runtimes=claude&caps=solo`);
+    expect(container.querySelector('[data-testid=quick-card]')).not.toBeNull();
+    expect(container.querySelector('[data-testid=quick-move]')).toBeNull();
+  });
+
+  it('kind=move in the address skips the card: the recipe page opens with the move chosen (the sidebar\'s move door)', async () => {
+    await entry(frag('&kind=move'));
+    expect(container.querySelector('[data-testid=quick-card]')).toBeNull(); // showsQuickCard ignoring kind → the card is drawn → fails
+    expect(kindOn('move')).toBe(true);
+  });
+
+  it('the move door\'s link is the app\'s own scheme with one intent', () => {
+    expect(appSetupLink(null, 'move')).toBe('ai.sprintable:/desktop/setup?intent=move');
+    expect(appSetupLink('dev', 'move')).toBe('ai.sprintable.dev:/desktop/setup?intent=move');
+    expect(appSetupLink(null, 'move', { agent: '11111111-1111-4111-8111-111111111111', pick: 'codex' })).toBe('ai.sprintable:/desktop/setup?intent=move'); // pick rides only on a folder ask; intent wins over agent
+  });
+});
+

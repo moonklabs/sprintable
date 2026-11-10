@@ -442,7 +442,7 @@ function TrustValue({ trust, selfReportOnly }: { trust: number; selfReportOnly: 
       {t('trustLabel')}{' '}
       <span className="text-foreground">{t('trustScorePercent', { score: Math.round(trust * 100) })}</span>
       {selfReportOnly ? (
-        <span className="rounded bg-muted px-1 py-px text-[10px] text-muted-foreground">{t('selfReportTag')}</span>
+        <span className="rounded bg-muted px-1 py-px text-micro text-muted-foreground">{t('selfReportTag')}</span>
       ) : null}
     </span>
   );
@@ -530,7 +530,7 @@ function GithubRependingReason({ gateId }: { gateId: string }) {
   if (!repending) return null;
 
   return (
-    <p className="mt-1 text-[11px] text-muted-foreground">
+    <p className="mt-1 text-editorial-meta text-muted-foreground">
       {repending.prior_sha
         ? t('githubCheckRependingReasonWithPrior', { priorSha: repending.prior_sha.slice(0, 7), newSha: repending.head_sha.slice(0, 7) })
         : t('githubCheckRependingReason', { newSha: repending.head_sha.slice(0, 7) })}
@@ -659,9 +659,9 @@ export function GateActivityHistory({ gateId, refreshKey }: { gateId: string; re
 
   return (
     <div>
-      <p className="mb-1.5 text-[11px] font-semibold text-muted-foreground">{t('gateActivityHistoryTitle')}</p>
+      <p className="mb-1.5 text-editorial-meta font-semibold text-muted-foreground">{t('gateActivityHistoryTitle')}</p>
       {items.length === 0 ? (
-        <p className="text-[11px] italic text-muted-foreground">{t('gateActivityEmpty')}</p>
+        <p className="text-editorial-meta italic text-muted-foreground">{t('gateActivityEmpty')}</p>
       ) : (
         <ul className="space-y-1">
           {items.map((item) => {
@@ -669,7 +669,7 @@ export function GateActivityHistory({ gateId, refreshKey }: { gateId: string; re
             const labelKey = GATE_ACTIVITY_LABEL_KEY[item.action];
             const adsBoostLabel = adsBoostActivityLabel(item, t);
             return (
-              <li key={item.id} className="text-[11px] text-muted-foreground">
+              <li key={item.id} className="text-editorial-meta text-muted-foreground">
                 <span className="font-medium text-foreground">{(item.actor_id ? actorLabels.get(item.actor_id) : undefined) ?? actorLabel(item)}</span>
                 {' · '}
                 {/* story #4460 (Yuna 02:19Z · 02:20Z · PO) — an action this map does not know is never drawn as its raw key (the second
@@ -725,12 +725,12 @@ function HypothesisOutcomeDraft({ draft }: { draft: HypothesisOutcomeDraftFacts 
       <div className="flex flex-wrap items-center gap-1.5">
         <Badge variant="info" className="shrink-0">{t('hypothesisDraftBadge')}</Badge>
         {/* story #2420 규칙 — tint 배경 위 글자는 계열색이 아니라 text-foreground. */}
-        <span className="text-[11.5px] font-medium text-foreground">{t(DRAFT_TARGET_LABEL_KEY[draft.target])}</span>
+        <span className="text-editorial-meta font-medium text-foreground">{t(DRAFT_TARGET_LABEL_KEY[draft.target])}</span>
         {draft.actual !== null ? (
-          <span className="text-[11px] text-foreground">{t('hypothesisDraftActual', { value: String(draft.actual) })}</span>
+          <span className="text-editorial-meta text-foreground">{t('hypothesisDraftActual', { value: String(draft.actual) })}</span>
         ) : null}
       </div>
-      <p className="mt-1 text-[11px] text-foreground">
+      <p className="mt-1 text-editorial-meta text-foreground">
         {draft.reason ? t('hypothesisDraftReason', { reason: draft.reason }) : t('hypothesisDraftReasonMissing')}
       </p>
     </div>
@@ -847,7 +847,7 @@ function LinkedChannelDraftCard({ gate, isRecipeGate }: { gate: GateItem; isReci
     // `linked_draft_kind`(레시피 정의 capability 판별)로만 고른다 — 모르는 레시피(null)는 중립 문구.
     const pending = gate.linked_channel_draft_pending || gate.linked_site_draft_pending;
     return (
-      <p className="mt-1.5 text-[11.5px] text-muted-foreground">
+      <p className="mt-1.5 text-editorial-meta text-muted-foreground">
         {pending ? t('linkedChannelDraftPending')
           : gate.linked_draft_kind === 'channel_post' ? t('linkedChannelDraftNone')
           : gate.linked_draft_kind === 'site_post' ? t('linkedSiteDraftNone')
@@ -859,7 +859,7 @@ function LinkedChannelDraftCard({ gate, isRecipeGate }: { gate: GateItem; isReci
   const destinationLabel = draft.account_label || `${draft.channel}(${draft.account_id})`;
 
   return (
-    <div className="mt-1.5 space-y-1.5 rounded border border-border/60 p-2 text-[11.5px]">
+    <div className="mt-1.5 space-y-1.5 rounded border border-border/60 p-2 text-editorial-meta">
       <p className="text-muted-foreground">
         {t('linkedChannelDraftDestinationLabel')} · <span className="text-foreground">{destinationLabel}</span>
       </p>
@@ -892,7 +892,7 @@ function LinkedChannelDraftCard({ gate, isRecipeGate }: { gate: GateItem; isReci
       ) : null}
       <a
         href={flatHref(`/content/channel-posts/${draft.draft_id}`)}
-        className="inline-block text-[11px] text-primary underline underline-offset-2"
+        className="inline-block text-editorial-meta text-primary underline underline-offset-2"
       >
         {t('linkedChannelDraftOpenLink')}
       </a>
@@ -929,7 +929,7 @@ function LinkedSiteDraftCard({ gate }: { gate: GateItem }) {
     ? draft.account_label || `${draft.channel}(${draft.account_id ?? ''})`
     : null;
   return (
-    <div className="mt-1.5 space-y-1.5 rounded border border-border/60 p-2 text-[11.5px]" data-testid="linked-site-draft">
+    <div className="mt-1.5 space-y-1.5 rounded border border-border/60 p-2 text-editorial-meta" data-testid="linked-site-draft">
       {destinationLabel ? (
         <p className="text-muted-foreground">
           {t('linkedChannelDraftDestinationLabel')} · <span className="text-foreground">{destinationLabel}</span>
@@ -948,7 +948,7 @@ function LinkedSiteDraftCard({ gate }: { gate: GateItem }) {
       ) : null}
       <a
         href={flatHref(`/content/${draft.draft_id}`)}
-        className="inline-block text-[11px] text-primary underline underline-offset-2"
+        className="inline-block text-editorial-meta text-primary underline underline-offset-2"
       >
         {t('linkedChannelDraftOpenLink')}
       </a>
@@ -971,7 +971,7 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [expanded, setExpanded] = useState(false);
   return (
-    <div className="mt-1.5 space-y-1 rounded-lg bg-muted/40 px-2.5 py-1.5 text-[11.5px]">
+    <div className="mt-1.5 space-y-1 rounded-lg bg-muted/40 px-2.5 py-1.5 text-editorial-meta">
       {/* story #3806(Phase3·3-2 PR5, 유나 §절 §1 「결재 카드 봉인 5필드」) — 총예산·기간·
           목표 순서 그대로(통화는 총예산 표시에 붙는다, §절 표 그대로). ads_boost가
           아닌 gate_type은 adsBudgetMinor가 항상 null이라 이 블록 자체가 안 그려진다. */}
@@ -1269,7 +1269,7 @@ function RecipeApprovalFactsBlock({ facts }: { facts: RecipeApprovalFacts }) {
             <span className="font-mono text-foreground">{facts.targetExternalCommentId}</span>
           </p>
           <div>
-            <p className="text-[10px] font-medium text-muted-foreground">{t('commentReplyTargetTextLabel')}</p>
+            <p className="text-micro font-medium text-muted-foreground">{t('commentReplyTargetTextLabel')}</p>
             <p className="whitespace-pre-wrap text-foreground">
               {facts.targetText ?? <span className="italic text-muted-foreground">{t('commentReplyTargetTextNotSealed')}</span>}
             </p>
@@ -1327,7 +1327,7 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
     return (
       <div className={className}>
         {decisionBadge}
-        <p className="mt-1.5 text-[11.5px] italic text-muted-foreground">{t('evidenceNonePrompt')}</p>
+        <p className="mt-1.5 text-editorial-meta italic text-muted-foreground">{t('evidenceNonePrompt')}</p>
       </div>
     );
   }
@@ -1339,10 +1339,10 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
       <div className={className}>
         {decisionBadge}
         {/* HO-S8 AC①: CI(납품·"통과했다") ↔ Outcome(판단·"옳았다") 2열 분리 — "통과≠옳음" 명시. */}
-        <div className="mt-1.5 grid grid-cols-1 gap-2 text-[11.5px] sm:grid-cols-2 sm:gap-3">
+        <div className="mt-1.5 grid grid-cols-1 gap-2 text-editorial-meta sm:grid-cols-2 sm:gap-3">
           {/* 좌: 납품(delivery 신호 — 기계 검증). S5(GitHub앱) PR·AC·위험 슬롯 자리. */}
           <div className="space-y-0.5">
-            <p className="text-[10px] font-medium text-muted-foreground">{t('deliveryColLabel')}</p>
+            <p className="text-micro font-medium text-muted-foreground">{t('deliveryColLabel')}</p>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground">
               {ci !== null ? <CiSignal ci={ci} /> : null}
               {trust !== null ? <TrustValue trust={trust} selfReportOnly={selfReportOnly} /> : null}
@@ -1353,7 +1353,7 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
           </div>
           {/* 우: 판단("옳았다 판정"). gate엔 정밀 hit_rate 없음 → 임시 예측만(억지 % X). */}
           <div className="space-y-0.5">
-            <p className="text-[10px] font-medium text-muted-foreground">{t('outcomeColLabel')}</p>
+            <p className="text-micro font-medium text-muted-foreground">{t('outcomeColLabel')}</p>
             <div className="text-muted-foreground">
               {seedKey ? (
                 <Badge variant="chip" className="shrink-0">{t(seedKey)}</Badge>
@@ -1365,7 +1365,7 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
         </div>
         {showRepending ? <GithubRependingReason gateId={gate.id} /> : null}
         {reason ? (
-          <p className="mt-1.5 text-[11.5px] text-muted-foreground">{t('reasonLabel')} · {reason}</p>
+          <p className="mt-1.5 text-editorial-meta text-muted-foreground">{t('reasonLabel')} · {reason}</p>
         ) : null}
       </div>
     );
@@ -1382,7 +1382,7 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
     <div className={className}>
       {decisionBadge}
       {facts.length > 0 ? (
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11.5px] text-muted-foreground">
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-editorial-meta text-muted-foreground">
           {facts.map((node, i) => (
             <Fragment key={i}>
               {i > 0 ? <span aria-hidden className="text-muted-foreground">·</span> : null}
@@ -1414,7 +1414,7 @@ export function GateEvidence({ gate, className }: { gate: GateItem; className?: 
         <LinkedChannelDraftCard gate={gate} isRecipeGate={false} />
       ) : null}
       {reason ? (
-        <p className="mt-1.5 text-[11.5px] text-muted-foreground">{t('reasonLabel')} · {reason}</p>
+        <p className="mt-1.5 text-editorial-meta text-muted-foreground">{t('reasonLabel')} · {reason}</p>
       ) : null}
     </div>
   );
@@ -1516,9 +1516,9 @@ export function GateLinkedEvidenceSection({ gate }: { gate: GateItem }) {
 
   return (
     <div className="space-y-1.5" data-testid="gate-linked-evidence">
-      <p className="text-[11px] font-semibold text-muted-foreground">{t('gateLinkedEvidenceSectionTitle')}</p>
+      <p className="text-editorial-meta font-semibold text-muted-foreground">{t('gateLinkedEvidenceSectionTitle')}</p>
       {totalCount === 0 ? (
-        <p className="text-[11.5px] italic text-muted-foreground">{t('gateLinkedEvidenceEmpty')}</p>
+        <p className="text-editorial-meta italic text-muted-foreground">{t('gateLinkedEvidenceEmpty')}</p>
       ) : (
         <div className="flex flex-wrap items-center gap-1.5">
           {resolved.map((item) => (

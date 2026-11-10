@@ -70,7 +70,7 @@ export function ListRowMark({ label, color }: { label: string; color: string }) 
   return (
     <span
       // [SID:4282 · 유나 결정] 다크에서 검정 계열 브랜드색(Threads · X · Ghost)이 카드에 묻힌다(대비 1.02~1.19:1) → 다크에서만 옅은 테두리.
-      className="flex size-[30px] shrink-0 items-center justify-center rounded-md text-xs font-bold text-white dark:ring-1 dark:ring-border"
+      className="flex size-[30px] shrink-0 items-center justify-center rounded-md text-xs font-bold text-on-scrim dark:ring-1 dark:ring-border"
       style={{ backgroundColor: color }}
       aria-hidden="true"
     >

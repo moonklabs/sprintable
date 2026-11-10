@@ -6,6 +6,8 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Button } from '@/components/ui/button';
 import { useChatRail } from './chat-rail-context';
+import { useDashboardContext } from '../../dashboard/dashboard-shell';
+import { isNoProjectAtAll } from './no-project';
 import { ChatsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 
 /**
@@ -30,7 +32,10 @@ import { ChatsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 export default function ChatsPage() {
   const t = useTranslations('chats');
   const tc = useTranslations('common');
-  const { conversationsLoading, conversationCount, conversationsLoadError, retryConversations } = useChatRail();
+  const { conversationsLoading, conversationCount, conversationsLoadError, retryConversations, roomsAreOrgWide } = useChatRail();
+  // story 4847 — a person with no project at all, on a server that cannot make a room without one, is told so in the list (the rail); this side says nothing more (two different lines would be two voices).
+  // On a server that serves the organization's rooms a room can be made with none, so there is something to start and the outlet says «no conversations» like anywhere else.
+  const noProjectAtAll = isNoProjectAtAll(useDashboardContext()) && !roomsAreOrgWide;
 
   return (
     <>
@@ -52,7 +57,7 @@ export default function ChatsPage() {
                 {tc('retry')}
               </Button>
             </div>
-          ) : conversationCount === 0 ? (
+          ) : conversationCount === 0 && noProjectAtAll ? null : conversationCount === 0 ? (
             <EmptyState
               icon={<MessageSquare className="size-8 text-muted-foreground" />}
               title={t('noConversations')}

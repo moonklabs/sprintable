@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { FileText, Copy, Check, RefreshCw, ChevronRight, Info, Cloud, Terminal, Sparkles, RotateCw, Loader2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { cardVariants } from '@/components/ui/card';
@@ -408,7 +409,7 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
       </p>
 
       {/* [0] transport 세그먼트 토글 */}
-      <div className="flex gap-0 rounded-md border border-border bg-muted p-[3px]">
+      <div className="flex gap-0 rounded-md border border-border bg-muted p-1">
         <button
           type="button"
           onClick={() => setTransport('http')}
@@ -420,7 +421,7 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
         >
           <Cloud className="h-3.5 w-3.5" aria-hidden />
           {t('transportHosted')}
-          <Badge variant="info" className="px-1.5 py-0 text-[9px]">{t('transportRecommended')}</Badge>
+          <Badge variant="info" className="px-1.5 py-0 text-micro">{t('transportRecommended')}</Badge>
         </button>
         <button
           type="button"
@@ -497,11 +498,12 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
         {copyFailed && copyFailedRawConfig ? (
           <div className="space-y-1.5 rounded-md border border-destructive/30 bg-destructive-tint p-3">
             <p role="alert" className="text-xs text-foreground">{tc('copyFailedSelectManually')}</p>
-            <textarea
+            {/* 위 상자는 destructive 색 면(bg-destructive-tint)이라 불투명 면을 남긴다(부품은 투명 · dark:bg-input/30) */}
+            <Textarea
               readOnly
               value={copyFailedRawConfig}
               onFocus={(e) => e.currentTarget.select()}
-              className="w-full resize-none rounded border border-border bg-background p-2 font-mono text-base lg:text-xs text-foreground"
+              className="resize-none bg-background p-2 font-mono lg:text-xs dark:bg-background"
               rows={4}
               data-testid="connect-step-copy-failed-raw-config"
             />

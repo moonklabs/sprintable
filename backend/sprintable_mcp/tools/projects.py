@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
-from ..api_client import _api_key_override, _auth_ctx_cache, as_mapping, client
+from ..api_client import _api_key_override, as_mapping, client, set_cached_default_project
 from ..response import err, ok
 
 
@@ -49,12 +49,15 @@ async def set_default_project(args: SetDefaultProjectInput) -> list:
         # 다른 테넌트 키 오염 금지.
         new_default = as_mapping(result).get("resolved_default_project_id")
         if new_default:
-            client._project_id = new_default  # stdio(override 無) 경로.
-            client._project_id_ambiguous = False
-            _key = _api_key_override.get() or client._api_key
-            if _key in _auth_ctx_cache:
-                _auth_ctx_cache[_key]["project_id"] = new_default
-                _auth_ctx_cache[_key]["is_project_ambiguous"] = False
+            _request_key = _api_key_override.get()
+            if _request_key:
+                # story 4851 — HTTP: ONE process serves many keys, so the default of this key is this key's state only (its cache entry); nothing process-wide is written.
+                set_cached_default_project(_request_key, new_default)
+            else:
+                # stdio: one process = one key, the process-wide value IS this key's state.
+                client._project_id = new_default
+                client._project_id_ambiguous = False
+                set_cached_default_project(client._api_key, new_default)   # story 4849: also marks checks of this key that are still in flight
         return ok(result)
     except Exception as exc:
         return err(exc)

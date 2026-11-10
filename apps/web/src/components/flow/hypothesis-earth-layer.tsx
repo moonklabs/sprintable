@@ -63,24 +63,24 @@ function HypothesisCard({
       <div className="flex items-center gap-2">
         <HypothesisStatusBadge status={hypothesis.status} />
         {linkedEpicCount > 0 ? (
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-editorial-meta text-muted-foreground">
             {t('earthEpicCount', { n: linkedEpicCount })}
           </span>
         ) : null}
         {justPlanted ? (
-          <span className="ml-auto shrink-0 text-[10.5px] font-semibold text-primary">{t('earthJustPlanted')}</span>
+          <span className="ml-auto shrink-0 text-micro font-semibold text-primary">{t('earthJustPlanted')}</span>
         ) : null}
       </div>
       <p className="text-sm font-medium leading-snug text-foreground">{hypothesis.statement}</p>
       {hypothesis.metric_definition?.metric ? (
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-editorial-meta text-muted-foreground">
           {t('earthMetric')} <span className="text-foreground">{hypothesis.metric_definition.metric}</span>
           {' · '}
           {t('earthTarget')} <span className="text-foreground">{hypothesis.metric_definition.target}</span>{' '}
           <span aria-hidden="true">{hypothesis.metric_definition.direction === 'up' ? '↑' : '↓'}</span>
         </p>
       ) : null}
-      <div className="mt-auto flex items-center gap-1.5 border-t border-dashed border-border pt-2.5 text-[11px] text-muted-foreground">
+      <div className="mt-auto flex items-center gap-1.5 border-t border-dashed border-border pt-2.5 text-editorial-meta text-muted-foreground">
         <span aria-hidden="true">▸</span>
         {linkedStoryCount > 0
           ? t('earthFold', { n: linkedStoryCount })
@@ -125,9 +125,9 @@ function ConcludedRow({
       <HypothesisStatusBadge status={hypothesis.status} />
       <p className="min-w-0 flex-1 truncate text-sm text-foreground">{hypothesis.statement}</p>
       {showSupersededHint ? (
-        <span className="shrink-0 text-[11px] font-semibold text-info">{t('earthSupersededHint')}</span>
+        <span className="shrink-0 text-editorial-meta font-semibold text-info">{t('earthSupersededHint')}</span>
       ) : null}
-      <span className="shrink-0 text-[11px] text-muted-foreground">{t('earthConcludedAt', { date: concludedDate })}</span>
+      <span className="shrink-0 text-editorial-meta text-muted-foreground">{t('earthConcludedAt', { date: concludedDate })}</span>
     </div>
   );
 }

@@ -119,6 +119,27 @@ describe('DesktopContinueCard', () => {
     expect(container.querySelector('button[type=submit]')?.textContent).toBe('Open');
   });
 
+  it('an unverified e-mail adds one line telling where the mail is (ko · en) — [열기] is the same plain form POST, still pressable; a verified account has no line', () => {
+    const render = (locale: 'ko' | 'en', emailUnverified?: boolean) => act(() => {
+      root.render(
+        <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
+          <DesktopContinueCard account="jay@example.com" start={{ challenge: CH, returnApp: null }} here={HERE} emailUnverified={emailUnverified} />
+        </NextIntlClientProvider>,
+      );
+    });
+    render('ko');
+    expect(container.querySelector('[data-testid=continue-unverified]')).toBeNull();
+    render('ko', false);
+    expect(container.querySelector('[data-testid=continue-unverified]')).toBeNull();
+    render('ko', true);
+    expect(container.querySelector('[data-testid=continue-unverified]')?.textContent).toBe('이메일 인증이 아직이에요 — 받은 메일의 [이메일 인증하기]를 눌러 주세요. 지금 열어도 돼요.');
+    const form = container.querySelector('form[data-testid=continue-form]') as HTMLFormElement;
+    expect(form.getAttribute('action')).toBe('/native/continue/open');
+    expect((form.querySelector('button[type=submit]') as HTMLButtonElement).disabled).toBe(false); // the line never holds the press back
+    render('en', true);
+    expect(container.querySelector('[data-testid=continue-unverified]')?.textContent).toBe('Your e-mail is not verified yet — press [Verify email] in the mail we sent. You can open the app now.');
+  });
+
   it('[로그아웃하고 다른 계정으로] signs this browser out and returns to this same page (the start kept)', async () => {
     const f = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
     vi.stubGlobal('fetch', f);

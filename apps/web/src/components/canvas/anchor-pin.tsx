@@ -27,8 +27,8 @@ export function AnchorPin({ number, state, active, onClick, className, style, re
       onClick={onClick}
       style={style}
       className={cn(
-        'flex h-5 w-5 shrink-0 items-center justify-center rounded-full rounded-bl-none text-[10px] font-bold transition-transform',
-        state === 'open' && 'bg-info text-white',
+        'flex h-5 w-5 shrink-0 items-center justify-center rounded-full rounded-bl-none text-micro font-bold transition-transform',
+        state === 'open' && 'bg-info text-on-scrim',
         state === 'resolved' && 'border-2 border-border bg-transparent text-muted-foreground',
         state === 'draft' && 'animate-pulse border-2 border-dashed border-primary bg-primary/10 text-primary',
         active && 'ring-2 ring-info/40',

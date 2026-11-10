@@ -1313,7 +1313,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         // story #3007(로드맵 P2·PR-E, L1) — 토스트성 배너는 floating이라 --elev-overlay.
         // story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는 이 테마에
         // 매핑이 없는 no-op(라이트 3.55·다크 3.00, AA 미달). trust-seal.tsx 선례.
-        <div key={transitionErrorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="pointer-events-auto rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-white dark:text-proof-bg shadow-[var(--elev-overlay)]">
+        <div key={transitionErrorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="pointer-events-auto rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-on-scrim dark:text-proof-bg shadow-[var(--elev-overlay)]">
           ⚠️ {transitionError}
         </div>,
         bottomDockBannerSlot,
@@ -1596,7 +1596,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                           )}
                         >
                           <span className="flex items-center gap-1.5 flex-1 truncate">
-                            <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: label.color ?? '#8A8F98' }} />
+                            <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: label.color ?? 'var(--muted-foreground)' }} />
                             {label.name}
                           </span>
                           {selectedLabelIds.includes(label.id) && <Check className="size-3.5 text-primary" />}
@@ -1614,7 +1614,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           {excludedCount > 0 && (
             <span
               title={t('excludedCountTitle')}
-              className="ml-1 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground"
+              className="ml-1 rounded-md px-2 py-1 text-editorial-meta font-medium text-muted-foreground"
             >
               {t('excludedCountBadge', { count: excludedCount })}
             </span>
@@ -1696,7 +1696,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 role="tab"
                 aria-selected={axisMode === 'status'}
                 onClick={() => handleSetAxisMode('status')}
-                className={`h-auto min-h-0 min-w-0 -mb-px whitespace-nowrap rounded-none border-x-0 border-t-0 border-b-2 px-0.5 pb-1.5 text-[11px] font-semibold ${
+                className={`h-auto min-h-0 min-w-0 -mb-px whitespace-nowrap rounded-none border-x-0 border-t-0 border-b-2 px-0.5 pb-1.5 text-editorial-meta font-semibold ${
                   axisMode === 'status' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
                 }`}
               >
@@ -1708,7 +1708,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 role="tab"
                 aria-selected={axisMode === 'trust'}
                 onClick={() => handleSetAxisMode('trust')}
-                className={`h-auto min-h-0 min-w-0 -mb-px whitespace-nowrap rounded-none border-x-0 border-t-0 border-b-2 px-0.5 pb-1.5 text-[11px] font-semibold ${
+                className={`h-auto min-h-0 min-w-0 -mb-px whitespace-nowrap rounded-none border-x-0 border-t-0 border-b-2 px-0.5 pb-1.5 text-editorial-meta font-semibold ${
                   axisMode === 'trust' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
                 }`}
               >

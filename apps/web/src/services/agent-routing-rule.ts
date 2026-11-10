@@ -1,5 +1,6 @@
 
 import { ForbiddenError, NotFoundError } from './sprint';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
 export type RoutingAutoReplyMode = 'process_and_forward' | 'process_and_report';
 export type RoutingRuleMatchType = 'event' | 'channel' | 'project' | 'manual' | 'fallback';
@@ -458,7 +459,7 @@ function presentVersion(row: WorkflowVersionRow): WorkflowVersionSummary {
   };
 }
 
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 export class AgentRoutingRuleService {
   constructor(private readonly db: any, private readonly accessToken?: string) {}

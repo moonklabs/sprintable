@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
+import { Input } from '@/components/ui/input';
 
 export default function ForgotPasswordPage() {
   const t = useTranslations('forgotPassword');
@@ -46,11 +47,11 @@ export default function ForgotPasswordPage() {
         ) : (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">{t('instructions')}</p>
-            <input
+            <Input
               type="email"
               placeholder={t('emailPlaceholder')}
               autoComplete="email"
-              className="w-full rounded-lg border border-border px-4 py-3 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-brand"
+              className="h-auto px-4 py-3"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}

@@ -28,6 +28,8 @@ import { orgRoleLabel } from '@/lib/org-member-role';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { ProjectLimitBanner } from '@/components/nav/project-limit-banner';
 import { NewProjectMacBlock } from '@/components/nav/new-project-mac-block';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 
 interface ContextSwitcherChipProps {
   orgs: OrgSwitcherItem[];
@@ -42,7 +44,7 @@ interface ContextSwitcherChipProps {
 
 function OrgInitial({ name, className }: { name: string; className?: string }) {
   return (
-    <span className={className ?? 'flex h-4 w-4 shrink-0 items-center justify-center rounded-sm bg-brand text-[9px] font-semibold text-brand-foreground'}>
+    <span className={className ?? 'flex h-4 w-4 shrink-0 items-center justify-center rounded-sm bg-brand text-micro font-semibold text-brand-foreground'}>
       {firstGraphemes(name, 1).toUpperCase()}
     </span>
   );
@@ -117,10 +119,10 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
           className="h-11 min-h-0 min-w-11 @[40rem]:min-w-[7.5rem] max-w-[190px] shrink-[10000] justify-start gap-2 overflow-hidden rounded-xl border border-border bg-card px-2 py-1.5 text-left font-normal hover:bg-muted disabled:opacity-60 lg:hidden"
           aria-label={t('switcherMobileTriggerAria')}
         >
-          <OrgInitial name={s.displayOrg} className="flex size-7 shrink-0 items-center justify-center rounded-[7px] bg-brand text-xs font-semibold text-brand-foreground" />
+          <OrgInitial name={s.displayOrg} className="flex size-7 shrink-0 items-center justify-center rounded-xl bg-brand text-xs font-semibold text-brand-foreground" />
           <span className="flex min-w-0 flex-1 flex-col items-start justify-center gap-0.5">
-            <span className="w-full truncate text-[10px] font-semibold leading-tight text-muted-foreground">{s.displayOrg}</span>
-            <span className="w-full truncate text-[13px] font-bold leading-tight text-foreground">{chipLabel}</span>
+            <span className="w-full truncate text-micro font-semibold leading-tight text-muted-foreground">{s.displayOrg}</span>
+            <span className="w-full truncate text-editorial-ui font-bold leading-tight text-foreground">{chipLabel}</span>
           </span>
           <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
         </Button>
@@ -144,18 +146,18 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
             <div className="sticky top-0 z-10 bg-background px-1 pb-2 pt-2">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-                <input
+                <Input
                   type="search"
                   value={s.searchQuery}
                   onChange={(e) => s.setSearchQuery(e.target.value)}
                   placeholder={t('switcherProjectSearchPlaceholder')}
-                  className="h-10 w-full rounded-[10px] border border-border bg-muted pl-9 pr-3 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="h-10 bg-muted pl-9 pr-3 text-foreground dark:bg-muted"
                 />
               </div>
             </div>
 
             {/* 현재 조직 프로젝트 */}
-            <div className="flex items-center gap-1.5 px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <div className="flex items-center gap-1.5 px-2 py-2 text-editorial-meta font-semibold uppercase tracking-wide text-muted-foreground">
               {t('switcherCurrentOrgProjectsLabel', { org: s.displayOrg })}
             </div>
             {s.currentOrgLoading && (
@@ -181,9 +183,9 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                   >
                     <OrgInitial
                       name={project.projectName}
-                      className={`flex size-[26px] shrink-0 items-center justify-center rounded-[6px] text-[11px] font-semibold ${isCurrent ? 'bg-brand text-brand-foreground' : 'bg-muted text-muted-foreground'}`}
+                      className={`flex size-[26px] shrink-0 items-center justify-center rounded-xl text-editorial-meta font-semibold ${isCurrent ? 'bg-brand text-brand-foreground' : 'bg-muted text-muted-foreground'}`}
                     />
-                    <span className="min-w-0 flex-1 truncate text-[13.5px] text-foreground">{project.projectName}</span>
+                    <span className="min-w-0 flex-1 truncate text-editorial-ui text-foreground">{project.projectName}</span>
                     {/* 유나 규격 — 색만 의존 금지(브랜드 배경+글리프 이중 표식). */}
                     {isCurrent && <Check className="h-4 w-4 shrink-0 text-brand" />}
                   </Button>
@@ -202,7 +204,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
 
             {/* 다른 조직들 — 섹션 라벨 신설(§③). */}
             {s.otherOrgs.length > 0 && (
-              <div className="mt-2 flex items-center gap-1.5 border-t px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <div className="mt-2 flex items-center gap-1.5 border-t px-2 pb-1 pt-3 text-editorial-meta font-semibold uppercase tracking-wide text-muted-foreground">
                 {t('switcherOtherOrgsLabel')}
               </div>
             )}
@@ -216,10 +218,10 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
               const isLoading = s.loadingOrgIds.has(org.orgId);
               return (
                 <div key={org.orgId}>
-                  <div className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium text-muted-foreground">
-                    <OrgInitial name={org.orgName} className="flex size-[18px] shrink-0 items-center justify-center rounded-[5px] bg-muted text-[9px] font-semibold text-muted-foreground" />
+                  <div className="flex items-center gap-1.5 px-2 py-1.5 text-editorial-meta font-medium text-muted-foreground">
+                    <OrgInitial name={org.orgName} className="flex size-[18px] shrink-0 items-center justify-center rounded-xl bg-muted text-micro font-semibold text-muted-foreground" />
                     {org.orgName}
-                    {org.role && <span className="text-[9px] font-normal opacity-60">{orgRoleLabel(org.role, tSettings)}</span>}
+                    {org.role && <span className="text-micro font-normal opacity-60">{orgRoleLabel(org.role, tSettings)}</span>}
                   </div>
                   {isLoading ? (
                     <div className="flex items-center gap-2 px-4 py-2.5 text-sm text-muted-foreground">
@@ -236,7 +238,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                         onClick={() => void s.switchOrgAndProject(org.orgId, project.projectId)}
                         className="min-h-11 w-full justify-start gap-2.5 rounded-lg px-3.5 py-2.5 text-left font-normal hover:bg-accent disabled:opacity-60"
                       >
-                        <span className="min-w-0 flex-1 truncate text-[13.5px]">{project.projectName}</span>
+                        <span className="min-w-0 flex-1 truncate text-editorial-ui">{project.projectName}</span>
                         <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
                       </Button>
                     ))
@@ -248,7 +250,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                       onClick={() => void s.switchOrg(org.orgId)}
                       className="min-h-11 w-full justify-start gap-2.5 rounded-lg px-3.5 py-2.5 text-left font-normal text-muted-foreground hover:bg-accent hover:text-muted-foreground disabled:opacity-60"
                     >
-                      <span className="flex-1 text-[13.5px]">{t('switcherSwitchToOrg')}</span>
+                      <span className="flex-1 text-editorial-ui">{t('switcherSwitchToOrg')}</span>
                       <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
                     </Button>
                   )}
@@ -273,7 +275,7 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
             {accountsEnabled && (
               <>
                 <div className="mt-3 h-2 rounded-full border-y border-muted bg-muted" aria-hidden />
-                <div className="mt-2 flex items-center gap-1.5 px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <div className="mt-2 flex items-center gap-1.5 px-2 py-2 text-editorial-meta font-semibold uppercase tracking-wide text-muted-foreground">
                   {acc.t('title')}
                 </div>
                 {acc.error && (
@@ -297,12 +299,12 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
                         {firstGraphemes(label, 1).toUpperCase()}
                       </span>
                       <span className="flex min-w-0 flex-1 flex-col">
-                        <span className="truncate text-[13.5px] text-foreground">{label}</span>
+                        <span className="truncate text-editorial-ui text-foreground">{label}</span>
                         {isExpired ? (
-                          <span className="truncate text-[10.5px] text-muted-foreground">{acc.t('reloginRequired')}</span>
+                          <span className="truncate text-micro text-muted-foreground">{acc.t('reloginRequired')}</span>
                         ) : (
                           account.email && account.email !== label && (
-                            <span className="truncate text-[10.5px] text-muted-foreground">{account.email}</span>
+                            <span className="truncate text-micro text-muted-foreground">{account.email}</span>
                           )
                         )}
                       </span>
@@ -369,9 +371,9 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
               <label className="text-sm font-medium" htmlFor="chip-proj-name">
                 {t('switcherProjectNameLabel')} <span className="text-destructive">*</span>
               </label>
-              <input
+              <Input
                 id="chip-proj-name"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="h-auto bg-background dark:bg-background"
                 placeholder={t('switcherProjectNamePlaceholder')}
                 value={s.newProjectName}
                 onChange={(e) => s.setNewProjectName(e.target.value)}
@@ -383,9 +385,9 @@ export function ContextSwitcherChip({ orgs, currentOrgId, projects, currentProje
               <label className="text-sm font-medium" htmlFor="chip-proj-desc">
                 {t('switcherDescriptionLabel')} <span className="text-muted-foreground text-xs">{t('switcherOptionalLabel')}</span>
               </label>
-              <textarea
+              <Textarea
                 id="chip-proj-desc"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="min-h-0 bg-background dark:bg-background"
                 placeholder={t('switcherProjectDescPlaceholder')}
                 rows={3}
                 value={s.newProjectDesc}

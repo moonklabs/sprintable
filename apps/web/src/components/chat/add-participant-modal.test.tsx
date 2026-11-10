@@ -23,7 +23,6 @@ function wrap(node: React.ReactNode) {
   );
 }
 
-const PROJECT_ID = 'proj-1';
 const CONV_ID = 'conv-1';
 const MEMBERS = [
   { id: 'm-yuna', name: '유나', type: 'human' },
@@ -47,7 +46,7 @@ async function mountAndSelectBot(fetchMock: ReturnType<typeof vi.fn>) {
       <AddParticipantModal
         conversationId={CONV_ID}
         conversationType="group"
-        projectId={PROJECT_ID}
+       
         existingParticipantIds={['m-yuna']}
         onClose={() => {}}
         onAdded={() => {}}
@@ -98,7 +97,7 @@ describe('AddParticipantModal — 시스템 발행 제외(story #3997)', () => {
         <AddParticipantModal
           conversationId={CONV_ID}
           conversationType="group"
-          projectId={PROJECT_ID}
+         
           existingParticipantIds={['m-yuna']}
           onClose={() => {}}
           onAdded={() => {}}
@@ -122,7 +121,7 @@ describe('AddParticipantModal — 이름 없는 에이전트 행([SID:4286])', (
     )));
     await act(async () => {
       root.render(wrap(
-        <AddParticipantModal conversationId={CONV_ID} conversationType="group" projectId={PROJECT_ID} existingParticipantIds={[]} onClose={() => {}} onAdded={() => {}} />,
+        <AddParticipantModal conversationId={CONV_ID} conversationType="group" existingParticipantIds={[]} onClose={() => {}} onAdded={() => {}} />,
       ));
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
@@ -144,7 +143,7 @@ describe('AddParticipantModal — 이름 없는 사람 둘은 서로 다른 두 
     )));
     await act(async () => {
       root.render(wrap(
-        <AddParticipantModal conversationId={CONV_ID} conversationType="group" projectId={PROJECT_ID} existingParticipantIds={[]} onClose={() => {}} onAdded={() => {}} />,
+        <AddParticipantModal conversationId={CONV_ID} conversationType="group" existingParticipantIds={[]} onClose={() => {}} onAdded={() => {}} />,
       ));
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
@@ -196,7 +195,7 @@ describe('AddParticipantModal — story #3049(AgentIdentity 헤어라인+신호 
     await act(async () => {
       root.render(wrap(
         <AddParticipantModal
-          conversationId={CONV_ID} conversationType="group" projectId={PROJECT_ID}
+          conversationId={CONV_ID} conversationType="group"
           existingParticipantIds={['m-yuna']} onClose={() => {}} onAdded={() => {}}
         />,
       ));
@@ -276,7 +275,7 @@ describe('[SID:4388] AddParticipantModal — the picked member is announced as p
         <AddParticipantModal
           conversationId={CONV_ID}
           conversationType="group"
-          projectId={PROJECT_ID}
+         
           existingParticipantIds={['m-yuna']}
           onClose={() => {}}
           onAdded={() => {}}
@@ -298,5 +297,19 @@ describe('[SID:4388] AddParticipantModal — the picked member is announced as p
 
     await act(async () => { memberButton('미르코').dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(pressed()).toEqual(['점검봇:false', '미르코:false']);
+  });
+});
+
+// story 4847 (AC3) — a room's people are picked from the organization, not from the project the person is looking at: the read carries no
+// `project_id` (the server's org-roster branch), so a person in project A can add someone who only works in project B.
+describe('AddParticipantModal — 조직 구성원에서 고름(story 4847)', () => {
+  it('⭐구성원 목록을 project_id 없이 읽고, 그 목록의 사람을 그대로 더할 수 있다', async () => {
+    const posts: unknown[] = [];
+    const fetchMock = mockFetches((body) => { posts.push(body); return { ok: true, json: async () => ({ id: CONV_ID }) }; });
+    await mountAndSelectBot(fetchMock);
+    const reads = fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.startsWith('/api/members'));
+    expect(reads).toEqual(['/api/members?is_active=true']);
+    expect(reads.join('')).not.toContain('project_id');
+    expect(posts).toHaveLength(1);
   });
 });

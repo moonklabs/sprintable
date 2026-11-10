@@ -42,7 +42,7 @@ export function ChatV3ThreadRail({ threads, meId, selectedId, onSelect }: {
   return (
     <section className="flex w-full shrink-0 flex-col border-r border-border bg-card lg:w-[320px]" data-testid="chat-v3-thread-rail">
       <div className="flex h-[52px] shrink-0 items-center border-b border-border px-4">
-        <h1 className="text-[15px] font-bold text-foreground">{t('threadRailTitle')}</h1>
+        <h1 className="text-base font-bold text-foreground">{t('threadRailTitle')}</h1>
       </div>
       {threads.length === 0 ? (
         <p className="p-5 text-center text-sm text-muted-foreground">{t('threadRailEmpty')}</p>
@@ -73,7 +73,7 @@ export function ChatV3ThreadRail({ threads, meId, selectedId, onSelect }: {
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
-                      <span className="truncate text-[13.5px] font-semibold text-foreground">{rowLabel}</span>
+                      <span className="truncate text-editorial-ui font-semibold text-foreground">{rowLabel}</span>
                       {/* 교차 PR 드리프트(유나 점검표 1c6a0ced, 항목 4) — 색 있는
                           attention(위험·질문·사람 손 필요)만 Badge, 중립 역할
                           라벨은 muted-text span(4373 task 상태 라벨과 같은 결).
@@ -81,7 +81,7 @@ export function ChatV3ThreadRail({ threads, meId, selectedId, onSelect }: {
                           붙이면 스크린리더가 자식 텍스트를 더 안 읽어(대체가
                           아니라 은폐) 이 역할 표시·미리보기가 사라졌다 —
                           aria-describedby로 다시 잇는다. */}
-                      {isAgent ? <span id={roleId ?? undefined} className="shrink-0 text-[10px] text-muted-foreground" data-testid="chat-v3-role-tag-agent">{t('roleTagAgent')}</span> : null}
+                      {isAgent ? <span id={roleId ?? undefined} className="shrink-0 text-micro text-muted-foreground" data-testid="chat-v3-role-tag-agent">{t('roleTagAgent')}</span> : null}
                     </div>
                     <p id={previewId} className="mt-0.5 truncate text-xs text-muted-foreground">{thread.latest_message?.content ? toPlainPreview(thread.latest_message.content) : (thread.latest_message?.has_attachments ? tChats('latestAttachmentOnly') : '')}</p>
                   </div>

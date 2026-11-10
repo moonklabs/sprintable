@@ -87,7 +87,7 @@ describe('ConnectStep — 웹 설정 복사(.mcp.json) 실패 처리(story #3986
     await act(async () => { copyBtn.click(); });
     expect(copyBtn.textContent).not.toContain(ko.onboarding.copied);
     expect(container.querySelector('[role="alert"]')?.textContent).toBe(ko.common.copyFailedSelectManually);
-    const rawConfig = container.querySelector('[data-testid="connect-step-copy-failed-raw-config"]') as HTMLTextAreaElement;
+    const rawConfig = container.querySelector('textarea[data-slot="textarea"][data-testid="connect-step-copy-failed-raw-config"]') as HTMLTextAreaElement;
     expect(rawConfig).not.toBeNull();
     expect(rawConfig.readOnly).toBe(true);
     // 실 config엔 마스킹 안 된 진짜 키가 실려야 데스크톱 앱에 붙여 넣을 수 있다.

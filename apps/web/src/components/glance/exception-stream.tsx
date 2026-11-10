@@ -49,11 +49,11 @@ export function ExceptionStream({ items = [], loadFailed = false }: ExceptionStr
   const t = useTranslations('glance');
 
   if (loadFailed) {
-    return <p className="px-1 py-3 text-[11.5px] text-muted-foreground">{t('exceptionsLoadError')}</p>;
+    return <p className="px-1 py-3 text-editorial-meta text-muted-foreground">{t('exceptionsLoadError')}</p>;
   }
 
   if (items.length === 0) {
-    return <p className="px-1 py-3 text-[11.5px] text-muted-foreground">{t('exceptionsEmpty')}</p>;
+    return <p className="px-1 py-3 text-editorial-meta text-muted-foreground">{t('exceptionsEmpty')}</p>;
   }
 
   return (
@@ -73,12 +73,12 @@ export function ExceptionStream({ items = [], loadFailed = false }: ExceptionStr
             <span className={`mt-1 size-1.5 shrink-0 rounded-full ${DOT_BY_STATE[it.proofState] ?? 'bg-proof-ink-3'}`} aria-hidden="true" />
             <span className="min-w-0 flex-1">
               <span className="flex items-center gap-1.5">
-                <span className="text-[9px] font-bold uppercase tracking-[0.06em] text-proof-ink-3">{it.kindLabel}</span>
-                {it.actor ? <span className="truncate text-[10px] font-semibold text-proof-ink-3">· {it.actor.name}</span> : null}
+                <span className="text-micro font-bold uppercase tracking-[0.06em] text-proof-ink-3">{it.kindLabel}</span>
+                {it.actor ? <span className="truncate text-micro font-semibold text-proof-ink-3">· {it.actor.name}</span> : null}
               </span>
-              <span className="mt-0.5 block truncate text-[12.5px] font-medium text-proof-ink">{it.claim}</span>
+              <span className="mt-0.5 block truncate text-xs font-medium text-proof-ink">{it.claim}</span>
             </span>
-            <span className="shrink-0 self-center text-[11px] font-bold text-proof-blue">{it.actionLabel}</span>
+            <span className="shrink-0 self-center text-editorial-meta font-bold text-proof-blue">{it.actionLabel}</span>
           </Link>
         </li>
       ))}

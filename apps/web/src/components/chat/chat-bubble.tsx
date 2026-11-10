@@ -1,16 +1,17 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { hasNoVisibleText, remarkStripHtmlComments, stripHtmlCommentsFromPlainText } from '@/lib/remark-strip-html-comments';
-import { Check, Copy, MessageSquare, Terminal } from 'lucide-react';
+import { Check, Copy, MessageSquare, MoreHorizontal, Terminal } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { ViewerDate } from '@/components/viewer-time-zone';
 import { VIEWER_TIME_OPTIONS } from '@/lib/viewer-time-zone';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { AgentIdentity } from '@/components/ui/agent-identity';
+import { Button } from '@/components/ui/button';
 import { commandArgs, commandName, dequoteLiteral, isCommand } from '@/lib/command-classifier';
 import { copyTextSafely } from '@/lib/clipboard';
 import { EmbedCard, EntityChip, getEntityHref } from '@/components/chat/embed-card';
@@ -37,6 +38,7 @@ import { ApprovalRequestCard, type CardState } from './approval-request-card';
 import { EventBlockCard } from './event-block-card';
 import { parseBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
 import { segmentMessageContent } from './message-segments';
+import { classifyChatHref, HAS_MENTION_RE, MENTION_RE, splitPlainUrls } from './chat-link-rules';
 import { EmbedGroup } from './embed-group';
 import { toEmbedCardOpenPanel } from './embed-card-open-panel-adapter';
 import { ReportMessageSummary } from './report-message-summary';
@@ -103,6 +105,8 @@ interface ChatBubbleProps {
 interface ContextMenuState {
   x: number;
   y: number;
+  /** story 4855 — the text the person had selected in this message when the menu opened ('' = none). */
+  selectedText?: string;
 }
 
 // story #2671 — EmbedCard(ME-S5 원조 카드 렌더)가 실 렌더 경로에 미배선이던 것을 여기서
@@ -131,12 +135,21 @@ function hastNodeText(node: HastTextLike | undefined): string {
 // Convert @name tokens to markdown links so react-markdown v10 can render them via the `a` component.
 // Uses negative lookbehind to skip already-linked mentions (e.g. inside [...]).
 function prepareMentions(content: string): string {
-  return content.replace(/(?<![[(])@([\w가-힣]+)/g, '[@$1](mention:$1)');
+  return content.replace(MENTION_RE, '[@$1](mention:$1)'); // story 4854: not the «@example» of an e-mail address (chat-link-rules.ts)
 }
 
 // story #2002: 원클릭 복사 — inline(단일 백틱)은 클릭 즉시 복사, 블록(펜스)은 호버 시 드러나는
 // 코너 버튼. inline/block 판별은 doc-content-renderer.tsx의 기존 검증된 휴리스틱과 동일
 // (className에 language- 없음 + 개행 없음 = inline) — 팀 컨벤션 재사용.
+/** a non-empty text selection stands (the person is selecting / has selected something) */
+function hasSelectedText(): boolean {
+  if (typeof window === 'undefined') return false;
+  const sel = window.getSelection();
+  return !!sel && !sel.isCollapsed && sel.toString().length > 0;
+}
+/** how long a plain click on an inline code span waits before it copies (a second click or a selection in that time ends it) */
+export const INLINE_CODE_COPY_DELAY_MS = 400;
+
 function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean; className: string }) {
   const t = useTranslations('chats');
   const tc = useTranslations('common');
@@ -146,6 +159,10 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
   // <code>에 이미 선택 가능하게 떠 있어 별도 노출 블록은 불요.
   const [copyFailed, setCopyFailed] = useState(false);
 
+  // story 4855 — the one-click copy of an inline code span must not run while the person is SELECTING part of it (a drag ends in a click → the whole span overwrote the clipboard,
+  // measured) or double-clicking a word of it. A plain click copies after a short moment, and the moment ends the copy if a second click came or a selection stands.
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (clickTimerRef.current) clearTimeout(clickTimerRef.current); }, []);
   const handleCopy = useCallback(() => {
     void (async () => {
       const result = await copyTextSafely(raw);
@@ -166,8 +183,24 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
         <code
           role="button"
           tabIndex={0}
-          onClick={handleCopy}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCopy(); } }}
+          onClick={(e) => {
+            if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null; }
+            if (e.detail > 1) return; // a double (triple) click selects a word (a line): not a copy
+            if (hasSelectedText()) return; // the click that ends a drag-selection
+            // a finger: the copy happens INSIDE the tap (a web view on iOS refuses a clipboard write that comes after the gesture); drag-selection and double click are mouse things
+            if (isTouchEvent(e.nativeEvent)) { handleCopy(); return; }
+            clickTimerRef.current = setTimeout(() => {
+              clickTimerRef.current = null;
+              if (!hasSelectedText()) handleCopy();
+            }, INLINE_CODE_COPY_DELAY_MS);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null; } // one copy, not a click's and a key's
+              handleCopy();
+            }
+          }}
           title={copyFailed ? tc('copyFailedSelectManually') : copied ? t('copied') : t('clickToCopy')}
           className={`${className} cursor-pointer transition hover:brightness-95 active:brightness-90`}
         >
@@ -178,7 +211,7 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
             실패가 안 보였다. 눈에 보이는 3초짜리 알림을 별도로 낸다(<code> 자체는
             이미 선택 가능한 원문이라 여기선 문구만). */}
         {copyFailed && (
-          <span role="alert" className="ml-1 text-xs text-destructive">{tc('copyFailedSelectManually')}</span>
+          <span role="alert" data-copy-ui="" className="ml-1 text-xs text-destructive">{tc('copyFailedSelectManually')}</span>
         )}
       </>
     );
@@ -192,7 +225,7 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
         onClick={handleCopy}
         aria-label={copyFailed ? tc('copyFailedSelectManually') : copied ? t('copied') : t('copyCode')}
         title={copyFailed ? tc('copyFailedSelectManually') : copied ? t('copied') : t('copyCode')}
-        className="absolute right-1 top-1 rounded p-1 opacity-60 transition hover:bg-black/10 group-hover/code:opacity-100 dark:hover:bg-white/10"
+        className="absolute right-1 top-1 rounded p-1 opacity-60 transition hover:bg-overlay-fill-3 group-hover/code:opacity-100"
       >
         {copied ? <Check className="size-3.5" /> : <Copy className={copyFailed ? 'size-3.5 text-destructive' : 'size-3.5'} />}
       </button>
@@ -202,7 +235,7 @@ function CopyableCode({ raw, inline, className }: { raw: string; inline: boolean
 
 // story #ec57c80c(v2 3호) — report-message-summary.tsx가 「전문 보기」 펼침 상태에서 이
 // 컴포넌트를 그대로 재사용한다(사본 분화 금지 — 접힘 해제 시 원래 렌더 경로와 완전히 동일).
-export function ChatMarkdown({ content: rawContent, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey }: {
+export function ChatMarkdown({ content: rawContent, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey }: {
   content: string; isMine: boolean; references: ChatMessage['references'];
   entityStatusByKey?: Record<string, EntityStatusFetchState>;
   onOpenReadingPanel?: (target: ReadingPanelTarget) => void;
@@ -231,7 +264,7 @@ export function ChatMarkdown({ content: rawContent, isMine, references, entitySt
   const markdownish = /[*_`#\[\]>~]|entity:/.test(detectionText)
     || (hasComment && (/^(?: {4}|\t)/m.test(rawContent) || /^\s*(?:[-*+]|\d+[.)])\s/m.test(detectionText)));
   const content = hasComment && !markdownish ? stripHtmlCommentsFromPlainText(rawContent) : rawContent;
-  const hasMention = /@[\w가-힣]+/.test(content);
+  const hasMention = HAS_MENTION_RE.test(content);
   const hasMarkdown = markdownish;
 
   // story #2021: react-markdown이 리졸브한 컴포넌트 함수 참조를 그대로 React 엘리먼트 type으로
@@ -335,7 +368,7 @@ export function ChatMarkdown({ content: rawContent, isMine, references, entitySt
         // 주석 참조) mention_parser가 애초에 entity_references에 안 쓴다 — stored 참조와
         // 대조하면 asset 임베드가 전부 유령으로 오판된다. 유령 판정 자체를 안 태운다.
         if (decision.kind === 'asset') {
-          return <AssetEmbedCard entityId={ref.entityId} label={String(children)} ownMessage={isMine} onOpenReadingPanel={onOpenReadingPanel} />;
+          return <AssetEmbedCard entityId={ref.entityId} label={String(children)} onOpenReadingPanel={onOpenReadingPanel} />;
         }
         // allowCard:false라 decision.kind는 여기서 항상 'chip'('card'는 불가능 — resolveEmbedDecision
         // 계약: opts.allowCard가 false면 'card'를 반환하지 않는다).
@@ -354,14 +387,24 @@ export function ChatMarkdown({ content: rawContent, isMine, references, entitySt
           );
         }
       }
-      return <a href={href} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{children}</a>;
+      // story 4854 — an address that is not a link (empty: a `javascript:` link the markdown reader emptied · or any kind but http(s)/mailto) is text; before, it was an anchor that
+      // looked like a link and, pressed, opened THIS page again in a new window. A mail address is a plain anchor (no new window).
+      // story 4855 — `draggable={false}` on both anchors: the link does not take the drag over (a default draggable link starts a link drag instead of a selection), so a selection that
+      // STARTS on the text next to a link runs on over the link's text. A selection that starts INSIDE the link text is not made by Chromium (measured: nothing is selected) — this does not change that.
+      const kind = classifyChatHref(href);
+      if (kind === 'none') return <span className={text}>{children}</span>;
+      if (kind === 'mail') return <a href={href} draggable={false} className={`underline underline-offset-2 ${text}`}>{children}</a>;
+      return <a href={href} target="_blank" rel="noopener noreferrer" draggable={false} className={`underline underline-offset-2 ${text}`}>{children}</a>;
     },
-  }), [text, muted, codeBg, border, isMine, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey, flatHref]);
+  }), [text, muted, codeBg, border, references, entityStatusByKey, onOpenReadingPanel, eventDefinitionsByKey, flatHref]);
 
   if (!hasMarkdown && !hasMention) {
     return (
       <span className={`whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-relaxed ${text}`}>
-        {content}
+        {/* story 4854 — a plain message (no markdown character) used to show an address as dead text; the plain path links http(s) addresses now (whitespace and line breaks stay as typed) */}
+        {splitPlainUrls(content).map((part, i) => part.kind === 'url'
+          ? <a key={i} href={part.value} target="_blank" rel="noopener noreferrer" className={`underline underline-offset-2 ${text}`}>{part.value}</a>
+          : <Fragment key={i}>{part.value}</Fragment>)}
       </span>
     );
   }
@@ -404,6 +447,35 @@ export function ChatMarkdown({ content: rawContent, isMine, references, entitySt
 }
 
 const LONG_PRESS_MS = 500;
+
+/** story 4855 — a touch gesture: the event says so (`pointerType`), and where a web view delivers a plain mouse-shaped event without it, the device's primary pointer decides */
+function isTouchEvent(e: Event): boolean {
+  const pt = (e as PointerEvent).pointerType;
+  if (pt) return pt === 'touch';
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+}
+
+/** story 4855 — the text of a message bubble as it is drawn (`innerText` keeps the lines of paragraphs · list items · code lines). `root` is THIS bubble's own element (the same message can be on the page twice:
+ * the chat and its thread panel); the markdown source (`fallback`) when the bubble is not drawn or is a folded summary. */
+export function visibleMessageText(root: HTMLElement | null, fallback: string): string {
+  const el = root?.querySelector<HTMLElement>('[data-testid="chat-bubble-text"]');
+  if (!el) return fallback;
+  // a folded report card shows a summary, not the message: its source is what «whole message» means
+  if (el.querySelector('[data-copy-source]')) return fallback;
+  // the bubble's own controls that carry text (the «couldn't copy» notice · «view full») are not the message: hidden for the read (synchronously — nothing is painted in between)
+  const controls = Array.from(el.querySelectorAll<HTMLElement>('[data-copy-ui]'));
+  const before = controls.map((c) => c.style.display);
+  controls.forEach((c) => { c.style.display = 'none'; });
+  let shown = '';
+  try {
+    shown = el.innerText ?? el.textContent ?? '';
+  } finally {
+    controls.forEach((c, i) => { c.style.display = before[i]!; });
+  }
+  // only the lines around the text go (a code line's own leading spaces stay)
+  shown = shown.replace(/^\s*\n/, '').replace(/\n\s*$/, '');
+  return shown.trim().length > 0 ? shown : fallback;
+}
 
 export function ChatBubble({
   message, isMine, isGrouped = false, senderLabel, onOpenThread, onDelete, onBlockUser, presenceStatus, isWorking = false,
@@ -460,6 +532,9 @@ export function ChatBubble({
   // 있어도 이미지끼리의 상대 순서만 쓰면 되므로). react-hooks/immutability가 render 중
   // 변수 재대입을 막아 카운터를 안 쓴다 — 대신 "이 위치 앞의 이미지 개수"를 순수하게 센다
   // (한 메시지 첨부 수는 항상 소수라 O(n²)는 무관하다).
+  // story 4856 — the id a signed-URL request for this message's attachments names: the CONVERSATION's. `memo_id` is the parent message's id for a thread reply, which the backend
+  // answers «conversation not found» (so a picture in a thread never showed).
+  const attachmentConversationId = message.conversation_id || message.memo_id;
   const imageAttachmentEntries = useMemo(() => {
     const atts = message.attachments ?? [];
     const isImageAtt = (a: (typeof atts)[number]) => Boolean(a.url) && a.content_type?.startsWith('image/');
@@ -480,6 +555,9 @@ export function ChatBubble({
     const rect = e.currentTarget.getBoundingClientRect();
     setProfilePopover({ x: rect.left, y: rect.bottom + 4 });
   }, [isMine]);
+  // story 4855 — THIS bubble's own row (not a lookup by id: the same message can be on the page twice — the chat and its thread panel)
+  const rowRef = useRef<HTMLDivElement>(null);
+  const longPressFiredRef = useRef(false);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchPosRef = useRef<{ x: number; y: number } | null>(null);
   // story #2349 — tombstone(deleted_at)과 다르다: 서버는 내용을 그대로 내려주고, 가리는 것은
@@ -487,20 +565,45 @@ export function ChatBubble({
   const [blockedMessageRevealed, setBlockedMessageRevealed] = useState(false);
   const isBlockedSender = message.is_blocked_sender === true;
 
+  // story 4855 — a long press ON the message text belongs to the platform (it selects a word and shows its own Copy · Share · Select all); the web's own menu used to open at the
+  // same moment and sit on top of the selection handles (measured on the phone app). The menu opens from the long press only OFF the text (the avatar · the margins · the time row),
+  // and a touch device has the «⋯» button on every message (below) for the menu.
+  // «on the text» = anywhere in the message column except its name · time · reply-count line (data-chat-meta): the plain bubble, the command box, the cards all hold text a person may select
+  const touchStartedOnText = (target: EventTarget | null): boolean =>
+    target instanceof Element && target.closest('[data-chat-content]') !== null && target.closest('[data-chat-meta]') === null;
+  /** the text the person has selected INSIDE this message (empty when the selection is elsewhere or collapsed) */
+  const selectionInThisMessage = (): string => {
+    if (typeof window === 'undefined') return '';
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return '';
+    const box = rowRef.current;
+    // BOTH ends inside this message: a drag from one message into another is not «this message's selection»
+    return box && sel.anchorNode && sel.focusNode && box.contains(sel.anchorNode) && box.contains(sel.focusNode) ? sel.toString() : '';
+  };
+
   // AC1: 우클릭 컨텍스트 메뉴 (데스크톱)
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    const touch = isTouchEvent(e.nativeEvent);
+    // a touch «context menu» on the text is the platform's long press (selection): not ours
+    if (touch && touchStartedOnText(e.target)) return;
     e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY });
-  }, []);
+    setContextMenu({ x: e.clientX, y: e.clientY, selectedText: selectionInThisMessage() });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [message.id]);
 
-  // AC2: 롱프레스 컨텍스트 메뉴 (모바일)
+  // AC2: 롱프레스 컨텍스트 메뉴 (모바일) — off the text only (see above)
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    // a NEW touch ends the «swallow the click that follows a long press» of an earlier one: that click may never have come (the platform took the gesture over), and the next tap must not be eaten
+    longPressFiredRef.current = false;
     const touch = e.touches[0];
     if (!touch) return;
+    if (touchStartedOnText(e.target)) return; // the platform selects the word; no menu timer
     touchPosRef.current = { x: touch.clientX, y: touch.clientY };
     longPressTimerRef.current = setTimeout(() => {
       if (touchPosRef.current) {
-        setContextMenu({ x: touchPosRef.current.x, y: touchPosRef.current.y });
+        // the press that opened the menu must not also «click» the avatar · name · reply count it ended on (the click that follows the release is swallowed once)
+        longPressFiredRef.current = true;
+        setContextMenu({ x: touchPosRef.current.x, y: touchPosRef.current.y, selectedText: selectionInThisMessage() });
       }
     }, LONG_PRESS_MS);
   }, []);
@@ -520,17 +623,43 @@ export function ChatBubble({
     }
   }, []);
 
+  // a touch the platform took over (it began a scroll · a system gesture → `touchcancel`) or a bubble that left the page must not open the menu later
+  useEffect(() => () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
   // story #3986(클래스 «거짓 성공 표시») — 옛 코드는 결과를 아예 안 봤다(성공
   // 표시도 원래 없었으니 그 자리는 그대로 두되, 실패는 이제 알려야 한다).
   const [copyMessageFailed, setCopyMessageFailed] = useState(false);
-  const handleCopy = useCallback(() => {
-    void copyTextSafely(message.content).then((result) => {
+  const copyAndReport = useCallback((text: string) => {
+    void copyTextSafely(text).then((result) => {
       if (!result.ok) {
         setCopyMessageFailed(true);
         setTimeout(() => setCopyMessageFailed(false), 3000);
+      } else {
+        setCopyMessageFailed(false); // a retry that worked ends the notice of the try that did not
       }
     });
-  }, [message.content]);
+  }, []);
+  const handleCopy = useCallback(() => {
+    // story 4855 — what is copied is what the person SEES (the rendered bubble's text: no code fences, no `**` · `_` · `- ` marks); the markdown source is the fallback only when
+    // the bubble is not on the screen's DOM (a card message · a test)
+    copyAndReport(visibleMessageText(rowRef.current, message.content));
+  }, [message.content, copyAndReport]);
+  // story 4855 — «copy the selected text» from the menu (the selection was read when the menu opened: opening a menu may clear it)
+  const handleCopySelection = useCallback(() => {
+    const text = contextMenu?.selectedText;
+    if (text) copyAndReport(text);
+  }, [contextMenu, copyAndReport]);
+  // story 4855 — the touch-only «⋯» button: the menu next to the button (a selection that survives the tap is carried too)
+  const handleOpenMenuButton = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setContextMenu({ x: isMine ? rect.right - 160 : rect.left, y: rect.bottom + 4, selectedText: selectionInThisMessage() });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMine, message.id]);
 
   const handleDelete = useCallback(() => {
     onDelete?.(message.id);
@@ -545,10 +674,18 @@ export function ChatBubble({
     <>
       <div
         id={`msg-${message.id}`}
+        ref={rowRef}
+        onClickCapture={(e) => {
+          if (!longPressFiredRef.current) return;
+          longPressFiredRef.current = false;
+          e.preventDefault();
+          e.stopPropagation();
+        }}
         className={`flex scroll-mt-4 gap-2 transition-shadow ${isMine ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-0.5' : 'mt-2'} ${highlight ? 'rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-background' : ''} ${(isCiteAnchor || isCiteInRange) ? 'border-l-[3px] border-l-primary pl-1' : ''}`}
         onContextMenu={handleContextMenu}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
         onTouchMove={handleTouchMove}
       >
         {/* Avatar — hidden when grouped. 1aeecdde P2: agent에 연결 dot + working ring(2축). */}
@@ -587,16 +724,16 @@ export function ChatBubble({
             a long unbreakable code line/URL's min-content overrides max-w-[72%] and overflows
             the row → page. With it, the column respects max-w and the inner content contains
             itself — whitespace-pre-wrap code wraps, <pre> scrolls (overflow-x-auto), URLs break. */}
-        <div className={`flex min-w-0 max-w-[72%] flex-col gap-0.5 ${isMine ? 'items-end' : 'items-start'}`}>
+        <div data-chat-content="" className={`flex min-w-0 max-w-[72%] flex-col gap-0.5 ${isMine ? 'items-end' : 'items-start'}`}>
           {/* Sender name — hidden when grouped */}
           {!isGrouped && (
-            <div className="flex items-center gap-1.5">
+            <div data-chat-meta="" className="flex items-center gap-1.5">
               <span
                 role={isMine ? undefined : 'button'}
                 tabIndex={isMine ? undefined : 0}
                 onClick={isMine ? undefined : handleOpenProfilePopover}
                 onKeyDown={isMine ? undefined : (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOpenProfilePopover(e); } }}
-                className={`text-[11px] font-medium text-muted-foreground ${isMine ? '' : 'cursor-pointer hover:underline'}`}
+                className={`text-editorial-meta font-medium text-muted-foreground ${isMine ? '' : 'cursor-pointer hover:underline'}`}
               >
                 {displayName}
               </span>
@@ -666,7 +803,7 @@ export function ChatBubble({
             />
           ) : isCmd ? (
             <div className={`min-w-0 max-w-full rounded-xl border border-info/30 bg-info/8 px-3.5 py-2 ${isMine ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}>
-              <div className="mb-1 flex items-center gap-1 text-[10px] font-medium text-foreground">
+              <div className="mb-1 flex items-center gap-1 text-micro font-medium text-foreground">
                 <Terminal className="h-3 w-3" aria-hidden />
                 {t('commandTag')}
               </div>
@@ -775,7 +912,7 @@ export function ChatBubble({
                     <AttachmentImage
                       key={href ?? i}
                       storedUrl={href}
-                      conversationId={message.memo_id}
+                      conversationId={attachmentConversationId}
                       alt={label}
                       onOpen={() => setLightboxIndex(imageIndex)}
                     />
@@ -788,7 +925,7 @@ export function ChatBubble({
                     <AttachmentMedia
                       key={href ?? i}
                       storedUrl={href}
-                      conversationId={message.memo_id}
+                      conversationId={attachmentConversationId}
                       label={label}
                       kind={isAudio ? 'audio' : 'video'}
                     />
@@ -798,7 +935,7 @@ export function ChatBubble({
                   <AttachmentFile
                     key={href ?? i}
                     storedUrl={href}
-                    conversationId={message.memo_id}
+                    conversationId={attachmentConversationId}
                     label={label}
                     Icon={getFileIcon(att.content_type)}
                     contentType={att.content_type}
@@ -815,13 +952,29 @@ export function ChatBubble({
           )}
 
           {/* story #4443 PR2 — the viewer's zone and locale (was ko-KR in the runtime's zone: «오전 07:32» in en too) */}
-          <time className="text-[10px] text-muted-foreground" dateTime={message.created_at}><ViewerDate value={message.created_at} options={VIEWER_TIME_OPTIONS} /></time>
+          {/* story 4855 — touch-only «⋯» opens the menu (a long press on the text is the platform's selection).
+              Shown where the primary pointer is coarse OR nothing can hover (a device that reports a fine primary pointer — a stylus source, a tablet with a mouse — but cannot hover would otherwise never show it).
+              Absolutely placed beside the time (never over it, never pushing it) and out of the way of the text. */}
+          <span data-chat-meta="" className="relative inline-block">
+            <time className="text-micro text-muted-foreground" dateTime={message.created_at}><ViewerDate value={message.created_at} options={VIEWER_TIME_OPTIONS} /></time>
+            <Button
+              type="button"
+              variant="ghost"
+              data-testid="chat-bubble-menu-button"
+              aria-label={t('messageActions')}
+              onClick={handleOpenMenuButton}
+              className={`absolute top-1/2 hidden h-8 min-h-0 w-8 min-w-0 -translate-y-1/2 items-center justify-center rounded-full border-0 p-0 text-muted-foreground pointer-coarse:inline-flex [@media(hover:none)]:inline-flex ${isMine ? 'right-full mr-1' : 'left-full ml-1'}`}
+            >
+              <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </span>
 
           {/* AC5: 답글 수 표시 — reply_count > 0 */}
           {replyCount > 0 && (
             <button
               type="button"
               onClick={handleOpenThread}
+              data-chat-meta=""
               className="mt-0.5 flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/8"
             >
               <MessageSquare className="h-3 w-3" />
@@ -850,6 +1003,8 @@ export function ChatBubble({
           isMine={isMine}
           onReply={handleOpenThread}
           onCopy={handleCopy}
+          selectedText={contextMenu.selectedText}
+          onCopySelection={handleCopySelection}
           onDelete={handleDelete}
           onClose={() => setContextMenu(null)}
           citeAction={citeAction}
@@ -878,7 +1033,7 @@ export function ChatBubble({
         <ImageLightbox
           items={lightboxItems}
           startIndex={lightboxIndex}
-          conversationId={message.memo_id}
+          conversationId={attachmentConversationId}
           onClose={() => setLightboxIndex(null)}
         />
       )}

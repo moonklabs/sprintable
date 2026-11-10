@@ -33,7 +33,7 @@ describe('VerifyPromptCopyFailedPanel — story #4372', () => {
   it('⭐실패면 알림 문구 + 전체 문구 입력(선택 가능)', async () => {
     await render(true);
     expect(container.querySelector('[role="alert"]')?.textContent).toBe(koMessages.common.copyFailedSelectManually);
-    expect((container.querySelector('[data-testid="raw"]') as HTMLInputElement).value).toBe('검증 도구를 불러 주세요');
+    expect((container.querySelector('input[data-slot="input"][data-testid="raw"]') as HTMLInputElement).value).toBe('검증 도구를 불러 주세요');
   });
 
   it('✕ · Esc · 바깥 클릭이면 닫기를 부른다(안쪽 클릭은 아님)', async () => {

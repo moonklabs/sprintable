@@ -580,7 +580,7 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
                   role="tab"
                   aria-selected={axisMode === 'status'}
                   onClick={() => handleSetAxisMode('status')}
-                  className={`-mb-px whitespace-nowrap border-b-2 px-0.5 pb-1.5 text-[11px] font-semibold transition ${
+                  className={`-mb-px whitespace-nowrap border-b-2 px-0.5 pb-1.5 text-editorial-meta font-semibold transition ${
                     axisMode === 'status' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
                   }`}
                 >
@@ -591,7 +591,7 @@ export function EpicSwimlaneBoard({ projectId }: { projectId: string }) {
                   role="tab"
                   aria-selected={axisMode === 'trust'}
                   onClick={() => handleSetAxisMode('trust')}
-                  className={`-mb-px whitespace-nowrap border-b-2 px-0.5 pb-1.5 text-[11px] font-semibold transition ${
+                  className={`-mb-px whitespace-nowrap border-b-2 px-0.5 pb-1.5 text-editorial-meta font-semibold transition ${
                     axisMode === 'trust' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
                   }`}
                 >

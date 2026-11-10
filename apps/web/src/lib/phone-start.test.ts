@@ -53,7 +53,7 @@ describe('[4714] startOnPhone — what the web asks and posts', () => {
   });
 
   it.each([
-    ['cancelled', 'cancelled'], ['biometric_required', 'biometric_required'], ['no_screen_lock', 'no_screen_lock'], ['key_invalidated', 'key_invalidated'],
+    ['cancelled', 'cancelled'], ['biometric_required', 'biometric_required'], ['no_screen_lock', 'no_screen_lock'], ['key_invalidated', 'key_invalidated'], ['no_key', 'not_paired'], // [SID:4834] no_key = never paired
     ['not_registered', 'not_registered'], ['signed_out', 'signed_out'], ['remote_control_off', 'remote_off'], ['computer_not_found', 'not_paired'],
     ['device_unreachable', 'unreachable'], ['no_folder', 'no_folder'], ['agent_not_found', 'list_changed'], ['not_allowed', 'failed'], ['sign_failed', 'failed'], ['something_new', 'failed'],
   ])('the shell says %s → %s, and nothing is posted', async (code, kind) => {

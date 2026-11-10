@@ -5,6 +5,8 @@ import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 
 export interface GuidedHypothesisValue {
   statement: string;
@@ -129,31 +131,31 @@ export function GuidedHypothesisForm({
 
       <div className="space-y-1">
         <label className="text-xs font-medium text-muted-foreground">{t('guidedStatementLabel')}</label>
-        <textarea
+        <Textarea
           rows={2}
           value={value.statement}
           onChange={(e) => { setActiveExample(null); setValue((v) => ({ ...v, statement: e.target.value })); }}
           placeholder={t('guidedStatementPlaceholder')}
-          className="w-full resize-y rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          className="min-h-0 bg-background dark:bg-background"
         />
       </div>
 
       <div className="space-y-1">
         <label className="text-xs font-medium text-muted-foreground">{t('guidedMetricLabel')}</label>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_auto]">
-          <input
+          <Input
             value={value.metric}
             onChange={(e) => { setActiveExample(null); setValue((v) => ({ ...v, metric: e.target.value })); }}
             placeholder={t('guidedMetricPlaceholder')}
-            className="rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            className="h-auto bg-background dark:bg-background"
           />
-          <input
+          <Input
             type="number"
             inputMode="decimal"
             value={value.target}
             onChange={(e) => { setActiveExample(null); setValue((v) => ({ ...v, target: e.target.value === '' ? '' : Number(e.target.value) })); }}
             placeholder={t('guidedTargetPlaceholder')}
-            className="w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary sm:w-24"
+            className="h-auto tabular-nums bg-background dark:bg-background sm:w-24"
           />
           <div className="flex overflow-hidden rounded-xl border border-border">
             {(['up', 'down'] as const).map((dir) => (
@@ -172,7 +174,7 @@ export function GuidedHypothesisForm({
             ))}
           </div>
         </div>
-        <p className="text-[11px] text-info">{t('guidedMetricHint')}</p>
+        <p className="text-editorial-meta text-info">{t('guidedMetricHint')}</p>
       </div>
 
       <div className="mt-auto flex justify-end gap-2 pt-1">

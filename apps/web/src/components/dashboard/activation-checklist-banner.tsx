@@ -1,5 +1,6 @@
 'use client';
 
+import { useEmbeddedServer } from '@/components/embedded-server-context';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
@@ -79,6 +80,9 @@ function writeMark(key: string): void {
 function clearMark(key: string): void {
   try { window.localStorage.removeItem(key); } catch { /* nothing to clear */ }
 }
+
+/** story 4832: the two steps that are the person's own on the app's own server — what the skeleton is sized by before the server's answer (`applicable_steps`) arrives */
+const LOCAL_STEP_KEYS: (keyof ActivationState['steps'])[] = ['agent_connected', 'first_roundtrip'];
 
 export function ActivationChecklistBanner() {
   const pathname = usePathname();
@@ -167,13 +171,21 @@ export function ActivationChecklistBanner() {
   // story #4032 — 로딩 스켈레톤(아래)이 이 배열의 길이(5)로 자리를 잡아야 실 콘텐츠가
   // 도착했을 때 행 수가 안 바뀐다 — state 유무와 무관해 가드보다 앞으로 옮겼다(단일
   // 출처, 매직넘버 방지).
-  const stepItems: { key: keyof ActivationState['steps']; label: string }[] = [
+  const allStepItems: { key: keyof ActivationState['steps']; label: string }[] = [
     { key: 'signed_up', label: t('stepSignedUp') },
     { key: 'email_verified', label: t('stepEmailVerified') },
     { key: 'org_created', label: t('stepOrgCreated') },
     { key: 'agent_connected', label: t('stepAgentConnected') },
     { key: 'first_roundtrip', label: t('stepFirstRoundtrip') },
   ];
+  // story 4832: the app's own server makes the account, its address and its organization itself — only the steps the server counts are drawn (an older server names none: all five).
+  // Before the first read the skeleton is sized by the server the page runs on (the layout knows it), so the row count does not change when the answer arrives.
+  const embedded = useEmbeddedServer();
+  // once the server has answered, its list (or, for a server that sends none, the five its own count is over) decides; the page's own marker only sizes the skeleton before that
+  const countedKeys = state ? (state.applicable_steps ?? null) : (embedded ? LOCAL_STEP_KEYS : null);
+  const stepItems = countedKeys ? allStepItems.filter((s) => countedKeys.includes(s.key)) : allStepItems;
+  // the words of the title, the finish and the chip say «가입» (sign-up) — true only where sign-up is a counted step; where it is not, the local words are used
+  const localWords = !!countedKeys && !countedKeys.includes('signed_up');
 
   if (allComplete) {
     // story 4780 (AC4, phone lap 10-26): the line is drawn on the screen itself — fixed to the viewport, in `document.body`, outside the shell's column. The reply arrives on the conversation screen, where the
@@ -185,8 +197,8 @@ export function ActivationChecklistBanner() {
             data-testid="activation-done-fixed"
           >
             <Alert variant="success" data-testid="activation-done" className="shadow-md">
-              <AlertTitle>{t('doneTitle')}</AlertTitle>
-              <AlertDescription>{t('doneBody')}</AlertDescription>
+              <AlertTitle>{t(localWords ? 'doneTitleLocal' : 'doneTitle')}</AlertTitle>
+              <AlertDescription>{t(localWords ? 'doneBodyLocal' : 'doneBody')}</AlertDescription>
             </Alert>
           </div>,
           document.body,
@@ -302,7 +314,7 @@ export function ActivationChecklistBanner() {
         data-testid="activation-chip"
         className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-muted/50 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
       >
-        <span>{t('collapsedChip', { completed: state.completed, total: state.total })}</span>
+        <span>{t(localWords ? 'collapsedChipLocal' : 'collapsedChip', { completed: state.completed, total: state.total })}</span>
         <ChevronDown className="size-3.5 shrink-0" />
       </button>
     );
@@ -310,7 +322,7 @@ export function ActivationChecklistBanner() {
 
   return (
     <Alert variant="info" className="relative" data-testid="activation-banner">
-      <AlertTitle>{t('bannerTitle')}</AlertTitle>
+      <AlertTitle>{t(localWords ? 'bannerTitleLocal' : 'bannerTitle')}</AlertTitle>
       <AlertDescription>{t('bannerProgress', { completed: state.completed, total: state.total })}</AlertDescription>
 
       <ul className="col-start-2 mt-2 space-y-1.5">

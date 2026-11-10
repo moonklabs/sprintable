@@ -95,15 +95,18 @@ class FakeRunner:
         self.metadata_rc = 1   # the gateway database container asked for the metadata server: refused (1) is the answer wanted; 0 would mean it can reach it
         self.chain_lines = ["-N DOCKER-USER", "-A DOCKER-USER -d 169.254.169.254/32 -i br-gwdb -j DROP", "-A DOCKER-USER -j RETURN"]   # what `iptables -S DOCKER-USER` prints: the metadata rule first
         self.iptables_rc = 0
+        self.images_out = ""   # what `docker image ls --digests` prints: «<id> <repository>@<digest>» per line
 
-    def run(self, args, env, cwd=None, timeout=900, stdin=None):
-        self.calls.append({"args": list(args), "env": dict(env), "stdin": stdin})
+    def run(self, args, env, cwd=None, timeout=900, stdin=None, whole=False):
+        self.calls.append({"args": list(args), "env": dict(env), "stdin": stdin, "whole": whole, "timeout": timeout})
         joined = " ".join(args)
         for marker, exc in self.raise_on.items():
             if marker in joined:
                 raise exc
         if args[:1] == ["iptables"]:
             return self.iptables_rc, "\n".join(self.chain_lines) + "\n"
+        if args[:3] == ["docker", "image", "ls"]:
+            return 0, self.images_out
         if "169.254.169.254" in joined:
             return self.metadata_rc, ""
         if "process.exit(r.status<500" in joined:
@@ -193,7 +196,7 @@ def _text_tree(root: Path) -> str:
 def test_a_deploy_migrates_before_it_swaps_and_checks_health_after(world) -> None:
     d = world.publish("a" * 40)
     assert world.dep.run_once() == "deployed"
-    assert world.runner.verbs() == ["iptables", "login", "pull", "logout", "up:db", "up:gwdb", "exec:gwdb-ready", "exec:gwdb-metadata", "run", "iptables", "up:all", "exec:reload", "exec:gwdb-reload", "exec:gwdb-metadata", "exec:health-be", "exec:health-fe", "exec:gwdb-ready"]
+    assert world.runner.verbs() == ["iptables", "login", "pull", "logout", "up:db", "up:gwdb", "exec:gwdb-ready", "exec:gwdb-metadata", "run", "iptables", "up:all", "exec:reload", "exec:gwdb-reload", "exec:gwdb-metadata", "exec:health-be", "exec:health-fe", "exec:gwdb-ready", "image"]
     cur = _state(world, "current.json")
     assert cur["sha"] == d["sha"] and cur["previous"] is None
     assert (world.cfg.install_dir / "releases" / d["sha"] / "compose.yml").exists()
@@ -801,6 +804,222 @@ def test_a_rollback_that_raises_unexpectedly_is_reported_not_thrown(world) -> No
 
     world.dep._activate = lambda p: flaky(world.dep, p)
     assert world.dep.run_once() == "rollback-failed"
+
+
+def _ls(*rows) -> str:
+    """rows (image id, «repository@digest»[, tag]) printed the way `docker image ls --digests --format "{{.ID}} {{.Repository}} {{.Tag}} {{.Digest}}"` does"""
+    out = []
+    for row in rows:
+        image_id, ref, tag = (*row, "<none>")[:3]
+        repo, _, digest = ref.rpartition("@")
+        out.append(f"{image_id} {repo} {tag} {digest}")
+    return "\n".join(out) + "\n"
+
+
+def _image_rm_calls(world) -> list[str]:
+    return [c["args"][3] for c in world.runner.calls if c["args"][:3] == ["docker", "image", "rm"]]
+
+
+def test_old_images_of_our_registry_are_removed_but_the_running_and_previous_stay(world) -> None:
+    """11-04: every release pulled its own images and nothing removed them — the dev disk filled and a deploy could not pull"""
+    world.publish("a" * 40)
+    world.dep.run_once()
+    old_b, old_f = f"{REG}/backend@{_digest('c' * 40)}", f"{REG}/frontend-vm@{_digest('c' * 40)}"
+    prev_b, prev_f = f"{REG}/backend@{_digest('a' * 40)}", f"{REG}/frontend-vm@{_digest('a' * 40)}"
+    new_b, new_f = f"{REG}/backend@{_digest('b' * 40)}", f"{REG}/frontend-vm@{_digest('b' * 40)}"
+    world.runner.images_out = _ls(
+        ("sha256:new-b", new_b), ("sha256:new-f", new_f),              # the release being deployed
+        ("sha256:prev-b", prev_b), ("sha256:prev-f", prev_f),          # the one a rollback goes back to
+        ("sha256:old-b", old_b), ("sha256:old-f", old_f),              # older: removed
+        ("sha256:shared", f"{REG}/backend@{_digest('d' * 40)}"), ("sha256:shared", prev_b),   # one image with a kept reference: stays
+        ("sha256:db", "pgvector/pgvector@sha256:" + "d" * 64, "pg15"),   # another registry: never touched
+        ("sha256:mixed", f"{REG}/backend@<none>"), ("sha256:mixed", "caddy@<none>", "2.8.4-alpine"),   # a reference outside our registry: stays
+        ("sha256:tagged", f"{REG}/backend@{_digest('e' * 40)}", "v1"),   # carries a tag: stays (a tag is never a bare digest reference)
+    )
+    world.publish("b" * 40)
+    assert world.dep.run_once() == "deployed"
+    assert _image_rm_calls(world) == sorted([old_b, old_f])
+    ls = [c for c in world.runner.calls if c["args"][:3] == ["docker", "image", "ls"]]
+    assert ls and all(c["whole"] for c in ls)   # a decision is made from this listing: it is read whole, never the truncated log tail
+
+
+def test_the_first_deploy_keeps_only_its_own_images(world) -> None:
+    mine = f"{REG}/backend@{_digest('a' * 40)}"
+    stray = f"{REG}/backend@{_digest('z' * 40)}"
+    world.runner.images_out = _ls(("sha256:mine", mine), ("sha256:stray", stray))
+    world.publish("a" * 40)
+    assert world.dep.run_once() == "deployed"
+    assert _image_rm_calls(world) == [stray]
+
+
+def test_a_kept_reference_with_a_tag_still_keeps_its_image(world) -> None:
+    """desired.json may say «repository:tag@digest» while Docker lists «repository@digest»: compared raw, the running image would look unkept"""
+    world.publish("a" * 40)
+    world.dep.run_once()
+    tagged = f"{REG}/backend:v2@{_digest('b' * 40)}"
+    world.runner.images_out = _ls(("sha256:new-b", f"{REG}/backend@{_digest('b' * 40)}"), ("sha256:old", f"{REG}/backend@{_digest('c' * 40)}"))
+    world.publish("b" * 40, backend=tagged)
+    assert world.dep.run_once() == "deployed"
+    assert _image_rm_calls(world) == [f"{REG}/backend@{_digest('c' * 40)}"]
+
+
+def test_a_rollback_removes_the_failed_candidates_images_and_keeps_the_restored_ones(world) -> None:
+    a = world.publish("a" * 40)
+    world.dep.run_once()
+    b = world.publish("b" * 40)
+    world.runner.images_out = _ls(("sha256:ab", a["backend_image"]), ("sha256:af", a["frontend_image"]), ("sha256:bb", b["backend_image"]), ("sha256:bf", b["frontend_image"]))
+    world.runner.healthy_after = 10**6   # the candidate never turns green; the rollback's `up` turns health on
+    orig = world.runner.run
+
+    def run(args, env, **kw):
+        if env.get("BACKEND_IMAGE") == a["backend_image"] and "up" in args:
+            world.runner.healthy_after = 0
+            world.runner._probes = 0
+        return orig(args, env, **kw)
+
+    world.runner.run = run
+    assert world.dep.run_once() == "rolled-back"
+    assert _image_rm_calls(world) == sorted([b["backend_image"], b["frontend_image"]])
+
+
+def test_an_image_prune_error_of_any_kind_leaves_a_rollback_rolled_back(world) -> None:
+    a = world.publish("a" * 40)
+    world.dep.run_once()
+    world.publish("b" * 40)
+    world.runner.raise_on["image ls"] = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad byte")   # not an OSError
+    world.runner.healthy_after = 10**6
+    orig = world.runner.run
+
+    def run(args, env, **kw):
+        if env.get("BACKEND_IMAGE") == a["backend_image"] and "up" in args:
+            world.runner.healthy_after = 0
+            world.runner._probes = 0
+        return orig(args, env, **kw)
+
+    world.runner.run = run
+    assert world.dep.run_once() == "rolled-back"
+    assert _state(world, "current.json")["sha"] == "a" * 40
+
+
+@pytest.mark.parametrize("piece", ["clock", "keep"])
+def test_nothing_in_the_image_prune_escapes_a_deploy_or_a_rollback(world, monkeypatch, piece) -> None:
+    """every line of the pass is inside its one `try` — the clock read before the listing and the kept-reference set included"""
+    if piece == "clock":
+        clock = world.dep.now
+
+        def now():
+            if sys._getframe(1).f_code.co_name == "_prune_images":
+                raise RuntimeError("clock")
+            return clock()
+
+        world.dep.now = now
+    else:
+        monkeypatch.setattr(D, "_digest_ref", lambda r: (_ for _ in ()).throw(RuntimeError("keep")))
+    world.publish("a" * 40)
+    assert world.dep.run_once() == "deployed"
+    b = world.publish("b" * 40)
+    assert world.dep.run_once() == "deployed"
+    assert _state(world, "current.json")["sha"] == "b" * 40
+    world.publish("c" * 40)
+    world.runner.healthy_after = 10**6
+    orig = world.runner.run
+
+    def run(args, env, **kw):
+        if env.get("BACKEND_IMAGE") == b["backend_image"] and "up" in args:
+            world.runner.healthy_after = 0
+            world.runner._probes = 0
+        return orig(args, env, **kw)
+
+    world.runner.run = run
+    assert world.dep.run_once() == "rolled-back"
+    assert _state(world, "current.json")["sha"] == "b" * 40
+    assert any("image prune skipped: RuntimeError" in line for line in world.logs)
+
+
+def test_not_even_a_failing_log_line_lets_a_cleanup_change_a_deploy_or_a_rollback(world, monkeypatch) -> None:
+    """both cleanups fail AND the line about the failure cannot be written: the deploy is still deployed and the rollback still rolled-back"""
+    def boom(self):
+        raise OSError("I/O error")
+
+    def log(m):
+        if "prune" in m:
+            raise OSError("the log cannot be written")
+        world.logs.append(m)
+
+    world.publish("a" * 40)
+    assert world.dep.run_once() == "deployed"
+    b = world.publish("b" * 40)
+    monkeypatch.setattr(D.Path, "iterdir", boom)
+    world.runner.raise_on["image ls"] = OSError("docker is gone")
+    world.dep.log = log
+    assert world.dep.run_once() == "deployed"
+    assert _state(world, "current.json")["sha"] == "b" * 40
+    world.publish("c" * 40)
+    world.runner.healthy_after = 10**6
+    orig = world.runner.run
+
+    def run(args, env, **kw):
+        if env.get("BACKEND_IMAGE") == b["backend_image"] and "up" in args:
+            world.runner.healthy_after = 0
+            world.runner._probes = 0
+        return orig(args, env, **kw)
+
+    world.runner.run = run
+    assert world.dep.run_once() == "rolled-back"
+    assert _state(world, "current.json")["sha"] == "b" * 40
+
+
+def test_a_failing_folder_prune_does_not_skip_the_image_prune(world, monkeypatch) -> None:
+    world.publish("a" * 40)
+    world.dep.run_once()
+    old = f"{REG}/backend@{_digest('c' * 40)}"
+    world.runner.images_out = _ls(("sha256:old", old))
+
+    def boom(self):
+        raise OSError("I/O error")
+
+    monkeypatch.setattr(D.Path, "iterdir", boom)
+    world.publish("b" * 40)
+    assert world.dep.run_once() == "deployed"
+    assert _image_rm_calls(world) == [old]
+    assert any(line == "prune skipped: OSError" for line in world.logs)
+
+
+def test_the_image_prune_stops_at_its_deadline(world) -> None:
+    world.publish("a" * 40)
+    world.dep.run_once()
+    olds = [f"{REG}/backend@{_digest(c * 40)}" for c in "cde"]
+    world.runner.images_out = _ls(*((f"sha256:{i}", r) for i, r in enumerate(olds)))
+    orig = world.runner.run
+
+    def run(args, env, **kw):
+        if args[:3] == ["docker", "image", "rm"]:
+            world.clock.t += D.IMAGE_PRUNE_DEADLINE * 0.9   # each removal is slow: after the first, a tenth of the time is left
+        return orig(args, env, **kw)
+
+    world.runner.run = run
+    world.publish("b" * 40)
+    assert world.dep.run_once() == "deployed"
+    assert len(_image_rm_calls(world)) == 2 and any("deadline" in line for line in world.logs)
+    rm_timeouts = [c["timeout"] for c in world.runner.calls if c["args"][:3] == ["docker", "image", "rm"]]
+    assert rm_timeouts[1] <= D.IMAGE_PRUNE_DEADLINE * 0.1 + 1e-9 < 120   # the second removal may only use the time that is left, not its usual 120 s
+
+
+def test_the_runner_returns_a_whole_listing_only_when_asked() -> None:
+    env = {"PATH": "/bin:/usr/bin"}
+    rc, tail = D.Runner().run([sys.executable, "-c", "print('x' * 6000)"], env)
+    rc2, whole = D.Runner().run([sys.executable, "-c", "print('x' * 6000)"], env, whole=True)
+    assert rc == rc2 == 0 and len(tail) == 4000 and len(whole) == 6001
+
+
+def test_an_image_prune_that_fails_does_not_change_what_the_deploy_reported(world) -> None:
+    world.publish("a" * 40)
+    world.dep.run_once()
+    world.publish("b" * 40)
+    world.runner.raise_on["image ls"] = OSError("docker is gone")
+    assert world.dep.run_once() == "deployed"
+    assert _state(world, "current.json")["sha"] == "b" * 40
+    assert _image_rm_calls(world) == []
 
 
 def test_a_prune_that_fails_does_not_change_what_the_deploy_reported(world, monkeypatch) -> None:

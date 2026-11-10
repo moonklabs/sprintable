@@ -156,4 +156,22 @@ describe('ReportMessageSummary — 발동 조건 미충족(회귀 0)', () => {
     expect(container.querySelector('.bg-success')).toBeNull();
     expect(container.textContent).toContain('짧은 메시지');
   });
+
+  // story 4855 — whole-message copy: the folded card is a SUMMARY (the source is copied), and the fold / unfold controls carry text that is not the message
+  it('story 4855: the folded card is marked as a summary, and its «view full» / «fold» buttons are marked as controls', async () => {
+    await act(async () => {
+      root.render(wrap(
+        <ReportMessageSummary content={PASS_REPORT} messageKind="result" isMine={false} references={undefined} />,
+      ));
+    });
+    expect(container.querySelector('[data-copy-source]')).not.toBeNull();
+    const view = Array.from(container.querySelectorAll('button')).filter((b) => b.textContent?.includes('전문 보기'));
+    expect(view.length).toBe(1);
+    expect(view[0]!.hasAttribute('data-copy-ui')).toBe(true);
+    await act(async () => { view[0]!.click(); });
+    expect(container.querySelector('[data-copy-source]'), 'the unfolded message is the message itself').toBeNull();
+    const buttons = Array.from(container.querySelectorAll('button'));
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const b of buttons) expect(b.hasAttribute('data-copy-ui'), b.textContent ?? '').toBe(true);
+  });
 });

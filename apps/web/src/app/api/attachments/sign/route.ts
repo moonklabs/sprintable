@@ -2,15 +2,17 @@ import { getServerSession } from '@/lib/db/server';
 import { GCS_MEMO_ATTACHMENTS_BUCKET } from '@/lib/storage/config';
 import { canonicalObjectPath as _canonicalObjectPath } from '@/lib/storage/canonical';
 import { createStorageService } from '@/lib/storage/factory';
+import { resolveReadDisposition } from '@/lib/storage/sign-disposition';
 import { apiSuccess, ApiErrors } from '@/lib/api-response';
 import { handleApiError } from '@/lib/api-error';
 import { backendFetch } from '@/lib/backend-fetch';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
 // a54ddc16: 첨부 auth-gated 서빙. public 버킷 직링크 → 이 라우트가 BE authorize(접근권+path
 // 소속 2겹 방어) 통과 시에만 단기 만료 V4 서명 URL을 반환한다.
 //
 // GET /api/attachments/sign?path=<stored url|bare path>&conversation_id=<uuid>   (또는 story_id)
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 // story #2720(2026-08-17) — 이 라우트 자체 재구현을 없애고 lib/storage/canonical.ts(FE
 // canonicalization SSOT)를 이 버킷으로 호출하는 얇은 wrapper로 대체했다. BE와의 규칙 정합은
@@ -53,7 +55,8 @@ export async function GET(request: Request) {
       if (!authRes.ok) return ApiErrors.badRequest('attachment authorization failed');
       const a = (await authRes.json()) as { container?: string; object_path?: string };
       if (!a.container || !a.object_path) return ApiErrors.badRequest('asset authorization incomplete');
-      const url = await storage.signRead(a.container, a.object_path, { disposition });
+      // story 4860: a stored script-capable document (html · svg · xml) is signed as a download, whatever the caller asked for
+      const url = await storage.signRead(a.container, a.object_path, { disposition: await resolveReadDisposition(storage, a.container, a.object_path, disposition) });
       return apiSuccess({ url });
     }
 
@@ -75,7 +78,10 @@ export async function GET(request: Request) {
     if (authRes.status === 403) return ApiErrors.forbidden('첨부 접근 권한이 없습니다');
     if (!authRes.ok) return ApiErrors.badRequest('attachment authorization failed');
 
-    const url = await storage.signRead(GCS_MEMO_ATTACHMENTS_BUCKET, objectPath, { disposition });
+    // story 4860: same rule on the room · story path (a person's upload and an agent's are the same object)
+    const url = await storage.signRead(GCS_MEMO_ATTACHMENTS_BUCKET, objectPath, {
+      disposition: await resolveReadDisposition(storage, GCS_MEMO_ATTACHMENTS_BUCKET, objectPath, disposition),
+    });
     return apiSuccess({ url });
   } catch (err: unknown) {
     return handleApiError(err);

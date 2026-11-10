@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 /**
  * story #3986 CHANGES(페드루 PO C2·2회차) — 검증 예시 프롬프트 복사가 실패했을 때만 안 잘린 전체 문구를 선택 가능하게 보인다.
@@ -51,11 +52,11 @@ export function VerifyPromptCopyFailedPanel({ failed, onDismiss, promptText, raw
           ✕
         </Button>
       </div>
-      <input
+      <Input
         readOnly
         value={promptText}
         onFocus={(e) => e.currentTarget.select()}
-        className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-base lg:text-xs text-foreground"
+        className="h-auto bg-background px-2 py-1 font-mono lg:text-xs dark:bg-background"
         data-testid={rawTestId}
       />
     </div>

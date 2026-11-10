@@ -128,6 +128,25 @@ def _parse_stories_cursor(cursor: str | None) -> datetime | None:
         ) from exc
 
 
+def _parse_backlog_cursor(cursor: str | None) -> tuple[datetime, uuid.UUID | None] | None:
+    """story #4833 — no_sprint 분기의 커서는 `<ISO 시각>|<스토리 id>`(같은 시각에 여럿 만들어진 장이 쪽 사이에서 빠지지 않게).
+    id 없이 시각만 와도 받는다. 틀린 값은 400."""
+    if not cursor:
+        return None
+    at_part, _, id_part = cursor.partition("|")
+    if not at_part:
+        raise HTTPException(status_code=400, detail="invalid cursor: expected '<ISO 8601 datetime>|<story id>'")
+    at = _parse_stories_cursor(at_part)
+    if at is None:  # unreachable for a non-empty at_part (parsed or 400) — kept as an explicit refusal, never an `assert`
+        raise HTTPException(status_code=400, detail="invalid cursor: expected '<ISO 8601 datetime>|<story id>'")
+    if not id_part:
+        return at, None
+    try:
+        return at, uuid.UUID(id_part)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid cursor: expected '<ISO 8601 datetime>|<story id>'") from exc
+
+
 @router.get("", response_model=list[StoryResponse])
 async def list_stories(
     project_id: uuid.UUID | None = Query(default=None),
@@ -268,23 +287,29 @@ async def list_stories(
     # 검증 비용만 느는지라 주석+pinning 테스트로 계약을 선언하고 닫는다.
     if no_sprint and project_id:
         # story #2188 형제(#2489와 동형): 필터 전부 넘긴다.
-        # ⚠️ cursor는 안 넘긴다 — #2190은 이 분기와 무관함이 밝혀졌다(list_backlog
-        # docstring 참조: /api/stories/backlog 프록시가 status를 강제 부착해 실제로는
-        # board 분기로 감).
+        # story #4833 — 커서는 이제 넘긴다(`<시각>|<id>`, 오름차순 다음 쪽). 예전엔 /api/stories/backlog 프록시가 status를 강제 부착해
+        # board 분기로 갔지만, 프록시가 status를 안 받으면 no_sprint+exclude_status로 이 분기를 탄다.
         # story #2428: list_backlog가 이제 (stories, total) — X-Total-Count로 호출부가
         # "더 있는지"를 알 수 있게 한다(이 분기는 cursor 미지원, 위 docstring 참조 — 더
         # 필요하면 limit을 올려 재호출하는 것이 유일한 다음 페이지 수단).
         parsed_exclude_statuses = (
             [x.strip() for x in exclude_status.split(",") if x.strip()] if exclude_status else None
         )
+        # story #4833 — one more than asked, to know whether another page exists: a last page that is exactly `limit` long must not
+        # offer «더 보기» (the web proxy trusts X-Next-Cursor). The caller still gets at most `limit` rows.
         stories, total = await repo.list_backlog(
-            project_id, limit=limit, epic_id=epic_id, assignee_id=assignee_id,
+            project_id, limit=limit + 1, epic_id=epic_id, assignee_id=assignee_id,
             status=status_filter, story_number=story_number, q=q, unattached=unattached,
             exclude_statuses=parsed_exclude_statuses, priority=priority, no_assignee=no_assignee,
+            cursor=_parse_backlog_cursor(cursor),
         )
+        has_more = len(stories) > limit
+        stories = stories[:limit]
         if response is not None:
             response.headers["X-Total-Count"] = str(total)
             response.headers["X-Result-Count"] = str(len(stories))
+            if has_more:
+                response.headers["X-Next-Cursor"] = f"{stories[-1].created_at.isoformat()}|{stories[-1].id}"
         await _attach_list_fields(repo.session, repo.org_id, stories)
         return [StoryResponse.model_validate(s) for s in stories]
 
@@ -1732,9 +1757,10 @@ async def get_story_outgoing_references(
                 "referenced_at": r.created_at.isoformat(),
                 "still_exists": r.still_exists,
                 "proof_payload": r.proof_payload,
+                # story #4846: a room may have no project — the key is there and its value is None: that is null, not the string «None»
                 "conversation_project_id": (
-                    str(project_by_conversation[conversation_id_by_target_id[r.target_id]])
-                    if conversation_id_by_target_id.get(r.target_id) in project_by_conversation else None
+                    None if project_by_conversation.get(conversation_id_by_target_id.get(r.target_id)) is None
+                    else str(project_by_conversation[conversation_id_by_target_id[r.target_id]])
                 ),
             }
             for r in refs
@@ -1884,19 +1910,21 @@ async def upload_story_attachment(
     )
 
     from app.services.storage import get_storage_provider
+    # story 4856 — the bytes decide what a picture is (the caller may have declared a generic or wrong type): store, measure and report the resolved type.
+    content_type = mcp_attachment_upload.resolve_attachment_content_type(body.content_type, data)
     uploaded = await get_storage_provider().put_object(
-        DEFAULT_CONTAINER, object_path, data, content_type=body.content_type,
+        DEFAULT_CONTAINER, object_path, data, content_type=content_type,
     )
     if not uploaded:
         raise HTTPException(status_code=502, detail="upload failed")
 
     # story #2055 AC1: 바이트가 이미 메모리에 있으므로 재다운로드 없이 직접 측정.
     from app.services.image_dimensions import measure_image_dimensions_from_bytes
-    dims = measure_image_dimensions_from_bytes(body.content_type, data)
+    dims = measure_image_dimensions_from_bytes(content_type, data)
     width, height = dims if dims is not None else (None, None)
 
     return StoryAttachment(
-        url=object_path, name=body.name, content_type=body.content_type, size=len(data),
+        url=object_path, name=body.name, content_type=content_type, size=len(data),
         width=width, height=height,
     )
 

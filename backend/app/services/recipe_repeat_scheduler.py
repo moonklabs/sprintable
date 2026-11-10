@@ -116,7 +116,7 @@ async def _publish_next_collect_event(db: AsyncSession, *, org_id: uuid.UUID, de
     `background_tasks()`(side-channel)를 분리해, 후자의 실패만 별도로 삼킨다."""
     from fastapi import BackgroundTasks
 
-    from app.dependencies.auth import AuthContext
+    from app.dependencies.auth import ServerIssuedAuth
     from app.models.event_definition import EventDefinition
     from app.routers.events import _get_or_create_system_publisher, _publish_registry_event_core
     from sqlalchemy import or_
@@ -132,7 +132,7 @@ async def _publish_next_collect_event(db: AsyncSession, *, org_id: uuid.UUID, de
         raise ValueError(f"definition not found/disabled at publish time: {definition_key!r}")
 
     system_member = await _get_or_create_system_publisher(db, org_id)
-    auth = AuthContext(
+    auth = ServerIssuedAuth(
         user_id=str(system_member.id), email=None,
         claims={"app_metadata": {"api_key_id": "system-publisher"}}, org_id=str(org_id),
     )

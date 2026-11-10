@@ -37,7 +37,8 @@ from fastapi import HTTPException
 
 _REAL_DB_URL = __import__("os").getenv("PARITY_TEST_DATABASE_URL") or __import__("os").getenv("ALEMBIC_DATABASE_URL")
 
-pytestmark = pytest.mark.destructive_schema
+# story #4846: a TeamMember seeded on the create_all schema needs its `members` anchor (the room code resolves an api-key caller through it) — see conftest
+pytestmark = [pytest.mark.destructive_schema, pytest.mark.usefixtures("team_member_has_members_anchor")]
 
 _REAL_DB_SKIP = pytest.mark.skipif(not _REAL_DB_URL, reason="real Postgres 필요")
 
@@ -333,9 +334,11 @@ async def _seed_org_with_owner(session, *, slug="e3332"):
 
 async def _seed_agent(session, org_id, project_id, *, name="executor"):
     from app.models.team import TeamMember
+    from tests.conftest import grant_org_projects
 
     m = TeamMember(id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent", name=name, is_active=True)
     session.add(m)
+    await grant_org_projects(session, org_id, agent_member_id=m.id)   # story #4846 AC12: a real agent has its project's grant (the story-4351 seed line)
     await session.commit()
     return m.id
 

@@ -182,7 +182,7 @@ export function FlowCanvasResizePane({ lanes, nodeRowHeight, laneMinHeight, head
           <button
             type="button"
             onClick={handleReset}
-            className="text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+            className="text-editorial-meta text-muted-foreground underline-offset-2 hover:underline"
             data-testid="flow-canvas-resize-reset"
           >
             {t('canvasResizeReset')}

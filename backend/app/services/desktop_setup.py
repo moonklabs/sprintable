@@ -233,6 +233,7 @@ class RoleChoice:
     owner: str | None = None
     agent_id: str | None = None
     tools: list[str] | None = None  # story 4653 (PO 14015): the CLI names this agent uses — cleaned by clean_agent_tools
+    add_to_team: bool = False  # story 4832 (a MOVE row only): the agent is not on the project's team yet — put it there with this confirmation (same transaction, same rule as the access route)
 
 
 @dataclass
@@ -515,6 +516,24 @@ async def confirm_setup_first_project(
     return setup_id, members, work_item_id, project.id
 
 
+async def _put_agent_on_team(db: AsyncSession, *, user_id: uuid.UUID, project_id: uuid.UUID, agent_id: uuid.UUID) -> bool:
+    """story 4832 — the move's `add_to_team`: the grant is `grant_agent_project_access` (the access route's own function: the same who-may-do-it rule
+    inside it, the same agent checks, nothing committed here — the confirmation commits once, and a confirmation that fails leaves no access
+    behind). Its refusals become this flow's closed codes. Returns whether THIS confirmation wrote the grant: an agent another request put on the
+    team in the meantime is on the team (True is never claimed for it — the event names only who this confirmation added)."""
+    from app.services.project_agent_grant import ALREADY_GRANTED, AGENT_INVALID, NOT_ALLOWED, AgentGrantRefused, grant_agent_project_access
+
+    try:
+        await grant_agent_project_access(db, project_id=project_id, member_id=agent_id, by_user_id=user_id)
+    except AgentGrantRefused as e:
+        if e.reason == ALREADY_GRANTED:
+            return False
+        if e.reason == NOT_ALLOWED:
+            raise DesktopSetupError("not_org_admin") from None
+        raise DesktopSetupError("agent_not_found" if e.reason == AGENT_INVALID else "agent_not_in_project") from None
+    return True
+
+
 async def _attachable_runtime(db: AsyncSession, *, org_id: uuid.UUID, project_id: uuid.UUID, agent_id: uuid.UUID) -> str:
     """story #4565 — the runtime (claude · codex) of an agent the confirming person may attach, or a closed code. An id that
     is not an active agent of THIS org is `agent_not_found` (another org's agent and no agent at all read the same — whether it
@@ -650,8 +669,19 @@ async def confirm_move_setup(
         tools_by_agent[agent_id] = r.tools
 
     members: list[dict] = []
+    add_to_team = {uuid.UUID(str(r.agent_id)) for r in roles if r.add_to_team}
+    added: list[uuid.UUID] = []  # story 4832: the agents this confirmation put on the project's team (who, not just how many — the event names them)
     for agent_id in agent_ids:
-        runtime = await _attachable_runtime(db, org_id=org_id, project_id=project_id, agent_id=agent_id)
+        try:
+            runtime = await _attachable_runtime(db, org_id=org_id, project_id=project_id, agent_id=agent_id)
+        except DesktopSetupError as e:
+            # story 4832 (PO 11-03 «팀에 넣고 옮기기»): only a row that ASKED for it, and only for «not on the team yet» — every other refusal (another org's agent,
+            # an agent with no desktop runtime, …) stays as it was, and the checks before the team's are `_attachable_runtime`'s own (it is asked again after the grant)
+            if e.code != "agent_not_in_project" or agent_id not in add_to_team:
+                raise
+            if await _put_agent_on_team(db, user_id=user_id, project_id=project_id, agent_id=agent_id):
+                added.append(agent_id)
+            runtime = await _attachable_runtime(db, org_id=org_id, project_id=project_id, agent_id=agent_id)
         name = (await db.execute(select(Member.name).where(Member.id == agent_id))).scalar_one_or_none() or ""
         # PO 04:24Z — a move's agent is its id, its runtime and its own name: no recipe role, no stages
         members.append({"member_id": str(agent_id), "kind": "agent", "runtime": runtime, "existing": True, "name": " ".join(name.split())[:120],
@@ -667,7 +697,8 @@ async def confirm_move_setup(
     await db.flush()
     await emit_onboarding_event(
         db, EVENT_CONFIRMED, session_id=setup.id, org_id=org_id, project_id=project_id,
-        meta={"flow": "desktop_move", "human_hand": True, "agents": len(members)},
+        meta={"flow": "desktop_move", "human_hand": True, "agents": len(members),
+              "added_to_team": len(added), "added_agent_ids": [str(a) for a in added]},
     )
     return setup.id, members, None
 

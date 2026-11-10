@@ -92,7 +92,7 @@ function TreeNodeBox({ node }: { node: ArtifactTreeNode }) {
   const text = typeof node.props?.['text'] === 'string' ? (node.props['text'] as string) : node.type;
   return (
     <div className="rounded-md border border-border bg-card p-2 text-xs text-foreground">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{node.type}</span>
+      <span className="text-micro font-semibold uppercase tracking-wide text-muted-foreground">{node.type}</span>
       {text ? <p className="mt-0.5 truncate">{text}</p> : null}
       {node.children && node.children.length > 0 ? (
         <div className="mt-1.5 space-y-1.5 border-l border-border pl-2">
@@ -519,8 +519,8 @@ function CanvasViewport({
       </div>
       {/* [SID:4362] 좁은 폭에서 안내 글과 도구 버튼이 한 줄에 다 안 들어가면 도구 줄을 넘긴다 — 예전엔 «전체 보기» · «실제 크기»가 낱말 중간에서 꺾였다. */}
       <div className="mt-1.5 flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1">
-        <p className="min-w-0 text-[11px] text-muted-foreground">{t(isTouchDevice ? 'viewerCanvasHintTouch' : 'viewerCanvasHint')}</p>
-        <div className="flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] font-medium text-muted-foreground">
+        <p className="min-w-0 text-editorial-meta text-muted-foreground">{t(isTouchDevice ? 'viewerCanvasHintTouch' : 'viewerCanvasHint')}</p>
+        <div className="flex shrink-0 items-center gap-1 whitespace-nowrap text-editorial-meta font-medium text-muted-foreground">
           <span className="tabular-nums">{Math.round(transform.scale * 100)}%</span>
           <button type="button" onClick={fitToView} title={t('viewerFitAction')} className="flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 hover:bg-muted hover:text-foreground">
             <Scan className="size-3" aria-hidden />

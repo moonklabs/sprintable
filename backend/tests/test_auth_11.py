@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
+from tests.login_row_mocks import answer_login_rows as _hash_reread
+
 ORG_ID = uuid.uuid4()
 USER_ID = uuid.uuid4()
 CALLER_ID = uuid.uuid4()
@@ -101,6 +103,7 @@ def _make_member(role: str = "member", id: uuid.UUID | None = None) -> MagicMock
 
 # ─── AC2: 로그인 성공 감사 로그 ───────────────────────────────────────────────
 
+
 @pytest.mark.anyio
 async def test_login_success_writes_audit_log():
     """로그인 성공 시 login_success audit log가 session.add()로 기록됨."""
@@ -116,6 +119,7 @@ async def test_login_success_writes_audit_log():
             mock_get_user.return_value = user
             mock_meta.return_value = {}
 
+            _hash_reread(session, user)
             async with client as c:
                 resp = await c.post("/api/v2/auth/token", json={
                     "email": "test@example.com",
@@ -123,6 +127,7 @@ async def test_login_success_writes_audit_log():
                 })
 
         assert resp.status_code == 200
+        assert session.hash_rereads == 1  # story 4838: read again under the person's session lock before the session is stored
         audit_calls = [
             c.args[0] for c in session.add.call_args_list
             if isinstance(c.args[0], LoginAuditLog)
@@ -148,6 +153,7 @@ async def test_login_failure_writes_audit_log():
         with patch("app.routers.auth._get_user_by_email", new_callable=AsyncMock) as mock_get_user:
             mock_get_user.return_value = user
             session.execute = AsyncMock(return_value=MagicMock())
+            _hash_reread(session, user)
 
             async with client as c:
                 resp = await c.post("/api/v2/auth/token", json={

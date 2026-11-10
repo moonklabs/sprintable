@@ -4,6 +4,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
+      "env": ["SPRINTABLE_EMBEDDED_BUILD"],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"]
     },
     "dev": {

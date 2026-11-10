@@ -13,7 +13,7 @@ import koMessages from '../../../messages/ko.json';
 import { ChatListView } from './chat-list-view';
 
 const { useDashboardContextMock, fetchWithAuthMock } = vi.hoisted(() => ({
-  useDashboardContextMock: vi.fn(() => ({ role: 'member' })),
+  useDashboardContextMock: vi.fn(() => ({ role: 'member', projectMemberships: [] as never[] })),
   fetchWithAuthMock: vi.fn(),
 }));
 

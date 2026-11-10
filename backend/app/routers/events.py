@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.datetime_query import aware_datetime_query
 from app.dependencies.auth import (
     AuthContext,
+    ServerIssuedAuth,
     get_current_user,
     get_current_user_streaming,
     get_verified_org_id,
@@ -43,6 +44,7 @@ from app.core.sse_event_name import sse_event_name, validate_event_type
 from app.dependencies.database import get_db
 from app.dependencies.ownership import _is_org_admin
 from app.models.event import Event
+from app.services.event_room_gate import stored_event, withheld_payloads
 from app.services.agent_onboarding_config import resolve_locale_from_request
 from app.services.stream_access import RECHECK_BEFORE_SEND_SEC, AccessRecheck, SeatRecheck
 from app.services.org_locale import resolve_org_locale
@@ -345,7 +347,9 @@ def _should_skip_live_event(eid: str | None, sent_event_ids: set[str]) -> bool:
     return bool(eid) and eid in sent_event_ids
 
 
-def _event_to_payload(event: "Event") -> dict:
+def _event_to_payload(event: "Event", payload: "dict | None" = None) -> dict:
+    # story #4870: `payload` replaces the stored one in what is handed back (the room's words withheld from a caller who may not read the room now); the stored row is never changed
+    _payload = event.payload if payload is None else payload
     return {
         # story 4649 — 백필은 배치 조회 결과(_backfill_frame_data가 넣는다)로 채운다. 여기서는 모른다고 둔다.
         # 행의 org_id는 만든 곳이라 쓰지 않고, 저장된 payload의 값은 신뢰하지 않는다.
@@ -354,10 +358,10 @@ def _event_to_payload(event: "Event") -> dict:
         "event_type": event.event_type,
         "source": {"type": event.source_entity_type, "id": str(event.source_entity_id) if event.source_entity_id else None},
         "sender_id": str(event.sender_id) if event.sender_id else None,
-        "payload": event.payload,
+        "payload": _payload,
         # E-EVENT-INJECT S1: content를 SSE top-level로 노출(conversation.message_created 미러).
         # connector가 top-level content를 읽어 드롭 안 걸리게.
-        "content": (event.payload or {}).get("content"),
+        "content": (_payload or {}).get("content"),
         "created_at": event.created_at.isoformat(),
         # story #4245 — 만든 트랜잭션 id(xid8 · 문자열 — 64비트라 JS number 정밀도 밖일 수 있음). 옛 행 None.
         "created_xid": str(event.created_xid) if getattr(event, "created_xid", None) is not None else None,
@@ -399,7 +403,7 @@ async def _sender_orgs_for(db: "AsyncSession", events: list) -> dict[str, str | 
 
 
 def _backfill_frame_data(event: "Event", stream_org_id: "uuid.UUID | None" = None,
-                         sender_orgs: "dict[str, str | None] | None" = None) -> dict:
+                         sender_orgs: "dict[str, str | None] | None" = None, payload: "dict | None" = None) -> dict:
     """story #4505 (Mirko live 00:51Z · PO 01:06Z) — a backfill frame in the shape of the live one. A live frame is the pushed
     dict, whose payload keys are top-level (`gate_id`, `status`, `conversation_id` …); a backfill frame was `_event_to_payload`,
     where they sit only under `payload` — so a handler reading the live shape (the approvals inbox `payload.gate_id`, the chat
@@ -407,9 +411,9 @@ def _backfill_frame_data(event: "Event", stream_org_id: "uuid.UUID | None" = Non
     never appeared until reload. The payload's keys are also put at the top level here, never over a key the frame already
     has (event_id · event_type · source · sender_id · payload · content · created_at · created_xid). Backfill only — the live
     dispatch (`dispatch_router`) and the agent gateway build their own frames and are unchanged."""
-    data = _event_to_payload(event)
+    data = _event_to_payload(event, payload)
     data["sender_org_id"] = (sender_orgs or {}).get(str(event.sender_id)) if event.sender_id is not None else None
-    flat = {k: v for k, v in (event.payload or {}).items() if k not in data}
+    flat = {k: v for k, v in ((event.payload or {}) if payload is None else payload).items() if k not in data}
     return _with_stream_org({**flat, **data}, stream_org_id)
 
 
@@ -693,7 +697,9 @@ async def agent_event_stream(
                         return
                     batch = pending_events[i : i + _SSE_BATCH_SIZE]
                     sender_orgs = await _sender_orgs_for(db, batch)  # story 4649: one lookup for the batch's senders
-                    batch_data = [_backfill_frame_data(evt, org_id, sender_orgs) for evt in batch]  # story #4505: the live frame's shape
+                    # story #4870: a stored copy of a room's words is read back only by who may read the room NOW (one question for the batch); the words are taken out of the frame otherwise
+                    _withheld = await withheld_payloads(db, org_id, auth, [stored_event(e) for e in batch])
+                    batch_data = [_backfill_frame_data(evt, org_id, sender_orgs, _withheld.get(str(evt.id))) for evt in batch]  # story #4505: the live frame's shape
                     # 1c22da3e fix: yield 먼저 → 성공 후 delivered 마킹.
                     # 선마킹 시 yield(클라 disconnect 등) 실패하면 이벤트가 delivered로
                     # 남아 영구 누락. 후마킹 + 클라 seen_ids dedup 으로 손실 0(재전송 허용).
@@ -1007,7 +1013,13 @@ async def get_pending_events(
         response.headers["X-Result-Count"] = str(len(events))
         if events:
             response.headers["X-Next-Cursor"] = events[-1].created_at.isoformat()
-    return [EventResponse.model_validate(e) for e in events]
+    # story #4870: the pending list is a re-read of stored copies — the room's words are handed back only to who may read the room NOW (the rows are kept; the stored copy is not changed)
+    withheld = await withheld_payloads(db, org_id, auth, [stored_event(e) for e in events])
+    responses = [EventResponse.model_validate(e) for e in events]
+    for e, resp in zip(events, responses):
+        if str(e.id) in withheld:
+            resp.payload = withheld[str(e.id)]
+    return responses
 
 
 @router.patch("/{event_id}/delivered", response_model=EventResponse)
@@ -1040,7 +1052,12 @@ async def mark_delivered(
     await db.execute(update(Event).where(Event.id == event.id).values(status="delivered", delivered_at=func.coalesce(Event.delivered_at, datetime.now(timezone.utc))))
     await db.commit()
     await db.refresh(event)
-    return EventResponse.model_validate(event)
+    response = EventResponse.model_validate(event)
+    # story #4870: the same gate as the pending list
+    withheld = await withheld_payloads(db, org_id, auth, [stored_event(event)])
+    if str(event.id) in withheld:
+        response.payload = withheld[str(event.id)]
+    return response
 
 
 # ─── S3: 큐 관리 (expired + cleanup) ─────────────────────────────────────────
@@ -3272,8 +3289,23 @@ async def _publish_registry_event_core(
         mentioned_ids=list(escalation_ids),
         event_context={"event_key": definition.key, "payload": payload, "refs": {**refs, **(routing_context or {})}},
     )
+    send_auth = auth
+    # story #4846 (AC12): an agent writes in a room of a project only while it has the project — except the notice of a recipe it is BOUND to, whose ground is
+    # the binding (a setting the user gave the agent). Every condition of that exception lives in ONE predicate (see its docstring); the mark is built here,
+    # after it holds, and nowhere else.
+    from app.services.recipe_role_bindings import recipe_notice_stands_on_binding
+
+    if await recipe_notice_stands_on_binding(
+        db, org_id=org_id, sender_type=sender.type, plain_call=not _is_system_publisher and not isinstance(auth, ServerIssuedAuth),
+        definition=definition, project_id=project_id, named_room=conversation_id is not None, agent_member_id=sender.id,
+    ):
+        from app.dependencies.auth import RecipeBoundAuth
+
+        send_auth = RecipeBoundAuth(
+            user_id=auth.user_id, email=auth.email, claims=auth.claims, org_id=auth.org_id, bound_project_id=project_id,
+        )
     msg_response = await send_message_core(
-        conv.id, send_body, background_tasks, db=db, auth=auth, org_id=org_id, after_commit=after_commit,
+        conv.id, send_body, background_tasks, db=db, auth=send_auth, org_id=org_id, after_commit=after_commit,
         as_system_publisher=post_as_system_publisher,
     )
     if sender.type == "agent" and payload.get("work_item_type") == "story" and payload.get("work_item_id"):
@@ -3460,7 +3492,7 @@ async def publish_preset_event(
     # SAVEPOINT 안에서 예약된 wake(event_seq)는 그 SAVEPOINT 소유라, 실패해 롤백되면 그것만 버려진다(after_commit 기전).
     async with db.begin_nested():
         system_member = await _get_or_create_system_publisher(db, org_id)
-        auth = AuthContext(
+        auth = ServerIssuedAuth(
             user_id=str(system_member.id), email=None,
             claims={"app_metadata": {"api_key_id": "system-publisher"}}, org_id=str(org_id),
         )
@@ -4140,6 +4172,31 @@ async def apply_recipe_role_bindings(
             status_code=422,
             detail=f"agent(s) not found in this org: {missing_agents}",
         )
+
+    if body.project_id is not None:
+        # story #4846 (AC12): a binding of a PROJECT says «this agent does this recipe's work in that project», and an agent writes in a project's rooms only
+        # while it has the project — so it is told now, not by a notice that silently stops later. An organization-wide binding (no project) is unchanged.
+        from app.services.project_auth import has_project_access as _agent_has_project
+
+        agent_kind = {
+            member_id: kind for member_id, kind in (await db.execute(
+                select(TeamMember.id, TeamMember.type).where(TeamMember.id.in_(agent_ids), TeamMember.org_id == org_id)
+            )).all()
+        }
+        lacking = []
+        for agent_id in sorted(agent_ids, key=str):
+            # only an AGENT needs the project to write there; a person mapped to a stage is not asked (human stages never required a grant)
+            if agent_kind.get(agent_id) == "agent" and not await _agent_has_project(db, agent_id, body.project_id, org_id):
+                lacking.append(str(agent_id))
+        if lacking:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "AGENT_LACKS_PROJECT",
+                    "message": "Agent(s) are not members of this project — give them the project first, or bind them organization-wide",
+                    "errors": lacking,
+                },
+            )
 
     channel_connection_ids = {uuid.UUID(v) for v in channel_stage_values.values()}
     valid_connections = set((await db.execute(

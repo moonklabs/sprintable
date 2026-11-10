@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
+from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id, get_verified_org_id_no_project_gate
 from app.dependencies.database import get_db
 from app.models.asset import Asset, AssetLink
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
@@ -47,7 +47,7 @@ async def authorize_attachment(
     asset_id: uuid.UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     auth: AuthContext = Depends(get_current_user),
-    org_id: uuid.UUID = Depends(get_verified_org_id),
+    org_id: uuid.UUID = Depends(get_verified_org_id_no_project_gate),
 ) -> dict:
     """GET /api/v2/attachments/authorize — 첨부 접근 인가(200) / 거부(403).
 
@@ -75,10 +75,13 @@ async def authorize_attachment(
             raise HTTPException(status_code=404, detail="Asset not found")
         # 인가(AC1·AC4): project asset=has_project_access·org-level(project_id NULL)=verified-org 멤버.
         # org_id 는 get_verified_org_id 로 검증됨(asset.org_id==org_id 매치)→ org-level 통과.
-        if asset.project_id is not None and not await has_project_access(
-            db, uuid.UUID(auth.user_id), asset.project_id, org_id
-        ):
-            raise HTTPException(status_code=403, detail="No access to this project")
+        # story #4846 (AC10): an asset whose every link is a chat message follows its ROOM (the one readable predicate), not its project: a project member who is
+        # not in the room is refused, a participant who lost the project is not, and an asset registered with no project (a room without one) is not the
+        # organization's. Every other asset keeps the project rule, as before.
+        from app.services.chat_asset_scope import asset_accessible_to_caller
+
+        if not await asset_accessible_to_caller(db, auth, org_id, asset):
+            raise HTTPException(status_code=403, detail="No access to this attachment")
 
         # story #2319 미완 2차(미르코 dev 라이브 실측 2026-08-02) — #2808이 conversation_id+path
         # 분기(belongs SQL)만 고쳤고 이 asset_id 분기는 Asset.deleted_at만 봐서 tombstone된
@@ -124,11 +127,24 @@ async def authorize_attachment(
             )
         )).scalar_one_or_none()
         if conv_proj is None:
-            raise HTTPException(status_code=404, detail="Conversation not found")
+            # story #4846: a room without a project has project_id NULL — that is not «no such room»; ask whether the ROOM exists
+            room = (await db.execute(
+                select(Conversation.id).where(Conversation.id == conversation_id, Conversation.org_id == org_id)
+            )).scalar_one_or_none()
+            if room is None:
+                raise HTTPException(status_code=404, detail="Conversation not found")
         if not path_in_source_scope(path, "conversation_message", conv_proj, conversation_id, org_id):
             raise HTTPException(status_code=403, detail="Attachment path not scoped to this conversation")
         # 권한: conversation 참가자(canonical member). team_member 봐주기 없음.
         member = await resolve_member(auth, org_id, db, project_id=None)
+        # story #4846 (AC12): an agent reads a room that has a project only with that project, as every other read of the room does
+        from app.services.conversation_auth import agent_project_valid_for_room
+
+        if not await agent_project_valid_for_room(
+            db, caller_is_agent=bool(auth.claims.get("app_metadata", {}).get("api_key_id")), caller_id=member.id,
+            conv_project_id=conv_proj, org_id=org_id,
+        ):
+            raise HTTPException(status_code=403, detail="Not a participant of this conversation")
         is_participant = (await db.execute(
             select(ConversationParticipant.id).where(
                 ConversationParticipant.conversation_id == conversation_id,
@@ -151,7 +167,7 @@ async def authorize_attachment(
             role = await _effective_org_role(auth, org_id, db, member, project_id=conv_proj)
             if not (
                 role in ("owner", "admin")
-                and not await _conversation_has_human_participant(conversation_id, db)
+                and not await _conversation_has_human_participant(conversation_id, db, org_id)
             ):
                 raise HTTPException(status_code=403, detail="Not a participant of this conversation")
         # ② 정확 매치: stored url == bare path(신규) OR == legacy 전체 URL. substring 금지.
@@ -245,12 +261,12 @@ async def convert_attachment(
     )).scalar_one_or_none()
     if asset is None:
         raise HTTPException(status_code=404, detail="Asset not found")
-    if asset.project_id is not None and not await has_project_access(
-        db, uuid.UUID(auth.user_id), asset.project_id, org_id
-    ):
-        # story #2342(존재 비노출) — has_project_access 거부는 항상 404(CI lint_project_access_403.py
-        # 가 403을 신규 위반으로 잡는다). authorize_attachment의 asset_id 분기(위)는 이 파일이
-        # 통째로 grandfather 베이스라인에 있어 403이지만, 이건 신규 코드라 정공법(404)으로 낸다.
+    # story #4846 (AC10): the SAME rule as the authorize branch above — a chat-only asset (and what was derived from one) follows its ROOM, every other asset the
+    # project; the answer is 404 (existence not disclosed, story #2342). The converted PDF is derived from this asset, so what it may be read by is computed from
+    # THIS asset by the same rule (see `chat_asset_scope`): it never opens wider than its origin.
+    from app.services.chat_asset_scope import asset_accessible_to_caller
+
+    if not await asset_accessible_to_caller(db, auth, org_id, asset):
         raise HTTPException(status_code=404, detail="Asset not found")
 
     if not office_conversion.is_convertible(asset.name, asset.content_type):

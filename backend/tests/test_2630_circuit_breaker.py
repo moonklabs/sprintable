@@ -84,12 +84,14 @@ async def _seed_org_project(session):
 
 async def _seed_agent(session, org_id, project_id):
     from app.models.team import TeamMember
+    from tests.conftest import grant_org_projects
 
     m = TeamMember(
         id=uuid.uuid4(), org_id=org_id, project_id=project_id, type="agent",
         name="agent", is_active=True,
     )
     session.add(m)
+    await grant_org_projects(session, org_id, agent_member_id=m.id)   # story #4846 AC12: a real agent has its project's grant (the story-4351 seed line)
     await session.commit()
     return m.id
 

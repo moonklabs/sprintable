@@ -130,7 +130,7 @@ export function HypothesisRow({
             {t('startMeasuring')}
           </button>
           {/* AC2: 동선의 의미를 문구로 — "측정 시작"이 언제부터 재는지 사람이 알 수 있게. */}
-          <p className="mt-1 text-[11px] text-muted-foreground">
+          <p className="mt-1 text-editorial-meta text-muted-foreground">
             {hypothesis.measure_after ? t('startMeasuringHintWithDate', { date: hypothesis.measure_after.slice(0, 10) }) : t('startMeasuringHint')}
           </p>
         </div>

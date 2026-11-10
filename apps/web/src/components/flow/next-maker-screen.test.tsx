@@ -336,7 +336,7 @@ describe('NextMakerScreen — real fetch orchestration + lane grouping', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    const select = container.querySelector('select')!;
+    const select = container.querySelector('select[data-slot="select"]')!;
     expect(select).toBeTruthy();
     await act(async () => {
       const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;

@@ -101,6 +101,10 @@ class Settings(BaseSettings):
     pool_holder_warn_sec: int = 60
     pool_holder_poll_sec: int = 15
     db_idle_in_txn_timeout_ms: int = 900_000  # PO 11-09: 15 min — the zombies of 11-09 were hours old, and a few legitimate request paths (SSE backfill · direct webhook fan-out · request-pool cron) can sit past 5 min
+    # story #4867 — background work that takes a REQUEST-pool place per piece is let through `limit` at a time (app/core/bounded_gate.py; 0 = no gate). Nothing is dropped: the rest wait their turn.
+    pg_notify_max_concurrent: int = 4  # one org-wide event = one pg_notify per member (a 40-member org took 30 of 30 places at once)
+    au_metering_max_concurrent: int = 2  # one AU metering task per agent API request (its own connection + an org-wide advisory lock)
+    tool_call_recording_max_concurrent: int = 2  # one tool-call recording task per agent tool-call request (its own connection)
     # story #4336(PO 04:52Z) — 발행 명령 워커 틱 예산 = min(스케줄러 시한, 이 서비스의 요청 시한) − 여유(publication_command.py).
     # 요청 시한은 배포가 Cloud Run `--timeout`과 같은 값을 넣는다(cloudbuild `_BACKEND_TIMEOUT`). 모르면 보수적으로 300(옛 prod 값).
     backend_request_timeout_seconds: int = 300
@@ -114,6 +118,16 @@ class Settings(BaseSettings):
 
     # JWT
     jwt_secret: str = ""
+
+    # story #4825 (공개 2-②, 로컬 모드 로그인) — the desktop app's embedded server mints the owner's first session with this per-install secret
+    # (`POST /api/v2/auth/local-bootstrap`, loopback only). Hosted deployments must never carry it: `is_embedded` is the single switch, and the
+    # route exists only when it is on. The value is never logged or printed.
+    local_bootstrap_secret: str = ""
+
+    # story 4826 (공개 2-③ (나)) — the app's own server runs the scheduled jobs itself (`app/services/embedded_timers.py`), in-process, instead of a cloud scheduler.
+    # On by default (`is_embedded` still decides WHERE it can run: only the app's own server); the test configuration (tests/conftest.py) turns it off, and the
+    # one test that checks the lifespan turns it back on. An explicit setting, not a look at whether pytest is running.
+    embedded_timers_enabled: bool = True
 
     # story #3259(지원v1·1경계) — Support Gateway 위임 토큰 서명 시크릿. jwt_secret과 **의도적으로
     # 분리**(별도 값) — 이 시크릿이 유출돼도 fleet JWT_SECRET과는 무관(반대도 동일). Support
@@ -636,6 +650,21 @@ class Settings(BaseSettings):
         if os.environ.get("PYTEST_CURRENT_TEST"):
             return True
         return os.environ.get("SPRINTABLE_LOCAL_DEV", "").strip().lower() in {"1", "true", "yes"}
+
+    @property
+    def is_embedded(self) -> bool:
+        """story #4825 — True only in the desktop app's embedded server: `SPRINTABLE_EMBEDDED` is set AND a bootstrap secret of at least 32
+        characters exists AND this is not Cloud Run (`K_SERVICE` is a positive «hosted» signal; it wins). The local-bootstrap route is registered only
+        when this is True, so hosted deployments — which never set either variable (pinned by tests/test_4825_local_bootstrap_not_hosted.py) —
+        have no such route at all."""
+        import os
+        if os.environ.get("K_SERVICE"):
+            return False
+        # exactly "1" — the value the desktop app's supervisor sets and the web server's own check reads (a looser value here would switch on the backend's
+        # route and guard while the web server's Host refusal stayed off)
+        if os.environ.get("SPRINTABLE_EMBEDDED", "").strip() != "1":
+            return False
+        return len(self.local_bootstrap_secret) >= 32
 
     @property
     def is_internal_secret_gate_exempt(self) -> bool:

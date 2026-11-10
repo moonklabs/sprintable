@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from '@/lib/db/server';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
-const FASTAPI_URL = () => process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_URL = () => fastapiBaseUrl();
 
 // E-ARCH 1단계(story #2078) — SSE/LISTEN 전용 realtime-gateway(REALTIME_URL)로 이 라우트만
 // 전환한다. REALTIME_URL이 설정돼 있으면 그쪽으로, 없으면 기존 FASTAPI_URL로 폴백 —

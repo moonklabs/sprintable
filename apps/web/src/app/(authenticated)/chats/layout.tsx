@@ -1,15 +1,15 @@
 'use client';
 
-import { useCallback, useState, useSyncExternalStore } from 'react';
+import { useCallback, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Plus, PanelLeftOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ChatListView } from '@/components/chat/chat-list-view';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
-import { tabProjectCandidates } from '@/lib/project-context-client';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { ChatRailProvider, useChatRail } from './chat-rail-context';
+import { isNoProjectAtAll } from './no-project';
 
 /**
  * story #2921 S1(P0-C, 챗 리디자인 시안 §S1) — D04 「Chat 분리=맥락 두동강」 처방 골격.
@@ -32,29 +32,22 @@ export default function ChatsLayout({ children }: { children: React.ReactNode })
   );
 }
 
-const subscribeToNothing = () => () => {};
-
 function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
   const t = useTranslations('chats');
   const tc = useTranslations('common');
   const pathname = usePathname();
-  const { currentTeamMemberId, projectId, projectMemberships, projectPathUnresolved } = useDashboardContext();
-  // `null` on the server and while hydrating (the tab's own storage is not readable there), the answer once on the client — no effect, no extra render.
-  const tabHasNoChoice = useSyncExternalStore(
-    subscribeToNothing,
-    () => {
-      const accessible = new Set(projectMemberships.map((m) => m.projectId));
-      const candidates = tabProjectCandidates(new URLSearchParams(window.location.search).get('p'), true);
-      return !candidates.some((id) => accessible.has(id));
-    },
-    () => null,
-  );
+  const dashboardCtx = useDashboardContext();
+  const { currentTeamMemberId, projectId } = dashboardCtx;
   const [showModal, setShowModal] = useState(false);
-  const { railMode, toggleManualExpand } = useChatRail();
+  const { railMode, toggleManualExpand, roomsAreOrgWide } = useChatRail();
+  // a room is filed under a project unless the server serves the organization's rooms as a whole — it then lets one be made with none («조직(프로젝트 없음)»).
+  // So with no project at all «새 대화» is there when the list was answered org-wide, and hidden on an older server (where the window could not create anything).
+  const canStartRoom = !isNoProjectAtAll(dashboardCtx) || roomsAreOrgWide;
   // story #2921 S6 후속(유나 design:changes 2026-08-22, CI a11y 가드 지적 처방) — overlay는
   // 모바일 드로어와 동형인데 접근 가능한 dialog 시맨틱이 없었다(「손수 구현된 모달」로 CI가
-  // 정당하게 잡음). contextual-panel-layout.tsx의 기존 반응형 드로어와 같은 useFocusTrap
-  // 배선을 재사용한다(사본 분화 금지) — Tab 순환+Esc 닫힘+포커스 반환.
+  // 정당하게 잡음). 당시 contextual-panel-layout.tsx의 반응형 드로어와 같은 useFocusTrap
+  // 배선을 재사용했다(사본 분화 금지) — Tab 순환+Esc 닫힘+포커스 반환. (그 드로어는 story 4831에서 바탕 Sheet로 옮겼다 — 이 레일은 같은
+  // 요소가 docked ↔ overlay로 모양만 바뀌어 포털(Sheet)로 옮기면 목록 상태가 사라지므로 useFocusTrap에 남는다.)
   const closeOverlay = useCallback(() => toggleManualExpand(), [toggleManualExpand]);
   const trapRef = useFocusTrap(railMode === 'overlay', closeOverlay);
 
@@ -63,22 +56,11 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
   // 라우트 전환 UX 그대로 계승).
   const isListRoute = pathname === '/chats';
 
-  // story #4762 (AC2) — «known to have no project» is an answer, not «still loading»: a person with no project (or with several and none
-  // picked) used to wait on this «Loading…» for ever (4758: 7 minutes). Say what to do next, in one line. The loading line stays for a person
-  // whose own member id is not known yet.
-  // A person WITH projects but none chosen: the tab's own choice (`?p=` · sessionStorage) is only read after hydration — until the effect above has
-  // looked, that is «not known yet» (loading), never «none picked» (a flash of the wrong line before the shell settles).
-  const showNextStep = Boolean(currentTeamMemberId) && !projectId && !projectPathUnresolved
-    && (projectMemberships.length === 0 || tabHasNoChoice === true);
-  if (showNextStep) {
-    return (
-      <div className="flex h-64 items-center justify-center px-6 text-center" data-testid="chats-no-project">
-        <p className="text-sm text-muted-foreground">{projectMemberships.length === 0 ? t('noProjectYet') : t('pickProject')}</p>
-      </div>
-    );
-  }
-
-  if (!currentTeamMemberId || !projectId) {
+  // story #4762 (AC2) — «known to have no project» is an answer, not «still loading»: a person with no project at all used to wait on this «Loading…» for ever (4758: 7 minutes);
+  // the loading line stays only for a person whose own member id is not known yet.
+  // story 4847 — the layout no longer stops anybody: the list is the organization's rooms, and a person with no project may still have rooms (a room outlives its project).
+  // The «no project yet» line is the LIST's empty state now (chat-list-view.tsx: no project and no room read) — a stop here would keep that person from rooms they have.
+  if (!currentTeamMemberId) {
     // story #3788(B-④, 유나 定) — 「없다」 부품(EmptyState)으로 「아직 모른다」(로딩)를 그리지
     // 않는다(3784와 같은 축). 값은 story #3783이 common.loading을 정본화하면 자동으로 따라온다.
     return (
@@ -127,7 +109,7 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
           aria-hidden="true"
           tabIndex={-1}
           onClick={toggleManualExpand}
-          className="fixed inset-0 z-30 hidden bg-black/20 lg:block xl:hidden"
+          className="fixed inset-0 z-30 hidden bg-scrim-1 lg:block xl:hidden"
         />
       )}
 
@@ -146,14 +128,16 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
       >
         <div className="flex flex-shrink-0 items-center justify-between border-b border-border px-3 py-2.5">
           <h1 id="chat-rail-heading" className="text-sm font-medium text-foreground">{t('title')}</h1>
-          <Button size="sm" variant="outline" onClick={() => setShowModal(true)}>
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
-            {t('newConversation')}
-          </Button>
+          {canStartRoom ? (
+            <Button size="sm" variant="outline" onClick={() => setShowModal(true)}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              {t('newConversation')}
+            </Button>
+          ) : null}
         </div>
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <ChatListView
-            projectId={projectId}
+            projectId={projectId || null}
             currentTeamMemberId={currentTeamMemberId}
             open={showModal}
             onOpenChange={setShowModal}

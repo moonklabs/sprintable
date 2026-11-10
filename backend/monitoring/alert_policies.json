@@ -84,5 +84,22 @@
     "alertStrategy": {"notificationRateLimit": {"period": "3600s"}, "autoClose": "86400s"},
     "notificationChannels": [],
     "severity": "ERROR"
+  },
+  {
+    "displayName": "Sprintable — Expo push credentials error (VM backends dev · prod)",
+    "documentation": {
+      "mimeType": "text/markdown",
+      "content": "story 4694 (the VM half · after story 4796 moved the backends off Cloud Run: dev 10-27, prod 10-29). The backend on a VM logged `expo_push_credentials_error`: Expo refused a push ticket with a credentials-class error (`InvalidCredentials` · `MismatchSenderId`) — the push credentials of the app's Firebase / FCM key, not the recipient. **Every push of that app is refused until it is fixed.** This policy only sees the line if the container logs reach Cloud Logging (Ops Agent · story 4869) — the Cloud Run policy of the same name above matches nothing once the Cloud Run backends are gone. Look at the line's `codes` · `event_type` · `devices` (ids and counts only), then the key's Android restriction in the project's API keys."
+    },
+    "combiner": "OR",
+    "conditions": [{
+      "displayName": "expo_push_credentials_error logged on sprintable-vm-dev or sprintable-vm-prod",
+      "conditionMatchedLog": {
+        "filter": "resource.type=\"gce_instance\" AND labels.\"compute.googleapis.com/resource_name\"=~\"^sprintable-vm-(dev|prod)$\" AND (jsonPayload.event=\"expo_push_credentials_error\" OR \"expo_push_credentials_error\")"
+      }
+    }],
+    "alertStrategy": {"notificationRateLimit": {"period": "3600s"}, "autoClose": "86400s"},
+    "notificationChannels": [],
+    "severity": "ERROR"
   }
 ]

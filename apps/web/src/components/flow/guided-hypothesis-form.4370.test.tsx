@@ -25,9 +25,9 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); });
 
-const statement = () => container.querySelector<HTMLTextAreaElement>(`textarea[placeholder="${f.guidedStatementPlaceholder}"]`);
-const metric = () => container.querySelector<HTMLInputElement>(`input[placeholder="${f.guidedMetricPlaceholder}"]`);
-const target = () => container.querySelector<HTMLInputElement>(`input[placeholder="${f.guidedTargetPlaceholder}"]`);
+const statement = () => container.querySelector<HTMLTextAreaElement>(`textarea[data-slot="textarea"][placeholder="${f.guidedStatementPlaceholder}"]`);
+const metric = () => container.querySelector<HTMLInputElement>(`input[data-slot="input"][placeholder="${f.guidedMetricPlaceholder}"]`);
+const target = () => container.querySelector<HTMLInputElement>(`input[data-slot="input"][placeholder="${f.guidedTargetPlaceholder}"]`);
 const settle = async () => { await act(async () => { await new Promise((r) => setTimeout(r, 20)); }); };
 
 async function open() {

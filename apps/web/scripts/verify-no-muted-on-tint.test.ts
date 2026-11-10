@@ -362,7 +362,7 @@ describe('scanContent — 실 파일 뮤테이션(story #3850 AC3, 신설 분석
     };
     // 반려 사유 상자(bg-destructive-tint) 안 muted 글 줄 — 기존 #3839 GRANDFATHER 위반 자리. 조각은 위반 클래스
     // (text-muted-foreground)를 빼고 잡는다 — 클래스를 지우면 줄은 그대로 찾히고 «위반 없음»으로 RED가 나야 하므로.
-    const DESTRUCTIVE_MUTED_SNIPPET = 'flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]';
+    const DESTRUCTIVE_MUTED_SNIPPET = 'flex flex-wrap items-center gap-x-2 gap-y-1 text-editorial-meta'; // story 4831: text-[11px] → 바탕 눈금 이름
     // AUDIT_META 조회(`${am.dot}`) span — #3865 정밀화로 더 이상 위반 아닌 자리.
     const AUDIT_DOT_SNIPPET = 'place-items-center rounded-full ${am.dot}';
 
@@ -406,7 +406,7 @@ describe('scanContent — 실 파일 뮤테이션(story #3850 AC3, 신설 분석
     const original = readFileSync(ABS_FILE, 'utf8');
 
     it('상태 라벨 옆에 muted 텍스트를 끼워 넣으면(템플릿 치환 안 삼항 tint가 조상으로 인식돼) RED', () => {
-      const target = '<div className="text-[15px] font-bold text-foreground">{t(STATE_LABEL_KEY[state])}</div>';
+      const target = '<div className="text-base font-bold text-foreground">{t(STATE_LABEL_KEY[state])}</div>'; // story 4831: text-[15px] → text-base
       expect(original.includes(target)).toBe(true);
       const mutated = original.replace(target, `${target}<div className="text-muted-foreground">x</div>`);
       expect(mutated).not.toBe(original);
@@ -571,11 +571,11 @@ describe('scanContent — 실 파일 양성대조(recruiter-client.tsx, 불투�
   });
 
   it('bg-card를 걷으면(불투명 경계 소실) 조상 info-tint가 다시 비쳐 RED', () => {
-    // value={newAgentName}로 시작하는 입력은 파일에 하나뿐(1112행) — 그 className까지
-    // 통째로 타깃 삼아 결정적으로 그 입력 하나만 고른다(다른 bg-card 입력과 안 섞임).
-    const target = "value={newAgentName}\n                      onChange={(e) => setNewAgentName(e.target.value)}\n                      placeholder={suggestedAgentName || t('agentNamePlaceholder')}\n                      className=\"w-full rounded-lg border border-border bg-card px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary\"";
-    expect(original.includes(target)).toBe(true);
-    const mutated = original.replace(target, target.replace('bg-card ', ''));
+    // 이 className 문자열은 파일에 하나뿐(신규 에이전트 이름 입력) — 결정적으로 그 입력 하나만 고른다.
+    // story 4831: 이 입력은 바탕 Input 부품이 됐다 — 불투명 면은 className(bg-card dark:bg-card)으로 유지하고, 정적 가드가 읽도록 placeholder 클래스도 적혀 있다.
+    const target = "className=\"bg-card placeholder:text-muted-foreground dark:bg-card\"";
+    expect(original.split(target).length - 1).toBe(1);
+    const mutated = original.replace(target, 'className="placeholder:text-muted-foreground"');
     expect(mutated).not.toBe(original);
 
     const before = scanContent(original, REL_FILE);

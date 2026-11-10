@@ -871,7 +871,7 @@ export function DocContentRenderer({
 
   const rootClassName = cn(
     'doc-renderer prose dark:prose-invert prose-sm max-w-none text-foreground',
-    '[&_h1]:scroll-mt-24 [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:tracking-tight',
+    '[&_h1]:scroll-mt-24 [&_h1]:text-display [&_h1]:font-bold [&_h1]:tracking-tight',
     '[&_h2]:scroll-mt-24 [&_h2]:mt-10 [&_h2]:text-2xl [&_h2]:font-semibold',
     '[&_h3]:scroll-mt-24 [&_h3]:mt-8 [&_h3]:text-xl [&_h3]:font-semibold',
     // story #2967 — 다크 체감 눌림(/92=14.88 vs full=17.66, 둘 다 WCAG 통과지만 체감 차).
@@ -896,7 +896,7 @@ export function DocContentRenderer({
     '[&_pre_code]:bg-transparent [&_pre_code]:p-0',
     '[&_[data-doc-code-shell="true"]]:not-prose [&_[data-doc-code-shell="true"]]:my-6',
     '[&_[data-doc-code-actions="true"]]:mb-2 [&_[data-doc-code-actions="true"]]:flex [&_[data-doc-code-actions="true"]]:justify-end',
-    '[&_[data-doc-copy-button="true"]]:rounded-md [&_[data-doc-copy-button="true"]]:border [&_[data-doc-copy-button="true"]]:border-border [&_[data-doc-copy-button="true"]]:bg-card [&_[data-doc-copy-button="true"]]:px-3 [&_[data-doc-copy-button="true"]]:py-1.5 [&_[data-doc-copy-button="true"]]:text-[11px] [&_[data-doc-copy-button="true"]]:font-medium [&_[data-doc-copy-button="true"]]:text-muted-foreground',
+    '[&_[data-doc-copy-button="true"]]:rounded-md [&_[data-doc-copy-button="true"]]:border [&_[data-doc-copy-button="true"]]:border-border [&_[data-doc-copy-button="true"]]:bg-card [&_[data-doc-copy-button="true"]]:px-3 [&_[data-doc-copy-button="true"]]:py-1.5 [&_[data-doc-copy-button="true"]]:text-editorial-meta [&_[data-doc-copy-button="true"]]:font-medium [&_[data-doc-copy-button="true"]]:text-muted-foreground',
     className,
   );
 
@@ -1026,7 +1026,7 @@ function ShikiCodeBlock({
         <button
           type="button"
           onClick={handleCopy}
-          className="rounded-md border border-border bg-card px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition hover:text-foreground"
+          className="rounded-md border border-border bg-card px-3 py-1.5 text-editorial-meta font-medium text-muted-foreground transition hover:text-foreground"
         >
           {copyFailed ? copyFailedLabel : copied ? copiedLabel : copyLabel}
         </button>

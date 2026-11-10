@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import type { SupportWidgetSession } from '@/hooks/use-support-widget-session';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { Input } from '@/components/ui/input';
 
 /**
  * story #3260 — 헤더가 반전 톤(bg-foreground/text-background, tooltip.tsx·avatar.tsx와 동일
@@ -26,7 +27,7 @@ export function SupportWidgetPanelHeader({ onClose }: { onClose: () => void }) {
     <div className="flex shrink-0 items-start justify-between gap-2 bg-foreground px-4 py-3 text-background">
       <div className="min-w-0">
         <p className="text-sm font-semibold leading-tight">{t('panelTitle')}</p>
-        <p className="mt-0.5 text-[11px] leading-snug text-background/70">{t('panelSubtitle')}</p>
+        <p className="mt-0.5 text-editorial-meta leading-snug text-background/70">{t('panelSubtitle')}</p>
       </div>
       <button
         type="button"
@@ -134,7 +135,7 @@ function ConversationToolbar({ session }: { session: SupportWidgetSession }) {
                   {formatViewerRelativeTime(conv.created_at, locale, displayTimezone)}
                 </span>
                 {conv.ended_at === null ? (
-                  <span className="text-[11px] text-muted-foreground">{t('conversationActiveBadge')}</span>
+                  <span className="text-editorial-meta text-muted-foreground">{t('conversationActiveBadge')}</span>
                 ) : null}
               </DropdownMenuItem>
             ))
@@ -194,7 +195,7 @@ export function SupportWidgetPanelBody({ session }: { session: SupportWidgetSess
             type="button"
             size="sm"
             variant="secondary"
-            className="h-6 px-2 text-[11px]"
+            className="h-6 px-2 text-editorial-meta"
             onClick={() => void session.startNewConversation()}
           >
             {t('startNewConversation')}
@@ -231,17 +232,17 @@ export function SupportWidgetPanelBody({ session }: { session: SupportWidgetSess
               } ${m.pending ? 'opacity-60' : ''} ${m.failed ? 'border border-destructive/50' : ''}`}
             >
               {m.role === 'operator' ? (
-                <p className="mb-1 flex items-center gap-1 text-[11px] font-semibold text-foreground">
+                <p className="mb-1 flex items-center gap-1 text-editorial-meta font-semibold text-foreground">
                   <UserRound className="h-3 w-3" aria-hidden />
                   {t('operatorSenderLabel')}
                 </p>
               ) : null}
               {m.content}
               {m.escalated ? (
-                <p className="mt-1 text-[10px] font-medium text-muted-foreground">{t('escalatedBadge')}</p>
+                <p className="mt-1 text-micro font-medium text-muted-foreground">{t('escalatedBadge')}</p>
               ) : null}
               {m.failed ? (
-                <p role="alert" className="mt-1 text-[10px] font-medium text-destructive">{t('messageFailedLabel')}</p>
+                <p role="alert" className="mt-1 text-micro font-medium text-destructive">{t('messageFailedLabel')}</p>
               ) : null}
             </div>
           ))
@@ -265,20 +266,20 @@ export function SupportWidgetPanelBody({ session }: { session: SupportWidgetSess
           setDraft('');
         }}
       >
-        <input
+        <Input
           type="text"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={t('inputPlaceholder')}
           disabled={session.status !== 'ready' || session.sending || session.isEnded}
-          className="min-w-0 flex-1 rounded-lg border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+          className="h-auto min-w-0 flex-1 text-foreground bg-background dark:bg-background"
         />
         {!session.isEnded && session.conversationId !== null ? (
           <Button
             type="button"
             size="sm"
             variant="ghost"
-            className="shrink-0 text-[11px]"
+            className="shrink-0 text-editorial-meta"
             onClick={() => void session.endConversation()}
           >
             {t('endConversation')}

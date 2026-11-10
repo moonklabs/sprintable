@@ -3,8 +3,9 @@ import { cookies } from 'next/headers';
 import { resolveAppUrl } from '@/services/app-url';
 import { oauthCookieOptions } from '@/lib/auth/oauth-cookies';
 import { SP_AT_COOKIE } from '@/lib/db/server';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
 
-const FASTAPI_BASE = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
+const FASTAPI_BASE = fastapiBaseUrl();
 
 // story #3122(계정·후속 — 수동 계정 연결) — auth/login/route.ts와 형태는 닮았지만 의미가
 // 다르다: 저건 "아직 로그인 안 된 사람을 로그인/가입시키는" rail이고 이건 "이미 로그인된
