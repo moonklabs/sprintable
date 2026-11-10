@@ -73,7 +73,7 @@ describe('홈 모델 — 결재 SSE 라이브(story #4885 · 4263 AC2 이사)', 
   it('⭐게이트 · 권한 요청 이벤트를 구독한다(이름은 서버가 실제로 쓰는 것)', async () => {
     await mount();
     expect(Object.keys(muxState.handlers).filter((k) => (muxState.handlers[k] ?? []).length > 0).sort())
-      .toEqual(['agent.permission_request.changed', 'conversation.gate_delegated', 'conversation.gate_resolved', 'conversation.gate_tossed', 'dispatched']);
+      .toEqual(['agent.permission_request.changed', 'conversation.gate_created', 'conversation.gate_delegated', 'conversation.gate_resolved', 'conversation.gate_tossed', 'dispatched']);
   });
 
   it('⭐결재가 풀리는 이벤트가 오면 60초 폴을 기다리지 않고 다시 읽어 배지가 바뀐다', async () => {
@@ -84,6 +84,17 @@ describe('홈 모델 — 결재 SSE 라이브(story #4885 · 4263 AC2 이사)', 
     await emit('conversation.gate_resolved', JSON.stringify({ gate_id: 'g2' }));
     await advance(HOME_EVENT_COALESCE_MS);
     expect(badge()).toBe('1'); // reverted (no subscription) → stays '2' until the 60-second poll
+  });
+
+  // story #4885 — dev 실측(11-10): 결재가 «새로 생길 때» 폰 탭 배지 37.9초 · 웹 막대 42.2초 뒤에야 올랐다(60초 폴). 서버는 결재자에게 conversation.gate_created를 보내는데 듣는 목록에 없었다.
+  it('⭐결재가 새로 생기는 이벤트(conversation.gate_created)가 오면 60초 폴을 기다리지 않고 다시 읽어 배지가 오른다', async () => {
+    const { HOME_EVENT_COALESCE_MS } = await import('./home-model-provider');
+    await mount();
+    expect(badge()).toBe('2');
+    needs = [need('g1'), need('g2'), need('g3')];
+    await emit('conversation.gate_created', JSON.stringify({ gate_id: 'g3' }));
+    await advance(HOME_EVENT_COALESCE_MS);
+    expect(badge()).toBe('3'); // reverted (not in the list) → stays '2' until the 60-second poll
   });
 
   it('이벤트가 한꺼번에 와도 읽기는 한 번이다(재연결 백필 · 결재 + 알림 한 쌍)', async () => {
