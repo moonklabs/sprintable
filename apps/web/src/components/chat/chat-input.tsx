@@ -821,7 +821,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         {/* story #92f00dc4 — w-72→w-80: 서버 카탈로그 인자 힌트(예: `<스토리#> <멤버명>`)가
             추가되며 한 줄에 명령+힌트+설명이 안 맞아 줄바꿈되던 것 보정. */}
         {commandCandidates.length > 0 && (
-          <ul role="listbox" aria-label={t('commandCandidatesLabel')} className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-80 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+          <ul role="listbox" aria-label={t('commandCandidatesLabel')} className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-80 overflow-y-auto overflow-x-hidden rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
             {commandCandidates.map((cmd, idx) => (
               <li key={cmd.name}>
                 <button
@@ -835,11 +835,13 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
                   <Terminal className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
                   {/* story #92f00dc4(doc exec-command-final-spec-92f00dc4 §①) — 커맨드명
                       mono+primary·인자 힌트 mono+muted(있을 때만)·설명은 우측 정렬. */}
-                  <span className="font-mono text-xs font-semibold text-primary">/{cmd.name}</span>
+                  <span className="shrink-0 font-mono text-xs font-semibold text-primary">/{cmd.name}</span>
+                  {/* story 4887 (UI-4 P1) — the argument hint is the part that may be long (`/priority ‹스토리#› ‹critical|high|medium|low›` ran past the list's width and was cut mid-word):
+                      it now takes what is left and ends in «…» (the whole hint stays on the title); the name and the description keep their room. */}
                   {cmd.argHintKey ? (
-                    <span className="shrink-0 whitespace-nowrap font-mono text-editorial-meta text-muted-foreground">{t(cmd.argHintKey)}</span>
+                    <span title={t(cmd.argHintKey)} className="min-w-0 truncate whitespace-nowrap font-mono text-editorial-meta text-muted-foreground">{t(cmd.argHintKey)}</span>
                   ) : null}
-                  <span className="ml-auto truncate pl-2 text-editorial-meta text-foreground">{t(cmd.descKey)}</span>
+                  <span className="ml-auto max-w-[45%] shrink-0 truncate pl-2 text-editorial-meta text-foreground">{t(cmd.descKey)}</span>
                 </button>
               </li>
             ))}
