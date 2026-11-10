@@ -44,20 +44,20 @@ def _size(payload) -> int:
 
 def _padded(to_bytes: int, char: str = "x") -> dict:
     """a flat payload whose compact serialization is exactly `to_bytes` bytes long"""
-    base = _size({"blob": ""})
+    base = _size({"content": ""})
     per = len(char.encode("utf-8"))
     assert (to_bytes - base) % per == 0
-    p = {"blob": char * ((to_bytes - base) // per)}
+    p = {"content": char * ((to_bytes - base) // per)}
     assert _size(p) == to_bytes
     return p
 
 
 def _nested(levels: int) -> dict:
     """a payload nested `levels` levels deep (a flat dict is 1)"""
-    p: object = "leaf"
-    for _ in range(levels):
-        p = {"k": p}
-    return p  # type: ignore[return-value]
+    inner: object = "leaf"
+    for _ in range(levels - 1):   # the payload dict itself is level 1; story #4895: the only keys accepted are content / title / body / summary
+        inner = {"k": inner}
+    return {"content": inner}
 
 
 async def _count_events(Session) -> int:
@@ -101,26 +101,33 @@ async def test_the_size_is_counted_in_bytes_not_characters():
 async def test_the_size_that_was_a_201_on_develop_a_million_characters_is_refused():
     engine, Session, w = await _world()
     try:
-        r = await _post(Session, w, "participant", {"blob": "x" * 1_000_000})
+        r = await _post(Session, w, "participant", {"content": "x" * 1_000_000})
         assert r.status_code == 422, r.text[:300]
     finally:
         await engine.dispose()
 
 
-async def test_the_depth_bound_has_an_edge_eight_levels_pass_nine_are_refused():
+def test_the_depth_count_has_its_edges_dicts_and_lists_both_count_a_scalar_is_zero():
+    """story #4895 narrowed what the public route accepts (a payload holds text only, so a deep body is also refused for that), which leaves the depth rule itself to be pinned where it lives"""
+    from app.routers.events import _json_depth
+
+    assert _json_depth("leaf") == 0 and _json_depth({}) == 1 and _json_depth([]) == 1 and _json_depth({"a": "b"}) == 1
+    assert _json_depth(_nested(DEPTH)) == DEPTH and _json_depth(_nested(DEPTH + 1)) == DEPTH + 1
+    assert _json_depth({"content": [[[[[[[["leaf"]]]]]]]]}) == 9, "lists count as levels too: 1 + 8"
+    assert _json_depth({"content": [[[[[[["leaf"]]]]]]]}) == 8
+    assert _json_depth({"a": [{"b": []}], "c": {"d": {}}}) == 4
+
+
+async def test_a_body_over_the_depth_bound_is_refused_for_its_depth_with_the_depth_and_the_limit_in_the_answer():
     engine, Session, w = await _world()
     try:
-        r = await _post(Session, w, "participant", _nested(DEPTH))
-        assert r.status_code == 201, r.text[:300]
         before = await _count_events(Session)
         r = await _post(Session, w, "participant", _nested(DEPTH + 1))
         assert r.status_code == 422, r.text[:300]
         assert f"{DEPTH + 1} levels" in r.text and f"limit is {DEPTH}" in r.text, "it says the depth received and the limit"
+        r = await _post(Session, w, "participant", {"content": [[[[[[[["leaf"]]]]]]]]})   # lists count as levels too: 1 + 8 = 9
+        assert r.status_code == 422 and "9 levels" in r.text, r.text[:300]
         assert await _count_events(Session) == before
-        r = await _post(Session, w, "participant", {"list": [[[[[[[["leaf"]]]]]]]]})   # lists count as levels too: 1 + 8 = 9
-        assert r.status_code == 422, r.text[:300]
-        r = await _post(Session, w, "participant", {"list": [[[[[[["leaf"]]]]]]]})     # 1 + 7 = 8
-        assert r.status_code == 201, r.text[:300]
     finally:
         await engine.dispose()
 
@@ -137,7 +144,7 @@ async def test_a_very_deep_body_is_a_422_not_a_server_error():
 async def test_ordinary_payloads_and_the_empty_one_are_untouched():
     engine, Session, w = await _world()
     try:
-        for payload in ({}, {"title": "t", "body": "b", "refs": {"story": {"id": "1", "name": "n"}}, "list": [1, 2, {"a": [3]}]}):
+        for payload in ({}, {"title": "t", "body": "b", "content": "c", "summary": "s"}):
             r = await _post(Session, w, "participant", payload)
             assert r.status_code == 201, (payload, r.text[:300])
     finally:
@@ -154,7 +161,7 @@ async def test_non_finite_numbers_are_a_422_not_a_server_error_at_the_write(toke
     try:
         await _setup_app_human(app, Session, w.u_a, w.org)
         try:
-            raw = ('{"project_id": "%s", "event_type": "dispatched", "recipient_id": "%s", "recipient_type": "human", "payload": {"x": %s}}' % (w.p1, w.h_b, token)).encode()
+            raw = ('{"project_id": "%s", "event_type": "dispatched", "recipient_id": "%s", "recipient_type": "human", "payload": {"content": %s}}' % (w.p1, w.h_b, token)).encode()
             async with _client_for(app) as c:
                 r = await c.post("/api/v2/events", content=raw, headers={"content-type": "application/json"})
         finally:

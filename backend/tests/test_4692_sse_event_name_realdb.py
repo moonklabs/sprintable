@@ -123,7 +123,7 @@ async def test_05_the_events_api_refuses_a_name_outside_the_shape(world, name):
 
 async def test_06_the_events_api_does_not_refuse_a_name_in_the_shape(world):
     async with _client() as c:
-        for name in ("story_assigned", "conversation:mention", "x" * 64):
+        for name in ("dispatched", "handoff"):   # story #4895: the route takes a closed list of types; these are in it and in the shape
             r = await c.post("/api/v2/events", json=_event_body(name), headers=_person(OWNER))
             assert r.status_code != 422, (name, r.text)  # whatever else the call meets (the recipient is made up), the shape is not what stops it
 

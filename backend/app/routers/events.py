@@ -54,7 +54,9 @@ from app.services.member_resolver import (
     canonicalize_member_id,
     lookup_members_by_ids,
     org_recipient_ids,
+    resolve_auth_member,
     resolve_member_identity,
+    UNNAMED_MEMBER_LABEL,
 )
 
 
@@ -448,14 +450,20 @@ def _json_depth(value: object) -> int:
     return deepest
 
 
+# story #4895 — what a caller may put into `POST /api/v2/events`, as a closed list. The route used to take the whole body as sent, and each place that shows or acts on an event reads some other key as «who sent
+# it» (the bell: payload.sender_name; the agent connectors: payload.sender; the chat screen: payload.created_by; the activity feed: the event's sender, none = «system»), so removing the bad keys one at a time
+# left the next one. Now only these are accepted; any other field or payload key is a 422, and who sent it is always filled in by the server from the caller's authentication.
+PUBLIC_EVENT_TYPES = frozenset({"dispatched", "kickoff", "review_request", "qa_request", "deploy_request", "handoff"})
+PUBLIC_EVENT_PAYLOAD_KEYS = frozenset({"content", "title", "body", "summary"})
+
+
 class CreateEventRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # a field this model does not name is a 422, not ignored
+
     project_id: uuid.UUID
     event_type: str
-    source_entity_type: str | None = None
-    source_entity_id: uuid.UUID | None = None
-    sender_id: uuid.UUID | None = None
     recipient_id: uuid.UUID
-    recipient_type: str
+    recipient_type: str | None = None  # read-only information for the caller: the server resolves the recipient's kind itself
     payload: dict = {}
 
     @field_validator("payload")
@@ -473,11 +481,26 @@ class CreateEventRequest(BaseModel):
             raise ValueError(f"payload is {size} bytes; the limit is {EVENT_PAYLOAD_MAX_BYTES} bytes")
         return v
 
+    @field_validator("payload")
+    @classmethod
+    def _payload_keys_and_values_are_the_allowed_ones(cls, v: dict) -> dict:
+        unknown = sorted(str(k) for k in v if k not in PUBLIC_EVENT_PAYLOAD_KEYS)
+        if unknown:
+            raise ValueError(f"payload key(s) not accepted: {', '.join(unknown)}; the accepted keys are {', '.join(sorted(PUBLIC_EVENT_PAYLOAD_KEYS))}")
+        # the agent connectors and the bell treat these as text (strip / trim / replace): an object or a number would pass the check and then break the reader after the 201
+        not_text = sorted(str(k) for k, val in v.items() if not isinstance(val, str))
+        if not_text:
+            raise ValueError(f"payload value(s) must be text: {', '.join(not_text)}")
+        return v
+
     @field_validator("event_type")
     @classmethod
     def _event_type_is_a_closed_shape(cls, v: str) -> str:
         # story #4692 [SEC]: the name is written into SSE `event:` lines — a newline in it would plant frames on an agent's stream
-        return validate_event_type(v)
+        v = validate_event_type(v)
+        if v not in PUBLIC_EVENT_TYPES:
+            raise ValueError(f"event_type '{v}' cannot be created through this endpoint; the accepted types are {', '.join(sorted(PUBLIC_EVENT_TYPES))}")
+        return v
 
 
 class EventResponse(BaseModel):
@@ -904,17 +927,15 @@ async def create_event(
     미연결이면 status=pending 유지.
     Channel Router(S-A6)로 preference 기반 채널 결정 후 전달.
 
-    S19(SHOULD, PO 포함 승인): sender_id가 검증 없이 body에서 그대로 신뢰돼 caller가 임의
-    sender로 이벤트를 위조(임퍼스네이션)할 수 있었다. sender_id가 명시되면 caller 본인과
-    일치해야만 허용(시스템 이벤트의 sender_id=None 케이스는 그대로 무변경).
-
-    S19(발견·회귀수정): axis-safe 비교(assert_caller_is_member) 사용 — resolve_member()/.id
-    직접비교는 휴먼 JWT caller에서 축이 어긋나 본인 sender_id 지정도 403날 수 있었다.
+    story #4895: the body is a closed list (see CreateEventRequest) and the sender is never taken from it. Who sent the event is the caller's own: the event's sender, and the name and kind shown in
+    `payload.sender_name` / `payload.sender`, are filled in here from the caller's authentication. The caller must have a seat in the project (the event becomes an entry in its activity stream).
     """
-    if body.sender_id is not None:
-        await assert_caller_is_member(
-            body.sender_id, auth, db, org_id, detail="sender_id must match the caller's own identity",
-        )
+    # story #4895 — the event lands in the project's activity stream: the caller must have a seat in that project (existence is not revealed: 404)
+    from app.services.project_auth import require_project_access
+
+    await require_project_access(db, uuid.UUID(auth.user_id), body.project_id, org_id, not_found_detail="Project not found")
+    caller = await resolve_auth_member(auth, org_id, db)
+    caller_name = caller.name or UNNAMED_MEMBER_LABEL
 
     # recipient가 동일 org 소속인지 + type 확정
     # E-MEMBER-SSOT Phase 0: grant-only 휴먼(org_member)도 수신자로 허용
@@ -927,12 +948,12 @@ async def create_event(
         project_id=body.project_id,
         org_id=org_id,
         event_type=body.event_type,
-        source_entity_type=body.source_entity_type,
-        source_entity_id=body.source_entity_id,
-        sender_id=body.sender_id,
+        source_entity_type=None,
+        source_entity_id=None,
+        sender_id=caller.id,
         recipient_id=body.recipient_id,
         recipient_type=member_type,
-        payload=body.payload,
+        payload={**body.payload, "sender_name": caller_name, "sender": {"id": str(caller.id), "name": caller_name, "type": caller.type}},
         status="pending",
     )
     db.add(event)
