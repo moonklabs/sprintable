@@ -22,7 +22,7 @@ import { MoreTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 import { useCommandPaletteOpener } from '@/components/command-palette/command-palette-context';
 
 // story #2682(모바일 IA S2, doc mobile-ia-full-completion-2678 §2.3) — 임시 평면 stub(#1958·
-// #1965)을 데스크톱 GNB(app-sidebar.tsx) 5 zones를 그대로 미러하는 그룹형 허브로 재건한다.
+// #1965)을 그룹형 허브로 재건한다. 구역·항목의 «종류»는 데스크톱 길잡이(app-sidebar.tsx)와 같은 한 정의(NAV_GROUPS)이고, «순서»는 폰 탭에 맞춰 따로 정한다(MOBILE_HUB_GROUP_ORDER — 사이드바 순서와 다르다).
 // 목적지 목록 자체는 새로 만들지 않는다 — S1이 추출한 NAV_GROUPS(nav-config.ts)를 그대로
 // 소비해 데스크톱과 drift 없이 항상 정합한다(SSOT). 그룹 순서·제외 목록도 story #2684(S4)에서
 // nav-config.ts로 옮겨 depth 가드가 이 페이지 내부를 몰라도 SSOT 하나만 보고 판정할 수 있다.
