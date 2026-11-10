@@ -53,6 +53,14 @@ describe('ds ApprovalCard — 정보', () => {
     expect(card().querySelector('h3')).toBeNull();
   });
 
+  it('⭐제목 단추는 폰(coarse)에서 누름 영역 44를 지킨다 — min-h-0으로 지우지 않는다', async () => {
+    await render(<C onTitleClick={() => {}} state={{ kind: 'pending', view: 'readonly', note: 'n' }} />);
+    const cls = card().querySelector('h3 button')!.className;
+    expect(cls).toContain('pointer-coarse:min-h-11');
+    expect(cls).toContain('pointer-coarse:min-w-11');
+    expect(cls).not.toMatch(/(^|\s)min-h-0(\s|$)/);
+  });
+
   it('⭐위험 표시는 아이콘 + 글, 대기 중에만 — 결과 카드에는 안 나온다', async () => {
     await render(<C risk={{ level: 'high', label: '고위험' }} state={{ kind: 'pending', view: 'readonly', note: 'n' }} />);
     const chip = card().querySelector('[data-risk="high"]') as HTMLElement;
@@ -108,9 +116,9 @@ describe('ds ApprovalCard — 대기', () => {
 });
 
 describe('ds ApprovalCard — 결과', () => {
-  it('⭐결과 다섯 종이 아이콘 + 글로 말한다: 허용됨 done · 거부됨 failed · 보류/취소/만료 중립', async () => {
+  it('⭐결과 여섯 종이 아이콘 + 글로 말한다: 허용됨 done · 거부됨 failed · 자동 통과/보류/취소/만료 중립', async () => {
     const want = {
-      approved: ['check_circle', 'text-ds-done'], rejected: ['cancel', 'text-ds-failed'], held: ['do_not_disturb_on', 'text-ds-ink-2'], voided: ['block', 'text-ds-ink-2'], expired: ['schedule', 'text-ds-ink-2'],
+      approved: ['check_circle', 'text-ds-done'], rejected: ['cancel', 'text-ds-failed'], auto_passed: ['info', 'text-ds-ink-2'], held: ['do_not_disturb_on', 'text-ds-ink-2'], voided: ['block', 'text-ds-ink-2'], expired: ['schedule', 'text-ds-ink-2'],
     } as const;
     for (const [res, [icon, cls]] of Object.entries(want)) {
       await render(<C state={{ kind: 'resolved', resolution: res as keyof typeof want, statusLabel: `상태 ${res}` }} />);
@@ -119,6 +127,14 @@ describe('ds ApprovalCard — 결과', () => {
       expect(p.querySelector(`[data-icon="${icon}"]`), res).not.toBeNull();
       expect(p.className, res).toContain(cls);
     }
+  });
+
+  it('⭐자동 통과는 사람이 허용한 것처럼 보이지 않는다 — approved와 아이콘이 다르고 done 색이 아니다', async () => {
+    await render(<C state={{ kind: 'resolved', resolution: 'auto_passed', statusLabel: '자동 통과' }} />);
+    const p = card().querySelector('[data-resolution="auto_passed"]') as HTMLElement;
+    expect(p.querySelector('[data-icon="check_circle"]')).toBeNull();
+    expect(p.className).not.toContain('text-ds-done');
+    expect(p.textContent).toBe('자동 통과');
   });
 
   it('처리자 · 사유 · 결과 뒤 행동(되돌리기)이 실린다', async () => {

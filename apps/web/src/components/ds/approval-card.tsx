@@ -9,12 +9,14 @@ import { Field } from './field';
 import { Icon, type IconName } from './icon';
 import { Textarea } from './input';
 
-export type ApprovalResolution = 'approved' | 'rejected' | 'held' | 'voided' | 'expired';
+/** 게이트 상태 어휘와 같다(backend GATE_STATUSES: approved · rejected · auto_passed · voided · held) + 설계 문서의 `expired`. `auto_passed`는 사람이 허용한 것이 아니라 시스템이 자동으로 통과시킨 것 — `approved`와 다른 아이콘 · 중립 색이라 «사람이 허용함»으로 읽히지 않는다. */
+export type ApprovalResolution = 'approved' | 'rejected' | 'auto_passed' | 'held' | 'voided' | 'expired';
 
 /** 결과 한 줄의 모양 — 아이콘 + 글(색만으로 말하지 않는다). 허용됨만 `done`, 거부됨만 `failed`, 그 밖(보류 · 취소 · 만료)은 중립. */
 const RESOLUTION: Record<ApprovalResolution, { icon: IconName; text: string }> = {
   approved: { icon: 'check_circle', text: 'text-ds-done' },
   rejected: { icon: 'cancel', text: 'text-ds-failed' },
+  auto_passed: { icon: 'info', text: 'text-ds-ink-2' },
   held: { icon: 'do_not_disturb_on', text: 'text-ds-ink-2' },
   voided: { icon: 'block', text: 'text-ds-ink-2' },
   expired: { icon: 'schedule', text: 'text-ds-ink-2' },
@@ -109,7 +111,8 @@ export function ApprovalCard({ label, title, onTitleClick, level = 3, requester,
         <>
           <Heading className="m-0 min-w-0 text-ds-card-title font-semibold text-ds-ink break-keep [overflow-wrap:anywhere]">
             {onTitleClick ? (
-              <Button type="button" variant="quiet" onClick={onTitleClick} className="h-auto min-h-0 w-full justify-start whitespace-normal px-0 py-0 text-left text-ds-card-title text-ds-action-text hover:bg-transparent">
+              // 폰(coarse)에서는 Button이 쥔 누름 영역 44(pointer-coarse:min-h-11)를 그대로 둔다 — 한 줄 제목이어도 손가락이 닿는 높이는 ≥ 44. `min-h-0`을 주지 않는다.
+              <Button type="button" variant="quiet" onClick={onTitleClick} className="h-auto w-full justify-start whitespace-normal px-0 py-0 text-left text-ds-card-title text-ds-action-text hover:bg-transparent">
                 {title}
               </Button>
             ) : (
