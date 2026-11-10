@@ -7,8 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.workflow_trigger_type import WorkflowTriggerType
 
+# story #4888 — the system «kickoff» description said «에픽» before it said «목표» (migration 0473 corrects the rows that exist). The migration runs BEFORE the old backend is swapped out,
+# so during that window the old release can still seed a brand-new organization with the old text (`ON CONFLICT DO NOTHING` then keeps it). `list()` therefore corrects, with the
+# same exact-text rule as the migration (system row · description exactly this text), any row that still carries it — a description a person edited is never touched.
+_LEGACY_KICKOFF_DESCRIPTION = "스프린트 또는 에픽 킥오프"
+_KICKOFF_DESCRIPTION = "스프린트 또는 목표 킥오프"
+
 SYSTEM_TRIGGER_TYPES = [
-    {"slug": "kickoff", "label": "Kickoff", "description": "스프린트 또는 목표 킥오프"},
+    {"slug": "kickoff", "label": "Kickoff", "description": _KICKOFF_DESCRIPTION},
     {"slug": "review_request", "label": "Review Request", "description": "코드 리뷰 요청"},
     {"slug": "qa_request", "label": "QA Request", "description": "QA 검수 요청"},
     {"slug": "deploy_request", "label": "Deploy Request", "description": "배포 요청"},
@@ -56,6 +62,13 @@ class WorkflowTriggerTypeRepository:
                 .order_by(WorkflowTriggerType.is_system.desc(), WorkflowTriggerType.created_at.asc(), WorkflowTriggerType.id)
             )
             items = list(result2.scalars().all())
+        healed = False
+        for it in items:
+            if it.is_system and it.description == _LEGACY_KICKOFF_DESCRIPTION:
+                it.description = _KICKOFF_DESCRIPTION
+                healed = True
+        if healed:
+            await self.session.flush()
         return items
 
     async def get(self, id: uuid.UUID) -> WorkflowTriggerType | None:
