@@ -164,3 +164,37 @@ async def test_a_line_that_is_not_a_chat_line_carries_no_room_name():
         assert rows and all(x["target_conversation_title"] is None for x in rows), rows
     finally:
         await engine.dispose()
+
+
+async def test_every_room_on_the_page_is_named_in_one_query_not_one_per_line():
+    """the titles of a page are resolved together: three rooms → three names, and exactly one statement reads `conversations.title`"""
+    from sqlalchemy import event, update
+
+    from app.models.conversation import Conversation
+
+    engine, Session, org_id, project_id, conv_a, (sender, sender_user), (reader, reader_user) = await _world(title="room-A-4890")
+    try:
+        async with Session() as s:
+            conv_b = await _make_conversation(s, org_id, project_id, [sender, reader], sender, conv_type="group")
+            conv_c = await _make_conversation(s, org_id, project_id, [sender, reader], sender, conv_type="group")
+            await s.execute(update(Conversation).where(Conversation.id == conv_b).values(title="room-B-4890"))
+            await s.execute(update(Conversation).where(Conversation.id == conv_c).values(title="room-C-4890"))
+            await s.commit()
+        for c in (conv_a, conv_b, conv_c):
+            await _reader_speaks_first(Session, org_id, reader_user, c)
+            await _send(Session, org_id, sender_user, c)
+        seen: list[str] = []
+
+        def _spy(conn, cursor, statement, parameters, context, executemany):
+            if "conversations.title" in statement:
+                seen.append(statement)
+
+        event.listen(engine.sync_engine, "before_cursor_execute", _spy)
+        try:
+            rows, _text = await _bell(Session, org_id, reader_user)
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", _spy)
+        assert sorted(x["target_conversation_title"] for x in _chat(rows)) == ["room-A-4890", "room-B-4890", "room-C-4890"], rows
+        assert len(seen) == 1, seen
+    finally:
+        await engine.dispose()

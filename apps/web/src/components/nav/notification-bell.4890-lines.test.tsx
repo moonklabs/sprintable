@@ -78,6 +78,15 @@ describe('NotificationBell — who and where on a chat line (story 4890)', () =>
     }
   });
 
+  it('⭐an agent sender\'s Avatar inside the row is decorative: nothing inside the row button takes focus or is a second button (the sender\'s name is already text in the line)', async () => {
+    listItems = [chat('c1', { target_conversation_title: '개발 방' })];
+    await openBell();
+    const [line] = lines();
+    expect(line!.querySelector('[data-actor="agent"]')).not.toBeNull();
+    expect(line!.querySelector('button [tabindex], button button')).toBeNull();
+    expect(line!.querySelector('[data-actor="agent"]')!.getAttribute('aria-hidden')).toBe('true');
+  });
+
   it('⭐every line is a thumb-sized row (min height 56)', async () => {
     listItems = [chat('c1'), gate()];
     await openBell();

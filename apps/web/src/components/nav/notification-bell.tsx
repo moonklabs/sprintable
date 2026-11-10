@@ -364,7 +364,9 @@ function NotificationPanel({
         ) : (
           <>
           <ul>
-            {filtered.map((n) => (
+            {filtered.map((n) => {
+              const lineSender = chatLineSender(n);
+              return (
               <li key={n.id}>
                 <button
                   type="button"
@@ -374,9 +376,9 @@ function NotificationPanel({
                     !n.read_at && 'bg-primary/5',
                   )}
                 >
-                  {chatLineSender(n) ? (
+                  {lineSender ? (
                     <span className="mt-0.5 shrink-0" data-testid="notification-line-avatar">
-                      <Avatar name={chatLineSender(n)!.name} avatarUrl={chatLineSender(n)!.avatarUrl} actorType={chatLineSender(n)!.actorType} runtimeType={chatLineSender(n)!.runtimeType} size={32} />
+                      <Avatar decorative name={lineSender.name} avatarUrl={lineSender.avatarUrl} actorType={lineSender.actorType} runtimeType={lineSender.runtimeType} size={32} />
                     </span>
                   ) : (
                     <span
@@ -418,7 +420,8 @@ function NotificationPanel({
                   )}
                 </button>
               </li>
-            ))}
+              );
+            })}
           </ul>
           {/* story #2192 AC3/AC4 — hasMore일 때만 렌더(음성대조: 30건 이하 계정은 버튼 자체가 없음). */}
           {hasMore && (
