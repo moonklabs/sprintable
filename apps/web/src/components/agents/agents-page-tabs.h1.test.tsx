@@ -16,7 +16,7 @@ import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => useDashboardContextMock() }));
-vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams() }));
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(), useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
 vi.mock('@/lib/db/client', () => ({
   fetchWithAuth: vi.fn(async () => ({ ok: true, json: async () => ({ data: { role: 'member' } }) })),
 }));

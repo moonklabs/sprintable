@@ -1,21 +1,18 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { BarChart2, Settings2, ShieldCheck, UserPlus } from 'lucide-react';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { AgentPerformancePanel } from '@/components/agents/agent-performance-panel';
 import { AgentManagementTab } from '@/components/agents/agent-management-tab';
 import { AccessMatrixTab } from '@/components/agents/access-matrix-tab';
 import { RecruiterClient } from '@/app/(authenticated)/organization/workforce/recruiter/recruiter-client';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { fetchMe } from '@/lib/me-client';
 import { AgentsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 import { RecruitNoProject, recruitNoProjectState } from '@/components/agents/recruit-no-project';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { useOrgAdmin } from '@/hooks/use-org-admin';
 
 type AgentsTab = 'stats' | 'manage' | 'recruit' | 'access';
 const VALID_TABS = new Set<AgentsTab>(['stats', 'manage', 'recruit', 'access']);
@@ -27,128 +24,55 @@ export function resolveTab(tab: string | null): AgentsTab {
 }
 
 /**
- * 에이전트 관리 IA 통일 — 통계/관리/채용/접근권한 4탭 셸.
- * Phase 1(story d63d3f73): 통계·관리·채용. Phase 2(story da4c6b2d): 접근권한 매트릭스
- * — BE bulk endpoint(`GET /api/v2/agents/access-matrix`)가 org 전체를 admin/owner
- * 단일 게이트로 조회하므로 이 탭 자체를 admin/owner에게만 노출(비-admin은 데이터도
- * 못 받아 조회 자체가 무의미).
- * 페이지 타이틀은 탭 전환과 무관하게 고정 — RecruiterClient 임베드 시 자체 TopBarSlot을
- * showTopBar=false 로 꺼서 top-bar-context 싱글턴 레이스를 원천 차단.
+ * 에이전트 화면의 본문 — 통계 · 관리(기본) · 채용 · 접근권한 네 패널 중 **주소의 `?tab=`이 가리키는 하나**를 그린다.
  *
- * story #2952 AC1(발견성) — 기본 탭을 'stats'→'manage'로 정정. 사이드바 GNB "조직›워크포스"
- * 항목(nav-config.ts)과 settings/page.tsx의 "에이전트 관리로 이동" 버튼이 모두 ?tab= 없이
- * 이 경로로 보내는데, 실제 삭제(비활성화)/재활성 액션은 관리 탭에만 있다 — 첫 방문자가
- * 통계 탭(차트만 있음)에 떨어져 "삭제 경로가 없다"고 오판한 근본 원인(PO+선생님 실사례,
- * customer-zero: 코드상 존재해도 못 찾으면 없는 것과 같다).
+ * story 4889 (UI-6 · W1~W6): 예전엔 이 화면 안에 «통계 · 관리 · 채용 · 접근권한» 탭줄이 한 줄 더 있었다(바깥 «팀» 줄과 «채용»이 두 번 · 두 줄). 그 줄은 «팀» 탭줄(components/team/team-tabs.tsx)로
+ * 합쳐졌고(한 줄 · 링크 일곱), 이 화면은 **주소가 유일한 진실**이다 — 탭을 누르면 진짜 이동이라 «안쪽 탭을 눌렀는데 바깥 줄이 안 따라오던»(story #4885 · replaceState 결함) 구조가 사라졌다.
+ * 옛 `?tab=manage` · 탭 없는 주소 · 모르는 값은 모두 «관리»(= 팀 줄의 «에이전트»)로 열린다 — 북마크 · 알림 링크 · 문서 속 주소가 깨지지 않게.
+ * 비-관리자가 `?tab=access`로 오면 통계로 읽는다(관리자만 쓰는 패널 · 역할 답이 온 뒤에만 — 실제 관리자 사용자의 깜빡임 방지).
+ * 페이지 타이틀은 탭 전환과 무관하게 고정 — RecruiterClient 임베드 시 자체 TopBarSlot을 showTopBar=false 로 꺼서 top-bar-context 싱글턴 레이스를 원천 차단.
+ *
+ * story #2952 AC1(발견성) — 기본 탭은 'manage'(삭제 · 비활성화 · 재활성 액션이 있는 곳 — 통계는 차트뿐이라 첫 방문자가 «삭제 경로가 없다»고 오판한 PO+선생님 실사례).
  */
 export function AgentsPageTabs() {
   const t = useTranslations('agents');
   const searchParams = useSearchParams();
+  const router = useRouter();
   const dashboardCtx = useDashboardContext();
   const { projectId, orgId } = dashboardCtx;
   const flatHref = useFlatHref();
-  // story #4885 («팀» 탭줄) — 바깥 «팀» 줄의 «채용» 링크(?tab=recruit)는 같은 화면의 쿼리만 바꿔 이 컴포넌트를 다시 마운트하지 않는다 → 주소가 바뀌면 안쪽 탭도 따라가야 하고(아래 «렌더 중 이전 값 비교»),
-  // 안쪽 탭을 누르면 주소도 같이 바꿔(selectTab) 바깥 줄의 «지금 여기»와 어긋나지 않는다. 주소 쓰기는 history.replaceState(Next가 useSearchParams와 이어 줌 · 서버 왕복 0).
+  const { isAdmin, loaded } = useOrgAdmin();
   const urlTab = resolveTab(searchParams.get('tab'));
-  const [activeTab, setActiveTab] = useState<AgentsTab>(urlTab);
-  const [seenUrlTab, setSeenUrlTab] = useState<AgentsTab>(urlTab);
-  if (seenUrlTab !== urlTab) {
-    setSeenUrlTab(urlTab);
-    setActiveTab(urlTab);
-  }
-  const selectTab = (tab: AgentsTab) => {
-    setActiveTab(tab);
-    if (typeof window === 'undefined') return;
-    const sp = new URLSearchParams(window.location.search);
-    sp.set('tab', tab);
-    // ⚠️state 인자는 null이어야 한다 — Next는 자기 라우터 상태(`__NA` 등)를 든 호출을 «이미 처리된 것»으로 보고 useSearchParams에 안 알린다(바깥 «팀» 줄이 «채용»을 못 따라가던 실측 결함 · dev 11-11).
-    window.history.replaceState(null, '', `${window.location.pathname}?${sp.toString()}${window.location.hash}`);
-  };
-  // story 4891 — the person's role belongs to ONE organization (an organization switch re-renders this page without remounting it): the answer is kept with the organization it was asked for,
-  // and only an answer for the CURRENT organization counts (the Access tab must not stay open for an organization where the person is no admin). The Recruit pane does not use the role.
-  const [me, setMe] = useState<{ org: string | null; isAdmin: boolean } | null>(null);
-  const mine = me && me.org === (orgId ?? null) ? me : null;
-  const isAdmin = mine?.isAdmin ?? false;
-  const meLoaded = mine !== null;
-
-  useEffect(() => {
-    let cancelled = false;
-    const org = orgId ?? null;
-    void (async () => {
-      const res = await fetchMe();
-      let next = { org, isAdmin: false };
-      if (res.ok) {
-        const json = await res.json() as { data?: { role?: string } };
-        const role = json.data?.role ?? 'member';
-        next = { org, isAdmin: role === 'admin' || role === 'owner' };
-      }
-      if (!cancelled) setMe(next);
-    })();
-    return () => { cancelled = true; };
-  }, [orgId]);
-
-  // 비-admin이 ?tab=access로 딥링크하면 통계로 폴백 — role 확정 前(meLoaded=false)엔
-  // activeTab을 그대로 보여줘 실제 admin 사용자의 깜빡임을 방지한다. effect가 아닌
-  // 렌더 중 파생값으로 계산(react-hooks/set-state-in-effect 회피 — 굳이 상태로 안 만듦).
-  const effectiveTab = meLoaded && !isAdmin && activeTab === 'access' ? 'stats' : activeTab;
+  // 비-관리자가 ?tab=access로 딥링크하면 통계로 폴백 — 역할 확정 前(loaded=false)엔 주소 그대로(실제 관리자의 깜빡임 방지). 렌더 중 파생값(상태로 안 만듦).
+  const tab: AgentsTab = loaded && !isAdmin && urlTab === 'access' ? 'stats' : urlTab;
+  const goTab = (next: AgentsTab) => router.push(flatHref(`/organization/workforce?tab=${next}`));
 
   return (
     <>
       <TopBarSlot title={<AgentsTopBarTitle />} showContextChip />
-      <Tabs value={effectiveTab} onValueChange={(v) => selectTab(v as AgentsTab)}>
-        <div className="border-b border-border px-6">
-          <TabsList variant="line">
-            <TabsTrigger value="stats">
-              <BarChart2 className="h-4 w-4" />
-              {t('statsTab')}
-            </TabsTrigger>
-            <TabsTrigger value="manage">
-              <Settings2 className="h-4 w-4" />
-              {t('manageTab')}
-            </TabsTrigger>
-            <TabsTrigger value="recruit">
-              <UserPlus className="h-4 w-4" />
-              {t('recruitTab')}
-            </TabsTrigger>
-            {isAdmin ? (
-              <TabsTrigger value="access">
-                <ShieldCheck className="h-4 w-4" />
-                {t('accessTab')}
-              </TabsTrigger>
-            ) : null}
-          </TabsList>
-        </div>
-
-        <TabsContent value="stats">
+      {tab === 'stats' ? (
+        <>
           <div className="flex items-center gap-2 border-b border-border px-6 py-2">
             <Badge variant="info">{t('scopeThisProject')}</Badge>
           </div>
           <AgentPerformancePanel />
-        </TabsContent>
-
-        <TabsContent value="manage">
-          <AgentManagementTab onAddAgent={() => selectTab('recruit')} />
-        </TabsContent>
-
-        <TabsContent value="recruit">
-          {!projectId ? (
-            <RecruitNoProject state={recruitNoProjectState(dashboardCtx)} createHref={flatHref('/settings?tab=projects')} onRetry={() => window.location.reload()} />
-          ) : (
-            <RecruiterClient
-              projectId={projectId}
-              orgId={orgId}
-              showTopBar={false}
-              onExit={() => selectTab('manage')}
-            />
-          )}
-        </TabsContent>
-
-        {isAdmin ? (
-          <TabsContent value="access">
-            <AccessMatrixTab />
-          </TabsContent>
-        ) : null}
-      </Tabs>
+        </>
+      ) : null}
+      {tab === 'manage' ? <AgentManagementTab onAddAgent={() => goTab('recruit')} /> : null}
+      {tab === 'recruit' ? (
+        !projectId ? (
+          <RecruitNoProject state={recruitNoProjectState(dashboardCtx)} createHref={flatHref('/settings?tab=projects')} onRetry={() => window.location.reload()} />
+        ) : (
+          <RecruiterClient
+            projectId={projectId}
+            orgId={orgId}
+            showTopBar={false}
+            onExit={() => goTab('manage')}
+          />
+        )
+      ) : null}
+      {/* 관리자임이 **확인된 뒤에만** 그린다(옛 «접근권한» 탭과 같은 규칙 · story 4891): 역할 답이 오기 전이나 다른 조직의 답일 때 이 패널이 열려 있지 않게 — 그동안은 빈 본문. */}
+      {tab === 'access' && isAdmin ? <AccessMatrixTab /> : null}
     </>
   );
 }

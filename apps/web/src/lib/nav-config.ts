@@ -155,13 +155,18 @@ export function resolveNavGroups(flags: NavV3Flags): NavGroupConfig[] {
 // «팀» 탭줄(story #4885 · UI-2 AC4 · 선생님 «팀» 결정 → 갈래 1): 구성원 화면과 에이전트(워크포스) 화면들을 한 줄로 잇는 입구 배치 — 라우트 이동 0 · 두 화면을 한 목록으로 합치지 않음.
 // 이름은 «가는 화면이 이미 쓰는 낱말» 그대로(한 사물에 낱말 둘 0): 구성원(길잡이 «팀» 첫 항목) · 에이전트 · 실행 기록 · API 키 · 채용(에이전트 화면 안 «채용» 탭이 쓰는 낱말; AC3 표의 «모집»). «전체»(사람 + 에이전트 한 목록)는 한 목록 화면이 서는 뒤(화면 재건축 칸)의 몫이라 이번엔 없다.
 // 경로의 쿼리(?tab=recruit)는 «지금 여기» 판정(nav-active)이 읽는다 — 에이전트 화면은 탭 없이도 «에이전트»가 켜지고 ?tab=recruit이면 «채용»이 이긴다.
-export interface TeamTabConfig { id: string; ns: 'nav' | 'agents'; labelKey: string; path: string }
+// story 4889 (UI-6 · W1~W6) — 에이전트 화면 안쪽의 두 번째 탭줄(통계 · 관리 · 채용 · 접근권한)을 이 줄로 합쳤다: 한 줄 · 링크 일곱(관리자만 보는 «접근권한» 포함) · 빠지는 탭 0.
+// 옛 안쪽 «관리»(기본 탭)는 바깥 «에이전트»와 같은 화면이라 이름만 합쳐졌다 — 옛 주소 `?tab=manage`는 그대로 «에이전트»로 열린다(북마크 · 알림 링크 · 문서 속 주소가 깨지지 않게 · 시험이 지킨다).
+// 순서는 «이미 쓰던 다섯 자리는 그대로 + 뒤에 통계 · 접근권한»(PO 11-10): 손에 익은 위치가 안 밀리고, 관리자만 보는 «접근권한»을 맨 끝에 두면 관리자와 일반 구성원 사이에 다른 탭 자리가 안 밀린다.
+export interface TeamTabConfig { id: string; ns: 'nav' | 'agents'; labelKey: string; path: string; /** 조직 관리자(admin · owner)에게만 그린다 — 일반 구성원이 ?tab=access로 와도 통계로 읽는다. */ adminOnly?: boolean }
 export const TEAM_TABS: readonly TeamTabConfig[] = [
   { id: 'agents', ns: 'nav', labelKey: 'workforce', path: '/organization/workforce' },
   { id: 'people', ns: 'nav', labelKey: 'orgMembers', path: '/organization/members' },
   { id: 'runs', ns: 'nav', labelKey: 'workforceRuns', path: '/organization/workforce/runs' },
   { id: 'keys', ns: 'nav', labelKey: 'workforceApiKeys', path: '/organization/workforce/api-keys' },
   { id: 'recruit', ns: 'agents', labelKey: 'recruitTab', path: '/organization/workforce?tab=recruit' },
+  { id: 'stats', ns: 'agents', labelKey: 'statsTab', path: '/organization/workforce?tab=stats' },
+  { id: 'access', ns: 'agents', labelKey: 'accessTab', path: '/organization/workforce?tab=access', adminOnly: true },
 ];
 
 // «전체»(/more) 맨 아래 «그 밖» — 메뉴 입구를 따로 만들지 않는 화면들(쓰임을 우리가 모르거나 아직 준비 중인 화면; PO 결정 11-10: 막다른 곳은 만들지 않는다).
