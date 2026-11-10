@@ -350,3 +350,29 @@ describe('CommandPalette — 목록상자 · 켜진 항목 알림(story #4380)',
   });
 });
 
+// story 4892 (UI-9 D1, PO 11-10) — a document picked from the palette opens to READ (the reading screen), not the editor.
+describe('CommandPalette — 문서 결과를 고르면 읽기 화면으로 간다 (story 4892)', () => {
+  it('⭐검색어를 치면 문서 결과가 뜨고, 그걸 고르면 /…/docs/{slug}/view로 이동한다', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('fetch', vi.fn(async (url: string) => (url.includes('/api/docs?')
+        ? { ok: true, status: 200, json: async () => ({ data: [{ id: 'd1', title: '결제 스펙 v2', slug: 'payments-v2' }] }) }
+        : { ok: true, status: 200, json: async () => ({ data: [] }) })) as unknown as typeof fetch);
+      await mount({ projectId: 'proj-1' });
+      const input = document.querySelector('input[role="combobox"], input') as HTMLInputElement;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '결제');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      const docOption = [...document.querySelectorAll('[role="option"]')].find((o) => o.textContent?.includes('결제 스펙 v2'));
+      expect(docOption, 'the document result').toBeTruthy();
+      await act(async () => { docOption!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(pushMock).toHaveBeenCalledTimes(1);
+      expect(String(pushMock.mock.calls[0]![0])).toMatch(/\/docs\/payments-v2\/view$/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
