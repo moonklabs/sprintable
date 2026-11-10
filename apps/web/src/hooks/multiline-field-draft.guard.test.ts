@@ -64,6 +64,7 @@ const EXEMPT: Record<string, string> = {
   'components/shared/entity-aware-textarea.tsx': '부품 정의(여러 줄 칸 자체)',
   'components/ui/operator-control.tsx': '부품 정의(OperatorTextarea 자체)',
   'components/ui/textarea.tsx': '부품 정의(Textarea 자체) — 값을 소유하지 않는 부품이라 초안은 이 부품을 쓰는 폼이 단다(4831)',
+  'components/ds/input.tsx': '부품 정의(새 판 Textarea 자체, UI-3 4886) — 값을 소유하지 않는 부품이라 초안은 이 부품을 쓰는 폼이 단다(ui/textarea와 같은 자리)',
 };
 
 type Verdict = 'drafted' | 'via' | 'exempt' | 'undrafted' | 'none';

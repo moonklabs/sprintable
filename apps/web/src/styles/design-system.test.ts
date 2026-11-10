@@ -29,6 +29,12 @@ describe('design-system.css — 새 뜻 이름 토큰(--ds-*)', () => {
     expect(Object.keys(light).length).toBe(27);
   });
 
+  it('⭐고정폭 글자 하한: 가장 작은 mono-sm도 11px 이상(폰 11pt 하한 · 12px 미만 글자 처방)', () => {
+    const theme = css.slice(css.indexOf('@theme inline'));
+    const m = theme.match(/--text-ds-mono-sm:\s*(\d+)px;/);
+    expect(Number(m![1])).toBeGreaterThanOrEqual(11);
+  });
+
   it('모든 뜻 이름이 @theme inline으로 Tailwind 색 `ds-*`에 이어진다', () => {
     for (const name of Object.keys(light)) {
       expect(css, name).toContain(`--color-${name}: var(--${name});`);
