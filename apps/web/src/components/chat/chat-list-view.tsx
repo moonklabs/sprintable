@@ -216,10 +216,11 @@ function ConversationRow({
 
   const participantLayer = conv.participants && conv.participants.length > 0 ? (
     conv.type === 'dm' ? (
-      <div className="mt-0.5 flex items-center gap-1 text-editorial-meta text-muted-foreground">
-        <span className="rounded bg-muted px-1 py-0.5 font-medium text-muted-foreground">{t('you')}</span>
-        <span>↔</span>
-        <span className="max-w-[80px] truncate rounded bg-muted px-1 py-0.5 font-medium text-muted-foreground">
+      // story 4887 (UI-4 P2-c) — the DM line is ONE line that never runs past the column: «나 ↔ 상대» is one plain text segment (it was two pills + an arrow, ~35 px more) that gives way first, the «에이전트» chip keeps its size,
+      // and the computer chip may shrink to an ellipsis (it carried `shrink-0` and was cut mid-word at 320 px — AC1 10). Nothing is dropped.
+      <div className="mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden text-editorial-meta text-muted-foreground" data-testid="room-dm-line">
+        <span className="min-w-0 truncate font-medium">
+          {t('you')} ↔{' '}
           {/* story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, formatParticipantNames와
               동일 사람언어 폴백으로 통일('...'는 비인간어). story #3758(9번째) — resolved 비트. */}
           {participantDisplayLabel(others[0] ?? { name: null, resolved: false }, tc)}
@@ -232,14 +233,15 @@ function ConversationRow({
           </span>
         )}
         {/* story 4675 (F2): a DM with an agent names its computer after the «에이전트» chip; a group row says nothing (several · Q-b) */}
-        {isAgentInConv ? <DeviceChip name={others[0]?.device_name} className="text-micro" /> : null}
+        {isAgentInConv ? <DeviceChip name={others[0]?.device_name} className="min-w-0 shrink text-micro" /> : null}
       </div>
     ) : (
       <div className="mt-0.5 flex items-center gap-1.5 text-editorial-meta text-muted-foreground">
         {/* story 4887 (UI-4 P2-b) — the group's participants are one line of text (B3 row): the 18 px overlapping initials were unreadable beyond two people (AC1 10). The line says how many (the agents' count when there are agents, else the people's)
             AND who: the first two names + «외 N명» — for a group with agents too (the old stack showed three initials + an agent dot; a count alone would name nobody) */}
         <span className="truncate">
-          {`${isAgentInConv && agentCount > 0 ? t('agentCount', { count: agentCount }) : t('personCount', { count: others.length + 1 })} · ${groupNames}`}
+          {/* a group with nobody but the viewer (the server allows it) has no names: the count stands alone — no dangling « · » */}
+          {`${isAgentInConv && agentCount > 0 ? t('agentCount', { count: agentCount }) : t('personCount', { count: others.length + 1 })}${groupNames ? ` · ${groupNames}` : ''}`}
         </span>
       </div>
     )
@@ -252,7 +254,7 @@ function ConversationRow({
       onClick={onClick}
       // story 4853 (phone · point 1) — while the round support button floats over this list (it carries `data-support-launcher` on <html>, support-widget-launcher.tsx) the row keeps its
       // right side clear of it at phone width, so the time and the unread badge are not hidden behind it. A class literal on purpose (Tailwind reads it as written): the attribute is the launcher's SUPPORT_LAUNCHER_ATTR.
-      className="h-auto w-full items-center justify-start gap-3 rounded-lg px-3 py-2.5 text-left font-normal transition hover:bg-muted/60 active:bg-muted max-md:[:root[data-support-launcher]_&]:pr-16"
+      className="h-auto w-full items-center justify-start gap-3 rounded-lg px-3 py-2 text-left font-normal transition hover:bg-muted/60 active:bg-muted max-md:[:root[data-support-launcher]_&]:pr-16"
     >
       {/* story #2968 — 1:1(DM·agent 탭)은 avatar.tsx 정본으로 실사진(3단 폴백은 그 컴포넌트
           책임). group은 특정 1인 사진이 의미가 없어(다인원) 기존 아이콘 자리를 유지한다. */}

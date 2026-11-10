@@ -436,6 +436,14 @@ describe('ChatListView — story #3888 이벤트 메시지 미리보기(raw slug
     expect(container.textContent).not.toContain('개발 에이전트, 디디 외');
   });
 
+  it('4887 ⭐ a group with nobody but the viewer shows the count alone — no dangling « · »', async () => {
+    stubFetchWithConversations([ROOM({ id: 'g-solo', title: '나 혼자 방', participants: [{ member_id: 'me-1', name: '나', type: 'human' }] })]);
+    await mount();
+    const line = [...container.querySelectorAll('span.truncate')].find((e) => e.textContent?.startsWith('1명')) as HTMLElement;
+    expect(line).toBeTruthy();
+    expect(line.textContent).toBe('1명'); // reverted → «1명 · »
+  });
+
   it('4887 ⭐ a room with no participants list uses the ds icon disc (group = «groups», DM = «chat_bubble»)', async () => {
     stubFetchWithConversations([
       { id: 'g', type: 'group', title: '그룹 빈 참여자', participants: [], latest_message: null, updated_at: '2026-11-10T01:00:00Z', unread_count: 0 },
