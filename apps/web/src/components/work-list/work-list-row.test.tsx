@@ -177,4 +177,16 @@ describe('WorkListRowView', () => {
     await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ state: 'awaiting_approval' })} />)); });
     expect(container.textContent).toContain('승인 대기');
   });
+
+  it('hideStoryLevelChips: 산출물 칩은 숨기고, 스토리 결재에서 온 «저위험»도 숨기지만 자기 결재의 «저위험»은 보인다', async () => {
+    await act(async () => { root.render(wrap(<WorkListRowView hideStoryLevelChips row={baseRow({ artifactCount: 2, lowRisk: true, state: 'awaiting_approval', stateFromStory: true })} />)); });
+    expect(container.textContent).not.toContain('산출물');
+    expect(container.textContent).not.toContain('저위험');
+    await act(async () => { root.render(wrap(<WorkListRowView hideStoryLevelChips row={baseRow({ artifactCount: 2, lowRisk: true, state: 'awaiting_approval' })} />)); });
+    expect(container.textContent).not.toContain('산출물');
+    expect(container.textContent).toContain('저위험'); // its OWN gate
+    await act(async () => { root.render(wrap(<WorkListRowView row={baseRow({ artifactCount: 2 })} />)); });
+    expect(container.textContent).toContain('산출물 2'); // standalone use is as before
+  });
 });
+

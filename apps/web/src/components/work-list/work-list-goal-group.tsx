@@ -16,6 +16,12 @@ import { WorkListRowView } from './work-list-row';
  * work under it (tasks · agent runs, the rows this screen always had) stands indented below. Selecting a story opens the same detail panel the work rows open (on the story).
  */
 
+// the story's own status word: done = done colour · in review = stronger than the rest (it was the one status the old list set apart — the UI-3 rule for «other attention» is ink, not a warning colour) · the rest neutral
+const STORY_STATUS_STYLE: Record<string, string> = {
+  done: 'font-semibold text-ds-done',
+  'in-review': 'font-semibold text-ds-ink-2',
+};
+
 const AWAITING_HAND: ReadonlySet<NonNullable<WorkListRowState>> = new Set(['awaiting_approval', 'awaiting_signature', 'awaiting_answer']);
 
 function StateWord({ state }: { state: WorkListRowState }) {
@@ -50,7 +56,7 @@ function StoryRowView({ story, selectedRowId, onSelect }: { story: WorkListStory
         {story.selfRow.lowRisk ? <Chip>{t('chipLowRisk')}</Chip> : null}
         <StateWord state={story.selfRow.state} />
         {statusLabel ? (
-          <span className={cn('text-ds-small', story.status === 'done' ? 'font-semibold text-ds-done' : 'text-ds-ink-3')} data-testid="story-status-badge">{statusLabel}</span>
+          <span className={cn('text-ds-small', STORY_STATUS_STYLE[story.status] ?? 'text-ds-ink-3')} data-testid="story-status-badge">{statusLabel}</span>
         ) : null}
       </>
     ),
@@ -61,7 +67,7 @@ function StoryRowView({ story, selectedRowId, onSelect }: { story: WorkListStory
       {story.rows.length > 0 ? (
         <div className="ml-6 border-l border-ds-line" data-testid="story-work-rows">
           {story.rows.map((row) => (
-            <WorkListRowView key={row.id} row={row} isSelected={selectedRowId === row.id} onSelect={onSelect} />
+            <WorkListRowView key={row.id} row={row} isSelected={selectedRowId === row.id} onSelect={onSelect} hideStoryLevelChips />
           ))}
         </div>
       ) : null}
