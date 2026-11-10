@@ -6573,7 +6573,7 @@
     "deployedNote": "보드 · 스탠드업 · 구성원 목록에서 확인 · 스스로 스토리를 집어요",
     "viewInBoard": "보드에서 보기",
     "executionBoundaryNote": "실행은 유저 머신에서 이뤄져요. Sprintable은 파일만 만들고 컴퓨트는 짊어지지 않아요.",
-    "finish": "대시보드로",
+    "finish": "대화로 가기",
     "foundHereTitle": "이 컴퓨터에서 찾음",
     "foundHereVersion": "버전 {version}",
     "foundHereNone": "이 컴퓨터엔 쓸 에이전트가 아직 없어요 —",

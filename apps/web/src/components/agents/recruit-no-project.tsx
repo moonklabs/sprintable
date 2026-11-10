@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
-import { isNoProjectAtAll } from '@/app/(authenticated)/chats/no-project';
+import { isNoProjectAtAll, projectsUnknownBecauseFailed } from '@/app/(authenticated)/chats/no-project';
 
 /**
  * story 4891 — the Recruit tab («Add agent») without a project. A new account has an organization and NO project; the tab said «Please select a project.» and there was
@@ -20,7 +20,7 @@ export function recruitNoProjectState(
   ctx: { projectId?: string | null; projectMemberships: readonly unknown[]; projectPathUnresolved?: boolean; orgSyncPending?: boolean; projectMembershipsFailed?: boolean },
   role: { known: boolean; isAdmin: boolean },
 ): RecruitNoProjectState {
-  if (ctx.projectMembershipsFailed && ctx.projectMemberships.length === 0 && !ctx.projectId) return 'failed';
+  if (projectsUnknownBecauseFailed(ctx)) return 'failed';
   if (!isNoProjectAtAll(ctx)) return 'pick';
   if (!role.known) return 'none';
   return role.isAdmin ? 'create' : 'ask-admin';

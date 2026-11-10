@@ -105,7 +105,8 @@ test.describe('Onboarding — new user setup', () => {
     await page.waitForURL(/\/(dashboard|inbox|board|today|chats)/, { timeout: 15000 });
     const finalUrl = page.url();
     expect(
-      finalUrl.includes('/dashboard') || finalUrl.includes('/inbox') || finalUrl.includes('/board'),
+      // story 4891: the way out lands on the chats page (flag off) or on Today (flag on) — both are the app
+      finalUrl.includes('/dashboard') || finalUrl.includes('/inbox') || finalUrl.includes('/board') || finalUrl.includes('/chats') || finalUrl.includes('/today'),
       'should reach app after completing onboarding'
     ).toBe(true);
   });

@@ -56,10 +56,12 @@ describe('FirstScreen — the way out names its landing (story 4891)', () => {
 describe('the flag-off way-out word is the landing screen\'s menu name, in both languages', () => {
   const pairs = [['ko', koMessages], ['en', enMessages]] as const;
   for (const [lang, msgs] of pairs) {
-    it(`${lang}: onboarding.dashboardCta contains nav.chats and not nav.dashboard`, () => {
-      const m = msgs as unknown as { nav: Record<string, string>; onboarding: Record<string, string> };
-      expect(m.onboarding.dashboardCta).toContain(m.nav.chats);
-      expect(m.onboarding.dashboardCta).not.toContain(m.nav.dashboard);
+    it(`${lang}: onboarding.dashboardCta and recruiter.finish (the recruiter's last step lands on the chats page too) contain nav.chats and not nav.dashboard`, () => {
+      const m = msgs as unknown as { nav: Record<string, string>; onboarding: Record<string, string>; recruiter: Record<string, string> };
+      for (const word of [m.onboarding.dashboardCta, m.recruiter.finish]) {
+        expect(word).toContain(m.nav.chats);
+        expect(word).not.toContain(m.nav.dashboard);
+      }
     });
   }
 });

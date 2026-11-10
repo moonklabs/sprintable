@@ -116,7 +116,7 @@ describe('the wiring (story 4891)', () => {
   const read = (p: string) => readFileSync(resolve(__dirname, p), 'utf8');
   it('the tabs hand the component the real state (the dashboard context + the person\'s role) and the Settings › Projects address', () => {
     const src = read('agents-page-tabs.tsx');
-    expect(src).toContain("state={recruitNoProjectState(dashboardCtx, { known: meLoaded, isAdmin })}");
+    expect(src).toContain("state={recruitNoProjectState(dashboardCtx, { known: roleKnown, isAdmin })}");
     expect(src).toContain("createHref={flatHref('/settings?tab=projects')}");
     expect(src).toContain('onRetry={() => window.location.reload()}'); // the request is the layout's (server): a reload asks it again
   });

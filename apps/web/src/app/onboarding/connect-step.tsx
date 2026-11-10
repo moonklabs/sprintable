@@ -390,7 +390,7 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
           </Link>
         </div>
         <Button variant="glass" size="lg" className="w-full" onClick={onFinish}>
-          {t('dashboardCta')}
+          {todayV3Enabled ? t('desktopFinishToToday') : t('dashboardCta')}
         </Button>
       </div>
     );
@@ -657,7 +657,7 @@ export function ConnectStep({ agentId, apiKey, projectId, orgId = null, onFinish
             onClick={handleDashboard}
             className="whitespace-nowrap"
           >
-            {t('dashboardCta')}
+            {todayV3Enabled ? t('desktopFinishToToday') : t('dashboardCta')}
           </Button>
           <Button
             variant="hero"
