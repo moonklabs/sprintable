@@ -2064,6 +2064,7 @@
     "notification_coming_soon": "Coming soon",
     "notificationSaveError": "Failed to save notification settings.",
     "dangerZone": "Danger Zone",
+    "backToList": "Back to settings",
     "deleteAccount": "Delete Account",
     "deleteAccountDesc": "When you delete your account you are signed out at once and cannot sign in again. After 30 days your name, e-mail and other personal data are anonymized. What you wrote stays.",
     "deleteConfirmTitle": "Are you sure you want to delete your account?",

@@ -2064,6 +2064,7 @@
     "notification_coming_soon": "준비 중",
     "notificationSaveError": "알림 설정 저장에 실패했어요.",
     "dangerZone": "위험 구역",
+    "backToList": "설정 목록으로",
     "deleteAccount": "계정 삭제",
     "deleteAccountDesc": "계정을 삭제하면 바로 로그아웃되고 다시 로그인할 수 없어요. 30일 뒤 이름 · 이메일 같은 개인정보가 익명화돼요. 작성한 콘텐츠는 유지돼요.",
     "deleteConfirmTitle": "계정을 삭제할까요?",
