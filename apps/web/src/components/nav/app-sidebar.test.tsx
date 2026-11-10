@@ -512,7 +512,16 @@ describe('AppSidebar — 지금 여기 판정(story #4885)', () => {
     root = createRoot(container);
     queryRef.current = 'tab=notifications';
     await mount();
-    expect(activeLabels()).toEqual([]);
+    // 같은 화면의 다른 탭 — 정확히 맞는 항목이 없으니 이 화면의 항목(결재)이 위치를 알려 준다(예전엔 켜진 항목 0).
+    expect(activeLabels()).toEqual(['결재']);
+    await act(async () => { root.unmount(); });
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    queryRef.current = '';
+    await mount();
+    expect(activeLabels(), '탭 없는 /inbox(기본 탭 «알림»)').toEqual(['결재']);
   });
 
   it('⭐접두가 겹치는 형제: /organization/workforce/runs에서 «실행 기록»만 켜진다(에이전트는 꺼짐) — /content/channel-posts도 «채널 포스트»만', async () => {

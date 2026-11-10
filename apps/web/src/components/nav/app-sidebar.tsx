@@ -8,6 +8,7 @@ import { ChevronDown, LayoutGrid, Search, MessageSquare } from 'lucide-react';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
+import { findActiveStaticItemId } from '@/lib/nav-active';
 import { useCommandPalette } from '@/components/command-palette/command-palette-context';
 import { ProfileMenu } from '@/components/nav/profile-menu';
 import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosure';
@@ -172,20 +173,8 @@ export function AppSidebar({
   // pathname/href만의 순수 함수라 위치 이동에 따른 의미 변화 없음.
   // story #4885 (codex 1판) — 정적 항목의 «지금 여기» 판정 한 곳. 예전 isActive(href)는 쿼리 달린 경로(`/inbox?tab=gates`)를 pathname과 글자 그대로 비교해 영영 켜지지 않았고,
   // 접두 비교라 `/organization/workforce/runs`가 «에이전트»와 «실행 기록»을 함께 켜고 `/content/channel-posts`가 «블로그 포스트»와 «채널 포스트»를 함께 켰다.
-  // 이제 ① 쿼리는 경로와 따로 보고(항목 경로가 `?tab=gates`를 가지면 지금 주소의 같은 키가 같은 값일 때만) ② 맞는 항목이 여럿이면 **가장 구체적인(경로 가장 긴 · 쿼리 있는) 하나**만 켠다.
-  const activeStaticItemId = (() => {
-    let best: { id: string; weight: number } | null = null;
-    const candidates = [...navGroups.flatMap((g) => g.items.filter((i) => i.kind === 'static')), ALL_SCREENS_ITEM];
-    for (const item of candidates) {
-      const [route, query = ''] = item.path.split('?') as [string, string | undefined];
-      if (!(pathname === route || (route !== '/' && pathname.startsWith(`${route}/`)))) continue;
-      const wanted = new URLSearchParams(query);
-      if ([...wanted].some(([key, value]) => searchParams.get(key) !== value)) continue;
-      const weight = route.length * 2 + (query ? 1 : 0);
-      if (!best || weight > best.weight) best = { id: item.id, weight };
-    }
-    return best?.id ?? null;
-  })();
+  // 이제 lib/nav-active.ts 한 곳(아이콘 막대와 같은 판정): ① 쿼리는 경로와 따로 보고 ② 맞는 항목이 여럿이면 가장 구체적인 하나만 ③ 정확히 맞는 항목이 없으면 같은 화면의 가장 구체적인 항목(탭만 다른 경우).
+  const activeStaticItemId = findActiveStaticItemId([...navGroups.flatMap((g) => g.items), ALL_SCREENS_ITEM], pathname, searchParams);
   const t = useTranslations('nav');
   const { isMobile, setOpenMobile } = useSidebar();
   // ⌘K 액션 확장(story 4f991165) — 스토리 상세(`/flow?view=list&story={id}`)에서 열렸을
