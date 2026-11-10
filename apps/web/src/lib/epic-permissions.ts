@@ -9,7 +9,7 @@ export function validateStatusTransition(from: string, to: string): void {
   const allowed = ALLOWED_TRANSITIONS[from] ?? [];
   if (!allowed.includes(to)) {
     throw Object.assign(
-      new Error(`Cannot transition epic from '${from}' to '${to}'`),
+      new Error(`Cannot transition goal from '${from}' to '${to}'`),
       { code: 'INVALID_TRANSITION' },
     );
   }

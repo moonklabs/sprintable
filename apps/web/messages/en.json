@@ -1265,7 +1265,7 @@
     "trustResolveGate": "Open gate",
     "epicSwimlaneTitle": "Goal swimlanes",
     "epicSwimlaneUnassigned": "Unassigned",
-    "epicSwimlaneOverflowToggle": "{count} more goals",
+    "epicSwimlaneOverflowToggle": "{count, plural, one {# more goal} other {# more goals}}",
     "epicSwimlaneLoadError": "Couldn't load. Please try again in a moment.",
     "boardLoadFailed": "Couldn't load the board",
     "epicSwimlaneLoadTimeout": "Loading took too long, so we stopped. Please try again.",

@@ -2,6 +2,7 @@
 // 1925 이름 바꾸기가 프런트에서 덜 끝나 사람에게 두 이름이 같이 보였다(일감 탭 «에픽» ↔ 더보기 «목표» 등 ko 9 · en 9곳). 사람에게 보이는 글은 «목표» 하나.
 // 이 가드는 ko · en 메시지의 «값»(키 이름 · API 경로 · 엔티티 타입 값이 아님)에 에픽/Epic이 다시 들어오면 RED. 되돌리면(값을 에픽으로) 실패한다.
 import { describe, expect, it } from 'vitest';
+import { createTranslator } from 'next-intl';
 import koMessages from '../messages/ko.json';
 import enMessages from '../messages/en.json';
 
@@ -26,5 +27,12 @@ describe('story 4888 — 사람에게 보이는 이름은 «목표» 하나(에�
     const en = enMessages as unknown as { nav: Record<string, string> };
     expect(ko.nav.epic).toBe('목표');
     expect(en.nav.epic).toBe('Goal');
+  });
+  it('en: «N more goals» is a plural — 1 reads «1 more goal», 2 reads «2 more goals»', () => {
+    const t = createTranslator({ locale: 'en', messages: enMessages, namespace: 'board' }) as unknown as (k: string, v: Record<string, number>) => string;
+    expect(t('epicSwimlaneOverflowToggle', { count: 1 })).toBe('1 more goal');
+    expect(t('epicSwimlaneOverflowToggle', { count: 2 })).toBe('2 more goals');
+    const tKo = createTranslator({ locale: 'ko', messages: koMessages, namespace: 'board' }) as unknown as (k: string, v: Record<string, number>) => string;
+    expect(tKo('epicSwimlaneOverflowToggle', { count: 1 })).toBe('목표 1개 더 보기');
   });
 });

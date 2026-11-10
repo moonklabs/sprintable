@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.workflow_trigger_type import WorkflowTriggerType
 
 SYSTEM_TRIGGER_TYPES = [
-    {"slug": "kickoff", "label": "Kickoff", "description": "스프린트 또는 에픽 킥오프"},
+    {"slug": "kickoff", "label": "Kickoff", "description": "스프린트 또는 목표 킥오프"},
     {"slug": "review_request", "label": "Review Request", "description": "코드 리뷰 요청"},
     {"slug": "qa_request", "label": "QA Request", "description": "QA 검수 요청"},
     {"slug": "deploy_request", "label": "Deploy Request", "description": "배포 요청"},
