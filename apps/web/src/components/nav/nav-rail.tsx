@@ -71,6 +71,8 @@ export function NavRail({ orgSlug, projectSlug, account, listColumn, navV3Flags 
   const byId = (id: string) => groups.find((g) => g.id === id) as NavGroupConfig | undefined;
   const orgGroup = byId('org');
   const settingsItem = byId('settings')?.items[0];
+  // 설정 묶음의 어느 항목이든(데스크톱 앱 등) 켜지면 막대의 설정 아이콘이 켜진다(codex P3) — 묶음 전체로 본다.
+  const settingsActive = Boolean(byId('settings')?.items.some((i) => link(i).isActive));
   const orgHasActive = Boolean(orgGroup?.items.some((i) => link(i).isActive));
 
 
@@ -122,8 +124,8 @@ export function NavRail({ orgSlug, projectSlug, account, listColumn, navV3Flags 
           {railIcon(Search, false)}
         </Button>
         {settingsItem ? (
-          <Link href={link(settingsItem).href} aria-label={t(settingsItem.labelKey)} title={t(settingsItem.labelKey)} aria-current={link(settingsItem).isActive ? 'page' : undefined} className="block rounded-md focus-visible:ring-2 focus-visible:ring-ring" data-rail-item={settingsItem.id}>
-            {railIcon(settingsItem.icon, link(settingsItem).isActive)}
+          <Link href={link(settingsItem).href} aria-label={t(settingsItem.labelKey)} title={t(settingsItem.labelKey)} aria-current={settingsActive ? 'page' : undefined} className="block rounded-md focus-visible:ring-2 focus-visible:ring-ring" data-rail-item={settingsItem.id}>
+            {railIcon(settingsItem.icon, settingsActive)}
           </Link>
         ) : null}
         <Link href={flatHref(ALL_SCREENS_ITEM.path)} aria-label={t(ALL_SCREENS_ITEM.labelKey)} title={t(ALL_SCREENS_ITEM.labelKey)} aria-current={activeStaticId === ALL_SCREENS_ITEM.id ? 'page' : undefined} className="block rounded-md focus-visible:ring-2 focus-visible:ring-ring" data-rail-item={ALL_SCREENS_ITEM.id}>
@@ -147,6 +149,9 @@ function DailyEntry({ group, link, label, groupLabel, icon, badge, count }: {
   count: number;
 }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLAnchorElement | null>(null);
+  // Esc가 초점을 아이콘으로 돌려 놓을 때 그 초점이 목록을 다시 열지 않게 한 번만 건너뛴다.
+  const escapedRef = useRef(false);
   const [first, ...rest] = group.items;
   if (!first) return null;
   const firstLink = link(first);
@@ -157,11 +162,11 @@ function DailyEntry({ group, link, label, groupLabel, icon, badge, count }: {
       data-rail-group={group.id}
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
-      onFocus={() => setOpen(true)}
+      onFocus={() => { if (escapedRef.current) { escapedRef.current = false; return; } setOpen(true); }}
       onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOpen(false); }}
-      onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}
+      onKeyDown={(e) => { if (e.key === 'Escape') { escapedRef.current = true; setOpen(false); triggerRef.current?.focus(); } }}
     >
-      <Link href={firstLink.href} aria-label={groupLabel ?? label(first)} title={groupLabel ?? label(first)} aria-current={anyActive ? 'page' : undefined} className="relative block rounded-md focus-visible:ring-2 focus-visible:ring-ring" data-rail-item={first.id}>
+      <Link ref={triggerRef} href={firstLink.href} aria-label={groupLabel ?? label(first)} title={groupLabel ?? label(first)} aria-current={anyActive ? 'page' : undefined} className="relative block rounded-md focus-visible:ring-2 focus-visible:ring-ring" data-rail-item={first.id}>
         {icon(first.icon, anyActive)}
         {badge(count)}
       </Link>

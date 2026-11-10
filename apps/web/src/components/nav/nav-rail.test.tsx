@@ -180,4 +180,22 @@ describe('NavRail — B 셸 초안(아이콘 막대)', () => {
     await act(async () => { (container.querySelector('[data-rail-item="account"]') as HTMLElement).click(); });
     expect(document.querySelector('[data-testid="rail-account-panel"]')?.getAttribute('aria-label')).toBe('계정');
   });
+
+  it('⭐Esc는 옆 목록을 닫고 초점을 구역 아이콘으로 되돌린다(목록 안 링크가 숨으면서 초점을 잃지 않게 — codex P2)', async () => {
+    await mount();
+    const board = container.querySelector('[data-rail-item="board"]') as HTMLAnchorElement;
+    await act(async () => { board.focus(); });
+    const goals = container.querySelector('[data-flyout-item="goals"]') as HTMLAnchorElement;
+    await act(async () => { goals.focus(); });
+    expect(document.activeElement).toBe(goals);
+    await act(async () => { goals.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    expect(container.querySelector('[data-rail-group="dev"] [data-testid="rail-flyout"]')?.getAttribute('data-open')).toBe('false');
+    expect(document.activeElement).toBe(board);
+  });
+
+  it('데스크톱 앱 항목(/desktop)에서도 막대의 설정 아이콘이 켜진다 — 설정 묶음 전체로 판정(codex P3)', async () => {
+    pathnameRef.current = '/desktop';
+    await mount({ navV3Flags: { todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: false, desktopDownloadEnabled: true } });
+    expect(container.querySelector('[data-rail-item="settings"]')?.getAttribute('aria-current')).toBe('page');
+  });
 });

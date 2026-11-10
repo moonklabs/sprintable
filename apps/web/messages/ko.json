@@ -3998,7 +3998,7 @@
     "adminOnlyHint": "조직 관리자/소유자만 리워드 지급 가능"
   },
   "attentionQueue": {
-    "kicker": "오늘",
+    "kicker": "홈",
     "title": "지금 개입할 것",
     "count": "<b>{count}</b>건 · 로그 안 열고 판단",
     "allClear": "안전",
@@ -4025,7 +4025,7 @@
   },
   "inbox": {
     "workflowExecutionLabel": "워크플로우 실행",
-    "attentionTabLabel": "오늘",
+    "attentionTabLabel": "홈",
     "notificationsTabLabel": "알림",
     "surfaceDescription": "스토리, 메모, 리워드, 시스템 알림을 하나의 운영 표면으로 확인해요.",
     "markAllRead": "전체 읽음",

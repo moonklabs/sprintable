@@ -106,6 +106,9 @@ describe('⭐메뉴 이름 = 그 화면을 부르는 글 (선생님 11-10: 맨 �
       expect((msg.desktop!.setup as Record<string, string>).goToday, 'desktop.setup.goToday').toContain(name);
       expect(msg.chatV3!.contextRelatedTodayLink as string, 'chatV3.contextRelatedTodayLink').toContain(name);
       expect(msg.chatV3!.eventCardSignAction as string, 'chatV3.eventCardSignAction').toContain(name);
+      // 같은 «오늘» 화면의 주의 큐 — 알림함의 탭 이름 · 주의 큐 화면의 머리 글(UI-5가 홈으로 접기 전까지 같은 낱말)
+      expect(msg.inbox!.attentionTabLabel as string, 'inbox.attentionTabLabel').toContain(name);
+      expect(msg.attentionQueue!.kicker as string, 'attentionQueue.kicker').toContain(name);
     });
   }
   it('정해진 이름: ko «홈» · en «Home»', () => {

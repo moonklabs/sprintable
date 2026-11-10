@@ -3998,7 +3998,7 @@
     "adminOnlyHint": "Only org admin/owner can grant rewards"
   },
   "attentionQueue": {
-    "kicker": "Today · Attention Queue",
+    "kicker": "Home · Attention Queue",
     "title": "Needs your call",
     "count": "<b>{count}</b> to review · no log needed",
     "allClear": "ALL CLEAR",
@@ -4025,7 +4025,7 @@
   },
   "inbox": {
     "workflowExecutionLabel": "Workflow execution",
-    "attentionTabLabel": "Today",
+    "attentionTabLabel": "Home",
     "notificationsTabLabel": "Notifications",
     "surfaceDescription": "Review story, memo, reward, and system notifications from one operator surface.",
     "markAllRead": "Mark all read",
