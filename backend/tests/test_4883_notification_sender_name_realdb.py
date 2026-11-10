@@ -33,9 +33,12 @@ def anyio_backend():
 
 
 async def _send(Session, w, content, *, mention=None, event_context=None):
-    body = {"content": content, "mentioned_ids": [str(mention)] if mention else []}
     if event_context is not None:
-        body["event_context"] = event_context
+        # story 4894: a card cannot be sent to the public route any more; the server's own publisher sends it in-process — the same road here
+        from tests._server_card import say_with_server_card
+
+        return await say_with_server_card(Session, w, "participant", w.r_human, content, event_context=event_context, mentioned=[mention] if mention else [])
+    body = {"content": content, "mentioned_ids": [str(mention)] if mention else []}
     r = await _as(Session, w, "participant", "POST", f"/api/v2/conversations/{w.r_human}/messages", body)
     assert r.status_code == 201, r.text
     return r
