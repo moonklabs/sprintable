@@ -99,6 +99,29 @@ describe('[SID:4669 · 4891] RegisterPage — Google first, the e-mail form on t
     vi.unstubAllGlobals();
   });
 
+  it('T2b the terms also gate the keyboard: Enter in a field while unticked sends nothing · the unticked Google is reachable by keyboard (focusable, aria-disabled) and Enter / Space on it says why', async () => {
+    process.env['NEXT_PUBLIC_OAUTH_ENABLED'] = 'true';
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) }));
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+    const [, name, email, password] = inputs() as HTMLInputElement[];
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    for (const [el, v] of [[name, '지우'], [email, 'jiwoo@example.com'], [password, 'Passw0rd!x']] as const) {
+      await act(async () => { setter.call(el!, v); el!.dispatchEvent(new Event('input', { bubbles: true })); });
+    }
+    await act(async () => { password!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await Promise.resolve(); });
+    expect(fetchMock, 'Enter with the terms unticked sends no request').not.toHaveBeenCalled();
+    const google = byTestId('register-google') as HTMLAnchorElement;
+    expect(google.getAttribute('tabindex')).toBe('0');
+    expect(google.getAttribute('aria-disabled')).toBe('true');
+    await act(async () => { google.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+    expect(container.textContent).toContain(koMessages.register.tosRequiredError);
+    await act(async () => { (inputs()[0] as HTMLInputElement).click(); });
+    expect((byTestId('register-google') as HTMLAnchorElement).getAttribute('aria-disabled')).toBeNull();
+    expect((byTestId('register-google') as HTMLAnchorElement).getAttribute('href')).toContain('tos_accepted=true');
+    vi.unstubAllGlobals();
+  });
+
   it('T3 OAuth off (OSS · local): the e-mail form is open as before · no Google · no fold button · [회원가입] is the brand button', async () => {
     delete process.env['NEXT_PUBLIC_OAUTH_ENABLED'];
     await mount();

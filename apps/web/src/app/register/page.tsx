@@ -112,7 +112,7 @@ export default function RegisterPage() {
           <p className="text-sm text-muted-foreground">{t('subtitle')}</p>
         </div>
 
-        {/* story 4669: the terms line first (both ways need it), then Google as the main button, then the folded e-mail form */}
+        {/* story 4669: the terms line first (both ways need it), then Google as the main button; story 4891: then the e-mail form, on the same screen */}
         <label className="flex items-start gap-2 cursor-pointer select-none">
           <Checkbox
             checked={tosAccepted}
@@ -146,6 +146,8 @@ export default function RegisterPage() {
             <a
               href={tosAccepted ? `/auth/login?provider=google&tos_accepted=true${nextParam ? `&next=${encodeURIComponent(nextParam)}` : ''}` : undefined}
               onClick={!tosAccepted ? (e) => { e.preventDefault(); setError(t('tosRequiredError')); } : undefined}
+              // without an href an anchor is not reachable by keyboard — until the terms are ticked it is a focusable, announced-as-unavailable link that says why (Enter / Space, like a press)
+              {...(!tosAccepted ? { role: 'link', tabIndex: 0, 'aria-disabled': true, onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setError(t('tosRequiredError')); } } } : {})}
               data-testid="register-google"
               className={`flex w-full min-h-[44px] items-center justify-center gap-3 rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90 ${!tosAccepted ? 'opacity-50 cursor-not-allowed' : ''}`}
             >

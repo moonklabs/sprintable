@@ -10,7 +10,9 @@ test.describe('Onboarding — new user setup', () => {
     const password = 'TestPassword123!';
 
     await page.goto('/register');
-    // story 4891: the e-mail form is on the screen from the start (no fold to open) — Google first, the three fields under it
+    // story 4891: the e-mail form is on the screen from the start (no fold to open) — Google first, the three fields under it.
+    // The terms checkbox gates both ways (AUTH-07): it is ticked before the sign-up button can be pressed.
+    await page.getByRole('checkbox').first().click();
     // CHANGES(페드루 PO, 2026-09-18) — networkidle 정리 — 바로 다음 줄의 이메일 입력창
     // visible 대기가 이미 decisive 신호라 networkidle은 여기서도 그냥 중복.
     const emailInput = page.locator('input[placeholder="Email"]');
