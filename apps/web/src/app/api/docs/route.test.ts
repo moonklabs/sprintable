@@ -205,7 +205,7 @@ describe('POST /api/docs — slug', () => {
   });
   const post = (body: Record<string, unknown>) => POST(new Request('http://localhost/api/docs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }));
 
-  it('no slug → an «untitled-<digits>» slug the editor recognises (never an empty one) · two creates get two different slugs', async () => {
+  it('no slug → an «untitled-<digits>» slug the editor recognises (never an empty one)', async () => {
     const a = await post({ title: '기획' });
     const b = await post({ title: '회의록' });
     expect(a.status).toBe(201); expect(b.status).toBe(201);
@@ -213,6 +213,23 @@ describe('POST /api/docs — slug', () => {
     expect(slugs[0]).toMatch(/^untitled-\d+$/);
     expect(slugs[1]).toMatch(/^untitled-\d+$/);
     expect(isUntitledSlug(slugs[0]!)).toBe(true); // the editor treats it as an automatic slug (renames it from the title), like the ones the screen makes
+    // no «the two differ» claim here: two creates in the same millisecond draw the same 3 digits once in 900 — that case is written down on the PR, not asserted away
+  });
+
+  it('two creates in different milliseconds never get the same slug (the clock is fixed so the test cannot flake)', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_700_000_000_000);
+      await post({ title: '기획' });
+      vi.setSystemTime(1_700_000_000_001);
+      await post({ title: '회의록' });
+    } finally {
+      vi.useRealTimers();
+    }
+    const slugs = createDocMock.mock.calls.map((c) => (c[0] as { slug: string }).slug);
+    expect(slugs).toHaveLength(2);
+    expect(slugs[0]).toMatch(/^untitled-1700000000000\d{3}$/);
+    expect(slugs[1]).toMatch(/^untitled-1700000000001\d{3}$/);
     expect(slugs[0]).not.toBe(slugs[1]);
   });
 
