@@ -23,7 +23,7 @@ import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { useSseNotifications, type SseEventNotification } from '@/hooks/use-sse-notifications';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useMediaQuery } from '@/lib/use-media-query';
-import { dispatchedInnerType, getDispatchedHeadline, getEventTypeCopy } from '@/services/notification-display';
+import { dispatchedInnerType, getDispatchedHeadline, getEventTypeCopy, isChatMessageBellCopy } from '@/services/notification-display';
 import { hasDesktopNotifyBridge, notifyViaDesktopBridge } from '@/lib/desktop-notify-bridge';
 import { useToast } from '@/components/ui/toast';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
@@ -245,9 +245,11 @@ function NotificationPanel({
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
 
   const loading = notifications === null;
-  const hasUnread = notifications?.some((n) => !n.read_at) ?? false;
+  // story 4890 — the dispatched copy of a chat message is not a line (its message_created row is): neither drawn nor counted as «something to mark read»
+  const hasUnread = notifications?.some((n) => !n.read_at && !isChatMessageBellCopy(n.event_type, n.payload)) ?? false;
 
   const filtered = notifications?.filter((n) => {
+    if (isChatMessageBellCopy(n.event_type, n.payload)) return false;
     if (showUnreadOnly && n.read_at) return false;
     if (filterTab !== 'all') return getNotificationTab(n) === filterTab;
     return true;
@@ -455,6 +457,8 @@ export function NotificationBell() {
 
   // SSE 실시간 알림 수신
   const handleSseNotification = useCallback((incoming: SseEventNotification) => {
+    // story 4890 — the dispatched copy of a chat message arrives next to its message_created row: it adds no line, no +1, no second desktop / browser notification
+    if (isChatMessageBellCopy(incoming.event_type, incoming.payload)) return;
     // unread count 즉시 증가
     setUnreadCount((c) => c + 1);
     // 패널 열린 상태면 목록 맨 앞에 추가

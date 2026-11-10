@@ -169,6 +169,18 @@ export function getDispatchedHeadline(
   return key ? t(key) : getEventTypeCopy(t, inner);
 }
 
+/**
+ * story 4890 — the `dispatched` COPY of a chat message (payload.event_type `conversation.message`, written for story 1934's «every human in the thread» notification + push). The same message already has its
+ * own `conversation.message_created` bell row (summary «보낸 이: 미리보기» · sender · room id), so the copy was a second line and a second unread for one message (measured on dev: 2 messages → 4 lines, badge 4).
+ * The server leaves it out of the bell list and the unread count; the bell leaves it out too (rows it already holds from an older server · the live SSE feed) so the two never disagree.
+ */
+export function isChatMessageBellCopy(
+  eventType: string,
+  payload: Record<string, unknown> | null | undefined,
+): boolean {
+  return dispatchedInnerType(eventType, payload) === 'conversation.message';
+}
+
 // 사람에게 «결재 요청»인 꼴 — 단건 결재(gate.pending_approval) · 병렬 결재의 결재자 몫(gate_approval_requested).
 const APPROVAL_REQUEST_KINDS = new Set(['gate.pending_approval', 'gate_approval_requested']);
 
