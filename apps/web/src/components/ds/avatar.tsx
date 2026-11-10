@@ -24,6 +24,8 @@ export interface AvatarProps {
   isWorking?: boolean;
   /** agent 전용 — 커넥터 정체(runtime_type 원값). 툴팁 둘째 줄 + 코너 배지에 쓰인다. */
   runtimeType?: string | null;
+  /** 장식 — 같은 줄에 이름이 글로 있을 때(알림 줄 등) 눌리는 줄 안에 들어가도 되도록 초점 · 툴팁 · 읽기 이름을 모두 끈다(story 4890: 단추 안에 초점 받는 에이전트 아바타가 들어가던 문제). */
+  decorative?: boolean;
   className?: string;
 }
 
@@ -57,6 +59,7 @@ export function Avatar({
   presenceStatus,
   isWorking = false,
   runtimeType = null,
+  decorative = false,
   className,
 }: AvatarProps) {
   const t = useTranslations('chats');
@@ -91,7 +94,8 @@ export function Avatar({
     <div
       className={cn('relative shrink-0', className)}
       style={{ width: size, height: size }}
-      tabIndex={isAgent ? 0 : undefined}
+      tabIndex={isAgent && !decorative ? 0 : undefined}
+      aria-hidden={decorative ? true : undefined}
       data-actor={actorType}
     >
       <div
@@ -169,7 +173,7 @@ export function Avatar({
     </div>
   );
 
-  if (!isAgent) return avatarNode;
+  if (!isAgent || decorative) return avatarNode;
 
   const runtimeLbl = runtimeLabel(runtimeType);
   return (

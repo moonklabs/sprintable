@@ -27,6 +27,7 @@ import { dispatchedInnerType, getDispatchedHeadline, getEventTypeCopy, isChatMes
 import { hasDesktopNotifyBridge, notifyViaDesktopBridge } from '@/lib/desktop-notify-bridge';
 import { useToast } from '@/components/ui/toast';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { Avatar } from '@/components/ds/avatar';
 
 type FilterTab = 'all' | 'story' | 'system';
 
@@ -66,6 +67,21 @@ export interface EventNotification {
   // `project_id`(events 행)는 수신자 멤버 행의 프로젝트라 링크에 쓰지 않는다. SSE로 막 들어온 항목엔 없다(→ 주소 그대로).
   target_project_id?: string | null;
   target_doc_slug?: string | null;
+  // story 4890 — the room's name for a chat line (the list carries it only for a named room the person can read now; a live (SSE) line has none until the list is read again)
+  target_conversation_title?: string | null;
+}
+
+/** story 4890 — who wrote a chat line, when the row carries it (the message_created / mention payload's `sender`): the bell draws that person's Avatar instead of the generic bell, and the room's name under the line */
+export function chatLineSender(n: Pick<EventNotification, 'event_type' | 'payload'>): { name: string; avatarUrl: string | null; actorType: 'human' | 'agent'; runtimeType: string | null } | null {
+  if (n.event_type !== 'conversation.message_created' && n.event_type !== 'conversation:mention') return null;
+  const sender = n.payload?.sender as { name?: unknown; avatar_url?: unknown; type?: unknown; runtime_type?: unknown } | undefined;
+  if (!sender || typeof sender.name !== 'string' || !sender.name.trim()) return null;
+  return {
+    name: sender.name,
+    avatarUrl: typeof sender.avatar_url === 'string' && sender.avatar_url ? sender.avatar_url : null,
+    actorType: sender.type === 'agent' ? 'agent' : 'human',
+    runtimeType: typeof sender.runtime_type === 'string' && sender.runtime_type ? sender.runtime_type : null,
+  };
 }
 
 // export — story #2956 QA changes(카디르+codex, 2026-08-23) 회귀가드(notification-bell.test.tsx)가
@@ -348,26 +364,34 @@ function NotificationPanel({
         ) : (
           <>
           <ul>
-            {filtered.map((n) => (
+            {filtered.map((n) => {
+              const lineSender = chatLineSender(n);
+              return (
               <li key={n.id}>
                 <button
                   type="button"
                   onClick={() => onNavigate(n)}
                   className={cn(
-                    'flex w-full gap-3 px-4 py-3 text-left transition hover:bg-accent',
+                    'flex min-h-14 w-full gap-3 px-4 py-3 text-left transition hover:bg-accent',
                     !n.read_at && 'bg-primary/5',
                   )}
                 >
-                  <span
-                    className={cn(
-                      'mt-0.5 shrink-0 rounded-full p-1.5',
-                      n.read_at
-                        ? 'bg-muted text-muted-foreground'
-                        : 'bg-primary/10 text-primary',
-                    )}
-                  >
-                    {getEventIcon(n)}
-                  </span>
+                  {lineSender ? (
+                    <span className="mt-0.5 shrink-0" data-testid="notification-line-avatar">
+                      <Avatar decorative name={lineSender.name} avatarUrl={lineSender.avatarUrl} actorType={lineSender.actorType} runtimeType={lineSender.runtimeType} size={32} />
+                    </span>
+                  ) : (
+                    <span
+                      className={cn(
+                        'mt-0.5 shrink-0 rounded-full p-1.5',
+                        n.read_at
+                          ? 'bg-muted text-muted-foreground'
+                          : 'bg-primary/10 text-primary',
+                      )}
+                    >
+                      {getEventIcon(n)}
+                    </span>
+                  )}
                   <div className="min-w-0 flex-1">
                     <p
                       className={cn(
@@ -377,6 +401,11 @@ function NotificationPanel({
                     >
                       {headline(t, n)}
                     </p>
+                    {n.target_conversation_title ? (
+                      <p className="truncate text-xs text-muted-foreground" data-testid="notification-line-room">
+                        {n.target_conversation_title}
+                      </p>
+                    ) : null}
                     {n.payload?.sender_name ? (
                       <p className="truncate text-xs text-muted-foreground">
                         {n.payload.sender_name}
@@ -391,7 +420,8 @@ function NotificationPanel({
                   )}
                 </button>
               </li>
-            ))}
+              );
+            })}
           </ul>
           {/* story #2192 AC3/AC4 — hasMore일 때만 렌더(음성대조: 30건 이하 계정은 버튼 자체가 없음). */}
           {hasMore && (

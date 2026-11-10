@@ -185,4 +185,11 @@ describe('ds Avatar — 코너 글자 배지 · 툴팁', () => {
     await act(async () => { root.render(wrap(<Avatar name="지우" actorType="human" />)); });
     expect(container.querySelector('[data-actor="human"]')!.getAttribute('tabindex')).toBeNull();
   });
+
+  it('decorative(줄 안 장식): 에이전트여도 초점 · 툴팁 없이 읽기 트리에서 빠진다 — 눌리는 줄 안에 넣어도 초점 받는 칸이 늘지 않게', async () => {
+    await act(async () => { root.render(wrap(<Avatar name="개발" actorType="agent" decorative />)); });
+    const node = container.querySelector('[data-actor="agent"]')!;
+    expect(node.getAttribute('tabindex')).toBeNull();
+    expect(node.getAttribute('aria-hidden')).toBe('true');
+  });
 });
