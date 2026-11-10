@@ -1,7 +1,8 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { CircleUserRound } from 'lucide-react';
+import { Icon } from '@/components/ds/icon';
+import { RAIL_ICON_BY_ITEM_ID } from './rail-icons';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { MoveAgentsEntry, NewProjectEntry } from '@/components/nav/new-project-entry';
@@ -32,11 +33,11 @@ export function RailAccount({ orgId, orgMemberships, projectId, projectMembershi
       <PopoverTrigger
         aria-label={label}
         title={label}
-        className={cn('block rounded-md focus-visible:ring-2 focus-visible:ring-ring', className)}
+        className={cn('block rounded-ds-control hover:bg-ds-surface-high focus-visible:ring-2 focus-visible:ring-ds-action', className)}
         data-rail-item="account"
       >
-        <span className="flex size-10 items-center justify-center rounded-md border border-transparent text-muted-foreground transition hover:bg-muted hover:text-foreground">
-          <CircleUserRound className="size-5" aria-hidden="true" />
+        <span className="flex size-10 items-center justify-center rounded-ds-control text-ds-ink-3 transition-colors">
+          <Icon name={RAIL_ICON_BY_ITEM_ID.account!} size={20} className="size-5" />
         </span>
       </PopoverTrigger>
       <PopoverContent side="right" align="end" sideOffset={8} className="flex w-72 flex-col gap-1 p-2" data-testid="rail-account-panel" aria-label={label}>

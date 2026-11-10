@@ -87,7 +87,7 @@ describe('NavRail — B 셸 초안(아이콘 막대)', () => {
     expect(badgeOf('chats')).toBe('99+');
     expect(badgeOf('board')).toBeUndefined();
     // 옆 목록의 «결재» 줄에는 따로 숫자가 없다 — 숫자는 «오늘» 하나(결재만 세는 두 번째 셈을 두지 않는다)
-    expect(container.querySelector('[data-flyout-item="inbox"] .bg-primary')).toBeNull();
+    expect(container.querySelector('[data-flyout-item="inbox"] [data-testid="rail-badge"]')).toBeNull();
   });
 
   it('값이 0이면 배지가 없다', async () => {
@@ -115,7 +115,7 @@ describe('NavRail — B 셸 초안(아이콘 막대)', () => {
     pathnameRef.current = '/organization/channels';
     await mount();
     const icon = container.querySelector('[data-rail-item="org"] span');
-    expect(icon?.className).toContain('bg-muted');
+    expect(icon?.className).toContain('bg-ds-action-soft');
   });
 
   it('찾기 아이콘은 팔레트를 연다(⌘K와 같은 창)', async () => {
@@ -223,5 +223,30 @@ describe('NavRail — B 셸 초안(아이콘 막대)', () => {
     expect(flyout(), '목록 안 링크로 초점이 옮겨도 열림').toBe('true');
     await act(async () => { chats.focus(); });
     expect(flyout(), '다른 구역으로 나가면 닫힘').toBe('false');
+  });
+
+  it('⭐배지 색은 뜻 둘: 홈(손 필요) = needs-hand 계열 · 대화(읽지 않음) = action 바탕 (UI-3 §4 #6)', async () => {
+    await mount({ todayCount: 3, chatUnreadTotal: 2 });
+    const home = container.querySelector('[data-rail-item="org-briefing"] [data-testid="rail-badge"]') as HTMLElement;
+    const chat = container.querySelector('[data-rail-item="chats"] [data-testid="rail-badge"]') as HTMLElement;
+    expect(home.getAttribute('data-tone')).toBe('needs-hand');
+    expect(home.className).toContain('text-ds-needs-hand');
+    expect(home.className).toContain('bg-ds-needs-hand-soft');
+    expect(chat.getAttribute('data-tone')).toBe('unread');
+    expect(chat.className).toContain('bg-ds-action');
+    expect(chat.className).toContain('text-ds-on-action');
+  });
+
+  it('⭐아이콘은 Material Symbols(ds Icon): 막대 · 옆 목록 · 조직 상자 모든 아이콘이 data-icon을 가지고 lucide(svg.lucide)는 0', async () => {
+    await mount({ account: { orgId: 'o1', orgMemberships: [], projectId: 'p1', projectMemberships: [], userName: '디디' }, listColumn: { open: true, onToggle: () => {} } });
+    await act(async () => { (container.querySelector('[data-rail-item="org"]') as HTMLElement).click(); });
+    expect(container.querySelectorAll('svg.lucide').length).toBe(0);
+    const names = [...container.querySelectorAll('[data-testid="nav-rail"] svg[data-icon]')].map((el) => el.getAttribute('data-icon'));
+    expect(names.length).toBeGreaterThan(30);
+    expect(names).toContain('newsmode'); // 홈
+    expect(names).toContain('chat_bubble');
+    expect(names).toContain('left_panel_open'); // 목록 칸 단추
+    expect(names).toContain('person'); // 계정
+    expect(names).toContain('domain'); // 조직
   });
 });
