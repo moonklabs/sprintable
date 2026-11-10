@@ -112,6 +112,39 @@ describe('TeamActivityView — first page failure (4892 §5 #1)', () => {
     expect(text()).not.toContain(ko.common.error);
   });
 
+  it('a stale first-page ERROR from before a retry never overwrites the list the retry loaded', async () => {
+    const pending: Array<(a: Answer) => void> = [];
+    stream(() => new Promise<Answer>((r) => { pending.push(r); }));
+    await mount();                                   // call 1 is in flight (no answer yet)
+    expect(pending.length).toBe(1);
+    // the person changes the end date → a NEW first page is asked for (generation 2) while the first is still in flight
+    const dates = Array.from(container.querySelectorAll('input[type="date"]'));
+    expect(dates.length).toBeGreaterThan(0);
+    const to = dates[dates.length - 1] as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(to, '2026-01-01'); to.dispatchEvent(new Event('input', { bubbles: true })); to.dispatchEvent(new Event('change', { bubbles: true })); await Promise.resolve(); });
+    expect(pending.length).toBe(2);
+    await act(async () => { pending[1]!(answer(true, 200, { items: [item(7)], next_after_seq: null })); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelectorAll('li').length).toBeGreaterThan(0);
+    await act(async () => { pending[0]!(answer(false, 500)); await Promise.resolve(); await Promise.resolve(); });
+    expect(text()).not.toContain(ko.common.error);   // the old call's failure is dropped
+    expect(container.querySelectorAll('li').length).toBeGreaterThan(0);
+  });
+
+  it('changing a filter while the error is shown asks again (the error does not stick)', async () => {
+    let calls = 0;
+    stream(() => (++calls === 1 ? answer(false, 500) : answer(true, 200, { items: [item(3)], next_after_seq: null })));
+    await mount();
+    expect(text()).toContain(ko.common.error);
+    const dates = Array.from(container.querySelectorAll('input[type="date"]'));
+    const to = dates[dates.length - 1] as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(to, '2026-01-02'); to.dispatchEvent(new Event('input', { bubbles: true })); to.dispatchEvent(new Event('change', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    expect(streamCalls()).toBe(2);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelectorAll('li').length).toBeGreaterThan(0);
+  });
+
   it('the error clears when a new first page loads fine (no error banner left over a good list)', async () => {
     let calls = 0;
     stream(() => (++calls === 1 ? answer(false, 500) : answer(true, 200, { items: [item(9)], next_after_seq: null })));
