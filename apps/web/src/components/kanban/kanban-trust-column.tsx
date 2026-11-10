@@ -75,6 +75,13 @@ interface KanbanTrustColumnProps {
    * `label` prop) 자체는 별개 어휘(TRUST_COLUMNS)라 여긴 안 건드림 — kanban-board.tsx가
    * TRUST_COLUMNS엔 이 override를 안 씀. */
   getStatusLabel?: (canonicalSlug: string) => string | undefined;
+  // story #4888 — same «N+» and «더 보기» as the classic column (KanbanColumn): the cards of a status are loaded a page at a time, and without these the cards past the first page of the
+  // default view could not be reached. hasMore = some status that feeds this column still has a page to load; onLoadMore loads the next page of each of those statuses.
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
+  /** hasMore, but this column has no button: its cards arrive with the page of the settable column that shares the status (derived columns). Only the «N+» shows. */
+  moreViaFeeder?: boolean;
 }
 
 /**
@@ -98,6 +105,7 @@ export function KanbanTrustColumn({
   id, label, locked, stories, epicMap, memberMap, onStoryClick, onEditStory, onChangeStatus, onDeleteStory,
   projectId, onKickoffStory, executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap,
   onCreateStory, autoComposeSignal, isDragging = false, getStatusLabel,
+  hasMore = false, loadingMore = false, onLoadMore, moreViaFeeder = false,
 }: KanbanTrustColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id, disabled: locked });
   const t = useTranslations('board');
@@ -151,7 +159,7 @@ export function KanbanTrustColumn({
           {locked && <Lock className="size-3 text-muted-foreground" aria-hidden="true" />}
         </h3>
         <div className="flex items-center gap-1.5">
-          <span className="text-xs tabular-nums text-muted-foreground">{stories.length}</span>
+          <span className="text-xs tabular-nums text-muted-foreground">{hasMore ? `${stories.length}+` : stories.length}</span>
           {!locked && onCreateStory ? (
             <button
               type="button"
@@ -241,6 +249,17 @@ export function KanbanTrustColumn({
               getStatusLabel={getStatusLabel}
             />
           ))}
+          {hasMore && !moreViaFeeder && onLoadMore ? (
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={onLoadMore}
+              disabled={loadingMore}
+              className="h-7 min-h-0 w-full px-3 text-xs text-muted-foreground disabled:opacity-50"
+            >
+              {loadingMore ? t('loading') : t('loadMore')}
+            </Button>
+          ) : null}
         </div>
       </SortableContextCompat>
     </div>
