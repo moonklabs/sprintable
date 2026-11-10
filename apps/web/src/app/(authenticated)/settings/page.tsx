@@ -3,10 +3,9 @@
 import { ORG_DELETED_LANDING } from '@/lib/auth/org-deleted-landing';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { BarChart2, Bell, CreditCard, FolderKanban, GitBranch, LifeBuoy, Menu, Monitor, Palette, Plus, ShieldCheck, Smartphone, Trash2, User, Users, Webhook, X } from 'lucide-react';
+import { Plus, Webhook } from 'lucide-react';
 import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
 import { PhoneAppCard } from '@/components/desktop/phone-app-card';
 import { ThisPhoneCard } from '@/components/settings/this-phone-card';
@@ -44,12 +43,15 @@ import { DeleteAccountDialog } from '@/components/settings/delete-account-dialog
 import { OperatorInput } from '@/components/ui/operator-control';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { LegalLinks, BusinessInfoBlock } from '@/components/legal/legal-footer';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/toast';
 import { NOTIFICATION_TYPES } from '@/lib/notification-types';
 import { isEEEnabled } from '@/lib/ee';
 import { isSupportWidgetEnabled } from '@/lib/support-widget-flag';
 import { HIDDEN_SETTINGS_TABS, resolveSettingsTab as resolveTab } from './settings-tab';
+import { settingsNavGroups } from './settings-nav';
+import { SettingsNav } from './settings-nav-list';
+import { IconButton } from '@/components/ds/icon-button';
 import { SupportSettingsTabPanel } from '@/components/settings/support-tab-panel';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import dynamic from 'next/dynamic';
@@ -115,14 +117,6 @@ type NotificationCategoryKey = typeof NOTIFICATION_CATEGORIES[number]['key'];
 // "아직 모름"이다. null로 비우면 콜드 진입 시 레일이 통째로 짧아져 그 탭들이 애초에 없던
 // 것처럼 보인다(로딩≠권한없음 클래스 결함) — 판정 전엔 자리만 스켈레톤으로 지키고,
 // 판정 뒤에만 null(진짜 숨김)로 확정한다.
-function SettingsTabSkeleton() {
-  return (
-    <div className="flex h-8 items-center gap-2 px-3" data-testid="settings-tab-skeleton" aria-hidden="true">
-      <div className="size-4 animate-pulse rounded bg-muted" />
-      <div className="h-3 w-16 animate-pulse rounded bg-muted" />
-    </div>
-  );
-}
 
 function isWebhookUrlAllowed(url: string): boolean {
   if (!url) return true;
@@ -146,7 +140,6 @@ export default function SettingsPage() {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('settings');
   const tc = useTranslations('common');
-  const tNav = useTranslations('nav');
   const tLegal = useTranslations('legal');
   // story #2485 — projectLimitExceededError는 onboarding-form.tsx(#2484)와 동일 개념
   // (resource:"project" PLAN_LIMIT_EXCEEDED)이라 새 키를 만들지 않고 재사용한다.
@@ -168,7 +161,7 @@ export default function SettingsPage() {
     setProfileLoadFailed(false);
     setProfileRetryNonce((n) => n + 1);
   }, []);
-  const [lnbOpen, setLnbOpen] = useState(false);
+  const [lnbOpen, setLnbOpen] = useState(() => !searchParamsHook.get('tab')); // a phone arriving at /settings with no ?tab= sees the LIST first (≥md the list is always there)
   const { addToast } = useToast();
 
   const pickedTabByHand = useRef(false); // story 4762 — set once the person clicks a tab: a phone claim that comes later must not move them back to the link's tab
@@ -186,7 +179,12 @@ export default function SettingsPage() {
     lastSearchParams.current = searchParamsHook;
     if (!linkChanged && pickedTabByHand.current) return;
     const tab = searchParamsHook.get('tab');
-    if (tab) setActiveTab(resolveSettingsTab(tab, inPhoneApp));
+    if (tab) {
+      setActiveTab(resolveSettingsTab(tab, inPhoneApp));
+      if (linkChanged) setLnbOpen(false); // a link to a section while the phone's list is up opens that pane (the row would be selected behind a hidden pane otherwise)
+    } else if (linkChanged) {
+      setLnbOpen(true); // …and back to /settings with no `?tab=` is the list again
+    }
   }, [searchParamsHook, inPhoneApp]);
 
   // story 4762 — the «이 폰» tab only exists inside the phone app: if the bridge goes away while the person is on it, the tab list must not point at a pane that is gone
@@ -730,6 +728,9 @@ export default function SettingsPage() {
     }
   };
 
+  const navGroups = settingsNavGroups({ adminChecked, isAdmin, inPhoneApp, supportWidget: isSupportWidgetEnabled(), billing: isEEEnabled() });
+  const activeLabelKey = navGroups.flatMap((g) => g.items).find((i) => i.kind === 'tab' && i.id === activeTab)?.labelKey;
+
   // suppress unused variable warning — createdProjectMembership used in future flows
   void createdProjectMembership;
   void projectMemberships;
@@ -743,159 +744,19 @@ export default function SettingsPage() {
           이 값이 0으로 떨어져 TopBar 몫을 안 뺀다 — #4130의 하드코딩 3rem이 여기서
           48px를 과다 차감하던 것도 같이 해소). */}
       <Tabs value={activeTab} onValueChange={handleTabChange} orientation="vertical" className="h-[calc(100svh-var(--shell-chrome-h))] min-h-0 gap-0">
-        {/* Left nav: desktop/tablet(≥md)=always visible, mobile(<md)=toggle via lnbOpen */}
-        <div className={`shrink-0 border-r overflow-y-auto p-4 flex-col w-52 ${lnbOpen ? 'flex' : 'hidden'} md:flex`}>
-          <h1 className="mb-4 px-2 text-sm font-semibold">{t('title')}</h1>
-          <TabsList variant="line" className="w-full flex-col items-stretch">
-            <span className="px-2 pb-1 pt-1 text-[10px] font-medium text-muted-foreground">{t('myAccount')}</span>
-            <TabsTrigger value="profile">
-              <User className="h-4 w-4" />
-              {t('tabProfile')}
-            </TabsTrigger>
-            <TabsTrigger value="appearance">
-              <Palette className="h-4 w-4" />
-              {/* story #4413 — 이 탭은 테마와 언어를 담는다(폰에서 언어를 바꾸는 유일한 자리) → 탭 이름은 «화면» · 사이드바 테마 토글 묶음은 tabAppearance(«테마») 그대로. */}
-              {t('tabDisplay')}
-            </TabsTrigger>
-            <TabsTrigger value="notifications">
-              <Bell className="h-4 w-4" />
-              {t('tabNotifications')}
-            </TabsTrigger>
-            {/* story 4668 (PO Q-b · Yuna A-4): where the onboarding's «데스크톱 앱 받기» screen is reopened — the card and the phone
-                card only, with no DESKTOP_DOWNLOAD_ENABLED gate (the onboarding card has none either; the gated «데스크톱 앱» menu
-                and /desktop page would be a lie to point at where the flag is off) */}
-            <TabsTrigger value="desktop">
-              <Monitor className="h-4 w-4" />
-              {t('desktopTab')}
-            </TabsTrigger>
-            {/* story 4762: the web «원격 기기» list says «if it matches the number in the phone app's settings › This phone» — this is that place (phone app only) */}
-            {inPhoneApp && (
-              <TabsTrigger value="this-phone">
-                <Smartphone className="h-4 w-4" />
-                {t('tabThisPhone')}
-              </TabsTrigger>
-            )}
-            {isSupportWidgetEnabled() && (
-              <TabsTrigger value="support">
-                <LifeBuoy className="h-4 w-4" />
-                {t('tabSupport')}
-              </TabsTrigger>
-            )}
-
-            <span className="px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('projectSettings')}</span>
-            {!adminChecked ? <SettingsTabSkeleton /> : null}
-            {adminChecked ? (
-              <TabsTrigger value="members">
-                <Users className="h-4 w-4" />
-                {t('tabMembers')}
-              </TabsTrigger>
-            ) : null}
-            {!adminChecked && !HIDDEN_SETTINGS_TABS.has('workflow') ? <SettingsTabSkeleton /> : null}
-            {adminChecked && isAdmin && !HIDDEN_SETTINGS_TABS.has('workflow') ? (
-              <TabsTrigger value="workflow">
-                <GitBranch className="h-4 w-4" />
-                {t('tabWorkflow')}
-              </TabsTrigger>
-            ) : null}
-            {!adminChecked ? <SettingsTabSkeleton /> : null}
-            {adminChecked && isAdmin ? (
-              <TabsTrigger value="workflow-policies">
-                <ShieldCheck className="h-4 w-4" />
-                {t('tabWorkflowPolicies')}
-              </TabsTrigger>
-            ) : null}
-
-            {!adminChecked ? (
-              <>
-                <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('organizationSettings')}</span>
-                <SettingsTabSkeleton />
-                <SettingsTabSkeleton />
-                {!HIDDEN_SETTINGS_TABS.has('org-members') ? <SettingsTabSkeleton /> : null}
-              </>
-            ) : null}
-            {adminChecked ? (
-              <>
-                <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('organizationSettings')}</span>
-                <TabsTrigger value="organization">
-                  <FolderKanban className="h-4 w-4" />
-                  {t('tabOrganization')}
-                </TabsTrigger>
-                {/* story c4980e70: org-members = /organization/members로 승격(딥링크는 next.config.ts
-                    redirects()가 서버에서 걷어간다) — 트리거·콘텐츠 둘 다 HIDDEN_SETTINGS_TABS에서
-                    차단해야 하는데 트리거만 빠져 있었다(story #3762 발견·회귀 pin). */}
-                {!HIDDEN_SETTINGS_TABS.has('org-members') ? (
-                  <TabsTrigger value="org-members">
-                    <Users className="h-4 w-4" />
-                    {t('tabOrgMembers')}
-                  </TabsTrigger>
-                ) : null}
-                <TabsTrigger value="projects">
-                  <FolderKanban className="h-4 w-4" />
-                  {t('tabProjects')}
-                </TabsTrigger>
-                {/* 7519c3ea: flat webhooks 탭 폐기 — webhook은 멤버/에이전트 관리(members)에 inline 통합. */}
-              </>
-            ) : null}
-
-            {!adminChecked ? (
-              <>
-                <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('billing')}</span>
-                <SettingsTabSkeleton />
-                <SettingsTabSkeleton />
-              </>
-            ) : null}
-            {adminChecked && isAdmin ? (
-              <>
-                <span className="truncate px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('billing')}</span>
-                {isEEEnabled() && (
-                  <TabsTrigger value="billing">
-                    <CreditCard className="h-4 w-4" />
-                    {t('tabBilling')}
-                  </TabsTrigger>
-                )}
-                <TabsTrigger value="usage">
-                  <BarChart2 className="h-4 w-4" />
-                  {t('tabUsage')}
-                </TabsTrigger>
-              </>
-            ) : null}
-
-            {/* E-GHAPP: 연동 — 자체 섹션(결제와 분리·향후 slack/jira 등 통합 표준 위치)·서브라우트 `/settings/integrations`(install-callback 타깃·탭 아닌 발견성 진입점) */}
-            <span className="px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('tabIntegrations')}</span>
-            <Link
-              href={flatHref('/settings/integrations')}
-              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-muted-foreground transition hover:text-foreground"
-            >
-              <Webhook className="h-4 w-4" />
-              {t('tabIntegrations')}
-            </Link>
-
-            <span className="px-2 pb-1 pt-4 text-[10px] font-medium text-muted-foreground">{t('dangerZone')}</span>
-            <TabsTrigger
-              value="danger"
-              className="text-destructive hover:text-destructive data-active:text-destructive data-active:bg-destructive-tint"
-            >
-              <Trash2 className="h-4 w-4" />
-              {t('deleteAccount')}
-            </TabsTrigger>
-          </TabsList>
+        {/* story 4891 (UI-8 AC4) — the section list drawn with the ds parts (settings-nav-list.tsx · which sections: settings-nav.ts). ≥lg (1024 — the breakpoint SSOT): always beside the pane. Below it (a phone · a tablet): the list FIRST — the whole screen
+            while `lnbOpen` (no `?tab=` on arrival) — and the pane with a back row after a section is picked (it used to be a hamburger over a 208px column squeezed next to the pane) */}
+        <div className={`focus-inset shrink-0 overflow-y-auto border-ds-line lg:w-56 lg:border-r ${lnbOpen ? 'flex w-full flex-col' : 'hidden'} lg:flex lg:flex-col`} data-testid="settings-nav-column">
+          <h1 className="px-4 pb-2 pt-4 text-ds-title font-semibold text-ds-ink">{t('title')}</h1>
+          <SettingsNav groups={navGroups} activeTab={activeTab} integrationsHref={flatHref('/settings/integrations')} />
         </div>
 
         {/* Right content */}
-        <div className="focus-inset flex-1 min-w-0 overflow-y-auto">
-          {/* Mobile toggle button — story #2683(모바일 IA S3): 전역 GNB 유일문(SidebarTrigger)
-              폐기(AC1). 그 문은 top-bar.tsx로 옮겨(태블릿 전용) 두 토글 혼동을 없앴다 — 이
-              헤더에 남는 건 설정 내부 LNB 토글 하나뿐이다. */}
-          <div className="lg:hidden flex items-center gap-2 border-b px-4 py-2">
-            <button
-              type="button"
-              onClick={() => setLnbOpen((v) => !v)} aria-expanded={lnbOpen}
-              className="md:hidden rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-              aria-label={tNav('toggleSidebar')}
-            >
-              {lnbOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-            </button>
-            <span className="text-sm font-medium">{t('title')}</span>
+        <div className={`focus-inset min-w-0 flex-1 overflow-y-auto ${lnbOpen ? 'hidden lg:block' : ''}`} data-testid="settings-pane">
+          {/* a phone, after a section is picked: back to the list (a 44px target) + where you are */}
+          <div className="flex items-center gap-2 border-b border-ds-line px-2 py-1 lg:hidden" data-testid="settings-back-row">
+            <IconButton label={t('backToList')} icon="arrow_back" size="lg" onClick={() => setLnbOpen(true)} />
+            <span className="min-w-0 flex-1 truncate text-ds-card-title font-semibold text-ds-ink">{activeLabelKey ? t(activeLabelKey) : t('title')}</span>
           </div>
           <div className="w-full max-w-3xl mx-auto p-6">
 

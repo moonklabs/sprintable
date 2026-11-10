@@ -529,7 +529,7 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 예외 축적 아님 — 아래 회귀가드가 "선언된 건 전부 실제로 걸린다"를 지킨다).
   'docs.indexDocCount <-> docs.title',
   'sprints.days <-> sprints.overdueBadge',
-  'onboarding.projectLimitExceededError <-> settings.tabProjects',
+  // story 4891 (settings list rebuild): `onboarding.projectLimitExceededError <-> settings.tabProjects` is no longer exempted — the tab's label is now read only from settings-nav.ts (a data list), not in a file that also reads the long sentence, so the pair does not meet any more (the dead-exemption guard below asks for its removal).
   // story #3758 2회차(위 docstring 정정 참고) — memberLimitExceededError가 "구성원을"로
   // 바뀌며 add-member-modal.tsx 안에서 roleMember="구성원"(단순 라벨)과 다시 겹친다.
   // tabProjects 짝과 완전히 동형(짧은 라벨 vs 그 라벨을 포함하는 긴 안내문) — 실제
@@ -697,7 +697,7 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 정확히 같은 클래스 — 「프로젝트」·「플랜」·「삭제」모두 그 자체엔 수가 없는 짧은
   // 라벨/탭 제목/버튼 동사고, 헷갈리는 건 «두 개의 서로 다른 수»가 아니라 그 라벨을
   // 포함하는 긴 안내 문장 하나뿐이다(docs.title<->docs.indexDocCount류 정상 패턴).
-  'settings.orgDeleteImpactProjects <-> settings.tabProjects',
+  // (story 4891: `settings.orgDeleteImpactProjects <-> settings.tabProjects` removed for the same reason — see above.)
   // orgPlanLabel="플랜"(조직 탭 필드 라벨) <-> onboarding.projectLimitExceededError
   // ("무료 플랜은 프로젝트를 {limit}개까지...", 온보딩 플랜-한도 토스트) — 두 화면이
   // 동시에 뜨는 자리가 아니고, "플랜"이라는 공통 명사 하나만 겹친다.
