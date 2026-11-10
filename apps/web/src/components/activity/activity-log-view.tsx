@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -17,6 +17,10 @@ import { actorRowLabels, memberDisplayLabel, memberOptionLabels } from '@/lib/me
 import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/lib/schedule-format';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { ActivityTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { useMediaQuery } from '@/lib/use-media-query';
+import { SectionHeader } from '@/components/ds/section-header';
+import { AuditDetail } from './audit-detail';
+import { formatDayHeader, groupByDay } from './group-by-day';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -228,6 +232,41 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   // [SID:4311 PR 2 · 유나] 피드 행의 행위자 — actor_id마다 한 번 · 시스템 행 제외 · 불러온 줄들 안에서만 겹침 판정.
   const actorLabels = actorRowLabels(items.map((item) => ({ id: item.actor_id, label: item.actor_id ? memberDisplayLabel(item.actor_name, tc) : null })));
 
+  // story 4892 (UI-9 활동 §2) — a row is chosen to read its details (the hover-only tooltip's facts, made visible). Wide (lg+): the details sit in a column beside the
+  // list; narrow: they open right under the chosen row and the keyboard focus moves into them. One instance is drawn at a time, so the row's `aria-controls` id is unique.
+  const isWide = useMediaQuery('(min-width: 1024px)');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const detailRef = useRef<HTMLElement | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLButtonElement>());
+  const selected = selectedId ? items.find((i) => i.id === selectedId) ?? null : null;
+  useEffect(() => {
+    // a new list (filter change, reload) that no longer holds the chosen row clears the choice
+    if (selectedId && !items.some((i) => i.id === selectedId)) setSelectedId(null);
+  }, [items, selectedId]);
+  // Focus moves only on a KEYBOARD activation (Enter / Space fire `click` with detail 0; a mouse or touch click has detail >= 1 and must not steal the focus), and it is
+  // done by an effect after the commit — the details element exists by then, and a pending timer can never fire after an unmount.
+  const [focusRequest, setFocusRequest] = useState<{ kind: 'detail' | 'row'; id: string } | null>(null);
+  useEffect(() => {
+    if (!focusRequest) return;
+    if (focusRequest.kind === 'detail') detailRef.current?.focus();
+    else rowRefs.current.get(focusRequest.id)?.focus();
+    setFocusRequest(null);
+  }, [focusRequest]);
+  const toggleRow = (id: string, viaKeyboard: boolean) => {
+    setSelectedId((cur) => (cur === id ? null : id));
+    if (!isWide && viaKeyboard && selectedId !== id) setFocusRequest({ kind: 'detail', id });
+  };
+  const closeDetail = () => {
+    const id = selectedId;
+    setSelectedId(null);
+    if (id) setFocusRequest({ kind: 'row', id });   // the close button disappears with the details — hand the focus back to the row that opened them
+  };
+  const displayTz = useViewerTimeZone() ?? 'UTC';
+  const locale = useLocale();
+  const dayGroups = groupByDay(items, displayTz);
+  const auditHeading = (g: { key: string; kind: 'today' | 'yesterday' | 'date' }) => (g.kind === 'today' ? t('dayToday') : g.kind === 'yesterday' ? t('dayYesterday') : formatDayHeader(g.key, locale));
+  const DETAIL_ID = 'audit-detail';
+
   const entityTypeOptions: SelectOption[] = [
     { value: ALL, label: t('filterAll') },
     ...ENTITY_TYPES.map((et) => ({ value: et, label: et })),
@@ -287,8 +326,9 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
           </div>
         </div>
 
-        {/* Table */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">
+        {/* List column (+ the details column beside it from lg) */}
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+        <div className="min-w-0 flex-1 overflow-y-auto px-6 py-4">
           {forbidden ? (
             <div className="flex h-64 items-center justify-center">
               <EmptyState title={t('forbiddenTitle')} description={t('forbiddenDescription')} />
@@ -323,8 +363,30 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
             />
           ) : (
             <div className="space-y-1.5">
-              {items.map((item) => (
-                <ActivityRow key={item.id} item={item} rowLabel={item.actor_id ? actorLabels.get(item.actor_id) : undefined} />
+              {dayGroups.map((group) => (
+                <section key={group.key} aria-label={auditHeading(group)} data-testid="audit-day-group" className="space-y-1.5">
+                  <SectionHeader title={auditHeading(group)} level={2} className="rounded-ds-control" />
+                  {group.items.map((item) => {
+                    const isSelected = item.id === selectedId;
+                    return (
+                      <div key={item.id}>
+                        <ActivityRow
+                          item={item}
+                          rowLabel={item.actor_id ? actorLabels.get(item.actor_id) : undefined}
+                          selected={isSelected}
+                          controlsId={DETAIL_ID}
+                          onToggle={(viaKeyboard) => toggleRow(item.id, viaKeyboard)}
+                          buttonRef={(el) => { if (el) rowRefs.current.set(item.id, el); else rowRefs.current.delete(item.id); }}
+                        />
+                        {isSelected && !isWide ? (
+                          <div className="mt-1.5">
+                            <AuditDetail ref={detailRef} id={DETAIL_ID} item={item} actorLabel={item.actor_id ? actorLabels.get(item.actor_id) ?? null : null} claim={auditClaim(item)} onClose={closeDetail} />
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </section>
               ))}
               {offset + PAGE_SIZE < total && (
                 <div className="pt-3 text-center">
@@ -335,6 +397,16 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
               )}
             </div>
           )}
+        </div>
+        {isWide && !forbidden && !loadError ? (
+          <aside aria-label={t('detailHeading')} className="w-[360px] shrink-0 overflow-y-auto border-l border-ds-line p-4">
+            {selected ? (
+              <AuditDetail ref={detailRef} id={DETAIL_ID} item={selected} actorLabel={selected.actor_id ? actorLabels.get(selected.actor_id) ?? null : null} claim={auditClaim(selected)} onClose={closeDetail} />
+            ) : (
+              <p className="m-0 text-ds-small text-ds-ink-3">{t('detailPickRow')}</p>
+            )}
+          </aside>
+        ) : null}
         </div>
       </div>
     </>
@@ -348,11 +420,6 @@ export function auditClaim(item: ActivityLogItem): string {
   return item.action;
 }
 
-export function auditContextTooltip(item: ActivityLogItem): string | undefined {
-  const entries = item.context ? Object.entries(item.context) : [];
-  const lines = [`action: ${item.action}`, ...entries.map(([k, v]) => `${k}: ${String(v)}`)];
-  return lines.join('\n');
-}
 
 // story #2923(P0-E AQ4, 그라운딩 발견) — actor_type 무관하게 항상 human prop으로만 넘겨(agent
 // prop 미사용) 시안의 "아바타 shape로 human/agent 구분"이 이 표면에서 안 걸렸다. AuditRow가
@@ -383,7 +450,14 @@ export function auditActorProps(item: ActivityLogItem, t: (key: string) => strin
   return { human: { name, ...label, role: item.actor_type ?? 'human' } };
 }
 
-function ActivityRow({ item, rowLabel }: { item: ActivityLogItem; rowLabel?: string }) {
+function ActivityRow({ item, rowLabel, selected, controlsId, onToggle, buttonRef }: {
+  item: ActivityLogItem;
+  rowLabel?: string;
+  selected: boolean;
+  controlsId: string;
+  onToggle: (viaKeyboard: boolean) => void;
+  buttonRef: (el: HTMLButtonElement | null) => void;
+}) {
   // story #3493 — 감사로그 created_at은 "기록" — 3436 묶음 8 정본(formatRelativeTime)
   // 으로 통일. document.documentElement.lang 수동 판독도 useLocale()로 정리(같은 뜻,
   // 정본 훅 사용).
@@ -393,16 +467,34 @@ function ActivityRow({ item, rowLabel }: { item: ActivityLogItem; rowLabel?: str
   const time = formatViewerRelativeTime(item.created_at, locale, useViewerTimeZone());
   const tc = useTranslations('common');
   const { human, agent } = auditActorProps(item, tc, rowLabel);
+  // story 4892 — a row opens its details (aria-expanded + aria-controls). The visible row is a ProofCapsule — block elements, and for an agent a focusable avatar — which may not sit inside
+  // a button element; so the row is two layers: the visible capsule (inert: no tab stop, not read twice) and a transparent button laid over it whose accessible name is the row's own words.
+  const actor = rowLabel ?? item.actor_name ?? '';
+  const rowName = [actor, auditClaim(item), time].filter(Boolean).join(' · ');
   return (
-    <div title={auditContextTooltip(item)}>
-      <ProofCapsule
-        density="audit"
-        proofState={deriveAuditProofState(item.action)}
-        stateLabel={item.action}
-        claim={auditClaim(item)}
-        now={time}
-        human={human}
-        agent={agent}
+    <div data-selected={selected} className="group/row relative rounded-ds-panel transition-colors hover:bg-ds-surface-high data-[selected=true]:bg-ds-surface-high">
+      <div inert aria-hidden="true">
+        <ProofCapsule
+          density="audit"
+          proofState={deriveAuditProofState(item.action)}
+          stateLabel={item.action}
+          claim={auditClaim(item)}
+          now={time}
+          human={human}
+          agent={agent}
+        />
+      </div>
+      <Button
+        ref={buttonRef}
+        type="button"
+        variant="ghost"
+        aria-label={rowName}
+        title={rowName}   // the overlay covers the row, so the truncated-claim hover tooltip now lives here (the whole words of the row)
+        aria-expanded={selected}
+        aria-controls={selected ? controlsId : undefined}
+        onClick={(e) => onToggle(e.detail === 0)}
+        data-audit-row
+        className="absolute inset-0 h-auto min-h-0 w-full min-w-0 rounded-ds-panel p-0 hover:bg-transparent aria-expanded:bg-transparent"
       />
     </div>
   );
