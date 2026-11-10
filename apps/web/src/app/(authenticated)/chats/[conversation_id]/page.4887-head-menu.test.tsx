@@ -163,8 +163,39 @@ describe('ConversationPage — the room head menu (story 4887 · UI-4 P3-a)', ()
   it('⭐ choosing «알림 설정» opens the delivery-contract window and closes the menu', async () => {
     stubFetch(true, false, 'group'); await mount(); await openMenu();
     await act(async () => { (document.querySelector('[data-testid="room-head-settings"]') as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(document.querySelector(`[aria-label="${koMessages.chats.deliveryContractFreeResponseLabel}"]`)).not.toBeNull();
-    expect(document.querySelector('[data-testid="room-head-settings"]')).toBeNull(); // the menu closed
+    // the window mounts and takes focus; the menu closes — poll for both (their order depends on the load of the run). «Closed» is the menu's OPEN STATE (the trigger's aria-expanded), not whether the popup's element is already out of the DOM — that is the library's own exit timing
+    await vi.waitFor(() => {
+      expect(document.querySelector(`[aria-label="${koMessages.chats.deliveryContractFreeResponseLabel}"]`)).not.toBeNull();
+      expect(triggerOf()!.getAttribute('aria-expanded')).toBe('false'); // reverted (menu never closes) → "true"
+    });
   });
+  // codex review of the first head (PR 5520): three real accessibility defects
+  it('⭐ the muted state is spoken at every width — role=status, and the words are sr-only below sm (shown from sm), never display:none', async () => {
+    stubFetch(true, true); await mount();
+    const indicator = container.querySelector('[data-testid="room-muted-indicator"]') as HTMLElement;
+    expect(indicator.getAttribute('role')).toBe('status');
+    const words = [...indicator.querySelectorAll('span')].find((e) => e.textContent === koMessages.chats.notificationsMuted) as HTMLElement;
+    expect(words.className).toContain('sr-only'); // reverted (`hidden sm:inline`) → a phone screen reader hears nothing
+    expect(words.className).toContain('sm:not-sr-only');
+    expect(words.className).not.toMatch(/(^|\s)hidden(\s|$)/);
+  });
+
+  it('⭐ the mute menu item carries no aria-pressed (it is not valid on a menuitem — the words themselves say 끄기 / 켜기)', async () => {
+    stubFetch(true, true); await mount(); await openMenu();
+    const mute = document.querySelector('[data-testid="room-head-mute"]') as HTMLElement;
+    expect(mute.getAttribute('aria-pressed')).toBeNull(); // reverted → "true"
+  });
+
+  it('⭐ closing the notification-settings window returns focus to the «⋯» button — not the page body (the menu item that opened it is gone)', async () => {
+    stubFetch(true, false, 'group'); await mount(); await openMenu();
+    await act(async () => { (document.querySelector('[data-testid="room-head-settings"]') as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await vi.waitFor(() => expect([...document.querySelectorAll('button')].some((b) => b.getAttribute('aria-label') === koMessages.common.close)).toBe(true));
+    const close = [...document.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === koMessages.common.close) as HTMLElement;
+    await act(async () => { close.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await vi.waitFor(() => {
+      expect(document.querySelector(`[aria-label="${koMessages.chats.deliveryContractFreeResponseLabel}"]`)).toBeNull(); // the window is gone
+      expect(document.activeElement).toBe(triggerOf()); // reverted (no finalFocus) → body
+    });
+  });
+
 });

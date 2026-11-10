@@ -120,6 +120,7 @@ export default function ConversationPage() {
   useEffect(() => { conversationIdRef.current = conversation_id; }, [conversation_id]);
   const [showAddParticipant, setShowAddParticipant] = useState(false);
   const [showDeliveryContract, setShowDeliveryContract] = useState(false);
+  const headMenuTriggerRef = useRef<HTMLButtonElement>(null); // the «⋯» button: where focus returns after the notification-settings window closes (the menu item that opened it is gone)
   const [headMenuOpen, setHeadMenuOpen] = useState(false); // story 4887 (UI-4 P3-a) — the room head's «⋯» menu (controlled: the library closes it through onOpenChange after an item is chosen)
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
@@ -367,9 +368,10 @@ export default function ConversationPage() {
               {/* story 4887 (UI-4 P3-a) — the room head shows what the person reaches for (add participants) and keeps the rest in one named «⋯» menu (mute · notification settings): three small icon buttons — one of them (the gear) with no name but a title — became «two shown + a menu».
                   The muted STATE stays visible (a person must see a room is muted without opening anything). per-대화 알림 mute 토글 (270c87e6): mute=BellOff + "알림 꺼짐" 시각 표시. */}
               {meta.muted ? (
-                <span className="flex items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground" data-testid="room-muted-indicator">
+                <span className="flex items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground" role="status" data-testid="room-muted-indicator">
                   <Icon name="notifications_off" size={14} />
-                  <span className="hidden sm:inline">{t('notificationsMuted')}</span>
+                  {/* the words stay for assistive tech below sm (sr-only) and show from sm up — a phone screen reader must still hear that the room is muted */}
+                  <span className="sr-only sm:not-sr-only">{t('notificationsMuted')}</span>
                 </span>
               ) : null}
               <button
@@ -384,6 +386,7 @@ export default function ConversationPage() {
               </button>
               <DropdownMenu open={headMenuOpen} onOpenChange={setHeadMenuOpen}>
                 <DropdownMenuTrigger
+                  ref={headMenuTriggerRef}
                   type="button"
                   aria-label={t('roomMoreActions')}
                   title={t('roomMoreActions')}
@@ -395,7 +398,6 @@ export default function ConversationPage() {
                 <DropdownMenuContent align="end" sideOffset={6} className="w-52">
                   <DropdownMenuItem
                     onClick={() => void handleToggleMute()}
-                    aria-pressed={meta.muted}
                     data-testid="room-head-mute"
                   >
                     <Icon name={meta.muted ? 'notifications' : 'notifications_off'} size={16} className="text-muted-foreground" />
@@ -481,6 +483,7 @@ export default function ConversationPage() {
           conversationType={meta.type}
           freeResponse={meta.freeResponse}
           onClose={() => setShowDeliveryContract(false)}
+          returnFocusRef={headMenuTriggerRef}
           onFreeResponseChange={(next) => setMeta((m) => (m ? { ...m, freeResponse: next } : m))}
         />
       )}
