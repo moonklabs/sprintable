@@ -9,6 +9,7 @@ import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
 import { findActiveStaticItemId, isResourceItemActive } from '@/lib/nav-active';
+import { isRealShortcut } from '@/lib/keyboard-shortcuts';
 import { useCommandPalette } from '@/components/command-palette/command-palette-context';
 import { ProfileMenu } from '@/components/nav/profile-menu';
 import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosure';
@@ -478,10 +479,10 @@ export function AppSidebar({
                       >
                         <Icon />
                         <span data-nav-label>{label}</span>
-                        {item.scope === 'project' || item.kbdHint ? (
+                        {item.scope === 'project' || (item.kbdHint && isRealShortcut([item.kbdHint])) ? (
                           <span className="ml-auto flex shrink-0 items-center gap-1.5">
                             {item.scope === 'project' ? <ScopeMark>{t('scopeProject')}</ScopeMark> : null}
-                            {item.kbdHint ? <KbdHint>{item.kbdHint}</KbdHint> : null}
+                            {item.kbdHint && isRealShortcut([item.kbdHint]) ? <KbdHint>{item.kbdHint}</KbdHint> : null}
                           </span>
                         ) : null}
                         {item.badgeKey && badgeCount > 0 ? (

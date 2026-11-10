@@ -210,11 +210,12 @@ describe('AppSidebar — story #3824 → #4885 새 구조 렌더 회귀가드(�
     expect(workLink?.getAttribute('href')).toBe('/flow');
   });
 
-  it('kbd 힌트(일감=B)가 정확히 붙는다', async () => {
+  it('⭐받는 곳 없는 kbd 힌트(일감 «B»)는 그리지 않는다(story #4885 · 단축키 표시 정직) — 일감 줄엔 「프로젝트」 표식만', async () => {
     expandAllGroups();
     await mount();
     const workBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
-    expect(workBtn?.textContent).toContain('B');
+    expect(workBtn?.textContent).toBe('일감프로젝트');
+    expect(workBtn?.querySelector('kbd')).toBeNull();
   });
 
   // story #9c5e82dc(IA·S3, 유나 § 確定 2026-09-08) — 「프로젝트」 표식은 scope:'project'
@@ -240,17 +241,13 @@ describe('AppSidebar — story #3824 → #4885 새 구조 렌더 회귀가드(�
     expect(todayBtn?.textContent).not.toContain('프로젝트');
   });
 
-  it('순서는 라벨→표식→kbd다(일감: "일감" 다음 "프로젝트" 다음 "B")', async () => {
+  it('순서는 라벨→표식이다(일감: "일감" 다음 "프로젝트") — kbd는 실제 단축키가 있을 때만 그 뒤에 붙는다(지금은 없음)', async () => {
     expandAllGroups();
     await mount();
     const workBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
     const text = workBtn?.textContent ?? '';
-    const labelIdx = text.indexOf('일감');
-    const scopeIdx = text.indexOf('프로젝트');
-    const kbdIdx = text.lastIndexOf('B');
-    expect(labelIdx).toBeGreaterThanOrEqual(0);
-    expect(scopeIdx).toBeGreaterThan(labelIdx);
-    expect(kbdIdx).toBeGreaterThan(scopeIdx);
+    expect(text.indexOf('일감')).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf('프로젝트')).toBeGreaterThan(text.indexOf('일감'));
   });
 
   it('표식은 칩/배지 모양(테두리·배경)을 안 쓴다(유나 § — 성질이지 행위가 아니다)', async () => {

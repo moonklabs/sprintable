@@ -23,6 +23,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { buildActionCommands, type ActionCommand } from './command-palette-actions';
+import { isRealShortcut } from '@/lib/keyboard-shortcuts';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { fetchWithAuth } from '@/lib/db/client';
 import { NAV_GROUPS, CHAT_CENTER_ITEM, OTHER_NAV_ITEMS } from '@/lib/nav-config';
@@ -53,13 +54,9 @@ interface StoryTitleResult {
 // story #3698(IA·후속, PO 確定 2026-09-08) — 사이드바 KbdHint(app-sidebar.tsx)와 같은
 // 단축키를 파생 항목에도 이식한다(id 매칭 — NAV_GROUPS 자체엔 팔레트 전용 단축키 개념이
 // 없다, kbdHint는 사이드바 표시용 다른 축이라 재사용 안 함).
-const NAV_ITEM_SHORTCUTS: Record<string, string[]> = {
-  inbox: ['G', 'I'],
-  board: ['G', 'B'],
-  chats: ['G', 'M'],
-  'org-workforce': ['G', 'A'],
-  docs: ['G', 'S'],
-};
+// story #4885 — 그 단축키(G I · G B · G M · G A · G S)를 받는 키 처리는 코드에 없었다(표시만 있던 거짓) → 표를 비웠다. 키 처리가 실제로 생기면 그 PR이 lib/keyboard-shortcuts.ts의
+// REAL_SHORTCUTS에 먼저 올리고 여기에 다시 적는다(아래 `isRealShortcut` 관문이 표에 없는 조합은 그리지 않는다).
+const NAV_ITEM_SHORTCUTS: Record<string, string[]> = {};
 
 // story #2930 I3(PO 확定 2026-08-22)·#2931 — /sprints·/epics는 nav-config.ts NAV_GROUPS에
 // 없는(S1에서 'board'가 flow+sprints를 흡수) 라우트지만, WorkspaceFrameTabs(flow/sprints
@@ -213,7 +210,7 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
       label: item.labelSource === 'anchor' ? t(item.labelKey) : goDestinationLabel(tNav(item.labelKey)),
       // story #4231 — 워크스페이스 없는(flat) 목적지는 사이드바·더보기와 같이 현재 프로젝트(`?p=`)를 싣는다.
       href: item.isWorkspaceless ? flatHref(item.href) : item.href,
-      shortcut: NAV_ITEM_SHORTCUTS[item.id],
+      shortcut: isRealShortcut(NAV_ITEM_SHORTCUTS[item.id]) ? NAV_ITEM_SHORTCUTS[item.id] : undefined,
     }));
     // resourceHref는 orgSlug·currentProjectSlug의 순수 파생(그 값들이 이미 deps에 있음) —
     // 함수 참조 자체를 deps에 넣으면 매 렌더 새로 만들어져 메모가 무의미해진다.

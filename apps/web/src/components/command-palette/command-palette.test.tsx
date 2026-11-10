@@ -168,15 +168,10 @@ describe('CommandPalette — navigate 목적지 = NAV_GROUPS 파생(story #3698 
     expect(document.body.textContent).toContain('설정'); // settings(예전엔 누락)
   });
 
-  it('기존 단축키(G I/B/M/A/S)가 파생 항목에도 그대로 보존된다', async () => {
+  it('⭐팔레트는 받는 곳 없는 단축키를 보여 주지 않는다(story #4885) — G I/B/M/A/S는 표시만 있고 키 처리가 없어 걷었다(실제 단축키는 lib/keyboard-shortcuts.ts REAL_SHORTCUTS뿐)', async () => {
     await mount();
     const shortcutTexts = [...document.querySelectorAll('kbd')].map((el) => el.textContent);
-    expect(shortcutTexts).toContain('G');
-    expect(shortcutTexts).toContain('I');
-    expect(shortcutTexts).toContain('B');
-    expect(shortcutTexts).toContain('M');
-    expect(shortcutTexts).toContain('A');
-    expect(shortcutTexts).toContain('S');
+    expect(shortcutTexts).toEqual([]);
   });
 
   it('go-sprints·go-epics·go-retro 가드 앵커는 그대로 남아 있다(#2376 orphan-route 가드용, 지우면 안 됨)', async () => {

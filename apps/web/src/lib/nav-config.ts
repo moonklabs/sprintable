@@ -85,7 +85,7 @@ const ITEM_ORG_BRIEFING: NavItemConfig = { id: 'org-briefing', labelKey: 'zoneNo
 // 결재: «오늘» 화면이 받은 함 하나로 합쳐지기 전(오늘 화면 주인 UI-5 몫)까지 결재의 입구다 — 폰 하단 «결재» 탭과 같은 이름 · 같은 착지(게이트 탭) · 같은 배지(내가 지정된 대기 결재 수). 알림 목록은 알림 종과 같은 화면의 다른 탭.
 // 사이드바에 «결재»가 없어 웹의 입구가 알림 종 하나뿐이던 것(UI-2 AC1)을 막는다. 막다른 곳을 만들지 않으려고 «오늘» 바로 아래에 둔다.
 const ITEM_INBOX: NavItemConfig = { id: 'inbox', labelKey: 'approvals', descriptionKey: 'descInbox', icon: Inbox, kind: 'static', path: '/inbox?tab=gates', badgeKey: 'inbox' };
-const ITEM_BOARD: NavItemConfig = { id: 'board', labelKey: 'zoneDev', descriptionKey: 'descBoard', icon: Workflow, kind: 'resource', path: 'flow', kbdHint: 'B', scope: 'project' };
+const ITEM_BOARD: NavItemConfig = { id: 'board', labelKey: 'zoneDev', descriptionKey: 'descBoard', icon: Workflow, kind: 'resource', path: 'flow', scope: 'project' };
 // 목표 · 실행은 일감의 탭줄로 올라가기 전까지(후속 칸) 일감 바로 아래에서 입구를 갖는다.
 const ITEM_GOALS: NavItemConfig = { id: 'goals', labelKey: 'goals', descriptionKey: 'descGoals', icon: Layers, kind: 'resource', path: 'goals', scope: 'project' };
 const ITEM_LOOPS: NavItemConfig = { id: 'loops', labelKey: 'loops', descriptionKey: 'descLoops', icon: FlaskConical, kind: 'resource', path: 'loops', scope: 'project' };
