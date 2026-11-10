@@ -46,7 +46,7 @@ def test_the_import_tool_description_no_longer_promises_that_the_server_reads_th
 def test_the_create_artifact_description_points_image_path_at_the_mac_app_only():
     desc = _DESC["sprintable_create_artifact"]
     assert "파일이 로컬에 있으면 그 도구의 image_path" not in desc
-    assert "맥 앱으로 붙은 에이전트는 그 도구의 image_path" in desc
+    assert "그 도구의 image_path를 쓸 수 있다" in desc
 
 
 def test_the_input_docstring_does_not_call_this_server_a_local_process():
@@ -82,3 +82,33 @@ def test_the_docs_do_not_call_every_server_remote():
     assert "호스팅" in doc and "uvx" in doc
     agents = (_REPO / "AGENTS.md").read_text(encoding="utf-8")
     assert "uvx sprintable" in agents and "The hosted MCP server is remote" not in agents
+
+
+def test_no_sentence_left_that_promises_the_app_reads_the_file_unconditionally():
+    """formal verdict (Kadir, codex): four places still said «Mac app → the app reads it» with no condition, which is false for an app that does not convert yet and for a local MCP"""
+    create_desc = _DESC["sprintable_create_artifact"]
+    assert "맥 앱으로 붙은 에이전트는 그 도구의 image_path를(앱이 파일을 읽어 보낸다)" not in create_desc
+    assert "변환하는 맥 앱이면" in create_desc and "서버가 에이전트 컴퓨터에서 돌면" in create_desc
+    import_desc = _DESC["sprintable_import_image_artifact"]
+    assert "(맥 앱이면) image_path" not in import_desc, "the large-image advice must not name the Mac app as the only way image_path is read"
+    fn_doc = va.import_image_artifact.__doc__ or ""
+    assert "맥 앱으로 붙은 에이전트에 권장" not in fn_doc, "the old line told a local user the wrong thing"
+    assert "서버가" in fn_doc and "앱이" in fn_doc and "변환을 하는 버전" in fn_doc
+    cls_doc = va.ImportImageArtifactInput.__doc__ or ""
+    assert "이 변환을 하는 앱 버전이면" in cls_doc
+    agents = (_REPO / "AGENTS.md").read_text(encoding="utf-8")
+    assert "the app reads the file for it" not in agents
+    assert "Prefer `image_path` whenever it\n  can be read" in agents
+
+
+@pytest.mark.anyio
+async def test_the_refusal_does_not_diagnose_it_only_names_a_possible_cause(tmp_path):
+    """formal verdict (Kadir): the code only knows is_file() failed — a typo gives the same text — so «this text means the app is old» is a guess, not a diagnosis"""
+    client = MagicMock()
+    client.post = AsyncMock()
+    with patch.object(va, "client", client):
+        out = await va.import_image_artifact(va.ImportImageArtifactInput(title="Shot", image_path=str(tmp_path / "typo.png")))
+    text = out[0].text
+    assert "이 글이 보이면 앱이 낡았" not in text, "stated as a diagnosis"
+    assert "가능한 까닭 중 하나" in text
+    assert "경로가 틀렸을 수 있고" in text, "a typo stays the first cause named"

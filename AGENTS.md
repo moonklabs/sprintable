@@ -116,5 +116,6 @@ in one call, not a bare URL).
   also call `sprintable_create_artifact` afterward, there's nothing left to do.
 - Only use `image_base64` (either via the MCP tool or curl above) for small images —
   the base64 string is typed/re-typed as text, and a single wrong character silently
-  corrupts the stored image (real incident, story #3753). Prefer `image_path` when the agent is
-  connected through the Mac app (see above) — the app reads the file for it.
+  corrupts the stored image (real incident, story #3753). Prefer `image_path` whenever it
+  can be read (the MCP runs on the agent's computer, or the Mac app is a version that converts it — see
+  above).
