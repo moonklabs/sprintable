@@ -12,7 +12,8 @@ import { Button } from '@/components/ui/button';
 import { cardVariants } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { DesktopDownloadCard, notAMac } from '@/components/desktop/desktop-download-card';
-import { PhoneAppCard } from '@/components/desktop/phone-app-card';
+import { PhoneAppCard, PhoneAppRow } from '@/components/desktop/phone-app-card';
+import { Chip } from '@/components/ds/chip';
 import { PhoneFirstScreen } from '@/components/desktop/phone-first-screen';
 import { appSetupLink } from '@/lib/auth/native-return-app';
 import { desktopApp } from '@/lib/desktop-app';
@@ -46,6 +47,7 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
   const to = useTranslations('onboarding');
   // the device is read after mount (null on the server and before the first read — no hydration mismatch), as the card does
   const { inPhoneApp } = usePhoneBridge();
+  const [downloaded, setDownloaded] = useState(false); // story 4891: the download was pressed — the «after the download» step is shown from here
   const [advancedBusy, setAdvancedBusy] = useState(false); // story 4766: while the web way's press is making the agent and its key, the other way out waits
   const finish = () => { if (advancedBusy) return; if (markLeaving()) onFinish(); }; // stops the flows that are out; a second tap is not a second finish // a way out: a start still being waited for in the phone's screen must not move the page after it
   const elsewhere = useSyncExternalStore(noSubscribe, () => notAMac(navigator.userAgent, inPhoneApp), () => null);
@@ -79,8 +81,9 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
     );
   }
 
+  // story 4891 (PO 11-10): which organization the app attaches to stays on the screen (it stops a wrong attach) — but as «시작 조직 [이름]», one chip, not a sentence
   const orgLine = orgName
-    ? <p className="break-keep text-xs text-muted-foreground" data-testid="onboarding-first-org">{t('orgLine', { org: orgName })}</p>
+    ? <p className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground" data-testid="onboarding-first-org">{t('orgLead')} <Chip className="min-w-0 max-w-full truncate">{orgName}</Chip></p>
     : null;
 
   return (
@@ -105,15 +108,16 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
         <>
           {/* the h1 already says what this is — the card's own «데스크톱 앱» title is not drawn twice (Yuna A-2) */}
           {/* the 3983 funnel's «went the desktop way» signal — sent where the fork's app choice used to send it, now on the download press */}
-          <DesktopDownloadCard hideTitle ctaLabel={t('macCta')} onCta={() => emitOnboardingEvent('desktop_handoff_selected', { agent_id: null, flow: 'onboarding' })} />
-          <p className="break-keep text-xs text-muted-foreground" data-testid="onboarding-first-after-note">{to('download.afterNote')}</p>
+          <DesktopDownloadCard hideTitle ctaLabel={t('macCta')} onCta={() => { setDownloaded(true); emitOnboardingEvent('desktop_handoff_selected', { agent_id: null, flow: 'onboarding' }); }} />
+          {/* story 4891 (PO 11-10): «after the download, open the app…» is the next step — it is said once the download is pressed, not before (the screen before the press is read for «what do I press») */}
+          {downloaded ? <p className="break-keep text-xs text-muted-foreground" data-testid="onboarding-first-after-note">{to('download.afterNote')}</p> : null}
           {/* story 4766 (AC1): the app that is already installed is opened, not downloaded again (the link is the host's own scheme — dev or prod) */}
           <p className="break-keep text-xs text-muted-foreground" data-testid="onboarding-first-open-note">
             {t('openAppLead')}{' '}
             <a href={appSetupLink(null)} className="font-medium text-primary underline-offset-2 hover:underline" data-testid="onboarding-first-open-app">{t('openApp')}</a>
           </p>
           {/* story 4671 (U3): a Mac draws the phone app's QR too — the person at the Mac is who needs it; nothing to get → nothing drawn */}
-          <PhoneAppCard />
+          <PhoneAppRow />
           {orgLine}
           {/* story 4766 (AC1): the app is the one way offered; the web way is folded under «고급» (a closed disclosure, no longer a link to a three-screen wizard) */}
           <details className={cn(cardVariants(), 'overflow-hidden')} data-testid="onboarding-first-advanced">
@@ -127,7 +131,7 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
 
       {/* a text line out, not a button in the hierarchy (Yuna A-2 · PO ②) */}
       <p className="break-keep border-t border-border pt-4 text-xs text-muted-foreground" data-testid="onboarding-first-later">
-        {to('download.laterNote')}{' '}
+        {t('laterShort')}{' '}
         <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={finish} disabled={advancedBusy} data-testid="onboarding-first-finish">
           {finishLabel}
         </Button>

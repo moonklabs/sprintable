@@ -168,7 +168,8 @@ export function DesktopDownloadCard({ hideTitle = false, ctaVariant = 'default',
       </Alert>
       )}
       <Button asChild size="sm" variant={ctaVariant} data-testid="desktop-download-button">
-        <a href={downloadUrl} download onClick={onCta}>{ctaLabel ?? t('downloadCta')}</a>
+        {/* story 4891: a middle-click (open in a new tab) starts the download too — it is an auxclick, not a click, so the press is counted on both (the first screen says «after the download…» from the press) */}
+        <a href={downloadUrl} download onClick={onCta} onAuxClick={(e) => { if (e.button === 1) onCta?.(); }}>{ctaLabel ?? t('downloadCta')}</a>
       </Button>
       </>
       )}

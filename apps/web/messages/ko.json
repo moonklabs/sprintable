@@ -1804,15 +1804,16 @@
     "sessionExpiredCta": "다시 로그인",
     "first": {
       "macTitle": "에이전트는 내 Mac에서 돌아가요",
-      "macLead": "Mac 앱을 받아 열고 같은 계정으로 들어가면 폴더를 고르고 에이전트를 바로 시작해요. 이 Mac에 Claude Code나 Codex가 있어야 해요.",
+      "macLead": "앱을 받아 이 계정으로 들어가면 돼요. Claude Code나 Codex가 있어야 해요.",
       "macCta": "Mac 앱 받기",
       "notMacTitle": "지금은 Mac 앱만 있어요",
       "notMacLead": "Mac에서 이 계정으로 로그인해 앱을 받으면 에이전트를 시작할 수 있어요. 다른 곳에서 이미 돌고 있는 에이전트는 지금 바로 연결할 수 있어요.",
-      "advancedSummary": "고급 — 앱 없이, 이미 쓰는 Claude Code · Codex 연결",
+      "advancedSummary": "고급",
       "openAppLead": "이미 앱이 있나요?",
       "openApp": "앱 열기",
       "advancedTitleNotMac": "이미 쓰는 에이전트 연결하기",
-      "orgLine": "{org}에서 시작해요 · 이름은 설정에서 바꿀 수 있어요"
+      "orgLead": "시작 조직",
+    "laterShort": "지금은 건너뛰어도 돼요 — 설정에서 다시 열 수 있어요."
     },
     "phone": {
       "off": {
@@ -7816,6 +7817,7 @@
     "notInApp": "폰의 Sprintable 앱에서 이 화면을 열어 주세요",
     "getApp": "폰 앱 받기",
     "macAppAux": "맥 앱은 맥에서 받아 주세요",
+    "useOnPhone": "폰에서도 쓰기",
     "needPhoneAppBody": "폰에서 이 컴퓨터의 에이전트에 답하고, 멈추거나 지시하려면 폰 앱이 필요해요.",
     "getAppAndroid": "안드로이드 · 구글 플레이",
     "getAppIos": "아이폰 · 앱스토어",
