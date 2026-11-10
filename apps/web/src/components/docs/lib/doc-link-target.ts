@@ -21,8 +21,8 @@ export function previewTarget(d: Preview, wsSlug: string, projSlug: string, curr
   if (!slug || slug === '.' || slug === '..') return null;
   const sameProject = !!(d.projectId && currentProjectId && d.projectId === currentProjectId);
   // the current workspace / project (route parameters) are used only for the project the answer confirms IS the current one — and even then they must look like slugs
-  let org: string | null = d.orgSlug ? d.orgSlug : sameProject ? wsSlug : null;
-  let proj: string | null = sameProject ? projSlug : (d.projectSlug ?? null);
+  const org: string | null = d.orgSlug ? d.orgSlug : sameProject ? wsSlug : null;
+  const proj: string | null = sameProject ? projSlug : (d.projectSlug ?? null);
   if (!isSlugSegment(org) || !isSlugSegment(proj)) return null;
   return docUrl(org, proj, pathSafe(slug));
 }
