@@ -399,7 +399,7 @@ describe('[4714] /phone-start — the start screen at its own address, with a wa
 
   it('where «today» is off the way out says what it goes to (the dashboard · the chat list), as the onboarding\'s own finish button does', async () => {
     await page(true, false);
-    expect(byId('phone-start-finish')?.textContent).toBe('대시보드로');
+    expect(byId('phone-start-finish')?.textContent).toBe('대화로 가기');
     await act(async () => { byId('phone-start-finish')?.click(); });
     expect(assign).toHaveBeenCalledWith('/chats');
   });

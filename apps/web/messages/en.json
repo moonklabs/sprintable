@@ -1704,7 +1704,7 @@
     "advancedTitle": "Advanced",
     "advancedSubtitle": "Webhook notifications · alternate transports (HTTP, SSE)",
     "advancedNote": "Configure webhook notifications and alternate connection methods later.",
-    "dashboardCta": "Go to dashboard",
+    "dashboardCta": "Go to Chats",
     "firstInstructionCta": "Send your first instruction",
     "firstInstructionStarting": "Opening chat…",
     "firstInstructionOpening": "Opening the conversation…",
