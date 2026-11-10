@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { isOwnMessage, useChatSse } from './use-chat-sse';
 import { fetchChatUnreadTotal } from '@/lib/chat-unread-total-client';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
+import { getEffectiveOrgId } from '@/lib/project-context-client';
 
 /**
  * story 4876 — a message event is NOT always «one more unread». The server number (the fetch) and the SSE stream are two views of the same
@@ -14,8 +15,13 @@ import { useSseMultiplexerContext } from '@/components/realtime-provider';
  * is known would count from 0. In those cases the event only means «the number changed» — ask the server again (one shared recount for every badge
  * on the screen, sent once the events go quiet) instead of adding 1. A live event with a server number in hand keeps the instant +1. A request that fails
  * leaves no number we can trust, so the next event asks again instead of adding to a stale one.
- * Known, older and not changed here: nothing in this hook starts over when the organization is switched (the shell's automatic switch raises `bumpOrgSyncVersion()`, the manual switcher
- * `use-unified-switcher.ts` → `router.refresh()` raises nothing), so the badge keeps the old organization's number until the next read, reconnect or focus recount — before and after story 4876.
+ * story 4881 — the number belongs to ONE organization. Switching organization (the switcher's `switchOrg` / `switchOrgAndProject` → `router.refresh()`, or the shell's automatic
+ * switch) keeps this hook mounted, and nothing in it noticed: the badge kept the old organization's number (dev, measured: B 4 → switch to A → badge 4, server 2; a new message
+ * 5 vs 3), because a stream that reconnects for the new organization replays only events the page has not seen — events it already saw are dropped by the per-hook dedup, so no
+ * replay came to ask the server again. Now the hook is keyed on the organization the shell puts on requests (`getEffectiveOrgId`): when it changes, the old number is dropped
+ * at once (never show one organization's number under another's name), answers of requests the old organization sent are ignored, and the server is asked for the new
+ * organization's number. A frame that carries the stream's organization (`stream_org_id`) and names another organization than the current one is from the stream the page just
+ * left — it is ignored, never counted. Not covered: a stream whose frames carry no `stream_org_id` (older server) — those frames are counted as before.
  */
 const RECOUNT_QUIET_MS = 250;
 const RECOUNT_MAX_WAIT_MS = 1500; // a steady stream of events still gets a recount within this long of the burst's first event
@@ -59,7 +65,10 @@ function scheduleServerRecount(): void {
  * 구조(단일 effect·로컬 async 함수)로 맞췄다.
  */
 export function useChatUnreadTotal(currentTeamMemberId?: string): number {
-  const [total, setTotal] = useState(0);
+  // story 4881 — the organization this number is for (what the shell puts on requests). The state remembers which organization its number was counted for, so after a switch the
+  // render itself returns 0 for the new organization until the new number arrives — no effect has to reset it, and an answer for the old organization can never be shown.
+  const orgKey = getEffectiveOrgId() ?? '';
+  const [counted, setCounted] = useState<{ org: string; n: number }>({ org: orgKey, n: 0 });
   const fetchTotalRef = useRef<(() => void) | null>(null);
   // story 4876 — do we hold a server number yet, and is a request for it out right now
   const haveServerCountRef = useRef(false);
@@ -70,14 +79,17 @@ export function useChatUnreadTotal(currentTeamMemberId?: string): number {
 
   useEffect(() => {
     let cancelled = false;
+    // story 4881 — a new organization starts with no number and no request out (the old effect's requests are cancelled above)
+    haveServerCountRef.current = false;
+    requestsOutRef.current = 0;
     async function fetchTotal(fresh = false) {
       // story #4263 AC1 — 공용 요청(진행 중이면 합류): 이 훅이 한 화면에 여럿 마운트돼도 같은 순간 1번(fetchWithAuth · 401 처리는 그 안).
       // ① 이벤트가 부른 재조회(fresh)는 이벤트 전에 뜬 요청에 합류하지 않는다.
       requestsOutRef.current += 1;
       const count = await fetchChatUnreadTotal({ fresh });
+      if (cancelled) return; // story 4881 — a request this effect (this organization) sent: its answer never counts, and it no longer owns the request counter (the next effect reset it)
       requestsOutRef.current -= 1;
-      if (cancelled) return;
-      if (count !== null) { haveServerCountRef.current = true; setTotal(count); }
+      if (count !== null) { haveServerCountRef.current = true; setCounted({ org: orgKey, n: count }); }
       else haveServerCountRef.current = false; // a failed request: the number on screen may be stale — the next event asks again instead of adding 1
     }
     fetchTotalRef.current = () => void fetchTotal(true); // SSE 이벤트(conversation.read · 재연결)용
@@ -103,16 +115,20 @@ export function useChatUnreadTotal(currentTeamMemberId?: string): number {
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('focus', handleVisibility);
     };
-  }, []);
+  }, [orgKey]);
 
   useChatSse({
     // story #4440 — my own message (now echoed to my other tabs) is never unread
     onConversationMessage: (payload) => {
       if (isOwnMessage(payload, currentTeamMemberId)) return;
+      // story 4881 — a frame from the stream the page just left (it names another organization than the current one): not this organization's message
+      const streamOrg = payload.stream_org_id;
+      const nowOrg = getEffectiveOrgId();
+      if (typeof streamOrg === 'string' && nowOrg && streamOrg.toLowerCase() !== nowOrg.toLowerCase()) return;
       // story 4876 — a replayed event (is_backfill), an event with no server number yet, or one that lands while a request is out only says
       // «the number changed»: take the server's number, never prev + 1 (the fetch may already count it)
       if (payload.is_backfill === true || !haveServerCountRef.current || requestsOutRef.current > 0) { scheduleServerRecount(); return; }
-      setTotal((prev) => prev + 1);
+      setCounted((prev) => ({ org: prev.org, n: prev.n + 1 })); // (a +1 on a number of another organization is never shown: the render returns 0 for it and the new organization's recount replaces it)
     },
     onConversationRead: () => fetchTotalRef.current?.(),
     // story #1978(트랙C) — SSE 드롭 중 놓친 conversation.message_created는 낙관 +1이 못 따라오니
@@ -123,5 +139,5 @@ export function useChatUnreadTotal(currentTeamMemberId?: string): number {
     onReconnect: () => fetchTotalRef.current?.(),
   });
 
-  return total;
+  return counted.org === orgKey ? counted.n : 0;
 }
