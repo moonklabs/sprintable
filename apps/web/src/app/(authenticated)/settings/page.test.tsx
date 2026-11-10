@@ -641,3 +641,36 @@ describe('SettingsPage — story #4184: /api/me 요청 공유', () => {
     expect(fetchWithAuthMock.mock.calls.filter((c) => c[0] === '/api/me')).toHaveLength(1);
   });
 });
+
+
+describe('SettingsPage — story #4897: the project create form is for every member (the API allows it)', () => {
+  async function mountProjectsTab(role: string) {
+    vi.doMock('next/navigation', () => ({
+      useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn(), prefetch: vi.fn() }),
+      useSearchParams: () => new URLSearchParams('tab=projects'),
+      usePathname: () => '/settings',
+    }));
+    const fetchWithAuthMock = vi.fn((url: string) => {
+      if (url === '/api/me') return Promise.resolve({ ok: true, json: async () => ({ data: { role, user_id: 'u1' } }) });
+      if (url === '/api/current-project') return Promise.resolve({ ok: true, json: async () => ({ data: { project_id: 'p1', org_id: 'org-1' } }) });
+      return Promise.resolve({ ok: false, json: async () => ({ data: null }) });
+    });
+    vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
+    const { default: SettingsPage } = await import('./page');
+    await mount(<SettingsPage />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it.each(['member', 'admin'])('⭐%s — the name field and the create button are on the screen, and no «admins only» line is', async (role) => {
+    await mountProjectsTab(role);
+    expect(container.querySelector(`input[placeholder="${koMessages.settings.projectNamePlaceholder}"]`)).not.toBeNull();
+    const buttons = Array.from(container.querySelectorAll('button')).map((b) => b.textContent?.trim());
+    expect(buttons).toContain(koMessages.settings.createProjectAction);
+    expect(container.textContent).not.toContain('조직 관리자만 가능해요');
+  });
+
+  it('the line that said only organization admins can create a project is gone from both languages', () => {
+    expect((koMessages.settings as Record<string, string>).projectAdminRequired).toBeUndefined();
+    expect((enMessages.settings as Record<string, string>).projectAdminRequired).toBeUndefined();
+  });
+});

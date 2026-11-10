@@ -177,6 +177,30 @@ async def create_project_with_member(
         slug = await resolve_unique_project_slug(session, org_id, slugify_ascii_or_fallback(name))
     project = await ProjectRepository(session, org_id).create(name=name, description=description, slug=slug, workdir_hint=workdir_hint)
     # project_memberships 테이블 미존재 — agent 자동 첨부는 agent 생성 시 project_id로 직접 연결.
+    # story #4897: the creator is put on the project's team (a granted `project_access` row, role `member` — no admin rights). Before, the route only made sure the person was an
+    # organization member, so a plain member (or an agent) got a 201 for a project they could then neither read, list nor rename: it existed, and only the plan's project count went down.
+    if user_id:
+        creator_agent = (
+            await session.execute(
+                text("SELECT id FROM members WHERE id = :uid AND type = 'agent' AND org_id = :org_id AND deleted_at IS NULL"),
+                {"uid": str(user_id), "org_id": str(org_id)},
+            )
+        ).scalar_one_or_none()
+        if creator_agent is not None:
+            # an agent has no organization-member row (and must not get one made from its id): it is placed on the project directly, with its per-project runtime profile (as the
+            # grant route does), so the team view shows it
+            from app.services.agent_anchor_sync import ensure_agent_project_profile
+
+            await session.execute(
+                text(
+                    "INSERT INTO project_access (id, project_id, org_member_id, member_id, permission, role)"
+                    " VALUES (gen_random_uuid(), :pid, NULL, :mid, 'granted', 'member')"
+                ),
+                {"pid": str(project.id), "mid": str(creator_agent)},
+            )
+            await ensure_agent_project_profile(session, member_id=creator_agent, project_id=project.id)
+            await session.flush()
+            return project
     # Ensure the creating user is in org_members (S5: human type team_member 신규 생성 제거).
     if user_id:
         await session.execute(
@@ -189,7 +213,15 @@ async def create_project_with_member(
         )
         om_id = await _org_member_id(session, org_id, user_id)
         if om_id is not None:
-            await ensure_human_member(session, om_id)
+            member_ok = await ensure_human_member(session, om_id)
+            await session.execute(
+                text(
+                    "INSERT INTO project_access (id, project_id, org_member_id, member_id, permission, role)"
+                    " VALUES (gen_random_uuid(), :pid, :omid, :mid, 'granted', 'member')"
+                    " ON CONFLICT (project_id, org_member_id) DO NOTHING"
+                ),
+                {"pid": str(project.id), "omid": str(om_id), "mid": str(om_id) if member_ok else None},
+            )
     return project
 
 
