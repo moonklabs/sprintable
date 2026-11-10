@@ -131,6 +131,28 @@ describe('TeamActivityView — first page failure (4892 §5 #1)', () => {
     expect(container.querySelectorAll('li').length).toBeGreaterThan(0);
   });
 
+  it('a RETRY still in flight when a newer filter load succeeds: the retry\'s late error never overwrites that list', async () => {
+    const pending: Array<(a: Answer) => void> = [];
+    let calls = 0;
+    stream(() => (++calls === 1 ? Promise.resolve(answer(false, 500)) : new Promise<Answer>((r) => { pending.push(r); })));
+    await mount();
+    expect(text()).toContain(ko.common.error);               // call 1 failed → error state
+    const retry = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.trim() === ko.common.retry)!;
+    await act(async () => { retry.click(); await Promise.resolve(); await Promise.resolve(); });
+    expect(pending.length).toBe(1);                          // call 2 (the retry) is in flight
+    const dates = Array.from(container.querySelectorAll('input[type="date"]'));
+    const to = dates[dates.length - 1] as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => { setter.call(to, '2026-01-03'); to.dispatchEvent(new Event('input', { bubbles: true })); to.dispatchEvent(new Event('change', { bubbles: true })); await Promise.resolve(); });
+    expect(pending.length).toBe(2);                          // call 3 (the newer filter) is in flight too
+    await act(async () => { pending[1]!(answer(true, 200, { items: [item(11)], next_after_seq: null })); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelectorAll('li').length).toBeGreaterThan(0);
+    await act(async () => { pending[0]!(answer(false, 500)); await Promise.resolve(); await Promise.resolve(); });   // the retry's late failure
+    expect(text()).not.toContain(ko.common.error);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelectorAll('li').length).toBeGreaterThan(0);
+  });
+
   it('changing a filter while the error is shown asks again (the error does not stick)', async () => {
     let calls = 0;
     stream(() => (++calls === 1 ? answer(false, 500) : answer(true, 200, { items: [item(3)], next_after_seq: null })));
