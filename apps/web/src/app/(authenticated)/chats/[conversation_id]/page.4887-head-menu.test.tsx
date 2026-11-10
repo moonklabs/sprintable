@@ -112,11 +112,25 @@ const triggerOf = () => container.querySelector('[data-testid="room-head-menu"]'
 async function openMenu() {
   await act(async () => { triggerOf()!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); triggerOf()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  // The popup opens in a first frame marked `data-starting-style` (the library's opening transition). An item pressed INSIDE that frame is dropped: the item's own handler runs, the library's close does not — the settings test then saw the window open and the menu still open, in 6 whole-file runs of 6 on a fast machine (0 of 6 once the click came 100 ms later; a person cannot press an item in the first frame). Wait for the popup to have left that frame — a state, not a time.
+  await vi.waitFor(() => {
+    const popup = document.querySelector('[role=menu]');
+    expect(popup, 'the menu popup is there').not.toBeNull();
+    expect(popup!.hasAttribute('data-starting-style'), 'the popup has left its opening frame').toBe(false);
+  });
 }
 /** the room head's own action buttons (the TopBarRenderer draws title + actions into the container) */
 const headButtons = () => [...container.querySelectorAll('button')].filter((b) => b.closest('[data-testid="chat-view-stub"]') === null);
 
 describe('ConversationPage — the room head menu (story 4887 · UI-4 P3-a)', () => {
+  it('⭐ the test helper leaves the menu popup OUT of its opening frame — so an item pressed next is a press the library takes (reverted: openMenu stops waiting → the popup still carries data-starting-style here, and the settings test failed in 6 whole-file runs of 6)', async () => {
+    stubFetch(true, false); await mount();
+    await openMenu();
+    const popup = document.querySelector('[role=menu]') as HTMLElement;
+    expect(popup, 'the popup is there').not.toBeNull();
+    expect(popup.hasAttribute('data-starting-style')).toBe(false);
+  });
+
   it('⭐ the head shows «참여자 추가» and ONE named «⋯» menu — the bell and the unnamed gear are not on the head any more', async () => {
     stubFetch(true); await mount();
     const names = headButtons().map((b) => (b.getAttribute('aria-label') ?? b.textContent ?? '').trim()).filter(Boolean);
