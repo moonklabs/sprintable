@@ -60,6 +60,30 @@ HEALTH_SNIPPET = (
 # short is never repeated, and `pg_isready` alone would pass for a server that has no application role at all.
 GATEWAY_DB_READY = ('pg_isready -q -U "$POSTGRES_USER" -d "$POSTGRES_DB" && psql -X -A -t -U "$POSTGRES_USER" -d postgres -c '
                     '"select count(*) from pg_database d join pg_roles r on r.oid = d.datdba where d.datname = \'$POSTGRES_DB\' and r.rolname = \'$GATEWAY_APP_USER\'" | grep -qx 1')
+# story 4874 — a migration that ran out of time (`T_MIGRATE`) must not go on in the background. `Runner.run` kills only the `docker compose` CLIENT: the container (docker's daemon owns it) and the database
+# statement it started both live on, the statement holding its locks while the old release serves. So every migration gets ONE name per release — the container (`--name`) and its database connections
+# (PGAPPNAME, read by libpq) — and on a timeout only that name is touched: the container is removed, its sessions are cancelled and, if one is left, terminated (a rolled-back transaction; a cancelled
+# session whose client is gone would stay «idle in transaction», lock and all). The running backend's connections carry no such name and are never matched. Before the next try the same is done for the
+# prefix, to clear what a deployer that died left behind (of this release or an older one).
+T_STOP_MIGRATE = 60 + 120 + 60   # the worst the clean-up takes: listing, removal, the sessions' statement (the systemd unit's limit must outlive it twice; a test pins it)
+MIGRATE_NAME_PREFIX = "sprintable-migrate-"
+CANCEL_GRACE_SECONDS = 3
+
+
+def migrate_name(release: Path) -> str:
+    return (MIGRATE_NAME_PREFIX + release.name)[:63]   # the whole sha (59 characters): two releases never share a name; a Postgres application_name is cut at 63
+
+
+MIGRATE_SQL_SHELL = 'psql -X -A -t -U "$POSTGRES_USER" -d postgres "$@"'   # run as `sh -c MIGRATE_SQL_SHELL sh <arguments>` inside the database container
+
+
+def migrate_sessions_sql(like: str) -> list[str]:
+    """the client arguments that cancel, wait, then terminate the sessions whose application_name matches `like` (the last line printed is how many had to be terminated)"""
+    where = f"application_name like '{like}' and pid <> pg_backend_pid()"
+    return ["-c", f"select count(pg_cancel_backend(pid)) from pg_stat_activity where {where}", "-c", f"select pg_sleep({CANCEL_GRACE_SECONDS})",
+            "-c", f"select count(pg_terminate_backend(pid)) from pg_stat_activity where {where}"]
+
+
 GATEWAY_DB_READY_TRIES = 15   # the first start of an empty data folder runs the script while the server already answers on its socket: a few seconds
 GATEWAY_DB_READY_WAIT = 2
 GATEWAY_DB_RELOAD = 'psql -X -q -U "$POSTGRES_USER" -d postgres -c "select pg_reload_conf()"'
@@ -313,6 +337,13 @@ def check_compose(compose_file: Path, trusted_file: Path) -> None:
 
 
 # ───────────────────────── the deployer ─────────────────────────
+
+@dataclass(frozen=True)
+class Stopped:
+    """what `_stop_migrate` managed: the containers removed, the database sessions ended (each also true when there was nothing to do)"""
+    containers: bool
+    sessions: bool
+
 
 @dataclass
 class Prepared:
@@ -808,7 +839,14 @@ class Deployer:
             else:
                 raise DeployError("the support gateway database answers but its first start did not finish: the application role does not own the database (RUNBOOK section 13, «A first start that was cut short»)", "pre-swap")
             self._probe_metadata(cand, "pre-swap")
-        rc, out = self._compose(cand.release, cand.env, "run", "--rm", "migrate", profile="migrate", timeout=T_MIGRATE)
+        name = migrate_name(cand.release)
+        cleared = self._stop_migrate(cand, MIGRATE_NAME_PREFIX, "before the migration")   # what an earlier, cut-off run left behind (a crashed deployer) must not hold the locks of this one
+        if not cleared.containers:
+            raise DeployError("an earlier migration's container could not be listed or removed (see the log): the new one would meet its name and its locks", "pre-swap")
+        rc, out = self._compose(cand.release, cand.env, "run", "--rm", "--name", name, "-e", f"PGAPPNAME={name}", "migrate", profile="migrate", timeout=T_MIGRATE)
+        if rc == 124 and out.startswith("timed out after"):   # Runner.run's own answer for a call that ran out of time (a container that exits with 124 by itself is an ordinary failure)
+            stopped = self._stop_migrate(cand, name, "after the timeout")
+            raise DeployError(f"migrate timed out after {T_MIGRATE} s; " + ("its container was removed and its database sessions ended" if stopped.containers and stopped.sessions else "it could NOT be stopped (see the log)"), "pre-swap")
         if rc != 0:
             raise DeployError(f"migrate failed: {out[-300:]}", "pre-swap")
         _write_json(self._pending_path, {**{k: desired[k] for k in STATE_KEYS}, "at": int(self.now())})  # «a swap started»: survives a crash before current.json is written
@@ -819,6 +857,41 @@ class Deployer:
         self._pending_path.unlink(missing_ok=True)
         self._cleanup("prune", lambda: self._prune(keep={desired["sha"], *([current["sha"]] if current else [])}))
         self._cleanup("image prune", lambda: self._prune_images(_kept_images(record)))
+
+    def _stop_migrate(self, cand: "Prepared", name: str, when: str) -> "Stopped":
+        """remove the one-off migrate container(s) whose name starts with `name` and cancel (then terminate) the database sessions whose application_name starts with it. `containers` / `sessions` say whether that
+        part was done (nothing left is also done). Never raises: it runs on the way to a failure that is reported anyway."""
+        containers = sessions = True
+        try:
+            # docker's name filter is a regular expression on the name (a substring match unless anchored); the names are checked again here, so only a container whose name STARTS with `name` is ever removed
+            rc, out = self.runner.run(["docker", "ps", "-a", "--no-trunc", "--filter", f"name={name}", "--format", "{{.ID}} {{.Names}}"], cand.env, timeout=60, whole=True)
+            ids = []
+            for line in out.splitlines() if rc == 0 else []:
+                parts = line.split()
+                if len(parts) == 2 and re.fullmatch(r"[0-9a-f]{12,64}", parts[0]) and any(n.lstrip("/").startswith(name) for n in parts[1].split(",")):
+                    ids.append(parts[0])
+            if rc != 0:
+                containers = False
+                self.log(f"migrate container listing failed {when}: rc={rc}")
+            if ids:
+                rc, out = self.runner.run(["docker", "rm", "-f", *ids], cand.env, timeout=120)
+                if rc != 0:
+                    containers = False
+                    self.log(f"migrate container removal failed {when}: {self._scrub(out)[-200:]}")
+                else:
+                    self.log(f"removed {len(ids)} migrate container(s) {when}")
+        except Exception as e:  # noqa: BLE001
+            containers = False
+            self.log(f"stopping the migration's containers failed {when}: {type(e).__name__}")
+        try:   # a separate stage: a failure here says nothing about the containers
+            rc, out = self._compose(cand.release, cand.env, "exec", "-T", "db", "sh", "-c", MIGRATE_SQL_SHELL, "sh", *migrate_sessions_sql(name + "%"), timeout=60)
+            if rc != 0:
+                sessions = False
+                self.log(f"ending the migration's database sessions failed {when}: {out[-200:]}")
+        except Exception as e:  # noqa: BLE001
+            sessions = False
+            self.log(f"ending the migration's database sessions failed {when}: {type(e).__name__}")
+        return Stopped(containers, sessions)
 
     def _rollback(self, current: Mapping | None) -> str:
         try:

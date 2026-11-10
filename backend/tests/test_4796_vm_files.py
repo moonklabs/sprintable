@@ -402,7 +402,7 @@ def test_the_deploy_unit_outlives_the_longest_possible_deploy() -> None:
     unit = (_VM / "systemd/sprintable-deploy.service").read_text()
     limit = int(re.search(r"^TimeoutStartSec=(\d+)$", unit, re.M).group(1))
     swap = mod.T_UP + 240 + 30 * 3  # up + health window + a few exec probes
-    worst = mod.T_PULL + mod.T_DB + mod.T_MIGRATE + swap + swap  # … and a rollback swap after a failed one
+    worst = mod.T_PULL + mod.T_DB + mod.T_MIGRATE + 2 * mod.T_STOP_MIGRATE + swap + swap  # … a clean-up before the migration and one after its timeout (story 4874), and a rollback swap after a failed one
     assert limit > worst, f"{limit} s is not above the worst deploy {worst} s"
     assert "UMask=0077" in unit
 
