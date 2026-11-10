@@ -235,7 +235,7 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     await mount();
     const foldersTab = [...container.querySelectorAll('button')].find((b) => b.textContent === '내 폴더');
     await act(async () => { foldersTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const group = container.querySelector('[role="group"]');
+    const group = container.querySelector('[role="group"][aria-label="정렬"]');   // story 4892 — the view-mode pair is a named group too, so select the sort one by name
     expect(group?.getAttribute('aria-label')).toBe('정렬');
     const manualBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '수동 순서');
     const titleBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '이름순');
@@ -253,7 +253,7 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     await mount();
     const foldersTab = [...container.querySelectorAll('button')].find((b) => b.textContent === '내 폴더');
     await act(async () => { foldersTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const group = container.querySelector('[role="group"]');
+    const group = container.querySelector('[role="group"][aria-label="정렬"]');
     expect(group?.className).toContain('flex-wrap');
   });
 
@@ -366,12 +366,11 @@ describe('DocsClientLayout — 새 폴더 이름 칸의 한글 조합(IME) 가�
 });
 
 describe('DocsClientLayout — 레일 v2 신규 요소(§3 proof 상태 도트·§2 에디토리얼 마스트헤드)', () => {
-  it('마스트헤드(kicker+H1+citron rule)가 렌더된다', async () => {
+  // story 4892 (UI-9 목록 열) — 에디토리얼 마스트헤드(kicker «지식 · 색인» · 큰 제목 · 시그니처 선)는 걷혔다. 열 머리가 대신한다(아래 describe).
+  it('옛 마스트헤드(kicker)는 더 렌더되지 않는다', async () => {
     stubFetch();
     await mount();
-    // story #3880(§⑤ 낱말 드리프트, 유나 확定) — railKicker ko 값 안 영단어 baked-in 정본화.
-    expect(container.textContent).toContain('색인');
-    expect(container.querySelectorAll('h1, div').length).toBeGreaterThan(0);
+    expect(container.textContent).not.toContain('색인');
   });
 
   it('문서 항목(내 폴더 뷰)에 status 색 도트가 뜬다(발명 0 — 색은 도트에만)', async () => {
@@ -568,3 +567,115 @@ describe('DocsClientLayout — 닫힌 트리 서랍은 inert([SID:4288])', () =>
   });
 });
 
+// story 4892 (UI-9 목록 열) — 열 머리 + 보기 전환/정렬 + 틀. 동작은 그대로(만들기 · 보기 · 정렬), 모양만 ds 부품.
+describe('DocsClientLayout — 목록 열 머리 · 토글 · 틀 (4892)', () => {
+  const columnHeader = () => container.querySelector('aside h2')!.parentElement as HTMLElement;
+  const inHeader = (label: string) => [...columnHeader().querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === label || b.textContent?.trim() === label) as HTMLButtonElement | undefined;
+
+  it('⭐열 머리 = 제목(h2 «문서») + 새 폴더(ds IconButton) + 새 문서(ds Button) — kicker 없음', async () => {
+    stubFetch();
+    await mount();
+    const h2 = container.querySelector('aside h2');
+    expect(h2?.textContent).toBe('문서');
+    expect(inHeader('새 폴더')?.getAttribute('data-slot')).toBe('ds-icon-button');
+    expect(inHeader('새 문서')?.getAttribute('data-slot')).toBe('ds-button');
+  });
+
+  it('⭐머리의 «새 문서»는 실제로 문서를 만든다(POST /api/docs, 폴더 아님)', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    stubFetch({ onCall: (url, init) => calls.push({ url, init }) });
+    await mount();
+    await act(async () => { inHeader('새 문서')!.click(); });
+    await act(async () => { await Promise.resolve(); });
+    const post = calls.find((c) => c.init?.method === 'POST');
+    expect(post).toBeTruthy();
+    expect(JSON.parse((post!.init!.body as string) ?? '{}').is_folder).toBeFalsy();
+  });
+
+  it('⭐머리의 «새 폴더»는 이름 칸 폼을 연다', async () => {
+    stubFetch();
+    await mount();
+    expect(container.querySelector('input[data-slot="input"][placeholder="폴더 이름"]')).toBeNull();
+    await act(async () => { inHeader('새 폴더')!.click(); });
+    expect(container.querySelector('input[data-slot="input"][placeholder="폴더 이름"]')).toBeTruthy();
+  });
+
+  it('두 동작은 한 화면에 한 자리 — 머리의 것은 lg 이상에서만, 상단 바의 것은 lg 미만에서만 보인다', async () => {
+    stubFetch();
+    await mount();
+    for (const label of ['새 폴더', '새 문서']) {
+      const cls = inHeader(label)!.className.split(/\s+/);
+      expect(cls, label).toContain('hidden');
+      expect(cls, label).toContain('lg:inline-flex');
+    }
+    const topBarBtn = [...container.querySelectorAll('button')].find((b) => !columnHeader().contains(b) && b.getAttribute('aria-label') === '새 문서');
+    expect(topBarBtn!.parentElement!.className.split(/\s+/)).toContain('lg:hidden');
+  });
+
+  it('⭐보기 전환은 ds 단추 둘 — 고른 쪽만 aria-pressed, 누르면 바뀐다', async () => {
+    stubFetch();
+    await mount();
+    const grouped = [...container.querySelectorAll('button')].find((b) => b.textContent === '자동 묶음') as HTMLButtonElement;
+    const folders = [...container.querySelectorAll('button')].find((b) => b.textContent === '내 폴더') as HTMLButtonElement;
+    expect(grouped.getAttribute('data-slot')).toBe('ds-button');
+    expect(folders.getAttribute('data-slot')).toBe('ds-button');
+    const pressed = (b: HTMLButtonElement) => b.getAttribute('aria-pressed') === 'true';
+    expect([pressed(grouped), pressed(folders)].filter(Boolean).length).toBe(1);
+    const openOne = pressed(grouped) ? grouped : folders;
+    const otherOne = openOne === grouped ? folders : grouped;
+    await act(async () => { otherOne.click(); });
+    expect(pressed(otherOne)).toBe(true);
+    expect(pressed(openOne)).toBe(false);
+  });
+
+  it('정렬 단추 셋도 ds 단추다(고른 쪽만 aria-pressed)', async () => {
+    stubFetch();
+    await mount();
+    await act(async () => { ([...container.querySelectorAll('button')].find((b) => b.textContent === '내 폴더') as HTMLButtonElement).click(); });
+    const group = container.querySelector('[role="group"][aria-label="정렬"]')!;
+    const buttons = [...group.querySelectorAll('button')];
+    expect(buttons.length).toBe(3);
+    for (const b of buttons) expect(b.getAttribute('data-slot')).toBe('ds-button');
+    expect(buttons.filter((b) => b.getAttribute('aria-pressed') === 'true').length).toBe(1);
+  });
+
+  it('⭐레일을 접어도 새 문서 · 새 폴더는 닿는다 — 접히면 상단 바의 두 동작이 lg에서도 보인다', async () => {
+    stubFetch();
+    await mount();
+    // the rail may be gone (collapsed) — look the header up without assuming it exists
+    const topBarBtn = () => [...container.querySelectorAll('button')].find((b) => !container.querySelector('aside')?.contains(b) && b.getAttribute('aria-label') === '새 문서') as HTMLButtonElement;
+    expect(topBarBtn().parentElement!.className.split(/\s+/)).toContain('lg:hidden');          // rail open → the header has them
+    const hide = [...container.querySelectorAll('button')].find((b) => b.getAttribute('title') === '문서 트리 숨기기') as HTMLButtonElement;
+    expect(hide, 'the collapse button').toBeTruthy();
+    await act(async () => { hide.click(); });
+    expect(container.querySelector('aside')).toBeNull();                                           // rail gone
+    expect(topBarBtn().parentElement!.className.split(/\s+/)).not.toContain('lg:hidden');       // → the top bar must carry them
+  });
+
+  it('머리 오른쪽은 접기 단추 자리를 비워 둔다(lg:pr-11) — 단추가 새 문서 위에 겹치지 않는다', async () => {
+    stubFetch();
+    await mount();
+    expect(columnHeader().className.split(/\s+/)).toContain('lg:pr-11');
+  });
+
+  it('보기 전환 둘은 이름 있는 그룹(«보기 방식») 안에 있다 · 새 폴더 IconButton은 title과 aria-label을 갖는다', async () => {
+    stubFetch();
+    await mount();
+    const group = container.querySelector('[role="group"][aria-label="보기 방식"]')!;
+    expect(group).toBeTruthy();
+    expect([...group.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['자동 묶음', '내 폴더']);
+    const folder = inHeader('새 폴더')!;
+    expect(folder.getAttribute('title')).toBe('새 폴더');
+    expect(folder.getAttribute('aria-label')).toBe('새 폴더');
+  });
+
+  it('틀 — 레일은 300px · ds 선과 바탕을 쓴다(옛 236px · border-border 아님)', async () => {
+    stubFetch();
+    await mount();
+    const cls = container.querySelector('aside')!.className.split(/\s+/);
+    expect(cls).toContain('w-[300px]');
+    expect(cls).toContain('border-ds-line');
+    expect(cls).toContain('bg-ds-background');
+    expect(cls).not.toContain('w-[236px]');
+  });
+});
