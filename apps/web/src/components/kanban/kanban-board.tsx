@@ -470,6 +470,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
 
   const fetchData = useCallback(async () => {
     const runId = ++fetchRunRef.current;
+    // story #4888 — a «더 보기» still on its way belongs to the old set (see handleLoadMore): its «loading» flag must not keep the new set's button disabled.
+    setLoadingMoreColumns({});
     const stale = () => runId !== fetchRunRef.current;
     const sprintParams = projectId ? `?project_id=${projectId}` : '';
     const epicParams = new URLSearchParams();
@@ -668,7 +670,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       setStories((prev) => [...prev, ...result.stories]);
       setColumnCursors((prev) => ({ ...prev, [status]: result.nextCursor }));
     } finally {
-      setLoadingMoreColumns((prev) => ({ ...prev, [status]: false }));
+      if (runId === fetchRunRef.current) setLoadingMoreColumns((prev) => ({ ...prev, [status]: false }));
     }
   }, [columnCursors, fetchStoriesByStatus]);
 

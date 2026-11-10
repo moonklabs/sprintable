@@ -390,4 +390,30 @@ describe('KanbanBoard 4888 — 코덱스 검수에서 나온 칸들', () => {
     expect(container.textContent).not.toContain('카드-25'); // proj-1's late page did not land in proj-2's board
     expect(container.textContent).toContain('카드-5');
   });
+
+  it('옛 프로젝트의 «더 보기»가 아직 안 끝났어도, 바뀐 프로젝트의 «더 보기» 버튼은 눌린다', async () => {
+    const hold: { release?: () => void; held?: boolean } = {};
+    stubPagedFetch(inProgress(25), { hold });
+    await mount();
+    await act(async () => { loadMoreButtons()[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(hold.held).toBe(true);
+    // while a page is on its way the button reads «불러오는 중…» and is disabled
+    const loadingBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === '불러오는 중…');
+    expect(loadingBtn?.disabled).toBe(true);
+
+    await switchProject('proj-2'); // same 25 cards: a fresh first page, a fresh button
+    expect(loadMoreButtons()).toHaveLength(1);
+    expect(loadMoreButtons()[0]!.disabled).toBe(false);
+
+    // proj-2's own page is now on its way; the old project's page finishing must not clear proj-2's «loading»
+    const releaseOld = hold.release!;
+    hold.held = false;
+    await act(async () => { loadMoreButtons()[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(hold.held).toBe(true);
+    await act(async () => { releaseOld(); });
+    await act(async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); });
+    const stillLoading = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === '불러오는 중…');
+    expect(stillLoading?.disabled).toBe(true);
+  });
 });
+
