@@ -163,6 +163,12 @@ export function OrgBriefingShell() {
         ) : null}
       </div>
 
+      {/* story #4888 — the start checklist is a card at the top of the home list (it used to stand over /chats and every other page as a band). It stands here, outside the data branch below: it draws its
+          own skeleton while it loads, so it does not arrive late and push the list down */}
+      <div className="empty:hidden" data-testid="home-checklist-slot">
+        <ActivationChecklistBanner placement="home" />
+      </div>
+
       {loadError && !model ? (
         <div className="flex flex-col items-center gap-3 py-10 text-center">
           <p role="alert" className="text-sm text-destructive">{t('loadErrorTitle')}</p>
@@ -175,10 +181,6 @@ export function OrgBriefingShell() {
         </div>
       ) : (
         <div className="space-y-6">
-          {/* story #4888 — the start checklist is a card at the top of the home list (it used to stand over /chats and every other page as a band) */}
-          <div className="empty:hidden" data-testid="home-checklist-slot">
-            <ActivationChecklistBanner placement="home" />
-          </div>
           {loadError || partial ? (
             // the last read failed, or part of it could not be read: the list below is what WAS read — said, with a way to read again (never passed off as complete)
             <div role="status" className="flex items-center justify-between gap-3 text-sm text-muted-foreground" data-testid="home-incomplete-notice">

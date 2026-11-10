@@ -23,6 +23,7 @@ import {
  *  - the newest load wins: an older answer that arrives late (a poll overlapping a «tab is back» read) is dropped;
  *  - what is project-scoped (the stories) belongs to the project it was read for — after a project switch the OLD project's stories are not shown for the new one (the approvals · notifications
  *    · today's results are the person's, not the project's, so they stay while the new project's stories are on their way);
+ *  - what was read belongs to the person AND organization it was read for: after an organization (or member) switch nothing of the old one is shown while the new answer is on its way;
  *  - the snapshot decides success; when notifications · stories · members fail, the model is still built from what was read but is `partial` (the screen never calls an empty partial list «all caught up»).
  */
 
@@ -101,11 +102,14 @@ interface Read {
   stories: HomeStoryInput[];
   /** the project the stories were read for */
   storiesFor: string | undefined;
+  /** whose read this is: the organization and the member (an organization switch must not show the old organization's approvals) */
+  forOrg: string | undefined;
+  forViewer: string | null;
   partial: boolean;
 }
 
-export function HomeModelProvider({ viewerMemberId, projectId, children }: { viewerMemberId: string | null; projectId: string | undefined; children: ReactNode }) {
-  const [read, setRead] = useState<Read | null>(null);
+export function HomeModelProvider({ viewerMemberId, projectId, orgId, children }: { viewerMemberId: string | null; projectId: string | undefined; orgId?: string; children: ReactNode }) {
+  const [readAny, setRead] = useState<Read | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [nonce, setNonce] = useState(0);
   // every load that starts takes the next number; only the newest one may commit (an older answer that arrives late — a poll overlapping a «tab is back» read, a project switch — is dropped)
@@ -129,6 +133,8 @@ export function HomeModelProvider({ viewerMemberId, projectId, children }: { vie
         notifications: notifJson?.data ?? [],
         stories: toStoryInputs(storiesJson?.data ?? [], membersJson?.data ?? []),
         storiesFor: projectId,
+        forOrg: orgId,
+        forViewer: viewerMemberId,
         // the other reads only add rows: a failed one leaves the model honest but incomplete
         partial: notifJson === null || (projectId !== undefined && (storiesJson === null || membersJson === null)),
       });
@@ -138,10 +144,12 @@ export function HomeModelProvider({ viewerMemberId, projectId, children }: { vie
     const onVisible = () => { if (document.visibilityState === 'visible') void load(); };
     document.addEventListener('visibilitychange', onVisible);
     return () => { alive = false; clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
-  }, [projectId, viewerMemberId, nonce]);
+  }, [projectId, viewerMemberId, orgId, nonce]);
 
   const retry = useCallback(() => setNonce((n) => n + 1), []);
   const value = useMemo<HomeModelState>(() => {
+    // a read of another organization or member is not this one's: none of it is shown while the new answer is on its way
+    const read = readAny && readAny.forOrg === orgId && readAny.forViewer === viewerMemberId ? readAny : null;
     if (!read) return { model: null, sources: null, loadError, partial: false, retry };
     const model = deriveHome({
       snapshot: read.snapshot,
@@ -163,6 +171,6 @@ export function HomeModelProvider({ viewerMemberId, projectId, children }: { vie
         runConversationById: Object.fromEntries((read.snapshot.completedToday ?? []).map((d) => [d.runId, d.conversationId])),
       },
     };
-  }, [read, loadError, projectId, viewerMemberId, retry]);
+  }, [readAny, loadError, projectId, viewerMemberId, orgId, retry]);
   return <HomeModelContext.Provider value={value}>{children}</HomeModelContext.Provider>;
 }

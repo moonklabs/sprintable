@@ -216,7 +216,7 @@ function ShellBody({
   const openPalette = useCallback(() => setPaletteOpen(true), [setPaletteOpen]);
   return (
     // story #4888 — the navigation bar's «홈» badge and the home screen read ONE model (the number of rows in «내 손이 필요해요»)
-    <HomeModelProvider viewerMemberId={currentTeamMemberId ?? null} projectId={projectId}>
+    <HomeModelProvider viewerMemberId={currentTeamMemberId ?? null} projectId={projectId} orgId={orgId}>
       <NavRailWithHomeBadge
         orgSlug={railOrgSlug}
         projectSlug={currentProjectSlug}

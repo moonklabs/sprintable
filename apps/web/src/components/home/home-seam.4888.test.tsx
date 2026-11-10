@@ -147,4 +147,13 @@ describe('홈 이음새 — 막대 «홈» 배지 = 홈 본문의 수 (story #48
     await act(async () => { more!.click(); });
     expect(bodyRows()).toBe(7);
   });
+
+  it('체크리스트 자리는 홈 모델을 읽는 동안에도 그 자리에 서 있다(늦게 끼어들어 목록을 밀지 않는다)', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {}))); // nothing ever answers: the model stays unread
+    await mountBarAndHome();
+    expect(railBadge()).toBeNull();
+    expect(container.querySelector('[data-testid="home-list"]')).toBeNull(); // still loading
+    expect(container.querySelector('[data-testid="home-checklist-slot"] [data-testid="activation-banner-stub"]')).not.toBeNull();
+  });
 });
+

@@ -26,7 +26,7 @@ const bad = () => ({ ok: false, status: 500, json: async () => ({}) });
 const agentStory = (id: string, title: string) => ({ id, title, status: 'in-progress', assignee_id: 'ag1', updated_at: '2026-09-13T05:00:00Z' });
 const MEMBERS = [{ id: 'ag1', name: '개발 에이전트', type: 'agent' }];
 
-async function mount(projectId: string | undefined, viewer: string | null = null) {
+async function mount(projectId: string | undefined, viewer: string | null = null, orgId?: string) {
   const { HomeModelProvider, useHomeModel } = await import('./home-model-provider');
   const { HomeList } = await import('./home-list');
   function Probe() {
@@ -41,14 +41,17 @@ async function mount(projectId: string | undefined, viewer: string | null = null
       </div>
     );
   }
-  const tree = (p: string | undefined) => (
+  const tree = (p: string | undefined, o: string | undefined = orgId) => (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      <HomeModelProvider viewerMemberId={viewer} projectId={p}><Probe /></HomeModelProvider>
+      <HomeModelProvider viewerMemberId={viewer} projectId={p} orgId={o}><Probe /></HomeModelProvider>
     </NextIntlClientProvider>
   );
   await act(async () => { root.render(tree(projectId)); });
   await settle();
-  return { rerender: async (p: string | undefined) => { await act(async () => { root.render(tree(p)); }); } };
+  return {
+    rerender: async (p: string | undefined) => { await act(async () => { root.render(tree(p)); }); },
+    rerenderOrg: async (o: string | undefined) => { await act(async () => { root.render(tree(projectId, o)); }); },
+  };
 }
 async function settle() { await act(async () => { for (let i = 0; i < 12; i += 1) await Promise.resolve(); }); }
 const text = (id: string) => container.querySelector(`[data-testid="${id}"]`)?.textContent ?? null;
@@ -153,4 +156,27 @@ describe('홈 모델 — 정직 규칙 (story #4888)', () => {
     await settle();
     expect(text('flags')).toBe('full|ok');
   });
+
+  it('⭐조직을 바꾸면 옛 조직의 결재 · 알림 · 결과는 새 조직의 답이 올 때까지 보이지 않는다(두 조직 다 프로젝트가 없어도)', async () => {
+    let release!: () => void;
+    let phase: 'org-a' | 'org-b' = 'org-a';
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/today') {
+        if (phase === 'org-b') { await new Promise<void>((r) => { release = r; }); return ok(todayOf([])); }
+        return ok(todayOf([need('a1', '2026-09-13T05:00:00Z'), need('a2', '2026-09-13T06:00:00Z')]));
+      }
+      if (url.startsWith('/api/notifications')) return ok([]);
+      return ok(null);
+    }));
+    const m = await mount(undefined, null, 'org-a');
+    expect(text('badge')).toBe('2');
+    phase = 'org-b';
+    await m.rerenderOrg('org-b');
+    await settle();
+    expect(text('badge')).toBe('none'); // org A's two approvals are not org B's
+    await act(async () => { release(); });
+    await settle();
+    expect(text('badge')).toBe('0');
+  });
 });
+
