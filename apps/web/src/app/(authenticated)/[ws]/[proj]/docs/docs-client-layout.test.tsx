@@ -235,7 +235,7 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     await mount();
     const foldersTab = [...container.querySelectorAll('button')].find((b) => b.textContent === '내 폴더');
     await act(async () => { foldersTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const group = container.querySelector('[role="group"]');
+    const group = container.querySelector('[role="group"][aria-label="정렬"]');   // story 4892 — the view-mode pair is a named group too, so select the sort one by name
     expect(group?.getAttribute('aria-label')).toBe('정렬');
     const manualBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '수동 순서');
     const titleBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '이름순');
@@ -253,7 +253,7 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     await mount();
     const foldersTab = [...container.querySelectorAll('button')].find((b) => b.textContent === '내 폴더');
     await act(async () => { foldersTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const group = container.querySelector('[role="group"]');
+    const group = container.querySelector('[role="group"][aria-label="정렬"]');
     expect(group?.className).toContain('flex-wrap');
   });
 
