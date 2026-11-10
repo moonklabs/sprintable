@@ -587,6 +587,40 @@ describe('ChatInput — 로드맵 PR-B L1(floating elev-overlay)', () => {
 // story #92f00dc4(Chat ②층 FE, doc exec-command-final-spec-92f00dc4 §①) — 서버 집행
 // 카탈로그(done/assign/priority) 자동완성 회귀가드.
 describe('ChatInput — 서버 집행 커맨드 자동완성(story #92f00dc4 §①)', () => {
+  // story 4887 (UI-4 P1) — a long argument hint (`/priority ‹스토리#› ‹critical|high|medium|low›`) ran past the 320 px list and was cut mid-word on dev. The hint must be the part that
+  // gives way (min-w-0 + truncate, the whole hint on the title), the list must not scroll sideways, and the name and the description must keep their room (shrink-0).
+  it('4887 ⭐ a long argument hint truncates (title = the whole hint); the list does not scroll sideways; name and description keep their room', async () => {
+    await act(async () => {
+      root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} />));
+    });
+    const el = textarea();
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(el, '/');
+      el.selectionStart = 1;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const listbox = container.querySelector('[role="listbox"][aria-label="커맨드 후보"]') as HTMLElement;
+    expect(listbox.className).toContain('overflow-x-hidden');
+    const rows = [...listbox.querySelectorAll('button[role="option"]')] as HTMLElement[];
+    const withHint = rows.filter((r) => r.querySelector('span[title]'));
+    expect(withHint.length).toBeGreaterThanOrEqual(3); // done · assign · priority carry a hint
+    for (const row of withHint) {
+      const spans = [...row.querySelectorAll('span')] as HTMLElement[];
+      const name = spans.find((s) => s.textContent?.startsWith('/'))!;
+      const hint = row.querySelector('span[title]') as HTMLElement;
+      const desc = spans[spans.length - 1]!;
+      expect(hint.className).toContain('min-w-0');
+      expect(hint.className).toContain('truncate');
+      expect(hint.className).not.toContain('shrink-0');
+      expect(hint.getAttribute('title')).toBe(hint.textContent);
+      expect(name.className).toContain('shrink-0');
+      expect(desc.className).toContain('shrink-0');
+    }
+    const priority = rows.find((r) => r.textContent?.includes('/priority'))!;
+    expect((priority.querySelector('span[title]') as HTMLElement).getAttribute('title')).toContain('critical|high|medium|low');
+  });
+
   it('"/" 입력 시 done/assign/priority가 인자 힌트와 함께 뜬다', async () => {
     await act(async () => {
       root.render(withIntl(<ChatInput threadId="c1" onSend={vi.fn()} />));
