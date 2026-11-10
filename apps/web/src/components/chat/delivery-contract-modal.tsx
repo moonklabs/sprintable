@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type RefObject } from 'react';
 import { X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
@@ -22,6 +22,8 @@ interface DeliveryContractModalProps {
   conversationType: 'dm' | 'group';
   freeResponse: boolean;
   onClose: () => void;
+  /** story 4887 (UI-4 P3-a) — where focus goes when the window closes: the menu item that opened it is already gone (the menu closed), so without this focus fell to the page body. The room head's «⋯» button. */
+  returnFocusRef?: RefObject<HTMLElement | null>;
   /** free_response가 바뀌면 부모(conversation meta)도 갱신 — 헤더 등 다른 표면과 어긋나지 않게. */
   onFreeResponseChange: (next: boolean) => void;
   /** story #2623 pre-work(BE #3037 action_auth와 같은 org role 축 — admin/owner만) — 지정되면
@@ -58,7 +60,7 @@ const LEVELS: DeliveryLevel[] = ['all', 'mentions', 'mute'];
  * docstring) — dm이면 그 축 자체를 안 보여준다.
  */
 export function DeliveryContractModal({
-  conversationId, conversationType, freeResponse, onClose, onFreeResponseChange, targetMemberId, targetMemberLabel,
+  conversationId, conversationType, freeResponse, onClose, returnFocusRef, onFreeResponseChange, targetMemberId, targetMemberLabel,
 }: DeliveryContractModalProps) {
   const t = useTranslations('chats');
   const tc = useTranslations('common');
@@ -148,7 +150,7 @@ export function DeliveryContractModal({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-md overflow-hidden rounded-xl p-0" showCloseButton={false}>
+      <DialogContent className="max-w-md overflow-hidden rounded-xl p-0" showCloseButton={false} finalFocus={returnFocusRef}>
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <DialogTitle className="text-sm font-semibold text-foreground">{t('deliveryContractTitle')}</DialogTitle>
           <button type="button" onClick={onClose} aria-label={tc('close')} className="text-muted-foreground hover:text-foreground">

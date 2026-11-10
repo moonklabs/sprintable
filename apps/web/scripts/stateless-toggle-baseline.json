@@ -150,6 +150,12 @@
       "count": 1,
       "why": "③-같음 오탐: `copiedInviteId === invite.id`는 «복사됨» 표시(고름 아님) — 이름(aria-label)이 이미 «복사됨»을 말함",
       "rule": "selection-class"
+    },
+    {
+      "file": "app/(authenticated)/chats/[conversation_id]/page.tsx",
+      "match": "handleToggleMute()",
+      "count": 1,
+      "why": "방 머리 «⋯» 메뉴 항목이 누르면 할 일을 글자로 말함 — «알림 끄기» ↔ «알림 켜기»(menuitem에는 aria-pressed가 유효하지 않아 속성 대신 문구가 말하고, 꺼짐 상태는 머리의 role=status로 따로 보임)"
     }
   ],
   "counts": {},
