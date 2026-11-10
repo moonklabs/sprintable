@@ -99,19 +99,48 @@ def test_presence_status_null_for_human():
     assert resp.presence_status is None
 
 
-def test_presence_status_boundary_just_under_5min():
+def _freeze_now(monkeypatch, now):
+    """story 4890 (5521 CI red) — the two boundary tests below build `last_seen_at = now − (5min − 1s)` and the schema reads the clock AGAIN when `presence_status` is asked: a 1-second margin that holds only if
+    the test runs fast. A full garbage collection (this suite measures pauses up to ~0.55 s on a fast Mac, with a 14k-test heap; a CI runner is slower) or any stall between the two clock reads makes 4:59 become
+    5:00+ → «idle». So the schema's clock is frozen at `now` — the boundary is then exact and independent of how long the test takes."""
+    import app.schemas.team_member as team_member
+
+    class _FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):  # noqa: D401 — same signature as datetime.now
+            return now if tz is None else now.astimezone(tz)
+
+    monkeypatch.setattr(team_member, "datetime", _FrozenDatetime)
+
+
+def test_presence_status_boundary_just_under_5min(monkeypatch):
     """AC2: 4분59초 전 → online (5분 경계 이내)."""
     from app.schemas.team_member import TeamMemberResponse
     now = datetime.now(timezone.utc)
+    _freeze_now(monkeypatch, now)
     m = _mock_member(last_seen_at=now - timedelta(minutes=4, seconds=59))
     resp = TeamMemberResponse.model_validate(m)
     assert resp.presence_status == "online"
 
 
-def test_presence_status_boundary_just_under_30min():
+def test_presence_status_boundary_is_exact_and_does_not_depend_on_how_long_the_test_takes(monkeypatch):
+    """the clock is frozen: 4:59 is online and 5:01 is idle whatever happens between building the member and asking (a pause of any length changes nothing)."""
+    from app.schemas.team_member import TeamMemberResponse
+    now = datetime.now(timezone.utc)
+    _freeze_now(monkeypatch, now)
+    inside = TeamMemberResponse.model_validate(_mock_member(last_seen_at=now - timedelta(minutes=4, seconds=59)))
+    outside = TeamMemberResponse.model_validate(_mock_member(last_seen_at=now - timedelta(minutes=5, seconds=1)))
+    import time as _time
+    _time.sleep(0.05)  # (any pause — the frozen clock does not move)
+    assert inside.presence_status == "online"
+    assert outside.presence_status == "idle"
+
+
+def test_presence_status_boundary_just_under_30min(monkeypatch):
     """AC3: 29분59초 전 → idle (30분 경계 이내)."""
     from app.schemas.team_member import TeamMemberResponse
     now = datetime.now(timezone.utc)
+    _freeze_now(monkeypatch, now)
     m = _mock_member(last_seen_at=now - timedelta(minutes=29, seconds=59))
     resp = TeamMemberResponse.model_validate(m)
     assert resp.presence_status == "idle"
