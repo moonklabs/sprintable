@@ -3,6 +3,7 @@
 import { useCallback, type Dispatch, type SetStateAction } from 'react';
 import { useTranslations } from 'next-intl';
 import { useToast } from '@/components/ui/toast';
+import { fetchWithAuth } from '@/lib/db/client';
 import { docsListUrl } from './lib/doc-project-url';
 
 // story 4892 (UI-9 §5 #4) — deleting the open document: the editor page asked with the browser's confirm, called DELETE, and on ANY failure
@@ -24,7 +25,7 @@ export function useDocDelete<T extends { id: string }>({ docId, projectId, wsSlu
     if (!docId || !projectId) return;
     if (!confirm(t('confirmDelete'))) return;
     try {
-      const res = await fetch(`/api/docs/${docId}`, { method: 'DELETE' });
+      const res = await fetchWithAuth(`/api/docs/${docId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to delete doc');
     } catch {
       addToast({ title: t('deleteFailed'), type: 'error' });
