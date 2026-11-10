@@ -128,3 +128,41 @@ async def test_the_event_card_of_an_event_publishing_message_is_withheld_with_th
         assert rows[0]["title"] == "X님의 새 메시지"
     finally:
         await engine.dispose()
+
+
+async def _insert_notification(Session, w, user, kind, room, body, event=None):
+    async with Session() as s:
+        await s.execute(text(
+            "INSERT INTO notifications (id, org_id, user_id, type, title, body, reference_type, reference_id, event) "
+            "VALUES (gen_random_uuid(), :o, :u, :k, 'T', :b, :rt, :r, CAST(:e AS jsonb))"),
+            {"o": w.org, "u": user, "k": kind, "b": body, "rt": "conversation" if room is not None else None, "r": room, "e": event})
+        await s.commit()
+
+
+async def test_an_organization_owner_reads_the_notification_of_a_room_of_agents_only_but_not_of_a_room_with_a_person_in_it():
+    """the predicate's own rule (4846 AC2), not a look-alike: an owner/admin is let into a room with no person in it, never into one with a person."""
+    engine, Session, w = await _world()
+    try:
+        agents_words, people_words = f"agents-{uuid.uuid4().hex[:8]}", f"people-{uuid.uuid4().hex[:8]}"
+        await _insert_notification(Session, w, w.u_o, "conversation.message", w.r_agents, agents_words)
+        await _insert_notification(Session, w, w.u_o, "conversation.message", w.r_human, people_words)
+        r = await _list(Session, w, "org_owner")
+        assert agents_words in r.text and people_words not in r.text, r.text
+    finally:
+        await engine.dispose()
+
+
+async def test_a_card_with_no_preview_a_room_that_does_not_exist_and_a_row_with_no_reference_are_all_withheld():
+    engine, Session, w = await _world()
+    try:
+        card, ghost, bare = (f"{n}-{uuid.uuid4().hex[:8]}" for n in ("card", "ghost", "bare"))
+        await _insert_notification(Session, w, w.u_c, "conversation.message", w.r_human, None, '{"sender_name": "X", "payload": {"note": "%s"}}' % card)     # h_c is not in r_human; body None, words only in the card
+        await _insert_notification(Session, w, w.u_c, "conversation.mention", uuid.uuid4(), ghost)                                                         # a room that does not exist
+        async with Session() as s:                                                                                                                         # a legacy row: the kind, no reference
+            await s.execute(text("INSERT INTO notifications (id, org_id, user_id, type, title, body) VALUES (gen_random_uuid(), :o, :u, 'conversation.message', 'T', :b)"), {"o": w.org, "u": w.u_c, "b": bare})
+            await s.commit()
+        r = await _list(Session, w, "member_outside")
+        assert card not in r.text and ghost not in r.text and bare not in r.text, r.text
+        assert len([n for n in r.json()["data"] if n["type"].startswith("conversation.")]) >= 3, "the bell items stay"
+    finally:
+        await engine.dispose()

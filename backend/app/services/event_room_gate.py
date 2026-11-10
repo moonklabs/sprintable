@@ -166,13 +166,15 @@ NOTIFICATION_ROOM_TYPES = frozenset({"conversation.message", "conversation.menti
 async def room_notifications_to_withhold(db, org_id: uuid.UUID, auth, rows: Any) -> "dict[uuid.UUID, dict | None]":
     """story #4875 — `notification id → the `event` to hand back instead` for the person's notification rows about a room's words whose room this caller may not read NOW.
     Same question as every stored copy (`readable_room_clause`, one statement for the page): a person is a participant, or the organization's owner/admin of a room with no person in it;
-    the project is not part of it for a person. A row that names no usable room is withheld too (fail closed). Rows of any other kind are not in the answer. The caller blanks `body`
+    the project is not part of it for a person. A row of these kinds that names no usable room (no reference, a reference that is not a room, a malformed id) is withheld too (fail closed). Rows of any other kind are not in the answer. The caller blanks `body`
     and uses the returned `event` (the sender's name only — the shape of a mention from outside the room, 4846 AC9); the stored row is never changed."""
     candidates: dict[uuid.UUID, "uuid.UUID | None"] = {}
     events: dict[uuid.UUID, Any] = {}
     for n in rows:
-        if getattr(n, "type", None) in NOTIFICATION_ROOM_TYPES and getattr(n, "reference_type", None) == "conversation":
-            candidates[n.id] = _uuid_or_none(getattr(n, "reference_id", None))
+        if getattr(n, "type", None) in NOTIFICATION_ROOM_TYPES:
+            # by KIND only: a row of these kinds whose reference is missing or is not a room is a copy of a room's words that cannot name its room — withheld, not passed (fail closed)
+            ref = getattr(n, "reference_id", None) if getattr(n, "reference_type", None) == "conversation" else None
+            candidates[n.id] = _uuid_or_none(ref)
             events[n.id] = getattr(n, "event", None)
     if not candidates:
         return {}
@@ -183,5 +185,5 @@ async def room_notifications_to_withhold(db, org_id: uuid.UUID, auth, rows: Any)
             continue
         ev = events[nid]
         sender = ev.get("sender_name") if isinstance(ev, dict) else None
-        out[nid] = {"sender_name": sender} if sender else None
+        out[nid] = {"sender_name": sender} if isinstance(sender, str) and sender else None   # only a plain name survives: any other shape (a list, a number, a nested object) is dropped
     return out
