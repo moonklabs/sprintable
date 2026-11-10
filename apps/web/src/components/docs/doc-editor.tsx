@@ -10,6 +10,7 @@ import { Bold, Italic, Strikethrough, Code, Link2, Highlighter, Undo2, Redo2, Pa
 import { pickAndUpload } from './extensions/slash-command';
 import { type SlashMenuStrings } from './extensions/slash-command';
 import { DocToc } from './doc-toc';
+import { useFileErrorNotice } from './use-file-error-notice';
 import { type DocHeading } from './doc-heading-utils';
 import { markdownToHtml, htmlToMarkdown } from './lib/content-converter';
 import { createDocEditorExtensions } from './doc-editor-extensions';
@@ -192,15 +193,8 @@ export function DocEditor({
   const [isDragging, setIsDragging] = useState(false);
   const dragDepthRef = useRef(0);
 
-  useEffect(() => {
-    if (!onFileError) return;
-    const handleFileSizeError = (e: Event) => {
-      const msg = (e as CustomEvent<{ message: string }>).detail.message;
-      onFileError(msg);
-    };
-    window.addEventListener('docs:file-size-error', handleFileSizeError);
-    return () => window.removeEventListener('docs:file-size-error', handleFileSizeError);
-  }, [onFileError]);
+  // story 4892 (UI-9 §5 #3) — a failed attach is shown (an error toast unless the page passes its own handler); it used to vanish when no handler was passed.
+  useFileErrorNotice(onFileError);
 
   const editor = useEditor({
     immediatelyRender: false,
