@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -140,9 +141,20 @@ _FAKE_SYSTEMCTL = r"""#!/bin/sh
 printf 'systemctl %s\n' "$*" >> "$FAKE_LOG"
 case "$1" in
   is-active) [ "${FAKE_ACTIVE-1}" = 1 ] && exit 0 || exit 3 ;;
-  restart) [ -n "${FAKE_SWAP_LOCK_PID-}" ] && printf '424242\n' > "$FAKE_SWAP_LOCK_PID"; [ "${FAKE_RESTART_FAIL-0}" = 1 ] && exit 5 ;;
+  restart) [ -e /dev/fd/9 ] && printf 'FD9-LEAK\n' >> "$FAKE_LOG"; [ "${FAKE_RESTART_FAIL-0}" = 1 ] && exit 5 ;;
 esac
 exit 0
+"""
+
+# macOS has no flock(1). Where it is missing, this stand-in takes the SAME kernel lock — flock(2) on the file description the shell passed as fd 9, which stays locked after this process exits, exactly as util-linux's
+# `flock -n 9` does. Where flock(1) exists (Linux, CI, the VMs) the real one is used and this is not installed.
+_FLOCK_STANDIN = """#!/usr/bin/env python3
+import fcntl, sys
+fd = int(sys.argv[-1])
+try:
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    sys.exit(1)
 """
 
 
@@ -153,6 +165,10 @@ def box(tmp_path: Path):
     sc = bin_dir / "systemctl"
     sc.write_text(_FAKE_SYSTEMCTL)
     sc.chmod(sc.stat().st_mode | stat.S_IXUSR)
+    if shutil.which("flock") is None:
+        fl = bin_dir / "flock"
+        fl.write_text(_FLOCK_STANDIN)
+        fl.chmod(fl.stat().st_mode | stat.S_IXUSR)
     log = tmp_path / "log"
     log.write_text("")
     target = tmp_path / "etc/config.yaml"
@@ -377,92 +393,67 @@ def test_a_marker_for_another_file_does_not_count_as_loaded(box) -> None:
     assert (target.parent / "config.yaml.loaded").read_text() != "1 2\n"
 
 
-def test_two_runs_at_once_are_refused_while_the_first_is_alive(box) -> None:
+def _hold(lockfile: Path):
+    """a stand-in for «another run»: a separate process that holds the exclusive flock(2) on the lock file and sleeps"""
+    code = ("import fcntl,sys,time\nf=open(sys.argv[1],'a')\nfcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)\nprint('held',flush=True)\ntime.sleep(60)\n")
+    proc = subprocess.Popen([sys.executable, "-c", code, str(lockfile)], stdout=subprocess.PIPE, text=True)
+    assert proc.stdout.readline().strip() == "held"
+    return proc
+
+
+def test_two_runs_at_once_the_second_is_refused_and_changes_nothing(box) -> None:
     run, target, new = box
-    lock = target.parent / "config.yaml.lock.d"
-    lock.mkdir(parents=True)
-    sleeper = subprocess.Popen(["sleep", "30"])
+    lockfile = target.parent / "config.yaml.lock"
+    target.parent.mkdir(parents=True)
+    other = _hold(lockfile)
     try:
-        (lock / "pid").write_text(f"{sleeper.pid}\n")
         p, log = run()
-        assert p.returncode == 1 and "another run of this installer is in progress" in p.stderr and "systemctl" not in log
-        assert not target.exists() and lock.is_dir(), "the other run's lock is left alone"
+        assert p.returncode == 1 and "another run of this installer is in progress" in p.stderr
+        assert "systemctl" not in log and not target.exists(), "nothing was changed"
     finally:
-        sleeper.kill()
-        sleeper.wait()
-
-
-def test_a_lock_whose_process_is_gone_is_taken_over_and_removed_at_the_end(box) -> None:
-    run, target, new = box
-    lock = target.parent / "config.yaml.lock.d"
-    lock.mkdir(parents=True)
-    gone = subprocess.Popen(["true"])
-    gone.wait()
-    (lock / "pid").write_text(f"{gone.pid}\n")
+        other.kill()
+        other.wait()
     p, _ = run()
-    assert p.returncode == 0 and "taking over a stale lock" in p.stderr
-    assert not lock.exists(), "released at the end"
+    assert p.returncode == 0 and target.exists(), "once the other run is gone the lock is free"
 
 
-def test_a_lock_that_is_still_being_made_is_waited_for_not_taken_over(box, tmp_path: Path) -> None:
-    """the other run has made the directory but not yet written its pid (empty `pid` file): it is not stale. No timing here: a stand-in `sleep` writes the live pid of the other run the FIRST time the installer
-    waits 0.2 s — so the test fails if the installer does not wait at all, and cannot pass if it does not look again afterwards"""
+def test_a_run_killed_with_sigkill_leaves_no_lock_behind(box) -> None:
+    """the lock belongs to the kernel: no pid file, no stale lock to judge — the next run goes straight in"""
     run, target, new = box
-    lock = target.parent / "config.yaml.lock.d"
-    lock.mkdir(parents=True)
-    (lock / "pid").write_text("")
-    sleeper = subprocess.Popen(["sleep", "30"])
-    fake_sleep = tmp_path / "bin" / "sleep"
-    fake_sleep.write_text(
-        '#!/bin/sh\nif [ "$1" = 0.2 ]; then printf \'%s\\n\' "$FAKE_OTHER_PID" > "$FAKE_LOCK_PID"; printf \'waited\\n\' >> "$FAKE_LOG"; fi\nexec /bin/sleep "$@"\n'
-    )
-    fake_sleep.chmod(fake_sleep.stat().st_mode | stat.S_IXUSR)
+    lockfile = target.parent / "config.yaml.lock"
+    target.parent.mkdir(parents=True)
+    other = _hold(lockfile)
     try:
-        p, log = run(FAKE_OTHER_PID=str(sleeper.pid), FAKE_LOCK_PID=str(lock / "pid"))
-        assert "waited" in log, "the installer waited for the pid before judging"
-        assert p.returncode == 1 and "another run of this installer is in progress" in p.stderr and "taking over" not in p.stderr and "systemctl" not in log
-        assert lock.is_dir() and (lock / "pid").read_text().strip() == str(sleeper.pid), "the other run's lock is untouched"
+        refused, _ = run()
+        assert refused.returncode == 1, "precondition: while the holder is alive the run is refused"
     finally:
-        sleeper.kill()
-        sleeper.wait()
+        other.kill()  # SIGKILL
+        other.wait()
+    p, _ = run()
+    assert p.returncode == 0 and "stale" not in p.stderr and target.exists()
 
 
-@pytest.mark.parametrize("how", ["directory_read_only", "pid_file_created_but_not_writable"])
-def test_a_lock_whose_pid_cannot_be_written_stops_the_run_and_leaves_no_lock(box, tmp_path: Path, how: str) -> None:
-    """mkdir succeeded but the pid cannot be written — the lock directory is read-only, or the pid file was created and then cannot be written (a disk that fills up): nothing is installed, no lock is left behind"""
-    import shutil
-
-    if os.geteuid() == 0:
-        pytest.skip("root can write into a read-only directory")
+def test_the_lock_is_not_passed_on_to_systemctl(box) -> None:
+    """a child that inherited fd 9 would keep the lock after the installer is gone"""
     run, target, new = box
-    real_mkdir = shutil.which("mkdir")
-    fake = tmp_path / "bin" / "mkdir"
-    after = 'chmod 555 "$last"' if how == "directory_read_only" else ': > "$last/pid"; chmod 444 "$last/pid"'
-    fake.write_text(f'#!/bin/sh\n"{real_mkdir}" "$@" || exit $?\nfor last; do :; done\ncase "$last" in *.lock.d) {after} ;; esac\n')
-    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
     p, log = run()
-    assert p.returncode == 1 and "cannot write the pid file of the lock" in p.stderr
-    assert "systemctl" not in log and not target.exists()
-    assert not (target.parent / "config.yaml.lock.d").exists(), "the lock that could not be filled is removed again"
+    assert p.returncode == 0 and "systemctl restart" in log, "precondition: systemctl was called"
+    assert "FD9-LEAK" not in log
 
 
-def test_a_run_never_removes_a_lock_that_another_run_owns(box) -> None:
-    """the cleanup of a run whose lock was taken over must leave the new owner's lock: a fake `systemctl` that rewrites the pid file while the installer runs stands for the takeover"""
-    run, target, new = box
-    lock = target.parent / "config.yaml.lock.d"
-    p, _ = run(FAKE_SWAP_LOCK_PID=str(lock / "pid"))
-    assert p.returncode == 0
-    assert lock.is_dir() and (lock / "pid").read_text().strip() == "424242", "released only by its owner"
-    (lock / "pid").unlink()
-    lock.rmdir()
-
-
-@pytest.mark.parametrize("fail", [False, True])
-def test_the_lock_is_released_after_success_and_after_failure(box, fail: bool) -> None:
-    run, target, new = box
-    p, _ = run(FAKE_ACTIVE="0" if fail else "1")
-    assert p.returncode == (1 if fail else 0)
-    assert not (target.parent / "config.yaml.lock.d").exists()
+def test_the_installer_needs_flock_and_says_so_when_it_is_missing(tmp_path: Path) -> None:
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    for name in ("cp", "install", "mkdir", "cmp", "mktemp", "cksum", "cut", "cat", "rm", "sleep", "dirname", "dpkg-query", "env", "bash"):
+        found = shutil.which(name)
+        if found:
+            (tools / name).symlink_to(found)
+    new = tmp_path / "new.yaml"
+    new.write_text("logging: {}\n")
+    target = tmp_path / "etc/config.yaml"
+    p = subprocess.run([shutil.which("bash"), str(_INSTALLER), str(new)], capture_output=True, text=True, timeout=60,
+                       env={"PATH": str(tools), "HOME": str(tmp_path), "OPS_AGENT_CONFIG": str(target), "OPS_AGENT_WAIT": "0", "OPS_AGENT_TRIES": "1"})
+    assert p.returncode == 1 and "flock(1) (util-linux) is not installed" in p.stderr and not target.exists()
 
 
 def test_a_successful_install_leaves_no_backup_file(box) -> None:

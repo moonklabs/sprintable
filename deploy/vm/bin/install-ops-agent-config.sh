@@ -8,7 +8,8 @@
 # Same content already in place is «nothing to do» ONLY if the log component is up AND this very file is known to have been loaded: a marker next to the target (`<target>.loaded`, the checksum of the file) is
 # written once the agent has come up with it. A run that was cut off between writing the file and the restart (ssh drop, kill -9, power) leaves no marker, so the next run restarts the agent and converges —
 # whatever the kind of interruption. Backups left by such a run (`<target>.previous.*`) are named in the output and never touched.
-# Two copies at the same time are refused: a lock directory `<target>.lock.d` holds the pid of the one that runs (a lock whose process is gone is taken over; a lock with no pid yet is waited for up to 2 s; only its owner removes it). Known limits: two runs that find the SAME stale lock at the very same instant can both take it (a mkdir lock cannot do better without flock; bootstrap is run by one person); a recycled pid keeps a dead run's lock «alive» (the message says how to remove it); the units are asked once, not for a stretch of time; a symbolic link as the target is followed.
+# Two copies at the same time are refused: an exclusive flock(1) on `<target>.lock` (fd 9) that the kernel holds and releases when the process ends, however it ends. The lock is not passed on to systemctl.
+# Known limits: the units are asked once, not for a stretch of time; a symbolic link as the target is followed; flock(1) must exist (util-linux; it is on the dev and prod VMs).
 # Settings for a test: OPS_AGENT_CONFIG (target file), OPS_AGENT_UNITS (units that must be active, default the log component; must not be empty), OPS_AGENT_TRIES / OPS_AGENT_WAIT (default 12 × 5 s).
 # Exit codes: 0 in place, loaded and working · 1 not in place or the agent did not come up (old state restored where there was one) · 2 bad usage.
 set -uo pipefail
@@ -27,44 +28,20 @@ wait_s=$((10#$wait_s))
 [ -n "${units//[[:space:]]/}" ] || { echo "OPS_AGENT_UNITS must name at least one unit (an empty or blank list would make «the agent is up» always true)" >&2; exit 2; }
 
 mkdir -p "$(dirname "$target")" || { echo "OPS AGENT CONFIG FAILED: cannot write $target (its directory cannot be made) — nothing was changed" >&2; exit 1; }
-lockdir="${target}.lock.d"
-# shellcheck disable=SC2329 # called by the EXIT trap
-release_lock() {
-  # only the run that owns the lock removes it (a run that was wrongly judged stale must not remove the lock of the one that took over)
-  [ "$(cat "$lockdir/pid" 2> /dev/null)" = "$$" ] || return 0
-  rm -f "$lockdir/pid" 2> /dev/null
-  rmdir "$lockdir" 2> /dev/null
-}
-if ! mkdir "$lockdir" 2> /dev/null; then
-  holder="$(cat "$lockdir/pid" 2> /dev/null || true)"
-  # the run that made the directory writes its pid a moment later: an empty lock is «being made», not «stale» — wait for the pid (up to 2 s) before judging
-  waited=0
-  while [ -z "$holder" ] && [ "$waited" -lt 10 ]; do
-    sleep 0.2
-    waited=$((waited + 1))
-    holder="$(cat "$lockdir/pid" 2> /dev/null || true)"
-  done
-  if [ -n "$holder" ] && kill -0 "$holder" 2> /dev/null; then
-    echo "OPS AGENT CONFIG FAILED: another run of this installer is in progress (pid $holder, lock $lockdir) — two runs would overwrite each other's backup and marker; if no installer is running, remove $lockdir and run again" >&2
-    exit 1
-  fi
-  echo "ops agent config: taking over a stale lock $lockdir (its process${holder:+ $holder} is gone)" >&2
-  rm -f "$lockdir/pid"
-  rmdir "$lockdir" 2> /dev/null
-  mkdir "$lockdir" 2> /dev/null || { echo "OPS AGENT CONFIG FAILED: cannot take the lock $lockdir" >&2; exit 1; }
-fi
-if ! echo "$$" > "$lockdir/pid"; then
-  rm -f "$lockdir/pid" 2> /dev/null # a pid file that was created and then not written is still a file in the directory
-  rmdir "$lockdir" 2> /dev/null
-  echo "OPS AGENT CONFIG FAILED: cannot write the pid file of the lock $lockdir — nothing was changed" >&2
+# One run at a time: an exclusive flock(1) on <target>.lock, held on fd 9 until this process ends. The KERNEL holds it, so a run that dies in any way (ssh drop, kill -9, power) releases it by itself — no pid file,
+# no stale lock to judge, nothing to clean up. -n: a second run does not wait, it is refused. The lock file itself stays (an empty file); only the lock on it matters.
+command -v flock > /dev/null 2>&1 || { echo "OPS AGENT CONFIG FAILED: flock(1) (util-linux) is not installed — it is what keeps two runs from writing the same files; nothing was changed" >&2; exit 1; }
+lockfile="${target}.lock"
+exec 9> "$lockfile" || { echo "OPS AGENT CONFIG FAILED: cannot open the lock file $lockfile — nothing was changed" >&2; exit 1; }
+if ! flock -n 9; then
+  echo "OPS AGENT CONFIG FAILED: another run of this installer is in progress (lock $lockfile) — two runs would overwrite each other's backup and marker; nothing was changed" >&2
   exit 1
 fi
-trap release_lock EXIT
 
 units_up() {
   local u
   for u in $units; do
-    systemctl is-active --quiet "$u" || return 1
+    systemctl is-active --quiet "$u" 9>&- || return 1
   done
 }
 
@@ -93,7 +70,7 @@ restore() {
   else
     rm -f "$target" || { ok=0; echo "  $target (ours) could NOT be removed" >&2; }
   fi
-  systemctl restart google-cloud-ops-agent || { ok=0; echo "  the agent could not be restarted after the restore" >&2; }
+  systemctl restart google-cloud-ops-agent 9>&- || { ok=0; echo "  the agent could not be restarted after the restore" >&2; }
   [ "$ok" = 1 ]
 }
 
@@ -136,7 +113,7 @@ if [ -f "$target" ] && cmp -s "$src" "$target"; then
     exit 0
   fi
   echo "ops agent config: the file is in place but not known to be loaded (or the unit(s) [$units] are not active) — restarting the agent" >&2
-  systemctl restart google-cloud-ops-agent || fail "the agent could not be restarted (systemctl restart failed)"
+  systemctl restart google-cloud-ops-agent 9>&- || fail "the agent could not be restarted (systemctl restart failed)"
   wait_for_units || fail "the configuration is in place but unit(s) [$units] did not come up within $((tries * wait_s)) s — sudo journalctl -u google-cloud-ops-agent-fluent-bit -n 50 --no-pager"
   sum_of "$target" > "$marker" || echo "ops agent config: warning — the marker $marker could not be written (the next run will restart the agent again)" >&2
   echo "ops agent config: unit(s) [$units] active after a restart"
@@ -152,7 +129,7 @@ if ! mkdir -p "$(dirname "$target")" || ! install -m 0644 "$src" "$target"; then
   give_up "cannot write $target"
 fi
 
-systemctl restart google-cloud-ops-agent || give_up "systemctl restart google-cloud-ops-agent failed"
+systemctl restart google-cloud-ops-agent 9>&- || give_up "systemctl restart google-cloud-ops-agent failed"
 wait_for_units || give_up "with the new configuration the unit(s) [$units] did not come up within $((tries * wait_s)) s"
 
 sum_of "$target" > "$marker" || echo "ops agent config: warning — the marker $marker could not be written (the next run will restart the agent once more)" >&2
