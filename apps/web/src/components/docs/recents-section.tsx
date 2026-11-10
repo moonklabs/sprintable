@@ -1,8 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, Clock, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Icon } from '@/components/ds/icon';
+import { ListRow } from '@/components/ds/list-row';
+import { SectionHeader } from '@/components/ds/section-header';
 import { DOC_STATUS_TONE, toDocStatusFilter } from './lib/doc-status-tone';
 
 interface Doc {
@@ -29,6 +31,8 @@ interface RecentsSectionProps {
   emptyLabel: string;
 }
 
+// story 4892 (UI-9 목록 열, 첫 조각) — «최근»이 ds 부품을 입는다: 머리글 = SectionHeader(접기 · 건수), 줄 = ListRow(줄 전체가 단추).
+// 동작은 그대로: 접기 `aria-expanded`, 고르면 `onSelect(slug)`, 열린 문서만 `aria-current="page"`, 상태 점, 빈 문구.
 export function RecentsSection({ recentSlugs, docs, selectedSlug, onSelect, label, emptyLabel }: RecentsSectionProps) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -37,54 +41,42 @@ export function RecentsSection({ recentSlugs, docs, selectedSlug, onSelect, labe
     .filter((d): d is Doc => d !== undefined);
 
   return (
-    <div className="border-b border-border/60">
-      <button
-        type="button"
-        onClick={() => setCollapsed((v) => !v)}
-        aria-expanded={!collapsed}
-        className="flex w-full items-center gap-1.5 px-3 py-1.5 text-muted-foreground hover:text-foreground"
-      >
-        {collapsed ? <ChevronRight className="size-3 shrink-0" /> : <ChevronDown className="size-3 shrink-0" />}
-        <Clock className="size-3 shrink-0" />
-        {/* rebase 발견(2026-08-23, #2973/#3391 rebase 중) — label(t('recentDocs'))이 한글이라
-            mono uppercase가 2967과 동일 결함(흐림)을 낸다 — sans로. */}
-        <span className="flex-1 text-left text-micro font-semibold">{label}</span>
-        {recentDocs.length > 0 && (
-          <span className="font-mono text-micro tabular-nums">{recentDocs.length}</span>
-        )}
-      </button>
+    <div>
+      <SectionHeader
+        title={label}
+        count={recentDocs.length > 0 ? <span className="font-mono text-ds-mono-md tabular-nums text-ds-ink-3">{recentDocs.length}</span> : undefined}
+        collapsed={collapsed}
+        onToggle={() => setCollapsed((v) => !v)}
+        level={2}
+      />
       {!collapsed && (
-        <div className="px-2 pb-1">
-          {recentDocs.length === 0 ? (
-            <p className="px-2 py-1 text-editorial-meta italic text-muted-foreground">{emptyLabel}</p>
-          ) : (
-            <ul className="space-y-0.5">
-              {recentDocs.map((doc) => (
-                <li key={doc.id}>
+        recentDocs.length === 0 ? (
+          <p className="px-4 py-2 text-ds-small italic text-ds-ink-3">{emptyLabel}</p>
+        ) : (
+          <ul>
+            {recentDocs.map((doc) => (
+              <li key={doc.id}>
+                {/* a narrow list (the 236px rail): the ds compact density (36px; 44px on a coarse pointer), not the default 56 */}
+                <ListRow asChild selected={selectedSlug === doc.slug} density="compact">
                   <button
                     type="button"
                     onClick={() => onSelect(doc.slug)}
                     aria-current={selectedSlug === doc.slug ? 'page' : undefined}
-                    className={cn(
-                      'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold transition-colors',
-                      selectedSlug === doc.slug
-                        ? 'bg-primary/10 text-primary'
-                        : 'text-foreground/80 hover:bg-muted hover:text-foreground'
-                    )}
+                    className="w-full"
                   >
                     <StatusDot status={doc.status} />
                     {doc.icon ? (
                       <span className="shrink-0 text-sm leading-none">{doc.icon}</span>
                     ) : (
-                      <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                      <Icon name="description" size={16} className="text-ds-ink-3" />
                     )}
-                    <span className="truncate">{doc.title}</span>
+                    <span className="min-w-0 flex-1 truncate text-ds-body font-semibold text-ds-ink">{doc.title}</span>
                   </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+                </ListRow>
+              </li>
+            ))}
+          </ul>
+        )
       )}
     </div>
   );
