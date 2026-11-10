@@ -185,13 +185,16 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     const headers = [...container.querySelectorAll('[data-slot="ds-section-header"]')] as HTMLElement[];
     const tagHeader = headers.find((h) => h.textContent?.includes('태그'));
     expect(tagHeader, 'the tag filter heading is a ds SectionHeader').toBeTruthy();
-    expect(tagHeader!.querySelector('h3')?.textContent).toContain('태그');
+    expect(tagHeader!.querySelector('h2')?.textContent).toContain('태그');
+    // a collapsed heading shows ONE bottom line (the ds header's own) — the wrapper's border appears only under the open chips
+    expect(tagHeader!.parentElement!.className).not.toContain('border-b');
     const toggle = tagHeader!.querySelector('button[aria-expanded]') as HTMLButtonElement;
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect([...container.querySelectorAll('button')].some((b) => b.textContent === '#스펙')).toBe(false);
     await act(async () => { toggle.click(); });
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect([...container.querySelectorAll('button')].some((b) => b.textContent === '#스펙')).toBe(true);
+    expect(tagHeader!.parentElement!.className).toContain('border-b');
   });
 
   // story #3053(2984-S5) — 선택 태그 칩은 헤어라인(border-proof-line+bg-transparent)을 쓰고

@@ -47,6 +47,7 @@ export function RecentsSection({ recentSlugs, docs, selectedSlug, onSelect, labe
         count={recentDocs.length > 0 ? <span className="font-mono text-ds-mono-md tabular-nums text-ds-ink-3">{recentDocs.length}</span> : undefined}
         collapsed={collapsed}
         onToggle={() => setCollapsed((v) => !v)}
+        level={2}
       />
       {!collapsed && (
         recentDocs.length === 0 ? (
@@ -55,7 +56,8 @@ export function RecentsSection({ recentSlugs, docs, selectedSlug, onSelect, labe
           <ul>
             {recentDocs.map((doc) => (
               <li key={doc.id}>
-                <ListRow asChild selected={selectedSlug === doc.slug}>
+                {/* 36px: the rail is 236px wide and the old row was ~32px — the ds default 56px would push the tree down by ~80px for four recents. A compact ListRow variant is a question to design (UI-3), not decided here. */}
+                <ListRow asChild selected={selectedSlug === doc.slug} className="min-h-9 py-1.5">
                   <button
                     type="button"
                     onClick={() => onSelect(doc.slug)}

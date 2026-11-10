@@ -568,13 +568,15 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         const allTags = [...new Set(tree.flatMap((d) => (d as unknown as { tags?: string[] | null }).tags ?? []))];
         if (allTags.length === 0) return null;
         return (
-          <div className="border-b border-border">
+          // the ds SectionHeader draws its own bottom line; the wrapper adds one only under the open chips (a collapsed heading would show two)
+          <div className={tagsCollapsed ? undefined : 'border-b border-border'}>
             {/* story 4892 (UI-9 목록 열) — 머리글이 ds SectionHeader: 접기 단추(`aria-expanded`) + 제목 + (접혔고 고른 태그가 있으면) 건수. 접기 상태 · 태그 고르기는 무변경. */}
             <SectionHeader
               title={t('tagFilter')}
               count={tagsCollapsed && selectedTags.length > 0 ? <CountBadge count={selectedTags.length} /> : undefined}
               collapsed={tagsCollapsed}
               onToggle={() => setTagsCollapsed((v) => !v)}
+              level={2}
             />
             {/* story #2963 §2 — collapsible pill 칩. selectedTags state·toggle 로직은 완전
                 무변경. story #7d7634ee(P0) — proof-cut-xs(컷코너) 폐지, proof-surface-press
