@@ -1022,34 +1022,57 @@ def _blocking_delete_provider():
 
 @pytest.mark.anyio
 async def test_grace_cron_holds_no_open_transaction_during_blob_delete(monkeypatch):
-    """story #4405 — GCS 삭제 도중 cron 연결이 idle in transaction이 아니다(예전: 대상 SELECT로 연 트랜잭션을 500건 GCS 왕복 내내 들고 있음 → RED)."""
+    """story #4405 - GCS 삭제 도중 cron 연결이 idle in transaction이 아니다(예전: 대상 SELECT로 연 트랜잭션을 500건 GCS 왕복 내내 들고 있음 → RED).
+    세는 것은 «이 시험 엔진의» 연결뿐이다(application_name 꼬리표, tests/own_connection_probe.py) - 공유 DB의 이웃 연결이 걸려 흔들리던 것(CI run 42639791595)을 뿌리에서 막는다.
+    그 소란한 조건을 일부러 만든다: 다른 이름의 연결이 트랜잭션을 연 채 쉬는 동안에도 초록이어야 하고, cron이 트랜잭션을 쥐게 되돌리면 RED."""
     import asyncio
     from unittest.mock import MagicMock
 
     from app.routers import cron
+    from tests.own_connection_probe import NEIGHBOUR_SUFFIX, idle_in_tx_snapshot, neighbour_transaction, tagged_engine, unique_tag
 
-    engine = create_async_engine(_ASYNC)
+    marker = unique_tag("t4879-grace")
+    engine = tagged_engine(_ASYNC, marker)
     Session = async_sessionmaker(engine, expire_on_commit=False)
     try:
         aid = await _seed_expired_asset(Session)
         prov, started, release = _blocking_delete_provider()
         monkeypatch.setattr(cron, "get_storage_provider", lambda: prov)
-        async with Session() as worker:
-            task = asyncio.create_task(cron.assets_grace_hard_delete(MagicMock(), session=worker))
-            try:
-                await asyncio.wait_for(started.wait(), 20)
-                async with Session() as probe:
-                    idle_in_tx = (await probe.execute(text(
-                        "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()"
-                        " AND pid <> pg_backend_pid() AND state LIKE 'idle in transaction%'"
-                    ))).scalar_one()
-                    await probe.rollback()
-            finally:
-                release.set()
-                await task
-        assert idle_in_tx == 0
+        async with neighbour_transaction(_ASYNC, marker + NEIGHBOUR_SUFFIX):
+            async with Session() as worker:
+                task = asyncio.create_task(cron.assets_grace_hard_delete(MagicMock(), session=worker))
+                try:
+                    await asyncio.wait_for(started.wait(), 20)
+                    own, neighbour, everyone = await idle_in_tx_snapshot(Session, marker)  # one statement: one snapshot of the three numbers
+                finally:
+                    release.set()
+                    await task
+        assert neighbour == 1 and everyone >= 1, f"the fixture's neighbour must be idle in its transaction at that moment: this test runs in the noisy condition on purpose ({neighbour}, {everyone})"
+        assert own == 0, f"the cron's own connection sat idle in transaction during the blob delete ({own})"
         async with Session() as s:
             assert (await s.execute(text(f"SELECT count(*) FROM assets WHERE id='{aid}'"))).scalar_one() == 0
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_the_own_engine_counter_sees_a_transaction_its_engine_holds_open():
+    """Positive control for the test above: the counter that picks out «this test's own» connections is not blind - the application_name really lands on the connection
+    (a count of 0 from a counter that could never see anything would prove nothing), and another name's transactions are not counted."""
+    from tests.own_connection_probe import idle_in_tx_count, tagged_engine, unique_tag
+
+    marker = unique_tag("t4879-ctl")
+    engine = tagged_engine(_ASYNC, marker)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with Session() as holder:
+            await holder.execute(text("select 1"))  # autobegin: idle in transaction, ours
+            own = await idle_in_tx_count(Session, marker)
+            other = await idle_in_tx_count(Session, marker + "-someone-else")
+            await holder.rollback()
+        assert own == 1, own
+        assert other == 0, other
+        assert await idle_in_tx_count(Session, marker) == 0  # rolled back: gone again
     finally:
         await engine.dispose()
 
