@@ -9,6 +9,7 @@ import {
   MOBILE_HUB_GROUP_ORDER,
   NAV_GROUPS,
   OTHER_NAV_ITEMS,
+  TEAM_TABS,
   TEAM_VARIANT,
   buildNavGroups,
   allNavItems,
@@ -114,6 +115,30 @@ describe('⭐메뉴 이름 = 그 화면을 부르는 글 (선생님 11-10: 맨 �
   it('정해진 이름: ko «홈» · en «Home»', () => {
     expect(koMessages.nav.zoneNow).toBe('홈');
     expect(enMessages.nav.zoneNow).toBe('Home');
+  });
+});
+
+describe('⭐«팀» 탭줄 데이터(TEAM_TABS)', () => {
+  it('순서 · 이름 키: 에이전트 · 구성원 · 실행 기록 · API 키 · 채용 — ko · en 모두 있다', () => {
+    expect(TEAM_TABS.map((t) => t.id)).toEqual(['agents', 'people', 'runs', 'keys', 'recruit']);
+    for (const t of TEAM_TABS) {
+      for (const [lang, m] of [['ko', koMessages], ['en', enMessages]] as const) {
+        const ns = (m as unknown as Record<string, Record<string, string>>)[t.ns]!;
+        expect(ns[t.labelKey], `${lang} ${t.ns}.${t.labelKey}`).toBeTruthy();
+      }
+    }
+  });
+  it('탭 경로(쿼리 뗀)는 모두 실제 화면이고 «팀» 구역 항목과 같은 화면을 가리킨다(라우트 이동 0)', () => {
+    const routes = new Set(pageRoutes(APP_DIR));
+    for (const t of TEAM_TABS) expect(routes.has(t.path.split('?')[0]!), t.path).toBe(true);
+    const teamPaths = new Set(NAV_GROUPS.find((g) => g.id === 'team')!.items.map((i) => i.path));
+    for (const id of ['agents', 'people', 'runs', 'keys']) {
+      const tab = TEAM_TABS.find((t) => t.id === id)!;
+      expect(teamPaths.has(tab.path), `팀 구역에 ${tab.path}`).toBe(true);
+    }
+  });
+  it('탭 경로(쿼리 포함)는 서로 겹치지 않는다', () => {
+    expect(new Set(TEAM_TABS.map((t) => t.path)).size).toBe(TEAM_TABS.length);
   });
 });
 

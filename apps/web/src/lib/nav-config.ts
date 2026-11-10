@@ -152,6 +152,18 @@ export function resolveNavGroups(flags: NavV3Flags): NavGroupConfig[] {
   return NAV_GROUPS.map((group) => (group.id === 'settings' ? { ...group, items: [...group.items, desktopItem] } : group));
 }
 
+// «팀» 탭줄(story #4885 · UI-2 AC4 · 선생님 «팀» 결정 → 갈래 1): 구성원 화면과 에이전트(워크포스) 화면들을 한 줄로 잇는 입구 배치 — 라우트 이동 0 · 두 화면을 한 목록으로 합치지 않음.
+// 이름은 «가는 화면이 이미 쓰는 낱말» 그대로(한 사물에 낱말 둘 0): 구성원(길잡이 «팀» 첫 항목) · 에이전트 · 실행 기록 · API 키 · 채용(에이전트 화면 안 «채용» 탭이 쓰는 낱말; AC3 표의 «모집»). «전체»(사람 + 에이전트 한 목록)는 한 목록 화면이 서는 뒤(화면 재건축 칸)의 몫이라 이번엔 없다.
+// 경로의 쿼리(?tab=recruit)는 «지금 여기» 판정(nav-active)이 읽는다 — 에이전트 화면은 탭 없이도 «에이전트»가 켜지고 ?tab=recruit이면 «채용»이 이긴다.
+export interface TeamTabConfig { id: string; ns: 'nav' | 'agents'; labelKey: string; path: string }
+export const TEAM_TABS: readonly TeamTabConfig[] = [
+  { id: 'agents', ns: 'nav', labelKey: 'workforce', path: '/organization/workforce' },
+  { id: 'people', ns: 'nav', labelKey: 'orgMembers', path: '/organization/members' },
+  { id: 'runs', ns: 'nav', labelKey: 'workforceRuns', path: '/organization/workforce/runs' },
+  { id: 'keys', ns: 'nav', labelKey: 'workforceApiKeys', path: '/organization/workforce/api-keys' },
+  { id: 'recruit', ns: 'agents', labelKey: 'recruitTab', path: '/organization/workforce?tab=recruit' },
+];
+
 // «전체»(/more) 맨 아래 «그 밖» — 메뉴 입구를 따로 만들지 않는 화면들(쓰임을 우리가 모르거나 아직 준비 중인 화면; PO 결정 11-10: 막다른 곳은 만들지 않는다).
 export const OTHER_NAV_ITEMS: NavItemConfig[] = [
   { id: 'rewards', labelKey: 'rewards', descriptionKey: 'descRewards', icon: Trophy, kind: 'static', path: '/rewards' },
