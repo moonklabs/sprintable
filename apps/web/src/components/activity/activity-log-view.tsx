@@ -467,8 +467,8 @@ function ActivityRow({ item, rowLabel, selected, controlsId, onToggle, buttonRef
   const time = formatViewerRelativeTime(item.created_at, locale, useViewerTimeZone());
   const tc = useTranslations('common');
   const { human, agent } = auditActorProps(item, tc, rowLabel);
-  // story 4892 — a row opens its details (aria-expanded + aria-controls). The visible row is a ProofCapsule — `<div>`s, and for an agent a focusable avatar — which may not sit inside a
-  // `<button>`; so the row is two layers: the visible capsule (inert: no tab stop, not read twice) and a transparent button laid over it whose accessible name is the row's own words.
+  // story 4892 — a row opens its details (aria-expanded + aria-controls). The visible row is a ProofCapsule — block elements, and for an agent a focusable avatar — which may not sit inside
+  // a button element; so the row is two layers: the visible capsule (inert: no tab stop, not read twice) and a transparent button laid over it whose accessible name is the row's own words.
   const actor = rowLabel ?? item.actor_name ?? '';
   const rowName = [actor, auditClaim(item), time].filter(Boolean).join(' · ');
   return (
