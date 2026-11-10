@@ -14,7 +14,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db, get_read_db
 from app.models.conversation import Conversation, ConversationMessage, ConversationParticipant
 from app.models.event import Event
-from app.services.event_room_gate import stored_event, withheld_payloads
+from app.services.event_room_gate import room_of, stored_event, withheld_payloads
 from app.models.team import TeamMember
 
 router = APIRouter(prefix="/api/v2/event-notifications", tags=["event-notifications", "Organization"])
@@ -209,6 +209,32 @@ class NotificationListItem(NotificationResponse):
 
     target_project_id: uuid.UUID | None = None
     target_doc_slug: str | None = None
+    # story 4890 (UI-7 P10) — the ROOM's name for a chat line («누가 · 어느 방»), resolved in one query for the page of items. Only for a room the caller may read NOW (the same gate that
+    # decides whether the words are handed back) and only for a named group/channel room: a DM has no name of its own (the other person is its name), so it stays None.
+    target_conversation_title: str | None = None
+
+
+async def _attach_conversation_titles(db: AsyncSession, org_id: uuid.UUID, events: list, items: list, withheld: dict) -> None:
+    """story 4890 — fill `target_conversation_title` on the page's chat lines. A row the room gate WITHHELD (the caller cannot read that room now) gets no title — the room's name is part of what the gate protects;
+    only rows the caller may read name their room. One query for every room on the page; a DM (no title of its own) and a room without a title stay None."""
+    rooms: dict[str, uuid.UUID] = {}
+    for e in events:
+        key = str(e.id)
+        if key in withheld:
+            continue
+        room = room_of(stored_event(e))
+        if room is not None:
+            rooms[key] = room
+    if not rooms:
+        return
+    rows = (await db.execute(
+        select(Conversation.id, Conversation.title, Conversation.type).where(Conversation.id.in_(set(rooms.values())), Conversation.org_id == org_id)
+    )).all()
+    titles = {r[0]: r[1] for r in rows if r[2] != "dm" and isinstance(r[1], str) and r[1].strip()}
+    for item in items:
+        room = rooms.get(str(item.id))
+        if room is not None:
+            item.target_conversation_title = titles.get(room)
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
@@ -249,6 +275,7 @@ async def list_notifications(
         if tgt is not None:
             i.target_project_id = tgt.project_id
             i.target_doc_slug = tgt.doc_slug
+    await _attach_conversation_titles(db, org_id, events, items, withheld)
     return items
 
 
