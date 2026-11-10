@@ -58,10 +58,11 @@ export function StandupDeadlineSection({ projectId }: Props) {
                 type="time"
                 value={deadline}
                 onChange={(e) => setDeadline(e.target.value)}
-                className="rounded-md border border-border bg-muted/30 px-3 py-2 text-base lg:text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                className="min-h-11 rounded-md border border-border bg-muted/30 px-3 py-2 text-base lg:min-h-0 lg:text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               />
             </div>
-            <Button size="sm" className="mt-4" onClick={handleSave} disabled={saving || !projectId}>
+            {/* story 4891: a phone press is ≥ 44 (the ui Button's default size carries the floor; «sm» was 28) */}
+            <Button className="mt-4" onClick={handleSave} disabled={saving || !projectId}>
               {saved ? <><Check className="size-4" />{tc('saved')}</> : saving ? tc('saving') : t('save')}
             </Button>
           </div>
