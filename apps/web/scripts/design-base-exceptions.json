@@ -151,7 +151,7 @@
       "count": 2,
       "why": "좁은 화면 풀스크린 오버레이는 같은 NotificationPanel을 넓은 화면의 포털 패널(공용 패널 열쇠 훅의 Tab/Esc · 벨 반환)과 나눠 그리고, 오버레이는 공용 useFocusTrap(자기 트랩)이 초점 · Tab 순환 · Esc · 반환을 맡는다. 바탕 Dialog로 감싸면 트랩이 겹치고 공용 패널 열쇠 훅과 초점/Esc가 부딪친다.",
       "lockedBy": [
-        "components/nav/notification-bell.4831.test.tsx::풀스크린(fixed inset-0) 모달 role=dialog이고 접근 이름이 «알림»이며 container 안에 그려진다(포털 아님)",
+        "components/nav/notification-bell.4831.test.tsx::풀스크린(fixed inset-0) 모달 role=dialog이고 접근 이름이 «알림»이며 <body> 직속으로 그려진다(머리줄 @container 밖 · 포털)",
         "components/nav/notification-bell.4831.test.tsx::열면 초점이 오버레이 안으로 들어간다(자기 트랩)",
         "components/nav/notification-bell.4831.test.tsx::Tab은 오버레이 안에서 돈다 — 마지막 조작에서 Tab은 첫 조작으로 · 첫 조작에서 Shift+Tab은 마지막으로",
         "components/nav/notification-bell.4831.test.tsx::Esc는 오버레이를 닫고 초점을 연 자리(벨)로 돌려준다"
