@@ -2357,8 +2357,9 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     await mountNoOrg(<DesktopSetupEntry />);
     await setHash('#progress=s-8');
     await flush();
-    await vi.waitFor(() => expect(window.location.hash, 'taken off the address').toBe('')); // state, not a tick count (the same race as above — this line was the one that failed)
+    // the s-8 setup call only happens once THIS change was handled (a queued event of the loop above cannot satisfy it) — and the handler takes the fragment off the address before it reads it: wait for that call FIRST, then the address
     await vi.waitFor(() => expect(calls.some((c) => c.url.includes('/api/desktop/setups/s-8'))).toBe(true));
+    await vi.waitFor(() => expect(window.location.hash, 'taken off the address').toBe('')); // state, not a tick count (the same race as above — this line was the one that failed)
     expect(text()).not.toContain('데스크톱 앱에서 열어 주세요');
   });
 
