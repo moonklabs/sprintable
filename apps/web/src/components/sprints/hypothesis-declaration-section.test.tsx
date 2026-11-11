@@ -44,7 +44,7 @@ describe('HypothesisDeclarationSection (E-SPRINT-LOOP sprint-open 278314e9)', ()
     expect(start).toBeGreaterThan(-1);
     expect(tag).toContain('data-slot="ds-button"');
     expect(tag).toContain('type="button"');
-    expect(tag).toContain('touch:min-h-11');
+    expect(tag).toContain('touch:min-h-ds-touch');
     // ds Button에는 `disabled:border-dashed`가 원래 있어 부분 문자열로는 못 가린다 — 맨 클래스 하나로 센다
     expect(tag).toMatch(/class="(?:[^"]* )?border-dashed(?: [^"]*)?"/);
     expect(tag).toContain('w-full');

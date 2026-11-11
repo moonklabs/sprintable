@@ -101,6 +101,8 @@ RESERVED_WORKSPACE_SLUGS: frozenset[str] = frozenset({
     "flow", "goals", "hypotheses", "work-list",
     # story 4714 — the phone app's landing and start screen (new top-level web routes)
     "phone-landing", "phone-start",
+    # story 4886 — the web design-system showcase page (new top-level route, internal reference)
+    "design-system",
 })
 
 
