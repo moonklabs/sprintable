@@ -128,6 +128,18 @@ describe('감사 로그 필터 줄 — ds 부품 (4892)', () => {
     expect([...es.querySelectorAll('button[data-slot="ds-button"]')].some((b) => b.textContent?.trim() === ko.common!.retry)).toBe(true);
   });
 
+  it('⭐«다시 시도»가 또 거절당하면 빈 목록이 아니라 오류 상태 그대로(다시 불러오기도 같은 규칙)', async () => {
+    api(() => answer(false, 500), teamOk([]));
+    await mountView('audit');
+    const retry = () => [...container.querySelectorAll('[data-slot="ds-empty-state"] button')].find((b) => b.textContent?.trim() === ko.common!.retry) as HTMLButtonElement;
+    await act(async () => { retry().click(); });
+    for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+    const es = container.querySelector('[data-slot="ds-empty-state"]') as HTMLElement;
+    expect(es.textContent).toContain(ko.common!.error);
+    expect(es.textContent).not.toContain(ko.activityLog!.emptyTitle);
+    expect(urlsOf('/api/activity-logs').length).toBe(2);   // it asked again
+  });
+
   it('⭐«다시 시도»는 다시 묻고, 이번엔 잘 오면 목록이 선다 · «더 보기» 실패는 지금처럼 토스트(오류 상태 아님)', async () => {
     let calls = 0;
     api(() => (++calls === 1 ? answer(false, 502) : answer(true, 200, { items: [auditRow('ok1')], total: 1, limit: 30, offset: 0 })), teamOk([]));
@@ -201,6 +213,6 @@ describe('활동 로딩 경로 — ds 스켈레톤 (4892)', () => {
       expect(src).not.toMatch(/OperatorDropdownSelect/);
     }
     expect(loadingRouteSource).not.toMatch(/page-skeleton|PageSkeleton/);
-    expect(loadingRouteSource).toContain('ActivityLoadingSkeleton');
+    expect(loadingRouteSource).toMatch(/<ActivityLoadingSkeleton\s*\/>/);   // rendered, not just imported
   });
 });

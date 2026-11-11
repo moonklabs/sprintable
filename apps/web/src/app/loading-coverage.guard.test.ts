@@ -131,7 +131,10 @@ function codeOnly(src: string): string {
 function announcesStatus(loadingFile: string): boolean {
   const hasStatus = (f: string) => {
     const src = codeOnly(readFileSync(f, 'utf8'));
-    return /\srole="status"/.test(src) && /\saria-busy="true"/.test(src) && /className="[^"]*\bsr-only\b/.test(src);
+    // story 4892 — the ds SkeletonGroup (components/ds/skeleton.tsx) sets role="status" · aria-busy="true" · its name (`aria-label={label}`) ITSELF, so a placeholder built on it announces the state without
+    // repeating the three literals; its `label` is required by the type. The exemption rests on that source — pinned by the test «ds SkeletonGroup는 …» below.
+    const viaDsGroup = /<SkeletonGroup\s+label=\{[^}]+\}/.test(src);
+    return viaDsGroup || (/\srole="status"/.test(src) && /\saria-busy="true"/.test(src) && /className="[^"]*\bsr-only\b/.test(src));
   };
   if (hasStatus(loadingFile)) return true;
   const SRC_ROOT = join(APP_ROOT, '..');
@@ -222,6 +225,14 @@ describe('story #4274 — 탭 · 메뉴 목적지 loading.tsx 전수(v3 플래�
       if (!announcesStatus(loading)) problems.push(`${k}: ${relative(APP_ROOT, loading)} 상태 알림 없음`);
     }
     expect(problems).toEqual([]);
+  });
+
+  it('⭐ds SkeletonGroup는 role="status" · aria-busy="true" · 이름(aria-label={label})을 부품 안에서 정한다 — 가드가 «SkeletonGroup + label»을 상태 알림으로 인정하는 근거', () => {
+    const ds = codeOnly(readFileSync(join(APP_ROOT, '../components/ds/skeleton.tsx'), 'utf8'));
+    expect(ds).toMatch(/role="status"/);
+    expect(ds).toMatch(/aria-busy="true"/);
+    expect(ds).toMatch(/aria-label=\{label\}/);
+    expect(ds).toMatch(/label: string;/);   // the name is required, not optional
   });
 
   it('⭐일감 프레임 여섯 경로: 자기 loading.tsx는 몸 스켈레톤(<WorkspaceFrameLoading />)만 · 탭 줄은 품지 않음', () => {

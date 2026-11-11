@@ -9,7 +9,7 @@ export function ActivityLoadingSkeleton() {
   return (
     <SkeletonGroup label={t('loading')} className="space-y-6 p-6">
       <div className="space-y-2">
-        <Skeleton className="h-8 w-40 md:h-9.5" />
+        <Skeleton className="h-8 w-40 lg:h-9.5" />
         <Skeleton className="h-4 w-64 max-w-full" />
       </div>
       <div className="space-y-3">
