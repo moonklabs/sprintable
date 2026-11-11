@@ -1,6 +1,7 @@
 'use client';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { isSessionExpiredSignaled } from '@/lib/auth/session-expired-signal';
 
 /**
  * story #2160 — EventSource가 readyState=CLOSED(2)로 error를 내는 것은 스펙상 "복구 불가"
@@ -45,7 +46,13 @@ export async function isSessionAlive(): Promise<boolean> {
   // 떠나는 페이지의 연결이 이동 때문에 끊긴 것 — 세션을 묻지 않는다(재시도도 이 페이지에선 의미 없다).
   if (leavingPage) return true;
   try {
-    return (await fetchWithAuth('/api/me')).ok;
+    const res = await fetchWithAuth('/api/me');
+    if (res.ok) return true;
+    // story 4902 — «응답이 ok가 아니다»는 «세션이 죽었다»가 아니다. 죽음은 fetchWithAuth가 갱신(refresh)에 최종 실패했을 때 올리는 신호 하나(`isSessionExpiredSignaled`)다. 예전엔 !ok면
+    // 곧 죽음으로 접어, `/api/me`가 순간 5xx를 내거나 다른 창이 먼저 갱신해 이 창의 갱신이 «superseded»(원래 401을 돌려줌 · 세션은 서 있음)로 끝나도 스트림이 다시 붙지 않고
+    // 닫힌 채 남았다(`sse-multiplexer`가 «죽었으면 재시도 안 함»). 신호가 안 올랐으면 살아 있다고 보고 백오프 재시도에 맡긴다.
+    // 재시도는 횟수가 아니라 간격으로 묶인다: 갱신이 «일시 불가»이거나 «superseded»가 되풀이되면 ≤30초 ±20% 지터로 계속 두드린다 — 의도(세션이 서 있는 동안엔 포기하지 않는다).
+    return !isSessionExpiredSignaled();
   } catch {
     // 네트워크 자체 문제(오프라인 등)는 세션 문제로 오판하지 않고 기존 백오프 재시도에 맡긴다.
     return true;
