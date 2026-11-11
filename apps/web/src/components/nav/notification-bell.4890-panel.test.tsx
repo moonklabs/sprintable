@@ -106,7 +106,7 @@ describe('NotificationBell — the panel on the B skeleton (story 4890)', () => 
     expect(pressed[0]!.getAttribute('aria-pressed')).toBe('true');
     const close = panel().querySelector<HTMLButtonElement>(`button[aria-label="${koMessages.common.close}"]`)!;
     expect(close.getAttribute('data-slot')).toBe('ds-icon-button');
-    expect(close.className).toContain('touch:min-h-11');
+    expect(close.className).toContain('touch:min-h-ds-touch'); // the ds touch floor token (develop 5619 renamed it from touch:min-h-11 · the value is still 44)
     expect(Array.from(panel().querySelectorAll('button')).some((b) => b.textContent?.includes(koMessages.inbox.markAllRead))).toBe(true);
   });
 
