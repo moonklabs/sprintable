@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ds/button';
 
 const VIEWPORT = 220;
 const OUTPUT = 512;
@@ -119,7 +119,7 @@ export function AvatarCropper({
   }, [transform, natSize, onApply]);
 
   if (!transform) {
-    return <div className="text-sm text-muted-foreground">{t('avatarCropLoading')}</div>;
+    return <div className="text-ds-body text-ds-ink-3">{t('avatarCropLoading')}</div>;
   }
 
   const scale = transform.baseScale * transform.zoom;
@@ -127,7 +127,7 @@ export function AvatarCropper({
   return (
     <div className="flex items-center gap-4">
       <div
-        className="relative shrink-0 touch-none select-none overflow-hidden rounded-lg bg-muted"
+        className="relative shrink-0 touch-none select-none overflow-hidden rounded-ds-control bg-ds-surface-high"
         style={{ width: VIEWPORT, height: VIEWPORT }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -155,7 +155,7 @@ export function AvatarCropper({
         />
       </div>
       <div className="flex-1 space-y-3">
-        <div className="text-sm font-semibold text-foreground">{t('avatarCropTitle')}</div>
+        <div className="text-ds-body font-semibold text-ds-ink">{t('avatarCropTitle')}</div>
         <input
           type="range"
           min={MIN_ZOOM}
@@ -163,12 +163,12 @@ export function AvatarCropper({
           step={0.05}
           value={transform.zoom}
           onChange={(e) => onZoomChange(Number(e.target.value))}
-          className="w-full accent-info"
+          className="w-full accent-ds-action pointer-coarse:h-11"
           aria-label={t('avatarCropZoomLabel')}
         />
         <div className="flex gap-2">
-          <Button size="sm" onClick={handleApply}>{t('avatarCropApply')}</Button>
-          <Button size="sm" variant="ghost" onClick={onCancel}>{t('avatarCropCancel')}</Button>
+          <Button variant="primary" onClick={handleApply}>{t('avatarCropApply')}</Button>
+          <Button variant="quiet" onClick={onCancel}>{t('avatarCropCancel')}</Button>
         </div>
       </div>
     </div>

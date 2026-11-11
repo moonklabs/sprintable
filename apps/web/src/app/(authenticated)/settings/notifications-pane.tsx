@@ -7,6 +7,7 @@
 import { useTranslations } from 'next-intl';
 import { PushRegisterNotice } from '@/components/settings/push-register-notice';
 import { Button } from '@/components/ds/button';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { ListRow } from '@/components/ds/list-row';
 import { SectionHeader } from '@/components/ds/section-header';
 import { SettingsSection } from '@/components/settings/settings-section';
@@ -46,11 +47,11 @@ export function NotificationsPane({ loading, categories, globalLevel, savingLeve
         {/* story #4694 AC2 ② — the phone's «could not register for notifications» line (phone app only · nothing when fine) */}
         <PushRegisterNotice />
         {loading ? (
-          <div className="space-y-3" data-testid="notifications-pane-loading">
+          <SkeletonGroup label={tc('loading')} className="space-y-3" data-testid="notifications-pane-loading">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-14 animate-pulse rounded-md bg-muted" />
+              <Skeleton key={i} className="h-14" />
             ))}
-          </div>
+          </SkeletonGroup>
         ) : (
           <div className="space-y-4" data-testid="notifications-pane">
             {/* story #2272 — the default level: one of three */}

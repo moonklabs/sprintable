@@ -2,8 +2,8 @@
 
 import { useCallback, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Button } from '@/components/ui/button';
-import { Avatar } from '@/components/shared/avatar';
+import { Button } from '@/components/ds/button';
+import { Avatar } from '@/components/ds/avatar';
 import { AvatarCropper } from '@/components/shared/avatar-cropper';
 import { AVATAR_ALLOWED_CONTENT_TYPES, AVATAR_MAX_BYTES, removeAvatar, uploadAvatar } from '@/lib/avatar-upload';
 
@@ -97,13 +97,13 @@ export function AvatarEditCard({
       <div className="flex items-center gap-4">
         <Avatar name={name} label={label} avatarUrl={avatarUrl} actorType={actorType} size={bigSize} />
         <div>
-          <div className="mb-2 text-sm font-semibold text-foreground">{label ?? name}</div>
-          <div className="flex gap-2">
-            <Button size="sm" disabled={stage.kind === 'uploading'} onClick={() => inputRef.current?.click()}>
+          <div className="mb-2 text-ds-body font-semibold text-ds-ink">{label ?? name}</div>
+          <div className="flex flex-wrap gap-2">
+            <Button disabled={stage.kind === 'uploading'} onClick={() => inputRef.current?.click()}>
               {t('avatarChange')}
             </Button>
             {avatarUrl ? (
-              <Button size="sm" variant="ghost" className="text-destructive" disabled={stage.kind === 'uploading'} onClick={() => void handleRemove()}>
+              <Button variant="danger" disabled={stage.kind === 'uploading'} onClick={() => void handleRemove()}>
                 {t('avatarRemove')}
               </Button>
             ) : null}
@@ -120,7 +120,7 @@ export function AvatarEditCard({
       />
 
       {stage.kind === 'uploading' ? (
-        <div className="text-xs text-muted-foreground">{t('avatarUploading', { pct: stage.pct })}</div>
+        <div className="text-ds-small text-ds-ink-3">{t('avatarUploading', { pct: stage.pct })}</div>
       ) : (
         <div
           role="button"
@@ -130,16 +130,16 @@ export function AvatarEditCard({
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
-          className={`cursor-pointer rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground transition-colors ${
-            dragOver ? 'border-info bg-info/5' : 'border-border bg-muted'
+          className={`cursor-pointer rounded-ds-control border border-dashed p-4 text-center text-ds-small text-ds-ink-3 transition-colors ${
+            dragOver ? 'border-ds-action bg-ds-action-soft' : 'border-ds-line bg-ds-surface-sunk'
           }`}
         >
           {t('avatarDropHint')}
         </div>
       )}
 
-      <p className="text-micro leading-relaxed text-muted-foreground">{t('avatarConstraint')}</p>
-      {error && <p role="alert" aria-live="assertive" className="text-xs text-destructive">{error}</p>}
+      <p className="text-ds-small leading-relaxed text-ds-ink-3">{t('avatarConstraint')}</p>
+      {error && <p role="alert" aria-live="assertive" className="text-ds-small text-ds-failed">{error}</p>}
     </div>
   );
 }

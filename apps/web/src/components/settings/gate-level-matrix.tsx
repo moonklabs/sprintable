@@ -6,8 +6,10 @@ import { useTranslations } from 'next-intl';
 import { Banner } from '@/components/ds/banner';
 import { Button } from '@/components/ds/button';
 import { ListRow } from '@/components/ds/list-row';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { cn } from '@/lib/utils';
 import { SettingsSection } from './settings-section';
+import { Tag } from './settings-parts';
 
 /**
  * HITL 게이트 레벨 매트릭스 (S-GATE-4). (work_type done·merge) × (actor agent·human) → level
@@ -54,17 +56,6 @@ const isLevelDisabled = (workType: WorkType, level: Level): boolean => workType 
 const cellKey = (w: string, a: string) => `${w}:${a}`;
 const toSource = (s?: string): Source => (s === 'override' ? 'override' : 'org_default');
 
-/** a small status tag on the ds meaning tokens, at 12 px (the ds Chip is the 11 px mono kind — a phone reads nothing under 12 here) */
-function Tag({ tone, children }: { tone: 'done' | 'needs-hand' | 'failed' | 'action'; children: React.ReactNode }) {
-  const TONE = {
-    done: 'bg-ds-done-soft text-ds-done',
-    'needs-hand': 'bg-ds-needs-hand-soft text-ds-needs-hand',
-    failed: 'bg-ds-failed-soft text-ds-failed',
-    action: 'bg-ds-action-soft text-ds-action-text',
-  } as const;
-  return <span className={cn('inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded-ds-tag border border-ds-line px-1.5 text-ds-small font-semibold', TONE[tone])}>{children}</span>;
-}
-
 interface GateLevelMatrixProps {
   surface: 'org' | 'project';
   /** project surface: 대상 project. org surface: PUT scope='org' 경유용 대표 project(없으면 편집 불가). */
@@ -76,6 +67,7 @@ interface GateLevelMatrixProps {
 
 export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLevelMatrixProps) {
   const t = useTranslations('gateConfig');
+  const tc = useTranslations('common');
   const [cells, setCells] = useState<Record<string, GateCell>>({});
   const [loading, setLoading] = useState(true);
   const [busyCell, setBusyCell] = useState<string | null>(null);
@@ -193,14 +185,14 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
       </div>
 
       {loading ? (
-        <div className="space-y-1">
+        <SkeletonGroup label={tc('loading')} className="space-y-1">
           {[1, 2, 3, 4].map((i) => (
             <div key={i} className="flex items-center justify-between gap-3 px-3 py-3">
-              <div className="h-4 w-20 animate-pulse rounded bg-ds-surface-high" />
-              <div className="h-7 w-48 animate-pulse rounded bg-ds-surface-high" />
+              <Skeleton className="h-4 w-20" />
+              <Skeleton className="h-7 w-48" />
             </div>
           ))}
-        </div>
+        </SkeletonGroup>
       ) : (
         WORK_TYPES.map((wt) => (
           <div key={wt} className="space-y-2">

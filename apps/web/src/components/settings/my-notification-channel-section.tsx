@@ -3,12 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { Trash2, Send, Check, X, Loader2, AlertTriangle } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { OperatorInput } from '@/components/ui/operator-control';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
-import { Switch } from '@/components/ui/switch';
-import { useToast } from '@/components/ui/toast';
+import { Button } from '@/components/ds/button';
+import { Input } from '@/components/ds/input';
+import { useToast } from '@/components/ui/toast'; // the toast HOOK (the context the app's toasts go through) — it has no ds twin; not a visual part
+import { SettingsSection } from './settings-section';
+import { SwitchButton, Tag } from './settings-parts';
 import { cn } from '@/lib/utils';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -270,186 +269,159 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
   if (loading || !projectId) return null;
 
   return (
-    <SectionCard>
-      <SectionCardHeader>
-        <div className="space-y-1">
-          <h2 className="text-base font-semibold text-foreground">{t('destinationsTitle')}</h2>
-          <p className="text-sm text-muted-foreground">{t('destinationsSubtitle')}</p>
+    <SettingsSection title={t('destinationsTitle')} description={t('destinationsSubtitle')}>
+      {/* AC3 — 자가진단 패널 */}
+      <section className="space-y-2 rounded-ds-control border border-ds-line bg-ds-surface-sunk p-3">
+        <p className="text-ds-body font-semibold text-ds-ink">{t('diagWhere')}</p>
+        <div className="flex items-center gap-2 text-ds-body text-ds-ink-3">
+          <Tag tone="done">{t('inAppAlwaysChip')}</Tag>
+          <span>{t('inAppAlways')}</span>
         </div>
-      </SectionCardHeader>
-      <SectionCardBody className="space-y-4">
-        {/* AC3 — 자가진단 패널 */}
-        <section className="space-y-2 rounded-md border border-border bg-muted/40 p-3">
-          <p className="text-sm font-medium text-foreground">{t('diagWhere')}</p>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Badge variant="success" className="shrink-0 text-xs">{t('inAppAlwaysChip')}</Badge>
-            <span>{t('inAppAlways')}</span>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {activeConfigs.length === 0
-              ? t('externalNone')
-              : `${t('externalActiveCount', { count: activeConfigs.length })} — ${activeScopeSummary}`}
-          </p>
-          {globalActive && (
-            <div className="space-y-2 rounded-md border border-warning/35 bg-warning/12 p-2.5 text-xs text-foreground">
-              <p className="flex items-start gap-1.5">
-                {/* story #2590(TIER1 아이콘) — text-warning은 tint 유무와 무관하게 3.0 미달(실측,
-                    #2420 doc) — text-foreground로 잠정 통일(진한 토큰 신설은 범위 밖). */}
-                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-foreground" aria-hidden />
-                <span>{t('misconfigGlobalActive')}</span>
-              </p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleTurnOffGlobal}
-                disabled={busyId === globalActive.id}
-                className="whitespace-nowrap"
-              >
-                {t('turnOffGlobal')} →
-              </Button>
-            </div>
-          )}
-        </section>
-
-        {/* AC2 — 목적지 집계(scope 그룹핑) */}
-        {webhookConfigs.length === 0 ? (
-          <p className="rounded-md border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
-            {t('emptyExternalDest')}
-          </p>
-        ) : (
-          <div className="space-y-3">
-            {groups.map((group) => (
-              <section key={group.key} className="space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <p className="text-xs font-medium text-foreground">{group.label}</p>
-                  {group.isCurrent && (
-                    <Badge variant="outline" className="text-[0.65rem]">{t('scopeCurrentMarker')}</Badge>
-                  )}
-                  <span className="text-xs text-muted-foreground tabular-nums">{group.configs.length}</span>
-                </div>
-                <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
-                  {group.configs.map((c) => {
-                    const busy = busyId === c.id;
-                    const test = testStates[c.id] ?? { status: 'idle' as TestStatus };
-                    const ariaScope = group.isGlobal ? t('webhookScopeGlobal') : group.label;
-
-                    if (deleteConfirmId === c.id) {
-                      return (
-                        <div
-                          key={c.id}
-                          role="group"
-                          aria-live="assertive"
-                          aria-label={`${t('webhookDeleteConfirm')} (${ariaScope})`}
-                          className="flex items-center justify-between gap-3 bg-destructive-tint px-3 py-2.5"
-                        >
-                          {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
-                          <span className="min-w-0 truncate text-sm text-foreground" title={c.url}>
-                            {t('webhookDeleteConfirm')}
-                          </span>
-                          <div className="flex shrink-0 items-center gap-2">
-                            <Button ref={cancelRef} variant="ghost" size="sm" onClick={() => setDeleteConfirmId(null)} disabled={busy}>
-                              {tc('cancel')}
-                            </Button>
-                            <Button variant="destructive" size="sm" onClick={() => void handleDeleteRow(c)} disabled={busy}>
-                              {busy ? '...' : tc('delete')}
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <div key={c.id} className="px-3 py-2.5">
-                        <div className="flex items-center gap-3">
-                          <div className="flex min-w-0 flex-1 items-center gap-2">
-                            <Badge variant={group.isGlobal ? 'secondary' : 'outline'} className="shrink-0 text-xs">
-                              {group.label}
-                            </Badge>
-                            <span className="truncate font-mono text-xs text-muted-foreground" title={c.url}>
-                              {c.url}
-                            </span>
-                          </div>
-                          <div className="flex shrink-0 items-center gap-1.5">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="px-2 text-muted-foreground hover:text-foreground"
-                              onClick={() => void handleTestSend(c)}
-                              disabled={test.status === 'sending'}
-                              aria-label={`${t('testSend')} — ${ariaScope}`}
-                            >
-                              {test.status === 'sending'
-                                ? <Loader2 className="h-4 w-4 animate-spin" />
-                                : <Send className="h-4 w-4" />}
-                            </Button>
-                            <Switch
-                              checked={c.is_active}
-                              onCheckedChange={(next) => void handleToggleRow(c, next)}
-                              disabled={busy}
-                              aria-label={`${t('webhookEnabledToggle')} — ${ariaScope}`}
-                            />
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="px-2 text-muted-foreground hover:text-destructive"
-                              onClick={() => setDeleteConfirmId(c.id)}
-                              disabled={busy}
-                              aria-label={`${tc('delete')} — ${ariaScope}`}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                        {test.status !== 'idle' && (
-                          <p
-                            className={cn(
-                              'mt-1.5 flex items-center gap-1 text-xs',
-                              test.status === 'ok' && 'text-success',
-                              test.status === 'fail' && 'text-destructive',
-                              (test.status === 'sending' || test.status === 'unavailable') && 'text-muted-foreground',
-                            )}
-                            role={test.status === 'fail' ? 'alert' : 'status'}
-                            aria-live={test.status === 'fail' ? 'assertive' : 'polite'}
-                            aria-atomic="true"
-                          >
-                            {test.status === 'ok' && <><Check className="h-3 w-3" />{t('testReached')}{test.ts ? ` · ${formatTs(test.ts, locale, displayTimezone)}` : ''}</>}
-                            {test.status === 'fail' && <><X className="h-3 w-3" />{t('testFailed')}{test.reason ? ` · ${test.reason}` : ''}</>}
-                            {test.status === 'sending' && <>{t('testSending')}</>}
-                            {test.status === 'unavailable' && <>{t('testUnavailable')}</>}
-                          </p>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            ))}
-          </div>
-        )}
-
-        {/* [B] 현재 프로젝트 webhook 추가/편집 슬롯 */}
-        <section className="space-y-2 border-t border-border pt-4">
-          <p className="text-sm font-medium">{t('webhookAddCurrentProject')}</p>
-          <div className="flex gap-2">
-            <OperatorInput
-              type="url"
-              value={webhookUrl}
-              onChange={(e) => setWebhookUrl(e.target.value)}
-              placeholder={t('webhookUrlPlaceholder')}
-              className="flex-1 font-mono"
-              aria-label={t('webhookAddCurrentProject')}
-            />
-            <Button
-              variant="hero"
-              size="sm"
-              onClick={() => void handleSaveCurrentProject()}
-              disabled={savingNew || !webhookUrl.trim()}
-            >
-              {savingNew ? '...' : tc('save')}
+        <p className="text-ds-body text-ds-ink-3">
+          {activeConfigs.length === 0
+            ? t('externalNone')
+            : `${t('externalActiveCount', { count: activeConfigs.length })} — ${activeScopeSummary}`}
+        </p>
+        {globalActive && (
+          <div className="space-y-2 rounded-ds-control border border-ds-needs-hand-bar/40 bg-ds-needs-hand-soft p-2.5 text-ds-small text-ds-ink">
+            <p className="flex items-start gap-1.5">
+              {/* story #2590(TIER1 아이콘) — 경고 아이콘은 글자색(ink)으로(색만으로 뜻을 싣지 않는다: 글이 같이 간다). */}
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ds-ink" aria-hidden />
+              <span>{t('misconfigGlobalActive')}</span>
+            </p>
+            <Button variant="secondary" onClick={handleTurnOffGlobal} disabled={busyId === globalActive.id}>
+              {t('turnOffGlobal')} →
             </Button>
           </div>
-        </section>
-      </SectionCardBody>
-    </SectionCard>
+        )}
+      </section>
+
+      {/* AC2 — 목적지 집계(scope 그룹핑) */}
+      {webhookConfigs.length === 0 ? (
+        <p className="rounded-ds-control border border-dashed border-ds-line px-3 py-6 text-ds-body text-ds-ink-3">
+          {t('emptyExternalDest')}
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {groups.map((group) => (
+            <section key={group.key} className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <p className="min-w-0 truncate text-ds-small font-semibold text-ds-ink">{group.label}</p>
+                {group.isCurrent && <Tag>{t('scopeCurrentMarker')}</Tag>}
+                <span className="text-ds-small tabular-nums text-ds-ink-3">{group.configs.length}</span>
+              </div>
+              <div className="divide-y divide-ds-line overflow-hidden rounded-ds-control border border-ds-line">
+                {group.configs.map((c) => {
+                  const busy = busyId === c.id;
+                  const test = testStates[c.id] ?? { status: 'idle' as TestStatus };
+                  const ariaScope = group.isGlobal ? t('webhookScopeGlobal') : group.label;
+
+                  if (deleteConfirmId === c.id) {
+                    return (
+                      <div
+                        key={c.id}
+                        role="group"
+                        aria-live="assertive"
+                        aria-label={`${t('webhookDeleteConfirm')} (${ariaScope})`}
+                        className="flex flex-wrap items-center justify-between gap-3 bg-ds-failed-soft px-3 py-2.5"
+                      >
+                        <span className="min-w-0 flex-1 text-ds-body text-ds-ink" title={c.url}>
+                          {t('webhookDeleteConfirm')}
+                        </span>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Button ref={cancelRef} variant="quiet" onClick={() => setDeleteConfirmId(null)} disabled={busy}>
+                            {tc('cancel')}
+                          </Button>
+                          <Button variant="danger" onClick={() => void handleDeleteRow(c)} disabled={busy}>
+                            {busy ? '...' : tc('delete')}
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div key={c.id} className="px-3 py-2.5">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+                          <Tag tone={group.isGlobal ? 'action' : 'neutral'}>{group.label}</Tag>
+                          <span className="min-w-[8rem] flex-1 truncate font-mono text-ds-small text-ds-ink-3" title={c.url}>
+                            {c.url}
+                          </span>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <Button
+                            variant="quiet"
+                            className="px-2"
+                            onClick={() => void handleTestSend(c)}
+                            disabled={test.status === 'sending'}
+                            aria-label={`${t('testSend')} — ${ariaScope}`}
+                          >
+                            {test.status === 'sending'
+                              ? <Loader2 className="h-4 w-4 animate-spin" />
+                              : <Send className="h-4 w-4" />}
+                          </Button>
+                          <SwitchButton
+                            checked={c.is_active}
+                            onCheckedChange={(next) => void handleToggleRow(c, next)}
+                            disabled={busy}
+                            aria-label={`${t('webhookEnabledToggle')} — ${ariaScope}`}
+                          />
+                          <Button
+                            variant="quiet"
+                            className="px-2"
+                            onClick={() => setDeleteConfirmId(c.id)}
+                            disabled={busy}
+                            aria-label={`${tc('delete')} — ${ariaScope}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                      {test.status !== 'idle' && (
+                        <p
+                          className={cn(
+                            'mt-1.5 flex items-center gap-1 text-ds-small',
+                            test.status === 'ok' && 'text-ds-done',
+                            test.status === 'fail' && 'text-ds-failed',
+                            (test.status === 'sending' || test.status === 'unavailable') && 'text-ds-ink-3',
+                          )}
+                          role={test.status === 'fail' ? 'alert' : 'status'}
+                          aria-live={test.status === 'fail' ? 'assertive' : 'polite'}
+                          aria-atomic="true"
+                        >
+                          {test.status === 'ok' && <><Check className="h-3 w-3" />{t('testReached')}{test.ts ? ` · ${formatTs(test.ts, locale, displayTimezone)}` : ''}</>}
+                          {test.status === 'fail' && <><X className="h-3 w-3" />{t('testFailed')}{test.reason ? ` · ${test.reason}` : ''}</>}
+                          {test.status === 'sending' && <>{t('testSending')}</>}
+                          {test.status === 'unavailable' && <>{t('testUnavailable')}</>}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
+
+      {/* [B] 현재 프로젝트 webhook 추가/편집 슬롯 */}
+      <section className="space-y-2 border-t border-ds-line pt-4">
+        <p className="text-ds-body font-semibold text-ds-ink">{t('webhookAddCurrentProject')}</p>
+        <div className="flex flex-wrap gap-2">
+          <Input
+            type="url"
+            value={webhookUrl}
+            onChange={(e) => setWebhookUrl(e.target.value)}
+            placeholder={t('webhookUrlPlaceholder')}
+            className="min-w-0 flex-1 font-mono pointer-coarse:h-11"
+            aria-label={t('webhookAddCurrentProject')}
+          />
+          <Button variant="primary" onClick={() => void handleSaveCurrentProject()} disabled={savingNew || !webhookUrl.trim()}>
+            {savingNew ? '...' : tc('save')}
+          </Button>
+        </div>
+      </section>
+    </SettingsSection>
   );
 }
