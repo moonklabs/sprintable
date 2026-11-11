@@ -16,6 +16,7 @@ import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { logServerTiming, withServerTiming } from '@/lib/server-timing';
 import { TabOwnerGate } from '@/components/auth/tab-owner-gate';
 import { fastapiBaseUrl } from '@/lib/fastapi-url';
+import { SP_RENEW_TRIED_COOKIE } from '@/lib/auth/cookies';
 
 interface MemberContext {
   id: string;
@@ -93,7 +94,14 @@ async function AuthenticatedLayoutBody({
     // the onboarding (and the desktop setup's «새 조직» mode) would let them create a second organization. The session is out of step with the membership —
     // a new sign-in issues a token with the right claim (the proxy reads the same field the same way: only `no_membership` is «no organization»).
     // Any other 404 (no reason · an older backend · an unreadable body) keeps the old reading, as before.
-    if ((await readMe404Reason(meRes)) === ME_REASON_MEMBERSHIP_ELSEWHERE) redirect(buildLoginRedirect(currentPath, navV3Flags));
+    if ((await readMe404Reason(meRes)) === ME_REASON_MEMBERSHIP_ELSEWHERE) {
+      // story 4904 — «the token names no organization the person belongs to» is not yet «the session ended»: a token minted before the organization existed (the same new
+      // account in a second window) is one refresh away from the right claim. Renew ONCE, read again; only when the renewal was already tried (the marker the renew road
+      // leaves for a minute) and it is still none is it the sign-in.
+      const renewTried = (await cookies()).get(SP_RENEW_TRIED_COOKIE)?.value;
+      if (!renewTried) redirect(`/api/auth/renew?next=${encodeURIComponent(currentPath || '/')}`);
+      redirect(buildLoginRedirect(currentPath, navV3Flags));
+    }
     if (staysForNewOrgSetup(currentPath)) return { userId: session.user_id, node: children };
     redirect(onboardingRedirect(currentPath));
   }
