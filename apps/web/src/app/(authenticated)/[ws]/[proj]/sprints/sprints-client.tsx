@@ -784,7 +784,8 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       <TopBarSlot
         title={<h1 className="text-sm font-medium">{t('title')}</h1>}
         actions={
-          <Button size="sm" onClick={() => setShowCreate(true)}>
+          // story #4888 — 폰 폭에서는 글자(span)가 숨어 아이콘(+)만 남는다: aria-label이 이름을 주고, 폰 누름 영역은 44 이상.
+          <Button size="sm" aria-label={t('newSprint')} className="pointer-coarse:min-h-11 pointer-coarse:min-w-11" onClick={() => setShowCreate(true)}>
             <Plus className="size-4" />
             <span className="hidden sm:inline">{t('newSprint')}</span>
           </Button>
