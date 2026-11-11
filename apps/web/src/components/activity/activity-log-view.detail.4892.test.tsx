@@ -497,6 +497,15 @@ describe('ActivityLogView — lg에서 상세 칸이 열린 동안만 행위자 
     expect(visibleLayer(0).textContent).toContain('안나');
   });
 
+  it('⭐resize glitch narrow → xl: isWide is already true and isXl still false (lagging), but the «lg only» query already says false → the names are NOT folded', async () => {
+    mq.wide = false; mq.xl = false;
+    await mount();
+    await click(rows()[0]!);                                      // narrow: details under the row, names kept
+    mq.wide = true; mq.xl = false; mq.lgOnly = false;             // the width jumped to >= 1280: isWide updated, isXl lags, the lg-only query is already false
+    await rerender();
+    expect(visibleLayer(0).textContent).toContain('안나');
+  });
+
   it('xl keeps the names while a row is chosen (the details column is beside a wide list)', async () => {
     mq.xl = true;
     await mount();
