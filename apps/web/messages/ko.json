@@ -4737,6 +4737,8 @@
     "recruitTab": "채용",
     "scopeThisProject": "이 프로젝트",
     "backToList": "목록으로",
+    "detailNotFound": "에이전트를 찾을 수 없어요",
+    "detailLoadFailed": "에이전트를 불러오지 못했어요",
     "manageAddAgent": "에이전트 추가",
     "manageProjectsGranted": "{count, plural, =0 {프로젝트 팀 없음} other {프로젝트 팀 #곳}}",
     "agentNotConnected": "연결 안 됨",

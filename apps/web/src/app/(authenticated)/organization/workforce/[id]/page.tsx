@@ -19,6 +19,8 @@ import { AgentRunProfileSection } from '@/components/agents/agent-run-profile-se
 import { isDesktopRuntime } from '@/lib/agent-run-profile';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Button as DsButton } from '@/components/ds/button';
+import { EmptyState } from '@/components/ds/empty-state';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
@@ -150,6 +152,8 @@ export default function AgentDetailPage() {
 
   const [agent, setAgent] = useState<AgentMember | null>(null);
   const [loading, setLoading] = useState(true);
+  // story 4889 (AC3 §5 #6) — the agent could not be read: said on the screen (it used to bounce to the list without a word, and `!agent` drew nothing)
+  const [loadError, setLoadError] = useState<null | 'notfound' | 'failed'>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [orgRole, setOrgRole] = useState<string>('member');
   // story 4675 (F2): the computer this agent runs on (its reported session · the DM strip's own read) or is bound to (its live
@@ -188,14 +192,30 @@ export default function AgentDetailPage() {
   const flatHrefRef = useRef(flatHref);
   useEffect(() => { flatHrefRef.current = flatHref; }, [flatHref]);
 
-  const fetchAgent = useCallback(async () => {
-    const res = await fetchWithAuth(`/api/team-members/${id}`);
-    // story #1990: replace — 뒤로가기 재진입 트랩 방지(§3.2 원칙, gate/chat/goal/loop과 동일).
-    // 까디르 QA(d5b64e7dc [P2]) — ref는 되돌리는 **그 순간**에 읽는다(요청 전에 읽어 두면 요청 중 전환 시 옛 프로젝트로 돌아간다).
-    if (!res.ok) { const flatHref = flatHrefRef.current; router.replace(flatHref('/organization/workforce?tab=manage')); return; }
-    const json = await res.json() as { data: AgentMember };
-    setAgent(json.data);
-  }, [id, router]);
+  // story 4889 — one read at a time counts: a new id (or a retry) starts a new read and the late answer of an older one is dropped (it used to be able to
+  // overwrite the newer page, and the OLD agent stayed on the screen while the new one was being read — or after its read failed).
+  const readSeq = useRef(0);
+  const fetchAgent = useCallback(async (): Promise<boolean> => {
+    // story 4889 (AC3 §5 #6): a failed read is SAID on the screen with a way out (retry · back to the list) — no silent bounce, no blank page. (Before: `router.replace(list)` — story #1990's
+    // «no back-button trap» still holds: this page never redirects itself, so Back leaves it at once.) Returns whether this read is still the current one.
+    const seq = ++readSeq.current;
+    const live = () => seq === readSeq.current;
+    setAgent(null);
+    setLoadError(null);
+    try {
+      const res = await fetchWithAuth(`/api/team-members/${id}`);
+      if (!live()) return false;
+      if (!res.ok) { setLoadError(res.status === 404 || res.status === 403 ? 'notfound' : 'failed'); return true; }
+      const json = await res.json() as { data: AgentMember };
+      if (!live()) return false;
+      setAgent(json.data);
+      return true;
+    } catch {
+      if (!live()) return false;
+      setLoadError('failed');
+      return true;
+    }
+  }, [id]);
 
   const fetchOrgContext = useCallback(async () => {
     // story #3519(§16-7 2부, PO 確定 2026-09-05) — 둘 다 부수(ok?채움:방치, 그 외 화면을
@@ -239,9 +259,11 @@ export default function AgentDetailPage() {
   }, [id]);
 
   useEffect(() => {
+    let current = true; // story 4889: an older id's late answer does not end the newer id's loading
     setLoading(true);
     Promise.all([fetchAgent(), fetchActiveApiKey(), fetchOrgContext()])
-      .finally(() => setLoading(false));
+      .finally(() => { if (current) setLoading(false); });
+    return () => { current = false; };
   }, [fetchAgent, fetchActiveApiKey, fetchOrgContext]);
 
   useEffect(() => {
@@ -373,7 +395,27 @@ export default function AgentDetailPage() {
     );
   }
 
-  if (!agent) return null;
+  if (!agent) {
+    // story 4889 (AC3 §5 #6): not a blank page — the reason, and the way out. The list address is read at the PRESS (story #4231: the project the person is switching to now, not the one at render).
+    const kind = loadError ?? 'failed';
+    const backToList = () => { const flatHref = flatHrefRef.current; router.push(flatHref('/organization/workforce?tab=manage')); }; // (read at the press · the ratchet knows the `flatHref(` wrap by this name)
+    return (
+      <div className="w-full max-w-3xl mx-auto p-6" data-testid="agent-detail-load-error" data-kind={kind} role="alert">
+        <EmptyState
+          icon="error"
+          title={ta(kind === 'notfound' ? 'detailNotFound' : 'detailLoadFailed')}
+          action={(
+            <div className="flex flex-wrap justify-center gap-2">
+              {kind === 'failed' ? (
+                <DsButton variant="primary" onClick={() => { setLoading(true); void fetchAgent().then((isCurrent) => { if (isCurrent) setLoading(false); }); }}>{tc('retry')}</DsButton>
+              ) : null}
+              <DsButton variant="secondary" onClick={backToList}>{ta('backToList')}</DsButton>
+            </div>
+          )}
+        />
+      </div>
+    );
+  }
 
   const canEditBase =
     (currentUserId !== null && agent.created_by === currentUserId) ||

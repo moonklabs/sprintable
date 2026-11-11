@@ -4737,6 +4737,8 @@
     "recruitTab": "Recruit",
     "scopeThisProject": "This project",
     "backToList": "Back to list",
+    "detailNotFound": "Agent not found",
+    "detailLoadFailed": "Could not load the agent",
     "manageAddAgent": "Add agent",
     "manageProjectsGranted": "{count, plural, =0 {No project team} one {# project team} other {# project teams}}",
     "agentNotConnected": "Not connected",
