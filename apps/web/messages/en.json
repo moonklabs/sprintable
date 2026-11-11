@@ -2547,6 +2547,8 @@
   },
   "standup": {
     "dateLabel": "Date",
+    "sprintStoryCountPartial": "{count}+ stories",
+    "taskProgressPartial": "{done}+/{total}+ tasks done",
     "orgLevelTitle": "Today's standup",
     "orgLevelDesc": "Write once a day and it's shared across every project you can access.",
     "orgWriteBanner": "Organization-level entry — write once and it automatically appears in every project you have access to. No project selection needed.",

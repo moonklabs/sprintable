@@ -2547,6 +2547,8 @@
   },
   "standup": {
     "dateLabel": "날짜",
+    "sprintStoryCountPartial": "스토리 {count}개 이상",
+    "taskProgressPartial": "태스크 {done}+/{total}+개 완료",
     "orgLevelTitle": "오늘의 스탠드업",
     "orgLevelDesc": "하루 한 번 작성하면 접근한 모든 프로젝트에 공유돼요.",
     "orgWriteBanner": "조직 레벨 작성 — 한 번 작성하면 접근 권한이 있는 프로젝트에 자동으로 표시돼요. 프로젝트 선택은 필요 없어요.",
