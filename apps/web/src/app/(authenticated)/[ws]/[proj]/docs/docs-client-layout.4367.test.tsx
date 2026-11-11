@@ -118,12 +118,12 @@ describe('DocsClientLayout — 서랍 안 새 폴더 입력칸 Esc는 입력칸�
     // «새 폴더»는 상단바 버튼(서랍 밖) — 누르면 입력칸이 트리 목록(서랍 안에도 같은 목록)에 선다.
     const newFolderBtn = [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === koMessages.docs.newFolder)!;
     await act(async () => { newFolderBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const input = drawer().querySelector(`input[data-slot="input"][placeholder="${koMessages.docs.newFolderPlaceholder}"]`) as HTMLInputElement;
+    const input = drawer().querySelector(`input[data-slot="ds-input"][placeholder="${koMessages.docs.newFolderPlaceholder}"]`) as HTMLInputElement;
     expect(input).toBeTruthy();
     let ev!: KeyboardEvent;
     await act(async () => { ev = esc(input); });
     expect(ev.defaultPrevented).toBe(true);
-    expect(drawer().querySelector(`input[data-slot="input"][placeholder="${koMessages.docs.newFolderPlaceholder}"]`)).toBeNull();
+    expect(drawer().querySelector(`input[data-slot="ds-input"][placeholder="${koMessages.docs.newFolderPlaceholder}"]`)).toBeNull();
     expect(drawer().getAttribute('aria-hidden')).toBe('false');
     await act(async () => { esc(document.activeElement ?? document.body); });
     expect(drawer().getAttribute('aria-hidden')).toBe('true');

@@ -12,6 +12,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../../messages/ko.json';
 import { DocsClientLayout } from './docs-client-layout';
 import { DocsIndex } from './docs-index';
+import layoutSource from './docs-client-layout.tsx?raw';
 
 const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
 vi.mock('next/navigation', () => ({
@@ -111,7 +112,7 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     const calls: string[] = [];
     const fetchMock = stubFetch({ onCall: (url) => calls.push(url) });
     await mount();
-    const input = container.querySelector('input[type="text"][data-slot="input"]') as HTMLInputElement;
+    const input = container.querySelector('input[type="text"][data-slot="ds-input"]') as HTMLInputElement;
     expect(input).toBeTruthy();
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
@@ -209,9 +210,9 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     expect(tagChip?.className).toContain('border-proof-line');
     expect(tagChip?.className).not.toContain('bg-proof-blue-soft');
 
-    // 접으면 카운트 배지(CountBadge, mono+엠보스 inset)가 뜬다.
+    // 접으면 카운트 배지(ds CountBadge)가 뜬다.
     await act(async () => { tagToggle!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const badge = container.querySelector('.font-mono.shadow-\\[var\\(--elev-inset\\)\\]');
+    const badge = container.querySelector('[data-slot="ds-count-badge"]');
     expect(badge).toBeTruthy();
     expect(badge?.textContent).toBe('1');
     expect(container.querySelector('.bg-proof-blue-soft')).toBeNull();
@@ -303,7 +304,7 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     await mount();
     const newFolderBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('새 폴더'));
     await act(async () => { newFolderBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const input = container.querySelector('input[data-slot="input"][placeholder="폴더 이름"]') as HTMLInputElement;
+    const input = container.querySelector('input[data-slot="ds-input"][placeholder="폴더 이름"]') as HTMLInputElement;
     expect(input).toBeTruthy();
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
@@ -329,7 +330,7 @@ describe('DocsClientLayout — 새 폴더 이름 칸의 한글 조합(IME) 가�
     await mount();
     const newFolderBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('새 폴더'));
     await act(async () => { newFolderBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const input = container.querySelector('input[data-slot="input"][placeholder="폴더 이름"]') as HTMLInputElement;
+    const input = container.querySelector('input[data-slot="ds-input"][placeholder="폴더 이름"]') as HTMLInputElement;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '기획문');
       input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -359,9 +360,9 @@ describe('DocsClientLayout — 새 폴더 이름 칸의 한글 조합(IME) 가�
     stubFetch();
     const input = await openFolderForm();
     await act(async () => { keydown(input, 'Escape', { isComposing: true }); });
-    expect(container.querySelector('input[data-slot="input"][placeholder="폴더 이름"]')).not.toBeNull();
+    expect(container.querySelector('input[data-slot="ds-input"][placeholder="폴더 이름"]')).not.toBeNull();
     await act(async () => { keydown(input, 'Escape'); });
-    expect(container.querySelector('input[data-slot="input"][placeholder="폴더 이름"]')).toBeNull();
+    expect(container.querySelector('input[data-slot="ds-input"][placeholder="폴더 이름"]')).toBeNull();
   });
 });
 
@@ -595,9 +596,9 @@ describe('DocsClientLayout — 목록 열 머리 · 토글 · 틀 (4892)', () =>
   it('⭐머리의 «새 폴더»는 이름 칸 폼을 연다', async () => {
     stubFetch();
     await mount();
-    expect(container.querySelector('input[data-slot="input"][placeholder="폴더 이름"]')).toBeNull();
+    expect(container.querySelector('input[data-slot="ds-input"][placeholder="폴더 이름"]')).toBeNull();
     await act(async () => { inHeader('새 폴더')!.click(); });
-    expect(container.querySelector('input[data-slot="input"][placeholder="폴더 이름"]')).toBeTruthy();
+    expect(container.querySelector('input[data-slot="ds-input"][placeholder="폴더 이름"]')).toBeTruthy();
   });
 
   it('두 동작은 한 화면에 한 자리 — 머리의 것은 lg 이상에서만, 상단 바의 것은 lg 미만에서만 보인다', async () => {
@@ -695,5 +696,32 @@ describe('DocsClientLayout — 목록에서 문서를 고르면 읽기로 연다
     await act(async () => { row.click(); });
     expect(pushMock).toHaveBeenCalledTimes(1);
     expect(String(pushMock.mock.calls[0]![0])).toMatch(/\/docs\/doc-a\/view$/);
+  });
+});
+
+// story 4892 (UI-9 목록 열) — the new-folder panel, the retry button and the tag count wear the ds parts (ds Input · ds Button · ds CountBadge); the old ui/ parts are gone from the layout.
+describe('DocsClientLayout — 새 폴더 칸 · 다시 시도 · 건수는 ds 부품 (4892)', () => {
+  it('⭐the inline new-folder panel: a ds Input, «취소» is a quiet ds Button and «만들기» the primary ds Button', async () => {
+    stubFetch();
+    await mount();
+    const newFolderBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('새 폴더'));
+    await act(async () => { newFolderBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const input = container.querySelector('input[placeholder="폴더 이름"]') as HTMLInputElement;
+    expect(input.getAttribute('data-slot')).toBe('ds-input');
+    const panel = input.parentElement as HTMLElement;
+    expect(panel.className).toContain('border-ds-line');
+    const cancel = [...panel.querySelectorAll('button')].find((b) => b.textContent === '취소') as HTMLButtonElement;
+    const confirm = [...panel.querySelectorAll('button')].find((b) => b.textContent === '만들기') as HTMLButtonElement;
+    expect(cancel.getAttribute('data-slot')).toBe('ds-button');
+    expect(confirm.getAttribute('data-slot')).toBe('ds-button');
+    expect(cancel.className).not.toContain('bg-ds-action');
+    expect(confirm.className).toContain('bg-ds-action');
+  });
+
+  it('the layout no longer imports the old ui/ button · input · count-badge (and the top-bar actions are ds buttons in the source)', () => {
+    expect(layoutSource).not.toMatch(/from '@\/components\/ui\/(button|input|count-badge)'/);
+    expect(layoutSource).toMatch(/from '@\/components\/ds\/input'/);
+    expect(layoutSource).toMatch(/from '@\/components\/ds\/count-badge'/);
+    expect(layoutSource).not.toMatch(/<Button\b/);   // every button is a DsButton / IconButton now
   });
 });

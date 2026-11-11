@@ -1,8 +1,9 @@
 'use client';
 
 import { useRef } from 'react';
-import { Search, X } from 'lucide-react';
-import { Input } from '@/components/ui/input';
+import { Icon } from '@/components/ds/icon';
+import { IconButton } from '@/components/ds/icon-button';
+import { Input } from '@/components/ds/input';
 
 interface TreeSearchInputProps {
   value: string;
@@ -31,31 +32,28 @@ export function TreeSearchInput({
 
   return (
     <div className="flex-shrink-0 px-3 pb-2 pt-1">
-      {/* story #2963 §2 — 에디토리얼 검색 필드(hairline border·proof-bg). debounce·API·핸들러
-          무변경, 형태만(shadcn rounded-xl+muted bg → hairline+proof-bg). */}
+      {/* story 4892 (UI-9 목록 열) — 찾기 칸 = ds Input + ds Icon · 지우기 = ds IconButton. debounce · API · 핸들러 무변경, 부품만. */}
       <div className="relative">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+        <Icon name="search" size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ds-ink-3" />
         <Input
           ref={inputRef}
           type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className="h-auto bg-card py-1.5 pl-8 pr-8 dark:bg-card"
+          className="pl-8 pr-9"
         />
         {isSearching && (
-          <button
-            type="button"
+          <IconButton
+            icon="close"
+            label={clearLabel}
             onClick={() => { onClear(); inputRef.current?.focus(); }}
-            aria-label={clearLabel}
-            className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <X className="size-3.5" />
-          </button>
+            className="absolute right-1 top-1/2 -translate-y-1/2"
+          />
         )}
       </div>
       {isSearching && (
-        <p className="mt-1 px-1 text-editorial-meta text-muted-foreground">
+        <p className="mt-1 px-1 text-ds-small text-ds-ink-3">
           {matchCount === 0 ? noResultsLabel : resultCountLabel(matchCount)}
         </p>
       )}

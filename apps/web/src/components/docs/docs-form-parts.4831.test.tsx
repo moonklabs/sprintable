@@ -146,7 +146,7 @@ describe('TreeSearchInput — 문서 트리 검색 칸', () => {
   it('바탕 Input이고 입력이 onChange로 전해진다', async () => {
     const onChange = vi.fn();
     await mount(false, onChange);
-    const input = container.querySelector<HTMLInputElement>('input[data-slot="input"][placeholder="검색"]')!;
+    const input = container.querySelector<HTMLInputElement>('input[data-slot="ds-input"][placeholder="검색"]')!;
     expect(input.value).toBe('abc');
     await act(async () => { setNative(input, 'abcd'); });
     expect(onChange).toHaveBeenCalledWith('abcd');
@@ -159,7 +159,7 @@ describe('TreeSearchInput — 문서 트리 검색 칸', () => {
     const clear = container.querySelector<HTMLButtonElement>('button[aria-label="지우기"]')!;
     await act(async () => { clear.click(); });
     expect(onClear).toHaveBeenCalledTimes(1);
-    expect(document.activeElement).toBe(container.querySelector('input[data-slot="input"]'));
+    expect(document.activeElement).toBe(container.querySelector('input[data-slot="ds-input"]'));
     expect(container.textContent).toContain('2건');
   });
 });
