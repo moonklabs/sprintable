@@ -165,7 +165,8 @@ describe('[SID:4891] OrgMembersSection on ds parts', () => {
 
   it('the invite role select lists «구성원» first (the default) and then «관리자»', async () => {
     await draw();
-    const inviteRole = container.querySelector('select[aria-label*="/"]') as HTMLSelectElement;
+    const inviteRole = container.querySelector('select[aria-label="역할"]') as HTMLSelectElement;
+    expect(inviteRole).not.toBeNull();
     expect([...inviteRole.options].map((o) => o.value)).toEqual(['member', 'admin']);
     expect(inviteRole.value).toBe('member');
   });

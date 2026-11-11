@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useId } from 'react';
 import { useTranslations } from 'next-intl';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { OperatorInput } from '@/components/ui/operator-control';
-import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
-import { Button } from '@/components/ui/button';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ds/dialog';
+import { Input } from '@/components/ds/input';
+import { NativeSelect } from '@/components/ds/select';
 import { cn } from '@/lib/utils';
 import { useRenderNonce } from '@/hooks/use-render-nonce';
 
@@ -33,6 +34,7 @@ export function AddMemberModal({ open, onClose, orgId, projects, onAdded }: AddM
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<'admin' | 'member'>('member');
   const [projectIds, setProjectIds] = useState<string[]>([]);
+  const titleId = useId();
 
   const reset = () => {
     setEmail(''); setRole('member'); setProjectIds([]);
@@ -86,54 +88,47 @@ export function AddMemberModal({ open, onClose, orgId, projects, onAdded }: AddM
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) close(); }}>
-      <DialogContent>
+      <DialogContent aria-labelledby={titleId}>
         <DialogHeader>
-          <DialogTitle>{t('addMember')}</DialogTitle>
+          <DialogTitle id={titleId}>{t('addMember')}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-3">
-          <OperatorInput
+          <Input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder={t('inviteEmailPlaceholder')}
+            aria-label={t('inviteEmailPlaceholder')}
           />
-          <OperatorDropdownSelect
-            value={role}
-            onValueChange={(v) => setRole(v as 'admin' | 'member')}
-            options={[
-              { value: 'member', label: t('roleMember') },
-              { value: 'admin', label: t('roleAdmin') },
-            ]}
-          />
+          <NativeSelect value={role} onChange={(e) => setRole(e.target.value as 'admin' | 'member')} aria-label={t('agentRoleLabel')}>
+            <option value="member">{t('roleMember')}</option>
+            <option value="admin">{t('roleAdmin')}</option>
+          </NativeSelect>
           <div className="space-y-1.5">
-            <p className="text-xs text-muted-foreground">{t('inviteProjectsLabel')}</p>
+            <p className="text-ds-small font-semibold text-ds-ink">{t('inviteProjectsLabel')}</p>
             <div className="flex flex-wrap gap-1.5">
               {projects.map((p) => (
-                <button
+                <Button
                   key={p.id}
                   type="button"
+                  variant="secondary"
                   aria-pressed={projectIds.includes(p.id)}
                   onClick={() => toggleProject(p.id)}
-                  className={cn(
-                    'rounded-md border px-2 py-1 text-xs transition-colors',
-                    projectIds.includes(p.id)
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border text-muted-foreground hover:bg-muted/40',
-                  )}
+                  className={cn(projectIds.includes(p.id) && 'border-ds-action bg-ds-action-soft text-ds-action-text')}
                 >
                   {p.name}
-                </button>
+                </Button>
               ))}
             </div>
           </div>
         </div>
 
-        {error ? <p key={errorNonce} className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
+        {error ? <Banner key={errorNonce} tone="failed">{error}</Banner> : null}
 
         <DialogFooter>
-          <Button variant="ghost" onClick={close} disabled={submitting}>{tc('cancel')}</Button>
-          <Button variant="hero" onClick={() => void submitHuman()} disabled={submitting || !orgId}>
+          <Button variant="quiet" onClick={close} disabled={submitting}>{tc('cancel')}</Button>
+          <Button variant="primary" onClick={() => void submitHuman()} disabled={submitting || !orgId}>
             {submitting ? '...' : t('addMember')}
           </Button>
         </DialogFooter>

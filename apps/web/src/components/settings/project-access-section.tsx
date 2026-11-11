@@ -3,11 +3,11 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Shield, ShieldOff, Loader2 } from 'lucide-react';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { MemberRow } from '@/components/ui/member-row';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
+import { SettingsSection } from './settings-section';
+import { Tag } from './settings-parts';
 import { cn } from '@/lib/utils';
 
 import { fetchWithAuth } from '@/lib/db/client';
@@ -117,27 +117,19 @@ export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
 
   if (loading) {
     return (
-      <SectionCard>
-        <SectionCardHeader>
-          <div className="space-y-1">
-            <h2 className="text-base font-semibold text-foreground">{t('projectAccessTitle')}</h2>
-            <p className="text-sm text-muted-foreground">{tc('loading')}</p>
-          </div>
-        </SectionCardHeader>
-        <SectionCardBody>
-          <div className="space-y-1 divide-y divide-border">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="flex items-center gap-3 px-3 py-3">
-                <div className="flex-1 space-y-1.5">
-                  <div className="h-4 w-32 animate-pulse rounded bg-muted" />
-                  <div className="h-3 w-48 animate-pulse rounded bg-muted/60" />
-                </div>
-                <div className="h-7 w-20 animate-pulse rounded bg-muted" />
+      <SettingsSection title={t('projectAccessTitle')} description={tc('loading')}>
+        <SkeletonGroup label={tc('loading')} className="divide-y divide-ds-line">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="flex items-center gap-3 px-3 py-3">
+              <div className="flex-1 space-y-1.5">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-3 w-48" />
               </div>
-            ))}
-          </div>
-        </SectionCardBody>
-      </SectionCard>
+              <Skeleton className="h-7 w-20" />
+            </div>
+          ))}
+        </SkeletonGroup>
+      </SettingsSection>
     );
   }
 
@@ -146,16 +138,11 @@ export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
     // 결과다 — org-level currentRole 추정이 아니라 서버가 이 프로젝트의 effective
     // 관리자가 아니라고 실제로 거부한 경우에만 이 안내가 뜬다.
     return (
-      <SectionCard>
-        <SectionCardHeader>
-          <h2 className="text-base font-semibold text-foreground">{t('projectAccessTitle')}</h2>
-        </SectionCardHeader>
-        <SectionCardBody>
-          {/* story #3776(1층B) — "관리자 전용 페이지입니다", settings ns의 기존 orgMembersAdminOnly 키 재사용. */}
-          <p className="text-sm font-medium text-foreground">{t('orgMembersAdminOnly')}</p>
-          <p className="mt-1 text-sm text-muted-foreground">{t('projectAccessAdminOnlyDesc')}</p>
-        </SectionCardBody>
-      </SectionCard>
+      <SettingsSection title={t('projectAccessTitle')}>
+        {/* story #3776(1층B) — "관리자 전용 페이지입니다", settings ns의 기존 orgMembersAdminOnly 키 재사용. */}
+        <p className="text-ds-body font-medium text-ds-ink">{t('orgMembersAdminOnly')}</p>
+        <p className="text-ds-body text-ds-ink-3">{t('projectAccessAdminOnlyDesc')}</p>
+      </SettingsSection>
     );
   }
 
@@ -163,111 +150,81 @@ export function ProjectAccessSection({ projectId }: ProjectAccessSectionProps) {
   const totalCount = orgMembers.length;
 
   return (
-    <SectionCard>
-      <SectionCardHeader>
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1">
-            <h2 className="text-base font-semibold text-foreground">{t('projectAccessTitle')}</h2>
-            <p className="text-sm text-muted-foreground">
-              {t('projectAccessSubtitle')}
-            </p>
-          </div>
-          <div className="shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-            <div className="font-medium text-foreground">{grantedCount} / {totalCount}</div>
-            <div>{t('projectAccessGrantedLabel')}</div>
-          </div>
-        </div>
-      </SectionCardHeader>
-      <SectionCardBody className="space-y-3">
-        {message && (
-          // story #2105 2차 — handleToggle이 재시도 전 setMessage(null)을 먼저 호출해(위 정의) 매
-          // 시도마다 언마운트→리마운트된다. 에러=alert/assertive, 성공=status/polite.
-          <Alert
-            variant={message.type === 'success' ? 'success' : 'destructive'}
-            role={message.type === 'success' ? 'status' : 'alert'}
-            aria-live={message.type === 'success' ? 'polite' : 'assertive'}
-            aria-atomic="true"
-          >
-            <AlertDescription>{message.text}</AlertDescription>
-          </Alert>
-        )}
+    <SettingsSection
+      title={t('projectAccessTitle')}
+      description={t('projectAccessSubtitle')}
+    >
+      <div className="text-right text-ds-small text-ds-ink-3 tabular-nums">
+        <span className="font-medium text-ds-ink">{grantedCount} / {totalCount}</span> {t('projectAccessGrantedLabel')}
+      </div>
+      {message && (
+        // story #2105 2차 — handleToggle이 재시도 전 setMessage(null)을 먼저 호출해(위 정의) 매
+        // 시도마다 언마운트→리마운트된다. 에러=alert, 성공=status(ds Banner의 역할 규칙).
+        <Banner tone={message.type === 'success' ? 'info' : 'failed'}>{message.text}</Banner>
+      )}
 
-        {orgMembers.length === 0 ? (
-          <p className="rounded-md border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
-            {t('noOrgMembersInviteFirst')}
-          </p>
-        ) : (
-          <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
-            {orgMembers.map((member) => {
-              const grant = getGrant(member.id);
-              const granted = !!grant;
-              const isOwner = member.role === 'owner';   // org owner = always granted, 토글 불가
-              const toggling = togglingId === member.id;
+      {orgMembers.length === 0 ? (
+        <p className="rounded-ds-control border border-dashed border-ds-line px-3 py-6 text-ds-body text-ds-ink-3">
+          {t('noOrgMembersInviteFirst')}
+        </p>
+      ) : (
+        <div className="divide-y divide-ds-line overflow-hidden rounded-ds-control border border-ds-line">
+          {orgMembers.map((member) => {
+            const grant = getGrant(member.id);
+            const granted = !!grant;
+            const isOwner = member.role === 'owner';   // org owner = always granted, 토글 불가
+            const toggling = togglingId === member.id;
 
-              return (
-                <MemberRow
-                  key={member.id}
-                  name={member.name}
-                  email={member.email}
-                  className={cn(
-                    'border-0 rounded-none bg-transparent transition-opacity duration-200',
-                    !granted && !isOwner && 'opacity-60',
-                  )}
-                  actions={
-                    <>
-                      {granted && grant ? (
-                        <Badge variant="outline" className="text-xs">
-                          {orgRoleLabel(grant.role, t)}
-                        </Badge>
-                      ) : isOwner ? (
-                        <Badge variant="info" className="text-xs">
-                          {orgRoleLabel(member.role, t)}
-                        </Badge>
-                      ) : null}
-                      {isOwner ? (
-                        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                          <Shield className="h-3 w-3" />
-                          {t('projectAccessAlwaysAllowed')}
-                        </span>
-                      ) : canManage ? (
-                        <Button
-                          variant="glass"
-                          size="sm"
-                          disabled={toggling}
-                          onClick={() => void handleToggle(member)}
-                          className={cn(
-                            'min-w-[72px] gap-1 transition-colors',
-                            // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
-                            granted
-                              ? 'border-success/40 bg-success-tint text-foreground hover:bg-success/15'
-                              : 'border-border text-muted-foreground hover:bg-muted/40',
-                          )}
-                        >
-                          {toggling ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : granted ? (
-                            <><Shield className="h-3 w-3" />{t('projectAccessAllowed')}</>
-                          ) : (
-                            <><ShieldOff className="h-3 w-3" />{t('projectAccessBlocked')}</>
-                          )}
-                        </Button>
+            return (
+              <div
+                key={member.id}
+                className={cn(
+                  'flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2.5 transition-opacity duration-200',
+                  !granted && !isOwner && 'opacity-60',
+                )}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-ds-body font-medium text-ds-ink">{member.name}</div>
+                  {member.email ? <div className="truncate text-ds-small text-ds-ink-3">{member.email}</div> : null}
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {granted && grant ? (
+                    <Tag>{orgRoleLabel(grant.role, t)}</Tag>
+                  ) : isOwner ? (
+                    <Tag tone="action">{orgRoleLabel(member.role, t)}</Tag>
+                  ) : null}
+                  {isOwner ? (
+                    <span className="inline-flex items-center gap-1 text-ds-small text-ds-ink-3">
+                      <Shield className="h-3 w-3" />
+                      {t('projectAccessAlwaysAllowed')}
+                    </span>
+                  ) : canManage ? (
+                    <Button
+                      variant={granted ? 'primary' : 'secondary'}
+                      disabled={toggling}
+                      onClick={() => void handleToggle(member)}
+                      className="min-w-[72px] gap-1"
+                    >
+                      {toggling ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : granted ? (
+                        <><Shield className="h-3 w-3" />{t('projectAccessAllowed')}</>
                       ) : (
-                        <span className={cn(
-                          'inline-flex items-center gap-1 text-xs',
-                          granted ? 'text-success' : 'text-muted-foreground',
-                        )}>
-                          {granted ? <Shield className="h-3 w-3" /> : <ShieldOff className="h-3 w-3" />}
-                          {granted ? t('projectAccessAllowed') : t('projectAccessBlocked')}
-                        </span>
+                        <><ShieldOff className="h-3 w-3" />{t('projectAccessBlocked')}</>
                       )}
-                    </>
-                  }
-                />
-              );
-            })}
-          </div>
-        )}
-      </SectionCardBody>
-    </SectionCard>
+                    </Button>
+                  ) : (
+                    <span className={cn('inline-flex items-center gap-1 text-ds-small', granted ? 'text-ds-done' : 'text-ds-ink-3')}>
+                      {granted ? <Shield className="h-3 w-3" /> : <ShieldOff className="h-3 w-3" />}
+                      {granted ? t('projectAccessAllowed') : t('projectAccessBlocked')}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </SettingsSection>
   );
 }
