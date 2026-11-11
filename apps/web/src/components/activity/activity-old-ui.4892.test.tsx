@@ -275,6 +275,23 @@ describe('감사 로그 필터 줄 — ds 부품 (4892)', () => {
       expect(rows()).toBe(30);
     });
 
+    it('⭐화면을 떠난 뒤 늦게 온 «더 보기» 실패는 토스트를 띄우지 못한다', async () => {
+      let calls = 0;
+      let fail: (e: Error) => void = () => {};
+      api(() => {
+        calls += 1;
+        if (calls === 1) return page(30, 'old', 90);
+        return new Promise<Answer>((_resolve, reject) => { fail = reject; });                          // «더 보기» — held in flight, the filter never changes
+      }, teamOk([]));
+      await mountView('audit');
+      await act(async () => { loadMoreButton()!.click(); });
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);                                                                    // the afterEach unmounts a root too
+      await act(async () => { fail(new Error('offline')); });
+      for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+      expect(addToastMock).not.toHaveBeenCalled();
+    });
+
     it('«더 보기» 성공 · 같은 목록이면 그대로 붙는다(막은 것은 낡은 답뿐)', async () => {
       let calls = 0;
       api(() => { calls += 1; return calls === 1 ? page(30, 'old', 60) : page(30, 'more', 60); }, teamOk([]));

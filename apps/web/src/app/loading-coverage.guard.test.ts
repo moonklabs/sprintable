@@ -130,7 +130,9 @@ function codeOnly(src: string): string {
 /** story 4892 — `<SkeletonGroup label={…}>` with a NON-empty expression (an empty literal name — `label={''}` · `label={""}` · ``label={``}`` — would leave an unnamed status; `label="x"` is not the form the guard knows). */
 const DS_SKELETON_GROUP_NAMED = /<SkeletonGroup\s+label=\{(?!\s*(?:''|""|``)\s*\})[^}]+\}/;
 /** …and that `SkeletonGroup` must BE the ds one — imported from `@/components/ds/skeleton`; a local / other-path component with the same name proves nothing about role="status". */
-const DS_SKELETON_GROUP_IMPORT = /import\s*\{[^}]*\bSkeletonGroup\b[^}]*\}\s*from\s*['"]@\/components\/ds\/skeleton['"]/;
+const DS_SKELETON_GROUP_IMPORT = /import\s*\{[^}]*\bSkeletonGroup\b(?!\s+as\b)[^}]*\}\s*from\s*['"]@\/components\/ds\/skeleton['"]/;
+/** …and the file must not define its own `SkeletonGroup` beside it (an aliased ds import + a local one of the same name would otherwise pass). */
+const LOCAL_SKELETON_GROUP_DEF = /\b(?:function|const|let|var|class)\s+SkeletonGroup\b/;
 
 /** loading 파일 자체 또는 그것이 import한 `@/components/…` 파일 중 하나가 «불러오는 중»을 제대로 알리는지 — 같은 소스에 `role="status"` ·
  * `aria-busy="true"` · 화면 읽기 프로그램용 라벨(`sr-only`) 셋 다(까디르 검수 P3 · role만 보면 라벨 없는 상태도 통과했다). */
@@ -139,7 +141,7 @@ function announcesStatus(loadingFile: string): boolean {
     const src = codeOnly(readFileSync(f, 'utf8'));
     // story 4892 — the ds SkeletonGroup (components/ds/skeleton.tsx) sets role="status" · aria-busy="true" · its name (`aria-label={label}`) ITSELF, so a placeholder built on it announces the state without
     // repeating the three literals; its `label` is required by the type. The exemption rests on that source — pinned by the test «ds SkeletonGroup는 …» below.
-    const viaDsGroup = DS_SKELETON_GROUP_NAMED.test(src) && DS_SKELETON_GROUP_IMPORT.test(src);
+    const viaDsGroup = DS_SKELETON_GROUP_NAMED.test(src) && DS_SKELETON_GROUP_IMPORT.test(src) && !LOCAL_SKELETON_GROUP_DEF.test(src);
     return viaDsGroup || (/\srole="status"/.test(src) && /\saria-busy="true"/.test(src) && /className="[^"]*\bsr-only\b/.test(src));
   };
   if (hasStatus(loadingFile)) return true;
@@ -249,6 +251,8 @@ describe('story #4274 — 탭 · 메뉴 목적지 loading.tsx 전수(v3 플래�
     expect(DS_SKELETON_GROUP_IMPORT.test("import { SkeletonGroup } from '@/components/ui/skeleton';")).toBe(false);
     expect(DS_SKELETON_GROUP_IMPORT.test("import { Skeleton } from '@/components/ds/skeleton';\nfunction SkeletonGroup() { return null; }")).toBe(false);
     expect(DS_SKELETON_GROUP_IMPORT.test("import { SkeletonGroupX } from '@/components/ds/skeleton';")).toBe(false);
+    expect(DS_SKELETON_GROUP_IMPORT.test("import { SkeletonGroup as DsSkeletonGroup } from '@/components/ds/skeleton';")).toBe(false);
+    expect(DS_SKELETON_GROUP_IMPORT.test("import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';")).toBe(true);
   });
 
   it('⭐announcesStatus: 이름만 같은 로컬 SkeletonGroup는 인정 안 함 · ds 부품에서 가져온 것은 인정', () => {
@@ -258,6 +262,9 @@ describe('story #4274 — 탭 · 메뉴 목적지 loading.tsx 전수(v3 플래�
       writeFileSync(local, "function SkeletonGroup({ children }: { label: string; children: unknown }) { return children; }\nexport default function Loading() { return <SkeletonGroup label={t('loading')}>x</SkeletonGroup>; }\n");
       const ds = join(dir, 'ds.tsx');
       writeFileSync(ds, "import { SkeletonGroup } from '@/components/ds/skeleton';\nexport default function Loading() { return <SkeletonGroup label={t('loading')}>x</SkeletonGroup>; }\n");
+      const aliased = join(dir, 'aliased.tsx');   // the ds one imported under another name + a local one with the exempt name
+      writeFileSync(aliased, "import { SkeletonGroup as DsSkeletonGroup } from '@/components/ds/skeleton';\nconst SkeletonGroup = ({ children }: { label: string; children: unknown }) => children;\nexport default function Loading() { return <SkeletonGroup label={t('loading')}>x</SkeletonGroup>; }\n");
+      expect(announcesStatus(aliased)).toBe(false);
       expect(announcesStatus(local)).toBe(false);
       expect(announcesStatus(ds)).toBe(true);
     } finally { rmSync(dir, { recursive: true, force: true }); }

@@ -100,6 +100,8 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   // story 4892 — one «generation» for every first-page load (the filter effect AND «다시 시도»/«새로고침»): only the newest one may write the list / the error state, so a late answer of an older
   // request (a retry still in flight while a filter changed) can never put an error over a newer, successful result.
   const firstPageGen = useRef(0);
+  // leaving the screen makes every request still in flight stale (a late «더 보기» failure must not toast on another page)
+  useEffect(() => () => { firstPageGen.current += 1; }, []);
 
   const [actorFilter, setActorFilter] = useState(ALL);
   const [actionFilter, setActionFilter] = useState(ALL);
