@@ -48,12 +48,14 @@ export function useGoalLabels() {
   return { status, priority };
 }
 
-/** the goal's result as a chip — or null while the goal has no result state to say (`n_a`) */
-export function useOutcomeChip(goal: Pick<Goal, 'outcome_status' | 'measure_after'>): { text: string; tone: ChipTone } | null {
+/**
+ * the goal's result as a chip. Every goal says its result state — a goal with no result definition yet (`n_a`, no hypothesis · no measure date) reads «측정 대기» exactly as the old card's result line did
+ * (found on dev 11-11 20:30Z: the first version of this row dropped the line for `n_a`, so a goal row lost what it used to say). Only the DETAIL's header chip leaves `n_a` out (the old badge did too).
+ */
+export function useOutcomeChip(goal: Pick<Goal, 'outcome_status' | 'measure_after'>): { text: string; tone: ChipTone } {
   const t = useTranslations('goals');
   const tOutcome = useTranslations('outcomeLoop');
   const displayTimezone = useViewerTimeZone();
-  if (goal.outcome_status === 'n_a') return null;
   const line = outcomeLineText(t, tOutcome, goal.outcome_status, goal.measure_after, displayTimezone);
   return { text: line.text, tone: outcomeChipTone(line.tone) };
 }
@@ -147,7 +149,7 @@ export function GoalListRow({ goal, selected, onSelect, onDeleteRequest, sortabl
               ) : (
                 <ProgressBar className="w-full" aria-label={t('taskLabel')} tone="usage" value={null} max={1} unavailableLabel={t('noStories')} />
               )}
-              {outcome ? <Chip tone={outcome.tone}>{outcome.text}</Chip> : null}
+              <Chip tone={outcome.tone}>{outcome.text}</Chip>
             </div>
             {/* BE rejects a delete from a non-human (403), so an agent never gets the trigger. A mouse sees it on hover / focus; a touch screen always sees it */}
             <HumanOnlyAction>
