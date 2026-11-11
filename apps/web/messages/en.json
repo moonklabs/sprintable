@@ -456,7 +456,21 @@
     "rowApproveAndSign": "Approve and sign",
     "actionAnswer": "Answer",
     "actionOpen": "Open",
-    "partialNotice": "Part of this could not be loaded — the number shown is a minimum"
+    "partialNotice": "Part of this could not be loaded — the number shown is a minimum",
+    "detailPick": "Pick one in the list and its details show here",
+    "detailWaited": "Waiting {waited}",
+    "waitedNow": "just now",
+    "waitedMinutes": "{count} min",
+    "waitedHours": "{count} h",
+    "waitedDays": "{count} d",
+    "detailRequest": "Request",
+    "detailTarget": "Target",
+    "detailUndo": "Undo",
+    "detailRequestedBy": "Requested by {name}",
+    "detailNoReason": "No reason was left",
+    "detailWhat": "What are you approving?",
+    "detailKind": "Kind",
+    "detailSheetLabel": "Details of {title}"
   },
   "orgBriefing": {
     "title": "Home",

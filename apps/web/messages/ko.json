@@ -456,7 +456,21 @@
     "rowApproveAndSign": "승인하고 서명",
     "actionAnswer": "답하기",
     "actionOpen": "열기",
-    "partialNotice": "일부를 불러오지 못했어요 — 보이는 수는 최소 수예요"
+    "partialNotice": "일부를 불러오지 못했어요 — 보이는 수는 최소 수예요",
+    "detailPick": "목록에서 하나를 고르면 여기에 자세히 나와요",
+    "detailWaited": "{waited} 기다림",
+    "waitedNow": "방금",
+    "waitedMinutes": "{count}분",
+    "waitedHours": "{count}시간",
+    "waitedDays": "{count}일",
+    "detailRequest": "요청",
+    "detailTarget": "대상",
+    "detailUndo": "되돌리기",
+    "detailRequestedBy": "{name}님이 요청했어요",
+    "detailNoReason": "남긴 사유가 없어요",
+    "detailWhat": "무엇을 승인하나요?",
+    "detailKind": "종류",
+    "detailSheetLabel": "{title} 자세히"
   },
   "orgBriefing": {
     "title": "홈",
