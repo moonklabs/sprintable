@@ -2546,6 +2546,7 @@
     "projectSelectDescription": "헤더의 프로젝트 스위처에서 현재 프로젝트를 선택하면 이 화면이 활성화돼요."
   },
   "standup": {
+    "dateLabel": "날짜",
     "orgLevelTitle": "오늘의 스탠드업",
     "orgLevelDesc": "하루 한 번 작성하면 접근한 모든 프로젝트에 공유돼요.",
     "orgWriteBanner": "조직 레벨 작성 — 한 번 작성하면 접근 권한이 있는 프로젝트에 자동으로 표시돼요. 프로젝트 선택은 필요 없어요.",
