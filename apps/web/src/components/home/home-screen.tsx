@@ -36,13 +36,13 @@ export function HomeScreen({ model, sources, partial = false }: { model: HomeMod
       <HomeList model={model} sources={sources} partial={partial} selectedKey={selectedKey} onSelect={onSelect} />
       {wide ? (
         <aside className="sticky top-4 max-h-[calc(100svh-6rem)]" aria-label={t('detailRequest')} data-testid="home-detail-column">
-          <HomeDetail row={selectedRow} model={model} sources={sources} now={now} />
+          <HomeDetail row={selectedRow} model={model} sources={sources} now={now} partial={partial} />
         </aside>
       ) : (
         <Panel open={sheetOpen && selectedRow !== null} onOpenChange={setSheetOpen}>
           <PanelContent aria-label={t('detailSheetLabel', { title: selectedRow?.title ?? '' })} data-testid="home-detail-sheet">
             <PanelHeader><DialogTitle className="sr-only">{t('detailSheetLabel', { title: selectedRow?.title ?? '' })}</DialogTitle></PanelHeader>
-            <PanelBody className="p-0"><HomeDetail row={selectedRow} model={model} sources={sources} now={now} /></PanelBody>
+            <PanelBody className="p-0"><HomeDetail row={selectedRow} model={model} sources={sources} now={now} partial={partial} /></PanelBody>
           </PanelContent>
         </Panel>
       )}

@@ -20,7 +20,9 @@ export function useHomeSelection(model: HomeModel): { selectedKey: string | null
     if (current === null) next = model.initialSelection;
     else if (present.has(current)) next = current;
     else {
-      const after = selectAfterHandled(state.model.needsHand, current);
+      // the next row is the one that now sits where it was — in the SAME section it was in (a handled approval → the next approval; a finished run → the next finished one)
+      const section = [state.model.needsHand, state.model.working, state.model.justDone].find((rows) => rows.some((r) => r.key === current)) ?? state.model.needsHand;
+      const after = selectAfterHandled(section, current);
       next = after !== null && present.has(after) ? after : model.initialSelection;
     }
     setState({ model, selectedKey: next });

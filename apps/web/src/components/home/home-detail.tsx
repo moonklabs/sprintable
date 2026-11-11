@@ -20,18 +20,24 @@ import { waitedSince } from './waited';
  * cannot be taken back — the undo notice the old row already carried. Bottom: one fixed action line with the SAME action the row had (the link to the approval, the answer, the story)
  * and «무엇을 승인하나요?» above it. Nothing here is invented: every word is a fact the row already had.
  */
-export function HomeDetail({ row, model, sources, now }: { row: HomeRow | null; model: HomeModel; sources: HomeSources; now: number }) {
+export function HomeDetail({ row, model, sources, now, partial = false }: { row: HomeRow | null; model: HomeModel; sources: HomeSources; now: number; partial?: boolean }) {
   const t = useTranslations('home');
   const tb = useTranslations('orgBriefing');
   const flatHref = useFlatHref();
   const linkFor = useRowLink(sources);
 
   if (!row) {
+    // the same rule the list follows: an empty list is «all caught up» only when EVERYTHING was read — a partial read or approvals the server counted but gave no rows for are said in words, never passed off as done
+    const hiddenNeedsMe = Math.max(0, sources.snapshot.needsMeCount - sources.snapshot.needsMe.length);
     return (
       <div data-testid="home-detail-empty" className="rounded-ds-control border border-ds-line bg-ds-surface">
-        {model.needsHand.length === 0
-          ? <EmptyState icon="check_circle" title={t('emptyAllTitle')} description={t('emptyAllDescription')} />
-          : <p className="m-0 px-4 py-10 text-center text-ds-small text-ds-ink-3">{t('detailPick')}</p>}
+        {model.needsHand.length === 0 && partial && hiddenNeedsMe === 0
+          ? <p className="m-0 px-4 py-10 text-center text-ds-small text-ds-ink-2" data-testid="home-detail-partial">{tb('loadErrorTitle')}</p>
+          : model.needsHand.length === 0 && hiddenNeedsMe > 0
+            ? <p className="m-0 px-4 py-10 text-center text-ds-small text-ds-ink-2" data-testid="home-detail-hidden">{tb('needsMeHiddenCountNotice', { count: hiddenNeedsMe })}</p>
+            : model.needsHand.length === 0
+              ? <EmptyState icon="check_circle" title={t('emptyAllTitle')} description={t('emptyAllDescription')} />
+              : <p className="m-0 px-4 py-10 text-center text-ds-small text-ds-ink-3">{t('detailPick')}</p>}
       </div>
     );
   }

@@ -217,6 +217,28 @@ describe('홈 — 넓은 화면: 목록 + 상세 열(story #4888)', () => {
     expect(detail()!.getAttribute('data-row-key')).toBe('gate:g1');
   });
 
+  it('⭐일부만 읽었으면(partial) 손 필요 행이 없어도 상세 열은 «모두 확인했어요»라고 하지 않는다 — 목록과 같은 말을 한다', async () => {
+    stubWidth(true);
+    const { model, sources } = build([]);
+    const { HomeScreen } = await import('./home-screen');
+    await act(async () => {
+      root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><HomeScreen model={model} sources={sources} partial /></NextIntlClientProvider>);
+    });
+    const empty = container.querySelector('[data-testid="home-detail-empty"]')!;
+    expect(empty.textContent).not.toContain(H.emptyAllTitle);
+    expect(empty.querySelector('[data-testid="home-detail-partial"]')!.textContent).toBe(koMessages.orgBriefing.loadErrorTitle);
+  });
+
+  it('⭐서버가 센 결재가 행보다 많으면(숨은 N개) 빈 상세 열도 «모두 확인했어요»가 아니라 숨은 수를 말한다', async () => {
+    stubWidth(true);
+    const { model } = build([]);
+    const snapshot = { needsMe: [], needsMeCount: 2, agentProgress: [] } as unknown as TodaySnapshot;
+    await mount(model, { snapshot, notificationHrefById: {}, runConversationById: {} });
+    const empty = container.querySelector('[data-testid="home-detail-empty"]')!;
+    expect(empty.textContent).not.toContain(H.emptyAllTitle);
+    expect(empty.querySelector('[data-testid="home-detail-hidden"]')!.textContent).toContain('2');
+  });
+
   it('손 필요 행이 하나도 없으면 상세 열은 «모두 확인했어요»다', async () => {
     stubWidth(true);
     const { model, sources } = build([]);
