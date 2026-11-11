@@ -10,6 +10,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { ThreadPanel } from './thread-panel';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import koMessages from '../../../messages/ko.json';
+import { CHAT_MESSAGE_DELETED_EVENT } from '@/lib/chat-message-deleted';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -74,8 +75,13 @@ describe('ThreadPanel — the message menu works (story 4887)', () => {
 
   it('⭐ «삭제» on my reply sends DELETE to the same endpoint the room uses and leaves a tombstone in its place', async () => {
     stubFetch(true); await mount();
+    const heard: unknown[] = [];
+    const listen = (e: Event) => heard.push((e as CustomEvent).detail);
+    window.addEventListener(CHAT_MESSAGE_DELETED_EVENT, listen);
     await openMenu('내 답글');
     await click(menuItem(koMessages.common.delete)!);
+    window.removeEventListener(CHAT_MESSAGE_DELETED_EVENT, listen);
+    expect(heard, 'the panel announces the delete so the room LIST blanks a preview that showed this reply').toEqual([{ conversationId: 'conv-1', createdAt: '2026-11-11T00:01:00.000Z' }]);
     const del = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE');
     expect(String(del?.[0])).toBe('/api/conversations/conv-1/messages/r-mine'); // reverted → no DELETE at all
     expect(container.textContent).not.toContain('내 답글');

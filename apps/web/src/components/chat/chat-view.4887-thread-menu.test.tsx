@@ -7,6 +7,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import { CHAT_MESSAGE_DELETED_EVENT } from '@/lib/chat-message-deleted';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }), usePathname: () => '/chats/thread-1' }));
 vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => false }));
@@ -59,9 +60,14 @@ describe('ChatView — the thread\'s original message can be deleted from its me
     const original = container.querySelector('[data-testid="thread-original"] .group\\/bubble') as HTMLElement;
     expect(original, 'the thread is open with its original').not.toBeNull();
     await act(async () => { original.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 50 })); });
+    const heard: unknown[] = [];
+    const listen = (e: Event) => heard.push((e as CustomEvent).detail);
+    window.addEventListener(CHAT_MESSAGE_DELETED_EVENT, listen);
     const del = [...document.querySelectorAll('[role="menuitem"]')].find((b) => b.textContent?.includes(koMessages.common.delete)) as HTMLElement;
     await act(async () => { del.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
     const sent = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE');
+    window.removeEventListener(CHAT_MESSAGE_DELETED_EVENT, listen);
+    expect(heard, 'the room announces the delete so its LIST blanks the preview').toEqual([{ conversationId: 'thread-1', createdAt: mine.created_at }]); // reverted (nothing announced) → []
     expect(String(sent?.[0])).toBe('/api/conversations/thread-1/messages/m1'); // reverted (the panel is not handed the room's handler) → no DELETE at all
     const roomRow = container.querySelector('.group\\/bubble') as HTMLElement; // the first row of the ROOM's list
     expect(roomRow.textContent).toContain(koMessages.chats.deletedMessagePlaceholder);

@@ -15,6 +15,7 @@ import type { EventDefinitionSummary } from '@/lib/block-template';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { useToast } from '@/components/ui/toast';
+import { announceChatMessageDeleted } from '@/lib/chat-message-deleted';
 import { actorRowLabels } from '@/lib/member-display';
 
 // story #2262 PR② — 배치조회가 꺼진(구 호출부) 경우 훅에 넘길 안정적인 빈 배열 참조(매
@@ -86,6 +87,8 @@ export function ThreadPanel({
   const { addToast } = useToast();
   const panelRef = useRef<HTMLDivElement>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const messagesRef = useRef<ChatMessage[]>([]); // the delete handler reads the replies as they are now
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
   const [loading, setLoading] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
   // AC6: CB-S8 패턴 — render 후 DOM 반영된 직후 스크롤 보장
@@ -204,6 +207,9 @@ export function ThreadPanel({
         return;
       }
       const body = (await res.json()) as { deleted_at?: string | null };
+      // the room LIST may hold this reply as the room's latest message (its one-line preview): tell it
+      const gone = messagesRef.current.find((m) => m.id === messageId);
+      if (gone) announceChatMessageDeleted({ conversationId, createdAt: gone.created_at });
       setMessages((prev) => prev.map((m) => (
         m.id === messageId ? { ...m, content: '', deleted_at: body.deleted_at ?? new Date().toISOString() } : m
       )));
