@@ -55,10 +55,11 @@ describe('ServerCommandResultCard — story #92f00dc4 상태별 dot·배지', ()
         />
       ));
     });
-    expect(container.querySelector('.bg-success')).not.toBeNull();
+    expect(container.querySelector('[data-testid="server-command-card"]')?.getAttribute('data-outcome')).toBe('executed');
+    expect(container.querySelector('[data-testid="server-command-outcome"]')?.textContent).toBe('집행됨'); // words, not a colour dot alone
   });
 
-  it('outcome=denied → destructive dot(bg-destructive)', async () => {
+  it('outcome=denied → «거부됨» chip (failed tone)', async () => {
     await act(async () => {
       root.render(wrap(
         <ServerCommandResultCard
@@ -67,10 +68,11 @@ describe('ServerCommandResultCard — story #92f00dc4 상태별 dot·배지', ()
         />
       ));
     });
-    expect(container.querySelector('.bg-destructive')).not.toBeNull();
+    expect(container.querySelector('[data-testid="server-command-card"]')?.getAttribute('data-outcome')).toBe('denied');
+    expect(container.querySelector('[data-testid="server-command-outcome"]')?.textContent).toBe('거부됨');
   });
 
-  it('outcome=not_found → muted dot(bg-muted-foreground)', async () => {
+  it('outcome=not_found → neutral «대상 없음» chip', async () => {
     await act(async () => {
       root.render(wrap(
         <ServerCommandResultCard
@@ -79,10 +81,11 @@ describe('ServerCommandResultCard — story #92f00dc4 상태별 dot·배지', ()
         />
       ));
     });
-    expect(container.querySelector('.bg-muted-foreground')).not.toBeNull();
+    expect(container.querySelector('[data-testid="server-command-card"]')?.getAttribute('data-outcome')).toBe('not_found');
+    expect(container.querySelector('[data-testid="server-command-outcome"]')?.textContent).toBe('대상 없음');
   });
 
-  it('outcome=ambiguous → amber dot(bg-warning)', async () => {
+  it('outcome=ambiguous → «일치 여럿» chip that asks for a hand (needs-hand tone)', async () => {
     await act(async () => {
       root.render(wrap(
         <ServerCommandResultCard
@@ -91,7 +94,8 @@ describe('ServerCommandResultCard — story #92f00dc4 상태별 dot·배지', ()
         />
       ));
     });
-    expect(container.querySelector('.bg-warning')).not.toBeNull();
+    expect(container.querySelector('[data-testid="server-command-card"]')?.getAttribute('data-outcome')).toBe('ambiguous');
+    expect(container.querySelector('[data-testid="server-command-outcome"]')?.textContent).toBe('일치 여럿');
   });
 
   it('lead 텍스트는 원문 verbatim(no-fiction) — 지어낸 문구 없음', async () => {

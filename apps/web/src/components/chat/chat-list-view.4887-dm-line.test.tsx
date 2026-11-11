@@ -103,7 +103,7 @@ describe('[SID:4887] ChatListView — the DM line (P2-c)', () => {
 
   it('⭐ the row is a little tighter (py-2) — the room list shows more rooms per screen', async () => {
     await mount([conv('c1', [ME, HUMAN])]);
-    const row = container.querySelector('button') as HTMLElement;
+    const row = container.querySelector('[data-testid="chat-list-rooms"] button') as HTMLElement; // the head's «+» is the first button of the list now
     expect(row.className).toContain('py-2 ');
     expect(row.className).not.toContain('py-2.5'); // reverted → the old padding
   });

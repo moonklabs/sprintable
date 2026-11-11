@@ -39,9 +39,16 @@ vi.mock('next/navigation', () => ({
 // 그대로 받는지만 확認하는 얕은 스텁.
 const chatListViewProps: Array<{ projectId: string | null }> = [];
 vi.mock('@/components/chat/chat-list-view', () => ({
-  ChatListView: (props: { open?: boolean; projectId: string | null }) => {
+  // story 4887 (UI-4 screen PR) — the list head («대화 · + · ⋯») is the list's own now: the layout hands it `canStartRoom` and the modal's open / onOpenChange; this stub draws the head's heading and the «+» as the real list does
+  ChatListView: (props: { open?: boolean; onOpenChange?: (v: boolean) => void; canStartRoom?: boolean; projectId: string | null }) => {
     chatListViewProps.push({ projectId: props.projectId });
-    return <div data-testid="chat-list-view">chat-list-view(open={String(props.open)})</div>;
+    return (
+      <div data-testid="chat-list-view">
+        <h1 id="chat-rail-heading">대화</h1>
+        {props.canStartRoom ? <button type="button" onClick={() => props.onOpenChange?.(true)}>새 대화</button> : null}
+        chat-list-view(open={String(props.open)})
+      </div>
+    );
   },
 }));
 

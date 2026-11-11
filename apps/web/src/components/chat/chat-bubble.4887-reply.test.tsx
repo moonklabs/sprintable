@@ -103,17 +103,17 @@ describe('ChatBubble — the reply button (story 4887 · UI-4 P6-a)', () => {
     expect(cls).toContain('pointer-fine:group-hover/bubble:opacity-100'); // …the row is hovered
     expect(cls).toContain('pointer-fine:group-focus-within/bubble:opacity-100'); // …or holds keyboard focus
     expect(cls).toContain('pointer-fine:focus-visible:opacity-100');
-    expect(cls).toContain('pointer-coarse:hidden'); expect(cls).toContain('[@media(hover:none)]:hidden'); // the touch twin takes over there — the SAME two conditions as «⋯»
+    expect(cls).toContain('touch:hidden'); // the touch twin takes over there — the SAME `touch:` variant as «⋯»
     expect(cls, 'opacity-0 only under pointer-fine').not.toMatch(/(^|\s)opacity-0(\s|$)/);
     expect(btn()!.getAttribute('tabindex'), 'in the tab order (never -1)').not.toBe('-1');
   });
 
-  it('⭐ the touch twin: 44 × 44, shown exactly where «⋯» is shown (the same two media conditions), hidden otherwise', async () => {
+  it('⭐ the touch twin: 44 × 44, shown exactly where «⋯» is shown (the same `touch:` variant), hidden otherwise', async () => {
     await render();
     const cls = btnTouch()!.className; const more = (container.querySelector('[data-testid="chat-bubble-menu-button"]') as HTMLElement).className;
     expect(cls).toContain('h-11'); expect(cls).toContain('w-11'); // reverted (a 28 px size) → fails
     expect(cls).toMatch(/(^|\s)hidden(\s|$)/);
-    for (const cond of ['pointer-coarse:inline-flex', '[@media(hover:none)]:inline-flex']) { expect(cls).toContain(cond); expect(more, '«⋯» uses it too').toContain(cond); }
+    expect(cls).toContain('touch:inline-flex'); expect(more, '«⋯» uses it too').toContain('touch:inline-flex');
     expect(cls, 'the cluster sits row-local: centred on the time line').toContain('top-1/2');
   });
 

@@ -5,7 +5,9 @@ import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { hasNoVisibleText, remarkStripHtmlComments, stripHtmlCommentsFromPlainText } from '@/lib/remark-strip-html-comments';
-import { Check, Copy, MessageSquare, MessageSquareReply, MoreHorizontal, Terminal } from 'lucide-react';
+import { Check, Copy, MessageSquare, MessageSquareReply, MoreHorizontal } from 'lucide-react';
+import { Card } from '@/components/ds/card';
+import { Chip } from '@/components/ds/chip';
 import { useTranslations } from 'next-intl';
 import { ViewerDate } from '@/components/viewer-time-zone';
 import { VIEWER_TIME_OPTIONS } from '@/lib/viewer-time-zone';
@@ -48,6 +50,8 @@ import { useFlatHref } from '@/hooks/use-flat-href';
 interface ChatBubbleProps {
   message: ChatMessage;
   isMine: boolean;
+  /** story 4887 (UI-4 screen PR · the approved thread) — a PLAIN ROW: left-aligned, no bubble, full width — every sender reads like an agent does in the room (name · time, then the text on the page). Used by the thread panel; `isMine` still decides what a person may do with the message. */
+  plainRow?: boolean;
   isGrouped?: boolean;
   /** [SID:4311 PR 3] 목록이 actorRowLabels로 지은 발신자 라벨(같은 이름 둘이면 «· ID 앞 8자») — 머리글자 · 아바타는 원래 이름. */
   senderLabel?: string;
@@ -478,7 +482,7 @@ export function visibleMessageText(root: HTMLElement | null, fallback: string): 
 }
 
 export function ChatBubble({
-  message, isMine, isGrouped = false, senderLabel, onOpenThread, onDelete, onBlockUser, presenceStatus, isWorking = false,
+  message, isMine, plainRow = false, isGrouped = false, senderLabel, onOpenThread, onDelete, onBlockUser, presenceStatus, isWorking = false,
   highlight = false, projectId, isCiteAnchor = false, isCiteInRange = false, citeAction, entityStatusByKey,
   hitlAnswer = null, onRespondHitl, eventDefinitionsByKey, onOpenReadingPanel, onFillComposer, gateByKey,
 }: ChatBubbleProps) {
@@ -681,7 +685,7 @@ export function ChatBubble({
           e.preventDefault();
           e.stopPropagation();
         }}
-        className={`group/bubble flex scroll-mt-4 gap-2 transition-shadow ${isMine ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-0.5' : 'mt-2'} ${highlight ? 'rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-background' : ''} ${(isCiteAnchor || isCiteInRange) ? 'border-l-[3px] border-l-primary pl-1' : ''}`}
+        className={`group/bubble flex scroll-mt-4 gap-2 transition-shadow ${isMine && !plainRow ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-0.5' : 'mt-2'} ${highlight ? 'rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-background' : ''} ${(isCiteAnchor || isCiteInRange) ? 'border-l-[3px] border-l-primary pl-1' : ''}`}
         onContextMenu={handleContextMenu}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
@@ -725,7 +729,7 @@ export function ChatBubble({
             the row → page. With it, the column respects max-w and the inner content contains
             itself — whitespace-pre-wrap code wraps, <pre> scrolls (overflow-x-auto), URLs break. */}
         {/* story 4887 (UI-4 P6-a) — where a mouse can hover, the reply button (28 px + 4 px gap) and the continuation's hover time (≈ 47 px, 56 px with room for font and locale) sit OUTSIDE this column on its outer side, beside the 36 px avatar gutter: so — where that button is drawn (`--reply-cap`, not inside a thread) — the column may take at most the row's width minus 128 px (36 gutter + 36 button + 56 time), or the usual 72%, whichever is smaller. From a ~490 px window up the 72% still wins (nothing changes); in a narrower window the bubble gives way so the time stays on screen at any width. Touch has no hover time and its reply button sits in the time line below, so it keeps the plain 72%; so does a bubble inside a thread (no reply button there). */}
-        <div data-chat-content="" className={`relative flex min-w-0 max-w-[72%] [@media(pointer:fine)_and_(hover:hover)]:max-w-[min(72%,calc(100%_-_var(--reply-cap,0px)))] flex-col gap-0.5 ${isMine ? 'items-end' : 'items-start'}`}
+        <div data-chat-content="" className={`relative flex min-w-0 max-w-[72%] [@media(pointer:fine)_and_(hover:hover)]:max-w-[min(72%,calc(100%_-_var(--reply-cap,0px)))] flex-col gap-0.5 ${isMine && !plainRow ? 'items-end' : 'items-start'}${plainRow ? ' !max-w-full' : ''}`}
           style={onOpenThread ? ({ '--reply-cap': '128px' } as CSSProperties) : undefined}>
           {/* story 4887 (UI-4 P6-a · AC3 «답글 아이콘 상시»): the first reply used to sit behind a right-click / «⋯» menu (two hands). ONE reply control opens the thread at once, in the place each kind of device can use:
               · a MOUSE (this button — hover-capable, fine pointer): beside the bubble on its outer side, transparent until the row is hovered or holds keyboard focus (WCAG 1.4.13; the repo's HOVER_REVEAL shape — lib/hover-reveal.ts), still in the tab order (opacity, never display:none, on a mouse device);
@@ -738,7 +742,7 @@ export function ChatBubble({
               data-testid="chat-bubble-reply-button"
               aria-label={isMine ? t('replyToMyMessage') : t('replyToMessageFrom', { name: displayName })}
               onClick={handleOpenThread}
-              className={`absolute top-0 inline-flex h-7 min-h-0 w-7 min-w-0 items-center justify-center rounded-full border-0 p-0 text-muted-foreground opacity-100 pointer-coarse:hidden [@media(hover:none)]:hidden pointer-fine:opacity-0 pointer-fine:group-hover/bubble:opacity-100 pointer-fine:group-focus-within/bubble:opacity-100 pointer-fine:focus-visible:opacity-100 ${isMine ? 'right-full mr-1' : 'left-full ml-1'}`}
+              className={`absolute top-0 inline-flex h-7 min-h-0 w-7 min-w-0 items-center justify-center rounded-full border-0 p-0 text-muted-foreground opacity-100 touch:hidden pointer-fine:opacity-0 pointer-fine:group-hover/bubble:opacity-100 pointer-fine:group-focus-within/bubble:opacity-100 pointer-fine:focus-visible:opacity-100 ${isMine ? 'right-full mr-1' : 'left-full ml-1'}`}
             >
               <MessageSquareReply className="h-4 w-4" aria-hidden="true" />
             </Button>
@@ -822,18 +826,18 @@ export function ChatBubble({
               onRespond={onRespondHitl!}
             />
           ) : isCmd ? (
-            <div className={`min-w-0 max-w-full rounded-xl border border-info/30 bg-info/8 px-3.5 py-2 ${isMine ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}>
-              <div className="mb-1 flex items-center gap-1 text-micro font-medium text-foreground">
-                <Terminal className="h-3 w-3" aria-hidden />
-                {t('commandTag')}
+            // story 4887 (UI-4 P4-c) — the runtime-command bubble is a ds Card with a ds Chip («커맨드»); the /name and its args keep their reading order and the args still go through ChatMarkdown.
+            <Card data-testid="command-bubble" className="min-w-0 max-w-full px-3 py-2">
+              <div className="mb-1">
+                <Chip icon="terminal">{t('commandTag')}</Chip>
               </div>
               {/* story #3129 — 커맨드 렌더도 args 안의 참조 토큰(`[제목](entity:type:id)`)은
                   링크/칩으로 풀려야 한다. `/cmdName`만 code로 고정하고, args는 일반 메시지와
                   동일한 ChatMarkdown 경로(references·엔티티 칩 SSOT 공유)로 넘긴다 — args가
                   순수 텍스트뿐이면 마크다운 매치가 없어 기존과 동일하게 보인다(회귀 0). */}
-              <code className="font-mono text-sm text-foreground">/{cmdName}</code>
+              <code className="font-mono text-ds-body text-ds-ink">/{cmdName}</code>
               {args && (
-                <div className="mt-0.5 font-mono text-sm text-muted-foreground [&_p]:mb-0">
+                <div className="mt-0.5 font-mono text-ds-body text-ds-ink-2 [&_p]:mb-0">
                   <ChatMarkdown
                     content={args}
                     isMine={isMine}
@@ -844,7 +848,7 @@ export function ChatBubble({
                   />
                 </div>
               )}
-            </div>
+            </Card>
           ) : noVisibleText ? (
             hasAttachments ? null : (
               // story #4197·#4200(유나 확정) — 보여 줄 글자도 첨부도 없는 메시지. 빈 말풍선 대신 «삭제된 메시지»와
@@ -862,12 +866,14 @@ export function ChatBubble({
                배경 위 ink, 색은 아이콘/배지가 진다는 #2420 규율과 동형). */
             // story 4887 (UI-4 P4-b · AC3 B3) — an AGENT's message has no bubble: the head line above (name · tag · time) says who, and the text sits on the page. A person's message (mine or another person's) keeps its bubble — it is the bubble that tells the two kinds apart at a glance (B3: «에이전트 글만 말풍선 없는 평문»).
             <div data-testid="chat-bubble-text" className={`min-w-0 max-w-full text-sm leading-relaxed text-foreground [overflow-wrap:anywhere] ${
-              isMine
-                ? 'rounded-xl rounded-tr-sm bg-proof-blue-soft px-3.5 py-2'
-                : isAgent
-                  ? 'py-0.5'
-                  : 'rounded-xl rounded-tl-sm bg-proof-panel px-3.5 py-2'
-            }`} data-bubble={isAgent && !isMine ? 'plain' : 'filled'}>
+              plainRow
+                ? 'py-0.5'
+                : isMine
+                  ? 'rounded-xl rounded-tr-sm bg-proof-blue-soft px-3.5 py-2'
+                  : isAgent
+                    ? 'py-0.5'
+                    : 'rounded-xl rounded-tl-sm bg-proof-panel px-3.5 py-2'
+            }`} data-bubble={plainRow || (isAgent && !isMine) ? 'plain' : 'filled'}>
               {/* story #ec57c80c(v2 3호) — report성 밀도 재설계는 에이전트 메시지에만
                   적용한다(진단·처방 전부 "에이전트 report성 메시지" 범위, human 메시지는
                   무변경). ReportMessageSummary 내부가 발동 조건(computeReportDensity) 미충족
@@ -997,7 +1003,7 @@ export function ChatBubble({
               data-testid="chat-bubble-menu-button"
               aria-label={t('messageActions')}
               onClick={handleOpenMenuButton}
-              className={`absolute top-1/2 hidden h-8 min-h-0 w-8 min-w-0 -translate-y-1/2 items-center justify-center rounded-full border-0 p-0 text-muted-foreground pointer-coarse:inline-flex [@media(hover:none)]:inline-flex ${isMine ? 'right-full mr-1' : 'left-full ml-1'}`}
+              className={`absolute top-1/2 hidden h-8 min-h-0 w-8 min-w-0 -translate-y-1/2 items-center justify-center rounded-full border-0 p-0 text-muted-foreground touch:inline-flex ${isMine ? 'right-full mr-1' : 'left-full ml-1'}`}
             >
               <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
             </Button>
@@ -1008,7 +1014,7 @@ export function ChatBubble({
                 data-testid="chat-bubble-reply-button-touch"
                 aria-label={isMine ? t('replyToMyMessage') : t('replyToMessageFrom', { name: displayName })}
                 onClick={handleOpenThread}
-                className={`absolute top-1/2 hidden h-11 min-h-0 w-11 min-w-0 -translate-y-1/2 items-center justify-center rounded-full border-0 p-0 text-muted-foreground pointer-coarse:inline-flex [@media(hover:none)]:inline-flex ${isMine ? 'right-full mr-10' : 'left-full ml-10'}`}
+                className={`absolute top-1/2 hidden h-11 min-h-0 w-11 min-w-0 -translate-y-1/2 items-center justify-center rounded-full border-0 p-0 text-muted-foreground touch:inline-flex ${isMine ? 'right-full mr-10' : 'left-full ml-10'}`}
               >
                 <MessageSquareReply className="h-4 w-4" aria-hidden="true" />
               </Button>

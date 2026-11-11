@@ -1,7 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowRight, Info } from 'lucide-react';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Icon } from '@/components/ds/icon';
 import { useTranslations } from 'next-intl';
 import { runtimeLabel } from '@/lib/runtime-capabilities';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -28,23 +30,21 @@ export function CommandHintNotice({ hint }: { hint: BlockedHint }) {
   // S8 #1: 런타임 표기 — claude-code→"Claude Code"·미등록→원값·null→"런타임 미설정"(i18n).
   const runtime = runtimeLabel(hint.runtime_type) ?? t('runtimeUnsetLabel');
   return (
-    <div className="mx-2 flex items-start gap-2.5 rounded-xl border border-info-border bg-info-tint px-3.5 py-2.5">
-      <Info className="mt-0.5 h-[18px] w-[18px] shrink-0 text-info" aria-hidden />
-      <div className="min-w-0 space-y-1">
-        <p className="text-sm text-foreground">
-          {t('commandBlockedLead', { agentName: hint.agent_name, runtime })}
-        </p>
-        <p className="text-sm text-muted-foreground">
-          {t('commandBlockedAlt', { command: hint.command })}
-        </p>
-        <Link
-          href={flatHref(`/organization/workforce/${hint.agent_id}`)}
-          className="inline-flex items-center gap-1 rounded text-xs font-medium text-info underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          {t('commandBlockedSettings')}
-          <ArrowRight className="h-3.5 w-3.5" aria-hidden />
-        </Link>
-      </div>
+    <div className="mx-2" data-testid="command-hint-notice">
+      <Banner
+        tone="info"
+        action={(
+          <Button asChild variant="quiet">
+            <Link href={flatHref(`/organization/workforce/${hint.agent_id}`)}>
+              {t('commandBlockedSettings')}
+              <Icon name="arrow_forward" size={14} aria-hidden />
+            </Link>
+          </Button>
+        )}
+      >
+        <p className="text-ds-body text-ds-ink">{t('commandBlockedLead', { agentName: hint.agent_name, runtime })}</p>
+        <p className="text-ds-body text-ds-ink-2">{t('commandBlockedAlt', { command: hint.command })}</p>
+      </Banner>
     </div>
   );
 }

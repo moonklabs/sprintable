@@ -2,10 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { useTranslations } from 'next-intl';
-import { ArrowLeft, MessageSquare, X } from 'lucide-react';
+import { IconButton } from '@/components/ds/icon-button';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import { newClientNonce, normalizeToMessage, sentMessageFromAnswer } from '@/hooks/use-chat-sse';
-import { toPlainPreview } from './entity-ref';
 import { ChatBubble } from './chat-bubble';
 import { ChatInput } from './chat-input';
 import type { EntityStatusFetchState } from '@/components/chat/entity-status-labels';
@@ -21,17 +20,6 @@ import { actorRowLabels } from '@/lib/member-display';
 // 렌더 새 배열을 만들면 useEntityStatusBatchFetch의 effect가 messages 변경으로 오인해
 // 매번 재실행된다 — 어차피 빈 배열이라 fetch는 안 나가지만 불필요한 재실행 자체를 막는다).
 const EMPTY_THREAD_MESSAGES: ChatMessage[] = [];
-
-// story #2911(S2e②③) — 헤더 칩의 "원 메시지 요약"은 순수 텍스트라야 한다(ChatBubble의 마크다운
-// 렌더 전체를 여기 또 태우면 칩 안에 카드/칩이 중첩되는 사고). 마크다운 링크 `[라벨](...)`는
-// 라벨만 남기고, 기본 강조 마커는 지운 뒤 공백을 접는다 — 시안이 요구하는 "≤15ch truncate"는
-// CSS(max-w+truncate, ReadingPanel과 동일 패턴)가 처리하므로 여기선 자르지 않는다.
-function plainPreview(content: string): string {
-  return toPlainPreview(content)
-    .replace(/[*_`#]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 interface ThreadPanelProps {
   parentMessage: ChatMessage;
@@ -190,8 +178,14 @@ export function ThreadPanel({
   // [SID:4311 PR 3] 원본 + 답글 한 목록 — 같은 이름 서로 다른 발신자 둘이면 «· ID 앞 8자»(발신자 id마다 한 번 · 내 메시지는 «나»라 셈에서 뺌).
   const senderLabels = actorRowLabels([parentMessage, ...messages].filter((m) => m.created_by !== currentTeamMemberId).map((m) => ({ id: m.created_by, label: m.sender_name || t('team') })));
 
+  // what the thread is ABOUT, in one word (the head says «스레드 ··· {kind} · N개의 답글»): an approval request, an event card, a command's result or a plain message
+  const parentKind = parentMessage.approval_target ? t('approvalRequestLabel')
+    : parentMessage.event ? t('threadKindEvent')
+    : parentMessage.server_command ? t('serverCommandBadge')
+    : t('threadKindMessage');
+
   return (
-    <div className="flex h-full flex-col overflow-hidden border-l border-border bg-background">
+    <div className="flex h-full flex-col overflow-hidden border-l border-border bg-background" data-testid="thread-panel">
       {/* Header — story #2911(S2e②③/R4) 「s2e-thread-depth-grammar」 확定: ReadingPanel과
           «같은 칩 브레드크럼» 문법(칩 버튼 + `›` text-border 구분자, 동일 토큰/스타일).
           「스레드」 평문 폐기. 스레드는 단일 레벨이라 세그먼트는 정확히 2개 — [대화](뒤로
@@ -200,47 +194,22 @@ export function ThreadPanel({
           최상단 세그먼트와 같은 문법). tint는 유나양 확定(2026-08-21) — chat_message는
           의도적 무색(§2263 C-7)이고 메시지는 5계열 어느 의미도 아니라 둘 다 중립 muted bg
           하나로 통일, 구분은 색이 아니라 아이콘+텍스트 weight로만(아래). */}
-      <div className="flex flex-shrink-0 items-center gap-1 overflow-x-auto border-b border-border/80 px-2 py-1.5">
-        {/* story #2911 — 유나양 확定(2026-08-21, C-7 논거: chat_message는 의도적 무색이고
-            메시지는 5계열 어느 «의미」도 아니라 없는 뜻을 억지로 안 붙인다): 둘 다 muted bg
-            하나로 통일, 구분은 색이 아니라 **아이콘+텍스트 weight**로만 — 「대화」=뒤로
-            어포던스(ArrowLeft)+text-muted-foreground, 원 메시지=현재 위치(MessageSquare)+
-            text-foreground font-medium. 신규 색 0. */}
-        <button
-          type="button"
-          onClick={onClose}
-          className="flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-1 text-xs text-muted-foreground transition hover:text-foreground"
-        >
-          <ArrowLeft className="size-3 shrink-0" />
-          <span>{t('title')}</span>
-        </button>
-        <span className="text-xs text-border">›</span>
-        <span
-          title={plainPreview(parentMessage.content)}
-          className="flex max-w-32 shrink items-center gap-1 rounded bg-muted px-1.5 py-1 text-xs font-medium text-foreground"
-        >
-          <MessageSquare className="size-3 shrink-0" />
-          <span className="truncate">{plainPreview(parentMessage.content)}</span>
-        </span>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label={t('closeThread')}
-          className="ml-auto shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-        >
-          <X className="h-4 w-4" />
-        </button>
+      <div className="flex flex-shrink-0 items-center gap-2 border-b border-ds-line px-4 py-2" data-testid="thread-head">
+        {/* the phone's way back to the room: a thread is a full screen there */}
+        <IconButton icon="arrow_back" label={t('title')} onClick={onClose} className="-ml-1 lg:hidden" data-testid="thread-back" />
+        <h2 className="m-0 text-ds-body font-semibold text-ds-ink">{t('threadLabel')}</h2>
+        <p className="ml-auto min-w-0 truncate font-mono text-ds-mono-md text-ds-ink-3" data-testid="thread-meta">
+          {parentKind} · {t('replyCount', { count: messages.length })}
+        </p>
+        <IconButton icon="close" label={t('closeThread')} onClick={onClose} />
       </div>
 
-      {/* AC9: 원본 메시지. story #2911(S2e①/R4) — 좌측 rail(border-l-2)이 이 블록에서
-          시작해 아래 답글 목록까지 같은 x-오프셋(pl-3)으로 끊김 없이 이어진다(스펙 §5 "원
-          메시지 pin + 좌측 라인" — 답글이 원 메시지에서 뻗어나온 것처럼). 기존 border-border
-          토큰 재사용(신규 색 0). */}
-      <div className="flex-shrink-0 border-b border-l-2 border-border bg-muted/30 py-3 pl-3 pr-4">
-        <p className="mb-1 text-micro font-medium text-muted-foreground">{t('originalMessage')}</p>
+      {/* story 4887 (UI-4 screen PR · the approved thread) — the original message sits at the top as the thread's subject: no «원본 메시지» label, no rail — a card (approval · event) already draws itself as a card */}
+      <div className="flex-shrink-0 border-b border-ds-line px-4 py-3" data-testid="thread-original">
         <ChatBubble
           message={parentMessage}
           isMine={parentMessage.created_by === currentTeamMemberId}
+          plainRow
           isGrouped={false}
           senderLabel={senderLabels.get(parentMessage.created_by)}
           projectId={projectId}
@@ -254,17 +223,13 @@ export function ThreadPanel({
           `py-3`의 top 12px가 pin 블록 rail-bottom과 답글 rail-top 사이를 세로로 끊었다
           (「코드 연속≠픽셀 연속」). pt-0으로 상단 패딩 제거해 flush — border-b는 구분자로
           그대로 유지. */}
-      <div className="flex-1 overflow-y-auto pt-0 pb-3 pr-4">
+      <div className="flex-1 overflow-y-auto px-4 pb-3 pt-1" data-testid="thread-replies">
         {loading ? (
           <p className="text-center text-sm text-muted-foreground">{tc('loading')}</p>
         ) : messages.length === 0 ? (
-          <p className="text-center text-sm text-muted-foreground">{t('noRepliesYet')}</p>
+          <p className="pt-3 text-center text-sm text-muted-foreground">{t('noRepliesYet')}</p>
         ) : (
-          // story #2911 — rail은 목록 전체를 감싸는 이 wrapper 하나(border-l-2, 원본 메시지
-          // 블록과 동일 x-오프셋 — 둘 다 컨테이너 왼쪽 끝에서 시작)뿐이라 개별 ChatBubble
-          // 그룹핑(isGrouped)과 무관하게 끊기지 않는다(AC3 — 한 줄로 쭉 이어지고, 그 안의
-          // 버블 간격만 gap-2로 나뉜다).
-          <div className="flex flex-col gap-2 border-l-2 border-border pl-3">
+          <div className="flex flex-col gap-2">
             {messages.map((msg, idx) => {
               const prev = messages[idx - 1];
               const isGrouped = Boolean(prev && prev.created_by === msg.created_by);
@@ -273,6 +238,7 @@ export function ThreadPanel({
                   key={msg.id}
                   message={msg}
                   isMine={msg.created_by === currentTeamMemberId}
+                  plainRow
                   isGrouped={isGrouped}
                   senderLabel={senderLabels.get(msg.created_by)}
                   projectId={projectId}
