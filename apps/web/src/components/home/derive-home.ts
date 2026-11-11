@@ -9,7 +9,8 @@
  *  2. What counts as «my hand is needed»: the approvals/answers the today snapshot already lists (`needsMe`) + the UNREAD notifications whose `type` says a person must act
  *     (mention · assignment · permission request · stopped · limit paused). `gate.pending_approval` is NEVER counted on top — it is the same thing as the approval row
  *     (counting both would break rule 1). `conversation.message` belongs to the chat badge; status changes · system dispatches · «limit lifted» are information, not a task.
- *  3. Longest wait first (`since` ascending, ties by key) — the order of the existing `needs_me` list; the first 5 are shown and «N more» says how many are folded.
+ *  3. Two groups, then longest wait first inside each (`since` ascending, ties by key): what an agent waits for a person to press (approval · signature · answer) goes BEFORE the notifications that went by
+ *     (mention · assignment · permission request · stopped · limit paused) — a blocked agent is freed first (PO 11-11). The first 5 are shown and «N more» says how many are folded.
  *  4. «일하는 중» = the agent runs of the snapshot + the in-progress stories assigned to me or to an agent (the old screen showed 0 of 14 stories — AC1 problem 5).
  *  5. «방금 끝남» = what finished today, most recent first.
  *  6. After an action the next row is selected (3 taps → 1): `selectAfterHandled`.
@@ -104,6 +105,19 @@ export const HOME_NEEDS_HAND_NOTIFICATION_TYPES: Readonly<Record<string, HomeRow
 };
 
 
+/**
+ * story #4888 (PO 11-11 20:10Z) — inside «손 필요», the requests a person must press for an agent to move on (an approval · a signature · an answer) come BEFORE the notifications that went by (a mention · an assignment …).
+ * Found on the real thing: a decision request that had just arrived sat behind seven 38-hour-old notifications, hidden behind «5개 더 보기», though it is what a blocked agent waits for — freeing the blocked agent first is what the home is for.
+ * Inside each of the two groups the order is what it was: the longest wait first, ties by key. The number (badge · header) is unchanged — only the order inside the one list.
+ */
+const AGENT_WAITS_FOR_ME: ReadonlySet<HomeRowKind> = new Set<HomeRowKind>(['approval', 'signature', 'answer']);
+
+function needsHandOrder(a: HomeRow, b: HomeRow): number {
+  const ra = AGENT_WAITS_FOR_ME.has(a.kind) ? 0 : 1;
+  const rb = AGENT_WAITS_FOR_ME.has(b.kind) ? 0 : 1;
+  return ra !== rb ? ra - rb : byWait(a, b);
+}
+
 function byWait(a: HomeRow, b: HomeRow): number {
   return a.since < b.since ? -1 : a.since > b.since ? 1 : a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
 }
@@ -172,7 +186,7 @@ export function deriveHome(input: HomeInput): HomeModel {
     if (!kind) continue;
     needsHand.push(notificationRow(n, kind));
   }
-  needsHand.sort(byWait);
+  needsHand.sort(needsHandOrder);
 
   const working: HomeRow[] = [
     // `agent_progress` IS the backend's list of runs in progress (today_service filters it by its in-progress statuses): every run in it is a working row. The screen does not re-filter it by a status list of its own

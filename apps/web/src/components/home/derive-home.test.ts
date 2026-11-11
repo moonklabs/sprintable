@@ -156,16 +156,56 @@ describe('rule 2 — what counts as «my hand is needed»', () => {
   });
 });
 
-describe('rule 3 — longest wait first', () => {
-  it('orders by the time the wait began, across sources, ties by key', () => {
+describe('rule 3 — what an agent waits for comes first, then the longest wait first', () => {
+  it('within a group the order is the time the wait began, across sources, ties by key', () => {
     const m = deriveHome(
       base({
         snapshot: { needsMe: [needsMe('late', '2026-11-10T09:00:00Z'), needsMe('early', '2026-11-10T01:00:00Z')], agentProgress: [] },
-        notifications: [note('mid', 'conversation.mention', '2026-11-10T05:00:00Z')],
+        notifications: [note('late', 'conversation.mention', '2026-11-10T07:00:00Z'), note('early', 'story_assigned', '2026-11-10T03:00:00Z')],
       }),
     );
-    expect(m.needsHand.map((r) => r.key)).toEqual(['gate:early', 'notification:mid', 'gate:late']);
+    // the two approvals first (oldest wait first), then the two notifications (oldest wait first) — never mixed by the clock alone
+    expect(m.needsHand.map((r) => r.key)).toEqual(['gate:early', 'gate:late', 'notification:early', 'notification:late']);
     expect(m.initialSelection).toBe('gate:early');
+  });
+
+  it('⭐a new approval goes ahead of seven old notifications and lands inside the first five (the visible ones) — not behind «N개 더 보기»', () => {
+    const old = Array.from({ length: 7 }, (_, i) => note(`n${i}`, 'conversation.mention', `2026-11-09T0${i}:00:00Z`));
+    const m = deriveHome(base({ snapshot: { needsMe: [needsMe('new', '2026-11-11T11:59:00Z')], agentProgress: [] }, notifications: old }));
+    expect(NEEDS_HAND_VISIBLE).toBe(5);
+    expect(m.needsHand[0]!.key).toBe('gate:new');
+    expect(m.needsHandVisible.map((r) => r.key)).toContain('gate:new');
+    expect(m.initialSelection).toBe('gate:new'); // the first row selected at the start is the one an agent waits for
+    // the old notifications keep their own order behind it
+    expect(m.needsHand.slice(1).map((r) => r.key)).toEqual(old.map((n) => `notification:${n.id}`));
+  });
+
+  it('approval · signature · answer are one group (oldest wait first among them); mention · assignment · permission · stopped · limit stay behind it', () => {
+    const m = deriveHome(
+      base({
+        snapshot: {
+          needsMe: [
+            needsMe('sig', '2026-11-10T05:00:00Z', { state: 'signature', risk: 'high' }),
+            needsMe('ans', '2026-11-10T03:00:00Z', { state: 'answer', source: 'hitl' }),
+            needsMe('apv', '2026-11-10T04:00:00Z'),
+          ],
+          agentProgress: [],
+        },
+        notifications: [
+          note('perm', 'agent.permission_request', '2026-11-09T01:00:00Z'),
+          note('stop', 'agent.restart_stopped', '2026-11-09T02:00:00Z'),
+          note('lim', 'agent.limit_paused', '2026-11-09T03:00:00Z'),
+          note('men', 'conversation.mention', '2026-11-09T04:00:00Z'),
+        ],
+      }),
+    );
+    expect(m.needsHand.map((r) => r.key)).toEqual(['hitl:ans', 'gate:apv', 'gate:sig', 'notification:perm', 'notification:stop', 'notification:lim', 'notification:men']);
+  });
+
+  it('the number does not change with the order: the badge and the header count the same rows', () => {
+    const m = deriveHome(base({ snapshot: { needsMe: [needsMe('a', '2026-11-11T01:00:00Z')], agentProgress: [] }, notifications: [note('n', 'conversation.mention', '2026-11-09T01:00:00Z')] }));
+    expect(m.badge).toBe(2);
+    expect(m.header.needsHand).toBe(2);
   });
 });
 

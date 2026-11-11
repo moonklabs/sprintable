@@ -143,6 +143,19 @@ describe('홈 — 넓은 화면: 목록 + 상세 열(story #4888)', () => {
     expect(detail()!.querySelector('[data-testid="home-detail-actions"]')!.textContent).toContain(H.rowApproveAndSign);
   });
 
+  it('⭐방금 온 결재가 오래된 알림 일곱 뒤 «N개 더 보기» 안으로 숨지 않는다 — 펼치기 전 다섯 행 안에 있고 처음 선택돼 있다(실물 측정 11-11)', async () => {
+    stubWidth(true);
+    const old = Array.from({ length: 7 }, (_, i) => ({ id: `n${i}`, type: 'conversation.mention', title: `오래된 멘션 ${i}`, is_read: false, reference_type: null, reference_id: null, created_at: `2026-11-09T0${i}:00:00Z` }));
+    const { model, sources } = build([need({ id: 'new', workItemTitle: '막 올라온 결재', createdAt: '2026-11-11T11:59:00Z' })], { notifications: old as never });
+    await mount(model, sources);
+    const keys = [...container.querySelectorAll('[data-testid="home-section-needs-hand"] [data-row-key]')].map((r) => r.getAttribute('data-row-key'));
+    expect(keys).toHaveLength(5); // 펼치기 전
+    expect(keys[0]).toBe('gate:new');
+    expect(row('gate:new').querySelector('[aria-current="true"]')).not.toBeNull();
+    expect(detail()!.querySelector('h2')!.textContent).toBe('막 올라온 결재');
+    expect(container.textContent).toContain('3개 더 보기'); // 숨은 것은 오래된 알림 셋 — 결재가 아니다
+  });
+
   it('⭐기다린 시간이 지금 시각 기준으로 나온다(09:00 → 3시간 · 10:00 → 2시간 · 11:00 → 1시간)', async () => {
     stubWidth(true);
     const { model, sources } = THREE();
