@@ -60,6 +60,18 @@ describe('ds ToastCard', () => {
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
+  it('그림자는 떠 있는 작은 상자용 popup 토큰이다(대화창 · 패널의 overlay가 아니다)', async () => {
+    await render(<ToastCard title="글" onDismiss={() => {}} />);
+    expect(el().className.split(/\s+/)).toContain('shadow-ds-popup');
+    expect(el().className.split(/\s+/)).not.toContain('shadow-ds-overlay');
+  });
+
+  it('⭐들어오는 움직임: 옛 slide-in과 같은 값(0.3초 · 오른쪽에서 밀려 들어옴)의 토큰을 쓰고, 움직임 줄이기면 멈춘다', async () => {
+    await render(<ToastCard title="글" onDismiss={() => {}} />);
+    expect(el().className.split(/\s+/)).toContain('animate-ds-slide-in');
+    expect(el().className.split(/\s+/)).toContain('motion-reduce:animate-none');
+  });
+
   it('단추 이름이나 콜백 중 하나라도 없으면 보조 단추를 그리지 않는다', async () => {
     await render(<ToastCard title="글" actionLabel="되돌리기" onDismiss={() => {}} />);
     expect([...el().querySelectorAll('button')].map((b) => b.getAttribute('aria-label'))).toEqual(['닫기']);

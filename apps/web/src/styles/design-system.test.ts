@@ -117,11 +117,20 @@ describe('design-system.css — 밀도 · 그림자 · 움직임 이름 토큰',
 
   it('⭐움직임: 빠름 100ms · 움직임 줄이기 0 · 숨쉬기 2초 · 숨쉬기 모양은 Tailwind pulse와 같다(50%에서 투명도 0.5)', () => {
     const v = (n: string) => css.match(new RegExp(`--ds-duration-${n}:\\s*([^;]+);`))![1]!.trim();
-    expect([v('fast'), v('instant'), v('pulse')]).toEqual(['100ms', '0ms', '2s']);
+    expect([v('fast'), v('instant'), v('pulse'), v('enter')]).toEqual(['100ms', '0ms', '2s', '300ms']);
     const tw = readFileSync(join(__dirname, '../../node_modules/tailwindcss/theme.css'), 'utf8');
     const twAnim = tw.match(/--animate-pulse:\s*([^;]+);/)![1]!.trim();
     const dsAnim = css.match(/--animate-ds-pulse:\s*([^;]+);/)![1]!.trim();
     expect(dsAnim.replace('ds-pulse', 'pulse').replace('var(--ds-duration-pulse)', '2s')).toBe(twAnim);
     expect(css).toMatch(/@keyframes ds-pulse\s*\{\s*50%\s*\{\s*opacity:\s*0\.5;/);
+  });
+
+  it('⭐토스트 들어오기: 옛 globals.css의 slide-in과 같은 값이다(0.3초 ease-out · 오른쪽 100%에서 투명 → 제자리 불투명)', () => {
+    const globals = readFileSync(join(__dirname, '../app/globals.css'), 'utf8');
+    const norm = (t: string) => t.replace(/\s+/g, ' ').trim();
+    const frames = (src: string, name: string) => norm(src.match(new RegExp(`@keyframes ${name}\\s*\\{(.*?\\})\\s*\\}`, 's'))![1]!);
+    expect(frames(css, 'ds-slide-in')).toBe(frames(globals, 'slide-in'));
+    expect(css.match(/--animate-ds-slide-in:\s*([^;]+);/)![1]!.trim()).toBe('ds-slide-in var(--ds-duration-enter) ease-out');
+    expect(globals).toMatch(/animation:\s*slide-in 0\.3s ease-out;/);
   });
 });

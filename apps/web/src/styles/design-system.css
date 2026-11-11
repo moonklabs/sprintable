@@ -73,7 +73,8 @@
  * 밀도 = 누르는 «높이»(Tailwind `--spacing-*` 이름이라 `h-ds-control` · `min-h-ds-touch` · `size-ds-control-sm`처럼 쓴다):
  *   control-sm 28(작은 단추) · compact 32(탭 · 메뉴 항목 · 달력 칸) · control 36(큰 단추 · 입력칸) · touch 44(폰 바닥) · control-xl 48(큰 아이콘 단추) · row 56(목록 줄).
  * 그림자 = popup(떠 있는 작은 상자: 토스트 · 메뉴 · 달력 팝업) · overlay(바깥을 가리는 큰 상자: 대화창 · 패널).
- * 움직임 = 100ms(`--ds-duration-fast`) · 움직임 줄이기면 0(`--ds-duration-instant`) · 불러오는 중 숨쉬기 2초(`--ds-duration-pulse`, `animate-ds-pulse`).
+ * 움직임 = 100ms(`--ds-duration-fast`) · 움직임 줄이기면 0(`--ds-duration-instant`) · 불러오는 중 숨쉬기 2초(`--ds-duration-pulse`, `animate-ds-pulse`)
+ *   · 토스트 들어오기 0.3초(`--ds-duration-enter`, `animate-ds-slide-in` — 옛 `slide-in`과 같은 값: 오른쪽에서 밀려 들어오며 투명 → 불투명).
  */
 @theme {
   --spacing-ds-control-sm: 1.75rem;
@@ -85,9 +86,20 @@
   --shadow-ds-popup: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
   --shadow-ds-overlay: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
   --animate-ds-pulse: ds-pulse var(--ds-duration-pulse) cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-ds-slide-in: ds-slide-in var(--ds-duration-enter) ease-out;
   @keyframes ds-pulse {
     50% {
       opacity: 0.5;
+    }
+  }
+  @keyframes ds-slide-in {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
     }
   }
 }
@@ -96,6 +108,7 @@
   --ds-duration-fast: 100ms;
   --ds-duration-instant: 0ms;
   --ds-duration-pulse: 2s;
+  --ds-duration-enter: 300ms;
 }
 
 /*

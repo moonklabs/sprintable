@@ -84,6 +84,8 @@ describe('cn() — ds 밀도 · 그림자 · 움직임 토큰(UI-3)', () => {
   it('⭐움직임: animate-ds-pulse는 다른 animate와 충돌하고 transition과 공존한다', () => {
     expect(cn('animate-ds-pulse', 'animate-none')).toBe('animate-none');
     expect(cn('animate-ds-pulse', 'transition-colors')).toBe('animate-ds-pulse transition-colors');
+    expect(cn('animate-ds-slide-in', 'animate-none')).toBe('animate-none');
+    expect(cn('animate-ds-slide-in', 'motion-reduce:animate-none')).toBe('animate-ds-slide-in motion-reduce:animate-none');
     expect(cn('duration-(--ds-duration-fast)', 'duration-300')).toBe('duration-300');
   });
 });

@@ -119,7 +119,7 @@ export function ShowcaseTokens() {
       </Block>
       <Block title="움직임 (--ds-duration-*)">
         <Row>
-          <span className="font-mono text-ds-mono-md text-ds-ink-2">fast 100ms · instant 0ms(움직임 줄이기) · pulse 2s</span>
+          <span className="font-mono text-ds-mono-md text-ds-ink-2">fast 100ms · instant 0ms(움직임 줄이기) · pulse 2s · enter 300ms(토스트 들어오기)</span>
           <span className="inline-flex items-center gap-2 text-ds-small text-ds-ink-2">
             <span aria-hidden="true" className="size-2 rounded-full bg-ds-action motion-safe:animate-ds-pulse" />
             불러오는 중 숨쉬기

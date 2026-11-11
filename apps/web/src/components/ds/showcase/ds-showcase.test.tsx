@@ -44,6 +44,7 @@ describe('ds 견본 화면 (AC3)', () => {
     for (const r of ['tag 2', 'control 4', 'panel 8', 'pill 12']) expect(text, r).toContain(r);
     for (const s of ['popup', 'overlay']) expect(text, s).toContain(s);
     expect(text).toContain('fast 100ms');
+    expect(text).toContain('enter 300ms');
   });
 
   it('⭐모든 ds 부품이 견본에 있다 — ds 폴더에 부품 파일이 새로 생겼는데 견본에 안 넣으면 빨개진다', () => {
@@ -55,9 +56,13 @@ describe('ds 견본 화면 (AC3)', () => {
       ['icon.tsx', '아이콘 — IconButton · Banner 등 안에서 늘 보인다'],
       ['icon-paths.ts', '아이콘 경로 표'],
     ]);
-    const missing = sources
-      .map((f) => f.replace(/\.tsx$/, ''))
-      .filter((name) => !NOT_A_PART.has(`${name}.tsx`) && !showcase.includes(`from '../${name}'`));
+    // 임포트만 남기고 사용을 지워도 통과하지 않도록: 파일이 내보내는 부품(대문자 이름) 중 하나라도 견본에서 실제로 «그려져야» 한다(`<이름`).
+    const drawn = (file: string) => {
+      const src = readFileSync(join(dir, file), 'utf-8');
+      const names = [...src.matchAll(/export (?:function|const) ([A-Z]\w*)/g)].map((m) => m[1]!);
+      return names.some((n) => new RegExp(`<${n}[\\s/>]`).test(showcase));
+    };
+    const missing = sources.filter((f) => !NOT_A_PART.has(f) && !drawn(f)).map((f) => f.replace(/\.tsx$/, ''));
     expect(missing).toEqual([]);
   });
 
