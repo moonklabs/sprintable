@@ -1,12 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Input } from '@/components/ui/input';
+import { Banner } from '@/components/ds/banner';
+import { Button, buttonVariants } from '@/components/ds/button';
+import { Checkbox } from '@/components/ds/checkbox';
+import { Input } from '@/components/ds/input';
+import { cn } from '@/lib/utils';
 import { LegalFooter } from '@/components/legal/legal-footer';
 import { safeNextPath } from '@/lib/auth/session-redirect';
 import { isImeComposing } from '@/lib/ime-composition';
@@ -37,6 +40,7 @@ export default function RegisterPage() {
   const [tosAccepted, setTosAccepted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const consentIds = { prefix: useId(), terms: useId(), and: useId(), privacy: useId() }; // the box is named by the WHOLE sentence: the words beside it and the two documents' names
   // story 4669 (U6 · Yuna A-5): with Google on, Google leads — the way with no mail round trip (email-verify-gate treats a social sign-in as verified).
   // story 4891 (UI-8 U1 · PO 11-10): the e-mail form is NOT folded behind a second press any more — one screen: the terms line, Google, the three fields, [가입]. The terms
   // checkbox (unticked by default, AUTH-07) still gates BOTH ways: Google goes nowhere until it is ticked and [가입] stays off; the server still refuses `tos_accepted=false`.
@@ -100,8 +104,8 @@ export default function RegisterPage() {
   const showRules = passwordTouched && password.length > 0;
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-muted px-4 py-4 sm:gap-8 sm:py-8">
-      <div className="w-full max-w-sm space-y-6 rounded-2xl bg-background p-4 shadow-lg sm:p-8">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-ds-background px-4 py-4 sm:gap-8 sm:py-8">
+      <div className="w-full max-w-sm space-y-4 rounded-2xl border border-ds-line bg-ds-surface p-4 shadow-lg sm:space-y-6 sm:p-8">
         <div className="flex flex-col items-center gap-3 text-center">
           <SprintableLogo
             variant="stacked"
@@ -109,28 +113,27 @@ export default function RegisterPage() {
             markClassName="h-14"
             wordmarkClassName="h-5"
           />
-          <p className="text-sm text-muted-foreground">{t('subtitle')}</p>
+          <p className="text-ds-body text-ds-ink-3">{t('subtitle')}</p>
         </div>
 
         {/* story 4669: the terms line first (both ways need it), then Google as the main button; story 4891: then the e-mail form, on the same screen */}
         {/* story 4891 (PO 11-11 · a person's first step on a phone): the box and its words are ONE ≥44 press (the label — a tap on the box or on «다음에 동의해요:» ticks it), and the two documents are their OWN named ≥44 links beside it, never inside the label — before, the middle of the sentence
             was a link, so a tap on the words opened the terms instead of ticking the box (dev walk 11-11). One checkbox still (AUTH-07: unticked by default, gates both ways). */}
-        <div data-testid="register-consent" className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
-          <label className="flex min-h-11 cursor-pointer select-none items-center gap-2 pr-1">
-            {/* the box is named by the WHOLE sentence (the two documents are links beside the label, not inside it — a screen reader must still hear what is agreed to) */}
-            <Checkbox
-              checked={tosAccepted}
-              onCheckedChange={(checked) => setTosAccepted(checked === true)}
-              disabled={loading}
-              aria-label={`${t('tosPrefix')} ${t('termsOfService')} ${t('and')} ${t('privacyPolicy')}`}
-            />
-            <span>{t('tosPrefix')}</span>
-          </label>
-          <Link href="/terms" target="_blank" className="inline-flex min-h-11 items-center font-medium text-brand-text hover:text-brand-text/85">
+        <div data-testid="register-consent" className="flex flex-wrap items-center gap-x-1.5 text-ds-small text-ds-ink-3">
+          {/* the box and the words beside it are ONE press (the ds Checkbox is its own label, ≥ 44 on touch); the box is named by the WHOLE sentence (the two documents are links beside the label, not inside it — a screen reader must still hear what is agreed to) */}
+          <Checkbox
+            checked={tosAccepted}
+            onCheckedChange={(checked) => setTosAccepted(checked === true)}
+            disabled={loading}
+            aria-labelledby={`${consentIds.prefix} ${consentIds.terms} ${consentIds.and} ${consentIds.privacy}`}
+            label={<span id={consentIds.prefix}>{t('tosPrefix')}</span>}
+            className="pr-1 text-ds-small text-ds-ink-3"
+          />
+          <Link id={consentIds.terms} href="/terms" target="_blank" className="inline-flex min-h-11 min-w-11 items-center justify-center font-medium text-brand-text hover:text-brand-text/85">
             {t('termsOfService')}
           </Link>
-          {t('and')}
-          <Link href="/privacy" target="_blank" className="inline-flex min-h-11 items-center font-medium text-brand-text hover:text-brand-text/85">
+          <span id={consentIds.and}>{t('and')}</span>
+          <Link id={consentIds.privacy} href="/privacy" target="_blank" className="inline-flex min-h-11 min-w-11 items-center justify-center font-medium text-brand-text hover:text-brand-text/85">
             {t('privacyPolicy')}
           </Link>
         </div>
@@ -139,7 +142,7 @@ export default function RegisterPage() {
             실패 사유가 스크린리더에 안 읽힘). setError(null)이 재시도마다 먼저 실행돼(위
             handleRegister) 이 단락이 매번 언마운트→리마운트되므로 동일 사유가 반복돼도
             안정적으로 낭독된다. */}
-        {error && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">{error}</p>}
+        {error && <Banner tone="failed">{error}</Banner>}
 
         {googleEnabled && (
           <div className="space-y-3">
@@ -152,7 +155,8 @@ export default function RegisterPage() {
               // without an href an anchor is not reachable by keyboard — until the terms are ticked it is a focusable, announced-as-unavailable link that says why (Enter / Space, like a press)
               {...(!tosAccepted ? { role: 'link', tabIndex: 0, 'aria-disabled': true, onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setError(t('tosRequiredError')); } } } : {})}
               data-testid="register-google"
-              className={`flex w-full min-h-[44px] items-center justify-center gap-3 rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90 ${!tosAccepted ? 'opacity-50 cursor-not-allowed' : ''}`}
+              // the ds primary look; until the terms are ticked the link is «unavailable» in look (aria-disabled → dashed) but STILL takes the press — it is the press that says why (pointer events back on)
+              className={cn(buttonVariants({ variant: 'primary', size: 'lg' }), 'w-full gap-3 aria-disabled:pointer-events-auto', !tosAccepted && 'cursor-not-allowed')}
             >
               <svg className="h-5 w-5 rounded-full bg-background p-0.5" viewBox="0 0 24 24">
                 <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
@@ -164,9 +168,9 @@ export default function RegisterPage() {
             </a>
 
             <div className="relative flex items-center">
-              <div className="flex-grow border-t border-border/50" />
-              <span className="mx-3 flex-shrink text-xs text-muted-foreground">{t('or')}</span>
-              <div className="flex-grow border-t border-border/50" />
+              <div className="flex-grow border-t border-ds-line" />
+              <span className="mx-3 flex-shrink text-ds-small text-ds-ink-3">{t('or')}</span>
+              <div className="flex-grow border-t border-ds-line" />
             </div>
 
           </div>
@@ -176,8 +180,8 @@ export default function RegisterPage() {
           <Input
             type="text"
             placeholder={t('namePlaceholder')}
+            aria-label={t('namePlaceholder')}
             autoComplete="name"
-            className="h-auto px-4 py-3"
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             onKeyDown={(e) => {
@@ -190,8 +194,8 @@ export default function RegisterPage() {
           <Input
             type="email"
             placeholder={t('emailPlaceholder')}
+            aria-label={t('emailPlaceholder')}
             autoComplete="email"
-            className="h-auto px-4 py-3"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
@@ -200,36 +204,40 @@ export default function RegisterPage() {
           <Input
             type="password"
             placeholder={t('passwordPlaceholder')}
+            aria-label={t('passwordPlaceholder')}
             autoComplete="new-password"
-            className={showRules && !isPasswordValid ? 'h-auto border-destructive px-4 py-3' : 'h-auto px-4 py-3'}
+            aria-invalid={showRules && !isPasswordValid ? true : undefined}
             value={password}
             onChange={(e) => { setPassword(e.target.value); setPasswordTouched(true); }}
             onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
             disabled={loading}
           />
           {showRules && (
-            <ul className="space-y-1 text-xs">
+            <ul className="space-y-1 text-ds-small">
               <RuleItem met={rules.length} label={t('ruleLength')} />
-              <li className={`flex items-center gap-1.5 ${categoriesMet >= 3 ? 'text-success' : 'text-muted-foreground'}`}>
+              <li className={`flex items-center gap-1.5 ${categoriesMet >= 3 ? 'text-ds-done' : 'text-ds-ink-3'}`}>
                 <span>{categoriesMet >= 3 ? '✓' : '○'}</span>
                 <span>{t('ruleCategories', { count: categoriesMet })}</span>
               </li>
             </ul>
           )}
           {/* story 4669: with Google on this is the second way — not a second brand-colored button (the hero is Google's) */}
-          <button
+          <Button
+            type="button"
+            variant={googleEnabled ? 'secondary' : 'primary'}
+            size="lg"
+            className="w-full"
             onClick={handleRegister}
             disabled={loading || !displayName.trim() || !email.trim() || !password.trim() || !tosAccepted}
             data-testid="register-submit"
-            className={`flex w-full min-h-[44px] items-center justify-center rounded-lg px-4 py-3 text-sm font-medium transition disabled:opacity-50 ${googleEnabled ? 'bg-muted text-foreground hover:bg-muted/80' : 'bg-brand text-brand-foreground hover:bg-brand/90'}`}
           >
             {loading ? t('creatingAccount') : t('submit')}
-          </button>
+          </Button>
         </div>
 
-        <p className="text-center text-sm text-muted-foreground">
-          {t('alreadyHaveAccount')}{' '}
-          <Link href="/login" className="font-medium text-brand-text hover:text-brand-text/85">
+        <p className="flex flex-wrap items-center justify-center gap-x-1 text-center text-ds-body text-ds-ink-3">
+          <span>{t('alreadyHaveAccount')}</span>
+          <Link href="/login" className="inline-flex min-h-11 min-w-11 items-center justify-center font-medium text-brand-text hover:text-brand-text/85">
             {t('signIn')}
           </Link>
         </p>
@@ -241,7 +249,7 @@ export default function RegisterPage() {
 
 function RuleItem({ met, label }: { met: boolean; label: string }) {
   return (
-    <li className={`flex items-center gap-1.5 ${met ? 'text-success' : 'text-muted-foreground'}`}>
+    <li className={`flex items-center gap-1.5 ${met ? 'text-ds-done' : 'text-ds-ink-3'}`}>
       <span>{met ? '✓' : '○'}</span>
       <span>{label}</span>
     </li>

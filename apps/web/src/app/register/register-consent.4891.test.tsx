@@ -31,7 +31,7 @@ const box = () => consent().querySelector('[role="checkbox"]') as HTMLElement;
 describe.each([['ko', koMessages.register], ['en', enMessages.register]] as const)('[SID:4891] the consent line (%s)', (locale, T) => {
   it('the label holds the box and the words «tosPrefix» — and no link', async () => {
     await mount(locale);
-    const label = consent().querySelector('label')!;
+    const label = consent().querySelector('label[data-slot="ds-checkbox-field"]')!;
     expect(label.contains(box())).toBe(true);
     expect(label.textContent?.trim()).toBe(T.tosPrefix);
     expect(label.querySelector('a')).toBeNull();
@@ -39,7 +39,9 @@ describe.each([['ko', koMessages.register], ['en', enMessages.register]] as cons
 
   it('the box is named by the whole sentence (prefix + both documents), though the links sit outside the label', async () => {
     await mount(locale);
-    expect(box().getAttribute('aria-label')).toBe(`${T.tosPrefix} ${T.termsOfService} ${T.and} ${T.privacyPolicy}`);
+    // story 4891 (ds Checkbox): the name is the words of the elements the box points at (aria-labelledby), in order — the prefix beside it, then the two documents and the «and» between
+    const named = (box().getAttribute('aria-labelledby') ?? '').split(' ').map((id) => document.getElementById(id)?.textContent?.trim() ?? '').join(' ');
+    expect(named).toBe(`${T.tosPrefix} ${T.termsOfService} ${T.and} ${T.privacyPolicy}`);
   });
 
   it('the two documents are their own links, outside the label, opening in a new tab', async () => {
@@ -49,6 +51,7 @@ describe.each([['ko', koMessages.register], ['en', enMessages.register]] as cons
     expect(links.map((a) => a.getAttribute('href'))).toEqual(['/terms', '/privacy']);
     expect(links.every((a) => a.getAttribute('target') === '_blank')).toBe(true);
     expect(links.every((a) => !consent().querySelector('label')!.contains(a))).toBe(true);
+    expect(consent().querySelector('label[data-slot="ds-checkbox-field"]'), 'the box and its words are the ds Checkbox').not.toBeNull();
     // the touch floor is a class of the link itself (the layout spec measures the pixels)
     expect(links.every((a) => /(^|\s)min-h-11(\s|$)/.test(a.className))).toBe(true);
   });
@@ -56,7 +59,7 @@ describe.each([['ko', koMessages.register], ['en', enMessages.register]] as cons
   it('a tap on the words ticks the box; a tap on a document link does not', async () => {
     await mount(locale);
     expect(box().getAttribute('aria-checked')).toBe('false');
-    const words = consent().querySelector('label span:not([role="checkbox"])') as HTMLElement;
+    const words = consent().querySelector('label > span') as HTMLElement; // the ds Checkbox's own text span
     await act(async () => { words.click(); });
     expect(box().getAttribute('aria-checked')).toBe('true');
     await act(async () => { words.click(); });

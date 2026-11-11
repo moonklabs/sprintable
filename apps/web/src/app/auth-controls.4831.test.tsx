@@ -112,7 +112,7 @@ describe('가입 화면 약관 체크박스', () => {
   it('라벨 글자를 눌러도 켜지고 다시 누르면 꺼진다 · 엔터로는 안 켜지고 스페이스로는 켜진다', async () => {
     const { default: RegisterPage } = await import('./register/page');
     await act(async () => { root.render(wrap(<RegisterPage />)); });
-    const box = () => container.querySelector<HTMLElement>('[data-slot="checkbox"]')!;
+    const box = () => container.querySelector<HTMLElement>('[data-slot="ds-checkbox"]')!;
     expect(box()).toBeTruthy();
     expect(box().getAttribute('aria-checked')).toBe('false');
     const labelText = [...container.querySelectorAll('label span')].find((s) => s.textContent?.includes(koMessages.register.tosPrefix))!;
@@ -140,9 +140,9 @@ describe('가입 제출 — 엔터 · 요청 내용 (인증은 되돌리기 어�
     }));
     const { default: RegisterPage } = await import('./register/page');
     await act(async () => { root.render(wrap(<RegisterPage />)); });
-    const name = container.querySelector<HTMLInputElement>('input[data-slot="input"][type="text"]')!;
-    const email = container.querySelector<HTMLInputElement>('input[data-slot="input"][type="email"]')!;
-    const pw = container.querySelector<HTMLInputElement>('input[data-slot="input"][type="password"]')!;
+    const name = container.querySelector<HTMLInputElement>('input[data-slot="ds-input"][type="text"]')!;
+    const email = container.querySelector<HTMLInputElement>('input[data-slot="ds-input"][type="email"]')!;
+    const pw = container.querySelector<HTMLInputElement>('input[data-slot="ds-input"][type="password"]')!;
     await act(async () => { setNative(name, '홍길동'); setNative(email, ' a@b.co '); setNative(pw, 'Str0ng!Passw0rd#2026'); });
     // 약관을 켜기 전에는 어느 칸의 엔터도 제출하지 않는다
     await act(async () => { press(name, 'Enter'); });

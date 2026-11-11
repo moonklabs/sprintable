@@ -45,7 +45,8 @@ async function build() {
     ],
   });
   const js = out.outputFiles[0]!.text;
-  const candidates = [...new Set([...js.matchAll(/"([^"\n]+)"/g)].flatMap((m) => m[1]!.split(/\s+/)).filter(Boolean))];
+  // the class tokens: the quoted strings AND the template literals (a shared part such as the legal footer writes `flex flex-wrap … ${className}` as a template — a scan of quoted strings alone draws it only when the same words happen to stand in a quoted string elsewhere in the bundle)
+  const candidates = [...new Set([...js.matchAll(/"([^"\n]+)"/g), ...js.matchAll(/`([^`]*)`/g)].flatMap((m) => m[1]!.replace(/\$\{[^}]*\}/g, ' ').split(/\s+/)).filter(Boolean))];
   const compiler = await compile(readFileSync(path.join(APP, 'globals.css'), 'utf8'), { base: APP, onDependency: () => {} });
   const css = (optimize as unknown as (c: string, o?: object) => { code: string })(compiler.build(candidates), { minify: false }).code;
   built = { js, css };
