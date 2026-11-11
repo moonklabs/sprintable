@@ -712,7 +712,7 @@ _SHRINK_BLOCK_MIN_LOST_CHARS = 100
 
 
 async def _assert_story_link_targets_in_project(
-    session: AsyncSession, project_id: uuid.UUID, body: "StoryCreate | StoryUpdate",
+    session: AsyncSession, project_id: uuid.UUID, body: "StoryCreate | StoryUpdate | BulkUpdateItem",
 ) -> None:
     """E-SECURITY SEC-S8(story 83ea3d6a) T(까심 전수스윕, 실HTTP 확定): epic_id/sprint_id/
     meeting_id가 body.project_id 소속인지 검증 없이 그대로 repo.create에 전달됐다 — 같은 org
@@ -724,7 +724,9 @@ async def _assert_story_link_targets_in_project(
     남아있었다 — 여기서 StoryUpdate도 받아 같은 검증을 update_story에도 재사용(대상 project는
     기존 story 자신의 project_id, StoryUpdate엔 project_id 필드 자체가 없어 변경 불가)."""
     for field, table in _STORY_LINK_TABLES.items():
-        target_id = getattr(body, field)
+        # story 4899: PATCH /bulk's item model carries `sprint_id` only (no epic_id / meeting_id) — a field the body does not have
+        # is nothing to check
+        target_id = getattr(body, field, None)
         if target_id is None:
             continue
         target_project_id = (await session.execute(
@@ -2092,6 +2094,26 @@ async def bulk_update_stories(
         await _assert_assignees_in_org(db, repo.org_id, [
             _aid for _sid, _aid in _given.items() if _aid != _single.get(_sid) and _aid not in _joined.get(_sid, [])
         ])
+    # story 4899 (SEC-S8 T/X's third road): create and PATCH /{id} refuse a sprint of another project; this route set it with
+    # setattr and no check, so a story of one project could be hung on a sprint of another (the same org's) and the burndown
+    # (no project filter) and the list (project filter) disagreed. Same check, same 404, against EACH story's own project.
+    # It runs here, BEFORE the loop, not inside it: the loop's status gate (`_preflight_merge_gate` · `enforce_gate`) commits
+    # when it blocks or parks an item, so a refusal found midway would leave the items before it saved. Only a story the caller
+    # can reach is checked — one they cannot stays silently skipped by the loop, never answered differently (that would show it
+    # exists).
+    # The loop below writes `sprint_id` only for a story THIS pass checked: it decides «reachable and the sprint is the project's» once,
+    # so a grant that lands between the two reads cannot let the loop write a sprint nobody checked (codex 01a1c9b2).
+    _sprint_checked: set[uuid.UUID] = set()
+    for _item in payload.items:
+        if _item.sprint_id is None:
+            continue
+        _story = (await db.execute(
+            select(Story).where(Story.id == _item.id, Story.org_id == repo.org_id)
+        )).scalar_one_or_none()
+        if _story is None or not await has_project_access(db, uuid.UUID(auth.user_id), _story.project_id, repo.org_id):
+            continue
+        await _assert_story_link_targets_in_project(db, _story.project_id, _item)
+        _sprint_checked.add(_story.id)
     for item in payload.items:
         # E-SECURITY SEC-S8(story 83ea3d6a) W(까심 QA, CRITICAL·실HTTP 확定): 이 raw 쿼리가
         # org_id 필터 자체가 없어(정상 repo.get()은 self._org_filter() 명시·RLS도 0002서 off)
@@ -2109,6 +2131,8 @@ async def bulk_update_stories(
         # 미접근 item은 not-found와 동형으로 조용히 스킵(존재 비노출·나머지 정당 item은 진행).
         if not await has_project_access(db, uuid.UUID(auth.user_id), story.project_id, repo.org_id):
             continue
+        if item.sprint_id is not None and story.id not in _sprint_checked:
+            continue  # story 4899: not reachable when the sprint was checked above — skipped the same way, never written unchecked
         update_data = item.model_dump(exclude={"id"}, exclude_none=True)
         # story #2521(2026-08-07, 카디르 QA 적출) 근본수정 — bulk가 status를 setattr로 그대로
         # 써 merge-gate(H1 Cage)를 아예 안 거쳤다. 단건 PATCH /{id}/status(update_story_status)
