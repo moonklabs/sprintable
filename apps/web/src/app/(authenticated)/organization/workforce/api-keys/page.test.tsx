@@ -81,3 +81,15 @@ describe('ApiKeysPage — 에이전트 동명이인([SID:4311 PR 3])', () => {
   });
 });
 
+// story 4889 — 큰 제목이 셸 칼럼 왼쪽 끝(x≈313)에 붙어 있었다(판정 캡처). 줄 띠(px-4)와 같은 안쪽 여백.
+describe('ApiKeysPage — 왼쪽 여백(story 4889)', () => {
+  it('⭐본문 래퍼가 px-4 안쪽 여백을 가진다 — 되돌리면 빨강', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 })));
+    await mount();
+    const h1 = container.querySelector('h1')!;
+    const wrapper = h1.closest('div.container');
+    expect(wrapper).toBeTruthy();
+    expect(wrapper!.className).toContain('px-4');
+  });
+});
+

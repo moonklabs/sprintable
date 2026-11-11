@@ -40,7 +40,7 @@ export default function ApiKeysPage() {
   }, []);
 
   return (
-    <div className="container mx-auto py-8 space-y-8">
+    <div className="container mx-auto px-4 py-8 space-y-8"> {/* story 4889: 큰 제목이 셸 칼럼 왼쪽 끝(x≈313)에 붙던 것 — 줄 띠와 같은 px-4 */}
       <div>
         <h1 className="text-display font-bold">{t('agentApiKeysPageTitle')}</h1>
         <p className="text-muted-foreground mt-2">

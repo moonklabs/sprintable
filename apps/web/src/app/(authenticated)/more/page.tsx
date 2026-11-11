@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Search } from 'lucide-react';
+import { ChevronRight, Search } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Card } from '@/components/ds/card';
@@ -94,8 +94,9 @@ export default function MorePage() {
           story #fddd0e6b(B) — 「전체」(mobileTabBar.more, 탭 이름)와 「전체 메뉴」(페이지
           제목, 새 키)는 다른 값이다 — 재사용 아님. */}
       <TopBarSlot title={<MoreTopBarTitle />} showContextChip />
-      {/* story #4413(유나 자리 결정) — 전역 검색(명령 팔레트) 폰 진입점. 사이드바 머리의 검색 단추와 같은 모양(돋보기 + «검색…») ·
-          이 목록 맨 위. «전체»는 시트가 아니라 페이지라 닫을 것 없이 팔레트 한 겹만 열린다. 아래 입력칸은 이 목록만 거르는 것(다른 일). */}
+      {/* story #4413(유나 자리 결정) — 전역 검색(명령 팔레트) 폰 진입점 · 이 목록 맨 위. «전체»는 시트가 아니라 페이지라 닫을 것 없이 팔레트 한 겹만 열린다.
+          story 4889(PO 판정 캡처) — 아래 «화면 이름으로 찾기» 입력칸과 같은 «검색 칸 둘»로 읽혔다(돋보기 + «검색…» 회색 칸이 둘). 둘은 다른 일이라(위 = 팔레트를 연다 · 아래 = 이 목록만 거른다)
+          합치지 않고 «모양 · 이름»을 가른다: 위는 입력칸이 아니라 단추(진한 글 + 오른쪽 ›, 이름 «전체 검색 열기»), 아래 입력칸은 «이 목록에서 …»라고 범위를 말한다. */}
       {openPalette && (
         <Button
           type="button"
@@ -103,10 +104,11 @@ export default function MorePage() {
           size="lg"
           onClick={openPalette}
           data-testid="more-global-search"
-          className="mb-4 w-full justify-start gap-2 border-border/60 bg-muted/30 px-3 font-normal text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="mb-4 w-full justify-start gap-2 px-3 font-medium text-foreground"
         >
           <Search className="size-4" aria-hidden="true" />
-          <span className="flex-1 truncate text-left">{t('search')}</span>
+          <span className="flex-1 truncate text-left">{t('moreGlobalSearch')}</span>
+          <ChevronRight className="size-4 text-muted-foreground" aria-hidden="true" />
         </Button>
       )}
       {/* story #4222(유나 design) — space-y는 display:none 형제도 세어, 숨은 탭 문장(lg:hidden)이 마지막 자식이 되면 부제에

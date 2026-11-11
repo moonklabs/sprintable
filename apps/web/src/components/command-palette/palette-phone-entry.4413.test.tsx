@@ -96,7 +96,15 @@ describe('폰 폭 — 전역 검색 팔레트(story #4413)', () => {
     });
     const row = container.querySelector('[data-testid="more-global-search"]') as HTMLButtonElement | null;
     expect(row).not.toBeNull();
-    expect(row!.textContent).toContain(koMessages.nav.search);
+    // story 4889 (PO 판정 캡처 — «검색 칸 둘»): 위 행은 입력칸이 아니라 단추이고 이름이 «전체 검색 열기» — 아래 «이 목록에서 화면 이름으로 찾기» 입력칸과 같은 칸 둘로 읽히지 않는다.
+    expect(row!.textContent).toContain(koMessages.nav.moreGlobalSearch);
+    expect(row!.tagName).toBe('BUTTON');
+    expect(row!.querySelector('input')).toBeNull();
+    const filter = container.querySelector('[data-testid="more-search-input"]') as HTMLInputElement;
+    expect(filter.getAttribute('placeholder')).toBe(koMessages.nav.moreSearchPlaceholder);
+    expect(koMessages.nav.moreGlobalSearch).not.toBe(koMessages.nav.search); // not the sidebar head's «검색…» (that one IS an input-like entry)
+    expect(koMessages.nav.moreSearchPlaceholder).toContain('이 목록'); // the filter says its scope
+    expect(row!.textContent).not.toBe(filter.getAttribute('placeholder'));
     expect(container.querySelector('[data-testid="probe-state"]')!.textContent).toBe('closed');
     await act(async () => { row!.click(); });
     expect(container.querySelector('[data-testid="probe-state"]')!.textContent).toBe('open');
