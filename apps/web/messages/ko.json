@@ -4958,6 +4958,9 @@
     "switchToVerify": "달성으로 전환"
   },
   "goals": {
+    "viewLabel": "보기",
+    "viewList": "목록",
+    "viewSwimlane": "스윔레인",
     "goalDeleteFailed": "목표 삭제에 실패했어요.",
     "title": "목표",
     "subtitle": "워크스페이스의 주요 목표와 작업 범위를 관리해요.",

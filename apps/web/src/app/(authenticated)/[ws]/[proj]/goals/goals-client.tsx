@@ -12,6 +12,8 @@ import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { useGoalsRoute } from './goals-context';
 import { formatViewerScheduledAt } from '@/lib/schedule-format';
 import { Button } from '@/components/ui/button';
+import { Button as DsButton } from '@/components/ds/button';
+import { EpicSwimlaneBoard } from '@/components/epics/epic-swimlane-board';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -998,6 +1000,21 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
   const tc = useTranslations('common');
   const router = useRouter();
   const { wsSlug, projSlug } = useGoalsRoute();
+  // story #4888(UI-5 목표 화면 첫 조각) — «보기: 목록 | 스윔레인». 에픽 탭(/epics 스윔레인)과 목표 화면(/goals)을 한 화면으로 합친다: 같은 마스트헤드 아래에서 보기만 갈아 낀다.
+  // 기본은 목록(예전 /goals 그대로). 고른 보기는 프로젝트별로 이 브라우저에 기억한다(스윔레인 보드가 축 전환을 기억하는 것과 같은 방식 · 저장이 막혀도 화면은 선다).
+  const [view, setViewState] = useState<'list' | 'swimlane'>('list');
+  useEffect(() => {
+    // 프로젝트가 바뀔 때마다(같은 화면이 다시 마운트되지 않고 projectId만 바뀌는 이동 포함) 그 프로젝트의 보기로 맞춘다 — 저장값이 없으면 기본(목록). 이전 프로젝트의 보기를 끌고 가지 않는다.
+    let next: 'list' | 'swimlane' = 'list';
+    try {
+      if (window.localStorage.getItem(`goals-view:${projectId}`) === 'swimlane') next = 'swimlane';
+    } catch { /* 저장소 막힘 — 기본 보기로 */ }
+    setViewState(next);
+  }, [projectId]);
+  const setView = useCallback((next: 'list' | 'swimlane') => {
+    setViewState(next);
+    try { window.localStorage.setItem(`goals-view:${projectId}`, next); } catch { /* 저장 못 해도 이번 화면은 바뀐다 */ }
+  }, [projectId]);
   const { addToast } = useToast();
   const [epics, setGoals] = useState<Goal[]>([]);
   const [selectedEpic, setSelectedEpic] = useState<Goal | null>(null);
@@ -1183,12 +1200,7 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
   ).length;
   const doneCount = epics.filter((e) => e.status === 'done').length;
 
-  const listPanel = (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-muted/35">
-
-      {/* story #2958 §3 — 에디토리얼 마스트헤드(docs 재조립 #2955와 동형 언어, editorial 타이포
-          스케일 goals 첫 소비처). TopBarSlot(아래)은 얇은 전역 브레드크럼 칩이라 존속 — 이
-          마스트헤드가 실질 콘텐츠 헤더. */}
+  const masthead = (
       <div className="shrink-0 border-b border-border px-4 pb-4 pt-5 sm:px-6">
         <div className="font-mono text-editorial-meta font-semibold uppercase tracking-[0.16em] text-proof-blue">{t('indexKicker')}</div>
         {/* story #2974(PR-D0) delta — font-display(페이스)+font-editorial-heading(무게 유틸,
@@ -1201,6 +1213,30 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
           {t('indexDek')} <span className="text-muted-foreground">{t('indexCountActive', { count: activeCount })} · {t('indexCountDone', { count: doneCount })}</span>
         </p>
       </div>
+  );
+
+  // story #4888 — 보기 전환: 같은 화면 안에서 목록 ↔ 스윔레인을 갈아 끼우는 두 단추(켜진 쪽 `aria-pressed`). 패널을 가진 탭이 아니라 «보기 토글»이라 role=tab은 안 쓴다.
+  const viewSwitch = (
+    <div className="flex shrink-0 items-center gap-2 px-4 pt-3 sm:px-6" role="group" aria-label={t('viewLabel')} data-testid="goals-view-switch">
+      <span className="text-ds-small text-ds-ink-3">{t('viewLabel')}</span>
+      <DsButton type="button" variant={view === 'list' ? 'secondary' : 'quiet'} aria-pressed={view === 'list'} onClick={() => setView('list')}>
+        {t('viewList')}
+      </DsButton>
+      <DsButton type="button" variant={view === 'swimlane' ? 'secondary' : 'quiet'} aria-pressed={view === 'swimlane'} onClick={() => setView('swimlane')}>
+        {t('viewSwimlane')}
+      </DsButton>
+    </div>
+  );
+
+  const listPanel = (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-muted/35">
+
+      {/* story #2958 §3 — 에디토리얼 마스트헤드(docs 재조립 #2955와 동형 언어, editorial 타이포
+          스케일 goals 첫 소비처). TopBarSlot(아래)은 얇은 전역 브레드크럼 칩이라 존속 — 이
+          마스트헤드가 실질 콘텐츠 헤더. */}
+      {masthead}
+
+      {viewSwitch}
 
       {/* Status filter — story #2017: 'all' 아닌 나머지는 raw status 값을 그대로 렌더해(t() 미호출)
           KO 로케일에서도 draft/active/done/archived 영문 그대로 보였음. 배지·드롭다운(epic-status-
@@ -1322,6 +1358,18 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
         showContextChip
       />
 
+      {view === 'swimlane' ? (
+        // story #4888 — 스윔레인 보기: 보드는 «한 곳에만» 그린다(아래 목록 보기는 데스크톱 · 모바일 두 배치를 CSS로 가려 둘 다 DOM에 있어 거기에 넣으면 보드가 두 번 서 두 번 불러온다).
+        // 마스트헤드(h1) · 보기 전환은 목록 보기와 같은 것을 그대로 쓰고, 상단바 슬롯은 위의 것(목표 제목 + 새 목표) 하나만 — 보드는 embedded로 자기 슬롯을 안 그린다.
+        <div className="flex h-[calc(100svh-var(--shell-chrome-h))] min-h-0 flex-col overflow-hidden bg-muted/35" data-testid="goals-swimlane-view">
+          {masthead}
+          {viewSwitch}
+          <div className="focus-inset min-h-0 flex-1 overflow-y-auto">
+            <EpicSwimlaneBoard projectId={projectId} embedded />
+          </div>
+        </div>
+      ) : (
+        <>
       {/* Desktop layout: list + slide-in detail panel.
           story #4130 — 셸이 더 이상 뷰포트 높이 캡을 안 주므로(min-h-0 제거, #4121 게이트
           상세 sticky 픽스) 이 2열 split(리스트+상세, 각자 독립 overflow-y-auto)이 뷰포트
@@ -1365,6 +1413,8 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
           </div>
         )}
       </div>
+        </>
+      )}
 
       {/* Create modal */}
       {showCreate ? (

@@ -73,6 +73,8 @@ export const BROWSER_STORAGE_KEYS: readonly StorageKeyEntry[] = [
   { key: 'done_collapsed_', prefix: true, area: 'local', scope: 'kept', where: ['components/kanban/kanban-board.tsx'] },
   { key: 'wip_limit_', prefix: true, area: 'local', scope: 'kept', where: ['components/kanban/kanban-board.tsx'] },
   { key: 'epic_swimlane_axis_mode_', prefix: true, area: 'local', scope: 'kept', where: ['components/epics/epic-swimlane-board.tsx'] },
+  // story #4888: the 목표 screen's «보기: 목록 | 스윔레인» choice, per project — a view setting like the swimlane's axis mode above (kept with the device)
+  { key: 'goals-view:', prefix: true, area: 'local', scope: 'kept', where: ['app/(authenticated)/[ws]/[proj]/goals/goals-client.tsx'] },
   { key: 'docs-sort-mode:', prefix: true, area: 'local', scope: 'kept', where: ['app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx'] },
   { key: 'docs-view-mode:', prefix: true, area: 'local', scope: 'kept', where: ['app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx'] },
   { key: 'docs-sidebar-collapsed', area: 'local', scope: 'kept', where: ['app/(authenticated)/[ws]/[proj]/docs/docs-client-layout.tsx'] },

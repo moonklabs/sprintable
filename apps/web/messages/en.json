@@ -4958,6 +4958,9 @@
     "switchToVerify": "Switch to verified"
   },
   "goals": {
+    "viewLabel": "View",
+    "viewList": "List",
+    "viewSwimlane": "Swimlane",
     "goalDeleteFailed": "Failed to delete the goal.",
     "title": "Goals",
     "subtitle": "Manage the big outcomes your workspace is working toward as goals.",
