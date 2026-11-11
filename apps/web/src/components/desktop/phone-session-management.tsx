@@ -85,7 +85,7 @@ function SessionsForOrg({ orgId, orgSyncPending }: { orgId: string | undefined; 
   if (section.kind === 'failed') {
     return (
       <section className="space-y-2" data-testid="phone-sessions" aria-labelledby="phone-sessions-heading">
-        <h2 id="phone-sessions-heading" className="text-sm font-semibold text-foreground">{t('title')}</h2>
+        <h2 id="phone-sessions-heading" className="text-ds-card-title font-semibold text-ds-ink">{t('title')}</h2>
         <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="phone-sessions-read-failed">
           {t('readFailed')} <Button variant="outline" size="sm" className="min-h-11" onClick={readList}>{t('retry')}</Button>
         </p>
@@ -95,14 +95,14 @@ function SessionsForOrg({ orgId, orgSyncPending }: { orgId: string | undefined; 
   if (section.kind === 'remote_off') {
     return (
       <section className="space-y-2" data-testid="phone-sessions" aria-labelledby="phone-sessions-heading">
-        <h2 id="phone-sessions-heading" className="text-sm font-semibold text-foreground">{t('title')}</h2>
+        <h2 id="phone-sessions-heading" className="text-ds-card-title font-semibold text-ds-ink">{t('title')}</h2>
         <p role="status" className="break-keep text-xs text-muted-foreground" data-testid="phone-sessions-remote-off">{t('remoteOff')}</p>
       </section>
     );
   }
   return (
     <section className="space-y-3" data-testid="phone-sessions" aria-labelledby="phone-sessions-heading">
-      <h2 id="phone-sessions-heading" className="text-sm font-semibold text-foreground">{t('title')}</h2>
+      <h2 id="phone-sessions-heading" className="text-ds-card-title font-semibold text-ds-ink">{t('title')}</h2>
       {section.computers.map((c) => (
         <ComputerCard key={`${orgId ?? ''}:${c.computer_id ?? c.setup_id}`} computer={c} phoneKeyId={section.phoneKeyId} onChanged={readList} frozen={orgSyncPending} held={held} />
       ))}

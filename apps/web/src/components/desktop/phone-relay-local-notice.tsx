@@ -10,7 +10,7 @@ export function PhoneRelayLocalNotice() {
   const t = useTranslations('desktop.phoneRelayLocal');
   return (
     <Card className="break-keep flex flex-col gap-1 p-4" data-testid="phone-relay-local-notice">
-      <p className="text-sm font-semibold text-foreground">{t('title')}</p>
+      <p className="text-ds-card-title font-semibold text-ds-ink">{t('title')}</p>
       <p className="text-sm text-muted-foreground">{t('body')}</p>
     </Card>
   );

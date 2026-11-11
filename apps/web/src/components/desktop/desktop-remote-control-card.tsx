@@ -108,7 +108,7 @@ export function DesktopRemoteControlCard() {
   return (
     <Card ref={cardRef} id={REMOTE_CONTROL_ANCHOR} tabIndex={-1} className="break-keep flex scroll-mt-24 flex-col gap-2 p-4 focus:outline-none data-[arrived]:border-ring data-[arrived]:ring-3 data-[arrived]:ring-ring" data-testid="desktop-remote-control">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-foreground">{t('title')}</h2>
+        <h2 className="text-ds-card-title font-semibold text-ds-ink">{t('title')}</h2>
         {state.can_change ? (
           <Switch
             ref={switchRef}

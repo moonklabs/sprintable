@@ -70,7 +70,7 @@ describe('[SID:4889] /desktop — the screen is one composition', () => {
 
   it('the head says what the screen holds (ko · en keys exist)', async () => {
     for (const l of ['ko', 'en']) {
-      const d = JSON.parse(readFileSync(join(process.cwd(), `messages/${l}.json`), 'utf-8')).desktop;
+      const d = JSON.parse(readFileSync(join(__dirname, `../../../../messages/${l}.json`), 'utf-8')).desktop;
       expect(typeof d.pageTitle).toBe('string');
       expect(typeof d.pageNote).toBe('string');
     }
@@ -78,8 +78,8 @@ describe('[SID:4889] /desktop — the screen is one composition', () => {
 });
 
 describe('[SID:4889] /desktop — the cards share one grammar (source pins)', () => {
-  const src = (f: string) => readFileSync(join(process.cwd(), 'src/components/desktop', f), 'utf-8');
-  const TITLE = 'text-sm font-semibold text-foreground';
+  const src = (f: string) => readFileSync(join(__dirname, `../../../components/desktop/${f}`), 'utf-8');
+  const TITLE = 'text-ds-card-title font-semibold text-ds-ink';
   it.each([
     ['desktop-open-app-card.tsx', "t('openAppTitle')"],
     ['desktop-download-card.tsx', "t('title')"],
@@ -94,6 +94,8 @@ describe('[SID:4889] /desktop — the cards share one grammar (source pins)', ()
     expect(m, file).toBeTruthy();
     expect(m![1]).toContain(TITLE);
     expect(m![1]).not.toMatch(/text-base|font-medium|text-ds-body/);
+    // the e2e contrast guard (desktop-phone-tab.4891.layout.spec) refuses these bare classes on a drawn card — the title scale is the ds token
+    expect(m![1]).not.toMatch(/(^|\s)(text-xs|text-sm|text-muted-foreground|text-foreground)(\s|$)/);
   });
   it('the action cards share one padding (p-4) — no p-6 left on the remote-control card or the guidance card', () => {
     expect(src('desktop-remote-control-card.tsx')).not.toMatch(/Card[^>]*\bp-6\b/);

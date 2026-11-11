@@ -167,7 +167,7 @@ export function DesktopDevices() {
 
   return (
     <section ref={sectionRef} className="space-y-2" data-testid="desktop-devices" aria-labelledby="desktop-devices-heading">
-      <h2 id="desktop-devices-heading" ref={headingRef} tabIndex={-1} className="text-sm font-semibold text-foreground outline-none">
+      <h2 id="desktop-devices-heading" ref={headingRef} tabIndex={-1} className="text-ds-card-title font-semibold text-ds-ink outline-none">
         {t('title')}
       </h2>
       {!manage ? (
