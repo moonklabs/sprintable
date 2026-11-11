@@ -1007,18 +1007,22 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
   const { wsSlug, projSlug } = useGoalsRoute();
   // story #4888(UI-5 목표 화면 첫 조각) — «보기: 목록 | 스윔레인». 에픽 탭(/epics 스윔레인)과 목표 화면(/goals)을 한 화면으로 합친다: 같은 마스트헤드 아래에서 보기만 갈아 낀다.
   // 기본은 목록(예전 /goals 그대로). 고른 보기는 프로젝트별로 이 브라우저에 기억한다(스윔레인 보드가 축 전환을 기억하는 것과 같은 방식 · 저장이 막혀도 화면은 선다).
-  const [view, setViewState] = useState<'list' | 'swimlane'>(initialView ?? 'list');
-  useEffect(() => {
-    // 프로젝트가 바뀔 때마다(같은 화면이 다시 마운트되지 않고 projectId만 바뀌는 이동 포함) 그 프로젝트의 보기로 맞춘다 — 저장값이 없으면 기본(목록). 이전 프로젝트의 보기를 끌고 가지 않는다.
-    if (initialView) { setViewState(initialView); return; } // 주소가 보기를 정한다 — 저장값은 안 읽는다
-    let next: 'list' | 'swimlane' = 'list';
+  // 보기는 «어느 프로젝트의 보기인가»와 같이 든다: 프로젝트가 바뀐 첫 렌더에서 이전 프로젝트의 보기로 한 번 그려지며 쓸데없는 목록 읽기가 나가지 않게, 프로젝트가 다르면 그 자리에서 바로 새 프로젝트의 보기를 계산한다.
+  const resolveView = useCallback((pid: string): 'list' | 'swimlane' => {
+    if (initialView) return initialView; // 주소가 보기를 정한다 — 저장값은 안 읽는다
     try {
-      if (window.localStorage.getItem(`goals-view:${projectId}`) === 'swimlane') next = 'swimlane';
+      if (typeof window !== 'undefined' && window.localStorage.getItem(`goals-view:${pid}`) === 'swimlane') return 'swimlane';
     } catch { /* 저장소 막힘 — 기본 보기로 */ }
-    setViewState(next);
-  }, [projectId, initialView]);
+    return 'list';
+  }, [initialView]);
+  const [viewState, setViewState] = useState<{ pid: string; v: 'list' | 'swimlane' }>({ pid: projectId, v: initialView ?? 'list' });
+  const view = viewState.pid === projectId ? viewState.v : resolveView(projectId);
+  useEffect(() => {
+    // 처음 열 때(저장값 읽기)와 프로젝트 · 진입 주소가 바뀔 때 상태를 그 프로젝트의 보기로 맞춘다(저장값이 없으면 기본 목록 — 이전 프로젝트의 보기를 끌고 가지 않는다).
+    setViewState({ pid: projectId, v: resolveView(projectId) });
+  }, [projectId, resolveView]);
   const setView = useCallback((next: 'list' | 'swimlane') => {
-    setViewState(next);
+    setViewState({ pid: projectId, v: next });
     if (initialView) return; // 주소가 정한 진입의 전환은 이번 화면만(기억은 /goals의 몫)
     try { window.localStorage.setItem(`goals-view:${projectId}`, next); } catch { /* 저장 못 해도 이번 화면은 바뀐다 */ }
   }, [projectId, initialView]);
@@ -1049,12 +1053,12 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
 
   // wedge #2: order_by=position 옵트인 — 큐레이션 prefix + 자동(NULL) tail. position 모드는 BE가
   // 커서를 발행하지 않으므로 이어달리기(cursor pagination) 없이 전량(상위 STEER_LIMIT) 로드한다(AC4).
-  // story #4888 — 응답 뒤섞임 방어(codex): 프로젝트를 옮기는 사이 먼저 보낸 읽기가 늦게 돌아와도 «지금 프로젝트»의 화면을 덮지 않고, 현재 프로젝트의 읽기가 실패해도 이전 프로젝트의 목록이 이 프로젝트 아래 남지 않는다.
-  const currentProjectRef = useRef(projectId);
-  useEffect(() => { currentProjectRef.current = projectId; }, [projectId]);
-  const listProjectRef = useRef<string | null>(null); // `epics` 상태가 어느 프로젝트의 목록인가
+  // story #4888 — 응답 뒤섞임 방어(codex 3차): 읽기마다 번호표(순번)를 붙이고 «가장 마지막에 시작한 읽기»만 반영한다. 프로젝트 비교만으로는 같은 프로젝트의 겹친 읽기(조직 동기화로 다시 읽기 ·
+  // A→B→A 이동)에서 오래된 응답이 새 응답을 덮는 것을 못 막는다. 프로젝트가 바뀌는 순간에는 이전 프로젝트의 목록을 바로 비우고(아래 효과) 진행 중 읽기를 무효로 만든다.
+  const fetchSeqRef = useRef(0);
+  const listProjectRef = useRef<string | null>(null); // `epics` 상태가 어느 프로젝트의 것인가(null = 비었거나 아직 안 읽음)
   const fetchGoals = useCallback(async () => {
-    let applied = false;
+    const seq = ++fetchSeqRef.current;
     try {
       // story #3126 — include=glance로 latest_story_activity_at을 같이 받는다(신규 round-trip
       // 없음, 이미 하던 이 fetch에 옵트인 파라미터만 추가).
@@ -1064,20 +1068,15 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
       const res = await fetchWithAuth(`/api/goals?${params.toString()}`);
       if (!res.ok) throw new Error(`Failed to fetch epics: ${res.status}`);
       const { data } = await res.json() as { data: Goal[] };
-      if (currentProjectRef.current !== projectId) return; // 이미 다른 프로젝트로 옮겼다 — 늦게 온 응답은 버린다
+      if (seq !== fetchSeqRef.current) return; // 더 나중에 시작한 읽기가 있다(같은 프로젝트의 겹친 읽기 · 프로젝트 이동) — 이 응답은 버린다
       setGoals(data ?? []);
       setCapped((data?.length ?? 0) >= STEER_LIMIT);
       listProjectRef.current = projectId;
-      applied = true;
     } catch (err) {
       // AC3: silent-swallow 금지 — 최소 로깅.
       console.error('[epics] 목록을 불러오지 못했습니다', err);
     } finally {
-      if (currentProjectRef.current === projectId) {
-        // 실패했는데 상태에 남은 목록이 다른 프로젝트 것이면 비운다(이 프로젝트 아래 남의 목록을 보이지 않게). 같은 프로젝트의 이전 목록은 예전처럼 둔다.
-        if (!applied && listProjectRef.current !== projectId) { setGoals([]); setCapped(false); listProjectRef.current = projectId; }
-        setLoadedProject(projectId);
-      }
+      if (seq === fetchSeqRef.current) setLoadedProject(projectId);
     }
     // orgSyncVersion은 콜백 안에서 안 읽는다 — switch-org 성공 直後 이 콜백 새 참조를
     // 강제해 재요청시키기 위한 의도적 invalidation 트리거다(story #2545, project-context-
@@ -1156,9 +1155,10 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
 
   const handleCreated = useCallback((epic: Goal) => {
     setGoals((prev) => [epic, ...prev]);
+    listProjectRef.current = projectId; // 상태에 이 프로젝트의 목표가 들어왔다 — 프로젝트를 옮길 때 비워야 할 대상
     setSelectedEpic(epic);
     setMobileView('detail');
-  }, []);
+  }, [projectId]);
 
   const handleUpdate = useCallback((updated: Goal) => {
     setSelectedEpic(updated);
@@ -1168,6 +1168,17 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
   // story #4888 — 목록 읽기는 «목록 보기»일 때만. 스윔레인 보기(= `/epics` 진입 포함)는 보드가 자기 읽기 · 시간초과 · 실패 표시를 쥐므로, 여기서 또 읽거나 그 읽기를 기다리면
   // 목록 읽기가 느릴 때 보드의 «느림 vs 멈춤» 표시(story #3019)가 가려지고 같은 /api/goals를 두 번 읽는다. 목록 보기로 넘어올 때 읽는다.
   const needsGoals = view === 'list';
+  // 프로젝트가 바뀌는 순간: 진행 중이던 읽기를 무효로 하고, 상태에 남은 «다른 프로젝트의 목록»을 바로 비운다(실패 경로에서 지우는 것이 아니라 이동 시점에 — 방금 이 프로젝트에서 만든 목표를 실패가 지우지 않게).
+  // 이 효과는 아래 읽기 효과보다 먼저 선언돼 같은 커밋에서 먼저 돈다.
+  useEffect(() => {
+    fetchSeqRef.current += 1;
+    if (listProjectRef.current !== null && listProjectRef.current !== projectId) {
+      setGoals([]);
+      setCapped(false);
+      setSelectedEpic(null);
+      listProjectRef.current = null;
+    }
+  }, [projectId]);
   useEffect(() => {
     if (!needsGoals) return;
     void fetchGoals();

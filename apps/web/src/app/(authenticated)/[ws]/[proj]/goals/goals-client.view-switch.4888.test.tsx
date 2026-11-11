@@ -242,16 +242,18 @@ describe('GoalsClient — 스윔레인 보기는 목록 읽기를 기다리지�
 
   // codex 5543-epics 2차 BLOCKING — 프로젝트를 옮기는 사이 응답이 뒤섞이는 경우. 위 시험은 새 프로젝트의 읽기를 «영영 안 끝나게»만 해서 못 잡았다.
   function deferredGoals() {
-    const pending = new Map<string, (r: { ok: boolean; json: () => Promise<unknown> }) => void>();
+    type Resolver = (r: { ok: boolean; json: () => Promise<unknown> }) => void;
+    const pending = new Map<string, Resolver>();
+    const calls: Array<{ pid: string; resolve: Resolver }> = []; // 읽기를 시작한 순서대로(같은 프로젝트를 여러 번 읽는 경우 포함)
     vi.stubGlobal('fetch', vi.fn((url: string) => {
       if (typeof url === 'string' && url.includes('/api/goals?')) {
         const pid = new URL(url, 'http://x').searchParams.get('project_id')!;
-        return new Promise((resolve) => { pending.set(pid, resolve as never); });
+        return new Promise((resolve) => { pending.set(pid, resolve as never); calls.push({ pid, resolve: resolve as never }); });
       }
       return Promise.resolve({ ok: false, json: async () => null });
     }));
     const goals = (title: string) => ({ ok: true, json: async () => ({ data: [{ id: `id-${title}`, title, status: 'active', story_count: 1, is_ai_generated: false }] }) });
-    return { pending, goals };
+    return { pending, goals, calls };
   }
 
   it('⭐새 프로젝트(B)의 읽기가 먼저 끝나고 이전 프로젝트(A)의 늦은 응답이 나중에 와도 B의 목록이 서고 · A가 덮지 않고 · B가 로딩 자리에 갇히지 않는다', async () => {
@@ -274,6 +276,38 @@ describe('GoalsClient — 스윔레인 보기는 목록 읽기를 기다리지�
     await act(async () => { pending.get('proj-A')!(goals('E-A-GOAL')); await Promise.resolve(); await Promise.resolve(); });
     expect(container.textContent).toContain('E-A-GOAL');
     await act(async () => { root.render(wrap(<GoalsClient projectId="proj-B" />)); });
+    await act(async () => { pending.get('proj-B')!({ ok: false, json: async () => null }); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).not.toContain('E-A-GOAL');
+  });
+
+  // codex 3차 BLOCKING — 프로젝트 비교만으로는 같은 프로젝트의 겹친 읽기(A→B→A 이동 · 조직 동기화)에서 오래된 응답이 새 응답을 덮는다. 순번표로 «가장 나중에 시작한 읽기»만 반영.
+  it('⭐A → B → A로 옮겨 A를 두 번 읽었을 때 · 나중에 시작한 읽기가 먼저 끝나고 먼저 시작한 오래된 읽기가 늦게 와도 새 응답이 남는다(오래된 응답이 덮지 않는다)', async () => {
+    const { goals, calls } = deferredGoals();
+    const { GoalsClient } = await import('./goals-client');
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-A" />)); });
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-B" />)); });
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-A" />)); });
+    const aCalls = calls.filter((c) => c.pid === 'proj-A');
+    expect(aCalls).toHaveLength(2); // 첫 A 읽기(오래됨) · 되돌아온 A 읽기(새 것)
+    await act(async () => { aCalls[1]!.resolve(goals('E-A-NEW')); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('E-A-NEW');
+    await act(async () => { aCalls[0]!.resolve(goals('E-A-OLD')); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('E-A-NEW');
+    expect(container.textContent).not.toContain('E-A-OLD');
+  });
+
+  it('⭐스윔레인 보기로 프로젝트를 옮긴 뒤 목록 보기로 넘어와 새 프로젝트 읽기가 실패해도 이전 프로젝트의 목록은 남지 않는다(이동 시점에 비움)', async () => {
+    const { pending, goals } = deferredGoals();
+    const { GoalsClient } = await import('./goals-client');
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-A" />)); });
+    await act(async () => { pending.get('proj-A')!(goals('E-A-GOAL')); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('E-A-GOAL');
+    store.set('goals-view:proj-B', 'swimlane'); // B는 스윔레인으로 열린다(프로젝트를 옮기면 그 프로젝트의 보기로 맞춘다)
+    const before = vi.mocked(fetch).mock.calls.filter(([u]) => typeof u === 'string' && u.includes('/api/goals?')).length;
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-B" />)); }); // 스윔레인 보기라 B의 목록은 안 읽는다
+    expect(container.querySelector('[data-testid="swimlane-board-stub"]')).not.toBeNull();
+    expect(vi.mocked(fetch).mock.calls.filter(([u]) => typeof u === 'string' && u.includes('/api/goals?')).length).toBe(before);
+    await click(viewBtn(koMessages.goals.viewList)!); // 이제 B의 목록을 읽는다
     await act(async () => { pending.get('proj-B')!({ ok: false, json: async () => null }); await Promise.resolve(); await Promise.resolve(); });
     expect(container.textContent).not.toContain('E-A-GOAL');
   });
