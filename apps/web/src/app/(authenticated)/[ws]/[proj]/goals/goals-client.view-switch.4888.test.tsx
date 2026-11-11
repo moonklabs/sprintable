@@ -245,6 +245,8 @@ describe('GoalsClient — 스윔레인 보기는 목록 읽기를 기다리지�
     type Resolver = (r: { ok: boolean; json: () => Promise<unknown> }) => void;
     const pending = new Map<string, Resolver>();
     const deletes: Resolver[] = []; // 삭제 요청(끝내기 전까지 매달아 둔다)
+    const posts: Array<() => void> = []; // 만들기 요청(holdPosts일 때 매달아 둔다)
+    let holdPosts = false;
     const calls: Array<{ pid: string; resolve: Resolver }> = []; // 읽기를 시작한 순서대로(같은 프로젝트를 여러 번 읽는 경우 포함)
     vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
       if (typeof url === 'string' && url.includes('/api/goals?')) {
@@ -252,7 +254,9 @@ describe('GoalsClient — 스윔레인 보기는 목록 읽기를 기다리지�
         return new Promise((resolve) => { pending.set(pid, resolve as never); calls.push({ pid, resolve: resolve as never }); });
       }
       if (typeof url === 'string' && url === '/api/goals' && init?.method === 'POST') {
-        return Promise.resolve({ ok: true, json: async () => ({ data: { id: 'goal-new', title: 'E-NEW-GOAL', status: 'draft', priority: 'medium', stories: [] } }) });
+        const created = { ok: true, json: async () => ({ data: { id: 'goal-new', title: 'E-NEW-GOAL', status: 'draft', priority: 'medium', stories: [] } }) };
+        if (holdPosts) return new Promise((resolve) => { posts.push(() => resolve(created)); }); // 만들기 응답을 매달아 둔다
+        return Promise.resolve(created);
       }
       if (typeof url === 'string' && /^\/api\/goals\/[^/?]+$/.test(url) && init?.method === 'DELETE') {
         return new Promise((resolve) => { deletes.push(resolve as never); });
@@ -260,7 +264,7 @@ describe('GoalsClient — 스윔레인 보기는 목록 읽기를 기다리지�
       return Promise.resolve({ ok: false, json: async () => null });
     }));
     const goals = (title: string) => ({ ok: true, json: async () => ({ data: [{ id: `id-${title}`, title, status: 'active', story_count: 1, is_ai_generated: false }] }) });
-    return { pending, goals, calls, deletes };
+    return { pending, goals, calls, deletes, posts, hold: () => { holdPosts = true; } };
   }
 
   it('⭐새 프로젝트(B)의 읽기가 먼저 끝나고 이전 프로젝트(A)의 늦은 응답이 나중에 와도 B의 목록이 서고 · A가 덮지 않고 · B가 로딩 자리에 갇히지 않는다', async () => {
@@ -384,5 +388,30 @@ describe('GoalsClient — 스윔레인 보기는 목록 읽기를 기다리지�
     await act(async () => { calls.filter((c) => c.pid === 'proj-1')[1]!.resolve(goals('E-OLD-GOAL')); await Promise.resolve(); await Promise.resolve(); });
     expect(copies()).toBe(before); // 목록 줄에서 사라지지 않았다
     expect(container.textContent).toContain('E-OLD-GOAL');
+  });
+
+  // codex 5차 BLOCKING — A에서 만들던 목표의 응답이 프로젝트를 B로 옮긴 뒤 도착하면 A의 목표가 B의 목록에 끼어든다.
+  it('⭐A에서 목표를 만드는 중(응답 매달림)에 B로 옮기고 그 응답이 B 화면에서 도착해도 A의 새 목표가 B 목록에 끼어들지 않는다', async () => {
+    const { pending, goals, posts, hold } = deferredGoals();
+    hold();
+    const gm = koMessages.goals as Record<string, string>;
+    const { GoalsClient } = await import('./goals-client');
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-A" />)); });
+    await act(async () => { pending.get('proj-A')!(goals('E-A-GOAL')); await Promise.resolve(); await Promise.resolve(); });
+    // A에서 새 목표 만들기를 눌러 응답을 매달아 둔다
+    await act(async () => { ([...document.body.querySelectorAll('button')].find((b) => b.textContent?.trim() === gm.newGoal)!).click(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+    const titleInput = document.body.querySelector<HTMLInputElement>(`input[data-slot="input"][placeholder="${gm.fieldTitlePlaceholder}"]`)!;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(titleInput, 'E-NEW-GOAL'); titleInput.dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => { ([...document.body.querySelectorAll('button')].find((b) => b.textContent?.trim() === gm.createGoal)!).click(); });
+    expect(posts).toHaveLength(1);
+    // B로 옮기고 B의 목록이 선다
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-B" />)); });
+    await act(async () => { pending.get('proj-B')!(goals('E-B-GOAL')); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('E-B-GOAL');
+    // 이제 A의 만들기 응답이 도착한다
+    await act(async () => { posts[0]!(); await Promise.resolve(); await Promise.resolve(); await new Promise((r) => setTimeout(r, 30)); });
+    expect(container.textContent).toContain('E-B-GOAL');
+    expect(container.textContent).not.toContain('E-NEW-GOAL');
   });
 });

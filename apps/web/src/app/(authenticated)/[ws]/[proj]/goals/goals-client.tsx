@@ -1163,6 +1163,8 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
   }, [fetchGoals, addToast, t]);
 
   const handleCreated = useCallback((epic: Goal) => {
+    // 다른 프로젝트로 옮긴 뒤에야 도착한 «만들기 응답» — 그 목표는 서버에 만들어졌지만 지금 화면(다른 프로젝트)의 목록에 끼어들면 안 된다(그 프로젝트를 다시 열면 읽기로 들어온다).
+    if (currentProjectRef.current !== projectId) return;
     setGoals((prev) => [epic, ...prev]);
     createdRef.current.push({ goal: epic, atSeq: fetchSeqRef.current });
     listProjectRef.current = projectId; // 상태에 이 프로젝트의 목표가 들어왔다 — 프로젝트를 옮길 때 비워야 할 대상
