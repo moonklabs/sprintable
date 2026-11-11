@@ -102,6 +102,11 @@ const EXEMPT: { file: string; needle: string; reason: string }[] = [
     reason: '장식(aria-hidden 연필) — 조작은 늘 보이는 방 이름 버튼(aria-label «방 이름 바꾸기»)',
   },
   {
+    file: 'components/chat/chat-bubble.tsx',
+    needle: 'pointer-fine:group-hover/bubble:opacity-100',
+    reason: '마우스 쌍둥이 — 터치(`pointer-coarse` · `hover:none`)에서만 display:none이고, 그 자리엔 «⋯» 옆에 늘 보이는 44×44 터치 쌍둥이(chat-bubble-reply-button-touch)가 같은 두 조건으로 선다 → 어느 기기에서도 하나는 보이고 탭 순서에 든다(jsdom 시험 + Chromium spec이 핀)',
+  },
+  {
     file: 'components/kanban/story-detail-panel.tsx',
     needle: 'mt-1 shrink-0 text-xs text-muted-foreground opacity-0',
     reason: '장식(✎ 글리프) — 조작은 늘 보이는 제목 Button',

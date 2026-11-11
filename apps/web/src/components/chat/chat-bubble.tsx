@@ -1,11 +1,11 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { hasNoVisibleText, remarkStripHtmlComments, stripHtmlCommentsFromPlainText } from '@/lib/remark-strip-html-comments';
-import { Check, Copy, MessageSquare, MoreHorizontal, Terminal } from 'lucide-react';
+import { Check, Copy, MessageSquare, MessageSquareReply, MoreHorizontal, Terminal } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { ViewerDate } from '@/components/viewer-time-zone';
 import { VIEWER_TIME_OPTIONS } from '@/lib/viewer-time-zone';
@@ -724,7 +724,25 @@ export function ChatBubble({
             a long unbreakable code line/URL's min-content overrides max-w-[72%] and overflows
             the row → page. With it, the column respects max-w and the inner content contains
             itself — whitespace-pre-wrap code wraps, <pre> scrolls (overflow-x-auto), URLs break. */}
-        <div data-chat-content="" className={`relative flex min-w-0 max-w-[72%] flex-col gap-0.5 ${isMine ? 'items-end' : 'items-start'}`}>
+        {/* story 4887 (UI-4 P6-a) — where a mouse can hover, the reply button (28 px + 4 px gap) and the continuation's hover time (≈ 47 px, 56 px with room for font and locale) sit OUTSIDE this column on its outer side, beside the 36 px avatar gutter: so — where that button is drawn (`--reply-cap`, not inside a thread) — the column may take at most the row's width minus 128 px (36 gutter + 36 button + 56 time), or the usual 72%, whichever is smaller. From a ~490 px window up the 72% still wins (nothing changes); in a narrower window the bubble gives way so the time stays on screen at any width. Touch has no hover time and its reply button sits in the time line below, so it keeps the plain 72%; so does a bubble inside a thread (no reply button there). */}
+        <div data-chat-content="" className={`relative flex min-w-0 max-w-[72%] [@media(pointer:fine)_and_(hover:hover)]:max-w-[min(72%,calc(100%_-_var(--reply-cap,0px)))] flex-col gap-0.5 ${isMine ? 'items-end' : 'items-start'}`}
+          style={onOpenThread ? ({ '--reply-cap': '128px' } as CSSProperties) : undefined}>
+          {/* story 4887 (UI-4 P6-a · AC3 «답글 아이콘 상시»): the first reply used to sit behind a right-click / «⋯» menu (two hands). ONE reply control opens the thread at once, in the place each kind of device can use:
+              · a MOUSE (this button — hover-capable, fine pointer): beside the bubble on its outer side, transparent until the row is hovered or holds keyboard focus (WCAG 1.4.13; the repo's HOVER_REVEAL shape — lib/hover-reveal.ts), still in the tab order (opacity, never display:none, on a mouse device);
+              · a TOUCH screen (the twin in the time line below): always shown at 44 × 44 right beside «⋯», so the two controls form one row-local cluster that cannot reach into the previous or next message. Each twin is display:none exactly where the other shows (the same two media conditions as «⋯»), so a screen reader or the Tab key meets one.
+              Not drawn where no thread can be opened (inside a thread). The accessible name says WHOSE message — a list of these is not dozens of the same name. The continuation's hover time moved out by this button's width (28 px + 4 px gap + 4 px = ml-9 / mr-9) so the two never meet; the column's mouse-only width cap below keeps that time on screen at every window width. */}
+          {onOpenThread && (
+            <Button
+              type="button"
+              variant="ghost"
+              data-testid="chat-bubble-reply-button"
+              aria-label={isMine ? t('replyToMyMessage') : t('replyToMessageFrom', { name: displayName })}
+              onClick={handleOpenThread}
+              className={`absolute top-0 inline-flex h-7 min-h-0 w-7 min-w-0 items-center justify-center rounded-full border-0 p-0 text-muted-foreground opacity-100 pointer-coarse:hidden [@media(hover:none)]:hidden pointer-fine:opacity-0 pointer-fine:group-hover/bubble:opacity-100 pointer-fine:group-focus-within/bubble:opacity-100 pointer-fine:focus-visible:opacity-100 ${isMine ? 'right-full mr-1' : 'left-full ml-1'}`}
+            >
+              <MessageSquareReply className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          )}
           {/* Sender name — hidden when grouped */}
           {!isGrouped && (
             <div data-chat-meta="" className="flex items-center gap-1.5">
@@ -966,9 +984,11 @@ export function ChatBubble({
             // story 4887 (UI-4 P4-a) — where a mouse can hover (fine pointer + hover): the first message of a run has no time line (its head has the time); a continuation keeps its time for screen readers (sr-only) and shows it beside the bubble while the row is hovered OR holds the keyboard focus (WCAG 1.4.13: what hover reveals, focus reveals too — a link or button inside the bubble). Everywhere else (touch · a stylus that cannot hover) the line stays under the bubble as before — the touch «⋯» button sits on it (story 4855)
             className={isGrouped
               ? (isMine
-                ? 'relative inline-block [@media(pointer:fine)_and_(hover:hover)]:sr-only [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:not-sr-only [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:absolute [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:bottom-0 [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:right-full [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:mr-2 [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:whitespace-nowrap [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:not-sr-only [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:absolute [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:bottom-0 [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:right-full [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:mr-2 [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:whitespace-nowrap'
-                : 'relative inline-block [@media(pointer:fine)_and_(hover:hover)]:sr-only [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:not-sr-only [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:absolute [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:bottom-0 [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:left-full [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:ml-2 [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:whitespace-nowrap [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:not-sr-only [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:absolute [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:bottom-0 [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:left-full [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:ml-2 [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:whitespace-nowrap')
+                ? 'relative inline-block [@media(pointer:fine)_and_(hover:hover)]:sr-only [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:not-sr-only [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:absolute [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:bottom-0 [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:right-full [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:mr-[var(--reply-room,8px)] [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:whitespace-nowrap [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:not-sr-only [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:absolute [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:bottom-0 [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:right-full [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:mr-[var(--reply-room,8px)] [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:whitespace-nowrap'
+                : 'relative inline-block [@media(pointer:fine)_and_(hover:hover)]:sr-only [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:not-sr-only [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:absolute [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:bottom-0 [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:left-full [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:ml-[var(--reply-room,8px)] [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:whitespace-nowrap [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:not-sr-only [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:absolute [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:bottom-0 [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:left-full [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:ml-[var(--reply-room,8px)] [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:whitespace-nowrap')
               : 'relative inline-block [@media(pointer:fine)_and_(hover:hover)]:hidden'}
+            // story 4887 (UI-4 P6-a) — the room the mouse reply button takes beside the bubble; only where that button is drawn (inside a thread it is not, and the hover time keeps its old 8 px)
+            style={onOpenThread ? ({ '--reply-room': '36px' } as CSSProperties) : undefined}
           >
             <time className="text-micro text-muted-foreground" dateTime={message.created_at}><ViewerDate value={message.created_at} options={VIEWER_TIME_OPTIONS} /></time>
             <Button
@@ -981,6 +1001,18 @@ export function ChatBubble({
             >
               <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
             </Button>
+            {onOpenThread && (
+              <Button
+                type="button"
+                variant="ghost"
+                data-testid="chat-bubble-reply-button-touch"
+                aria-label={isMine ? t('replyToMyMessage') : t('replyToMessageFrom', { name: displayName })}
+                onClick={handleOpenThread}
+                className={`absolute top-1/2 hidden h-11 min-h-0 w-11 min-w-0 -translate-y-1/2 items-center justify-center rounded-full border-0 p-0 text-muted-foreground pointer-coarse:inline-flex [@media(hover:none)]:inline-flex ${isMine ? 'right-full mr-10' : 'left-full ml-10'}`}
+              >
+                <MessageSquareReply className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            )}
           </span>
 
           {/* AC5: 답글 수 표시 — reply_count > 0 */}
