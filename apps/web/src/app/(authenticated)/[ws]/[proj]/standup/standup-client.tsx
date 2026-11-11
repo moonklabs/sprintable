@@ -279,6 +279,8 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
         setLoading(true);
         setLoadError(null);
         setSaveError(null);
+        // story #4888(PO 결정 ②) — 다시 읽는 동안(날짜 이동 · 새로고침 · 프로젝트 이동) 이전 번다운 총수를 정확한 수로 남기지 않는다: 새 총수가 오기 전까지는 «N+» 하한이 정직하다.
+        setSprintStoryTotal(null);
       }
 
       try {

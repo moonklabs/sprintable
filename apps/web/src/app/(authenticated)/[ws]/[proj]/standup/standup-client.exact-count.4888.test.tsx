@@ -127,6 +127,29 @@ describe('하단 요약 — 번다운으로 스토리 수를 늘 정확하게(st
     expect(text()).not.toContain('이상');
   });
 
+  it('⭐다시 읽는 동안(날짜 이동)에는 이전 총수를 정확한 수로 남기지 않는다 — 새 총수가 오기 전까지 «이상», 오면 다시 정확한 수', async () => {
+    stubFetch({ firstCount: 40, next: 'c1', storiesTotal: 48 });
+    await mount();
+    expect(text()).toContain(fmt(S.sprintStoryCount, { count: 48 }));
+    // 이제부터 스토리 읽기를 붙잡아 «다시 읽는 중»을 만든다
+    const realFetch = globalThis.fetch as unknown as (u: string) => Promise<unknown>;
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((r) => { release = r; });
+    vi.stubGlobal('fetch', vi.fn(async (u: string) => {
+      if (typeof u === 'string' && u.includes('/api/stories?project_id=')) await gate;
+      return realFetch(u);
+    }));
+    const prev = [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === S.previousDay) as HTMLButtonElement;
+    expect(prev).toBeTruthy();
+    await act(async () => { prev.click(); });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(text()).not.toContain(fmt(S.sprintStoryCount, { count: 48 }));
+    expect(text()).toContain(fmt(S.sprintStoryCountPartial, { count: 40 }));
+    await act(async () => { release!(); });
+    for (let i = 0; i < 12; i += 1) await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(text()).toContain(fmt(S.sprintStoryCount, { count: 48 }));
+  });
+
   it('활성 스프린트가 없으면 번다운을 읽지 않는다(읽을 대상이 없다)', async () => {
     stubFetch({ firstCount: 0, next: null, noSprint: true });
     await mount();
