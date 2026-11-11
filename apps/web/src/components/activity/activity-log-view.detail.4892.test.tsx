@@ -13,7 +13,7 @@ import koMessages from '../../../messages/ko.json';
 
 const { mq, tzMock } = vi.hoisted(() => ({ mq: { wide: true, xl: true }, tzMock: { value: 'UTC' as string | null } }));
 // two queries: lg (min-width 1024) and xl (min-width 1280)
-vi.mock('@/lib/use-media-query', () => ({ useMediaQuery: (q: string) => (q.includes('1280') ? mq.xl : mq.wide) }));
+vi.mock('@/lib/use-media-query', () => ({ useMediaQuery: (q: string) => (q.includes('max-width') ? mq.wide && !mq.xl : q.includes('1280') ? mq.xl : mq.wide) }));
 // the viewer's zone decides which day a row is on — pin it so the test does not depend on the machine's zone
 vi.mock('@/components/viewer-time-zone', () => ({ useViewerTimeZone: () => tzMock.value }));
 const fetchWithAuthMock = vi.fn();
@@ -414,18 +414,46 @@ describe('ActivityLogView — 상세의 «행위자» 줄이 사람과 에이전
 describe('ActivityLogView — lg에서 상세 칸이 열린 동안만 행위자 이름 글자를 접는다 (4892)', () => {
   const visibleLayer = (i: number) => (container.querySelectorAll('[data-selected] > div[inert]')[i] as HTMLElement);
 
-  it('⭐lg + a row chosen: every row\'s visible layer has no «안나» text but keeps the avatar badge and the time; the overlay button still names the actor', async () => {
+  it('⭐lg + a row chosen: every row\'s visible layer loses EXACTLY the name text (badge and time stay); the overlay button still names the actor', async () => {
     mq.xl = false;
     await mount();
-    expect(visibleLayer(0).textContent).toContain('안나');          // before choosing: the name is there
+    const before = ITEMS.map((_, i) => visibleLayer(i).textContent ?? '');
+    expect(before[0]).toContain('안나');                                 // before choosing: the name is there
     await click(rows()[0]!);
     for (let i = 0; i < rows().length; i += 1) {
-      expect(visibleLayer(i).textContent, `row ${i}`).not.toContain('안나');
-      expect(visibleLayer(i).textContent, `row ${i} time`).toMatch(/전|오늘|어제|\d/);     // the time chunk stays
-      expect(rows()[i]!.getAttribute('aria-label'), `row ${i} name`).toContain('안나');   // the accessible name keeps the actor
+      const after = visibleLayer(i).textContent ?? '';
+      expect(after, `row ${i}`).not.toContain('안나');
+      // exactly the name is gone — the claim, the time chunk and everything else are as before
+      expect(after.replace(/\s+/g, ''), `row ${i} rest`).toBe(before[i]!.replace('안나', '').replace(/\s+/g, ''));
+      expect(visibleLayer(i).querySelector('[aria-label="안나"]'), `row ${i} badge`).not.toBeNull();   // the avatar badge stays and carries the name
+      expect(rows()[i]!.getAttribute('aria-label'), `row ${i} name`).toContain('안나');
       expect(rows()[i]!.getAttribute('title'), `row ${i} title`).toContain('안나');
     }
-    expect(detail()!.textContent).toContain('안나');                 // and the details column names the actor
+    expect(detail()!.textContent).toContain('안나');                     // and the details column names the actor
+  });
+
+  it('an agent row folds the same way (the agent badge keeps the name), a system row (no actor) is unchanged', async () => {
+    mq.xl = false;
+    fetchWithAuthMock.mockImplementation(async (url: string) => {
+      if (url.includes('/api/members')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      const items = [row('ag', '2026-11-10T08:00:00Z', { actor_type: 'agent', actor_name: '디버거', actor_id: 'a1' }), row('sys', '2026-11-10T07:00:00Z', { actor_id: null, actor_name: null, actor_type: 'human' })];
+      return { ok: true, status: 200, json: async () => ({ data: { items, total: 2, limit: 30, offset: 0 } }) };
+    });
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC">
+          <TopBarProvider><ActivityLogView projectId="p1" /></TopBarProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(visibleLayer(0).textContent).toContain('디버거');
+    const sysBefore = visibleLayer(1).textContent;
+    await click(rows()[0]!);
+    expect(visibleLayer(0).textContent).not.toContain('디버거');
+    expect(visibleLayer(0).querySelector('[aria-label="디버거"]')).not.toBeNull();
+    expect(rows()[0]!.getAttribute('aria-label')).toContain('디버거');
+    expect(visibleLayer(1).textContent).toBe(sysBefore);                  // no actor → nothing to fold
   });
 
   it('⭐closing the column brings the names back (the list is full width again)', async () => {
