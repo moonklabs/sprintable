@@ -189,6 +189,29 @@ describe('목표 화면 — 한 장의 구성(머리 · 목록 행 · 상세 열
   });
 });
 
+describe('목표 화면 — 결과 상태가 n_a인 목표도 결과 줄을 말한다(dev 실측 11-11 20:30Z)', () => {
+  const NA = { id: 'g5', title: '결과 정의가 아직 없는 목표', status: 'active', priority: 'medium', created_at: '2026-11-03T00:00:00Z', total_stories: 2, done_stories: 0, outcome_status: 'n_a', position: null };
+
+  it('⭐행: n_a여도 «측정 대기» 중립 칩이 있다 — 옛 카드의 «결과 측정 대기» 줄이 없어지지 않는다(그냥 비는 것이 아니다)', async () => {
+    stubMedia(true); stubFetch({ goals: [NA] }); await mount();
+    const chip = qa('[data-testid="goal-row"] [data-slot="ds-chip"]').find((c) => c.textContent === '측정 대기');
+    expect(chip, '결과 칩').toBeDefined();
+    expect(chip!.getAttribute('data-tone')).toBe('neutral');
+  });
+
+  it('⭐상세: n_a면 머리 칩에는 결과를 안 달지만(옛 배지처럼) 진척 카드의 «결과» 줄은 «측정 대기»를 말한다', async () => {
+    stubMedia(true); stubFetch({ goals: [NA] }); await mount();
+    const headerChips = qa('[data-testid="goal-detail"] header [data-slot="ds-chip"]').map((c) => c.textContent);
+    expect(headerChips).not.toContain('측정 대기');
+    expect(q('[data-testid="goal-detail-outcome"]')!.textContent).toContain('측정 대기');
+  });
+
+  it('결과 상태가 있는 목표(적중)는 머리 칩에도 단다 — n_a만 뺀다', async () => {
+    stubMedia(true); stubFetch({ goals: [G2] }); await mount();
+    expect(qa('[data-testid="goal-detail"] header [data-slot="ds-chip"]').map((c) => c.textContent)).toContain('적중');
+  });
+});
+
 describe('목표 화면 — 넓은 화면: 상세 열', () => {
   it('⭐첫 목표가 고른 상태로 서고 상세 열에 그 목표가 보인다(빈 열이 없다)', async () => {
     stubMedia(true); stubFetch(); await mount();
@@ -417,6 +440,20 @@ describe('목표 화면 — 있던 동작이 그대로', () => {
     expect(qa('h1').length).toBe(1);
     expect(q('[data-testid="goals-status-filter"]')).toBeNull();
     expect(q('[data-testid="goals-swimlane-view"]')).not.toBeNull();
+  });
+
+  it('⭐상단바의 «목표 추가»는 ds 단추라 폰 터치 44를 가진다(예전 ui/Button size=sm은 36×28) · 이름 « 목표 추가» 그대로 · 눌러도 만들기 창만 연다', async () => {
+    stubMedia(false); stubFetch(); await mount();
+    const btn = container.querySelector<HTMLButtonElement>('button[aria-label="목표 추가"]')!;
+    expect(btn).not.toBeNull();
+    expect(btn.getAttribute('data-slot')).toBe('ds-button');
+    expect(btn.className).toContain('touch:min-h-ds-touch');
+    expect(btn.className).toContain('touch:min-w-ds-touch');
+    // 폰에서는 아이콘만(글자는 sm부터) — 이름은 aria-label이 준다
+    expect(btn.querySelector('span.hidden')!.textContent).toBe('목표 추가');
+    await click(btn);
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('목표 생성'); // 만들기 창의 단추
   });
 
   it('en 로케일에서도 머리와 행 · 상세 글이 나온다(ko/en 파리티)', async () => {

@@ -91,7 +91,8 @@ export function GoalDetailColumn({ goal, projectId, onUpdate }: { goal: Goal; pr
           <div className="flex flex-wrap items-center gap-1.5">
             <Chip dot tone={statusChipTone(goal.status)}>{labels.status[goal.status]}</Chip>
             <Chip tone={priorityChipTone(goal.priority)}>{labels.priority[goal.priority]}</Chip>
-            {outcome ? <Chip tone={outcome.tone}>{outcome.text}</Chip> : null}
+            {/* the header chip leaves out a goal that has no result definition (`n_a`) — the old badge did too; the progress card below still says «측정 대기» */}
+            {goal.outcome_status !== 'n_a' ? <Chip tone={outcome.tone}>{outcome.text}</Chip> : null}
           </div>
           <h2 id={headingId} className="m-0 mt-1.5 text-ds-title font-semibold text-ds-ink">{goal.title}</h2>
         </div>
@@ -151,12 +152,10 @@ export function GoalDetailColumn({ goal, projectId, onUpdate }: { goal: Goal; pr
                 </div>
               ) : null}
               {/* the result is a second, separate signal: finishing the stories is not proving the goal */}
-              {outcome ? (
-                <div className="flex items-center gap-2" data-testid="goal-detail-outcome">
-                  <span className="text-ds-small text-ds-ink-3">{t('outcomeLabel')}</span>
-                  <Chip tone={outcome.tone}>{outcome.text}</Chip>
-                </div>
-              ) : null}
+              <div className="flex items-center gap-2" data-testid="goal-detail-outcome">
+                <span className="text-ds-small text-ds-ink-3">{t('outcomeLabel')}</span>
+                <Chip tone={outcome.tone}>{outcome.text}</Chip>
+              </div>
             </Card>
 
             <div data-testid="goal-detail-hypotheses">

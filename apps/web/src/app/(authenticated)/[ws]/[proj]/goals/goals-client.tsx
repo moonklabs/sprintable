@@ -683,10 +683,10 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
         title={<GoalsTopBarTitle />}
         actions={
           // story #4277 — 402폭에서 글자 버튼이 상단바를 가로로 넘쳤다(410/402 · 가드가 잡음). 스프린트 상단바 관례: 폰은 아이콘만 · 접근 이름 aria-label.
-          <Button size="sm" variant="outline" onClick={() => setShowCreate(true)} aria-label={t('newGoal')}>
-            <Plus className="h-3.5 w-3.5 sm:mr-1.5" />
+          // story #4888 — the ds Button carries the touch 44 floor (the old ui/Button size=sm stayed 36×28 on a phone); the icon alone on a phone, icon + words from `sm` up
+          <DsButton type="button" variant="secondary" onClick={() => setShowCreate(true)} aria-label={t('newGoal')} iconStart={<Plus className="size-3.5" aria-hidden="true" />}>
             <span className="hidden sm:inline">{t('newGoal')}</span>
-          </Button>
+          </DsButton>
         }
         showContextChip
       />

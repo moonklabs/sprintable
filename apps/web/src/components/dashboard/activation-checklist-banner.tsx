@@ -326,17 +326,23 @@ export function ActivationChecklistBanner({ placement = 'shell' }: { placement?:
 
   if (collapsed) {
     return (
-      <button
-        type="button"
-        onClick={toggleCollapse}
-        aria-expanded={false}
-        aria-label={t('expandAria')}
-        data-testid="activation-chip"
-        className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-muted/50 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
-      >
-        <span>{t(localWords ? 'collapsedChipLocal' : 'collapsedChip', { completed: state.completed, total: state.total })}</span>
-        <ChevronDown className="size-3.5 shrink-0" />
-      </button>
+      // story #4888 — the visible chip stays 30px tall (AC3 §4-5 «40 이하»; the placeholder above is the SAME box — its className is the chip's, byte for byte, so the two never differ).
+      // On touch the PRESS area is 46: the `relative` wrapper (the chip's own box) holds a transparent band (inside the button, so a press on it IS a press on the chip) that reaches 8px above and below it.
+      // The band is hidden for a mouse. It must sit on no other pressable — measured on the real browser (dev: elementsFromPoint on the band), see the PR; jsdom has no layout.
+      <div className="relative">
+        <button
+          type="button"
+          onClick={toggleCollapse}
+          aria-expanded={false}
+          aria-label={t('expandAria')}
+          data-testid="activation-chip"
+          className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-muted/50 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+        >
+          <span>{t(localWords ? 'collapsedChipLocal' : 'collapsedChip', { completed: state.completed, total: state.total })}</span>
+          <ChevronDown className="size-3.5 shrink-0" />
+          <span aria-hidden="true" data-testid="activation-chip-hit" className="absolute inset-x-0 -inset-y-2 hidden touch:block" />
+        </button>
+      </div>
     );
   }
 

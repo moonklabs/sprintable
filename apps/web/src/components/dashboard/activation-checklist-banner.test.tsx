@@ -646,6 +646,30 @@ describe('[SID:4832] ActivationChecklistBanner — the local server\'s two count
     expect(container.querySelectorAll('[data-testid="activation-skeleton-expanded"] li')).toHaveLength(5);
   });
 
+  it('⭐the collapsed chip keeps its visible 30px and gets a transparent press band on touch only — the chip\'s own classes did not change (4888)', async () => {
+    // jsdom has no layout, so the pins are the classes that make the numbers: the visible size comes from py-1.5 + text-xs (nothing may add a min-height to the chip itself) = 30; the press area comes from the band
+    // (inside the button, `absolute inset-x-0 -inset-y-2` = 8px above and below → 46) which `hidden touch:block` shows on touch only. «The band overlaps no other pressable» is measured on the real browser (dev) — see the PR.
+    mockInitialActivationCollapsed = true;
+    stubChecklist(PARTIAL);
+    await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
+    await flush();
+    const chip = container.querySelector('[data-testid="activation-chip"]') as HTMLButtonElement;
+    const cls = chip.className.split(/\s+/);
+    expect(cls).toEqual(expect.arrayContaining(['py-1.5', 'text-xs']));
+    expect(cls.some((c) => /(^|:)min-h-|(^|:)h-\d|(^|:)py-(?!1\.5$)/.test(c))).toBe(false); // nothing grows the visible chip
+    const band = chip.querySelector('[data-testid="activation-chip-hit"]') as HTMLElement;
+    expect(band, 'the band is INSIDE the button — a press on it is a press on the chip').not.toBeNull();
+    expect(band.getAttribute('aria-hidden')).toBe('true');
+    const bandCls = band.className.split(/\s+/);
+    expect(bandCls).toEqual(expect.arrayContaining(['absolute', 'inset-x-0', '-inset-y-2', 'hidden', 'touch:block']));
+    expect(bandCls).not.toContain('block'); // touch-only: a mouse gets no invisible band
+    expect((chip.parentElement as HTMLElement).className).toBe('relative'); // the band is placed against the chip's own box
+    // a press on the band reaches the chip's handler
+    await act(async () => { band.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await flush();
+    expect(container.querySelector('[data-testid="activation-chip"]')).toBeNull(); // opened
+  });
+
   it('the finish and the collapsed chip use the local words (ko · en); the hosted words stay hosted', async () => {
     expect(koMessages.activation.doneTitleLocal).toBe('시작 준비를 마쳤어요');
     expect(koMessages.activation.doneBodyLocal).toBe('첫 지시를 보냈고 회신도 받았어요 — 두 단계가 모두 끝났어요.');
