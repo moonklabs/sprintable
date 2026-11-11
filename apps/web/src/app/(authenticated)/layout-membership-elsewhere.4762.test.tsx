@@ -20,11 +20,14 @@ vi.mock('@/components/auth/tab-owner-gate', () => ({ TabOwnerGate: ({ children }
 
 let meBody: unknown = null;
 let meJsonThrows = false;
+let meOk = false;
 beforeEach(() => {
   req.cookies = new Map();
   meJsonThrows = false;
+  meOk = false;
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     const path = new URL(url).pathname;
+    if (path === '/api/v2/me' && meOk) return { ok: true, status: 200, json: async () => ({ id: 'm1', org_id: 'o1', project_id: 'p1', project_name: 'P', name: 'N' }) };
     if (path === '/api/v2/me') return { ok: false, status: 404, json: async () => { if (meJsonThrows) throw new SyntaxError('Unexpected token <'); return meBody; } };
     return { ok: true, status: 200, json: async () => [] };
   }));
@@ -48,18 +51,33 @@ const envelope = (reason: string) => ({ data: null, error: { code: 'NOT_FOUND', 
 const detail = (reason: string) => ({ detail: { code: 'NOT_FOUND', message: 'Member not found', reason } });
 
 describe('(authenticated) layout — a 404 of /api/v2/me is read by its reason (story 4762)', () => {
-  it.each([
-    ['the envelope shape', envelope('membership_elsewhere')],
-    ['FastAPI\'s detail shape', detail('membership_elsewhere')],
-  ])('membership_elsewhere (%s) → the sign-in with the page kept as `next`, never the onboarding', async (_n, body) => {
-    meBody = body;
-    expect(await outcomeFor('/chats')).toBe('redirect:/login?next=%2Fchats&reason=session_expired');
-    expect(await outcomeFor('/glance?story=abc')).toBe('redirect:/login?next=%2Fglance%3Fstory%3Dabc&reason=session_expired');
-  });
+  // story 4904 — the sign-in is now the SECOND answer: the first visit goes through the renew road once (a token minted before the organization existed is one refresh
+  // away from the right claim); only when the renewal was already tried (the marker the road leaves for a minute) and it is still none is it the sign-in.
+  describe('membership_elsewhere — renew once, then the sign-in', () => {
+    it.each([
+      ['the envelope shape', envelope('membership_elsewhere')],
+      ['FastAPI\'s detail shape', detail('membership_elsewhere')],
+    ])('(%s) first visit → the renew road with the page kept as `next`; renewal already tried → the sign-in with the page kept as `next`; never the onboarding', async (_n, body) => {
+      meBody = body;
+      expect(await outcomeFor('/chats')).toBe('redirect:/api/auth/renew?next=%2Fchats');
+      expect(await outcomeFor('/glance?story=abc')).toBe('redirect:/api/auth/renew?next=%2Fglance%3Fstory%3Dabc');
+      req.cookies = new Map([['sp_renew_tried', '1']]);
+      expect(await outcomeFor('/chats')).toBe('redirect:/login?next=%2Fchats&reason=session_expired');
+      expect(await outcomeFor('/glance?story=abc')).toBe('redirect:/login?next=%2Fglance%3Fstory%3Dabc&reason=session_expired');
+    });
 
-  it('…also on the desktop setup page, which otherwise stays for an organization-less person (its «새 조직» mode would create a second organization)', async () => {
-    meBody = envelope('membership_elsewhere');
-    expect(await outcomeFor('/desktop/setup')).toBe('redirect:/login?next=%2Fdesktop%2Fsetup&reason=session_expired');
+    it('…also on the desktop setup page, which otherwise stays for an organization-less person (its «새 조직» mode would create a second organization)', async () => {
+      meBody = envelope('membership_elsewhere');
+      expect(await outcomeFor('/desktop/setup')).toBe('redirect:/api/auth/renew?next=%2Fdesktop%2Fsetup');
+      req.cookies = new Map([['sp_renew_tried', '1']]);
+      expect(await outcomeFor('/desktop/setup')).toBe('redirect:/login?next=%2Fdesktop%2Fsetup&reason=session_expired');
+    });
+
+    it('the renewed read that finds the organization renders the page (no second renewal, no sign-in)', async () => {
+      req.cookies = new Map([['sp_renew_tried', '1']]);
+      meOk = true;
+      expect(await outcomeFor('/chats')).toBe('no redirect');
+    });
   });
 
   it('no_membership (a person with no organization at all) is unchanged: the onboarding, and the desktop setup page stays', async () => {

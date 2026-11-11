@@ -1,0 +1,60 @@
+// story 4904 — «renew once, then read again» for a document navigation. The authenticated layout (a server component: it cannot write cookies) reads `/api/v2/me` and
+// may find a token minted before the person's organization existed (404 `membership_elsewhere` — the same new account in a second window creates/joins the organization
+// in the first one). One refresh issues a token with the right organization claim (measured: the same stale token → `/api/me` 404, after one refresh → 200). This road
+// does that refresh and sends the browser back to the page; the layout reads again. Only if it is STILL none does the layout call the session expired.
+// Loop guard: the road leaves `sp_renew_tried` (60 s) — while it is there the layout does not come back here.
+import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
+import { cookieBase, markSessionChanged, SP_AT_MAX_AGE_SECONDS, SP_RENEW_TRIED_COOKIE, SP_RENEW_TRIED_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
+import { buildLoginRedirect, safeNextPath } from '@/lib/auth/session-redirect';
+import { safeJsonParse } from '@/lib/api-response';
+import { backendFetch } from '@/lib/backend-fetch';
+import { fastapiBaseUrl } from '@/lib/fastapi-url';
+import { resolveAppUrl } from '@/services/app-url';
+
+const TOKEN_SUPERSEDED = 'TOKEN_SUPERSEDED';
+
+/** GET /api/auth/renew?next=<path> — one refresh, then back to `next` (an internal path only; anything else is the chat home) */
+export async function GET(request: Request) {
+  // the base is the app's own origin, not request.url (on Cloud Run request.url holds the internal bind address — same reason as auth/oauth-handoff)
+  const base = resolveAppUrl(null);
+  const next = safeNextPath(new URL(request.url).searchParams.get('next'));
+  const toLogin = () => NextResponse.redirect(`${base}${buildLoginRedirect(next)}`, 303);
+
+  const cookieStore = await cookies();
+  const refreshToken = cookieStore.get(SP_RT_COOKIE)?.value;
+  if (!refreshToken) return toLogin();
+
+  let fastapiRes: Response;
+  try {
+    fastapiRes = await backendFetch(`${fastapiBaseUrl()}/api/v2/auth/refresh`, {
+      timeLimitOnly: true, // 시간 제한만 — a refresh token is single-use: do not abandon the call while the new one is on its way (story #4320)
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+  } catch {
+    return toLogin(); // not confirmed: the cookies stay (same rule as the refresh road · story 4778)
+  }
+
+  const json = await safeJsonParse(fastapiRes) as { data?: { access_token?: unknown; refresh_token?: unknown }; error?: { code?: string } } | null;
+  const accessToken = typeof json?.data?.access_token === 'string' ? json.data.access_token : '';
+  const newRefreshToken = typeof json?.data?.refresh_token === 'string' ? json.data.refresh_token : '';
+  if (!fastapiRes.ok || !accessToken || !newRefreshToken) {
+    const res = toLogin();
+    // only an answer that says the token is DEAD (a 401 that is not «superseded») clears the cookies — the same line as the refresh road
+    if (fastapiRes.status === 401 && json?.error?.code !== TOKEN_SUPERSEDED) {
+      res.cookies.set(SP_AT_COOKIE, '', { ...cookieBase(), maxAge: 0 });
+      res.cookies.set(SP_RT_COOKIE, '', { ...cookieBase(), maxAge: 0 });
+      markSessionChanged(res);
+    }
+    return res;
+  }
+
+  const res = NextResponse.redirect(`${base}${next}`, 303);
+  res.cookies.set(SP_AT_COOKIE, accessToken, { ...cookieBase(), maxAge: SP_AT_MAX_AGE_SECONDS });
+  res.cookies.set(SP_RT_COOKIE, newRefreshToken, { ...cookieBase(), maxAge: 30 * 24 * 60 * 60 });
+  res.cookies.set(SP_RENEW_TRIED_COOKIE, '1', { ...cookieBase(), maxAge: SP_RENEW_TRIED_MAX_AGE_SECONDS });
+  return markSessionChanged(res);
+}
