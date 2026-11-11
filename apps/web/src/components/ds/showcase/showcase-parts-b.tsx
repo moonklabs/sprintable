@@ -5,7 +5,7 @@ import { ApprovalActions, ApprovalCard, ApprovalReason } from '../approval-card'
 import { Button, buttonVariants } from '../button';
 import { Calendar } from '../calendar';
 import { Chip } from '../chip';
-import { ConfirmDialog, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../dialog';
+import { ConfirmDialog, Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../dialog';
 import { DateNav } from '../date-nav';
 import { DatePicker } from '../date-picker';
 import { Metric } from '../metric';
@@ -128,7 +128,7 @@ export function ShowcasePartsB({ today }: { today: string }) {
                 <DialogTitle>견본 대화창</DialogTitle>
                 <DialogDescription>제목 · 설명 · 아래 단추 줄.</DialogDescription>
               </DialogHeader>
-              <DialogFooter><Button variant="primary">확인</Button></DialogFooter>
+              <DialogFooter><DialogClose render={<Button variant="primary" />}>확인</DialogClose></DialogFooter>
             </DialogContent>
           </Dialog>
           <Button variant="danger" onClick={() => setConfirmOpen(true)}>위험 확인 창</Button>

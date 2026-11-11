@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 const css = readFileSync(join(__dirname, 'design-system.css'), 'utf8');
 
 function block(selector: string): Record<string, string> {
-  const m = css.match(new RegExp(`(?:^|\\n)${selector.replace('.', '\\.')}\\s*\\{([^}]*)\\}`));
+  const m = css.match(new RegExp(`(?:^|\\n)${selector.replace('.', '\\.')}(?:,\\s*\\.[\\w-]+)*\\s*\\{([^}]*)\\}`));
   if (!m) throw new Error(`block ${selector} not found`);
   return Object.fromEntries([...m[1].matchAll(/--(ds-[\w-]+)\s*:\s*(#[0-9a-fA-F]{6})\s*;/g)].map((x) => [x[1], x[2].toLowerCase()]));
 }
@@ -24,6 +24,11 @@ function ratio(a: string, b: string): number {
 }
 
 describe('design-system.css — 새 뜻 이름 토큰(--ds-*)', () => {
+  it('`.ds-theme-light`는 밝음 값 «한 벌»을 :root와 같은 규칙에서 쥔다 — 어두운 화면 안 밝음 틀(견본)이 별도 복사본 없이 밝게 보인다', () => {
+    expect(css).toMatch(/(?:^|\n):root,\s*\.ds-theme-light\s*\{/);
+    expect(css.match(/\.ds-theme-light\s*\{/g)?.length).toBe(1);
+  });
+
   it('밝음 · 어둠이 같은 이름 집합을 정의한다(한쪽만 있으면 한 테마가 비어 렌더된다)', () => {
     expect(Object.keys(light).sort()).toEqual(Object.keys(dark).sort());
     expect(Object.keys(light).length).toBe(27);

@@ -31,7 +31,7 @@ const ITEMS = [
 
 describe('ds SummaryCard', () => {
   it('⭐section은 제목으로 이름을 얻고(aria-labelledby) 항목은 dl의 dt/dd 쌍이다', async () => {
-    await render(<SummaryCard title="지금까지 고른 것" items={ITEMS} />);
+    await render(<SummaryCard emptyLabel="비었어요" title="지금까지 고른 것" items={ITEMS} />);
     expect(card().tagName).toBe('SECTION');
     const h = card().querySelector('h2')!;
     expect(card().getAttribute('aria-labelledby')).toBe(h.id);
@@ -43,14 +43,14 @@ describe('ds SummaryCard', () => {
   });
 
   it('⭐넓은 화면(lg)은 카드: 면 surface · 헤어라인 · 모서리 · 안 여백 — 좁은 화면엔 껍데기가 없다', async () => {
-    await render(<SummaryCard title="요약" items={ITEMS} />);
+    await render(<SummaryCard emptyLabel="비었어요" title="요약" items={ITEMS} />);
     for (const c of ['lg:rounded-ds-control', 'lg:border', 'lg:border-ds-line', 'lg:bg-ds-surface', 'lg:p-3']) expect(has(card(), c), c).toBe(true);
     expect(has(card(), 'border')).toBe(false);
     expect(has(card(), 'bg-ds-surface')).toBe(false);
   });
 
   it('⭐좁은 화면은 칩 줄: 제목은 눈에서만 숨고(sr-only) · 항목은 둥근 칩이 되며 «이름 값»이 글로 함께 있다', async () => {
-    await render(<SummaryCard title="요약" items={ITEMS} />);
+    await render(<SummaryCard emptyLabel="비었어요" title="요약" items={ITEMS} />);
     expect(has(card().querySelector('h2') as Element, 'max-lg:sr-only')).toBe(true);
     const dl = card().querySelector('dl')!;
     for (const c of ['max-lg:flex-row', 'max-lg:flex-wrap']) expect(has(dl, c), c).toBe(true);
@@ -69,23 +69,23 @@ describe('ds SummaryCard', () => {
     expect(dd(5).querySelector('.sr-only')).toBeNull();
   });
 
-  it('이유 글(emptyLabel)이 없으면 보이는 «—»만 · 값이 있는 항목엔 이유 글이 없다', async () => {
+  it('빈 값의 이유 글(emptyLabel)은 필수다 — 타입이 막고, 값이 있는 항목엔 이유 글이 없다', async () => {
+    // @ts-expect-error emptyLabel 없이는 쓸 수 없다(빈 값이 스크린리더에 읽히지 않는 꼴을 타입이 막는다)
     await render(<SummaryCard title="요약" items={ITEMS} />);
-    expect(rows()[2]!.querySelector('.sr-only')).toBeNull();
     expect(rows()[0]!.querySelector('.sr-only')).toBeNull();
   });
 
   it('항목이 하나도 없으면 emptyText(없으면 아무것도 안 그림) — dl은 없다', async () => {
-    await render(<SummaryCard title="요약" items={[]} emptyText="고른 것이 없어요" />);
+    await render(<SummaryCard emptyLabel="비었어요" title="요약" items={[]} emptyText="고른 것이 없어요" />);
     expect(card().querySelector('dl')).toBeNull();
     expect(card().querySelector('p')!.textContent).toBe('고른 것이 없어요');
-    await render(<SummaryCard title="요약" items={[]} />);
+    await render(<SummaryCard emptyLabel="비었어요" title="요약" items={[]} />);
     expect(card().querySelector('p')).toBeNull();
     expect(card().querySelector('dl')).toBeNull();
   });
 
   it('값 글은 어디서나 줄바꿈되고 항목은 칸을 밀지 않는다(초장문이 칸을 안 넘친다)', async () => {
-    await render(<SummaryCard title="요약" items={[{ id: 1, label: 'a', value: 'x'.repeat(100) }]} />);
+    await render(<SummaryCard emptyLabel="비었어요" title="요약" items={[{ id: 1, label: 'a', value: 'x'.repeat(100) }]} />);
     const dd = rows()[0]!.querySelector('dd')!;
     expect(has(dd, 'break-keep')).toBe(true);
     expect(has(dd, '[overflow-wrap:anywhere]')).toBe(true);
@@ -93,7 +93,7 @@ describe('ds SummaryCard', () => {
   });
 
   it('호출부 className · 속성이 닿고 data-slot은 덮이지 않는다 · 제목 id는 카드마다 다르다', async () => {
-    await render(<><SummaryCard title="가" items={ITEMS} className="mt-2" data-testid="s1" {...({ 'data-slot': 'evil' } as object)} /><SummaryCard title="나" items={ITEMS} /></>);
+    await render(<><SummaryCard emptyLabel="비었어요" title="가" items={ITEMS} className="mt-2" data-testid="s1" {...({ 'data-slot': 'evil' } as object)} /><SummaryCard emptyLabel="비었어요" title="나" items={ITEMS} /></>);
     const cards = Array.from(container.querySelectorAll('[data-slot="ds-summary-card"]'));
     expect(cards.length).toBe(2);
     expect(has(cards[0]!, 'mt-2')).toBe(true);

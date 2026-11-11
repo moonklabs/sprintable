@@ -103,6 +103,7 @@ export const ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'components/ds/showcase/showcase-parts-a.tsx::label::StatusLabel',
   'components/ds/showcase/showcase-parts-a.tsx::title::Card · CardInset · SectionHeader · EmptyState',
   'components/ds/showcase/showcase-parts-a.tsx::label::Checkbox',
+  'components/ds/showcase/showcase-parts-a.tsx::label::Tag',
 ]);
 
 function walkTsxFiles(dir: string, out: string[]): void {

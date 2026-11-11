@@ -15,8 +15,8 @@ export type SummaryCardProps = Omit<HTMLAttributes<HTMLElement>, 'title' | 'chil
   items: readonly SummaryItem[];
   /** 항목이 하나도 없을 때 보이는 글. */
   emptyText?: ReactNode;
-  /** 값이 비어 «—»로 그려질 때 스크린리더가 읽는 글(예: «아직 안 골랐어요»). */
-  emptyLabel?: string;
+  /** 값이 비어 «—»로 그려질 때 스크린리더가 읽는 글(예: «아직 안 골랐어요»). 필수 — 보이는 «—»는 장식이라 이 글이 없으면 빈 값이 읽히지 않는다. */
+  emptyLabel: string;
 };
 
 function isEmptyValue(v: ReactNode): boolean {
@@ -49,7 +49,7 @@ export function SummaryCard({ title, items, emptyText, emptyLabel, className, ..
                   {empty ? (
                     <>
                       <span aria-hidden="true" className="text-ds-ink-3">—</span>
-                      {emptyLabel ? <span className="sr-only">{emptyLabel}</span> : null}
+                      <span className="sr-only">{emptyLabel}</span>
                     </>
                   ) : (
                     item.value

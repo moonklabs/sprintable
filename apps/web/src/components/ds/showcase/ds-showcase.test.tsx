@@ -33,6 +33,9 @@ describe('ds 견본 화면 (AC3)', () => {
     expect(frame('dark')).not.toBeNull();
     expect(frame('dark').classList.contains('dark')).toBe(true);
     expect(frame('light').classList.contains('dark')).toBe(false);
+    // 앱이 어두운 화면일 때도 밝음 틀이 밝게 보이도록 밝음 값을 다시 거는 감싸개(.ds-theme-light) — 어둠 틀에는 없다.
+    expect(frame('light').classList.contains('ds-theme-light')).toBe(true);
+    expect(frame('dark').classList.contains('ds-theme-light')).toBe(false);
     const parts = (t: HTMLElement) => Array.from(t.querySelectorAll('[data-slot]')).map((e) => e.getAttribute('data-slot'));
     expect(parts(frame('dark'))).toEqual(parts(frame('light')));
   });
@@ -56,13 +59,17 @@ describe('ds 견본 화면 (AC3)', () => {
       ['icon.tsx', '아이콘 — IconButton · Banner 등 안에서 늘 보인다'],
       ['icon-paths.ts', '아이콘 경로 표'],
     ]);
-    // 임포트만 남기고 사용을 지워도 통과하지 않도록: 파일이 내보내는 부품(대문자 이름) 중 하나라도 견본에서 실제로 «그려져야» 한다(`<이름`).
-    const drawn = (file: string) => {
+    // 임포트만 남기고 사용을 지워도 통과하지 않도록: 파일이 내보내는 부품(대문자 이름) «전부»가 견본에서 실제로 «그려져야» 한다(`<이름`) — 한 파일에 부품이 여럿이면(Chip · Tag · AgentTag) 하나만 그려도 통과하던 구멍을 닫는다.
+    const NOT_DRAWN_DIRECTLY = new Map<string, string>([['Icon', '아이콘 — IconButton · Banner · Menu 항목 등 안에서 늘 그려진다']]);
+    const missing: string[] = [];
+    for (const file of sources.filter((f) => !NOT_A_PART.has(f))) {
       const src = readFileSync(join(dir, file), 'utf-8');
-      const names = [...src.matchAll(/export (?:function|const) ([A-Z]\w*)/g)].map((m) => m[1]!);
-      return names.some((n) => new RegExp(`<${n}[\\s/>]`).test(showcase));
-    };
-    const missing = sources.filter((f) => !NOT_A_PART.has(f) && !drawn(f)).map((f) => f.replace(/\.tsx$/, ''));
+      for (const m of src.matchAll(/export (?:function|const) ([A-Z]\w*)/g)) {
+        const name = m[1]!;
+        if (NOT_DRAWN_DIRECTLY.has(name)) continue;
+        if (!new RegExp(`<${name}[\\s/>]`).test(showcase)) missing.push(`${file.replace(/\.tsx$/, '')}:${name}`);
+      }
+    }
     expect(missing).toEqual([]);
   });
 

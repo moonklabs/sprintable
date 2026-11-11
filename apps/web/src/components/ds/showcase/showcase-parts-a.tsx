@@ -5,7 +5,7 @@ import { Banner } from '../banner';
 import { Button, buttonVariants } from '../button';
 import { Card, CardInset } from '../card';
 import { Checkbox } from '../checkbox';
-import { Chip } from '../chip';
+import { AgentTag, Chip, Tag } from '../chip';
 import { CountBadge } from '../count-badge';
 import { EmptyState } from '../empty-state';
 import { Field } from '../field';
@@ -13,7 +13,7 @@ import { IconButton } from '../icon-button';
 import { Input, Textarea } from '../input';
 import { Kbd } from '../kbd';
 import { ListRow } from '../list-row';
-import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from '../menu';
+import { Menu, MenuContent, MenuGroup, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from '../menu';
 import { NativeSelect } from '../select';
 import { Radio, RadioGroup } from '../radio';
 import { SectionHeader } from '../section-header';
@@ -66,6 +66,10 @@ export function ShowcasePartsA() {
           {(['neutral', 'needs-hand', 'done', 'failed', 'info', 'action'] as const).map((t) => (
             <Chip key={t} tone={t} dot>{t}</Chip>
           ))}
+        </Row>
+        <Row label="Tag">
+          <Tag>읽기 전용</Tag>
+          <AgentTag />
         </Row>
         <Row label="CountBadge">
           <CountBadge count={3} />
@@ -183,9 +187,11 @@ export function ShowcasePartsA() {
           <Menu>
             <MenuTrigger className={buttonVariants()}>메뉴 열기</MenuTrigger>
             <MenuContent>
-              <MenuLabel>작업</MenuLabel>
-              <MenuItem icon="edit" shortcut={<Kbd>E</Kbd>}>이름 바꾸기</MenuItem>
-              <MenuItem>위로</MenuItem>
+              <MenuGroup>
+                <MenuLabel>작업</MenuLabel>
+                <MenuItem icon="edit" shortcut={<Kbd>E</Kbd>}>이름 바꾸기</MenuItem>
+                <MenuItem>위로</MenuItem>
+              </MenuGroup>
               <MenuSeparator />
               <MenuItem variant="danger">삭제</MenuItem>
             </MenuContent>

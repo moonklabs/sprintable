@@ -8,7 +8,9 @@
  * 값은 어둠 / 밝음. 앱의 테마 스위치는 `.dark` 클래스(globals.css `@custom-variant dark`)라 밝음이 :root · 어둠이 .dark.
  * 대비는 design-system.test.ts가 이 파일의 값을 읽어 계산한다(글자 조합 4.5:1 · 누를 수 있는 경계 3:1 아래로 내려가면 빨개진다).
  */
-:root {
+/* `.ds-theme-light`: 어두운 화면 안에서 «밝음»을 강제로 보여야 할 때(견본 화면의 밝음 틀) 같은 밝음 값을 그 가지에 다시 건다 — 값은 한 벌(이 규칙)뿐. */
+:root,
+.ds-theme-light {
   --ds-surface-sunk: #e6eaf1;
   --ds-background: #f3f5f9;
   --ds-surface: #ffffff;
