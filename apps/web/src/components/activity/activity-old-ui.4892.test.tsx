@@ -180,17 +180,38 @@ describe('감사 로그 필터 줄 — ds 부품 (4892)', () => {
     expect(container.querySelector('button[data-audit-row]')).not.toBeNull();
   });
 
+  it('⭐필터를 연달아 바꿔 앞 요청이 403으로 늦게 오면, 뒤 요청의 목록을 «접근 불가»로 덮어쓰지 못한다', async () => {
+    let calls = 0;
+    let releaseStale: (a: Answer) => void = () => {};
+    api(() => {
+      calls += 1;
+      if (calls === 1) return answer(true, 200, { items: [auditRow('first')], total: 1, limit: 30, offset: 0 });
+      if (calls === 2) return new Promise<Answer>((resolve) => { releaseStale = resolve; });           // filter change #1 — held in flight
+      return answer(true, 200, { items: [auditRow('latest')], total: 1, limit: 30, offset: 0 });       // filter change #2 answers fine
+    }, teamOk([]));
+    await mountView('audit');
+    const options = [...selects()[1]!.options].map((o) => o.value).filter((v) => v !== selects()[1]!.options[0]!.value);
+    await change(selects()[1]!, options[0]!);
+    await change(selects()[1]!, options[1]!);
+    expect(container.querySelector('button[data-audit-row]')).not.toBeNull();
+    await act(async () => { releaseStale(answer(false, 403)); });
+    for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-slot="ds-empty-state"]')).toBeNull();
+    expect(container.querySelector('button[data-audit-row]')).not.toBeNull();
+  });
+
   describe('«더 보기»가 오는 중에 필터를 바꾸면 (옛 목록의 답은 낡은 답)', () => {
     const page = (n: number, tag: string, total: number) => answer(true, 200, { items: Array.from({ length: n }, (_, i) => auditRow(`${tag}${i}`)), total, limit: 30, offset: 0 });
     const loadMoreButton = () => [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === ko.activityLog!.loadMore) as HTMLButtonElement | undefined;
     const rows = () => container.querySelectorAll('button[data-audit-row]').length;
-    async function startStaleLoadMore(): Promise<(a: Answer) => void> {
+    async function startStaleLoadMore(): Promise<{ release: (a: Answer) => void; fail: (e: Error) => void }> {
       let calls = 0;
       let release: (a: Answer) => void = () => {};
+      let fail: (e: Error) => void = () => {};
       api(() => {
         calls += 1;
         if (calls === 1) return page(30, 'old', 90);                                                  // first page of the unfiltered list: 30 of 90
-        if (calls === 2) return new Promise<Answer>((resolve) => { release = resolve; });             // «더 보기» — held in flight
+        if (calls === 2) return new Promise<Answer>((resolve, reject) => { release = resolve; fail = reject; });   // «더 보기» — held in flight
         return page(1, 'fresh', 1);                                                                    // the filtered list
       }, teamOk([]));
       await mountView('audit');
@@ -198,11 +219,11 @@ describe('감사 로그 필터 줄 — ds 부품 (4892)', () => {
       await act(async () => { loadMoreButton()!.click(); });
       await change(selects()[1]!, 'story');                                                           // filter change while «더 보기» is still in flight
       expect(rows()).toBe(1);
-      return release;
+      return { release: (a) => release(a), fail: (e) => fail(e) };
     }
 
     it('⭐늦게 온 옛 «더 보기» 성공은 새 목록에 줄을 붙이지 못한다(줄 수 · 합계 그대로)', async () => {
-      const release = await startStaleLoadMore();
+      const { release } = await startStaleLoadMore();
       await act(async () => { release(page(30, 'stale', 90)); });
       for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
       expect(rows()).toBe(1);
@@ -210,7 +231,7 @@ describe('감사 로그 필터 줄 — ds 부품 (4892)', () => {
     });
 
     it('⭐늦게 온 옛 «더 보기» 실패는 토스트를 띄우지 못한다', async () => {
-      const release = await startStaleLoadMore();
+      const { release } = await startStaleLoadMore();
       await act(async () => { release(answer(false, 500)); });
       for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
       expect(addToastMock).not.toHaveBeenCalled();
@@ -218,11 +239,40 @@ describe('감사 로그 필터 줄 — ds 부품 (4892)', () => {
     });
 
     it('⭐늦게 온 옛 «더 보기» 403은 새 목록을 «접근 불가»로 바꾸지 못한다', async () => {
-      const release = await startStaleLoadMore();
+      const { release } = await startStaleLoadMore();
       await act(async () => { release(answer(false, 403)); });
       for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
       expect(container.querySelector('[data-slot="ds-empty-state"]')).toBeNull();
       expect(rows()).toBe(1);
+    });
+
+    it('⭐늦게 온 옛 «더 보기» 네트워크 오류도 토스트를 띄우지 못한다', async () => {
+      const { fail } = await startStaleLoadMore();
+      await act(async () => { fail(new Error('offline')); });
+      for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+      expect(addToastMock).not.toHaveBeenCalled();
+      expect(rows()).toBe(1);
+    });
+
+    it('⭐새 목록의 «더 보기»가 오는 중에 옛 «더 보기»가 늦게 끝나도 새 쪽 돌림 표시는 그대로', async () => {
+      let calls = 0;
+      let releaseStale: (a: Answer) => void = () => {};
+      api(() => {
+        calls += 1;
+        if (calls === 1) return page(30, 'old', 90);
+        if (calls === 2) return new Promise<Answer>((resolve) => { releaseStale = resolve; });         // the old list's «더 보기» (stale from the filter change on)
+        if (calls === 3) return page(30, 'fresh', 90);                                                  // the filtered list, also 30 of 90
+        return new Promise<Answer>(() => {});                                                           // the new list's own «더 보기» — never answers
+      }, teamOk([]));
+      await mountView('audit');
+      await act(async () => { loadMoreButton()!.click(); });
+      await change(selects()[1]!, 'story');
+      await act(async () => { loadMoreButton()!.click(); });
+      expect(loadMoreButton()!.getAttribute('aria-busy')).toBe('true');
+      await act(async () => { releaseStale(page(30, 'stale', 90)); });
+      for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+      expect(loadMoreButton()!.getAttribute('aria-busy')).toBe('true');                                 // the stale finish did not clear the newer spinner
+      expect(rows()).toBe(30);
     });
 
     it('«더 보기» 성공 · 같은 목록이면 그대로 붙는다(막은 것은 낡은 답뿐)', async () => {

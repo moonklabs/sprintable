@@ -25,7 +25,8 @@
  *
  * 못 잡는 것(선언): redirect를 다른 모듈에서 다시 내보내 부르는 경우(재수출 체인)는 못 본다 — 지금 app/ 안 0건.
  */
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CHAT_CENTER_ITEM, OTHER_NAV_ITEMS, resolveNavGroups } from '@/lib/nav-config';
@@ -248,6 +249,18 @@ describe('story #4274 — 탭 · 메뉴 목적지 loading.tsx 전수(v3 플래�
     expect(DS_SKELETON_GROUP_IMPORT.test("import { SkeletonGroup } from '@/components/ui/skeleton';")).toBe(false);
     expect(DS_SKELETON_GROUP_IMPORT.test("import { Skeleton } from '@/components/ds/skeleton';\nfunction SkeletonGroup() { return null; }")).toBe(false);
     expect(DS_SKELETON_GROUP_IMPORT.test("import { SkeletonGroupX } from '@/components/ds/skeleton';")).toBe(false);
+  });
+
+  it('⭐announcesStatus: 이름만 같은 로컬 SkeletonGroup는 인정 안 함 · ds 부품에서 가져온 것은 인정', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'loading-guard-'));
+    try {
+      const local = join(dir, 'local.tsx');
+      writeFileSync(local, "function SkeletonGroup({ children }: { label: string; children: unknown }) { return children; }\nexport default function Loading() { return <SkeletonGroup label={t('loading')}>x</SkeletonGroup>; }\n");
+      const ds = join(dir, 'ds.tsx');
+      writeFileSync(ds, "import { SkeletonGroup } from '@/components/ds/skeleton';\nexport default function Loading() { return <SkeletonGroup label={t('loading')}>x</SkeletonGroup>; }\n");
+      expect(announcesStatus(local)).toBe(false);
+      expect(announcesStatus(ds)).toBe(true);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
   it('⭐ds SkeletonGroup는 role="status" · aria-busy="true" · 이름(aria-label={label})을 부품 안에서 정한다 — 가드가 «SkeletonGroup + label»을 상태 알림으로 인정하는 근거', () => {
