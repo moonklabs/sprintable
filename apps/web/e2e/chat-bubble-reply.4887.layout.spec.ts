@@ -14,7 +14,7 @@ const APP = path.join(__dirname, '../src/app');
 function classesFromSource() {
   const src = readFileSync(BUBBLE, 'utf8');
   const pick = (re: RegExp, what: string, i = 1) => { const m = re.exec(src); if (!m) throw new Error(`${what} not found`); return m[i]!; };
-  const cont = /\? \(isMine\s*\? '([^']+)'\s*: '([^']+)'\)/.exec(src);
+  const cont = /\? \(isMine(?: && !plainRow)?\s*\? '([^']+)'\s*: '([^']+)'\)/.exec(src);
   if (!cont) throw new Error('the continuation time line classes not found');
   const reply = /data-testid="chat-bubble-reply-button"[\s\S]*?className=\{`([^`$]+)\$\{isMine(?: && !plainRow)? \? '([^']+)' : '([^']+)'\}`\}/.exec(src);
   if (!reply) throw new Error('the reply button classes not found');

@@ -661,9 +661,10 @@ export function ChatBubble({
   // story 4855 — the touch-only «⋯» button: the menu next to the button (a selection that survives the tap is carried too)
   const handleOpenMenuButton = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    setContextMenu({ x: isMine ? rect.right - 160 : rect.left, y: rect.bottom + 4, selectedText: selectionInThisMessage() });
+    // a plain row (a thread reply) is left-aligned whoever wrote it — the menu opens from the button's left edge there (codex round 2)
+    setContextMenu({ x: isMine && !plainRow ? rect.right - 160 : rect.left, y: rect.bottom + 4, selectedText: selectionInThisMessage() });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMine, message.id]);
+  }, [isMine, plainRow, message.id]);
 
   const handleDelete = useCallback(() => {
     onDelete?.(message.id);
@@ -989,7 +990,7 @@ export function ChatBubble({
             data-testid="bubble-meta-line"
             // story 4887 (UI-4 P4-a) — where a mouse can hover (fine pointer + hover): the first message of a run has no time line (its head has the time); a continuation keeps its time for screen readers (sr-only) and shows it beside the bubble while the row is hovered OR holds the keyboard focus (WCAG 1.4.13: what hover reveals, focus reveals too — a link or button inside the bubble). Everywhere else (touch · a stylus that cannot hover) the line stays under the bubble as before — the touch «⋯» button sits on it (story 4855)
             className={isGrouped
-              ? (isMine
+              ? (isMine && !plainRow
                 ? 'relative inline-block [@media(pointer:fine)_and_(hover:hover)]:sr-only [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:not-sr-only [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:absolute [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:bottom-0 [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:right-full [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:mr-[var(--reply-room,8px)] [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:whitespace-nowrap [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:not-sr-only [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:absolute [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:bottom-0 [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:right-full [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:mr-[var(--reply-room,8px)] [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:whitespace-nowrap'
                 : 'relative inline-block [@media(pointer:fine)_and_(hover:hover)]:sr-only [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:not-sr-only [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:absolute [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:bottom-0 [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:left-full [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:ml-[var(--reply-room,8px)] [@media(pointer:fine)_and_(hover:hover)]:group-hover/bubble:whitespace-nowrap [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:not-sr-only [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:absolute [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:bottom-0 [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:left-full [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:ml-[var(--reply-room,8px)] [@media(pointer:fine)_and_(hover:hover)]:group-focus-within/bubble:whitespace-nowrap')
               : 'relative inline-block [@media(pointer:fine)_and_(hover:hover)]:hidden'}

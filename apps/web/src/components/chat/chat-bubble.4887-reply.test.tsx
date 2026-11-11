@@ -160,3 +160,30 @@ describe('story 4887 (codex round 1) — a plain row keeps its touch «⋯» on 
     expect((container.querySelector('[data-testid="chat-bubble-menu-button"]') as HTMLElement).className).toContain('right-full');
   });
 });
+
+describe('story 4887 (codex round 2) — a plain row is left-aligned whoever wrote it: the grouped hover time and the touch menu follow', () => {
+  it('⭐ a grouped plain row of mine shows its hover time at the right of the text (left-full) — as a bubble it stays at the left of it (right-full)', async () => {
+    await render({ isMine: true, plainRow: true, isGrouped: true });
+    const meta = () => container.querySelector('[data-testid="bubble-meta-line"]') as HTMLElement;
+    expect(meta().className).toContain('group-hover/bubble:left-full');
+    expect(meta().className).not.toContain('group-hover/bubble:right-full'); // reverted (isMine alone) → right-full: the time floats on the wrong side of a left-aligned row
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await render({ isMine: true, isGrouped: true });
+    expect(meta().className).toContain('group-hover/bubble:right-full');
+  });
+
+  it('⭐ the touch «⋯» opens the menu from the button\'s LEFT edge for a plain row of mine (a bubble of mine opens it right-aligned, ending at the button\'s right edge)', async () => {
+    const open = async (plainRow: boolean) => {
+      await render({ isMine: true, plainRow });
+      const more = container.querySelector('[data-testid="chat-bubble-menu-button"]') as HTMLElement;
+      more.getBoundingClientRect = () => ({ left: 300, right: 340, top: 10, bottom: 50, width: 40, height: 40, x: 300, y: 10, toJSON() {} }) as DOMRect;
+      await act(async () => { more.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      return (document.querySelector('[role="menu"]') as HTMLElement).style.left;
+    };
+    expect(await open(true)).toBe('300px'); // reverted (isMine alone) → 180px: detached from the button
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    expect(await open(false)).toBe('180px'); // 340 − 160
+  });
+});
