@@ -169,6 +169,8 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
   const [saveError, setSaveError] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const [storiesNextCursor, setStoriesNextCursor] = useState<string | null>(null);
+  // story #4888(PO 11-11 결정 ②) — 활성 스프린트의 번다운(stories_count)이 말하는 스토리 총수. 처음 40개만 읽어도 다음 쪽이 남은 때 스토리 수를 정확하게 보이려고 한 번 읽는다(못 읽으면 null → «N+»).
+  const [sprintStoryTotal, setSprintStoryTotal] = useState<number | null>(null);
   const [loadingMoreStories, setLoadingMoreStories] = useState(false);
   const [sprintExpanded, setSprintExpanded] = useState(false);
   const [editingSelf, setEditingSelf] = useState(false);
@@ -309,6 +311,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
         let sprint: StandupSprintSummary | null = null;
         let storySummaries: StandupStorySummary[] = [];
         let nextStoriesCursor: string | null = null;
+        let storyTotalRead: number | null = null;
 
         if (projectId) {
           // story #3519(§16-7 2부, PO 確定 2026-09-05) — missingRes는 주석("실패해도 본
@@ -333,8 +336,15 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
           sprint = sprintsData.find((item) => item.status === 'active') ?? sprintsData[0] ?? null;
 
           if (sprint) {
-          const storiesRes = await fetchWithAuth(`/api/stories?project_id=${projectId}&sprint_id=${sprint.id}&limit=40`);
+          // story #4888(PO 11-11 결정 ②) — 번다운(집계 수 + 선 두 줄, 가벼운 응답)은 스토리와 **같이** 한 번 읽는다. 부수라 leg를 격리한다: 실패 · 모양 이상이면 null → 아래 «N+» 하한으로 내려가고 화면은 막히지 않는다.
+          const [storiesRes, burndownRes] = await Promise.all([
+            fetchWithAuth(`/api/stories?project_id=${projectId}&sprint_id=${sprint.id}&limit=40`),
+            fetchWithAuth(`/api/sprints/${sprint.id}/burndown`).catch(() => null),
+          ]);
           if (!storiesRes.ok) throw new Error('Failed to load sprint stories');
+          const burndownJson = burndownRes?.ok ? await burndownRes.json().catch(() => null) as { data?: { stories_count?: unknown } } | null : null;
+          const burndownTotal = burndownJson?.data?.stories_count;
+          storyTotalRead = typeof burndownTotal === 'number' && Number.isInteger(burndownTotal) && burndownTotal >= 0 ? burndownTotal : null;
           const storiesJson = await storiesRes.json().catch(() => null);
           if (!storiesJson || !('data' in storiesJson)) throw new Error('Failed to load sprint stories');
           const storyRows = storiesJson.data as StandupStoryRow[];
@@ -375,6 +385,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
         setActiveSprint(sprint);
         setStories(storySummaries);
         setStoriesNextCursor(nextStoriesCursor);
+        setSprintStoryTotal(storyTotalRead);
         setLoadError(null);
         setSaveError(null);
       } catch {
@@ -402,7 +413,10 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
   // story #4888(UI-5 스프린트 화면, PO 11-11) — 이 요약의 수는 «지금까지 불러온 스토리»(처음 40개 + 더 보기로 이어 붙인 쪽)만 센 부분 수다. 다음 쪽이 더 있는데(storiesNextCursor) 그 수를 정확한 총수처럼
   // 보이면 «틀린 값을 정확한 것처럼»이라, 더 있을 때는 «N+»로 정직하게 보인다(스토리 수 · 태스크 완료/전체 둘 다 «이상»). 끝까지 불러오면(커서 없음) 예전처럼 정확한 수.
   const storiesPartial = storiesNextCursor !== null;
-  const storyCountLabel = storiesPartial ? t('sprintStoryCountPartial', { count: stories.length }) : t('sprintStoryCount', { count: stories.length });
+  // 다음 쪽이 남았어도 번다운이 총수를 알려 줬으면 그 정확한 수(PO 결정 ②). 다 불러왔으면 목록 길이(= 화면에 보이는 수). 번다운을 못 읽었으면 «N+».
+  const storyCountLabel = storiesPartial
+    ? (sprintStoryTotal !== null ? t('sprintStoryCount', { count: sprintStoryTotal }) : t('sprintStoryCountPartial', { count: stories.length }))
+    : t('sprintStoryCount', { count: stories.length });
   const taskProgressLabel = storiesPartial ? t('taskProgressPartial', { done: doneTasks, total: totalTasks }) : t('taskProgress', { done: doneTasks, total: totalTasks });
   const summaryBadges = [
     activeSprint ? { label: activeSprint.title, variant: 'chip' as const } : { label: t('noActiveSprint'), variant: 'outline' as const },
