@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { PublishedSection } from './today-sections';
 import { CountBadge } from '@/components/ds/count-badge';
 import { ActivationChecklistBanner } from '@/components/dashboard/activation-checklist-banner';
-import { HomeList } from '@/components/home/home-list';
+import { HomeScreen } from '@/components/home/home-screen';
 import { useHomeModel } from '@/components/home/home-model-provider';
 import { AgentStateSection } from './agent-state-section';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -188,7 +188,7 @@ export function OrgBriefingShell() {
               <Button size="sm" variant="outline" onClick={retry}>{tc('retry')}</Button>
             </div>
           ) : null}
-          <HomeList model={model} sources={sources} partial={partial || loadError} />
+          <HomeScreen model={model} sources={sources} partial={partial || loadError} />
           <AgentStateSection />
           <PublishedSection published={sources.snapshot.published} usage={sources.snapshot.usage} />
         </div>

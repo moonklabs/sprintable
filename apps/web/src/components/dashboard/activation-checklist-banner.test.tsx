@@ -264,7 +264,8 @@ describe('ActivationChecklistBanner — 접기(collapse), 완전 dismiss는 없�
 
     expect(container.textContent).not.toContain('이메일 인증하기');
     expect(container.textContent).toContain('가입 완료 2/5');
-    expect(document.cookie).toContain('sp_activation_collapsed=org-1');
+    // story #4888 — 접힘이 기본값이라 접으면 «열어 둔 org» 기억을 지운다(쿠키 없음 = 접힘)
+    expect(decodeURIComponent(document.cookie)).not.toContain('sp_activation_collapsed=open:');
   });
 
   it('접힌 칩을 다시 누르면 펼쳐진다', async () => {
@@ -280,6 +281,8 @@ describe('ActivationChecklistBanner — 접기(collapse), 완전 dismiss는 없�
     await act(async () => { chip.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await flush();
     expect(container.textContent).toContain('이메일 인증하기');
+    // story #4888 — 펼치면 이 org를 «열어 둔 org»로 세션 쿠키에 기억한다(다음 문서도 펼침)
+    expect(decodeURIComponent(document.cookie)).toContain('sp_activation_collapsed=open:org-1');
   });
 });
 
@@ -650,7 +653,6 @@ describe('[SID:4832] ActivationChecklistBanner — the local server\'s two count
     expect(enMessages.activation.bannerTitleLocal).toBe('Connect your first agent?');
     expect(enMessages.activation.collapsedChipLocal).toBe('Getting started {completed}/{total}');
     stubChecklist(LOCAL);
-    document.cookie = 'sp_activation_collapsed=1; Path=/';
     mockInitialActivationCollapsed = true;
     await act(async () => { root.render(wrap(<ActivationChecklistBanner />)); });
     await flush();

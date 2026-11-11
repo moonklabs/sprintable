@@ -22,7 +22,7 @@ import type { HomeSources } from './home-model-provider';
  */
 
 /** the word under a row's title that says what kind of thing it is (literal keys, so each one is visibly read) */
-function kindLabel(t: ReturnType<typeof useTranslations>, kind: HomeRowKind): string {
+export function kindLabel(t: ReturnType<typeof useTranslations>, kind: HomeRowKind): string {
   switch (kind) {
     case 'approval': return t('kindApproval');
     case 'signature': return t('kindSignature');
@@ -39,15 +39,15 @@ function kindLabel(t: ReturnType<typeof useTranslations>, kind: HomeRowKind): st
 }
 
 /** the agent run statuses the old «에이전트가 하는 일» rows named (an unknown status gets no word — nothing is invented) */
-const AGENT_STATUS_KEY: Record<string, string> = {
+export const AGENT_STATUS_KEY: Record<string, string> = {
   queued: 'agentStatusQueued',
   held: 'agentStatusHeld',
   running: 'agentStatusRunning',
   hitl_pending: 'agentStatusHitlPending',
 };
 
-type RowAction = 'approve' | 'approveAndSign' | 'answer' | 'open';
-function actionLabel(t: ReturnType<typeof useTranslations>, action: RowAction): string {
+export type RowAction = 'approve' | 'approveAndSign' | 'answer' | 'open';
+export function actionLabel(t: ReturnType<typeof useTranslations>, action: RowAction): string {
   switch (action) {
     case 'approve': return t('rowApprove');
     case 'approveAndSign': return t('rowApproveAndSign');
@@ -57,7 +57,7 @@ function actionLabel(t: ReturnType<typeof useTranslations>, action: RowAction): 
 }
 const NEEDS_ACTION: Partial<Record<HomeRowKind, RowAction>> = { approval: 'approve', signature: 'approveAndSign', answer: 'answer' };
 
-function useRowLink(sources: HomeSources): (row: HomeRow) => { action: RowAction; href: string } | null {
+export function useRowLink(sources: HomeSources): (row: HomeRow) => { action: RowAction; href: string } | null {
   const flatHref = useFlatHref();
   return (row) => {
     switch (row.kind) {
@@ -86,7 +86,7 @@ function useRowLink(sources: HomeSources): (row: HomeRow) => { action: RowAction
   };
 }
 
-function HomeRowView({ row, sources, needsHand }: { row: HomeRow; sources: HomeSources; needsHand: boolean }) {
+function HomeRowView({ row, sources, needsHand, selected, onSelect }: { row: HomeRow; sources: HomeSources; needsHand: boolean; selected: boolean; onSelect: (key: string) => void }) {
   const t = useTranslations('home');
   const tb = useTranslations('orgBriefing');
   const flatHref = useFlatHref();
@@ -102,7 +102,8 @@ function HomeRowView({ row, sources, needsHand }: { row: HomeRow; sources: HomeS
   const subtitle = [kindLabel(t, row.kind), row.actor?.name, need?.reason, statusKey ? tb(statusKey) : null].filter(Boolean).join(' · ');
   const common = {
     leading: row.actor ? <Avatar name={row.actor.name} actorType={row.actor.type} size={24} /> : undefined,
-    title: row.title,
+    // story #4888 — the title is a real button: Tab reaches it, Enter selects (the same as a click on the row). The row's action link stays where it was (the right slot).
+    title: <Button type="button" variant="quiet" className="h-auto max-w-full justify-start px-0 text-left text-ds-body font-semibold text-ds-ink hover:bg-transparent hover:text-ds-ink focus-visible:ring-0"><span className="truncate">{row.title}</span></Button>,
     subtitle,
     trailing: link || conversationHref ? (
       <>
@@ -116,14 +117,17 @@ function HomeRowView({ row, sources, needsHand }: { row: HomeRow; sources: HomeS
     ) : undefined,
   } as const;
   return (
-    <div data-row-key={row.key}>
-      {needsHand ? <ListRow {...common} needsHand needsHandLabel={t('needsHandLabel')} /> : <ListRow {...common} />}
+    // a click anywhere on the row selects it (a click on the row's own link goes where the link goes and does not also select)
+    <div data-row-key={row.key} onClick={(e) => { if (!(e.target as HTMLElement).closest('a')) onSelect(row.key); }}>
+      {needsHand
+        ? <ListRow {...common} selected={selected} needsHand needsHandLabel={t('needsHandLabel')} className="has-[button:focus-visible]:ring-2 has-[button:focus-visible]:ring-inset has-[button:focus-visible]:ring-ds-action" />
+        : <ListRow {...common} selected={selected} className="has-[button:focus-visible]:ring-2 has-[button:focus-visible]:ring-inset has-[button:focus-visible]:ring-ds-action" />}
       {need?.state === 'signature' ? <p className="m-0 border-b border-ds-line px-4 pb-2 text-ds-small text-ds-ink-3">{tb('signatureRiskNotice')}</p> : null}
     </div>
   );
 }
 
-function FoldableSection({ title, rows, sources, defaultCollapsed, emptyText }: { title: string; rows: HomeRow[]; sources: HomeSources; defaultCollapsed: boolean; emptyText: string }) {
+function FoldableSection({ title, rows, sources, defaultCollapsed, emptyText, selectedKey, onSelect }: { title: string; rows: HomeRow[]; sources: HomeSources; defaultCollapsed: boolean; emptyText: string; selectedKey: string | null; onSelect: (key: string) => void }) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
   return (
     <section aria-label={title}>
@@ -131,13 +135,30 @@ function FoldableSection({ title, rows, sources, defaultCollapsed, emptyText }: 
       {collapsed ? null : rows.length === 0 ? (
         <p className="m-0 px-4 py-6 text-center text-ds-small text-ds-ink-3">{emptyText}</p>
       ) : (
-        <div>{rows.map((row) => <HomeRowView key={row.key} row={row} sources={sources} needsHand={false} />)}</div>
+        <div>{rows.map((row) => <HomeRowView key={row.key} row={row} sources={sources} needsHand={false} selected={row.key === selectedKey} onSelect={onSelect} />)}</div>
       )}
     </section>
   );
 }
 
-export function HomeList({ model, sources, partial = false }: { model: HomeModel; sources: HomeSources; partial?: boolean }) {
+/** the move keys: a letter or arrow pressed while the focus is inside the list (never while someone types in a field) walks the rows that are on screen */
+function handleListKeys(e: React.KeyboardEvent<HTMLElement>, onSelect: (key: string) => void) {
+  const target = e.target as HTMLElement;
+  if (target.closest('input, textarea, select, [contenteditable="true"]')) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const dir = e.key === 'ArrowDown' || e.key === 'j' ? 1 : e.key === 'ArrowUp' || e.key === 'k' ? -1 : 0;
+  if (dir === 0) return;
+  const rows = [...e.currentTarget.querySelectorAll<HTMLElement>('[data-row-key]')];
+  const here = rows.findIndex((r) => r.contains(target));
+  const next = rows[here === -1 ? (dir === 1 ? 0 : rows.length - 1) : here + dir];
+  if (!next) return;
+  e.preventDefault();
+  const key = next.getAttribute('data-row-key');
+  if (key) onSelect(key);
+  next.querySelector<HTMLElement>('button')?.focus();
+}
+
+export function HomeList({ model, sources, partial = false, selectedKey = null, onSelect = () => {} }: { model: HomeModel; sources: HomeSources; partial?: boolean; selectedKey?: string | null; onSelect?: (key: string) => void }) {
   const t = useTranslations('home');
   const tb = useTranslations('orgBriefing');
   const [showAll, setShowAll] = useState(false);
@@ -145,7 +166,8 @@ export function HomeList({ model, sources, partial = false }: { model: HomeModel
   const hiddenNeedsMe = Math.max(0, sources.snapshot.needsMeCount - sources.snapshot.needsMe.length);
   const visible = showAll ? model.needsHand : model.needsHandVisible;
   return (
-    <div className="overflow-hidden rounded-ds-control border border-ds-line bg-ds-surface" data-testid="home-list">
+    // story #4888 — j / k / ↑ / ↓ move the selection between the rows that are on screen (and the focus with it); Enter on a row's title selects it. No new command key: this only walks the list.
+    <div className="overflow-hidden rounded-ds-control border border-ds-line bg-ds-surface" data-testid="home-list" onKeyDown={(e) => handleListKeys(e, onSelect)}>
       <p className="m-0 px-4 py-2 font-mono text-ds-mono-md text-ds-ink-3" data-testid="home-header-line">
         {t('headerLine', { needsHand: model.header.needsHand, working: model.header.working, justDone: model.header.justDone })}
       </p>
@@ -167,7 +189,7 @@ export function HomeList({ model, sources, partial = false }: { model: HomeModel
           <p className="m-0 px-4 py-6 text-center text-ds-small text-ds-ink-2" data-testid="home-hidden-notice">{tb('needsMeHiddenCountNotice', { count: hiddenNeedsMe })}</p>
         ) : (
           <div>
-            {visible.map((row) => <HomeRowView key={row.key} row={row} sources={sources} needsHand />)}
+            {visible.map((row) => <HomeRowView key={row.key} row={row} sources={sources} needsHand selected={row.key === selectedKey} onSelect={onSelect} />)}
             {model.needsHandHidden > 0 ? (
               <div className="border-b border-ds-line px-4 py-2">
                 <Button type="button" variant="quiet" aria-expanded={showAll} onClick={() => setShowAll((s) => !s)}>
@@ -179,8 +201,8 @@ export function HomeList({ model, sources, partial = false }: { model: HomeModel
           </div>
         )}
       </section>
-      <FoldableSection title={t('sectionWorking')} rows={model.working} sources={sources} defaultCollapsed emptyText={t('emptyWorking')} />
-      <FoldableSection title={t('sectionJustDone')} rows={model.justDone} sources={sources} defaultCollapsed emptyText={t('emptyJustDone')} />
+      <FoldableSection title={t('sectionWorking')} rows={model.working} sources={sources} defaultCollapsed emptyText={t('emptyWorking')} selectedKey={selectedKey} onSelect={onSelect} />
+      <FoldableSection title={t('sectionJustDone')} rows={model.justDone} sources={sources} defaultCollapsed emptyText={t('emptyJustDone')} selectedKey={selectedKey} onSelect={onSelect} />
     </div>
   );
 }
