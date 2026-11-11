@@ -81,9 +81,9 @@ async function build() {
               <div id="screen" style={{ display: 'flex', width: '1028px', height: '760px' }} className="bg-background text-foreground">
                 <div id="rail" className="flex min-h-0 w-[248px] shrink-0 flex-col overflow-hidden border-r border-border"><ChatListView projectId="p1" currentTeamMemberId="me-1" canStartRoom /></div>
                 <div id="room" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                  <RoomHead backLabel="대화" onBack={() => {}} title="결제 연동 · 오늘 할 일" tag="프로젝트 방" subline="AC4 project · 4명" chips={[chip({ member_id: 'me-1', name: '지우', type: 'human' }), chip({ member_id: 'a-1', name: '개발 에이전트', type: 'agent' }, 'online'), chip({ member_id: 'a-2', name: '검수 에이전트', type: 'agent' }, 'idle'), chip({ member_id: 'h-2', name: '민서', type: 'human' })]} addLabel="참여자 추가" onAdd={() => {}} trailing={<button type="button" aria-label="방 더보기">⋯</button>} />
+                  <RoomHead title="결제 연동 · 오늘 할 일" tag="프로젝트 방" subline="AC4 project · 4명" chips={[chip({ member_id: 'me-1', name: '지우', type: 'human' }), chip({ member_id: 'a-1', name: '개발 에이전트', type: 'agent' }, 'online'), chip({ member_id: 'a-2', name: '검수 에이전트', type: 'agent' }, 'idle'), chip({ member_id: 'h-2', name: '민서', type: 'human' })]} addLabel="참여자 추가" onAdd={() => {}} trailing={<button type="button" aria-label="방 더보기">⋯</button>} />
                   <div id="timeline" className="min-h-0 flex-1 overflow-y-auto px-4 py-3">{MESSAGES.map((m, i) => <ChatBubble key={m.id} message={m} isMine={m.created_by === 'me-1'} isGrouped={false} onOpenThread={() => {}} />)}</div>
-                  <ChatInput threadId="c1" onSend={async () => {}} onUploadFile={async (f) => ({ url: 'u', name: f.name, content_type: f.type, size: f.size })} projectId="p1" currentTeamMemberId="me-1" participants={[]} />
+                  <ChatInput threadId="c1" onSend={async () => {}} onUploadFile={async (f) => ({ url: 'u', name: f.name, content_type: f.type, size: f.size })} projectId="p1" currentTeamMemberId="me-1" participants={[{ member_id: 'a-1', name: '개발 에이전트' }]} placeholder={ko.chats.inputPlaceholderFull} />
                 </div>
                 <div id="thread" className="flex min-h-0 w-[300px] shrink-0 flex-col overflow-hidden"><ThreadPanel parentMessage={PARENT} conversationId="c1" currentTeamMemberId="me-1" projectId="p1" onClose={() => {}} /></div>
               </div>
@@ -190,7 +190,11 @@ for (const scheme of ['light', 'dark'] as const) {
       expect(face.border, 'the box has a visible border').toBeGreaterThanOrEqual(1); // reverted (a borderless row) → 0
       expect(face.bg, 'and its own face').not.toBe(face.page);
       expect(face.sendW, `«⏎ 보내기» is a words button at 1100 (${face.sendW}px), not a bare icon`).toBeGreaterThanOrEqual(70);
-      expect(await page.locator('#room textarea').getAttribute('placeholder')).toBe('메시지 쓰기 — / 로 명령, @ 로 멘션');
+      // the REAL hint ChatView passes at desktop widths (this scene once used the short phone hint, and the long one wrapped and was cut off in the real 480 px room column): it must fit on ONE line, whole
+      const hint = await page.evaluate(() => { const ta = document.querySelector('#room textarea') as HTMLTextAreaElement; const cs = getComputedStyle(ta); const c = document.createElement('canvas').getContext('2d')!; c.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`; const avail = ta.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight); const plc = getComputedStyle(ta, '::placeholder'); return { text: ta.placeholder, need: Math.ceil(c.measureText(ta.placeholder).width), avail: Math.round(avail), nowrap: plc.whiteSpace }; });
+      expect(hint.text).toBe('메시지 쓰기 — / 명령 · @ 멘션 · # 엔티티');
+      expect(hint.need, `the hint needs ${hint.need}px of the ${hint.avail}px the text area has`).toBeLessThanOrEqual(hint.avail); // reverted (the old long hint, ~40 characters) → wider than the box: wraps and is cut
+      expect(hint.nowrap, 'and it can never wrap into a second (clipped) line').toBe('nowrap');
       expect(await page.locator('#room [data-testid="chat-send"]').textContent()).toContain('보내기');
 
       // ④ the thread head is ONE line; the original message is right under it; the replies are plain rows

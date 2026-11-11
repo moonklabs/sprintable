@@ -6,7 +6,9 @@ import { useTranslations } from 'next-intl';
 import { Pencil } from 'lucide-react';
 import { Icon } from '@/components/ds/icon';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { RoomHead } from '@/components/chat/room-head';
+import { RoomHead, RoomBarTitle } from '@/components/chat/room-head';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { StatusLabel } from '@/components/ds/status-label';
 import { AgentSessionStrip } from '@/components/chat/agent-session-strip';
 import { AgentsPausedBand, type AgentsPausedState } from '@/components/chat/agents-paused-band';
@@ -100,6 +102,7 @@ export default function ConversationPage() {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const { conversation_id } = useParams<{ conversation_id: string }>();
   const router = useRouter();
+  const isBelowLg = useIsMobile(); // the phone shell's width (below lg = 1024): the room head goes into the shell's header row there
   // story #1959(P2-S3): 딥링크 매니페스트(chat_thread→parentTab=chat) — 콜드 진입 시 "채팅"
   // 탭 루트를 BACK 대상으로 선주입. 목록에서 클릭해 온 경우(history.length>1)는 no-op.
   useSyntheticParentTabHistory('/chats');
@@ -376,20 +379,41 @@ export default function ConversationPage() {
 
   return (
     <>
-      <RoomHead
-        backLabel={t('title')}
-        // story #1990: replace(), not push() — 콜드-진입 합성 스택에 세번째 엔트리를 쌓지 않아 브라우저 BACK 재진입 트랩을 구조적으로 없앤다(§3.2). back()류 직접 호출은 하지 않는다([[feedback-history-back-nextjs]]).
-        // story #2168 PR-② AC④ — "다른 프로젝트" 경유로 왔으면(`from` 존재) 원래 프로젝트로 `?p=`를 실어 복귀시킨다: 이 뒤로가기가 그 역할을 겸한다.
-        onBack={() => router.replace(fromProjectId ? flatHref(`/chats?p=${fromProjectId}`) : flatHref('/chats'))}
-        title={headTitle}
-        tag={headTag}
-        subline={headSubline}
-        chips={headChips}
-        moreCount={headMoreCount}
-        addLabel={t('addParticipants')}
-        onAdd={meta ? () => setShowAddParticipant(true) : undefined}
-        trailing={meta ? headTrailing : null}
-      />
+      {/* story 4887 (UI-4) — a PHONE (below lg) puts the room's name · people · «⋯» into the shell's own header row (no second head under it: 135 px of reading column); lg up keeps the in-column head below. */}
+      {isBelowLg ? (
+        <TopBarSlot
+          title={(
+            <RoomBarTitle
+              backLabel={t('title')}
+              // story #1990: replace(), not push() — 콜드-진입 합성 스택에 세번째 엔트리를 쌓지 않아 브라우저 BACK 재진입 트랩을 구조적으로 없앤다(§3.2). back()류 직접 호출은 하지 않는다([[feedback-history-back-nextjs]]).
+              // story #2168 PR-② AC④ — "다른 프로젝트" 경유로 왔으면(`from` 존재) 원래 프로젝트로 `?p=`를 실어 복귀시킨다: 이 뒤로가기가 그 역할을 겸한다.
+              onBack={() => router.replace(fromProjectId ? flatHref(`/chats?p=${fromProjectId}`) : flatHref('/chats'))}
+              title={headTitle}
+              tag={headTag}
+              subline={headSubline}
+              peopleLabel={t('roomPeopleOpen')}
+              peopleCount={meta?.participants.length ?? 0}
+              chips={headChips}
+              moreCount={headMoreCount}
+              addLabel={t('addParticipants')}
+              onAdd={meta ? () => setShowAddParticipant(true) : undefined}
+            />
+          )}
+          actions={meta ? headTrailing : null}
+        />
+      ) : null}
+      {isBelowLg ? null : (
+        <RoomHead
+          title={headTitle}
+          tag={headTag}
+          subline={headSubline}
+          chips={headChips}
+          moreCount={headMoreCount}
+          addLabel={t('addParticipants')}
+          onAdd={meta ? () => setShowAddParticipant(true) : undefined}
+          trailing={meta ? headTrailing : null}
+          />
+      )}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
         {blocked ? (
           // story #2168 PR-② — 능동 클릭 후 접근 불가(권한 회수 등, BE 403 — 인가는 이미
