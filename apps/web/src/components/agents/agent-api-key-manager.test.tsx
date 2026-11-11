@@ -42,6 +42,32 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+// story 4889 — 402폭 가로 넘침(CI layout e2e `mobile-width-overflow` · 실측 스크롤러 scrollWidth 487 > 402): 카드 머리가 «제목 | 버튼 셋(333px 한 줄)»이라 좁은 폭에서 버튼 줄이 카드 밖으로 밀렸다.
+// jsdom은 폭을 못 재므로 wrap/shrink 계약을 DOM 클래스로 고정한다(실제 폭은 e2e `402폭 — API 키 화면`이 잰다).
+describe('AgentApiKeyManager — 4889 header does not push the card wider at 402', () => {
+  it('⭐머리는 줄바꿈을 허용하고(flex-wrap) 제목 칸은 줄어들 수 있고(min-w-0) 버튼 묶음도 줄바꿈 · 줄어든다 — 되돌리면 빨강', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 })));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages}>
+          <AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const card = document.querySelector('[data-testid="agent-api-key-manager"]');
+    expect(card).toBeTruthy();
+    const head = card!.querySelector('h3')!.parentElement!.parentElement!; // 제목 칸의 부모 = 머리 줄
+    expect(head.className).toContain('flex-wrap');
+    expect(head.firstElementChild!.className).toContain('min-w-0');
+    const actions = head.lastElementChild!; // 버튼 묶음 칸
+    expect(actions.className).toContain('min-w-0');
+    const buttonRow = actions.firstElementChild!; // 버튼 셋의 줄
+    expect(buttonRow.className).toContain('flex-wrap');
+    expect(buttonRow.querySelectorAll('button').length).toBe(3);
+  });
+});
+
 // story #2526 — scope 개수가 늘면 권한 칩이 카드/화면 밖으로 overflow 되던 결함.
 // jsdom은 실제 overflow를 계산하지 않으므로, wrap/shrink 계약(flex-wrap·min-w-0·max-width)이
 // DOM 클래스로 고정돼 있는지를 검증한다. 실제 시각 회귀는 라이브 QA 몫.

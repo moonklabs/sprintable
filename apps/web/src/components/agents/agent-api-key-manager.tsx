@@ -223,16 +223,17 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
   const hasActiveKey = activeKeys.length > 0 || generatedKey !== null;
 
   return (
-    <SectionCard className="p-6">
-      <div className="flex items-start justify-between mb-4">
-        <div>
+    <SectionCard className="p-6" data-testid="agent-api-key-manager">
+      {/* story 4889 — 402폭 가로 넘침(실측: 스크롤러 scrollWidth 487 > 402): 머리가 «제목 | 버튼 셋(333px 한 줄)»이라 좁은 폭에서 버튼 줄이 카드 밖으로 밀렸다. 줄바꿈을 허용하고(flex-wrap) 제목 칸은 줄어들 수 있게(min-w-0) 한다. */}
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div className="min-w-0">
           <h3 className="text-lg font-semibold">{t('agentApiKeyListTitle', { name: agentLabel ?? agentName })}</h3>
           <p className="text-sm text-muted-foreground">
             {t('agentApiKeyListDescription')}
           </p>
         </div>
-        <div className="flex flex-col items-end gap-2">
-          <div className="flex gap-2">
+        <div className="flex min-w-0 flex-col items-end gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
             <Button variant="outline" onClick={loadApiKeys} disabled={loading}>
               {t('agentApiKeyRefresh')}
             </Button>
