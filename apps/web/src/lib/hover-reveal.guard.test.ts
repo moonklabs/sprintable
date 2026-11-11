@@ -92,6 +92,11 @@ const EXEMPT: { file: string; needle: string; reason: string }[] = [
     reason: '끌기 손잡이 = 마우스 전용: 센서가 터치를 안 받고(#1988) 키보드 센서도 없다 → tabIndex -1 · aria-hidden(PO 08:45Z · 렌더 테스트가 핀)',
   },
   {
+    file: 'components/ds/tree-row.tsx',
+    needle: 'z-10 flex items-center opacity-0',
+    reason: '끌기 손잡이 자리 = 마우스 전용(UI-3 4886 TreeRow가 doc-tree 줄 구조를 부품으로 옮긴 것): 센서가 터치를 안 받고 키보드 센서도 없다 → 터치(pointer-coarse)에서는 아예 없고(hidden) 마우스에서만 호버 때 보인다. 손잡이 노드(aria-hidden · tabIndex -1)는 호출부가 준다 · 키보드 대체 길은 줄 «⋮» 메뉴(위로/아래로/폴더로)',
+  },
+  {
     file: 'app/(authenticated)/chats/[conversation_id]/page.tsx',
     needle: 'group-hover/title:opacity-100',
     reason: '장식(aria-hidden 연필) — 조작은 늘 보이는 방 이름 버튼(aria-label «방 이름 바꾸기»)',
