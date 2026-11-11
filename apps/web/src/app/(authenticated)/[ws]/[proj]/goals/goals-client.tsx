@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChevronLeft, GripVertical, Plus, Send, Trash2, X, Flag } from 'lucide-react';
@@ -993,32 +993,45 @@ function CreateModal({ projectId, orgId, onCreated, onClose }: CreateModalProps)
 interface GoalsClientProps {
   projectId: string;
   orgId?: string;
+  /**
+   * story #4888(UI-5 목표 화면 둘째 조각) — 주소가 보기를 정하는 진입(`/epics` = 일감 탭줄의 «목표» 탭 = 스윔레인으로 열림). 있으면 저장된 보기보다 먼저고 프로젝트가 바뀌어도 이 보기로 다시 서며,
+   * 그 진입에서 누른 전환은 이번 화면에만 닿는다(저장하지 않는다 — `/goals`가 다음에 열릴 때 기본 보기를 이 진입이 바꾸지 않게). 없으면 예전 그대로(기본 목록 · 프로젝트별 기억).
+   */
+  initialView?: 'list' | 'swimlane';
 }
 
-export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
+export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps) {
   const t = useTranslations('goals');
   const tc = useTranslations('common');
   const router = useRouter();
   const { wsSlug, projSlug } = useGoalsRoute();
   // story #4888(UI-5 목표 화면 첫 조각) — «보기: 목록 | 스윔레인». 에픽 탭(/epics 스윔레인)과 목표 화면(/goals)을 한 화면으로 합친다: 같은 마스트헤드 아래에서 보기만 갈아 낀다.
   // 기본은 목록(예전 /goals 그대로). 고른 보기는 프로젝트별로 이 브라우저에 기억한다(스윔레인 보드가 축 전환을 기억하는 것과 같은 방식 · 저장이 막혀도 화면은 선다).
-  const [view, setViewState] = useState<'list' | 'swimlane'>('list');
-  useEffect(() => {
-    // 프로젝트가 바뀔 때마다(같은 화면이 다시 마운트되지 않고 projectId만 바뀌는 이동 포함) 그 프로젝트의 보기로 맞춘다 — 저장값이 없으면 기본(목록). 이전 프로젝트의 보기를 끌고 가지 않는다.
-    let next: 'list' | 'swimlane' = 'list';
+  // 보기는 «어느 프로젝트의 보기인가»와 같이 든다: 프로젝트가 바뀐 첫 렌더에서 이전 프로젝트의 보기로 한 번 그려지며 쓸데없는 목록 읽기가 나가지 않게, 프로젝트가 다르면 그 자리에서 바로 새 프로젝트의 보기를 계산한다.
+  const resolveView = useCallback((pid: string): 'list' | 'swimlane' => {
+    if (initialView) return initialView; // 주소가 보기를 정한다 — 저장값은 안 읽는다
     try {
-      if (window.localStorage.getItem(`goals-view:${projectId}`) === 'swimlane') next = 'swimlane';
+      if (typeof window !== 'undefined' && window.localStorage.getItem(`goals-view:${pid}`) === 'swimlane') return 'swimlane';
     } catch { /* 저장소 막힘 — 기본 보기로 */ }
-    setViewState(next);
-  }, [projectId]);
+    return 'list';
+  }, [initialView]);
+  const [viewState, setViewState] = useState<{ pid: string; v: 'list' | 'swimlane' }>({ pid: projectId, v: initialView ?? 'list' });
+  const view = viewState.pid === projectId ? viewState.v : resolveView(projectId);
+  useEffect(() => {
+    // 처음 열 때(저장값 읽기)와 프로젝트 · 진입 주소가 바뀔 때 상태를 그 프로젝트의 보기로 맞춘다(저장값이 없으면 기본 목록 — 이전 프로젝트의 보기를 끌고 가지 않는다).
+    setViewState({ pid: projectId, v: resolveView(projectId) });
+  }, [projectId, resolveView]);
   const setView = useCallback((next: 'list' | 'swimlane') => {
-    setViewState(next);
+    setViewState({ pid: projectId, v: next });
+    if (initialView) return; // 주소가 정한 진입의 전환은 이번 화면만(기억은 /goals의 몫)
     try { window.localStorage.setItem(`goals-view:${projectId}`, next); } catch { /* 저장 못 해도 이번 화면은 바뀐다 */ }
-  }, [projectId]);
+  }, [projectId, initialView]);
   const { addToast } = useToast();
   const [epics, setGoals] = useState<Goal[]>([]);
   const [selectedEpic, setSelectedEpic] = useState<Goal | null>(null);
-  const [loading, setLoading] = useState(true);
+  // story #4888 — «이 프로젝트의 목표 목록을 읽었나». 예전엔 한 번 읽으면 끝나는 `loading` 불리언이었는데, 스윔레인 보기는 이 목록을 읽지 않고(보드가 자기 읽기를 쥔다) 프로젝트가 바뀌면 이전 프로젝트의
+  // 목록이 남을 수 있어, 어느 프로젝트의 목록인지를 같이 든다 — 목록 보기는 이 값이 지금 프로젝트일 때만 서고, 마스트헤드 수도 그때만 보인다.
+  const [loadedProject, setLoadedProject] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
   const [statusFilter, setStatusFilter] = useState<GoalStatus | 'all'>('all');
@@ -1040,7 +1053,17 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
 
   // wedge #2: order_by=position 옵트인 — 큐레이션 prefix + 자동(NULL) tail. position 모드는 BE가
   // 커서를 발행하지 않으므로 이어달리기(cursor pagination) 없이 전량(상위 STEER_LIMIT) 로드한다(AC4).
+  // story #4888 — 응답 뒤섞임 방어(codex 3차): 읽기마다 번호표(순번)를 붙이고 «가장 마지막에 시작한 읽기»만 반영한다. 프로젝트 비교만으로는 같은 프로젝트의 겹친 읽기(조직 동기화로 다시 읽기 ·
+  // A→B→A 이동)에서 오래된 응답이 새 응답을 덮는 것을 못 막는다. 프로젝트가 바뀌는 순간에는 이전 프로젝트의 목록을 바로 비우고(아래 효과) 진행 중 읽기를 무효로 만든다.
+  const fetchSeqRef = useRef(0);
+  const listProjectRef = useRef<string | null>(null); // `epics` 상태가 어느 프로젝트의 것인가(null = 비었거나 아직 안 읽음)
+  const currentProjectRef = useRef(projectId);        // 지금 화면의 프로젝트 — 옛 프로젝트의 클로저가 늦게 다시 읽기를 부르는 것(삭제 실패 뒤 재읽기)을 시작에서 거절한다
+  useEffect(() => { currentProjectRef.current = projectId; }, [projectId]);
+  // 읽기가 진행 중일 때 만든 목표 — 그 읽기의 응답에는 없을 수 있어 응답에 합쳐 넣는다(오래된 응답이 방금 만든 목표를 덮어 사라지게 하지 않는다). atSeq = 만든 때의 읽기 순번.
+  const createdRef = useRef<Array<{ goal: Goal; atSeq: number }>>([]);
   const fetchGoals = useCallback(async () => {
+    if (currentProjectRef.current !== projectId) return; // 다른 프로젝트로 옮긴 뒤 옛 클로저가 부른 재읽기 — 지금 프로젝트의 읽기를 건드리지 않는다
+    const seq = ++fetchSeqRef.current;
     try {
       // story #3126 — include=glance로 latest_story_activity_at을 같이 받는다(신규 round-trip
       // 없음, 이미 하던 이 fetch에 옵트인 파라미터만 추가).
@@ -1050,13 +1073,19 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
       const res = await fetchWithAuth(`/api/goals?${params.toString()}`);
       if (!res.ok) throw new Error(`Failed to fetch epics: ${res.status}`);
       const { data } = await res.json() as { data: Goal[] };
-      setGoals(data ?? []);
-      setCapped((data?.length ?? 0) >= STEER_LIMIT);
+      if (seq !== fetchSeqRef.current) return; // 더 나중에 시작한 읽기가 있다(같은 프로젝트의 겹친 읽기 · 프로젝트 이동) — 이 응답은 버린다
+      const fetched = data ?? [];
+      // 이 읽기를 시작한 뒤에 만든 목표(atSeq >= seq)가 응답에 없으면 앞에 합친다. 이 읽기보다 나중에 시작한 읽기가 이미 본 것(atSeq < seq)은 서버가 알고 있으니 목록에서 뺀다.
+      const extra = createdRef.current.filter((c) => c.atSeq >= seq && !fetched.some((d) => d.id === c.goal.id)).map((c) => c.goal);
+      createdRef.current = createdRef.current.filter((c) => c.atSeq >= seq);
+      setGoals(extra.length > 0 ? [...extra, ...fetched] : fetched);
+      setCapped(fetched.length >= STEER_LIMIT);
+      listProjectRef.current = projectId;
     } catch (err) {
       // AC3: silent-swallow 금지 — 최소 로깅.
       console.error('[epics] 목록을 불러오지 못했습니다', err);
     } finally {
-      setLoading(false);
+      if (seq === fetchSeqRef.current) setLoadedProject(projectId);
     }
     // orgSyncVersion은 콜백 안에서 안 읽는다 — switch-org 성공 直後 이 콜백 새 참조를
     // 강제해 재요청시키기 위한 의도적 invalidation 트리거다(story #2545, project-context-
@@ -1134,23 +1163,46 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
   }, [fetchGoals, addToast, t]);
 
   const handleCreated = useCallback((epic: Goal) => {
+    // 다른 프로젝트로 옮긴 뒤에야 도착한 «만들기 응답» — 그 목표는 서버에 만들어졌지만 지금 화면(다른 프로젝트)의 목록에 끼어들면 안 된다(그 프로젝트를 다시 열면 읽기로 들어온다).
+    if (currentProjectRef.current !== projectId) return;
     setGoals((prev) => [epic, ...prev]);
+    createdRef.current.push({ goal: epic, atSeq: fetchSeqRef.current });
+    listProjectRef.current = projectId; // 상태에 이 프로젝트의 목표가 들어왔다 — 프로젝트를 옮길 때 비워야 할 대상
     setSelectedEpic(epic);
     setMobileView('detail');
-  }, []);
+  }, [projectId]);
 
   const handleUpdate = useCallback((updated: Goal) => {
     setSelectedEpic(updated);
     setGoals((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
   }, []);
 
+  // story #4888 — 목록 읽기는 «목록 보기»일 때만. 스윔레인 보기(= `/epics` 진입 포함)는 보드가 자기 읽기 · 시간초과 · 실패 표시를 쥐므로, 여기서 또 읽거나 그 읽기를 기다리면
+  // 목록 읽기가 느릴 때 보드의 «느림 vs 멈춤» 표시(story #3019)가 가려지고 같은 /api/goals를 두 번 읽는다. 목록 보기로 넘어올 때 읽는다.
+  const needsGoals = view === 'list';
+  // 프로젝트가 바뀌는 순간: 진행 중이던 읽기를 무효로 하고, 상태에 남은 «다른 프로젝트의 목록»을 바로 비운다(실패 경로에서 지우는 것이 아니라 이동 시점에 — 방금 이 프로젝트에서 만든 목표를 실패가 지우지 않게).
+  // 이 효과는 아래 읽기 효과보다 먼저 선언돼 같은 커밋에서 먼저 돈다.
   useEffect(() => {
+    fetchSeqRef.current += 1;
+    createdRef.current = [];
+    if (listProjectRef.current !== null && listProjectRef.current !== projectId) {
+      setGoals([]);
+      setCapped(false);
+      setSelectedEpic(null);
+      listProjectRef.current = null;
+    }
+    // «읽음» 표시도 같이 비운다 — 비운 목록을 «이 프로젝트의 목록을 읽은 것»으로 보고 0 · 0을 정확한 수처럼 보이는 구멍(A → B(스윔레인) → A)을 막는다. 처음 열 때는 이미 null이다.
+    setLoadedProject((prev) => (prev === projectId ? prev : null));
+  }, [projectId]);
+  useEffect(() => {
+    if (!needsGoals) return;
     void fetchGoals();
-  }, [fetchGoals]);
+  }, [fetchGoals, needsGoals]);
 
   // story #3126 — dormancy_threshold_hours를 1회 조회(project_id 변경 시 재조회). 실패 시
   // DEFAULT_DORMANCY_THRESHOLD_HOURS 유지(위 useState 초기값 그대로, 별도 처리 불요).
   useEffect(() => {
+    if (!needsGoals) return; // 이 값은 마스트헤드 «진행 중» 수에만 쓰인다 — 목록 보기일 때만 읽는다
     let cancelled = false;
     void (async () => {
       try {
@@ -1165,9 +1217,10 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
       }
     })();
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, needsGoals]);
 
-  if (loading) {
+  const goalsReady = loadedProject === projectId;
+  if (view === 'list' && !goalsReady) {
     return (
       <>
         {/* story #3945 — 아래 :1157(본문 «목표» 제목)이 이 페이지의 진짜 h1이다. 로딩
@@ -1210,7 +1263,9 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
             시그니처는 무채 두께(3px)·길이로 유지. */}
         <hr className="my-3 h-[3px] w-16 border-0 bg-proof-line-strong" />
         <p className="text-editorial-ui text-muted-foreground">
-          {t('indexDek')} <span className="text-muted-foreground">{t('indexCountActive', { count: activeCount })} · {t('indexCountDone', { count: doneCount })}</span>
+          {t('indexDek')}{' '}
+          {/* story #4888 — 수는 이 프로젝트의 목록을 읽은 뒤에만(스윔레인 보기로 곧장 열렸으면 아직 안 읽어 0 · 0이 «정확한 수»처럼 보이지 않게) */}
+          {goalsReady ? <span className="text-muted-foreground">{t('indexCountActive', { count: activeCount })} · {t('indexCountDone', { count: doneCount })}</span> : null}
         </p>
       </div>
   );
@@ -1361,7 +1416,7 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
       {view === 'swimlane' ? (
         // story #4888 — 스윔레인 보기: 보드는 «한 곳에만» 그린다(아래 목록 보기는 데스크톱 · 모바일 두 배치를 CSS로 가려 둘 다 DOM에 있어 거기에 넣으면 보드가 두 번 서 두 번 불러온다).
         // 마스트헤드(h1) · 보기 전환은 목록 보기와 같은 것을 그대로 쓰고, 상단바 슬롯은 위의 것(목표 제목 + 새 목표) 하나만 — 보드는 embedded로 자기 슬롯을 안 그린다.
-        <div className="flex h-[calc(100svh-var(--shell-chrome-h))] min-h-0 flex-col overflow-hidden bg-muted/35" data-testid="goals-swimlane-view">
+        <div className="flex h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))] min-h-0 flex-col overflow-hidden bg-muted/35" data-testid="goals-swimlane-view">
           {masthead}
           {viewSwitch}
           <div className="focus-inset min-h-0 flex-1 overflow-y-auto">
@@ -1377,7 +1432,7 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
           story #4131, --shell-chrome-h가 TopBar 표시 여부+모바일 탭바를 CSS만으로 합성한
           SSOT). ActivationChecklistBanner 표시 시엔 그만큼 못 미침(페이지 스크롤로 보정,
           기능 파손 아님) — PO 라이브 확認 요청. */}
-      <div className="hidden h-[calc(100svh-var(--shell-chrome-h))] min-h-0 overflow-hidden lg:flex lg:items-stretch lg:gap-0">
+      <div className="hidden h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))] min-h-0 overflow-hidden lg:flex lg:items-stretch lg:gap-0">
         <div className={`transition-all duration-300 ${selectedEpic ? 'w-[380px] shrink-0 border-r border-border/80' : 'w-full'}`}>
           {listPanel}
         </div>
@@ -1398,7 +1453,7 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
           분기 L893의 min-h-0와 동형·모바일 스크롤 불가 재현+근본 확인 후 정정).
           story #4130/#4131 — 같은 이유로 h-[calc(100svh-var(--shell-chrome-h))] 앵커 추가
           (위 desktop 분기와 동형). */}
-      <div className="flex h-[calc(100svh-var(--shell-chrome-h))] min-h-0 flex-col overflow-hidden lg:hidden">
+      <div className="flex h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))] min-h-0 flex-col overflow-hidden lg:hidden">
         {mobileView === 'list' ? (
           <div className="min-h-0 flex-1">{listPanel}</div>
         ) : (
