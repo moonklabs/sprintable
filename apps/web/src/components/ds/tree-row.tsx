@@ -10,18 +10,27 @@ import { Icon, type IconName } from './icon';
 const PAD = ['pl-2', 'pl-6', 'pl-10', 'pl-14', 'pl-18', 'pl-22', 'pl-26', 'pl-30', 'pl-34'] as const;
 const HANDLE_GAP = ['w-0', 'w-4', 'w-8', 'w-12', 'w-16', 'w-20', 'w-24', 'w-28', 'w-32'] as const;
 
-function level(depth: number): number {
-  return Math.min(Math.max(0, Math.trunc(depth)), PAD.length - 1);
+// story 4892 (UI-9 문서 트리) — 좁은 들여쓰기: 깊이당 8px, 4단에서 멈춘다(그 아래 깊이는 같은 자리). 깊게 쌓은 문서의 제목이 «들여쓰기에 다 먹혀» 잘리는 퇴행을 막으려는 것 —
+// 16px씩 8단은 1440에서 깊이 7 제목이 16 → 7자, 폰 390에서 깊이 5가 13 → 7자로 줄었다(측정). 옛 줄도 5단에서 멈췄다(14px × 5 = 72) — 같은 뜻의 «멈춤».
+const PAD_COMPACT = ['pl-2', 'pl-4', 'pl-6', 'pl-8', 'pl-10'] as const;
+const HANDLE_GAP_COMPACT = ['w-0', 'w-2', 'w-4', 'w-6', 'w-8'] as const;
+/** 들여쓰기 표: `default` = 깊이당 16px · 8단(디자인 부품 v0.3 M17 기본) / `compact` = 깊이당 8px · 4단에서 멈춤(깊은 트리용). */
+export type TreeIndent = 'default' | 'compact';
+
+function level(depth: number, indent: TreeIndent = 'default'): number {
+  return Math.min(Math.max(0, Math.trunc(depth)), (indent === 'compact' ? PAD_COMPACT : PAD).length - 1);
 }
 
 /** 깊이의 들여쓰기 px — 제목 글이 시작하는 자리를 계산해야 하는 호출부(삽입선 등)가 쓴다. 줄과 같은 표를 쓰니 어긋나지 않는다. */
-export function treeIndentPx(depth: number): number {
-  return level(depth) * 16;
+export function treeIndentPx(depth: number, indent: TreeIndent = 'default'): number {
+  return level(depth, indent) * (indent === 'compact' ? 8 : 16);
 }
 
 export type TreeRowProps = {
-  /** 깊이(0부터) — 깊이당 16px 들여쓴다. */
+  /** 깊이(0부터) — 기본은 깊이당 16px(8단), `indent="compact"`면 깊이당 8px(4단에서 멈춤). */
   depth: number;
+  /** 들여쓰기 표 — 기본 `default`. 깊게 쌓이는 트리(문서 트리)는 `compact`: 제목이 들여쓰기에 먹히지 않게(줄 높이 · 폰 44는 그대로). */
+  indent?: TreeIndent;
   /** 줄의 이름 글. 한 줄 말줄임. */
   title: ReactNode;
   /** 글 앞 아이콘(문서 · 폴더 · 열린 폴더) — 장식, 뜻은 제목 글이 싣는다. */
@@ -54,14 +63,16 @@ export type TreeRowProps = {
  * 접힌 자식을 그리고 안 그리는 일 · 키 · 끌기 센서 · 미리보기 카드 · 메뉴는 호출부(지금의 문서 트리)가 그대로 맡는다 — 이 부품은 «한 줄의 모양»이다.
  * 트리 역할(`role=tree`)과 화살표 키는 얹지 않는다: 지금 트리에는 없는 것이고, 얹으면 키 약속까지 따라와야 한다(새 기능).
  */
-export function TreeRow({ depth, title, icon, emoji, statusMark, selected = false, expanded, dropZone, dragHandle, trailing, controlProps, className, ...rest }: TreeRowProps) {
-  const lv = level(depth);
+export function TreeRow({ depth, indent = 'default', title, icon, emoji, statusMark, selected = false, expanded, dropZone, dragHandle, trailing, controlProps, className, ...rest }: TreeRowProps) {
+  const lv = level(depth, indent);
+  const pads = indent === 'compact' ? PAD_COMPACT : PAD;
+  const handleGaps = indent === 'compact' ? HANDLE_GAP_COMPACT : HANDLE_GAP;
   const isFolder = expanded !== undefined;
   return (
-    <div {...rest} data-slot="ds-tree-row" data-depth={depth} className={cn('group relative', className)}>
+    <div {...rest} data-slot="ds-tree-row" data-depth={depth} data-indent={indent} className={cn('group relative', className)}>
       {dragHandle ? (
         <div data-slot="ds-tree-handle" className="pointer-events-none absolute inset-y-0 left-0 z-10 flex items-center opacity-0 pointer-fine:group-hover:opacity-100 pointer-coarse:hidden [@media(hover:none)]:hidden">
-          <span aria-hidden="true" className={cn('shrink-0', HANDLE_GAP[lv])} />
+          <span aria-hidden="true" className={cn('shrink-0', handleGaps[lv])} />
           <span className="pointer-events-auto">{dragHandle}</span>
         </div>
       ) : null}
@@ -75,7 +86,7 @@ export function TreeRow({ depth, title, icon, emoji, statusMark, selected = fals
         // ds Button(조용 변형)이 폰 누름 영역 44(touch:min-h-ds-touch)와 초점 링을 이미 쥔다 — 줄 모양만 덮는다(오른쪽 여백: 마우스 40 = right-2 + 24 «⋮», 폰 56 = right-2 + 44 누름 영역 + 숨): 높이는 내용을 따르되 36 이상, 가득 폭, 왼쪽 정렬, 글 굵기는 제목에만.
         className={cn(
           'h-auto min-h-ds-control w-full justify-start gap-2 whitespace-normal py-1 pr-10 touch:pr-14 text-left text-ds-body font-normal focus-visible:ring-inset focus-visible:ring-offset-0',
-          PAD[lv],
+          pads[lv],
           selected ? 'border-transparent bg-ds-action-soft text-ds-action-text hover:bg-ds-action-soft hover:text-ds-action-text' : 'text-ds-ink',
           dropZone === 'into' && 'bg-ds-action-soft ring-1 ring-inset ring-ds-action',
         )}

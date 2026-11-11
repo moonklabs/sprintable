@@ -11,20 +11,15 @@ import { slugifyDocTitle, isUntitledSlug } from '@/components/docs/lib/doc-slug'
 import { docsListUrl, docUrl } from '@/components/docs/lib/doc-project-url';
 import { useDocSync, unwrapDocResponse } from '@/components/docs/use-doc-sync';
 import { htmlToMarkdown } from '@/components/docs/lib/content-converter';
-import { Check, Copy, Link2, MoreHorizontal, Share2, Trash2 } from 'lucide-react';
 import { InlineSaveIndicator } from './inline-save-indicator';
 import { DocShareDialog } from '@/components/docs/doc-share-dialog';
 import { DocModeSwitch } from '@/components/docs/doc-mode-switch';
 import { DocSyncBanner } from '@/components/docs/doc-sync-banner';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
+import { cn } from '@/lib/utils';
+import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '@/components/ds/menu';
+import { IconButton } from '@/components/ds/icon-button';
+import { Icon } from '@/components/ds/icon';
+import { Textarea } from '@/components/ds/input';
 import { useDocsLayout } from '../docs-context';
 import { useDocDelete } from '@/components/docs/use-doc-delete';
 import { DocAssigneeControl } from '@/components/docs/doc-assignee-control';
@@ -308,7 +303,7 @@ export default function DocSlugPage() {
   if (docLoading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-muted-foreground">{t('loading')}</p>
+        <p className="text-ds-small text-ds-ink-3">{t('loading')}</p>
       </div>
     );
   }
@@ -316,7 +311,7 @@ export default function DocSlugPage() {
   if (!selectedDoc) {
     return (
       <div className="flex h-full items-center justify-center">
-        <p className="break-keep text-sm text-muted-foreground">{t('notFound')}</p>
+        <p className="break-keep text-ds-small text-ds-ink-3">{t('notFound')}</p>
       </div>
     );
   }
@@ -325,35 +320,24 @@ export default function DocSlugPage() {
     <>
       <InlineSaveIndicator status={saveStatus} onAction={save} t={t} tc={tc} />
       <div className="relative">
-        <button
-          type="button"
+        {/* story 4892 (UI-9 문서 상세 열) — 도구 줄 단추 = ds IconButton(lg 이상에서만 · 그 아래는 ⋯ 메뉴 안). 복사 성공 = 체크 · 실패 = 실패 색 아이콘(이름 · title이 실패 문구로 바뀜 — 그대로). */}
+        <IconButton
+          icon={mdCopied ? 'check' : 'content_copy'}
+          label={mdCopyFailed ? tc('copyFailedSelectManually') : t('copyMarkdown')}
           onClick={handleCopyMarkdown}
-          title={mdCopyFailed ? tc('copyFailedSelectManually') : t('copyMarkdown')}
-          aria-label={mdCopyFailed ? tc('copyFailedSelectManually') : t('copyMarkdown')}
-          className="hidden h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground lg:inline-flex"
+          className={cn('hidden lg:inline-flex', mdCopied && 'text-ds-done', mdCopyFailed && 'text-ds-failed')}
           data-testid="docs-toolbar-copy-markdown"
-        >
-          {mdCopied ? <Check className="h-4 w-4 text-success" /> : <Copy className={mdCopyFailed ? 'h-4 w-4 text-destructive' : 'h-4 w-4'} />}
-        </button>
+        />
         {/* story #3986 CHANGES(페드루 PO C2·C3) — 아이콘 버튼만으론 실패가 안 보였다
             (title·aria-label·아이콘 색만 바뀜 — 터치 기기는 title도 못 봄). 눈에 보이는
             role=alert + markdown 원문 선택 칸을 드롭다운으로 띄운다. 패널 자체는
             mdCopyFailed(3초 코스메틱)와 분리해 mdCopyFailedRaw만으로 뜬다 — 손으로
             고를 시간을 3초로 자르지 않는다(다음 성공·바깥 클릭·Esc·✕로 닫는다). */}
         {mdCopyFailedRaw != null ? (
-          <div ref={(el) => { mdCopyFailedPanelRef.current = el; mdCopyFailedClampRef(el); }} data-dropdown-panel="md-copy-failed" className="absolute right-0 top-full z-50 mt-1 w-72 max-w-[calc(100vw-1rem)] space-y-1.5 rounded-md border border-border bg-popover p-2 shadow-md">
+          <div ref={(el) => { mdCopyFailedPanelRef.current = el; mdCopyFailedClampRef(el); }} data-dropdown-panel="md-copy-failed" className="absolute right-0 top-full z-50 mt-1 w-72 max-w-[calc(100vw-1rem)] space-y-1.5 rounded-ds-panel border border-ds-line-control bg-ds-surface-raised p-2 shadow-md">
             <div className="flex items-start justify-between gap-2">
-              <p role="alert" className="break-keep text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => setMdCopyFailedRaw(null)}
-                aria-label={tc('close')}
-                className="shrink-0 text-muted-foreground hover:text-foreground"
-              >
-                ✕
-              </Button>
+              <p role="alert" className="break-keep text-ds-small text-ds-failed">{tc('copyFailedSelectManually')}</p>
+              <IconButton icon="close" label={tc('close')} onClick={() => setMdCopyFailedRaw(null)} className="shrink-0" />
             </div>
             <Textarea
               readOnly
@@ -376,54 +360,42 @@ export default function DocSlugPage() {
         editLabel={t('editDoc')}
         groupLabel={t('modeSwitchLabel')}
       />
-      <button
-        type="button"
-        onClick={() => setShareDialogOpen(true)}
-        title={ts('share')}
-        aria-label={ts('share')}
-        className="hidden h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground lg:inline-flex"
-        data-testid="docs-toolbar-share"
-      >
-        <Share2 className="h-4 w-4" />
-      </button>
-      <DropdownMenu>
-        <DropdownMenuTrigger aria-label={t('moreActions')} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground">
-          <MoreHorizontal className="h-4 w-4" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-48">
+      <IconButton icon="share" label={ts('share')} onClick={() => setShareDialogOpen(true)} className="hidden lg:inline-flex" data-testid="docs-toolbar-share" />
+      {/* story 4892 — ⋯ 메뉴 = ds Menu(읽기 화면과 같은 부품). 항목 · 이름 · 규칙은 그대로(공유 · 복사는 lg 미만 전용 · 읽기 전용 문서엔 주소 바꾸기 · 삭제 없음 · 삭제는 사람만). */}
+      <Menu>
+        <MenuTrigger aria-label={t('moreActions')} className="inline-flex size-7 items-center justify-center rounded-ds-control text-ds-ink-2 transition-colors outline-none hover:bg-ds-surface-high hover:text-ds-ink focus-visible:ring-2 focus-visible:ring-ds-action touch:size-11">
+          <Icon name="more_horiz" size={16} />
+        </MenuTrigger>
+        <MenuContent align="end" className="w-48">
           {/* story #4361(유나 실측 390/360) — 도구 줄 오른쪽 무리가 편집 카드(overflow-hidden) 밖으로 밀려 폰에서 «공유» · «⋯»(360은
               «마크다운 복사»까지)를 누를 길이 없었다. `lg` 미만(GNB가 모바일 모양인 폭 — 웹 규칙 `md` 금지)에서는 두 버튼을 도구 줄에서
               빼고 이 메뉴 안에서 같은 동작 · 같은 이름으로. 복사 실패 패널은 버튼을 감싼 칸에 그대로 떠서 여기서 눌러도 보인다. */}
-          <DropdownMenuItem className="lg:hidden" onClick={() => void handleCopyMarkdown()} data-testid="docs-menu-copy-markdown">
-            <Copy className="mr-2 h-4 w-4" />
+          <MenuItem className="lg:hidden" icon="content_copy" onClick={() => void handleCopyMarkdown()} data-testid="docs-menu-copy-markdown">
             {t('copyMarkdown')}
-          </DropdownMenuItem>
-          <DropdownMenuItem className="lg:hidden" onClick={() => setShareDialogOpen(true)} data-testid="docs-menu-share">
-            <Share2 className="mr-2 h-4 w-4" />
+          </MenuItem>
+          <MenuItem className="lg:hidden" icon="share" onClick={() => setShareDialogOpen(true)} data-testid="docs-menu-share">
             {ts('share')}
-          </DropdownMenuItem>
-          {selectedDoc.doc_type !== 'sprint_report' && <DropdownMenuSeparator className="lg:hidden" />}
+          </MenuItem>
+          {selectedDoc.doc_type !== 'sprint_report' && <MenuSeparator className="lg:hidden" />}
           {selectedDoc.doc_type !== 'sprint_report' && (
             <>
-              <DropdownMenuItem onClick={() => setUrlDialogOpen(true)}>
-                <Link2 className="mr-2 h-4 w-4" />
+              <MenuItem icon="link" onClick={() => setUrlDialogOpen(true)}>
                 {t('editUrl')}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
+              </MenuItem>
+              <MenuSeparator />
               {/* story #2104 — BE docs.py:471이 human-only로 삭제를 403 거부한다(delete는 사람만
                   가능, 되돌릴 수 없는 조작). 에이전트 계정에도 이 항목을 열어두면 "내가 지울 수
                   있다"고 믿게 만드는 #2091/#2103과 같은 결함이라 미리 숨긴다(메뉴 공간 제약상
                   사유 문구 대신 항목 자체를 생략 — edit-url 등 남은 항목은 그대로 유지). */}
               <HumanOnlyAction>
-                <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive">
-                  <Trash2 className="mr-2 h-4 w-4" />
+                <MenuItem variant="danger" icon="delete" onClick={handleDelete}>
                   {t('deleteDoc')}
-                </DropdownMenuItem>
+                </MenuItem>
               </HumanOnlyAction>
             </>
           )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+        </MenuContent>
+      </Menu>
     </>
   );
 
@@ -439,7 +411,7 @@ export default function DocSlugPage() {
       ) : null}
 
       {/* Editor */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pt-2 pb-4 lg:px-6 lg:pt-3 lg:pb-6">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pt-2 pb-4 lg:px-6 lg:pt-3 lg:pb-6 lg:group-data-[collapsed=true]/docs:pl-14">
         <DocEditor
           value={content}
           contentFormat={contentFormat}

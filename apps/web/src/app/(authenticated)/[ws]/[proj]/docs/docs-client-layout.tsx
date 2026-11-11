@@ -708,7 +708,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             {sidebarContent}
           </aside>
         )}
-        <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-ds-background">
+        <section data-collapsed={sidebarCollapsed ? 'true' : undefined} className="group/docs relative flex min-w-0 flex-1 flex-col overflow-hidden bg-ds-background">
           {/* 박스1: 모바일 칩 띠는 리스트뷰(문서 미선택)서만 노출 — doc 상세는 슬림 헤더 트리 아이콘이
               트리 트리거 대체(중복 빈 띠 제거·문서명은 헤더 제목이 흡수). 리스트뷰는 칩이 유일 트리 접근이라 보존. */}
           {!currentSlug && (

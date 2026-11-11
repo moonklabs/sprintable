@@ -50,7 +50,7 @@ describe('DocMiniToc (story #f546601e — 긴 문서 우측 미니 TOC 자동 �
     expect(buttons[0]?.textContent).toBe('헤딩 0');
   });
 
-  it('activeId와 일치하는 헤딩만 proof-blue로 하이라이트된다(현위치 하이라이트)', async () => {
+  it('activeId와 일치하는 헤딩만 ds action 색으로 하이라이트된다(현위치 하이라이트)', async () => {
     const items = headings(6);
     await act(async () => {
       root.render(wrap(<DocMiniToc headings={items} activeId="h-2" onHeadingClick={vi.fn()} />));
@@ -58,7 +58,8 @@ describe('DocMiniToc (story #f546601e — 긴 문서 우측 미니 TOC 자동 �
     const buttons = [...container.querySelectorAll('nav button')];
     const active = buttons.find((b) => b.getAttribute('aria-current') === 'location');
     expect(active?.textContent).toBe('헤딩 2');
-    expect(active?.className).toContain('text-proof-blue');
+    expect(active?.className).toContain('text-ds-action-text');
+    expect(active?.className).toContain('border-l-ds-action');
     expect(buttons.filter((b) => b.getAttribute('aria-current') === 'location')).toHaveLength(1);
   });
 

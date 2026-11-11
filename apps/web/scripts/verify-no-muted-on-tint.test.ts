@@ -440,8 +440,8 @@ describe('scanContent — 실 파일 뮤테이션(story #3850 AC3, 신설 분석
   // 그 div의 직계 자식(172행 상태 라벨) 바로 뒤에 muted 텍스트를 하나 더 끼워 넣는다.
   describe('축 (b) 템플릿 리터럴 안 삼항 — doc-status-rail.tsx', () => {
     const REL_FILE = 'components/docs/doc-status-rail.tsx';
-    const ABS_FILE = path.join(SRC_ROOT, REL_FILE);
-    const original = readFileSync(ABS_FILE, 'utf8');
+    // story 4892 — 실 파일은 ds 토큰으로 옮겨져 이 축의 «템플릿 치환 안 삼항 tint» 모양이 없다 → 옛 마크업의 얼린 사본(fixtures/)을 변이한다(양성대조 모양 유지).
+    const original = readFileSync(path.join(__dirname, 'fixtures', 'doc-status-rail.old-tint.fixture.txt'), 'utf8');
 
     it('상태 라벨 옆에 muted 텍스트를 끼워 넣으면(템플릿 치환 안 삼항 tint가 조상으로 인식돼) RED', () => {
       const target = '<div className="text-base font-bold text-foreground">{t(STATE_LABEL_KEY[state])}</div>'; // story 4831: text-[15px] → text-base

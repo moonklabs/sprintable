@@ -10,15 +10,14 @@ import { DocMiniToc } from '@/components/docs/doc-mini-toc';
 import { useActiveDocHeading } from '@/components/docs/doc-active-heading';
 import { extractDocHeadings } from '@/components/docs/doc-heading-utils';
 import { DocStatusHeader, DocEvidenceRail } from '@/components/docs/doc-status-rail';
-import { DOC_STATUS_TONE, docStatusLabelKey, toDocStatusFilter } from '@/components/docs/lib/doc-status-tone';
-import { cn } from '@/lib/utils';
 import { IconButton } from '@/components/ds/icon-button';
 import { Icon } from '@/components/ds/icon';
 import { DocModeSwitch } from '@/components/docs/doc-mode-switch';
 import { DocShareDialog } from '@/components/docs/doc-share-dialog';
 import { useDocDelete } from '@/components/docs/use-doc-delete';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '@/components/ds/menu';
+import { DocStatusChip } from '@/components/docs/doc-status-chip';
 import { useDocsLayout } from '../../docs-context';
 import { docUrl, docsListUrl } from '@/components/docs/lib/doc-project-url';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
@@ -143,14 +142,11 @@ export default function DocViewPage() {
           이제 머리에 한 번만, 본문은 바로 내용으로 시작한다. 동작 · 링크 · 메뉴 규칙은 그대로(공유 lg+ 단추 / lg 미만 메뉴 안 · 읽기 전용 문서엔 «고치기» · «삭제» 없음). */}
       {/* [SID:4356] 좁은 폭에서 «지식»이 꺾이지 않게: 뿌리 · 구분은 줄지 않고(shrink-0 · nowrap), 분류는 한 줄 말줄임. 머리는 감싼다: 제목 칸(바닥 11rem)과 동작이 한 줄에 못 들어가면(320 / 360 / 390)
           동작이 오른쪽 정렬로 둘째 줄로 내려가 제목을 밀어내지 못한다. */}
-      <div data-testid="docs-reader-head" className="shrink-0 border-b border-ds-line bg-ds-background px-4 py-2 lg:px-8">
+      <div data-testid="docs-reader-head" className="shrink-0 border-b border-ds-line bg-ds-background px-4 py-2 lg:px-8 lg:group-data-[collapsed=true]/docs:pl-14">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <div className="flex min-w-0 flex-1 basis-[11rem] items-center gap-2">
             <h1 className="m-0 min-w-[3rem] truncate text-ds-card-title font-semibold text-ds-ink">{doc.title}</h1>
-            <span data-testid="docs-reader-status" className="inline-flex shrink-0 items-center gap-1.5 rounded-ds-control border border-ds-line px-2 py-0.5 text-ds-small text-ds-ink-2">
-              <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full', DOC_STATUS_TONE[toDocStatusFilter(doc.status)].dot)} />
-              {t(docStatusLabelKey(toDocStatusFilter(doc.status)))}
-            </span>
+            <DocStatusChip status={doc.status} data-testid="docs-reader-status" className="shrink-0" />
           </div>
           <span className="ml-auto flex shrink-0 items-center gap-1">
             <DocToc headings={headings} onHeadingClick={scrollToHeading} />
@@ -166,28 +162,27 @@ export default function DocViewPage() {
             )}
             {/* story 4892 — share and the ⋯ menu are on the reading screen too (they used to exist only on the editing screen). Below lg «공유» is inside the menu. */}
             <IconButton icon="share" label={ts('share')} onClick={() => setShareDialogOpen(true)} className="hidden lg:inline-flex" data-testid="docs-reader-share" />
-            <DropdownMenu>
-              <DropdownMenuTrigger aria-label={t('moreActions')} className="inline-flex size-7 items-center justify-center rounded-ds-control text-ds-ink-2 transition-colors hover:bg-ds-surface-high hover:text-ds-ink touch:size-11">
+            {/* story 4892 — ⋯ 메뉴 = ds Menu(Base UI: 열고 닫기 · 화살표 · Esc · 초점 복원). 항목 · 이름 · 규칙(공유 lg 미만 전용 · 읽기 전용 문서엔 삭제 없음 · 삭제는 사람만)은 그대로. */}
+            <Menu>
+              <MenuTrigger aria-label={t('moreActions')} className="inline-flex size-7 items-center justify-center rounded-ds-control text-ds-ink-2 transition-colors outline-none hover:bg-ds-surface-high hover:text-ds-ink focus-visible:ring-2 focus-visible:ring-ds-action touch:size-11">
                 <Icon name="more_horiz" size={16} />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem className="lg:hidden" onClick={() => setShareDialogOpen(true)} data-testid="docs-reader-menu-share">
-                  <Icon name="share" size={16} className="mr-2" />
+              </MenuTrigger>
+              <MenuContent align="end" className="w-48">
+                <MenuItem className="lg:hidden" icon="share" onClick={() => setShareDialogOpen(true)} data-testid="docs-reader-menu-share">
                   {ts('share')}
-                </DropdownMenuItem>
+                </MenuItem>
                 {/* story 4892 — a sprint report is read-only: no «고치기» above and no «삭제» here (the editor page hides it too; the server only lets humans delete). */}
                 {readOnlyDoc ? null : (
                   <HumanOnlyAction>
                     {/* the divider belongs with «삭제»: an agent (who gets no delete) must not see a divider with nothing under it */}
-                    <DropdownMenuSeparator className="lg:hidden" />
-                    <DropdownMenuItem onClick={handleDelete} className="text-destructive focus:text-destructive" data-testid="docs-reader-menu-delete">
-                      <Icon name="delete" size={16} className="mr-2" />
+                    <MenuSeparator className="lg:hidden" />
+                    <MenuItem variant="danger" icon="delete" onClick={handleDelete} data-testid="docs-reader-menu-delete">
                       {t('deleteDoc')}
-                    </DropdownMenuItem>
+                    </MenuItem>
                   </HumanOnlyAction>
                 )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+              </MenuContent>
+            </Menu>
           </span>
         </div>
         <div data-testid="docs-reader-subline" className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-ds-small text-ds-ink-3">
@@ -204,14 +199,16 @@ export default function DocViewPage() {
       </div>
 
       <div ref={scrollRootRef} className="focus-inset flex-1 overflow-y-auto">
-        <div className="grid grid-cols-1 gap-8 px-4 py-8 lg:grid-cols-[minmax(0,1fr)_316px] lg:px-8">
-          {/* 리딩 컬럼(§3) — 68ch 정본(§8 확定), 본문 렌더는 무변경(DocContentRenderer). */}
-          <article className="mx-auto w-full max-w-[68ch]">
-            <div>
-              <DocStatusHeader docId={doc.id} status={doc.status} editHref={docUrl(wsSlug, projSlug, slug)} onTransitioned={refetch} />
-            </div>
+        {/* story 4892 (UI-9 문서 상세 열) — 오른쪽 열 = «상태 · 목차 · 이력» 패널(시안의 스레드 열처럼 본문 옆 상시 열). 상태 머리는 DOM에 한 번만 두고 자리는 CSS 격자가 정한다:
+            lg(1024+)에서는 오른쪽 열 맨 위(2열 1행), 그 아래 폭에서는 DOM 순서대로 본문 맨 위. 미디어 쿼리 상태로 옮기면 첫 그림이 «아래 폭»으로 그려졌다 옮겨져 깜빡이고 이력 요청이 두 번 나가서(codex) 격자로 바꿨다. */}
+        <div className="grid grid-cols-1 gap-x-8 gap-y-8 px-4 py-8 lg:grid-cols-[minmax(0,1fr)_316px] lg:gap-y-0 lg:px-8">
+          <div data-testid="docs-reader-status-block" className="lg:col-start-2 lg:row-start-1 lg:border-l lg:border-ds-line lg:pb-6 lg:pl-6">
+            <DocStatusHeader docId={doc.id} status={doc.status} editHref={docUrl(wsSlug, projSlug, slug)} onTransitioned={refetch} />
+          </div>
 
-            <div className="mt-8">
+          {/* 리딩 컬럼(§3) — 68ch 정본(§8 확定), 본문 렌더는 무변경(DocContentRenderer). */}
+          <article className="mx-auto w-full max-w-[68ch] lg:col-start-1 lg:row-span-2 lg:row-start-1">
+            <div>
               <DocContentRenderer
                 content={doc.content}
                 contentFormat={doc.content_format ?? 'markdown'}
@@ -238,7 +235,7 @@ export default function DocViewPage() {
           </article>
 
           {/* 수직 증거 레일(§3/§6) — 접힌 gate 박스를 상시 공간으로 승격. */}
-          <aside className="lg:border-l lg:border-ds-line lg:pl-6">
+          <aside data-testid="docs-reader-rail" className="lg:col-start-2 lg:row-start-2 lg:border-l lg:border-ds-line lg:pl-6">
             {/* story #f546601e(v2 5호) — 긴 문서(N헤딩↑)만 자동 노출, 짧은 문서는 무변경
                 (MINI_TOC_MIN_HEADINGS 가드는 컴포넌트 내부). */}
             <DocMiniToc headings={headings} activeId={activeHeadingId} onHeadingClick={scrollToHeading} className="mb-6" />

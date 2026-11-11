@@ -340,3 +340,62 @@ describe('DocViewPage — 에이전트가 ⋯ 메뉴를 열면 (4892)', () => {
     expect(container.ownerDocument.querySelectorAll('[role="separator"]').length).toBe(0);
   });
 });
+
+// story 4892 (UI-9 문서 상세 열) — 오른쪽 열 = 상태 · 목차 · 이력 패널(시안의 스레드 열처럼 본문 옆 상시 열). 상태 머리는 DOM에 한 번, 자리는 CSS 격자가 정한다(lg = 오른쪽 열 맨 위 · 그 아래 = 본문 위) —
+// 미디어 쿼리 상태로 옮기면 첫 그림이 아래 폭으로 그려졌다 옮겨져 깜빡이고 이력 요청이 두 번 나갔다(codex).
+describe('DocViewPage — 상태 머리 자리(CSS 격자 · 한 번만) · 목록 접힘 여백 (4892)', () => {
+  const cls = (el: Element | null) => (el?.getAttribute('class') ?? '').split(/\s+/);
+
+  it('⭐상태 머리는 DOM에 정확히 하나 · 본문(article) 앞에 서고(그 아래 폭에서 본문 위) lg에서는 오른쪽 열 1행에 앉는다', async () => {
+    await mount();
+    expect(container.querySelectorAll('[data-testid="status-header"]').length).toBe(1);
+    const block = container.querySelector('[data-testid="docs-reader-status-block"]')!;
+    const article = container.querySelector('article')!;
+    expect(block.contains(container.querySelector('[data-testid="status-header"]'))).toBe(true);
+    expect(block.compareDocumentPosition(article) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();   // DOM 순서: 상태 머리 → 본문
+    expect(cls(block)).toEqual(expect.arrayContaining(['lg:col-start-2', 'lg:row-start-1', 'lg:border-l', 'lg:border-ds-line']));
+    expect(article.contains(container.querySelector('[data-testid="status-header"]'))).toBe(false);
+  });
+
+  it('⭐lg 격자: 본문은 1열(2행에 걸침) · 오른쪽 열은 «상태(1행) → 목차 · 이력(2행)» — 같은 왼쪽 선이 이어진다', async () => {
+    await mount();
+    const article = container.querySelector('article')!;
+    expect(cls(article)).toEqual(expect.arrayContaining(['lg:col-start-1', 'lg:row-span-2', 'lg:row-start-1']));
+    const rail = container.querySelector('[data-testid="docs-reader-rail"]')!;
+    expect(cls(rail)).toEqual(expect.arrayContaining(['lg:col-start-2', 'lg:row-start-2', 'lg:border-l', 'lg:border-ds-line']));
+    expect(rail.querySelector('[data-testid="evidence-rail"]')).not.toBeNull();
+    const grid = article.parentElement!;
+    expect(cls(grid)).toEqual(expect.arrayContaining(['lg:grid-cols-[minmax(0,1fr)_316px]', 'lg:gap-y-0']));    // 행 사이 틈 0 → 선이 끊기지 않음
+  });
+
+  it('미디어 쿼리 상태로 옮기지 않는다(첫 그림 깜빡임 · 이력 요청 두 번 방지)', async () => {
+    await mount();
+    const src = (await import('./page.tsx?raw')).default as string;
+    expect(src).not.toContain('use-media-query');
+    expect(src).not.toMatch(/useMediaQuery/);
+  });
+
+  it('⭐목록 열을 접은 채일 때(펴기 단추가 머리 왼쪽 위로 뜸) 머리 왼쪽 여백이 늘어난다 — lg · 접힘 상태 클래스', async () => {
+    await mount();
+    const head = container.querySelector('[data-testid="docs-reader-head"]')!;
+    expect(head.className.split(/\s+/)).toContain('lg:group-data-[collapsed=true]/docs:pl-14');
+  });
+
+  it('상태 칩은 공용 ds 칩(점 + 글) — 승인됨 · 검토 중 · 반려됨 · 초안이 각자 자기 톤으로', async () => {
+    await mount({ ...DOC, status: 'confirmed' });
+    const chip = container.querySelector('[data-testid="docs-reader-status"]')!;
+    expect(chip.getAttribute('data-doc-status')).toBe('confirmed');
+    expect(chip.textContent).toBe(koMessages.docs.docGateConfirmed);
+    expect(chip.className).toContain('text-ds-done');
+  });
+
+  it('⋯ 메뉴는 ds Menu — 트리거는 이름 «더 보기»를 가진 단추(폰 touch:size-11) · 옛 DropdownMenu 아님', async () => {
+    await mount();
+    const trigger = container.querySelector(`button[aria-label="${koMessages.docs.moreActions}"]`)!;
+    expect(trigger).not.toBeNull();
+    expect(trigger.className.split(/\s+/)).toContain('touch:size-11');
+    const src = (await import('./page.tsx?raw')).default as string;
+    expect(src).toContain("from '@/components/ds/menu'");
+    expect(src).not.toContain('ui/dropdown-menu');
+  });
+});

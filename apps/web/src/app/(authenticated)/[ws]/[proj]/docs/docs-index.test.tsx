@@ -102,7 +102,7 @@ describe('DocsIndex — story #3784 로딩/0건/실패 3분기', () => {
   });
 });
 
-describe('DocsIndex — 문서 있음(§2 마스트헤드+목록)', () => {
+describe('DocsIndex — 문서 있음(첫 화면: 머리줄 + 필터 한 줄 + 줄 목록 · 4892 B 뼈대)', () => {
   const tree = [
     { id: 'f1', parent_id: null, title: '제품 스펙', slug: 'f1', icon: null, sort_order: 0, is_folder: true },
     { id: 'd1', parent_id: 'f1', title: '결제 스펙 v2', slug: 'payments-v2', icon: null, sort_order: 0, status: 'confirmed', updated_at: '2026-08-21T00:00:00Z' },
@@ -114,23 +114,54 @@ describe('DocsIndex — 문서 있음(§2 마스트헤드+목록)', () => {
     useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree });
     await mount();
     expect(container.textContent).not.toContain('문서를 선택하세요');
-    // story #3880(§⑤ 낱말 드리프트, 유나 확定) — kicker ko 값 안 영단어 baked-in 정본화.
-    expect(container.textContent).toContain('지식 · 문서고');
+    // story 4892 — 예전 에디토리얼 마스트헤드(kicker «지식 · 문서고» · 시그니처 선 · 해설 문장)는 걷었다. 머리줄에 제목 + 개수만.
+    expect(container.textContent).not.toContain('지식 · 문서고');
+    expect(container.querySelector('hr')).toBeNull();
+    const head = container.querySelector('[data-testid="docs-index-head"]')!;
+    expect(head.querySelector('h1')?.textContent).toBe('문서');
+    expect(head.querySelector('[data-testid="docs-index-count"]')?.textContent).toBe('3');   // 폴더는 개수에서 빠진다(문서 셋)
   });
 
-  // story #2974 §1/§3(PR-D0) — Display 헤딩(마스트헤드 h1·리드 카드 h2)이 font-display
-  // 토큰 경유(family)로 페이스를 받는다(D0 값=Pretendard·시각 무변화, 세리프 전환 전제조건).
-  // delta(PO/유나 지적 2026-08-24) — font-editorial-heading(무게 유틸, 820)도 같이
-  // 있어야 한다(family-only 치환이 무게 820→400을 조용히 지웠던 회귀 재발 방지).
-  it('마스트헤드 h1·리드 h2가 font-display+font-editorial-heading 둘 다 경유한다(#2974 D0 배선)', async () => {
+  // story 4892 — 제목은 머리줄 안(ds 카드 제목 글자) · 리드 카드 제목은 ds 제목 글자. 옛 에디토리얼 글자(font-display · font-editorial-heading)는 없다.
+  it('머리줄 h1은 ds 카드 제목 글자 · 리드 h2는 ds 제목 글자 — 옛 에디토리얼 글자 없음', async () => {
     useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree });
     await mount();
     const h1 = container.querySelector('h1');
-    expect(h1?.className).toContain('font-display');
-    expect(h1?.className).toContain('font-editorial-heading');
+    expect(h1?.className).toContain('text-ds-card-title');
+    expect(h1?.className).not.toContain('font-display');
+    expect(container.querySelectorAll('h1').length).toBe(1);
     const h2 = container.querySelector('h2');
-    expect(h2?.className).toContain('font-display');
-    expect(h2?.className).toContain('font-editorial-heading');
+    expect(h2?.className).toContain('text-ds-title');
+    expect(h2?.className).not.toContain('font-editorial-heading');
+  });
+
+  it('⭐머리줄 오른쪽: 보기 전환 = 이름 있는 그룹(«보기 방식») 안 ds IconButton 둘(aria-pressed) · 새 문서 = ds Button — 격자로 바꾸면 카드 격자가 서고 리드 카드가 없다', async () => {
+    useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree });
+    await mount();
+    const head = container.querySelector('[data-testid="docs-index-head"]')!;
+    const group = head.querySelector('[role="group"]')!;
+    expect(group.getAttribute('aria-label')).toBe('보기 방식');
+    const [listBtn, gridBtn] = [...group.querySelectorAll('button')] as HTMLButtonElement[];
+    expect(listBtn!.getAttribute('data-slot')).toBe('ds-icon-button');
+    expect(listBtn!.getAttribute('aria-pressed')).toBe('true');
+    expect(gridBtn!.getAttribute('aria-pressed')).toBe('false');
+    const newDoc = [...head.querySelectorAll('button')].find((b) => b.textContent?.includes('새 문서'))!;
+    expect(newDoc.getAttribute('data-slot')).toBe('ds-button');
+    expect(container.querySelector('h2')).not.toBeNull();                                  // list view: lead card
+    await act(async () => { gridBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(gridBtn!.getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelector('h2')).toBeNull();                                       // grid view: cards only
+    expect(container.querySelectorAll('[data-slot="ds-card"]').length).toBe(3);
+  });
+
+  it('⭐필터 한 줄: 분류 · 상태가 ds Button(aria-pressed) · 상태는 ds 칩(점 + 글)과 개수 — 승인됨/검토 중/반려됨/초안 넷', async () => {
+    useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree });
+    await mount();
+    const bar = container.querySelector('[data-testid="docs-index-filters"]')!;
+    const buttons = [...bar.querySelectorAll('button')];
+    expect(buttons.every((b) => b.getAttribute('data-slot') === 'ds-button' && b.getAttribute('aria-pressed') !== null)).toBe(true);
+    expect([...bar.querySelectorAll('[data-doc-status]')].map((c) => c.getAttribute('data-doc-status'))).toEqual(['confirmed', 'pending', 'denied', 'draft']);
+    expect(bar.querySelector('[data-doc-status="denied"]')?.textContent).toBe('반려됨');
   });
 
   it('폴더(is_folder)는 목록 항목에서 제외되고 카테고리 필터로만 뜬다', async () => {
@@ -207,12 +238,13 @@ describe('DocsIndex — 문서 있음(§2 마스트헤드+목록)', () => {
     expect(container.textContent).toContain('조건에 맞는 문서가 없어요');
   });
 
-  // story #3053(2984-S5) — lead 문서 좌측 액센트가 무채(border-proof-line-strong)를 쓰고
-  // citron 정적 장식은 안 쓴다(citron은 live pulse 전용).
-  it('lead 문서 좌측 액센트가 무채 헤어라인을 쓰고 bg-proof-citron은 안 쓴다', async () => {
+  // story 4892 — lead 문서 좌측 액센트 = ds Card의 무채 왼쪽 막대(border-l-ds-line-strong) · 옛 proof 클래스(bg-proof-line-strong · bg-proof-citron)는 없다.
+  it('lead 문서는 ds Card + 무채 왼쪽 막대를 쓰고 옛 proof 클래스는 안 쓴다', async () => {
     useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree });
     await mount();
-    expect(container.querySelector('.bg-proof-line-strong')).toBeTruthy();
+    const card = container.querySelector('[data-slot="ds-card"]')!;
+    expect(card.className.split(/\s+/)).toContain('border-l-ds-line-strong');
+    expect(container.querySelector('.bg-proof-line-strong')).toBeNull();
     expect(container.querySelector('.bg-proof-citron')).toBeNull();
   });
 });
@@ -235,5 +267,28 @@ describe('[SID:4388] DocsIndex — the chosen category filter is announced as pr
     expect(pressed()).toEqual(['전체:false', '제품 스펙:true', '미분류:false']);
     await act(async () => { button('미분류').click(); });
     expect(pressed()).toEqual(['전체:false', '제품 스펙:false', '미분류:true']);
+  });
+});
+
+// story 4892 — 페이지 h1은 늘 정확히 하나(story #3946): 첫 화면의 오류 · 빈 상태도 h1을 갖는다(ds EmptyState 제목은 <p>라서 sr-only h1을 따로 둔다).
+describe('DocsIndex — 오류 · 빈 상태에도 h1이 정확히 하나 (4892)', () => {
+  it('⭐오류 상태: h1 1개(sr-only) + role=alert + 다시 시도 ds Button', async () => {
+    useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree: [], loadError: true });
+    await mount();
+    const h1s = container.querySelectorAll('h1');
+    expect(h1s.length).toBe(1);
+    expect(h1s[0]!.className).toContain('sr-only');
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
+    expect(container.querySelector('[data-slot="ds-empty-state"] button')?.getAttribute('data-slot')).toBe('ds-button');
+  });
+
+  it('⭐빈 상태(0건): h1 1개(sr-only) + ds EmptyState + 첫 문서 만들기 ds Button', async () => {
+    useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree: [] });
+    await mount();
+    const h1s = container.querySelectorAll('h1');
+    expect(h1s.length).toBe(1);
+    expect(h1s[0]!.className).toContain('sr-only');
+    const es = container.querySelector('[data-slot="ds-empty-state"]')!;
+    expect(es.querySelector('button')?.getAttribute('data-slot')).toBe('ds-button');
   });
 });

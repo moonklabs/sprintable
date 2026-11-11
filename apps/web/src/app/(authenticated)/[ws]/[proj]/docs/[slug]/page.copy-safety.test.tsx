@@ -129,7 +129,7 @@ describe('DocSlugPage — 마크다운 복사 실패 패널(story #3986 CHANGES)
     await act(async () => { await vi.advanceTimersByTimeAsync(3500); });
 
     // 3초 코스메틱 타이머는 지났어도, 원문 칸은 그대로 남아야 한다.
-    const raw = container.querySelector('[data-testid="docs-copy-markdown-failed-raw"][data-slot="textarea"]') as HTMLTextAreaElement | null;
+    const raw = container.querySelector('[data-testid="docs-copy-markdown-failed-raw"][data-slot="ds-textarea"]') as HTMLTextAreaElement | null;
     expect(raw).not.toBeNull();
     expect(raw!.value).toBe(RAW_MARKDOWN);
   });
@@ -179,5 +179,26 @@ describe('DocSlugPage — 좁은 폭 도구 줄(story #4361)', () => {
     expect(copyItem?.textContent).toContain('마크다운');
     await act(async () => { copyItem!.click(); await vi.advanceTimersByTimeAsync(20); });
     expect(writeText).toHaveBeenCalledTimes(1);
+  });
+});
+
+// story 4892 (UI-9 문서 상세 열 · 편집) — 도구 줄 단추 · ⋯ 메뉴 · 복사 실패 패널이 ds 부품이고, 목록 접힘 여백 규칙이 편집 칸에도 있다.
+describe('DocSlugPage — 도구 줄 ds 부품 (4892)', () => {
+  it('⭐복사 · 공유는 ds IconButton(lg 이상) · ⋯ 메뉴 트리거 = ds Menu 단추 · 옛 DropdownMenu · lucide 없음', async () => {
+    await mount();
+    for (const id of ['docs-toolbar-copy-markdown', 'docs-toolbar-share']) {
+      const el = container.querySelector(`[data-testid="${id}"]`)!;
+      expect(el.getAttribute('data-slot')).toBe('ds-icon-button');
+      expect(el.className.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', 'lg:inline-flex']));
+    }
+    expect(container.querySelector(`button[aria-label="${koMessages.docs.moreActions}"]`)).not.toBeNull();
+    const src = (await import('./page.tsx?raw')).default as string;
+    expect(src).toContain("from '@/components/ds/menu'");
+    expect(src).not.toMatch(/ui\/dropdown-menu|lucide-react|from '@\/components\/ui\/(?:button|textarea)'/);
+  });
+
+  it('편집 칸은 목록 접힘 여백 규칙을 갖는다(lg · 접힘일 때 왼쪽 pl-14)', async () => {
+    const src = (await import('./page.tsx?raw')).default as string;
+    expect(src).toContain('lg:group-data-[collapsed=true]/docs:pl-14');
   });
 });

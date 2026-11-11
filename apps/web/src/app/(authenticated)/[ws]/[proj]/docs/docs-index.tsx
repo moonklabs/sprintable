@@ -3,12 +3,16 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
-import { BookOpen, LayoutGrid, List as ListIcon, Plus } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { EmptyState } from '@/components/ui/empty-state';
+import { Button } from '@/components/ds/button';
+import { IconButton } from '@/components/ds/icon-button';
+import { Icon } from '@/components/ds/icon';
+import { Card } from '@/components/ds/card';
+import { EmptyState } from '@/components/ds/empty-state';
+import { ListRow } from '@/components/ds/list-row';
+import { DocStatusChip } from '@/components/docs/doc-status-chip';
 import { useDocsLayout, type Doc } from './docs-context';
 import { docUrl } from '@/components/docs/lib/doc-project-url';
-import { DOC_STATUS_TONE, toDocStatusFilter, docStatusLabelKey, type DocStatusFilter } from '@/components/docs/lib/doc-status-tone';
+import { toDocStatusFilter, type DocStatusFilter } from '@/components/docs/lib/doc-status-tone';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
@@ -37,21 +41,6 @@ import { useViewerTimeZone } from '@/components/viewer-time-zone';
 type StatusFilter = DocStatusFilter;
 const STATUS_FILTERS: StatusFilter[] = ['confirmed', 'pending', 'denied', 'draft'];
 const UNCATEGORIZED = '__uncategorized__';
-
-// story #7d7634ee(P0) — proof-cut(컷코너, 옛 sm/xs 사선 크기 모디파이어)는 폐지되고
-// proof-surface(13px 균일 라운드)로 수렴 — size prop이 지오메트리 결정에만 쓰였으므로 그
-// 존재 이유가 없어져 제거(호출부 중 유일하게 size="xs"를 넘기던 자리도 함께 정리).
-function StatusChip({ status }: { status: string | undefined }) {
-  const t = useTranslations('docs');
-  const s = toDocStatusFilter(status);
-  const tone = DOC_STATUS_TONE[s];
-  return (
-    <span className={`proof-surface proof-surface-press inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-editorial-meta font-bold ${tone.bg} ${tone.text}`}>
-      <span className={`size-1.5 rounded-full ${tone.dot}`} aria-hidden="true" />
-      {t(docStatusLabelKey(s))}
-    </span>
-  );
-}
 
 export function DocsIndex() {
   const t = useTranslations('docs');
@@ -116,38 +105,34 @@ export function DocsIndex() {
   }
 
   if (loadError) {
-    // story #3784(유나 정정 09:40Z) — settings/page.tsx의 Alert destructive 배너는
-    // 배너 「아래」에 계속 그려지는 섹션들이 있다는 전제 위에 선다(870-873행). 이
-    // 0건 분기(아래)는 early return이라 "위"가 없는 빈 페인이 된다 — 배너를 얹을
-    // 자리 자체가 없다. 집안에 이미 같은 형(early return + 빈 페인 중앙)을 가른
-    // 정본이 chat-view.tsx의 messagesLoadFailed다 — 그 형 그대로.
+    // story #3784(유나 정정 09:40Z) — 0건 분기와 같은 형(early return + 빈 페인 중앙). story 4892: ds EmptyState + ds Button, 알림 역할(role=alert)은 그대로.
     return (
       <div className="flex h-full items-center justify-center p-4 lg:p-6">
-        <div className="flex flex-col items-center gap-3 text-center">
-          <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">
-            {t('indexLoadError')}
-          </p>
-          <Button size="sm" variant="outline" onClick={() => void fetchTree()}>
-            {tc('retry')}
-          </Button>
+        {/* 페이지 h1은 늘 정확히 하나(story #3946) — 오류 · 빈 상태에도 시각 변화 없이(sr-only) 제목 h1을 둔다. */}
+        <h1 className="sr-only">{t('title')}</h1>
+        <div role="alert" aria-live="assertive" aria-atomic="true">
+          <EmptyState
+            icon="error"
+            title={t('indexLoadError')}
+            action={<Button variant="secondary" onClick={() => void fetchTree()}>{tc('retry')}</Button>}
+          />
         </div>
       </div>
     );
   }
 
-  // story #2955 §6(PO 요건②) — "문서를 선택하세요" 재현 금지. 0건은 에러가 아니라 만들
-  // 데이터로서 설계 — 첫 문서 CTA + 왜 0인지 맥락(신규 프로젝트) 병기.
+  // story #2955 §6(PO 요건②) — "문서를 선택하세요" 재현 금지. 0건은 에러가 아니라 만들 데이터로서 설계 — 첫 문서 CTA + 왜 0인지 맥락(신규 프로젝트) 병기.
   if (tree.length === 0) {
     return (
       <div className="flex h-full items-center justify-center p-4 lg:p-6">
+        <h1 className="sr-only">{t('title')}</h1>
         <EmptyState
-          icon={<BookOpen className="size-8" />}
+          icon="menu_book"
           title={t('emptyTitle')}
           description={t('emptyDescription')}
-          className="w-full max-w-lg bg-background/70"
+          className="w-full max-w-lg"
           action={
-            <Button size="sm" onClick={handleNewDoc}>
-              <Plus className="mr-1 h-4 w-4" />
+            <Button variant="primary" onClick={handleNewDoc} iconStart={<Icon name="add" size={14} />}>
               {t('newDoc')}
             </Button>
           }
@@ -156,163 +141,106 @@ export function DocsIndex() {
     );
   }
 
-  // story #3493 — doc.updated_at은 "기록"(마지막으로 편집된 시점) — 3436 묶음 8
-  // 정본(formatRelativeTime)으로 통일.
+  // story #3493 — doc.updated_at은 "기록"(마지막으로 편집된 시점) — 3436 묶음 8 정본(formatRelativeTime)으로 통일.
   const formatDate = (s: string | undefined) => (s ? formatViewerRelativeTime(s, locale, displayTimezone) : '—');
   const [lead, ...rest] = filtered;
 
+  // story 4892 (UI-9 문서 화면 배치 · 첫 화면) — 시안(홈 · 보드 · 대화)의 B 뼈대: 머리줄(제목 + 개수 · 오른쪽 보기 전환 + 새 문서) → 필터 한 줄(분류 · 상태) → 촘촘한 줄 목록.
+  // 예전 에디토리얼 마스트헤드(kicker · 큰 제목 · 시그니처 선 · 해설 문장)는 걷었다 — 같은 정보(개수)는 머리줄에, 해설 문장(indexDek)은 쓰지 않는다. 분류 · 상태 필터 · 격자 전환 · 리드 카드 · 줄 이동은 그대로.
   return (
-    <div className="h-full overflow-y-auto px-6 py-8 lg:px-10">
-      {/* 마스트헤드(§2) — editorial 타이포 스케일 첫 소비처(story #2917 토큰). */}
-      <div className="mb-6">
-        <div className="font-mono text-editorial-meta font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-          {t('indexKicker')}
+    <div className="flex h-full flex-col overflow-hidden">
+      <div data-testid="docs-index-head" className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-ds-line bg-ds-background px-4 py-1.5 lg:px-8">
+        <div className="flex min-w-0 flex-1 basis-[11rem] items-baseline gap-2">
+          <h1 className="m-0 min-w-0 truncate text-ds-card-title font-semibold text-ds-ink">{t('title')}</h1>
+          <span data-testid="docs-index-count" className="shrink-0 font-mono text-ds-mono-md text-ds-ink-3">{items.length}</span>
         </div>
-        {/* story #2974(PR-D0) delta — `font-editorial-heading`은 무게 유틸(--font-weight-editorial-heading:
-            820, Tailwind가 자동생성)이지 페이스 토큰이 아니다. font-display 단독 치환이 무게 820을
-            조용히 지웠던 걸 유나군이 배포 CSS로 실증(2026-08-23) — 페이스(font-display)+무게
-            (font-editorial-heading) 병기로 복원. 정적 className이라 twMerge 충돌군 문제 없음. */}
-        <h1 className="mt-2 font-display font-editorial-heading text-display leading-none tracking-[-0.035em] text-foreground">
-          {t('title')}
-        </h1>
-        {/* story #2983(유나 확定) — 정적 장식 citron 퇴출(citron=live pulse 신호 전용).
-            시그니처는 무채 두께(3px)·길이로 유지. */}
-        <hr className="my-4 h-[3px] w-[88px] border-0 bg-proof-line-strong" />
-        <p className="text-editorial-ui text-muted-foreground">
-          {t('indexDek')} <span className="text-muted-foreground">{t('indexDocCount', { count: items.length })}</span>
-        </p>
-      </div>
-
-      {/* 본문 헤더 존 필터(PO 확定 — 시안 색인 레일의 카테고리·상태 정보가 여기로 이동) +
-          목록/격자 토글 + 새 문서. */}
-      <div className="mb-5 flex flex-wrap items-center gap-2 border-b border-border pb-4">
-        <button
-          type="button"
-          onClick={() => setCategoryFilter(null)}
-          aria-pressed={categoryFilter === null}
-          className={`px-2.5 py-1 text-editorial-ui font-semibold transition ${categoryFilter === null ? 'border-b-2 border-proof-citron text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-        >
-          {t('indexCategoryAll')} <span className="font-mono text-editorial-meta text-muted-foreground">{items.length}</span>
-        </button>
-        {folders.map((f) => (
-          <button
-            key={f.id}
-            type="button"
-            onClick={() => setCategoryFilter(f.id)}
-            aria-pressed={categoryFilter === f.id}
-            className={`px-2.5 py-1 text-editorial-ui font-medium transition ${categoryFilter === f.id ? 'border-b-2 border-proof-citron text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-          >
-            {f.title} <span className="font-mono text-editorial-meta text-muted-foreground">{categoryCounts[f.id] ?? 0}</span>
-          </button>
-        ))}
-        {categoryCounts[UNCATEGORIZED] > 0 && (
-          <button
-            type="button"
-            onClick={() => setCategoryFilter(UNCATEGORIZED)}
-            aria-pressed={categoryFilter === UNCATEGORIZED}
-            className={`px-2.5 py-1 text-editorial-ui font-medium transition ${categoryFilter === UNCATEGORIZED ? 'border-b-2 border-proof-citron text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-          >
-            {t('indexCategoryUncategorized')} <span className="font-mono text-editorial-meta text-muted-foreground">{categoryCounts[UNCATEGORIZED]}</span>
-          </button>
-        )}
-
-        <span className="mx-1 h-4 w-px bg-border" aria-hidden="true" />
-
-        {STATUS_FILTERS.map((s) => (
-          <button
-            key={s}
-            type="button"
-            onClick={() => setStatusFilter((prev) => (prev === s ? null : s))}
-            aria-pressed={statusFilter === s}
-            className={`transition ${statusFilter === s ? 'ring-2 ring-proof-citron' : 'opacity-80 hover:opacity-100'}`}
-          >
-            <StatusChip status={s} />
-            <span className="ml-1 font-mono text-micro text-muted-foreground">{statusCounts[s]}</span>
-          </button>
-        ))}
-
-        <div className="ml-auto flex items-center gap-2">
-          <div className="flex overflow-hidden rounded-md border border-border">
-            <button
-              type="button"
-              onClick={() => setViewMode('list')}
-              aria-pressed={viewMode === 'list'}
-              className={`flex h-7 w-7 items-center justify-center transition ${viewMode === 'list' ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'}`}
-              aria-label={t('indexViewList')}
-            >
-              <ListIcon className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('grid')}
-              aria-pressed={viewMode === 'grid'}
-              className={`flex h-7 w-7 items-center justify-center border-l border-border transition ${viewMode === 'grid' ? 'bg-foreground text-background' : 'text-muted-foreground hover:bg-muted'}`}
-              aria-label={t('indexViewGrid')}
-            >
-              <LayoutGrid className="size-3.5" />
-            </button>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <div role="group" aria-label={t('viewModeLabel')} className="flex items-center gap-0.5 rounded-ds-control border border-ds-line p-0.5">
+            <IconButton icon="view_list" label={t('indexViewList')} aria-pressed={viewMode === 'list'} onClick={() => setViewMode('list')} className={viewMode === 'list' ? 'bg-ds-surface-high text-ds-ink' : undefined} />
+            <IconButton icon="grid_view" label={t('indexViewGrid')} aria-pressed={viewMode === 'grid'} onClick={() => setViewMode('grid')} className={viewMode === 'grid' ? 'bg-ds-surface-high text-ds-ink' : undefined} />
           </div>
-          <Button size="sm" onClick={handleNewDoc}>
-            <Plus className="mr-1 h-3.5 w-3.5" />
+          <Button variant="primary" onClick={handleNewDoc} iconStart={<Icon name="add" size={14} />}>
             {t('newDoc')}
           </Button>
         </div>
       </div>
 
-      {filtered.length === 0 ? (
-        <p className="py-10 text-center text-sm text-muted-foreground">{t('indexNoResults')}</p>
-      ) : viewMode === 'grid' ? (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((doc) => (
-            <button
-              key={doc.id}
-              type="button"
-              onClick={() => goToDoc(doc.slug)}
-              className="flex flex-col items-start gap-2 rounded-lg border border-border bg-card p-4 text-left transition hover:border-foreground/30"
-            >
-              <StatusChip status={doc.status} />
-              <span className="text-lg font-editorial-claim text-foreground line-clamp-2">{doc.title}</span>
-              <span className="mt-auto font-mono text-micro text-muted-foreground">{formatDate(doc.updated_at)}</span>
-            </button>
-          ))}
-        </div>
-      ) : (
-        <>
-          {lead ? (
-            <button
-              type="button"
-              onClick={() => goToDoc(lead.slug)}
-              className="relative mb-3 flex w-full flex-col items-start gap-2 border border-border bg-card px-6 py-5 pl-7 text-left transition hover:border-foreground/30"
-            >
-              {/* story #3053(2984-S5) — 무채 헤어라인 액센트 채택, citron 정적 장식 폐지
-                  (citron은 live pulse 신호 전용 — 위 §2983 주석과 동일 규율, 이 스트라이프는
-                  라이브가 아닌 정적 "lead" 표식이라 애초에 citron 대상이 아니었다). */}
-              <span className="absolute inset-y-0 left-0 w-1 bg-proof-line-strong" aria-hidden="true" />
-              <div className="flex items-center gap-2.5">
-                <StatusChip status={lead.status} />
-                <span className="font-mono text-editorial-meta uppercase tracking-[0.05em] text-muted-foreground">{t('indexLeadBadge')}</span>
-              </div>
-              <h2 className="font-display font-editorial-heading text-2xl leading-[1.15] tracking-[-0.02em] text-foreground">{lead.title}</h2>
-              <div className="font-mono text-xs text-muted-foreground">{formatDate(lead.updated_at)}</div>
-            </button>
-          ) : null}
-          <ul className="divide-y divide-border/60">
-            {rest.map((doc) => (
-              <li key={doc.id}>
-                <button
-                  type="button"
-                  onClick={() => goToDoc(doc.slug)}
-                  className="grid w-full grid-cols-[auto_1fr_auto] items-center gap-4 py-4 text-left transition hover:bg-muted/40"
-                >
-                  <StatusChip status={doc.status} />
-                  <span className="min-w-0 truncate text-lg font-editorial-claim text-foreground">{doc.title}</span>
-                  <span className="shrink-0 font-mono text-editorial-meta text-muted-foreground">{formatDate(doc.updated_at)}</span>
+      {/* 필터 한 줄 — 분류(폴더) · 상태. 한 번에 하나(다시 누르면 풀림) · 개수는 이 뷰가 들고 있는 받은 집합 기준(위 주석 그대로). */}
+      <div data-testid="docs-index-filters" className="flex shrink-0 flex-wrap items-center gap-1 border-b border-ds-line px-4 py-1.5 lg:px-8">
+        <Button variant={categoryFilter === null ? 'secondary' : 'quiet'} aria-pressed={categoryFilter === null} onClick={() => setCategoryFilter(null)}>
+          {t('indexCategoryAll')} <span className="font-mono text-ds-mono-md text-ds-ink-3">{items.length}</span>
+        </Button>
+        {folders.map((f) => (
+          <Button key={f.id} variant={categoryFilter === f.id ? 'secondary' : 'quiet'} aria-pressed={categoryFilter === f.id} onClick={() => setCategoryFilter(f.id)}>
+            {f.title} <span className="font-mono text-ds-mono-md text-ds-ink-3">{categoryCounts[f.id] ?? 0}</span>
+          </Button>
+        ))}
+        {categoryCounts[UNCATEGORIZED] > 0 && (
+          <Button variant={categoryFilter === UNCATEGORIZED ? 'secondary' : 'quiet'} aria-pressed={categoryFilter === UNCATEGORIZED} onClick={() => setCategoryFilter(UNCATEGORIZED)}>
+            {t('indexCategoryUncategorized')} <span className="font-mono text-ds-mono-md text-ds-ink-3">{categoryCounts[UNCATEGORIZED]}</span>
+          </Button>
+        )}
+
+        <span className="mx-1 h-4 w-px bg-ds-line" aria-hidden="true" />
+
+        {STATUS_FILTERS.map((s) => (
+          <Button key={s} variant={statusFilter === s ? 'secondary' : 'quiet'} aria-pressed={statusFilter === s} onClick={() => setStatusFilter((prev) => (prev === s ? null : s))}>
+            <DocStatusChip status={s} />
+            <span className="font-mono text-ds-mono-md text-ds-ink-3">{statusCounts[s]}</span>
+          </Button>
+        ))}
+      </div>
+
+      <div className="focus-inset flex-1 overflow-y-auto px-4 py-3 lg:px-8">
+        {filtered.length === 0 ? (
+          <p className="py-10 text-center text-ds-small text-ds-ink-3">{t('indexNoResults')}</p>
+        ) : viewMode === 'grid' ? (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {filtered.map((doc) => (
+              <Card key={doc.id} className="p-0">
+                <button type="button" onClick={() => goToDoc(doc.slug)} className="flex h-full w-full flex-col items-start gap-2 rounded-ds-control p-4 text-left outline-none transition-colors hover:bg-ds-surface-high focus-visible:ring-2 focus-visible:ring-ds-action touch:min-h-11">
+                  <DocStatusChip status={doc.status} />
+                  <span className="line-clamp-2 text-ds-card-title font-semibold text-ds-ink">{doc.title}</span>
+                  <span className="mt-auto font-mono text-ds-mono-md text-ds-ink-3">{formatDate(doc.updated_at)}</span>
                 </button>
-              </li>
+              </Card>
             ))}
-          </ul>
-        </>
-      )}
+          </div>
+        ) : (
+          <>
+            {lead ? (
+              <Card className="mb-3 border-l-4 border-l-ds-line-strong p-0">
+                <button type="button" onClick={() => goToDoc(lead.slug)} className="flex w-full flex-col items-start gap-2 rounded-ds-control px-5 py-4 text-left outline-none transition-colors hover:bg-ds-surface-high focus-visible:ring-2 focus-visible:ring-ds-action touch:min-h-11">
+                  <div className="flex items-center gap-2.5">
+                    <DocStatusChip status={lead.status} />
+                    <span className="text-ds-small text-ds-ink-3">{t('indexLeadBadge')}</span>
+                  </div>
+                  <h2 className="m-0 text-ds-title font-semibold text-ds-ink">{lead.title}</h2>
+                  <div className="font-mono text-ds-mono-md text-ds-ink-3">{formatDate(lead.updated_at)}</div>
+                </button>
+              </Card>
+            ) : null}
+            <ul className="divide-y divide-ds-line">
+              {rest.map((doc) => (
+                <li key={doc.id}>
+                  <ListRow
+                    asChild
+                    density="compact"
+                    leading={undefined}
+                    trailing={undefined}
+                  >
+                    <button type="button" onClick={() => goToDoc(doc.slug)} className="grid w-full grid-cols-[auto_1fr_auto] items-center gap-3 text-left">
+                      <DocStatusChip status={doc.status} />
+                      <span className="min-w-0 truncate text-ds-body font-semibold text-ds-ink">{doc.title}</span>
+                      <span className="shrink-0 font-mono text-ds-mono-md text-ds-ink-3">{formatDate(doc.updated_at)}</span>
+                    </button>
+                  </ListRow>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
     </div>
   );
 }

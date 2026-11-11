@@ -789,3 +789,20 @@ describe('DocsClientLayout — 열 머리 개수 · 접기 단추 · 폰 서랍 
     expect(drawer.className).not.toContain('border-border');
   });
 });
+
+// story 4892 (UI-9 문서 화면 배치) — 목록 열을 접으면 본문 쪽(읽기 · 편집 머리)이 왼쪽 여백을 늘려 «펴기» 단추가 제목을 덮지 않는다: 본문 칸이 접힘 상태를 속성으로 내놓고(group/docs · data-collapsed), 머리들이 그 속성을 읽는다.
+describe('DocsClientLayout — 접힘 상태 속성 (4892 배치)', () => {
+  it('⭐본문 칸은 group/docs이고 접으면 data-collapsed="true" · 펴면 속성이 사라진다', async () => {
+    stubFetch();
+    await mount();
+    const section = container.querySelector('section.group\\/docs') as HTMLElement;
+    expect(section).not.toBeNull();
+    expect(section.hasAttribute('data-collapsed')).toBe(false);
+    const hide = container.querySelector<HTMLButtonElement>(`aside button[aria-label="${koMessages.docs.hideSidebar}"]`)!;
+    await act(async () => { hide.click(); });
+    expect(section.getAttribute('data-collapsed')).toBe('true');
+    const open = container.querySelector<HTMLButtonElement>(`button[aria-label="${koMessages.docs.openSidebar}"]`)!;
+    await act(async () => { open.click(); });
+    expect(section.hasAttribute('data-collapsed')).toBe(false);
+  });
+});

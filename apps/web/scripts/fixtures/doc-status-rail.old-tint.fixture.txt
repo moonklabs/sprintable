@@ -1,0 +1,15 @@
+// FROZEN FIXTURE (story 4892) — the old tinted status-header markup of components/docs/doc-status-rail.tsx as it was before the ds rebuild. verify-no-muted-on-tint.test.ts mutates THIS copy
+// (the real file now uses ds tokens) so the analyzer's template-literal-ternary axis keeps a real-shaped positive control.
+  return (
+    <div className={`proof-surface proof-surface-lift flex flex-wrap items-center gap-3 border px-4 py-3.5 ${
+      state === 'confirmed' ? 'border-success/30 bg-success-tint' : state === 'denied' ? 'border-destructive/30 bg-destructive-tint' : 'border-warning/30 bg-warning-tint'
+    }`}
+    >
+      {/* story #2955 §4(대비 주의, 실측 대비표) — 소형 계열색은 텍스트가 아니라 아이콘
+          그래픽이라도 배경 위 신뢰도를 아끼려 중립(bg-background) 원 위에 계열색 아이콘만
+          쓴다(tint 배경 위 계열색 텍스트 금지 규칙과 같은 결의 안전판 — #2534/#2420 계열). */}
+      <span className="grid size-8 shrink-0 place-items-center rounded-sm bg-background">
+        <Icon className={`size-4 ${state === 'confirmed' ? 'text-success' : state === 'denied' ? 'text-destructive' : 'text-warning'}`} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-base font-bold text-foreground">{t(STATE_LABEL_KEY[state])}</div>

@@ -532,7 +532,7 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 하나뿐)가 더는 numberAdjacent가 아니게 됐다 — 애초에 "혼동 여지 실질 0"이라고 적어
   // 뒀던 그 판단이 이제 구조로도 맞아떨어진 것(EXEMPT였던 게 아예 후보에서 빠짐, 죽은
   // 예외 축적 아님 — 아래 회귀가드가 "선언된 건 전부 실제로 걸린다"를 지킨다).
-  'docs.indexDocCount <-> docs.title',
+  // story 4892 (UI-9 문서 화면): `docs.indexDocCount <-> docs.title` left the list — the docs first screen was rebuilt (head line = title + count), `indexDocCount` is gone, so the exemption would be dead.
   'sprints.days <-> sprints.overdueBadge',
   // story 4891 (settings list rebuild): `onboarding.projectLimitExceededError <-> settings.tabProjects` is no longer exempted — the tab's label is now read only from settings-nav.ts (a data list), not in a file that also reads the long sentence, so the pair does not meet any more (the dead-exemption guard below asks for its removal).
   // story #3758 2회차(위 docstring 정정 참고) — memberLimitExceededError가 "구성원을"로
