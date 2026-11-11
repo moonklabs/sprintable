@@ -6,6 +6,8 @@ import { useTranslations } from 'next-intl';
 import { Plus, X, Play, StopCircle, ChevronRight, Trash2, AlertTriangle, Target, Clock, Users, Calendar, Ban } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Button as DsButton } from '@/components/ds/button';
+import { ListRow } from '@/components/ds/list-row';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ds/field';
@@ -828,44 +830,45 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
             }
           />
         ) : (
-          <ul className="space-y-2">
+          // story #4888(UI-5 스프린트 화면) — 손으로 만든 카드 행(<li onClick>: 키보드로 못 고르고 선택은 색뿐)을 ds ListRow로: 제목이 키보드로 닿는 단추,
+          // 선택한 줄은 aria-current, 상태 · 지남 배지는 오른쪽, 날짜는 둘째 줄, «리포트 보기»는 단추 밖 링크. 줄 전체 클릭(li onClick)은 그대로 — 단추의 클릭도 여기로 올라와 선택된다.
+          // 카드마다 일감 수는 넣지 않는다(PO 11-11 결정 ① — 새 읽기가 든다).
+          <ul>
             {sprints.map((sprint) => (
-              <li
-                key={sprint.id}
-                onClick={() => void handleSelect(sprint)}
-                className={`cursor-pointer rounded-lg border p-4 transition hover:bg-muted/40 ${selected?.id === sprint.id ? 'border-primary bg-muted/40' : 'border-border'}`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-foreground">{sprint.title}</span>
-                  <div className="flex items-center gap-2">
-                  <Badge variant={statusVariant(sprint.status)}>{sprintStatusLabel(sprint.status)}</Badge>
-                  {isSprintOverdue(sprint, now) ? (
-                    // 유나 규격(2026-08-02, #2791 design:changes) — Badge variant="warning"의
-                    // 계열색 텍스트(text-warning)는 light에서 2.06(AA 4.5의 절반 이하). 명도를
-                    // 낮추면 통과하지만 노랑이 갈색이 되어 "경고" 의미가 사라진다 — 문제는
-                    // 배경이 아니라 글자가 밝은 것. tint 배경 위에서는 foreground로 덮는다
-                    // (배경이 이미 "옅은 경고색"으로 의미를 말하므로 글자까지 계열색일 필요는
-                    // 없다). 이 오버라이드는 이 두 배지(#2413) 한정 — badge.tsx의 warning
-                    // variant 자체는 다른 4개 색 계열과 함께 #2420에서 다룬다.
-                    <Badge variant="warning" className="text-foreground">{t('overdueBadge', { days: daysOverdue(sprint.end_date, now) })}</Badge>
-                  ) : null}
-                  <ChevronRight className="size-4 text-muted-foreground" />
-                  </div>
-                </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {sprint.start_date} ~ {sprint.end_date} · {sprintDurationDays(sprint.start_date, sprint.end_date)}{t('days')}
-              </p>
-              {sprint.report_doc_id ? (
-                <a
-                  href={flatHref(`/docs?id=${sprint.report_doc_id}`)}
-                  onClick={(e) => e.stopPropagation()}
-                  className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                >
-                  📄 {t('viewReport')}
-                </a>
-              ) : null}
-            </li>
-          ))}
+              <li key={sprint.id} onClick={() => void handleSelect(sprint)} className="cursor-pointer">
+                <ListRow
+                  selected={selected?.id === sprint.id}
+                  className="has-[button:focus-visible]:ring-2 has-[button:focus-visible]:ring-inset has-[button:focus-visible]:ring-ds-action"
+                  title={<DsButton type="button" variant="quiet" className="h-auto max-w-full justify-start px-0 text-left text-ds-body font-semibold text-ds-ink hover:bg-transparent hover:text-ds-ink focus-visible:ring-0"><span className="truncate">{sprint.title}</span></DsButton>}
+                  subtitle={`${sprint.start_date} ~ ${sprint.end_date} · ${sprintDurationDays(sprint.start_date, sprint.end_date)}${t('days')}`}
+                  trailing={
+                    <>
+                      {sprint.report_doc_id ? (
+                        <a
+                          href={flatHref(`/docs?id=${sprint.report_doc_id}`)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-xs font-medium text-primary hover:underline"
+                        >
+                          📄 {t('viewReport')}
+                        </a>
+                      ) : null}
+                      <Badge variant={statusVariant(sprint.status)}>{sprintStatusLabel(sprint.status)}</Badge>
+                      {isSprintOverdue(sprint, now) ? (
+                        // 유나 규격(2026-08-02, #2791 design:changes) — Badge variant="warning"의
+                        // 계열색 텍스트(text-warning)는 light에서 2.06(AA 4.5의 절반 이하). 명도를
+                        // 낮추면 통과하지만 노랑이 갈색이 되어 "경고" 의미가 사라진다 — 문제는
+                        // 배경이 아니라 글자가 밝은 것. tint 배경 위에서는 foreground로 덮는다
+                        // (배경이 이미 "옅은 경고색"으로 의미를 말하므로 글자까지 계열색일 필요는
+                        // 없다). 이 오버라이드는 이 두 배지(#2413) 한정 — badge.tsx의 warning
+                        // variant 자체는 다른 4개 색 계열과 함께 #2420에서 다룬다.
+                        <Badge variant="warning" className="text-foreground">{t('overdueBadge', { days: daysOverdue(sprint.end_date, now) })}</Badge>
+                      ) : null}
+                      <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
+                    </>
+                  }
+                />
+              </li>
+            ))}
         </ul>
       )}
     </div>
