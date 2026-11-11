@@ -821,7 +821,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         {/* story #92f00dc4 — w-72→w-80: 서버 카탈로그 인자 힌트(예: `<스토리#> <멤버명>`)가
             추가되며 한 줄에 명령+힌트+설명이 안 맞아 줄바꿈되던 것 보정. */}
         {commandCandidates.length > 0 && (
-          <ul role="listbox" aria-label={t('commandCandidatesLabel')} className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-80 overflow-y-auto overflow-x-hidden rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+          <ul role="listbox" aria-label={t('commandCandidatesLabel')} className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-80 max-w-[calc(100%-2.5rem)] overflow-y-auto overflow-x-hidden rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
             {commandCandidates.map((cmd, idx) => (
               <li key={cmd.name}>
                 <button
@@ -850,14 +850,14 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
         {/* Mention dropdown 실패 상태 — story #3687: 조용한 0건과 구분되는 별도 얼굴. */}
         {mentionQuery !== null && mentionLoadFailed && (
-          <div role="status" className="focus-inset absolute bottom-full left-8 z-50 mb-1 w-56 rounded-md border border-border bg-popover px-3 py-2 text-xs text-muted-foreground shadow-[var(--elev-overlay)]">
+          <div role="status" className="focus-inset absolute bottom-full left-8 z-50 mb-1 w-56 max-w-[calc(100%-2.5rem)] rounded-md border border-border bg-popover px-3 py-2 text-xs text-muted-foreground shadow-[var(--elev-overlay)]">
             {t('mentionLoadFailed')}
           </div>
         )}
 
         {/* Mention dropdown */}
         {mentionMembers.length > 0 && (
-          <ul role="listbox" aria-label={t('mentionCandidatesLabel')} className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-56 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+          <ul role="listbox" aria-label={t('mentionCandidatesLabel')} className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-56 max-w-[calc(100%-2.5rem)] overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
             {/* story #4284(유나 판정) — 행 라벨: 이름 없는 행이 둘 이상이면 역할 라벨로 갈리지 않을 때 «· ID 앞 8자»(본문 `@…`엔 꼬리 없음). */}
             {(() => {
               const rowLabels = memberRowLabels(mentionMembers, tc, (m) => (m.role ? mentionMemberRoleLabel(m, tSettings, tOrg) : ''));
@@ -883,7 +883,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         {/* Entity dropdown — story #2263(C-5) ㉡: 종류별 구역(머리글)으로 묶되 열은 안 나눈다
             (entityResults가 이미 groupEntitiesByType로 그룹 순서라 렌더 순서=entityIndex 순서). */}
         {entityPicker.entityResults.length > 0 && (
-          <ul role="listbox" aria-label={t('entityCandidatesLabel')} className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+          <ul role="listbox" aria-label={t('entityCandidatesLabel')} className="focus-inset absolute bottom-full left-8 z-50 mb-1 max-h-48 w-72 max-w-[calc(100%-2.5rem)] overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
             {entityPicker.entityResults.map((entity, idx) => {
               const EntityIcon = ENTITY_ICONS[entity.entity_type] ?? Hash;
               const isNewGroup = idx === 0 || entityPicker.entityResults[idx - 1]!.entity_type !== entity.entity_type;

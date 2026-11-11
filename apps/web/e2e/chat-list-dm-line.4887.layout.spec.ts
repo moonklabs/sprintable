@@ -51,9 +51,9 @@ async function build() {
         import React from 'react'; import { createRoot } from 'react-dom/client'; import { NextIntlClientProvider } from 'next-intl';
         import ko from './messages/ko.json';
         import { ChatListView } from './src/components/chat/chat-list-view';
-        window.__mount = () => {
+        window.__mount = (w) => {
           createRoot(document.getElementById('root')).render(React.createElement(NextIntlClientProvider, { locale: 'ko', messages: ko, timeZone: 'Asia/Seoul' },
-            React.createElement('div', { id: 'rail', style: { width: '270px', padding: '0 8px' } }, React.createElement(ChatListView, { projectId: 'p1', currentTeamMemberId: 'me-1' }))));
+            React.createElement('div', { id: 'rail', style: { width: (w || 270) + 'px', padding: '0 8px' } }, React.createElement(ChatListView, { projectId: 'p1', currentTeamMemberId: 'me-1' }))));
         };`,
       resolveDir: WEB, loader: 'tsx',
     },
@@ -79,7 +79,7 @@ async function build() {
   return built;
 }
 
-async function open(page: Page) {
+async function open(page: Page, width?: number) {
   const { js, css } = await build();
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.unrouteAll();
@@ -96,7 +96,7 @@ async function open(page: Page) {
   await page.goto('about:blank');
   await page.goto('http://preview.test/');
   await page.addScriptTag({ content: js });
-  await page.evaluate(() => (window as unknown as { __mount: () => void }).__mount());
+  await page.evaluate((w) => (window as unknown as { __mount: (w?: number) => void }).__mount(w), width);
   await page.getByTestId('device-chip').first().waitFor();
 }
 
@@ -155,4 +155,18 @@ test('[SID:4887] a person\'s DM has no participant line at all and is the shorte
   const human = rowOf(page, '지우');
   await expect(human.getByTestId('room-dm-line')).toHaveCount(0);
   expect(h['지우']!, 'a row without the participant line is shorter than one with it').toBeLessThan(h[AGENT_NAME]!);
+});
+
+// story 4887 (UI-4 P6-b) — the list slot is narrower between lg and xl (read from chats/layout.tsx, not typed here): at THAT width the list must read exactly as it does at 270 — the short computer name in full, the same cut rows.
+// (Measured over ten rows on a Mac: 232 px and up cut 4 titles · 3 previews · 4 computer names · 2 agent names · 0 project names, the same as 270; 224 px newly cuts «SYJ-Mac» and a project name. The CI's wider Linux font cuts «SYJ-Mac» at 232 (32 of 41 px), which is why the slot is 248.)
+const LG_LIST_WIDTH = Number(/lg:w-\[(\d+)px\] xl:w-\[270px\]/.exec(readFileSync(path.join(WEB, 'src/app/(authenticated)/chats/layout.tsx'), 'utf8'))?.[1]);
+
+test('[SID:4887] at the narrower lg list width the short computer name is still READ in full and no line runs past its column', async ({ page }) => {
+  expect(LG_LIST_WIDTH, 'the lg list width is read from the layout source').toBeGreaterThan(200);
+  await open(page, LG_LIST_WIDTH);
+  const g = await chipOf(page, AGENT_NAME);
+  expect(g.textCut, `«${COMPUTER}» is cut at the ${LG_LIST_WIDTH} px list (text ${g.textW}px of ${g.fullW}px)`).toBe(false); // reverted to 224 → 29 of 36 px
+  expect(g.chipInsideLine && !g.lineOverflow).toBe(true);
+  const named = await chipOf(page, '배포 도우미');
+  expect(named.lineOverflow, 'the named DM line stays inside its column').toBe(false);
 });

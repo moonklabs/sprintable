@@ -75,6 +75,7 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
   // 보인다(①rail은 절대 안 접힘의 이중 안전장치 — Tailwind가 브레이크포인트를 sm→2xl 오름차순
   // 소스 순서로 컴파일하므로 xl:flex가 lg:hidden을 폭 ≥1280에서 CSS 캐스케이드로 자연히 이긴다).
   // railMode==='overlay'는 고정 오버레이로 뜬다 — main/reading 폭을 다시 누르지 않는다(③④).
+  // story 4887 (UI-4 P6-b) — the list slot is 248 px between lg and xl and 270 from xl up. Measured over ten rows of the real list: 232 px and up cuts exactly what 270 cuts, 224 px newly cuts the short computer name P2-e made readable — but the CI's Linux fallback font needs 41 px for «SYJ-Mac» where a Mac needs 36, and at 232 it showed 32 of 41; so 248 (7 px of margin on the wider font, 17 px on the Mac) instead of the 232 edge. It gives the room body +22 px next to an open thread.
   const railHiddenClass = railMode === 'collapsed' ? 'lg:hidden' : '';
   // story #2921 S6 후속(PO dev 라이브 실측, 2026-08-22) — 이 fixed 분기 컨테이너에 배경이
   // 없어(rail 자신의 base className은 border-border만 지정하고 bg-*는 어디에도 없다) docked
@@ -85,7 +86,7 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
   // story #3007(로드맵 P2·PR-E, L1) — 모바일 드로어는 floating이라 shadow-xl 리터럴 대신
   // --elev-overlay.
   const railOverlayClass = railMode === 'overlay'
-    ? 'fixed inset-y-0 left-0 z-40 w-[270px] bg-background shadow-[var(--elev-overlay)] border-r border-border lg:!flex xl:static xl:z-auto xl:w-[270px] xl:shadow-none'
+    ? 'fixed inset-y-0 left-0 z-40 w-[270px] bg-background shadow-[var(--elev-overlay)] border-r border-border lg:!flex lg:!w-[270px] xl:static xl:z-auto xl:w-[270px] xl:shadow-none'
     : '';
 
   return (
@@ -124,7 +125,7 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
         role={railMode === 'overlay' ? 'dialog' : undefined}
         aria-modal={railMode === 'overlay' ? true : undefined}
         aria-labelledby={railMode === 'overlay' ? 'chat-rail-heading' : undefined}
-        className={`${isListRoute ? 'flex' : 'hidden'} lg:flex min-h-0 w-full flex-col overflow-hidden border-border outline-none lg:w-[270px] lg:shrink-0 lg:border-r ${railHiddenClass} xl:flex ${railOverlayClass}`}
+        className={`${isListRoute ? 'flex' : 'hidden'} lg:flex min-h-0 w-full flex-col overflow-hidden border-border outline-none lg:w-[248px] xl:w-[270px] lg:shrink-0 lg:border-r ${railHiddenClass} xl:flex ${railOverlayClass}`}
       >
         <div className="flex flex-shrink-0 items-center justify-between border-b border-border px-3 py-2.5">
           <h1 id="chat-rail-heading" className="text-sm font-medium text-foreground">{t('title')}</h1>

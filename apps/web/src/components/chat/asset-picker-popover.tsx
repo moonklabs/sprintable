@@ -139,7 +139,7 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
       ref={containerRef}
       role="dialog"
       aria-label={t('assetPickerTitle')}
-      className="absolute bottom-14 left-3 z-40 flex max-h-[380px] w-[372px] flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-[var(--elev-overlay)]"
+      className="absolute bottom-14 left-3 z-40 flex max-h-[380px] w-[372px] max-w-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-[var(--elev-overlay)]"
     >
       {/* 헤더 */}
       <div className="flex items-center gap-2 px-3 pb-2 pt-3 text-xs font-semibold">
