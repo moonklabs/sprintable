@@ -399,10 +399,15 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
     ];
   }, [humanMembers, currentTeamMemberId]);
 
+  // story #4888(UI-5 스프린트 화면, PO 11-11) — 이 요약의 수는 «지금까지 불러온 스토리»(처음 40개 + 더 보기로 이어 붙인 쪽)만 센 부분 수다. 다음 쪽이 더 있는데(storiesNextCursor) 그 수를 정확한 총수처럼
+  // 보이면 «틀린 값을 정확한 것처럼»이라, 더 있을 때는 «N+»로 정직하게 보인다(스토리 수 · 태스크 완료/전체 둘 다 «이상»). 끝까지 불러오면(커서 없음) 예전처럼 정확한 수.
+  const storiesPartial = storiesNextCursor !== null;
+  const storyCountLabel = storiesPartial ? t('sprintStoryCountPartial', { count: stories.length }) : t('sprintStoryCount', { count: stories.length });
+  const taskProgressLabel = storiesPartial ? t('taskProgressPartial', { done: doneTasks, total: totalTasks }) : t('taskProgress', { done: doneTasks, total: totalTasks });
   const summaryBadges = [
     activeSprint ? { label: activeSprint.title, variant: 'chip' as const } : { label: t('noActiveSprint'), variant: 'outline' as const },
-    { label: t('sprintStoryCount', { count: stories.length }), variant: 'outline' as const },
-    { label: t('taskProgress', { done: doneTasks, total: totalTasks }), variant: 'outline' as const },
+    { label: storyCountLabel, variant: 'outline' as const },
+    { label: taskProgressLabel, variant: 'outline' as const },
   ];
   const headerBadges = loadError
     ? []
@@ -576,13 +581,13 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
                   <div className="space-y-0.5">
                     <h2 className="text-sm font-semibold text-foreground">{t('currentSprint')}</h2>
                     {activeSprint ? (
-                      <p className="text-xs text-muted-foreground">{activeSprint.title} · {t('sprintStoryCount', { count: stories.length })}</p>
+                      <p className="text-xs text-muted-foreground">{activeSprint.title} · {storyCountLabel}</p>
                     ) : (
                       <p className="text-xs text-muted-foreground">{t('noActiveSprint')}</p>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    <Badge variant="outline">{t('taskProgress', { done: doneTasks, total: totalTasks })}</Badge>
+                    <Badge variant="outline">{taskProgressLabel}</Badge>
                     <span className="text-xs text-muted-foreground">{sprintExpanded ? t('collapseSprintStories') : t('expandSprintStories')}</span>
                   </div>
                 </button>
