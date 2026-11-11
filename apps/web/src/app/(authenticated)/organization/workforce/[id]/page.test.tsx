@@ -10,14 +10,16 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../../messages/ko.json';
 
 // story #3519 harness gotcha — useRouter가 매 렌더 새 객체를 반환하면 fetchAgent의
-// useCallback identity가 매번 바뀌어 로드 useEffect가 무한 재실행된다(fetchAgent가
-// [id, router] 의존). router mock 자체를 안정 참조로 고정해야 한다.
-const { routerReplaceMock, routerMock } = vi.hoisted(() => {
+// useCallback identity가 매번 바뀌어 로드 useEffect가 무한 재실행된다(story 4889 前 fetchAgent가
+// [id, router] 의존이었다 — 지금은 [id]뿐). router mock은 그래도 안정 참조로 고정해 둔다.
+const { routerReplaceMock, routerPushMock, routerMock, paramId } = vi.hoisted(() => {
   const routerReplaceMock = vi.fn();
-  return { routerReplaceMock, routerMock: { replace: routerReplaceMock, push: vi.fn() } };
+  const routerPushMock = vi.fn();
+  const paramId = { current: 'agent-1' };
+  return { paramId, routerReplaceMock, routerPushMock, routerMock: { replace: routerReplaceMock, push: routerPushMock } };
 });
 vi.mock('next/navigation', () => ({
-  useParams: () => ({ id: 'agent-1' }),
+  useParams: () => ({ id: paramId.current }),
   useRouter: () => routerMock,
 }));
 
@@ -57,6 +59,8 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   routerReplaceMock.mockReset();
+  routerPushMock.mockReset();
+  paramId.current = 'agent-1';
 });
 
 afterEach(async () => {
@@ -219,7 +223,7 @@ describe('AgentDetailPage — 프로젝트 전환과 flat 링크(story #4231)', 
     await act(async () => { setPendingProjectTarget(null); });
   });
 
-  it('⭐조회 실패 되돌리기 — 요청 중 전환됐으면 되돌리는 순간의 목표 프로젝트를 싣는다', async () => {
+  it('⭐조회 실패 «목록으로» — 눌린 그 순간의 목표 프로젝트를 싣는다(story 4889: 자동 되돌리기는 없어졌고 같은 규칙이 단추로 옮겨 감)', async () => {
     let resolveAgent!: (v: unknown) => void;
     stubFetch();
     const base = globalThis.fetch as unknown as (u: string) => Promise<unknown>;
@@ -229,8 +233,131 @@ describe('AgentDetailPage — 프로젝트 전환과 flat 링크(story #4231)', 
     await mount();
     const { setPendingProjectTarget } = await import('@/lib/pending-project-switch');
     await act(async () => { setPendingProjectTarget('proj-B'); });
-    await act(async () => { resolveAgent({ ok: false, json: async () => null }); await Promise.resolve(); await Promise.resolve(); });
-    expect(routerReplaceMock).toHaveBeenCalledWith('/organization/workforce?tab=manage&p=proj-B');
+    await act(async () => { resolveAgent({ ok: false, status: 500, json: async () => null }); await Promise.resolve(); await Promise.resolve(); });
+    expect(routerReplaceMock).not.toHaveBeenCalled(); // no silent bounce
+    const back = [...container.querySelectorAll('button')].find((b) => b.textContent === '목록으로')!;
+    await act(async () => { back.click(); });
+    expect(routerPushMock).toHaveBeenCalledWith('/organization/workforce?tab=manage&p=proj-B');
     await act(async () => { setPendingProjectTarget(null); });
+  });
+});
+
+// story 4889 (AC3 §5 #6) — the agent detail used to bounce to the list WITHOUT A WORD when the read failed, and `if (!agent) return null` could draw a blank page.
+// Now the failure is said on the screen with a way out. Reverting either goes red.
+describe('AgentDetailPage — 불러오기 실패는 말한다(story 4889 · §5 #6)', () => {
+  function stubAgentReply(reply: () => unknown) {
+    stubFetch();
+    const base = globalThis.fetch as unknown as (u: string) => Promise<unknown>;
+    vi.stubGlobal('fetch', vi.fn((url: string) => (url === '/api/team-members/agent-1' ? Promise.resolve(reply()) : base(url))));
+  }
+  const err = () => container.querySelector('[data-testid="agent-detail-load-error"]');
+  const btn = (label: string) => [...container.querySelectorAll('button')].find((b) => b.textContent === label);
+
+  it('⭐404 → «에이전트를 찾을 수 없어요» + [목록으로] — 다시 시도는 없다 · 조용한 되돌리기(router.replace) 없음 · 빈 화면 아님', async () => {
+    stubAgentReply(() => ({ ok: false, status: 404, json: async () => null }));
+    await mount();
+    expect(routerReplaceMock).not.toHaveBeenCalled();
+    expect(err()?.getAttribute('data-kind')).toBe('notfound');
+    expect(container.textContent).toContain('에이전트를 찾을 수 없어요');
+    expect(btn('목록으로')).toBeTruthy();
+    expect(btn('다시 시도')).toBeUndefined();
+  });
+
+  it('⭐서버 오류(500) → «에이전트를 불러오지 못했어요» + [다시 시도] [목록으로] — [다시 시도]를 누르면 다시 받아 화면이 선다', async () => {
+    let ok = false;
+    stubAgentReply(() => (ok ? { ok: true, json: async () => ({ data: AGENT }) } : { ok: false, status: 500, json: async () => null }));
+    await mount();
+    expect(routerReplaceMock).not.toHaveBeenCalled();
+    expect(err()?.getAttribute('data-kind')).toBe('failed');
+    expect(container.textContent).toContain('에이전트를 불러오지 못했어요');
+    expect(btn('다시 시도')).toBeTruthy();
+    expect(btn('목록으로')).toBeTruthy();
+    ok = true;
+    await act(async () => { btn('다시 시도')!.click(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(err()).toBeNull();
+    expect(container.textContent).toContain('에이전트1');
+  });
+
+  it('⭐네트워크가 끊겨 읽기가 던져도(reject) 같은 «불러오지 못했어요» 상태 — 빈 화면 · 처리 안 된 거절 아님', async () => {
+    stubFetch();
+    const base = globalThis.fetch as unknown as (u: string) => Promise<unknown>;
+    vi.stubGlobal('fetch', vi.fn((url: string) => (url === '/api/team-members/agent-1' ? Promise.reject(new Error('network down')) : base(url))));
+    await mount();
+    expect(err()?.getAttribute('data-kind')).toBe('failed');
+    expect(btn('다시 시도')).toBeTruthy();
+  });
+
+  it('읽기가 성공하면 오류 상태는 없다(회귀 0)', async () => {
+    stubFetch();
+    await mount();
+    expect(err()).toBeNull();
+    expect(container.textContent).toContain('에이전트1');
+  });
+});
+
+// story 4889 — one read at a time counts: a new id never shows the OLD agent (while reading or after its read failed), and an older read's late answer does not overwrite the newer page.
+describe('AgentDetailPage — id가 바뀔 때(story 4889)', () => {
+  const rerender = async () => {
+    const { default: AgentDetailPage } = await import('./page');
+    await act(async () => { root.render(wrap(<AgentDetailPage />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+  };
+
+  it('⭐A를 보다가 B로 바뀌어 B의 읽기가 실패하면 A가 남지 않고 오류 상태가 선다 — 되돌리면 빨강', async () => {
+    stubFetch(); // agent-1 ok · anything else (agent-2) → not ok
+    await mount();
+    expect(container.textContent).toContain('에이전트1');
+    paramId.current = 'agent-2';
+    await rerender();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="agent-detail-load-error"]')?.getAttribute('data-kind')).toBe('failed');
+    expect(container.textContent).not.toContain('에이전트1');
+  });
+
+  it('⭐옛 id의 늦은 답이 새 id의 화면을 덮지 않는다', async () => {
+    let resolveA!: (v: unknown) => void;
+    stubFetch();
+    const base = globalThis.fetch as unknown as (u: string) => Promise<unknown>;
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url === '/api/team-members/agent-1') return new Promise((r) => { resolveA = r; });
+      if (url === '/api/team-members/agent-2') return Promise.resolve({ ok: true, json: async () => ({ data: { ...AGENT, id: 'agent-2', name: '에이전트2' } }) });
+      return base(url);
+    }));
+    await mount(); // A pending
+    paramId.current = 'agent-2';
+    await rerender(); // B answers first
+    expect(container.textContent).toContain('에이전트2');
+    await act(async () => { resolveA({ ok: true, json: async () => ({ data: AGENT }) }); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('에이전트2');
+    expect(container.textContent).not.toContain('에이전트1');
+  });
+
+  it('⭐옛 id의 답이 먼저 와도 새 id의 로딩을 끝내지 않는다(그 사이 오류 상태 · 옛 화면이 깜빡이지 않는다)', async () => {
+    let resolveA!: (v: unknown) => void;
+    let resolveB!: (v: unknown) => void;
+    stubFetch();
+    const base = globalThis.fetch as unknown as (u: string) => Promise<unknown>;
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url === '/api/team-members/agent-1') return new Promise((r) => { resolveA = r; });
+      if (url === '/api/team-members/agent-2') return new Promise((r) => { resolveB = r; });
+      return base(url);
+    }));
+    await mount(); // A pending
+    paramId.current = 'agent-2';
+    await rerender(); // B pending too
+    await act(async () => { resolveA({ ok: true, json: async () => ({ data: AGENT }) }); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="agent-detail-load-error"]')).toBeNull(); // still loading B — not an error, not A
+    expect(container.textContent).not.toContain('에이전트1');
+    await act(async () => { resolveB({ ok: true, json: async () => ({ data: { ...AGENT, id: 'agent-2', name: '에이전트2' } }) }); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('에이전트2');
+  });
+
+  it('오류 상태는 알림 역할(role=alert)로 읽힌다', async () => {
+    stubFetch();
+    const base = globalThis.fetch as unknown as (u: string) => Promise<unknown>;
+    vi.stubGlobal('fetch', vi.fn((url: string) => (url === '/api/team-members/agent-1' ? Promise.resolve({ ok: false, status: 500, json: async () => null }) : base(url))));
+    await mount();
+    expect(container.querySelector('[data-testid="agent-detail-load-error"]')?.getAttribute('role')).toBe('alert');
   });
 });
