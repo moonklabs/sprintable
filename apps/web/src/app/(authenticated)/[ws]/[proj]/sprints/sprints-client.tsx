@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Button as DsButton } from '@/components/ds/button';
 import { Chip } from '@/components/ds/chip';
 import { IconButton } from '@/components/ds/icon-button';
+import { Metric } from '@/components/ds/metric';
 import { ListRow } from '@/components/ds/list-row';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -1001,40 +1002,33 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       ) : burndown ? (
         <div className="mb-6 space-y-3">
           <p className="text-xs font-medium text-muted-foreground">{t('burndown')}</p>
-          {/* 진행 바 — 기존 completion_pct 시각화(새 데이터 0·번다운 주인공) */}
-          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-            <div className="h-full rounded-full bg-success transition-all" style={{ width: `${burndown.completion_pct}%` }} />
+          {/* story #4888 — 진행 바: 토큰 색 + role=progressbar(이름 · 값 · 범위). 예전엔 눈에만 보였다. */}
+          <div
+            role="progressbar"
+            aria-label={t('completionRate')}
+            aria-valuenow={burndown.completion_pct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            className="h-1.5 overflow-hidden rounded-full bg-ds-surface-high"
+          >
+            <div className="h-full rounded-full bg-ds-done transition-all" style={{ width: `${burndown.completion_pct}%` }} />
           </div>
+          {/* 수치 타일 셋 → ds Metric(이름 위 · 값 아래 · «/ 한도»). 값은 그대로. */}
           <div className="grid grid-cols-3 gap-2">
-            <div className="rounded-md border border-border bg-muted/30 p-2 text-center">
-              <p className="text-xl font-bold text-foreground">{burndown.completion_pct}%</p>
-              <p className="text-micro text-muted-foreground">{t('completionRate')}</p>
-            </div>
-            <div className="rounded-md border border-border bg-muted/30 p-2 text-center">
-              <p className="text-xl font-bold text-foreground">{burndown.done_points}<span className="text-xs text-muted-foreground">/{burndown.total_points}</span></p>
-              <p className="text-micro text-muted-foreground">SP</p>
-            </div>
-            <div className="rounded-md border border-border bg-muted/30 p-2 text-center">
-              <p className="text-xl font-bold text-foreground">{burndown.done_count}<span className="text-xs text-muted-foreground">/{burndown.stories_count}</span></p>
-              <p className="text-micro text-muted-foreground">{t('stories')}</p>
-            </div>
+            <Metric label={t('completionRate')} value={`${burndown.completion_pct}%`} />
+            <Metric label={<>SP</>} value={burndown.done_points} limit={burndown.total_points} />
+            <Metric label={t('stories')} value={burndown.done_count} limit={burndown.stories_count} />
           </div>
           {burndown.ideal_line.length > 0 ? (
-            <div className="rounded-md border border-border p-3">
-              <p className="mb-1 text-xs font-medium text-muted-foreground">{t('burndown')}</p>
-              <div className="flex gap-4 text-xs text-muted-foreground">
-                <span>{t('idealLine')}: {burndown.ideal_line[0]?.points ?? 0} → 0</span>
-                <span>{t('actualLine')}: {burndown.actual_line[0]?.points ?? 0} → {burndown.actual_line[burndown.actual_line.length - 1]?.points ?? 0}</span>
-              </div>
+            <div className="flex flex-wrap gap-2">
+              <Chip>{t('idealLine')}: {burndown.ideal_line[0]?.points ?? 0} → 0</Chip>
+              <Chip>{t('actualLine')}: {burndown.actual_line[0]?.points ?? 0} → {burndown.actual_line[burndown.actual_line.length - 1]?.points ?? 0}</Chip>
             </div>
           ) : null}
           {selected.report_doc_id ? (
-            <a
-              href={flatHref(`/docs?id=${selected.report_doc_id}`)}
-              className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 p-3 text-sm font-medium text-primary transition hover:bg-primary/10"
-            >
-              📄 {t('viewReport')}
-            </a>
+            <DsButton asChild variant="secondary" className="w-full justify-start">
+              <a href={flatHref(`/docs?id=${selected.report_doc_id}`)}>📄 {t('viewReport')}</a>
+            </DsButton>
           ) : null}
         </div>
       ) : null}
