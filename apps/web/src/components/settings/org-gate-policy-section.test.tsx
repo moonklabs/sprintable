@@ -104,7 +104,7 @@ describe('OrgGatePolicySection — 조회(story e0c1b24c)', () => {
     expect(container.textContent).toContain('송윤재 (iamyoonjae@moonklabs.com)');
   });
 
-  it('canEdit=true — 승인자 드롭다운 트리거가 현재 지정된 승인자 표시이름을 초기값으로 보여준다', async () => {
+  it('canEdit=true — 승인자 선택 상자가 현재 지정된 승인자 표시이름을 초기값으로 보여준다', async () => {
     stubFetch({
       id: 'p1', org_id: 'o1', posture: 'balanced',
       merge_gate_default_approver_member_id: 'member-2',
@@ -115,10 +115,9 @@ describe('OrgGatePolicySection — 조회(story e0c1b24c)', () => {
     });
     await flush();
 
-    const triggerBtn = Array.from(container.querySelectorAll('button')).find((b) =>
-      b.textContent?.includes('페드루'),
-    );
-    expect(triggerBtn).toBeDefined();
+    // the picker is a native select (story 4891 ⑤a): the chosen option carries the approver's display name
+    const picker = Array.from(container.querySelectorAll('select')).find((sel) => sel.selectedOptions[0]?.textContent?.includes('페드루'));
+    expect(picker).toBeDefined();
   });
 
   it('⭐story #4083 — 레시피 게이트 기본 승인자 라벨·값이 머지 필드와 독립적으로 표시된다', async () => {

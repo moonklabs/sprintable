@@ -50,3 +50,13 @@ export function tabBlock(value: string): string {
 }
 /** the capitalised component names a tab block draws (TabsContent itself left out) */
 export const namedComponents = (block: string) => [...new Set([...block.matchAll(/<([A-Z][A-Za-z]+)/g)].map((m) => m[1]!))].filter((n) => n !== 'TabsContent');
+
+/** where the settings page imports `name` from (`import { A as B }` is found by the local name `B`; null = not imported there) */
+export function pageImportSource(name: string): string | null {
+  const page = readFileSync(PAGE, 'utf8');
+  for (const m of page.matchAll(/import\s+(?:\{([^}]+)\}|(\w+))\s+from\s+'([^']+)'/g)) {
+    const locals = m[1] ? m[1].split(',').map((x) => x.trim().split(/\s+as\s+/).pop()!) : [m[2]!];
+    if (locals.includes(name)) return m[3]!;
+  }
+  return null;
+}
