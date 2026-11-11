@@ -63,7 +63,7 @@ async function openBell() {
   return bell;
 }
 const panel = () => document.querySelector<HTMLElement>('[data-dropdown-panel="notification-bell"]')!;
-const headlines = () => Array.from(panel().querySelectorAll('p.truncate.text-sm')).map((p) => p.textContent);
+const headlines = () => Array.from(panel().querySelectorAll('[data-testid="notification-line-headline"]')).map((p) => p.textContent);
 const markAllReadButton = () => Array.from(panel().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.inbox.markAllRead));
 
 describe('NotificationBell — a chat message is one line (story 4890)', () => {

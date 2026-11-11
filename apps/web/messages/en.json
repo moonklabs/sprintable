@@ -4193,6 +4193,8 @@
     "eventFallback": "New notification",
     "panelTitle": "Notifications",
     "unreadOnly": "Unread only",
+    "groupUnread": "Unread",
+    "groupEarlier": "Earlier",
     "loadMore": "Load more",
     "emptyAll": "No new notifications",
     "emptyStory": "No story notifications",

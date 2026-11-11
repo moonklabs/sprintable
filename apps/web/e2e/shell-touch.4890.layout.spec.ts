@@ -82,7 +82,10 @@ async function open(page: Page, scene: 'shell' | 'card' | 'more', canChange = tr
       return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body class="bg-ds-canvas text-ds-ink"><div id="root"></div></body></html>` });
     }
     if (url.pathname === '/api/event-notifications/unread-count') return json({ count: 7 });
-    if (url.pathname === '/api/event-notifications') return json({ data: [], meta: { hasMore: false } });
+    if (url.pathname === '/api/event-notifications') {
+      const chat = (id: string, read: boolean, room: string, who: string) => ({ id, event_type: 'conversation.message_created', source_entity_type: 'conversation_message', source_entity_id: `${id}-m`, payload: { summary: `${who}: 안녕하세요 이 글은 조금 길어서 한 줄에 다 안 들어갈 수도 있어요`, conversation_id: 'room-1', sender: { id: 's1', name: who, type: 'agent', avatar_url: null, runtime_type: 'claude-code' } }, read_at: read ? '2026-11-10T13:00:00Z' : null, created_at: '2026-11-10T12:00:00Z', target_conversation_title: room });
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [chat('n1', false, '결제 연동 · 오늘 할 일', '개발 에이전트'), chat('n2', false, '랜딩 문구 검토', '검수 에이전트'), chat('n3', true, '주간 고객 문의', '리서치 에이전트'), chat('n4', true, '회원가입 오류 수정', '개발 에이전트')], meta: { hasMore: false } }) });
+    }
     if (url.pathname === '/api/organizations/org-1/remote-control') return json({ data: { enabled: true, enabled_at: '2026-10-03T09:00:00Z', can_change: canChange, owner_names: ['송윤재'], connected_setups: 1 } });
     return route.fulfill({ status: 404, body: '{}' });
   });
@@ -205,5 +208,47 @@ test.describe('the shortcut rows keep the row inset (390 × 844)', () => {
     expect(g.borderBottom, 'the separator under the first row').not.toBe('0px');
     expect(g.borderTop, 'no stray border on the other sides').toBe('0px');
     expect(g.borderLeft).toBe('0px');
+  });
+});
+
+// story 4890 (UI-7 · 알림 화면 통째): the open panel on a phone — header one line with 44 presses, ONE chip row, two groups, rows of two lines.
+test.describe('the notification panel on a touch phone (390 × 844)', () => {
+  test.use({ hasTouch: true, isMobile: true });
+  test('[SID:4890] header (title · [전체 읽음] · close) and the chip row are ≥44; two groups «안 읽음 2» / «이전»; each row is two lines and ≥56 tall; text ≥12 px; no old part; no sideways scroll', async ({ page }) => {
+    await open(page, 'shell');
+    await page.getByRole('button', { name: /알림/ }).first().tap();
+    // both the lg+ popover and the below-lg overlay are mounted (CSS shows one): measure the visible one
+    const panel = page.locator('[data-testid="notification-group-unread"]:visible').first();
+    await panel.waitFor();
+    const m = await page.evaluate(() => {
+      const root = ([...document.querySelectorAll('[data-testid="notification-group-unread"]')].find((e) => (e as HTMLElement).offsetParent !== null) as HTMLElement).closest('[role="dialog"], [data-dropdown-panel]') as HTMLElement;
+      const shown = (e: Element) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden'; };
+      const presses = [...root.querySelectorAll('button, a[href]')].filter(shown);
+      const small = presses.filter((e) => { const r = e.getBoundingClientRect(); return r.width < 43.5 || r.height < 43.5; }).map((e) => `${(e.getAttribute('aria-label') || e.textContent || '').trim().slice(0, 18)} ${Math.round(e.getBoundingClientRect().width)}x${Math.round(e.getBoundingClientRect().height)}`);
+      const tiny = [...root.querySelectorAll('*')].filter((e) => e.children.length === 0 && (e.textContent || '').trim() && shown(e) && !e.closest('[data-slot="ds-count-badge"]')).filter((e) => parseFloat(getComputedStyle(e).fontSize) < 12).map((e) => `${(e.textContent || '').trim().slice(0, 16)} ${getComputedStyle(e).fontSize}`);
+      const rows = [...root.querySelectorAll('ul > li')].map((li) => { const b = li.querySelector('button')!.getBoundingClientRect(); return { h: Math.round(b.height), lines: li.querySelectorAll('button > span > span.block').length }; });
+      const weight = (id: string) => { const rows = [...root.querySelectorAll('ul > li')]; return rows.map((li) => ({ id: li.parentElement!.closest('[data-testid^="notification-group-"]')?.getAttribute('data-testid'), w: Number(getComputedStyle(li.querySelector('[data-testid="notification-line-headline"]')!).fontWeight) })); };
+      const weights = weight('');
+      const chips = [...root.querySelectorAll('button[aria-pressed]')];
+      const old = [...new Set([...root.querySelectorAll('[data-slot]')].map((e) => e.getAttribute('data-slot')!))].filter((x) => !x.startsWith('ds-') && x !== 'avatar');
+      const bg = getComputedStyle(root).backgroundColor;
+      return { weights, bg, small, tiny, rows, chipsOneRow: new Set(chips.map((c) => Math.round(c.getBoundingClientRect().top))).size === 1, chipCount: chips.length, groups: [...root.querySelectorAll('[data-testid^="notification-group-"]')].map((g) => g.getAttribute('data-testid')), old, overflowX: root.scrollWidth > root.clientWidth + 1 || document.documentElement.scrollWidth > innerWidth + 1 };
+    });
+    expect(m.small, `presses under 44 px: ${m.small.join(' · ')}`).toEqual([]);
+    expect(m.tiny, `text under 12 px: ${m.tiny.join(' · ')}`).toEqual([]);
+    expect(m.groups).toEqual(['notification-group-unread', 'notification-group-earlier']);
+    expect(m.rows).toHaveLength(4);
+    for (const r of m.rows) { expect(r.lines, 'two lines').toBe(2); expect(r.h, 'a row is a ≥56 press').toBeGreaterThanOrEqual(56); expect(r.h, 'and stays compact (before: ~78 px rows of three lines)').toBeLessThanOrEqual(72); }
+    // an unread headline is heavier than a read one (the quiet button must not make every row bold)
+    const wUnread = m.weights.filter((x) => x.id === 'notification-group-unread').map((x) => x.w);
+    const wRead = m.weights.filter((x) => x.id === 'notification-group-earlier').map((x) => x.w);
+    expect(Math.min(...wUnread), 'unread headlines are semibold').toBeGreaterThanOrEqual(600);
+    expect(Math.max(...wRead), 'read headlines are regular').toBeLessThan(600);
+    expect(m.chipCount).toBe(4);
+    expect(m.chipsOneRow, 'the four chips share one row').toBe(true);
+    expect(m.old, 'old (non-ds) parts drawn').toEqual([]);
+    expect(m.bg, 'the full-screen overlay has an opaque face (the page behind must not show through)').not.toMatch(/rgba\(\d+, \d+, \d+, 0(\.\d+)?\)|transparent/);
+    expect(m.overflowX).toBe(false);
+    await expect(panel).toBeVisible();
   });
 });

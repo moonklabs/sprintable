@@ -57,7 +57,7 @@ describe('NotificationBell — who and where on a chat line (story 4890)', () =>
     const [line] = lines();
     expect(line!.querySelector('[data-testid="notification-line-avatar"]')).not.toBeNull();
     expect(line!.querySelector('[data-testid="notification-line-room"]')?.textContent).toBe('개발 방');
-    expect(line!.querySelector('p.truncate.text-sm')?.textContent).toBe('에이전트 N: 안녕하세요');
+    expect(line!.querySelector('[data-testid="notification-line-headline"]')?.textContent).toBe('에이전트 N: 안녕하세요');
   });
 
   it('⭐a chat line with no room name (a DM · a room the server withheld) draws the Avatar but no room line', async () => {
