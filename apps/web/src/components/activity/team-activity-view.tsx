@@ -4,12 +4,13 @@ import { firstGraphemes } from '@/lib/first-graphemes';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
-import { Inbox } from 'lucide-react';
 import { Button } from '@/components/ds/button';
 import { useToast } from '@/components/ui/toast';
-import { EmptyState } from '@/components/ui/empty-state';
+import { EmptyState } from '@/components/ds/empty-state';
+import { Input } from '@/components/ds/input';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
+import { FilterSelect, type FilterOption } from './filter-select';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
 import { getEventTypeCopy, KNOWN_EVENT_TYPE_VERBS } from '@/services/notification-display';
 import { getEntityHref } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
@@ -116,12 +117,13 @@ function ActorAvatar({ name, isSystem }: { name: string; isSystem: boolean }) {
 }
 
 function RowSkeleton() {
+  // story 4892 — the feed row's placeholder (avatar circle + two text bars) on ds Skeleton bars; the «불러오는 중» is said once by the SkeletonGroup around the rows
   return (
-    <div className="flex animate-pulse items-start gap-3 px-3 py-2.5">
-      <span className="size-7 shrink-0 rounded-full bg-muted" />
+    <div className="flex items-start gap-3 px-3 py-2.5">
+      <Skeleton variant="circle" className="size-7 shrink-0" />
       <div className="min-w-0 flex-1 space-y-1.5 pt-1">
-        <span className="block h-3 w-[70%] rounded bg-muted" />
-        <span className="block h-3 w-[40%] rounded bg-muted" />
+        <Skeleton className="h-3 w-[70%]" />
+        <Skeleton className="h-3 w-[40%]" />
       </div>
     </div>
   );
@@ -355,17 +357,17 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   // ─── Dropdown options ──────────────────────────────────────────────────────
   // [SID:4286 · 유나 규칙] 드롭다운 선택지는 타입 표식이 없어 라벨이 타입을 대신 · 같은 라벨이 둘 이상이면 행 꼬리(한 규칙).
   const actorLabelById = memberOptionLabels(members, tc);
-  const actorOptions: SelectOption[] = [
+  const actorOptions: FilterOption[] = [
     { value: ALL, label: t('filterAll') },
     ...members.map((m) => ({ value: m.id, label: actorLabelById.get(m.id) ?? '' })),
   ];
 
-  const objectTypeOptions: SelectOption[] = [
+  const objectTypeOptions: FilterOption[] = [
     { value: ALL, label: t('filterAll') },
     ...OBJECT_TYPES.map((ot) => ({ value: ot, label: ot })),
   ];
 
-  const verbOptions: SelectOption[] = useMemo(
+  const verbOptions: FilterOption[] = useMemo(
     () => [
       { value: ALL, label: t('filterAll') },
       ...KNOWN_EVENT_TYPE_VERBS.map((v) => ({ value: v, label: getEventTypeCopy(tInbox, v) })),
@@ -398,42 +400,24 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
         <div className="flex-shrink-0 border-b border-border/80 px-6 py-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <div className="flex flex-wrap items-center gap-2">
-              <OperatorDropdownSelect
-                value={actorFilter}
-                onValueChange={setActorFilter}
-                options={actorOptions}
-                placeholder={t('filterActor')}
-                className="w-36"
-              />
-              <OperatorDropdownSelect
-                value={objectTypeFilter}
-                onValueChange={setObjectTypeFilter}
-                options={objectTypeOptions}
-                placeholder={t('filterObject')}
-                className="w-36"
-              />
-              <OperatorDropdownSelect
-                value={verbFilter}
-                onValueChange={setVerbFilter}
-                options={verbOptions}
-                placeholder={t('filterVerb')}
-                className="w-44"
-              />
+              <FilterSelect value={actorFilter} onValueChange={setActorFilter} options={actorOptions} label={t('filterActor')} className="w-36" />
+              <FilterSelect value={objectTypeFilter} onValueChange={setObjectTypeFilter} options={objectTypeOptions} label={t('filterObject')} className="w-36" />
+              <FilterSelect value={verbFilter} onValueChange={setVerbFilter} options={verbOptions} label={t('filterVerb')} className="w-44" />
             </div>
             <div className="flex items-center gap-2 sm:ml-auto">
-              <input
+              <Input
                 type="date"
                 value={fromDate}
                 onChange={(e) => setFromDate(e.target.value)}
-                className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-base lg:text-sm text-foreground outline-none sm:flex-none sm:px-3"
+                className="min-w-0 flex-1 px-2 sm:w-auto sm:flex-none sm:px-3"
                 aria-label={t('fromDate')}
               />
               <span className="text-xs text-muted-foreground">~</span>
-              <input
+              <Input
                 type="date"
                 value={toDate}
                 onChange={(e) => setToDate(e.target.value)}
-                className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-base lg:text-sm text-foreground outline-none sm:flex-none sm:px-3"
+                className="min-w-0 flex-1 px-2 sm:w-auto sm:flex-none sm:px-3"
                 aria-label={t('toDate')}
               />
             </div>
@@ -447,11 +431,11 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
               <EmptyState title={t('forbiddenTitle')} description={t('forbiddenDescription')} />
             </div>
           ) : loading ? (
-            <div className="space-y-1">
+            <SkeletonGroup label={tc('loading')} className="space-y-1">
               {Array.from({ length: 3 }).map((_, i) => (
                 <RowSkeleton key={i} />
               ))}
-            </div>
+            </SkeletonGroup>
           ) : loadError ? (
             <div className="flex h-64 items-center justify-center" role="alert">
               <EmptyState
@@ -467,7 +451,7 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
           ) : items.length === 0 ? (
             <div className="flex h-64 items-center justify-center">
               <EmptyState
-                icon={<Inbox className="size-8 text-muted-foreground" />}
+                icon="inbox"
                 title={t('emptyTitle')}
                 description={t('emptyDesc')}
               />

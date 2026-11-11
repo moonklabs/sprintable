@@ -6,9 +6,11 @@ import { Button } from '@/components/ui/button';   // (the row's overlay hit-box
 import { Button as DsButton } from '@/components/ds/button';
 import { Icon } from '@/components/ds/icon';
 import { useToast } from '@/components/ui/toast';
-import { EmptyState } from '@/components/ui/empty-state';
+import { EmptyState } from '@/components/ds/empty-state';
+import { Input } from '@/components/ds/input';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
+import { FilterSelect, type FilterOption } from './filter-select';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
 import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { deriveAuditProofState } from './derive-audit-proof-state';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -77,10 +79,6 @@ const DEFAULT_RANGE_PAST_DAYS = 7;
 
 // ─── Row skeleton ─────────────────────────────────────────────────────────────
 
-function RowSkeleton() {
-  return <div className="h-9 animate-pulse rounded-[6px] bg-muted" />;
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
 
 interface ActivityLogViewProps {
@@ -99,6 +97,11 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [forbidden, setForbidden] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  // story 4892 — one «generation» for every first-page load (the filter effect AND «다시 시도»/«새로고침»): only the newest one may write the list / the error state, so a late answer of an older
+  // request (a retry still in flight while a filter changed) can never put an error over a newer, successful result.
+  const firstPageGen = useRef(0);
+  // leaving the screen makes every request still in flight stale (a late «더 보기» failure must not toast on another page)
+  useEffect(() => () => { firstPageGen.current += 1; }, []);
 
   const [actorFilter, setActorFilter] = useState(ALL);
   const [actionFilter, setActionFilter] = useState(ALL);
@@ -146,10 +149,13 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   );
 
   const fetchLogs = useCallback(
-    async (nextOffset = 0, onForbidden?: () => void) => {
+    async (nextOffset = 0, onForbidden?: () => void, firstPage = false) => {
       const res = await fetchWithAuth(`/api/activity-logs?${buildParams(nextOffset)}`);
-      if (res.status === 403) { setForbidden(true); onForbidden?.(); return null; }
-      if (!res.ok) return null;
+      // the 403 is REPORTED to the caller (who writes the «접근 불가» state only while its own load is still the newest) — never written from here, so a late older answer cannot turn a newer result into it.
+      if (res.status === 403) { onForbidden?.(); return null; }
+      // story 4892 (found while rebuilding this screen — the team feed had the same defect, §5 #1): a FIRST page that the server refused (500 …) was shown as «활동 내역이 없어요», the empty state.
+      // It is an error state with a retry now (the same state a network error always had). «더 보기» keeps its own answer: null → the shared toast.
+      if (!res.ok) { if (firstPage) throw new Error(`activity-logs ${res.status}`); return null; }
       const json = await res.json() as { data?: ActivityLogResponse };
       return json.data ?? null;
     },
@@ -163,20 +169,23 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   // reset + reload on filter change
   useEffect(() => {
     let cancelled = false;
+    const gen = ++firstPageGen.current;
+    const current = () => !cancelled && gen === firstPageGen.current;
     async function load() {
       setLoading(true);
+      setLoadingMore(false);   // a «더 보기» still in flight belongs to the old list — this load supersedes it
       setForbidden(false);
       setLoadError(false);
       setOffset(0);
       try {
-        const result = await fetchLogs(0);
-        if (cancelled) return;
+        const result = await fetchLogs(0, () => { if (current()) setForbidden(true); }, true);
+        if (!current()) return;
         setItems(result?.items ?? []);
         setTotal(result?.total ?? 0);
       } catch {
-        if (!cancelled) setLoadError(true);
+        if (current()) setLoadError(true);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (current()) setLoading(false);
       }
     }
     void load();
@@ -185,10 +194,13 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
 
   const loadMore = async () => {
     const nextOffset = offset + PAGE_SIZE;
+    const gen = firstPageGen.current;   // «더 보기» belongs to the list that was on screen when it was pressed — a filter change / reload in the meantime makes its answer stale
+    const stale = () => gen !== firstPageGen.current;
     setLoadingMore(true);
     let forbidden403 = false;
     try {
-      const result = await fetchLogs(nextOffset, () => { forbidden403 = true; });
+      const result = await fetchLogs(nextOffset, () => { forbidden403 = true; if (!stale()) setForbidden(true); });
+      if (stale()) return;
       if (result) {
         setItems((prev) => [...prev, ...result.items]);
         setOffset(nextOffset);
@@ -200,25 +212,28 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
       }
     } catch {
       // story 4892 — the same for a network error: say so, keep the button (a second press retries).
-      addToast({ title: tc('loadMoreFailed'), type: 'error' });
+      if (!stale()) addToast({ title: tc('loadMoreFailed'), type: 'error' });
     } finally {
-      setLoadingMore(false);
+      if (!stale()) setLoadingMore(false);   // a stale one must not clear the spinner of the newer load (that load reset it itself)
     }
   };
 
   const reload = async () => {
+    const gen = ++firstPageGen.current;   // a newer first-page load (this one, or a filter change) supersedes every older one
+    setLoadingMore(false);
     setForbidden(false);
     setLoadError(false);
     setLoading(true);
     setOffset(0);
     try {
-      const result = await fetchLogs(0);
+      const result = await fetchLogs(0, () => { if (gen === firstPageGen.current) setForbidden(true); }, true);
+      if (gen !== firstPageGen.current) return;
       setItems(result?.items ?? []);
       setTotal(result?.total ?? 0);
     } catch {
-      setLoadError(true);
+      if (gen === firstPageGen.current) setLoadError(true);
     } finally {
-      setLoading(false);
+      if (gen === firstPageGen.current) setLoading(false);
     }
   };
 
@@ -226,7 +241,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
 
   // [SID:4286 · 유나 규칙] 드롭다운 선택지는 타입 표식이 없어 라벨이 타입을 대신 · 같은 라벨이 둘 이상이면 행 꼬리(한 규칙).
   const actorLabelById = memberOptionLabels(members, tc);
-  const actorOptions: SelectOption[] = [
+  const actorOptions: FilterOption[] = [
     { value: ALL, label: t('filterAll') },
     ...members.map((m) => ({ value: m.id, label: actorLabelById.get(m.id) ?? '' })),
   ];
@@ -282,7 +297,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   const auditHeading = (g: { key: string; kind: 'today' | 'yesterday' | 'date' | 'undated' }) => (g.kind === 'today' ? t('dayToday') : g.kind === 'yesterday' ? t('dayYesterday') : g.kind === 'undated' ? t('dayUndated') : formatDayHeader(g.key, locale));
   const DETAIL_ID = 'audit-detail';
 
-  const entityTypeOptions: SelectOption[] = [
+  const entityTypeOptions: FilterOption[] = [
     { value: ALL, label: t('filterAll') },
     ...ENTITY_TYPES.map((et) => ({ value: et, label: et })),
   ];
@@ -298,43 +313,32 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
         <div className="flex-shrink-0 border-b border-border/80 px-6 py-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <div className="flex flex-wrap items-center gap-2">
-              <OperatorDropdownSelect
-                value={actorFilter}
-                onValueChange={setActorFilter}
-                options={actorOptions}
-                placeholder={t('filterActor')}
-                className="w-36"
-              />
-              <OperatorDropdownSelect
-                value={entityTypeFilter}
-                onValueChange={setEntityTypeFilter}
-                options={entityTypeOptions}
-                placeholder={t('filterEntityType')}
-                className="w-36"
-              />
-              <input
+              <FilterSelect value={actorFilter} onValueChange={setActorFilter} options={actorOptions} label={t('filterActor')} className="w-36" />
+              <FilterSelect value={entityTypeFilter} onValueChange={setEntityTypeFilter} options={entityTypeOptions} label={t('filterEntityType')} className="w-36" />
+              <Input
                 type="text"
                 value={actionFilter === ALL ? '' : actionFilter}
                 onChange={(e) => setActionFilter(e.target.value || ALL)}
                 placeholder={t('filterAction')}
+                aria-label={t('filterAction')}
                 maxLength={ACTION_FILTER_MAX_LENGTH}
-                className="rounded-md border border-input bg-background px-3 py-1.5 text-base lg:text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                className="w-44"
               />
             </div>
             <div className="flex items-center gap-2 sm:ml-auto">
-              <input
+              <Input
                 type="date"
                 value={fromDate}
                 onChange={(e) => setFromDate(e.target.value)}
-                className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-base lg:text-sm text-foreground outline-none sm:flex-none sm:px-3"
+                className="min-w-0 flex-1 px-2 sm:w-auto sm:flex-none sm:px-3"
                 aria-label={t('fromDate')}
               />
               <span className="text-xs text-muted-foreground">~</span>
-              <input
+              <Input
                 type="date"
                 value={toDate}
                 onChange={(e) => setToDate(e.target.value)}
-                className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-base lg:text-sm text-foreground outline-none sm:flex-none sm:px-3"
+                className="min-w-0 flex-1 px-2 sm:w-auto sm:flex-none sm:px-3"
                 aria-label={t('toDate')}
               />
             </div>
@@ -361,9 +365,9 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
               />
             </div>
           ) : loading ? (
-            <div className="space-y-1.5">
-              {Array.from({ length: 8 }).map((_, i) => <RowSkeleton key={i} />)}
-            </div>
+            <SkeletonGroup label={tc('loading')} className="space-y-1.5">
+              {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-9" />)}
+            </SkeletonGroup>
           ) : items.length === 0 ? (
             <EmptyState
               title={t('emptyTitle')}

@@ -25,7 +25,8 @@
  *
  * 못 잡는 것(선언): redirect를 다른 모듈에서 다시 내보내 부르는 경우(재수출 체인)는 못 본다 — 지금 app/ 안 0건.
  */
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CHAT_CENTER_ITEM, OTHER_NAV_ITEMS, resolveNavGroups } from '@/lib/nav-config';
@@ -126,12 +127,22 @@ function codeOnly(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 }
 
+/** story 4892 — `<SkeletonGroup label={…}>` with a NON-empty expression (an empty literal name — `label={''}` · `label={""}` · ``label={``}`` — would leave an unnamed status; `label="x"` is not the form the guard knows). */
+const DS_SKELETON_GROUP_NAMED = /<SkeletonGroup\s+label=\{(?!\s*(?:''|""|``)\s*\})[^}]+\}/;
+/** …and that `SkeletonGroup` must BE the ds one — imported from `@/components/ds/skeleton`; a local / other-path component with the same name proves nothing about role="status". */
+const DS_SKELETON_GROUP_IMPORT = /import\s*\{[^}]*\bSkeletonGroup\b(?!\s+as\b)[^}]*\}\s*from\s*['"]@\/components\/ds\/skeleton['"]/;
+/** …and the file must not define its own `SkeletonGroup` beside it (an aliased ds import + a local one of the same name would otherwise pass). */
+const LOCAL_SKELETON_GROUP_DEF = /\b(?:function|const|let|var|class)\s+SkeletonGroup\b/;
+
 /** loading 파일 자체 또는 그것이 import한 `@/components/…` 파일 중 하나가 «불러오는 중»을 제대로 알리는지 — 같은 소스에 `role="status"` ·
  * `aria-busy="true"` · 화면 읽기 프로그램용 라벨(`sr-only`) 셋 다(까디르 검수 P3 · role만 보면 라벨 없는 상태도 통과했다). */
 function announcesStatus(loadingFile: string): boolean {
   const hasStatus = (f: string) => {
     const src = codeOnly(readFileSync(f, 'utf8'));
-    return /\srole="status"/.test(src) && /\saria-busy="true"/.test(src) && /className="[^"]*\bsr-only\b/.test(src);
+    // story 4892 — the ds SkeletonGroup (components/ds/skeleton.tsx) sets role="status" · aria-busy="true" · its name (`aria-label={label}`) ITSELF, so a placeholder built on it announces the state without
+    // repeating the three literals; its `label` is required by the type. The exemption rests on that source — pinned by the test «ds SkeletonGroup는 …» below.
+    const viaDsGroup = DS_SKELETON_GROUP_NAMED.test(src) && DS_SKELETON_GROUP_IMPORT.test(src) && !LOCAL_SKELETON_GROUP_DEF.test(src);
+    return viaDsGroup || (/\srole="status"/.test(src) && /\saria-busy="true"/.test(src) && /className="[^"]*\bsr-only\b/.test(src));
   };
   if (hasStatus(loadingFile)) return true;
   const SRC_ROOT = join(APP_ROOT, '..');
@@ -222,6 +233,55 @@ describe('story #4274 — 탭 · 메뉴 목적지 loading.tsx 전수(v3 플래�
       if (!announcesStatus(loading)) problems.push(`${k}: ${relative(APP_ROOT, loading)} 상태 알림 없음`);
     }
     expect(problems).toEqual([]);
+  });
+
+  it('⭐SkeletonGroup 면제는 «이름이 비지 않은» label={…}만 — 빈 문자열 이름 · 따옴표 문자열 꼴 · label 없음은 인정하지 않는다', () => {
+    expect(DS_SKELETON_GROUP_NAMED.test("<SkeletonGroup label={t('loading')} className=\"x\">")).toBe(true);
+    expect(DS_SKELETON_GROUP_NAMED.test("<SkeletonGroup label={tc('loading')}>")).toBe(true);
+    expect(DS_SKELETON_GROUP_NAMED.test("<SkeletonGroup label={''} className=\"x\">")).toBe(false);
+    expect(DS_SKELETON_GROUP_NAMED.test('<SkeletonGroup label={""}>')).toBe(false);
+    expect(DS_SKELETON_GROUP_NAMED.test('<SkeletonGroup label={``}>')).toBe(false);
+    expect(DS_SKELETON_GROUP_NAMED.test('<SkeletonGroup label="x">')).toBe(false);
+    expect(DS_SKELETON_GROUP_NAMED.test('<SkeletonGroup className="x">')).toBe(false);
+  });
+
+  it('⭐SkeletonGroup 면제는 ds 부품(@/components/ds/skeleton)에서 가져온 것만 — 이름만 같은 다른 컴포넌트는 인정하지 않는다', () => {
+    expect(DS_SKELETON_GROUP_IMPORT.test("import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';")).toBe(true);
+    expect(DS_SKELETON_GROUP_IMPORT.test('import { SkeletonGroup } from "@/components/ds/skeleton";')).toBe(true);
+    expect(DS_SKELETON_GROUP_IMPORT.test("import { SkeletonGroup } from '@/components/ui/skeleton';")).toBe(false);
+    expect(DS_SKELETON_GROUP_IMPORT.test("import { Skeleton } from '@/components/ds/skeleton';\nfunction SkeletonGroup() { return null; }")).toBe(false);
+    expect(DS_SKELETON_GROUP_IMPORT.test("import { SkeletonGroupX } from '@/components/ds/skeleton';")).toBe(false);
+    expect(DS_SKELETON_GROUP_IMPORT.test("import { SkeletonGroup as DsSkeletonGroup } from '@/components/ds/skeleton';")).toBe(false);
+    expect(DS_SKELETON_GROUP_IMPORT.test("import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';")).toBe(true);
+  });
+
+  it('⭐announcesStatus: 이름만 같은 로컬 SkeletonGroup는 인정 안 함 · ds 부품에서 가져온 것은 인정', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'loading-guard-'));
+    try {
+      const local = join(dir, 'local.tsx');
+      writeFileSync(local, "function SkeletonGroup({ children }: { label: string; children: unknown }) { return children; }\nexport default function Loading() { return <SkeletonGroup label={t('loading')}>x</SkeletonGroup>; }\n");
+      const ds = join(dir, 'ds.tsx');
+      writeFileSync(ds, "import { SkeletonGroup } from '@/components/ds/skeleton';\nexport default function Loading() { return <SkeletonGroup label={t('loading')}>x</SkeletonGroup>; }\n");
+      const aliased = join(dir, 'aliased.tsx');   // the ds one imported under another name + a local one with the exempt name
+      writeFileSync(aliased, "import { SkeletonGroup as DsSkeletonGroup } from '@/components/ds/skeleton';\nconst SkeletonGroup = ({ children }: { label: string; children: unknown }) => children;\nexport default function Loading() { return <SkeletonGroup label={t('loading')}>x</SkeletonGroup>; }\n");
+      const both = join(dir, 'both.tsx');   // the ds import (unaliased) + a local definition of the same name
+      writeFileSync(both, "import { SkeletonGroup } from '@/components/ds/skeleton';\nconst SkeletonGroup = ({ children }: { label: string; children: unknown }) => children;\nexport default function Loading() { return <SkeletonGroup label={t('loading')}>x</SkeletonGroup>; }\n");
+      const other = join(dir, 'other.tsx');   // same name from somewhere else, no local definition
+      writeFileSync(other, "import { SkeletonGroup } from './not-the-ds';\nexport default function Loading() { return <SkeletonGroup label={t('loading')}>x</SkeletonGroup>; }\n");
+      expect(announcesStatus(both)).toBe(false);
+      expect(announcesStatus(other)).toBe(false);
+      expect(announcesStatus(aliased)).toBe(false);
+      expect(announcesStatus(local)).toBe(false);
+      expect(announcesStatus(ds)).toBe(true);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('⭐ds SkeletonGroup는 role="status" · aria-busy="true" · 이름(aria-label={label})을 부품 안에서 정한다 — 가드가 «SkeletonGroup + label»을 상태 알림으로 인정하는 근거', () => {
+    const ds = codeOnly(readFileSync(join(APP_ROOT, '../components/ds/skeleton.tsx'), 'utf8'));
+    expect(ds).toMatch(/role="status"/);
+    expect(ds).toMatch(/aria-busy="true"/);
+    expect(ds).toMatch(/aria-label=\{label\}/);
+    expect(ds).toMatch(/label: string;/);   // the name is required, not optional
   });
 
   it('⭐일감 프레임 여섯 경로: 자기 loading.tsx는 몸 스켈레톤(<WorkspaceFrameLoading />)만 · 탭 줄은 품지 않음', () => {
