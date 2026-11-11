@@ -1,11 +1,13 @@
 'use client';
 
+// story 4891 (UI-8 · settings › 화면 · piece ③) — the theme card on the ds parts (SettingsSection · Field · NativeSelect): the same three choices, the same `setTheme`; the phone's own picker opens
+// instead of the old dropdown menu. The «following the system» line stays under the field.
 import { useTheme } from 'next-themes';
 import { useEffect, useState, startTransition } from 'react';
 import { useTranslations } from 'next-intl';
-import { Palette } from 'lucide-react';
-import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { Field } from '@/components/ds/field';
+import { NativeSelect } from '@/components/ds/select';
+import { SettingsSection } from './settings-section';
 
 export function ThemeSettings() {
   const t = useTranslations('settings');
@@ -24,37 +26,21 @@ export function ThemeSettings() {
   const currentTheme = theme === 'system' ? systemTheme : theme;
 
   return (
-    <SectionCard>
-      <SectionCardHeader>
-        <div className="space-y-1">
-          <h2 className="flex items-center gap-1.5 text-base font-semibold text-foreground"><Palette className="size-4" />{t('themeSettingsTitle')}</h2>
-          <p className="text-sm text-muted-foreground">{t('themeFollowSystemDesc')}</p>
-        </div>
-      </SectionCardHeader>
-      <SectionCardBody>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-2 text-foreground">
-              {t('themeSelectLabel')}
-            </label>
-            <OperatorDropdownSelect
-              value={theme || 'system'}
-              onValueChange={(v) => setTheme(v as 'light' | 'dark' | 'system')}
-              options={[
-                { value: 'light', label: t('themeLight') },
-                { value: 'dark', label: t('themeDark') },
-                { value: 'system', label: t('themeSystem') },
-              ]}
-            />
-          </div>
-
-          {theme === 'system' && (
-            <p className="text-sm text-muted-foreground">
-              {t('themeCurrentSystemLabel')} <span className="font-medium text-foreground">{currentTheme === 'dark' ? t('themeDark') : t('themeLight')}</span>
-            </p>
-          )}
-        </div>
-      </SectionCardBody>
-    </SectionCard>
+    <SettingsSection title={t('themeSettingsTitle')} description={t('themeFollowSystemDesc')}>
+      <Field label={t('themeSelectLabel')}>
+        {(control) => (
+          <NativeSelect {...control} className="pointer-coarse:[&_select]:h-11" value={theme || 'system'} onChange={(e) => setTheme(e.target.value as 'light' | 'dark' | 'system')}>
+            <option value="light">{t('themeLight')}</option>
+            <option value="dark">{t('themeDark')}</option>
+            <option value="system">{t('themeSystem')}</option>
+          </NativeSelect>
+        )}
+      </Field>
+      {theme === 'system' && (
+        <p className="text-ds-body text-ds-ink-3">
+          {t('themeCurrentSystemLabel')} <span className="font-medium text-ds-ink">{currentTheme === 'dark' ? t('themeDark') : t('themeLight')}</span>
+        </p>
+      )}
+    </SettingsSection>
   );
 }
