@@ -4,6 +4,8 @@
 // 부수(ok?채움:방치)인데 catch가 어디에도 없어, 하나가 네트워크단 reject하면 나머지도
 // 조용히 못 채워지던 결함의 회귀가드. 전체 기능 스위트가 아니라 이 격리 하나만 좁게 검증.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
@@ -353,11 +355,144 @@ describe('AgentDetailPage — id가 바뀔 때(story 4889)', () => {
     expect(container.textContent).toContain('에이전트2');
   });
 
+  it('⭐A의 웹훅 주소가 B 화면에 남지 않는다 — id가 바뀌면 그 에이전트의 부수 상태(웹훅 · 키 유무 · 새 키)를 비우고, 옛 id의 늦은 답은 버린다(story 4889: 부수 상태 id 전환)', async () => {
+    const hook = 'https://a.example/hook-of-agent-1';
+    stubFetch();
+    const base = globalThis.fetch as unknown as (u: string) => Promise<unknown>;
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.startsWith('/api/webhooks/config') && url.includes('member_id=agent-1')) return Promise.resolve({ ok: true, json: async () => ({ data: [{ id: 'w1', member_id: 'agent-1', url: hook, is_active: true }] }) });
+      if (url.startsWith('/api/webhooks/config')) return Promise.resolve({ ok: false, json: async () => null }); // agent-2: no answer
+      if (url === '/api/team-members/agent-2') return Promise.resolve({ ok: true, json: async () => ({ data: { ...AGENT, id: 'agent-2', name: '에이전트2' } }) });
+      return base(url);
+    }));
+    const hasHook = () => [...container.querySelectorAll('input')].some((i) => (i as HTMLInputElement).value === hook);
+    await mount();
+    expect(hasHook()).toBe(true);
+    paramId.current = 'agent-2';
+    await rerender();
+    expect(container.textContent).toContain('에이전트2');
+    expect(hasHook()).toBe(false);
+  });
+
+  it('⭐옛 id의 웹훅 답이 B가 서고 난 뒤 늦게 와도 B 화면에 들어오지 않는다(늦은 답 버림)', async () => {
+    const hook = 'https://a.example/late-hook';
+    let releaseHook!: (v: unknown) => void;
+    stubFetch();
+    const base = globalThis.fetch as unknown as (u: string) => Promise<unknown>;
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.startsWith('/api/webhooks/config') && url.includes('member_id=agent-1')) return new Promise((r) => { releaseHook = r; });
+      if (url.startsWith('/api/webhooks/config')) return Promise.resolve({ ok: true, json: async () => ({ data: [] }) });
+      if (url === '/api/team-members/agent-2') return Promise.resolve({ ok: true, json: async () => ({ data: { ...AGENT, id: 'agent-2', name: '에이전트2' } }) });
+      return base(url);
+    }));
+    await mount(); // agent-1 shown, its webhook read still pending
+    paramId.current = 'agent-2';
+    await rerender();
+    expect(container.textContent).toContain('에이전트2');
+    await act(async () => { releaseHook({ ok: true, json: async () => ({ data: [{ id: 'w1', member_id: 'agent-1', url: hook, is_active: true }] }) }); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect([...container.querySelectorAll('input')].some((i) => (i as HTMLInputElement).value === hook)).toBe(false);
+  });
+
+  it('⭐A→B 사이에 B의 웹훅을 A의 프로젝트로 묻지 않는다 — 다른 프로젝트의 두 에이전트(story 4889: 옛 agent가 한 번 남는 틈)', async () => {
+    const calls: string[] = [];
+    stubFetch();
+    const base = globalThis.fetch as unknown as (u: string) => Promise<unknown>;
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      calls.push(url);
+      if (url === '/api/team-members/agent-2') return Promise.resolve({ ok: true, json: async () => ({ data: { ...AGENT, id: 'agent-2', name: '에이전트2', project_id: 'proj-2' } }) });
+      if (url.startsWith('/api/webhooks/config')) return Promise.resolve({ ok: true, json: async () => ({ data: [] }) });
+      return base(url);
+    }));
+    await mount(); // agent-1 · proj-1
+    paramId.current = 'agent-2';
+    await rerender();
+    expect(container.textContent).toContain('에이전트2');
+    const forB = calls.filter((u) => u.startsWith('/api/webhooks/config') && u.includes('member_id=agent-2'));
+    expect(forB.length).toBeGreaterThan(0);
+    expect(forB.every((u) => u.includes('project_id=proj-2'))).toBe(true);
+  });
+
+  it('⭐(소스 핀) 지금 보이는 id를 쥔 ref는 렌더 중이 아니라 효과에서만 바뀐다 — 그리다 만 동시 렌더가 맞는 답을 버리게 하지 않는다', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'page.tsx'), 'utf8');
+    expect(src).toMatch(/useEffect\(\(\) => \{ idRef\.current = id; \}, \[id\]\)/);
+    expect(src.match(/idRef\.current = id/g)?.length).toBe(1); // only that one assignment (the effect's)
+  });
+
   it('오류 상태는 알림 역할(role=alert)로 읽힌다', async () => {
     stubFetch();
     const base = globalThis.fetch as unknown as (u: string) => Promise<unknown>;
     vi.stubGlobal('fetch', vi.fn((url: string) => (url === '/api/team-members/agent-1' ? Promise.resolve({ ok: false, status: 500, json: async () => null }) : base(url))));
     await mount();
     expect(container.querySelector('[data-testid="agent-detail-load-error"]')?.getAttribute('role')).toBe('alert');
+  });
+});
+
+// story 4889 (UI-6 · W2, AC3 §2) — the agent detail's one long scroll became four panels under a ds Tabs strip (실행 환경 · 키 · 알림 · 메시징 · 접근). Every section stays (the panels stay mounted);
+// each lives in ITS panel; a panel with nothing to show this viewer is not offered. Reverting the regrouping makes these go red.
+describe('AgentDetailPage — 네 구역 탭(story 4889 · W2)', () => {
+  const triggers = () => [...container.querySelectorAll('[data-slot="ds-tabs-trigger"]')] as HTMLElement[];
+  const labels = () => triggers().map((b) => b.textContent);
+  /** the label of the tab whose panel holds this element */
+  const panelOf = (testid: string): string | null => {
+    const el = container.querySelector(`[data-testid="${testid}"]`);
+    const panel = el?.closest('[role="tabpanel"]') as HTMLElement | null;
+    const by = panel?.getAttribute('aria-labelledby');
+    return by ? document.getElementById(by)?.textContent ?? null : null;
+  };
+  const selected = () => triggers().find((b) => b.getAttribute('aria-selected') === 'true')?.textContent ?? null;
+
+  it('⭐일반 에이전트(관리자): 구역 탭 넷이 이 순서로 서고 첫 구역은 «실행 환경»', async () => {
+    stubFetch({ agent: { ...AGENT, runtime_type: 'claude-code' } });
+    await mount();
+    expect(labels()).toEqual(['실행 환경', '키', '알림 · 메시징', '접근']);
+    expect(selected()).toBe('실행 환경');
+    expect(container.querySelector('[data-testid="agent-detail-tabs"]')?.getAttribute('aria-label')).toBe('에이전트 상세 구역');
+  });
+
+  it('⭐각 구역은 자기 칸에 산다 — 연결 설정 · 런타임 → 실행 환경 · 키 관리 → 키 · 메시징 정책 → 알림 · 메시징 · 프로젝트 접근 → 접근(칸은 늘 마운트라 하나도 안 사라진다)', async () => {
+    stubFetch({ agent: { ...AGENT, runtime_type: 'claude-code' } });
+    await mount();
+    expect(panelOf('stub-agent-connection-settings-section')).toBe('실행 환경');
+    expect(panelOf('stub-agent-api-key-manager')).toBe('키');
+    expect(panelOf('stub-messaging-policy-section')).toBe('알림 · 메시징');
+    expect(panelOf('project-access-projects-count')).toBe('접근');
+    // the header card is above the panels (state · name · avatar stay on every panel)
+    expect(container.querySelector('[data-testid="stub-avatar-edit-card"]')?.closest('[role="tabpanel"]')).toBeNull();
+  });
+
+  it('⭐구역 탭을 누르면 그 칸이 보이고(나머지는 숨김 · 마운트는 유지) 선택이 바뀐다', async () => {
+    stubFetch({ agent: { ...AGENT, runtime_type: 'claude-code' } });
+    await mount();
+    const keysTab = triggers().find((b) => b.textContent === '키')!;
+    await act(async () => { keysTab.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(selected()).toBe('키');
+    const keysPanel = container.querySelector('[data-testid="stub-agent-api-key-manager"]')!.closest('[role="tabpanel"]') as HTMLElement;
+    const runPanel = container.querySelector('[data-testid="stub-agent-connection-settings-section"]')!.closest('[role="tabpanel"]') as HTMLElement;
+    expect(keysPanel.hidden).toBe(false);
+    expect(runPanel.hidden).toBe(true);
+    expect(container.querySelector('[data-testid="stub-agent-connection-settings-section"]')).not.toBeNull(); // still mounted
+  });
+
+  it('⭐「시스템 발행」: 알림 · 메시징 칸은 보이지 않고(그 구역의 카드가 전부 숨김) 키 칸은 중립 설명으로 남는다', async () => {
+    stubFetch({ agent: { ...AGENT, runtime_type: 'system-publisher' } });
+    await mount();
+    expect(labels()).toEqual(['실행 환경', '키', '접근']);
+    expect(panelOf('agent-detail-system-publisher-notice')).toBe('키');
+  });
+});
+
+// story 4889 — the detail's hand-drawn `animate-pulse` loading bars became the ds Skeleton group: ONE spoken «불러오는 중…», the bars decorative.
+describe('AgentDetailPage — 불러오는 중(story 4889)', () => {
+  it('⭐읽는 동안 ds SkeletonGroup(role=status · 안내 하나) + 장식 막대 셋 — 손으로 그린 animate-pulse 막대 아님', async () => {
+    stubFetch();
+    const base = globalThis.fetch as unknown as (u: string) => Promise<unknown>;
+    vi.stubGlobal('fetch', vi.fn((url: string) => (url === '/api/team-members/agent-1' ? new Promise(() => {}) : base(url))));
+    const { default: AgentDetailPage } = await import('./page');
+    await act(async () => { root.render(wrap(<AgentDetailPage />)); });
+    const group = container.querySelector('[data-testid="agent-detail-loading"]')!;
+    expect(group.getAttribute('role')).toBe('status');
+    expect(group.getAttribute('aria-label')).toBe(koMessages.common.loading);
+    expect(group.querySelectorAll('[data-slot="ds-skeleton"]').length).toBe(3);
+    expect(container.querySelector('.animate-pulse.bg-muted')).toBeNull();
   });
 });

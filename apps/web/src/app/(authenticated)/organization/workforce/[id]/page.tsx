@@ -20,6 +20,8 @@ import { isDesktopRuntime } from '@/lib/agent-run-profile';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Button as DsButton } from '@/components/ds/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ds/tabs';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { EmptyState } from '@/components/ds/empty-state';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
@@ -132,6 +134,8 @@ function isWebhookUrlAllowed(url: string): boolean {
   return /^http:\/\/(localhost|127\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)/i.test(url);
 }
 
+type DetailTab = 'run' | 'keys' | 'notify' | 'access';
+
 export default function AgentDetailPage() {
   const embedded = useEmbeddedServer();
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
@@ -152,6 +156,8 @@ export default function AgentDetailPage() {
 
   const [agent, setAgent] = useState<AgentMember | null>(null);
   const [loading, setLoading] = useState(true);
+  // story 4889 (UI-6 · W2): which panel of the detail is shown (the page's own state — not an address)
+  const [detailTab, setDetailTab] = useState<DetailTab>('run');
   // story 4889 (AC3 §5 #6) — the agent could not be read: said on the screen (it used to bounce to the list without a word, and `!agent` drew nothing)
   const [loadError, setLoadError] = useState<null | 'notfound' | 'failed'>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -160,6 +166,7 @@ export default function AgentDetailPage() {
   // key's setup) — one read; nothing said when neither (the page as it was)
   const [desk, setDesk] = useState<DeskView | null>(null);
   useEffect(() => {
+    setDesk(null); // story 4889: the previous agent's computer line must not stay while the new id is read
     let off = false;
     fetchWithAuth(`/api/agents/${id}/desktop-session`)
       .then(async (r) => (r.ok ? ((await r.json()) as DeskView) : null))
@@ -178,6 +185,9 @@ export default function AgentDetailPage() {
 
   const [webhookConfigs, setWebhookConfigs] = useState<WebhookConfig[]>([]);
   const [webhookUrl, setWebhookUrl] = useState('');
+  // story 4889: the id the page shows NOW — a late answer for an older id is dropped (and the per-agent side state is cleared when the id changes)
+  const idRef = useRef(id);
+  useEffect(() => { idRef.current = id; }, [id]); // (assigned in an effect, not during render — an abandoned concurrent render must not move it; this effect is declared before the loads below, so it runs first)
   const [webhookActive, setWebhookActive] = useState(false);
   const [savingWebhook, setSavingWebhook] = useState(false);
 
@@ -240,26 +250,32 @@ export default function AgentDetailPage() {
     // story 933248fa 재오픈: GET은 기본 caller-scope라 project_id만으로는 "내(caller) 웹훅"만
     // 돌아온다 — admin이 타 멤버(id) 상세를 보는 중이면 ?member_id=로 그 타깃을 명시 조회해야
     // BE의 admin override(list_webhook_configs)가 실제로 작동한다(write_ok≠read_success).
+    const forId = id;
     const res = await fetchWithAuth(
       `/api/webhooks/config?project_id=${encodeURIComponent(projectId)}&member_id=${encodeURIComponent(id)}`,
     );
-    if (!res.ok) return;
+    if (!res.ok || idRef.current !== forId) return;
     const json = await res.json() as { data: WebhookConfig[] };
+    if (idRef.current !== forId) return;
     const agentConfigs = (json.data ?? []).filter((c) => c.member_id === id);
     setWebhookConfigs(agentConfigs);
     setWebhookUrl(agentConfigs[0]?.url ?? '');
   }, [id]);
 
   const fetchActiveApiKey = useCallback(async () => {
+    const forId = id;
     const res = await fetchWithAuth(`/api/agents/${id}/api-key`);
-    if (!res.ok) return;
+    if (!res.ok || idRef.current !== forId) return;
     const json = await res.json() as { data: ApiKey[] };
+    if (idRef.current !== forId) return;
     const active = (json.data ?? []).find((k) => !k.revoked_at);
     setHasActiveKey(!!active);
   }, [id]);
 
   useEffect(() => {
     let current = true; // story 4889: an older id's late answer does not end the newer id's loading
+    // story 4889: the previous agent's side state (key presence · webhook · a freshly shown key) does not stay while this id is read
+    setHasActiveKey(false); setWebhookConfigs([]); setWebhookUrl(''); setFreshApiKey(null);
     setLoading(true);
     Promise.all([fetchAgent(), fetchActiveApiKey(), fetchOrgContext()])
       .finally(() => { if (current) setLoading(false); });
@@ -267,9 +283,10 @@ export default function AgentDetailPage() {
   }, [fetchAgent, fetchActiveApiKey, fetchOrgContext]);
 
   useEffect(() => {
-    if (!agent) return;
+    // story 4889: right after the id changes `agent` still holds the PREVIOUS agent for a render — its project must not be asked for the new id
+    if (!agent || agent.id !== id) return;
     void fetchWebhookConfigs(agent.project_id);
-  }, [agent, fetchWebhookConfigs]);
+  }, [agent, id, fetchWebhookConfigs]);
 
   useEffect(() => {
     setWebhookActive(webhookConfigs[0]?.is_active ?? false);
@@ -389,9 +406,9 @@ export default function AgentDetailPage() {
 
   if (loading) {
     return (
-      <div className="w-full max-w-3xl mx-auto p-6 space-y-4">
-        {[1, 2, 3].map((i) => <div key={i} className="h-24 animate-pulse rounded-lg bg-muted" />)}
-      </div>
+      <SkeletonGroup label={tc('loading')} className="w-full max-w-3xl mx-auto p-6 space-y-4" data-testid="agent-detail-loading">
+        {[1, 2, 3].map((i) => <Skeleton key={i} className="h-24" />)}
+      </SkeletonGroup>
     );
   }
 
@@ -434,6 +451,10 @@ export default function AgentDetailPage() {
   // IDOR 방어 유지). canEdit(creator 포함)보다 엄격하게 별도 게이트 — 아니면 편집 UI가 "가능해 보이는데
   // 실제로 실패"하는 정직하지 않은 상태가 재발한다(§673 프로젝트 grant 게이트와 동일 패턴).
   const canEditWebhook = (orgRole === 'admin' || orgRole === 'owner') && !isSystemPublisherAgent;
+  // story 4889 (W2): a panel is offered only while it has a section to show this viewer (keys: canEditBase · notify: the webhook/summary cards or the messaging policy)
+  const showKeysTab = canEditBase;
+  const showNotifyTab = !isSystemPublisherAgent || canEdit;
+  const shownTab: DetailTab = (detailTab === 'keys' && !showKeysTab) || (detailTab === 'notify' && !showNotifyTab) ? 'run' : detailTab;
 
   const handleSaveRuntime = async () => {
     setSavingRuntime(true);
@@ -604,281 +625,299 @@ export default function AgentDetailPage() {
         )}
       </SectionCard>
 
-      {/* 런타임 타입 (E-CHAT-CMD S2) */}
-      {/* story #3994 CHANGES-4(페드루 PO C3 2026-09-17) — 「시스템 발행」의 runtime_type
-          은 §3107 예약값이라 resolveRuntimeStatus()의 두 capability 축이 둘 다 false로
-          해석돼 'unsupported'(destructive 빨간 배지+XCircle)로 떨어진다 — "연결 필요
-          없음" 화면 한복판에 빨간 경고가 뜨는 거짓 신호(헤더에 이미 있는 「커넥터:
-          Sprintable」 칩으로 충분, 새 문구 0). */}
-      {!isSystemPublisherAgent && (() => {
-        const savedRuntime = agent.runtime_type ?? '';
-        const runtimeStatus = resolveRuntimeStatus(selectedRuntime || null);
-        const ui = RUNTIME_STATUS_UI[runtimeStatus];
-        const stagedDef = getRuntimeDef(selectedRuntime);
-        const stagedKnown = !!stagedDef;
-        // ⑤ 미인식: 원값을 드롭다운 트리거에 그대로 노출(데이터 은닉 금지) + 미인식 표시.
-        // story #3107 — system-publisher는 사람이 만든 에이전트가 고를 실 런타임이 아니라
-        // 시스템 예약값이라(뱃지/라벨 표기 전용) 이 "에이전트 런타임 지정" 드롭다운에서만
-        // 명시적으로 걸러낸다(runtimeLabel()·CONNECTOR_BADGE_REGISTRY 등 다른 소비처는
-        // RUNTIME_REGISTRY를 그대로 써 무필터).
-        const runtimeOptions = [
-          ...(selectedRuntime && !stagedKnown
-            ? [{ value: selectedRuntime, label: `${selectedRuntime} (${t('runtimeUnknown')})`, disabled: true }]
-            : []),
-          ...RUNTIME_REGISTRY.filter((r) => r.key !== 'system-publisher').map((r) => ({ value: r.key, label: r.label })),
-        ];
-        // 변경 + registry 등록값일 때만 저장 가능(④ 미선택·⑤ 미인식 재저장 방지).
-        const canSaveRuntime = stagedKnown && selectedRuntime !== savedRuntime;
-        const StatusIcon = ui.Icon;
-        return (
+      {/* story 4889 (UI-6 · W2, AC3 §2) — the one long scroll became four panels under a ds Tabs strip: 실행 환경 · 키 · 알림/메시징 · 접근. Every section stays (nothing removed · no new behaviour);
+          panels stay MOUNTED (keepMounted) so a section's own state and loads are not lost when you switch. A tab whose sections are all hidden for this viewer/agent is not offered. */}
+      <Tabs value={shownTab} onValueChange={(v) => setDetailTab(v as DetailTab)}>
+        <TabsList aria-label={ta('detailTabsLabel')} data-testid="agent-detail-tabs">
+          <TabsTrigger value="run">{ta('detailTabRun')}</TabsTrigger>
+          {showKeysTab ? <TabsTrigger value="keys">{ta('detailTabKeys')}</TabsTrigger> : null}
+          {showNotifyTab ? <TabsTrigger value="notify">{ta('detailTabNotify')}</TabsTrigger> : null}
+          <TabsTrigger value="access">{ta('detailTabAccess')}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="run" keepMounted className="space-y-6 pt-4">
+        {/* 런타임 타입 (E-CHAT-CMD S2) */}
+        {/* story #3994 CHANGES-4(페드루 PO C3 2026-09-17) — 「시스템 발행」의 runtime_type
+            은 §3107 예약값이라 resolveRuntimeStatus()의 두 capability 축이 둘 다 false로
+            해석돼 'unsupported'(destructive 빨간 배지+XCircle)로 떨어진다 — "연결 필요
+            없음" 화면 한복판에 빨간 경고가 뜨는 거짓 신호(헤더에 이미 있는 「커넥터:
+            Sprintable」 칩으로 충분, 새 문구 0). */}
+        {!isSystemPublisherAgent && (() => {
+          const savedRuntime = agent.runtime_type ?? '';
+          const runtimeStatus = resolveRuntimeStatus(selectedRuntime || null);
+          const ui = RUNTIME_STATUS_UI[runtimeStatus];
+          const stagedDef = getRuntimeDef(selectedRuntime);
+          const stagedKnown = !!stagedDef;
+          // ⑤ 미인식: 원값을 드롭다운 트리거에 그대로 노출(데이터 은닉 금지) + 미인식 표시.
+          // story #3107 — system-publisher는 사람이 만든 에이전트가 고를 실 런타임이 아니라
+          // 시스템 예약값이라(뱃지/라벨 표기 전용) 이 "에이전트 런타임 지정" 드롭다운에서만
+          // 명시적으로 걸러낸다(runtimeLabel()·CONNECTOR_BADGE_REGISTRY 등 다른 소비처는
+          // RUNTIME_REGISTRY를 그대로 써 무필터).
+          const runtimeOptions = [
+            ...(selectedRuntime && !stagedKnown
+              ? [{ value: selectedRuntime, label: `${selectedRuntime} (${t('runtimeUnknown')})`, disabled: true }]
+              : []),
+            ...RUNTIME_REGISTRY.filter((r) => r.key !== 'system-publisher').map((r) => ({ value: r.key, label: r.label })),
+          ];
+          // 변경 + registry 등록값일 때만 저장 가능(④ 미선택·⑤ 미인식 재저장 방지).
+          const canSaveRuntime = stagedKnown && selectedRuntime !== savedRuntime;
+          const StatusIcon = ui.Icon;
+          return (
+            <SectionCard>
+              <SectionCardHeader>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-base font-semibold text-foreground">{t('runtimeTypeTitle')}</h2>
+                    <Badge variant={ui.variant}>
+                      {StatusIcon ? <StatusIcon className="h-3 w-3" /> : null}
+                      {t(ui.labelKey)}
+                    </Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground">{t('runtimeTypeDescription')}</p>
+                </div>
+              </SectionCardHeader>
+              <SectionCardBody className="space-y-3">
+                {canEdit ? (
+                  <>
+                    <div className="flex gap-2">
+                      <OperatorDropdownSelect
+                        value={selectedRuntime}
+                        onValueChange={setSelectedRuntime}
+                        options={runtimeOptions}
+                        placeholder={t('runtimeTypePlaceholder')}
+                        className="flex-1"
+                      />
+                      <Button
+                        variant="hero"
+                        size="sm"
+                        onClick={() => void handleSaveRuntime()}
+                        disabled={savingRuntime || !canSaveRuntime}
+                      >
+                        {savingRuntime ? '...' : tc('save')}
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{t(ui.helpKey)}</p>
+                  </>
+                ) : (
+                  <div className="space-y-1">
+                    <p className="text-sm text-foreground">
+                      {stagedDef?.label ?? (selectedRuntime || t('runtimeUnset'))}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{t(ui.helpKey)}</p>
+                  </div>
+                )}
+              </SectionCardBody>
+            </SectionCard>
+          );
+        })()}
+
+        {/* story #4540 (C-5) — «실행»: the model · effort the desktop app starts this agent with (desktop runtimes only) */}
+        {isDesktopRuntime(agent.runtime_type) ? <AgentRunProfileSection agentId={agent.id} runtimeType={agent.runtime_type ?? null} runNow={desk?.run ?? null} /> : null}
+
+        {/* story #2751(설계①) — 연결 설정 상시 섹션. connection-artifact를 항상 재조회해
+            .mcp.json 등 연결 구조를 언제든 다시 볼 수 있게 한다(freshApiKey 유무와 무관).
+            story #3994 CHANGES-2(페드루 PO 판정 2026-09-17) — 「시스템 발행」은 연결
+            대상이 아니다(위 키 관리 자리의 중립 설명 "따로 연결하지 않아도 돼요" 바로
+            아래에 "이렇게 연결하세요"가 뜨는 모순 발견) — 이 섹션 자체를 안 그린다
+            (중립 설명을 또 하나 더 안 얹는다 — 위 1줄로 충분, 두 번째 대체 문구는
+            같은 말을 반복할 뿐 새 정보가 없다). */}
+        {!isSystemPublisherAgent ? (
+          <AgentConnectionSettingsSection agentId={id} freshApiKey={freshApiKey} />
+        ) : null}
+
+        {/* Fakechat 채널 (SSE) — story #2362(2026-07-31): 예전엔 여기가 "이 포트로 접속하라"고
+            안내했는데, fakechat은 다이얼아웃 방식이라 그 주소를 아무도 안 연다(포트를 안 쓴다).
+            진짜 필요한 건 런치 셸의 env 한 줄 — API Keys 섹션(위)이 이미 관리하는 그 키를
+            그대로 재사용한다(AC3 — 키 노출은 새 방식을 안 만들고 그 섹션의 fresh-key/masked
+            패턴을 그대로 쓴다).
+            story #3994 CHANGES-3(유나 design 재앵커 적발·PO 코드 확認 2026-09-17) — 이 인라인
+            SectionCard가 canEdit류 게이트 없이 무조건 렌더돼, 「시스템 발행」(키 발급이 막혀
+            hasActiveKey는 항상 false)에게 「런치 셸에 export SPRINTABLE_API_KEY=… 넣으세요」
+            연결 지시 + agentFakechatEnvKeyRequired amber 거짓 경고(위 API 키 자리의 "따로
+            연결하지 않아도 돼요"와 같은 화면에서 모순)가 떴다. 연결 설정 섹션(위)과 동일하게
+            섹션 자체를 미렌더 — 새 대체 문구 추가 없음(위 중립 설명 1줄로 이미 충분). */}
+        {!isSystemPublisherAgent ? (
           <SectionCard>
             <SectionCardHeader>
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="text-base font-semibold text-foreground">{t('runtimeTypeTitle')}</h2>
-                  <Badge variant={ui.variant}>
-                    {StatusIcon ? <StatusIcon className="h-3 w-3" /> : null}
-                    {t(ui.labelKey)}
-                  </Badge>
+              <div className="flex items-center justify-between w-full">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-semibold text-foreground">{t('agentFakechatTitle')}</h2>
+                    <Badge variant="info">SSE</Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground break-keep">
+                    {t('agentFakechatDescription')}
+                  </p>
                 </div>
-                <p className="text-sm text-muted-foreground">{t('runtimeTypeDescription')}</p>
+                {freshApiKey ? (
+                  <Button variant="glass" size="sm" onClick={() => void handleCopyFakechatEnvKey()}>
+                    {fakechatEnvKeyCopied ? <Check className="h-3.5 w-3.5" /> : <><Copy className="h-3.5 w-3.5 mr-1" />{ta('fakechatEnvCopyExport')}</>}
+                  </Button>
+                ) : null}
               </div>
             </SectionCardHeader>
-            <SectionCardBody className="space-y-3">
-              {canEdit ? (
+            {/* story #4240(유나 390 실측 «않아/요») — 한국어 안내 줄은 낱말 단위로만 줄바꿈(break-keep · CJK에만 작용 · 키·코드 줄 무영향). */}
+            <SectionCardBody className="space-y-3 break-keep">
+              <div className="space-y-1.5 text-xs text-muted-foreground">
+                <p>{t('agentFakechatEnvKeyInstruction')}</p>
+                <p>{webhookActive ? t('agentFakechatWebhookActiveNote') : t('agentFakechatWebhookOffNote')}</p>
+                <p>
+                  {t.rich('agentFakechatSuccessCheck', {
+                    code: (chunks) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-editorial-meta text-foreground">{chunks}</code>,
+                  })}
+                </p>
+              </div>
+
+              {freshApiKey ? (
                 <>
-                  <div className="flex gap-2">
-                    <OperatorDropdownSelect
-                      value={selectedRuntime}
-                      onValueChange={setSelectedRuntime}
-                      options={runtimeOptions}
-                      placeholder={t('runtimeTypePlaceholder')}
-                      className="flex-1"
-                    />
-                    <Button
-                      variant="hero"
-                      size="sm"
-                      onClick={() => void handleSaveRuntime()}
-                      disabled={savingRuntime || !canSaveRuntime}
-                    >
-                      {savingRuntime ? '...' : tc('save')}
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">{t(ui.helpKey)}</p>
+                  <p className="text-xs text-success">{t('agentFakechatEnvKeyFreshNote')}</p>
+                  <code className="block overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
+                    export SPRINTABLE_API_KEY={freshApiKey}
+                  </code>
                 </>
+              ) : !hasActiveKey ? (
+                <p className="text-xs text-warning-strong">{t('agentFakechatEnvKeyRequired')}</p>
               ) : (
-                <div className="space-y-1">
-                  <p className="text-sm text-foreground">
-                    {stagedDef?.label ?? (selectedRuntime || t('runtimeUnset'))}
-                  </p>
-                  <p className="text-xs text-muted-foreground">{t(ui.helpKey)}</p>
-                </div>
+                <p className="text-xs text-muted-foreground">{t('agentFakechatEnvKeySecurityNote')}</p>
               )}
             </SectionCardBody>
           </SectionCard>
-        );
-      })()}
+        ) : null}
 
-      {/* story #4540 (C-5) — «실행»: the model · effort the desktop app starts this agent with (desktop runtimes only) */}
-      {isDesktopRuntime(agent.runtime_type) ? <AgentRunProfileSection agentId={agent.id} runtimeType={agent.runtime_type ?? null} runNow={desk?.run ?? null} /> : null}
+        </TabsContent>
+        <TabsContent value="keys" keepMounted className="space-y-6 pt-4">
+        {/* API Keys */}
+        {/* story #3994(«거짓 경고» 클래스, PO CHANGES-1 2026-09-17) — 「시스템 발행」은
+            키를 발급받을 연결 대상이 아니다(연결된 키로 고객 에이전트가 "시스템 발행"
+            이름을 사칭해 메시지를 보낼 수 있는 모양이 되는 실 문제). 서버 쪽 발급 거부는
+            새 BE라 이 카드 밖(PO가 별도 카드로) — 여기서는 FE 진입점만 막고 목록과 같은
+            중립 설명 1줄로 대체(런타임 선택 자체는 §3107이 이미 배제 — 아래 §478 참고).
+            canEditBase를 쓴다(위에서 좁힌 canEdit이 아니라) — 그래야 편집권 있는 뷰어가
+            여기서 «못 만짐»이 아니라 «중립 설명»을 본다(narrowed canEdit이면 이 블록
+            자체가 안 뜬다). */}
+        {canEditBase && (
+          isSystemPublisherAgent ? (
+            <SectionCard>
+              <SectionCardBody>
+                <p className="text-xs text-muted-foreground" data-testid="agent-detail-system-publisher-notice">
+                  {ta('systemPublisherNeutralDescription')}
+                </p>
+              </SectionCardBody>
+            </SectionCard>
+          ) : (
+            <AgentApiKeyManager
+              agentId={id}
+              agentName={agent.name}
+              onNewKey={(key) => { setFreshApiKey(key); setHasActiveKey(true); }}
+            />
+          )
+        )}
 
-      {/* API Keys */}
-      {/* story #3994(«거짓 경고» 클래스, PO CHANGES-1 2026-09-17) — 「시스템 발행」은
-          키를 발급받을 연결 대상이 아니다(연결된 키로 고객 에이전트가 "시스템 발행"
-          이름을 사칭해 메시지를 보낼 수 있는 모양이 되는 실 문제). 서버 쪽 발급 거부는
-          새 BE라 이 카드 밖(PO가 별도 카드로) — 여기서는 FE 진입점만 막고 목록과 같은
-          중립 설명 1줄로 대체(런타임 선택 자체는 §3107이 이미 배제 — 아래 §478 참고).
-          canEditBase를 쓴다(위에서 좁힌 canEdit이 아니라) — 그래야 편집권 있는 뷰어가
-          여기서 «못 만짐»이 아니라 «중립 설명»을 본다(narrowed canEdit이면 이 블록
-          자체가 안 뜬다). */}
-      {canEditBase && (
-        isSystemPublisherAgent ? (
-          <SectionCard>
-            <SectionCardBody>
-              <p className="text-xs text-muted-foreground" data-testid="agent-detail-system-publisher-notice">
-                {ta('systemPublisherNeutralDescription')}
-              </p>
-            </SectionCardBody>
-          </SectionCard>
-        ) : (
-          <AgentApiKeyManager
-            agentId={id}
-            agentName={agent.name}
-            onNewKey={(key) => { setFreshApiKey(key); setHasActiveKey(true); }}
-          />
-        )
-      )}
+        </TabsContent>
+        <TabsContent value="notify" keepMounted className="space-y-6 pt-4">
+        {/* Notification channel section */}
+        {/* story #3994 CHANGES-4(페드루 PO C4 2026-09-17) — 「시스템 발행」은 canEditWebhook이
+            false라 webhookAdminOnly("관리자만 다른 멤버의 웹훅을 설정할 수 있어요")가 org
+            admin 본인에게도 뜬다 — 실제 사유(예약 멤버라 무조건 편집 불가)와 다른 거짓
+            사유라 카드 자체를 미렌더(아래 알림 설정 요약 카드도 동일 사유·동일 처방). */}
+        {!isSystemPublisherAgent && (() => {
+          const webhookState = getWebhookState(webhookConfigs);
+          return (
+            <SectionCard>
+              <SectionCardHeader>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-base font-semibold text-foreground">{t('notificationChannel')}</h2>
+                    {webhookState === 'empty' && <Badge variant="info">{t('webhookStatusEmpty')}</Badge>}
+                    {webhookState === 'active' && <Badge variant="success">{t('webhookStatusActive')}</Badge>}
+                    {webhookState === 'paused' && (
+                      <>
+                        <Badge variant="secondary">{t('webhookStatusInactive')}</Badge>
+                        <Badge variant="info">{t('webhookStatusFallback')}</Badge>
+                      </>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {webhookState === 'empty' && t('webhookHelperEmpty')}
+                    {webhookState === 'active' && t('webhookHelperActive')}
+                    {webhookState === 'paused' && t('webhookHelperPaused')}
+                  </p>
+                </div>
+              </SectionCardHeader>
+              <SectionCardBody className="space-y-3">
+                {!canEditWebhook ? (
+                  <p className="text-xs text-muted-foreground">{t('webhookAdminOnly')}</p>
+                ) : null}
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">{t('webhookEnabledToggle')}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{t('webhookEnabledHelp')}</p>
+                  </div>
+                  <Switch
+                    checked={webhookActive}
+                    onCheckedChange={(next) => void handleToggle(next)}
+                    disabled={savingWebhook || !canEditWebhook}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <OperatorInput
+                    type="url"
+                    value={webhookUrl}
+                    onChange={(e) => setWebhookUrl(e.target.value)}
+                    placeholder="https://your-agent.example.com/webhook"
+                    className="flex-1 font-mono"
+                    disabled={!webhookActive || !canEditWebhook}
+                  />
+                  <Button
+                    variant="hero"
+                    size="sm"
+                    onClick={() => void handleSaveWebhook()}
+                    disabled={savingWebhook || !webhookActive || !webhookUrl.trim() || !canEditWebhook}
+                  >
+                    {savingWebhook ? '...' : tc('save')}
+                  </Button>
+                </div>
+              </SectionCardBody>
+            </SectionCard>
+          );
+        })()}
 
-      {/* Notification channel section */}
-      {/* story #3994 CHANGES-4(페드루 PO C4 2026-09-17) — 「시스템 발행」은 canEditWebhook이
-          false라 webhookAdminOnly("관리자만 다른 멤버의 웹훅을 설정할 수 있어요")가 org
-          admin 본인에게도 뜬다 — 실제 사유(예약 멤버라 무조건 편집 불가)와 다른 거짓
-          사유라 카드 자체를 미렌더(아래 알림 설정 요약 카드도 동일 사유·동일 처방). */}
-      {!isSystemPublisherAgent && (() => {
-        const webhookState = getWebhookState(webhookConfigs);
-        return (
+        {/* story #2623 — 멤버 관점 요약(AC3, «이 에이전트는 어느 대화에서 무엇을 받나»). 웹훅
+            섹션과 동일 admin/owner 게이트(canEditWebhook — story 933248fa와 같은 org role 축,
+            새 인가 어휘 발명 없음) 재사용. BE #2623 착지 대기 — 착지 前엔 로드에러/자기자신
+            목록으로 보일 수 있다(컴포넌트 자체 docstring 참고, 조용히 감추지 않는다).
+            story #3994 CHANGES-4(페드루 PO C4) — 위 알림 채널 카드와 동일 사유(거짓
+            webhookAdminOnly 사유 회피)로 시스템 발행이면 미렌더. */}
+        {!isSystemPublisherAgent && (
           <SectionCard>
             <SectionCardHeader>
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="text-base font-semibold text-foreground">{t('notificationChannel')}</h2>
-                  {webhookState === 'empty' && <Badge variant="info">{t('webhookStatusEmpty')}</Badge>}
-                  {webhookState === 'active' && <Badge variant="success">{t('webhookStatusActive')}</Badge>}
-                  {webhookState === 'paused' && (
-                    <>
-                      <Badge variant="secondary">{t('webhookStatusInactive')}</Badge>
-                      <Badge variant="info">{t('webhookStatusFallback')}</Badge>
-                    </>
-                  )}
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  {webhookState === 'empty' && t('webhookHelperEmpty')}
-                  {webhookState === 'active' && t('webhookHelperActive')}
-                  {webhookState === 'paused' && t('webhookHelperPaused')}
-                </p>
-              </div>
+              <h2 className="text-base font-semibold text-foreground">{t('notificationPreferencesSummaryTitle')}</h2>
             </SectionCardHeader>
-            <SectionCardBody className="space-y-3">
+            <SectionCardBody>
               {!canEditWebhook ? (
                 <p className="text-xs text-muted-foreground">{t('webhookAdminOnly')}</p>
-              ) : null}
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">{t('webhookEnabledToggle')}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{t('webhookEnabledHelp')}</p>
-                </div>
-                <Switch
-                  checked={webhookActive}
-                  onCheckedChange={(next) => void handleToggle(next)}
-                  disabled={savingWebhook || !canEditWebhook}
-                />
-              </div>
-              <div className="flex gap-2">
-                <OperatorInput
-                  type="url"
-                  value={webhookUrl}
-                  onChange={(e) => setWebhookUrl(e.target.value)}
-                  placeholder="https://your-agent.example.com/webhook"
-                  className="flex-1 font-mono"
-                  disabled={!webhookActive || !canEditWebhook}
-                />
-                <Button
-                  variant="hero"
-                  size="sm"
-                  onClick={() => void handleSaveWebhook()}
-                  disabled={savingWebhook || !webhookActive || !webhookUrl.trim() || !canEditWebhook}
-                >
-                  {savingWebhook ? '...' : tc('save')}
-                </Button>
-              </div>
+              ) : (
+                <MemberNotificationPreferencesSummary memberId={id} memberLabel={agent.name} />
+              )}
             </SectionCardBody>
           </SectionCard>
-        );
-      })()}
+        )}
 
-      {/* story #2623 — 멤버 관점 요약(AC3, «이 에이전트는 어느 대화에서 무엇을 받나»). 웹훅
-          섹션과 동일 admin/owner 게이트(canEditWebhook — story 933248fa와 같은 org role 축,
-          새 인가 어휘 발명 없음) 재사용. BE #2623 착지 대기 — 착지 前엔 로드에러/자기자신
-          목록으로 보일 수 있다(컴포넌트 자체 docstring 참고, 조용히 감추지 않는다).
-          story #3994 CHANGES-4(페드루 PO C4) — 위 알림 채널 카드와 동일 사유(거짓
-          webhookAdminOnly 사유 회피)로 시스템 발행이면 미렌더. */}
-      {!isSystemPublisherAgent && (
-        <SectionCard>
-          <SectionCardHeader>
-            <h2 className="text-base font-semibold text-foreground">{t('notificationPreferencesSummaryTitle')}</h2>
-          </SectionCardHeader>
-          <SectionCardBody>
-            {!canEditWebhook ? (
-              <p className="text-xs text-muted-foreground">{t('webhookAdminOnly')}</p>
-            ) : (
-              <MemberNotificationPreferencesSummary memberId={id} memberLabel={agent.name} />
-            )}
-          </SectionCardBody>
-        </SectionCard>
-      )}
+        {/* Messaging policy (E-MSG-POLICY S3) */}
+        {canEdit && <MessagingPolicySection agentId={id} creatorUserId={agent.created_by} />}
 
-      {/* Messaging policy (E-MSG-POLICY S3) */}
-      {canEdit && <MessagingPolicySection agentId={id} creatorUserId={agent.created_by} />}
-
-      {/* story #2751(설계①) — 연결 설정 상시 섹션. connection-artifact를 항상 재조회해
-          .mcp.json 등 연결 구조를 언제든 다시 볼 수 있게 한다(freshApiKey 유무와 무관).
-          story #3994 CHANGES-2(페드루 PO 판정 2026-09-17) — 「시스템 발행」은 연결
-          대상이 아니다(위 키 관리 자리의 중립 설명 "따로 연결하지 않아도 돼요" 바로
-          아래에 "이렇게 연결하세요"가 뜨는 모순 발견) — 이 섹션 자체를 안 그린다
-          (중립 설명을 또 하나 더 안 얹는다 — 위 1줄로 충분, 두 번째 대체 문구는
-          같은 말을 반복할 뿐 새 정보가 없다). */}
-      {!isSystemPublisherAgent ? (
-        <AgentConnectionSettingsSection agentId={id} freshApiKey={freshApiKey} />
-      ) : null}
-
-      {/* Fakechat 채널 (SSE) — story #2362(2026-07-31): 예전엔 여기가 "이 포트로 접속하라"고
-          안내했는데, fakechat은 다이얼아웃 방식이라 그 주소를 아무도 안 연다(포트를 안 쓴다).
-          진짜 필요한 건 런치 셸의 env 한 줄 — API Keys 섹션(위)이 이미 관리하는 그 키를
-          그대로 재사용한다(AC3 — 키 노출은 새 방식을 안 만들고 그 섹션의 fresh-key/masked
-          패턴을 그대로 쓴다).
-          story #3994 CHANGES-3(유나 design 재앵커 적발·PO 코드 확認 2026-09-17) — 이 인라인
-          SectionCard가 canEdit류 게이트 없이 무조건 렌더돼, 「시스템 발행」(키 발급이 막혀
-          hasActiveKey는 항상 false)에게 「런치 셸에 export SPRINTABLE_API_KEY=… 넣으세요」
-          연결 지시 + agentFakechatEnvKeyRequired amber 거짓 경고(위 API 키 자리의 "따로
-          연결하지 않아도 돼요"와 같은 화면에서 모순)가 떴다. 연결 설정 섹션(위)과 동일하게
-          섹션 자체를 미렌더 — 새 대체 문구 추가 없음(위 중립 설명 1줄로 이미 충분). */}
-      {!isSystemPublisherAgent ? (
-        <SectionCard>
-          <SectionCardHeader>
-            <div className="flex items-center justify-between w-full">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-base font-semibold text-foreground">{t('agentFakechatTitle')}</h2>
-                  <Badge variant="info">SSE</Badge>
-                </div>
-                <p className="text-sm text-muted-foreground break-keep">
-                  {t('agentFakechatDescription')}
-                </p>
-              </div>
-              {freshApiKey ? (
-                <Button variant="glass" size="sm" onClick={() => void handleCopyFakechatEnvKey()}>
-                  {fakechatEnvKeyCopied ? <Check className="h-3.5 w-3.5" /> : <><Copy className="h-3.5 w-3.5 mr-1" />{ta('fakechatEnvCopyExport')}</>}
-                </Button>
-              ) : null}
-            </div>
-          </SectionCardHeader>
-          {/* story #4240(유나 390 실측 «않아/요») — 한국어 안내 줄은 낱말 단위로만 줄바꿈(break-keep · CJK에만 작용 · 키·코드 줄 무영향). */}
-          <SectionCardBody className="space-y-3 break-keep">
-            <div className="space-y-1.5 text-xs text-muted-foreground">
-              <p>{t('agentFakechatEnvKeyInstruction')}</p>
-              <p>{webhookActive ? t('agentFakechatWebhookActiveNote') : t('agentFakechatWebhookOffNote')}</p>
-              <p>
-                {t.rich('agentFakechatSuccessCheck', {
-                  code: (chunks) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-editorial-meta text-foreground">{chunks}</code>,
-                })}
-              </p>
-            </div>
-
-            {freshApiKey ? (
-              <>
-                <p className="text-xs text-success">{t('agentFakechatEnvKeyFreshNote')}</p>
-                <code className="block overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
-                  export SPRINTABLE_API_KEY={freshApiKey}
-                </code>
-              </>
-            ) : !hasActiveKey ? (
-              <p className="text-xs text-warning-strong">{t('agentFakechatEnvKeyRequired')}</p>
-            ) : (
-              <p className="text-xs text-muted-foreground">{t('agentFakechatEnvKeySecurityNote')}</p>
-            )}
-          </SectionCardBody>
-        </SectionCard>
-      ) : null}
-
-      {/* 프로젝트 접근 (org-agent 멀티프로젝트 단일키 grant) — 088987d8 */}
-      {/* 프로젝트 grant 게이트는 page canEdit(creator 포함)보다 엄격 — creator라도 비-admin이면 과권한
-          (RC①). org admin/owner 만 page-wide 허용(org admin 은 org 전 프로젝트 grant 가능 = BE
-          _require_owner_or_admin 정합·403 surprise 0; 단일 project owner-non-admin 은 안전하게 미노출). */}
-      <AgentProjectAccessSection
-        agentMemberId={id}
-        projects={projects}
-        canEdit={(orgRole === 'admin' || orgRole === 'owner') && !isSystemPublisherAgent}
-      />
+        </TabsContent>
+        <TabsContent value="access" keepMounted className="space-y-6 pt-4">
+        {/* 프로젝트 접근 (org-agent 멀티프로젝트 단일키 grant) — 088987d8 */}
+        {/* 프로젝트 grant 게이트는 page canEdit(creator 포함)보다 엄격 — creator라도 비-admin이면 과권한
+            (RC①). org admin/owner 만 page-wide 허용(org admin 은 org 전 프로젝트 grant 가능 = BE
+            _require_owner_or_admin 정합·403 surprise 0; 단일 project owner-non-admin 은 안전하게 미노출). */}
+        <AgentProjectAccessSection
+          agentMemberId={id}
+          projects={projects}
+          canEdit={(orgRole === 'admin' || orgRole === 'owner') && !isSystemPublisherAgent}
+        />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
