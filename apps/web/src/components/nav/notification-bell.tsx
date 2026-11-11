@@ -16,7 +16,7 @@ import {
 import { useLocale, useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { toPlainPreview } from '@/components/chat/entity-ref';
-import { CornerCountBadge } from '@/components/ui/corner-count-badge';
+import { CountBadge } from '@/components/ds/count-badge';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
@@ -708,7 +708,6 @@ export function NotificationBell() {
     [handleMarkRead, router],
   );
 
-  const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount);
   const closePanel = useCallback(() => setOpen(false), []);
   const panelKeys = usePortalMenuKeys({ open, onClose: closePanel, popoverRef: desktopPanelRef, triggerRef: bellRef, kind: 'panel' });
 
@@ -732,14 +731,14 @@ export function NotificationBell() {
             ? (unreadCount > 99 ? t('bellAriaLabelCountCapped') : t('bellAriaLabelCount', { count: unreadCount }))
             : t('panelTitle')
         }
-        className="relative flex size-8 items-center justify-center rounded-md text-foreground/70 transition hover:bg-accent hover:text-foreground"
+        className="relative flex size-8 items-center justify-center rounded-md text-foreground/70 transition hover:bg-accent hover:text-foreground touch:size-11"
       >
         <Bell className="size-4" />
-        {/* story #3431(공용, PO 確定 2026-09-05) — 공용 CornerCountBadge로 통합(team-presence-
+        {/* story #3431(공용, PO 確定 2026-09-05) — 공용 배지로 통합(4890부터 ds CountBadge · team-presence-
             toggle.tsx와 동일 정의). 색 계산 근거(story 3466이 이미 확保)와 크기(9→10px,
-            AC4)는 corner-count-badge.tsx 주석 참고 — 정의를 두 곳에 중복하지 않는다. */}
+            AC4)는 ds/count-badge.tsx 참고 — 정의를 두 곳에 중복하지 않는다. */}
         {unreadCount > 0 && (
-          <CornerCountBadge variant="destructive" value={badgeLabel} className="absolute -right-0.5 -top-0.5" />
+          <CountBadge count={unreadCount} aria-hidden className="absolute right-0 top-0" />
         )}
       </button>
 

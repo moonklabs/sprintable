@@ -8,7 +8,7 @@ import { keepHref } from '@/lib/with-project-param';
 import { useTranslations } from 'next-intl';
 import { MessageSquare, Grid2x2, Newspaper, Workflow } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { CornerCountBadge } from '@/components/ui/corner-count-badge';
+import { CountBadge } from '@/components/ds/count-badge';
 import { useHomeModel } from '@/components/home/home-model-provider';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { WORKSPACE_FRAME_TAB_PATHS } from '@/components/workspace/workspace-frame-tabs';
@@ -257,9 +257,8 @@ export function MobileTabBar({
           : key === 'chat' && chatUnreadTotal > 0
             ? chatUnreadTotal
             : null;
-        const badgeText = badge === null ? null : badge > 99 ? '99+' : key === 'today' && homePartial ? `${badge}+` : badge;
-        // story #3518(유나 사전 스티어, 2026-09-05) — CornerCountBadge는 aria-hidden이라
-        // 그 수를 보조기술에 전하는 책임은 이 링크에 있다(계약은 corner-count-badge.tsx
+        // story #3518(유나 사전 스티어, 2026-09-05) — 숨긴 배지(aria-hidden)의
+        // 수를 보조기술에 전하는 책임은 이 링크에 있다(계약은 ds/count-badge-hidden-a11y.guard.test.ts
         // 주석 참고). ⚠️여기 aria-label을 쓰지 않는다 — 이 탭은 벨/프레즌스와 달리
         // 보이는 텍스트 라벨("대화"·"홈")이 이미 있어서, aria-label로 접근성 이름을
         // 통째로 갈아치우면 그 보이는 라벨이 이름에서 사라진다(WCAG 2.5.3 Label in
@@ -285,14 +284,14 @@ export function MobileTabBar({
             <span className="relative">
               <Icon className="size-[22px]" strokeWidth={1.8} />
               {badge !== null ? (
-                // story #3431 — 공용 CornerCountBadge로 통합(bell·presence와 동일 정의,
+                // story #3431 — 공용 배지로 통합(bell·presence와 동일 정의, 4890부터 ds CountBadge,
                 // 색/크기 무변경). 위치만 이 소비처 고유(아이콘 오른쪽 옆, 코너 아님).
-                <CornerCountBadge
-                  variant="primary"
-                  className="absolute -top-1 left-full ml-0.5"
-                  // 채팅 · 홈 둘 다 99+ 상한(홈은 웹 막대와 같은 수 — story #4885)
-                  value={badgeText ?? badge}
-                />
+                // story 4890 (UI-7 겸사): the ds CountBadge (11px mono · the one badge definition) — before, a 10px corner badge. Home = «내 손이 필요한 일» (amber · named), chat = unread. The count is told by the link's own name (srCountText), so the badge stays aria-hidden.
+                key === 'today' ? (
+                  <CountBadge kind="needs-hand" label={srCountText ?? ''} count={badge} atLeast={homePartial} aria-hidden className="absolute -top-1 left-full ml-0.5" />
+                ) : (
+                  <CountBadge count={badge} aria-hidden className="absolute -top-1 left-full ml-0.5" />
+                )
               ) : null}
             </span>
             {namespace === 'nav' ? tNav(labelKey) : t(labelKey)}

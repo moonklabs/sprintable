@@ -179,7 +179,6 @@
     "descSettings": "조직·계정·요금",
     "descChats": "무엇을 이야기하고 있나",
     "moreMenuTitle": "전체 메뉴",
-    "moreSubtitle": "{n}개 화면 · {g}개 구역",
     "moreGlobalSearch": "전체 검색 열기",
     "moreSearchPlaceholder": "이 목록에서 화면 이름으로 찾기",
     "moreOtherScreens": "그 밖의 화면",
@@ -7627,7 +7626,9 @@
       "turnOff": "끄기",
       "cancel": "취소",
       "failed": "바꾸지 못했어요 — 다시 시도해 주세요",
-      "offEffect": "꺼져 있으면 권한 요청이 폰으로 오지 않고, 폰에서 멈추거나 지시할 수도 없어요"
+      "offEffect": "꺼져 있으면 권한 요청이 폰으로 오지 않고, 폰에서 멈추거나 지시할 수도 없어요",
+      "stateOn": "켜짐",
+      "stateOff": "꺼짐"
     },
     "remoteDevices": {
       "title": "원격 기기",

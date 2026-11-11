@@ -205,10 +205,8 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
     const hint = container.querySelector('[data-testid="more-tab-hint"]');
     expect(hint).not.toBeNull();
     expect(hint!.className.split(/\s+/)).toContain('lg:hidden');
-    // 유나 design — 숨은 문장이 space-y의 마지막 자식이면 부제에 margin이 남아 데스크톱 검색창이 4px 밀렸다 → 묶음은 flex+gap.
-    const group = hint!.parentElement!;
-    expect(group.className.split(/\s+/)).toEqual(expect.arrayContaining(['flex', 'flex-col', 'gap-1']));
-    expect(group.className).not.toMatch(/\bspace-y-/);
+    // story 4890 — the sentence moved under the sections (it explains what is NOT here); the top of the page is only the search row (no margin left behind on a desktop width).
+    expect(hint!.nextElementSibling).toBeNull();
   });
 
   // story #3845(§①④, 2026-09-14) — retro·standup이 LEGACY_NAV_ITEMS에서 빠지며(각각

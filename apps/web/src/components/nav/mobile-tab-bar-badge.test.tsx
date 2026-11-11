@@ -2,7 +2,7 @@
 //
 // story #3431(공용, PO 確定 2026-09-05) — 그라운딩 중 발견한 3번째 복사본(chat/approvals
 // 카운트 배지, `CircleDot`/`Inbox` 옆이 아니라 오른쪽 옆에 얹는 위치)을 공용
-// CornerCountBadge로 통합했다 — 색·크기·값 상한(9+/99+) 로직은 무변경, 위치와 정의만 접었다.
+// 공용 배지로 통합했다(4890부터 ds CountBadge) — 색·크기·값 상한(9+/99+) 로직은 무변경, 위치와 정의만 접었다.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -50,43 +50,46 @@ async function mount(homeBadge: number, chatUnreadTotal: number, locale: 'ko' | 
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 }
 
-describe('MobileTabBar — 홈(내 손이 필요한 일)/채팅 카운트 배지(story #3431 CornerCountBadge 통합 · #4885 홈 모델)', () => {
+const countText = (el: Element | null) => { if (!el) return null; const c = el.cloneNode(true) as Element; c.querySelectorAll('.sr-only').forEach((n) => n.remove()); return (c.textContent ?? '').trim(); };
+const BADGE = '[data-slot="ds-count-badge"]';
+
+describe('MobileTabBar — 홈(내 손이 필요한 일)/채팅 카운트 배지(story #3431 · #4885 홈 모델 · 4890 UI-7: ds CountBadge 한 정의)', () => {
   it('두 배지 모두 0건이면 배지 자체가 안 뜬다', async () => {
     await mount(0, 0);
-    expect(container.querySelector('span[aria-hidden]')).toBeNull();
+    expect(container.querySelector(BADGE)).toBeNull();
   });
 
-  it('홈 5건 — primary variant·10px 유지', async () => {
+  it('홈 5건 — ds CountBadge «내 손이 필요»(호박) · 아이콘 옆 자리 · 화면 읽기에선 숨김(수는 링크 이름이 전함)', async () => {
     await mount(5, 0);
-    const badge = container.querySelector('span[aria-hidden]');
-    expect(badge?.textContent).toBe('5');
-    expect(badge?.className).toContain('bg-primary');
-    expect(badge?.className).toContain('text-primary-foreground');
-    expect(badge?.className).toContain('text-micro');
+    const badge = container.querySelector(BADGE);
+    expect(countText(badge)).toBe('5');
+    expect(badge?.getAttribute('data-kind')).toBe('needs-hand');
+    expect(badge?.getAttribute('aria-hidden')).toBe('true');
     expect(badge?.className).toContain('absolute');
     expect(badge?.className).toContain('left-full');
+    expect(badge?.className).not.toContain('text-micro'); // the old 10px corner badge is gone
   });
 
   it('홈 12건 — 그대로 12(웹 막대와 같은 수 · 예전 9+ 상한은 걷었다)', async () => {
     await mount(12, 0);
-    const badge = container.querySelector('span[aria-hidden]');
-    expect(badge?.textContent).toBe('12');
+    expect(countText(container.querySelector(BADGE))).toBe('12');
   });
 
   it('홈 150건 — 웹 막대와 같은 99+ 상한', async () => {
     await mount(150, 0);
-    expect(container.querySelector('span[aria-hidden]')?.textContent).toBe('99+');
+    expect(countText(container.querySelector(BADGE))).toBe('99+');
   });
 
   it('⭐홈 읽기가 불완전(partial) 5건 — «5+»(웹 막대 atLeast와 같은 규칙)', async () => {
     await mount(5, 0, 'ko', undefined, true);
-    expect(container.querySelector('span[aria-hidden]')?.textContent).toBe('5+');
+    expect(countText(container.querySelector(BADGE))).toBe('5+');
   });
 
   it('채팅 unread 150건 — 99+ 상한(기존 로직 무변경, 결재와 다른 캡)', async () => {
     await mount(0, 150);
-    const badge = container.querySelector('span[aria-hidden]');
-    expect(badge?.textContent).toBe('99+');
+    const badge = container.querySelector(BADGE);
+    expect(countText(badge)).toBe('99+');
+    expect(badge?.getAttribute('data-kind')).toBe('unread');
   });
 });
 
@@ -156,8 +159,9 @@ describe('MobileTabBar — 탭 접근성 이름에 카운트 포함(story #3518)
     await mount(0, 150);
     const chatLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/chats')!;
     expect(approxAccessibleName(chatLink)).toBe('대화 안읽음 99건 이상');
-    const badge = container.querySelector('span[aria-hidden]');
-    expect(badge?.textContent).toBe('99+');
+    const badge = container.querySelector(BADGE);
+    expect(countText(badge)).toBe('99+');
+    expect(badge?.getAttribute('data-kind')).toBe('unread');
   });
 
   // story #3518(유나 사전 스티어 H, PO 決定) — 홈 sr 문구는 EN에서 셀 수 있는 명사("thing")라 ICU plural이 실제로 갈린다(1 vs 그 외). 채팅 "unread"는

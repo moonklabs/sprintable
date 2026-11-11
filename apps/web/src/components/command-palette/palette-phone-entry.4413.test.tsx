@@ -96,15 +96,18 @@ describe('폰 폭 — 전역 검색 팔레트(story #4413)', () => {
     });
     const row = container.querySelector('[data-testid="more-global-search"]') as HTMLButtonElement | null;
     expect(row).not.toBeNull();
-    // story 4889 (PO 판정 캡처 — «검색 칸 둘»): 위 행은 입력칸이 아니라 단추이고 이름이 «전체 검색 열기» — 아래 «이 목록에서 화면 이름으로 찾기» 입력칸과 같은 칸 둘로 읽히지 않는다.
-    expect(row!.textContent).toContain(koMessages.nav.moreGlobalSearch);
+    // story 4889 (PO 판정 캡처 — «검색 칸 둘»): 팔레트 입구는 입력칸이 아니라 단추이고 이름이 «전체 검색 열기» — 이 목록 입력칸과 같은 칸 둘로 읽히지 않는다.
+    // story 4890 (UI-7 · «전체» 화면 통째): 그 단추는 이제 입력칸 오른쪽의 돋보기 아이콘 단추(한 줄 검색) — 이름은 글이 아니라 접근 이름(aria-label)이다.
+    expect(row!.getAttribute('aria-label')).toBe(koMessages.nav.moreGlobalSearch);
+    expect(row!.textContent).toBe('');
+    expect(row!.nextElementSibling).toBeNull(); // the last thing of the one search row, right of the filter input
     expect(row!.tagName).toBe('BUTTON');
     expect(row!.querySelector('input')).toBeNull();
     const filter = container.querySelector('[data-testid="more-search-input"]') as HTMLInputElement;
     expect(filter.getAttribute('placeholder')).toBe(koMessages.nav.moreSearchPlaceholder);
     expect(koMessages.nav.moreGlobalSearch).not.toBe(koMessages.nav.search); // not the sidebar head's «검색…» (that one IS an input-like entry)
     expect(koMessages.nav.moreSearchPlaceholder).toContain('이 목록'); // the filter says its scope
-    expect(row!.textContent).not.toBe(filter.getAttribute('placeholder'));
+    expect(row!.previousElementSibling).toBe(filter); // one row: the filter input, then the palette button
     expect(container.querySelector('[data-testid="probe-state"]')!.textContent).toBe('closed');
     await act(async () => { row!.click(); });
     expect(container.querySelector('[data-testid="probe-state"]')!.textContent).toBe('open');
