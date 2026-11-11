@@ -9,6 +9,8 @@ vi.mock('next/headers', () => ({
 }));
 vi.mock('@/lib/db/server', () => ({ SP_AT_COOKIE: 'sp_at', SP_RT_COOKIE: 'sp_rt' }));
 vi.mock('@/lib/auth/csrf', () => ({ verifyCsrfOrigin: () => null }));
+const loc = vi.hoisted(() => ({ getLocale: vi.fn(async () => 'ko') }));
+vi.mock('@/i18n/request', () => ({ getLocale: loc.getLocale }));
 
 const mockFetch = vi.fn();
 // story #4320 — 목은 맨 객체를 돌려도 된다(asFetchResponse가 진짜 Response로 · backendFetch는 본문을 다 읽는다).
@@ -102,5 +104,35 @@ describe('POST /api/auth/register — 이름을 지어내지 않는다(story #42
     mockFetch.mockResolvedValue(new Response(JSON.stringify({ error: { code: 'VALIDATION_ERROR', message: 'blank' } }), { status: 422 }));
     await POST(makeRequest({ email: 'someone@example.com', password: 'Abc123!!', display_name: '   ', tos_accepted: true }));
     expect(sentBody()['display_name']).toBe('   ');
+  });
+});
+
+// story 4891 (PO 11-11) — the verification mail follows the screen's language: the route sends the locale to the backend as `Accept-Language` (the backend saves it as the account's locale and mails in it).
+describe('POST /api/auth/register — Accept-Language to the backend (story 4891)', () => {
+  beforeEach(() => { mockFetch.mockReset(); h.cookiesGetMock.mockReset(); h.cookiesGetMock.mockReturnValue(undefined); loc.getLocale.mockReset(); });
+  const signUp = (req: Request = makeRequest({ email: 'a@b.com', password: 'Abc123!!', display_name: 'A', tos_accepted: true })) => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ data: { access_token: 'at', refresh_token: 'rt' } }) });
+    return POST(req);
+  };
+  const sentHeaders = () => (mockFetch.mock.calls[0]?.[1] as { headers: Record<string, string> }).headers;
+
+  it('an English screen sends «en» (so the backend saves en and mails in English)', async () => {
+    loc.getLocale.mockResolvedValue('en');
+    await signUp();
+    expect(sentHeaders()['Accept-Language']).toBe('en');
+    expect(sentHeaders()['Content-Type']).toBe('application/json');
+  });
+
+  it('a Korean screen sends «ko»', async () => {
+    loc.getLocale.mockResolvedValue('ko');
+    await signUp();
+    expect(sentHeaders()['Accept-Language']).toBe('ko');
+  });
+
+  it('outside a request scope (getLocale throws) nothing is sent — the sign-up still goes (the backend takes its default)', async () => {
+    loc.getLocale.mockRejectedValue(new Error('outside a request scope'));
+    const res = await signUp();
+    expect(res.status).toBe(201);
+    expect(sentHeaders()['Accept-Language']).toBeUndefined();
   });
 });

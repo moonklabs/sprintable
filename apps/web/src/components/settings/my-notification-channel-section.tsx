@@ -414,7 +414,7 @@ export function MyNotificationChannelSection({ projectId, projectName }: MyNotif
             value={webhookUrl}
             onChange={(e) => setWebhookUrl(e.target.value)}
             placeholder={t('webhookUrlPlaceholder')}
-            className="min-w-0 flex-1 font-mono pointer-coarse:h-11"
+            className="min-w-0 flex-1 font-mono touch:h-11"
             aria-label={t('webhookAddCurrentProject')}
           />
           <Button variant="primary" onClick={() => void handleSaveCurrentProject()} disabled={savingNew || !webhookUrl.trim()}>

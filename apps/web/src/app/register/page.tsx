@@ -113,24 +113,27 @@ export default function RegisterPage() {
         </div>
 
         {/* story 4669: the terms line first (both ways need it), then Google as the main button; story 4891: then the e-mail form, on the same screen */}
-        <label className="flex items-start gap-2 cursor-pointer select-none">
-          <Checkbox
-            checked={tosAccepted}
-            onCheckedChange={(checked) => setTosAccepted(checked === true)}
-            className="mt-0.5"
-            disabled={loading}
-          />
-          <span className="text-xs text-muted-foreground">
-            {t('tosPrefix')}{' '}
-            <Link href="/terms" target="_blank" className="font-medium text-brand-text hover:text-brand-text/85">
-              {t('termsOfService')}
-            </Link>{' '}
-            {t('and')}{' '}
-            <Link href="/privacy" target="_blank" className="font-medium text-brand-text hover:text-brand-text/85">
-              {t('privacyPolicy')}
-            </Link>
-          </span>
-        </label>
+        {/* story 4891 (PO 11-11 · a person's first step on a phone): the box and its words are ONE ≥44 press (the label — a tap on the box or on «다음에 동의해요:» ticks it), and the two documents are their OWN named ≥44 links beside it, never inside the label — before, the middle of the sentence
+            was a link, so a tap on the words opened the terms instead of ticking the box (dev walk 11-11). One checkbox still (AUTH-07: unticked by default, gates both ways). */}
+        <div data-testid="register-consent" className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+          <label className="flex min-h-11 cursor-pointer select-none items-center gap-2 pr-1">
+            {/* the box is named by the WHOLE sentence (the two documents are links beside the label, not inside it — a screen reader must still hear what is agreed to) */}
+            <Checkbox
+              checked={tosAccepted}
+              onCheckedChange={(checked) => setTosAccepted(checked === true)}
+              disabled={loading}
+              aria-label={`${t('tosPrefix')} ${t('termsOfService')} ${t('and')} ${t('privacyPolicy')}`}
+            />
+            <span>{t('tosPrefix')}</span>
+          </label>
+          <Link href="/terms" target="_blank" className="inline-flex min-h-11 items-center font-medium text-brand-text hover:text-brand-text/85">
+            {t('termsOfService')}
+          </Link>
+          {t('and')}
+          <Link href="/privacy" target="_blank" className="inline-flex min-h-11 items-center font-medium text-brand-text hover:text-brand-text/85">
+            {t('privacyPolicy')}
+          </Link>
+        </div>
 
         {/* story #2105 1차 — #2096과 같은 결함클래스(계정 없는 사람이 처음 만나는 화면인데
             실패 사유가 스크린리더에 안 읽힘). setError(null)이 재시도마다 먼저 실행돼(위

@@ -49,7 +49,7 @@ export function StandupDeadlineSection({ projectId }: Props) {
         {/* story 4891: the deadline is a ds Field + Input (a phone press ≥ 44: the field is 44 on touch), the save is the ds Button — same value, same PATCH, same «saved» word */}
         <div className="flex flex-wrap items-end gap-3">
           <Field label={t('standupDeadline')} className="w-40">
-            {(control) => <Input {...control} type="time" value={deadline} onChange={(e) => setDeadline(e.target.value)} className="pointer-coarse:h-11" />}
+            {(control) => <Input {...control} type="time" value={deadline} onChange={(e) => setDeadline(e.target.value)} className="touch:h-11" />}
           </Field>
           <Button variant="primary" size="lg" onClick={handleSave} disabled={saving || !projectId}>
             {saved ? <><Check className="size-4" />{tc('saved')}</> : saving ? tc('saving') : t('save')}

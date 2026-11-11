@@ -14,9 +14,9 @@
 import { useCallback, useRef, useState } from 'react';
 import { Check, Copy, KeyRound, Loader2, Terminal } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ds/button';
 import { Textarea } from '@/components/ui/textarea';
-import { cardVariants } from '@/components/ui/card';
+import { cardVariants } from '@/components/ds/card';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth, refreshSessionAfterChange } from '@/lib/db/client';
 import { copyPromisedText, copyTextSafely } from '@/lib/clipboard';
@@ -290,7 +290,7 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
           <li key={rt} className="flex flex-wrap items-center gap-2" data-testid={`advanced-install-${rt}`}>
             <span className="w-24 shrink-0 text-xs text-foreground">{RUNTIME_LABEL[rt]}</span>
             <code className="min-w-0 flex-1 break-all rounded bg-background px-2 py-1 font-mono text-xs text-foreground">{INSTALL[rt]}</code>
-            <Button variant="outline" size="sm" onClick={() => void copyInstall(rt)} data-testid={`advanced-install-copy-${rt}`} aria-label={t('installCopyAria', { n: i + 1, label: RUNTIME_LABEL[rt] })}>
+            <Button variant="secondary" onClick={() => void copyInstall(rt)} data-testid={`advanced-install-copy-${rt}`} aria-label={t('installCopyAria', { n: i + 1, label: RUNTIME_LABEL[rt] })}>
               {installCopied === rt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copy')}</>}
             </Button>
           </li>
@@ -307,8 +307,7 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
       {phase !== 'ready' || revoked ? (
         <div className="space-y-1.5">
           <Button
-            variant="glass"
-            size="lg"
+            variant="secondary"
             className="w-full"
             onClick={() => void (revoked ? rekey() : make())}
             disabled={phase === 'working' || !orgId}
@@ -334,14 +333,13 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
               <Button
                 key={rt}
                 type="button"
-                variant={runtime === rt ? 'outline' : 'ghost'}
-                size="sm"
+                variant={runtime === rt ? 'secondary' : 'quiet'}
                 data-testid={`advanced-runtime-${rt}`}
                 aria-pressed={runtime === rt}
                 aria-label={t('choiceAria', { n: i + 1, label: RUNTIME_LABEL[rt] })}
                 onClick={() => { setRuntime(rt); setCopied(false); setCopyFailedLine(null); }}
                 // the chosen one reads as chosen: a filled chip, darker and heavier text; the other is quiet (the first build had it the other way round)
-                className={cn('flex-1', runtime === rt ? 'font-semibold text-foreground' : 'text-muted-foreground')}
+                className={cn('flex-1', runtime === rt ? 'border-ds-action bg-ds-action-soft font-semibold text-ds-action-text' : 'font-normal text-muted-foreground')}
               >
                 {RUNTIME_LABEL[rt]}
               </Button>
@@ -351,7 +349,7 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
           <div className={cn(cardVariants(), 'overflow-hidden')}>
             <div className="flex items-center justify-between gap-2 border-b border-border bg-muted px-3 py-2">
               <span className="text-xs text-foreground">{t('lineLabel')}</span>
-              <Button variant="outline" size="sm" onClick={() => void copyLine(made, runtime)} data-testid="advanced-copy" className="shrink-0 whitespace-nowrap">
+              <Button variant="secondary" onClick={() => void copyLine(made, runtime)} data-testid="advanced-copy" className="shrink-0 whitespace-nowrap">
                 {copied ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copy')}</>}
               </Button>
             </div>
@@ -363,7 +361,7 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
           <div className="flex flex-wrap items-start gap-2 rounded-md border border-warning-border bg-warning-tint px-3 py-2.5 text-xs text-foreground" data-testid="advanced-key-line">
             <KeyRound className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
             <span className="min-w-0 flex-1 break-keep">{keyLine}</span>
-            <Button variant="outline" size="sm" onClick={() => void revoke()} disabled={revoking} data-testid="advanced-revoke" className="shrink-0 whitespace-nowrap">
+            <Button variant="secondary" onClick={() => void revoke()} disabled={revoking} data-testid="advanced-revoke" className="shrink-0 whitespace-nowrap">
               {revoking ? t('revoking') : t('revoke')}
             </Button>
             {revokeFailed ? <p role="alert" className="w-full break-keep text-foreground" data-testid="advanced-revoke-failed">{t('revokeFailed')}</p> : null}
@@ -383,7 +381,7 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
                   data-testid="advanced-copy-failed-raw"
                 />
               ) : (
-                <Button variant="outline" size="sm" onClick={() => setRawShownFor(copyFailedLine)} data-testid="advanced-show-command">
+                <Button variant="secondary" onClick={() => setRawShownFor(copyFailedLine)} data-testid="advanced-show-command">
                   {t('showCommand')}
                 </Button>
               )}
@@ -404,7 +402,7 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
               <div role="status" className="rounded-md border border-info-border bg-info-tint px-3 py-2.5 text-xs text-foreground" data-testid="advanced-timeout">
                 <p className="font-medium">{tOnb('verifyTimeoutTitle')}</p>
                 <p className="mt-1">{runtime === 'claude' ? t('timeoutHint') : t('timeoutHintCodex')}</p>
-                <Button variant="outline" size="sm" className="mt-2" onClick={() => void rail.handleVerify()} disabled={rail.verifying} data-testid="advanced-retest">
+                <Button variant="secondary" className="mt-2" onClick={() => void rail.handleVerify()} disabled={rail.verifying} data-testid="advanced-retest">
                   {tOnb('verifyRetry')}
                 </Button>
               </div>
@@ -417,10 +415,10 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
               </div>
             ) : null}
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={onFinish} data-testid="advanced-finish">
+              <Button variant="secondary" onClick={onFinish} data-testid="advanced-finish">
                 {todayV3Enabled ? tOnb('desktopFinishToToday') : tOnb('dashboardCta')}
               </Button>
-              <Button variant="glass" size="sm" onClick={() => void firstInstruction()} disabled={startingInstruction} data-testid="advanced-first-instruction">
+              <Button variant="primary" onClick={() => void firstInstruction()} disabled={startingInstruction} data-testid="advanced-first-instruction">
                 {tOnb('firstInstructionCta')}
               </Button>
             </div>

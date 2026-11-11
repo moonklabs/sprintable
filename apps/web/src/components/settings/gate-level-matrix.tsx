@@ -230,7 +230,7 @@ export function GateLevelMatrix({ surface, projectId, orgId, canEdit }: GateLeve
                                   title={t('revertToDefault')}
                                   aria-label={t('revertToDefault')}
                                   // a 14 px icon press — on a touch screen the press area is 44 × 44 (the picture stays small)
-                                  className="inline-flex items-center justify-center text-ds-ink-3 hover:text-ds-ink disabled:opacity-50 pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+                                  className="inline-flex items-center justify-center text-ds-ink-3 hover:text-ds-ink disabled:opacity-50 touch:min-h-11 touch:min-w-11"
                                 >
                                   <RotateCcw className="h-3.5 w-3.5" />
                                 </button>

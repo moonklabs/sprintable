@@ -29,7 +29,7 @@ export function SwitchButton({ checked, onCheckedChange, disabled, className, ..
       aria-checked={checked}
       disabled={disabled}
       onClick={() => onCheckedChange(!checked)}
-      className={cn('h-8 w-12 border-transparent p-0 pointer-coarse:h-11 pointer-coarse:w-14', className)}
+      className={cn('h-8 w-12 border-transparent p-0 touch:h-11 touch:w-14', className)}
     >
       <span className={cn('relative h-6 w-11 rounded-full border transition', checked ? 'border-ds-action bg-ds-action' : 'border-ds-line-control bg-ds-surface-high')}>
         <span className={cn('absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-[left]', checked ? 'left-[22px]' : 'left-0.5')} />
