@@ -7,9 +7,9 @@ import { Card } from '@/components/ds/card';
 import { SectionHeader } from '@/components/ds/section-header';
 import { cn } from '@/lib/utils';
 
-export function SettingsSection({ title, description, children, className, id }: { title: ReactNode; description?: ReactNode; children: ReactNode; className?: string; id?: string }) {
+export function SettingsSection({ title, description, children, className, id, testId }: { title: ReactNode; description?: ReactNode; children: ReactNode; className?: string; id?: string; /** a card that already had its own test id keeps it (the default is `settings-section-<id>`) */ testId?: string }) {
   return (
-    <Card id={id} className={cn('overflow-hidden', className)} data-testid={id ? `settings-section-${id}` : undefined}>
+    <Card id={id} className={cn('overflow-hidden', className)} data-testid={testId ?? (id ? `settings-section-${id}` : undefined)}>
       <SectionHeader title={title} level={2} />
       <div className="space-y-3 p-3">
         {description ? <p className="break-keep text-ds-small text-ds-ink-3">{description}</p> : null}
