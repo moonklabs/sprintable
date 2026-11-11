@@ -150,14 +150,14 @@ def _say(ws, content: str, **extra) -> None:
     ws.send_text(json.dumps({"content": content, **extra}))
 
 
-def _room_sockets() -> set:
+def _room_sockets(agent_id: uuid.UUID | None = None) -> set:
     """the sockets that are in the agent's room right now (the server's own registry — the test runs in the same process)"""
     from app.routers.ws_chat import _rooms
 
-    return set(_rooms.get(str(AGENT), ()))
+    return set(_rooms.get(str(agent_id or AGENT), ()))
 
 
-def _wait_in_room(before: set, how_many: int, timeout: float = 8.0) -> None:
+def _wait_in_room(before: set, how_many: int, timeout: float = 8.0, agent_id: uuid.UUID | None = None) -> None:
     """Wait until `how_many` NEW sockets (not in `before`) are in the room. The client's `websocket_connect` returns when the server has
     *accepted* the socket; the server puts it into the room only after its lookups (agent · project reach · key · conversation · name) —
     a line published in between is never heard by it. A test that sends over REST right after connecting raced that gap (it failed on a
@@ -165,7 +165,7 @@ def _wait_in_room(before: set, how_many: int, timeout: float = 8.0) -> None:
     import time
 
     deadline = time.monotonic() + timeout
-    while len(_room_sockets() - before) < how_many:
+    while len(_room_sockets(agent_id) - before) < how_many:
         if time.monotonic() > deadline:
             raise AssertionError(f"{how_many} new socket(s) did not enter the room within {timeout} s")
         time.sleep(0.01)
@@ -222,7 +222,9 @@ def test_a_line_of_one_persons_dm_does_not_reach_another_person_on_the_same_agen
 
 def test_the_agents_own_socket_hears_the_dm_lines_it_is_a_participant_of(world, client):
     """the agent X is a participant of both DMs: it hears A's line and B's line (and nobody else's)"""
+    before = _room_sockets()
     with client.websocket_connect(_url_human(UA)) as wa, client.websocket_connect(_url_human(UB)) as wb, client.websocket_connect(_url_agent()) as wx:
+        _wait_in_room(before, 3)  # X must be in the room when A's line is published, or it never hears it
         _say(wa, "A-to-X")
         _recv_until(wa, "A-to-X")
         _say(wb, "B-to-X")
@@ -240,7 +242,9 @@ def test_the_agents_answer_is_saved_in_the_conversation_it_names_and_heard_by_it
     _make_dm(client, UA)  # A's DM with X now exists (it is the OLDEST DM of the agent)
     _make_dm(client, UB)  # B's DM exists second
     dm_a, dm_b = _dm_of(MA), _dm_of(MB)
+    before = _room_sockets()
     with client.websocket_connect(_url_human(UA)) as wa, client.websocket_connect(_url_human(UB)) as wb, client.websocket_connect(_url_agent()) as wx:
+        _wait_in_room(before, 3)  # B must be in the room when X's answer is published, or it never hears it
         _say(wx, "X-REPLY-TO-B", conversation_id=str(dm_b))
         b_heard = _recv_until(wb, "X-REPLY-TO-B")
         assert b_heard[-1]["conversation_id"] == str(dm_b)
