@@ -105,7 +105,8 @@ describe('<ToastContainer> 렌더 자리 전수 1(story #3759 AC1) — 셸(Botto
     const hits: string[] = [];
     for (const file of files) {
       const content = readFileSync(file, 'utf-8');
-      if (content.includes('<ToastContainer')) {
+      // story 4886 — ds 견본 화면(`components/ds/showcase/`)은 쌓기 «모양»을 정적 틀 안에 그릴 뿐 fixed 좌표를 갖지 않는다(토스트 열이 아님) — 셸 단일 렌더 약속의 밖.
+      if (content.includes('<ToastContainer') && !file.includes('/components/ds/showcase/')) {
         hits.push(file.replace(`${SRC_ROOT}src/`, ''));
       }
     }
