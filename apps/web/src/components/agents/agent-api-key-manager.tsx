@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { Check, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -44,13 +44,25 @@ interface AgentApiKeyManagerProps {
   onNewKey?: (apiKey: string, mcpConfig?: string | null) => void;
 }
 
-export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }: AgentApiKeyManagerProps) {
+/**
+ * story 4889 (codex, three rounds on the same gap): one card = ONE agent. Everything that lives in it — the keys, the failure line, `loading`, the new-key dialog, the generate / revoke
+ * still out — belongs to that agent, so a different agent is a different card (`key`): a late answer of an earlier agent lands in a card that is gone. (Checking «is this still my
+ * agent?» in every callback was one more spelling of the same gap each round.)
+ */
+export function AgentApiKeyManager(props: AgentApiKeyManagerProps) {
+  return <AgentApiKeyManagerCard key={props.agentId} {...props} />;
+}
+
+function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: AgentApiKeyManagerProps) {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
   const locale = useLocale();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(false);
+  // story 4889 (AC3 §5-8): a failed read was a toast and then «키가 없어요» — which a failed read is not. The list area says the read failed, with [다시 시도] (the same read as [새로고침]).
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [refocus, setRefocus] = useState(false); // the failure's [다시 시도] was pressed: once its read is done and worked, the focus goes to [새로고침] (the pressed button is gone)
   const [newKeyDialog, setNewKeyDialog] = useState(false);
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
   // EF-S3: mcp_config is captured-at-creation (returned once with the plaintext key) so the
@@ -79,6 +91,10 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
   // story #2416 — 개별 키 revoke의 native confirm() 대체. null=닫힘, 아니면 대상 키 id.
   const [revokeKeyId, setRevokeKeyId] = useState<string | null>(null);
   const { addToast } = useToast();
+  // story 4889 (codex): this card belongs to ONE agent — once it is gone (the person went to another agent), what it still has in flight must not reach the page: no new-key callback (the plaintext key would land on the OTHER agent's screen), no toast
+  const aliveRef = useRef(true);
+  useEffect(() => { aliveRef.current = true; return () => { aliveRef.current = false; }; }, []);
+  const notify = useCallback((toast: Parameters<typeof addToast>[0]) => { if (aliveRef.current) addToast(toast); }, [addToast]);
 
   // 문서 app 단일화(2026-08-10 선생님 지시): app 자기 도메인 canonical 직지정(랜딩 301 제거로 app.sprintable.ai 가 자기 /llms.txt 를 직접 서빙).
   const LLMS_URL = 'https://app.sprintable.ai/llms.txt';
@@ -87,26 +103,40 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
     t('agentApiKeyOnboardingMessageBase', { agentName, apiKey, llmsUrl: LLMS_URL }) +
     (mcpConfig ? t('agentApiKeyOnboardingMessageMcpSuffix', { mcpConfig }) : '');
 
+  // story 4889 (codex): only the LATEST read writes — an older read (the read before a re-run of the load effect · an earlier press) answering late must not set the keys, the failure line or `loading` over a newer one
+  const readSeq = useRef(0);
+  const refreshRef = useRef<HTMLButtonElement>(null); // this card's own [새로고침] (the API-key page holds several cards — never a global lookup)
   const loadApiKeys = useCallback(async () => {
     if (!agentId) return;
+    const seq = ++readSeq.current;
     setLoading(true);
     try {
       const response = await fetchWithAuth(`/api/agents/${agentId}/api-key`);
       if (!response.ok) throw new Error('Failed to load API keys');
       const result = await response.json() as { data?: ApiKey[] };
+      if (seq !== readSeq.current) return;
       setApiKeys(result.data ?? []);
+      setLoadFailed(false);
     } catch (error) {
       console.error('[agent-api-key] load failed', error);
-      addToast({
+      if (seq !== readSeq.current) return;
+      setLoadFailed(true);
+      notify({
         type: 'error',
         title: tc('error'),
         // story #4359(까디르) — 화면엔 늘 ko 키 · 원인(영어 Error 메시지)은 로그로만.
         body: t('agentApiKeyLoadFailed'),
       });
     } finally {
-      setLoading(false);
+      if (seq === readSeq.current) setLoading(false);
     }
-  }, [agentId, addToast, t, tc]);
+  }, [agentId, notify, t, tc]);
+
+  useEffect(() => {
+    if (!refocus || loading) return;
+    if (!loadFailed) refreshRef.current?.focus();
+    setRefocus(false);
+  }, [refocus, loading, loadFailed]);
 
   // Load API keys on mount
   useEffect(() => {
@@ -124,6 +154,7 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
       });
       if (!response.ok) throw new Error('Failed to generate API key');
       const result = await response.json() as { data?: { api_key?: string; mcp_config?: unknown } };
+      if (!aliveRef.current) return; // the card is gone (another agent now): the key made for THIS agent is not shown on that one's page
       const rawKey = (result.data?.api_key ?? '') as string;
       const rawMcp = result.data?.mcp_config;
       const mcpConfigStr = rawMcp == null ? null : typeof rawMcp === 'string' ? rawMcp : JSON.stringify(rawMcp, null, 2);
@@ -133,7 +164,7 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
       await loadApiKeys();
     } catch (error) {
       console.error('[agent-api-key] generate failed', error);
-      addToast({
+      notify({
         type: 'error',
         title: tc('error'),
         // story #4359(까디르) — 화면엔 늘 ko 키 · 원인(영어 Error 메시지)은 로그로만.
@@ -173,14 +204,14 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
       });
       if (!response.ok) throw new Error('Failed to revoke API key');
       await loadApiKeys();
-      addToast({
+      notify({
         type: 'success',
         title: t('agentApiKeyRevokedTitle'),
         body: t('agentApiKeyRevokedBody'),
       });
     } catch (error) {
       console.error('[agent-api-key] revoke failed', error);
-      addToast({
+      notify({
         type: 'error',
         title: tc('error'),
         // story #4359(까디르) — 화면엔 늘 ko 키 · 원인(영어 Error 메시지)은 로그로만.
@@ -234,7 +265,7 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
         </div>
         <div className="flex min-w-0 flex-col items-end gap-2">
           <div className="flex flex-wrap justify-end gap-2">
-            <Button variant="outline" onClick={loadApiKeys} disabled={loading}>
+            <Button ref={refreshRef} variant="outline" onClick={loadApiKeys} disabled={loading} data-testid="agent-api-key-refresh">
               {t('agentApiKeyRefresh')}
             </Button>
             <Button
@@ -299,8 +330,15 @@ export function AgentApiKeyManager({ agentId, agentName, agentLabel, onNewKey }:
         </Select>
       </div>
 
+      {loadFailed ? (
+        <div className="mb-3 flex flex-wrap items-center gap-3" data-testid="agent-api-key-load-failed">
+          <p role="status" className="text-sm text-muted-foreground">{t('agentApiKeyLoadFailed')}</p>
+          {/* the retry button goes away once the read works — the focus goes to [새로고침] then (never to the page) */}
+          <Button variant="outline" disabled={loading} onClick={() => { setRefocus(true); void loadApiKeys(); }}>{tc('retry')}</Button>
+        </div>
+      ) : null}
       {apiKeys.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t('agentApiKeyEmpty')}</p>
+        loadFailed ? null : <p className="text-sm text-muted-foreground">{t('agentApiKeyEmpty')}</p>
       ) : (
         <div className="space-y-2">
           {apiKeys.map((key) => (

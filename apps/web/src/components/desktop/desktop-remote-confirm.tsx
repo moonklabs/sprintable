@@ -121,6 +121,8 @@ function Confirm({ code }: { code: string }) {
     setView(ok ? { kind: 'done' } : viewOf(errorCode(body)));
   };
 
+  // story 4889 (AC3 §5-7): a result with no button was a dead end — every one of them gets the way back to «연결된 기기» (`/desktop`, the same link the «disconnected» result already had)
+  const devicesLink = <div><Button variant="outline" asChild><a href={flat('/desktop')}>{t('devicesAction')}</a></Button></div>;
   if (view.kind === 'loading') {
     return <Card className="p-6"><Loader2 className="size-4 animate-spin" aria-label={t('loading')} /></Card>;
   }
@@ -142,13 +144,14 @@ function Confirm({ code }: { code: string }) {
     );
   }
   if (view.kind === 'done') {
-    return <Card className="break-keep p-6"><ResultLine focus={pressed} className="text-sm">{t('done')}</ResultLine></Card>;
+    return <Card className="break-keep flex flex-col gap-3 p-6"><ResultLine focus={pressed} className="text-sm">{t('done')}</ResultLine>{devicesLink}</Card>;
   }
   if (view.kind === 'notAdmin') {
     return (
       <Card className="break-keep flex flex-col gap-3 p-6">
         <h1 className="text-lg font-semibold">{t('cantTitle')}</h1>
         <ResultLine focus={pressed}>{t('notAdmin')}</ResultLine>
+        {devicesLink}
       </Card>
     );
   }
@@ -156,7 +159,7 @@ function Confirm({ code }: { code: string }) {
     return (
       <Card className="break-keep flex flex-col gap-3 p-6">
         <ResultLine focus={pressed}>{t('disconnected')}</ResultLine>
-        <div><Button variant="outline" asChild><a href={flat('/desktop')}>{t('devicesAction')}</a></Button></div>
+        {devicesLink}
       </Card>
     );
   }
@@ -170,10 +173,10 @@ function Confirm({ code }: { code: string }) {
         </Card>
       );
     }
-    return <Card className="break-keep p-6"><ResultLine focus={pressed}>{t('remoteOffOthers', remoteOff?.names ?? { owners: '', hasOwners: 'no' })}</ResultLine></Card>;
+    return <Card className="break-keep flex flex-col gap-3 p-6"><ResultLine focus={pressed}>{t('remoteOffOthers', remoteOff?.names ?? { owners: '', hasOwners: 'no' })}</ResultLine>{devicesLink}</Card>;
   }
   if (view.kind === 'expired' || view.kind === 'spent') {
-    return <Card className="break-keep p-6"><ResultLine focus={pressed}>{view.kind === 'expired' ? t('expired') : t('spent')}</ResultLine></Card>;
+    return <Card className="break-keep flex flex-col gap-3 p-6"><ResultLine focus={pressed}>{view.kind === 'expired' ? t('expired') : t('spent')}</ResultLine>{devicesLink}</Card>;
   }
   return (
     <Card className="break-keep flex flex-col gap-3 p-6">
