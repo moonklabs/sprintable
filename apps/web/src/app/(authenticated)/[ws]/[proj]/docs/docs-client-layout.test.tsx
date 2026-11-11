@@ -207,8 +207,12 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     await act(async () => { tagToggle!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const tagChip = [...container.querySelectorAll('button')].find((b) => b.textContent === '#스펙');
     await act(async () => { tagChip!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(tagChip?.className).toContain('border-proof-line');
+    // story 4892 — 태그 칩은 ds Button: 고른 칩 = 보조(윤곽) 변형 + aria-pressed · 안 고른 칩 = 조용 변형. 옛 proof 재질 클래스는 없다.
+    expect(tagChip?.getAttribute('data-slot')).toBe('ds-button');
+    expect(tagChip?.getAttribute('aria-pressed')).toBe('true');
+    expect(tagChip?.className).toContain('border-ds-line-control');
     expect(tagChip?.className).not.toContain('bg-proof-blue-soft');
+    expect(tagChip?.className).not.toContain('proof-surface');
 
     // 접으면 카운트 배지(ds CountBadge)가 뜬다.
     await act(async () => { tagToggle!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
@@ -446,7 +450,7 @@ describe('DocsClientLayout — story #3784 loading/loadError 컨텍스트 실 �
       await mountWithIndex();
       await act(async () => { await vi.advanceTimersByTimeAsync(29_000); });
       expect(container.textContent).not.toContain('불러오지 못했어요');
-      expect(container.textContent).toContain('불러오는 중');
+      expect(container.querySelector('aside [data-slot="ds-skeleton-group"]')?.getAttribute('aria-label')).toBe('불러오는 중…');   // 목록 열은 ds SkeletonGroup(이름 «불러오는 중»)
       await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
       expect(container.textContent).toContain('불러오지 못했어요');
       expect(container.textContent).not.toContain('아직 쌓인 문서가 없어요');
@@ -478,7 +482,7 @@ describe('DocsClientLayout — story #3784 loading/loadError 컨텍스트 실 �
     // 재시도 fetch가 아직 안 풀린 시점(pending) — 양쪽 다 "없어요" 단정 0, 로딩 문구는 有.
     expect(container.textContent).not.toContain('아직 쌓인 문서가 없어요');
     expect(container.textContent).not.toContain('불러오지 못했어요');
-    expect(container.textContent).toContain('불러오는 중');
+    expect(container.querySelector('aside [data-slot="ds-skeleton-group"]')?.getAttribute('aria-label')).toBe('불러오는 중…');
 
     await act(async () => {
       resolveRetry({ ok: true, json: async () => ({ data: [DOC_A, DOC_B], meta: { hasMore: false, nextCursor: null } }) });
@@ -570,7 +574,7 @@ describe('DocsClientLayout — 닫힌 트리 서랍은 inert([SID:4288])', () =>
 
 // story 4892 (UI-9 목록 열) — 열 머리 + 보기 전환/정렬 + 틀. 동작은 그대로(만들기 · 보기 · 정렬), 모양만 ds 부품.
 describe('DocsClientLayout — 목록 열 머리 · 토글 · 틀 (4892)', () => {
-  const columnHeader = () => container.querySelector('aside h2')!.parentElement as HTMLElement;
+  const columnHeader = () => container.querySelector('aside h2')!.parentElement!.parentElement as HTMLElement;   // h2 + 개수가 한 칸(flex) 안 · 그 칸이 열 머리 안
   const inHeader = (label: string) => [...columnHeader().querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === label || b.textContent?.trim() === label) as HTMLButtonElement | undefined;
 
   it('⭐열 머리 = 제목(h2 «문서») + 새 폴더(ds IconButton) + 새 문서(ds Button) — kicker 없음', async () => {

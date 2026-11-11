@@ -330,13 +330,14 @@ test('402폭 — 이름 없는 소유자: 일감 목록 · 담당자 필터 정�
 test('320 · 360 · 390 — 문서 읽기 빵부스러기: 짧은 분류는 통째로 · 긴 분류는 말줄임 · «지식» 한 줄(story #4356)', async ({ page }) => {
   test.setTimeout(5 * 60_000);
   expect(crumbShortSlug && crumbLongSlug, '빵부스러기 문서 시드').toBeTruthy();
+  // story 4892 — 머리줄이 둘째 줄(경로 · 메타)과 첫 줄(제목 h1)로 갈렸다: «지식» · 분류는 둘째 줄 `docs-reader-subline`, 제목은 머리 첫 줄 h1.
   const measure = (category: string) => page.evaluate((cat) => {
-    const root = [...document.querySelectorAll('a')].find((a) => a.textContent === '지식' && (a.parentElement?.textContent ?? '').includes(cat));
-    const row = root?.parentElement;
-    const kids = row ? ([...row.children] as HTMLElement[]) : [];
+    const sub = document.querySelector('[data-testid="docs-reader-subline"]');
+    const root = sub ? [...sub.querySelectorAll('a')].find((a) => a.textContent === '지식') : undefined;
+    const kids = sub ? ([...sub.children] as HTMLElement[]) : [];
     const catEl = kids.find((el) => el.textContent === cat);
     if (!root || !catEl) return null;
-    const title = kids[kids.indexOf(catEl) + 2];
+    const title = document.querySelector('[data-testid="docs-reader-head"] h1') as HTMLElement | null;
     const range = (el: Element) => { const r = document.createRange(); r.selectNodeContents(el); return r; };
     // 줄 수 = 글자 조각 사각형의 서로 다른 윗변 수(블록이 된 flex 항목도 글자 줄은 따로 센다).
     const lines = (el: Element) => new Set([...range(el).getClientRects()].map((q) => Math.round(q.top))).size;

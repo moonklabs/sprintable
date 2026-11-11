@@ -94,13 +94,13 @@ describe('DocViewPage — 에디토리얼 리더 배선(§3)', () => {
     expect(container.textContent).toContain('v3');
   });
 
-  // story 4892 (UI-9 상세 열) — 리더의 제목은 옛 에디토리얼 글자(font-display · font-editorial-heading)가 아니라 ds 제목 글자(text-ds-title)다.
+  // story 4892 (UI-9 상세 열) — 리더의 제목은 옛 에디토리얼 글자(font-display · font-editorial-heading)가 아니라 ds 글자다 — 머리줄 안(text-ds-card-title · 시안의 머리줄 제목 크기).
   it('마스트헤드 h1은 ds 제목 글자를 입고, 페이지에 h1은 정확히 하나다', async () => {
     await mount();
     const h1s = container.querySelectorAll('h1');
     expect(h1s.length).toBe(1);
     const cls = h1s[0]!.className.split(/\s+/);
-    expect(cls).toContain('text-ds-title');
+    expect(cls).toContain('text-ds-card-title');
     expect(cls).toContain('text-ds-ink');
     expect(cls).not.toContain('font-editorial-heading');
   });
@@ -174,21 +174,20 @@ describe('DocViewPage — 페이지 h1 1개(story #3946)', () => {
 describe('DocViewPage — 빵부스러기 좁은 폭(4356)', () => {
   // 유나 CR(PR 4747) — 제목은 남는 자리만(flex-1 · 바탕 0 · 바닥 3rem) · 분류는 바탕 = 글자 폭(flex-1 아님)이라 짧은 분류가 통째로 남는다.
   // jsdom은 배치를 안 해서 여기선 클래스만 — 실제 폭은 e2e/mobile-width-overflow.spec.ts(짧은 분류 + 긴 제목 · 320/360/390)가 잰다.
-  it('«지식» · 구분 «/»는 shrink-0(«지식»은 whitespace-nowrap) · 분류는 min-w-0 truncate(바탕 = 글자 폭) · 제목은 min-w-[3rem] flex-1 truncate', async () => {
+  it('«지식» · 구분 «/»는 shrink-0(«지식»은 whitespace-nowrap) · 분류는 min-w-0 truncate(바탕 = 글자 폭) — 둘째 줄 · 제목은 머리 첫 줄 h1(min-w-[3rem] truncate)', async () => {
     await mount();
     const c = (el: Element | null | undefined) => (el?.getAttribute('class') ?? '').split(/\s+/);
-    const rootLink = [...container.querySelectorAll('a')].find((a) => a.textContent === koMessages.docs.breadcrumbKnowledgeRoot)!;
+    const sub = container.querySelector('[data-testid="docs-reader-subline"]')!;
+    const rootLink = [...sub.querySelectorAll('a')].find((a) => a.textContent === koMessages.docs.breadcrumbKnowledgeRoot)!;
     expect(c(rootLink)).toEqual(expect.arrayContaining(['shrink-0', 'whitespace-nowrap']));
-    const row = rootLink.parentElement!;
-    const seps = [...row.children].filter((el) => el.textContent === '/');
-    expect(seps).toHaveLength(2);
-    for (const sep of seps) expect(c(sep)).toContain('shrink-0');
-    const cat = [...row.children].find((el) => el.textContent === '제품 스펙')!;
-    const title = [...row.children].find((el) => el.textContent === '결제 스펙 v2')!;
+    const seps = [...sub.children].filter((el) => el.textContent === '/');
+    expect(seps).toHaveLength(1);
+    expect(c(seps[0])).toContain('shrink-0');
+    const cat = [...sub.children].find((el) => el.textContent === '제품 스펙')!;
     expect(c(cat)).toEqual(expect.arrayContaining(['min-w-0', 'truncate']));
     expect(c(cat)).not.toContain('flex-1');
-    expect(c(title)).toEqual(expect.arrayContaining(['min-w-[3rem]', 'flex-1', 'truncate']));
-    expect(c(title)).not.toContain('min-w-0');
+    const title = container.querySelector('[data-testid="docs-reader-head"] h1')!;
+    expect(c(title)).toEqual(expect.arrayContaining(['min-w-[3rem]', 'truncate']));
   });
 });
 
@@ -238,33 +237,50 @@ describe('DocViewPage — 상세 열 읽기 화면이 ds 부품을 입는다 (48
     expect(deleteMock).toHaveBeenCalledTimes(1);
   });
 
-  it('머리 한 줄은 ds 선 · 바탕이고 뿌리 «지식» 링크는 목록으로 간다', async () => {
+  it('머리줄은 ds 선 · 바탕이고 뿌리 «지식» 링크는 목록으로 간다', async () => {
     await mount();
     const root = [...container.querySelectorAll('a')].find((a) => a.textContent === '지식') as HTMLAnchorElement;
     expect(root.getAttribute('href')).toBe('/ws1/proj1/docs');
-    const bar = root.parentElement!.parentElement!;   // breadcrumb block → header bar
+    const bar = container.querySelector('[data-testid="docs-reader-head"]') as HTMLElement;
     const cls = bar.className.split(/\s+/);
     expect(cls).toContain('border-ds-line');
     expect(cls).toContain('bg-ds-background');
     expect(cls).not.toContain('bg-muted/20');
-    // min-h (not h): on a coarse pointer the ds Button is 44px tall — a fixed 40px bar would be poked through
-    expect(cls).toContain('min-h-10');
-    expect(cls).not.toContain('h-10');
+    expect(cls).not.toContain('h-10');                              // 고정 높이 아님 — 폰의 44 단추가 막대를 뚫지 않게 내용을 따른다
+    expect(bar.contains(root)).toBe(true);                          // 경로는 머리줄 안(본문에 따로 서지 않는다)
   });
 
-  it('⭐머리는 줄바꿈 구조 — 빵부스러기 한 덩어리(바닥 폭)와 오른쪽 동작 무리가 따로이고, 좁으면 동작이 둘째 줄로 내려간다(320 · 360 · 390)', async () => {
+  it('⭐머리줄 = 1행(제목 h1 + 상태 · 오른쪽 동작) + 2행(경로 · 담당 · 갱신 · 읽기 분 · 버전) — 본문에는 제목 · 분류 · 메타가 다시 서지 않는다', async () => {
     await mount();
-    const root = [...container.querySelectorAll('a')].find((a) => a.textContent === '지식') as HTMLAnchorElement;
-    const crumbs = root.parentElement!;
-    const bar = crumbs.parentElement!;
-    expect(bar.className.split(/\s+/)).toContain('flex-wrap');
-    expect(crumbs.className.split(/\s+/)).toContain('basis-[11rem]');
-    expect(crumbs.className.split(/\s+/)).toContain('min-w-0');
-    const actions = [...bar.children].find((c) => c !== crumbs) as HTMLElement;
+    const head = container.querySelector('[data-testid="docs-reader-head"]') as HTMLElement;
+    const h1 = head.querySelector('h1')!;
+    expect(h1.textContent).toBe('결제 스펙 v2');
+    const status = head.querySelector('[data-testid="docs-reader-status"]')!;
+    expect(status.textContent).toContain(koMessages.docs.docGatePending);             // DOC.status = pending
+    expect(status.querySelector('[aria-hidden="true"]')).not.toBeNull();             // 상태 점
+    const sub = head.querySelector('[data-testid="docs-reader-subline"]')!;
+    for (const part of ['지식', '제품 스펙', '윤도선', 'v3']) expect(sub.textContent).toContain(part);
+    expect(sub.textContent).toContain(koMessages.docs.readMinutes.replace('{minutes}', '1'));
+    // 본문(article)엔 제목 · 분류 글 · 메타가 반복되지 않는다 — 머리줄에만
+    const article = container.querySelector('article')!;
+    expect(article.querySelector('h1')).toBeNull();
+    expect(article.textContent).not.toContain('윤도선');
+    expect(article.textContent).not.toContain('제품 스펙');
+  });
+
+  it('⭐머리는 줄바꿈 구조 — 제목 덩어리(바닥 폭)와 오른쪽 동작 무리가 따로이고, 좁으면 동작이 둘째 줄로 내려간다(320 · 360 · 390)', async () => {
+    await mount();
+    const head = container.querySelector('[data-testid="docs-reader-head"]') as HTMLElement;
+    const row = head.firstElementChild as HTMLElement;
+    const titleBlock = head.querySelector('h1')!.parentElement as HTMLElement;
+    expect(row.className.split(/\s+/)).toContain('flex-wrap');
+    expect(titleBlock.className.split(/\s+/)).toContain('basis-[11rem]');
+    expect(titleBlock.className.split(/\s+/)).toContain('min-w-0');
+    const actions = [...row.children].find((c) => c !== titleBlock) as HTMLElement;
     expect(actions.className.split(/\s+/)).toContain('ml-auto');
     expect(actions.className.split(/\s+/)).toContain('shrink-0');
-    // the breadcrumb pieces are still direct children of one row (the 4356 e2e measures root → category → title as siblings)
-    expect([...crumbs.children].map((c) => c.textContent)).toEqual(['지식', '/', '제품 스펙', '/', '결제 스펙 v2'].filter((x) => x !== undefined));
+    const sub = head.querySelector('[data-testid="docs-reader-subline"]') as HTMLElement;
+    expect(sub.className.split(/\s+/)).toContain('flex-wrap');                         // 좁으면 메타가 다음 줄로 — 잘리지 않는다
   });
 
   it('오른쪽 레일의 선도 ds 선이다', async () => {
