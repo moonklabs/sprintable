@@ -22,6 +22,43 @@ import {
 const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
 const UI_DIR = path.join(SRC_ROOT, 'components/ui');
 
+// story 4892 — frozen shapes of the OLD doc-gate-section.tsx (before it moved to ds tokens): an object map whose `dot` strings are looked up as `${am.dot}` on a span, a denied-reason box
+// (bg-destructive-tint) that holds a muted-foreground line, and the AIcon child. See the describe «축 (a)» below.
+const LEGACY_GATE_AUDIT_FIXTURE = `import { Shield, Pencil, CheckCircle, XCircle } from 'lucide-react';
+type AuditKind = 'request' | 'resubmit' | 'approved' | 'rejected';
+const AUDIT_META: Record<AuditKind, { dot: string; Icon: typeof Shield; labelKey: string }> = {
+  request: { dot: 'bg-info-tint text-info', Icon: Shield, labelKey: 'docGateAuditRequested' },
+  resubmit: { dot: 'bg-muted text-muted-foreground', Icon: Pencil, labelKey: 'docGateAuditResubmitted' },
+  approved: { dot: 'bg-success-tint text-success', Icon: CheckCircle, labelKey: 'docGateAuditApproved' },
+  rejected: { dot: 'bg-destructive-tint text-destructive', Icon: XCircle, labelKey: 'docGateAuditRejected' },
+};
+export function LegacyGateAudit({ state, auditEvents }: { state: string; auditEvents: { key: string; kind: AuditKind }[] }) {
+  return (
+    <section>
+      {state === 'denied' ? (
+        <div className="space-y-1.5 rounded-lg border border-destructive/30 bg-destructive-tint p-2.5">
+          <p className="text-xs font-medium text-foreground">reason</p>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-editorial-meta text-muted-foreground"><span>who</span></div>
+        </div>
+      ) : null}
+      <ul>
+        {auditEvents.map((ev) => {
+          const am = AUDIT_META[ev.kind];
+          const AIcon = am.Icon;
+          return (
+            <li key={ev.key}>
+              <span className={\`z-[1] grid size-[18px] place-items-center rounded-full \${am.dot}\`}>
+                <AIcon className="size-2.5" />
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+`;
+
 describe('compareToBaseline — story #3839', () => {
   it('일치(baseline과 실측 개수가 정확히 같음) — 초과 0·stale 0 (GREEN)', () => {
     const baseline = new Map([['a.tsx::muted-on-info-tint', 2]]);
@@ -349,15 +386,16 @@ describe('scanContent — 실 파일 뮤테이션(story #3850 AC3, 신설 분석
   // 조회가 className에 들어가는 실 자리(`${am.dot}` span). 그 span의 유일한 자식
   // (AIcon)을 건드리지 않고 muted 텍스트를 하나 더 끼워 넣는다 — 원래 있던 AIcon 아이콘은
   // 그대로 두고 "실수로 muted 텍스트를 추가했다"를 재현.
-  describe('축 (a) 객체 맵 — doc-gate-section.tsx (AUDIT_META)', () => {
-    const REL_FILE = 'components/docs/doc-gate-section.tsx';
-    const ABS_FILE = path.join(SRC_ROOT, REL_FILE);
-    const original = readFileSync(ABS_FILE, 'utf8');
+  // story 4892 — doc-gate-section.tsx wears ds tokens now, so the real file no longer holds the old tint/muted shapes this axis was proven on. The proof keeps its force with a FROZEN
+  // fixture that has the same three shapes the real file had (the AUDIT_META object map looked up as `${am.dot}`, the denied-reason box with a muted line, the AIcon child) — same analyzer, same assertions.
+  describe('축 (a) 객체 맵 — 옛 doc-gate-section.tsx의 모양을 얼린 재료 (AUDIT_META)', () => {
+    const REL_FILE = 'components/docs/legacy-gate-audit.fixture.tsx';
+    const original = LEGACY_GATE_AUDIT_FIXTURE;
     // story #4370(까디르) — 줄 번호를 못박지 않고 내용으로 줄을 찾는다(이 파일을 만지는 PR마다 번호가 밀려 깨지던 것).
     // 조각은 파일에 정확히 한 번 있어야 한다(없거나 둘 이상이면 이 전제부터 RED — 조각을 고쳐 준다).
     const lineOf = (snippet: string) => {
       const hits = original.split('\n').flatMap((text, i) => (text.includes(snippet) ? [i + 1] : []));
-      expect(hits, `doc-gate-section.tsx에서 «${snippet}» 줄이 정확히 하나여야 한다`).toHaveLength(1);
+      expect(hits, `재료에서 «${snippet}» 줄이 정확히 하나여야 한다`).toHaveLength(1);
       return hits[0]!;
     };
     // 반려 사유 상자(bg-destructive-tint) 안 muted 글 줄 — 기존 #3839 GRANDFATHER 위반 자리. 조각은 위반 클래스

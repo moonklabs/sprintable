@@ -997,7 +997,6 @@ export const GRANDFATHER_BASELINE = new Map<string, number>([
   ['components/chat/command-hint-notice.tsx::muted-on-info-tint', 1],
   ['components/chat/hitl-approval-card.tsx::muted-on-warning-tint', 3],
   ['components/chat/reference-drop-notice.tsx::muted-on-warning-tint', 2],
-  ['components/docs/doc-gate-section.tsx::muted-on-destructive-tint', 1],
   ['components/epics/hypothesis-declaration-card.tsx::muted-on-info-tint', 1],
   ['components/epics/hypothesis-declaration-section.tsx::muted-on-info-tint', 1],
   ['components/hypotheses/hypothesis-verdict-card.tsx::muted-on-success-tint', 5],

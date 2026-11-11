@@ -1,19 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { memberLookup } from '@/lib/member-display';
 import { pickIGaJosa } from '@/lib/korean-particle';
-import {
-  Shield, ShieldCheck, ShieldX, RotateCcw, Pencil, History, User, ChevronDown,
-  CheckCircle, XCircle,
-} from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
+import { Button } from '@/components/ds/button';
+import { Icon, type IconName } from '@/components/ds/icon';
+import { StatusLabel, type StatusKind } from '@/components/ds/status-label';
+import { Field } from '@/components/ds/field';
+import { Textarea } from '@/components/ds/input';
+import { NativeSelect } from '@/components/ds/select';
+import { SectionHeader } from '@/components/ds/section-header';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ds/dialog';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
 import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
@@ -21,7 +20,7 @@ import { GateSignatureApproval } from '@/components/cage/gate-signature-approval
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { ORG_NAMES_URL } from '@/hooks/use-member-name-fallback';
-import { buildApproverPickerOptions } from '@/lib/approver-picker-options';
+import { buildApproverPickerOptions, type ApproverPickerOption } from '@/lib/approver-picker-options';
 import { useFieldDraft } from '@/hooks/use-field-draft';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
@@ -39,10 +38,10 @@ import { useViewerTimeZone } from '@/components/viewer-time-zone';
  */
 type DocGateState = 'pending' | 'confirmed' | 'denied';
 
-const META: Record<DocGateState, { variant: 'warning' | 'success' | 'destructive'; Icon: typeof Shield; labelKey: string }> = {
-  pending: { variant: 'warning', Icon: Shield, labelKey: 'docGatePending' },
-  confirmed: { variant: 'success', Icon: ShieldCheck, labelKey: 'docGateConfirmed' },
-  denied: { variant: 'destructive', Icon: ShieldX, labelKey: 'docGateDenied' },
+const META: Record<DocGateState, { labelKey: string }> = {
+  pending: { labelKey: 'docGatePending' },
+  confirmed: { labelKey: 'docGateConfirmed' },
+  denied: { labelKey: 'docGateDenied' },
 };
 
 interface DocRevision {
@@ -64,11 +63,12 @@ interface AuditEvent {
   note?: string | null;
 }
 
-const AUDIT_META: Record<AuditKind, { dot: string; Icon: typeof Shield; labelKey: string }> = {
-  request: { dot: 'bg-info-tint text-info', Icon: Shield, labelKey: 'docGateAuditRequested' },
-  resubmit: { dot: 'bg-muted text-muted-foreground', Icon: Pencil, labelKey: 'docGateAuditResubmitted' },
-  approved: { dot: 'bg-success-tint text-success', Icon: CheckCircle, labelKey: 'docGateAuditApproved' },
-  rejected: { dot: 'bg-destructive-tint text-destructive', Icon: XCircle, labelKey: 'docGateAuditRejected' },
+// story 4892 — the timeline's dots wear ds tokens + ds Icon names (the same four words as before: requested · resubmitted · approved · rejected).
+const AUDIT_META: Record<AuditKind, { dot: string; icon: IconName; labelKey: string }> = {
+  request: { dot: 'bg-ds-info-soft text-ds-info', icon: 'shield', labelKey: 'docGateAuditRequested' },
+  resubmit: { dot: 'bg-ds-surface-high text-ds-ink-3', icon: 'edit', labelKey: 'docGateAuditResubmitted' },
+  approved: { dot: 'bg-ds-done-soft text-ds-done', icon: 'check_circle', labelKey: 'docGateAuditApproved' },
+  rejected: { dot: 'bg-ds-failed-soft text-ds-failed', icon: 'cancel', labelKey: 'docGateAuditRejected' },
 };
 
 function toState(status: string | undefined): DocGateState | null {
@@ -106,13 +106,15 @@ export function DocGateSection({
   // story #3004(선생님 정책 확定 2026-08-24) — 결재선 지정이 상신의 전제(서버가 미지정을
   // 400으로 거부) — draft→pending 클릭이 이제 즉시 전이가 아니라 결재자 픽커를 연다.
   const [approverPickerOpen, setApproverPickerOpen] = useState(false);
-  const [approverOptions, setApproverOptions] = useState<SelectOption[]>([]);
+  const [approverOptions, setApproverOptions] = useState<ApproverPickerOption[]>([]);
   const [loadingApprovers, setLoadingApprovers] = useState(false);
   const [selectedApprover, setSelectedApprover] = useState('');
   const [approverError, setApproverError] = useState<string | null>(null);
   // story #3040 v3 — 동명 표시이름 오지정 실사고(선생님 실계정 vs PO 대행 계정, 둘 다
   // "송윤재") 재발 방지. AC2: 동명이 실재할 때만 경고(음성 대조 — 비동명 org는 항상 false).
   const [approverHasDuplicateNames, setApproverHasDuplicateNames] = useState(false);
+  const rejectTitleId = useId();   // story 4892 — the ds Dialog needs an accessible name: its own title
+  const sigTitleId = useId();
 
   const load = useCallback(async (signal?: AbortSignal) => {
     const [gates, revsJson, membersJson] = await Promise.all([
@@ -143,10 +145,11 @@ export function DocGateSection({
 
   const state = toState(status);
   const meta = state ? META[state] : null;
-  const MetaIcon = meta?.Icon;
   const isDraft = status === 'draft';
   // 자격 = gate.can_approve(BE per-caller·rule A: human+has_project_access+not-author). FE=가시성·실 authz=BE 403.
   const isApprover = status === 'pending' && gate?.can_approve === true;
+  // story 4892 — the state word is a ds StatusLabel: «내 손이 필요» (needs-hand) when the viewer is the approver, «쉬는 중»(idle) while someone else's answer is awaited, done / failed for the two ends
+  const statusKind: StatusKind = state === 'confirmed' ? 'online' : state === 'denied' ? 'failed' : isApprover ? 'needs-hand' : 'idle';
   // [SID:4286] 구성원 id 조각(앞 6자)을 이름 칸에 싣지 않는다 — 표에 없음 → «알 수 없는 구성원». 이름 표는 게이트 · 개정 목록과
   // 같은 load(Promise.all)에서 함께 채워져, 이름을 찾는 시점엔 늘 다 불러온 상태(불러오는 중 갈래 없음 → loaded: true).
   const resolveNameInfo = (id: string | null | undefined) => (id ? memberLookup(memberNames, id, tc, { loaded: true }) : null);
@@ -290,22 +293,21 @@ export function DocGateSection({
   if (!isDraft && !state && !hasHistory) return null;
 
   return (
-    <section aria-label={t('docGateLabel')} className="mb-4 max-h-[40vh] space-y-2 overflow-y-auto rounded-xl border border-border bg-muted/20 p-3">
+    <section aria-label={t('docGateLabel')} className="mb-4 max-h-[40vh] space-y-2 overflow-y-auto rounded-ds-panel border border-ds-line bg-ds-surface-sunk p-3">
       {/* (34360c54) draft = "검토 요청" 상시 entry(Shield + 안내 + primary 버튼 → draft→pending). 저자 자기승인 아님. */}
       {isDraft && !approverPickerOpen ? (
         <div className="flex flex-wrap items-center gap-2">
-          <span className="grid size-6 shrink-0 place-items-center text-muted-foreground">
-            <Shield className="size-4" />
+          <span className="grid size-6 shrink-0 place-items-center text-ds-ink-3">
+            <Icon name="shield" size={16} />
           </span>
-          <span className="min-w-0 flex-1 break-keep text-xs text-muted-foreground">{t('docGateRequestReviewHint')}</span>
+          <span className="min-w-0 flex-1 break-keep text-ds-small text-ds-ink-3">{t('docGateRequestReviewHint')}</span>
           <Button
-            size="sm"
-            variant="default"
-            className="h-7 shrink-0 gap-1"
+            variant="primary"
+            className="shrink-0"
             disabled={busy}
             onClick={() => void openApproverPicker()}
+            iconStart={<Icon name="shield" size={14} />}
           >
-            <Shield className="size-3.5" />
             {t('docGateRequestReview')}
           </Button>
         </div>
@@ -316,26 +318,28 @@ export function DocGateSection({
       {isDraft && approverPickerOpen ? (
         <div className="space-y-1.5">
           {approverError ? (
-            <p role="alert" aria-live="assertive" className="break-keep text-editorial-meta text-foreground">{approverError}</p>
+            <p role="alert" aria-live="assertive" className="break-keep text-ds-small text-ds-failed">{approverError}</p>
           ) : null}
           {/* story #3040 v3 AC2 — 동명 표시이름이 실재할 때만(음성 대조: 비동명 org는 렌더 0). */}
           {approverHasDuplicateNames ? (
-            <p role="alert" className="break-keep text-editorial-meta text-warning-strong">{t('docGateApproverPickerDuplicateWarning')}</p>
+            <p role="alert" className="break-keep text-ds-small font-semibold text-ds-needs-hand">{t('docGateApproverPickerDuplicateWarning')}</p>
           ) : null}
-          <OperatorDropdownSelect
+          {/* story 4892 — the approver picker is the ds NativeSelect (the same options «이름 (이메일)» and the same value → setSelectedApprover); a native list reads whole labels on a phone too. */}
+          <NativeSelect
             value={selectedApprover}
-            onValueChange={setSelectedApprover}
-            options={approverOptions}
-            placeholder={loadingApprovers ? t('docGateApproverPickerLoading') : t('docGateApproverPickerPlaceholder')}
+            onChange={(e) => setSelectedApprover(e.target.value)}
             disabled={loadingApprovers || busy}
-          />
+            aria-label={t('docGateApproverPickerPlaceholder')}
+          >
+            <option value="" disabled>{loadingApprovers ? t('docGateApproverPickerLoading') : t('docGateApproverPickerPlaceholder')}</option>
+            {approverOptions.map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
+          </NativeSelect>
           <div className="flex gap-1.5">
-            <Button size="sm" className="h-7 flex-1" disabled={!selectedApprover || busy} onClick={() => void submitForApproval()}>
-              <Shield className="size-3.5" />
+            <Button variant="primary" className="flex-1" disabled={!selectedApprover || busy} onClick={() => void submitForApproval()} iconStart={<Icon name="shield" size={14} />}>
               {t('docGateRequestReview')}
             </Button>
             <Button
-              size="sm" variant="ghost" className="h-7 flex-1 text-muted-foreground" disabled={busy}
+              variant="quiet" className="flex-1" disabled={busy}
               onClick={() => { setApproverPickerOpen(false); setSelectedApprover(''); setApproverError(null); }}
             >
               {t('docGateApproverPickerCancel')}
@@ -344,63 +348,53 @@ export function DocGateSection({
         </div>
       ) : null}
 
-      {meta && MetaIcon ? (
+      {meta ? (
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={meta.variant} className="shrink-0 gap-1">
-            <MetaIcon className="size-3 shrink-0" />
-            {t(meta.labelKey)}
-          </Badge>
+          <StatusLabel status={statusKind} label={t(meta.labelKey)} className="shrink-0" />
+          {/* the state's difference must be readable without the colour / icon: a viewer who can approve hears «내 결재가 필요해요» after «검토 중» (a viewer who only waits does not) */}
+          {isApprover ? <span className="sr-only">{t('docGateNeedsYou')}</span> : null}
 
           {/* ③ pending + decider 자격자 = in-doc 승인/반려(반려는 사유 모달 경유). */}
           {isApprover ? (
             <>
               <span className="flex-1" />
               <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 gap-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
+                variant="danger"
                 disabled={busy}
                 onClick={() => { if (isSigFlow) { setSigError(null); setSigOpen(true); } else setRejectOpen(true); }}
+                iconStart={<Icon name="cancel" size={14} />}
               >
-                <XCircle className="size-3.5" />
                 {t('docGateReject')}
               </Button>
               <Button
-                size="sm"
-                variant="ghost"
-                // story #9853aa2f(§AC7 가드, 페드루 지적 2026-08-17) — tint 배경 위 계열색
-                // 글자는 hover 순간 대비 최저점(#2420 규칙). approvals-queue.tsx:268/
-                // workflow-line-editor-section.tsx:227과 동일 처방(rest=text-success 유지,
-                // hover만 text-foreground)으로 통일 — 새 패턴 발명 0.
-                className="h-7 gap-1 text-success hover:bg-success-tint hover:text-foreground"
+                variant="primary"
                 disabled={busy}
                 onClick={() => { if (isSigFlow) { setSigError(null); setSigOpen(true); } else approve(); }}
+                iconStart={<Icon name="check_circle" size={14} />}
               >
-                <CheckCircle className="size-3.5" />
                 {t('docGateApprove')}
               </Button>
             </>
           ) : state === 'pending' ? (
             /* ② pending + author/비자격자 = 검토자 응답 대기(액션 없음·self-approval 금지). */
-            <span className="break-keep text-xs text-muted-foreground">
+            <span className="break-keep text-ds-small text-ds-ink-3">
               {t('docGateAwaitingGeneric')}
             </span>
           ) : state === 'confirmed' && gate ? (
             /* ④ confirmed = 결재자 + 시각. */
-            <span className="inline-flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-              <span className="inline-flex items-center gap-1"><User className="size-3" />{resolveName(gate.resolver_id)}</span>
+            <span className="inline-flex flex-wrap items-center gap-x-2 text-ds-small text-ds-ink-3">
+              <span className="inline-flex items-center gap-1"><Icon name="person" size={12} />{resolveName(gate.resolver_id)}</span>
               {gate.resolved_at ? <span>· {fmtDate(gate.resolved_at)}</span> : null}
             </span>
           ) : state === 'denied' ? (
             /* ⑤ denied = 수정 진입(denied→draft). 사유는 아래 deny 섹션. */
             <Button
-              size="sm"
-              variant="ghost"
-              className="ml-auto h-7 gap-1 text-foreground hover:bg-accent"
+              variant="secondary"
+              className="ml-auto"
               disabled={busy}
               onClick={() => void docTransition('draft')}
+              iconStart={<Icon name="undo" size={14} />}
             >
-              <RotateCcw className="size-3.5" />
               {t('docGateEdit')}
             </Button>
           ) : null}
@@ -409,50 +403,45 @@ export function DocGateSection({
 
       {/* 반려 섹션: 사유 + 결재자 + 시각(현재 상태 prominent surface). */}
       {state === 'denied' ? (
-        <div className="space-y-1.5 rounded-lg border border-destructive/30 bg-destructive-tint p-2.5">
-          <p className="text-xs font-medium text-foreground">{t('docGateDeniedReason')}</p>
-          <p className="whitespace-pre-wrap break-keep [overflow-wrap:anywhere] text-xs text-foreground">{gate?.resolution_note?.trim() || t('docGateNoReason')}</p>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-editorial-meta text-muted-foreground">
-            <span className="inline-flex items-center gap-1"><User className="size-3" />{resolveName(gate?.resolver_id)}</span>
+        <div className="space-y-1.5 rounded-ds-control border border-ds-failed/40 bg-ds-failed-soft p-2.5">
+          <p className="text-ds-small font-semibold text-ds-ink">{t('docGateDeniedReason')}</p>
+          <p className="whitespace-pre-wrap break-keep [overflow-wrap:anywhere] text-ds-small text-ds-ink">{gate?.resolution_note?.trim() || t('docGateNoReason')}</p>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-ds-small text-ds-ink-3">
+            <span className="inline-flex items-center gap-1"><Icon name="person" size={12} />{resolveName(gate?.resolver_id)}</span>
             {gate?.resolved_at ? <span>· {fmtDate(gate.resolved_at)}</span> : null}
           </div>
         </div>
       ) : null}
 
-      {/* (crux5) 결재 audit 타임라인: revision + gate resolution 병합·접기 기본·바운드 scroll. */}
+      {/* (crux5) 결재 audit 타임라인: revision + gate resolution 병합·접기 기본·바운드 scroll. 접는 머리글 = ds SectionHeader(aria-expanded). */}
       {auditEvents.length > 0 ? (
-        <div className="space-y-1 border-t border-border pt-2">
-          <button
-            type="button"
-            onClick={() => setAuditOpen((o) => !o)}
-            aria-expanded={auditOpen}
-            className="inline-flex items-center gap-1 text-editorial-meta font-medium text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <History className="size-3 shrink-0" />
-            {t('docGateAuditTitle')}
-            <span className="text-muted-foreground">({auditEvents.length})</span>
-            <ChevronDown className={`size-3 shrink-0 transition-transform ${auditOpen ? 'rotate-180' : ''}`} />
-          </button>
+        <div className="space-y-1 border-t border-ds-line pt-2">
+          <SectionHeader
+            level={3}
+            title={t('docGateAuditTitle')}
+            count={<span className="font-mono text-ds-mono-md tabular-nums text-ds-ink-3">({auditEvents.length})</span>}
+            collapsed={!auditOpen}
+            onToggle={() => setAuditOpen((o) => !o)}
+          />
           {auditOpen ? (
             <ul className="max-h-48 space-y-0 overflow-y-auto pr-1">
               {auditEvents.map((ev, i) => {
                 const am = AUDIT_META[ev.kind];
-                const AIcon = am.Icon;
                 const isLast = i === auditEvents.length - 1;
                 return (
                   <li key={ev.key} className="relative grid grid-cols-[18px_1fr] gap-2 pb-2.5">
-                    {!isLast ? <span className="absolute left-2 top-4 bottom-0 w-px bg-border" aria-hidden /> : null}
+                    {!isLast ? <span className="absolute left-2 top-4 bottom-0 w-px bg-ds-line" aria-hidden /> : null}
                     <span className={`z-[1] grid size-[18px] place-items-center rounded-full ${am.dot}`}>
-                      <AIcon className="size-2.5" />
+                      <Icon name={am.icon} size={10} />
                     </span>
                     <div className="min-w-0">
-                      <p className="break-keep text-xs text-foreground">
+                      <p className="break-keep text-ds-small text-ds-ink">
                         {t(ev.nameFallback ? 'docGateAuditByFallback' : 'docGateAuditBy', { name: ev.name, josa: pickIGaJosa(ev.name), action: t(am.labelKey) })}
-                        {ev.version ? <span className="text-muted-foreground"> (v{ev.version})</span> : null}
+                        {ev.version ? <span className="text-ds-ink-3"> (v{ev.version})</span> : null}
                       </p>
-                      <p className="mt-px text-micro text-muted-foreground">{fmtDate(ev.at)}</p>
+                      <p className="mt-px font-mono text-ds-mono-md text-ds-ink-3">{fmtDate(ev.at)}</p>
                       {ev.note?.trim() ? (
-                        <p className="mt-1 whitespace-pre-wrap break-keep [overflow-wrap:anywhere] rounded border-l-2 border-destructive bg-muted px-2 py-1 text-editorial-meta leading-[14px] text-muted-foreground">{ev.note}</p>
+                        <p className="mt-1 whitespace-pre-wrap break-keep [overflow-wrap:anywhere] rounded-ds-control border-l-2 border-ds-failed bg-ds-surface-high px-2 py-1 text-ds-small text-ds-ink-2">{ev.note}</p>
                       ) : null}
                     </div>
                   </li>
@@ -463,48 +452,50 @@ export function DocGateSection({
         </div>
       ) : null}
 
-      {/* 반려 사유 모달 — story #2061: 공용 Dialog(base-ui, 포커스트랩+Esc+반환 내장)로 교체. */}
+      {/* 반려 사유 모달 — story #2061: 공용 Dialog(포커스트랩+Esc+반환 내장). story 4892: ds Dialog · ds Field + Textarea · ds Button — 닫는 규칙(!busy)과 사유 초안 규칙은 그대로. */}
       {rejectOpen ? (
         <Dialog open={rejectOpen} onOpenChange={(open) => { if (!open && !busy) setRejectOpen(false); }}>
-          <DialogContent className="max-w-sm" showCloseButton={false}>
-            <div className="mb-3 flex items-center gap-2">
-              <ShieldX className="size-4 shrink-0 text-destructive" />
-              <DialogTitle className="text-sm font-semibold">{t('docGateRejectModalTitle')}</DialogTitle>
-            </div>
-            <label className="mb-1.5 block break-keep text-editorial-meta text-muted-foreground">{t('docGateRejectReasonLabel')}</label>
-            <Textarea
-              rows={3}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder={t('docGateRejectReasonPlaceholder')}
-              className="resize-none break-keep"
-            />
-            <div className="mt-3 flex justify-end gap-2">
-              <Button variant="ghost" size="sm" disabled={busy} onClick={() => { clearNoteDraft(); setRejectOpen(false); }}>{t('cancel')}</Button>
+          <DialogContent aria-labelledby={rejectTitleId} className="max-w-sm" showCloseButton={false}>
+            <DialogTitle id={rejectTitleId} className="flex items-center gap-2">
+              <Icon name="gpp_bad" size={16} className="shrink-0 text-ds-failed" />
+              {t('docGateRejectModalTitle')}
+            </DialogTitle>
+            {/* the label is a Korean sentence line: it breaks by word (story 4363 guard) */}
+            <Field label={<span className="break-keep">{t('docGateRejectReasonLabel')}</span>}>
+              {(control) => (
+                <Textarea
+                  {...control}
+                  rows={3}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder={t('docGateRejectReasonPlaceholder')}
+                  className="resize-none break-keep"
+                />
+              )}
+            </Field>
+            <DialogFooter>
+              <Button variant="quiet" disabled={busy} onClick={() => { clearNoteDraft(); setRejectOpen(false); }}>{t('cancel')}</Button>
               <Button
-                variant="ghost"
-                size="sm"
-                className="gap-1 text-destructive hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
+                variant="danger"
+                iconStart={<Icon name="gpp_bad" size={14} />}
                 // story #3334 — 반려 사유(note) 서버측 필수 강제(gates.py 422)와 짝 — 예전엔
                 // busy만 봐서 빈 textarea로도 즉시 제출됐다(서버 무검증이던 시절 그대로 방치).
                 disabled={busy || !note.trim()}
                 onClick={() => void submitReject()}
               >
-                <ShieldX className="size-3.5" />
                 {busy ? '...' : t('docGateRejectConfirm')}
               </Button>
-            </div>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       ) : null}
 
-      {/* story #6c89e40d(ⓑ) — 고위험 서명 모달. approvals-queue.tsx와 동일 컴포넌트를 동일
-          Dialog 패턴으로(canonical 상세와 1:1, 새 UI 발명 0). */}
+      {/* story #6c89e40d(ⓑ) — 고위험 서명 모달. approvals-queue.tsx와 동일 컴포넌트(GateSignatureApproval — 이 PR은 건드리지 않는다)를 같은 Dialog 패턴으로. 창 껍데기만 ds Dialog. */}
       {sigOpen && gate ? (
         <Dialog open={sigOpen} onOpenChange={(open) => { if (!open && !busy) setSigOpen(false); }}>
-          <DialogContent>
+          <DialogContent aria-labelledby={sigTitleId}>
             <DialogHeader>
-              <DialogTitle>{t('docGateLabel')}</DialogTitle>
+              <DialogTitle id={sigTitleId}>{t('docGateLabel')}</DialogTitle>
             </DialogHeader>
             <GateSignatureApproval
               gate={gate}

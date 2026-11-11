@@ -3689,6 +3689,7 @@
     "docGateRejectConfirm": "Reject",
     "docGateAwaitingReviewer": "Awaiting {name}'s response",
     "docGateAwaitingGeneric": "Awaiting the reviewer's response",
+    "docGateNeedsYou": "Your approval is needed",
     "docGateAuditTitle": "Approval history",
     "docGateAuditRequested": "Requested review",
     "docGateAuditApproved": "Approved",

@@ -243,8 +243,8 @@ describe('DocGateSection — high-risk(risk_grade=high) 승인은 서명 플로�
     // 플로우로 정확히 분기됐다는 증거 — 단순히 "클릭해도 안 터진다"만으론 부족).
     // Dialog(base-ui)는 container 밖 document.body로 portal된다(approvals-queue.tsx의
     // 서명 Dialog와 동일 구조 — gates/[id]/page.test.tsx의 discuss dialog 케이스 참조).
-    const checkbox = document.body.querySelector('[data-slot="dialog-content"] [role="checkbox"]');
-    const textarea = document.body.querySelector('[data-slot="dialog-content"] #gate-sig-reason');
+    const checkbox = document.body.querySelector('[data-slot="ds-dialog-content"] [role="checkbox"]');
+    const textarea = document.body.querySelector('[data-slot="ds-dialog-content"] #gate-sig-reason');
     expect(checkbox).toBeTruthy();
     expect(textarea).toBeTruthy();
   });
@@ -258,8 +258,8 @@ describe('DocGateSection — high-risk(risk_grade=high) 승인은 서명 플로�
       approveBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    const checkbox = document.body.querySelector('[data-slot="dialog-content"] [role="checkbox"]') as HTMLElement;
-    const textarea = document.body.querySelector('[data-slot="dialog-content"] #gate-sig-reason') as HTMLTextAreaElement;
+    const checkbox = document.body.querySelector('[data-slot="ds-dialog-content"] [role="checkbox"]') as HTMLElement;
+    const textarea = document.body.querySelector('[data-slot="ds-dialog-content"] #gate-sig-reason') as HTMLTextAreaElement;
 
     await act(async () => {
       checkbox.click();
@@ -270,7 +270,7 @@ describe('DocGateSection — high-risk(risk_grade=high) 승인은 서명 플로�
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
     });
 
-    const signButtons = Array.from(document.body.querySelectorAll('[data-slot="dialog-content"] button'))
+    const signButtons = Array.from(document.body.querySelectorAll('[data-slot="ds-dialog-content"] button'))
       .filter((b) => b.textContent?.includes('승인하고 서명'));
     expect(signButtons.length).toBeGreaterThan(0);
     const signBtn = signButtons[0]!;
@@ -300,14 +300,14 @@ describe('DocGateSection — 서명 창 «취소»는 사유 초안을 지운다
       await act(async () => { approveBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     };
     const cancelLabel = (koMessages.cage as unknown as Record<string, string>).cancel;
-    const reason = () => document.body.querySelector<HTMLTextAreaElement>('[data-slot="dialog-content"] #gate-sig-reason');
+    const reason = () => document.body.querySelector<HTMLTextAreaElement>('[data-slot="ds-dialog-content"] #gate-sig-reason');
     await openSig();
     const el = reason()!;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(el, '버릴 사유');
       el.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    const cancel = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[data-slot="dialog-content"] button')).find((b) => b.textContent?.trim() === cancelLabel)!;
+    const cancel = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[data-slot="ds-dialog-content"] button')).find((b) => b.textContent?.trim() === cancelLabel)!;
     await act(async () => { cancel.click(); });
     await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
     expect(reason()).toBeNull();

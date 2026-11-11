@@ -3689,6 +3689,7 @@
     "docGateRejectConfirm": "반려",
     "docGateAwaitingReviewer": "{name}님의 응답 대기 중",
     "docGateAwaitingGeneric": "검토자의 응답 대기 중",
+    "docGateNeedsYou": "내 결재가 필요해요",
     "docGateAuditTitle": "결재 이력",
     "docGateAuditRequested": "검토 요청",
     "docGateAuditApproved": "승인",
