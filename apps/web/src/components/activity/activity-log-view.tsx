@@ -97,6 +97,9 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [forbidden, setForbidden] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  // story 4892 — one «generation» for every first-page load (the filter effect AND «다시 시도»/«새로고침»): only the newest one may write the list / the error state, so a late answer of an older
+  // request (a retry still in flight while a filter changed) can never put an error over a newer, successful result.
+  const firstPageGen = useRef(0);
 
   const [actorFilter, setActorFilter] = useState(ALL);
   const [actionFilter, setActionFilter] = useState(ALL);
@@ -163,6 +166,8 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   // reset + reload on filter change
   useEffect(() => {
     let cancelled = false;
+    const gen = ++firstPageGen.current;
+    const current = () => !cancelled && gen === firstPageGen.current;
     async function load() {
       setLoading(true);
       setForbidden(false);
@@ -170,13 +175,13 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
       setOffset(0);
       try {
         const result = await fetchLogs(0, undefined, true);
-        if (cancelled) return;
+        if (!current()) return;
         setItems(result?.items ?? []);
         setTotal(result?.total ?? 0);
       } catch {
-        if (!cancelled) setLoadError(true);
+        if (current()) setLoadError(true);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (current()) setLoading(false);
       }
     }
     void load();
@@ -207,18 +212,20 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   };
 
   const reload = async () => {
+    const gen = ++firstPageGen.current;   // a newer first-page load (this one, or a filter change) supersedes every older one
     setForbidden(false);
     setLoadError(false);
     setLoading(true);
     setOffset(0);
     try {
       const result = await fetchLogs(0, undefined, true);
+      if (gen !== firstPageGen.current) return;
       setItems(result?.items ?? []);
       setTotal(result?.total ?? 0);
     } catch {
-      setLoadError(true);
+      if (gen === firstPageGen.current) setLoadError(true);
     } finally {
-      setLoading(false);
+      if (gen === firstPageGen.current) setLoading(false);
     }
   };
 

@@ -126,6 +126,9 @@ function codeOnly(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 }
 
+/** story 4892 — `<SkeletonGroup label={…}>` with a NON-empty expression (an empty literal name — `label={''}` · `label={""}` · ``label={``}`` — would leave an unnamed status; `label="x"` is not the form the guard knows). */
+const DS_SKELETON_GROUP_NAMED = /<SkeletonGroup\s+label=\{(?!\s*(?:''|""|``)\s*\})[^}]+\}/;
+
 /** loading 파일 자체 또는 그것이 import한 `@/components/…` 파일 중 하나가 «불러오는 중»을 제대로 알리는지 — 같은 소스에 `role="status"` ·
  * `aria-busy="true"` · 화면 읽기 프로그램용 라벨(`sr-only`) 셋 다(까디르 검수 P3 · role만 보면 라벨 없는 상태도 통과했다). */
 function announcesStatus(loadingFile: string): boolean {
@@ -133,7 +136,7 @@ function announcesStatus(loadingFile: string): boolean {
     const src = codeOnly(readFileSync(f, 'utf8'));
     // story 4892 — the ds SkeletonGroup (components/ds/skeleton.tsx) sets role="status" · aria-busy="true" · its name (`aria-label={label}`) ITSELF, so a placeholder built on it announces the state without
     // repeating the three literals; its `label` is required by the type. The exemption rests on that source — pinned by the test «ds SkeletonGroup는 …» below.
-    const viaDsGroup = /<SkeletonGroup\s+label=\{[^}]+\}/.test(src);
+    const viaDsGroup = DS_SKELETON_GROUP_NAMED.test(src);
     return viaDsGroup || (/\srole="status"/.test(src) && /\saria-busy="true"/.test(src) && /className="[^"]*\bsr-only\b/.test(src));
   };
   if (hasStatus(loadingFile)) return true;
@@ -225,6 +228,16 @@ describe('story #4274 — 탭 · 메뉴 목적지 loading.tsx 전수(v3 플래�
       if (!announcesStatus(loading)) problems.push(`${k}: ${relative(APP_ROOT, loading)} 상태 알림 없음`);
     }
     expect(problems).toEqual([]);
+  });
+
+  it('⭐SkeletonGroup 면제는 «이름이 비지 않은» label={…}만 — 빈 문자열 이름 · 따옴표 문자열 꼴 · label 없음은 인정하지 않는다', () => {
+    expect(DS_SKELETON_GROUP_NAMED.test("<SkeletonGroup label={t('loading')} className=\"x\">")).toBe(true);
+    expect(DS_SKELETON_GROUP_NAMED.test("<SkeletonGroup label={tc('loading')}>")).toBe(true);
+    expect(DS_SKELETON_GROUP_NAMED.test("<SkeletonGroup label={''} className=\"x\">")).toBe(false);
+    expect(DS_SKELETON_GROUP_NAMED.test('<SkeletonGroup label={""}>')).toBe(false);
+    expect(DS_SKELETON_GROUP_NAMED.test('<SkeletonGroup label={``}>')).toBe(false);
+    expect(DS_SKELETON_GROUP_NAMED.test('<SkeletonGroup label="x">')).toBe(false);
+    expect(DS_SKELETON_GROUP_NAMED.test('<SkeletonGroup className="x">')).toBe(false);
   });
 
   it('⭐ds SkeletonGroup는 role="status" · aria-busy="true" · 이름(aria-label={label})을 부품 안에서 정한다 — 가드가 «SkeletonGroup + label»을 상태 알림으로 인정하는 근거', () => {

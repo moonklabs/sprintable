@@ -140,6 +140,26 @@ describe('감사 로그 필터 줄 — ds 부품 (4892)', () => {
     expect(urlsOf('/api/activity-logs').length).toBe(2);   // it asked again
   });
 
+  it('⭐다시 시도가 오는 중에 필터를 바꿔 새 요청이 잘 오면, 늦게 도착한 옛 요청의 500은 오류 상태를 덮어쓰지 못한다', async () => {
+    let calls = 0;
+    let releaseStale: (a: Answer) => void = () => {};
+    api(() => {
+      calls += 1;
+      if (calls === 1) return answer(false, 500);                                                  // first page refused → error state
+      if (calls === 2) return new Promise<Answer>((resolve) => { releaseStale = resolve; });       // «다시 시도» — held in flight
+      return answer(true, 200, { items: [auditRow('fresh')], total: 1, limit: 30, offset: 0 });     // the filtered request answers fine
+    }, teamOk([]));
+    await mountView('audit');
+    const retry = [...container.querySelectorAll('[data-slot="ds-empty-state"] button')].find((b) => b.textContent?.trim() === ko.common!.retry) as HTMLButtonElement;
+    await act(async () => { retry.click(); });
+    await change(selects()[1]!, 'story');                                                           // a filter change while the retry is still in flight
+    expect(container.querySelector('button[data-audit-row]')).not.toBeNull();                        // the newer answer is on screen
+    await act(async () => { releaseStale(answer(false, 500)); });
+    for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-slot="ds-empty-state"]')).toBeNull();                      // the stale 500 did not put the error back
+    expect(container.querySelector('button[data-audit-row]')).not.toBeNull();
+  });
+
   it('⭐«다시 시도»는 다시 묻고, 이번엔 잘 오면 목록이 선다 · «더 보기» 실패는 지금처럼 토스트(오류 상태 아님)', async () => {
     let calls = 0;
     api(() => (++calls === 1 ? answer(false, 502) : answer(true, 200, { items: [auditRow('ok1')], total: 1, limit: 30, offset: 0 })), teamOk([]));
