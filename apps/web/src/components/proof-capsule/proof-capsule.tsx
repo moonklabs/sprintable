@@ -100,6 +100,9 @@ export interface ProofCapsuleProps {
   /** card 밀도 전용(story #32dcc294) — StateHeader 아래·claim 위에 삽입할 콘텐츠(예: 「다음:
    * …」1급 라인·카테고리 칩). 없으면 기존과 동일(렌더 자체가 생략) — 다른 소비처 무영향. */
   cardHeader?: ReactNode;
+  /** audit density only (story 4892): drop the actor's NAME text from the right-hand «time + name» chunk and keep the avatar badge — for a row squeezed into a narrow list column.
+   *  The caller keeps the name in its own accessible name (the activity row's overlay button carries «actor · claim · time»), so no information is lost. */
+  compactActor?: boolean;
   className?: string;
 }
 
@@ -114,11 +117,11 @@ export interface ProofCapsuleProps {
  * glow·999px pill·숫자 KPI화·raw CoT·초록만-완료 전부 미사용(색은 항상 stateLabel 텍스트 병기).
  */
 export function ProofCapsule({
-  proofState, stateLabel, claim, claimLabel, human, agent, now, evidence, gate, trustSeal, density, footer, className, duration, onClaimClick, typeBadge, headerAside, cardHeader,
+  proofState, stateLabel, claim, claimLabel, human, agent, now, evidence, gate, trustSeal, density, footer, className, duration, onClaimClick, typeBadge, headerAside, cardHeader, compactActor,
 }: ProofCapsuleProps) {
   if (density === 'audit') {
     return (
-      <AuditRow proofState={proofState} claim={claim} now={now} human={human} agent={agent} className={className} />
+      <AuditRow proofState={proofState} claim={claim} now={now} human={human} agent={agent} className={className} compactActor={compactActor} />
     );
   }
   if (density === 'row') {
@@ -428,7 +431,7 @@ function InlineRow({
 // 안 넘어옴 — 위 ProofCapsule 본체 참고) human/agent 구분 신호가 텍스트 role 문자열 하나뿐이라
 // 도크트린④(자동화 경계, 항상 구분된 마커)를 audit density만 못 채우고 있었다. 공유 Avatar를
 // size=16(시안 .av 16px 그대로)으로 재사용 — 신규 아바타 컴포넌트 0.
-function AuditRow({ proofState, claim, now, human, agent, className }: Pick<ProofCapsuleProps, 'proofState' | 'claim' | 'now' | 'human' | 'agent' | 'className'>) {
+function AuditRow({ proofState, claim, now, human, agent, className, compactActor }: Pick<ProofCapsuleProps, 'proofState' | 'claim' | 'now' | 'human' | 'agent' | 'className' | 'compactActor'>) {
   const dotTone: Record<ProofState, string> = {
     blue: 'bg-proof-blue', amber: 'bg-proof-amber', green: 'bg-proof-green', red: 'bg-proof-red',
   };
@@ -441,7 +444,7 @@ function AuditRow({ proofState, claim, now, human, agent, className }: Pick<Proo
       <span className={cn('size-1.5 shrink-0 rounded-full', dotTone[proofState])} aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate font-medium text-proof-ink" title={claim}>{claim}</span>
       {actor ? <Avatar name={actor.name} label={actor.label} actorType={agent ? 'agent' : 'human'} size={16} /> : null}
-      <span className="shrink-0 font-mono text-micro text-proof-ink-3">{[now, actorLabel].filter(Boolean).join(' ')}</span>
+      <span className="shrink-0 font-mono text-micro text-proof-ink-3">{[now, compactActor ? null : actorLabel].filter(Boolean).join(' ')}</span>
     </div>
   );
 }

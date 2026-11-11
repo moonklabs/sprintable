@@ -384,6 +384,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
                           item={item}
                           rowLabel={item.actor_id ? actorLabels.get(item.actor_id) : undefined}
                           selected={isSelected}
+                          compactActor={isWide && !isXl && !!selected}   // lg (1024–1279) while the details column is open: the list is ~344px — names yield to the claim
                           controlsId={DETAIL_ID}
                           onToggle={(viaKeyboard) => toggleRow(item.id, viaKeyboard)}
                           buttonRef={(el) => { if (el) rowRefs.current.set(item.id, el); else rowRefs.current.delete(item.id); }}
@@ -460,10 +461,12 @@ export function auditActorProps(item: ActivityLogItem, t: (key: string) => strin
   return { human: { name, ...label, role: item.actor_type ?? 'human' } };
 }
 
-function ActivityRow({ item, rowLabel, selected, controlsId, onToggle, buttonRef }: {
+function ActivityRow({ item, rowLabel, selected, compactActor, controlsId, onToggle, buttonRef }: {
   item: ActivityLogItem;
   rowLabel?: string;
   selected: boolean;
+  /** the list column is narrow (the details column is open below xl): the row drops the actor's NAME text and keeps the avatar badge; the name stays in the overlay button's accessible name + title */
+  compactActor: boolean;
   controlsId: string;
   onToggle: (viaKeyboard: boolean) => void;
   buttonRef: (el: HTMLButtonElement | null) => void;
@@ -493,6 +496,7 @@ function ActivityRow({ item, rowLabel, selected, controlsId, onToggle, buttonRef
           now={time}
           human={human}
           agent={agent}
+          compactActor={compactActor}
         />
       </div>
       <Button

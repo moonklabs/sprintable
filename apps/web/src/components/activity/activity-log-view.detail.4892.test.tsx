@@ -408,3 +408,48 @@ describe('ActivityLogView — 상세의 «행위자» 줄이 사람과 에이전
   });
 });
 
+
+// lg (1024–1279) while the details column is open, the list is ~344px: the row drops the actor's NAME text (the avatar badge stays) so the claim keeps its room. The name is not lost: the row's
+// overlay button (its accessible name and title) still says «actor · claim · time», and the details column names the actor. Closed, xl and narrow rows keep the name.
+describe('ActivityLogView — lg에서 상세 칸이 열린 동안만 행위자 이름 글자를 접는다 (4892)', () => {
+  const visibleLayer = (i: number) => (container.querySelectorAll('[data-selected] > div[inert]')[i] as HTMLElement);
+
+  it('⭐lg + a row chosen: every row\'s visible layer has no «안나» text but keeps the avatar badge and the time; the overlay button still names the actor', async () => {
+    mq.xl = false;
+    await mount();
+    expect(visibleLayer(0).textContent).toContain('안나');          // before choosing: the name is there
+    await click(rows()[0]!);
+    for (let i = 0; i < rows().length; i += 1) {
+      expect(visibleLayer(i).textContent, `row ${i}`).not.toContain('안나');
+      expect(visibleLayer(i).textContent, `row ${i} time`).toMatch(/전|오늘|어제|\d/);     // the time chunk stays
+      expect(rows()[i]!.getAttribute('aria-label'), `row ${i} name`).toContain('안나');   // the accessible name keeps the actor
+      expect(rows()[i]!.getAttribute('title'), `row ${i} title`).toContain('안나');
+    }
+    expect(detail()!.textContent).toContain('안나');                 // and the details column names the actor
+  });
+
+  it('⭐closing the column brings the names back (the list is full width again)', async () => {
+    mq.xl = false;
+    await mount();
+    await click(rows()[0]!);
+    expect(visibleLayer(0).textContent).not.toContain('안나');
+    await click(rows()[0]!);                                         // choose the same row again → the column closes
+    expect(container.querySelector('aside')).toBeNull();
+    expect(visibleLayer(0).textContent).toContain('안나');
+  });
+
+  it('xl keeps the names while a row is chosen (the details column is beside a wide list)', async () => {
+    mq.xl = true;
+    await mount();
+    await click(rows()[0]!);
+    expect(visibleLayer(0).textContent).toContain('안나');
+  });
+
+  it('narrow (< lg) keeps the names while a row is chosen (the details open under the row, the list stays full width)', async () => {
+    mq.wide = false;
+    mq.xl = false;
+    await mount();
+    await click(rows()[0]!);
+    expect(visibleLayer(0).textContent).toContain('안나');
+  });
+});
