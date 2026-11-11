@@ -4,16 +4,13 @@ import { useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { History, Plus, Send, UserRound, X } from 'lucide-react';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
-import { Button, buttonVariants } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Input } from '@/components/ds/input';
+import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ds/menu';
+import { cn } from '@/lib/utils';
 import type { SupportWidgetSession } from '@/hooks/use-support-widget-session';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
-import { Input } from '@/components/ui/input';
 
 /**
  * story #3260 — 헤더가 반전 톤(bg-foreground/text-background, tooltip.tsx·avatar.tsx와 동일
@@ -57,11 +54,11 @@ function ThinkingIndicator() {
     return () => clearInterval(id);
   }, []);
   return (
-    <div className="flex items-center gap-1.5 rounded-xl bg-muted px-3 py-2 text-sm text-muted-foreground">
+    <div className="flex items-center gap-1.5 rounded-xl bg-ds-surface-high px-3 py-2 text-ds-body text-ds-ink-2">
       <span className="flex gap-0.5" aria-hidden>
-        <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.3s]" />
-        <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:-0.15s]" />
-        <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/60" />
+        <span className="size-1.5 animate-bounce rounded-full bg-ds-ink-3 [animation-delay:-0.3s]" />
+        <span className="size-1.5 animate-bounce rounded-full bg-ds-ink-3 [animation-delay:-0.15s]" />
+        <span className="size-1.5 animate-bounce rounded-full bg-ds-ink-3" />
       </span>
       {t('thinkingLabel', { seconds })}
     </div>
@@ -81,67 +78,63 @@ function ConversationToolbar({ session }: { session: SupportWidgetSession }) {
   const [listOpen, setListOpen] = useState(false);
 
   return (
-    <div className="flex shrink-0 items-center justify-end gap-1 border-b border-border px-2 py-1.5">
+    <div className="flex shrink-0 items-center justify-end gap-1 border-b border-ds-line px-2 py-1.5">
       <Button
         type="button"
-        size="sm"
-        variant="ghost"
-        className="h-7 gap-1 px-2 text-xs"
+        variant="quiet"
         onClick={() => void session.startNewConversation()}
+        iconStart={<Plus className="h-3.5 w-3.5" aria-hidden />}
       >
-        <Plus className="h-3.5 w-3.5" aria-hidden />
         {t('startNewConversation')}
       </Button>
-      <DropdownMenu
+      <Menu
         open={listOpen}
         onOpenChange={(open) => {
           setListOpen(open);
           if (open && session.conversations === null) void session.loadConversations();
         }}
       >
-        <DropdownMenuTrigger
-          className={buttonVariants({ variant: 'ghost', size: 'sm', className: 'h-7 gap-1 px-2 text-xs' })}
-        >
-          <History className="h-3.5 w-3.5" aria-hidden />
+        <MenuTrigger render={<Button type="button" variant="quiet" iconStart={<History className="h-3.5 w-3.5" aria-hidden />} />}>
           {t('conversationHistory')}
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-64">
+        </MenuTrigger>
+        <MenuContent align="end" className="w-64">
           {session.isEnded ? (
-            <DropdownMenuItem
+            <MenuItem
               onClick={() => {
                 setListOpen(false);
                 void session.viewActiveConversation();
               }}
             >
               {t('backToActiveConversation')}
-            </DropdownMenuItem>
+            </MenuItem>
           ) : null}
           {session.conversations === null ? (
-            <div className="px-2 py-1.5 text-xs text-muted-foreground">{t('conversationListLoading')}</div>
+            <div className="px-2 py-1.5 text-ds-small text-ds-ink-3">{t('conversationListLoading')}</div>
           ) : session.conversations.length === 0 ? (
-            <div className="px-2 py-1.5 text-xs text-muted-foreground">{t('conversationListEmpty')}</div>
+            <div className="px-2 py-1.5 text-ds-small text-ds-ink-3">{t('conversationListEmpty')}</div>
           ) : (
             session.conversations.map((conv) => (
-              <DropdownMenuItem
+              <MenuItem
                 key={conv.id}
                 onClick={() => {
                   setListOpen(false);
                   void session.selectConversation(conv.id);
                 }}
-                className="flex items-center justify-between gap-2"
               >
-                {/* story #3493 — 상담 생성 시각은 "기록"(정본 formatRelativeTime). */}
-                <span className={conv.id === session.conversationId ? 'font-medium text-foreground' : undefined}>
-                  {formatViewerRelativeTime(conv.created_at, locale, displayTimezone)}
+                <span className="flex items-center justify-between gap-2">
+                  {/* story #3493 — 상담 생성 시각은 "기록"(정본 formatRelativeTime). */}
+                  <span className={cn('truncate', conv.id === session.conversationId && 'font-semibold')}>
+                    {formatViewerRelativeTime(conv.created_at, locale, displayTimezone)}
+                  </span>
+                  {conv.ended_at === null ? (
+                    <span className="shrink-0 text-ds-small text-ds-ink-3">{t('conversationActiveBadge')}</span>
+                  ) : null}
                 </span>
-                {conv.ended_at === null ? (
-                  <span className="text-editorial-meta text-muted-foreground">{t('conversationActiveBadge')}</span>
-                ) : null}
-              </DropdownMenuItem>
+              </MenuItem>
             ))
           )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+        </MenuContent>
+      </Menu>
     </div>
   );
 }
@@ -161,8 +154,8 @@ export function SupportWidgetPanelBody({ session }: { session: SupportWidgetSess
   if (session.status === 'unavailable') {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-1.5 px-6 text-center">
-        <p className="text-sm font-medium text-foreground">{t('unavailableTitle')}</p>
-        <p className="text-xs text-muted-foreground">{t('unavailableBody')}</p>
+        <p className="text-ds-body font-semibold text-ds-ink">{t('unavailableTitle')}</p>
+        <p className="text-ds-small text-ds-ink-3">{t('unavailableBody')}</p>
       </div>
     );
   }
@@ -170,9 +163,9 @@ export function SupportWidgetPanelBody({ session }: { session: SupportWidgetSess
   if (session.status === 'error') {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
-        <p className="text-sm font-medium text-foreground">{t('errorTitle')}</p>
-        <p className="text-xs text-muted-foreground">{t('errorBody')}</p>
-        <Button type="button" size="sm" variant="secondary" onClick={() => session.connect()}>
+        <p className="text-ds-body font-semibold text-ds-ink">{t('errorTitle')}</p>
+        <p className="text-ds-small text-ds-ink-3">{t('errorBody')}</p>
+        <Button type="button" variant="secondary" onClick={() => session.connect()}>
           {t('retryConnect')}
         </Button>
       </div>
@@ -186,63 +179,61 @@ export function SupportWidgetPanelBody({ session }: { session: SupportWidgetSess
     <>
       <ConversationToolbar session={session} />
       {session.isEnded ? (
-        <div
-          role="status"
-          className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-muted px-3 py-2 text-xs text-foreground"
+        <Banner
+          tone="note"
+          className="shrink-0 rounded-none border-x-0 border-t-0"
+          action={
+            <Button type="button" variant="secondary" onClick={() => void session.startNewConversation()}>
+              {t('startNewConversation')}
+            </Button>
+          }
         >
-          <span>{t('conversationEndedBanner')}</span>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            className="h-6 px-2 text-editorial-meta"
-            onClick={() => void session.startNewConversation()}
-          >
-            {t('startNewConversation')}
-          </Button>
-        </div>
+          {t('conversationEndedBanner')}
+        </Banner>
       ) : null}
       {session.escalationStatus === 'open' ? (
-        <div
-          role="status"
-          className="flex shrink-0 items-center gap-2 border-b border-border bg-muted px-3 py-2 text-xs text-foreground"
-        >
-          <UserRound className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-          {t('escalationOpenBanner')}
-        </div>
+        <Banner tone="info" className="shrink-0 rounded-none border-x-0 border-t-0">
+          <span className="inline-flex items-center gap-1.5">
+            <UserRound className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            {t('escalationOpenBanner')}
+          </span>
+        </Banner>
       ) : null}
       <div className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
         {session.status === 'connecting' ? (
-          <div className="h-8 animate-pulse rounded-lg bg-muted" />
+          <div className="h-8 animate-pulse rounded-lg bg-ds-surface-high" />
         ) : (
           session.messages.map((m) => (
             <div
               key={m.id}
               data-role={m.role}
-              className={`max-w-[85%] rounded-xl px-3 py-2 text-sm leading-relaxed [overflow-wrap:anywhere] ${
+              className={cn(
+                'max-w-[85%] rounded-xl px-3 py-2 text-ds-body leading-relaxed [overflow-wrap:anywhere]',
                 m.role === 'user'
-                  ? 'ml-auto bg-proof-blue-soft text-foreground'
+                  ? 'ml-auto bg-ds-action-soft text-ds-ink'
                   // story #3279 — operator(사람 운영자 실 회신)는 agent(AI 자동응대)와 같은
-                  // bg-muted를 쓰되 좌측 강조 보더로 시각 축을 분리한다(발신자가 다르다는
+                  // 면(surface-high)을 쓰되 좌측 강조 보더로 시각 축을 분리한다(발신자가 다르다는
                   // 신호 — no-fiction 원칙의 렌더 축 대응물: "누가 답했는지"도 지어내면
                   // 안 된다).
                   : m.role === 'operator'
-                    ? 'border-l-2 border-l-primary bg-muted text-foreground'
-                    : 'bg-muted text-foreground'
-              } ${m.pending ? 'opacity-60' : ''} ${m.failed ? 'border border-destructive/50' : ''}`}
+                    ? 'border-l-2 border-l-ds-action bg-ds-surface-high text-ds-ink'
+                    : 'bg-ds-surface-high text-ds-ink',
+                m.pending && 'opacity-60',
+                m.failed && 'border border-ds-failed/50',
+              )}
             >
               {m.role === 'operator' ? (
-                <p className="mb-1 flex items-center gap-1 text-editorial-meta font-semibold text-foreground">
+                <p className="mb-1 flex items-center gap-1 text-ds-small font-semibold text-ds-ink">
                   <UserRound className="h-3 w-3" aria-hidden />
                   {t('operatorSenderLabel')}
                 </p>
               ) : null}
               {m.content}
               {m.escalated ? (
-                <p className="mt-1 text-micro font-medium text-muted-foreground">{t('escalatedBadge')}</p>
+                <p className="mt-1 text-ds-small font-medium text-ds-ink-3">{t('escalatedBadge')}</p>
               ) : null}
               {m.failed ? (
-                <p role="alert" className="mt-1 text-micro font-medium text-destructive">{t('messageFailedLabel')}</p>
+                <p role="alert" className="mt-1 text-ds-small font-medium text-ds-failed">{t('messageFailedLabel')}</p>
               ) : null}
             </div>
           ))
@@ -250,15 +241,21 @@ export function SupportWidgetPanelBody({ session }: { session: SupportWidgetSess
         {session.sending ? <ThinkingIndicator /> : null}
       </div>
       {session.sendError ? (
-        <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border bg-destructive-tint px-3 py-2">
-          <p role="alert" aria-live="assertive" className="text-xs text-foreground">{session.sendError}</p>
-          <Button type="button" size="sm" variant="outline" onClick={() => session.retryLastMessage()}>
-            {t('sendErrorRetry')}
-          </Button>
-        </div>
+        // the send failed: said out loud (a failed Banner is an alert) with the one way on — never a silent loss (story #3260 · Qadir's rule)
+        <Banner
+          tone="failed"
+          className="shrink-0 rounded-none border-x-0 border-b-0"
+          action={
+            <Button type="button" variant="secondary" onClick={() => session.retryLastMessage()}>
+              {t('sendErrorRetry')}
+            </Button>
+          }
+        >
+          {session.sendError}
+        </Banner>
       ) : null}
       <form
-        className="flex shrink-0 items-center gap-1.5 border-t border-border p-2"
+        className="flex shrink-0 items-center gap-1.5 border-t border-ds-line p-2"
         onSubmit={(e) => {
           e.preventDefault();
           if (!canSend) return;
@@ -271,21 +268,16 @@ export function SupportWidgetPanelBody({ session }: { session: SupportWidgetSess
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={t('inputPlaceholder')}
+          aria-label={t('inputPlaceholder')}
           disabled={session.status !== 'ready' || session.sending || session.isEnded}
-          className="h-auto min-w-0 flex-1 text-foreground bg-background dark:bg-background"
+          className="min-w-0 flex-1"
         />
         {!session.isEnded && session.conversationId !== null ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="shrink-0 text-editorial-meta"
-            onClick={() => void session.endConversation()}
-          >
+          <Button type="button" variant="quiet" className="shrink-0" onClick={() => void session.endConversation()}>
             {t('endConversation')}
           </Button>
         ) : null}
-        <Button type="submit" size="sm" disabled={!canSend} aria-label={t('sendLabel')}>
+        <Button type="submit" variant="primary" disabled={!canSend} aria-label={t('sendLabel')}>
           <Send className="h-3.5 w-3.5" aria-hidden />
         </Button>
       </form>

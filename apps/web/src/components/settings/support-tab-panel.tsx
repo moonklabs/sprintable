@@ -4,13 +4,15 @@ import { useEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import { useSupportWidgetSession } from '@/hooks/use-support-widget-session';
 import { SupportWidgetPanelBody } from '@/components/support-widget/support-widget-panel';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { SettingsSection } from './settings-section';
 
 /**
  * story #3274(지원v1·후속, 선생님 확定 2026-09-01) — 상시 플로팅 폐기 후 "일반 상황"의
  * 유일한 상담 진입점. 설정 > 문의 탭(settings/page.tsx `support` 탭 콘텐츠)에 위젯 세션
  * 훅+패널 body를 그대로 인라인 임베드한다(#3260 자산 재사용 — 발명 0, support-widget-
  * launcher.tsx의 오버레이 chrome/닫기 버튼만 빼고 body는 완전히 동일 컴포넌트).
+ *
+ * story 4891(UI-8) — 카드 틀은 설정 공용 `SettingsSection`(ds Card + 제목 + 한 줄 설명), 안의 상담 상자는 ds 부품으로 그린 같은 body(상자 높이 32rem 그대로).
  *
  * 탭이 활성화될 때만 마운트된다(TabsContent의 base-ui Tabs.Panel 기본값 keepMounted=false
  * — 비활성 탭은 아예 언마운트) — 그래서 이 컴포넌트의 mount effect 1회 connect()가 곧
@@ -27,16 +29,10 @@ export function SupportSettingsTabPanel() {
   }, []);
 
   return (
-    <SectionCard>
-      <SectionCardHeader>
-        <h2 className="text-sm font-semibold text-foreground">{t('panelTitle')}</h2>
-        <p className="text-xs text-muted-foreground">{t('panelSubtitle')}</p>
-      </SectionCardHeader>
-      <SectionCardBody className="p-0">
-        <div className="flex h-[32rem] flex-col overflow-hidden rounded-b-[inherit] border-t border-border">
-          <SupportWidgetPanelBody session={session} />
-        </div>
-      </SectionCardBody>
-    </SectionCard>
+    <SettingsSection title={t('panelTitle')} description={t('panelSubtitle')} id="support">
+      <div className="flex h-[32rem] flex-col overflow-hidden rounded-ds-control border border-ds-line bg-ds-surface" data-testid="settings-support-box">
+        <SupportWidgetPanelBody session={session} />
+      </div>
+    </SettingsSection>
   );
 }

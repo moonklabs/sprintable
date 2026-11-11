@@ -1,5 +1,5 @@
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 
 export default function Loading() {
-  return <PageSkeleton className="mx-auto w-full max-w-3xl space-y-6 p-6" />;
+  return <PageSkeleton className="mx-auto w-full max-w-3xl space-y-6 p-4 lg:p-6" />;
 }

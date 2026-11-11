@@ -690,7 +690,9 @@ describe('SettingsPage — story #4897: the project create form is for every mem
 
   it.each(['member', 'admin'])('⭐%s — the name field and the create button are on the screen, and no «admins only» line is', async (role) => {
     await mountProjectsTab(role);
-    expect(container.querySelector(`input[placeholder="${koMessages.settings.projectNamePlaceholder}"]`)).not.toBeNull();
+    // story 4891: the box is found by its words — the placeholder (old screen) or the visible name the ds Field gives it (new screen)
+    const nameBoxes = Array.from(container.querySelectorAll('input')).filter((i) => i.placeholder === koMessages.settings.projectNamePlaceholder || (i.labels?.[0]?.textContent ?? '').trim() === koMessages.settings.projectNamePlaceholder);
+    expect(nameBoxes.length).toBeGreaterThan(0);
     const buttons = Array.from(container.querySelectorAll('button')).map((b) => b.textContent?.trim());
     expect(buttons).toContain(koMessages.settings.createProjectAction);
     expect(container.textContent).not.toContain('조직 관리자만 가능해요');

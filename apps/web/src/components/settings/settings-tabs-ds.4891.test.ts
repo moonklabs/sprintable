@@ -1,7 +1,9 @@
 // story 4891 (UI-8 · settings pieces ③ …) — for each settings tab that stands on the ds parts: no old `@/components/ui/*` part anywhere in what the tab draws (import walk from its roots, named exceptions in
 // the helper), and every component the page's `<TabsContent>` names for the tab is one of the roots (a new one added there must be added here). Pieces add their tab below.
 import { describe, expect, it } from 'vitest';
-import { IMPORT_RE, componentFile, namedComponents, pageImportSource, tabBlock, walkOldUi } from './settings-tab-walk.helper';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { IMPORT_RE, SRC, componentFile, namedComponents, pageImportSource, tabBlock, walkOldUi } from './settings-tab-walk.helper';
 
 /** tab value → { the components its block names in page.tsx → its file under components/ (without .tsx) } */
 const TABS: Record<string, Record<string, string>> = {
@@ -11,6 +13,11 @@ const TABS: Record<string, Record<string, string>> = {
   members: { ProjectAccessSection: 'settings/project-access-section', MemberWebhooksSection: 'settings/member-webhooks-section' },
   'org-members': { OrgMembersSection: 'settings/org-members-section' }, // the remove dialog is reached through its imports
   organization: { OrganizationSection: 'settings/organization-section', OrgDangerSection: 'settings/organization-section', GateLevelMatrix: 'settings/gate-level-matrix', OrgGatePolicySection: 'settings/org-gate-policy-section' },
+  // story 4891 (settings frame + four tabs)
+  support: { SupportSettingsTabPanel: 'settings/support-tab-panel' }, // the chat body is reached through its imports
+  'api-keys': { ApiKeysMovedCard: 'settings/api-keys-moved-card' },
+  projects: { ProjectsSection: 'settings/projects-section' }, // the page keeps the state and the requests; the part draws
+  danger: { AccountDangerSection: 'settings/account-danger-section' },
 };
 
 /** tabs whose block in page.tsx also draws JSX of its own (not only components): every capitalised name there must come from a ds part (or the settings frame / parts), and the block must hold no hand-drawn old pieces */
@@ -46,5 +53,27 @@ describe('settings tabs on ds parts: nothing old in what they draw', () => {
   it('the «멤버 추가» dialog (opened from the members tab, rendered by the page outside the tab block) has no old ui/ part either', () => {
     const { olds } = walkOldUi([componentFile('settings/add-member-modal')]);
     expect(olds, `old ui/ imports in the add-member dialog:\n${olds.join('\n')}`).toEqual([]);
+  });
+
+  // story 4891 — the confirmations the page renders outside any tab block (opened from the organization · projects · account panes)
+  for (const dialog of ['settings/delete-account-dialog', 'settings/org-delete-dialog', 'settings/project-delete-dialog']) {
+    it(`the confirmation «${dialog}» has no old ui/ part`, () => {
+      const { olds } = walkOldUi([componentFile(dialog)]);
+      expect(olds, `old ui/ imports in ${dialog}:\n${olds.join('\n')}`).toEqual([]);
+    });
+  }
+});
+
+// story 4891 — the settings FRAME (settings/page.tsx itself, outside every tab block): which old `ui/` parts the page still imports. Exactly two are left, each named with its reason; a third one, or a leftover of the four tabs' own, fails here.
+describe('the settings frame (page.tsx): the old ui/ parts it still imports are the named ones', () => {
+  const page = readFileSync(path.join(SRC, 'app', '(authenticated)', 'settings', 'page.tsx'), 'utf8');
+  const olds = [...page.matchAll(IMPORT_RE)].map((m) => m[1]!).filter((spec) => /^@\/components\/ui\//.test(spec)).sort();
+  it('only the Tabs mechanism (a vertical list + panels — ds Tabs is the horizontal kind and carries no panel text size the untouched tabs rely on), the toast hook, and the section card the workflow-policies tab still draws', () => {
+    expect(olds).toEqual(['@/components/ui/section-card', '@/components/ui/tabs', '@/components/ui/toast']);
+  });
+  it('the page draws no hand-made old piece outside the workflow-policies tab: no <Button>/<Dialog>/<Alert>/<Badge>/<OperatorInput>/<input>/<select>/<button> of its own', () => {
+    const wf = tabBlock('workflow-policies');
+    const rest = page.replace(wf, '');
+    expect(rest.match(/<(Button|Dialog|DialogContent|Alert|Badge|OperatorInput|input|select|button)\b/)?.[0] ?? null).toBeNull();
   });
 });

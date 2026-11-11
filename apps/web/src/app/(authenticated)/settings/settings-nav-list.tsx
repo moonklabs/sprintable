@@ -45,7 +45,8 @@ export function SettingsNav({ groups, activeTab, integrationsHref }: SettingsNav
         <Link href={integrationsHref} className="w-full">{inner}</Link>
       </ListRow>
     ) : (
-      <ListRow key={item.id} asChild selected={active}>
+      // below lg the list is only ever shown INSTEAD of a pane (the whole screen), so a tinted «selected» row there points at nothing — the tint is for the side-by-side layout (≥lg); `aria-current` stays at every width
+      <ListRow key={item.id} asChild selected={active} className="max-lg:bg-transparent">
         <TabsPrimitive.Tab value={item.id} data-settings-tab={item.id} className="w-full">{inner}</TabsPrimitive.Tab>
       </ListRow>
     );

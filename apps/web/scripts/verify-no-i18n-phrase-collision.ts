@@ -705,11 +705,8 @@ export const EXEMPT_PAIRS = new Set<string>([
   // (story 4891: `settings.orgDeleteImpactProjects <-> settings.tabProjects` removed for the same reason — see above.)
   // (story 4891 ⑤a: `onboarding.projectLimitExceededError <-> settings.orgPlanLabel` removed — the organization card moved out of settings/page.tsx
   // into organization-section.tsx, where the page's limit toast is not read any more, so the pair no longer collides (the guard names a dead exemption).)
-  // deleteProject="삭제"(프로젝트 관리 섹션의 다른 행 버튼) <-> orgDeleteImpactProjects
-  // ("프로젝트 {count}개 영구 삭제", 조직 삭제 영향도 문장 안의 "영구 삭제") — 서로
-  // 다른 대상(프로젝트 행 삭제 버튼 vs 조직 전체 삭제 영향도 서술)이 우연히 "삭제"
-  // 한 글자만 공유한다.
-  'settings.deleteProject <-> settings.orgDeleteImpactProjects',
+  // (story 4891 ⑥: `settings.deleteProject <-> settings.orgDeleteImpactProjects` removed — the project list (and its «삭제» button) moved out of settings/page.tsx into
+  // projects-section.tsx / project-delete-dialog.tsx, while the organization-delete window is org-delete-dialog.tsx, so the two no longer stand in one file and the pair no longer collides.)
   // orgDeleteConfirmCta="영구 삭제"(다이얼로그 확인 버튼 라벨) <-> orgDeleteImpactProjects
   // ("프로젝트 {count}개 영구 삭제", 영향도 문장 조각) — 이 스토리(#3789) 자체가 요구한
   // 의도된 분리다: 유나 定 §5 "「영구 삭제」가 두 뜻이다 — 반드시 둘로 갈라야 한다"(버튼

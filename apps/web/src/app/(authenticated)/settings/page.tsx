@@ -37,13 +37,8 @@ import { SetPasswordSection } from '@/components/settings/set-password-section';
 import { LinkedAccountsSection } from '@/components/settings/linked-accounts-section';
 import { NotificationsPane } from './notifications-pane';
 import { SettingsSection } from '@/components/settings/settings-section';
-import { Alert, AlertDescription } from '@/components/ui/alert';
 import { canSubmitOrgDelete } from './org-delete-gate';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { DeleteAccountDialog } from '@/components/settings/delete-account-dialog';
-import { OperatorInput } from '@/components/ui/operator-control';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { LegalLinks, BusinessInfoBlock } from '@/components/legal/legal-footer';
 import { Tabs, TabsContent } from '@/components/ui/tabs';
@@ -59,7 +54,11 @@ import { Banner } from '@/components/ds/banner';
 import { Button as DsButton } from '@/components/ds/button';
 import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { SupportSettingsTabPanel } from '@/components/settings/support-tab-panel';
-import { HumanOnlyAction } from '@/components/ui/human-only-action';
+import { ApiKeysMovedCard } from '@/components/settings/api-keys-moved-card';
+import { AccountDangerSection } from '@/components/settings/account-danger-section';
+import { ProjectsSection } from '@/components/settings/projects-section';
+import { ProjectDeleteDialog } from '@/components/settings/project-delete-dialog';
+import { OrgDeleteDialog } from '@/components/settings/org-delete-dialog';
 import dynamic from 'next/dynamic';
 import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
@@ -763,7 +762,8 @@ export default function SettingsPage() {
             <IconButton label={t('backToList')} icon="arrow_back" size="lg" onClick={() => setLnbOpen(true)} />
             <span className="min-w-0 flex-1 truncate text-ds-card-title font-semibold text-ds-ink">{activeLabelKey ? t(activeLabelKey) : t('title')}</span>
           </div>
-          <div className="w-full max-w-3xl mx-auto p-6">
+          {/* the pane's gutter: a phone's 16 (the 24 left a 342 px column on a 390 screen), ≥lg the 24 it had */}
+          <div className="mx-auto w-full max-w-3xl p-4 lg:p-6">
 
             <TabsContent value="profile">
               <div className="space-y-6">
@@ -823,20 +823,7 @@ export default function SettingsPage() {
             )}
 
             <TabsContent value="api-keys">
-              <SectionCard>
-                <SectionCardBody>
-                  <p className="text-sm text-muted-foreground">
-                    {t.rich('agentApiKeyMoved', { b: (chunks) => <strong>{chunks}</strong> })}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => router.push(flatHref('/organization/workforce'))}
-                    className="mt-3 rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
-                  >
-                    {t('agentManagementCta')}
-                  </button>
-                </SectionCardBody>
-              </SectionCard>
+              <ApiKeysMovedCard />
             </TabsContent>
 
             <TabsContent value="notifications">
@@ -917,126 +904,33 @@ export default function SettingsPage() {
             </TabsContent>
 
             <TabsContent value="projects">
-              <SectionCard>
-                <SectionCardHeader>
-                  <div className="space-y-1">
-                    <h2 className="text-base font-semibold text-foreground">{t('projectManagement')}</h2>
-                    <p className="text-sm text-muted-foreground">{t('projectManagementDescription')}</p>
-                  </div>
-                </SectionCardHeader>
-                <SectionCardBody className="space-y-4">
-                  <div className="space-y-2">
-                    {projects.length > 0 ? (
-                      projects.map((project) => (
-                        <div key={project.id} className="rounded-md border border-border bg-muted/30 px-4 py-3">
-                          {editingProjectId === project.id ? (
-                            <div className="space-y-2">
-                              <OperatorInput
-                                value={editProjectName}
-                                onChange={(e) => setEditProjectName(e.target.value)}
-                                placeholder={t('projectNamePlaceholder')}
-                              />
-                              <OperatorInput
-                                value={editProjectDescription}
-                                onChange={(e) => setEditProjectDescription(e.target.value)}
-                                placeholder={t('projectDescriptionPlaceholder')}
-                              />
-                              <div className="flex gap-2">
-                                <Button variant="hero" size="sm" onClick={handleUpdateProject} disabled={!editProjectName.trim() || savingProject}>
-                                  {savingProject ? '...' : tc('save')}
-                                </Button>
-                                <Button variant="ghost" size="sm" onClick={() => setEditingProjectId(null)}>
-                                  {tc('cancel')}
-                                </Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="font-medium text-foreground">{project.name}</div>
-                                {project.description ? (
-                                  <div className="mt-1 text-sm text-muted-foreground">{project.description}</div>
-                                ) : null}
-                              </div>
-                              <div className="flex shrink-0 items-center gap-2">
-                                {project.id === currentProjectId ? <Badge variant="info">{t('currentProjectBadge')}</Badge> : null}
-                                {isAdmin ? (
-                                  <>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => {
-                                        setEditingProjectId(project.id);
-                                        setEditProjectName(project.name);
-                                        setEditProjectDescription(project.description ?? '');
-                                      }}
-                                    >
-                                      {tc('edit')}
-                                    </Button>
-                                    {/* story #2104 — BE projects.py:213이 human-only로 삭제를
-                                        403 거부한다(되돌릴 수 없는 조작). 이 버튼은 이미
-                                        isAdmin(org owner/admin)으로 감싸져 있으나, 에이전트도
-                                        구조상 owner/admin 권한을 가질 수 있어 human 여부는
-                                        별도 확認이 필요하다(#2091/#2103과 같은 결함). edit
-                                        버튼은 BE에 human-only 가드가 없어 그대로 둔다. */}
-                                    <HumanOnlyAction>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="text-destructive hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
-                                        onClick={() => setDeleteProjectConfirmId(project.id)}
-                                        disabled={deletingProjectId === project.id}
-                                      >
-                                        {deletingProjectId === project.id ? '...' : t('deleteProject')}
-                                      </Button>
-                                    </HumanOnlyAction>
-                                  </>
-                                ) : null}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ))
-                    ) : (
-                      <div className="rounded-md border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
-                        {t('projectListEmpty')}
-                      </div>
-                    )}
-                  </div>
-
-                  {projectActionMessage ? (
-                    // story #2105 2차 — 성공/실패 결과 모두 아직 시각 전용이었다(#2096/#2105 1차와 동일
-                    // 결함클래스). 에러=alert/assertive, 성공=status/polite.
-                    <Alert
-                      variant={projectActionMessage.type === 'success' ? 'success' : 'destructive'}
-                      role={projectActionMessage.type === 'success' ? 'status' : 'alert'}
-                      aria-live={projectActionMessage.type === 'success' ? 'polite' : 'assertive'}
-                      aria-atomic="true"
-                    >
-                      <AlertDescription>{projectActionMessage.text}</AlertDescription>
-                    </Alert>
-                  ) : null}
-
-                  {/* story #4897 — any member of the organization may create a project (the API has always allowed it: POST /api/v2/projects checks the organization and the plan limit, not the role).
-                      The form used to be drawn for org owner/admin only, with a line saying only admins can; the screen now follows the API. Renaming and deleting stay with the admins (the API guards them). */}
-                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-                    <OperatorInput
-                      value={newProjectName}
-                      onChange={(event) => setNewProjectName(event.target.value)}
-                      placeholder={t('projectNamePlaceholder')}
-                    />
-                    <OperatorInput
-                      value={newProjectDescription}
-                      onChange={(event) => setNewProjectDescription(event.target.value)}
-                      placeholder={t('projectDescriptionPlaceholder')}
-                    />
-                    <Button variant="hero" size="lg" onClick={handleCreateProject} disabled={!newProjectName.trim() || creatingProject}>
-                      {creatingProject ? '...' : t('createProjectAction')}
-                    </Button>
-                  </div>
-                </SectionCardBody>
-              </SectionCard>
-
+              <ProjectsSection
+                projects={projects}
+                currentProjectId={currentProjectId}
+                isAdmin={isAdmin}
+                editingId={editingProjectId}
+                editName={editProjectName}
+                editDescription={editProjectDescription}
+                saving={savingProject}
+                onEditStart={(project) => {
+                  setEditingProjectId(project.id);
+                  setEditProjectName(project.name);
+                  setEditProjectDescription(project.description ?? '');
+                }}
+                onEditName={setEditProjectName}
+                onEditDescription={setEditProjectDescription}
+                onEditSave={() => void handleUpdateProject()}
+                onEditCancel={() => setEditingProjectId(null)}
+                deletingId={deletingProjectId}
+                onDeleteAsk={setDeleteProjectConfirmId}
+                message={projectActionMessage}
+                newName={newProjectName}
+                newDescription={newProjectDescription}
+                creating={creatingProject}
+                onNewName={setNewProjectName}
+                onNewDescription={setNewProjectDescription}
+                onCreate={() => void handleCreateProject()}
+              />
             </TabsContent>
 
             <TabsContent value="members">
@@ -1123,29 +1017,16 @@ export default function SettingsPage() {
             )}
 
             <TabsContent value="danger">
-              <SectionCard className="border-destructive/20 bg-destructive-tint">
-                <SectionCardHeader className="border-b border-destructive/20">
-                  <div className="space-y-1">
-                    <h2 className="text-base font-semibold text-destructive">{t('dangerZone')}</h2>
-                    <p className="text-sm text-foreground">{t('dangerDescription')}</p>
-                  </div>
-                </SectionCardHeader>
-                <SectionCardBody>
-                  <p className="mb-4 text-sm text-foreground">{t('deleteAccountDesc')}</p>
-                  <Button variant="destructive" size="lg" onClick={() => setShowDeleteConfirm(true)}>
-                    {t('deleteAccount')}
-                  </Button>
-                </SectionCardBody>
-              </SectionCard>
+              <AccountDangerSection onOpenDelete={() => setShowDeleteConfirm(true)} />
             </TabsContent>
 
             {/* 설정 전역 법적 고지 푸터 — 활성 탭 무관 상시 노출 (story #2865) */}
-            <div className="mt-8 border-t border-border pt-6">
-              <h2 className="mb-3 text-sm font-medium text-foreground">{tLegal('policiesHeading')}</h2>
-              <LegalLinks className="justify-start text-sm text-muted-foreground" />
-              <div className="mt-4 border-t border-border pt-4">
-                <p className="mb-1.5 text-xs font-medium text-muted-foreground">{tLegal('businessInfoHeading')}</p>
-                <BusinessInfoBlock className="justify-start text-xs text-muted-foreground" />
+            <div className="mt-8 border-t border-ds-line pt-6" data-testid="settings-legal-footer">
+              <h2 className="mb-3 text-ds-small font-semibold text-ds-ink">{tLegal('policiesHeading')}</h2>
+              <LegalLinks className="justify-start text-ds-body text-ds-ink-3" />
+              <div className="mt-4 border-t border-ds-line pt-4">
+                <p className="mb-1.5 text-ds-small font-semibold text-ds-ink-3">{tLegal('businessInfoHeading')}</p>
+                <BusinessInfoBlock className="justify-start text-ds-small text-ds-ink-3" />
               </div>
             </div>
           </div>
@@ -1153,135 +1034,38 @@ export default function SettingsPage() {
       </Tabs>
 
       {showDeleteOrgConfirm && orgInfo ? (
-        <Dialog
-          open={showDeleteOrgConfirm}
-          onOpenChange={(open) => {
-            if (!open && !deletingOrg) { setShowDeleteOrgConfirm(false); setDeleteOrgConfirmName(''); }
-          }}
-        >
-          <DialogContent className="max-w-md space-y-4 border-destructive/30" showCloseButton={false}>
-            <DialogTitle className="text-lg font-semibold text-destructive">{t('orgDeleteTitle')}</DialogTitle>
-
-            {/* 영향도 */}
-            {orgImpactLoading ? (
-              <div className="space-y-2">
-                {[1, 2, 3].map((i) => <div key={i} className="h-6 animate-pulse rounded bg-muted" />)}
-              </div>
-            ) : orgImpact ? (
-              <div className="rounded-md border border-border bg-muted/30 p-3 space-y-1 text-sm">
-                <p className="text-muted-foreground">{t('orgDeleteImpactTitle')}</p>
-                <ul className="space-y-0.5 text-foreground">
-                  <li>{t('orgDeleteImpactProjects', { count: orgImpact.project_count })}</li>
-                  <li>{t('orgDeleteImpactMembers', { count: orgImpact.member_count })}</li>
-                  {/* story #2590(TIER1) — 조상(bg-muted/30)이 pale이라 text-warning도 대비 미달
-                      (교차-요소). tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
-                  {orgImpact.has_active_subscription && (
-                    <li className="text-foreground">{t('orgDeleteImpactSubscription')}</li>
-                  )}
-                </ul>
-              </div>
-            ) : (
-              // story #2092(P0) — 예전엔 "계속 진행해도 됩니다"로 되돌릴 수 없는 삭제를
-              // 권했다(동작 결함, 문구만으로 안 닫힘). 이제 1차로 진행을 막고(버튼 disabled,
-              // 아래), 재시도 또는 명시 인정(탈출구)만 남긴다. 서버(#2898)가 최종 방어선.
-              <Alert variant="warning">
-                <AlertDescription className="space-y-3">
-                  <p>{t('orgDeleteImpactUnavailable')}</p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void fetchOrgImpact()}
-                    disabled={orgImpactLoading}
-                  >
-                    {/* story #3776(1층B) — "다시 시도", common ns의 기존 retry 키 재사용. */}
-                    {tc('retry')}
-                  </Button>
-                  <label className="flex items-start gap-2 pt-1">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5"
-                      checked={confirmWithoutImpact}
-                      onChange={(e) => setConfirmWithoutImpact(e.target.checked)}
-                    />
-                    <span className="space-y-0.5">
-                      <span className="block">{t('orgDeleteWithoutImpact')}</span>
-                      <span className="block text-xs">{t('orgDeleteWithoutImpactAudit')}</span>
-                    </span>
-                  </label>
-                </AlertDescription>
-              </Alert>
-            )}
-
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-foreground">
-                {t('orgDeleteConfirmPrompt', { name: orgInfo.name })}
-              </label>
-              <input
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-destructive"
-                placeholder={orgInfo.name}
-                value={deleteOrgConfirmName}
-                onChange={(e) => setDeleteOrgConfirmName(e.target.value)}
-                autoFocus
-              />
-            </div>
-
-            <div className="flex gap-3 pt-1">
-              <Button
-                variant="glass"
-                className="flex-1"
-                onClick={() => { setShowDeleteOrgConfirm(false); setDeleteOrgConfirmName(''); }}
-                disabled={deletingOrg}
-              >
-                {/* story #3776(1층B) — "취소", common ns의 기존 cancel 키 재사용. */}
-                {tc('cancel')}
-              </Button>
-              <Button
-                variant="destructive"
-                className="flex-1"
-                onClick={() => void handleDeleteOrg()}
-                disabled={!canSubmitOrgDelete({
-                  orgName: orgInfo.name,
-                  confirmName: deleteOrgConfirmName,
-                  deletingOrg,
-                  orgImpactLoading,
-                  hasActiveSubscription: orgImpact?.has_active_subscription ?? false,
-                  orgImpactFailed,
-                  confirmWithoutImpact,
-                })}
-              >
-                {deletingOrg ? tc('deleting') : t('orgDeleteConfirmCta')}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <OrgDeleteDialog
+          orgName={orgInfo.name}
+          impact={orgImpact}
+          impactLoading={orgImpactLoading}
+          confirmName={deleteOrgConfirmName}
+          onConfirmName={setDeleteOrgConfirmName}
+          confirmWithoutImpact={confirmWithoutImpact}
+          onConfirmWithoutImpact={setConfirmWithoutImpact}
+          deleting={deletingOrg}
+          canSubmit={canSubmitOrgDelete({
+            orgName: orgInfo.name,
+            confirmName: deleteOrgConfirmName,
+            deletingOrg,
+            orgImpactLoading,
+            hasActiveSubscription: orgImpact?.has_active_subscription ?? false,
+            orgImpactFailed,
+            confirmWithoutImpact,
+          })}
+          onRetryImpact={() => void fetchOrgImpact()}
+          onClose={() => { setShowDeleteOrgConfirm(false); setDeleteOrgConfirmName(''); }}
+          onConfirm={() => void handleDeleteOrg()}
+        />
       ) : null}
 
       {showDeleteConfirm ? <DeleteAccountDialog onClose={() => setShowDeleteConfirm(false)} onDeleted={() => router.push('/login')} /> : null}
 
       {deleteProjectConfirmId ? (
-        <Dialog
-          open={!!deleteProjectConfirmId}
-          onOpenChange={(open) => { if (!open && deletingProjectId !== deleteProjectConfirmId) setDeleteProjectConfirmId(null); }}
-        >
-          <DialogContent className="max-w-sm" showCloseButton={false}>
-            <DialogTitle className="text-lg font-semibold text-destructive">{t('projectDeleteConfirmTitle')}</DialogTitle>
-            <p className="mt-2 text-sm text-muted-foreground">{t('projectDeleteConfirmDesc')}</p>
-            <div className="mt-6 flex gap-3">
-              <Button variant="glass" className="flex-1" onClick={() => setDeleteProjectConfirmId(null)}>
-                {tc('cancel')}
-              </Button>
-              <Button
-                variant="destructive"
-                className="flex-1"
-                onClick={() => handleDeleteProject(deleteProjectConfirmId)}
-                disabled={deletingProjectId === deleteProjectConfirmId}
-              >
-                {deletingProjectId === deleteProjectConfirmId ? '...' : t('deleteProject')}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <ProjectDeleteDialog
+          deleting={deletingProjectId === deleteProjectConfirmId}
+          onClose={() => setDeleteProjectConfirmId(null)}
+          onConfirm={() => void handleDeleteProject(deleteProjectConfirmId)}
+        />
       ) : null}
       {orgId ? (
         <AddMemberModal
