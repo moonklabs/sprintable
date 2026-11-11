@@ -61,6 +61,10 @@ describe('[SID:4887] ChatListView — a deleted latest message does not stay in 
     expect(sameInstant('2026-10-13T09:00:00Z', '2026-10-13T09:00:00.000+00:00')).toBe(true);
     expect(sameInstant('2026-10-13T09:00:00Z', '2026-10-13T09:00:01Z')).toBe(false);
     expect(sameInstant('nope', 'nope')).toBe(false);
+    // microseconds are kept: two messages of one room created within the SAME millisecond are not the same message (Date.parse would say they are)
+    expect(sameInstant('2026-10-13T09:00:00.000001Z', '2026-10-13T09:00:00.000999Z')).toBe(false); // reverted (Date.parse) → true: the wrong message would be blanked
+    expect(sameInstant('2026-10-13T09:00:00.123456+00:00', '2026-10-13T09:00:00.1234560Z')).toBe(true);
+    expect(sameInstant('2026-10-13T18:00:00.5+09:00', '2026-10-13T09:00:00.500000Z')).toBe(true); // another offset, same instant
     expect(sameInstant(null, T)).toBe(false);
   });
 });

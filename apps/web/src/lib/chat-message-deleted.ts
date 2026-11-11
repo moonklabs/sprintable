@@ -25,10 +25,28 @@ export function onChatMessageDeleted(handler: (detail: ChatMessageDeletedDetail)
   return () => window.removeEventListener(CHAT_MESSAGE_DELETED_EVENT, listener);
 }
 
-/** the same instant, whatever the ISO spelling (`Z` vs `+00:00`, fractional digits) */
+/**
+ * An ISO time as whole MICROSECONDS since the epoch (what the server's database keeps) — or null when it is not an ISO time with an offset.
+ * `Date.parse` keeps only milliseconds: two messages of one room created within the same millisecond would compare equal and the wrong one would be blanked (codex round 1).
+ */
+export function isoToMicros(iso: string | null | undefined): bigint | null {
+  if (!iso) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}(?::?\d{2})?)$/.exec(iso.trim());
+  if (!m) return null;
+  const ms = Date.UTC(+m[1]!, +m[2]! - 1, +m[3]!, +m[4]!, +m[5]!, +m[6]!);
+  if (!Number.isFinite(ms)) return null;
+  const frac = (m[7] ?? '').padEnd(6, '0').slice(0, 6); // microseconds (a nanosecond tail is cut)
+  let offsetMin = 0;
+  if (m[8] !== 'Z') {
+    const o = /^([+-])(\d{2}):?(\d{2})?$/.exec(m[8]!)!;
+    offsetMin = (o[1] === '-' ? -1 : 1) * (+o[2]! * 60 + +(o[3] ?? 0));
+  }
+  return (BigInt(ms) - BigInt(offsetMin) * BigInt(60000)) * BigInt(1000) + BigInt(frac);
+}
+
+/** the same instant (to the microsecond), whatever the ISO spelling (`Z` vs `+00:00`, trailing zeros, fractional digits) */
 export function sameInstant(a: string | null | undefined, b: string | null | undefined): boolean {
-  if (!a || !b) return false;
-  const x = Date.parse(a);
-  const y = Date.parse(b);
-  return Number.isFinite(x) && x === y;
+  const x = isoToMicros(a);
+  const y = isoToMicros(b);
+  return x !== null && y !== null && x === y;
 }
