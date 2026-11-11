@@ -251,6 +251,19 @@ describe('ds Calendar — 초점 · 방향 · 범위 끝', () => {
     expect(document.activeElement).toBe(cell('2026-11-21'));
   });
 
+  it('⭐달 단추를 (초점을 못 받는 채로) 눌러 달이 바뀌어도 초점이 격자 칸으로 튀지 않는다 — 밖의 값 변경만 초점을 옮긴다', async () => {
+    await render(<Calendar key="m" {...base} value="2026-11-20" />);
+    cell('2026-11-20').focus();
+    await act(async () => { (container.querySelector('button[aria-label="다음 달"]') as HTMLButtonElement).click(); });
+    expect(title()).toBe('2026년 12월');
+    expect(tabbable()).toEqual(['2026-12-20']);
+    expect(document.activeElement).not.toBe(cell('2026-12-20'));
+    // 그 뒤에 밖에서 값이 바뀌는 것은 여전히 초점을 따라 옮긴다.
+    cell('2026-12-20').focus();
+    await render(<Calendar key="m" {...base} value="2026-12-25" />);
+    expect(document.activeElement).toBe(cell('2026-12-25'));
+  });
+
   it('같은 달 안에서 value가 바뀌어도 격자 밖에 있던 초점은 빼앗지 않는다', async () => {
     await render(<><button type="button" id="other2">다른 곳</button><Calendar key="t" {...base} value="2026-11-10" /></>);
     (document.getElementById('other2') as HTMLButtonElement).focus();
