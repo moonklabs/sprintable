@@ -21,6 +21,10 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => useDashboardContextMock(),
 }));
 
+// story 4887 — the page asks «is this a phone (below lg)?»; each test says so (default: a desktop)
+const belowLg = vi.hoisted(() => ({ current: false }));
+vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => belowLg.current, useIsBelowLg: () => belowLg.current }));
+
 vi.mock('next/navigation', () => ({
   useParams: () => ({ conversation_id: 'conv-1' }),
   useRouter: () => ({ replace: replaceMock, push: vi.fn() }),
@@ -59,6 +63,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  belowLg.current = false;
   await act(async () => { root.unmount(); });
   container.remove();
   vi.unstubAllGlobals();
@@ -98,9 +103,10 @@ describe('ConversationPage — 뒤로가기 복귀 (story #2168 PR-② AC④)', 
       }
       return { ok: true, json: async () => ({ data: [] }) };
     }));
-    await mount();
 
-    const backBtn = container.querySelector('[data-testid="room-head-back"]'); // the head's phone back arrow (an icon button named «대화»)
+    belowLg.current = true; // the back arrow lives in the shell's header row on a phone (RoomBarTitle)
+    await mount();
+    const backBtn = container.querySelector('[data-testid="room-bar-back"]'); // an icon button named «대화»
     await act(async () => { backBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     expect(replaceMock).toHaveBeenCalledWith(`/chats?p=${FROM_PROJECT_UUID}`);
@@ -109,9 +115,10 @@ describe('ConversationPage — 뒤로가기 복귀 (story #2168 PR-② AC④)', 
   it('?from=이 project id(UUID) 형식이 아니면 신뢰하지 않고 /chats로 떨어진다(형식 검증)', async () => {
     searchParamsRef.current = 'from=not-a-uuid;alert(1)';
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ title: null, type: 'dm', participants: [] }) })));
-    await mount();
 
-    const backBtn = container.querySelector('[data-testid="room-head-back"]'); // the head's phone back arrow (an icon button named «대화»)
+    belowLg.current = true; // the back arrow lives in the shell's header row on a phone (RoomBarTitle)
+    await mount();
+    const backBtn = container.querySelector('[data-testid="room-bar-back"]'); // an icon button named «대화»
     await act(async () => { backBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     // story #4231 — 현재 프로젝트(`?p=`)를 싣고 복귀(착지한 flat 목록이 셸 ?p= 정규화로 다시 요청하지 않게).
@@ -120,9 +127,10 @@ describe('ConversationPage — 뒤로가기 복귀 (story #2168 PR-② AC④)', 
 
   it('?from=이 없으면(직접 진입 등) 기존대로 /chats로 복귀한다(회귀 없음)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ title: null, type: 'dm', participants: [] }) })));
-    await mount();
 
-    const backBtn = container.querySelector('[data-testid="room-head-back"]'); // the head's phone back arrow (an icon button named «대화»)
+    belowLg.current = true; // the back arrow lives in the shell's header row on a phone (RoomBarTitle)
+    await mount();
+    const backBtn = container.querySelector('[data-testid="room-bar-back"]'); // an icon button named «대화»
     await act(async () => { backBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     // story #4231 — 현재 프로젝트(`?p=`)를 싣고 복귀(착지한 flat 목록이 셸 ?p= 정규화로 다시 요청하지 않게).
@@ -244,17 +252,49 @@ describe('ConversationPage — 헤더 아바타(story #2968)', () => {
     expect(container.querySelector('[data-testid="room-head-add"]')).toBeNull(); // reverted (always drawn) → a dead «+»
   });
 
-  it('the head has no button of its own: the phone back arrow, the «+» of the chip row and the «⋯» menu — nothing else', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url.includes('/api/conversations/conv-1')) {
-        return { ok: true, json: async () => ({ title: '팀 채널', type: 'group', muted: false, lastReadAt: null, freeResponse: false, participants: [{ member_id: 'me-1', name: '나', avatar_url: null, type: 'human' }] }) };
-      }
-      return { ok: true, json: async () => ({ data: [] }) };
-    }));
+  const groupRoom = () => vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.includes('/api/conversations/conv-1')) {
+      return { ok: true, json: async () => ({ title: '팀 채널', type: 'group', muted: false, lastReadAt: null, freeResponse: false, participants: [{ member_id: 'me-1', name: '나', avatar_url: null, type: 'human' }, { member_id: 'them-1', name: '유나', avatar_url: null, type: 'human' }] }) };
+    }
+    return { ok: true, json: async () => ({ data: [] }) };
+  }));
+
+  it('a DESKTOP (lg up): the in-column head has no button of its own — the «+» of the chip row, the «⋯» menu and the group name\'s edit; no back arrow, and the phone bar is not drawn', async () => {
+    groupRoom();
     await mount();
     const head = container.querySelector('[data-testid="room-head"]') as HTMLElement;
     const names = [...head.querySelectorAll('button')].map((b) => b.getAttribute('data-testid') ?? b.getAttribute('aria-label'));
-    expect([...names].sort(), `the head's buttons: ${JSON.stringify(names)}`).toEqual(['room-head-add', 'room-head-back', 'room-head-menu', koMessages.chats.editRoomName].sort()); // the group's name is editable in place
+    expect([...names].sort(), `the head's buttons: ${JSON.stringify(names)}`).toEqual(['room-head-add', 'room-head-menu', koMessages.chats.editRoomName].sort());
+    expect(container.querySelector('[data-testid="room-bar"]')).toBeNull();
+  });
+
+  it('⭐ a PHONE (below lg): the room\'s name · people · «⋯» are in the shell\'s header row — ONE h1, no second head block; the people button opens the participants and the «+»', async () => {
+    belowLg.current = true;
+    groupRoom();
+    await mount();
+    expect(container.querySelector('[data-testid="room-head"]'), 'no in-column head on a phone (it cost 135 px of reading column)').toBeNull();
+    const bar = container.querySelector('[data-testid="room-bar"]') as HTMLElement;
+    expect(bar.querySelector('h1')?.textContent).toContain('팀 채널'); // reverted (the head stays a block under the shell row) → no bar
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
+    const people = bar.querySelector('[data-testid="room-bar-people"]') as HTMLElement;
+    expect(people.textContent, 'the fixed name + the number: «참여자 보기 2»').toBe(`${koMessages.chats.roomPeopleOpen} 2`);
+    expect(container.querySelector('[data-testid="room-head-menu"]'), 'the «⋯» menu rides in the header row\'s actions').not.toBeNull();
+    await act(async () => { people.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    const popup = document.querySelector('[data-testid="room-bar-people-popup"]') as HTMLElement;
+    expect(popup.querySelectorAll('[data-testid="room-head-chip"]')).toHaveLength(2);
+    expect(popup.querySelector('[data-testid="room-head-add"]')).not.toBeNull();
+    // the «+» closes the popover and opens the add dialog — never both layers at once (two Escape presses)
+    await act(async () => { (popup.querySelector('[data-testid="room-head-add"]') as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    expect(document.querySelector('[data-testid="room-bar-people-popup"]'), 'the people popover is closed once the add dialog is asked for').toBeNull(); // reverted (the «+» only calls onAdd) → the popover stays open behind the dialog
+  });
+
+  it('the room menu\'s trigger is a 44 px press on touch (it rides in the phone\'s shell row now: it was a 28 px raw trigger)', async () => {
+    belowLg.current = true;
+    groupRoom();
+    await mount();
+    const trigger = container.querySelector('[data-testid="room-head-menu"]') as HTMLElement;
+    expect(trigger.className).toContain('touch:min-h-11');
+    expect(trigger.className).toContain('touch:min-w-11');
   });
 });
 

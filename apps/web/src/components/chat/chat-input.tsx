@@ -632,7 +632,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
   return (
     <div
-      className="relative flex-shrink-0 border-t border-ds-line bg-background px-3 py-3"
+      className="relative flex-shrink-0 border-t border-ds-line bg-background px-2 py-3 sm:px-3"
       onDragOver={(e) => e.preventDefault()}
       onDrop={handleDrop}
     >
@@ -817,7 +817,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       )}
 
       {/* story 4887 (UI-4 screen PR · the approved composer): the controls and the field are ONE bordered box — the clip (+ its ▾), the steer compass when there is someone to steer, the text and a «⏎ 보내기» at the right end. */}
-      <div className="relative flex items-end gap-1 rounded-ds-control border border-ds-line-control bg-ds-surface-sunk px-0.5 py-1.5 focus-within:border-ds-action focus-within:ring-2 focus-within:ring-ds-action" data-testid="chat-composer-box">
+      <div className="relative flex items-end gap-0.5 rounded-ds-control border border-ds-line-control bg-ds-surface-sunk px-0.5 py-1.5 focus-within:border-ds-action focus-within:ring-2 focus-within:ring-ds-action" data-testid="chat-composer-box">
         {/* Command dropdown (선생님 B·mockup #3) — mention/entity 셸·키보드 nav 동일·command 활성=info 신호 토큰 */}
         {/* story #92f00dc4 — w-72→w-80: 서버 카탈로그 인자 힌트(예: `<스토리#> <멤버명>`)가
             추가되며 한 줄에 명령+힌트+설명이 안 맞아 줄바꿈되던 것 보정. */}
@@ -977,7 +977,8 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
               setSteerMode((v) => !v);
               setSteerError(null);
             }}
-            className={`flex-shrink-0 rounded-md p-1.5 transition-colors disabled:opacity-40 ${
+            // a 44 × 44 press on a touch screen (it was 28 × 28 — the phone-bar spec's «every press ≥ 44» found it)
+            className={`flex-shrink-0 rounded-md p-1.5 transition-colors disabled:opacity-40 touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center touch:justify-center ${
               steerMode ? 'bg-info/10 text-info' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
             }`}
           >
@@ -1025,7 +1026,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           }}
           disabled={disabled || sending || steerSending}
           placeholder={steerMode ? t('steerPanelInstructionPlaceholder') : (placeholder ?? t('inputPlaceholderMobile'))}
-          className="min-h-0 flex-1 resize-none border-0 bg-transparent px-1 py-1.5 shadow-none focus-visible:border-transparent focus-visible:ring-0 disabled:opacity-40 dark:bg-transparent"
+          className="min-h-0 flex-1 resize-none border-0 bg-transparent px-1 py-1.5 shadow-none placeholder:truncate focus-visible:border-transparent focus-visible:ring-0 disabled:opacity-40 dark:bg-transparent"
           style={{ minHeight: '36px', maxHeight: '160px' }}
         />
 
