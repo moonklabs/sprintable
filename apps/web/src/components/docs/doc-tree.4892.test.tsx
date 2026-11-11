@@ -142,6 +142,8 @@ describe('행 메뉴 · 창 — ds 부품 (4892)', () => {
     expect(dialog).not.toBeNull();
     const buttons = [...dialog.querySelectorAll<HTMLButtonElement>('[data-slot="ds-button"]')];
     expect(buttons.map((b) => b.textContent)).toEqual([ko.docs!.cancel, ko.docs!.deleteDoc]);
+    expect(buttons[1]!.className).toContain('border-ds-failed');                                     // 위험 모양(tone="danger")
+    expect(buttons[1]!.className).not.toContain('bg-ds-action');
     await act(async () => { buttons[1]!.click(); });
     expect(onDelete).toHaveBeenCalledWith('d1');
   });
