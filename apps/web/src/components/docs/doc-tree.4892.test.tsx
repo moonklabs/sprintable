@@ -112,11 +112,33 @@ describe('폴더 보기 — 줄 = ds TreeRow (4892)', () => {
     expect(menu()).not.toBeNull();
   });
 
-  it('⭐삽입선 · 빈 폴더 글의 들여쓰기가 새 줄 표(깊이당 16px)에서 나온다 — 옛 14px 식이 남지 않음', () => {
-    expect(treeSource).toContain('treeIndentPx(depth) + 8');
-    expect(treeSource).toContain('treeIndentPx(depth + 1)');
+  it('⭐삽입선 · 빈 폴더 글의 들여쓰기가 새 줄 표(좁은 표: 깊이당 8px · 4단 멈춤)에서 나온다 — 옛 14px 식이 남지 않음', () => {
+    expect(treeSource).toContain("treeIndentPx(depth, 'compact') + 8");
+    expect(treeSource).toContain("treeIndentPx(depth + 1, 'compact')");
     expect(treeSource).not.toMatch(/depth \* 14/);
     expect(treeSource).not.toMatch(/\(depth \+ 1\) \* 14/);
+  });
+});
+
+describe('깊은 트리 — 제목이 들여쓰기에 먹히지 않는다 (4892 · PO 11-11 «고객 퇴행»)', () => {
+  // 측정(dev 5608 · 모의 트리): 16px × 8단 들여쓰기에서 보이는 제목 글자 — 1440 깊이 7 = 7자(전 16) · 폰 390 깊이 5 = 7자(전 13). 줄 높이 · 폰 44는 그대로 두고 들여쓰기만 줄인다.
+  const CHAIN = Array.from({ length: 8 }, (_, d) => ({ id: `c${d}`, parent_id: d ? `c${d - 1}` : null, title: `${d}단 긴 제목 가나다라마바사아자차카`, slug: `c${d}`, icon: null, sort_order: 0, is_folder: d < 7 }));
+  const padClass = (id: string) => ctl(id).className.split(/\s+/).find((c) => /^pl-\d+$/.test(c))!;
+  const padPx = (id: string) => Number(padClass(id).slice(3)) * 4;                       // pl-N = N × 4px
+  const oldPadPx = (depth: number) => Math.min(depth * 14 + 8, 72);                       // 예전 줄: 깊이 × 14 + 8, 72에서 멈춤
+
+  it('⭐줄은 좁은 들여쓰기(data-indent=compact): 깊이 0~4는 8px씩 · 4단부터 같은 자리(pl-10) — 깊이 5 · 7도 깊이 4와 같다', async () => {
+    await mountTree({ docs: CHAIN });
+    expect(['c0', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7'].map(padClass)).toEqual(['pl-2', 'pl-4', 'pl-6', 'pl-8', 'pl-10', 'pl-10', 'pl-10', 'pl-10']);
+    expect(rowOf('c7').getAttribute('data-indent')).toBe('compact');
+    expect(rowOf('c7').getAttribute('data-depth')).toBe('7');
+  });
+
+  it('⭐어느 깊이에서도 새 왼쪽 여백이 옛 줄(깊이 × 14 + 8 · 72에서 멈춤)보다 넓지 않다 — 깊이 5 · 7은 40 ≤ 72(제목 칸이 «전» 이상으로 남는 쪽)', async () => {
+    await mountTree({ docs: CHAIN });
+    for (let d = 0; d <= 7; d += 1) expect(padPx(`c${d}`), `깊이 ${d}`).toBeLessThanOrEqual(oldPadPx(d));
+    expect(padPx('c5')).toBe(40);
+    expect(padPx('c7')).toBe(40);
   });
 });
 

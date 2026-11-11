@@ -264,8 +264,8 @@ function TreeNode({
   // 끄는 행은 제자리에서 흐리게 · 포인터를 따라가는 건 DragOverlay 복제.
   const style = { opacity: isDragging ? 0.5 : 1 };
   const zone = dropTarget?.overId === doc.id ? dropTarget.zone : null;
-  // 줄 안쪽 시작(= 화살표 자리) — TreeRow의 깊이 표(깊이당 16px) 위 8px 바탕 여백. 삽입선의 왼쪽 끝이 «어느 단계에 들어가는지»를 말한다.
-  const textIndent = treeIndentPx(depth) + 8;
+  // 줄 안쪽 시작(= 화살표 자리) — TreeRow의 좁은 깊이 표(깊이당 8px · 4단에서 멈춤) 위 8px 바탕 여백. 삽입선의 왼쪽 끝이 «어느 단계에 들어가는지»를 말한다.
+  const textIndent = treeIndentPx(depth, 'compact') + 8;
   // 펼친 폴더의 «뒤» = 그 폴더 다음 형제 자리(자식들 아래) → 선은 하위 트리 끝에(선이 가리키는 곳 = 들어가는 곳).
   const afterLineAtSubtreeEnd = zone === 'after' && isFolder && expanded && hasChildren;
 
@@ -377,6 +377,7 @@ function TreeNode({
           ref={setRowNode}
           data-drop-target={doc.id}
           depth={depth}
+          indent="compact"
           title={doc.title}
           icon={isFolder ? (expanded ? 'folder_open' : 'folder') : 'description'}
           emoji={doc.icon ?? undefined}
@@ -523,7 +524,7 @@ function TreeNode({
           ) : (
             <p
               className="py-1 text-ds-small italic text-ds-ink-3"
-              style={{ paddingLeft: `${treeIndentPx(depth + 1) + 8 + 14 + 8}px` }}
+              style={{ paddingLeft: `${treeIndentPx(depth + 1, 'compact') + 8 + 14 + 8}px` }}
             >
               {/* story #4390 — 예전엔 기본값 'No child docs'(영어)를 호출부가 안 넘겨 한국어 화면에도 영어가 나왔다 → 로케일 문장(docs.noChildDocs). */}
               {emptyFolderLabel ?? t('noChildDocs')}

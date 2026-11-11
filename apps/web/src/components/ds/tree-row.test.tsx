@@ -47,7 +47,7 @@ describe('ds TreeRow', () => {
     expect(await pad(8)).toBe('pl-34');
     expect(await pad(20)).toBe('pl-34');
     expect(await pad(-2)).toBe('pl-2');
-    expect([0, 1, 3, 8, 20, -2].map(treeIndentPx)).toEqual([0, 16, 48, 128, 128, 0]);
+    expect([0, 1, 3, 8, 20, -2].map((d) => treeIndentPx(d))).toEqual([0, 16, 48, 128, 128, 0]);
     await render(<TreeRow depth={4} title="문서" />);
     expect(row().getAttribute('data-depth')).toBe('4');
   });
@@ -178,5 +178,27 @@ describe('ds TreeRow', () => {
     const s = ctl().querySelector('span.truncate') as HTMLElement;
     expect(s.textContent).toBe('아주 긴 문서 제목');
     expect(has(s, 'min-w-0')).toBe(true);
+  });
+
+  // story 4892 (UI-9 문서 트리) — 좁은 들여쓰기: 깊게 쌓은 문서의 제목이 들여쓰기에 먹혀 잘리는 퇴행(1440 깊이 7: 16 → 7자 · 폰 깊이 5: 13 → 7자, 측정)을 막는다.
+  it('⭐indent="compact": 깊이당 8px · 4단에서 멈춘다(그 아래 깊이는 같은 자리) — treeIndentPx도 같은 표 · 기본(default)은 그대로 16px × 8단', async () => {
+    const pad = async (d: number, indent?: 'compact') => { await render(<TreeRow depth={d} indent={indent} title="문서" />); return ctl().className.split(/\s+/).find((c) => /^pl-\d+$/.test(c)); };
+    const got: Array<string | undefined> = [];
+    for (const d of [0, 1, 2, 3, 4, 5, 6, 7, 20]) got.push(await pad(d, 'compact'));          // 한 칸을 되풀이해 그리니 차례로
+    expect(got).toEqual(['pl-2', 'pl-4', 'pl-6', 'pl-8', 'pl-10', 'pl-10', 'pl-10', 'pl-10', 'pl-10']);
+    expect([0, 1, 2, 3, 4, 5, 7, 20, -3].map((d) => treeIndentPx(d, 'compact'))).toEqual([0, 8, 16, 24, 32, 32, 32, 32, 0]);
+    expect(await pad(8)).toBe('pl-34');                                           // default unchanged
+    expect(treeIndentPx(8)).toBe(128);
+    await render(<TreeRow depth={5} indent="compact" title="문서" />);
+    expect(row().getAttribute('data-indent')).toBe('compact');
+    expect(row().getAttribute('data-depth')).toBe('5');                            // 깊이 자체(data-depth)는 줄지 않는다
+  });
+
+  it('⭐끌기 손잡이 자리 간격도 같은 좁은 표를 따른다(손잡이가 줄 글자 위로 안 겹침)', async () => {
+    await render(<TreeRow depth={3} indent="compact" title="문서" dragHandle={<i data-testid="h" />} />);
+    const gap = row().querySelector('[data-slot="ds-tree-handle"] > span[aria-hidden]') as HTMLElement;
+    expect(gap.className.split(/\s+/)).toContain('w-6');                          // depth 3 → 24px = same as pl-8 − 8
+    await render(<TreeRow depth={9} indent="compact" title="문서" dragHandle={<i />} />);
+    expect((row().querySelector('[data-slot="ds-tree-handle"] > span[aria-hidden]') as HTMLElement).className.split(/\s+/)).toContain('w-8');
   });
 });
