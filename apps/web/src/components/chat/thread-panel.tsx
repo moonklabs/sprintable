@@ -14,6 +14,7 @@ import type { CardState as GateCardState } from '@/components/chat/approval-requ
 import type { EventDefinitionSummary } from '@/lib/block-template';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { useToast } from '@/components/ui/toast';
 import { actorRowLabels } from '@/lib/member-display';
 
 // story #2262 PR② — 배치조회가 꺼진(구 호출부) 경우 훅에 넘길 안정적인 빈 배열 참조(매
@@ -56,6 +57,8 @@ interface ThreadPanelProps {
    * 완료 시·신규 답글 수신 시 마크리드해야 conversation-level unread_count가 내려간다(스레드
    * 답글도 parent_id 구분 없이 unread_count를 올리는 chat-list-view.tsx#applyConversationMessageUpdate
    * 와 대칭). */
+  /** deleting the ORIGINAL message (shown at the top of the thread) is the room's business — it lives in the room's list: the room hands its own delete handler */
+  onDeleteParent?: (messageId: string) => void;
   onMarkRead?: (upToIso: string) => void;
 }
 
@@ -75,10 +78,13 @@ export function ThreadPanel({
   requestedGateIdsRef,
   setGateByKey,
   onMarkRead,
+  onDeleteParent,
 }: ThreadPanelProps) {
   // story #3783 — "불러오는 중…", common ns의 기존 loading 키 재사용.
   const tc = useTranslations('common');
   const t = useTranslations('chats');
+  const { addToast } = useToast();
+  const panelRef = useRef<HTMLDivElement>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -184,8 +190,30 @@ export function ThreadPanel({
     : parentMessage.server_command ? t('serverCommandBadge')
     : t('threadKindMessage');
 
+  // story 4887 — the message menu inside a thread used to be a dead end («답글 달기» · «삭제» did nothing). A thread is flat: «reply» means «write in THIS thread» — the composer takes the focus.
+  const focusReply = useCallback(() => {
+    panelRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus();
+  }, []);
+
+  // the same tombstone the room's list uses (the row stays as a placeholder; a failure is always shown — story #2319 AC②)
+  const handleDeleteReply = useCallback(async (messageId: string) => {
+    try {
+      const res = await fetchWithAuth(`/api/conversations/${conversationId}/messages/${messageId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        addToast({ type: 'error', title: t('deleteMessageErrorTitle'), body: t('deleteMessageErrorBody') });
+        return;
+      }
+      const body = (await res.json()) as { deleted_at?: string | null };
+      setMessages((prev) => prev.map((m) => (
+        m.id === messageId ? { ...m, content: '', deleted_at: body.deleted_at ?? new Date().toISOString() } : m
+      )));
+    } catch {
+      addToast({ type: 'error', title: t('deleteMessageErrorTitle'), body: t('deleteMessageErrorBody') });
+    }
+  }, [conversationId, addToast, t]);
+
   return (
-    <div className="flex h-full flex-col overflow-hidden border-l border-border bg-background" data-testid="thread-panel">
+    <div ref={panelRef} className="flex h-full flex-col overflow-hidden border-l border-border bg-background" data-testid="thread-panel">
       {/* Header — story #2911(S2e②③/R4) 「s2e-thread-depth-grammar」 확定: ReadingPanel과
           «같은 칩 브레드크럼» 문법(칩 버튼 + `›` text-border 구분자, 동일 토큰/스타일).
           「스레드」 평문 폐기. 스레드는 단일 레벨이라 세그먼트는 정확히 2개 — [대화](뒤로
@@ -211,6 +239,8 @@ export function ThreadPanel({
           isMine={parentMessage.created_by === currentTeamMemberId}
           plainRow
           isGrouped={false}
+          onMenuReply={focusReply}
+          onDelete={onDeleteParent}
           senderLabel={senderLabels.get(parentMessage.created_by)}
           projectId={projectId}
           entityStatusByKey={entityStatusByKey}
@@ -240,6 +270,8 @@ export function ThreadPanel({
                   isMine={msg.created_by === currentTeamMemberId}
                   plainRow
                   isGrouped={isGrouped}
+                  onMenuReply={focusReply}
+                  onDelete={handleDeleteReply}
                   senderLabel={senderLabels.get(msg.created_by)}
                   projectId={projectId}
                   entityStatusByKey={entityStatusByKey}

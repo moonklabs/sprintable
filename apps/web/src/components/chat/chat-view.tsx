@@ -1235,6 +1235,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
               incomingMessage={threadIncoming?.parent_id === activeThread.id ? threadIncoming : null}
               onReplyAdded={handleReplyAdded}
               onMarkRead={markRead}
+              onDeleteParent={handleDeleteMessage}
               entityStatusByKey={entityStatusByKey}
               eventDefinitionsByKey={eventDefinitionsByKey}
               requestedEntityStatusKeysRef={requestedEntityStatusKeysRef}
