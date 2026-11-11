@@ -124,5 +124,5 @@ export function RemoteControlLink({ variant = 'link' }: { variant?: 'link' | 'bu
   if (variant === 'button') {
     return <Button variant="primary" asChild><Link href={href} onClick={markPlainClick} data-testid="remote-off-link">{t('goTo')}</Link></Button>;
   }
-  return <Link href={href} onClick={markPlainClick} className="inline-flex items-center text-ds-body text-ds-ink underline underline-offset-2 pointer-coarse:min-h-11" data-testid="remote-off-link">{t('goTo')}</Link>;
+  return <Link href={href} onClick={markPlainClick} className="inline-flex items-center text-ds-body text-ds-ink underline underline-offset-2 touch:min-h-11" data-testid="remote-off-link">{t('goTo')}</Link>;
 }

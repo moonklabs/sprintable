@@ -20,6 +20,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { useChatsHref } from '@/app/dashboard/dashboard-shell';
 import { cn } from '@/lib/utils';
+import { Stepper } from '@/components/ds/stepper'; // story 4889 (W3)
 import { pickEulReulJosa, pickEunNeunJosa } from '@/lib/korean-particle';
 import { VerifyRail, useVerificationRail } from '@/app/onboarding/verify-rail';
 import { emitOnboardingEvent, beaconOnboardingEvent } from '@/app/onboarding/onboarding-telemetry';
@@ -214,29 +215,6 @@ function downloadTextFile(filename: string, content: string) {
 }
 
 // ─── 재사용 하위 컴포넌트 ────────────────────────────────────────────────────
-
-function StepperHeader({ step, stages }: { step: Step; stages: { n: Step; label: string }[] }) {
-  return (
-    <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-1 pb-3">
-      {stages.map((s, i) => (
-        <div key={s.n} className="flex items-center gap-1.5">
-          <span
-            className={cn(
-              'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold',
-              s.n === step && 'border-transparent bg-foreground text-background',
-              s.n < step && 'border-success/40 text-success',
-              s.n > step && 'border-border text-muted-foreground',
-            )}
-          >
-            {s.n < step ? <Check className="h-3 w-3" aria-hidden /> : s.n}
-            {s.label}
-          </span>
-          {i < stages.length - 1 && <span className="text-muted-foreground">›</span>}
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function CopyDownloadButtons({
   content, filename, copied, onCopied,
@@ -1170,7 +1148,13 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
       <SectionCard>
         {oneScreen ? null : (
           <SectionCardHeader>
-            <StepperHeader step={step} stages={stages} />
+            {/* story 4889 (W3 · UI-3 ds Stepper): the header is the ds Stepper — done (check) · now (ring + number) · upcoming (hollow dot + number); the equip-skip way has three */}
+            <Stepper
+              aria-label={t('stepperLabel')}
+              steps={stages.map((st) => ({ id: st.n, label: st.label }))}
+              current={Math.max(0, stages.findIndex((st) => st.n === step))}
+              stateLabels={{ done: t('stepStateDone'), current: t('stepStateCurrent'), upcoming: t('stepStateUpcoming') }}
+            />
           </SectionCardHeader>
         )}
         <SectionCardBody className="space-y-4">
