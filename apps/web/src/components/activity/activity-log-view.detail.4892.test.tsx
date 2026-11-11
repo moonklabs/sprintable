@@ -11,9 +11,9 @@ import { ActivityLogView } from './activity-log-view';
 import { TopBarProvider } from '@/components/nav/top-bar-context';
 import koMessages from '../../../messages/ko.json';
 
-const { mq, tzMock } = vi.hoisted(() => ({ mq: { wide: true, xl: true }, tzMock: { value: 'UTC' as string | null } }));
+const { mq, tzMock } = vi.hoisted(() => ({ mq: { wide: true, xl: true, lgOnly: null as boolean | null }, tzMock: { value: 'UTC' as string | null } }));
 // two queries: lg (min-width 1024) and xl (min-width 1280)
-vi.mock('@/lib/use-media-query', () => ({ useMediaQuery: (q: string) => (q.includes('max-width') ? mq.wide && !mq.xl : q.includes('1280') ? mq.xl : mq.wide) }));
+vi.mock('@/lib/use-media-query', () => ({ useMediaQuery: (q: string) => (q.includes('max-width') ? (mq.lgOnly ?? (mq.wide && !mq.xl)) : q.includes('1280') ? mq.xl : mq.wide) }));   // `lgOnly` overrides the derived value: a media-query state can lag for a render during a resize
 // the viewer's zone decides which day a row is on — pin it so the test does not depend on the machine's zone
 vi.mock('@/components/viewer-time-zone', () => ({ useViewerTimeZone: () => tzMock.value }));
 const fetchWithAuthMock = vi.fn();
@@ -41,6 +41,7 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   mq.wide = true;
   mq.xl = true;
+  mq.lgOnly = null;
   tzMock.value = 'UTC';
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -463,6 +464,36 @@ describe('ActivityLogView — lg에서 상세 칸이 열린 동안만 행위자 
     expect(visibleLayer(0).textContent).not.toContain('안나');
     await click(rows()[0]!);                                         // choose the same row again → the column closes
     expect(container.querySelector('aside')).toBeNull();
+    expect(visibleLayer(0).textContent).toContain('안나');
+  });
+
+  const rerender = async () => {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC">
+          <TopBarProvider><ActivityLogView projectId="p1" /></TopBarProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+  };
+
+  it('⭐resize glitch lg → xl: the «lg only» state still says true for a render while isXl is already true → the names are NOT folded (the column sits beside a wide list)', async () => {
+    mq.xl = false;
+    await mount();
+    await click(rows()[0]!);
+    expect(visibleLayer(0).textContent).not.toContain('안나');   // lg + chosen: folded
+    mq.xl = true; mq.lgOnly = true;                               // xl arrives first, the lg-only query lags
+    await rerender();
+    expect(visibleLayer(0).textContent).toContain('안나');
+  });
+
+  it('⭐resize glitch lg → narrow: «lg only» lags while isWide is already false → the names are NOT folded (the details moved under the row, the list is full width)', async () => {
+    mq.xl = false;
+    await mount();
+    await click(rows()[0]!);
+    expect(visibleLayer(0).textContent).not.toContain('안나');
+    mq.wide = false; mq.lgOnly = true;
+    await rerender();
     expect(visibleLayer(0).textContent).toContain('안나');
   });
 
