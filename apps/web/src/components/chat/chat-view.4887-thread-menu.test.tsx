@@ -62,8 +62,12 @@ describe('ChatView — the thread\'s original message can be deleted from its me
     const del = [...document.querySelectorAll('[role="menuitem"]')].find((b) => b.textContent?.includes(koMessages.common.delete)) as HTMLElement;
     await act(async () => { del.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
     const sent = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE');
-    expect(String(sent?.[0])).toContain('/thread-1/messages/m1'); // reverted (the panel is not handed the room's handler) → no DELETE at all
+    expect(String(sent?.[0])).toBe('/api/conversations/thread-1/messages/m1'); // reverted (the panel is not handed the room's handler) → no DELETE at all
     const roomRow = container.querySelector('.group\\/bubble') as HTMLElement; // the first row of the ROOM's list
     expect(roomRow.textContent).toContain(koMessages.chats.deletedMessagePlaceholder);
+    // and the OPEN thread's own copy of that original is a tombstone too — it must not keep showing the text of a message that is gone
+    const threadOriginal = container.querySelector('[data-testid="thread-original"]') as HTMLElement;
+    expect(threadOriginal.textContent).toContain(koMessages.chats.deletedMessagePlaceholder); // reverted (only the room's list is updated) → the old text stays
+    expect(threadOriginal.textContent).not.toContain('내 원본 글');
   });
 });

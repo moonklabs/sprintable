@@ -101,6 +101,16 @@ describe('ThreadPanel — the message menu works (story 4887)', () => {
     expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(false);
   });
 
+  it('⭐ the «삭제» condition is the room\'s (mine AND not already deleted): after deleting, the tombstone row offers no «삭제» again', async () => {
+    stubFetch(true); await mount();
+    await openMenu('내 답글');
+    await click(menuItem(koMessages.common.delete)!);
+    const tomb = [...container.querySelectorAll('[data-testid="thread-replies"] .group\\/bubble')].find((r) => r.textContent?.includes(koMessages.chats.deletedMessagePlaceholder)) as HTMLElement; // the tombstone row has no text test-id: find the ROW by its words
+    await act(async () => { tomb.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 50 })); });
+    expect(menuItem(koMessages.common.delete)).toBeUndefined(); // reverted (a gate on isMine alone) → a second DELETE is offered for a message that is gone
+    expect(menuItem(koMessages.chats.replyToMessage)).toBeDefined(); // the rest of the menu is still there
+  });
+
   it('someone else\'s reply has no «삭제» (permission unchanged) and the thread still draws NO hover reply button (the menu is the only way)', async () => {
     stubFetch(true); await mount();
     await openMenu('남의 답글');

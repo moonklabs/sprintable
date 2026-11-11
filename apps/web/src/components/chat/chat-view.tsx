@@ -625,9 +625,12 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
         return;
       }
       const body = (await res.json()) as { deleted_at?: string | null };
+      const deletedAt = body.deleted_at ?? new Date().toISOString();
       setMessages((prev) => prev.map((m) => (
-        m.id === messageId ? { ...m, content: '', deleted_at: body.deleted_at ?? new Date().toISOString() } : m
+        m.id === messageId ? { ...m, content: '', deleted_at: deletedAt } : m
       )));
+      // the open thread holds its own COPY of its original: the same tombstone there, or the panel keeps showing the text of a message that is gone (codex round 1 on the thread-menu PR)
+      setActiveThread((prev) => (prev && prev.id === messageId ? { ...prev, content: '', deleted_at: deletedAt } : prev));
     } catch {
       addToast({ type: 'error', title: t('deleteMessageErrorTitle'), body: t('deleteMessageErrorBody') });
     }
