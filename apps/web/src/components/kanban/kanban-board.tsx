@@ -78,6 +78,8 @@ interface KanbanBoardProps {
   projectId?: string;
   wsSlug: string;
   projSlug: string;
+  /** story #4888 — 머리 줄 맨 앞에 서는 것(렌즈 칩). 있으면 렌즈 + 필터 + 보기 전환이 한 줄이다(폰은 가로로 미는 한 줄). */
+  headLead?: React.ReactNode;
 }
 
 // WIP limit localStorage 키
@@ -143,7 +145,7 @@ function saveAxisMode(projectId: string | undefined, mode: 'status' | 'trust'): 
   localStorage.setItem(axisModeKey(projectId), mode);
 }
 
-export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
+export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoardProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   // story #2545(카디르 라이브 재QA 5단계) — org 불일치 자동교정(switch-org)이 이 fetchData
@@ -1379,10 +1381,20 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         bottomDockBannerSlot,
       )}
 
-      {/* Board header */}
-      <div className="flex min-h-11 flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border/80 px-4 py-1.5">
+      {/* Board header — story #4888(보드 머리 통째): 렌즈 칩(headLead) + 필터 + 검색 · 보기 전환이 **한 줄**이다. 넓은 화면(lg)은 모자라면 줄바꿈, 폰은 줄바꿈 없이 가로로 미는 한 줄
+          (예전엔 폰에서 3줄로 접혀 113px · 첫 카드가 화면의 74% 아래). 눌리는 것은 터치에서 44. */}
+      <div
+        data-testid="board-head"
+        className="focus-inset flex min-h-11 flex-shrink-0 flex-nowrap items-center gap-2 overflow-x-auto border-b border-border/80 px-4 py-1.5 lg:flex-wrap lg:overflow-visible"
+      >
+        {headLead ? (
+          <>
+            {headLead}
+            <div className="h-5 w-px shrink-0 bg-border/80" aria-hidden="true" />
+          </>
+        ) : null}
         {/* Left: assignee type tabs + filter chips */}
-        <div className="flex flex-wrap items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1 lg:flex-wrap">
           {([
             { id: '' as const, label: t('filterAll') },
             { id: 'human' as const, label: t('filterMembers') },
@@ -1394,7 +1406,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               variant="ghost"
               aria-pressed={assigneeTypeFilter === id}
               onClick={() => setAssigneeTypeFilter(id)}
-              className={`h-auto min-h-0 min-w-0 rounded-md px-3 py-1.5 text-xs font-medium ${
+              className={`h-auto min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 rounded-md px-3 py-1.5 text-xs font-medium ${
                 assigneeTypeFilter === id
                   ? 'bg-foreground/10 text-foreground'
                   : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
@@ -1413,7 +1425,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 <Button
                   type="button"
                   variant="ghost"
-                  className={`h-7 min-h-0 min-w-0 gap-1 rounded-md border px-2 text-xs font-medium ${
+                  className={`h-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 gap-1 rounded-md border px-2 text-xs font-medium ${
                     selectedSprintId
                       ? 'border-primary/40 bg-primary/10 text-primary'
                       : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
@@ -1472,7 +1484,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 <Button
                   type="button"
                   variant="ghost"
-                  className={`h-7 min-h-0 min-w-0 gap-1 rounded-md border px-2 text-xs font-medium ${
+                  className={`h-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 gap-1 rounded-md border px-2 text-xs font-medium ${
                     selectedEpicId
                       ? 'border-primary/40 bg-primary/10 text-primary'
                       : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
@@ -1531,7 +1543,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 <Button
                   type="button"
                   variant="ghost"
-                  className={`h-7 min-h-0 min-w-0 gap-1 rounded-md border px-2 text-xs font-medium ${
+                  className={`h-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 gap-1 rounded-md border px-2 text-xs font-medium ${
                     selectedAssigneeId
                       ? 'border-primary/40 bg-primary/10 text-primary'
                       : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
@@ -1617,7 +1629,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                   <Button
                     type="button"
                     variant="ghost"
-                    className={`h-7 min-h-0 min-w-0 gap-1 rounded-md border px-2 text-xs font-medium ${
+                    className={`h-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 gap-1 rounded-md border px-2 text-xs font-medium ${
                       selectedLabelIds.length > 0
                         ? 'border-primary/40 bg-primary/10 text-primary'
                         : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
@@ -1682,7 +1694,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         </div>
 
         {/* Right: search + view toggle */}
-        <div className="flex items-center gap-1">
+        <div className="ml-auto flex shrink-0 items-center gap-1">
           {/* Search toggle */}
           {showSearch ? (
             <Input
@@ -1692,15 +1704,16 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               onChange={(e) => setSearchQuery(e.target.value)}
               onBlur={() => { if (!searchQuery) setShowSearch(false); }}
               placeholder={t('searchPlaceholder')}
-              className="h-7 w-36"
+              className="h-7 w-36 touch:h-11"
             />
           ) : (
             <Button
               type="button"
               variant="ghost"
               title={t('searchPlaceholder')}
+              aria-label={t('searchPlaceholder')}
               onClick={() => setShowSearch(true)}
-              className={`size-7 min-h-0 min-w-0 rounded-md ${
+              className={`size-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 rounded-md ${
                 searchQuery ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
               }`}
             >
@@ -1717,7 +1730,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               onClick={() => setViewMode('board')}
               aria-label={t('boardViewLabel')}
               title={t('boardViewLabel')}
-              className={`size-7 min-h-0 min-w-0 rounded-none ${
+              className={`size-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 rounded-none ${
                 viewMode === 'board' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-muted-foreground'
               }`}
             >
@@ -1730,7 +1743,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               onClick={() => setViewMode('list')}
               aria-label={t('listViewLabel')}
               title={t('listViewLabel')}
-              className={`size-7 min-h-0 min-w-0 rounded-none ${
+              className={`size-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 rounded-none ${
                 viewMode === 'list' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-muted-foreground'
               }`}
             >
@@ -1756,7 +1769,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 role="tab"
                 aria-selected={axisMode === 'status'}
                 onClick={() => handleSetAxisMode('status')}
-                className={`h-auto min-h-0 min-w-0 -mb-px whitespace-nowrap rounded-none border-x-0 border-t-0 border-b-2 px-0.5 pb-1.5 text-editorial-meta font-semibold ${
+                className={`h-auto min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 -mb-px whitespace-nowrap rounded-none border-x-0 border-t-0 border-b-2 px-0.5 pb-1.5 text-editorial-meta font-semibold ${
                   axisMode === 'status' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
                 }`}
               >
@@ -1768,7 +1781,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 role="tab"
                 aria-selected={axisMode === 'trust'}
                 onClick={() => handleSetAxisMode('trust')}
-                className={`h-auto min-h-0 min-w-0 -mb-px whitespace-nowrap rounded-none border-x-0 border-t-0 border-b-2 px-0.5 pb-1.5 text-editorial-meta font-semibold ${
+                className={`h-auto min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 -mb-px whitespace-nowrap rounded-none border-x-0 border-t-0 border-b-2 px-0.5 pb-1.5 text-editorial-meta font-semibold ${
                   axisMode === 'trust' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
                 }`}
               >

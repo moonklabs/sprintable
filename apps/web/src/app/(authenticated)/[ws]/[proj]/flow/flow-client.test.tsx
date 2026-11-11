@@ -40,7 +40,8 @@ vi.mock('@/components/workspace/workspace-frame-tabs', () => ({
 }));
 
 vi.mock('@/components/kanban/kanban-board', () => ({
-  KanbanBoard: () => <div data-testid="kanban-board-stub">kanban</div>,
+  // story #4888 — 렌즈 칩(ScaleLadder)이 보드 머리 줄 안으로 들어왔다: 스텁도 headLead를 그린다(진짜 보드는 머리 줄 맨 앞에 그림)
+  KanbanBoard: ({ headLead }: { headLead?: React.ReactNode }) => <div data-testid="kanban-board-stub">{headLead}kanban</div>,
 }));
 
 // story #2531 — 지구층은 default view가 됐으니 view=flow/list 를 테스트하는 기존 스펙들이
@@ -217,6 +218,23 @@ describe('FlowPageClient — story #2354 (노드 클릭이 지도를 안 끈다)
     // 패널은 사라지지만 — URL의 story는 안 지웠으므로(닫기가 router 호출을 안 함) selectedNodeId는 그대로다.
     expect(container.querySelector('[data-testid="flow-node-story-panel-stub"]')).toBeNull();
     expect(container.querySelector('[data-testid="selected-node-id"]')?.textContent).toBe('story-abc');
+  });
+
+  // story #4888(보드 머리 통째) — 렌즈 칩은 목록(칸반) 보기에서는 보드 머리 줄 «안»에 서고(한 줄), 갈래 보기에서는 예전처럼 위에 선다. 어느 쪽이든 하나뿐이다.
+  it('⭐view=list: 렌즈 칩이 보드(머리 줄) 안에 하나만 서 있다 — 보드 위에 따로 한 줄이 더 없다', async () => {
+    currentSearch = 'view=list';
+    await renderFlowClient();
+    const slots = container.querySelectorAll('[data-testid="scale-ladder-slot"]');
+    expect(slots).toHaveLength(1);
+    expect(slots[0]!.closest('[data-testid="kanban-board-stub"]')).not.toBeNull();
+  });
+
+  it('⭐view=flow: 렌즈 칩은 예전처럼 갈래 지도 위에 하나만 선다(보드 안이 아니다)', async () => {
+    currentSearch = 'view=flow';
+    await renderFlowClient();
+    const slots = container.querySelectorAll('[data-testid="scale-ladder-slot"]');
+    expect(slots).toHaveLength(1);
+    expect(container.querySelector('[data-testid="kanban-board-stub"]')).toBeNull();
   });
 
   it('view=list renders KanbanBoard and does NOT also mount the flow overlay panel (AC9 — no double panel)', async () => {

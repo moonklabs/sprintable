@@ -32,6 +32,25 @@ describe('HypothesisDeclarationSection (E-SPRINT-LOOP sprint-open 278314e9)', ()
     expect(markup).not.toContain('data-variant="destructive"');
   });
 
+  // story #4888 — dev 폰 390 실측: «+ 가설 추가» 332×34(손으로 쓴 raw button · data-slot 없음). ds Button이면 폰 44 바닥이 따라온다(점선 «더하기» 모양은 그대로).
+  it('⭐«+ 가설 추가»가 ds Button이고(폰 44 · 점선 · 폭 가득) 글이 그대로다', () => {
+    const markup = renderToStaticMarkup(wrap(
+      <HypothesisDeclarationSection projectId="p1" contextTitle="스프린트 A" declarations={[]} onChange={() => {}} />,
+    ));
+    // 노드 환경(DOM 없음): CTA 글자 바로 앞의 <button …> 태그를 잘라 속성만 본다
+    const at = markup.indexOf(koMessages.sprints.declareAddCta);
+    const start = markup.lastIndexOf('<button', at);
+    const tag = markup.slice(start, markup.indexOf('>', start) + 1);
+    expect(start).toBeGreaterThan(-1);
+    expect(tag).toContain('data-slot="ds-button"');
+    expect(tag).toContain('type="button"');
+    expect(tag).toContain('touch:min-h-11');
+    // ds Button에는 `disabled:border-dashed`가 원래 있어 부분 문자열로는 못 가린다 — 맨 클래스 하나로 센다
+    expect(tag).toMatch(/class="(?:[^"]* )?border-dashed(?: [^"]*)?"/);
+    expect(tag).toContain('w-full');
+    expect(markup.slice(start, markup.indexOf('</button>', start)).replace(/<!-- -->/g, '')).toContain(`+ ${koMessages.sprints.declareAddCta}`);
+  });
+
   it('renders a declaration card once at least one is added', () => {
     const declarations: HypothesisDeclarationValue[] = [{ ...EMPTY_DECLARATION }];
     const markup = renderToStaticMarkup(wrap(

@@ -248,11 +248,12 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
             (칸반의 단위는 스토리 — story #3111에서 «건물»=작업 오매핑 정정) — 「지금 보는
             층 = 묻는 질문 전환」을 탭 전환마다 같은 자리에서 보인다. story #3112 — 클릭
             배선(렌즈 전환·목표 이동·작업 비활성)은 컴포넌트 자체가 갖는다(scale-ladder.tsx). */}
-        {view !== 'hypothesis' ? (
+        {view === 'flow' ? (
           // story #4888 — 래더는 모든 폭에서 칩 한 줄 하나뿐이다. story #4222의 «두 판을 CSS 중단점으로 가름»은 판이 하나가 되며 필요 없어졌다
           // (서버 출력 = 최종 높이 → 하이드레이션 뒤 흔들림 0은 그대로, 요청 수 0도 그대로).
+          // story #4888(보드 머리 통째) — 목록(칸반) 보기에서는 렌즈 칩이 이 위 줄이 아니라 보드 머리 줄 **안**(맨 앞)에 선다: 렌즈 + 필터가 한 줄(폰은 가로로 미는 한 줄).
           <div data-testid="scale-ladder-slot">
-            <ScaleLadder activeLevel={view === 'flow' ? 'city' : 'street'} />
+            <ScaleLadder activeLevel="city" />
           </div>
         ) : null}
 
@@ -270,7 +271,12 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           // 명시 높이(보이는 영역 = 100svh − 셸 크롬 · 문서 · 스프린트 화면과 같은 앵커)를 주면 보드는 제 높이만 쓰고 뿌리가 내용만큼 자란다(넘침 0 ·
           // 뿌리 p-4 아래 여백이 그대로 틈). 보드 칸 안 세로 스크롤(칸마다 overflow-y-auto)은 무변.
           <div className="h-[calc(100svh-var(--shell-chrome-h))]" data-testid="flow-board-frame">
-            <KanbanBoard projectId={projectId} wsSlug={wsSlug} projSlug={projSlug} />
+            <KanbanBoard
+              projectId={projectId}
+              wsSlug={wsSlug}
+              projSlug={projSlug}
+              headLead={<div data-testid="scale-ladder-slot" className="shrink-0"><ScaleLadder activeLevel="street" /></div>}
+            />
           </div>
         ) : (
           // 「갈래」보기 — story #2224 AC1(2026-07-31) 멀티레인 본체. 30일 안 변화 있는 목표
