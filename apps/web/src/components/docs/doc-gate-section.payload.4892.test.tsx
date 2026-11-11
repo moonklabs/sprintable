@@ -163,9 +163,12 @@ describe('결재 구역 — ds 부품 (story 4892)', () => {
     await mount('pending', [gate()]);
     expect(label().getAttribute('data-status')).toBe('needs-hand');
     expect(label().textContent).toContain(docs.docGatePending);
+    // readable without colour / icon: the approver's section says «내 결재가 필요해요» in text (screen readers), the waiting viewer's does not
+    expect(container.querySelector('section')!.textContent).toContain(docs.docGateNeedsYou);
     await act(async () => { root.unmount(); }); root = createRoot(container);
     await mount('pending', [gate({ can_approve: false })]);
     expect(label().getAttribute('data-status')).toBe('idle');
+    expect(container.querySelector('section')!.textContent).not.toContain(docs.docGateNeedsYou);
     await act(async () => { root.unmount(); }); root = createRoot(container);
     await mount('confirmed', [gate({ status: 'approved', can_approve: false, resolver_id: 'member-2', resolved_at: new Date().toISOString() })]);
     expect(label().getAttribute('data-status')).toBe('online');

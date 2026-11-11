@@ -351,6 +351,8 @@ export function DocGateSection({
       {meta ? (
         <div className="flex flex-wrap items-center gap-2">
           <StatusLabel status={statusKind} label={t(meta.labelKey)} className="shrink-0" />
+          {/* the state's difference must be readable without the colour / icon: a viewer who can approve hears «내 결재가 필요해요» after «검토 중» (a viewer who only waits does not) */}
+          {isApprover ? <span className="sr-only">{t('docGateNeedsYou')}</span> : null}
 
           {/* ③ pending + decider 자격자 = in-doc 승인/반려(반려는 사유 모달 경유). */}
           {isApprover ? (
