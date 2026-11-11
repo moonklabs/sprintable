@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createContext, Fragment, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 
 export interface ToastAction {
@@ -29,8 +29,11 @@ interface ToastProps {
   onDismiss: (id: string) => void;
 }
 
-function Toast({ item, onDismiss }: ToastProps) {
-  const t = useTranslations('common');
+/**
+ * 토스트 한 장의 수명 — 시간(5초, 되돌리기가 있으면 8초) · 붙잡기(포인터/초점) · 닫힌 까닭(onClose 한 번). 카드 모양과 따로 떼어, 옛 카드(아래 `Toast`)와
+ * 새 ds 카드(`components/ds/toast.tsx`)가 «같은 수명 코드»를 쓴다 — 타이머를 두 곳에 두지 않는다(UI-3 4886).
+ */
+export function useToastLifecycle(item: ToastItem, onDismiss: (id: string) => void) {
   // story #4345(유나 규격) — 포인터나 초점이 토스트 안에 있으면 안 닫힌다(읽고 «되돌리기»를 누르는 중에 사라지지 않게).
   // 떠나면 시간을 처음부터 다시 잰다.
   const [pointerInside, setPointerInside] = useState(false);
@@ -49,6 +52,18 @@ function Toast({ item, onDismiss }: ToastProps) {
     const timer = setTimeout(() => close('timeout'), item.action ? 8000 : 5000);
     return () => clearTimeout(timer);
   }, [item.id, item.action, held, close]);
+  const holdProps = {
+    onPointerEnter: () => setPointerInside(true),
+    onPointerLeave: () => setPointerInside(false),
+    onFocus: () => setFocusInside(true),
+    onBlur: (e: React.FocusEvent<HTMLElement>) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusInside(false); },
+  };
+  return { close, holdProps };
+}
+
+function Toast({ item, onDismiss }: ToastProps) {
+  const t = useTranslations('common');
+  const { close, holdProps } = useToastLifecycle(item, onDismiss);
 
   const borderColor = item.isHighlight
     ? 'border-l-4 border-l-brand'
@@ -80,10 +95,7 @@ function Toast({ item, onDismiss }: ToastProps) {
       // story #2969 §2 PR-4(doc proofline-system-layer-2969) — shadow-lg→--elev-overlay·
       // 나머지 3면 hairline을 proof-line-strong으로(좌측은 type별 색이 계속 덮어씀).
       className={`animate-slide-in rounded-lg border border-proof-line-strong bg-popover p-4 shadow-[var(--elev-overlay)] ${borderColor}`}
-      onPointerEnter={() => setPointerInside(true)}
-      onPointerLeave={() => setPointerInside(false)}
-      onFocus={() => setFocusInside(true)}
-      onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusInside(false); }}
+      {...holdProps}
     >
       <div className="flex items-start justify-between">
         {/* 유나 지적(error-display 폴리시) — 공백 없는 초장문(토큰·URL 등)이 토스트 폭을
@@ -183,9 +195,12 @@ export function useToast(): ToastContextValue {
 export function ToastContainer({
   toasts,
   onDismiss,
+  renderItem,
 }: {
   toasts: ToastItem[];
   onDismiss: (id: string) => void;
+  /** 카드 모양을 갈아 끼우는 자리(UI-3 4886 — ds 카드). 없으면 지금의 카드. 쌓는 구조(최신 한 장 shrink-0 · 오래된 것 서브스택)는 어느 카드든 같다. */
+  renderItem?: (item: ToastItem, onDismiss: (id: string) => void) => React.ReactNode;
 }) {
   if (toasts.length === 0) return null;
 
@@ -238,12 +253,12 @@ export function ToastContainer({
       <div className="shrink-0">
         {/* story #4345 — key로 토스트마다 제 인스턴스를(닫힘 · 붙잡기 상태가 다음 토스트로 새지 않게 — key가 없으면 새 토스트가 이 자리의
             옛 인스턴스를 물려받아 «이미 닫힘»이 남아 영영 안 닫혔다). */}
-        <Toast key={newest.id} item={newest} onDismiss={onDismiss} />
+        <Fragment key={newest.id}>{renderItem ? renderItem(newest, onDismiss) : <Toast item={newest} onDismiss={onDismiss} />}</Fragment>
       </div>
       {older.length > 0 && (
         <div className="flex min-h-0 flex-col-reverse gap-2 overflow-hidden">
           {olderNewestFirst.map((t) => (
-            <Toast key={t.id} item={t} onDismiss={onDismiss} />
+            <Fragment key={t.id}>{renderItem ? renderItem(t, onDismiss) : <Toast item={t} onDismiss={onDismiss} />}</Fragment>
           ))}
         </div>
       )}

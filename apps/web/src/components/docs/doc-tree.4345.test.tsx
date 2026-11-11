@@ -66,8 +66,8 @@ describe('DocTree 행 «⋮» · 끌기 손잡이([SID:4345])', () => {
   it('상수가 비거나 바뀌어도 잡히게 — 글자로 핀(터치 늘 보임 · 마우스만 숨김 · 행 호버 · 행 안 초점 · 제 초점 · citron 링)', () => {
     const { more } = renderTree();
     expect(tokens(more)).toEqual(expect.arrayContaining([
-      'opacity-100', 'pointer-fine:opacity-0', 'pointer-fine:group-hover:opacity-100',
-      'pointer-fine:group-focus-within:opacity-100', 'pointer-fine:focus-within:opacity-100',
+      'opacity-100', 'mouse:opacity-0', 'mouse:group-hover:opacity-100',
+      'mouse:group-focus-within:opacity-100', 'mouse:focus-within:opacity-100',
       'focus-visible:ring-3', 'focus-visible:ring-proof-citron',
       // PO · 유나 10:01Z — 누르는 자리 24×24(아이콘 그대로)
       'inline-flex', 'min-h-6', 'min-w-6', 'items-center', 'justify-center',

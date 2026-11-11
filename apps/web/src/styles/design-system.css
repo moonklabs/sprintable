@@ -79,8 +79,21 @@
   @media (pointer: coarse), (hover: none) {
     @slot;
   }
-  &:where([data-sprintable-shell="ios"] *, [data-sprintable-shell="android"] *) {
+  &:where(:root[data-sprintable-shell="ios"] *, :root[data-sprintable-shell="android"] *) {
     @slot;
+  }
+}
+
+/*
+ * `mouse:` 변형 — `touch:`의 «반대»: 정말 마우스 올림이 되는 곳(pointer fine 그리고 hover 가능, 앱 셸 밖)에서만 건다.
+ * 호버로만 드러나는 조작 요소(HOVER_REVEAL)의 «숨김»은 이 변형으로만 한다 — `pointer-fine:` 하나로 숨기면 에뮬 웹뷰 · 스타일러스 폰(pointer fine · hover none)과
+ * 앱 셸 안에서 올릴 마우스가 없는데도 숨은 채 영영 안 드러난다. 표지는 `:root`에 박힌 것만 읽는다(사용자 글 안의 요소가 같은 속성을 달아도 안 걸린다).
+ */
+@custom-variant mouse {
+  @media (pointer: fine) and (hover: hover) {
+    &:where(:not(:root[data-sprintable-shell="ios"] *, :root[data-sprintable-shell="android"] *)) {
+      @slot;
+    }
   }
 }
 

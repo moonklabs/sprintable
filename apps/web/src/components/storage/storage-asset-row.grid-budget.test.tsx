@@ -90,12 +90,12 @@ describe('스토리지 목록 행 — lg 미만 두 줄(story #4277 · 유나 �
 });
 
 describe('스토리지 목록 행 — 메뉴 버튼(story #4277 · 유나 판정)', () => {
-  it('⭐메뉴 이름은 «{name} 작업»(행 이름과 다름) · 호버 되는 기기(pointer-fine)만 숨김 — 그 밖엔 늘 보임', async () => {
+  it('⭐메뉴 이름은 «{name} 작업»(행 이름과 다름) · 호버 되는 곳(mouse:)만 숨김 — 그 밖엔 늘 보임', async () => {
     await renderRow(0);
     const trigger = container.querySelector('[aria-label$="작업"]') as HTMLElement;
     expect(trigger?.getAttribute('aria-label')).toBe('분기 보고서 최종본.pdf 작업');
     expect(trigger.className).toContain('opacity-100');
-    expect(trigger.className).toContain('pointer-fine:opacity-0');
+    expect(trigger.className).toContain('mouse:opacity-0');
     expect(trigger.className).not.toMatch(/(^|\s)(lg:)?opacity-0(\s|$)/);
   });
 });
