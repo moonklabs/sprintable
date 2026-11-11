@@ -264,6 +264,12 @@ describe('story #4274 — 탭 · 메뉴 목적지 loading.tsx 전수(v3 플래�
       writeFileSync(ds, "import { SkeletonGroup } from '@/components/ds/skeleton';\nexport default function Loading() { return <SkeletonGroup label={t('loading')}>x</SkeletonGroup>; }\n");
       const aliased = join(dir, 'aliased.tsx');   // the ds one imported under another name + a local one with the exempt name
       writeFileSync(aliased, "import { SkeletonGroup as DsSkeletonGroup } from '@/components/ds/skeleton';\nconst SkeletonGroup = ({ children }: { label: string; children: unknown }) => children;\nexport default function Loading() { return <SkeletonGroup label={t('loading')}>x</SkeletonGroup>; }\n");
+      const both = join(dir, 'both.tsx');   // the ds import (unaliased) + a local definition of the same name
+      writeFileSync(both, "import { SkeletonGroup } from '@/components/ds/skeleton';\nconst SkeletonGroup = ({ children }: { label: string; children: unknown }) => children;\nexport default function Loading() { return <SkeletonGroup label={t('loading')}>x</SkeletonGroup>; }\n");
+      const other = join(dir, 'other.tsx');   // same name from somewhere else, no local definition
+      writeFileSync(other, "import { SkeletonGroup } from './not-the-ds';\nexport default function Loading() { return <SkeletonGroup label={t('loading')}>x</SkeletonGroup>; }\n");
+      expect(announcesStatus(both)).toBe(false);
+      expect(announcesStatus(other)).toBe(false);
       expect(announcesStatus(aliased)).toBe(false);
       expect(announcesStatus(local)).toBe(false);
       expect(announcesStatus(ds)).toBe(true);
