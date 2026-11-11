@@ -239,6 +239,9 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   // lg (1024–1279): the list needs the width — the details column is not held open while nothing is chosen (a held-open column cut 23 of 24 one-line claims at 1024).
   // xl (1280+): the column stays, with its «pick a row» line.
   const isXl = useMediaQuery('(min-width: 1280px)');
+  // «lg only» (1024–1279) for the row's compact-actor fold. Media-query states update independently during a resize (isWide, isXl, isLgOnly each in its own effect), so any ONE of them can lag for a
+  // render: the fold therefore needs all three to agree with the column (open only when isWide && !isXl, and only while a row is chosen) — no glitch in either direction (lg → xl, lg → narrow).
+  const isLgOnly = useMediaQuery('(min-width: 1024px) and (max-width: 1279.99px)');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const detailRef = useRef<HTMLElement | null>(null);
   const rowRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -384,6 +387,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
                           item={item}
                           rowLabel={item.actor_id ? actorLabels.get(item.actor_id) : undefined}
                           selected={isSelected}
+                          compactActor={isLgOnly && isWide && !isXl && !!selected}   // lg (1024–1279) while the details column is open: the list is ~344px — names yield to the claim
                           controlsId={DETAIL_ID}
                           onToggle={(viaKeyboard) => toggleRow(item.id, viaKeyboard)}
                           buttonRef={(el) => { if (el) rowRefs.current.set(item.id, el); else rowRefs.current.delete(item.id); }}
@@ -460,10 +464,12 @@ export function auditActorProps(item: ActivityLogItem, t: (key: string) => strin
   return { human: { name, ...label, role: item.actor_type ?? 'human' } };
 }
 
-function ActivityRow({ item, rowLabel, selected, controlsId, onToggle, buttonRef }: {
+function ActivityRow({ item, rowLabel, selected, compactActor, controlsId, onToggle, buttonRef }: {
   item: ActivityLogItem;
   rowLabel?: string;
   selected: boolean;
+  /** the list column is narrow (the details column is open below xl): the row drops the actor's NAME text and keeps the avatar badge; the name stays in the overlay button's accessible name + title */
+  compactActor: boolean;
   controlsId: string;
   onToggle: (viaKeyboard: boolean) => void;
   buttonRef: (el: HTMLButtonElement | null) => void;
@@ -493,6 +499,7 @@ function ActivityRow({ item, rowLabel, selected, controlsId, onToggle, buttonRef
           now={time}
           human={human}
           agent={agent}
+          compactActor={compactActor}
         />
       </div>
       <Button

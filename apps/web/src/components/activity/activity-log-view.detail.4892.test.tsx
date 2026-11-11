@@ -11,9 +11,9 @@ import { ActivityLogView } from './activity-log-view';
 import { TopBarProvider } from '@/components/nav/top-bar-context';
 import koMessages from '../../../messages/ko.json';
 
-const { mq, tzMock } = vi.hoisted(() => ({ mq: { wide: true, xl: true }, tzMock: { value: 'UTC' as string | null } }));
+const { mq, tzMock } = vi.hoisted(() => ({ mq: { wide: true, xl: true, lgOnly: null as boolean | null }, tzMock: { value: 'UTC' as string | null } }));
 // two queries: lg (min-width 1024) and xl (min-width 1280)
-vi.mock('@/lib/use-media-query', () => ({ useMediaQuery: (q: string) => (q.includes('1280') ? mq.xl : mq.wide) }));
+vi.mock('@/lib/use-media-query', () => ({ useMediaQuery: (q: string) => (q.includes('max-width') ? (mq.lgOnly ?? (mq.wide && !mq.xl)) : q.includes('1280') ? mq.xl : mq.wide) }));   // `lgOnly` overrides the derived value: a media-query state can lag for a render during a resize
 // the viewer's zone decides which day a row is on — pin it so the test does not depend on the machine's zone
 vi.mock('@/components/viewer-time-zone', () => ({ useViewerTimeZone: () => tzMock.value }));
 const fetchWithAuthMock = vi.fn();
@@ -41,6 +41,7 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   mq.wide = true;
   mq.xl = true;
+  mq.lgOnly = null;
   tzMock.value = 'UTC';
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -408,3 +409,115 @@ describe('ActivityLogView — 상세의 «행위자» 줄이 사람과 에이전
   });
 });
 
+
+// lg (1024–1279) while the details column is open, the list is ~344px: the row drops the actor's NAME text (the avatar badge stays) so the claim keeps its room. The name is not lost: the row's
+// overlay button (its accessible name and title) still says «actor · claim · time», and the details column names the actor. Closed, xl and narrow rows keep the name.
+describe('ActivityLogView — lg에서 상세 칸이 열린 동안만 행위자 이름 글자를 접는다 (4892)', () => {
+  const visibleLayer = (i: number) => (container.querySelectorAll('[data-selected] > div[inert]')[i] as HTMLElement);
+
+  it('⭐lg + a row chosen: every row\'s visible layer loses EXACTLY the name text (badge and time stay); the overlay button still names the actor', async () => {
+    mq.xl = false;
+    await mount();
+    const before = ITEMS.map((_, i) => visibleLayer(i).textContent ?? '');
+    expect(before[0]).toContain('안나');                                 // before choosing: the name is there
+    await click(rows()[0]!);
+    for (let i = 0; i < rows().length; i += 1) {
+      const after = visibleLayer(i).textContent ?? '';
+      expect(after, `row ${i}`).not.toContain('안나');
+      // exactly the name is gone — the claim, the time chunk and everything else are as before
+      expect(after.replace(/\s+/g, ''), `row ${i} rest`).toBe(before[i]!.replace('안나', '').replace(/\s+/g, ''));
+      expect(visibleLayer(i).querySelector('[aria-label="안나"]'), `row ${i} badge`).not.toBeNull();   // the avatar badge stays and carries the name
+      expect(rows()[i]!.getAttribute('aria-label'), `row ${i} name`).toContain('안나');
+      expect(rows()[i]!.getAttribute('title'), `row ${i} title`).toContain('안나');
+    }
+    expect(detail()!.textContent).toContain('안나');                     // and the details column names the actor
+  });
+
+  it('an agent row folds the same way (the agent badge keeps the name), a system row (no actor) is unchanged', async () => {
+    mq.xl = false;
+    fetchWithAuthMock.mockImplementation(async (url: string) => {
+      if (url.includes('/api/members')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      const items = [row('ag', '2026-11-10T08:00:00Z', { actor_type: 'agent', actor_name: '디버거', actor_id: 'a1' }), row('sys', '2026-11-10T07:00:00Z', { actor_id: null, actor_name: null, actor_type: 'human' })];
+      return { ok: true, status: 200, json: async () => ({ data: { items, total: 2, limit: 30, offset: 0 } }) };
+    });
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC">
+          <TopBarProvider><ActivityLogView projectId="p1" /></TopBarProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(visibleLayer(0).textContent).toContain('디버거');
+    const sysBefore = visibleLayer(1).textContent;
+    await click(rows()[0]!);
+    expect(visibleLayer(0).textContent).not.toContain('디버거');
+    expect(visibleLayer(0).querySelector('[aria-label="디버거"]')).not.toBeNull();
+    expect(rows()[0]!.getAttribute('aria-label')).toContain('디버거');
+    expect(visibleLayer(1).textContent).toBe(sysBefore);                  // no actor → nothing to fold
+  });
+
+  it('⭐closing the column brings the names back (the list is full width again)', async () => {
+    mq.xl = false;
+    await mount();
+    await click(rows()[0]!);
+    expect(visibleLayer(0).textContent).not.toContain('안나');
+    await click(rows()[0]!);                                         // choose the same row again → the column closes
+    expect(container.querySelector('aside')).toBeNull();
+    expect(visibleLayer(0).textContent).toContain('안나');
+  });
+
+  const rerender = async () => {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC">
+          <TopBarProvider><ActivityLogView projectId="p1" /></TopBarProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+  };
+
+  it('⭐resize glitch lg → xl: the «lg only» state still says true for a render while isXl is already true → the names are NOT folded (the column sits beside a wide list)', async () => {
+    mq.xl = false;
+    await mount();
+    await click(rows()[0]!);
+    expect(visibleLayer(0).textContent).not.toContain('안나');   // lg + chosen: folded
+    mq.xl = true; mq.lgOnly = true;                               // xl arrives first, the lg-only query lags
+    await rerender();
+    expect(visibleLayer(0).textContent).toContain('안나');
+  });
+
+  it('⭐resize glitch lg → narrow: «lg only» lags while isWide is already false → the names are NOT folded (the details moved under the row, the list is full width)', async () => {
+    mq.xl = false;
+    await mount();
+    await click(rows()[0]!);
+    expect(visibleLayer(0).textContent).not.toContain('안나');
+    mq.wide = false; mq.lgOnly = true;
+    await rerender();
+    expect(visibleLayer(0).textContent).toContain('안나');
+  });
+
+  it('⭐resize glitch narrow → xl: isWide is already true and isXl still false (lagging), but the «lg only» query already says false → the names are NOT folded', async () => {
+    mq.wide = false; mq.xl = false;
+    await mount();
+    await click(rows()[0]!);                                      // narrow: details under the row, names kept
+    mq.wide = true; mq.xl = false; mq.lgOnly = false;             // the width jumped to >= 1280: isWide updated, isXl lags, the lg-only query is already false
+    await rerender();
+    expect(visibleLayer(0).textContent).toContain('안나');
+  });
+
+  it('xl keeps the names while a row is chosen (the details column is beside a wide list)', async () => {
+    mq.xl = true;
+    await mount();
+    await click(rows()[0]!);
+    expect(visibleLayer(0).textContent).toContain('안나');
+  });
+
+  it('narrow (< lg) keeps the names while a row is chosen (the details open under the row, the list stays full width)', async () => {
+    mq.wide = false;
+    mq.xl = false;
+    await mount();
+    await click(rows()[0]!);
+    expect(visibleLayer(0).textContent).toContain('안나');
+  });
+});

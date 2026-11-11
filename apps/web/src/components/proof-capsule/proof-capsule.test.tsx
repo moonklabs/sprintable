@@ -233,6 +233,26 @@ describe('ProofCapsule (안티패턴 자체 체크 — 도크트린 준수 회�
   });
 });
 
+describe('ProofCapsule audit density — compactActor (story 4892)', () => {
+  it('⭐compactActor drops the actor NAME text from the time chunk but keeps the avatar badge; without it the name stays', () => {
+    const full = renderWithIntl(<ProofCapsule {...BASE} density="audit" now="3일 전" human={{ name: '유나', role: '' }} />);
+    const compact = renderWithIntl(<ProofCapsule {...BASE} density="audit" now="3일 전" human={{ name: '유나', role: '' }} compactActor />);
+    expect(full).toContain('3일 전 유나');                        // the time chunk carries the name…
+    expect(compact).not.toContain('3일 전 유나');                 // …and with compactActor it does not
+    expect(compact).toContain('3일 전');                          // the time stays
+    expect(compact).toContain('aria-label="유나"');               // the avatar badge is still drawn and still carries the actor's name as its accessible name
+    expect(full).toContain('aria-label="유나"');
+  });
+
+  it('compactActor does nothing for the other densities', () => {
+    for (const density of ['full', 'card', 'row'] as const) {
+      const a = renderWithIntl(<ProofCapsule {...BASE} density={density} human={{ name: '유나', role: '' }} />);
+      const b = renderWithIntl(<ProofCapsule {...BASE} density={density} human={{ name: '유나', role: '' }} compactActor />);
+      expect(b, density).toBe(a);
+    }
+  });
+});
+
 describe('ProofCapsule (human optional — Board card 확산, bf9037cb) — 다중 담당자 등 human 필드로 표현 안 되는 실 기능을 위한 완화', () => {
   it('renders full/audit density without a human prop, omitting the human-dependent UI instead of crashing or leaking "undefined"', () => {
     for (const density of ['full', 'audit'] as const) {
