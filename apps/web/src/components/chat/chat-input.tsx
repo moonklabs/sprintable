@@ -9,6 +9,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { Button } from '@/components/ui/button';
 import { IconButton } from '@/components/ds/icon-button';
+import { Chip } from '@/components/ds/chip';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -756,66 +757,61 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           0, doc §4 "참가자로 한정"), work item 피커=workItemPicker(useEntityPicker 독립
           인스턴스) 검색 결과 목록. */}
       {steerMode && (
-        <div className="mb-2 space-y-1.5 rounded-lg border border-info/30 bg-info/8 p-2">
-          <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
-            <Compass className="h-3.5 w-3.5 shrink-0 text-info" aria-hidden />
-            {t('steerPanelTitle')}
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {/* 조종 패널은 info 색 면(bg-info/8) 안이라 두 칸 모두 불투명 면을 남긴다(부품은 투명 · dark:bg-input/30). */}
-            <Select
-              aria-label={t('steerPanelTargetLabel')}
-              value={steerTargetId}
-              onChange={(e) => setSteerTargetId(e.target.value)}
-              className="h-auto min-w-0 flex-1 bg-background px-2 py-1 lg:text-xs dark:bg-background"
-            >
-              <option value="">{t('steerPanelTargetPlaceholder')}</option>
-              {steerTargets.map((p) => (
-                // story #3203(카디르 QA 블로킹) — BE가 orphan participant.name을 이제 null로
-                // 실어보낸다(예전엔 uuid 앞 8자였으나 그마저 없어짐) — p.member_id 그대로 쓰면
-                // 36자 uuid 전체가 노출된다(예전보다 더 심함). 사람 언어 폴백으로 통일. story
-                // #3758(9번째) — resolved 비트로 갈라 그린다(participantDisplayLabel).
-                <option key={p.member_id} value={p.member_id}>{participantDisplayLabel(p, tc)}</option>
-              ))}
-            </Select>
-            <div className="relative min-w-0 flex-1">
-              <Input
-                type="text"
-                value={steerWorkItem ? steerWorkItem.title : steerWorkItemQuery}
-                onChange={(e) => {
-                  setSteerWorkItem(null);
-                  setSteerWorkItemQuery(e.target.value);
-                  workItemPicker.setEntityQuery(e.target.value);
-                }}
-                onFocus={() => { if (!steerWorkItem) workItemPicker.setEntityQuery(steerWorkItemQuery); }}
-                placeholder={t('steerPanelWorkItemPlaceholder')}
-                aria-label={t('steerPanelWorkItemLabel')}
-                className="h-auto bg-background px-2 py-1 lg:text-xs dark:bg-background"
-              />
-              {/* story #3000 로드맵 PR-B(L1) — 이 파일의 floating 드롭다운 4곳(작업항목·커맨드·
-                  멘션·엔티티 후보) 전부 --elev-overlay(오버레이 전용) 토큰으로 통일. */}
-              {workItemPicker.entityResults.length > 0 && (
-                <ul role="listbox" aria-label={t('steerPanelWorkItemLabel')} className="focus-inset absolute top-full left-0 z-50 mt-1 max-h-40 w-full overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
-                  {workItemPicker.entityResults.map((ent) => (
-                    <li key={`${ent.entity_type}:${ent.entity_id}`}>
-                      <button
-                        type="button"
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          setSteerWorkItem({ entity_type: ent.entity_type, entity_id: ent.entity_id, title: ent.title });
-                          setSteerWorkItemQuery('');
-                          workItemPicker.close();
-                        }}
-                        className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-xs text-foreground hover:bg-muted"
-                      >
-                        <span className="shrink-0 text-muted-foreground">{domainLabels.entityTypeLabel(ent.entity_type) ?? entityTypeLabel(ent.entity_type)}</span>
-                        <span className="truncate">{ent.title}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+        // story 4887 (UI-4 P5-b · AC3 «지시 대상 이름표 칩»): the steer panel (an info-coloured box: a title row, then the controls under it) is ONE chip strip — the «조종» chip, then the target and the work item on the same line (they wrap on a narrow screen). The same controls, the same data, the same `preset.steer.instruct` event: only the place and the shape changed.
+        <div role="group" aria-label={t('steerPanelTitle')} data-testid="steer-strip" className="mb-2 flex flex-wrap items-center gap-1.5">
+          <Chip tone="info" icon="explore" aria-hidden="true" data-testid="steer-chip">{t('steerPanelTitle')}</Chip>
+          <Select
+            aria-label={t('steerPanelTargetLabel')}
+            value={steerTargetId}
+            onChange={(e) => setSteerTargetId(e.target.value)}
+            className="h-auto min-w-[7rem] flex-1 border-ds-line-control bg-ds-surface-sunk dark:bg-ds-surface-sunk px-2 py-1 lg:text-xs"
+          >
+            <option value="">{t('steerPanelTargetPlaceholder')}</option>
+            {steerTargets.map((p) => (
+              // story #3203(카디르 QA 블로킹) — BE가 orphan participant.name을 이제 null로
+              // 실어보낸다(예전엔 uuid 앞 8자였으나 그마저 없어짐) — p.member_id 그대로 쓰면
+              // 36자 uuid 전체가 노출된다(예전보다 더 심함). 사람 언어 폴백으로 통일. story
+              // #3758(9번째) — resolved 비트로 갈라 그린다(participantDisplayLabel).
+              <option key={p.member_id} value={p.member_id}>{participantDisplayLabel(p, tc)}</option>
+            ))}
+          </Select>
+          <div className="relative min-w-[7rem] flex-1">
+            <Input
+              type="text"
+              value={steerWorkItem ? steerWorkItem.title : steerWorkItemQuery}
+              onChange={(e) => {
+                setSteerWorkItem(null);
+                setSteerWorkItemQuery(e.target.value);
+                workItemPicker.setEntityQuery(e.target.value);
+              }}
+              onFocus={() => { if (!steerWorkItem) workItemPicker.setEntityQuery(steerWorkItemQuery); }}
+              placeholder={t('steerPanelWorkItemPlaceholder')}
+              aria-label={t('steerPanelWorkItemLabel')}
+              className="h-auto border-ds-line-control bg-ds-surface-sunk dark:bg-ds-surface-sunk px-2 py-1 lg:text-xs"
+            />
+            {/* story #3000 로드맵 PR-B(L1) — 이 파일의 floating 드롭다운 4곳(작업항목·커맨드·
+                멘션·엔티티 후보) 전부 --elev-overlay(오버레이 전용) 토큰으로 통일. */}
+            {workItemPicker.entityResults.length > 0 && (
+              <ul role="listbox" aria-label={t('steerPanelWorkItemLabel')} className="focus-inset absolute top-full left-0 z-50 mt-1 max-h-40 w-full overflow-y-auto rounded-md border border-border bg-popover shadow-[var(--elev-overlay)]">
+                {workItemPicker.entityResults.map((ent) => (
+                  <li key={`${ent.entity_type}:${ent.entity_id}`}>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        setSteerWorkItem({ entity_type: ent.entity_type, entity_id: ent.entity_id, title: ent.title });
+                        setSteerWorkItemQuery('');
+                        workItemPicker.close();
+                      }}
+                      className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-xs text-foreground hover:bg-muted"
+                    >
+                      <span className="shrink-0 text-muted-foreground">{domainLabels.entityTypeLabel(ent.entity_type) ?? entityTypeLabel(ent.entity_type)}</span>
+                      <span className="truncate">{ent.title}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </div>
       )}
