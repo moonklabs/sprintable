@@ -458,7 +458,8 @@ export function DocGateSection({
               <Icon name="gpp_bad" size={16} className="shrink-0 text-ds-failed" />
               {t('docGateRejectModalTitle')}
             </DialogTitle>
-            <Field label={t('docGateRejectReasonLabel')}>
+            {/* the label is a Korean sentence line: it breaks by word (story 4363 guard) */}
+            <Field label={<span className="break-keep">{t('docGateRejectReasonLabel')}</span>}>
               {(control) => (
                 <Textarea
                   {...control}
