@@ -472,7 +472,8 @@ describe('story 4855 — the platform keeps the long press on the text; the «�
     // the class names are only text until Tailwind turns them into CSS: compile the button's own classes with the design system's own `touch` variant and read the media rule back
     const { readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
-    const ds = readFileSync(join(process.cwd(), 'src/styles/design-system.css'), 'utf8');
+    // relative to THIS file, not to the working directory (CI runs from the repository root, a developer from apps/web)
+    const ds = readFileSync(join(__dirname, '../../styles/design-system.css'), 'utf8');
     const variant = /@custom-variant touch \{[\s\S]*?\n\}/.exec(ds)?.[0];
     expect(variant, 'the touch variant is defined in design-system.css').toBeTruthy();
     const { compile } = await import('tailwindcss');

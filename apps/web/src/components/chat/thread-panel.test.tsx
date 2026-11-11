@@ -206,6 +206,22 @@ describe('ThreadPanel — the thread head (story 4887 · approved layout)', () =
     expect(container.textContent).not.toContain('›');
   });
 
+  it('⭐ EVERY reply is a plain row — a person\'s and my own too: no bubble fill, left-aligned (not only the agent\'s)', async () => {
+    const replies = [
+      { id: 'p1', created_by: 'human-2', sender: { id: 'human-2', name: '지우', type: 'human' }, content: '사람 답글', created_at: '2026-08-08T00:01:00.000Z' },
+      { id: 'p2', created_by: 'member-1', sender: { id: 'member-1', name: '나', type: 'human' }, content: '내 답글', created_at: '2026-08-08T00:02:00.000Z' },
+    ];
+    await mountWith(parentMessage, replies);
+    const texts = [...container.querySelectorAll('[data-testid="thread-replies"] [data-testid="chat-bubble-text"]')] as HTMLElement[];
+    expect(texts).toHaveLength(2);
+    for (const el of texts) {
+      expect(el.className, 'no bubble fill').not.toMatch(/bg-proof|rounded-xl/); // reverted (a person gets the grey bubble, I get the blue one) → fails
+      expect(el.getAttribute('data-bubble')).toBe('plain');
+    }
+    const rows = [...container.querySelectorAll('[data-testid="thread-replies"] .group\\/bubble')] as HTMLElement[];
+    expect(rows.some((r) => r.className.includes('flex-row-reverse')), 'my reply is not pushed to the right').toBe(false);
+  });
+
   it('⭐ the close button and the phone back arrow both call onClose', async () => {
     const onClose = vi.fn();
     await mountWith(parentMessage, [], onClose);
