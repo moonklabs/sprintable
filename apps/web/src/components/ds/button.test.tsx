@@ -37,16 +37,16 @@ describe('ds Button', () => {
   it('기본은 보조 · 크기 28(md) / 36(lg)', async () => {
     await act(async () => { root.render(<Button>기본</Button>); });
     expect(btn().className).toContain('border-ds-line-control');
-    expect(btn().className).toContain('h-7');
+    expect(btn().className).toContain('h-ds-control-sm');
     await act(async () => { root.render(<Button size="lg">큰</Button>); });
-    expect(btn().className).toContain('h-9');
+    expect(btn().className).toContain('h-ds-control');
   });
 
   it('초점 링은 action 2px · 폰은 누름 영역 44 이상', async () => {
     await act(async () => { root.render(<Button>확인</Button>); });
     expect(btn().className).toContain('focus-visible:ring-2');
     expect(btn().className).toContain('focus-visible:ring-ds-action');
-    expect(btn().className).toContain('touch:min-h-11');
+    expect(btn().className).toContain('touch:min-h-ds-touch');
   });
 
   it('비활성은 disabled + 점선 윤곽 + 글 ink-3(색만으로 비활성을 말하지 않는다)', async () => {

@@ -82,8 +82,8 @@ describe('ds Calendar — 격자', () => {
 
   it('⭐높이 32 · 폰(touch)은 44 — 폰은 칸이 열 너비를 채운다', async () => {
     await render(<Calendar {...base} />);
-    expect(has(cell('2026-11-11'), 'h-8')).toBe(true);
-    expect(has(cell('2026-11-11'), 'touch:h-11')).toBe(true);
+    expect(has(cell('2026-11-11'), 'h-ds-compact')).toBe(true);
+    expect(has(cell('2026-11-11'), 'touch:h-ds-touch')).toBe(true);
     expect(has(cell('2026-11-11'), 'touch:w-full')).toBe(true);
     expect(has(container.firstElementChild!, 'touch:w-72')).toBe(true);
   });

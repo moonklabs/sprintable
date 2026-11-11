@@ -33,7 +33,7 @@ describe('ds NativeSelect', () => {
   it('Input과 같은 모양: 높이 36 · sunk · line-control 경계 · 초점 action · 폰 16px / lg 13', async () => {
     await render(<NativeSelect aria-label="역할"><option>x</option></NativeSelect>);
     const cls = sel().className;
-    expect(cls).toContain('h-9');
+    expect(cls).toContain('h-ds-control');
     expect(cls).toContain('bg-ds-surface-sunk');
     expect(cls).toMatch(/(^|\s)border-ds-line-control(\s|$)/);
     expect(cls).toContain('focus-visible:ring-ds-action');
@@ -43,8 +43,8 @@ describe('ds NativeSelect', () => {
 
   it('⭐폰(coarse 포인터)은 칸 높이 44 — 평소 36(h-9)은 그대로', async () => {
     await render(<NativeSelect aria-label="역할"><option>x</option></NativeSelect>);
-    expect(sel().className).toContain('h-9');
-    expect(sel().className).toContain('touch:h-11');
+    expect(sel().className).toContain('h-ds-control');
+    expect(sel().className).toContain('touch:h-ds-touch');
   });
 
   it('⭐열리는 칸 표시(expand_more)는 장식이고 클릭을 가로채지 않는다', async () => {

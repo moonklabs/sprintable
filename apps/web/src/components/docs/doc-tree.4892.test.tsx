@@ -84,10 +84,10 @@ describe('폴더 보기 — 줄 = ds TreeRow (4892)', () => {
     expect(ctl('f2').querySelector('[data-icon="folder"]')).not.toBeNull();                         // 접힌 폴더 = 닫힌 폴더 아이콘
   });
 
-  it('⭐줄 높이 36 · 폰 44(ds Button이 쥔 touch:min-h-11을 줄이 지우지 않음) · 줄 사이 틈 0(끌기 복제 이동량 36과 한 쌍)', async () => {
+  it('⭐줄 높이 36 · 폰 44(ds Button이 쥔 touch:min-h-ds-touch를 줄이 지우지 않음) · 줄 사이 틈 0(끌기 복제 이동량 36과 한 쌍)', async () => {
     await mountTree();
     const cls = ctl('d1').className.split(/\s+/);
-    expect(cls).toEqual(expect.arrayContaining(['min-h-9', 'touch:min-h-11']));
+    expect(cls).toEqual(expect.arrayContaining(['min-h-ds-control', 'touch:min-h-ds-touch']));
     expect(cls).not.toContain('min-h-0');
     expect(container.querySelector('nav')!.className).not.toContain('space-y');
     expect(treeSource).toMatch(/transform\.y \+ 36/);

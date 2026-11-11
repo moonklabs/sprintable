@@ -54,7 +54,7 @@ describe('ds StatusLabel', () => {
   it('일하는 중 점은 motion-safe로만 깜빡이고 action 색이다 · 손 필요 글만 호박색', async () => {
     await render(<StatusLabel status="working" label="일하는 중" />);
     const dot = el().querySelector('[data-mark="pulse"]') as HTMLElement;
-    expect(dot.className).toContain('motion-safe:animate-pulse');
+    expect(dot.className).toContain('motion-safe:animate-ds-pulse');
     expect(dot.className).toContain('bg-ds-action');
     expect(el().className).not.toContain('needs-hand');
     await render(<StatusLabel status="needs-hand" label="손 필요" />);

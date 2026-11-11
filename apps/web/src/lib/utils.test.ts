@@ -59,3 +59,33 @@ describe('cn() — ds 글자 눈금이 text-color와 공존한다', () => {
     expect(cn('text-ds-small', 'text-ds-body')).toBe('text-ds-body');
   });
 });
+
+// UI-3(a9d56577) 밀도 · 그림자 · 움직임 토큰(design-system.css `@theme`)이 cn()에서 «올바른 충돌군»에 든다.
+// 안 알리면 `h-ds-control`을 호출부의 `h-8`이 못 덮거나(둘 다 남음) 다른 축의 클래스를 지운다.
+describe('cn() — ds 밀도 · 그림자 · 움직임 토큰(UI-3)', () => {
+  it('⭐밀도: 같은 축끼리는 뒤가 이기고(높이 · 최소 높이 · 정사각), 다른 축과는 공존한다', () => {
+    expect(cn('h-ds-control', 'h-8')).toBe('h-8');
+    expect(cn('h-8', 'h-ds-control')).toBe('h-ds-control');
+    expect(cn('h-ds-control touch:h-ds-touch', 'h-8')).toBe('touch:h-ds-touch h-8');
+    expect(cn('min-h-ds-compact', 'min-h-0')).toBe('min-h-0');
+    expect(cn('size-ds-control-sm', 'size-10')).toBe('size-10');
+    expect(cn('h-ds-control', 'min-h-ds-touch')).toBe('h-ds-control min-h-ds-touch');
+    expect(cn('touch:min-h-ds-touch', 'touch:min-h-0')).toBe('touch:min-h-0');
+    expect(cn('touch:h-ds-touch', 'touch:h-11')).toBe('touch:h-11');
+  });
+
+  it('⭐그림자: ds 그림자끼리 · 기본 그림자와는 충돌하고, 글자색 · 테두리색과는 공존한다', () => {
+    expect(cn('shadow-ds-popup', 'shadow-none')).toBe('shadow-none');
+    expect(cn('shadow-ds-popup', 'shadow-ds-overlay')).toBe('shadow-ds-overlay');
+    expect(cn('shadow-md', 'shadow-ds-popup')).toBe('shadow-ds-popup');
+    expect(cn('shadow-ds-popup', 'text-ds-ink', 'border-ds-line')).toBe('shadow-ds-popup text-ds-ink border-ds-line');
+  });
+
+  it('⭐움직임: animate-ds-pulse는 다른 animate와 충돌하고 transition과 공존한다', () => {
+    expect(cn('animate-ds-pulse', 'animate-none')).toBe('animate-none');
+    expect(cn('animate-ds-pulse', 'transition-colors')).toBe('animate-ds-pulse transition-colors');
+    expect(cn('animate-ds-slide-in', 'animate-none')).toBe('animate-none');
+    expect(cn('animate-ds-slide-in', 'motion-reduce:animate-none')).toBe('animate-ds-slide-in motion-reduce:animate-none');
+    expect(cn('duration-(--ds-duration-fast)', 'duration-300')).toBe('duration-300');
+  });
+});

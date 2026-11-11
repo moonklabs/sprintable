@@ -28,10 +28,10 @@ export function PanelContent({ className, children, ...props }: PanelContentProp
         data-slot="ds-panel"
         data-close-button=""
         className={cn(
-          'group/dialog fixed z-50 flex flex-col bg-ds-surface-raised text-ds-body text-ds-ink shadow-xl outline-none',
+          'group/dialog fixed z-50 flex flex-col bg-ds-surface-raised text-ds-body text-ds-ink shadow-ds-overlay outline-none',
           'inset-x-0 bottom-0 max-h-[92dvh] rounded-t-ds-panel border-t border-ds-line-control',
           'lg:inset-y-0 lg:right-0 lg:left-auto lg:max-h-none lg:w-100 lg:rounded-none lg:border-t-0 lg:border-l',
-          'duration-100 motion-reduce:duration-0 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0',
+          'duration-(--ds-duration-fast) motion-reduce:duration-(--ds-duration-instant) data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0',
           className,
         )}
         {...props}

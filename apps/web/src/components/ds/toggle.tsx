@@ -22,7 +22,7 @@ export function Toggle({ label, onText, offText, className, checked, defaultChec
   const [inner, setInner] = useState(!!defaultChecked);
   const on = checked ?? inner;
   return (
-    <label data-slot="ds-toggle-field" className={cn('inline-flex min-h-7 cursor-pointer items-center gap-2 text-ds-body text-ds-ink touch:min-h-11 has-data-disabled:cursor-not-allowed has-data-disabled:text-ds-ink-3', className)}>
+    <label data-slot="ds-toggle-field" className={cn('inline-flex min-h-ds-control-sm cursor-pointer items-center gap-2 text-ds-body text-ds-ink touch:min-h-ds-touch has-data-disabled:cursor-not-allowed has-data-disabled:text-ds-ink-3', className)}>
       <SwitchPrimitive.Root
         data-slot="ds-toggle"
         aria-labelledby={labelId}
@@ -36,7 +36,7 @@ export function Toggle({ label, onText, offText, className, checked, defaultChec
         className="group/toggle relative inline-flex h-4 w-7 shrink-0 items-center rounded-full border border-ds-line-control bg-ds-surface-sunk outline-none focus-visible:ring-2 focus-visible:ring-ds-action focus-visible:ring-offset-1 focus-visible:ring-offset-ds-background data-checked:border-ds-action data-checked:bg-ds-action data-disabled:cursor-not-allowed data-disabled:border-dashed data-disabled:bg-transparent data-disabled:data-checked:border-ds-line-control data-disabled:data-checked:bg-transparent"
         {...props}
       >
-        <SwitchPrimitive.Thumb className="pointer-events-none block size-3 translate-x-0.5 rounded-full bg-ds-ink-2 transition-transform duration-100 motion-reduce:transition-none data-checked:translate-x-3.5 data-checked:bg-ds-on-action group-data-[disabled]/toggle:bg-ds-ink-3 group-data-[disabled]/toggle:data-checked:bg-ds-ink-3" />
+        <SwitchPrimitive.Thumb className="pointer-events-none block size-3 translate-x-0.5 rounded-full bg-ds-ink-2 transition-transform duration-(--ds-duration-fast) motion-reduce:transition-none data-checked:translate-x-3.5 data-checked:bg-ds-on-action group-data-[disabled]/toggle:bg-ds-ink-3 group-data-[disabled]/toggle:data-checked:bg-ds-ink-3" />
       </SwitchPrimitive.Root>
       <span id={labelId}>{label}</span>
       <span data-slot="ds-toggle-state" aria-hidden="true" className="font-mono text-ds-mono-md text-ds-ink-3">

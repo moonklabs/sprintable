@@ -119,17 +119,17 @@ describe('ListStoryComposer', () => {
     await act(async () => { root.render(wrap(<ListStoryComposer onCreate={vi.fn()} />)); });
     const opener = entry()!;
     expect(opener.getAttribute('data-slot')).toBe('ds-button');
-    expect(opener.className.split(/\s+/)).toEqual(expect.arrayContaining(['touch:min-h-11', 'touch:min-w-11']));
+    expect(opener.className.split(/\s+/)).toEqual(expect.arrayContaining(['touch:min-h-ds-touch', 'touch:min-w-ds-touch']));
     await act(async () => { opener.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const buttons = [...container.querySelectorAll('[data-testid="list-story-composer"] button')];
     expect(buttons.map((b) => b.textContent)).toEqual([koMessages.board.addStorySubmit, koMessages.board.addStoryCancel]);
     for (const b of buttons) {
       expect(b.getAttribute('data-slot'), b.textContent ?? '').toBe('ds-button');
-      expect(b.className.split(/\s+/), b.textContent ?? '').toContain('touch:min-h-11');
+      expect(b.className.split(/\s+/), b.textContent ?? '').toContain('touch:min-h-ds-touch');
     }
     expect(input()!.getAttribute('data-slot')).toBe('ds-input');
     // 호출부가 따로 얹은 옛 클래스(touch:min-h-11)가 아니라 ds Input이 쥔 44(touch:h-11)를 본다 — ds가 잃으면 RED.
-    expect(input()!.className.split(/\s+/)).toContain('touch:h-11');
+    expect(input()!.className.split(/\s+/)).toContain('touch:h-ds-touch');
   });
 
   it('취소 단추도 닫기만 한다', async () => {

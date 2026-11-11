@@ -114,7 +114,7 @@ describe('스프린트 상세 패널 번다운 — ds 부품(story #4888)', () =
     expect(link).toBeTruthy();
     expect(link.getAttribute('data-slot')).toBe('ds-button');
     expect(link.getAttribute('href')).toContain('/docs?id=doc-9');
-    expect(link.className.split(/\s+/)).toContain('touch:min-h-11');
+    expect(link.className.split(/\s+/)).toContain('touch:min-h-ds-touch');
   });
 
   it('⭐리포트가 없는 스프린트(report_doc_id 없음)에는 상세 안 «리포트 보기»가 없다 — 예전과 같은 조건', async () => {

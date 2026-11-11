@@ -22,6 +22,10 @@ const twMerge = extendTailwindMerge({
         // UI-3(a9d56577) 새 글자 눈금 — 같은 이유로 크기 축에 알려준다(안 그러면 `cn('text-ds-ink', 'text-ds-small')`가 글자색을 지운다).
         'ds-title', 'ds-card-title', 'ds-body', 'ds-small', 'ds-mono-lg', 'ds-mono-md', 'ds-mono-sm',
       ],
+      // UI-3(a9d56577) 밀도 · 그림자 · 움직임 토큰(design-system.css `@theme`) — 안 알리면 `cn('h-ds-control', 'h-8')`처럼 호출부의 덮어쓰기가 조용히 안 먹는다.
+      'spacing': ['ds-control-sm', 'ds-compact', 'ds-control', 'ds-touch', 'ds-control-xl', 'ds-row'],
+      'shadow': ['ds-popup', 'ds-overlay'],
+      'animate': ['ds-pulse', 'ds-slide-in'],
     },
   },
 })

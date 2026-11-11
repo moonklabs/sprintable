@@ -23,6 +23,16 @@ export type Env = {
 
 const CSS_SOURCE = readFileSync(resolve(__dirname, '../styles/design-system.css'), 'utf-8');
 
+/** design-system.css `@theme`의 밀도 토큰(`--spacing-ds-*: <rem>`) — 소스 그대로. */
+const SPACING_TOKENS: Record<string, string> = Object.fromEntries([...CSS_SOURCE.matchAll(/--spacing-(ds-[a-z-]+):\s*([\d.]+)rem;/g)].map((m) => [m[1]!, m[2]!]));
+
+/** 밀도 토큰 이름(`ds-touch` 등)을 px로(1rem = 16px). 모르는 이름이면 던진다. */
+export function spacingTokenPx(name: string): number {
+  const rem = SPACING_TOKENS[name];
+  if (rem === undefined) throw new Error(`design-system.css에 --spacing-${name}이 없다`);
+  return Number(rem) * 16;
+}
+
 /** `@custom-variant <name> { … }` 블록을 CSS 소스에서 그대로 꺼낸다. */
 export function variantBlock(name: string): string {
   const start = CSS_SOURCE.indexOf(`@custom-variant ${name} `);
@@ -101,7 +111,8 @@ export type Probe = { classes: Map<string, Decl[]>; order: string[] };
 
 /** 클래스들을 컴파일해 («읽을 속성»만) 기기 꼴 판정용 색인을 만든다. 변형 정의는 design-system.css에서 꺼낸 `variants` 이름들. */
 export async function buildProbe(classes: string[], variants: string[], props: string[]): Promise<Probe> {
-  const compiler = await compile(`@theme { --spacing: 0.25rem; }\n${variants.map(variantBlock).join('\n')}\n@tailwind utilities;`);
+  const tokens = Object.entries(SPACING_TOKENS).map(([k, v]) => `--spacing-${k}: ${v}rem;`).join(' ');
+  const compiler = await compile(`@theme { --spacing: 0.25rem; ${tokens} }\n${variants.map(variantBlock).join('\n')}\n@tailwind utilities;`);
   const css = compiler.build([...new Set(classes)]);
   const out = new Map<string, Decl[]>();
   const order: string[] = [];

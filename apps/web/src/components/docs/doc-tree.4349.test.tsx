@@ -184,7 +184,7 @@ describe('DocTree 행 메뉴 — 목록 밖(body)에 · 모자라면 위로 · �
     for (const token of `${HOVER_REVEAL} ${HOVER_REVEAL_HIT}`.split(' ')) expect(slotCls).toContain(token);
     expect(slotCls).not.toContain('opacity-0');
     expect(slotCls).not.toContain('group-hover:opacity-100');
-    expect(trigger().className.split(/\s+/)).toEqual(expect.arrayContaining(['focus-visible:ring-2', 'focus-visible:ring-ds-action', 'touch:min-h-11']));
+    expect(trigger().className.split(/\s+/)).toEqual(expect.arrayContaining(['focus-visible:ring-2', 'focus-visible:ring-ds-action', 'touch:min-h-ds-touch']));
     expect(trigger().tabIndex).toBe(0);
   });
 });

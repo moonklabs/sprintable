@@ -62,8 +62,8 @@ describe('ds Menu', () => {
   it('⭐항목: 높이 32 · 폰 44 · 키보드 초점은 안쪽 링 · 비활성은 ink-3 + 눌림 없음', async () => {
     await render(<Demo />);
     const cls = items()[0]!.className;
-    expect(cls).toContain('min-h-8');
-    expect(cls).toContain('touch:min-h-11');
+    expect(cls).toContain('min-h-ds-compact');
+    expect(cls).toContain('touch:min-h-ds-touch');
     expect(cls).toContain('focus-visible:ring-inset');
     expect(cls).toContain('focus-visible:ring-ds-action');
     expect(items()[1]!.getAttribute('aria-disabled')).toBe('true');

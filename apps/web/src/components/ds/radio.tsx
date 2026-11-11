@@ -30,7 +30,7 @@ export function Radio({ label, className, onKeyDown, ...props }: RadioProps) {
   // 뿌리(span role=radio)는 감싼 <label>로 이름을 못 받는다 — 이름 글 id를 aria-labelledby로 가리킨다.
   const labelId = useId();
   return (
-    <label data-slot="ds-radio-field" className={cn('inline-flex min-h-7 cursor-pointer items-center gap-2 text-ds-body text-ds-ink touch:min-h-11 has-data-disabled:cursor-not-allowed has-data-disabled:text-ds-ink-3', className)}>
+    <label data-slot="ds-radio-field" className={cn('inline-flex min-h-ds-control-sm cursor-pointer items-center gap-2 text-ds-body text-ds-ink touch:min-h-ds-touch has-data-disabled:cursor-not-allowed has-data-disabled:text-ds-ink-3', className)}>
       <RadioPrimitive.Root
         data-slot="ds-radio"
         aria-labelledby={labelId}

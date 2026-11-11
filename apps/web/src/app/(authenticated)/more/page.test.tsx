@@ -262,7 +262,7 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
     const membersLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('구성원'));
     expect(membersLink?.getAttribute('data-slot')).toBe('ds-list-row');
     expect(membersLink?.getAttribute('data-density')).toBe('default');
-    expect(membersLink?.className).toContain('min-h-14');
+    expect(membersLink?.className).toContain('min-h-ds-row');
     // 모든 메뉴 줄이 같은 부품이다(손코딩 줄이 섞이지 않는다).
     const links = [...container.querySelectorAll('[data-testid="more-menu-link"]')];
     expect(links.length).toBeGreaterThan(10);

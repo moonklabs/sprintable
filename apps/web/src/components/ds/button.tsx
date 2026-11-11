@@ -14,12 +14,12 @@ import { Icon } from './icon';
 export const buttonVariants = cva(
   [
     'inline-flex shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-ds-control border font-semibold',
-    'transition-[filter,background-color] duration-100 motion-reduce:transition-none outline-none',
+    'transition-[filter,background-color] duration-(--ds-duration-fast) motion-reduce:transition-none outline-none',
     'focus-visible:ring-2 focus-visible:ring-ds-action focus-visible:ring-offset-1 focus-visible:ring-offset-ds-background',
     'active:brightness-90 disabled:pointer-events-none disabled:border-dashed disabled:border-ds-line-control disabled:bg-transparent disabled:text-ds-ink-3 disabled:brightness-100',
     // asChild(링크 등)는 native :disabled가 없다 — aria-disabled가 같은 «비활성» 모양을 입는다.
     'aria-disabled:pointer-events-none aria-disabled:border-dashed aria-disabled:border-ds-line-control aria-disabled:bg-transparent aria-disabled:text-ds-ink-3 aria-disabled:brightness-100',
-    'aria-busy:pointer-events-none touch:min-h-11 touch:min-w-11',
+    'aria-busy:pointer-events-none touch:min-h-ds-touch touch:min-w-ds-touch',
   ],
   {
     variants: {
@@ -30,8 +30,8 @@ export const buttonVariants = cva(
         danger: 'border-ds-failed bg-transparent text-ds-failed hover:bg-ds-failed-soft',
       },
       size: {
-        md: 'h-7 px-3 text-ds-small',
-        lg: 'h-9 px-4 text-ds-body',
+        md: 'h-ds-control-sm px-3 text-ds-small',
+        lg: 'h-ds-control px-4 text-ds-body',
       },
     },
     defaultVariants: { variant: 'secondary', size: 'md' },

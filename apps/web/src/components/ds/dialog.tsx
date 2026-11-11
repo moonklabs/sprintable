@@ -50,8 +50,8 @@ export function DialogContent({ className, children, showCloseButton = true, ...
         data-slot="ds-dialog-content"
         data-close-button={showCloseButton ? '' : undefined}
         className={cn(
-          'group/dialog fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 grid-cols-[minmax(0,1fr)] gap-3 overflow-y-auto rounded-ds-panel border border-ds-line-control bg-ds-surface-raised p-4 text-ds-body text-ds-ink shadow-xl outline-none sm:max-w-105',
-          'duration-100 motion-reduce:duration-0 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95',
+          'group/dialog fixed top-1/2 left-1/2 z-50 grid max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 grid-cols-[minmax(0,1fr)] gap-3 overflow-y-auto rounded-ds-panel border border-ds-line-control bg-ds-surface-raised p-4 text-ds-body text-ds-ink shadow-ds-overlay outline-none sm:max-w-105',
+          'duration-(--ds-duration-fast) motion-reduce:duration-(--ds-duration-instant) data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95',
           className,
         )}
         {...props}

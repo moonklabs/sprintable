@@ -97,7 +97,7 @@ describe('ds Avatar — 일하는 중 링(활동 축) · 연결 점(연결 축)'
   it('⭐에이전트가 일하는 중이면 action 펄스 링', async () => {
     await act(async () => { root.render(wrap(<Avatar name="개발" actorType="agent" isWorking />)); });
     expect(shape().className).toContain('ring-ds-action');
-    expect(shape().className).toContain('motion-safe:animate-pulse');
+    expect(shape().className).toContain('motion-safe:animate-ds-pulse');
   });
 
   it('사람에게는 일하는 중 링이 없다', async () => {

@@ -43,7 +43,7 @@ describe('[SID:4891] ThisPhoneCard on ds parts', () => {
     await draw(async () => (++n === 1 ? { id: 'w', ok: false, code: 'timeout' } : { id: 'w', ok: true, key_number: '018 604' }));
     const retry = host.querySelector('[data-testid="this-phone-retry"]') as HTMLButtonElement;
     expect(retry.getAttribute('data-slot')).toBe('ds-button');
-    expect(retry.className).toContain('touch:min-h-11');
+    expect(retry.className).toContain('touch:min-h-ds-touch');
     await act(async () => { retry.click(); });
     await act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
     expect(n).toBe(2);

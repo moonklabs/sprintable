@@ -170,7 +170,7 @@ describe('WorkspaceFrameTabs — story #2930 I3', () => {
         isMobileMock = mobile;
         await act(async () => { root.render(wrap(<WorkspaceFrameTabs active="board" />)); });
         const cls = ([...container.querySelectorAll('[data-slot="ds-tab-nav-link"]')].find((t) => t.textContent === '보드')?.className ?? '');
-        for (const c of ['touch:min-h-11', 'touch:border-b-3', 'min-h-8']) expect(cls.split(/\s+/), `${mobile} ${c}`).toContain(c);
+        for (const c of ['touch:min-h-ds-touch', 'touch:border-b-3', 'min-h-ds-compact']) expect(cls.split(/\s+/), `${mobile} ${c}`).toContain(c);
         seen.push(cls);
       }
       expect(seen[0]).toBe(seen[1]);

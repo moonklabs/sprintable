@@ -88,7 +88,23 @@ export function refKey(r: Pick<AsciiJsxAttrRef, 'file' | 'prop' | 'text'>): stri
 }
 
 // ALLOWLIST — 영구 예외(번역 대상 자체가 아님). story #3880 실측 그라운딩으로 채움.
-export const ALLOWLIST: ReadonlySet<string> = new Set<string>([]);
+export const ALLOWLIST: ReadonlySet<string> = new Set<string>([
+  // story 4886(UI-3) — `/design-system` 견본 화면(내부 참고용)의 줄 이름 · 블록 제목. 부품의 코드 이름(Radio · Toggle · DateNav ·
+  // Calendar · DatePicker · Tabs · TabNav · Menu · Kbd)이라 번역 대상이 아니다. 제품 화면이 아님. (PO 승인 요청: PR 본문)
+  'components/ds/showcase/showcase-parts-a.tsx::label::Radio',
+  'components/ds/showcase/showcase-parts-a.tsx::label::Toggle',
+  'components/ds/showcase/showcase-parts-a.tsx::title::Tabs · TabNav · Menu · Kbd',
+  'components/ds/showcase/showcase-parts-b.tsx::title::DateNav · Calendar · DatePicker',
+  'components/ds/showcase/showcase-parts-b.tsx::label::DateNav',
+  'components/ds/showcase/showcase-parts-a.tsx::label::quiet',
+  'components/ds/showcase/showcase-parts-a.tsx::label::primary',
+  'components/ds/showcase/showcase-parts-a.tsx::label::Chip',
+  'components/ds/showcase/showcase-parts-a.tsx::label::CountBadge',
+  'components/ds/showcase/showcase-parts-a.tsx::label::StatusLabel',
+  'components/ds/showcase/showcase-parts-a.tsx::title::Card · CardInset · SectionHeader · EmptyState',
+  'components/ds/showcase/showcase-parts-a.tsx::label::Checkbox',
+  'components/ds/showcase/showcase-parts-a.tsx::label::Tag',
+]);
 
 function walkTsxFiles(dir: string, out: string[]): void {
   for (const entry of readdirSync(dir)) {

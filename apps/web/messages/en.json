@@ -8044,5 +8044,9 @@
       "lastJoin": ", and ",
       "pairJoin": " and "
     }
+  },
+  "designSystem": {
+    "title": "Design system",
+    "lead": "Tokens and every ds part and state, light and dark side by side."
   }
 }

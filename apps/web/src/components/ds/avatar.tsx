@@ -103,7 +103,7 @@ export function Avatar({
         className={cn(
           'h-full w-full overflow-hidden',
           isAgent ? 'rounded-full' : 'rounded-ds-control border border-ds-line-control',
-          isAgent && isWorking && 'ring-2 ring-ds-action ring-offset-1 ring-offset-ds-background motion-safe:animate-pulse',
+          isAgent && isWorking && 'ring-2 ring-ds-action ring-offset-1 ring-offset-ds-background motion-safe:animate-ds-pulse',
         )}
       >
         {showImage ? (

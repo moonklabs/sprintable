@@ -74,7 +74,7 @@ describe('DocTree 행 «⋮» · 끌기 손잡이([SID:4345])', () => {
       'opacity-100', 'mouse:opacity-0', 'mouse:group-hover:opacity-100',
       'mouse:group-focus-within:opacity-100', 'mouse:focus-within:opacity-100',
     ]));
-    expect(tokens(more)).toEqual(expect.arrayContaining(['focus-visible:ring-2', 'focus-visible:ring-ds-action', 'touch:min-h-11']));
+    expect(tokens(more)).toEqual(expect.arrayContaining(['focus-visible:ring-2', 'focus-visible:ring-ds-action', 'touch:min-h-ds-touch']));
   });
 
   it('행 버튼 오른쪽 여백 pr-10(폰 touch:pr-14) — «⋮» 자리(right-2 + 24px · 폰은 44 누름 영역)와 행 글자가 안 겹침', () => {

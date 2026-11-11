@@ -56,8 +56,8 @@ describe('ds ApprovalCard — 정보', () => {
   it('⭐제목 단추는 폰(coarse)에서 누름 영역 44를 지킨다 — min-h-0으로 지우지 않는다', async () => {
     await render(<C onTitleClick={() => {}} state={{ kind: 'pending', view: 'readonly', note: 'n' }} />);
     const cls = card().querySelector('h3 button')!.className;
-    expect(cls).toContain('touch:min-h-11');
-    expect(cls).toContain('touch:min-w-11');
+    expect(cls).toContain('touch:min-h-ds-touch');
+    expect(cls).toContain('touch:min-w-ds-touch');
     expect(cls).not.toMatch(/(^|\s)min-h-0(\s|$)/);
   });
 

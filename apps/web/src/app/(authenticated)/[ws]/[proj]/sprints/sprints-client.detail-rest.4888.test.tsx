@@ -94,7 +94,7 @@ describe('스프린트 상세 패널 남은 칸 — ds 부품(story #4888)', () 
     const add = btn(gate, S.declareAddCta)!;
     expect(add).toBeTruthy();
     expect(add.getAttribute('data-slot')).toBe('ds-button');
-    expect(cls(add)).toContain('touch:min-h-11');
+    expect(cls(add)).toContain('touch:min-h-ds-touch');
   });
 
   it('가설이 이미 있으면 가설 게이트가 나오지 않는다(예전과 같은 조건)', async () => {
@@ -118,7 +118,7 @@ describe('스프린트 상세 패널 남은 칸 — ds 부품(story #4888)', () 
     const un = row.querySelector(`button[aria-label="${S.unassign}"]`) as HTMLButtonElement;
     expect(un).toBeTruthy();
     expect(un.getAttribute('data-slot')).toBe('ds-icon-button');
-    expect(cls(un)).toContain('touch:min-h-11');
+    expect(cls(un)).toContain('touch:min-h-ds-touch');
     await act(async () => { un.click(); });
     await flush();
     expect(patches).toEqual([{ url: '/api/stories/st-1', body: { sprint_id: null } }]);
@@ -132,7 +132,7 @@ describe('스프린트 상세 패널 남은 칸 — ds 부품(story #4888)', () 
     expect(row).toBeTruthy();
     const assign = btn(row, S.assign)!;
     expect(assign.getAttribute('data-slot')).toBe('ds-button');
-    expect(cls(assign)).toContain('touch:min-h-11');
+    expect(cls(assign)).toContain('touch:min-h-ds-touch');
     await act(async () => { assign.click(); });
     await flush();
     expect(patches).toEqual([{ url: '/api/stories/bk-1', body: { sprint_id: 's1' } }]);

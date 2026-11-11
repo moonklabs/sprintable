@@ -15,7 +15,7 @@ export function NativeSelect({ className, children, ...props }: NativeSelectProp
     <div data-slot="ds-select" className={cn('relative w-full min-w-0', className)}>
       <select
         className={cn(
-          'h-9 touch:h-11 w-full min-w-0 appearance-none rounded-ds-control border border-ds-line-control bg-ds-surface-sunk py-0 pr-8 pl-3 text-base text-ds-ink outline-none transition-colors duration-100 motion-reduce:transition-none lg:text-ds-body',
+          'h-ds-control touch:h-ds-touch w-full min-w-0 appearance-none rounded-ds-control border border-ds-line-control bg-ds-surface-sunk py-0 pr-8 pl-3 text-base text-ds-ink outline-none transition-colors duration-(--ds-duration-fast) motion-reduce:transition-none lg:text-ds-body',
           'focus-visible:border-ds-action focus-visible:ring-2 focus-visible:ring-ds-action',
           'disabled:pointer-events-none disabled:cursor-not-allowed disabled:border-dashed disabled:bg-transparent disabled:text-ds-ink-3',
           'aria-invalid:border-ds-failed aria-invalid:focus-visible:ring-ds-failed',

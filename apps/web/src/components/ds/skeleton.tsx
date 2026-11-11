@@ -33,7 +33,7 @@ export function Skeleton({ variant = 'rect', size = 'body', as: Tag = 'div', cla
       data-slot="ds-skeleton"
       data-variant={variant}
       className={cn(
-        'block bg-ds-surface-high motion-safe:animate-pulse',
+        'block bg-ds-surface-high motion-safe:animate-ds-pulse',
         variant === 'rect' && 'rounded-ds-control',
         variant === 'text' && cn('w-full rounded-ds-control bg-clip-content', textBox(size)),
         variant === 'circle' && 'aspect-square rounded-full',

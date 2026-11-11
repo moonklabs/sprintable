@@ -147,7 +147,7 @@ export function Calendar({ value, onChange, today, min, max, locale, weekStartsO
         <thead>
           <tr>
             {weekdays.map((w) => (
-              <th key={w.iso} scope="col" abbr={w.long} className="h-8 p-0 text-center text-ds-small font-normal text-ds-ink-3">{w.short}</th>
+              <th key={w.iso} scope="col" abbr={w.long} className="h-ds-compact p-0 text-center text-ds-small font-normal text-ds-ink-3">{w.short}</th>
             ))}
           </tr>
         </thead>
@@ -182,7 +182,7 @@ export function Calendar({ value, onChange, today, min, max, locale, weekStartsO
                       }}
                       // ds Button(조용)이 모양 · 초점 링 · 비활성(aria-disabled = 점선 + ink-3 + 눌림 없음)을 쥔다 — 칸 모양만 덮는다: 32 정사각(폰은 높이 44 · 열 너비) · 글 굵기 보통.
                       className={cn(
-                        'relative mx-auto h-8 w-8 min-w-0 px-0 text-ds-body font-normal tabular-nums focus-visible:ring-inset focus-visible:ring-offset-0 touch:h-11 touch:w-full touch:min-w-0',
+                        'relative mx-auto h-ds-compact w-ds-compact min-w-0 px-0 text-ds-body font-normal tabular-nums focus-visible:ring-inset focus-visible:ring-offset-0 touch:h-ds-touch touch:w-full touch:min-w-0',
                         outside ? 'text-ds-ink-3' : 'text-ds-ink',
                         disabled && 'line-through',
                         selected && 'bg-ds-action font-semibold text-ds-on-action hover:bg-ds-action hover:text-ds-on-action',

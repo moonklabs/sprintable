@@ -139,7 +139,7 @@ describe('GoalsClient — 보기 전환 «목록 | 스윔레인»(story #4888)',
     await mount();
     for (const b of sw()!.querySelectorAll('button')) {
       expect(b.getAttribute('data-slot')).toBe('ds-button');
-      expect(b.className.split(/\s+/)).toContain('touch:min-h-11');
+      expect(b.className.split(/\s+/)).toContain('touch:min-h-ds-touch');
     }
   });
 });

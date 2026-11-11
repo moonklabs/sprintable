@@ -44,7 +44,7 @@ describe('[SID:4891] ProjectAccessSection on ds parts', () => {
 
   it('the toggle is a ds secondary button while blocked; the result line is a status (success) or an alert (failure)', async () => {
     await draw();
-    expect(btn(container, T.projectAccessBlocked).className).toContain('touch:min-h-11');
+    expect(btn(container, T.projectAccessBlocked).className).toContain('touch:min-h-ds-touch');
     postOk = false;
     await click(btn(container, T.projectAccessBlocked));
     expect(container.querySelector('[role="alert"]')?.textContent).toBe(T.projectAccessGrantFailed);

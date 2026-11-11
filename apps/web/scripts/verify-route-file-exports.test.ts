@@ -221,7 +221,8 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
     // story 4714 — `phone-landing/page.tsx`(폰 앱을 열 때의 착지 가름) · `phone-start/page.tsx`(폰 앱의 «맥에서 시작» 화면) 둘로 133→135(default export · dynamic만).
     // story 4763 — `login/layout.tsx`(서버 레이아웃: 받기 스위치를 로그인 화면으로 내림 · default export만)로 135→136.
     // story #4885(«팀» 탭줄) — `organization/workforce/layout.tsx` · `organization/members/layout.tsx`(서버 레이아웃: 탭줄 + children · default export만) 둘로 136→138.
-    expect(fileCount).toBe(138);
+    // story 4886 — `design-system/page.tsx`(ds 견본 화면: default · generateMetadata) 하나로 138→139.
+    expect(fileCount).toBe(139);
     expect(violations).toEqual([]);
   });
 });
