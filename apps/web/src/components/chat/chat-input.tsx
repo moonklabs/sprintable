@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import { AttachmentNeedsProjectError } from '@/lib/chat-attachment-error';
 import Link from 'next/link';
-import { AlertTriangle, Compass, FolderOpen, Loader2, Paperclip, Send, Terminal, Type, Upload, X, Hash } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Compass, FolderOpen, Loader2, Send, Terminal, Type, X, Hash } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { Button } from '@/components/ui/button';
+import { IconButton } from '@/components/ds/icon-button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -15,7 +16,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { getFileIcon } from '@/lib/file-icon';
@@ -265,6 +265,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   // S6: 첨부 메뉴(파일 업로드/스토리지에서 선택) + 자산 피커.
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const attachMoreRef = useRef<HTMLButtonElement | null>(null); // the ▾ of the split attach button — where focus goes back when the storage picker is dismissed with Escape
   // command 후보 = 레지스트리에서 prefix 필터(로컬·fetch 0). query '' → 전체.
   const commandCandidates = commandQuery === null
     ? []
@@ -636,11 +637,14 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
     >
       {/* S6: 스토리지 자산 피커 — 첨부 메뉴 '스토리지에서 선택' 진입(목업 ①). */}
       {pickerOpen && projectId && (
-        <AssetPickerPopover
-          projectId={projectId}
-          onSelect={selectAsset}
-          onClose={() => setPickerOpen(false)}
-        />
+        // story 4887 (UI-4 P5-a): Escape ANYWHERE in the picker (its search field, a scope button, an asset row — the picker's own handler only sits on the search field) closes it and puts focus back on the ▾ that opened it (the focused element was inside the picker and is gone with it — focus fell to the page), and marks the Escape as USED (preventDefault — «one Escape = one layer», story 4367: an enclosing drawer's focus trap reads defaultPrevented and stays open). Only Escape: a click outside closes the picker too, and must NOT steal the focus from wherever the person clicked; choosing an asset puts focus in the text box (selectAsset).
+        <div onKeyDown={(e) => { if (e.key === 'Escape' && !isImeComposing(e)) { e.preventDefault(); setPickerOpen(false); attachMoreRef.current?.focus(); } }}>
+          <AssetPickerPopover
+            projectId={projectId}
+            onSelect={selectAsset}
+            onClose={() => setPickerOpen(false)}
+          />
+        </div>
       )}
       {/* Pending file chips (전송 전) */}
       {pendingFiles.length > 0 && (
@@ -922,44 +926,47 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           </ul>
         )}
 
-        {/* Attach — S6: 메뉴(파일 업로드 / 스토리지에서 선택). 피커 열림 시 info 틴트(목업 .iconbtn.on). */}
-        <DropdownMenu open={attachMenuOpen} onOpenChange={setAttachMenuOpen}>
-          <DropdownMenuTrigger
-            type="button"
-            disabled={disabled}
-            aria-label={t('attachMenuLabel')}
-            className={`flex-shrink-0 rounded-md p-1.5 transition-colors disabled:opacity-40 ${
-              attachMenuOpen || pickerOpen
-                ? 'bg-info/10 text-info'
-                : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-            }`}
-          >
-            <Paperclip className="h-4 w-4" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" side="top" sideOffset={8} className="w-52">
-            <DropdownMenuItem
-              disabled={atMaxAttachments}
-              onClick={() => {
-                setAttachMenuOpen(false);
-                fileInputRef.current?.click();
-              }}
+        {/* Attach — story 4887 (UI-4 P5-a · AC3 «클립 분할»): the clip opens the file window AT ONCE (one action — a click, a tap, Enter or Space on the focused button: it is a native button element), and the ▾ beside it holds the other way in, «스토리지에서 선택». It was a menu first — clip → «파일 업로드» → file window: one hand more for the common case. The info tint (목업 .iconbtn.on) follows the storage picker being open. */}
+        <div
+          data-testid="chat-attach-split"
+          className={`flex flex-shrink-0 items-center rounded-md transition-colors ${
+            attachMenuOpen || pickerOpen ? 'bg-info/10 text-info' : 'text-muted-foreground'
+          }`}
+        >
+          <IconButton
+            icon="attach_file"
+            label={t('attachMenuUpload')}
+            data-testid="chat-attach-upload"
+            disabled={disabled || atMaxAttachments}
+            onClick={() => fileInputRef.current?.click()}
+            // the ds IconButton paints its own ink colour, so the split's «open» tint (the container's text-info) must be passed on to it, or only the ▾ turns blue
+            className={`rounded-l-md rounded-r-none ${attachMenuOpen || pickerOpen ? 'text-info hover:text-info' : ''}`}
+          />
+          <DropdownMenu open={attachMenuOpen} onOpenChange={setAttachMenuOpen}>
+            <DropdownMenuTrigger
+              ref={attachMoreRef}
+              type="button"
+              data-testid="chat-attach-more"
+              disabled={disabled}
+              aria-label={t('attachMenuLabel')}
+              className="inline-flex items-center justify-center rounded-r-md px-1.5 py-1.5 transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-40 pointer-coarse:min-h-11 pointer-coarse:min-w-11"
             >
-              <Upload className="size-4 text-muted-foreground" aria-hidden />
-              {t('attachMenuUpload')}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              disabled={!projectId}
-              onClick={() => {
-                setAttachMenuOpen(false);
-                setPickerOpen(true);
-              }}
-            >
-              <FolderOpen className="size-4 text-info" aria-hidden />
-              {t('attachMenuStorage')}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" side="top" sideOffset={8} className="w-52">
+              <DropdownMenuItem
+                disabled={!projectId}
+                onClick={() => {
+                  setAttachMenuOpen(false);
+                  setPickerOpen(true);
+                }}
+              >
+                <FolderOpen className="size-4 text-info" aria-hidden />
+                {t('attachMenuStorage')}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
 
         {/* STEER 토글 — story #2942(2921-S5). doc §4: 대상이 0명(본인만 있는 대화 등)이면
             발행 자체가 원천 불가라 토글을 안 보인다(죽은 버튼 금지). */}

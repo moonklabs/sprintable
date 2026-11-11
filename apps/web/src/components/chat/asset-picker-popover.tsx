@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { fetchWithAuth } from '@/lib/db/client';
+import { isImeComposing } from '@/lib/ime-composition';
 
 interface AssetPickerPopoverProps {
   projectId: string;
@@ -105,6 +106,8 @@ export function AssetPickerPopover({ projectId, currentFolderId, onSelect, onClo
   }, [selectedIndex]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    // story 4887 (UI-4 P5-a): a key pressed while an IME is composing is the IME's — Escape cancels the composition, Enter confirms the syllable. It must not close the picker or pick an asset (the composer's own text box has said so since story 4831).
+    if (isImeComposing(e)) return;
     if (e.key === 'Escape') {
       e.preventDefault();
       onClose();

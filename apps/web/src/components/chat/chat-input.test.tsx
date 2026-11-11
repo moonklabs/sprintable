@@ -138,7 +138,8 @@ describe('ChatInput — 대화별 임시저장(story #2032 AC2/AC3/AC6)', () => 
     await act(async () => {
       root.render(withIntl(<ChatInput threadId="c1" onSend={onSend} />));
     });
-    const sendButton = Array.from(container.querySelectorAll('button')).find((b) => b.querySelector('svg') && !b.hasAttribute('aria-haspopup'));
+    // the send button by its NAME (it used to be «the first button with an icon that is no menu» — the attach clip is such a button now, story 4887 P5-a)
+    const sendButton = container.querySelector(`button[aria-label="${koMessages.chats.sendAction}"]`) as HTMLElement | null;
     await act(async () => {
       sendButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve();
