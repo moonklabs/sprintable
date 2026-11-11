@@ -34,6 +34,14 @@ describe('ds Input', () => {
     expect(cls).toContain('focus-visible:border-ds-action');
   });
 
+  it('⭐폰(coarse 포인터)은 높이 44 — 평소 36(h-9)은 그대로이고 호출부 className이 평소 높이를 줄여도 폰 44는 남는다', async () => {
+    await render(<Input aria-label="이름" />);
+    expect(input().className).toContain('pointer-coarse:h-11');
+    await render(<Input aria-label="이름" className="h-8" />);
+    expect(input().className).toContain('pointer-coarse:h-11');
+    expect(input().className).not.toMatch(/(^|\s)h-9(\s|$)/);
+  });
+
   it('⭐폰은 16px(text-base)이고 lg부터 본문 13 — iOS가 16px 미만 칸에서 화면을 확대하지 않게', async () => {
     await render(<Input aria-label="이름" />);
     expect(input().className).toMatch(/(^|\s)text-base(\s|$)/);

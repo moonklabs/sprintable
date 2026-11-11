@@ -66,7 +66,7 @@ export function DateNav({ value, onChange, onToday, labels, min, max, step, clas
         step={step}
         disabled={locked}
         onChange={(e) => onChange(e.target.value)}
-        className="w-auto shrink-0 pointer-coarse:h-11"
+        className="w-auto shrink-0"
       />
       <IconButton icon="chevron_right" label={labels.nextDay} disabled={locked || next === value || (max !== undefined && next !== null && next > max)} onClick={() => next !== null && onChange(next)} />
       <Button type="button" variant="quiet" onClick={onToday} className="shrink-0">

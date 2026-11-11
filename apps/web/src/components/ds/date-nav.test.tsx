@@ -119,7 +119,7 @@ describe('ds DateNav', () => {
     expect(btn('전날').disabled).toBe(false);
   });
 
-  it('⭐줄은 좁은 화면에서 접히고(flex-wrap) 날짜 칸도 폰 누름 높이 44를 지킨다', async () => {
+  it('⭐줄은 좁은 화면에서 접히고(flex-wrap) 날짜 칸도 폰 누름 높이 44를 지킨다(ds Input이 쥔다 — DateNav 자기 덮어쓰기 없음)', async () => {
     await render(<DateNav value="2026-11-10" onChange={() => {}} onToday={() => {}} labels={labels} />);
     expect((container.querySelector('[data-slot="ds-date-nav"]') as HTMLElement).className).toContain('flex-wrap');
     expect(input().className).toContain('pointer-coarse:h-11');

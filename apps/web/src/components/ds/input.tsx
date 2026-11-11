@@ -16,11 +16,11 @@ const FIELD =
 export type InputProps = Omit<ComponentProps<typeof InputPrimitive>, 'className'> & { className?: string };
 
 /**
- * UI-3(a9d56577) Input — doc §4 #3. 높이 36 · `surface-sunk` 바탕 · `line-control` 경계(3:1) · 초점 = `action` 경계 + 링 · 오류(`aria-invalid`) = `failed` 경계.
+ * UI-3(a9d56577) Input — doc §4 #3. 높이 36(폰 = coarse 포인터는 44 — 누름 영역) · `surface-sunk` 바탕 · `line-control` 경계(3:1) · 초점 = `action` 경계 + 링 · 오류(`aria-invalid`) = `failed` 경계.
  * 오류는 색만으로 말하지 않는다 — 보이는 글과 아이콘은 `Field`가 칸 아래에 붙인다(Input 혼자 쓰면 호출부가 오류 글을 준다).
  */
 export function Input({ className, ...props }: InputProps) {
-  return <InputPrimitive data-slot="ds-input" className={cn(FIELD, 'h-9', className)} {...props} />;
+  return <InputPrimitive data-slot="ds-input" className={cn(FIELD, 'h-9 pointer-coarse:h-11', className)} {...props} />;
 }
 
 export type TextareaProps = ComponentProps<'textarea'>;
