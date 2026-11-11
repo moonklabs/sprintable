@@ -102,7 +102,7 @@ describe('CreateDialog — 첫 스프린트 시작 침묵 금지 (story #2755)',
 
   it('이름+기본날짜 있으나 가설 0개로 「스프린트 시작」 클릭 → activateBlocked가 뜨고 POST 미발화(게이트 유지)', async () => {
     await mount();
-    const titleInput = document.body.querySelector('input[data-slot="input"][type=text]') as HTMLInputElement;
+    const titleInput = document.body.querySelector('input[data-slot="ds-input"][type=text]') as HTMLInputElement;
     await act(async () => { setNativeValue(titleInput, '스프린트 1'); });
     await clickActivate();
     expect(document.body.textContent).toContain(koMessages.sprints.activateBlocked);
@@ -113,14 +113,14 @@ describe('CreateDialog — 첫 스프린트 시작 침묵 금지 (story #2755)',
 describe('CreateDialog — 용량 · 인원 칸 (story 4831 바탕 부품)', () => {
   it('용량 · 인원은 바탕 Input(숫자)이고 최소값(0 · 1)과 자리표시자가 그대로이며 쓴 값이 칸에 반영된다 · 접미사 칩(SP · 명)이 칸 안쪽 여백을 비워 둔다', async () => {
     await mount();
-    const nums = [...document.body.querySelectorAll('input[data-slot="input"][type=number]')] as HTMLInputElement[];
+    const nums = [...document.body.querySelectorAll('input[data-slot="ds-input"][type=number]')] as HTMLInputElement[];
     expect(nums).toHaveLength(2);
     expect(nums.map((n) => n.getAttribute('min'))).toEqual(['0', '1']);
     expect(nums.map((n) => n.getAttribute('placeholder'))).toEqual(['0', '0']);
     expect(nums[0]!.className).toContain('pr-8');
     expect(nums[1]!.className).toContain('pr-6');
     await act(async () => { setNativeValue(nums[0]!, '13'); setNativeValue(nums[1]!, '4'); });
-    const after = [...document.body.querySelectorAll('input[data-slot="input"][type=number]')] as HTMLInputElement[];
+    const after = [...document.body.querySelectorAll('input[data-slot="ds-input"][type=number]')] as HTMLInputElement[];
     expect(after.map((n) => n.value)).toEqual(['13', '4']);
   });
 });

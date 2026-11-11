@@ -966,7 +966,6 @@ export function countViolations(violations: Violation[]): Map<string, number> {
 // 나머지는 이 스토리 스코프 밖(화면이 다르고 개별 triage 필요) 기존 채무를 그대로 얼린다.
 // 신규 재유입·증가만 막고, 늘어도 줄어도(stale) FAIL — PO 승인 없이 조용히 못 움직인다.
 export const GRANDFATHER_BASELINE = new Map<string, number>([
-  ['app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx::muted-on-info-tint', 1],
   ['app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx::muted-on-destructive-tint', 1],
   // story #3865(AC1·조건①②, PO 확定 2026-09-14 11:04Z) — 같은 요소 tint+muted 공존 판정을
   // "합친 문자열 전체"에서 "그룹 단위"(같은 삼항/바인딩의 분기끼리만 상호배타, 독립 축은
