@@ -296,6 +296,26 @@ describe('ConversationPage — 헤더 아바타(story #2968)', () => {
     expect(trigger.className).toContain('touch:min-h-11');
     expect(trigger.className).toContain('touch:min-w-11');
   });
+
+  it('⭐ a PHONE before the person\'s own member id has come: the shell\'s header row is NOT empty — the generic «← 대화» (back + the one h1), no people button with a «0», while the page body says it is loading (measured on dev: the row was blank 0.30–0.89 s on a cold load)', async () => {
+    belowLg.current = true;
+    useDashboardContextMock.mockReturnValue({ currentTeamMemberId: null, projectId: 'proj-content', projectMemberships: [] });
+    await mount();
+    const bar = container.querySelector('[data-testid="room-bar"]') as HTMLElement | null;
+    expect(bar, 'the header row carries the generic title while the member id is on its way (reverted: the early return renders no title slot → no bar)').not.toBeNull();
+    expect(bar!.querySelector('h1')?.textContent).toBe(koMessages.chats.title);
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
+    expect(bar!.querySelector('[data-testid="room-bar-back"]'), 'the way back is there from the first frame').not.toBeNull();
+    expect(bar!.querySelector('[data-testid="room-bar-people"]'), 'no people button («0») before the room is known').toBeNull();
+    expect(container.textContent).toContain(koMessages.common.loading);
+  });
+
+  it('a DESKTOP before the member id has come: only the loading text (no phone bar)', async () => {
+    useDashboardContextMock.mockReturnValue({ currentTeamMemberId: null, projectId: 'proj-content', projectMemberships: [] });
+    await mount();
+    expect(container.querySelector('[data-testid="room-bar"]')).toBeNull();
+    expect(container.textContent).toContain(koMessages.common.loading);
+  });
 });
 
 // story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 헤더 상대명/방이름=Claim(600)
