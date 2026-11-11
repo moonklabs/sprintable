@@ -107,6 +107,9 @@ describe('[SID:4889 W3] RecruiterClient — the header is the ds Stepper', () =>
     expect(Array.from(summary()!.querySelectorAll('[data-summary-key]')).every((e) => (e as HTMLElement).dataset.filled === 'false')).toBe(true);
     expect(summary()!.textContent).toContain('recruiter.summaryEmpty');
     expect(summary()!.querySelectorAll('button, a, input, select').length).toBe(0);
+    // a phone shows nothing here until something is chosen (the first question stays near the top); a wide screen keeps the column
+    expect(summary()!.className).toContain('max-lg:hidden');
+    expect(summary()!.className).toContain('lg:sticky');
   });
 
   it('the «역할 없이» way: the role line says so, there is no runtime line, and the scope is not claimed before the scope step is done', async () => {
@@ -115,6 +118,7 @@ describe('[SID:4889 W3] RecruiterClient — the header is the ds Stepper', () =>
     expect(summaryItem('role')!.textContent).toContain('recruiter.summaryNoRole');
     expect(summaryItem('role')!.dataset.filled).toBe('true');
     expect(summaryItem('runtime')).toBeNull();
+    expect(summary()!.className).not.toContain('max-lg:hidden'); // once something is chosen the phone shows the chips
     expect(summaryItem('scope')!.dataset.filled).toBe('false');
   });
 

@@ -222,8 +222,10 @@ function downloadTextFile(filename: string, content: string) {
  * nothing in it can be pressed, nothing is new data. Wide: a sticky column at the right of the step panel; phone: a wrapping row of chips above the panel.
  */
 function RecruitSummary({ title, empty, items }: { title: string; empty: string; items: { key: string; label: string; value: string | null }[] }) {
+  // PO 11-11 (5609 «후»): on a phone, four «not chosen yet» chips above the first question push it down — before anything is chosen the phone shows nothing here (a wide screen keeps its column: there it costs no height)
+  const nothingChosen = items.every((it) => !it.value);
   return (
-    <aside aria-label={title} data-testid="recruit-summary" className={cn(cardVariants({ surface: 'solid', radius: 'card' }), 'px-3 py-3 lg:sticky lg:top-4 lg:order-2')}>
+    <aside aria-label={title} data-testid="recruit-summary" className={cn(cardVariants({ surface: 'solid', radius: 'card' }), 'px-3 py-3 lg:sticky lg:top-4 lg:order-2', nothingChosen && 'max-lg:hidden')}>
       <p className="mb-2 text-xs font-semibold text-muted-foreground">{title}</p>
       <ul className="m-0 flex list-none flex-wrap gap-2 p-0 lg:flex-col lg:gap-3">
         {items.map((it) => (
