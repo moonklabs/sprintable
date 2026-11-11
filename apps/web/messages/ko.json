@@ -8044,5 +8044,9 @@
       "lastJoin": " · ",
       "pairJoin": " · "
     }
+  },
+  "designSystem": {
+    "title": "디자인 시스템",
+    "lead": "토큰과 ds 부품의 상태를 밝음 · 어둠으로 나란히 보여요."
   }
 }

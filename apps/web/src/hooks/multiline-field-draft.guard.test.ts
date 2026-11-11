@@ -37,6 +37,7 @@ const VIA: Record<string, { source: string; why: string }> = {
 
 /** 초안 대상이 아닌 여러 줄 칸 파일 → 사유. */
 const EXEMPT: Record<string, string> = {
+  'components/ds/showcase/showcase-parts-a.tsx': '견본 화면(`/design-system`) — 값을 저장하는 폼이 아니라 부품 상태를 보여 주는 견본 · 창 밖',
   'app/(authenticated)/[ws]/[proj]/docs/[slug]/page.tsx': '페이지 본문 — 닫히는 창 · 패널 밖',
   'app/(authenticated)/[ws]/[proj]/goals/[id]/page.tsx': '목표 상세 페이지 편집 폼 — 창 밖(파일의 창은 지우기 확인뿐)',
   'app/(authenticated)/[ws]/[proj]/retro/[id]/page.tsx': '회고 페이지 본문 — 창 밖',

@@ -28,20 +28,27 @@ import { Block, Row } from './showcase-layout';
 
 const noop = () => {};
 
+const BUTTON_VARIANTS = ['primary', 'secondary', 'quiet', 'danger'] as const;
+
+/** 변형 하나의 상태 줄 — 목록 `.map` 안에 단추를 직접 두지 않는다(같은 이름 단추가 줄마다 반복되는 꼴을 가드가 막는다). */
+function ButtonVariantRow({ variant }: { variant: (typeof BUTTON_VARIANTS)[number] }) {
+  return (
+    <Row label={variant}>
+      <Button variant={variant}>기본</Button>
+      <Button variant={variant} disabled>끔</Button>
+      <Button variant={variant} loading>불러오는 중</Button>
+      <Button variant={variant} size="lg">큰 단추</Button>
+      <Button variant={variant} iconStart={<span aria-hidden="true">+</span>}>글 앞 아이콘</Button>
+    </Row>
+  );
+}
+
 /** 부품 견본 ① — 단추 · 표시 · 면 · 입력 · 탐색. */
 export function ShowcasePartsA() {
   return (
     <>
       <Block title="Button — 변형 × 상태">
-        {(['primary', 'secondary', 'quiet', 'danger'] as const).map((v) => (
-          <Row key={v} label={v}>
-            <Button variant={v}>기본</Button>
-            <Button variant={v} disabled>끔</Button>
-            <Button variant={v} loading>불러오는 중</Button>
-            <Button variant={v} size="lg">큰 단추</Button>
-            <Button variant={v} iconStart={<span aria-hidden="true">+</span>}>글 앞 아이콘</Button>
-          </Row>
-        ))}
+        {BUTTON_VARIANTS.map((v) => <ButtonVariantRow key={v} variant={v} />)}
       </Block>
       <Block title="IconButton — 이름 필수 · 크기 · 주 행동">
         <Row label="quiet">
