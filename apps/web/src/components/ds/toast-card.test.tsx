@@ -66,6 +66,14 @@ describe('ds ToastCard', () => {
     expect(el().className.split(/\s+/)).not.toContain('shadow-ds-overlay');
   });
 
+  it('⭐폭: 360(22.5rem), 좁은 화면은 양쪽 16px을 남기고 가득 — 카드 자신이 폭을 쥔다(내용만큼 줄던 5614 실측 178~282px)', async () => {
+    await render(<ToastCard title="글" onDismiss={() => {}} />);
+    const cls = el().className.split(/\s+/);
+    expect(cls).toContain('w-[min(22.5rem,calc(100vw-2rem))]');
+    expect(cls).toContain('max-w-full');
+    expect(cls).not.toContain('w-full');
+  });
+
   it('⭐들어오는 움직임: 옛 slide-in과 같은 값(0.3초 · 오른쪽에서 밀려 들어옴)의 토큰을 쓰고, 움직임 줄이기면 멈춘다', async () => {
     await render(<ToastCard title="글" onDismiss={() => {}} />);
     expect(el().className.split(/\s+/)).toContain('animate-ds-slide-in');
