@@ -147,6 +147,9 @@ const DESKTOP: Env = { pointer: 'fine', hover: 'hover' }; // 데스크톱 마우
 const EMULATOR: Env = { pointer: 'fine', hover: 'none' }; // 안드로이드 에뮬 웹뷰 · S펜류 — 민군 실측 꼴
 const PHONE: Env = { pointer: 'coarse', hover: 'none' }; // 보통 폰 · 태블릿(iOS)
 const TABLET_PEN: Env = { pointer: 'coarse', hover: 'hover' }; // coarse만 참인 꼴
+const APP_ANDROID: Env = { pointer: 'fine', hover: 'hover', shell: 'android' }; // 스타일러스 폰이 앱 안에서 마우스로 읽히는 꼴 — 앱 셸 표지가 건다
+const APP_IOS: Env = { pointer: 'fine', hover: 'hover', shell: 'ios' };
+const APP_MAC: Env = { pointer: 'fine', hover: 'hover', shell: 'macos' }; // 맥 데스크톱 앱 = 마우스 → 36
 
 describe('touch: 변형 — 44 바닥', () => {
   it('⭐데스크톱(fine + hover)은 그대로: Button 28/36 · Input 36 · NativeSelect 36', () => {
@@ -162,6 +165,13 @@ describe('touch: 변형 — 44 바닥', () => {
 
   it('⭐보통 폰(coarse + hover none)과 coarse만 참인 꼴도 44', () => {
     for (const env of [PHONE, TABLET_PEN]) for (const [name, cls] of Object.entries(parts)) expect(pressHeight(cls, index, env), name).toBe(44);
+  });
+
+  it('⭐앱 셸 안(ios · android)은 기기 분류가 «마우스»여도 44, 맥 앱(macos)은 36 그대로', () => {
+    for (const env of [APP_ANDROID, APP_IOS]) for (const [name, cls] of Object.entries(parts)) expect(pressHeight(cls, index, env), name).toBe(44);
+    expect(pressHeight(parts.Input!, index, APP_MAC)).toBe(36);
+    expect(pressHeight(parts.NativeSelect!, index, APP_MAC)).toBe(36);
+    expect(pressHeight(parts['Button(md)']!, index, APP_MAC)).toBe(28);
   });
 
   it('ds 부품은 pointer-coarse:를 더 쓰지 않는다(쓰면 에뮬 꼴에서 44가 빠진다)', () => {
