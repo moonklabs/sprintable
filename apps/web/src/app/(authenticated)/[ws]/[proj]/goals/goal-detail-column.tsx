@@ -193,7 +193,7 @@ export function GoalDetailColumn({ goal, projectId, onUpdate }: { goal: Goal; pr
                         }
                         trailing={
                           <>
-                            {story.story_points !== undefined ? <span className="font-mono text-ds-mono-md text-ds-ink-3">{t('storyPointsShort', { count: story.story_points })}</span> : null}
+                            {story.story_points !== undefined ? <span className="font-mono text-ds-mono-md text-ds-ink-3">{tBoard('storyPointsBadge', { count: story.story_points })}</span> : null}
                             <Chip tone="neutral">{storyLabel(story.status)}</Chip>
                           </>
                         }

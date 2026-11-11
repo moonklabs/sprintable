@@ -115,7 +115,8 @@ describe('ScaleLadder — 칩 한 줄(story #4888)', () => {
     act(() => { root.render(wrap(<ScaleLadder />)); });
     const all = chips();
     expect(all).toHaveLength(5);
-    for (const c of all) expect(c.className, c.textContent ?? '').toContain('touch:min-h-11');
+    // 안내 칸(작업)은 팝오버 기준점 래퍼(div) 안의 버튼이다 — 눌리는 것은 그 버튼
+    for (const c of all) { const hit = c.tagName === 'DIV' ? c.querySelector('button')! : c; expect(hit.className, hit.textContent ?? '').toContain('touch:min-h-11'); }
     expect(all.some((c) => c.tagName === 'A')).toBe(true);
     expect(all.some((c) => c.tagName === 'BUTTON')).toBe(true);
   });

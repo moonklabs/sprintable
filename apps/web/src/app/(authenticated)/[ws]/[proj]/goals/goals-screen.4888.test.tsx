@@ -239,7 +239,7 @@ describe('목표 화면 — 넓은 화면: 상세 열', () => {
     expect(calls.length).toBe(1);
     const stories = q('[data-testid="goal-detail-stories"]')!;
     expect(stories.textContent).toContain('인터뷰 질문지');
-    expect(stories.textContent).toContain('3 SP');
+    expect(stories.textContent).toContain('포인트 3'); // 보드의 «포인트 {count}» 낱말 그대로(ko에 «SP» 약어를 두지 않는다 · #3922)
     expect(stories.textContent).toContain('진행 중'); // 보드의 상태 낱말
     // 스토리 진행(1/2가 아니라 목록 집계 1/6이 아니라 읽은 행 기준 1/2)과 SP 진행이 선다
     expect(q('[data-testid="goal-detail-progress"]')!.textContent).toContain('1/2');

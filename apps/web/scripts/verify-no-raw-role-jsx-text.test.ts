@@ -158,18 +158,19 @@ describe('scanRepo — story #3770(실 트리 실행)', () => {
 
 // story #3878(§⑤ 낱말 드리프트) — 실 파일 뮤테이션(합성 표본 아님, AC2 명시): 7곳 中 대표
 // 1곳(goals-client.tsx)을 원시 slug로 되돌려 RED가 되는지 직접 확인한다.
-describe('실 파일 뮤테이션 — goals-client.tsx(story #3878, story.status 정본화)', () => {
-  const REL_FILE = 'app/(authenticated)/[ws]/[proj]/goals/goals-client.tsx';
+// story #4888 — 스토리 상태 배지는 목표 화면의 상세 열(goal-detail-column.tsx)로 옮겨 갔다(예전엔 goals-client.tsx의 인라인 패널).
+describe('실 파일 뮤테이션 — goal-detail-column.tsx(story #3878, story.status 정본화)', () => {
+  const REL_FILE = 'app/(authenticated)/[ws]/[proj]/goals/goal-detail-column.tsx';
   const ABS_FILE = path.join(SRC_ROOT, REL_FILE);
   const original = readFileSync(ABS_FILE, 'utf8');
 
-  it('전제: 원본은 이 파일에서 status 원시 위반 0(storyStatusLabel(story.status)로 감싸짐)', () => {
+  it('전제: 원본은 이 파일에서 status 원시 위반 0(storyLabel(story.status)로 감싸짐)', () => {
     const refs = scanJsxFileContent(original, REL_FILE);
     expect(refs.filter((r) => r.field === 'status')).toEqual([]);
   });
 
   it('story.status 배지를 원시 렌더로 되돌리면 RED', () => {
-    const target = '{storyStatusLabel(story.status)}';
+    const target = '{storyLabel(story.status)}';
     expect(original.includes(target)).toBe(true);
     const mutated = original.replace(target, '{story.status}');
     expect(mutated).not.toBe(original);
