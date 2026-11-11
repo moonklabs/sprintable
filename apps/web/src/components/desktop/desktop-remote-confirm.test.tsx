@@ -74,7 +74,7 @@ describe('DesktopRemoteConfirm (story #4548)', () => {
     for (let i = 0; i < 3; i++) await act(async () => { await Promise.resolve(); });
     expect(fetchWithAuth.mock.calls[1]).toEqual(['/api/desktop/device-token-codes/confirm', expect.objectContaining({ body: JSON.stringify({ code: CODE }) })]);
     expect(fetchWithAuth.mock.calls.every(([url]) => !String(url).includes(CODE))).toBe(true);
-    expect(text()).toBe('켰어요 — 데스크톱 앱으로 돌아가면 «원격 제어 켜짐»으로 바뀌어 있어요. 이 창은 닫아도 돼요.');
+    expect(text()).toBe('켰어요 — 데스크톱 앱으로 돌아가면 «원격 제어 켜짐»으로 바뀌어 있어요. 이 창은 닫아도 돼요.연결된 기기 보기'); // story 4889 §5-7: + the way back
     expect(spoken()).toBe('켰어요 — 데스크톱 앱으로 돌아가면 «원격 제어 켜짐»으로 바뀌어 있어요. 이 창은 닫아도 돼요.');
     expect(document.activeElement?.getAttribute('role')).toBe('status'); // the button is gone — focus is on the result (Yuna 10:28Z)
     expect(document.activeElement?.textContent).toBe('켰어요 — 데스크톱 앱으로 돌아가면 «원격 제어 켜짐»으로 바뀌어 있어요. 이 창은 닫아도 돼요.');
@@ -91,7 +91,7 @@ describe('DesktopRemoteConfirm (story #4548)', () => {
   it('someone who may not turn it on sees «켤 수 없어요» and no computer or org name', async () => {
     fetchWithAuth.mockResolvedValueOnce(err(403, 'not_org_admin'));
     await open(`#code=${CODE}`);
-    expect(text()).toBe('원격 제어를 켤 수 없어요이 컴퓨터의 원격 제어는 이 조직의 소유자 · 관리자만 켤 수 있어요');
+    expect(text()).toBe('원격 제어를 켤 수 없어요이 컴퓨터의 원격 제어는 이 조직의 소유자 · 관리자만 켤 수 있어요연결된 기기 보기'); // story 4889 §5-7: + the way back (a link, not a button)
     expect(spoken()).toBe('이 컴퓨터의 원격 제어는 이 조직의 소유자 · 관리자만 켤 수 있어요');
     expect(document.activeElement).toBe(document.body); // the first read moves no focus
     expect(container.querySelector('button')).toBeNull();
@@ -105,8 +105,11 @@ describe('DesktopRemoteConfirm (story #4548)', () => {
   ])('%s reads its own line', async (code, status, line) => {
     fetchWithAuth.mockResolvedValueOnce(err(status, code));
     await open(`#code=${CODE}`);
-    expect(text()).toBe(line);
+    expect(text()).toBe(line + '연결된 기기 보기'); // the line, then the way back (the whole page text — nothing else)
     expect(spoken()).toBe(line); // heard by a screen reader too (Yuna 10:26Z)
+    // story 4889 (AC3 §5-7): no result is a dead end — each ends with the way back to «연결된 기기» (the org-off one for the owner has its own button to the switch)
+    const back = Array.from(container.querySelectorAll('a')).filter((a) => a.textContent === '연결된 기기 보기');
+    expect(back.map((a) => a.getAttribute('href'))).toEqual(['/desktop']);
   });
 
   it('a device disconnected between the peek and the press says so, with the way to «연결된 기기»', async () => {
@@ -138,5 +141,48 @@ describe('DesktopRemoteConfirm (story #4548)', () => {
     await open(`#code=${CODE}`, 'en');
     expect(text()).toContain('Turn on remote control for this computer?');
     expect(text()).toContain("This computer's agents stay as they are — no new agents are created.");
+  });
+});
+
+describe('DesktopRemoteConfirm — story 4889 (AC3 §5-7): the results that were text only now end with the way back', () => {
+  it('⭐done (after [켜기]) ends with the link to «연결된 기기» — and the focus still goes to the result line', async () => {
+    fetchWithAuth.mockResolvedValueOnce(json(200, { device_name: 'mac', org_name: 'org', expires_at: 'x' }));
+    await open(`#code=${CODE}`);
+    fetchWithAuth.mockResolvedValueOnce(json(200, { setup_id: 's' }));
+    await act(async () => { button('켜기').click(); });
+    for (let i = 0; i < 3; i++) await act(async () => { await Promise.resolve(); });
+    const back = Array.from(container.querySelectorAll('a')).filter((a) => a.textContent === '연결된 기기 보기');
+    expect(back).toHaveLength(1);
+    expect(back[0]!.getAttribute('href')).toBe('/desktop');
+    expect(document.activeElement?.getAttribute('role')).toBe('status');
+  });
+  it.each([
+    ['code_expired', 410, '시간이 지났어요 — 데스크톱 앱에서 [이 컴퓨터에서 켜기]를 다시 눌러 주세요.'],
+    ['code_used', 410, '이 링크는 더 쓸 수 없어요 — 데스크톱 앱에서 [이 컴퓨터에서 켜기]를 다시 눌러 주세요'],
+  ])('after the press (the confirm answers %s): the same line, then the way back — and the focus is on the line', async (code, status, line) => {
+    fetchWithAuth.mockResolvedValueOnce(json(200, { device_name: 'mac', org_name: 'org', expires_at: 'x' }));
+    await open(`#code=${CODE}`);
+    fetchWithAuth.mockResolvedValueOnce(err(status, code));
+    await act(async () => { button('켜기').click(); });
+    for (let i = 0; i < 3; i++) await act(async () => { await Promise.resolve(); });
+    expect(text()).toBe(line + '연결된 기기 보기');
+    expect(Array.from(container.querySelectorAll('a')).map((a) => a.getAttribute('href'))).toEqual(['/desktop']);
+    expect(document.activeElement?.getAttribute('role')).toBe('status');
+  });
+  it('the ready step keeps only «취소» (no extra link)', async () => {
+    fetchWithAuth.mockResolvedValueOnce(json(200, { device_name: 'mac', org_name: 'org', expires_at: 'x' }));
+    await open(`#code=${CODE}`);
+    expect(Array.from(container.querySelectorAll('a')).map((a) => a.textContent)).toEqual(['취소']);
+  });
+  it('a failure keeps «다시 시도» as its way on and gets no extra link', async () => {
+    fetchWithAuth.mockRejectedValueOnce(new Error('offline'));
+    await open(`#code=${CODE}`);
+    expect(container.querySelectorAll('a')).toHaveLength(0);
+    expect(button('다시 시도')).toBeTruthy();
+  });
+  it('en: the link reads «View connected devices»', async () => {
+    fetchWithAuth.mockResolvedValueOnce(err(410, 'code_expired'));
+    await open(`#code=${CODE}`, 'en');
+    expect(Array.from(container.querySelectorAll('a')).map((a) => a.textContent)).toEqual(['View connected devices']);
   });
 });

@@ -7,8 +7,8 @@ import koMessages from '../../../messages/ko.json';
 import { AgentApiKeyManager } from './agent-api-key-manager';
 
 // story #4359(까디르 4740) — 실패 toast는 늘 ko 키(원인 영어 Error 메시지는 로그로만) → toast를 손에 쥔다.
-const addToast = vi.fn();
-vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast }) }));
+const { addToast, toastHolder } = vi.hoisted(() => { const f = vi.fn(); return { addToast: f, toastHolder: { current: f } }; });
+vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast: toastHolder.current }) }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -36,6 +36,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  toastHolder.current = addToast;
   await act(async () => { root.unmount(); });
   container.remove();
   vi.unstubAllGlobals();
@@ -317,5 +318,294 @@ describe('AgentApiKeyManager — 보이는 영어 0(story #4359)', () => {
     expect(text).toContain('만료 ');
     expect(text).toContain('만료됨');
     expect(text).not.toMatch(/Last used|Revoked|Expire/);
+  });
+});
+
+describe('AgentApiKeyManager — story 4889 (AC3 §5-8): a failed read says so with [다시 시도] (it was a toast and then «키가 없어요»)', () => {
+  const mount = async () => {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages}>
+          <AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  };
+  const failed = () => document.querySelector('[data-testid="agent-api-key-load-failed"]');
+  it('⭐a failed read: the failure line + [다시 시도] are there and «키가 없어요» is NOT (a failed read is not an empty list) — and the retry reads again, then shows the keys', async () => {
+    let ok = false;
+    const fetchMock = vi.fn(async (url: string) => (!String(url).endsWith('/api-key') ? new Response(JSON.stringify({ data: [] }), { status: 200 }) : ok ? new Response(JSON.stringify({ data: [apiKeyFixture(['read'])] }), { status: 200 }) : new Response('{}', { status: 500 })));
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+    expect(failed()).toBeTruthy();
+    expect(failed()!.textContent).toContain(koMessages.settings.agentApiKeyLoadFailed);
+    expect(document.body.textContent).not.toContain(koMessages.settings.agentApiKeyEmpty);
+    const retry = Array.from(failed()!.querySelectorAll('button')).find((b) => b.textContent === '다시 시도')!;
+    expect(retry).toBeTruthy();
+    ok = true;
+    retry.focus();
+    await act(async () => { retry.click(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(failed()).toBeNull();
+    expect(document.body.textContent).toContain('sk_live_abcd1234');
+    expect(document.activeElement?.getAttribute('data-testid')).toBe('agent-api-key-refresh'); // the retry button is gone — the focus did not fall to the page
+  });
+  it('a read that works: no failure line, and an empty list still says «키가 없어요»', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 })));
+    await mount();
+    expect(failed()).toBeNull();
+    expect(document.body.textContent).toContain(koMessages.settings.agentApiKeyEmpty);
+  });
+  it('a refresh that fails after keys were shown keeps the keys and adds the failure line above them', async () => {
+    let n = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (!String(url).endsWith('/api-key') ? new Response(JSON.stringify({ data: [] }), { status: 200 }) : n++ === 0 ? new Response(JSON.stringify({ data: [apiKeyFixture(['read'])] }), { status: 200 }) : new Response('{}', { status: 500 }))));
+    await mount();
+    expect(failed()).toBeNull();
+    const refresh = Array.from(document.querySelectorAll('button')).find((b) => b.textContent === koMessages.settings.agentApiKeyRefresh)!;
+    await act(async () => { refresh.click(); await Promise.resolve(); await Promise.resolve(); });
+    expect(failed()).toBeTruthy();
+    expect(document.body.textContent).toContain('sk_live_abcd1234');
+  });
+});
+
+describe('AgentApiKeyManager — story 4889: only the latest read writes (a late older answer must not overwrite a newer one)', () => {
+  const render = (agentId: string) => root.render(
+    <NextIntlClientProvider locale="ko" messages={koMessages}>
+      <AgentApiKeyManager agentId={agentId} agentName="테스트 에이전트" />
+    </NextIntlClientProvider>,
+  );
+  it('⭐another agent: an earlier agent\'s read that FAILS late does not put the failure line over this agent\'s keys', async () => {
+    const pending: Array<{ resolve: (r: Response) => void; url: string }> = [];
+    vi.stubGlobal('fetch', vi.fn((url: string) => new Promise<Response>((resolve) => { if (String(url).endsWith('/api-key')) pending.push({ resolve, url }); else resolve(new Response(JSON.stringify({ data: [] }), { status: 200 })); })));
+    await act(async () => { render('agent-1'); });
+    await act(async () => { render('agent-2'); });
+    await act(async () => { pending[pending.length - 1]!.resolve(new Response(JSON.stringify({ data: [apiKeyFixture(['read'])] }), { status: 200 })); await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => { pending[0]!.resolve(new Response('{}', { status: 500 })); await Promise.resolve(); await Promise.resolve(); });
+    expect(document.querySelector('[data-testid="agent-api-key-load-failed"]')).toBeNull();
+    expect(document.body.textContent).toContain('sk_live_abcd1234');
+    expect((document.querySelector('[data-testid="agent-api-key-refresh"]') as HTMLButtonElement).disabled).toBe(false); // (the late answer did not touch `loading` either)
+  });
+  it('⭐another agent: the earlier agent\'s keys do not stay, and the earlier agent\'s late answer does not land on this one', async () => {
+    const pending: Array<{ resolve: (r: Response) => void; url: string }> = [];
+    vi.stubGlobal('fetch', vi.fn((url: string) => new Promise<Response>((resolve) => { if (String(url).endsWith('/api-key')) pending.push({ resolve, url }); else resolve(new Response(JSON.stringify({ data: [] }), { status: 200 })); })));
+    await act(async () => { render('agent-1'); });
+    await act(async () => { render('agent-2'); });
+    const urls = pending.map((p) => p.url);
+    expect(urls[0]).toContain('agent-1');
+    expect(urls[urls.length - 1]).toContain('agent-2');
+    await act(async () => { pending[pending.length - 1]!.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 })); await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => { pending[0]!.resolve(new Response(JSON.stringify({ data: [apiKeyFixture(['read'])] }), { status: 200 })); await Promise.resolve(); await Promise.resolve(); });
+    expect(document.body.textContent).not.toContain('sk_live_abcd1234');
+    expect(document.body.textContent).toContain(koMessages.settings.agentApiKeyEmpty);
+  });
+});
+
+describe('AgentApiKeyManager — story 4889: the rest of the read bookkeeping', () => {
+  const render = (agentId: string) => root.render(
+    <NextIntlClientProvider locale="ko" messages={koMessages}>
+      <AgentApiKeyManager agentId={agentId} agentName="테스트 에이전트" />
+    </NextIntlClientProvider>,
+  );
+  const keyReads = () => {
+    const pending: Array<{ resolve: (r: Response) => void; url: string }> = [];
+    vi.stubGlobal('fetch', vi.fn((url: string) => new Promise<Response>((resolve) => { if (String(url).endsWith('/api-key')) pending.push({ resolve, url }); else resolve(new Response(JSON.stringify({ data: [] }), { status: 200 })); })));
+    return pending;
+  };
+  const refreshOff = () => (document.querySelector('[data-testid="agent-api-key-refresh"]') as HTMLButtonElement).disabled;
+  const answer = async (p: { resolve: (r: Response) => void }, r: Response) => { await act(async () => { p.resolve(r); await Promise.resolve(); await Promise.resolve(); }); };
+  const KEYS = () => new Response(JSON.stringify({ data: [apiKeyFixture(['read'])] }), { status: 200 });
+  it('⭐an older read answering while the newer one is still out does not turn the loading state off (the refresh stays off until the newer read ends)', async () => {
+    const pending = keyReads();
+    await act(async () => { render('agent-1'); });
+    await act(async () => { render('agent-2'); });
+    expect(refreshOff()).toBe(true);
+    await answer(pending[0]!, KEYS()); // the OLDER one answers first
+    expect(refreshOff()).toBe(true);
+    expect(document.body.textContent).not.toContain('sk_live_abcd1234'); // and its keys are not this agent's
+    await answer(pending[pending.length - 1]!, new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    expect(refreshOff()).toBe(false);
+  });
+  it('⭐switching agents drops the earlier agent\'s keys at once (they do not stay while the new agent\'s read is out)', async () => {
+    const pending = keyReads();
+    await act(async () => { render('agent-1'); });
+    await answer(pending[0]!, KEYS());
+    expect(document.body.textContent).toContain('sk_live_abcd1234');
+    await act(async () => { render('agent-2'); });
+    expect(document.body.textContent).not.toContain('sk_live_abcd1234');
+  });
+  it('⭐an agent that goes away (no id) cancels the read still out — its late answer lands nowhere', async () => {
+    const pending = keyReads();
+    await act(async () => { render('agent-1'); });
+    await act(async () => { render(''); });
+    await answer(pending[0]!, KEYS());
+    expect(document.body.textContent).not.toContain('sk_live_abcd1234');
+  });
+  it('⭐a retry that fails again keeps the focus on [다시 시도] (it moves to [새로고침] only once the read worked)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (String(url).endsWith('/api-key') ? new Response('{}', { status: 500 }) : new Response(JSON.stringify({ data: [] }), { status: 200 }))));
+    await act(async () => { render('agent-1'); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const retry = document.querySelector('[data-testid="agent-api-key-load-failed"] button') as HTMLButtonElement;
+    retry.focus();
+    await act(async () => { retry.click(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(document.querySelector('[data-testid="agent-api-key-load-failed"]')).toBeTruthy();
+    expect(document.activeElement?.textContent).toBe('다시 시도');
+  });
+});
+
+describe('AgentApiKeyManager — story 4889: a late callback of an EARLIER agent (generate / revoke still out) and several cards on one page', () => {
+  const render = (agentId: string) => root.render(
+    <NextIntlClientProvider locale="ko" messages={koMessages}>
+      <AgentApiKeyManager agentId={agentId} agentName="테스트 에이전트" />
+    </NextIntlClientProvider>,
+  );
+  it('⭐a revoke of the earlier agent that ends after the switch does not reload the earlier agent\'s keys into this one nor clear this one\'s loading', async () => {
+    const readers: Array<{ resolve: (r: Response) => void; url: string }> = [];
+    let revokeDone: (r: Response) => void = () => {};
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => new Promise<Response>((resolve) => {
+      const u = String(url);
+      if (init?.method === 'DELETE') { revokeDone = resolve; return; }
+      if (u.endsWith('/api-key')) readers.push({ resolve, url: u });
+      else resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    })));
+    await act(async () => { render('agent-1'); });
+    await act(async () => { readers[0]!.resolve(new Response(JSON.stringify({ data: [apiKeyFixture(['read'])] }), { status: 200 })); await Promise.resolve(); await Promise.resolve(); });
+    // press «무효화» on agent-1's key (opens a confirm → confirm) — simpler: call through the revoke button path
+    const revokeBtn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent === koMessages.settings.agentApiKeySingleRevokeConfirmCta);
+    expect(revokeBtn).toBeTruthy();
+    await act(async () => { revokeBtn!.click(); await Promise.resolve(); });
+    const confirm = Array.from(document.querySelectorAll('button')).filter((b) => b.textContent === koMessages.settings.agentApiKeySingleRevokeConfirmCta).pop()!;
+    await act(async () => { confirm.click(); await Promise.resolve(); });
+    await act(async () => { render('agent-2'); });
+    await act(async () => { revokeDone(new Response('{}', { status: 200 })); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    // the earlier agent's card is gone: its reload (if it still asks) answers nowhere
+    for (const r of readers.slice(1).filter((x) => x.url.includes('agent-1'))) await act(async () => { r.resolve(new Response(JSON.stringify({ data: [apiKeyFixture(['read'])] }), { status: 200 })); await Promise.resolve(); await Promise.resolve(); });
+    expect((document.querySelector('[data-testid="agent-api-key-refresh"]') as HTMLButtonElement).disabled).toBe(true); // agent-2's read is still out — the late callback did not clear it
+    expect(document.body.textContent).not.toContain('sk_live_abcd1234');
+  });
+  it('⭐an agent that goes away while its read is out leaves no stuck loading state (the refresh is not left off)', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => new Promise<Response>((resolve) => { if (!String(url).endsWith('/api-key')) resolve(new Response(JSON.stringify({ data: [] }), { status: 200 })); })));
+    await act(async () => { render('agent-1'); });
+    expect((document.querySelector('[data-testid="agent-api-key-refresh"]') as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { render(''); });
+    expect((document.querySelector('[data-testid="agent-api-key-refresh"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+  it('⭐two cards on one page: the retry of the SECOND card focuses its own [새로고침] (not the first card\'s)', async () => {
+    let ok = false;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (!String(url).endsWith('/api-key') ? new Response(JSON.stringify({ data: [] }), { status: 200 }) : ok ? new Response(JSON.stringify({ data: [] }), { status: 200 }) : new Response('{}', { status: 500 }))));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages}>
+          <AgentApiKeyManager agentId="agent-1" agentName="첫째" />
+          <AgentApiKeyManager agentId="agent-2" agentName="둘째" />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const cards = Array.from(document.querySelectorAll('[data-testid="agent-api-key-manager"]'));
+    expect(cards).toHaveLength(2);
+    ok = true;
+    const retry2 = cards[1]!.querySelector('[data-testid="agent-api-key-load-failed"] button') as HTMLButtonElement;
+    retry2.focus();
+    await act(async () => { retry2.click(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const refresh2 = cards[1]!.querySelector('[data-testid="agent-api-key-refresh"]');
+    expect(document.activeElement).toBe(refresh2);
+  });
+});
+
+describe('AgentApiKeyManager — story 4889: reads of ONE card that overlap (the load effect re-runs) — only the latest writes', () => {
+  const render = () => root.render(
+    <NextIntlClientProvider locale="ko" messages={koMessages}>
+      <AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" />
+    </NextIntlClientProvider>,
+  );
+  const overlap = async () => {
+    const pending: Array<{ resolve: (r: Response) => void }> = [];
+    vi.stubGlobal('fetch', vi.fn((url: string) => new Promise<Response>((resolve) => { if (String(url).endsWith('/api-key')) pending.push({ resolve }); else resolve(new Response(JSON.stringify({ data: [] }), { status: 200 })); })));
+    await act(async () => { render(); });
+    toastHolder.current = vi.fn(); // a new toast function = a new loader = the load effect runs again while the first read is still out
+    await act(async () => { render(); });
+    expect(pending).toHaveLength(2);
+    return pending;
+  };
+  const settle = async (p: { resolve: (r: Response) => void }, r: Response) => { await act(async () => { p.resolve(r); await Promise.resolve(); await Promise.resolve(); }); };
+  it('⭐the older read answers LAST with a failure → no failure line over the newer read\'s keys', async () => {
+    const pending = await overlap();
+    await settle(pending[1]!, new Response(JSON.stringify({ data: [apiKeyFixture(['read'])] }), { status: 200 }));
+    await settle(pending[0]!, new Response('{}', { status: 500 }));
+    expect(document.querySelector('[data-testid="agent-api-key-load-failed"]')).toBeNull();
+    expect(document.body.textContent).toContain('sk_live_abcd1234');
+  });
+  it('⭐the older read answers LAST with keys → they do not overwrite the newer read\'s empty list; and the older read does not turn loading off while the newer is out', async () => {
+    const pending = await overlap();
+    await settle(pending[0]!, new Response(JSON.stringify({ data: [apiKeyFixture(['read'])] }), { status: 200 }));
+    expect((document.querySelector('[data-testid="agent-api-key-refresh"]') as HTMLButtonElement).disabled).toBe(true);
+    expect(document.body.textContent).not.toContain('sk_live_abcd1234');
+    await settle(pending[1]!, new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    expect((document.querySelector('[data-testid="agent-api-key-refresh"]') as HTMLButtonElement).disabled).toBe(false);
+    expect(document.body.textContent).toContain(koMessages.settings.agentApiKeyEmpty);
+  });
+});
+
+describe('AgentApiKeyManager — story 4889: what a gone card still has in flight does not reach the page', () => {
+  it('⭐a generate of agent-1 that ends AFTER the switch to agent-2 neither calls onNewKey (its plaintext key) nor toasts', async () => {
+    const onNewKey = vi.fn();
+    let postDone: (r: Response) => void = () => {};
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => new Promise<Response>((resolve) => {
+      if (String(url).includes('/api-key') && init?.method === 'POST') { postDone = resolve; return; }
+      resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    })));
+    const render = (id: string) => root.render(
+      <NextIntlClientProvider locale="ko" messages={koMessages}>
+        <AgentApiKeyManager agentId={id} agentName="테스트 에이전트" onNewKey={onNewKey} />
+      </NextIntlClientProvider>,
+    );
+    await act(async () => { render('agent-1'); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const generateBtn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent === koMessages.settings.agentApiKeyGenerate);
+    await act(async () => { generateBtn?.click(); await Promise.resolve(); });
+    await act(async () => { render('agent-2'); });
+    addToast.mockClear();
+    await act(async () => { postDone(new Response(JSON.stringify({ data: { api_key: 'sk_live_AGENT1_SECRET' } }), { status: 201 })); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(onNewKey).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain('sk_live_AGENT1_SECRET');
+    expect(addToast).not.toHaveBeenCalled();
+  });
+  it('⭐a generate of agent-1 that FAILS after the switch to agent-2 does not toast the failure on the other agent\'s page', async () => {
+    let postDone: (r: Response) => void = () => {};
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => new Promise<Response>((resolve) => {
+      if (String(url).includes('/api-key') && init?.method === 'POST') { postDone = resolve; return; }
+      resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    })));
+    const render = (id: string) => root.render(
+      <NextIntlClientProvider locale="ko" messages={koMessages}>
+        <AgentApiKeyManager agentId={id} agentName="테스트 에이전트" />
+      </NextIntlClientProvider>,
+    );
+    await act(async () => { render('agent-1'); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const generateBtn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent === koMessages.settings.agentApiKeyGenerate);
+    await act(async () => { generateBtn?.click(); await Promise.resolve(); });
+    await act(async () => { render('agent-2'); });
+    addToast.mockClear();
+    await act(async () => { postDone(new Response('{}', { status: 500 })); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(addToast).not.toHaveBeenCalled();
+  });
+  it('a generate that ends while its card is still there calls onNewKey (the normal path is unchanged)', async () => {
+    const onNewKey = vi.fn();
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => (String(url).includes('/api-key') && init?.method === 'POST'
+      ? new Response(JSON.stringify({ data: { api_key: 'sk_live_new' } }), { status: 201 })
+      : new Response(JSON.stringify({ data: [] }), { status: 200 }))));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages}>
+          <AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" onNewKey={onNewKey} />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const generateBtn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent === koMessages.settings.agentApiKeyGenerate);
+    await act(async () => { generateBtn?.click(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(onNewKey).toHaveBeenCalledWith('sk_live_new', null);
   });
 });
