@@ -5,7 +5,10 @@ import { TeamTabs } from '@/components/team/team-tabs';
 export default function WorkforceLayout({ children }: { children: ReactNode }) {
   return (
     <>
-      <TeamTabs />
+      {/* story 4889 — 줄이 셸 칼럼 왼쪽 끝에 붙어 있었다(판정 캡처: «팀» 줄 x≈316 · 본문 판 x≈312). 일감 줄 띠(WorkTabsFrame)와 같은 안쪽 여백(px-4 pt-3)으로 맞춘다. */}
+      <div className="px-4 pt-3" data-testid="team-tabs-band">
+        <TeamTabs />
+      </div>
       {children}
     </>
   );

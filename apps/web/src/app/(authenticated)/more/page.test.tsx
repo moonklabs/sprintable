@@ -252,7 +252,7 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
 
   it('찾기 placeholder에 ⌘K를 언급하지 않는다(폰엔 키보드 단축키가 없어 거짓)', async () => {
     await mount();
-    expect(searchInput().getAttribute('placeholder')).toBe('화면 이름으로 찾기');
+    expect(searchInput().getAttribute('placeholder')).toBe('이 목록에서 화면 이름으로 찾기');
     expect(searchInput().getAttribute('placeholder')).not.toContain('⌘');
   });
 
