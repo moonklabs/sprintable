@@ -161,7 +161,7 @@ for (const width of [1440, 390]) {
       await toFirst(page);
       await expect(stepOf(page)).toHaveCount(0); // no progress strip on the first screen
       // the one primary control is the card's [Mac 앱 받기]; the web way is a CLOSED fold (story 4766) and an installed app is opened, not downloaded
-      const primaries = page.locator('a[class*="bg-primary"], button[class*="bg-primary"]');
+      const primaries = page.locator('a[class~="bg-ds-action"], button[class~="bg-ds-action"]');
       await expect(primaries).toHaveCount(1);
       await expect(primaries.first()).toHaveAttribute('data-testid', 'desktop-download-button');
       await expect(primaries.first()).toHaveText('Mac 앱 받기');

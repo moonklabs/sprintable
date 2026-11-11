@@ -240,7 +240,7 @@ describe('[SID:4715] AC2 · AC3 — one screen in place of the fork and the down
     await mount();
     expect(container.textContent).toContain(first.macLead);
     expect(byTestId('desktop-download-button')?.textContent).toBe(first.macCta);
-    const primaries = [...container.querySelectorAll('a, button')].filter((el) => el.className.includes('bg-primary'));
+    const primaries = [...container.querySelectorAll('a, button')].filter((el) => el.className.split(/\s+/).includes('bg-ds-action')); // the ds primary variant (was the old ui `bg-primary`)
     expect(primaries.map((el) => el.getAttribute('data-testid'))).toEqual(['desktop-download-button']);
     // story 4766 (AC1): the web way is a FOLDED «고급» (a closed disclosure), not a link into a three-screen wizard; an app that is already
     // installed is opened, not downloaded again
