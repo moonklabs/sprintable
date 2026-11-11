@@ -742,7 +742,7 @@ export function ChatBubble({
               data-testid="chat-bubble-reply-button"
               aria-label={isMine ? t('replyToMyMessage') : t('replyToMessageFrom', { name: displayName })}
               onClick={handleOpenThread}
-              className={`absolute top-0 inline-flex h-7 min-h-0 w-7 min-w-0 items-center justify-center rounded-full border-0 p-0 text-muted-foreground opacity-100 touch:hidden pointer-fine:opacity-0 pointer-fine:group-hover/bubble:opacity-100 pointer-fine:group-focus-within/bubble:opacity-100 pointer-fine:focus-visible:opacity-100 ${isMine ? 'right-full mr-1' : 'left-full ml-1'}`}
+              className={`absolute top-0 inline-flex h-7 min-h-0 w-7 min-w-0 items-center justify-center rounded-full border-0 p-0 text-muted-foreground opacity-100 touch:hidden pointer-fine:opacity-0 pointer-fine:group-hover/bubble:opacity-100 pointer-fine:group-focus-within/bubble:opacity-100 pointer-fine:focus-visible:opacity-100 ${isMine && !plainRow ? 'right-full mr-1' : 'left-full ml-1'}`}
             >
               <MessageSquareReply className="h-4 w-4" aria-hidden="true" />
             </Button>
@@ -1003,7 +1003,7 @@ export function ChatBubble({
               data-testid="chat-bubble-menu-button"
               aria-label={t('messageActions')}
               onClick={handleOpenMenuButton}
-              className={`absolute top-1/2 hidden h-8 min-h-0 w-8 min-w-0 -translate-y-1/2 items-center justify-center rounded-full border-0 p-0 text-muted-foreground touch:inline-flex ${isMine ? 'right-full mr-1' : 'left-full ml-1'}`}
+              className={`absolute top-1/2 hidden h-8 min-h-0 w-8 min-w-0 -translate-y-1/2 items-center justify-center rounded-full border-0 p-0 text-muted-foreground touch:inline-flex ${isMine && !plainRow ? 'right-full mr-1' : 'left-full ml-1'}`}
             >
               <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
             </Button>
@@ -1014,7 +1014,7 @@ export function ChatBubble({
                 data-testid="chat-bubble-reply-button-touch"
                 aria-label={isMine ? t('replyToMyMessage') : t('replyToMessageFrom', { name: displayName })}
                 onClick={handleOpenThread}
-                className={`absolute top-1/2 hidden h-11 min-h-0 w-11 min-w-0 -translate-y-1/2 items-center justify-center rounded-full border-0 p-0 text-muted-foreground touch:inline-flex ${isMine ? 'right-full mr-10' : 'left-full ml-10'}`}
+                className={`absolute top-1/2 hidden h-11 min-h-0 w-11 min-w-0 -translate-y-1/2 items-center justify-center rounded-full border-0 p-0 text-muted-foreground touch:inline-flex ${isMine && !plainRow ? 'right-full mr-10' : 'left-full ml-10'}`}
               >
                 <MessageSquareReply className="h-4 w-4" aria-hidden="true" />
               </Button>

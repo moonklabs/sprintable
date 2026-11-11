@@ -16,11 +16,11 @@ function classesFromSource() {
   const pick = (re: RegExp, what: string, i = 1) => { const m = re.exec(src); if (!m) throw new Error(`${what} not found`); return m[i]!; };
   const cont = /\? \(isMine\s*\? '([^']+)'\s*: '([^']+)'\)/.exec(src);
   if (!cont) throw new Error('the continuation time line classes not found');
-  const reply = /data-testid="chat-bubble-reply-button"[\s\S]*?className=\{`([^`$]+)\$\{isMine \? '([^']+)' : '([^']+)'\}`\}/.exec(src);
+  const reply = /data-testid="chat-bubble-reply-button"[\s\S]*?className=\{`([^`$]+)\$\{isMine(?: && !plainRow)? \? '([^']+)' : '([^']+)'\}`\}/.exec(src);
   if (!reply) throw new Error('the reply button classes not found');
-  const replyT = /data-testid="chat-bubble-reply-button-touch"[\s\S]*?className=\{`([^`$]+)\$\{isMine \? '([^']+)' : '([^']+)'\}`\}/.exec(src);
+  const replyT = /data-testid="chat-bubble-reply-button-touch"[\s\S]*?className=\{`([^`$]+)\$\{isMine(?: && !plainRow)? \? '([^']+)' : '([^']+)'\}`\}/.exec(src);
   if (!replyT) throw new Error('the touch reply button classes not found');
-  const more = /data-testid="chat-bubble-menu-button"[\s\S]*?className=\{`([^`$]+)\$\{isMine \? '([^']+)' : '([^']+)'\}`\}/.exec(src);
+  const more = /data-testid="chat-bubble-menu-button"[\s\S]*?className=\{`([^`$]+)\$\{isMine(?: && !plainRow)? \? '([^']+)' : '([^']+)'\}`\}/.exec(src);
   if (!more) throw new Error('the «⋯» button classes not found');
   const text = /<div data-testid="chat-bubble-text" className=\{`([^$`]+)\$\{/.exec(src);
   const tern = /isMine\s*\?\s*'([^']+)'\s*:\s*isAgent\s*\?\s*'([^']+)'\s*:\s*'([^']+)'\s*\}`\}\s*data-bubble=/.exec(src);

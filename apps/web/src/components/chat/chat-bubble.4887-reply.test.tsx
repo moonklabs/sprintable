@@ -32,11 +32,11 @@ const message = (o: Partial<ChatMessage> = {}): ChatMessage => ({
   id: 'm1', memo_id: 'conv-1', created_by: 'agent-1', sender_name: '개발 에이전트', sender_type: 'agent', sender_avatar_url: null, sender_runtime_type: null,
   content: '안녕하세요', attachments: [], created_at: '2026-11-10T01:00:00.000Z', ...o,
 });
-async function render(o: { message?: ChatMessage; isMine?: boolean; isGrouped?: boolean; onOpenThread?: ((m: ChatMessage) => void) | null; locale?: 'ko' | 'en' } = {}) {
+async function render(o: { message?: ChatMessage; plainRow?: boolean; isMine?: boolean; isGrouped?: boolean; onOpenThread?: ((m: ChatMessage) => void) | null; locale?: 'ko' | 'en' } = {}) {
   const loc = o.locale ?? 'ko'; const msgs = loc === 'ko' ? koMessages : enMessages;
   const m = o.message ?? message();
   await act(async () => {
-    root.render(<NextIntlClientProvider locale={loc} messages={msgs} timeZone="Asia/Seoul"><ChatBubble message={m} isMine={o.isMine ?? false} isGrouped={o.isGrouped ?? false} onOpenThread={o.onOpenThread === null ? undefined : (o.onOpenThread ?? (() => {}))} /></NextIntlClientProvider>);
+    root.render(<NextIntlClientProvider locale={loc} messages={msgs} timeZone="Asia/Seoul"><ChatBubble message={m} plainRow={o.plainRow} isMine={o.isMine ?? false} isGrouped={o.isGrouped ?? false} onOpenThread={o.onOpenThread === null ? undefined : (o.onOpenThread ?? (() => {}))} /></NextIntlClientProvider>);
   });
 }
 const btn = () => container.querySelector('[data-testid="chat-bubble-reply-button"]') as HTMLButtonElement | null;
@@ -145,5 +145,18 @@ describe('ChatBubble — the reply button (story 4887 · UI-4 P6-a)', () => {
     expect(meta.className).toContain(`${MOUSE}:group-hover/bubble:ml-[var(--reply-room,8px)]`); // reverted → ml-2: the time sits under the button
     await render({ isGrouped: true, isMine: true, message: message({ created_by: 'member-1', sender_type: 'human', sender_name: '민서' }) });
     expect((container.querySelector('[data-testid="bubble-meta-line"]') as HTMLElement).className).toContain(`${MOUSE}:group-hover/bubble:mr-[var(--reply-room,8px)]`);
+  });
+});
+
+describe('story 4887 (codex round 1) — a plain row keeps its touch «⋯» on the same side whoever wrote it', () => {
+  it('⭐ my message as a plain row (a thread reply): the «⋯» is at the left like everyone else\'s; as a bubble it stays on the bubble\'s outer (left) side when mine', async () => {
+    await render({ isMine: true, plainRow: true });
+    const more = container.querySelector('[data-testid="chat-bubble-menu-button"]') as HTMLElement;
+    expect(more.className).toContain('left-full');
+    expect(more.className).not.toContain('right-full'); // reverted (isMine alone) → right-full: the opposite side from the other rows
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await render({ isMine: true });
+    expect((container.querySelector('[data-testid="chat-bubble-menu-button"]') as HTMLElement).className).toContain('right-full');
   });
 });

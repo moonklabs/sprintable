@@ -160,6 +160,17 @@ for (const scheme of ['light', 'dark'] as const) {
       expect(await page.locator('#rail select, #rail [role="tab"]').count(), 'no filter select and no tabs above the rooms').toBe(0);
       expect(await page.locator('#rail').getByText('DM', { exact: true }).count(), 'no «DM» / «그룹» sub-heads').toBe(0);
 
+      // the moved controls are REACHABLE: «⋯» opens a named popover that holds the project filter (portal) — and the whole thing stays on the screen
+      await page.locator('[data-testid="chat-list-options"]').click();
+      const popup = page.locator('[role="dialog"][aria-label="목록 설정"]');
+      await expect(popup).toBeVisible(); // reverted (the popover has no name) → not found
+      await expect(popup.locator('[data-testid="project-filter"]')).toBeVisible();
+      const pb = (await popup.boundingBox())!;
+      expect(pb.x >= 0 && pb.x + pb.width <= 1100, `the popover is on the screen (x ${Math.round(pb.x)}..${Math.round(pb.x + pb.width)})`).toBe(true);
+      await page.keyboard.press('Escape');
+      await expect(popup).toHaveCount(0);
+      expect(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute('data-testid')), 'focus returns to the «⋯» that opened it').toBe('chat-list-options');
+
       // ② the room head: name · tag · one line · a chip row; its buttons are only the «+» (the «⋯» here is the harness's trailing slot)
       const head = page.locator('[data-testid="room-head"]');
       await expect(head.locator('h1')).toHaveText('결제 연동 · 오늘 할 일');

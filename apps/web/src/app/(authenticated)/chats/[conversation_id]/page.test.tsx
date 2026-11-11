@@ -235,6 +235,15 @@ describe('ConversationPage — 헤더 아바타(story #2968)', () => {
     expect(chips[0]!.querySelector('[data-slot="ds-status-label"]'), 'a person has no connection word (no presence exists for people)').toBeNull();
   });
 
+  it('⭐ while the room\'s data is not there (the lookup fails) the head draws no «+» — a button that does nothing is not drawn', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/conv-1')) return { ok: false, status: 500, json: async () => ({}) };
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await mount();
+    expect(container.querySelector('[data-testid="room-head-add"]')).toBeNull(); // reverted (always drawn) → a dead «+»
+  });
+
   it('the head has no button of its own: the phone back arrow, the «+» of the chip row and the «⋯» menu — nothing else', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/conversations/conv-1')) {

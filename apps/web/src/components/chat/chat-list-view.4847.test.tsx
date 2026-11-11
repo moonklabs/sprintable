@@ -658,6 +658,28 @@ describe('ChatListView — 옛 서버(422)에서는 지금 화면과 같다 (sto
     expect(replaceMock).toHaveBeenCalledWith('/chats/conv-dm?compose=' + encodeURIComponent('지시') + '&p=proj-a');
   });
 
+  it('⭐ the «pick a project» fallback still carries the rail\'s name (the overlay rail is labelled by #chat-rail-heading) — an h2 when it sits beside a room', async () => {
+    oldServer(); ctx({ projectId: undefined });
+    await mount({ projectId: null, headingLevel: 2 });
+    const heading = container.querySelector('#chat-rail-heading');
+    expect(heading?.tagName).toBe('H2'); // reverted (the early return has no heading) → null: an unnamed dialog
+    expect(heading?.textContent).toBe(koMessages.chats.title);
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await mount({ projectId: null });
+    expect(container.querySelector('#chat-rail-heading')?.tagName).toBe('H1');
+  });
+
+  it('⭐ the list head is an h2 beside a room and an h1 on the list route; the «⋯» popover has a name', async () => {
+    oldServer(); ctx();
+    await mount({ projectId: 'proj-a', headingLevel: 2 });
+    expect(container.querySelector('[data-testid="chat-list-head"] h2#chat-rail-heading')).not.toBeNull();
+    expect(container.querySelector('[data-testid="chat-list-head"] h1')).toBeNull();
+    await openListOptions();
+    const popup = document.querySelector('[data-testid="chat-list-now"]')!.closest('[role="dialog"]');
+    expect(popup?.getAttribute('aria-label')).toBe(koMessages.chats.listOptions); // reverted (no name on the dialog) → null
+  });
+
   it('⭐현재 프로젝트가 없으면 예전처럼 «프로젝트를 고르세요» 한 줄 — 오류도 목록도 아니다. 프로젝트를 고르면 그 프로젝트의 목록이 선다', async () => {
     const fetchMock = oldServer(); ctx({ projectId: undefined });
     await mount({ projectId: null });

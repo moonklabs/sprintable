@@ -26,7 +26,8 @@ export interface RoomHeadProps {
   /** how many participants did not fit (shown as «+N») */
   moreCount?: number;
   addLabel: string;
-  onAdd: () => void;
+  /** absent while the room's data is not there (loading · blocked): a «+» that does nothing is not drawn */
+  onAdd?: () => void;
   /** the right end: the muted state and the «⋯» menu — the head itself has no other button */
   trailing?: ReactNode;
 }
@@ -53,9 +54,7 @@ export function RoomHead({ backLabel, onBack, title, tag, subline, chips, moreCo
           </li>
         ))}
         {moreCount > 0 ? <li data-testid="room-head-more" className="font-mono text-ds-mono-md text-ds-ink-3">+{moreCount}</li> : null}
-        <li>
-          <IconButton icon="add" label={addLabel} onClick={onAdd} data-testid="room-head-add" />
-        </li>
+        {onAdd ? <li><IconButton icon="add" label={addLabel} onClick={onAdd} data-testid="room-head-add" /></li> : null}
       </ul>
     </header>
   );

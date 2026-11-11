@@ -133,6 +133,7 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
             currentTeamMemberId={currentTeamMemberId}
             open={showModal}
             onOpenChange={setShowModal}
+            headingLevel={isListRoute ? 1 : 2}
             canStartRoom={canStartRoom}
           />
         </div>
