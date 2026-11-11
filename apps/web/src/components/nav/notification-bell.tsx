@@ -28,6 +28,12 @@ import { hasDesktopNotifyBridge, notifyViaDesktopBridge } from '@/lib/desktop-no
 import { useToast } from '@/components/ui/toast';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { Avatar } from '@/components/ds/avatar';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { EmptyState } from '@/components/ds/empty-state';
+import { Icon } from '@/components/ds/icon';
+import { IconButton } from '@/components/ds/icon-button';
+import { SectionHeader } from '@/components/ds/section-header';
 
 type FilterTab = 'all' | 'story' | 'system';
 
@@ -276,166 +282,113 @@ function NotificationPanel({
     filterTab === 'system' ? t('emptySystem') :
     t('emptyAll');
 
-  // story #4557: a flex item that may shrink (min-h-0 · flex-1) — in the lg+ popover (a flex column capped at 480px) `h-full`
-  // resolved to the content and never shrank, so the list below got no bounded height and did not scroll
+  // story 4890 (UI-7 · 알림 화면 통째): the panel on the B skeleton — one header line (title · [전체 읽음] · ✕ 44), ONE chip row (전체 · 스토리 · 시스템 + 안읽음만), rows of TWO lines (headline / «방 · 보낸이 · 시각») with an unread dot,
+  // and on the «all» view the list is cut in two groups, «안 읽음» first (with its count) and «이전» after — before: a tab strip + a pill + rows of three or four lines (title · room · sender · time).
+  // story #4557: a flex item that may shrink (min-h-0 · flex-1) — in the lg+ popover (a flex column capped at 480px) `h-full` resolved to the content and never shrank, so the list below got no bounded height and did not scroll
+  const grouped = filterTab === 'all' && !showUnreadOnly;
+  const unreadRows = grouped ? filtered.filter((n) => !n.read_at) : [];
+  const earlierRows = grouped ? filtered.filter((n) => !!n.read_at) : [];
+  const renderRow = (n: EventNotification) => {
+    const lineSender = chatLineSender(n);
+    const room = n.target_conversation_title;
+    const sender = n.payload?.sender_name;
+    return (
+      <li key={n.id}>
+        <Button
+          type="button"
+          variant="quiet"
+          onClick={() => onNavigate(n)}
+          className={cn('h-auto min-h-14 w-full justify-start gap-3 rounded-none border-0 border-b border-ds-line px-4 py-3 text-left font-normal', !n.read_at && 'bg-ds-action-soft')}
+        >
+          {lineSender ? (
+            <span className="shrink-0" data-testid="notification-line-avatar">
+              <Avatar decorative name={lineSender.name} avatarUrl={lineSender.avatarUrl} actorType={lineSender.actorType} runtimeType={lineSender.runtimeType} size={32} />
+            </span>
+          ) : (
+            <span className={cn('shrink-0 rounded-full p-1.5', n.read_at ? 'bg-ds-surface-high text-ds-ink-3' : 'bg-ds-action-soft text-ds-action-text')}>
+              {getEventIcon(n)}
+            </span>
+          )}
+          <span className="min-w-0 flex-1">
+            <span data-testid="notification-line-headline" className={cn('block truncate text-ds-body text-ds-ink', !n.read_at && 'font-semibold')}>{headline(t, n)}</span>
+            <span className="block truncate text-ds-small text-ds-ink-3">
+              {room ? <span data-testid="notification-line-room">{room}</span> : null}
+              {room && sender ? ' · ' : null}
+              {sender ? <span>{sender}</span> : null}
+              {room || sender ? ' · ' : null}
+              <span>{formatViewerRelativeTime(n.created_at, locale, displayTimezone)}</span>
+            </span>
+          </span>
+          {!n.read_at ? <span className="size-2 shrink-0 rounded-full bg-ds-action" aria-hidden /> : null}
+        </Button>
+      </li>
+    );
+  };
+  const chip = (active: boolean) => cn('h-8 shrink-0 px-3 text-ds-small', active && 'border-ds-action bg-ds-action-soft text-ds-action-text');
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* 헤더 */}
-      <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
-        <span className="text-sm font-semibold">{t('panelTitle')}</span>
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-ds-line px-4 py-2">
+        <h2 className="text-ds-card-title font-semibold text-ds-ink">{t('panelTitle')}</h2>
         <div className="flex items-center gap-1">
           {hasUnread && (
-            <button
-              type="button"
-              onClick={onMarkAllRead}
-              className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
-            >
-              <CheckCheck className="size-3.5" />
+            <Button variant="quiet" onClick={onMarkAllRead} iconStart={<Icon name="done_all" size={16} />} className="text-ds-small">
               {t('markAllRead')}
-            </button>
+            </Button>
           )}
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex size-7 items-center justify-center rounded text-muted-foreground transition hover:bg-accent hover:text-foreground"
-            aria-label={tCommon('close')}
-          >
-            <X className="size-4" />
-          </button>
+          <IconButton icon="close" label={tCommon('close')} size="lg" variant="quiet" onClick={onClose} />
         </div>
       </div>
 
-      {/* story #2201 — SSE backfill이 강등된 연결에서만 뜨는 옅은 회색 한 줄. no_cursor(최초
-          연결)는 제외 — "일부 유실"이 아니라 "아직 아무것도 안 받은 정상 상태"이기 때문. */}
-      {syncDegraded && (
-        <div className="shrink-0 border-b bg-muted/50 px-4 py-1.5 text-xs text-muted-foreground">
-          {t('syncDegradedBanner')}
-        </div>
-      )}
+      {/* story #2201 — SSE backfill이 강등된 연결에서만 뜨는 옅은 한 줄. no_cursor(최초 연결)는 제외 — "일부 유실"이 아니라 "아직 아무것도 안 받은 정상 상태"이기 때문. */}
+      {syncDegraded && <Banner tone="note" className="rounded-none border-x-0 border-t-0">{t('syncDegradedBanner')}</Banner>}
 
-      {/* 필터 탭 */}
-      <div className="focus-inset flex shrink-0 overflow-x-auto border-b">
+      {/* 칩 한 줄: 보는 종류 + 안읽음만 */}
+      <div className="focus-inset flex shrink-0 items-center gap-2 overflow-x-auto border-b border-ds-line px-4 py-2">
         {FILTER_TABS.map((tab) => (
-          <button
-            key={tab.value}
-            type="button"
-            onClick={() => setFilterTab(tab.value)}
-            aria-pressed={filterTab === tab.value}
-            className={cn(
-              'shrink-0 px-3 py-2 text-xs font-medium transition',
-              filterTab === tab.value
-                ? 'border-b-2 border-primary text-foreground'
-                : 'text-muted-foreground hover:text-foreground',
-            )}
-          >
+          <Button key={tab.value} type="button" variant="secondary" onClick={() => setFilterTab(tab.value)} aria-pressed={filterTab === tab.value} className={chip(filterTab === tab.value)}>
             {t(tab.labelKey)}
-          </button>
+          </Button>
         ))}
-        <div className="ml-auto flex shrink-0 items-center px-3">
-          <button
-            type="button"
-            onClick={() => setShowUnreadOnly((v) => !v)}
-            aria-pressed={showUnreadOnly}
-            className={cn(
-              // story #2062: showUnreadOnly=true면 bg-primary(링색과 동일) — focus-inset 컨테이너
-              // 안에서는 inset 링이 안 보이므로 focus-outset으로 바깥 링을 되돌린다(유나 규격).
-              'focus-outset rounded-full px-2.5 py-0.5 text-editorial-meta font-medium transition',
-              showUnreadOnly
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-muted text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {t('unreadOnly')}
-          </button>
-        </div>
+        <Button type="button" variant="secondary" onClick={() => setShowUnreadOnly((v) => !v)} aria-pressed={showUnreadOnly} className={cn('ml-auto', chip(showUnreadOnly))}>
+          {t('unreadOnly')}
+        </Button>
       </div>
 
       {/* 목록 */}
       <div className="focus-inset min-h-0 flex-1 overflow-y-auto">
         {loading ? (
-          <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
-            {tCommon('loading')}
-          </div>
+          <div className="py-12 text-center text-ds-body text-ds-ink-3">{tCommon('loading')}</div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
-            <Bell className="size-8 opacity-30" />
-            <span>{emptyMessage}</span>
-          </div>
+          <EmptyState icon="notifications" title={emptyMessage} />
         ) : (
           <>
-          <ul>
-            {filtered.map((n) => {
-              const lineSender = chatLineSender(n);
-              return (
-              <li key={n.id}>
-                <button
-                  type="button"
-                  onClick={() => onNavigate(n)}
-                  className={cn(
-                    'flex min-h-14 w-full gap-3 px-4 py-3 text-left transition hover:bg-accent',
-                    !n.read_at && 'bg-primary/5',
-                  )}
-                >
-                  {lineSender ? (
-                    <span className="mt-0.5 shrink-0" data-testid="notification-line-avatar">
-                      <Avatar decorative name={lineSender.name} avatarUrl={lineSender.avatarUrl} actorType={lineSender.actorType} runtimeType={lineSender.runtimeType} size={32} />
-                    </span>
-                  ) : (
-                    <span
-                      className={cn(
-                        'mt-0.5 shrink-0 rounded-full p-1.5',
-                        n.read_at
-                          ? 'bg-muted text-muted-foreground'
-                          : 'bg-primary/10 text-primary',
-                      )}
-                    >
-                      {getEventIcon(n)}
-                    </span>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p
-                      className={cn(
-                        'truncate text-sm',
-                        !n.read_at && 'font-medium',
-                      )}
-                    >
-                      {headline(t, n)}
-                    </p>
-                    {n.target_conversation_title ? (
-                      <p className="truncate text-xs text-muted-foreground" data-testid="notification-line-room">
-                        {n.target_conversation_title}
-                      </p>
-                    ) : null}
-                    {n.payload?.sender_name ? (
-                      <p className="truncate text-xs text-muted-foreground">
-                        {n.payload.sender_name}
-                      </p>
-                    ) : null}
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {formatViewerRelativeTime(n.created_at, locale, displayTimezone)}
-                    </p>
-                  </div>
-                  {!n.read_at && (
-                    <span className="mt-1.5 size-2 shrink-0 rounded-full bg-primary" />
-                  )}
-                </button>
-              </li>
-              );
-            })}
-          </ul>
-          {/* story #2192 AC3/AC4 — hasMore일 때만 렌더(음성대조: 30건 이하 계정은 버튼 자체가 없음). */}
-          {hasMore && (
-            <div className="flex justify-center py-3">
-              <button
-                type="button"
-                onClick={onLoadMore}
-                disabled={loadingMore}
-                className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
-              >
-                {loadingMore ? tCommon('loading') : t('loadMore')}
-              </button>
-            </div>
-          )}
+            {grouped ? (
+              <>
+                {unreadRows.length > 0 ? (
+                  <section data-testid="notification-group-unread">
+                    <SectionHeader title={t('groupUnread')} level={3} count={<CountBadge count={unreadRows.length} />} className="px-4" />
+                    <ul>{unreadRows.map(renderRow)}</ul>
+                  </section>
+                ) : null}
+                {earlierRows.length > 0 ? (
+                  <section data-testid="notification-group-earlier">
+                    {unreadRows.length > 0 ? <SectionHeader title={t('groupEarlier')} level={3} className="px-4" /> : null}
+                    <ul>{earlierRows.map(renderRow)}</ul>
+                  </section>
+                ) : null}
+              </>
+            ) : (
+              <ul>{filtered.map(renderRow)}</ul>
+            )}
+            {/* story #2192 AC3/AC4 — hasMore일 때만 렌더(음성대조: 30건 이하 계정은 버튼 자체가 없음). */}
+            {hasMore && (
+              <div className="flex justify-center py-3">
+                <Button variant="secondary" onClick={onLoadMore} disabled={loadingMore}>
+                  {loadingMore ? tCommon('loading') : t('loadMore')}
+                </Button>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -768,7 +721,7 @@ export function NotificationBell() {
           role="dialog"
           aria-modal="true"
           aria-label={t('panelTitle')}
-          className="fixed inset-0 z-50 flex flex-col bg-background outline-none lg:hidden"
+          className="fixed inset-0 z-50 flex flex-col bg-ds-background outline-none lg:hidden"
         >
           <NotificationPanel
             notifications={notifications}
