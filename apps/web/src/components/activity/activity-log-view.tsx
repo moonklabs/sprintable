@@ -149,7 +149,8 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   const fetchLogs = useCallback(
     async (nextOffset = 0, onForbidden?: () => void, firstPage = false) => {
       const res = await fetchWithAuth(`/api/activity-logs?${buildParams(nextOffset)}`);
-      if (res.status === 403) { setForbidden(true); onForbidden?.(); return null; }
+      // the 403 is REPORTED to the caller (who writes the «접근 불가» state only while its own load is still the newest) — never written from here, so a late older answer cannot turn a newer result into it.
+      if (res.status === 403) { onForbidden?.(); return null; }
       // story 4892 (found while rebuilding this screen — the team feed had the same defect, §5 #1): a FIRST page that the server refused (500 …) was shown as «활동 내역이 없어요», the empty state.
       // It is an error state with a retry now (the same state a network error always had). «더 보기» keeps its own answer: null → the shared toast.
       if (!res.ok) { if (firstPage) throw new Error(`activity-logs ${res.status}`); return null; }
@@ -170,11 +171,12 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
     const current = () => !cancelled && gen === firstPageGen.current;
     async function load() {
       setLoading(true);
+      setLoadingMore(false);   // a «더 보기» still in flight belongs to the old list — this load supersedes it
       setForbidden(false);
       setLoadError(false);
       setOffset(0);
       try {
-        const result = await fetchLogs(0, undefined, true);
+        const result = await fetchLogs(0, () => { if (current()) setForbidden(true); }, true);
         if (!current()) return;
         setItems(result?.items ?? []);
         setTotal(result?.total ?? 0);
@@ -190,10 +192,13 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
 
   const loadMore = async () => {
     const nextOffset = offset + PAGE_SIZE;
+    const gen = firstPageGen.current;   // «더 보기» belongs to the list that was on screen when it was pressed — a filter change / reload in the meantime makes its answer stale
+    const stale = () => gen !== firstPageGen.current;
     setLoadingMore(true);
     let forbidden403 = false;
     try {
-      const result = await fetchLogs(nextOffset, () => { forbidden403 = true; });
+      const result = await fetchLogs(nextOffset, () => { forbidden403 = true; if (!stale()) setForbidden(true); });
+      if (stale()) return;
       if (result) {
         setItems((prev) => [...prev, ...result.items]);
         setOffset(nextOffset);
@@ -205,20 +210,21 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
       }
     } catch {
       // story 4892 — the same for a network error: say so, keep the button (a second press retries).
-      addToast({ title: tc('loadMoreFailed'), type: 'error' });
+      if (!stale()) addToast({ title: tc('loadMoreFailed'), type: 'error' });
     } finally {
-      setLoadingMore(false);
+      if (!stale()) setLoadingMore(false);   // a stale one must not clear the spinner of the newer load (that load reset it itself)
     }
   };
 
   const reload = async () => {
     const gen = ++firstPageGen.current;   // a newer first-page load (this one, or a filter change) supersedes every older one
+    setLoadingMore(false);
     setForbidden(false);
     setLoadError(false);
     setLoading(true);
     setOffset(0);
     try {
-      const result = await fetchLogs(0, undefined, true);
+      const result = await fetchLogs(0, () => { if (gen === firstPageGen.current) setForbidden(true); }, true);
       if (gen !== firstPageGen.current) return;
       setItems(result?.items ?? []);
       setTotal(result?.total ?? 0);
