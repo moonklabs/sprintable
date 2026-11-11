@@ -366,6 +366,8 @@ describe('DocViewPage — 상태 머리 자리(CSS 격자 · 한 번만) · 목�
     expect(rail.querySelector('[data-testid="evidence-rail"]')).not.toBeNull();
     const grid = article.parentElement!;
     expect(cls(grid)).toEqual(expect.arrayContaining(['lg:grid-cols-[minmax(0,1fr)_316px]', 'lg:gap-y-0']));    // 행 사이 틈 0 → 선이 끊기지 않음
+    // dev 실측(5621 직후): 본문이 두 행에 걸치면 auto 두 행이 남는 높이를 나눠 받아 상태 머리 행이 수천 px로 늘고 목차 · 이력(aside)이 y=2400에서 시작했다 → 1행은 내용 높이 · 2행이 나머지.
+    expect(cls(grid)).toContain('lg:grid-rows-[auto_1fr]');
   });
 
   it('미디어 쿼리 상태로 옮기지 않는다(첫 그림 깜빡임 · 이력 요청 두 번 방지)', async () => {

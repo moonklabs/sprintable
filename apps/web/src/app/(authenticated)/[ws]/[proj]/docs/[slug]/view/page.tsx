@@ -200,8 +200,9 @@ export default function DocViewPage() {
 
       <div ref={scrollRootRef} className="focus-inset flex-1 overflow-y-auto">
         {/* story 4892 (UI-9 문서 상세 열) — 오른쪽 열 = «상태 · 목차 · 이력» 패널(시안의 스레드 열처럼 본문 옆 상시 열). 상태 머리는 DOM에 한 번만 두고 자리는 CSS 격자가 정한다:
-            lg(1024+)에서는 오른쪽 열 맨 위(2열 1행), 그 아래 폭에서는 DOM 순서대로 본문 맨 위. 미디어 쿼리 상태로 옮기면 첫 그림이 «아래 폭»으로 그려졌다 옮겨져 깜빡이고 이력 요청이 두 번 나가서(codex) 격자로 바꿨다. */}
-        <div className="grid grid-cols-1 gap-x-8 gap-y-8 px-4 py-8 lg:grid-cols-[minmax(0,1fr)_316px] lg:gap-y-0 lg:px-8">
+            lg(1024+)에서는 오른쪽 열 맨 위(2열 1행), 그 아래 폭에서는 DOM 순서대로 본문 맨 위. 미디어 쿼리 상태로 옮기면 첫 그림이 «아래 폭»으로 그려졌다 옮겨져 깜빡이고 이력 요청이 두 번 나가서(codex) 격자로 바꿨다.
+            행은 «상태 머리 = 내용 높이 · 목차 · 이력 = 나머지 전부»(lg:grid-rows-[auto_1fr]) — 본문(article)이 두 행에 걸쳐 남는 높이가 생기면 auto 행이 그 높이를 나눠 받아 상태 행이 수천 px로 늘고 목차 · 이력이 본문 한참 아래에서 시작했다(dev 실측: aside y=2400, 전 197). */}
+        <div className="grid grid-cols-1 gap-x-8 gap-y-8 px-4 py-8 lg:grid-cols-[minmax(0,1fr)_316px] lg:grid-rows-[auto_1fr] lg:gap-y-0 lg:px-8">
           <div data-testid="docs-reader-status-block" className="lg:col-start-2 lg:row-start-1 lg:border-l lg:border-ds-line lg:pb-6 lg:pl-6">
             <DocStatusHeader docId={doc.id} status={doc.status} editHref={docUrl(wsSlug, projSlug, slug)} onTransitioned={refetch} />
           </div>
