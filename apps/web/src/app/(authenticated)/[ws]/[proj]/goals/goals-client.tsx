@@ -1025,7 +1025,9 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
   const { addToast } = useToast();
   const [epics, setGoals] = useState<Goal[]>([]);
   const [selectedEpic, setSelectedEpic] = useState<Goal | null>(null);
-  const [loading, setLoading] = useState(true);
+  // story #4888 — «이 프로젝트의 목표 목록을 읽었나». 예전엔 한 번 읽으면 끝나는 `loading` 불리언이었는데, 스윔레인 보기는 이 목록을 읽지 않고(보드가 자기 읽기를 쥔다) 프로젝트가 바뀌면 이전 프로젝트의
+  // 목록이 남을 수 있어, 어느 프로젝트의 목록인지를 같이 든다 — 목록 보기는 이 값이 지금 프로젝트일 때만 서고, 마스트헤드 수도 그때만 보인다.
+  const [loadedProject, setLoadedProject] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
   const [statusFilter, setStatusFilter] = useState<GoalStatus | 'all'>('all');
@@ -1063,7 +1065,7 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
       // AC3: silent-swallow 금지 — 최소 로깅.
       console.error('[epics] 목록을 불러오지 못했습니다', err);
     } finally {
-      setLoading(false);
+      setLoadedProject(projectId);
     }
     // orgSyncVersion은 콜백 안에서 안 읽는다 — switch-org 성공 直後 이 콜백 새 참조를
     // 강제해 재요청시키기 위한 의도적 invalidation 트리거다(story #2545, project-context-
@@ -1151,13 +1153,18 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
     setGoals((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
   }, []);
 
+  // story #4888 — 목록 읽기는 «목록 보기»일 때만. 스윔레인 보기(= `/epics` 진입 포함)는 보드가 자기 읽기 · 시간초과 · 실패 표시를 쥐므로, 여기서 또 읽거나 그 읽기를 기다리면
+  // 목록 읽기가 느릴 때 보드의 «느림 vs 멈춤» 표시(story #3019)가 가려지고 같은 /api/goals를 두 번 읽는다. 목록 보기로 넘어올 때 읽는다.
+  const needsGoals = view === 'list';
   useEffect(() => {
+    if (!needsGoals) return;
     void fetchGoals();
-  }, [fetchGoals]);
+  }, [fetchGoals, needsGoals]);
 
   // story #3126 — dormancy_threshold_hours를 1회 조회(project_id 변경 시 재조회). 실패 시
   // DEFAULT_DORMANCY_THRESHOLD_HOURS 유지(위 useState 초기값 그대로, 별도 처리 불요).
   useEffect(() => {
+    if (!needsGoals) return; // 이 값은 마스트헤드 «진행 중» 수에만 쓰인다 — 목록 보기일 때만 읽는다
     let cancelled = false;
     void (async () => {
       try {
@@ -1172,9 +1179,10 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
       }
     })();
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, needsGoals]);
 
-  if (loading) {
+  const goalsReady = loadedProject === projectId;
+  if (view === 'list' && !goalsReady) {
     return (
       <>
         {/* story #3945 — 아래 :1157(본문 «목표» 제목)이 이 페이지의 진짜 h1이다. 로딩
@@ -1217,7 +1225,9 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
             시그니처는 무채 두께(3px)·길이로 유지. */}
         <hr className="my-3 h-[3px] w-16 border-0 bg-proof-line-strong" />
         <p className="text-editorial-ui text-muted-foreground">
-          {t('indexDek')} <span className="text-muted-foreground">{t('indexCountActive', { count: activeCount })} · {t('indexCountDone', { count: doneCount })}</span>
+          {t('indexDek')}{' '}
+          {/* story #4888 — 수는 이 프로젝트의 목록을 읽은 뒤에만(스윔레인 보기로 곧장 열렸으면 아직 안 읽어 0 · 0이 «정확한 수»처럼 보이지 않게) */}
+          {goalsReady ? <span className="text-muted-foreground">{t('indexCountActive', { count: activeCount })} · {t('indexCountDone', { count: doneCount })}</span> : null}
         </p>
       </div>
   );

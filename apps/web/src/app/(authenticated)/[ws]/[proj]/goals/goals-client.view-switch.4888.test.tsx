@@ -191,3 +191,52 @@ describe('GoalsClient — initialView(주소가 보기를 정함, story #4888 �
     for (const d of anchored) expect(d.className).toContain('var(--work-tabs-h,0px)');
   });
 });
+
+// codex 5543-epics BLOCKING — `/epics`가 목표 목록 읽기를 먼저 기다리면 보드가 원래 쥐던 «느림 vs 멈춤» 표시(story #3019)가 가려지고 같은 /api/goals를 두 번 읽는다.
+// 보드를 목 처리한 위 시험은 못 잡았다 — 여기서는 «목록 읽기가 영영 안 끝나도 스윔레인은 선다 · 목록 읽기는 목록 보기에서만»을 읽기 호출로 잰다.
+describe('GoalsClient — 스윔레인 보기는 목록 읽기를 기다리지도 하지도 않는다(story #4888 둘째 조각)', () => {
+  const goalsListCalls = () => vi.mocked(fetch).mock.calls.filter(([u]) => typeof u === 'string' && u.includes('/api/goals?'));
+  const hangGoalsList = () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => (typeof url === 'string' && url.includes('/api/goals?')
+      ? new Promise(() => {}) // 영영 안 끝난다
+      : Promise.resolve({ ok: false, json: async () => null }))));
+  };
+
+  it('⭐initialView="swimlane"이면 목록 읽기가 영영 안 끝나도 보드는 선다 · 목록 읽기는 아예 하지 않는다(/api/goals? 0회) · h1 하나', async () => {
+    hangGoalsList();
+    await mount('proj-1', koMessages, 'swimlane');
+    expect(container.querySelector('[data-testid="swimlane-board-stub"]')).not.toBeNull();
+    expect(goalsListCalls()).toHaveLength(0);
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
+  });
+
+  it('⭐읽지 않은 동안 마스트헤드는 수를 «정확한 수»처럼 보이지 않는다 — 진행 중 · 완료 수 글이 없다(0 · 0이 아님)', async () => {
+    hangGoalsList();
+    await mount('proj-1', koMessages, 'swimlane');
+    const masthead = container.querySelector('h1')!.parentElement!.textContent ?? '';
+    expect(masthead).toContain(koMessages.goals.indexDek);
+    expect(masthead).not.toMatch(/진행 중\s*\d|완료\s*\d|active\s*\d/);
+    expect(masthead).not.toContain('0 ·');
+  });
+
+  it('⭐스윔레인에서 목록 보기로 넘어오면 그때 «딱 한 번» 읽는다 · 읽은 뒤에 목록과 수가 선다', async () => {
+    await mount('proj-1', koMessages, 'swimlane');
+    expect(goalsListCalls()).toHaveLength(0);
+    await click(viewBtn(koMessages.goals.viewList)!);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(goalsListCalls()).toHaveLength(1);
+    expect(container.textContent).toContain('E-CANVAS');
+    expect(container.querySelector('h1')!.parentElement!.textContent).toMatch(/\d/); // 수가 선다
+  });
+
+  it('⭐프로젝트가 바뀌면(같은 마운트) 이전 프로젝트의 목록이 남지 않는다 — 새 목록을 읽는 동안은 로딩 자리 · 스윔레인 보기에서는 이전 프로젝트의 수를 안 보인다', async () => {
+    const { GoalsClient } = await import('./goals-client');
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-1" />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('E-CANVAS');
+    hangGoalsList(); // proj-2의 목록은 안 끝난다
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-2" />)); });
+    expect(container.textContent).not.toContain('E-CANVAS'); // 이전 프로젝트의 목록이 남지 않는다
+    expect(container.textContent).toContain(koMessages.goals.loading);
+  });
+});
