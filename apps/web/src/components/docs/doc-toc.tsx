@@ -2,7 +2,9 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
-import { List, X } from 'lucide-react';
+import { Button } from '@/components/ds/button';
+import { IconButton } from '@/components/ds/icon-button';
+import { Icon } from '@/components/ds/icon';
 import type { DocHeading } from './doc-heading-utils';
 import { cn } from '@/lib/utils';
 import { AnchoredPopover, isOutsidePress, usePortalMenuKeys } from '@/components/shared/anchored-popover';
@@ -47,56 +49,42 @@ export function DocToc({ headings, onHeadingClick, className }: DocTocProps) {
 
   return (
     <div ref={panelRef} className={cn('relative', className)}>
-      <button
+      {/* story 4892 (UI-9 문서 상세 열) — «목차» 단추 = ds Button(열려 있으면 보조 윤곽 · 닫히면 조용). 포털 · 키 길(usePortalMenuKeys)은 그대로. */}
+      <Button
         ref={buttonRef}
         {...keys.triggerProps}
-        type="button"
+        variant={open ? 'secondary' : 'quiet'}
         onClick={() => setOpen((v) => !v)}
         onKeyDown={keys.onTriggerKeyDown}
-        className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
-          open
-            ? 'border-border bg-muted text-foreground'
-            : 'border-border/60 bg-card text-foreground hover:border-muted-foreground/40 hover:text-foreground'
-        }`}
         title={t('tocSection')}
+        iconStart={<Icon name="list" size={14} />}
       >
-        <List className="size-3.5" />
-        <span>{t('tocSection')}</span>
-      </button>
+        {t('tocSection')}
+      </Button>
 
       {open && (
-        <AnchoredPopover anchorRef={panelRef} popoverRef={listRef} align="end" gap={6} onKeyDown={keys.onPopoverKeyDown} {...keys.popoverProps} data-dropdown-panel="doc-toc" className="z-50 w-64 max-w-[calc(100vw-1rem)] overflow-hidden rounded-xl border border-border bg-background">
-          <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
-            <span className="text-xs font-semibold text-foreground">{t('tocSection')}</span>
+        <AnchoredPopover anchorRef={panelRef} popoverRef={listRef} align="end" gap={6} onKeyDown={keys.onPopoverKeyDown} {...keys.popoverProps} data-dropdown-panel="doc-toc" className="z-50 w-64 max-w-[calc(100vw-1rem)] overflow-hidden rounded-ds-panel border border-ds-line-control bg-ds-surface-raised">
+          <div className="flex items-center justify-between border-b border-ds-line px-3 py-1">
+            <span className="text-ds-small font-semibold text-ds-ink">{t('tocSection')}</span>
             {/* 유나 #4728 — 새 키보드 길(«목차» → Tab)의 첫 자리. 이름(common.close)을 달고, 닫을 땐 Esc와 같은 길(닫고 «목차»로 초점) — 예전엔 초점이 body로 떨어졌다. */}
-            <button
-              type="button"
-              aria-label={tc('close')}
-              onClick={keys.closeToTrigger}
-              className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-            >
-              <X className="size-3.5" />
-            </button>
+            <IconButton icon="close" label={tc('close')} onClick={keys.closeToTrigger} />
           </div>
           <nav className="focus-inset max-h-72 overflow-y-auto py-1.5">
             {headings.map((heading) => (
-              <button
+              <Button
                 key={heading.id}
-                type="button"
+                variant="quiet"
                 onClick={() => handleClick(heading.id)}
-                className={`flex w-full items-start px-3 py-1.5 text-left text-xs transition-colors hover:bg-muted/60 ${
-                  heading.level === 1
-                    ? 'font-semibold text-foreground'
-                    : heading.level === 2
-                      ? 'pl-5 text-foreground/80'
-                      : 'pl-7 text-muted-foreground'
-                }`}
+                className={cn(
+                  'h-auto min-h-8 w-full justify-start gap-1.5 whitespace-normal rounded-none px-3 py-1.5 text-left text-ds-small font-normal',
+                  heading.level === 1 ? 'font-semibold text-ds-ink' : heading.level === 2 ? 'pl-5 text-ds-ink-2' : 'pl-7 text-ds-ink-3',
+                )}
               >
-                <span className="mr-1.5 mt-px flex-shrink-0 text-muted-foreground">
+                <span aria-hidden="true" className="mt-px shrink-0 text-ds-ink-3">
                   {heading.level === 1 ? '◆' : heading.level === 2 ? '◇' : '·'}
                 </span>
-                <span className="truncate">{heading.text}</span>
-              </button>
+                <span className="min-w-0 truncate">{heading.text}</span>
+              </Button>
             ))}
           </nav>
         </AnchoredPopover>

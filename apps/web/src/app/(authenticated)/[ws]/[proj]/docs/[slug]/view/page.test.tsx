@@ -16,6 +16,8 @@ const { useDocsLayoutMock, fetchWithAuthMock } = vi.hoisted(() => ({
 }));
 
 const { deleteMock } = vi.hoisted(() => ({ deleteMock: vi.fn() }));
+const { lg } = vi.hoisted(() => ({ lg: { current: false } }));
+vi.mock('@/lib/use-media-query', () => ({ useMediaQuery: () => lg.current }));
 vi.mock('next/navigation', () => ({ useParams: () => ({ slug: 'payments-v2' }), useRouter: () => ({ replace: vi.fn(), push: vi.fn() }) }));
 const { humanOnly } = vi.hoisted(() => ({ humanOnly: { current: true } }));
 vi.mock('@/components/ui/human-only-action', () => ({ HumanOnlyAction: ({ children }: { children: React.ReactNode }) => (humanOnly.current ? <>{children}</> : null) }));
@@ -58,6 +60,7 @@ afterEach(async () => {
   container.remove();
   vi.resetModules();
   fetchWithAuthMock.mockReset();
+  lg.current = false;
 });
 
 const TREE = [
@@ -338,5 +341,54 @@ describe('DocViewPage — 에이전트가 ⋯ 메뉴를 열면 (4892)', () => {
     expect(container.ownerDocument.querySelector('[data-testid="docs-reader-menu-share"]')).toBeTruthy();
     expect(container.ownerDocument.querySelector('[data-testid="docs-reader-menu-delete"]')).toBeNull();
     expect(container.ownerDocument.querySelectorAll('[role="separator"]').length).toBe(0);
+  });
+});
+
+// story 4892 (UI-9 문서 상세 열) — 오른쪽 열 = 상태 · 목차 · 이력 패널(시안의 스레드 열처럼 본문 옆 상시 열). lg(1024+)에서는 상태 머리가 그 열 맨 위에, 그 아래 폭에서는 본문 맨 위에 선다 — 한 자리에 하나만.
+describe('DocViewPage — 상태 머리 자리(lg 오른쪽 열 / 그 아래 본문 맨 위) · 목록 접힘 여백 (4892)', () => {
+  const placed = () => ({
+    all: container.querySelectorAll('[data-testid="status-header"]').length,
+    inBody: container.querySelector('article [data-testid="status-header"]') !== null,
+    inRail: container.querySelector('[data-testid="docs-reader-rail"] [data-testid="status-header"]') !== null,
+  });
+
+  it('⭐lg 아래: 상태 머리는 본문(article) 맨 위에 하나 · 오른쪽 열엔 없다', async () => {
+    lg.current = false;
+    await mount();
+    expect(placed()).toEqual({ all: 1, inBody: true, inRail: false });
+    expect(container.querySelector('article')!.firstElementChild?.getAttribute('data-testid')).toBe('docs-reader-status-body');
+  });
+
+  it('⭐lg 이상: 상태 머리는 오른쪽 열 맨 위에 하나 · 본문엔 없다(목차 · 이력은 그 아래에 그대로)', async () => {
+    lg.current = true;
+    await mount();
+    expect(placed()).toEqual({ all: 1, inBody: false, inRail: true });
+    const rail = container.querySelector('[data-testid="docs-reader-rail"]')!;
+    expect(rail.firstElementChild?.querySelector('[data-testid="status-header"]')).not.toBeNull();
+    expect(rail.querySelector('[data-testid="evidence-rail"]')).not.toBeNull();
+  });
+
+  it('⭐목록 열을 접은 채일 때(펴기 단추가 머리 왼쪽 위로 뜸) 머리 왼쪽 여백이 늘어난다 — lg · 접힘 상태 클래스', async () => {
+    await mount();
+    const head = container.querySelector('[data-testid="docs-reader-head"]')!;
+    expect(head.className.split(/\s+/)).toContain('lg:group-data-[collapsed=true]/docs:pl-14');
+  });
+
+  it('상태 칩은 공용 ds 칩(점 + 글) — 승인됨 · 검토 중 · 반려됨 · 초안이 각자 자기 톤으로', async () => {
+    await mount({ ...DOC, status: 'confirmed' });
+    const chip = container.querySelector('[data-testid="docs-reader-status"]')!;
+    expect(chip.getAttribute('data-doc-status')).toBe('confirmed');
+    expect(chip.textContent).toBe(koMessages.docs.docGateConfirmed);
+    expect(chip.className).toContain('text-ds-done');
+  });
+
+  it('⋯ 메뉴는 ds Menu — 트리거는 이름 «더 보기»를 가진 단추(폰 touch:size-11) · 옛 DropdownMenu 아님', async () => {
+    await mount();
+    const trigger = container.querySelector(`button[aria-label="${koMessages.docs.moreActions}"]`)!;
+    expect(trigger).not.toBeNull();
+    expect(trigger.className.split(/\s+/)).toContain('touch:size-11');
+    const src = (await import('./page.tsx?raw')).default as string;
+    expect(src).toContain("from '@/components/ds/menu'");
+    expect(src).not.toContain('ui/dropdown-menu');
   });
 });

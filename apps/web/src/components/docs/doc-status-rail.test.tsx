@@ -214,10 +214,10 @@ describe('gateTransition 데이터 레이어 안전판(§ 우회 금지, UI 은�
   });
 });
 
-describe('DocEvidenceRail — 증거 레일(§3/§6, 접힌 audit 리스트→상시 타임라인)', () => {
-  // story #2967(선생님 실사용 판정 ④) — 이력 1~2건은 316px 세로 레일이 텅 비어 보여 판이
-  // 왼쪽으로 쏠렸다. 노드 2개 이하는 세로선·제목 없이 컴팩트 가로 스트립으로 강등한다.
-  it('이력이 2건 이하면 세로 타임라인(제목·세로선) 없이 컴팩트 스트립으로 뜬다', async () => {
+describe('DocEvidenceRail — 증거 레일(§3/§6, 접힌 audit 리스트→상시 이력 목록)', () => {
+  // story 4892 (UI-9 문서 상세 열) — 예전엔 이력 1~2건이면 «컴팩트 스트립»(제목 없음), 3건 이상이면 «세로 타임라인»(제목 있음)으로 갈래가 둘이었다(2967 — 316px 레일이 텅 비어 보이는 결함).
+  // 이제 ds 줄 목록 하나(아이콘 + 이름 + 시각)라 건수와 무관하게 같은 모양 — 제목(결재 이력)도 늘 있다. 아래 시험은 그 한 갈래를 건수별로 잰다.
+  it('이력이 2건 이하여도 같은 줄 목록으로 뜬다(제목 + 줄들 · 아이콘 · 이름)', async () => {
     stubFetch({
       gates: [gate({ status: 'approved', resolver_id: 'm1', resolved_at: '2026-08-21T14:32:00Z' })],
       revisions: [{ id: 'r1', created_by: 'm2', created_at: '2026-08-19T00:00:00Z' }],
@@ -226,15 +226,16 @@ describe('DocEvidenceRail — 증거 레일(§3/§6, 접힌 audit 리스트→�
     const { DocEvidenceRail } = await import('./doc-status-rail');
     await act(async () => { root.render(wrap(<DocEvidenceRail docId="doc-1" status="confirmed" />)); });
     await flush();
-    expect(container.textContent).not.toContain('결재 이력');
-    expect(container.querySelector('ol')).toBeNull();
+    expect(container.textContent).toContain('결재 이력');
+    expect(container.querySelectorAll('ol > li').length).toBe(2);
+    expect(container.querySelector('[data-testid="doc-evidence-rail"]')?.getAttribute('aria-label')).toBe('결재 이력');
     expect(container.textContent).toContain('검토 요청');
     expect(container.textContent).toContain('승인');
     expect(container.textContent).toContain('윤도선');
     expect(container.textContent).toContain('송윤재');
   });
 
-  it('이력이 3건 이상이면 세로 타임라인(제목·세로선 있는 정규 레일)으로 뜬다', async () => {
+  it('이력이 3건 이상이어도 같은 줄 목록(제목 + 줄 셋)', async () => {
     stubFetch({
       gates: [gate({ status: 'approved', resolver_id: 'm1', resolved_at: '2026-08-21T14:32:00Z' })],
       revisions: [
@@ -247,7 +248,7 @@ describe('DocEvidenceRail — 증거 레일(§3/§6, 접힌 audit 리스트→�
     await act(async () => { root.render(wrap(<DocEvidenceRail docId="doc-1" status="confirmed" />)); });
     await flush();
     expect(container.textContent).toContain('결재 이력');
-    expect(container.querySelector('ol')).not.toBeNull();
+    expect(container.querySelectorAll('ol > li').length).toBe(3);
   });
 
   // [SID:4311 PR 3] 감사 이력 줄 — 같은 이름 서로 다른 사람 둘이면 «· ID 앞 8자»(행위자 id마다 한 번) · 다른 이름은 꼬리 없음.
@@ -267,11 +268,11 @@ describe('DocEvidenceRail — 증거 레일(§3/§6, 접힌 audit 리스트→�
     expect(text).toContain('송윤재 · e75ca548');
     expect(text).toContain('송윤재 · 2fd14616');
     expect(text).toContain('윤도선');
-    expect(text).not.toContain('윤도선 · ');
+    expect(text).not.toMatch(/윤도선 · [0-9a-f]{8}/);                 // 이름이 유일한 사람은 id 꼬리 없음(뒤의 « · 시각»은 꼬리가 아님)
   });
 
-  // [SID:4311 PR 3] 2건 이하 컴팩트 스트립도 같은 표(렌더 갈래가 둘 — 타임라인만 재면 스트립 쪽이 빈다).
-  it('[SID:4311 PR 3] 컴팩트 스트립(2건): 검토 요청 · 다시 요청 «송윤재» 둘(서로 다른 사람) = 줄마다 id 앞 8자', async () => {
+  // [SID:4311 PR 3] 2건짜리도 같은 표(예전엔 렌더 갈래가 둘이라 따로 재야 했다 — 이제 한 갈래, 그래도 2건 경우를 지킨다).
+  it('[SID:4311 PR 3] 2건: 검토 요청 · 다시 요청 «송윤재» 둘(서로 다른 사람) = 줄마다 id 앞 8자', async () => {
     stubFetch({
       revisions: [
         { id: 'r1', created_by: 'e75ca548-1', created_at: '2026-08-18T00:00:00Z' },
@@ -282,7 +283,6 @@ describe('DocEvidenceRail — 증거 레일(§3/§6, 접힌 audit 리스트→�
     const { DocEvidenceRail } = await import('./doc-status-rail');
     await act(async () => { root.render(wrap(<DocEvidenceRail docId="doc-1" status="pending" />)); });
     await flush();
-    expect(container.querySelector('ol')).toBeNull();
     const text = container.textContent ?? '';
     expect(text).toContain('송윤재 · e75ca548');
     expect(text).toContain('송윤재 · 2fd14616');
@@ -294,5 +294,75 @@ describe('DocEvidenceRail — 증거 레일(§3/§6, 접힌 audit 리스트→�
     await act(async () => { root.render(wrap(<DocEvidenceRail docId="doc-1" status="draft" />)); });
     await flush();
     expect(container.textContent).toBe('');
+  });
+});
+
+// story 4892 (UI-9 문서 상세 열) — 상태 머리 · 이력 레일이 ds 부품을 입는다. 승인/반려/서명 로직(요청 몸통 · 서명 흐름의 에디터 유도 · 침묵 실패 없음)은 위 시험이 그대로 지킨다(같은 단정으로 통과) —
+// 여기서는 «모양만 바뀌고 길은 안 바뀐다»를 못박는다: 승인은 같은 gateTransition 본문, 반려/서명은 같은 에디터 링크, 옛 ui · lucide · proof 토큰은 없다.
+describe('DocStatusHeader · DocEvidenceRail — ds 부품 (4892)', () => {
+  it('⭐draft: ds Card + 주 단추(ds Button primary) · 상태 속성(data-state)', async () => {
+    stubFetch({});
+    const { DocStatusHeader } = await import('./doc-status-rail');
+    await act(async () => { root.render(wrap(<DocStatusHeader docId="doc-1" status="draft" editHref={EDIT_HREF} onTransitioned={() => {}} />)); });
+    await flush();
+    const card = container.querySelector('[data-testid="doc-status-header"]')!;
+    expect(card.getAttribute('data-slot')).toBe('ds-card');
+    expect(card.getAttribute('data-state')).toBe('draft');
+    const cta = [...card.querySelectorAll('button')].find((b) => b.textContent?.includes('검토 요청'))!;
+    expect(cta.getAttribute('data-slot')).toBe('ds-button');
+    expect(cta.className).toContain('bg-ds-action');
+  });
+
+  it('⭐서명 흐름 결재자: 승인 · 반려 단추가 없고 에디터 링크 하나만(ds Button asChild) — 링크는 순수 이동', async () => {
+    stubFetch({ gates: [gate({ can_approve: true })] });
+    const { DocStatusHeader } = await import('./doc-status-rail');
+    await act(async () => { root.render(wrap(<DocStatusHeader docId="doc-1" status="pending" editHref={EDIT_HREF} onTransitioned={() => {}} />)); });
+    await flush();
+    const links = [...container.querySelectorAll('a')];
+    expect(links.length).toBe(1);
+    expect(links[0]!.getAttribute('href')).toBe(EDIT_HREF);
+    expect(links[0]!.getAttribute('data-slot')).toBe('ds-button');
+    expect(container.querySelectorAll('button').length).toBe(0);
+  });
+
+  it('⭐저위험 결재자: 반려 = 에디터 링크(위험 단추 모양) · 승인 = ds Button 원탭(같은 본문)', async () => {
+    const fetchMock = stubFetch({ gates: [gate({ can_approve: true, risk_grade: 'low' })] });
+    const { DocStatusHeader } = await import('./doc-status-rail');
+    await act(async () => { root.render(wrap(<DocStatusHeader docId="doc-1" status="pending" editHref={EDIT_HREF} onTransitioned={() => {}} />)); });
+    await flush();
+    const reject = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('반려'))!;
+    expect(reject.getAttribute('href')).toBe(EDIT_HREF);                       // 반려는 사유 창이 있는 에디터로 — 여기서 직행 안 함
+    expect(reject.className).toContain('border-ds-failed');
+    const approve = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('승인'))!;
+    expect(approve.getAttribute('data-slot')).toBe('ds-button');
+    await act(async () => { approve.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const call = fetchMock.mock.calls.find((c) => typeof c[0] === 'string' && (c[0] as string).includes('/gates/gate-1/transition'));
+    expect(JSON.parse((call![1] as RequestInit).body as string)).toEqual({ status: 'approved', resolver_id: 'member-1' });   // 몸통 한 글자도 안 바뀜
+  });
+
+  it('승인됨 · 반려됨 카드는 ds 면(done-soft · failed-soft) 위에 ds ink 글(흐린 글 금지)', async () => {
+    stubFetch({ gates: [gate({ status: 'approved', resolver_id: 'm1', resolved_at: '2026-08-21T14:32:00Z' })], members: [{ id: 'm1', name: '윤도선' }] });
+    const { DocStatusHeader } = await import('./doc-status-rail');
+    await act(async () => { root.render(wrap(<DocStatusHeader docId="doc-1" status="confirmed" editHref={EDIT_HREF} onTransitioned={() => {}} />)); });
+    await flush();
+    const card = container.querySelector('[data-testid="doc-status-header"]')!;
+    expect(card.className).toContain('bg-ds-done-soft');
+    expect(card.querySelector('.text-ds-ink-3')).toBeNull();
+    act(() => { root.unmount(); });
+    root = createRoot(container);
+    stubFetch({ gates: [gate({ status: 'rejected', resolver_id: 'm1', resolved_at: '2026-08-20T00:00:00Z', resolution_note: '근거 부족' })] });
+    await act(async () => { root.render(wrap(<DocStatusHeader docId="doc-1" status="denied" editHref={EDIT_HREF} onTransitioned={() => {}} />)); });
+    await flush();
+    expect(container.querySelector('[data-testid="doc-status-header"]')!.className).toContain('bg-ds-failed-soft');
+  });
+
+  it('이력 레일은 ds 부품(SectionHeader · ds Icon)이고 옛 ProofCapsule · lucide · proof 토큰이 없다', async () => {
+    const src = (await import('./doc-status-rail.tsx?raw')).default as string;
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    expect(code).not.toMatch(/ProofCapsule|lucide-react|from '@\/components\/ui\//);
+    expect(code).not.toMatch(/\b(?:proof-[a-z-]+|text-muted-foreground|text-foreground|bg-muted|text-destructive|text-success)\b/);
+    // 승인 · 반려 · 서명 길은 그대로: 승인 본문 · 서명 흐름 분기 · 반려 = 에디터 링크
+    expect(code).toContain("gateTransition({ status: 'approved', resolver_id: currentTeamMemberId }");
+    expect(code).toContain('isApprover && isSigFlow');
   });
 });

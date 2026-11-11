@@ -5,12 +5,14 @@ import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { actorRowLabels, memberLookup } from '@/lib/member-display';
-import { CheckCircle, ExternalLink, RotateCcw, Shield, ShieldCheck, ShieldX, XCircle } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ds/button';
+import { Icon, type IconName } from '@/components/ds/icon';
+import { Card } from '@/components/ds/card';
+import { SectionHeader } from '@/components/ds/section-header';
+import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
 import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
-import { ProofCapsule, type ProofState } from '@/components/proof-capsule/proof-capsule';
 import { fetchWithAuth } from '@/lib/db/client';
 import { LONG_ROUTES } from '@/lib/bff-route-timeouts';
 import { ORG_NAMES_URL } from '@/hooks/use-member-name-fallback';
@@ -47,8 +49,12 @@ function toState(status: string | undefined): DocGateState {
 const STATE_LABEL_KEY: Record<DocGateState, string> = {
   draft: 'docGateRequestReview', pending: 'docGatePending', confirmed: 'docGateConfirmed', denied: 'docGateDenied',
 };
-const STATE_ICON: Record<DocGateState, typeof Shield> = {
-  draft: Shield, pending: Shield, confirmed: ShieldCheck, denied: ShieldX,
+// story 4892 (UI-9 문서 상세 열) — 상태 아이콘은 ds Icon 이름(방패 · 확인된 방패 · 막힌 방패 자리). 데이터 · 전이 로직은 그대로, 모양만 ds 부품.
+const STATE_ICON: Record<DocGateState, IconName> = {
+  draft: 'shield', pending: 'shield', confirmed: 'verified_user', denied: 'block',
+};
+const STATE_ICON_TONE: Record<DocGateState, string> = {
+  draft: 'text-ds-ink-3', pending: 'text-ds-ink', confirmed: 'text-ds-done', denied: 'text-ds-failed',
 };
 
 interface DocRevision {
@@ -142,52 +148,45 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const { currentTeamMemberId } = useDashboardContext();
   const { gate, busy, error, state, isApprover, isSigFlow, resolveName, docTransition, gateTransition } = useDocGateData(docId, status);
-  const Icon = STATE_ICON[state];
   // story #3493 — gate 시각은 "기록"(정본 formatRelativeTime).
   const fmtDate = (s: string | undefined | null) => (s ? formatViewerRelativeTime(s, locale, displayTimezone) : '');
 
   const errorBanner = error ? (
-    <p className="mt-1.5 basis-full break-keep text-xs text-destructive">{error}</p>
+    <p className="mt-1.5 basis-full break-keep text-ds-small text-ds-failed">{error}</p>
   ) : null;
 
   // draft — 접힌 박스의 "검토 요청" CTA를 그대로 상시 승격(§7: 새 상태·새 API 0).
   if (state === 'draft') {
     return (
-      <div className="proof-surface proof-surface-lift flex flex-wrap items-center gap-3 border border-proof-line bg-proof-panel px-4 py-3">
-        <Icon className="size-5 shrink-0 text-muted-foreground" />
-        <p className="min-w-0 flex-1 break-keep text-sm text-muted-foreground">{t('docGateRequestReviewHint')}</p>
-        <Button size="sm" className="focus-outset" disabled={busy} onClick={() => void docTransition('pending', onTransitioned)}>
+      <Card data-testid="doc-status-header" data-state="draft" className="flex flex-wrap items-center gap-3 px-4 py-3">
+        <Icon name={STATE_ICON.draft} size={20} className={cn('shrink-0', STATE_ICON_TONE.draft)} />
+        <p className="m-0 min-w-0 flex-1 break-keep text-ds-body text-ds-ink-2">{t('docGateRequestReviewHint')}</p>
+        <Button variant="primary" disabled={busy} onClick={() => void docTransition('pending', onTransitioned)}>
           {t('docGateRequestReview')}
         </Button>
         {errorBanner}
-      </div>
+      </Card>
     );
   }
 
   return (
-    <div className={`proof-surface proof-surface-lift flex flex-wrap items-center gap-3 border px-4 py-3.5 ${
-      state === 'confirmed' ? 'border-success/30 bg-success-tint' : state === 'denied' ? 'border-destructive/30 bg-destructive-tint' : 'border-warning/30 bg-warning-tint'
-    }`}
+    // story 4892 — 면 색(승인 = done-soft · 반려 = failed-soft · 검토 중 = 중립)은 «면»이고 글은 전부 ds ink(색 면 위 흐린 글 금지 — story #3865 대비 규율 그대로).
+    <Card
+      data-testid="doc-status-header"
+      data-state={state}
+      className={cn('flex flex-wrap items-center gap-3 px-4 py-3', state === 'confirmed' ? 'bg-ds-done-soft' : state === 'denied' ? 'bg-ds-failed-soft' : 'bg-ds-surface')}
     >
-      {/* story #2955 §4(대비 주의, 실측 대비표) — 소형 계열색은 텍스트가 아니라 아이콘
-          그래픽이라도 배경 위 신뢰도를 아끼려 중립(bg-background) 원 위에 계열색 아이콘만
-          쓴다(tint 배경 위 계열색 텍스트 금지 규칙과 같은 결의 안전판 — #2534/#2420 계열). */}
-      <span className="grid size-8 shrink-0 place-items-center rounded-sm bg-background">
-        <Icon className={`size-4 ${state === 'confirmed' ? 'text-success' : state === 'denied' ? 'text-destructive' : 'text-warning'}`} />
+      <span className="grid size-8 shrink-0 place-items-center rounded-ds-control bg-ds-background">
+        <Icon name={STATE_ICON[state]} size={16} className={STATE_ICON_TONE[state]} />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="text-base font-bold text-foreground">{t(STATE_LABEL_KEY[state])}</div>
+        <div className="text-ds-card-title font-semibold text-ds-ink">{t(STATE_LABEL_KEY[state])}</div>
         {/* story #2967 — resolveName은 한글 사람 이름이라 mono 걷음(동일 결함 클래스). */}
-        {/* story #3865(AC1) — 이 div의 조상(부모 wrapper)이 state==='confirmed'일 때
-            bg-success-tint를 입는다(위 return 블록 상단 삼항) — text-muted-foreground는
-            그 tint 배경 위에서 AA 미달(story #3839류). 항상 confirmed 상태에서만 렌더되므로
-            드문 상태가 아니라 상시 노출 — text-foreground로 교체(범위 축소 불요, #3865
-            AC0 PO 확定). */}
         {state === 'confirmed' && gate ? (
-          <div className="text-xs text-foreground">{resolveName(gate.resolver_id)} · {fmtDate(gate.resolved_at)}</div>
+          <div className="text-ds-small text-ds-ink">{resolveName(gate.resolver_id)} · {fmtDate(gate.resolved_at)}</div>
         ) : state === 'denied' ? (
-          <div className="mt-1 break-keep [overflow-wrap:anywhere] text-xs text-foreground">
-            <span className="font-medium">{t('docGateDeniedReason')}:</span> {gate?.resolution_note?.trim() || t('docGateNoReason')}
+          <div className="mt-1 break-keep text-ds-small text-ds-ink [overflow-wrap:anywhere]">
+            <span className="font-semibold">{t('docGateDeniedReason')}:</span> {gate?.resolution_note?.trim() || t('docGateNoReason')}
           </div>
         ) : null}
       </div>
@@ -195,42 +194,36 @@ export function DocStatusHeader({ docId, status, editHref, onTransitioned }: { d
         // ⚠️PR#3384 QA CRITICAL 처방 — 서명(고위험) 결재는 리더에서 직행 처리하지 않는다.
         // 승인/반려 버튼 자체를 없애고 GateSignatureApproval을 가진 에디터로만 유도한다
         // (우회 경로 자체를 안 만든다 — 반려도 동일 취급, 비대칭 예외 없음).
-        <Button asChild size="sm" variant="outline" className="shrink-0 gap-1.5">
+        <Button asChild variant="secondary" className="shrink-0">
           <Link href={editHref}>
-            <ExternalLink className="size-3.5" />{t('docGateGoToEditorSign')}
+            <Icon name="open_in_new" size={14} />{t('docGateGoToEditorSign')}
           </Link>
         </Button>
       ) : isApprover ? (
         <div className="flex shrink-0 gap-2">
-          {/* story #3334 — 반려(변경 요청)는 gate_type 무관 사유 필수(서버 422). 저위험이라도
-              이 리더 헤더엔 사유 입력창이 없으므로, 반려는 사유 모달을 가진 에디터
-              (doc-gate-section.tsx의 rejectOpen 다이얼로그)로 유도한다 — 위 고위험 분기와
-              같은 원칙("여기서 직행 처리 안 함, 반려는 비대칭 예외 없이 동일 취급"). 승인은
-              사유가 필요 없으므로 기존처럼 원탭 그대로. */}
-          <Button asChild size="sm" variant="ghost" className="gap-1 text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60">
+          {/* story #3334 — 반려(변경 요청)는 gate_type 무관 사유 필수(서버 422). 이 리더 헤더엔 사유 입력창이 없으므로, 반려는 사유 모달을 가진 에디터
+              (doc-gate-section.tsx의 rejectOpen 다이얼로그)로 유도한다 — 위 고위험 분기와 같은 원칙("여기서 직행 처리 안 함, 반려는 비대칭 예외 없이 동일 취급").
+              승인은 사유가 필요 없으므로 기존처럼 원탭 그대로. */}
+          <Button asChild variant="danger">
             <Link href={editHref}>
-              <XCircle className="size-3.5" />{t('docGateReject')}
+              <Icon name="cancel" size={14} />{t('docGateReject')}
             </Link>
           </Button>
-          <Button size="sm" variant="ghost" disabled={busy} className="gap-1 text-success hover:ring-1 hover:ring-inset hover:ring-success/60"
+          <Button variant="secondary" disabled={busy} iconStart={<Icon name="check_circle" size={14} />}
             onClick={() => currentTeamMemberId && void gateTransition({ status: 'approved', resolver_id: currentTeamMemberId }, onTransitioned)}
           >
-            <CheckCircle className="size-3.5" />{t('docGateApprove')}
+            {t('docGateApprove')}
           </Button>
         </div>
       ) : state === 'pending' ? (
-        // story #3865(AC1) — 이 자리의 조상 wrapper는 state==='pending'일 때 위 return 블록
-        // 상단 삼항의 else 분기(bg-warning-tint)를 입는다 — text-muted-foreground는 그 tint
-        // 배경 위에서 AA 미달. 항상 pending 상태에서만 렌더되므로 상시 노출 — text-foreground로
-        // 교체(#3865 AC0 PO 확定).
-        <span className="shrink-0 break-keep text-xs text-foreground">{t('docGateAwaitingGeneric')}</span>
+        <span className="shrink-0 break-keep text-ds-small text-ds-ink">{t('docGateAwaitingGeneric')}</span>
       ) : state === 'denied' ? (
-        <Button size="sm" variant="ghost" disabled={busy} className="shrink-0 gap-1" onClick={() => void docTransition('draft', onTransitioned)}>
-          <RotateCcw className="size-3.5" />{t('docGateEdit')}
+        <Button variant="quiet" disabled={busy} iconStart={<Icon name="undo" size={14} />} onClick={() => void docTransition('draft', onTransitioned)}>
+          {t('docGateEdit')}
         </Button>
       ) : null}
       {errorBanner}
-    </div>
+    </Card>
   );
 }
 
@@ -238,7 +231,6 @@ type AuditKind = 'request' | 'resubmit' | 'approved' | 'rejected';
 interface AuditEvent {
   key: string;
   kind: AuditKind;
-  proofState: ProofState;
   name: string;
   /** [SID:4311 PR 3] 행위자 id — 같은 이름 서로 다른 사람 둘이면 «· ID 앞 8자» 꼬리의 기준. */
   actorId: string | null;
@@ -246,9 +238,6 @@ interface AuditEvent {
   version?: number;
   note?: string | null;
 }
-const AUDIT_KIND_PROOF: Record<AuditKind, ProofState> = {
-  request: 'blue', resubmit: 'blue', approved: 'green', rejected: 'red',
-};
 
 export function DocEvidenceRail({ docId, status }: { docId: string; status: string | undefined }) {
   const t = useTranslations('docs');
@@ -259,15 +248,15 @@ export function DocEvidenceRail({ docId, status }: { docId: string; status: stri
   const auditEvents: AuditEvent[] = [];
   revisions.forEach((rev, i) => {
     auditEvents.push({
-      key: `rev-${rev.id}`, kind: i === 0 ? 'request' : 'resubmit', proofState: AUDIT_KIND_PROOF[i === 0 ? 'request' : 'resubmit'],
+      key: `rev-${rev.id}`, kind: i === 0 ? 'request' : 'resubmit',
       name: resolveName(rev.created_by), actorId: rev.created_by ?? null, at: rev.created_at ?? '', version: i + 1,
     });
   });
   if (gate?.resolved_at) {
     if (gate.status === 'approved' || gate.status === 'confirmed') {
-      auditEvents.push({ key: `gate-ok-${gate.id}`, kind: 'approved', proofState: 'green', name: resolveName(gate.resolver_id), actorId: gate.resolver_id, at: gate.resolved_at });
+      auditEvents.push({ key: `gate-ok-${gate.id}`, kind: 'approved', name: resolveName(gate.resolver_id), actorId: gate.resolver_id, at: gate.resolved_at });
     } else if (gate.status === 'rejected' || gate.status === 'denied') {
-      auditEvents.push({ key: `gate-bad-${gate.id}`, kind: 'rejected', proofState: 'red', name: resolveName(gate.resolver_id), actorId: gate.resolver_id, at: gate.resolved_at, note: gate.resolution_note });
+      auditEvents.push({ key: `gate-bad-${gate.id}`, kind: 'rejected', name: resolveName(gate.resolver_id), actorId: gate.resolver_id, at: gate.resolved_at, note: gate.resolution_note });
     }
   }
   auditEvents.sort((a, b) => b.at.localeCompare(a.at));
@@ -283,56 +272,27 @@ export function DocEvidenceRail({ docId, status }: { docId: string; status: stri
 
   if (auditEvents.length === 0) return null;
 
-  // story #2967(선생님 실사용 판정 ④) — 이력 1~2건일 때 316px 세로 레일(선+노드 여백)이
-  // 텅 빈 공간을 만들어 판이 왼쪽으로 쏠려 보였다. 노드 2개 이하면 세로 타임라인(선·점) 대신
-  // 컴팩트 가로 스트립으로 강등 — ProofCapsule(density="audit") 자체는 그대로 재사용(발명
-  // 0), 세로선 장식만 걷어 짧은 이력이 "미완성"이 아니라 "원래 이 정도"로 읽히게 한다.
-  if (auditEvents.length <= 2) {
-    return (
-      <div className="flex flex-col gap-2">
-        {auditEvents.map((ev) => (
-          <ProofCapsule
-            key={ev.key}
-            density="audit"
-            proofState={ev.proofState}
-            stateLabel={auditKindLabel[ev.kind]}
-            claim={`${auditKindLabel[ev.kind]}${ev.version ? ` (v${ev.version})` : ''}`}
-            now={fmtDate(ev.at)}
-            human={{ name: ev.name, label: ev.actorId ? auditLabels.get(ev.actorId) : undefined, role: '' }}
-          />
-        ))}
-      </div>
-    );
-  }
-
+  // story 4892 (UI-9 문서 상세 열) — 감사 이력 = ds 부품 한 줄 목록(아이콘 + «요청됨 (vN)» + 이름 · 시각 · 반려 사유). 예전 ProofCapsule 세로 타임라인 / 가로 스트립 갈래는 하나로 합쳤다 —
+  // 이력 1~2건이든 여럿이든 같은 줄 모양(2967 «빈 316px 레일» 결함은 줄 목록이라 애초에 안 생김). 같은 이름 서로 다른 사람은 [SID:4311 PR 3] «· ID 앞 8자» 꼬리 그대로(auditLabels).
+  const kindIcon: Record<AuditKind, IconName> = { request: 'history', resubmit: 'history', approved: 'check_circle', rejected: 'cancel' };
+  const kindTone: Record<AuditKind, string> = { request: 'text-ds-ink-3', resubmit: 'text-ds-ink-3', approved: 'text-ds-done', rejected: 'text-ds-failed' };
   return (
-    <div>
-      <div className="text-xs font-semibold text-muted-foreground">
-        {t('docGateAuditTitle')}
-      </div>
-      {/* 수직 타임라인 — 기존 접힌 리스트(doc-gate-section.tsx)를 상시 레일로 공간화(§3/§6).
-          ProofCapsule(density="audit")를 노드 단위로 그대로 재사용(컴포넌트 발명 0) — 이
-          컴포넌트는 그 노드들을 잇는 세로선만 새로 그린다(레이아웃 합성, primitive 신규 아님). */}
-      <ol className="relative mt-3 space-y-2 border-l border-border pl-4">
+    <section data-testid="doc-evidence-rail" aria-label={t('docGateAuditTitle')}>
+      <SectionHeader title={t('docGateAuditTitle')} level={3} />
+      <ol className="m-0 list-none space-y-3 p-0 pt-3">
         {auditEvents.map((ev) => (
-          <li key={ev.key} className="relative">
-            <span className="absolute -left-5 top-2 size-2 rounded-full border-2 border-background bg-border" aria-hidden="true" />
-            <ProofCapsule
-              density="audit"
-              proofState={ev.proofState}
-              // audit 밀도(AuditRow)는 stateLabel을 렌더하지 않지만 타입상 필수(다른 밀도와
-              // 공유하는 단일 props 인터페이스) — claim과 동일 문구로 채워 무해하게 충족.
-              stateLabel={auditKindLabel[ev.kind]}
-              claim={`${auditKindLabel[ev.kind]}${ev.version ? ` (v${ev.version})` : ''}`}
-              now={fmtDate(ev.at)}
-              human={{ name: ev.name, label: ev.actorId ? auditLabels.get(ev.actorId) : undefined, role: '' }}
-            />
-            {ev.note?.trim() ? (
-              <p className="mt-1 whitespace-pre-wrap break-keep [overflow-wrap:anywhere] border-l-2 border-destructive bg-muted px-2 py-1 text-editorial-meta leading-[14px] text-muted-foreground">{ev.note}</p>
-            ) : null}
+          <li key={ev.key} className="flex gap-2">
+            <Icon name={kindIcon[ev.kind]} size={16} className={cn('mt-0.5 shrink-0', kindTone[ev.kind])} />
+            <div className="min-w-0 flex-1">
+              <div className="break-keep text-ds-body text-ds-ink">{`${auditKindLabel[ev.kind]}${ev.version ? ` (v${ev.version})` : ''}`}</div>
+              <div className="truncate text-ds-small text-ds-ink-3">{(ev.actorId ? auditLabels.get(ev.actorId) : undefined) ?? ev.name} · {fmtDate(ev.at)}</div>
+              {ev.note?.trim() ? (
+                <p className="mt-1 whitespace-pre-wrap break-keep border-l-2 border-ds-failed bg-ds-surface-sunk px-2 py-1 text-ds-small text-ds-ink-2 [overflow-wrap:anywhere]">{ev.note}</p>
+              ) : null}
+            </div>
           </li>
         ))}
       </ol>
-    </div>
+    </section>
   );
 }
