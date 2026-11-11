@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button as DsButton } from '@/components/ds/button';
 import type { Hypothesis } from '@sprintable/core-storage';
 import {
   EMPTY_DECLARATION,
@@ -98,13 +99,10 @@ export function HypothesisDeclarationSection({
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={addCard}
-        className="w-full rounded-xl border border-dashed border-border py-2 text-xs font-medium text-muted-foreground transition hover:border-primary hover:text-primary"
-      >
+      {/* story #4888 — 손으로 쓴 raw button(폰 높이 34 · data-slot 없음) → ds Button(폰 44). 점선 «더하기» 모양은 그대로. */}
+      <DsButton type="button" variant="secondary" className="w-full border-dashed" onClick={addCard}>
         + {t('declareAddCta')}
-      </button>
+      </DsButton>
     </div>
   );
 }
