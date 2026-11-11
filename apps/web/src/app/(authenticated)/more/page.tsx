@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ChevronRight, Search } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Card } from '@/components/ds/card';
@@ -10,8 +9,12 @@ import { Icon } from '@/components/ds/icon';
 import { ListRow } from '@/components/ds/list-row';
 import { SectionHeader } from '@/components/ds/section-header';
 import { RAIL_ICON_BY_ITEM_ID } from '@/components/nav/rail-icons';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ds/button';
+import { Input } from '@/components/ds/input';
+import { IconButton } from '@/components/ds/icon-button';
+import { CountBadge } from '@/components/ds/count-badge';
+import { useTeamPresenceToggle } from '@/components/presence/team-presence-toggle';
+import { useReleaseNotes } from '@/components/release-notes/release-notes-gate';
 import { MOBILE_HUB_GROUP_ORDER, OTHER_NAV_ITEMS, resolveNavGroups } from '@/lib/nav-config';
 import { buildMobileHubGroups, sectionHeader } from '@/lib/mobile-hub-groups';
 import { DEFAULT_NAV_V3_FLAGS, scopedResourceHref } from '@/lib/nav-v3-destinations';
@@ -55,8 +58,6 @@ export default function MorePage() {
     excludeIds: tabDestinationNavIds(flags),
   }), [flags]);
 
-  const totalScreenCount = useMemo(() => hubGroups.reduce((sum, g) => sum + g.items.length, 0), [hubGroups]);
-  const totalSectionCount = hubGroups.length;
 
   // story #4278(유나 결정 ①) — 탭 이름은 탭바가 실제로 그리는 탭 그대로(«전체» 뺌 · 탭바 순서). ko 「」·로 잇고, en은 "…"를 목록 접속으로.
   const locale = useLocale();
@@ -94,51 +95,22 @@ export default function MorePage() {
           story #fddd0e6b(B) — 「전체」(mobileTabBar.more, 탭 이름)와 「전체 메뉴」(페이지
           제목, 새 키)는 다른 값이다 — 재사용 아님. */}
       <TopBarSlot title={<MoreTopBarTitle />} showContextChip />
-      {/* story #4413(유나 자리 결정) — 전역 검색(명령 팔레트) 폰 진입점 · 이 목록 맨 위. «전체»는 시트가 아니라 페이지라 닫을 것 없이 팔레트 한 겹만 열린다.
-          story 4889(PO 판정 캡처) — 아래 «화면 이름으로 찾기» 입력칸과 같은 «검색 칸 둘»로 읽혔다(돋보기 + «검색…» 회색 칸이 둘). 둘은 다른 일이라(위 = 팔레트를 연다 · 아래 = 이 목록만 거른다)
-          합치지 않고 «모양 · 이름»을 가른다: 위는 입력칸이 아니라 단추(진한 글 + 오른쪽 ›, 이름 «전체 검색 열기»), 아래 입력칸은 «이 목록에서 …»라고 범위를 말한다. */}
-      {openPalette && (
-        <Button
-          type="button"
-          variant="outline"
-          size="lg"
-          onClick={openPalette}
-          data-testid="more-global-search"
-          className="mb-4 w-full justify-start gap-2 px-3 font-medium text-foreground"
-        >
-          <Search className="size-4" aria-hidden="true" />
-          <span className="flex-1 truncate text-left">{t('moreGlobalSearch')}</span>
-          <ChevronRight className="size-4 text-muted-foreground" aria-hidden="true" />
-        </Button>
-      )}
-      {/* story #4222(유나 design) — space-y는 display:none 형제도 세어, 숨은 탭 문장(lg:hidden)이 마지막 자식이 되면 부제에
-          margin 4px가 남아 데스크톱 검색창이 104→108px로 밀렸다. flex+gap은 숨은 자식에 간격을 안 준다. */}
-      <div className="mb-4 flex flex-col gap-1">
-        <p className="text-xs text-muted-foreground" data-testid="more-subtitle">
-          {t('moreSubtitle', { n: totalScreenCount, g: totalSectionCount })}
-        </p>
-        {/* story #fddd0e6b(AC1②) — 탭 바가 실제로 있을 때만(useIsMobile() true) 이 문장을
-            그린다. 데스크톱 폭에선 탭 바 자체가 없어 「아래 탭에 있다」가 거짓이 된다. */}
-        {/* story #4222 — useIsMobile()로 렌더를 가르면 서버·첫 렌더엔 없다가 하이드레이션 뒤 모바일에서 한 줄이 생겨 아래가 밀렸다.
-            늘 그리고 lg:(탭 바가 없는 폭 · 훅의 1024)에서만 숨긴다(display:none — 데스크톱 스크린리더에도 안 읽힘). */}
-        {(
-          <p className="text-xs text-muted-foreground lg:hidden" data-testid="more-tab-hint">
-            {t('moreTabHint', { tabs: tabNames })}
-          </p>
-        )}
-      </div>
-      <div className="relative mb-5">
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+      {/* story 4890 (UI-7 · 전체 화면 통째): 폰 «전체»는 한 줄 검색 하나로 시작한다 — 입력칸(이 목록의 화면 이름을 거름) + 오른쪽 돋보기 단추(전체 검색 · 명령 팔레트를 연다). 전엔 «전체 검색 열기» 단추 · «24개 화면 · 7개 구역» ·
+          탭 안내 두 줄 · «이 목록에서 …» 입력칸이 첫 내용 앞에 28%를 차지했다. 둘은 여전히 다른 일이라(오른쪽 단추 = 팔레트 · 입력칸 = 이 목록만 거름) 이름을 가른다 — 입력칸은 범위를 말하고(moreSearchPlaceholder) 단추는 «전체 검색 열기». */}
+      <div className="mb-4 flex items-center gap-2">
         <Input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t('moreSearchPlaceholder')}
           aria-label={t('moreSearchPlaceholder')}
-          className="pl-9"
+          className="min-w-0 flex-1"
           data-testid="more-search-input"
         />
+        {openPalette ? <IconButton icon="search" label={t('moreGlobalSearch')} size="lg" variant="quiet" onClick={openPalette} data-testid="more-global-search" /> : null}
       </div>
+      {/* story 4890 — 머리줄에서 빠진 둘(팀 현황 · 새 소식)의 새 자리: 탭 바가 있는 폭에서만, 구역들 앞에 한 카드 두 줄. 이름 · 동작은 머리줄 단추와 같다(같은 문맥 · 같은 열기). */}
+      <ShellShortcuts />
       {filteredGroups.length === 0 ? (
         <p className="text-sm text-muted-foreground" data-testid="more-search-empty">
           {t('moreSearchEmpty', { q: query.trim() })}
@@ -183,6 +155,41 @@ export default function MorePage() {
           })}
         </div>
       )}
+      <p className="mt-4 text-ds-small text-ds-ink-3 lg:hidden" data-testid="more-tab-hint">
+        {t('moreTabHint', { tabs: tabNames })}
+      </p>
     </div>
+  );
+}
+
+/** 팀 현황 · 새 소식 — 머리줄(폰 폭)에서 옮겨 온 두 줄. 컨텍스트가 없으면(provider 밖) 그 줄은 그리지 않는다(머리줄 단추와 같은 규칙). */
+function ShellShortcuts() {
+  const tPresence = useTranslations('presence');
+  const tNotes = useTranslations('releaseNotes');
+  const presence = useTeamPresenceToggle();
+  const notes = useReleaseNotes();
+  if (!presence && !notes) return null;
+  return (
+    <Card className="mb-4 overflow-hidden lg:hidden" data-testid="more-shell-shortcuts">
+      {presence ? (
+        <ListRow asChild>
+          <Button type="button" variant="quiet" onClick={presence.toggle} aria-pressed={presence.open} aria-label={presence.workingCount > 0 ? tPresence('fabLabelWorking', { count: presence.workingCount }) : tPresence('panelTitle')} data-testid="more-shortcut-presence" className="h-auto w-full justify-start gap-3 rounded-none border-0 border-b px-4 py-2 text-left last:border-b-0">
+            <Icon name="groups" size={20} className="text-ds-ink-3" />
+            <span className="min-w-0 flex-1 text-left text-ds-body font-semibold text-ds-ink">{tPresence('panelTitle')}</span>
+            {/* the button's own name carries the number (as the header button did) — the badge is only the picture of it */}
+            {presence.workingCount > 0 ? <CountBadge count={presence.workingCount} aria-hidden /> : null}
+          </Button>
+        </ListRow>
+      ) : null}
+      {notes ? (
+        <ListRow asChild className="last:border-b-0">
+          <Button type="button" variant="quiet" onClick={notes.open} data-testid="more-shortcut-news" className="h-auto w-full justify-start gap-3 rounded-none border-0 border-b px-4 py-2 text-left last:border-b-0">
+            <Icon name="auto_awesome" size={20} className="text-ds-ink-3" />
+            <span className="min-w-0 flex-1 text-left text-ds-body font-semibold text-ds-ink">{tNotes('openButtonAriaLabel')}</span>
+            {notes.hasUnseen ? <span className="size-2 rounded-full bg-ds-action" aria-hidden /> : null}
+          </Button>
+        </ListRow>
+      ) : null}
+    </Card>
   );
 }

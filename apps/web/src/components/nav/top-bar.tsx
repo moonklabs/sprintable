@@ -86,9 +86,10 @@ export function TopBar({ className, orgId, orgMemberships = [], projectId, proje
       </div>
       <div className="flex shrink-0 items-center gap-1">
         {actions}
-        {/* 2505d27d: presence 패널 토글(선생님 결정·FAB 대체) — Bell 옆·working-count 배지 */}
-        <PresenceToggleButton />
-        <WhatsNewButton />
+        {/* 2505d27d: presence 패널 토글(선생님 결정·FAB 대체) — Bell 옆·working-count 배지.
+            story 4890 (UI-7 · 폰 머리줄): 탭 바가 있는 폭(<lg)의 머리줄은 «칩 · 제목 · 알림» 하나로 — 팀 현황 · 새 소식은 «전체» 맨 위 두 줄로 옮겼다(손가락 폭 아이콘 셋이 한 줄에 몰리던 것). 탭 바 없는 폭(lg+)은 그대로. */}
+        <span className="hidden lg:contents"><PresenceToggleButton /></span>
+        <span className="hidden lg:contents"><WhatsNewButton /></span>
         <NotificationBell />
       </div>
     </div>

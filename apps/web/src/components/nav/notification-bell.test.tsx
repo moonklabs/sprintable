@@ -486,29 +486,30 @@ describe('NotificationBell — 배지 「99+」 대비(story 3466)', () => {
     }));
   }
 
-  it('⭐배지가 text-on-scrim dark:text-proof-bg를 쓰고, 무효 유틸(text-destructive-foreground)이 안 남았다', async () => {
+  it('⭐배지 = ds CountBadge(읽지 않음) — 99 넘으면 «99+», 옛 모서리 배지의 색 유틸이 안 남았다', async () => {
     stubUnreadCount(150);
     await act(async () => { root.render(withIntl(<NotificationBell />)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    const badge = Array.from(container.querySelectorAll('span')).find((s) => s.textContent === '99+');
-    expect(badge).toBeDefined();
-    expect(badge?.className).toContain('text-on-scrim');
-    expect(badge?.className).toContain('dark:text-proof-bg');
+    const badge = container.querySelector('[data-slot="ds-count-badge"]');
+    expect(badge?.textContent).toBe('99+');
+    expect(badge?.getAttribute('data-kind')).toBe('unread');
+    expect(badge?.getAttribute('aria-hidden')).toBe('true'); // the count is told by the button's own name
+    expect(badge?.className).not.toContain('text-on-scrim');
     expect(badge?.className).not.toContain('text-destructive-foreground');
   });
 
-  // story #3431 AC4 — 9px는 본문 최소보다 작았다. CornerCountBadge(공용) 도입으로 10px에
-  // 고정됐는지, team-presence-toggle.tsx와 같은 정의를 쓰는지(font-mono 폐기) 고정한다.
-  it('⭐크기 9px→10px(AC4) — 공용 CornerCountBadge를 쓰고 옛 font-mono가 안 남았다', async () => {
+  // story 4890 (UI-7 겸사) — the badge was a 10px corner badge (below the 12 px floor); it is the one ds CountBadge now (11px mono, the named exception), no old font tokens.
+  it('⭐배지 크기 — ds CountBadge(mono 11px 규격) · 옛 10px · 9px · text-micro가 안 남았다', async () => {
     stubUnreadCount(5);
     await act(async () => { root.render(withIntl(<NotificationBell />)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    const badge = Array.from(container.querySelectorAll('span')).find((s) => s.textContent === '5');
-    expect(badge?.className).toContain('text-micro');
+    const badge = container.querySelector('[data-slot="ds-count-badge"]');
+    expect(badge?.textContent).toBe('5');
+    expect(badge?.className).toContain('text-ds-mono-sm');
+    expect(badge?.className).not.toContain('text-micro');
     expect(badge?.className).not.toContain('text-[9px]');
-    expect(badge?.className).not.toContain('font-mono');
   });
 
   // story #3518(유나 사전 스티어 G, 2026-09-05) — 벨 버튼은 아이콘 전용(보이는 텍스트

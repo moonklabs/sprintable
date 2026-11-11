@@ -46,10 +46,10 @@ async function read(badge: number, partial: boolean) {
   // 웹 막대 「홈」 아이콘의 배지(ds CountBadge · data-testid="rail-badge") — 「대화」 배지는 안 읽음이라 0이면 없다.
   const rail = container.querySelector('[data-rail-group="now"] [data-testid="rail-badge"]');
   const tabLink = [...container.querySelectorAll('[data-testid="mobile-tab-bar"] a')].find((a) => a.getAttribute('href')?.startsWith('/org-briefing'))!;
-  const tab = tabLink.querySelector('span[aria-hidden]');
+  const tab = tabLink.querySelector('[data-slot="ds-count-badge"]');
   return {
     railText: rail ? (rail.textContent ?? '').replace('내 손이 필요', '').replace(/\s+/g, ' ').trim() : null,
-    tabText: tab ? (tab.textContent ?? '').trim() : null,
+    tabText: tab ? (() => { const c = tab.cloneNode(true) as Element; c.querySelectorAll('.sr-only').forEach((n) => n.remove()); return (c.textContent ?? '').trim(); })() : null,
   };
 }
 

@@ -14,7 +14,7 @@
 //
 // 이 가드는 그 계약을 소스 텍스트 수준에서 고정한다(story #3756의 test① — jsdom엔 실
 // layout이 없어 computed bottom을 잴 수 없으므로, 대신 ②"우하단 fixed 요소마다 변수
-// 참조가 있는가"를 전수 스캔·허용목록 0으로 검증한다. corner-count-badge-a11y.guard.
+// 참조가 있는가"를 전수 스캔·허용목록 0으로 검증한다. count-badge-hidden-a11y.guard.
 // test.ts와 동형 컨벤션(전수 소비처 나열+개별 assert, 새 소비처가 생기면 이 파일도 함께
 // 봐야 한다).
 import { readFileSync, readdirSync, statSync } from 'node:fs';

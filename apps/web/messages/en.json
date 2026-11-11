@@ -179,7 +179,6 @@
     "descSettings": "Organization, account, billing",
     "descChats": "What's being discussed",
     "moreMenuTitle": "Full menu",
-    "moreSubtitle": "{n, plural, one {# screen} other {# screens}} · {g, plural, one {# section} other {# sections}}",
     "moreGlobalSearch": "Open global search",
     "moreSearchPlaceholder": "Find a screen in this list",
     "moreOtherScreens": "Other screens",
@@ -7627,7 +7626,9 @@
       "turnOff": "Turn off",
       "cancel": "Cancel",
       "failed": "Couldn't change it — please try again",
-      "offEffect": "While it's off, permission requests don't reach phones, and no one can stop or instruct from a phone"
+      "offEffect": "While it's off, permission requests don't reach phones, and no one can stop or instruct from a phone",
+      "stateOn": "On",
+      "stateOff": "Off"
     },
     "remoteDevices": {
       "title": "Remote devices",

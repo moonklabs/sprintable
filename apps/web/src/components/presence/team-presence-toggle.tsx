@@ -4,7 +4,7 @@ import { createContext, useContext } from 'react';
 import { useTranslations } from 'next-intl';
 import { Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { CornerCountBadge } from '@/components/ui/corner-count-badge';
+import { CountBadge } from '@/components/ds/count-badge';
 
 // 2505d27d: presence 패널 토글을 헤더(TopBar)서 제어하기 위한 context.
 // 패널 state(useContextualPanelState)는 ScrollShell 소유 → provider로 TopBar에 toggle/count/open 공급.
@@ -41,16 +41,16 @@ export function PresenceToggleButton() {
       aria-pressed={open}
       title={t('panelTitle')}
       className={cn(
-        'relative flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground',
+        'relative flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground touch:size-11',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand',
         open && 'bg-muted/60 text-foreground',
       )}
     >
       <Users className="size-4" />
-      {/* story #2023 ⓑ: working 카운트 배지=L5(시스템 상태). story #3431 — 공용 CornerCountBadge로
+      {/* story #2023 ⓑ: working 카운트 배지=L5(시스템 상태). story #3431 — 공용 배지(4890부터 ds CountBadge)로
           통합(notification-bell.tsx와 동일 정의, 이 컴포넌트가 원형이었다 — 모양·크기 무변경). */}
       {workingCount > 0 ? (
-        <CornerCountBadge variant="info" value={workingCount} className="absolute -right-0.5 -top-0.5" />
+        <CountBadge count={workingCount} aria-hidden className="absolute right-0 top-0" />
       ) : null}
     </button>
   );

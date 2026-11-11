@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFormatter, useTranslations } from 'next-intl';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { Switch } from '@/components/ui/switch';
+import { Button } from '@/components/ds/button';
+import { Card } from '@/components/ds/card';
+import { Toggle } from '@/components/ds/toggle';
 import { fetchWithAuth } from '@/lib/db/client';
 import { deviceDateOptions } from '@/lib/desktop-devices';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -106,34 +106,41 @@ export function DesktopRemoteControlCard() {
   const ownerNames = { owners, hasOwners: owners ? 'yes' : 'no' };
 
   return (
-    <Card ref={cardRef} id={REMOTE_CONTROL_ANCHOR} tabIndex={-1} className="break-keep flex scroll-mt-24 flex-col gap-2 p-4 focus:outline-none data-[arrived]:border-ring data-[arrived]:ring-3 data-[arrived]:ring-ring" data-testid="desktop-remote-control">
+    // the anchor (id · ref · focus · arrival mark) is the card's own wrapper: the ds Card takes no ref, and the arrival ring is drawn on the wrapper from the same mark
+    <div ref={cardRef} id={REMOTE_CONTROL_ANCHOR} tabIndex={-1} className="scroll-mt-24 rounded-ds-control focus:outline-none data-[arrived]:ring-2 data-[arrived]:ring-ds-action" data-testid="desktop-remote-control">
+    <Card className="break-keep flex flex-col gap-2 p-4">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-ds-card-title font-semibold text-ds-ink">{t('title')}</h2>
         {state.can_change ? (
-          <Switch
-            ref={switchRef}
-            // story #4583 (Yuna 4974): the arrival ring — the same tokens as the Switch's own focus-visible ring
-            className="data-[arrived]:border-ring data-[arrived]:ring-3 data-[arrived]:ring-ring"
-            checked={state.enabled}
-            disabled={busy || asking}
-            aria-label={t('title')}
-            onCheckedChange={(on) => { if (on) void change(true); else { setFailed(false); setAsking(true); } }}
-          />
+          // story 4890 (UI-7 · 겸사 셋): the ds Toggle (a ≥44 press on touch — before, an old 32×18 switch). Its words are the heading's: the toggle's own label is kept for the screen reader only (it names the switch), its on/off WORDS stay drawn.
+          // The arrival ring (story #4583) is drawn on the switch from the same mark (`data-arrived`) — here through the wrapper.
+          <span className="[&_[data-slot=ds-toggle-field]>span:not([data-slot])]:sr-only [&_[data-slot=ds-toggle][data-arrived]]:ring-2 [&_[data-slot=ds-toggle][data-arrived]]:ring-ds-action">
+            <Toggle
+              ref={switchRef}
+              label={t('title')}
+              onText={t('stateOn')}
+              offText={t('stateOff')}
+              checked={state.enabled}
+              disabled={busy || asking}
+              onCheckedChange={(on) => { if (on) void change(true); else { setFailed(false); setAsking(true); } }}
+            />
+          </span>
         ) : null}
       </div>
-      <p className="text-sm text-muted-foreground">{t('body')}</p>
+      <p className="text-ds-body text-ds-ink-3">{t('body')}</p>
       {/* story #4583 (Yuna copy.md 5a): what off means, for everyone */}
-      {!state.enabled ? <p className="text-sm text-muted-foreground" data-testid="desktop-remote-control-off-effect">{t('offEffect')}</p> : null}
-      <p className="text-xs text-muted-foreground">{t('allowed')}</p>
+      {!state.enabled ? <p className="text-ds-body text-ds-ink-3" data-testid="desktop-remote-control-off-effect">{t('offEffect')}</p> : null}
+      <p className="text-ds-small text-ds-ink-3">{t('allowed')}</p>
       {state.enabled && state.enabled_at ? <EnabledSince at={state.enabled_at} /> : null}
       {!state.can_change ? (
-        <p className="text-xs text-muted-foreground" data-testid="desktop-remote-control-owner-only">
+        <p className="text-ds-small text-ds-ink-3" data-testid="desktop-remote-control-owner-only">
           {state.enabled ? t('ownerOnlyOn', ownerNames) : t('ownerOnlyOff', ownerNames)}
         </p>
       ) : null}
       {asking ? <ConfirmOff busy={busy} onConfirm={() => void change(false)} onCancel={() => setAsking(false)} /> : null}
-      <p className="text-xs text-destructive" role="status">{failed ? t('failed') : ''}</p>
+      <p className="text-ds-small text-ds-failed" role="status">{failed ? t('failed') : ''}</p>
     </Card>
+    </div>
   );
 }
 
@@ -143,7 +150,7 @@ function EnabledSince({ at }: { at: string }) {
   const format = useFormatter();
   const tz = useViewerTimeZone() ?? 'UTC';
   const date = format.dateTime(new Date(at), { ...deviceDateOptions(at, new Date(), tz), timeZone: tz });
-  return <p className="text-xs text-muted-foreground">{t('since', { date })}</p>;
+  return <p className="text-ds-small text-ds-ink-3">{t('since', { date })}</p>;
 }
 
 function ConfirmOff({ busy, onConfirm, onCancel }: { busy: boolean; onConfirm: () => void; onCancel: () => void }) {
@@ -151,11 +158,11 @@ function ConfirmOff({ busy, onConfirm, onCancel }: { busy: boolean; onConfirm: (
   const cancelRef = useRef<HTMLButtonElement>(null);
   useEffect(() => { cancelRef.current?.focus(); }, []); // [취소] first (Yuna B-1 ①)
   return (
-    <div className="flex flex-col gap-2 border-t border-border pt-3" role="group" aria-label={t('confirmOff')}>
-      <p className="text-sm">{t('confirmOff')}</p>
+    <div className="flex flex-col gap-2 border-t border-ds-line pt-3" role="group" aria-label={t('confirmOff')}>
+      <p className="text-ds-body text-ds-ink">{t('confirmOff')}</p>
       <div className="flex gap-2">
-        <Button size="sm" variant="destructive" disabled={busy} onClick={onConfirm}>{t('turnOff')}</Button>
-        <Button size="sm" variant="outline" ref={cancelRef} disabled={busy} onClick={onCancel}>{t('cancel')}</Button>
+        <Button variant="danger" disabled={busy} onClick={onConfirm}>{t('turnOff')}</Button>
+        <Button variant="secondary" ref={cancelRef} disabled={busy} onClick={onCancel}>{t('cancel')}</Button>
       </div>
     </div>
   );
