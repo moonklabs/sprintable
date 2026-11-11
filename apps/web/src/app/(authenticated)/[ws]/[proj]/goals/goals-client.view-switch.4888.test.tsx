@@ -135,11 +135,11 @@ describe('GoalsClient — 보기 전환 «목록 | 스윔레인»(story #4888)',
     expect([...sw()!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['List', 'Swimlane']);
   });
 
-  it('보기 전환 단추는 ds Button — 폰 누름 영역 44(pointer-coarse:min-h-11)', async () => {
+  it('보기 전환 단추는 ds Button — 폰 누름 영역 44(touch:min-h-11)', async () => {
     await mount();
     for (const b of sw()!.querySelectorAll('button')) {
       expect(b.getAttribute('data-slot')).toBe('ds-button');
-      expect(b.className.split(/\s+/)).toContain('pointer-coarse:min-h-11');
+      expect(b.className.split(/\s+/)).toContain('touch:min-h-11');
     }
   });
 });
