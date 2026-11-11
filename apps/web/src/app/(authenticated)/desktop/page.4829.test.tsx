@@ -20,9 +20,17 @@ async function cardsWith(embedded: string | undefined): Promise<unknown[]> {
   if (embedded === undefined) delete process.env.SPRINTABLE_EMBEDDED; else process.env.SPRINTABLE_EMBEDDED = embedded;
   vi.resetModules();
   const { default: DesktopPage } = await import('./page');
-  const result = DesktopPage() as { props: { children: Array<{ type: unknown } | null> } };
-  return result.props.children.filter(Boolean).map((c) => c!.type);
+  return componentTypes(DesktopPage());
 }
+// story 4889: the page is one composition (head · two columns · devices) — read its function components in document order, whatever DOM wrappers hold them
+function componentTypes(node: unknown): unknown[] {
+  if (Array.isArray(node)) return node.flatMap(componentTypes);
+  if (!node || typeof node !== 'object') return [];
+  const el = node as { type?: unknown; props?: { children?: unknown } };
+  if (typeof el.type === 'function') return [el.type];
+  return componentTypes(el.props?.children);
+}
+
 
 describe('[SID:4829] /desktop — the phone cards in local mode', () => {
   it('local mode: the three phone cards are one guidance card (nothing of the phone relay is drawn) and the device list is not drawn (4832)', async () => {
@@ -31,8 +39,9 @@ describe('[SID:4829] /desktop — the phone cards in local mode', () => {
     const { DesktopDownloadCard } = await import('@/components/desktop/desktop-download-card');
     const { DesktopDevices } = await import('@/components/desktop/desktop-devices');
     const { PhoneRelayLocalNotice } = await import('@/components/desktop/phone-relay-local-notice');
+    const { DesktopPageHead } = await import('@/components/desktop/desktop-page-head');
     // story 4832: and no «연결된 기기» list — a local install has one computer, nothing to list or disconnect
-    expect(types).toEqual([DesktopOpenAppCard, DesktopDownloadCard, PhoneRelayLocalNotice]);
+    expect(types).toEqual([DesktopPageHead, DesktopOpenAppCard, DesktopDownloadCard, PhoneRelayLocalNotice]);
     expect(types).not.toContain(DesktopDevices);
   });
 
@@ -45,7 +54,8 @@ describe('[SID:4829] /desktop — the phone cards in local mode', () => {
       const { DesktopRemoteDevices } = await import('@/components/desktop/desktop-remote-devices');
       const { PhoneSessionManagement } = await import('@/components/desktop/phone-session-management');
       const { DesktopDevices } = await import('@/components/desktop/desktop-devices');
-      expect(types, `SPRINTABLE_EMBEDDED=${String(value)}`).toEqual([DesktopOpenAppCard, DesktopDownloadCard, DesktopRemoteControlCard, DesktopRemoteDevices, PhoneSessionManagement, DesktopDevices]);
+      const { DesktopPageHead } = await import('@/components/desktop/desktop-page-head');
+      expect(types, `SPRINTABLE_EMBEDDED=${String(value)}`).toEqual([DesktopPageHead, DesktopOpenAppCard, DesktopDownloadCard, DesktopRemoteControlCard, DesktopRemoteDevices, PhoneSessionManagement, DesktopDevices]);
     }
   });
 });

@@ -109,7 +109,7 @@ export function DesktopDownloadCard({ hideTitle = false, ctaVariant = 'default',
   if (!manifest) {
     return (
       <Card className="space-y-2 p-4" data-testid="desktop-download-card">
-        {hideTitle ? null : <p className="text-ds-body font-medium text-ds-ink">{t('title')}</p>}
+        {hideTitle ? null : <p className="text-sm font-semibold text-foreground">{t('title')}</p>}
         <p className="text-ds-small text-ds-ink-3" data-testid="desktop-download-unavailable">
           {t('unavailable')}
         </p>
@@ -122,7 +122,7 @@ export function DesktopDownloadCard({ hideTitle = false, ctaVariant = 'default',
 
   return (
     <Card className="space-y-2 p-4" data-testid="desktop-download-card">
-      {hideTitle ? null : <p className="text-ds-body font-medium text-ds-ink">{t('title')}</p>}
+      {hideTitle ? null : <p className="text-sm font-semibold text-foreground">{t('title')}</p>}
       <p className="text-ds-small text-ds-ink-3" data-testid="desktop-download-target">
         {t('targetLabel')}
       </p>
