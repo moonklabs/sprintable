@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { Inbox } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ds/button';
 import { useToast } from '@/components/ui/toast';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
@@ -458,7 +458,7 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
                 title={tc('error')}
                 description={tc('errorDescription')}
                 action={(
-                  <Button variant="glass" size="sm" onClick={() => setReloadTick((n) => n + 1)}>
+                  <Button onClick={() => setReloadTick((n) => n + 1)}>
                     {tc('retry')}
                   </Button>
                 )}
@@ -499,8 +499,8 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
               <ul className="space-y-0.5">
               {nextBeforeSeq !== null ? (
                 <li className="pt-3 text-center">
-                  <Button variant="glass" size="sm" onClick={() => void loadMore()} disabled={loadingMore}>
-                    {loadingMore ? tc('loading') : t('loadMore')}
+                  <Button onClick={() => void loadMore()} loading={loadingMore}>
+                    {t('loadMore')}
                   </Button>
                 </li>
               ) : (

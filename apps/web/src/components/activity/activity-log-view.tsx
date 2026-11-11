@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { RefreshCw } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';   // (the row's overlay hit-box below — a ghost, full-row button the ds Button has no variant for)
+import { Button as DsButton } from '@/components/ds/button';
+import { Icon } from '@/components/ds/icon';
 import { useToast } from '@/components/ui/toast';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
@@ -235,6 +236,9 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   // story 4892 (UI-9 활동 §2) — a row is chosen to read its details (the hover-only tooltip's facts, made visible). Wide (lg+): the details sit in a column beside the
   // list; narrow: they open right under the chosen row and the keyboard focus moves into them. One instance is drawn at a time, so the row's `aria-controls` id is unique.
   const isWide = useMediaQuery('(min-width: 1024px)');
+  // lg (1024–1279): the list needs the width — the details column is not held open while nothing is chosen (a held-open column cut 23 of 24 one-line claims at 1024).
+  // xl (1280+): the column stays, with its «pick a row» line.
+  const isXl = useMediaQuery('(min-width: 1280px)');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const detailRef = useRef<HTMLElement | null>(null);
   const rowRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -252,6 +256,14 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
     else rowRefs.current.get(focusRequest.id)?.focus();
     setFocusRequest(null);
   }, [focusRequest]);
+  // Crossing 1024 while a row is chosen swaps where the details are drawn (under the row ↔ in the column): the old element is unmounted, so a focus that was inside it
+  // falls to <body>. Hand it back to the chosen row (which stays mounted) instead of letting it vanish.
+  const prevWide = useRef(isWide);
+  useEffect(() => {
+    if (prevWide.current === isWide) return;
+    prevWide.current = isWide;
+    if (selectedId && (!document.activeElement || document.activeElement === document.body)) setFocusRequest({ kind: 'row', id: selectedId });
+  }, [isWide, selectedId]);
   const toggleRow = (id: string, viaKeyboard: boolean) => {
     setSelectedId((cur) => (cur === id ? null : id));
     if (!isWide && viaKeyboard && selectedId !== id) setFocusRequest({ kind: 'detail', id });
@@ -339,10 +351,9 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
                 title={tc('error')}
                 description={tc('errorDescription')}
                 action={
-                  <Button variant="glass" size="sm" onClick={reload}>
-                    <RefreshCw className="mr-1.5 size-3.5" />
+                  <DsButton onClick={reload} iconStart={<Icon name="refresh" size={14} />}>
                     {tc('retry')}
-                  </Button>
+                  </DsButton>
                 }
               />
             </div>
@@ -355,10 +366,9 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
               title={t('emptyTitle')}
               description={t('emptyDescription')}
               action={
-                <Button variant="glass" size="sm" onClick={reload}>
-                  <RefreshCw className="mr-1.5 size-3.5" />
+                <DsButton onClick={reload} iconStart={<Icon name="refresh" size={14} />}>
                   {t('reload')}
-                </Button>
+                </DsButton>
               }
             />
           ) : (
@@ -390,15 +400,15 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
               ))}
               {offset + PAGE_SIZE < total && (
                 <div className="pt-3 text-center">
-                  <Button variant="glass" size="sm" onClick={loadMore} disabled={loadingMore}>
-                    {loadingMore ? tc('loading') : t('loadMore')}
-                  </Button>
+                  <DsButton onClick={loadMore} loading={loadingMore}>
+                    {t('loadMore')}
+                  </DsButton>
                 </div>
               )}
             </div>
           )}
         </div>
-        {isWide && !forbidden && !loadError ? (
+        {isWide && !forbidden && !loadError && (isXl || selected) ? (
           <aside aria-label={t('detailHeading')} className="w-[360px] shrink-0 overflow-y-auto border-l border-ds-line p-4">
             {selected ? (
               <AuditDetail ref={detailRef} id={DETAIL_ID} item={selected} actorLabel={selected.actor_id ? actorLabels.get(selected.actor_id) ?? null : null} claim={auditClaim(selected)} onClose={closeDetail} />

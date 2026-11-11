@@ -11,8 +11,9 @@ import { ActivityLogView } from './activity-log-view';
 import { TopBarProvider } from '@/components/nav/top-bar-context';
 import koMessages from '../../../messages/ko.json';
 
-const { mq, tzMock } = vi.hoisted(() => ({ mq: { wide: true }, tzMock: { value: 'UTC' as string | null } }));
-vi.mock('@/lib/use-media-query', () => ({ useMediaQuery: () => mq.wide }));
+const { mq, tzMock } = vi.hoisted(() => ({ mq: { wide: true, xl: true }, tzMock: { value: 'UTC' as string | null } }));
+// two queries: lg (min-width 1024) and xl (min-width 1280)
+vi.mock('@/lib/use-media-query', () => ({ useMediaQuery: (q: string) => (q.includes('1280') ? mq.xl : mq.wide) }));
 // the viewer's zone decides which day a row is on — pin it so the test does not depend on the machine's zone
 vi.mock('@/components/viewer-time-zone', () => ({ useViewerTimeZone: () => tzMock.value }));
 const fetchWithAuthMock = vi.fn();
@@ -39,6 +40,7 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
   vi.setSystemTime(NOW);
   mq.wide = true;
+  mq.xl = true;
   tzMock.value = 'UTC';
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -219,6 +221,95 @@ describe('ActivityLogView — 초점은 키보드 활성에서만 옮긴다 (489
     rows()[0]!.focus();
     await click(rows()[0]!);
     expect(document.activeElement).toBe(rows()[0]);
+  });
+});
+
+// lg (1024–1279): the details column is not held open while nothing is chosen — the list keeps the whole width (the held-open 360px column cut 23 of 24 one-line claims at 1024).
+// xl (1280+) keeps the column with its «pick a row» line.
+describe('ActivityLogView — lg 구간 상세 칸은 고른 뒤에만 선다 (4892)', () => {
+  const closeButton = () => (detail()!.querySelector(`button[aria-label="${koMessages.activityLog.detailClose}"]`) as HTMLButtonElement);
+
+  it('⭐lg, nothing chosen: no details column at all (no aside, no «행을 고르면» line) — the list has the full width', async () => {
+    mq.xl = false;
+    await mount();
+    expect(container.querySelector('aside')).toBeNull();
+    expect(container.textContent).not.toContain(koMessages.activityLog.detailPickRow);
+    expect(detail()).toBeNull();
+  });
+
+  it('⭐lg, choose a row: the column opens beside the list with the row\'s details; closing it removes the column again', async () => {
+    mq.xl = false;
+    await mount();
+    await click(rows()[0]!);
+    expect(container.querySelector('aside')).not.toBeNull();
+    expect(detail()!.closest('aside')).not.toBeNull();
+    expect(rows()[0]!.getAttribute('aria-expanded')).toBe('true');
+    await click(closeButton());
+    expect(container.querySelector('aside')).toBeNull();
+    expect(detail()).toBeNull();
+  });
+
+  it('⭐lg, closing with the close button hands the focus back to the row that opened it', async () => {
+    mq.xl = false;
+    await mount();
+    await click(rows()[1]!);
+    await click(closeButton());
+    expect(document.activeElement).toBe(rows()[1]);
+  });
+
+  it('lg, choosing the same row again closes the column too (the list is full width again)', async () => {
+    mq.xl = false;
+    await mount();
+    await click(rows()[0]!);
+    expect(container.querySelector('aside')).not.toBeNull();
+    await click(rows()[0]!);
+    expect(container.querySelector('aside')).toBeNull();
+  });
+
+  it('lg, a keyboard activation keeps the focus on the row (the column opens beside it)', async () => {
+    mq.xl = false;
+    await mount();
+    rows()[0]!.focus();
+    await click(rows()[0]!);
+    expect(container.querySelector('aside')).not.toBeNull();
+    expect(document.activeElement).toBe(rows()[0]);
+  });
+
+  it('⭐crossing 1024 while the details are focused (narrow → wide) does not drop the focus to the page: it goes to the chosen row', async () => {
+    mq.wide = false;
+    mq.xl = false;
+    await mount();
+    rows()[0]!.focus();
+    await click(rows()[0]!);                      // a keyboard activation at narrow width moves the focus into the details under the row
+    expect(detail()!.contains(document.activeElement)).toBe(true);
+    mq.wide = true;                                // the viewport grows past 1024: the details are drawn in the column instead (a new element)
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC">
+          <TopBarProvider><ActivityLogView projectId="p1" /></TopBarProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { vi.advanceTimersByTime(5); });
+    expect(document.activeElement).toBe(rows()[0]);
+    expect(detail()).not.toBeNull();
+  });
+
+  it('xl keeps the column open with its «pick a row» line before anything is chosen', async () => {
+    mq.xl = true;
+    await mount();
+    expect(container.querySelector('aside')).not.toBeNull();
+    expect(container.textContent).toContain(koMessages.activityLog.detailPickRow);
+  });
+
+  it('narrow (< lg) still has no column at all — the details open under the row (unchanged)', async () => {
+    mq.wide = false;
+    mq.xl = false;
+    await mount();
+    expect(container.querySelector('aside')).toBeNull();
+    await click(rows()[0]!);
+    expect(container.querySelector('aside')).toBeNull();
+    expect(detail()).not.toBeNull();
   });
 });
 
