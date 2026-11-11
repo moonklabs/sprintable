@@ -55,3 +55,22 @@ export function sortAgentStates<T extends { rank: number; row: AgentStateRow }>(
 
 /** the rows shown before «더 보기» */
 export const AGENT_STATE_FIRST_SHOWN = 8;
+
+/**
+ * story 4889 (UI-6 · W1) — the team list row's state mark: which ds `StatusLabel` look the row's word wears. Pure; the WORDS stay the strip's own table
+ * (`sessionStateLabel`), this only picks the mark (dot · ring · pulse · icon) so the list reads like the DM strip and the Mac board:
+ * a person's hand (a permission · an input question · a macOS window · a first-screen question) → needs-hand · an error → failed · working → working ·
+ * resting (a limit · starting · between turns) → idle · the computer lost / stopped / a word this page does not know → offline.
+ */
+export type StateMark = 'working' | 'needs-hand' | 'failed' | 'idle' | 'offline';
+export function stateMark(word: string, o: { ask: boolean; limitRests: boolean }): StateMark {
+  if (o.limitRests) return 'idle';
+  if (o.ask && (word === 'starting' || word === 'working' || word === 'idle')) return 'needs-hand';
+  switch (word) {
+    case 'waiting_permission': case 'waiting_system': case 'waiting_input': return 'needs-hand';
+    case 'error': return 'failed';
+    case 'working': return 'working';
+    case 'idle': case 'starting': case 'paused_limit': return 'idle';
+    default: return 'offline'; // stopped · unknown (the computer lost) · unrecognized
+  }
+}

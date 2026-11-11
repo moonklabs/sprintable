@@ -28,6 +28,12 @@ import { useFlatHref } from '@/hooks/use-flat-href';
 import { orgRoleLabel } from '@/lib/org-role-label';
 import { memberRowLabels } from '@/lib/member-display';
 import { RowName } from '@/components/shared/row-name';
+import { StatusLabel } from '@/components/ds/status-label';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
+import { useAgentStates } from '@/hooks/use-agent-states';
+import { sessionStateLabel, shownState } from '@/components/chat/agent-session-strip';
+import { limitHeld, limitLooksAgain } from '@/lib/agent-session-limit';
+import { stateMark, type AgentStateRow } from '@/lib/agent-state-list';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { DeviceChip } from '@/components/desktop/device-chip';
 
@@ -136,6 +142,9 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
   // story #4311(유나 비차단) — 행에 조직 역할 배지가 보이므로 그 글자를 roleLabel로 넘긴다(역할이 보이고 서로 다르면 꼬리 없음).
   const rowLabels = useMemo(() => memberRowLabels(agents, tc, (a) => orgRoleLabel(a.role, to) ?? ''), [agents, tc, to]);
 
+  // story 4889 (W1): the list reads the SAME live state as the DM strip and the Today list (one read: /api/agents/desktop-sessions) — a row of an agent on a computer wears its state
+  const { rows: stateRows } = useAgentStates();
+  const stateByAgent = useMemo(() => new Map(stateRows.map((r) => [r.agent_id, r])), [stateRows]);
   const [grantCounts, setGrantCounts] = useState<Record<string, number>>({});
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -280,9 +289,9 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
           ) : null}
 
           {loading ? (
-            <div className="space-y-2">
-              {[1, 2, 3].map((i) => <div key={i} className="h-14 animate-pulse rounded-md bg-muted" />)}
-            </div>
+            <SkeletonGroup label={tc('loading')} className="space-y-2" data-testid="agent-list-loading">
+              {[1, 2, 3].map((i) => <Skeleton key={i} className="h-14" />)}
+            </SkeletonGroup>
           ) : loadError ? (
             <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border px-3 py-8 text-center">
               <p className="text-sm text-muted-foreground">{tc('error')}</p>
@@ -314,6 +323,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                   <Link href={flatHref(`/organization/workforce/${agent.id}`)} className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <RowName className="font-medium text-foreground hover:underline hover:text-primary" label={rowLabels.get(agent.id)} id={agent.id} />
+                      <AgentStateMark row={stateByAgent.get(agent.id) ?? null} />
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-2">
                       <Badge variant="secondary">{t('agentMember')}</Badge>
@@ -417,4 +427,14 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
       </Dialog>
     </div>
   );
+}
+
+/** story 4889 (W1): the live state of an agent that runs on a computer — a ds StatusLabel in the strip's own words; nothing for an agent with no session (the row as it was). */
+function AgentStateMark({ row }: { row: AgentStateRow | null }) {
+  const tState = useTranslations('chats.agentSession');
+  if (!row || row.state === null) return null;
+  const word = shownState(row);
+  const limitRests = limitHeld(word, row.limit) || limitLooksAgain(word, row.limit) || (word === 'waiting_input' && !!row.limit?.self_resume);
+  const mark = stateMark(word, { ask: !!row.first_screen?.ask, limitRests });
+  return <StatusLabel status={mark} label={sessionStateLabel(row, tState)} data-testid="agent-state-mark" data-agent-id={row.agent_id} className="shrink-0 text-ds-small" />;
 }

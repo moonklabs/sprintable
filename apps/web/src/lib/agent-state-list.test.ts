@@ -1,6 +1,6 @@
 // story #4833 — the pure parts of the Today list: what is kept from a server answer, and the rank of each word
 import { describe, expect, it } from 'vitest';
-import { parseAgentStates, sortAgentStates, stateRank, type AgentStateRow } from './agent-state-list';
+import { parseAgentStates, sortAgentStates, stateMark, stateRank, type AgentStateRow } from './agent-state-list';
 
 describe('parseAgentStates', () => {
   it('keeps only rows that name an agent; anything else (null · a string · an object) is an empty list — never a crash', () => {
@@ -37,5 +37,29 @@ describe('sortAgentStates', () => {
     const copy = [...input];
     expect(sortAgentStates(input).map((x) => x.row.agent_name)).toEqual(['z', 'a', 'c', 'b']);
     expect(input).toEqual(copy);
+  });
+});
+
+// story 4889 (UI-6 · W1) — which ds StatusLabel look the team list row's word wears. Pure; the words stay the strip's own table.
+describe('stateMark (4889 W1)', () => {
+  const none = { ask: false, limitRests: false };
+  it('a person\'s hand → needs-hand: a permission · a macOS window · an input question', () => {
+    for (const w of ['waiting_permission', 'waiting_system', 'waiting_input']) expect(stateMark(w, none)).toBe('needs-hand');
+  });
+  it('a first-screen question wins over starting / working / idle (the strip says «터미널 질문» there) — but not over a word that is already something else', () => {
+    for (const w of ['starting', 'working', 'idle']) expect(stateMark(w, { ask: true, limitRests: false })).toBe('needs-hand');
+    expect(stateMark('error', { ask: true, limitRests: false })).toBe('failed');
+  });
+  it('error → failed · working → working · starting / idle / paused_limit → idle', () => {
+    expect(stateMark('error', none)).toBe('failed');
+    expect(stateMark('working', none)).toBe('working');
+    for (const w of ['starting', 'idle', 'paused_limit']) expect(stateMark(w, none)).toBe('idle');
+  });
+  it('⭐a limit the app waits out reads as resting (idle) — not as a hand, even on waiting_input / working', () => {
+    expect(stateMark('waiting_input', { ask: false, limitRests: true })).toBe('idle');
+    expect(stateMark('working', { ask: false, limitRests: true })).toBe('idle');
+  });
+  it('the computer lost · stopped · a word this page does not know → offline', () => {
+    for (const w of ['unknown', 'stopped', 'unrecognized', 'something-new']) expect(stateMark(w, none)).toBe('offline');
   });
 });
