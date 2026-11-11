@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 
 type ProgressName = { 'aria-label': string; 'aria-labelledby'?: never } | { 'aria-labelledby': string; 'aria-label'?: never };
 type ProgressValue =
-  | { /** 지금 값(0 이상). */ value: number; unavailableLabel?: never }
+  | { /** 지금 값(0 이상). NaN · Infinity나 끝 값(`max`)이 숫자가 아니면 «모름»으로 그려진다 — 그때 읽힐 글을 `unavailableLabel`로 줄 수 있다(없으면 값 글 없이 비어 있는 막대로만 읽힌다). */ value: number; unavailableLabel?: string }
   /** 값을 못 구했다 — 막대는 비어 있고 «—»만 보이며 «왜 비었나»는 읽히는 글(`unavailableLabel`)로 필수. 0과 «모름»을 섞지 않는다. */
   | { value: null; unavailableLabel: string };
 
@@ -33,8 +33,8 @@ function ratioOf(value: number, max: number): number {
  * 이름(`aria-label` | `aria-labelledby`)이 필수다. 채움 너비만 100ms로 움직이고(움직임 줄이기면 즉시) 값은 0~max로 맞춘다.
  */
 export function ProgressBar({ value, max, tone = 'progress', valueText, ariaValueText, unavailableLabel, className, ...rest }: ProgressBarProps) {
-  // NaN · Infinity도 «모름» — 숫자가 아닌 값을 aria-valuenow="NaN"으로 내보내지 않는다(막대 비율과 값 속성이 갈리지 않게).
-  const unavailable = value === null || value === undefined || !Number.isFinite(value);
+  // NaN · Infinity도 «모름» — 숫자가 아닌 값을 aria-valuenow="NaN"으로 내보내지 않고, 끝 값이 숫자가 아니면 «5/NaN» 같은 글을 그리지도 읽히지도 않는다(막대 비율과 값 속성 · 글이 갈리지 않게).
+  const unavailable = value === null || value === undefined || !Number.isFinite(value) || !Number.isFinite(max);
   const ratio = unavailable ? 0 : ratioOf(value, max);
   const validMax = Number.isFinite(max) && max > 0;
   const complete = !unavailable && validMax && ratio >= 1;

@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { Menu as MenuPrimitive } from '@base-ui/react/menu';
 import { cn } from '@/lib/utils';
 import { Icon, type IconName } from './icon';
+import { useDsPortalContainer } from './portal-container';
 
 /** UI-3(a9d56577) Menu — 단추 하나에서 펼쳐지는 목록. 열고 닫기 · 화살표 이동 · 바깥 눌러 닫기 · Esc · 초점 복원은 Base UI 몫이다(현행 `ui/dropdown-menu`와 같은 바탕). */
 export const Menu = MenuPrimitive.Root;
@@ -18,8 +19,9 @@ export type MenuContentProps = Omit<MenuPrimitive.Popup.Props, 'className'> &
  * ⚠️ 이 상자 «안»에 스크롤 칸을 더 넣으면 `tabIndex={-1}`을 준다 — 크롬이 넘치는 스크롤 칸을 키보드 초점 대상으로 만들어 역할 · 이름 없는 칸에 멈춘다(story #4308).
  */
 export function MenuContent({ align = 'start', alignOffset = 0, side = 'bottom', sideOffset = 4, className, ...props }: MenuContentProps) {
+  const portalContainer = useDsPortalContainer();
   return (
-    <MenuPrimitive.Portal>
+    <MenuPrimitive.Portal container={portalContainer ?? undefined}>
       <MenuPrimitive.Positioner className="isolate z-50 outline-none" align={align} alignOffset={alignOffset} side={side} sideOffset={sideOffset}>
         <MenuPrimitive.Popup
           data-slot="ds-menu-content"

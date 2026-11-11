@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { Calendar, type CalendarLabels } from './calendar';
 import { Icon } from './icon';
 import { parseIso, toIso } from './calendar-math';
+import { useDsPortalContainer } from './portal-container';
 
 export interface DatePickerLabels extends CalendarLabels {
   /** 트리거(날짜 칸)의 이름 — 필수(예: «시작일»). 팝업의 이름도 같다. */
@@ -51,6 +52,7 @@ function formatValue(value: string | null, locale: string): string | null {
 export function DatePicker({ value, onChange, today, min, max, locale, weekStartsOn, labels, disabled, invalid, className }: DatePickerProps) {
   const [open, setOpen] = useState(false);
   const popupRef = useRef<HTMLDivElement>(null);
+  const portalContainer = useDsPortalContainer();
   const shown = useMemo(() => formatValue(value, locale), [value, locale]);
   return (
     <PopoverPrimitive.Root open={open} onOpenChange={setOpen}>
@@ -71,7 +73,7 @@ export function DatePicker({ value, onChange, today, min, max, locale, weekStart
         <span className={cn('min-w-0 truncate', shown ? 'text-ds-ink' : 'text-ds-ink-3')}>{shown ?? labels.placeholder}</span>
         <Icon name="calendar_month" className="shrink-0 text-ds-ink-3" />
       </PopoverPrimitive.Trigger>
-      <PopoverPrimitive.Portal>
+      <PopoverPrimitive.Portal container={portalContainer ?? undefined}>
         <PopoverPrimitive.Positioner className="isolate z-50 outline-none" align="start" sideOffset={4}>
           <PopoverPrimitive.Popup
             ref={popupRef}

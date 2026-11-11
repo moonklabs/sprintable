@@ -57,6 +57,7 @@ export function Calendar({ value, onChange, today, min, max, locale, weekStartsO
   const gridRef = useRef<HTMLTableElement>(null);
   const wantsFocus = useRef(false);
   const gridHadFocus = useRef(false);
+  const monthNav = useRef(false);
 
   // 밖에서 값 · 범위가 바뀌면(다른 화면 조작) 초점 날도 따라간다 — 효과가 아니라 «렌더 중 이전 값과 비교»로(효과 안 setState는 연쇄 렌더를 부른다).
   const sync = `${value ?? ''}|${min ?? ''}|${max ?? ''}`;
@@ -67,7 +68,8 @@ export function Calendar({ value, onChange, today, min, max, locale, weekStartsO
   }
 
   // 키보드로 옮긴 뒤에만 실제 초점을 옮긴다(달 단추를 눌러 달이 바뀔 때 초점을 훔치지 않는다).
-  // 예외: 격자 안에 초점이 있었는데 밖에서 값 · 범위가 바뀌어 그 칸이 사라졌다면(초점이 문서로 떨어짐) 새 초점 칸으로 옮긴다.
+  // 예외: 격자 안에 초점이 있었는데 밖에서 값 · 범위가 바뀌어 초점 칸이 달라졌다면 — 그 칸이 사라져 초점이 문서로 떨어졌거나, 같은 달이라 옛 칸에 초점이 남았다면 — 새 초점 칸으로 옮긴다
+  // (탭 순서 칸과 실제 초점이 갈리면 다음 화살표가 엉뚱한 칸으로 튄다).
   useEffect(() => {
     const grid = gridRef.current;
     const cellEl = grid?.querySelector<HTMLButtonElement>(`button[data-date="${focusIso}"]`);
@@ -76,8 +78,20 @@ export function Calendar({ value, onChange, today, min, max, locale, weekStartsO
       cellEl?.focus();
       return;
     }
-    if (gridHadFocus.current && grid && !grid.contains(document.activeElement)) cellEl?.focus();
+    // 달 단추로 달을 넘긴 직후는 «밖의 변경»이 아니다 — 초점을 훔치지 않는다(사파리처럼 단추가 초점을 못 받는 브라우저 · 프로그램 클릭에서 격자 칸으로 튀지 않게).
+    if (monthNav.current) {
+      monthNav.current = false;
+      return;
+    }
+    if (!gridHadFocus.current || !grid) return;
+    const active = document.activeElement;
+    if (!grid.contains(active)) cellEl?.focus();
+    else if (active instanceof HTMLElement && active.dataset.date && active.dataset.date !== focusIso) cellEl?.focus();
   }, [focusIso]);
+  // 위 효과가 표지를 읽은 뒤(같은 커밋 안, 선언 순서대로) 지운다.
+  useEffect(() => {
+    monthNav.current = false;
+  });
 
   const focus = parseIso(focusIso) ?? parseIso('1970-01-01')!;
   const cells = useMemo(() => monthGrid(focus.y, focus.m, weekStartsOn), [focus.y, focus.m, weekStartsOn]);
@@ -95,10 +109,18 @@ export function Calendar({ value, onChange, today, min, max, locale, weekStartsO
   const inRange = (iso: string) => (!min || iso >= min) && (!max || iso <= max);
   const monthFirst = toIso({ ...focus, d: 1 });
   const monthLast = toIso({ ...focus, d: daysInMonth(focus.y, focus.m) });
-  const prevDisabled = !!min && monthFirst <= min;
-  const nextDisabled = !!max && monthLast >= max;
+  // 표현 범위(0001-01 ~ 9999-12)의 끝에서는 min · max가 없어도 더 갈 달이 없다 — 눌러도 아무 일 없는 단추를 켜 두지 않는다.
+  const prevDisabled = (!!min && monthFirst <= min) || (focus.y <= 1 && focus.m <= 1);
+  const nextDisabled = (!!max && monthLast >= max) || (focus.y >= 9999 && focus.m >= 12);
 
-  // 키보드 이동(실제 초점도 옮긴다). 달 단추는 위에서 함수형으로 — 연달아 눌러도 오래된 값으로 계산하지 않고, 초점을 훔치지도 않는다.
+  // 달 단추: 초점 날만 옮기고 실제 초점은 그대로(훔치지 않는다). 바뀐 게 없으면(범위 끝) 표지도 세우지 않는다.
+  // 함수형으로 — 연달아 눌러도 오래된 값으로 계산하지 않는다. 표지는 다음 커밋의 효과가 읽고 곧 지운다(단추가 잠기는 범위 끝에서는 눌러도 안 바뀌어 표지가 남을 길이 없다).
+  const stepMonth = (delta: number) => {
+    monthNav.current = true;
+    setFocusIso((cur) => clampIso(addMonths(cur, delta), min, max));
+  };
+
+  // 키보드 이동(실제 초점도 옮긴다).
   const move = (target: string) => {
     const next = clampIso(target, min, max);
     if (next === focusIso) return;
@@ -131,9 +153,9 @@ export function Calendar({ value, onChange, today, min, max, locale, weekStartsO
   return (
     <div data-slot="ds-calendar" className={cn('w-56 max-w-full touch:w-72', className)}>
       <div className="mb-1 flex items-center justify-between">
-        <IconButton icon="chevron_left" label={labels.previousMonth} disabled={prevDisabled} onClick={() => setFocusIso((cur) => clampIso(addMonths(cur, -1), min, max))} />
+        <IconButton icon="chevron_left" label={labels.previousMonth} disabled={prevDisabled} onClick={() => stepMonth(-1)} />
         <div data-slot="ds-calendar-title" aria-live="polite" className="text-ds-card-title font-semibold text-ds-ink">{monthLabel}</div>
-        <IconButton icon="chevron_right" label={labels.nextMonth} disabled={nextDisabled} onClick={() => setFocusIso((cur) => clampIso(addMonths(cur, 1), min, max))} />
+        <IconButton icon="chevron_right" label={labels.nextMonth} disabled={nextDisabled} onClick={() => stepMonth(1)} />
       </div>
       <table
         ref={gridRef}

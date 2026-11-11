@@ -241,6 +241,36 @@ describe('ds Calendar — 초점 · 방향 · 범위 끝', () => {
     expect(document.activeElement).toBe(cell('2027-03-04'));
   });
 
+  it('⭐같은 달 안에서 밖의 value가 바뀌면 실제 초점도 새 칸으로 간다 — 탭 순서 칸과 초점이 갈리지 않아 다음 →가 엉뚱한 칸으로 튀지 않는다', async () => {
+    await render(<Calendar key="s" {...base} value="2026-11-10" />);
+    cell('2026-11-10').focus();
+    await render(<Calendar key="s" {...base} value="2026-11-20" />);
+    expect(tabbable()).toEqual(['2026-11-20']);
+    expect(document.activeElement).toBe(cell('2026-11-20'));
+    await key(cell('2026-11-20'), 'ArrowRight');
+    expect(document.activeElement).toBe(cell('2026-11-21'));
+  });
+
+  it('⭐달 단추를 (초점을 못 받는 채로) 눌러 달이 바뀌어도 초점이 격자 칸으로 튀지 않는다 — 밖의 값 변경만 초점을 옮긴다', async () => {
+    await render(<Calendar key="m" {...base} value="2026-11-20" />);
+    cell('2026-11-20').focus();
+    await act(async () => { (container.querySelector('button[aria-label="다음 달"]') as HTMLButtonElement).click(); });
+    expect(title()).toBe('2026년 12월');
+    expect(tabbable()).toEqual(['2026-12-20']);
+    expect(document.activeElement).not.toBe(cell('2026-12-20'));
+    // 그 뒤에 밖에서 값이 바뀌는 것은 여전히 초점을 따라 옮긴다.
+    cell('2026-12-20').focus();
+    await render(<Calendar key="m" {...base} value="2026-12-25" />);
+    expect(document.activeElement).toBe(cell('2026-12-25'));
+  });
+
+  it('같은 달 안에서 value가 바뀌어도 격자 밖에 있던 초점은 빼앗지 않는다', async () => {
+    await render(<><button type="button" id="other2">다른 곳</button><Calendar key="t" {...base} value="2026-11-10" /></>);
+    (document.getElementById('other2') as HTMLButtonElement).focus();
+    await render(<><button type="button" id="other2">다른 곳</button><Calendar key="t" {...base} value="2026-11-20" /></>);
+    expect(document.activeElement).toBe(document.getElementById('other2'));
+  });
+
   it('⭐초점이 격자에 들어갔다가 밖으로 나갔다면(다른 단추로) 값이 바뀌어도 초점을 빼앗지 않는다', async () => {
     await render(<><button type="button" id="other">다른 곳</button><Calendar key="g" {...base} value="2026-11-20" /></>);
     cell('2026-11-20').focus();
@@ -290,6 +320,20 @@ describe('ds Calendar — 초점 · 방향 · 범위 끝', () => {
 });
 
 describe('ds Calendar — 달 단추', () => {
+  it('⭐표현 범위의 끝(0001-01 · 9999-12)에서는 min · max가 없어도 그 방향 단추가 잠긴다 — 눌러도 아무 일 없는 단추를 켜 두지 않는다', async () => {
+    const btn = (name: string) => container.querySelector(`button[aria-label="${name}"]`) as HTMLButtonElement;
+    await render(<Calendar key="b1" {...base} value="0001-01-15" today="0001-01-15" />);
+    expect(btn('이전 달').disabled).toBe(true);
+    expect(btn('다음 달').disabled).toBe(false);
+    await render(<Calendar key="b2" {...base} value="9999-12-20" today="9999-12-20" />);
+    expect(btn('이전 달').disabled).toBe(false);
+    expect(btn('다음 달').disabled).toBe(true);
+    await render(<Calendar key="b3" {...base} value="0001-02-01" today="0001-02-01" />);
+    expect(btn('이전 달').disabled).toBe(false);
+    await render(<Calendar key="b4" {...base} value="9999-11-30" today="9999-11-30" />);
+    expect(btn('다음 달').disabled).toBe(false);
+  });
+
   it('⭐‹ › 단추는 이름이 있고 달을 넘긴다 — 초점은 단추에 그대로(훔치지 않는다)', async () => {
     await render(<Calendar {...base} value="2026-11-11" />);
     const prev = container.querySelector('button[aria-label="이전 달"]') as HTMLButtonElement;
