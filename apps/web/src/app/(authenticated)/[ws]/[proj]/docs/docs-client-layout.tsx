@@ -15,16 +15,15 @@ import { useRecentDocs } from '@/components/docs/use-recent-docs';
 import { TreeSearchInput } from '@/components/docs/tree-search-input';
 import { DocSearchResults, type DocSearchResult } from '@/components/docs/doc-search-results';
 import { useTreeExpanded } from '@/components/docs/use-tree-expanded';
-import { Button } from '@/components/ui/button';
 import { Button as DsButton } from '@/components/ds/button';
 import { IconButton } from '@/components/ds/icon-button';
 import { Icon } from '@/components/ds/icon';
-import { Input } from '@/components/ui/input';
-import { CountBadge } from '@/components/ui/count-badge';
+import { Input } from '@/components/ds/input';
+import { CountBadge } from '@/components/ds/count-badge';
 import { SectionHeader } from '@/components/ds/section-header';
 import { useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { ChevronDown, ChevronLeft, ChevronRight, FileText, FolderPlus, Plus, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, FileText, X } from 'lucide-react';
 import { DocsLayoutContext, type Doc, type DocSortMode, type DocUpdate } from './docs-context';
 import { closedDrawerProps, useSwipeDrawer } from '@/lib/use-swipe-drawer';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
@@ -436,14 +435,12 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
       // story #4277(민 기기 #5) — 402폭에서 «새 폴더» · «새 문서» 글자 버튼이 셸 TopBar의 shrink-0 액션 칸을 넓혀 알림 벨을 화면 밖으로
       // 밀었다. 스프린트 상단바와 같은 관례: 폰(sm 미만)은 아이콘만 · 글자는 sm 이상 · 접근 이름은 aria-label로 늘 유지.
       <div className={cn('flex items-center gap-1.5', !sidebarCollapsed && 'lg:hidden')}>
-        <Button size="sm" variant="ghost" onClick={handleNewFolder} disabled={folderSubmitting} aria-label={t('newFolder')}>
-          <FolderPlus className="h-3.5 w-3.5 sm:mr-1.5" />
+        <DsButton variant="quiet" onClick={handleNewFolder} disabled={folderSubmitting} aria-label={t('newFolder')} iconStart={<Icon name="create_new_folder" size={14} />}>
           <span className="hidden sm:inline">{t('newFolder')}</span>
-        </Button>
-        <Button size="sm" variant="outline" onClick={handleNewDoc} disabled={isCreating} aria-label={isCreating ? t('loading') : t('newDoc')}>
-          <Plus className="h-3.5 w-3.5 sm:mr-1.5" />
+        </DsButton>
+        <DsButton onClick={handleNewDoc} disabled={isCreating} aria-label={isCreating ? t('loading') : t('newDoc')} iconStart={<Icon name="add" size={14} />}>
           <span className="hidden sm:inline">{isCreating ? t('loading') : t('newDoc')}</span>
-        </Button>
+        </DsButton>
       </div>
     ),
     [handleNewDoc, isCreating, handleNewFolder, folderSubmitting, t, sidebarCollapsed]
@@ -482,9 +479,9 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
       {/* story #1950 — 새 폴더 인라인 폼(팝오버 아님, #1942 결함 클래스 회피). 검색 중이어도
           "새 폴더" 버튼은 항상 접근 가능하므로 isSearching과 무관하게 렌더한다. */}
       {folderCreation ? (
-        <div className="mx-2 mt-1.5 space-y-1.5 rounded-lg border border-border bg-card p-2">
+        <div className="mx-2 mt-1.5 space-y-1.5 rounded-ds-panel border border-ds-line bg-ds-surface p-2">
           {folderCreationParentTitle ? (
-            <p className="truncate text-editorial-meta text-muted-foreground">{t('newFolderTarget', { title: folderCreationParentTitle })}</p>
+            <p className="truncate text-ds-small text-ds-ink-3">{t('newFolderTarget', { title: folderCreationParentTitle })}</p>
           ) : null}
           <Input
             autoFocus
@@ -498,18 +495,18 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             }}
             placeholder={t('newFolderPlaceholder')}
             disabled={folderSubmitting}
-            className="h-auto min-w-0 px-2 py-1.5 lg:text-xs"
+            className="min-w-0"
           />
           {folderCreateError ? (
-            <p className="text-editorial-meta text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{folderCreateError}</p>
+            <p className="text-ds-small text-ds-failed" role="alert" aria-live="assertive" aria-atomic="true">{folderCreateError}</p>
           ) : null}
           <div className="flex items-center justify-end gap-1.5">
-            <Button size="sm" variant="ghost" onClick={cancelCreateFolder} disabled={folderSubmitting}>
+            <DsButton variant="quiet" onClick={cancelCreateFolder} disabled={folderSubmitting}>
               {t('newFolderCancel')}
-            </Button>
-            <Button size="sm" onClick={() => void submitCreateFolder()} disabled={folderSubmitting}>
+            </DsButton>
+            <DsButton variant="primary" onClick={() => void submitCreateFolder()} disabled={folderSubmitting}>
               {t('newFolderConfirm')}
-            </Button>
+            </DsButton>
           </div>
         </div>
       ) : null}
@@ -618,15 +615,9 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
                 건드렸다. 이 레일 자리의 정본은 variant="link"(hover 배경 자체가 없음 —
                 content/page.tsx:248 실측 그대로, ghost는 좁은 레일에서 hover 사각형이
                 뜬다). 색은 문구가 아니라 행동에 싣는다(오른쪽 destructive 문구와 대칭). */}
-            <Button
-              type="button"
-              variant="link"
-              size="xs"
-              onClick={() => void fetchTree(selectedTags.length ? selectedTags : undefined)}
-              className="mt-1 h-auto px-0 text-xs"
-            >
+            <DsButton variant="quiet" onClick={() => void fetchTree(selectedTags.length ? selectedTags : undefined)} className="mt-1">
               {tc('retry')}
-            </Button>
+            </DsButton>
           </div>
         ) : tree.length === 0 ? (
           // story #3784(페드루 짚음 09:49Z) — 고를 문서가 0건인데 왼쪽은 "선택하세요"
