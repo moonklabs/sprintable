@@ -90,7 +90,6 @@ export const GRANDFATHER_BASELINE = new Map<string, number>([
   ['components/docs/doc-auto-groups.tsx::text-foreground/80', 1],
   ['components/docs/doc-breadcrumb.tsx::text-foreground/70', 1],
   ['components/docs/doc-content-renderer.tsx::text-foreground/92', 1],
-  ['components/docs/doc-search-results.tsx::text-foreground/88', 1],
   ['components/docs/doc-toc.tsx::text-foreground/80', 1],
   ['components/docs/doc-tree.tsx::text-foreground/88', 1],
   ['components/docs/extensions/embed-node.tsx::text-foreground/80', 1],
