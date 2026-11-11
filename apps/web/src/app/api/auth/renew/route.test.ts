@@ -11,6 +11,8 @@ const mockFetch = vi.fn();
 vi.stubGlobal('fetch', stubFetch(mockFetch));
 
 import { GET } from './route';
+import { safeNextPath } from '@/lib/auth/session-redirect';
+import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { stubFetch } from '@/test-utils/as-fetch-response';
 
 const get = (next: string | null) => GET(new Request(`http://0.0.0.0:8080/api/auth/renew${next === null ? '' : `?next=${encodeURIComponent(next)}`}`));
@@ -43,6 +45,8 @@ describe('GET /api/auth/renew (story 4904)', () => {
     mockFetch.mockResolvedValue({ ok: true, json: async () => ({ data: { access_token: AT, refresh_token: 'r' } }) });
     const res = await get(next);
     expect(res.headers.get('location')).toBe('https://app.test/chats');
+    // … and that default is the app's own safe landing (what the sign-in falls to), not a literal of this file
+    expect(res.headers.get('location')).toBe(`https://app.test${safeNextPath(null, readNavV3FlagsFromEnv())}`);
   });
 
   it('no refresh token → the sign-in, no backend call', async () => {

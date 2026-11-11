@@ -8,7 +8,8 @@ import { cookies } from 'next/headers';
 import { decodeJwt } from 'jose';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { cookieBase, markSessionChanged, SP_AT_MAX_AGE_SECONDS, SP_RENEW_TRIED_COOKIE, SP_RENEW_TRIED_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
-import { buildLoginRedirect } from '@/lib/auth/session-redirect';
+import { buildLoginRedirect, safeNextPath } from '@/lib/auth/session-redirect';
+import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { ACTIVE_ACCOUNT_COOKIE } from '@/lib/auth/account-vault';
 import { isRecentlySuperseded } from '@/lib/auth/switch-epoch';
 import { safeJsonParse } from '@/lib/api-response';
@@ -23,8 +24,11 @@ const TOKEN_SUPERSEDED = 'TOKEN_SUPERSEDED';
  * so it is used as it is — a second decode (what `safeNextPath` does for the login page's own param) would turn `?story=a%26b` into `?story=a&b`. Anything else is the chat home.
  * An `/api/…` target is refused so `next=/api/auth/renew` can never send the road back to itself.
  */
+/** the app's own safe landing (the place the sign-in falls to when it has no usable `next`) — not a literal flat link written here (story #4226 ratchet) */
+const landing = (): string => safeNextPath(null, readNavV3FlagsFromEnv());
+
 function internalPage(raw: string | null): string {
-  if (!raw || !raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\') || raw.startsWith('/api/') || /[\r\n]/.test(raw)) return '/chats';
+  if (!raw || !raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\') || raw.startsWith('/api/') || /[\r\n]/.test(raw)) return landing();
   return raw;
 }
 
