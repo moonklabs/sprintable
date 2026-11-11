@@ -94,6 +94,23 @@ describe('ds ProgressBar', () => {
     }
   });
 
+  it('⭐끝 값(max)이 숫자가 아니면 «5/NaN»을 그리지 않는다 — 모름("—")이고 값 속성도 안 낸다', async () => {
+    for (const badMax of [Number.NaN, Number.POSITIVE_INFINITY]) {
+      await render(<ProgressBar aria-label="x" value={5} max={badMax} />);
+      expect(text()!.textContent, String(badMax)).toBe('—');
+      expect(container.textContent, String(badMax)).not.toMatch(/NaN|Infinity/);
+      expect(bar().hasAttribute('aria-valuenow'), String(badMax)).toBe(false);
+      expect(bar().hasAttribute('aria-valuemax'), String(badMax)).toBe(false);
+    }
+  });
+
+  it('⭐숫자가 NaN이어도 읽힐 글(unavailableLabel)을 줄 수 있다 — 값 글에 «NaN»이 읽히지 않는다', async () => {
+    await render(<ProgressBar aria-label="x" value={Number.NaN} max={10} unavailableLabel="아직 집계하지 못했어요" />);
+    expect(bar().getAttribute('aria-valuetext')).toBe('아직 집계하지 못했어요');
+    expect(bar().hasAttribute('aria-valuenow')).toBe(false);
+    expect(container.textContent).not.toMatch(/NaN/);
+  });
+
   it('오른쪽 숫자 글: 직접 주면 그 글 · false면 그리지 않는다', async () => {
     await render(<ProgressBar aria-label="x" value={1} max={2} valueText="절반" />);
     expect(text()!.textContent).toBe('절반');

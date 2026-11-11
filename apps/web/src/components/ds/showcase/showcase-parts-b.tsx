@@ -119,7 +119,7 @@ export function ShowcasePartsB({ today }: { today: string }) {
           <ApprovalCard label="결재 요청" title="작업 이름 바꾸기" state={{ kind: 'error', message: '불러오지 못했어요' }} />
         </div>
       </Block>
-      <Block title="Dialog · ConfirmDialog · Panel — 눌러서 열기(팝업은 화면 테마를 따른다)">
+      <Block title="Dialog · ConfirmDialog · Panel — 눌러서 열기(팝업은 그 틀의 테마로 뜬다)">
         <Row>
           <Dialog>
             <DialogTrigger className={buttonVariants()}>대화창</DialogTrigger>

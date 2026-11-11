@@ -40,6 +40,17 @@ describe('ds 견본 화면 (AC3)', () => {
     expect(parts(frame('dark'))).toEqual(parts(frame('light')));
   });
 
+  for (const theme of ['dark', 'light'] as const) {
+    it(`⭐팝업은 «그 틀 안»에 그려진다 — ${theme === 'dark' ? '어둠' : '밝음'} 틀의 대화창은 그 틀 안(앱 테마를 따라 바깥 body에 뜨지 않는다)`, async () => {
+      const trigger = Array.from(frame(theme).querySelectorAll('button')).find((b) => b.textContent === '대화창') as HTMLButtonElement;
+      expect(trigger).toBeTruthy();
+      await act(async () => { trigger.click(); });
+      const popups = Array.from(document.querySelectorAll('[data-slot="ds-dialog-content"]'));
+      expect(popups).toHaveLength(1);
+      expect(popups[0]!.closest('[data-theme-frame]')).toBe(frame(theme));
+    });
+  }
+
   it('⭐토큰: 색 27종 · 글자 8단 가운데 7 · 모서리 4 · 밀도 6 · 그림자 2 이름이 코드의 이름 그대로 보인다', () => {
     const text = frame('light').textContent ?? '';
     for (const c of ['surface-sunk', 'action-text', 'needs-hand-bar', 'on-needs-hand', 'failed-soft', 'info-soft', 'scrim']) expect(text, c).toContain(c);
@@ -53,7 +64,7 @@ describe('ds 견본 화면 (AC3)', () => {
   it('⭐모든 ds 부품이 견본에 있다 — ds 폴더에 부품 파일이 새로 생겼는데 견본에 안 넣으면 빨개진다', () => {
     const dir = join(__dirname, '..');
     const sources = readdirSync(dir).filter((f) => f.endsWith('.tsx') && !f.endsWith('.test.tsx'));
-    const showcase = readdirSync(__dirname).filter((f) => f.startsWith('showcase-') && f.endsWith('.tsx')).map((f) => readFileSync(join(__dirname, f), 'utf-8')).join('\n');
+    const showcase = readdirSync(__dirname).filter((f) => (f.startsWith('showcase-') || f === 'ds-showcase.tsx') && f.endsWith('.tsx')).map((f) => readFileSync(join(__dirname, f), 'utf-8')).join('\n');
     // 견본에 «안 넣는» 파일(부품이 아니거나 내부용)은 이유와 함께 명시한다.
     const NOT_A_PART = new Map<string, string>([
       ['icon.tsx', '아이콘 — IconButton · Banner 등 안에서 늘 보인다'],

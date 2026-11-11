@@ -67,7 +67,8 @@ export function Calendar({ value, onChange, today, min, max, locale, weekStartsO
   }
 
   // 키보드로 옮긴 뒤에만 실제 초점을 옮긴다(달 단추를 눌러 달이 바뀔 때 초점을 훔치지 않는다).
-  // 예외: 격자 안에 초점이 있었는데 밖에서 값 · 범위가 바뀌어 그 칸이 사라졌다면(초점이 문서로 떨어짐) 새 초점 칸으로 옮긴다.
+  // 예외: 격자 안에 초점이 있었는데 밖에서 값 · 범위가 바뀌어 초점 칸이 달라졌다면 — 그 칸이 사라져 초점이 문서로 떨어졌거나, 같은 달이라 옛 칸에 초점이 남았다면 — 새 초점 칸으로 옮긴다
+  // (탭 순서 칸과 실제 초점이 갈리면 다음 화살표가 엉뚱한 칸으로 튄다).
   useEffect(() => {
     const grid = gridRef.current;
     const cellEl = grid?.querySelector<HTMLButtonElement>(`button[data-date="${focusIso}"]`);
@@ -76,7 +77,10 @@ export function Calendar({ value, onChange, today, min, max, locale, weekStartsO
       cellEl?.focus();
       return;
     }
-    if (gridHadFocus.current && grid && !grid.contains(document.activeElement)) cellEl?.focus();
+    if (!gridHadFocus.current || !grid) return;
+    const active = document.activeElement;
+    if (!grid.contains(active)) cellEl?.focus();
+    else if (active instanceof HTMLElement && active.dataset.date && active.dataset.date !== focusIso) cellEl?.focus();
   }, [focusIso]);
 
   const focus = parseIso(focusIso) ?? parseIso('1970-01-01')!;
@@ -95,8 +99,9 @@ export function Calendar({ value, onChange, today, min, max, locale, weekStartsO
   const inRange = (iso: string) => (!min || iso >= min) && (!max || iso <= max);
   const monthFirst = toIso({ ...focus, d: 1 });
   const monthLast = toIso({ ...focus, d: daysInMonth(focus.y, focus.m) });
-  const prevDisabled = !!min && monthFirst <= min;
-  const nextDisabled = !!max && monthLast >= max;
+  // 표현 범위(0001-01 ~ 9999-12)의 끝에서는 min · max가 없어도 더 갈 달이 없다 — 눌러도 아무 일 없는 단추를 켜 두지 않는다.
+  const prevDisabled = (!!min && monthFirst <= min) || (focus.y <= 1 && focus.m <= 1);
+  const nextDisabled = (!!max && monthLast >= max) || (focus.y >= 9999 && focus.m >= 12);
 
   // 키보드 이동(실제 초점도 옮긴다). 달 단추는 위에서 함수형으로 — 연달아 눌러도 오래된 값으로 계산하지 않고, 초점을 훔치지도 않는다.
   const move = (target: string) => {

@@ -9,6 +9,7 @@ import { guardEscClose } from '@/lib/inner-layer-esc';
 import { DialogOverlay } from '@/components/ui/dialog';
 import { Button } from './button';
 import { IconButton } from './icon-button';
+import { useDsPortalContainer } from './portal-container';
 
 // [SID:4367] 한 Esc = 한 층 · [SID:4369] 조합 중 Esc · 글 있는 여러 줄 칸의 첫 Esc는 닫지 않는다 — 현행 `ui/dialog`와 같은 갈래를 그대로 거친다(inner-layer-esc.ts).
 export function Dialog({ onOpenChange, ...props }: DialogPrimitive.Root.Props) {
@@ -42,8 +43,9 @@ export type DialogContentProps = Omit<DialogPrimitive.Popup.Props, 'className' |
  */
 export function DialogContent({ className, children, showCloseButton = true, ...props }: DialogContentProps) {
   const t = useTranslations('common');
+  const portalContainer = useDsPortalContainer();
   return (
-    <DialogPrimitive.Portal>
+    <DialogPrimitive.Portal container={portalContainer ?? undefined}>
       <DialogOverlay className="bg-ds-scrim/55" />
       <DialogPrimitive.Popup
         data-modal-popup=""

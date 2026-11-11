@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { DialogOverlay } from '@/components/ui/dialog';
 import { Dialog, DialogClose, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, type DialogName } from './dialog';
 import { IconButton } from './icon-button';
+import { useDsPortalContainer } from './portal-container';
 
 export { Dialog as Panel, DialogTrigger as PanelTrigger, DialogClose as PanelClose, DialogTitle as PanelTitle, DialogDescription as PanelDescription };
 
@@ -20,8 +21,9 @@ export type PanelContentProps = Omit<DialogPrimitive.Popup.Props, 'className' | 
  */
 export function PanelContent({ className, children, ...props }: PanelContentProps) {
   const t = useTranslations('common');
+  const portalContainer = useDsPortalContainer();
   return (
-    <DialogPrimitive.Portal>
+    <DialogPrimitive.Portal container={portalContainer ?? undefined}>
       <DialogOverlay className="bg-ds-scrim/55" />
       <DialogPrimitive.Popup
         data-modal-popup=""
