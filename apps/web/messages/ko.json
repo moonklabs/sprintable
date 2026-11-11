@@ -467,6 +467,7 @@
     "detailUndo": "되돌리기",
     "detailRequestedBy": "{name}님이 요청했어요",
     "detailNoReason": "남긴 사유가 없어요",
+    "titleFallback": "제목이 없는 요청",
     "detailWhat": "무엇을 승인하나요?",
     "detailKind": "종류",
     "detailSheetLabel": "{title} 자세히"
