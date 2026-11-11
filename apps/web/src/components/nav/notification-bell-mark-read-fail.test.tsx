@@ -88,7 +88,7 @@ function stubFetch(patchOk: boolean, patchNetworkError = false) {
 
 async function openBell() {
   await act(async () => { root.render(withIntl(<NotificationBell />)); });
-  const bellButton = container.querySelector('button[aria-expanded]') as HTMLButtonElement;
+  const bellButton = document.body.querySelector('button[aria-expanded]') as HTMLButtonElement;
   await act(async () => { bellButton.click(); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 }
@@ -97,29 +97,29 @@ describe('NotificationBell — 낙관 읽음 처리 실패 시 문장(story #363
   it('개별 읽음(handleMarkRead) 실패 시 markReadFailed 토스트가 뜬다', async () => {
     stubFetch(false);
     await openBell();
-    const itemBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('알림 n1'));
+    const itemBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.includes('알림 n1'));
     await act(async () => { itemBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(container.textContent).toContain(koMessages.inbox.markReadFailed);
+    expect(document.body.textContent).toContain(koMessages.inbox.markReadFailed);
   });
 
   it('전체 읽음(handleMarkAllRead) 실패 시 markAllReadFailed 토스트가 뜬다', async () => {
     stubFetch(false);
     await openBell();
-    const allReadBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.inbox.markAllRead));
+    const allReadBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.inbox.markAllRead));
     await act(async () => { allReadBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(container.textContent).toContain(koMessages.inbox.markAllReadFailed);
+    expect(document.body.textContent).toContain(koMessages.inbox.markAllReadFailed);
   });
 
   // 뮤테이션 대표 — 성공 시엔 토스트가 안 뜬다(과보고 방지).
   it('개별 읽음 성공 시엔 토스트가 안 뜬다', async () => {
     stubFetch(true);
     await openBell();
-    const itemBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('알림 n1'));
+    const itemBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.includes('알림 n1'));
     await act(async () => { itemBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(container.textContent).not.toContain(koMessages.inbox.markReadFailed);
+    expect(document.body.textContent).not.toContain(koMessages.inbox.markReadFailed);
   });
 
   // story #4295 — 망 오류(fetch가 던짐)는 예전엔 처리 안 된 거부로 새고 낙관적 «읽음»이 남았다.
@@ -136,10 +136,10 @@ describe('NotificationBell — 낙관 읽음 처리 실패 시 문장(story #363
     await expectNoUnhandled(async () => {
       stubFetch(true, true);
       await openBell();
-      const itemBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('알림 n1'));
+      const itemBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.includes('알림 n1'));
       await act(async () => { itemBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-      expect(container.textContent).toContain(koMessages.inbox.markReadFailed);
+      expect(document.body.textContent).toContain(koMessages.inbox.markReadFailed);
     });
   });
 
@@ -147,10 +147,10 @@ describe('NotificationBell — 낙관 읽음 처리 실패 시 문장(story #363
     await expectNoUnhandled(async () => {
       stubFetch(true, true);
       await openBell();
-      const allReadBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.inbox.markAllRead));
+      const allReadBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.inbox.markAllRead));
       await act(async () => { allReadBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-      expect(container.textContent).toContain(koMessages.inbox.markAllReadFailed);
+      expect(document.body.textContent).toContain(koMessages.inbox.markAllReadFailed);
     });
   });
 });
@@ -158,7 +158,7 @@ describe('NotificationBell — 낙관 읽음 처리 실패 시 문장(story #363
 // story #4295(까디르 P2 ①②) — «모두 읽음» 실패면 열린 목록도 바꾸기 전으로(배지만 다시 차고 목록은 전부 읽음 · 버튼 사라짐 = 한 화면 두 세계),
 // 보정용 안 읽음 수 재조회까지 망 오류여도 처리 안 된 거부가 새지 않는다.
 describe('NotificationBell — «모두 읽음» 실패 뒤 목록 · 배지가 같은 세계(story #4295)', () => {
-  const allReadButton = () => Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.inbox.markAllRead));
+  const allReadButton = () => Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.inbox.markAllRead));
 
   it('⭐서버 실패 → 목록이 안 읽음으로 되돌아와 «모두 읽음» 버튼이 다시 보인다', async () => {
     stubFetch(false);
@@ -166,7 +166,7 @@ describe('NotificationBell — «모두 읽음» 실패 뒤 목록 · 배지가 
     expect(allReadButton(), '누르기 전').toBeTruthy();
     await act(async () => { allReadButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
-    expect(container.textContent).toContain(koMessages.inbox.markAllReadFailed);
+    expect(document.body.textContent).toContain(koMessages.inbox.markAllReadFailed);
     expect(allReadButton(), '실패 뒤 — 목록이 되돌아와 버튼이 남는다').toBeTruthy();
   });
 
@@ -187,7 +187,7 @@ describe('NotificationBell — «모두 읽음» 실패 뒤 목록 · 배지가 
       await act(async () => { allReadButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
       await new Promise((r) => setTimeout(r, 0));
-      expect(container.textContent).toContain(koMessages.inbox.markAllReadFailed);
+      expect(document.body.textContent).toContain(koMessages.inbox.markAllReadFailed);
     } finally {
       process.off('unhandledRejection', unhandled);
     }
@@ -198,7 +198,7 @@ describe('NotificationBell — «모두 읽음» 실패 뒤 목록 · 배지가 
 // story #4295(까디르 · 유나) — «모두 읽음»이 망 오류면 서버가 커밋했을 수도 있다. 목록 · 개수를 다시 받아 서버 값으로 맞추고,
 // 토스트는 그 결과로 고른다(목록과 토스트가 다른 말을 하지 않게).
 describe('NotificationBell — «모두 읽음» 망 오류 뒤 재조회로 목록 · 토스트가 한 세계(story #4295)', () => {
-  const allReadButton = () => Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.inbox.markAllRead));
+  const allReadButton = () => Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.inbox.markAllRead));
   const readNotif = (id: string) => ({ ...unreadNotif(id), read_at: '2026-07-27T01:00:00Z' });
   const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
 
@@ -232,8 +232,8 @@ describe('NotificationBell — «모두 읽음» 망 오류 뒤 재조회로 목
     await openBell();
     await clickAllRead();
     expect(allReadButton(), '목록이 서버 값(전부 읽음)').toBeUndefined();
-    expect(container.textContent).not.toContain(koMessages.inbox.markAllReadFailed);
-    expect(container.textContent).not.toContain(koMessages.inbox.markAllReadUnconfirmed);
+    expect(document.body.textContent).not.toContain(koMessages.inbox.markAllReadFailed);
+    expect(document.body.textContent).not.toContain(koMessages.inbox.markAllReadUnconfirmed);
   });
 
   it('⭐망 오류 뒤 여전히 안 읽음 → 목록 안 읽음 · 버튼 남음 · «전체 읽음 처리에 실패했어요»', async () => {
@@ -241,8 +241,8 @@ describe('NotificationBell — «모두 읽음» 망 오류 뒤 재조회로 목
     await openBell();
     await clickAllRead();
     expect(allReadButton()).toBeTruthy();
-    expect(container.textContent).toContain(koMessages.inbox.markAllReadFailed);
-    expect(container.textContent).not.toContain(koMessages.inbox.markAllReadUnconfirmed);
+    expect(document.body.textContent).toContain(koMessages.inbox.markAllReadFailed);
+    expect(document.body.textContent).not.toContain(koMessages.inbox.markAllReadUnconfirmed);
   });
 
   it('⭐재조회까지 실패 → 되돌린 목록(버튼 남음) · «반영됐는지 확인하지 못했어요»', async () => {
@@ -250,8 +250,8 @@ describe('NotificationBell — «모두 읽음» 망 오류 뒤 재조회로 목
     await openBell();
     await clickAllRead();
     expect(allReadButton()).toBeTruthy();
-    expect(container.textContent).toContain(koMessages.inbox.markAllReadUnconfirmed);
-    expect(container.textContent).not.toContain(koMessages.inbox.markAllReadFailed);
+    expect(document.body.textContent).toContain(koMessages.inbox.markAllReadUnconfirmed);
+    expect(document.body.textContent).not.toContain(koMessages.inbox.markAllReadFailed);
   });
 
   it('⭐개수만 받음 · 0(목록 재조회 실패) → 서버 값대로 목록 전부 읽음 · 버튼 없음 · 토스트 없음', async () => {
@@ -259,8 +259,8 @@ describe('NotificationBell — «모두 읽음» 망 오류 뒤 재조회로 목
     await openBell();
     await clickAllRead();
     expect(allReadButton()).toBeUndefined();
-    expect(container.textContent).not.toContain(koMessages.inbox.markAllReadFailed);
-    expect(container.textContent).not.toContain(koMessages.inbox.markAllReadUnconfirmed);
+    expect(document.body.textContent).not.toContain(koMessages.inbox.markAllReadFailed);
+    expect(document.body.textContent).not.toContain(koMessages.inbox.markAllReadUnconfirmed);
   });
 
   it('개수만 받음 · 여전히 안 읽음(목록 재조회 실패) → 되돌린 목록 · «전체 읽음 처리에 실패했어요»', async () => {
@@ -268,7 +268,7 @@ describe('NotificationBell — «모두 읽음» 망 오류 뒤 재조회로 목
     await openBell();
     await clickAllRead();
     expect(allReadButton()).toBeTruthy();
-    expect(container.textContent).toContain(koMessages.inbox.markAllReadFailed);
+    expect(document.body.textContent).toContain(koMessages.inbox.markAllReadFailed);
   });
 
   it('목록만 받음 · 전부 읽음(개수 재조회 실패) → 배지를 확인 못 했으니 «확인하지 못했어요»', async () => {
@@ -276,14 +276,14 @@ describe('NotificationBell — «모두 읽음» 망 오류 뒤 재조회로 목
     await openBell();
     await clickAllRead();
     expect(allReadButton()).toBeUndefined();
-    expect(container.textContent).toContain(koMessages.inbox.markAllReadUnconfirmed);
+    expect(document.body.textContent).toContain(koMessages.inbox.markAllReadUnconfirmed);
   });
 
   it('서버가 답한 실패(500) → 재조회와 무관하게 «전체 읽음 처리에 실패했어요»', async () => {
     stubFetch(false);
     await openBell();
     await clickAllRead();
-    expect(container.textContent).toContain(koMessages.inbox.markAllReadFailed);
+    expect(document.body.textContent).toContain(koMessages.inbox.markAllReadFailed);
     expect(allReadButton()).toBeTruthy();
   });
 });

@@ -52,7 +52,7 @@ async function openBell() {
   await act(async () => {
     root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><NotificationBell /></NextIntlClientProvider>);
   });
-  const bell = container.querySelector<HTMLButtonElement>('button[aria-expanded]')!;
+  const bell = document.body.querySelector<HTMLButtonElement>('button[aria-expanded]')!;
   bell.focus();
   await act(async () => { bell.click(); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
@@ -62,14 +62,14 @@ const panel = () => document.querySelector<HTMLElement>('[data-dropdown-panel="n
 const key = (el: Element, k: string, shiftKey = false) => act(async () => { el.dispatchEvent(new KeyboardEvent('keydown', { key: k, shiftKey, bubbles: true })); });
 
 describe('NotificationBell 넓은 화면 드롭다운 — 셸 스크롤 면 밖(body) · 키보드(story #4349 전수 15번)', () => {
-  it('열면 넓은 화면 패널은 body 직속 fixed · 스크롤 면 밖 · 벨 오른쪽 끝에 맞춰 아래 4px · 좁은 화면 오버레이는 그대로 container 안', async () => {
+  it('열면 넓은 화면 패널은 body 직속 fixed · 스크롤 면 밖 · 벨 오른쪽 끝에 맞춰 아래 4px · 좁은 화면 오버레이도 body 직속(4890)', async () => {
     await openBell();
     expect(panel()!.parentElement).toBe(document.body);
     expect(container.contains(panel())).toBe(false);
     expect(panel()!.style.position).toBe('fixed');
     expect(panel()!.style.top).toBe('48px');
     expect(panel()!.style.left).toBe('900px'); // 1220 − 320
-    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
   });
 
   it('벨에서 Tab → 패널 첫 조작 · Esc → 닫고 벨(셸 트랩 document keydown 0)', async () => {
@@ -104,7 +104,7 @@ describe('NotificationBell 넓은 화면 드롭다운 — 셸 스크롤 면 밖(
   it('좁은 화면(lg 미만) — 벨 aria-controls는 실제로 뜨는 풀스크린 오버레이(role=dialog)를 가리킨다', async () => {
     vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
     const bell = await openBell();
-    const overlay = container.querySelector<HTMLElement>('[role="dialog"]')!;
+    const overlay = document.body.querySelector<HTMLElement>('[role="dialog"]')!;
     expect(overlay.id).not.toBe('');
     expect(bell.getAttribute('aria-controls')).toBe(overlay.id);
   });

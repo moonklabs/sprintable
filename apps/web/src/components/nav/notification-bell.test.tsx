@@ -109,7 +109,7 @@ describe('NotificationBell — 더 보기(story #2192 AC3/AC4)', () => {
     stubFetchSequenceByOffset({ 0: { items: Array.from({ length: 30 }, (_, i) => notif(`n${i}`)), hasMore: true } });
     await openBell();
 
-    const loadMoreBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '더 보기');
+    const loadMoreBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '더 보기');
     expect(loadMoreBtn).toBeDefined();
   });
 
@@ -117,7 +117,7 @@ describe('NotificationBell — 더 보기(story #2192 AC3/AC4)', () => {
     stubFetchSequenceByOffset({ 0: { items: Array.from({ length: 5 }, (_, i) => notif(`n${i}`)), hasMore: false } });
     await openBell();
 
-    const loadMoreBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '더 보기');
+    const loadMoreBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '더 보기');
     expect(loadMoreBtn).toBeUndefined();
   });
 
@@ -135,7 +135,7 @@ describe('NotificationBell — 더 보기(story #2192 AC3/AC4)', () => {
     expect(desktopPanel.querySelectorAll('ul li')).toHaveLength(30);
 
     const clickLoadMore = async () => {
-      const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '더 보기') as HTMLButtonElement;
+      const btn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '더 보기') as HTMLButtonElement;
       await act(async () => { btn.click(); await Promise.resolve(); await Promise.resolve(); });
     };
 
@@ -144,7 +144,7 @@ describe('NotificationBell — 더 보기(story #2192 AC3/AC4)', () => {
 
     await clickLoadMore(); // offset=60 요청 기대(누적)
     expect(desktopPanel.querySelectorAll('ul li')).toHaveLength(65); // 60 + 5
-    expect(Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '더 보기')).toBeUndefined(); // 3페이지째 hasMore=false
+    expect(Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '더 보기')).toBeUndefined(); // 3페이지째 hasMore=false
   });
 
   it('더 보기 사이에 SSE 실시간 알림이 앞에 끼어들어도 다음 페이지 offset이 안 밀린다(오르테가군 지적 — 제일 깨지기 쉬운 자리)', async () => {
@@ -168,7 +168,7 @@ describe('NotificationBell — 더 보기(story #2192 AC3/AC4)', () => {
 
     // "더 보기"를 누르면 offsetRef(30)를 그대로 써서 offset=30을 요청해야 한다 — SSE로 31개가
     // 됐다고 offset=31을 보내면 실제 30번째 API 항목을 건너뛰게 된다(중복/누락의 정확한 형태).
-    const loadMoreBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '더 보기') as HTMLButtonElement;
+    const loadMoreBtn = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '더 보기') as HTMLButtonElement;
     await act(async () => { loadMoreBtn.click(); await Promise.resolve(); await Promise.resolve(); });
 
     expect(desktopPanel.querySelectorAll('ul li')).toHaveLength(36); // 30(API) + 1(SSE) + 5(API 2페이지)
@@ -192,7 +192,7 @@ describe('NotificationBell — sync_status 배너(story #2201)', () => {
 
     await emitSyncStatus({ complete: false, reason: 'cursor_stale', returned: 5 });
 
-    expect(container.textContent).toContain('일부 지난 알림은 표시되지 않았어요');
+    expect(document.body.textContent).toContain('일부 지난 알림은 표시되지 않았어요');
   });
 
   it('강등(cursor_not_found)이면 배너가 뜬다', async () => {
@@ -203,7 +203,7 @@ describe('NotificationBell — sync_status 배너(story #2201)', () => {
 
     await emitSyncStatus({ complete: false, reason: 'cursor_not_found', returned: 50 });
 
-    expect(container.textContent).toContain('일부 지난 알림은 표시되지 않았어요');
+    expect(document.body.textContent).toContain('일부 지난 알림은 표시되지 않았어요');
   });
 
   it('음성대조 — no_cursor(최초 연결)는 배너가 안 뜬다(오르테가군 확定: 강등이 아니라 정상 최초상태)', async () => {
@@ -214,7 +214,7 @@ describe('NotificationBell — sync_status 배너(story #2201)', () => {
 
     await emitSyncStatus({ complete: false, reason: 'no_cursor', returned: 0 });
 
-    expect(container.textContent).not.toContain('일부 지난 알림은 표시되지 않았어요');
+    expect(document.body.textContent).not.toContain('일부 지난 알림은 표시되지 않았어요');
   });
 
   it('음성대조 — complete:true(정상 완결)면 배너가 안 뜬다', async () => {
@@ -225,7 +225,7 @@ describe('NotificationBell — sync_status 배너(story #2201)', () => {
 
     await emitSyncStatus({ complete: true, reason: null, returned: 12 });
 
-    expect(container.textContent).not.toContain('일부 지난 알림은 표시되지 않았어요');
+    expect(document.body.textContent).not.toContain('일부 지난 알림은 표시되지 않았어요');
   });
 
   it('강등 배너가 뜬 뒤 재연결로 정상 sync_status가 오면 자동으로 걷힌다(별도 dismiss 없음, 스펙 그대로)', async () => {
@@ -235,10 +235,10 @@ describe('NotificationBell — sync_status 배너(story #2201)', () => {
     await openBell();
 
     await emitSyncStatus({ complete: false, reason: 'cursor_stale', returned: 5 });
-    expect(container.textContent).toContain('일부 지난 알림은 표시되지 않았어요');
+    expect(document.body.textContent).toContain('일부 지난 알림은 표시되지 않았어요');
 
     await emitSyncStatus({ complete: true, reason: null, returned: 8 });
-    expect(container.textContent).not.toContain('일부 지난 알림은 표시되지 않았어요');
+    expect(document.body.textContent).not.toContain('일부 지난 알림은 표시되지 않았어요');
   });
 });
 
@@ -615,8 +615,8 @@ describe('NotificationBell — summary 내부 HTML 주석 평문화(story #4182)
   it('목록 행에 주석이 안 보이고 본문은 남는다', async () => {
     stubFetchSequenceByOffset({ 0: { items: [{ ...notif('c1'), payload: { summary: COMMENTED } }], hasMore: false } });
     await openBell();
-    expect(container.textContent).not.toContain('<!--');
-    expect(container.textContent).toContain('유나: 답장 내용');
+    expect(document.body.textContent).not.toContain('<!--');
+    expect(document.body.textContent).toContain('유나: 답장 내용');
   });
 
   it('데스크톱 셸 notify_show body에도 주석이 안 실린다', async () => {
@@ -646,12 +646,12 @@ describe('[SID:4388] NotificationBell — the chosen filter is announced as pres
     stubFetchSequenceByOffset({ 0: { items: [notif('n1')], hasMore: false } });
     await openBell();
     const filters = () => ['전체', '스토리', '시스템'].map((label) => {
-      const button = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === label)!;
+      const button = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === label)!;
       return `${label}:${button.getAttribute('aria-pressed')}`;
     });
     expect(filters()).toEqual(['전체:true', '스토리:false', '시스템:false']);
 
-    const story = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '스토리')!;
+    const story = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '스토리')!;
     await act(async () => { story.click(); });
     expect(filters()).toEqual(['전체:false', '스토리:true', '시스템:false']);
   });

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AnchoredPopover, isOutsidePress, usePortalMenuKeys } from '@/components/shared/anchored-popover';
 import { withProjectParam } from '@/lib/with-project-param';
 import { useRouter } from 'next/navigation';
@@ -713,8 +714,11 @@ export function NotificationBell() {
       )}
 
       {/* 모바일 풀스크린 오버레이 (< lg) */}
-      {open && (
+      {/* story 4890 (UI-7 · P14): the full-screen overlay is drawn in <body>, not inside the top bar — the top bar is a CSS container (`@container` = layout containment), so a `fixed inset-0` child was sized to the 48 px bar and the
+          page showed through everything below it (dev emulator 11-11: overlay rect 412×47 on a 766 px screen). `data-anchored-popover` = «inside» for the outside-press rule (anchored-popover.tsx). */}
+      {open && typeof document !== 'undefined' && createPortal(
         <div
+          data-anchored-popover
           ref={mobileOverlayRef}
           id={`${panelKeys.id}-overlay`}
           tabIndex={-1}
@@ -733,7 +737,8 @@ export function NotificationBell() {
             onLoadMore={() => void handleLoadMore()}
             syncDegraded={syncDegraded}
           />
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

@@ -232,7 +232,8 @@ test.describe('the notification panel on a touch phone (390 × 844)', () => {
       const chips = [...root.querySelectorAll('button[aria-pressed]')];
       const old = [...new Set([...root.querySelectorAll('[data-slot]')].map((e) => e.getAttribute('data-slot')!))].filter((x) => !x.startsWith('ds-') && x !== 'avatar');
       const bg = getComputedStyle(root).backgroundColor;
-      return { weights, bg, small, tiny, rows, chipsOneRow: new Set(chips.map((c) => Math.round(c.getBoundingClientRect().top))).size === 1, chipCount: chips.length, groups: [...root.querySelectorAll('[data-testid^="notification-group-"]')].map((g) => g.getAttribute('data-testid')), old, overflowX: root.scrollWidth > root.clientWidth + 1 || document.documentElement.scrollWidth > innerWidth + 1 };
+      const rr = root.getBoundingClientRect(); const overlay = { h: Math.round(rr.height), w: Math.round(rr.width), vh: innerHeight, vw: innerWidth, inBody: root.parentElement === document.body, insideTopBar: !!root.closest('[data-testid="top-bar"]') };
+      return { overlay, weights, bg, small, tiny, rows, chipsOneRow: new Set(chips.map((c) => Math.round(c.getBoundingClientRect().top))).size === 1, chipCount: chips.length, groups: [...root.querySelectorAll('[data-testid^="notification-group-"]')].map((g) => g.getAttribute('data-testid')), old, overflowX: root.scrollWidth > root.clientWidth + 1 || document.documentElement.scrollWidth > innerWidth + 1 };
     });
     expect(m.small, `presses under 44 px: ${m.small.join(' · ')}`).toEqual([]);
     expect(m.tiny, `text under 12 px: ${m.tiny.join(' · ')}`).toEqual([]);
@@ -244,6 +245,11 @@ test.describe('the notification panel on a touch phone (390 × 844)', () => {
     const wRead = m.weights.filter((x) => x.id === 'notification-group-earlier').map((x) => x.w);
     expect(Math.min(...wUnread), 'unread headlines are semibold').toBeGreaterThanOrEqual(600);
     expect(Math.max(...wRead), 'read headlines are regular').toBeLessThan(600);
+    // P14 (dev emulator 11-11): the overlay was sized to the 48 px top bar (a CSS container is a containing block for `fixed`) and the page showed through below it — it must cover the whole screen and live in <body>
+    expect(m.overlay.insideTopBar, 'the overlay is not drawn inside the top bar').toBe(false);
+    expect(m.overlay.inBody, 'the overlay is a child of <body>').toBe(true);
+    expect(m.overlay.h, `the overlay covers the screen (${m.overlay.h} of ${m.overlay.vh})`).toBeGreaterThanOrEqual(m.overlay.vh - 1);
+    expect(m.overlay.w).toBeGreaterThanOrEqual(m.overlay.vw - 1);
     expect(m.chipCount).toBe(4);
     expect(m.chipsOneRow, 'the four chips share one row').toBe(true);
     expect(m.old, 'old (non-ds) parts drawn').toEqual([]);
