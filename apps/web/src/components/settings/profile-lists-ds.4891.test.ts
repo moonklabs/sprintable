@@ -45,7 +45,7 @@ describe('settings › profile · the two list cards on ds parts', () => {
     expect(src).toContain('<SwitchButton');
     const parts = readFileSync(join(__dirname, 'settings-parts.tsx'), 'utf8');
     expect(parts).toContain('role="switch"');
-    expect(parts).toContain('pointer-coarse:h-11 pointer-coarse:w-14'); // 44 on touch · compact (h-8 w-12) with a mouse
+    expect(parts).toContain('touch:h-11 touch:w-14'); // 44 on touch · compact (h-8 w-12) with a mouse
     // the invariants come AFTER the caller's props: an object spread can name a label, never swap the role / state / handler
     expect(parts.indexOf('{...aria}')).toBeLessThan(parts.indexOf('role="switch"'));
     expect(parts.indexOf('{...aria}')).toBeLessThan(parts.indexOf('aria-checked={checked}'));

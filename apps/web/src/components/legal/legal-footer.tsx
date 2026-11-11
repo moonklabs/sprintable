@@ -28,15 +28,15 @@ export function LegalLinks({ className = '' }: { className?: string }) {
       className={`flex flex-wrap items-center gap-x-3 gap-y-1 ${className}`}
       aria-label={t('policiesHeading')}
     >
-      <Link href={LEGAL_DOC_ROUTES.terms} className="hover:text-foreground hover:underline pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:items-center pointer-coarse:justify-center">
+      <Link href={LEGAL_DOC_ROUTES.terms} className="hover:text-foreground hover:underline touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center touch:justify-center">
         {t('termsOfService')}
       </Link>
       <span aria-hidden>·</span>
-      <Link href={LEGAL_DOC_ROUTES.privacy} className="hover:text-foreground hover:underline pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:items-center pointer-coarse:justify-center">
+      <Link href={LEGAL_DOC_ROUTES.privacy} className="hover:text-foreground hover:underline touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center touch:justify-center">
         {t('privacyPolicy')}
       </Link>
       <span aria-hidden>·</span>
-      <Link href={LEGAL_DOC_ROUTES.refundPolicy} className="hover:text-foreground hover:underline pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:items-center pointer-coarse:justify-center">
+      <Link href={LEGAL_DOC_ROUTES.refundPolicy} className="hover:text-foreground hover:underline touch:inline-flex touch:min-h-11 touch:min-w-11 touch:items-center touch:justify-center">
         {t('refundPolicy')}
       </Link>
     </nav>

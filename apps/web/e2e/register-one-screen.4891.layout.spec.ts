@@ -113,3 +113,46 @@ test('[SID:4891] on a desktop width the same one screen holds', async ({ page })
   expect(m.foldButton).toBe(false);
   expect(m.submit!.bottom).toBeLessThanOrEqual(m.vh);
 });
+
+// story 4891 (PO 11-11) — the consent line on a phone: the box and its words are ONE ≥44 press; the two documents are their own ≥44 links outside that press. Before: the middle of the sentence was a link, so a tap on the words opened the terms and the box stayed off.
+test.describe('the consent line on a phone (390 × 844)', () => {
+  test.use({ hasTouch: true, isMobile: true });
+
+  test('[SID:4891] the label (box + words) is ≥44 tall; the two links are separate, ≥44 tall, outside the label', async ({ page }) => {
+    await open(page, 390, 844);
+    const m = await page.evaluate(() => {
+      const label = document.querySelector('[data-testid="register-consent"] label') as HTMLElement;
+      const card = label.closest('.rounded-2xl') as HTMLElement;
+      const lr = label.getBoundingClientRect(); const cr = card.getBoundingClientRect();
+      const links = [...document.querySelectorAll('[data-testid="register-consent"] a')].map((a) => { const r = a.getBoundingClientRect(); return { text: a.textContent?.trim(), h: Math.round(r.height), w: Math.round(r.width), insideLabel: label.contains(a), href: a.getAttribute('href'), target: a.getAttribute('target') }; });
+      return { labelH: Math.round(lr.height), labelW: Math.round(lr.width), cardInnerW: Math.round(cr.width - 2 * parseFloat(getComputedStyle(card).paddingLeft)), links, labelHasBox: !!label.querySelector('[role="checkbox"]'), labelText: label.textContent?.trim() };
+    });
+    expect(m.labelHasBox).toBe(true);
+    expect(m.labelH, 'the label is a 44 press').toBeGreaterThanOrEqual(44);
+    expect(m.labelW, 'the label holds the box and its words').toBeGreaterThan(60);
+    expect(m.labelText).toBe('다음에 동의해요:');
+    expect(m.links.map((l) => l.text)).toEqual(['이용약관', '개인정보처리방침']);
+    for (const l of m.links) {
+      expect(l.insideLabel, `${l.text} is not inside the ticking label`).toBe(false);
+      expect(l.h, `${l.text} is a 44 press`).toBeGreaterThanOrEqual(44);
+      expect(l.target).toBe('_blank');
+    }
+    expect(m.links.map((l) => l.href)).toEqual(['/terms', '/privacy']);
+  });
+
+  test('[SID:4891] a tap on the middle of the words ticks the box and opens nothing; a tap on a document link opens it and does not tick', async ({ page, context }) => {
+    await open(page, 390, 844);
+    const box = page.getByRole('checkbox');
+    await expect(box).toHaveAttribute('aria-checked', 'false');
+    const lb = (await page.locator('[data-testid="register-consent"] label').boundingBox())!;
+    await page.touchscreen.tap(lb.x + lb.width * 0.6, lb.y + lb.height / 2); // the words, not the box
+    await expect(box).toHaveAttribute('aria-checked', 'true');
+    expect(context.pages()).toHaveLength(1);
+    await page.touchscreen.tap(lb.x + lb.width * 0.6, lb.y + lb.height / 2);
+    await expect(box).toHaveAttribute('aria-checked', 'false');
+    const popup = page.waitForEvent('popup');
+    await page.locator('[data-testid="register-consent"]').getByRole('link', { name: '이용약관' }).tap();
+    await popup;
+    await expect(box).toHaveAttribute('aria-checked', 'false');
+  });
+});

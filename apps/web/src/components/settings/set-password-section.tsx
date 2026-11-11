@@ -201,7 +201,7 @@ export function SetPasswordSection({ onLoadError }: SetPasswordSectionProps = {}
               aria-label={t('setPasswordPlaceholderNew')}
               autoComplete="new-password"
               aria-invalid={showRules && !isPasswordValid ? true : undefined}
-              className="pointer-coarse:h-11"
+              className="touch:h-11"
               value={password}
               onChange={(e) => { setPassword(e.target.value); setTouched(true); }}
               disabled={busy}
@@ -212,7 +212,7 @@ export function SetPasswordSection({ onLoadError }: SetPasswordSectionProps = {}
               aria-label={t('setPasswordPlaceholderConfirm')}
               autoComplete="new-password"
               aria-invalid={touched && confirm && !isConfirmValid ? true : undefined}
-              className="pointer-coarse:h-11"
+              className="touch:h-11"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               disabled={busy}

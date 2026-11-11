@@ -54,7 +54,7 @@ export function PhoneAppGet({ body, scanHint = false }: { body?: string; scanHin
     <div key={key} className="flex items-center gap-3" data-testid={`phone-app-link-${key}`} data-kind={kind}>
       {/* Yuna 5060: the QR is decoration for a camera — the link's words are the row's name */}
       <QRCodeSVG value={url} size={72} aria-hidden="true" />
-      <a className="inline-flex items-center text-ds-body text-ds-ink underline underline-offset-2 pointer-coarse:min-h-11" href={url} target="_blank" rel="noreferrer">{label}</a>
+      <a className="inline-flex items-center text-ds-body text-ds-ink underline underline-offset-2 touch:min-h-11" href={url} target="_blank" rel="noreferrer">{label}</a>
     </div>
   );
   return (
@@ -271,7 +271,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
           )}
           {view.freed ? <Line>{tr('phoneRemoved', { phone: view.freed })}</Line> : null}
           {view.freed ? <Line>{t('limit.after')}</Line> : null}
-          <Actions>{rescan}<a href={flat('/desktop')} className="inline-flex items-center text-ds-body text-ds-ink underline underline-offset-2 pointer-coarse:min-h-11" data-testid="pairing-limit-web-link">{t('limit.webLink')}</a></Actions>
+          <Actions>{rescan}<a href={flat('/desktop')} className="inline-flex items-center text-ds-body text-ds-ink underline underline-offset-2 touch:min-h-11" data-testid="pairing-limit-web-link">{t('limit.webLink')}</a></Actions>
         </Shell>
       );
     }

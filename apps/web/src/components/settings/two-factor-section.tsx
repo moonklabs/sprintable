@@ -192,7 +192,7 @@ export function TwoFactorSection({ onLoadError }: TwoFactorSectionProps = {}) {
             maxLength={6}
             placeholder="000000"
             aria-label={t('twoFactorActivate')}
-            className="text-center font-mono tracking-widest pointer-coarse:h-11"
+            className="text-center font-mono tracking-widest touch:h-11"
             value={otpCode}
             onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
           />
@@ -212,7 +212,7 @@ export function TwoFactorSection({ onLoadError }: TwoFactorSectionProps = {}) {
               type="password"
               placeholder={t('twoFactorPasswordPlaceholder')}
               aria-label={t('twoFactorPasswordPlaceholder')}
-              className="pointer-coarse:h-11"
+              className="touch:h-11"
               value={disablePassword}
               onChange={(e) => setDisablePassword(e.target.value)}
             />
@@ -223,7 +223,7 @@ export function TwoFactorSection({ onLoadError }: TwoFactorSectionProps = {}) {
               maxLength={6}
               placeholder="000000"
               aria-label={t('twoFactorDisable')}
-              className="text-center font-mono tracking-widest pointer-coarse:h-11"
+              className="text-center font-mono tracking-widest touch:h-11"
               value={otpCode}
               onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
             />

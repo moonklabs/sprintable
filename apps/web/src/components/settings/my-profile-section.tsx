@@ -124,7 +124,7 @@ export function MyProfileSection({ onLoadError }: MyProfileSectionProps = {}) {
               <Input
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
-                className="min-w-0 flex-1 pointer-coarse:h-11"
+                className="min-w-0 flex-1 touch:h-11"
                 aria-label={t('profileName')}
                 autoFocus
               />

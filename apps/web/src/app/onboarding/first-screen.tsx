@@ -8,8 +8,8 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslations } from 'next-intl';
-import { Button } from '@/components/ui/button';
-import { cardVariants } from '@/components/ui/card';
+import { Button } from '@/components/ds/button';
+import { cardVariants } from '@/components/ds/card';
 import { cn } from '@/lib/utils';
 import { DesktopDownloadCard, notAMac } from '@/components/desktop/desktop-download-card';
 import { PhoneAppCard, PhoneAppRow } from '@/components/desktop/phone-app-card';
@@ -71,9 +71,9 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
     return (
       <div className="space-y-4" data-testid="onboarding-first-phone-app">
         <PhoneFirstScreen orgId={orgId} chatsHref={chatsHref} macDownloadEnabled={macDownloadEnabled} returnHref={todayHref} />
-        <p className="break-keep border-t border-border pt-4 text-xs text-muted-foreground" data-testid="onboarding-first-later">
-          {to('download.laterNote')}{' '}
-          <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={finish} disabled={advancedBusy} data-testid="onboarding-first-finish">
+        <p className="flex flex-wrap items-center gap-x-1.5 break-keep border-t border-border pt-2 text-xs text-muted-foreground" data-testid="onboarding-first-later">
+          {to('download.laterNote')}
+          <Button variant="quiet" className="px-2 text-xs" onClick={finish} disabled={advancedBusy} data-testid="onboarding-first-finish">
             {finishLabel}
           </Button>
         </p>
@@ -112,16 +112,16 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
           {/* story 4891 (PO 11-10): «after the download, open the app…» is the next step — it is said once the download is pressed, not before (the screen before the press is read for «what do I press») */}
           {downloaded ? <p className="break-keep text-xs text-muted-foreground" data-testid="onboarding-first-after-note">{to('download.afterNote')}</p> : null}
           {/* story 4766 (AC1): the app that is already installed is opened, not downloaded again (the link is the host's own scheme — dev or prod) */}
-          <p className="break-keep text-xs text-muted-foreground" data-testid="onboarding-first-open-note">
-            {t('openAppLead')}{' '}
-            <a href={appSetupLink(null)} className="font-medium text-primary underline-offset-2 hover:underline" data-testid="onboarding-first-open-app">{t('openApp')}</a>
+          <p className="flex flex-wrap items-center gap-x-1.5 break-keep text-xs text-muted-foreground" data-testid="onboarding-first-open-note">
+            {t('openAppLead')}
+            <a href={appSetupLink(null)} className="inline-flex min-h-11 min-w-11 items-center justify-center font-medium text-primary underline-offset-2 hover:underline" data-testid="onboarding-first-open-app">{t('openApp')}</a>
           </p>
           {/* story 4671 (U3): a Mac draws the phone app's QR too — the person at the Mac is who needs it; nothing to get → nothing drawn */}
           <PhoneAppRow />
           {orgLine}
           {/* story 4766 (AC1): the app is the one way offered; the web way is folded under «고급» (a closed disclosure, no longer a link to a three-screen wizard) */}
           <details className={cn(cardVariants(), 'overflow-hidden')} data-testid="onboarding-first-advanced">
-            <summary className="cursor-pointer break-keep px-3 py-2 text-xs text-muted-foreground" data-testid="onboarding-first-advanced-summary">{t('advancedSummary')}</summary>
+            <summary className="flex min-h-11 cursor-pointer items-center break-keep px-3 text-xs text-muted-foreground" data-testid="onboarding-first-advanced-summary">{t('advancedSummary')}</summary>
             <div className="px-3 pb-3 pt-1">
               <AdvancedConnect orgId={orgId} onFinish={finish} todayV3Enabled={todayV3Enabled} onWorking={setAdvancedBusy} />
             </div>
@@ -130,9 +130,9 @@ export function FirstScreen({ orgId = null, chatsHref, macDownloadEnabled = fals
       )}
 
       {/* a text line out, not a button in the hierarchy (Yuna A-2 · PO ②) */}
-      <p className="break-keep border-t border-border pt-4 text-xs text-muted-foreground" data-testid="onboarding-first-later">
-        {t('laterShort')}{' '}
-        <Button variant="link" size="sm" className="h-auto px-0 py-0 text-xs" onClick={finish} disabled={advancedBusy} data-testid="onboarding-first-finish">
+      <p className="flex flex-wrap items-center gap-x-1.5 break-keep border-t border-border pt-2 text-xs text-muted-foreground" data-testid="onboarding-first-later">
+        {t('laterShort')}
+        <Button variant="quiet" className="px-2 text-xs" onClick={finish} disabled={advancedBusy} data-testid="onboarding-first-finish">
           {finishLabel}
         </Button>
       </p>

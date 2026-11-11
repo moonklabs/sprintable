@@ -250,3 +250,69 @@ for (const width of [1440, 390]) {
     });
   }
 }
+
+// ── story 4891 (PO 11-11) · the first screen on a phone: every press ≥ 44 (also inside the opened «고급» fold and after the one press), text ≥ 12 px, no old (non-ds) part, nothing sideways ─────────────────────────────────────
+const measureFirst = (page: Page) => page.evaluate(() => {
+  const shown = (e: Element) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden' && !e.closest('[aria-hidden="true"]') && (e as HTMLElement & { checkVisibility?: () => boolean }).checkVisibility?.() !== false; };
+  const presses = [...document.querySelectorAll('button, a[href], input, select, summary, textarea')].filter(shown);
+  const small = presses.filter((e) => { const r = e.getBoundingClientRect(); return r.width < 43.5 || r.height < 43.5; }).map((e) => `${(e.getAttribute('data-testid') || e.getAttribute('aria-label') || e.textContent || e.tagName).trim().slice(0, 24)} ${Math.round(e.getBoundingClientRect().width)}x${Math.round(e.getBoundingClientRect().height)}`);
+  const leaves = [...document.querySelectorAll('body *')].filter((e) => e.children.length === 0 && (e.textContent || '').trim() && shown(e) && !e.closest('[data-slot="ds-chip"]')); // named exemption: the ds Chip («시작 조직» name) is 11 px by its UI-3 spec — a label, not reading text
+  const tiny = leaves.filter((e) => parseFloat(getComputedStyle(e).fontSize) < 12).map((e) => `${(e.textContent || '').trim().slice(0, 20)} ${getComputedStyle(e).fontSize}`);
+  // named exemption: the read-only textarea (the copy-failed fallback) has no ds twin
+  const oldSlots = [...document.querySelectorAll('[data-slot]')].map((e) => e.getAttribute('data-slot')!).filter((s) => !s.startsWith('ds-') && s !== 'textarea');
+  return { presses: presses.length, small, tiny, oldSlots, overflowX: document.documentElement.scrollWidth > innerWidth + 1 };
+});
+async function expectFirstClean(page: Page, label: string) {
+  const m = await measureFirst(page);
+  expect(m.small, `${label}: presses under 44 px: ${m.small.join(' · ')}`).toEqual([]);
+  expect(m.tiny, `${label}: text under 12 px: ${m.tiny.join(' · ')}`).toEqual([]);
+  expect(m.oldSlots, `${label}: old (non-ds) parts drawn`).toEqual([]);
+  expect(m.overflowX, `${label}: overflow`).toBe(false);
+  return m;
+}
+
+test.describe('the first screen on a touch phone (390 × 844) — story 4891', () => {
+  test.use({ hasTouch: true, isMobile: true });
+
+  test('a Mac: [Mac 앱 받기] · «앱 열기» · «고급» · the way out are all ≥44 (the fold closed)', async ({ page }) => {
+    await open(page, { width: 390, theme: 'L' });
+    await toFirst(page);
+    // the card's download button comes with the manifest answer (an async read) — measure after it is drawn (a slower runner counted the page before it, 2 presses)
+    await expect(page.getByTestId('desktop-download-button')).toBeVisible();
+    const m = await expectFirstClean(page, 'mac · closed');
+    expect(m.presses).toBeGreaterThanOrEqual(4);
+    for (const id of ['desktop-download-button', 'onboarding-first-open-app', 'onboarding-first-advanced-summary', 'onboarding-first-finish']) {
+      const box = await page.getByTestId(id).boundingBox();
+      expect(box!.height, `${id} is a 44 press`).toBeGreaterThanOrEqual(43.5);
+    }
+  });
+
+  test('a Mac: the «고급» fold opened — the program lines\' [복사] ×2 and the one press are ≥44', async ({ page }) => {
+    await open(page, { width: 390, theme: 'L' });
+    await toFirst(page);
+    await expect(page.getByTestId('desktop-download-button')).toBeVisible();
+    await page.getByTestId('onboarding-first-advanced-summary').tap();
+    await page.getByTestId('advanced-make').waitFor();
+    const m = await expectFirstClean(page, 'mac · fold open');
+    expect(m.presses).toBeGreaterThanOrEqual(7); // + [복사] ×2 + the one press inside the fold
+  });
+
+  test('a Mac: after the one press — runtime chips · [복사] · [키 폐기] · [첫 지시] · the way out are ≥44', async ({ page }) => {
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://preview.test' });
+    await open(page, { width: 390, theme: 'L' });
+    await toFirst(page);
+    await expect(page.getByTestId('desktop-download-button')).toBeVisible();
+    await page.getByTestId('onboarding-first-advanced-summary').tap();
+    await page.getByTestId('advanced-make').tap();
+    await expect(page.getByTestId('advanced-line')).toBeVisible();
+    const m = await expectFirstClean(page, 'mac · the line shown');
+    expect(m.presses).toBeGreaterThanOrEqual(10);
+  });
+
+  test('not a Mac: the web way stands unfolded and every press is ≥44', async ({ page }) => {
+    await open(page, { width: 390, theme: 'L', mac: false });
+    await toFirst(page, false);
+    await expect(page.getByTestId('advanced-make')).toBeVisible();
+    await expectFirstClean(page, 'not a mac');
+  });
+});

@@ -163,7 +163,7 @@ export function AvatarCropper({
           step={0.05}
           value={transform.zoom}
           onChange={(e) => onZoomChange(Number(e.target.value))}
-          className="w-full accent-ds-action pointer-coarse:h-11"
+          className="w-full accent-ds-action touch:h-11"
           aria-label={t('avatarCropZoomLabel')}
         />
         <div className="flex gap-2">
