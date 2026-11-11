@@ -20,7 +20,7 @@ import { ActivityTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 import { useMediaQuery } from '@/lib/use-media-query';
 import { SectionHeader } from '@/components/ds/section-header';
 import { AuditDetail } from './audit-detail';
-import { formatDayHeader, groupByDay } from './group-by-day';
+import { formatDayHeader, groupByDay, isValidTime } from './group-by-day';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -264,7 +264,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   const displayTz = useViewerTimeZone() ?? 'UTC';
   const locale = useLocale();
   const dayGroups = groupByDay(items, displayTz);
-  const auditHeading = (g: { key: string; kind: 'today' | 'yesterday' | 'date' }) => (g.kind === 'today' ? t('dayToday') : g.kind === 'yesterday' ? t('dayYesterday') : formatDayHeader(g.key, locale));
+  const auditHeading = (g: { key: string; kind: 'today' | 'yesterday' | 'date' | 'undated' }) => (g.kind === 'today' ? t('dayToday') : g.kind === 'yesterday' ? t('dayYesterday') : g.kind === 'undated' ? t('dayUndated') : formatDayHeader(g.key, locale));
   const DETAIL_ID = 'audit-detail';
 
   const entityTypeOptions: SelectOption[] = [
@@ -464,7 +464,8 @@ function ActivityRow({ item, rowLabel, selected, controlsId, onToggle, buttonRef
   const locale = useLocale();
   // story #4443 PR3a (PO 00:07Z) — a row says when it happened: the viewer's zone (was the org's, story #4280). The period above
   // (ActivityLogView's range) stays the org's — a team looks at the same days.
-  const time = formatViewerRelativeTime(item.created_at, locale, useViewerTimeZone());
+  const rowTz = useViewerTimeZone();   // (a hook — called every render, not inside the ternary below)
+  const time = isValidTime(item.created_at) ? formatViewerRelativeTime(item.created_at, locale, rowTz) : '';
   const tc = useTranslations('common');
   const { human, agent } = auditActorProps(item, tc, rowLabel);
   // story 4892 — a row opens its details (aria-expanded + aria-controls). The visible row is a ProofCapsule — block elements, and for an agent a focusable avatar — which may not sit inside

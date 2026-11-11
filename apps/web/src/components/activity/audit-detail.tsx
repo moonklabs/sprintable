@@ -6,6 +6,7 @@ import { IconButton } from '@/components/ds/icon-button';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import type { ActivityLogItem } from './activity-log-view';
+import { isValidTime } from './group-by-day';
 
 interface AuditDetailProps {
   item: ActivityLogItem;
@@ -36,7 +37,7 @@ export const AuditDetail = forwardRef<HTMLElement, AuditDetailProps>(function Au
   const target = item.entity_title
     ? (item.entity_type ? `${item.entity_type} · ${item.entity_title}` : item.entity_title)
     : item.entity_type;
-  const when = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short', timeZone: tz }).format(new Date(item.created_at));
+  const when = isValidTime(item.created_at) ? new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short', timeZone: tz }).format(new Date(item.created_at)) : '—';   // a row with no usable time sits in the «날짜 모름» group; its details must not throw
   return (
     <section ref={ref} id={id} tabIndex={-1} aria-labelledby={headingId} data-testid="audit-detail" className="rounded-ds-panel border border-ds-line bg-ds-surface p-4 outline-none focus-visible:ring-2 focus-visible:ring-ds-action">
       <div className="flex items-start gap-2">
@@ -49,7 +50,7 @@ export const AuditDetail = forwardRef<HTMLElement, AuditDetailProps>(function Au
         {target ? (<><dt className="text-ds-ink-3">{t('detailTarget')}</dt><dd className="m-0 break-words text-ds-ink">{target}</dd></>) : null}
         {actorText ? (<><dt className="text-ds-ink-3">{t('detailActor')}</dt><dd className="m-0 break-words text-ds-ink">{actorText}</dd></>) : null}
         <dt className="text-ds-ink-3">{t('detailWhen')}</dt>
-        <dd className="m-0 text-ds-ink">{when} <span className="text-ds-ink-3">· {formatViewerRelativeTime(item.created_at, locale, tz)}</span></dd>
+        <dd className="m-0 text-ds-ink">{when}{isValidTime(item.created_at) ? <> <span className="text-ds-ink-3">· {formatViewerRelativeTime(item.created_at, locale, tz)}</span></> : null}</dd>
       </dl>
       <h3 className="mb-1 mt-4 text-ds-small font-semibold text-ds-ink-2">{t('detailContext')}</h3>
       {context.length === 0 ? (

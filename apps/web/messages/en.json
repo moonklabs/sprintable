@@ -5904,6 +5904,7 @@
     "emptyTitle": "No activity found",
     "dayToday": "Today",
     "dayYesterday": "Yesterday",
+    "dayUndated": "Date unknown",
     "detailHeading": "Details",
     "detailAction": "Action",
     "detailTarget": "Target",

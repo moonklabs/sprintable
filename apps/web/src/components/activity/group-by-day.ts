@@ -7,26 +7,49 @@ import { addCalendarDays, todayDateKey, toDateKey } from '@/lib/schedule-format'
 export interface DayGroup<T> {
   /** YYYY-MM-DD in the zone. */
   key: string;
-  kind: 'today' | 'yesterday' | 'date';
+  /** `undated`: the row's time is empty or not a date — it is shown in a last group of its own, never dropped and never thrown on. */
+  kind: 'today' | 'yesterday' | 'date' | 'undated';
   items: T[];
 }
 
-export function groupByDay<T extends { created_at: string }>(items: readonly T[], tz: string, now: Date = new Date()): DayGroup<T>[] {
+/** `at` says where a row keeps its time — the audit log's rows have `created_at`, the team feed's `occurred_at`. */
+export function groupByDay<T>(
+  items: readonly T[],
+  tz: string,
+  now: Date = new Date(),
+  at: (item: T) => string = (item) => (item as unknown as { created_at: string }).created_at,
+): DayGroup<T>[] {
   const today = todayDateKey(tz, now);
   const yesterday = addCalendarDays(today, -1);   // calendar arithmetic on the date key — a zone whose clock changes at midnight (DST) cannot skip or repeat a day
   const groups: DayGroup<T>[] = [];
   const index = new Map<string, DayGroup<T>>();
   for (const item of items) {
-    const key = toDateKey(item.created_at, tz);
+    const key = safeDateKey(at(item), tz);
     let group = index.get(key);
     if (!group) {
-      group = { key, kind: key === today ? 'today' : key === yesterday ? 'yesterday' : 'date', items: [] };
+      group = { key, kind: key === UNDATED_KEY ? 'undated' : key === today ? 'today' : key === yesterday ? 'yesterday' : 'date', items: [] };
       index.set(key, group);
       groups.push(group);
     }
     group.items.push(item);
   }
+  // the undated group, if any, goes last (a real day is never placed after «날짜 모름»)
+  const at0 = groups.findIndex((x) => x.kind === 'undated');
+  if (at0 >= 0 && at0 !== groups.length - 1) groups.push(groups.splice(at0, 1)[0]!);
   return groups;
+}
+
+const UNDATED_KEY = '';
+
+/** a time that is empty, null or not a date would make Intl throw (RangeError) or land on 1970 — those rows get the «undated» key instead. */
+function safeDateKey(iso: unknown, tz: string): string {
+  if (!isValidTime(iso)) return UNDATED_KEY;
+  try { return toDateKey(iso, tz); } catch { return UNDATED_KEY; }
+}
+
+/** a usable time: a non-empty string that parses to a date. (`new Date(null)` is 1970 and `new Date('')` is invalid — neither is a time a row may be shown with.) */
+export function isValidTime(value: unknown): value is string {
+  return typeof value === 'string' && value !== '' && !Number.isNaN(new Date(value).getTime());
 }
 
 /** the date header text for a `date` group (the zone's calendar day, written in the viewer's locale). */

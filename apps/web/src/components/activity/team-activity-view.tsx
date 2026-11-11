@@ -20,6 +20,9 @@ import { withProjectParam } from '@/lib/with-project-param';
 import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/lib/schedule-format';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { RowName } from '@/components/shared/row-name';
+import { SectionHeader } from '@/components/ds/section-header';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { formatDayHeader, groupByDay, isValidTime } from './group-by-day';
 
 // ─── Types (BE ActivityStreamItem flat 실측 — doc §10 정정 정합) ──────────────
 interface ActivityStreamItem {
@@ -81,6 +84,7 @@ function objectLabel(item: ActivityStreamItem): string | null {
 }
 
 function relativeTime(iso: string, locale: string): string {
+  if (!isValidTime(iso)) return '—';   // an empty, null or broken time must not throw inside render (Intl.RelativeTimeFormat rejects NaN) nor read as 1970
   const diffMs = Date.now() - new Date(iso).getTime();
   const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
   const sec = Math.round(diffMs / 1000);
@@ -193,9 +197,12 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   const t = useTranslations('teamActivity');
   const tInbox = useTranslations('inbox'); // verb 사람카피(event* 키)는 inbox 네임스페이스
   const tc = useTranslations('common');
+  const tDay = useTranslations('activityLog'); // «오늘» / «어제» — the same two words the audit log's day headers use
   const { addToast } = useToast();
+  const viewerTz = useViewerTimeZone() ?? 'UTC';
   const locale =
     typeof document !== 'undefined' ? document.documentElement.lang || 'en' : 'en';
+  const dayLabel = (g: { key: string; kind: 'today' | 'yesterday' | 'date' | 'undated' }) => (g.kind === 'today' ? tDay('dayToday') : g.kind === 'yesterday' ? tDay('dayYesterday') : g.kind === 'undated' ? tDay('dayUndated') : formatDayHeader(g.key, locale));
 
   const [items, setItems] = useState<ActivityStreamItem[] | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -466,21 +473,30 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
               />
             </div>
           ) : (
-            <ul className="space-y-0.5">
-              {items.map((item) => {
-                const delivered = item.recipient_ids.length;
-                return (
-                  <FeedRow
-                    key={item.activity_id}
-                    item={item}
-                    actorName={memberName(item.actor_id)}
-                    actorLabel={(item.actor_id ? actorLabels.get(item.actor_id) : undefined) ?? memberName(item.actor_id)}
-                    verbCopy={getEventTypeCopy(tInbox, item.verb)}
-                    locale={locale}
-                    deliveredLabel={delivered > 0 ? t('deliveredCount', { count: delivered }) : null}
-                  />
-                );
-              })}
+            <div className="space-y-3">
+              {/* story 4892 (UI-9 활동 §2) — the feed is grouped by DAY in the viewer's zone (오늘 · 어제 · the date), like the audit log. Each day is its own list. */}
+              {groupByDay(items, viewerTz, new Date(), (it) => it.occurred_at).map((group) => (
+                <section key={group.key} aria-label={dayLabel(group)} data-testid="feed-day-group">
+                  <SectionHeader title={dayLabel(group)} level={2} className="mb-1 rounded-ds-control" />
+                  <ul className="space-y-0.5">
+                    {group.items.map((item) => {
+                      const delivered = item.recipient_ids.length;
+                      return (
+                        <FeedRow
+                          key={item.activity_id}
+                          item={item}
+                          actorName={memberName(item.actor_id)}
+                          actorLabel={(item.actor_id ? actorLabels.get(item.actor_id) : undefined) ?? memberName(item.actor_id)}
+                          verbCopy={getEventTypeCopy(tInbox, item.verb)}
+                          locale={locale}
+                          deliveredLabel={delivered > 0 ? t('deliveredCount', { count: delivered }) : null}
+                        />
+                      );
+                    })}
+                  </ul>
+                </section>
+              ))}
+              <ul className="space-y-0.5">
               {nextBeforeSeq !== null ? (
                 <li className="pt-3 text-center">
                   <Button variant="glass" size="sm" onClick={() => void loadMore()} disabled={loadingMore}>
@@ -494,7 +510,8 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
                   {rangeFrom ? t('endOfRange') : t('endOfAll')}
                 </li>
               )}
-            </ul>
+              </ul>
+            </div>
           )}
         </div>
       </div>
