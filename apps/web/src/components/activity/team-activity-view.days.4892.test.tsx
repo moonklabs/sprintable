@@ -154,6 +154,33 @@ describe('TeamActivityView — 일 단위 묶음 (4892)', () => {
     expect(groups().map((g) => [...g.querySelectorAll('li')].map((li) => li.textContent?.match(/#(\d+)/)?.[1]))).toEqual([['5', '4', '3'], ['2']]);
   });
 
+  it('«더 보기» is a ds Button; while it asks it keeps its words, shows busy and is not pressed twice', async () => {
+    let release: (v: Answer) => void = () => {};
+    let beforeCalls = 0;
+    fetchWithAuthMock.mockImplementation(async (url: string) => {
+      if (url.includes('/api/members')) return answer(true, 200, []);
+      if (url.includes('before_seq')) { beforeCalls += 1; return new Promise<Answer>((resolve) => { release = resolve; }); }
+      return answer(true, 200, { items: [item(5, '2026-11-10T09:00:00Z')], next_after_seq: null, next_before_seq: 5 });
+    });
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC">
+          <TopBarProvider><TeamActivityView projectId="p1" /></TopBarProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const more = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.teamActivity.loadMore)!;
+    expect(more.getAttribute('data-slot')).toBe('ds-button');
+    await act(async () => { more.click(); });
+    const busy = container.querySelector('button[data-slot="ds-button"][aria-busy="true"]') as HTMLButtonElement | null;
+    expect(busy).not.toBeNull();
+    expect(busy!.textContent!.trim()).toBe(koMessages.teamActivity.loadMore);   // the words stay
+    await act(async () => { busy!.click(); });
+    expect(beforeCalls).toBe(1);                                                   // a press while it asks does nothing
+    await act(async () => { release(answer(true, 200, { items: [], next_after_seq: null, next_before_seq: null })); await Promise.resolve(); });
+  });
+
   it('a real empty answer is still the empty state — no day header', async () => {
     await mount([]);
     expect(groups()).toHaveLength(0);
