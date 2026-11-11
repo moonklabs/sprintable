@@ -3,8 +3,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { Eye, Pencil, History, GitCompare, Plus, FileCheck2, Send, Save } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Field } from '@/components/ds/field';
+import { Textarea } from '@/components/ds/input';
+import { NativeSelect } from '@/components/ds/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ds/tabs';
+import { Tag } from './settings-parts';
 import { WorkflowActiveLineView } from './workflow-active-line-view';
 import { WorkflowPolicySimulatorSection } from './workflow-policy-simulator-section';
 import { useRenderNonce } from '@/hooks/use-render-nonce';
@@ -33,13 +38,13 @@ interface VersionItem {
   config?: { steps?: Step[] } | null;
 }
 
-// 5상태 배지(version.status). publish 거버넌스 lifecycle.
-const STATUS_VARIANT: Record<string, 'success' | 'warning' | 'destructive' | 'secondary' | 'chip'> = {
-  published: 'success',
-  draft: 'secondary',
-  pending_publish: 'warning',
-  rejected: 'destructive',
-  retired: 'chip',
+// 5상태 꼬리표(version.status). publish 거버넌스 lifecycle — ds 뜻 색(끝남 · 손 필요 · 실패)만 입고, 그 밖은 중립.
+const STATUS_TONE: Record<string, 'done' | 'needs-hand' | 'failed' | 'neutral'> = {
+  published: 'done',
+  draft: 'neutral',
+  pending_publish: 'needs-hand',
+  rejected: 'failed',
+  retired: 'neutral',
 };
 
 const MODES: { key: Mode; labelKey: string; Icon: typeof Eye }[] = [
@@ -67,11 +72,11 @@ function diffSteps(active: Step[], draft: Step[]): { key: string; kind: 'add' | 
   });
 }
 
-const DIFF_META: Record<string, { variant: 'success' | 'destructive' | 'warning' | 'chip'; sign: string }> = {
-  add: { variant: 'success', sign: '+' },
-  remove: { variant: 'destructive', sign: '−' },
-  change: { variant: 'warning', sign: '~' },
-  same: { variant: 'chip', sign: '=' },
+const DIFF_META: Record<string, { tone: 'done' | 'failed' | 'needs-hand' | 'neutral'; sign: string }> = {
+  add: { tone: 'done', sign: '+' },
+  remove: { tone: 'failed', sign: '−' },
+  change: { tone: 'needs-hand', sign: '~' },
+  same: { tone: 'neutral', sign: '=' },
 };
 
 export function WorkflowLineEditorSection({ projectId }: { projectId?: string | null }) {
@@ -176,138 +181,136 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
     } finally { setBusy(false); }
   };
 
-  const inputCls = 'h-9 rounded-md border border-border bg-background px-2 text-base lg:text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary';
   const diff = diffSteps(activeSteps, draftSteps);
 
   return (
     <div className="space-y-4">
-      {/* 모드 스위처 + entity_type */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex gap-1 rounded-lg border border-border bg-muted/30 p-0.5">
+      {/* 모드 스위처(같은 화면 안에서 칸을 갈아 보이는 탭) + entity_type */}
+      <Tabs value={mode} onValueChange={(next) => setMode(next as Mode)} className="gap-4">
+        <TabsList aria-label={t('tabWorkflowPolicies')}>
           {MODES.map(({ key, labelKey, Icon }) => (
-            <button
-              key={key}
-              type="button"
-              aria-pressed={mode === key}
-              onClick={() => setMode(key)}
-              className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${mode === key ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              <Icon className="size-3.5" />
+            <TabsTrigger key={key} value={key}>
+              <Icon className="size-3.5" aria-hidden />
               {t(labelKey)}
-            </button>
+            </TabsTrigger>
           ))}
-        </div>
-        <select value={entityType} onChange={(e) => setEntityType(e.target.value)} className={`${inputCls} ml-auto`}>
-          {ENTITY_TYPES.map((et) => <option key={et} value={et}>{et}</option>)}
-        </select>
-      </div>
+        </TabsList>
 
-      {error ? <p key={errorNonce} className="text-sm text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
+        <Field label={t('simEntityType')} className="sm:max-w-xs">
+          {(c) => (
+            <NativeSelect {...c} value={entityType} onChange={(e) => setEntityType(e.target.value)}>
+              {ENTITY_TYPES.map((et) => <option key={et} value={et}>{et}</option>)}
+            </NativeSelect>
+          )}
+        </Field>
 
-      {/* VIEW: S29 active + simulator 재사용 */}
-      {mode === 'view' ? (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <WorkflowActiveLineView projectId={projectId} />
-          <WorkflowPolicySimulatorSection />
-        </div>
-      ) : null}
+        {/* story #2154 — the nonce key remounts the line on every failure, so the same failure twice in a row is read out twice (the ds failed Banner is an alert) */}
+        {error ? <Banner key={errorNonce} tone="failed">{error}</Banner> : null}
 
-      {/* EDIT: config JSON 편집 + lint + 저장 + publish 요청 */}
-      {mode === 'edit' ? (
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" variant="ghost" className="gap-1" disabled={busy} onClick={() => void newDraft()}>
-              <Plus className="size-3.5" />{t('lineEditorNewDraft')}
-            </Button>
+        {/* VIEW: S29 active + simulator 재사용 */}
+        <TabsContent value="view">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <WorkflowActiveLineView projectId={projectId} />
+            <WorkflowPolicySimulatorSection />
+          </div>
+        </TabsContent>
+
+        {/* EDIT: config JSON 편집 + lint + 저장 + publish 요청 */}
+        <TabsContent value="edit">
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" variant="secondary" disabled={busy} iconStart={<Plus className="size-3.5" aria-hidden />} onClick={() => void newDraft()}>
+                {t('lineEditorNewDraft')}
+              </Button>
+              {draftId ? (
+                <>
+                  <Button type="button" variant="secondary" disabled={busy} iconStart={<FileCheck2 className="size-3.5" aria-hidden />} onClick={() => void runLint()}>
+                    {t('lineEditorLint')}
+                  </Button>
+                  <Button type="button" variant="primary" disabled={busy} iconStart={<Save className="size-3.5" aria-hidden />} onClick={() => void saveDraft()}>
+                    {t('lineEditorSave')}
+                  </Button>
+                  <Button type="button" variant="secondary" disabled={busy} iconStart={<Send className="size-3.5" aria-hidden />} onClick={() => void requestPublish()}>
+                    {t('lineEditorRequestPublish')}
+                  </Button>
+                </>
+              ) : null}
+            </div>
             {draftId ? (
               <>
-                <Button size="sm" variant="ghost" className="gap-1" disabled={busy} onClick={() => void runLint()}>
-                  <FileCheck2 className="size-3.5" />{t('lineEditorLint')}
-                </Button>
-                <Button size="sm" variant="ghost" className="gap-1 text-primary hover:bg-primary/10 hover:text-primary" disabled={busy} onClick={() => void saveDraft()}>
-                  <Save className="size-3.5" />{t('lineEditorSave')}
-                </Button>
-                {/* story #2590(TIER3) — rest는 투명 배경이라 text-success 그대로 통과, hover만
-                    bg-success-tint가 붙어 대비 미달 — hover 글자만 text-foreground로(#2420 규칙). */}
-                <Button size="sm" variant="ghost" className="gap-1 text-success hover:bg-success-tint hover:text-foreground" disabled={busy} onClick={() => void requestPublish()}>
-                  <Send className="size-3.5" />{t('lineEditorRequestPublish')}
-                </Button>
-              </>
-            ) : null}
-          </div>
-          {draftId ? (
-            <>
-              <textarea
-                rows={12}
-                value={configText}
-                onChange={(e) => setConfigText(e.target.value)}
-                spellCheck={false}
-                className="w-full resize-y rounded-xl border border-border bg-background px-3 py-2 font-mono text-base lg:text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-              />
-              {lint ? (
-                <div className="space-y-1">
-                  <Badge variant={lint.lint_status === 'passed' ? 'success' : 'destructive'}>
-                    {lint.lint_status === 'passed' ? t('lineEditorLintPass') : t('lineEditorLintFail')}
-                  </Badge>
-                  {lint.errors?.length ? (
-                    <ul className="space-y-0.5">
-                      {lint.errors.map((e, i) => <li key={i} className="text-[11px] text-destructive">{e.message ?? JSON.stringify(e)}</li>)}
-                    </ul>
-                  ) : null}
-                </div>
-              ) : null}
-            </>
-          ) : (
-            <p className="text-xs text-muted-foreground">{t('lineEditorNoDraft')}</p>
-          )}
-        </div>
-      ) : null}
-
-      {/* HISTORY: 버전 리스트 + 5상태 배지 */}
-      {mode === 'history' ? (
-        versions.length ? (
-          <ul className="space-y-1.5">
-            {versions.map((v, index) => (
-              <li key={v.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3 py-2">
-                <span className="font-mono text-xs text-foreground">v{v.version}</span>
-                <Badge variant={STATUS_VARIANT[v.status] ?? 'chip'}>{v.status}</Badge>
-                <span className="text-[10px] text-muted-foreground">{t('lineEditorLintLabel')}: {v.lint_status}</span>
-                {v.updated_at ? <span className="text-[10px] text-muted-foreground">{formatViewerRelativeTime(v.updated_at, locale, displayTimezone)}</span> : null}
-                {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「편집」 접근 이름이라
-                    보조기술 버튼 목록에서 어느 버전 행인지 못 가른다. */}
-                {v.status === 'draft' ? (
-                  <Button
-                    size="sm" variant="ghost" className="ml-auto h-7 gap-1" onClick={() => void openVersion(v.id)}
-                    aria-label={t('lineEditorEditAriaLabel', { n: index + 1, label: t('lineEditorEditAction') })}
-                  >
-                    <Pencil className="size-3.5" />{t('lineEditorEditAction')}
-                  </Button>
+                <Textarea
+                  rows={12}
+                  aria-label={t('lineModeEdit')}
+                  value={configText}
+                  onChange={(e) => setConfigText(e.target.value)}
+                  spellCheck={false}
+                  className="font-mono"
+                />
+                {lint ? (
+                  <div className="space-y-1">
+                    <Tag tone={lint.lint_status === 'passed' ? 'done' : 'failed'}>
+                      {lint.lint_status === 'passed' ? t('lineEditorLintPass') : t('lineEditorLintFail')}
+                    </Tag>
+                    {lint.errors?.length ? (
+                      <ul className="space-y-0.5">
+                        {lint.errors.map((e, i) => <li key={i} className="text-ds-small text-ds-failed">{e.message ?? JSON.stringify(e)}</li>)}
+                      </ul>
+                    ) : null}
+                  </div>
                 ) : null}
-              </li>
-            ))}
-          </ul>
-        ) : <p className="text-xs text-muted-foreground">{t('lineEditorNoVersions')}</p>
-      ) : null}
+              </>
+            ) : (
+              <p className="text-ds-small text-ds-ink-3">{t('lineEditorNoDraft')}</p>
+            )}
+          </div>
+        </TabsContent>
 
-      {/* DIFF: ⭐ FE 클라 계산(active vs 편집 中 draft) path별 add/change/remove */}
-      {mode === 'diff' ? (
-        <div className="space-y-2">
-          <p className="text-[11px] text-muted-foreground">{t('lineEditorDiffHint')}</p>
-          {diff.length ? (
-            <ul className="space-y-0.5">
-              {diff.map(({ key, kind }) => {
-                const m = DIFF_META[kind]!;
-                return (
-                  <li key={key} className="flex items-center gap-2 text-xs">
-                    <Badge variant={m.variant} className="w-5 justify-center font-mono">{m.sign}</Badge>
-                    <span className={`font-mono ${kind === 'remove' ? 'text-muted-foreground line-through' : 'text-foreground'}`}>{key}</span>
-                  </li>
-                );
-              })}
+        {/* HISTORY: 버전 리스트 + 5상태 꼬리표 */}
+        <TabsContent value="history">
+          {versions.length ? (
+            <ul className="divide-y divide-ds-line overflow-hidden rounded-ds-control border border-ds-line">
+              {versions.map((v, index) => (
+                <li key={v.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2">
+                  <span className="font-mono text-ds-small text-ds-ink">v{v.version}</span>
+                  <Tag tone={STATUS_TONE[v.status] ?? 'neutral'}>{v.status}</Tag>
+                  <span className="text-ds-small text-ds-ink-3">{t('lineEditorLintLabel')}: {v.lint_status}</span>
+                  {v.updated_at ? <span className="text-ds-small text-ds-ink-3">{formatViewerRelativeTime(v.updated_at, locale, displayTimezone)}</span> : null}
+                  {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「편집」 접근 이름이라 보조기술 버튼 목록에서 어느 버전 행인지 못 가른다. */}
+                  {v.status === 'draft' ? (
+                    <Button
+                      type="button" variant="quiet" className="ml-auto" onClick={() => void openVersion(v.id)}
+                      aria-label={t('lineEditorEditAriaLabel', { n: index + 1, label: t('lineEditorEditAction') })}
+                      iconStart={<Pencil className="size-3.5" aria-hidden />}
+                    >
+                      {t('lineEditorEditAction')}
+                    </Button>
+                  ) : null}
+                </li>
+              ))}
             </ul>
-          ) : <p className="text-xs text-muted-foreground">{t('lineEditorDiffEmpty')}</p>}
-        </div>
-      ) : null}
+          ) : <p className="text-ds-small text-ds-ink-3">{t('lineEditorNoVersions')}</p>}
+        </TabsContent>
+
+        {/* DIFF: ⭐ FE 클라 계산(active vs 편집 中 draft) path별 add/change/remove */}
+        <TabsContent value="diff">
+          <div className="space-y-2">
+            <p className="text-ds-small text-ds-ink-3">{t('lineEditorDiffHint')}</p>
+            {diff.length ? (
+              <ul className="space-y-1">
+                {diff.map(({ key, kind }) => {
+                  const m = DIFF_META[kind]!;
+                  return (
+                    <li key={key} className="flex items-center gap-2 text-ds-small">
+                      <Tag tone={m.tone} className="w-6 justify-center font-mono">{m.sign}</Tag>
+                      <span className={`font-mono ${kind === 'remove' ? 'text-ds-ink-3 line-through' : 'text-ds-ink'}`}>{key}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : <p className="text-ds-small text-ds-ink-3">{t('lineEditorDiffEmpty')}</p>}
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

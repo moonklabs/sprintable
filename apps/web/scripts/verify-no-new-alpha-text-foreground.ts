@@ -80,9 +80,8 @@ export const GRANDFATHER_BASELINE = new Map<string, number>([
   ['app/invite/accept/invite-accept-client.tsx::text-foreground/70', 1],
   ['app/invite/accept/invite-accept-client.tsx::text-foreground/85', 3],
   ['app/invite/invite-client.tsx::text-foreground/80', 2], // story #4017 CHANGES 2 — page.tsx(서버 래퍼)/invite-client.tsx(client) 분리로 자리 이동.
-  ['app/login/page.tsx::text-foreground/60', 2],
-  ['app/login/page.tsx::text-foreground/80', 2],
   // story 4669: app/register/page.tsx::text-foreground/80 (1) left the list — the Google link became the brand button (solid)
+  // story 4891: app/login/page.tsx::text-foreground/60 (2) and /80 (2) left the list — the terms line, the divider and the Google link are ds tokens / the ds Button now (solid)
   ['components/cage/gate-line-context.tsx::text-foreground/90', 1],
   ['components/cage/stuck-handoff-detail.tsx::text-foreground/80', 1],
   ['components/cage/stuck-handoff-detail.tsx::text-foreground/85', 1],

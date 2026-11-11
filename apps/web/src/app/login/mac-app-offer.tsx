@@ -33,18 +33,18 @@ export function MacAppOffer({ suppressed }: { suppressed: boolean }) {
   // the web sign-up for a person who would rather start there are still here, as two plain links on one line (the same links, the same places they go) with the one sentence on what this is.
   return (
     <div className="space-y-1 text-center" data-testid="login-mac-app-offer">
-      <p className="break-keep text-xs text-muted-foreground">{t('macAppPitch')}</p>
-      <p className="flex flex-wrap items-center justify-center gap-x-3 text-sm">
+      <p className="break-keep text-ds-small text-ds-ink-3">{t('macAppPitch')}</p>
+      <p className="flex flex-wrap items-center justify-center gap-x-3 text-ds-body">
         {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a file download (a route handler that redirects to the file), not a page: <Link> would try a client navigation to it */}
-        <a href="/desktop/get/macos" className="inline-flex min-h-[44px] items-center font-medium text-brand-text underline-offset-2 hover:underline">
+        <a href="/desktop/get/macos" className="inline-flex min-h-11 items-center font-medium text-brand-text underline-offset-2 hover:underline">
           {t('macAppGet')}
         </a>
-        <span aria-hidden className="text-muted-foreground">·</span>
-        <Link href="/register" className="inline-flex min-h-[44px] items-center break-keep text-muted-foreground underline underline-offset-2">
+        <span aria-hidden className="text-ds-ink-3">·</span>
+        <Link href="/register" className="inline-flex min-h-11 items-center break-keep text-ds-ink-3 underline underline-offset-2">
           {t('macAppWebSignup')}
         </Link>
       </p>
-      <p className="break-keep text-xs text-muted-foreground">{t('macAppGetHint')}</p>
+      <p className="break-keep text-ds-small text-ds-ink-3">{t('macAppGetHint')}</p>
     </div>
   );
 }

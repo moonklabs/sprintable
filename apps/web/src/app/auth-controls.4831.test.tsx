@@ -62,17 +62,17 @@ describe('인증 코드 칸 — 큰 글자 · 입력 정리 · 자동 초점', (
     }
   });
 
-  it('로그인 TOTP 칸: 인증 코드가 필요하다는 응답 뒤에 나타나는 바탕 Input이고, 모바일 · 데스크톱 모두 18px · 숫자만 6자 · 자동 초점', async () => {
+  it('로그인 TOTP 칸: 인증 코드가 필요하다는 응답 뒤에 나타나는 바탕 Input(ds Input — story 4891)이고, 모바일 · 데스크톱 모두 18px · 숫자만 6자 · 자동 초점', async () => {
     loginWithPasswordMock.mockResolvedValue({ error: { code: 'TOTP_REQUIRED', message: 'totp' } });
     const { default: LoginPage } = await import('./login/page');
     await act(async () => { root.render(wrap(<LoginPage />)); });
-    const email = container.querySelector<HTMLInputElement>('input[data-slot="input"][type="email"]')!;
-    const pw = container.querySelector<HTMLInputElement>('input[data-slot="input"][type="password"]')!;
+    const email = container.querySelector<HTMLInputElement>('input[data-slot="ds-input"][type="email"]')!;
+    const pw = container.querySelector<HTMLInputElement>('input[data-slot="ds-input"][type="password"]')!;
     await act(async () => { setNative(email, 'a@b.co'); setNative(pw, 'secret-pass'); });
     await act(async () => { press(pw, 'Enter'); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(loginWithPasswordMock).toHaveBeenCalledTimes(1);
-    const totp = container.querySelector<HTMLInputElement>('input[data-slot="input"][inputmode="numeric"]')!;
+    const totp = container.querySelector<HTMLInputElement>('input[data-slot="ds-input"][inputmode="numeric"]')!;
     expect(totp).toBeTruthy();
     expect(totp.maxLength).toBe(6);
     await act(async () => { setNative(totp, '9x8y7654321'); });
