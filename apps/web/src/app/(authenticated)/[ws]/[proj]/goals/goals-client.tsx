@@ -993,28 +993,35 @@ function CreateModal({ projectId, orgId, onCreated, onClose }: CreateModalProps)
 interface GoalsClientProps {
   projectId: string;
   orgId?: string;
+  /**
+   * story #4888(UI-5 목표 화면 둘째 조각) — 주소가 보기를 정하는 진입(`/epics` = 일감 탭줄의 «목표» 탭 = 스윔레인으로 열림). 있으면 저장된 보기보다 먼저고 프로젝트가 바뀌어도 이 보기로 다시 서며,
+   * 그 진입에서 누른 전환은 이번 화면에만 닿는다(저장하지 않는다 — `/goals`가 다음에 열릴 때 기본 보기를 이 진입이 바꾸지 않게). 없으면 예전 그대로(기본 목록 · 프로젝트별 기억).
+   */
+  initialView?: 'list' | 'swimlane';
 }
 
-export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
+export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps) {
   const t = useTranslations('goals');
   const tc = useTranslations('common');
   const router = useRouter();
   const { wsSlug, projSlug } = useGoalsRoute();
   // story #4888(UI-5 목표 화면 첫 조각) — «보기: 목록 | 스윔레인». 에픽 탭(/epics 스윔레인)과 목표 화면(/goals)을 한 화면으로 합친다: 같은 마스트헤드 아래에서 보기만 갈아 낀다.
   // 기본은 목록(예전 /goals 그대로). 고른 보기는 프로젝트별로 이 브라우저에 기억한다(스윔레인 보드가 축 전환을 기억하는 것과 같은 방식 · 저장이 막혀도 화면은 선다).
-  const [view, setViewState] = useState<'list' | 'swimlane'>('list');
+  const [view, setViewState] = useState<'list' | 'swimlane'>(initialView ?? 'list');
   useEffect(() => {
     // 프로젝트가 바뀔 때마다(같은 화면이 다시 마운트되지 않고 projectId만 바뀌는 이동 포함) 그 프로젝트의 보기로 맞춘다 — 저장값이 없으면 기본(목록). 이전 프로젝트의 보기를 끌고 가지 않는다.
+    if (initialView) { setViewState(initialView); return; } // 주소가 보기를 정한다 — 저장값은 안 읽는다
     let next: 'list' | 'swimlane' = 'list';
     try {
       if (window.localStorage.getItem(`goals-view:${projectId}`) === 'swimlane') next = 'swimlane';
     } catch { /* 저장소 막힘 — 기본 보기로 */ }
     setViewState(next);
-  }, [projectId]);
+  }, [projectId, initialView]);
   const setView = useCallback((next: 'list' | 'swimlane') => {
     setViewState(next);
+    if (initialView) return; // 주소가 정한 진입의 전환은 이번 화면만(기억은 /goals의 몫)
     try { window.localStorage.setItem(`goals-view:${projectId}`, next); } catch { /* 저장 못 해도 이번 화면은 바뀐다 */ }
-  }, [projectId]);
+  }, [projectId, initialView]);
   const { addToast } = useToast();
   const [epics, setGoals] = useState<Goal[]>([]);
   const [selectedEpic, setSelectedEpic] = useState<Goal | null>(null);
@@ -1361,7 +1368,7 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
       {view === 'swimlane' ? (
         // story #4888 — 스윔레인 보기: 보드는 «한 곳에만» 그린다(아래 목록 보기는 데스크톱 · 모바일 두 배치를 CSS로 가려 둘 다 DOM에 있어 거기에 넣으면 보드가 두 번 서 두 번 불러온다).
         // 마스트헤드(h1) · 보기 전환은 목록 보기와 같은 것을 그대로 쓰고, 상단바 슬롯은 위의 것(목표 제목 + 새 목표) 하나만 — 보드는 embedded로 자기 슬롯을 안 그린다.
-        <div className="flex h-[calc(100svh-var(--shell-chrome-h))] min-h-0 flex-col overflow-hidden bg-muted/35" data-testid="goals-swimlane-view">
+        <div className="flex h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))] min-h-0 flex-col overflow-hidden bg-muted/35" data-testid="goals-swimlane-view">
           {masthead}
           {viewSwitch}
           <div className="focus-inset min-h-0 flex-1 overflow-y-auto">
@@ -1377,7 +1384,7 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
           story #4131, --shell-chrome-h가 TopBar 표시 여부+모바일 탭바를 CSS만으로 합성한
           SSOT). ActivationChecklistBanner 표시 시엔 그만큼 못 미침(페이지 스크롤로 보정,
           기능 파손 아님) — PO 라이브 확認 요청. */}
-      <div className="hidden h-[calc(100svh-var(--shell-chrome-h))] min-h-0 overflow-hidden lg:flex lg:items-stretch lg:gap-0">
+      <div className="hidden h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))] min-h-0 overflow-hidden lg:flex lg:items-stretch lg:gap-0">
         <div className={`transition-all duration-300 ${selectedEpic ? 'w-[380px] shrink-0 border-r border-border/80' : 'w-full'}`}>
           {listPanel}
         </div>
@@ -1398,7 +1405,7 @@ export function GoalsClient({ projectId, orgId }: GoalsClientProps) {
           분기 L893의 min-h-0와 동형·모바일 스크롤 불가 재현+근본 확인 후 정정).
           story #4130/#4131 — 같은 이유로 h-[calc(100svh-var(--shell-chrome-h))] 앵커 추가
           (위 desktop 분기와 동형). */}
-      <div className="flex h-[calc(100svh-var(--shell-chrome-h))] min-h-0 flex-col overflow-hidden lg:hidden">
+      <div className="flex h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))] min-h-0 flex-col overflow-hidden lg:hidden">
         {mobileView === 'list' ? (
           <div className="min-h-0 flex-1">{listPanel}</div>
         ) : (

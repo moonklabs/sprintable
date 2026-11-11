@@ -43,9 +43,9 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); vi.resetModules(); });
 
-async function mount(projectId = 'proj-1', m: typeof koMessages = koMessages) {
+async function mount(projectId = 'proj-1', m: typeof koMessages = koMessages, initialView?: 'list' | 'swimlane') {
   const { GoalsClient } = await import('./goals-client');
-  await act(async () => { root.render(wrap(<GoalsClient projectId={projectId} />, m)); });
+  await act(async () => { root.render(wrap(<GoalsClient projectId={projectId} initialView={initialView} />, m)); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 }
 const sw = () => container.querySelector('[data-testid="goals-view-switch"]') as HTMLElement | null;
@@ -141,5 +141,53 @@ describe('GoalsClient — 보기 전환 «목록 | 스윔레인»(story #4888)',
       expect(b.getAttribute('data-slot')).toBe('ds-button');
       expect(b.className.split(/\s+/)).toContain('pointer-coarse:min-h-11');
     }
+  });
+});
+
+// story #4888(UI-5 목표 화면 둘째 조각) — `/epics`(일감 탭줄의 «목표» 탭)는 같은 화면을 스윔레인으로 연다: 주소가 보기를 정한다(initialView).
+describe('GoalsClient — initialView(주소가 보기를 정함, story #4888 둘째 조각)', () => {
+  it('⭐initialView="swimlane"이면 저장된 보기가 목록이어도 스윔레인으로 열린다(주소가 저장값보다 먼저) · 보드는 한 번 · embedded · h1 하나', async () => {
+    store.set('goals-view:proj-1', 'list');
+    await mount('proj-1', koMessages, 'swimlane');
+    expect(container.querySelectorAll('[data-testid="swimlane-board-stub"]')).toHaveLength(1);
+    expect(boardCalls.every((c) => c.embedded === true)).toBe(true);
+    expect(viewBtn(koMessages.goals.viewSwimlane)?.getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
+  });
+
+  it('⭐initialView="list"면 저장된 보기가 스윔레인이어도 목록으로 열린다', async () => {
+    store.set('goals-view:proj-1', 'swimlane');
+    await mount('proj-1', koMessages, 'list');
+    expect(container.querySelector('[data-testid="swimlane-board-stub"]')).toBeNull();
+    expect(container.textContent).toContain('E-CANVAS');
+  });
+
+  it('⭐그 진입에서 누른 전환은 이번 화면만 바꾸고 저장하지 않는다 — /goals가 다음에 열릴 때 기본 보기를 바꾸지 않게(되돌리면 RED)', async () => {
+    await mount('proj-1', koMessages, 'swimlane');
+    await click(viewBtn(koMessages.goals.viewList)!);
+    expect(container.querySelector('[data-testid="swimlane-board-stub"]')).toBeNull(); // 이번 화면은 바뀐다
+    expect(container.textContent).toContain('E-CANVAS');
+    expect(store.has('goals-view:proj-1')).toBe(false); // 저장은 안 한다
+  });
+
+  it('⭐initialView가 있으면 같은 마운트에서 프로젝트가 바뀌어도 그 보기로 다시 선다(다른 프로젝트의 저장값이 목록이어도)', async () => {
+    store.set('goals-view:proj-2', 'list');
+    const { GoalsClient } = await import('./goals-client');
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-1" initialView="swimlane" />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-2" initialView="swimlane" />)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="swimlane-board-stub"]')).not.toBeNull();
+  });
+
+  // /epics는 일감 탭줄 아래에 서므로(WorkTabsFrame의 sticky 띠) 화면 높이 앵커가 그 띠 높이(--work-tabs-h)를 빼야 셸이 한 번 더 스크롤되지 않는다(스프린트 화면과 같은 관례).
+  it('⭐세 높이 앵커(스윔레인 · 데스크톱 · 모바일)가 모두 탭 띠 높이를 뺀다 — 빼지 않으면 /epics에서 띠 높이만큼 셸이 더 스크롤된다', async () => {
+    await mount('proj-1', koMessages, 'swimlane');
+    const swim = container.querySelector('[data-testid="goals-swimlane-view"]') as HTMLElement;
+    expect(swim.className).toContain('h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))]');
+    await click(viewBtn(koMessages.goals.viewList)!);
+    const anchored = [...container.querySelectorAll('div')].filter((d) => d.className.includes('100svh-var(--shell-chrome-h)'));
+    expect(anchored.length).toBeGreaterThanOrEqual(2); // 데스크톱 · 모바일 배치
+    for (const d of anchored) expect(d.className).toContain('var(--work-tabs-h,0px)');
   });
 });
