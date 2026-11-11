@@ -218,7 +218,7 @@ describe('결재 구역 — ds 부품 (story 4892)', () => {
   });
 
   it('감사 타임라인 머리는 ds SectionHeader: 접힘 aria-expanded · 누르면 이력이 열린다 · 건수가 괄호로', async () => {
-    await mount('confirmed', [gate({ status: 'approved', can_approve: false, resolver_id: 'member-2', resolved_at: new Date().toISOString() })], [{ id: 'r1', created_by: 'member-2', created_at: '2026-11-10T01:00:00Z' }]);
+    await mount('confirmed', [gate({ status: 'approved', can_approve: false, resolver_id: 'member-2', resolved_at: new Date().toISOString() })], [{ id: 'r1', created_by: 'member-2', created_at: new Date(Date.now() - 3_600_000).toISOString() }]);
     const header = container.querySelector('[data-slot="ds-section-header"]') as HTMLElement;
     expect(header).not.toBeNull();
     const toggle = header.querySelector('button[aria-expanded]') as HTMLButtonElement;
