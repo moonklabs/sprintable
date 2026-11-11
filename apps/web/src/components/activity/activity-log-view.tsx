@@ -6,9 +6,11 @@ import { Button } from '@/components/ui/button';   // (the row's overlay hit-box
 import { Button as DsButton } from '@/components/ds/button';
 import { Icon } from '@/components/ds/icon';
 import { useToast } from '@/components/ui/toast';
-import { EmptyState } from '@/components/ui/empty-state';
+import { EmptyState } from '@/components/ds/empty-state';
+import { Input } from '@/components/ds/input';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
+import { FilterSelect, type FilterOption } from './filter-select';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
 import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { deriveAuditProofState } from './derive-audit-proof-state';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -77,10 +79,6 @@ const DEFAULT_RANGE_PAST_DAYS = 7;
 
 // ─── Row skeleton ─────────────────────────────────────────────────────────────
 
-function RowSkeleton() {
-  return <div className="h-9 animate-pulse rounded-[6px] bg-muted" />;
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
 
 interface ActivityLogViewProps {
@@ -146,10 +144,12 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   );
 
   const fetchLogs = useCallback(
-    async (nextOffset = 0, onForbidden?: () => void) => {
+    async (nextOffset = 0, onForbidden?: () => void, firstPage = false) => {
       const res = await fetchWithAuth(`/api/activity-logs?${buildParams(nextOffset)}`);
       if (res.status === 403) { setForbidden(true); onForbidden?.(); return null; }
-      if (!res.ok) return null;
+      // story 4892 (found while rebuilding this screen — the team feed had the same defect, §5 #1): a FIRST page that the server refused (500 …) was shown as «활동 내역이 없어요», the empty state.
+      // It is an error state with a retry now (the same state a network error always had). «더 보기» keeps its own answer: null → the shared toast.
+      if (!res.ok) { if (firstPage) throw new Error(`activity-logs ${res.status}`); return null; }
       const json = await res.json() as { data?: ActivityLogResponse };
       return json.data ?? null;
     },
@@ -169,7 +169,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
       setLoadError(false);
       setOffset(0);
       try {
-        const result = await fetchLogs(0);
+        const result = await fetchLogs(0, undefined, true);
         if (cancelled) return;
         setItems(result?.items ?? []);
         setTotal(result?.total ?? 0);
@@ -212,7 +212,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
     setLoading(true);
     setOffset(0);
     try {
-      const result = await fetchLogs(0);
+      const result = await fetchLogs(0, undefined, true);
       setItems(result?.items ?? []);
       setTotal(result?.total ?? 0);
     } catch {
@@ -226,7 +226,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
 
   // [SID:4286 · 유나 규칙] 드롭다운 선택지는 타입 표식이 없어 라벨이 타입을 대신 · 같은 라벨이 둘 이상이면 행 꼬리(한 규칙).
   const actorLabelById = memberOptionLabels(members, tc);
-  const actorOptions: SelectOption[] = [
+  const actorOptions: FilterOption[] = [
     { value: ALL, label: t('filterAll') },
     ...members.map((m) => ({ value: m.id, label: actorLabelById.get(m.id) ?? '' })),
   ];
@@ -282,7 +282,7 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   const auditHeading = (g: { key: string; kind: 'today' | 'yesterday' | 'date' | 'undated' }) => (g.kind === 'today' ? t('dayToday') : g.kind === 'yesterday' ? t('dayYesterday') : g.kind === 'undated' ? t('dayUndated') : formatDayHeader(g.key, locale));
   const DETAIL_ID = 'audit-detail';
 
-  const entityTypeOptions: SelectOption[] = [
+  const entityTypeOptions: FilterOption[] = [
     { value: ALL, label: t('filterAll') },
     ...ENTITY_TYPES.map((et) => ({ value: et, label: et })),
   ];
@@ -298,43 +298,32 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
         <div className="flex-shrink-0 border-b border-border/80 px-6 py-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <div className="flex flex-wrap items-center gap-2">
-              <OperatorDropdownSelect
-                value={actorFilter}
-                onValueChange={setActorFilter}
-                options={actorOptions}
-                placeholder={t('filterActor')}
-                className="w-36"
-              />
-              <OperatorDropdownSelect
-                value={entityTypeFilter}
-                onValueChange={setEntityTypeFilter}
-                options={entityTypeOptions}
-                placeholder={t('filterEntityType')}
-                className="w-36"
-              />
-              <input
+              <FilterSelect value={actorFilter} onValueChange={setActorFilter} options={actorOptions} label={t('filterActor')} className="w-36" />
+              <FilterSelect value={entityTypeFilter} onValueChange={setEntityTypeFilter} options={entityTypeOptions} label={t('filterEntityType')} className="w-36" />
+              <Input
                 type="text"
                 value={actionFilter === ALL ? '' : actionFilter}
                 onChange={(e) => setActionFilter(e.target.value || ALL)}
                 placeholder={t('filterAction')}
+                aria-label={t('filterAction')}
                 maxLength={ACTION_FILTER_MAX_LENGTH}
-                className="rounded-md border border-input bg-background px-3 py-1.5 text-base lg:text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                className="w-44"
               />
             </div>
             <div className="flex items-center gap-2 sm:ml-auto">
-              <input
+              <Input
                 type="date"
                 value={fromDate}
                 onChange={(e) => setFromDate(e.target.value)}
-                className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-base lg:text-sm text-foreground outline-none sm:flex-none sm:px-3"
+                className="min-w-0 flex-1 px-2 sm:w-auto sm:flex-none sm:px-3"
                 aria-label={t('fromDate')}
               />
               <span className="text-xs text-muted-foreground">~</span>
-              <input
+              <Input
                 type="date"
                 value={toDate}
                 onChange={(e) => setToDate(e.target.value)}
-                className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-base lg:text-sm text-foreground outline-none sm:flex-none sm:px-3"
+                className="min-w-0 flex-1 px-2 sm:w-auto sm:flex-none sm:px-3"
                 aria-label={t('toDate')}
               />
             </div>
@@ -361,9 +350,9 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
               />
             </div>
           ) : loading ? (
-            <div className="space-y-1.5">
-              {Array.from({ length: 8 }).map((_, i) => <RowSkeleton key={i} />)}
-            </div>
+            <SkeletonGroup label={tc('loading')} className="space-y-1.5">
+              {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-9" />)}
+            </SkeletonGroup>
           ) : items.length === 0 ? (
             <EmptyState
               title={t('emptyTitle')}

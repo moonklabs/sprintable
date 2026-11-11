@@ -1,0 +1,206 @@
+// @vitest-environment jsdom
+//
+// story 4892 (UI-9 활동) — the activity screen's filter row, empty / error states and loading placeholders wear ds parts, behaviour unchanged: the filter dropdowns are ds NativeSelects named by their label (the old
+// custom dropdown named itself by its placeholder), the text / date fields are ds Inputs, the empty · forbidden · error states are ds EmptyStates, the loading placeholders are ds SkeletonGroups (one «불러오는 중» for the
+// group, bars decorative). The old ui/ empty-state · operator-dropdown-select · page-skeleton are gone from both views and the route's loading file.
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
+import { ActivityLogView } from './activity-log-view';
+import { TeamActivityView } from './team-activity-view';
+import { ActivityLoadingSkeleton } from './activity-loading-skeleton';
+import { TopBarProvider } from '@/components/nav/top-bar-context';
+import koMessages from '../../../messages/ko.json';
+import auditSource from './activity-log-view.tsx?raw';
+import teamSource from './team-activity-view.tsx?raw';
+import loadingRouteSource from '../../app/(authenticated)/activity/loading.tsx?raw';
+
+const { addToastMock } = vi.hoisted(() => ({ addToastMock: vi.fn() }));
+vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast: addToastMock }) }));
+vi.mock('@/lib/use-media-query', () => ({ useMediaQuery: () => false }));
+const fetchWithAuthMock = vi.fn();
+vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: Parameters<typeof fetchWithAuthMock>) => fetchWithAuthMock(...args) }));
+const dashCtx = vi.hoisted(() => ({ value: {} as { orgId?: string } }));
+vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => dashCtx.value }));
+import { resetOrgMembersCacheForTests } from '@/hooks/use-member-name-fallback';
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+const ko = koMessages as unknown as Record<string, Record<string, string>>;
+
+let container: HTMLDivElement;
+let root: Root;
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+  fetchWithAuthMock.mockReset();
+  addToastMock.mockClear();
+  resetOrgMembersCacheForTests();
+});
+afterEach(async () => {
+  await act(async () => { root.unmount(); });
+  container.remove();
+  vi.useRealTimers();
+});
+
+type Answer = { ok: boolean; status: number; json: () => Promise<unknown> };
+const answer = (ok: boolean, status: number, data?: unknown): Answer => ({ ok, status, json: async () => ({ data }) });
+const auditRow = (id: string) => ({ id, actor_id: 'm1', actor_name: '안나', actor_type: 'human', action: 'story.updated', entity_type: 'story', entity_title: `일감 ${id}`, context: null, created_at: new Date().toISOString() });
+const teamItem = (seq: number) => ({ activity_id: `a${seq}`, project_id: 'p1', actor_id: null, verb: 'updated', object_type: 'doc', object_id: `d${seq}`, occurred_at: new Date().toISOString(), source_event_ids: [], recipient_ids: [], recipient_types: [], payload: {}, activity_seq: seq });
+function api(audit: () => Answer | Promise<Answer>, team: () => Answer | Promise<Answer>) {
+  fetchWithAuthMock.mockImplementation(async (url: string) => {
+    if (url.includes('/api/members')) return answer(true, 200, [{ id: 'm1', name: '안나', type: 'human' }]);
+    if (url.includes('/api/activity-logs')) return audit();
+    if (url.includes('/api/activity-stream')) return team();
+    return answer(false, 404);
+  });
+}
+const auditOk = (items: unknown[]) => () => answer(true, 200, { items, total: items.length, limit: 30, offset: 0 });
+const teamOk = (items: unknown[]) => () => answer(true, 200, { items, next_after_seq: null, next_before_seq: null });
+async function mountView(which: 'audit' | 'team') {
+  await act(async () => {
+    root.render(
+      <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC">
+        <TopBarProvider>{which === 'audit' ? <ActivityLogView projectId="p1" /> : <TeamActivityView projectId="p1" />}</TopBarProvider>
+      </NextIntlClientProvider>,
+    );
+  });
+  for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+}
+const selects = () => [...container.querySelectorAll('[data-slot="ds-select"] select')] as HTMLSelectElement[];
+const change = async (el: HTMLSelectElement, value: string) => {
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(el, value); el.dispatchEvent(new Event('change', { bubbles: true })); });
+  for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+};
+const urlsOf = (part: string) => fetchWithAuthMock.mock.calls.map((c) => String(c[0])).filter((u) => u.includes(part));
+
+describe('감사 로그 필터 줄 — ds 부품 (4892)', () => {
+  it('⭐수행자 · 엔티티 유형은 ds NativeSelect(이름 = 보이는 라벨), 고르면 같은 요청 파라미터로 다시 불러온다', async () => {
+    api(auditOk([auditRow('a1')]), teamOk([]));
+    await mountView('audit');
+    expect(selects().map((s) => s.getAttribute('aria-label'))).toEqual([ko.activityLog!.filterActor, ko.activityLog!.filterEntityType]);
+    expect(selects()[1]!.querySelector('option[value="story"]')).not.toBeNull();
+    await change(selects()[1]!, 'story');
+    expect(urlsOf('/api/activity-logs').some((u) => u.includes('entity_type=story'))).toBe(true);
+    await change(selects()[0]!, 'm1');
+    expect(urlsOf('/api/activity-logs').some((u) => u.includes('actor_id=m1'))).toBe(true);
+  });
+
+  it('⭐액션 칸은 ds Input(이름 · 200자 상한), 입력은 300ms 뒤 action 파라미터로 간다 · 날짜 칸 둘은 ds Input(이름 유지)', async () => {
+    api(auditOk([auditRow('a1')]), teamOk([]));
+    await mountView('audit');
+    const action = container.querySelector(`input[aria-label="${ko.activityLog!.filterAction}"]`) as HTMLInputElement;
+    expect(action.getAttribute('data-slot')).toBe('ds-input');
+    expect(action.getAttribute('maxlength')).toBe('200');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(action, 'doc.deleted');
+      action.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(urlsOf('/api/activity-logs').some((u) => u.includes('action=doc.deleted'))).toBe(false);   // not before the debounce
+    await act(async () => { vi.advanceTimersByTime(350); });
+    for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(urlsOf('/api/activity-logs').some((u) => u.includes('action=doc.deleted'))).toBe(true);
+    for (const label of [ko.activityLog!.fromDate, ko.activityLog!.toDate]) {
+      const d = container.querySelector(`input[type="date"][aria-label="${label}"]`) as HTMLInputElement;
+      expect(d.getAttribute('data-slot')).toBe('ds-input');
+    }
+  });
+
+  it('⭐비었다 · 접근 불가 · 오류는 ds EmptyState(오류에는 ds «다시 시도»)', async () => {
+    api(auditOk([]), teamOk([]));
+    await mountView('audit');
+    let es = container.querySelector('[data-slot="ds-empty-state"]') as HTMLElement;
+    expect(es.textContent).toContain(ko.activityLog!.emptyTitle);
+    expect(es.querySelector('button[data-slot="ds-button"]')).not.toBeNull();
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    api(() => answer(false, 403), teamOk([]));
+    await mountView('audit');
+    es = container.querySelector('[data-slot="ds-empty-state"]') as HTMLElement;
+    expect(es.textContent).toContain(ko.activityLog!.forbiddenTitle);
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    api(() => answer(false, 500), teamOk([]));
+    await mountView('audit');
+    es = container.querySelector('[data-slot="ds-empty-state"]') as HTMLElement;
+    expect(es.textContent).toContain(ko.common!.error);
+    expect(es.textContent).not.toContain(ko.activityLog!.emptyTitle);                 // ⭐a refused first page is NOT «활동 내역이 없어요» (it was, before 4892)
+    expect([...es.querySelectorAll('button[data-slot="ds-button"]')].some((b) => b.textContent?.trim() === ko.common!.retry)).toBe(true);
+  });
+
+  it('⭐«다시 시도»는 다시 묻고, 이번엔 잘 오면 목록이 선다 · «더 보기» 실패는 지금처럼 토스트(오류 상태 아님)', async () => {
+    let calls = 0;
+    api(() => (++calls === 1 ? answer(false, 502) : answer(true, 200, { items: [auditRow('ok1')], total: 1, limit: 30, offset: 0 })), teamOk([]));
+    await mountView('audit');
+    const retry = [...container.querySelectorAll('[data-slot="ds-empty-state"] button')].find((b) => b.textContent?.trim() === ko.common!.retry) as HTMLButtonElement;
+    await act(async () => { retry.click(); });
+    for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-slot="ds-empty-state"]')).toBeNull();
+    expect(container.querySelector('button[data-audit-row]')).not.toBeNull();
+  });
+
+  it('⭐불러오는 동안은 ds SkeletonGroup(role=status · 이름 «불러오는 중» 한 번) + 장식 막대 8줄', async () => {
+    api(() => new Promise<Answer>(() => {}), teamOk([]));
+    await mountView('audit');
+    const group = container.querySelector('[data-slot="ds-skeleton-group"]') as HTMLElement;
+    expect(group.getAttribute('role')).toBe('status');
+    expect(group.getAttribute('aria-label')).toBe(ko.common!.loading);
+    const bars = [...group.querySelectorAll('[data-slot="ds-skeleton"]')];
+    expect(bars.length).toBe(8);
+    expect(bars.every((b) => b.getAttribute('aria-hidden') === 'true')).toBe(true);
+  });
+});
+
+describe('팀 활동 필터 줄 — ds 부품 (4892)', () => {
+  it('⭐행위자 · 대상 · 동작은 ds NativeSelect(이름 = 보이는 라벨), 대상을 고르면 object_type 파라미터가 간다', async () => {
+    api(auditOk([]), teamOk([teamItem(1)]));
+    await mountView('team');
+    expect(selects().map((s) => s.getAttribute('aria-label'))).toEqual([ko.teamActivity!.filterActor, ko.teamActivity!.filterObject, ko.teamActivity!.filterVerb]);
+    const opts = [...selects()[1]!.querySelectorAll('option')].map((o) => o.value);
+    expect(opts.length).toBeGreaterThan(1);
+    await change(selects()[1]!, opts[1]!);
+    expect(urlsOf('/api/activity-stream').some((u) => u.includes(`object_type=${opts[1]}`))).toBe(true);
+    for (const label of [ko.teamActivity!.fromDate, ko.teamActivity!.toDate]) {
+      expect(container.querySelector(`input[type="date"][aria-label="${label}"]`)!.getAttribute('data-slot')).toBe('ds-input');
+    }
+  });
+
+  it('⭐비었다 · 접근 불가는 ds EmptyState(비었다는 ds 받은편지 아이콘) · 불러오는 동안은 ds SkeletonGroup + 줄마다 동그라미 · 막대', async () => {
+    api(auditOk([]), teamOk([]));
+    await mountView('team');
+    let es = container.querySelector('[data-slot="ds-empty-state"]') as HTMLElement;
+    expect(es.textContent).toContain(ko.teamActivity!.emptyTitle);
+    expect(es.querySelector('[data-icon="inbox"]')).not.toBeNull();
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    api(auditOk([]), () => answer(false, 403));
+    await mountView('team');
+    es = container.querySelector('[data-slot="ds-empty-state"]') as HTMLElement;
+    expect(es.textContent).toContain(ko.teamActivity!.forbiddenTitle);
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    api(auditOk([]), () => new Promise<Answer>(() => {}));
+    await mountView('team');
+    const group = container.querySelector('[data-slot="ds-skeleton-group"]') as HTMLElement;
+    expect(group.getAttribute('aria-label')).toBe(ko.common!.loading);
+    expect(group.querySelectorAll('[data-variant="circle"]').length).toBe(3);
+    expect(group.querySelectorAll('[data-slot="ds-skeleton"]').length).toBe(9);   // 3 rows × (circle + 2 bars)
+  });
+});
+
+describe('활동 로딩 경로 — ds 스켈레톤 (4892)', () => {
+  it('⭐ActivityLoadingSkeleton: 한 묶음(이름 «불러오는 중») · 제목 막대 + 설명 막대 + 줄 다섯', async () => {
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="UTC"><ActivityLoadingSkeleton /></NextIntlClientProvider>); });
+    const group = container.querySelector('[data-slot="ds-skeleton-group"]') as HTMLElement;
+    expect(group.getAttribute('aria-label')).toBe(ko.common!.loading);
+    expect(group.querySelectorAll('[data-slot="ds-skeleton"]').length).toBe(2 + 5);
+  });
+
+  it('두 화면과 로딩 경로에 옛 ui/ 빈 상태 · 드롭다운 · 페이지 스켈레톤 · 날 입력칸이 없다', () => {
+    for (const src of [auditSource, teamSource]) {
+      expect(src).not.toMatch(/from '@\/components\/ui\/(empty-state|operator-dropdown-select|page-skeleton)'/);
+      expect(src).not.toMatch(/<input\b/);
+      expect(src).not.toMatch(/OperatorDropdownSelect/);
+    }
+    expect(loadingRouteSource).not.toMatch(/page-skeleton|PageSkeleton/);
+    expect(loadingRouteSource).toContain('ActivityLoadingSkeleton');
+  });
+});
