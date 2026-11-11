@@ -59,8 +59,8 @@ describe('스프린트 상세 패널 머리 — ds 부품(story #4888)', () => {
       const b = container.querySelector(`button[aria-label="${label}"]`) as HTMLButtonElement;
       expect(b, label).not.toBeNull();
       expect(b.getAttribute('data-slot')).toBe('ds-icon-button');
-      expect(b.className.split(/\s+/)).toContain('touch:min-h-11');
-      expect(b.className.split(/\s+/)).toContain('touch:min-w-11');
+      expect(b.className.split(/\s+/)).toContain('touch:min-h-ds-touch');
+      expect(b.className.split(/\s+/)).toContain('touch:min-w-ds-touch');
     }
   });
 
@@ -102,7 +102,7 @@ describe('스프린트 상세 패널 머리 — ds 부품(story #4888)', () => {
     const link = rowOf('수치 있는 스프린트').querySelector('a') as HTMLAnchorElement;
     expect(link).not.toBeNull();
     const cls = link.className.split(/\s+/);
-    expect(cls).toContain('touch:min-h-11');
+    expect(cls).toContain('touch:min-h-11'); // 호출부가 직접 쓴 링크 클래스(ds 부품이 아님)
     expect(cls).toContain('touch:inline-flex');
   });
 });

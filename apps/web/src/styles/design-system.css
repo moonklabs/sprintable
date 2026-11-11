@@ -69,6 +69,36 @@
 }
 
 /*
+ * 밀도 · 그림자 · 움직임 토큰 (UI-3 4886 AC1 · PO 11-11). 값은 부품 안에 흩어져 있던 그대로다(화면 변화 0) — 이름만 붙였다.
+ * 밀도 = 누르는 «높이»(Tailwind `--spacing-*` 이름이라 `h-ds-control` · `min-h-ds-touch` · `size-ds-control-sm`처럼 쓴다):
+ *   control-sm 28(작은 단추) · compact 32(탭 · 메뉴 항목 · 달력 칸) · control 36(큰 단추 · 입력칸) · touch 44(폰 바닥) · control-xl 48(큰 아이콘 단추) · row 56(목록 줄).
+ * 그림자 = popup(떠 있는 작은 상자: 토스트 · 메뉴 · 달력 팝업) · overlay(바깥을 가리는 큰 상자: 대화창 · 패널).
+ * 움직임 = 100ms(`--ds-duration-fast`) · 움직임 줄이기면 0(`--ds-duration-instant`) · 불러오는 중 숨쉬기 2초(`--ds-duration-pulse`, `animate-ds-pulse`).
+ */
+@theme {
+  --spacing-ds-control-sm: 1.75rem;
+  --spacing-ds-compact: 2rem;
+  --spacing-ds-control: 2.25rem;
+  --spacing-ds-touch: 2.75rem;
+  --spacing-ds-control-xl: 3rem;
+  --spacing-ds-row: 3.5rem;
+  --shadow-ds-popup: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-ds-overlay: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  --animate-ds-pulse: ds-pulse var(--ds-duration-pulse) cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  @keyframes ds-pulse {
+    50% {
+      opacity: 0.5;
+    }
+  }
+}
+
+:root {
+  --ds-duration-fast: 100ms;
+  --ds-duration-instant: 0ms;
+  --ds-duration-pulse: 2s;
+}
+
+/*
  * `touch:` 변형 — «손가락으로 누르는 기기»의 44 바닥(UI-3 4886 · PO 결정 11-11). `pointer-coarse:` 하나는 안드로이드 에뮬 웹뷰(pointer fine · hover none)와
  * 스타일러스 소스가 붙은 폰(S펜 등)에서 44가 통째로 빠졌다 → `(pointer: coarse)` 또는 `(hover: none)`이면 건다.
  * 데스크톱 마우스(pointer fine · hover)는 그대로 36. ds 부품의 44는 `pointer-coarse:`가 아니라 이 변형만 쓴다(touch-variant.test.tsx가 컴파일된 CSS로 지킨다).

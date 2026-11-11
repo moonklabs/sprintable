@@ -119,7 +119,7 @@ describe('ds TabNav', () => {
     const nav = container.querySelector('nav')!;
     expect(nav.className).toContain('overflow-x-auto');
     expect(nav.parentElement!.className).toContain('border-b');
-    expect(links()[0]!.className).toContain('touch:min-h-11');
+    expect(links()[0]!.className).toContain('touch:min-h-ds-touch');
     expect(links()[0]!.className).toContain('focus-visible:ring-inset');
     expect(links()[0]!.className).toMatch(/(^|\s)-mb-px(\s|$)/);
   });

@@ -47,7 +47,7 @@ export function ToastCard({ kind = 'info', title, body, actionLabel, onAction, o
       aria-atomic="true"
       data-slot="ds-toast"
       data-kind={kind}
-      className={cn('flex w-full max-w-90 items-start gap-2 rounded-ds-panel border p-3 text-ds-ink shadow-md', spec.box, className)}
+      className={cn('flex w-full max-w-90 items-start gap-2 rounded-ds-panel border p-3 text-ds-ink shadow-ds-popup', spec.box, className)}
     >
       <Icon name={spec.icon} className={cn('mt-0.5 shrink-0', spec.iconColor)} />
       <div className="min-w-0 flex-1">

@@ -25,8 +25,8 @@ describe('ds Skeleton', () => {
   it('⭐막대는 surface-high이고 숨쉬기는 motion-safe로만(움직임 줄이기면 멈춘다)', async () => {
     await render(<Skeleton className="h-8 w-24" />);
     expect(sk().className).toMatch(/(^|\s)bg-ds-surface-high(\s|$)/);
-    expect(sk().className).toContain('motion-safe:animate-pulse');
-    expect(sk().className).not.toMatch(/(^|\s)animate-pulse(\s|$)/);
+    expect(sk().className).toContain('motion-safe:animate-ds-pulse');
+    expect(sk().className).not.toMatch(/(^|\s)animate-ds-pulse(\s|$)/);
   });
 
   it('⭐막대는 장식이다(aria-hidden) — 읽히는 말은 묶음이 한 번만', async () => {

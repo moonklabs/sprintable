@@ -27,10 +27,10 @@ describe('ds IconButton', () => {
 
   it('크기 28 / 36 · 폰 누름 영역 44', async () => {
     await act(async () => { root.render(<IconButton label="더보기" icon="more_horiz" />); });
-    expect(container.querySelector('button')!.className).toContain('size-7');
-    expect(container.querySelector('button')!.className).toContain('touch:min-h-11');
+    expect(container.querySelector('button')!.className).toContain('size-ds-control-sm');
+    expect(container.querySelector('button')!.className).toContain('touch:min-h-ds-touch');
     await act(async () => { root.render(<IconButton label="더보기" icon="more_horiz" size="lg" />); });
-    expect(container.querySelector('button')!.className).toContain('size-9');
+    expect(container.querySelector('button')!.className).toContain('size-ds-control');
   });
 
   it('⭐주 모양 primary: action 면 · 글 on-action · 비활성은 점선 윤곽 · 이름(label)은 그대로 필수', async () => {
@@ -45,8 +45,8 @@ describe('ds IconButton', () => {
   it('⭐크기 xl 48(떠 있는 단추) · 폰 누름 44 이상 · 기본 변형은 quiet(면 없음)', async () => {
     await act(async () => { root.render(<IconButton label="새 대화" icon="add" size="xl" />); });
     const b = container.querySelector('button')!;
-    expect(b.className).toContain('size-12');
-    expect(b.className).toContain('touch:min-h-11');
+    expect(b.className).toContain('size-ds-control-xl');
+    expect(b.className).toContain('touch:min-h-ds-touch');
     expect(b.className).not.toMatch(/(^|\s)bg-ds-action(\s|$)/);
     expect(b.querySelector('svg')!.getAttribute('width')).toBe('22');
   });

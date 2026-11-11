@@ -37,7 +37,7 @@ describe('SettingsNav — drawn with the ds parts (story 4891)', () => {
   it('⭐every section is a ListRow (min height 56) and the tab rows are role=tab buttons, one per section', async () => {
     await draw('profile');
     expect(rows().length).toBe(settingsNavGroups(gates).flatMap((x) => x.items).length);
-    for (const r of rows()) expect(r.className).toContain('min-h-14');
+    for (const r of rows()) expect(r.className).toContain('min-h-ds-row');
     const tabs = Array.from(container.querySelectorAll<HTMLElement>('[role="tab"]'));
     expect(tabs.map((t) => t.getAttribute('data-settings-tab'))).toEqual(settingsNavGroups(gates).flatMap((x) => x.items).filter((i) => i.kind === 'tab').map((i) => i.id));
   });

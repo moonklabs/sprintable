@@ -47,7 +47,7 @@ describe('ds ListRow', () => {
     await act(async () => { root.render(<ListRow asChild needsHand needsHandLabel="내 손이 필요"><a href="https://example.com/story/1">줄 전체가 링크</a></ListRow>); });
     const a = container.querySelector('a')!;
     expect(a.getAttribute('href')).toBe('https://example.com/story/1');
-    expect(a.className).toContain('min-h-14');
+    expect(a.className).toContain('min-h-ds-row');
     expect(a.getAttribute('data-needs-hand')).toBe('true');
   });
 
@@ -83,20 +83,20 @@ describe('ds ListRow', () => {
 
   it('⭐density=compact: 높이 36 · 폰 누름 44 이상 · 기본은 56', async () => {
     await act(async () => { root.render(<ListRow title="줄" />); });
-    expect(row().className).toContain('min-h-14');
+    expect(row().className).toContain('min-h-ds-row');
     expect(row().getAttribute('data-density')).toBe('default');
-    expect(row().className).not.toContain('min-h-9');
+    expect(row().className).not.toContain('min-h-ds-control');
     await act(async () => { root.render(<ListRow title="줄" density="compact" />); });
-    expect(row().className).toContain('min-h-9');
-    expect(row().className).toContain('touch:min-h-11');
-    expect(row().className).not.toContain('min-h-14');
+    expect(row().className).toContain('min-h-ds-control');
+    expect(row().className).toContain('touch:min-h-ds-touch');
+    expect(row().className).not.toContain('min-h-ds-row');
     expect(row().getAttribute('data-density')).toBe('compact');
   });
 
   it('compact도 asChild · 손 필요 · 선택과 함께 쓰인다', async () => {
     await act(async () => { root.render(<ListRow asChild density="compact" selected><a href="https://example.com/x">줄</a></ListRow>); });
     const a = container.querySelector('a')!;
-    expect(a.className).toContain('min-h-9');
+    expect(a.className).toContain('min-h-ds-control');
     expect(a.getAttribute('aria-current')).toBe('true');
   });
 });

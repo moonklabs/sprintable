@@ -32,9 +32,9 @@ describe('ds TreeRow', () => {
     expect(ctl().querySelector('[data-icon="description"]')).not.toBeNull();
     expect(ctl().querySelector('[data-testid="st"]')).not.toBeNull();
     expect(ctl().textContent).toBe('문서');
-    expect(has(ctl(), 'min-h-9')).toBe(true);
+    expect(has(ctl(), 'min-h-ds-control')).toBe(true);
     // 폰 누름 영역 44는 ds Button이 쥔 값(touch:min-h-11)을 그대로 — 줄 모양이 지우지 않는다.
-    expect(has(ctl(), 'touch:min-h-11')).toBe(true);
+    expect(has(ctl(), 'touch:min-h-ds-touch')).toBe(true);
     expect(has(ctl(), 'min-h-0')).toBe(false);
     expect(has(ctl(), 'w-full')).toBe(true);
   });

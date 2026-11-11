@@ -24,8 +24,8 @@ export function MenuContent({ align = 'start', alignOffset = 0, side = 'bottom',
         <MenuPrimitive.Popup
           data-slot="ds-menu-content"
           className={cn(
-            'z-50 max-h-(--available-height) min-w-40 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-ds-panel border border-ds-line-control bg-ds-surface-raised p-1 text-ds-body text-ds-ink shadow-xl outline-none',
-            'duration-100 motion-reduce:duration-0 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0',
+            'z-50 max-h-(--available-height) min-w-40 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-ds-panel border border-ds-line-control bg-ds-surface-raised p-1 text-ds-body text-ds-ink shadow-ds-overlay outline-none',
+            'duration-(--ds-duration-fast) motion-reduce:duration-(--ds-duration-instant) data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0',
             className,
           )}
           {...props}
@@ -53,7 +53,7 @@ export function MenuItem({ className, children, icon, shortcut, variant = 'defau
       data-slot="ds-menu-item"
       data-variant={variant}
       className={cn(
-        'relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-ds-control px-2 text-ds-body outline-none touch:min-h-11',
+        'relative flex min-h-ds-compact cursor-default select-none items-center gap-2 rounded-ds-control px-2 text-ds-body outline-none touch:min-h-ds-touch',
         'data-highlighted:bg-ds-surface-high focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ds-action',
         'data-disabled:pointer-events-none data-disabled:text-ds-ink-3',
         variant === 'danger' ? 'text-ds-failed' : 'text-ds-ink',

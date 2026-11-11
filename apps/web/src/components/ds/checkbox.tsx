@@ -20,7 +20,7 @@ export function Checkbox({ label, className, onKeyDown, ...props }: CheckboxProp
   // Base UI 뿌리는 span role=checkbox라 감싼 <label>이 이름을 주지 못한다(axe aria-toggle-field-name) — 이름 글에 id를 달아 뿌리가 aria-labelledby로 가리킨다.
   const labelId = useId();
   return (
-    <label data-slot="ds-checkbox-field" className={cn('inline-flex min-h-7 cursor-pointer items-center gap-2 text-ds-body text-ds-ink touch:min-h-11 has-data-disabled:cursor-not-allowed has-data-disabled:text-ds-ink-3', className)}>
+    <label data-slot="ds-checkbox-field" className={cn('inline-flex min-h-ds-control-sm cursor-pointer items-center gap-2 text-ds-body text-ds-ink touch:min-h-ds-touch has-data-disabled:cursor-not-allowed has-data-disabled:text-ds-ink-3', className)}>
       <CheckboxPrimitive.Root
         data-slot="ds-checkbox"
         aria-labelledby={labelId}

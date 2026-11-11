@@ -59,7 +59,7 @@ export function DatePicker({ value, onChange, today, min, max, locale, weekStart
         disabled={disabled}
         aria-invalid={invalid || undefined}
         className={cn(
-          'flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-ds-control border border-ds-line-control bg-ds-surface-sunk px-3 text-left text-base text-ds-ink outline-none transition-colors duration-100 motion-reduce:transition-none lg:text-ds-body touch:h-11',
+          'flex h-ds-control w-full min-w-0 items-center justify-between gap-2 rounded-ds-control border border-ds-line-control bg-ds-surface-sunk px-3 text-left text-base text-ds-ink outline-none transition-colors duration-(--ds-duration-fast) motion-reduce:transition-none lg:text-ds-body touch:h-ds-touch',
           'focus-visible:border-ds-action focus-visible:ring-2 focus-visible:ring-ds-action',
           'disabled:pointer-events-none disabled:cursor-not-allowed disabled:border-dashed disabled:bg-transparent disabled:text-ds-ink-3',
           'aria-invalid:border-ds-failed aria-invalid:focus-visible:ring-ds-failed',
@@ -79,7 +79,7 @@ export function DatePicker({ value, onChange, today, min, max, locale, weekStart
             initialFocus={() => popupRef.current?.querySelector<HTMLElement>('button[data-date][tabindex="0"]') ?? true}
             data-slot="ds-date-picker-popup"
             aria-label={labels.date}
-            className="z-50 max-w-[calc(100vw-1rem)] origin-(--transform-origin) rounded-ds-panel border border-ds-line-control bg-ds-surface-raised p-2 text-ds-ink shadow-md outline-none duration-100 motion-reduce:duration-0 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
+            className="z-50 max-w-[calc(100vw-1rem)] origin-(--transform-origin) rounded-ds-panel border border-ds-line-control bg-ds-surface-raised p-2 text-ds-ink shadow-ds-popup outline-none duration-(--ds-duration-fast) motion-reduce:duration-(--ds-duration-instant) data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
           >
             <Calendar
               value={value}

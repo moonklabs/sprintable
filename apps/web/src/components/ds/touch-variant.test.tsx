@@ -5,7 +5,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { act, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { buildProbe, variantBlock, winning, type Env, type Probe } from '@/lib/compiled-css-probe.test-helper';
+import { buildProbe, spacingTokenPx, variantBlock, winning, type Env, type Probe } from '@/lib/compiled-css-probe.test-helper';
 import { Button } from './button';
 import { IconButton } from './icon-button';
 import { Input } from './input';
@@ -16,6 +16,8 @@ import { NativeSelect } from './select';
 const SIZE_PROPS = ['height', 'min-height', 'width', 'min-width'];
 const SPACING_PX = 4; // @theme { --spacing: 0.25rem }
 function px(value: string): number {
+  const tok = /^var\(--spacing-(ds-[a-z-]+)\)$/.exec(value);
+  if (tok) return spacingTokenPx(tok[1]!);
   const m = /^calc\(var\(--spacing\)\s*\*\s*(\d+(?:\.\d+)?)\)$/.exec(value);
   if (!m) throw new Error(`시험이 모르는 값: ${value}`);
   return Number(m[1]) * SPACING_PX;

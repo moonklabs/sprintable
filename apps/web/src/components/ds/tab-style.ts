@@ -5,10 +5,10 @@
  * 켜짐을 색만으로 말하지 않는다 — 밑줄(모양) + 굵기가 같이 바뀐다(꺼짐 400 → 켜짐 600).
  */
 export const TAB_BASE =
-  'relative -mb-px inline-flex min-h-8 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap border-b-2 border-transparent px-1 text-ds-card-title font-normal text-ds-ink-3 outline-none ' +
-  'transition-colors duration-100 motion-reduce:transition-none hover:text-ds-ink ' +
+  'relative -mb-px inline-flex min-h-ds-compact shrink-0 items-center justify-center gap-1.5 whitespace-nowrap border-b-2 border-transparent px-1 text-ds-card-title font-normal text-ds-ink-3 outline-none ' +
+  'transition-colors duration-(--ds-duration-fast) motion-reduce:transition-none hover:text-ds-ink ' +
   'focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ds-action ' +
-  'touch:min-h-11 touch:border-b-3 disabled:pointer-events-none disabled:text-ds-ink-3 aria-disabled:pointer-events-none';
+  'touch:min-h-ds-touch touch:border-b-3 disabled:pointer-events-none disabled:text-ds-ink-3 aria-disabled:pointer-events-none';
 
 export const TAB_ACTIVE = 'border-ds-action font-semibold text-ds-action-text hover:text-ds-action-text';
 

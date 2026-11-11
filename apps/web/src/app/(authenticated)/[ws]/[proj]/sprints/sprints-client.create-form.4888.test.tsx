@@ -72,7 +72,7 @@ describe('스프린트 만들기 폼 · 열기 단추 · 삭제 확인 — ds �
     expect(opener.getAttribute('data-slot')).toBe('ds-button');
     expect(opener.getAttribute('aria-label')).toBe(S.newSprint);
     expect(cls(opener)).toContain('bg-ds-action');
-    expect(cls(opener)).toContain('touch:min-h-11');
+    expect(cls(opener)).toContain('touch:min-h-ds-touch');
   });
 
   it('⭐빈 화면 «첫 스프린트 시작하기» CTA가 ds Button(primary)이고 누르면 폼이 열린다', async () => {
@@ -93,7 +93,8 @@ describe('스프린트 만들기 폼 · 열기 단추 · 삭제 확인 — ds �
     expect(inputs).toHaveLength(4);
     for (const i of inputs) {
       expect(i.getAttribute('data-slot')).toBe('ds-input');
-      expect(cls(i)).toContain('touch:h-11');
+      // 호출부가 따로 얹은 `touch:h-11`이 있으면 병합에서 ds의 `touch:h-ds-touch`를 대신한다(둘 다 44) — 어느 쪽이든 폰 44가 남아야 한다.
+      expect(['touch:h-ds-touch', 'touch:h-11'].some((c) => cls(i).includes(c))).toBe(true);
       expect(i.labels?.[0]?.textContent, i.placeholder).toBeTruthy();   // 예전엔 label이 칸에 안 이어져 이름이 없었다
     }
     const names = inputs.map((i) => i.labels![0]!.textContent ?? '');
@@ -115,7 +116,7 @@ describe('스프린트 만들기 폼 · 열기 단추 · 삭제 확인 — ds �
     await openCreate();
     const x = dialog().querySelector(`button[aria-label="${TC.close}"]`) as HTMLButtonElement;
     expect(x.getAttribute('data-slot')).toBe('ds-icon-button');
-    expect(cls(x)).toContain('touch:min-h-11');
+    expect(cls(x)).toContain('touch:min-h-ds-touch');
     await act(async () => { x.click(); });
     await flush();
     expect(dialog()).toBeNull();

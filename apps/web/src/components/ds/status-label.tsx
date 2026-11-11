@@ -39,7 +39,7 @@ export function StatusLabel({ status, label, className, ...props }: StatusLabelP
         <span
           aria-hidden="true"
           data-mark={spec.mark}
-          className={cn('size-2 shrink-0 rounded-full', spec.mark === 'ring' ? cn('border bg-transparent', spec.color) : spec.color, spec.mark === 'pulse' && 'motion-safe:animate-pulse')}
+          className={cn('size-2 shrink-0 rounded-full', spec.mark === 'ring' ? cn('border bg-transparent', spec.color) : spec.color, spec.mark === 'pulse' && 'motion-safe:animate-ds-pulse')}
         />
       )}
       <span>{label}</span>

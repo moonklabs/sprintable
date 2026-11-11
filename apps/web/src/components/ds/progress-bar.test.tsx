@@ -106,7 +106,7 @@ describe('ds ProgressBar', () => {
     expect(has(bar(), 'h-1')).toBe(true);
     expect(has(bar(), 'bg-ds-surface-highest')).toBe(true);
     expect(has(fill(), 'transition-[width]')).toBe(true);
-    expect(has(fill(), 'duration-100')).toBe(true);
+    expect(has(fill(), 'duration-(--ds-duration-fast)')).toBe(true);
     expect(has(fill(), 'motion-reduce:transition-none')).toBe(true);
   });
 

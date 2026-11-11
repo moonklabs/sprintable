@@ -55,7 +55,7 @@ export function ProgressBar({ value, max, tone = 'progress', valueText, ariaValu
       >
         <div
           data-slot="ds-progress-fill"
-          className={cn('h-full rounded-full transition-[width] duration-100 motion-reduce:transition-none', complete && tone === 'progress' ? 'bg-ds-done' : 'bg-ds-action')}
+          className={cn('h-full rounded-full transition-[width] duration-(--ds-duration-fast) motion-reduce:transition-none', complete && tone === 'progress' ? 'bg-ds-done' : 'bg-ds-action')}
           style={{ width: `${ratio * 100}%` }}
         />
       </div>

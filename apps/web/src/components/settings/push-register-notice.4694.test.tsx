@@ -90,9 +90,9 @@ describe('PushRegisterNotice — drawn only when the phone says it failed', () =
     expect(button()!.className).toContain('border-ds-line-control');
     expect(button()!.className).not.toContain('bg-ds-action');
     // the 44px touch target (the line's only action; shown only in the phone app): the ds Button carries the touch floor (touch:) — the big size, not the 28px one
-    expect(button()!.className).toContain('touch:min-h-11');
-    expect(button()!.className).toContain('h-9');
-    expect(button()!.className).not.toContain('h-7');
+    expect(button()!.className).toContain('touch:min-h-ds-touch');
+    expect(button()!.className).toContain('h-ds-control');
+    expect(button()!.className).not.toContain('h-ds-control-sm');
     expect(button()!.className).not.toContain('bg-primary');
     expect(container.querySelector('p')!.className).toContain('text-ds-ink');
     expect(button()!.className).not.toContain('bg-ds-failed');

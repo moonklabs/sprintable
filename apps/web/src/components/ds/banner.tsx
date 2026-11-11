@@ -42,7 +42,7 @@ export function Banner({ tone = 'info', children, action, onDismiss, className }
       role={spec.role}
       data-slot="ds-banner"
       data-tone={tone}
-      className={cn('flex min-h-9 w-full items-center gap-2 border px-3 py-1.5 text-ds-body text-ds-ink', spec.box, className)}
+      className={cn('flex min-h-ds-control w-full items-center gap-2 border px-3 py-1.5 text-ds-body text-ds-ink', spec.box, className)}
     >
       <Icon name={spec.icon} className={cn('shrink-0', spec.iconColor)} />
       <div className="min-w-0 flex-1 break-keep [overflow-wrap:anywhere]">{children}</div>

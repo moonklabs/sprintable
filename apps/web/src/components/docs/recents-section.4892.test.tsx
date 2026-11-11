@@ -57,8 +57,8 @@ describe('RecentsSection — ds SectionHeader + ListRow (4892)', () => {
     for (const r of rows()) {
       expect(r.getAttribute('data-density')).toBe('compact');
       const cls = r.className.split(/\s+/);
-      expect(cls).toContain('min-h-9');
-      expect(cls).not.toContain('min-h-14');
+      expect(cls).toContain('min-h-ds-control');
+      expect(cls).not.toContain('min-h-ds-row');
     }
   });
 
