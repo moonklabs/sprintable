@@ -123,8 +123,8 @@ export function StorageAssetRow({ asset, selected, folderLabel, onSelect, onDele
             // story #4277(유나 판정) — 행 버튼과 같은 이름이면 화면 읽기가 두 번 읽는다 → «{name} 작업».
             aria-label={t('rowActionsLabel', { name: asset.name })}
             // story #4277(유나 판정) — 기준은 폭이 아니라 «호버가 되는가»: 호버 없는 기기(폰 · 1024 이상 태블릿 가로 포함)는 늘 보이고,
-            // 마우스(pointer-fine)만 예전처럼 hover · 초점 · 열림일 때 보인다.
-            className="grid size-[26px] place-items-center rounded-sm text-muted-foreground opacity-100 transition-opacity hover:bg-muted pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 pointer-fine:focus-visible:opacity-100 data-[popup-open]:opacity-100"
+            // 마우스(mouse: = 정말 올림이 되는 곳)만 예전처럼 hover · 초점 · 열림일 때 보인다.
+            className="grid size-[26px] place-items-center rounded-sm text-muted-foreground opacity-100 transition-opacity hover:bg-muted mouse:opacity-0 mouse:group-hover:opacity-100 mouse:focus-visible:opacity-100 data-[popup-open]:opacity-100"
           >
             <MoreVertical className="size-4" />
           </DropdownMenuTrigger>

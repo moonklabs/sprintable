@@ -2,13 +2,14 @@
  * story #4345 — 행 호버로만 드러나던 조작 요소(문서 트리 «⋮» · 끌기 손잡이 · 삭제 ✕ 등)가 터치 기기에서는 늘 투명했고,
  * 키보드 초점이 가도 안 보였다(`hidden`이면 탭 순서에서 아예 빠졌다). 그 부류의 한 모양.
  * 기준은 폭이 아니라 «호버가 되는가»다(#4277 storage-asset-row 선례):
- * - 호버 없는 기기(터치 폰 · 태블릿 — 1024 이상 가로 포함)는 늘 보인다.
- * - 마우스(`pointer-fine`)만 숨겼다가 행 호버(`group-hover`) · 행 안 초점(`group-focus-within`) · 제 초점(`focus-within` — 자기 자신 포함)에서 보인다.
+ * - 호버 없는 기기(터치 폰 · 태블릿 — 1024 이상 가로 포함)와, 마우스로 읽혀도 올릴 마우스가 없는 곳(안드로이드 에뮬 웹뷰 · 스타일러스 폰 = pointer fine + hover none, 앱 셸 안)은 늘 보인다.
+ *   `pointer-fine:` 하나로 숨기면 그 둘에서 숨은 채 영영 안 드러난다(UI-3 4886 PO 11-11) — 숨김은 이 변형으로만.
+ * - «정말 마우스 올림이 되는 곳»(`mouse:` 변형 = pointer fine 그리고 hover 가능, 앱 셸 밖 — design-system.css)만 숨겼다가 행 호버(`group-hover`) · 행 안 초점(`group-focus-within`) · 제 초점(`focus-within` — 자기 자신 포함)에서 보인다.
  * - `hidden`(display:none)으로 숨기지 않는다 — 탭 순서에서 빠져 키보드로 못 닿는다.
  * 행(부모)에 `group`이 있어야 한다. 부류 가드: `hover-reveal.guard.test.ts`.
  */
 export const HOVER_REVEAL =
-  'opacity-100 pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 pointer-fine:group-focus-within:opacity-100 pointer-fine:focus-within:opacity-100';
+  'opacity-100 mouse:opacity-0 mouse:group-hover:opacity-100 mouse:group-focus-within:opacity-100 mouse:focus-within:opacity-100';
 
 /** 초점 링 — 디자인 Button과 같은 토큰(citron). Button이 아닌 raw 조작 요소에 단다. */
 export const HOVER_REVEAL_FOCUS_RING = 'outline-none focus-visible:ring-3 focus-visible:ring-proof-citron';

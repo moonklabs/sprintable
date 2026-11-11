@@ -51,8 +51,8 @@ describe('앱 셸 표지(data-sprintable-shell)', () => {
   it('속성 이름은 앱 쪽이 정한 data-sprintable-shell 그대로 · CSS 변형도 같은 이름을 읽는다', () => {
     expect(SHELL_ATTRIBUTE).toBe('data-sprintable-shell');
     const css = readFileSync(resolve(__dirname, '../styles/design-system.css'), 'utf-8');
-    expect(css).toContain('[data-sprintable-shell="ios"]');
-    expect(css).toContain('[data-sprintable-shell="android"]');
+    expect(css).toContain(':root[data-sprintable-shell="ios"]');
+    expect(css).toContain(':root[data-sprintable-shell="android"]');
     expect(css).not.toContain('[data-sprintable-shell="macos"]');
   });
 
