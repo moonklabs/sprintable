@@ -145,7 +145,7 @@ describe('GoalsClient — 목표 first-touch 정체성', () => {
     expect(tokens).not.toContain('hidden');
     expect(tokens).not.toContain('group-hover:flex');
     expect(del.getAttribute('data-slot')).toBe('ds-icon-button');
-    expect(tokens).toEqual(expect.arrayContaining(['touch:min-h-11', 'touch:min-w-11']));
+    expect(tokens).toEqual(expect.arrayContaining(['touch:min-h-ds-touch', 'touch:min-w-ds-touch']));
     expect(del.tabIndex).toBe(0);
     expect(del.closest('.group')).not.toBeNull();
   });

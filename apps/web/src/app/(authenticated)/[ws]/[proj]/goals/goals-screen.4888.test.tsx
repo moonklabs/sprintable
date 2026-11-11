@@ -358,16 +358,16 @@ describe('목표 화면 — 좁은 화면(폰): 행을 누르면 목표 자신�
     expect(pushMock).not.toHaveBeenCalled();
   });
 
-  it('⭐폰 누름 영역: 머리의 보기 · 필터 단추와 행 제목 · 삭제가 ds 부품이라 touch:min-h-11', async () => {
+  it('⭐폰 누름 영역: 머리의 보기 · 필터 단추와 행 제목 · 삭제가 ds 부품이라 touch:min-h-ds-touch(44 — 이름 있는 토큰)', async () => {
     stubMedia(false); stubFetch(); await mount();
     const ctl = qa('[data-testid="goals-head-controls"] button');
     expect(ctl.length).toBe(7); // 목록 · 스윔레인 + 전체 · 초안 · 활성 · 완료 · 보관
-    for (const b of ctl) expect(b.className, b.textContent ?? '').toContain('touch:min-h-11');
-    expect(titleBtn('g1').className).toContain('touch:min-h-11');
+    for (const b of ctl) expect(b.className, b.textContent ?? '').toContain('touch:min-h-ds-touch');
+    expect(titleBtn('g1').className).toContain('touch:min-h-ds-touch');
     const del = rowOf('g1').querySelector<HTMLElement>('button[aria-label="목표 삭제"]')!;
     expect(del.getAttribute('data-slot')).toBe('ds-icon-button');
-    expect(del.className).toContain('touch:min-h-11');
-    expect(del.className).toContain('touch:min-w-11');
+    expect(del.className).toContain('touch:min-h-ds-touch');
+    expect(del.className).toContain('touch:min-w-ds-touch');
   });
 });
 
