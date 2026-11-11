@@ -18,7 +18,6 @@ import { useDocDelete } from '@/components/docs/use-doc-delete';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '@/components/ds/menu';
 import { DocStatusChip } from '@/components/docs/doc-status-chip';
-import { useMediaQuery } from '@/lib/use-media-query';
 import { useDocsLayout } from '../../docs-context';
 import { docUrl, docsListUrl } from '@/components/docs/lib/doc-project-url';
 import { EntityBacklinksSection } from '@/components/shared/entity-backlinks-section';
@@ -66,8 +65,6 @@ export default function DocViewPage() {
   const locale = useLocale();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const { wsSlug, projSlug, projectId, tree, setTree } = useDocsLayout();
-  // story 4892 (UI-9 문서 상세 열) — lg(1024+)부터 오른쪽 열이 «상태 · 목차 · 이력» 패널(시안의 스레드 열처럼 본문 옆 상시 열), 그 아래 폭에서는 상태 머리가 본문 맨 위에 선다. 한 자리에 하나만 그린다.
-  const isLg = useMediaQuery('(min-width: 1024px)');
 
   const [doc, setDoc] = useState<DocState>(null);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
@@ -202,16 +199,16 @@ export default function DocViewPage() {
       </div>
 
       <div ref={scrollRootRef} className="focus-inset flex-1 overflow-y-auto">
-        <div className="grid grid-cols-1 gap-8 px-4 py-8 lg:grid-cols-[minmax(0,1fr)_316px] lg:px-8">
-          {/* 리딩 컬럼(§3) — 68ch 정본(§8 확定), 본문 렌더는 무변경(DocContentRenderer). */}
-          <article className="mx-auto w-full max-w-[68ch]">
-            {isLg ? null : (
-              <div data-testid="docs-reader-status-body">
-                <DocStatusHeader docId={doc.id} status={doc.status} editHref={docUrl(wsSlug, projSlug, slug)} onTransitioned={refetch} />
-              </div>
-            )}
+        {/* story 4892 (UI-9 문서 상세 열) — 오른쪽 열 = «상태 · 목차 · 이력» 패널(시안의 스레드 열처럼 본문 옆 상시 열). 상태 머리는 DOM에 한 번만 두고 자리는 CSS 격자가 정한다:
+            lg(1024+)에서는 오른쪽 열 맨 위(2열 1행), 그 아래 폭에서는 DOM 순서대로 본문 맨 위. 미디어 쿼리 상태로 옮기면 첫 그림이 «아래 폭»으로 그려졌다 옮겨져 깜빡이고 이력 요청이 두 번 나가서(codex) 격자로 바꿨다. */}
+        <div className="grid grid-cols-1 gap-x-8 gap-y-8 px-4 py-8 lg:grid-cols-[minmax(0,1fr)_316px] lg:gap-y-0 lg:px-8">
+          <div data-testid="docs-reader-status-block" className="lg:col-start-2 lg:row-start-1 lg:border-l lg:border-ds-line lg:pb-6 lg:pl-6">
+            <DocStatusHeader docId={doc.id} status={doc.status} editHref={docUrl(wsSlug, projSlug, slug)} onTransitioned={refetch} />
+          </div>
 
-            <div className="mt-8">
+          {/* 리딩 컬럼(§3) — 68ch 정본(§8 확定), 본문 렌더는 무변경(DocContentRenderer). */}
+          <article className="mx-auto w-full max-w-[68ch] lg:col-start-1 lg:row-span-2 lg:row-start-1">
+            <div>
               <DocContentRenderer
                 content={doc.content}
                 contentFormat={doc.content_format ?? 'markdown'}
@@ -238,12 +235,7 @@ export default function DocViewPage() {
           </article>
 
           {/* 수직 증거 레일(§3/§6) — 접힌 gate 박스를 상시 공간으로 승격. */}
-          <aside data-testid="docs-reader-rail" className="lg:border-l lg:border-ds-line lg:pl-6">
-            {isLg ? (
-              <div className="mb-6">
-                <DocStatusHeader docId={doc.id} status={doc.status} editHref={docUrl(wsSlug, projSlug, slug)} onTransitioned={refetch} />
-              </div>
-            ) : null}
+          <aside data-testid="docs-reader-rail" className="lg:col-start-2 lg:row-start-2 lg:border-l lg:border-ds-line lg:pl-6">
             {/* story #f546601e(v2 5호) — 긴 문서(N헤딩↑)만 자동 노출, 짧은 문서는 무변경
                 (MINI_TOC_MIN_HEADINGS 가드는 컴포넌트 내부). */}
             <DocMiniToc headings={headings} activeId={activeHeadingId} onHeadingClick={scrollToHeading} className="mb-6" />

@@ -108,6 +108,8 @@ export function DocsIndex() {
     // story #3784(유나 정정 09:40Z) — 0건 분기와 같은 형(early return + 빈 페인 중앙). story 4892: ds EmptyState + ds Button, 알림 역할(role=alert)은 그대로.
     return (
       <div className="flex h-full items-center justify-center p-4 lg:p-6">
+        {/* 페이지 h1은 늘 정확히 하나(story #3946) — 오류 · 빈 상태에도 시각 변화 없이(sr-only) 제목 h1을 둔다. */}
+        <h1 className="sr-only">{t('title')}</h1>
         <div role="alert" aria-live="assertive" aria-atomic="true">
           <EmptyState
             icon="error"
@@ -123,6 +125,7 @@ export function DocsIndex() {
   if (tree.length === 0) {
     return (
       <div className="flex h-full items-center justify-center p-4 lg:p-6">
+        <h1 className="sr-only">{t('title')}</h1>
         <EmptyState
           icon="menu_book"
           title={t('emptyTitle')}

@@ -86,25 +86,25 @@ describe('computeNewViolations — 무관 PR no-op 표본', () => {
   });
 });
 
-// 실 파일 뮤테이션(합성 표본 아님, AC2(b) 명시) — 실 ko.json의 docs.indexKicker를
-// 되돌려(문서고 → KNOWLEDGE BASE) RED가 되는지 직접 확인한다.
-describe('실 파일 뮤테이션 — ko.json(docs.indexKicker 되돌리기)', () => {
+// 실 파일 뮤테이션(합성 표본 아님, AC2(b) 명시) — 실 ko.json의 docs 키 하나(indexViewList)를
+// 원시 영단어 섞인 값으로 되돌려 RED가 되는지 직접 확인한다. (story 4892: 예전 대상 docs.indexKicker는 첫 화면 재구성으로 쓰는 곳이 없어져 지웠다 → 같은 docs 네임스페이스의 살아 있는 키로.)
+describe('실 파일 뮤테이션 — ko.json(docs.indexViewList에 영단어 섞기)', () => {
   const original = loadKoJson(KO_JSON_PATH);
   const baseline = loadBaseline(BASELINE_PATH);
 
-  it('전제: 원본은 docs.indexKicker에서 위반 0(이미 한국어)', () => {
+  it('전제: 원본은 docs.indexViewList에서 위반 0(이미 한국어)', () => {
     const refs = scanKoValues(original);
-    expect(refs.some((r) => r.key === 'docs.indexKicker')).toBe(false);
+    expect(refs.some((r) => r.key === 'docs.indexViewList')).toBe(false);
   });
 
-  it('docs.indexKicker를 원시 영단어로 되돌리면 RED', () => {
+  it('docs.indexViewList에 원시 영단어를 섞으면 RED', () => {
     const docsNs = original.docs as Record<string, unknown>;
-    expect(docsNs.indexKicker).toBe('지식 · 문서고');
-    const mutated = { ...original, docs: { ...docsNs, indexKicker: '지식 · KNOWLEDGE BASE' } };
+    expect(docsNs.indexViewList).toBe('목록');
+    const mutated = { ...original, docs: { ...docsNs, indexViewList: '목록 · KNOWLEDGE BASE' } };
 
     const refs = scanKoValues(mutated);
     const newViolations = computeNewViolations(refs, ALLOWLIST, baseline);
-    expect(newViolations.some((r) => r.key === 'docs.indexKicker')).toBe(true);
+    expect(newViolations.some((r) => r.key === 'docs.indexViewList')).toBe(true);
   });
 });
 

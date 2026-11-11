@@ -269,3 +269,26 @@ describe('[SID:4388] DocsIndex — the chosen category filter is announced as pr
     expect(pressed()).toEqual(['전체:false', '제품 스펙:false', '미분류:true']);
   });
 });
+
+// story 4892 — 페이지 h1은 늘 정확히 하나(story #3946): 첫 화면의 오류 · 빈 상태도 h1을 갖는다(ds EmptyState 제목은 <p>라서 sr-only h1을 따로 둔다).
+describe('DocsIndex — 오류 · 빈 상태에도 h1이 정확히 하나 (4892)', () => {
+  it('⭐오류 상태: h1 1개(sr-only) + role=alert + 다시 시도 ds Button', async () => {
+    useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree: [], loadError: true });
+    await mount();
+    const h1s = container.querySelectorAll('h1');
+    expect(h1s.length).toBe(1);
+    expect(h1s[0]!.className).toContain('sr-only');
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
+    expect(container.querySelector('[data-slot="ds-empty-state"] button')?.getAttribute('data-slot')).toBe('ds-button');
+  });
+
+  it('⭐빈 상태(0건): h1 1개(sr-only) + ds EmptyState + 첫 문서 만들기 ds Button', async () => {
+    useDocsLayoutMock.mockReturnValue({ ...BASE_CTX, tree: [] });
+    await mount();
+    const h1s = container.querySelectorAll('h1');
+    expect(h1s.length).toBe(1);
+    expect(h1s[0]!.className).toContain('sr-only');
+    const es = container.querySelector('[data-slot="ds-empty-state"]')!;
+    expect(es.querySelector('button')?.getAttribute('data-slot')).toBe('ds-button');
+  });
+});
