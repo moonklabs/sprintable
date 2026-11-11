@@ -85,7 +85,7 @@ async function clickActivate() {
 describe('CreateDialog — 첫 스프린트 시작 침묵 금지 (story #2755)', () => {
   it('시작일·종료일이 pre-fill되어 빈 날짜 벽이 사라진다', async () => {
     await mount();
-    const dates = [...document.body.querySelectorAll('input[data-slot="input"][type=date]')] as HTMLInputElement[];
+    const dates = [...document.body.querySelectorAll('input[data-slot="ds-input"][type=date]')] as HTMLInputElement[];
     expect(dates.length).toBe(2);
     expect(dates[0]!.value).toMatch(/^\d{4}-\d{2}-\d{2}$/); // startDate
     expect(dates[1]!.value).toMatch(/^\d{4}-\d{2}-\d{2}$/); // endDate
