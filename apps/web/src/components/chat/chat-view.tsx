@@ -36,6 +36,7 @@ import { CitationComposeBar, type CitationSaveState } from './citation-compose-b
 import { StoryPickerDialog } from '@/components/canvas/story-picker-dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useToast } from '@/components/ui/toast';
+import { announceChatMessageDeleted } from '@/lib/chat-message-deleted';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { actorRowLabels } from '@/lib/member-display';
@@ -626,6 +627,9 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       }
       const body = (await res.json()) as { deleted_at?: string | null };
       const deletedAt = body.deleted_at ?? new Date().toISOString();
+      // the room LIST keeps this room's latest message as a one-line preview: tell it (the server scrubs it on refetch — the list does the same now, not at the next refetch)
+      const gone = messagesRef.current.find((m) => m.id === messageId);
+      if (gone) announceChatMessageDeleted({ conversationId: threadId, createdAt: gone.created_at });
       setMessages((prev) => prev.map((m) => (
         m.id === messageId ? { ...m, content: '', deleted_at: deletedAt } : m
       )));

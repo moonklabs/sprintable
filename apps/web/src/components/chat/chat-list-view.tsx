@@ -33,6 +33,7 @@ import { useOrgDomainLabels, type OrgDomainLabels } from '@/hooks/use-org-domain
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { DeviceChip } from '@/components/desktop/device-chip';
+import { onChatMessageDeleted, sameInstant } from '@/lib/chat-message-deleted';
 
 interface Participant {
   member_id: string;
@@ -719,6 +720,17 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
 
   // story #1977(트랙B): 다른 탭/기기에서 mark-read → conversation.read SSE(#1976, 본인 타
   // 커넥션 전파)로 이 목록이 열려있는 동안에도 unread 배지가 즉시 서버 truth로 자가정정.
+  // story 4887 — a message deleted on THIS screen (the room or its thread) that is a room's latest message: blank its preview now, as the server's refetch would (content «» · no attachment flag · no event card) — it kept showing the deleted text until the next refetch
+  useEffect(() => onChatMessageDeleted(({ conversationId, createdAt }) => {
+    const blank = (list: ConversationItem[]) => list.map((c) => (
+      c.id === conversationId && c.latest_message && sameInstant(c.latest_message.created_at, createdAt)
+        ? { ...c, latest_message: { content: '', created_at: c.latest_message.created_at, event: null } }
+        : c
+    ));
+    setConversations(blank);
+    setAllConversations(blank);
+  }), []);
+
   const handleConversationRead = useCallback((payload: SseConversationReadPayload) => {
     const applyRead = (list: ConversationItem[]) =>
       list.map((c) => (c.id === payload.conversation_id ? { ...c, unread_count: payload.unread_count } : c));
