@@ -244,16 +244,23 @@ describe('GoalsClient — 스윔레인 보기는 목록 읽기를 기다리지�
   function deferredGoals() {
     type Resolver = (r: { ok: boolean; json: () => Promise<unknown> }) => void;
     const pending = new Map<string, Resolver>();
+    const deletes: Resolver[] = []; // 삭제 요청(끝내기 전까지 매달아 둔다)
     const calls: Array<{ pid: string; resolve: Resolver }> = []; // 읽기를 시작한 순서대로(같은 프로젝트를 여러 번 읽는 경우 포함)
-    vi.stubGlobal('fetch', vi.fn((url: string) => {
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
       if (typeof url === 'string' && url.includes('/api/goals?')) {
         const pid = new URL(url, 'http://x').searchParams.get('project_id')!;
         return new Promise((resolve) => { pending.set(pid, resolve as never); calls.push({ pid, resolve: resolve as never }); });
       }
+      if (typeof url === 'string' && url === '/api/goals' && init?.method === 'POST') {
+        return Promise.resolve({ ok: true, json: async () => ({ data: { id: 'goal-new', title: 'E-NEW-GOAL', status: 'draft', priority: 'medium', stories: [] } }) });
+      }
+      if (typeof url === 'string' && /^\/api\/goals\/[^/?]+$/.test(url) && init?.method === 'DELETE') {
+        return new Promise((resolve) => { deletes.push(resolve as never); });
+      }
       return Promise.resolve({ ok: false, json: async () => null });
     }));
     const goals = (title: string) => ({ ok: true, json: async () => ({ data: [{ id: `id-${title}`, title, status: 'active', story_count: 1, is_ai_generated: false }] }) });
-    return { pending, goals, calls };
+    return { pending, goals, calls, deletes };
   }
 
   it('⭐새 프로젝트(B)의 읽기가 먼저 끝나고 이전 프로젝트(A)의 늦은 응답이 나중에 와도 B의 목록이 서고 · A가 덮지 않고 · B가 로딩 자리에 갇히지 않는다', async () => {
@@ -310,5 +317,72 @@ describe('GoalsClient — 스윔레인 보기는 목록 읽기를 기다리지�
     await click(viewBtn(koMessages.goals.viewList)!); // 이제 B의 목록을 읽는다
     await act(async () => { pending.get('proj-B')!({ ok: false, json: async () => null }); await Promise.resolve(); await Promise.resolve(); });
     expect(container.textContent).not.toContain('E-A-GOAL');
+  });
+
+  // codex 4차 BLOCKING 셋 — ① A → B(스윔레인) → A에서 비운 목록을 «읽은 것»으로 보면 0 · 0이 정확한 수처럼 보인다 ② 옛 프로젝트의 클로저가 늦게 다시 읽기를 불러 지금 프로젝트의 읽기를 건드린다 ③ 읽기가 진행 중일 때 만든 목표를 오래된 응답이 덮는다.
+  it('⭐A → B(스윔레인) → A로 돌아오면 A의 새 읽기가 끝나기 전까지 «읽은 것» 취급을 하지 않는다 — 로딩 자리 · 비운 목록(빈 상태 · 0 · 0)이 정확한 것처럼 보이지 않는다', async () => {
+    const { pending, goals } = deferredGoals();
+    const { GoalsClient } = await import('./goals-client');
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-A" />)); });
+    await act(async () => { pending.get('proj-A')!(goals('E-A-GOAL')); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('E-A-GOAL');
+    store.set('goals-view:proj-B', 'swimlane');
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-B" />)); }); // B는 스윔레인 — 목록은 안 읽는다
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-A" />)); }); // A로 돌아온다 — A의 새 읽기가 나가 있다(매달림)
+    expect(container.textContent).toContain(koMessages.goals.loading);
+    expect(container.textContent).not.toContain(koMessages.goals.noGoals); // 비운 목록을 «진짜 빈 프로젝트»로 보이지 않는다
+    expect(container.textContent).not.toContain('E-A-GOAL');
+  });
+
+  it('⭐삭제가 실패한 뒤 재읽기를 부르는 옛 프로젝트 클로저가 프로젝트를 옮긴 뒤에 늦게 와도 지금 프로젝트의 읽기를 건드리지 않는다(B가 로딩에 갇히지도 A 목록이 B에 나오지도 않는다)', async () => {
+    const { pending, goals, deletes } = deferredGoals();
+    const { GoalsClient } = await import('./goals-client');
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-A" />)); });
+    await act(async () => { pending.get('proj-A')!(goals('E-A-GOAL')); await Promise.resolve(); await Promise.resolve(); });
+    // A에서 삭제를 눌러 확인까지(요청은 매달림)
+    await click(container.querySelector('button[aria-label="목표 삭제"]')!);
+    const confirm = [...document.body.querySelectorAll('button')].find((b) => b.textContent === koMessages.goals.deleteConfirmButton)!;
+    await click(confirm);
+    expect(deletes).toHaveLength(1);
+    // 프로젝트를 B로 옮기고 B의 읽기가 끝난다
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-B" />)); });
+    await act(async () => { pending.get('proj-B')!(goals('E-B-GOAL')); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('E-B-GOAL');
+    // 이제 A의 삭제 요청이 «실패»로 끝난다 → 옛 클로저가 A를 다시 읽으려 한다
+    await act(async () => { deletes[0]!({ ok: false, json: async () => null }); await Promise.resolve(); await Promise.resolve(); });
+    // 거절되지 않았다면 A를 다시 읽는 요청이 나가 있다 — 그 응답이 «끝나도» B 화면에 닿지 않아야 한다(끝나지 않은 채 두면 해가 보이지 않는 헛통과가 된다)
+    await act(async () => { pending.get('proj-A')!(goals('E-A-LATE-REFETCH')); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('E-B-GOAL');
+    expect(container.textContent).not.toContain(koMessages.goals.loading);
+    expect(container.textContent).not.toContain('E-A-GOAL');
+    expect(container.textContent).not.toContain('E-A-LATE-REFETCH');
+  });
+
+  it('⭐읽기가 진행 중일 때 만든 목표는 그 읽기의 오래된 응답이 와도 사라지지 않는다 — 응답에 없으면 앞에 합쳐 놓는다', async () => {
+    const { pending, goals, calls } = deferredGoals();
+    const { GoalsClient } = await import('./goals-client');
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-1" />)); });
+    await act(async () => { pending.get('proj-1')!(goals('E-OLD-GOAL')); await Promise.resolve(); await Promise.resolve(); });
+    // 스윔레인 갔다가 목록으로 돌아오면 새 읽기가 나가고(매달림) 목록은 이미 읽은 것이라 그대로 보인다
+    await click(viewBtn(koMessages.goals.viewSwimlane)!);
+    await click(viewBtn(koMessages.goals.viewList)!);
+    expect(calls.filter((c) => c.pid === 'proj-1')).toHaveLength(2);
+    expect(container.textContent).toContain('E-OLD-GOAL');
+    // 그 사이 새 목표를 만든다
+    const gm = koMessages.goals as Record<string, string>;
+    await act(async () => { ([...document.body.querySelectorAll('button')].find((b) => b.textContent?.trim() === gm.newGoal)!).click(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+    const titleInput = document.body.querySelector<HTMLInputElement>(`input[data-slot="input"][placeholder="${gm.fieldTitlePlaceholder}"]`)!;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(titleInput, 'E-NEW-GOAL'); titleInput.dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => { ([...document.body.querySelectorAll('button')].find((b) => b.textContent?.trim() === gm.createGoal)!).click(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+    // 새 목표의 제목은 목록 줄에도 오른쪽 상세 패널에도 뜬다 — 글자가 있다는 것만으로는 목록에서 사라져도 통과해 버리니, 글자가 «몇 군데» 뜨는지로 잰다.
+    const copies = () => [...container.querySelectorAll('*')].filter((e) => e.children.length === 0 && e.textContent === 'E-NEW-GOAL').length;
+    const before = copies();
+    expect(before).toBeGreaterThanOrEqual(2); // 목록 줄(데스크톱 · 모바일 배치) + 상세 패널
+    // 이제 «만들기 전에 시작한» 읽기의 응답이 온다 — 새 목표가 없다
+    await act(async () => { calls.filter((c) => c.pid === 'proj-1')[1]!.resolve(goals('E-OLD-GOAL')); await Promise.resolve(); await Promise.resolve(); });
+    expect(copies()).toBe(before); // 목록 줄에서 사라지지 않았다
+    expect(container.textContent).toContain('E-OLD-GOAL');
   });
 });

@@ -1057,7 +1057,12 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
   // A→B→A 이동)에서 오래된 응답이 새 응답을 덮는 것을 못 막는다. 프로젝트가 바뀌는 순간에는 이전 프로젝트의 목록을 바로 비우고(아래 효과) 진행 중 읽기를 무효로 만든다.
   const fetchSeqRef = useRef(0);
   const listProjectRef = useRef<string | null>(null); // `epics` 상태가 어느 프로젝트의 것인가(null = 비었거나 아직 안 읽음)
+  const currentProjectRef = useRef(projectId);        // 지금 화면의 프로젝트 — 옛 프로젝트의 클로저가 늦게 다시 읽기를 부르는 것(삭제 실패 뒤 재읽기)을 시작에서 거절한다
+  useEffect(() => { currentProjectRef.current = projectId; }, [projectId]);
+  // 읽기가 진행 중일 때 만든 목표 — 그 읽기의 응답에는 없을 수 있어 응답에 합쳐 넣는다(오래된 응답이 방금 만든 목표를 덮어 사라지게 하지 않는다). atSeq = 만든 때의 읽기 순번.
+  const createdRef = useRef<Array<{ goal: Goal; atSeq: number }>>([]);
   const fetchGoals = useCallback(async () => {
+    if (currentProjectRef.current !== projectId) return; // 다른 프로젝트로 옮긴 뒤 옛 클로저가 부른 재읽기 — 지금 프로젝트의 읽기를 건드리지 않는다
     const seq = ++fetchSeqRef.current;
     try {
       // story #3126 — include=glance로 latest_story_activity_at을 같이 받는다(신규 round-trip
@@ -1069,8 +1074,12 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
       if (!res.ok) throw new Error(`Failed to fetch epics: ${res.status}`);
       const { data } = await res.json() as { data: Goal[] };
       if (seq !== fetchSeqRef.current) return; // 더 나중에 시작한 읽기가 있다(같은 프로젝트의 겹친 읽기 · 프로젝트 이동) — 이 응답은 버린다
-      setGoals(data ?? []);
-      setCapped((data?.length ?? 0) >= STEER_LIMIT);
+      const fetched = data ?? [];
+      // 이 읽기를 시작한 뒤에 만든 목표(atSeq >= seq)가 응답에 없으면 앞에 합친다. 이 읽기보다 나중에 시작한 읽기가 이미 본 것(atSeq < seq)은 서버가 알고 있으니 목록에서 뺀다.
+      const extra = createdRef.current.filter((c) => c.atSeq >= seq && !fetched.some((d) => d.id === c.goal.id)).map((c) => c.goal);
+      createdRef.current = createdRef.current.filter((c) => c.atSeq >= seq);
+      setGoals(extra.length > 0 ? [...extra, ...fetched] : fetched);
+      setCapped(fetched.length >= STEER_LIMIT);
       listProjectRef.current = projectId;
     } catch (err) {
       // AC3: silent-swallow 금지 — 최소 로깅.
@@ -1155,6 +1164,7 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
 
   const handleCreated = useCallback((epic: Goal) => {
     setGoals((prev) => [epic, ...prev]);
+    createdRef.current.push({ goal: epic, atSeq: fetchSeqRef.current });
     listProjectRef.current = projectId; // 상태에 이 프로젝트의 목표가 들어왔다 — 프로젝트를 옮길 때 비워야 할 대상
     setSelectedEpic(epic);
     setMobileView('detail');
@@ -1172,12 +1182,15 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
   // 이 효과는 아래 읽기 효과보다 먼저 선언돼 같은 커밋에서 먼저 돈다.
   useEffect(() => {
     fetchSeqRef.current += 1;
+    createdRef.current = [];
     if (listProjectRef.current !== null && listProjectRef.current !== projectId) {
       setGoals([]);
       setCapped(false);
       setSelectedEpic(null);
       listProjectRef.current = null;
     }
+    // «읽음» 표시도 같이 비운다 — 비운 목록을 «이 프로젝트의 목록을 읽은 것»으로 보고 0 · 0을 정확한 수처럼 보이는 구멍(A → B(스윔레인) → A)을 막는다. 처음 열 때는 이미 null이다.
+    setLoadedProject((prev) => (prev === projectId ? prev : null));
   }, [projectId]);
   useEffect(() => {
     if (!needsGoals) return;
