@@ -8,6 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Field } from '@/components/ds/field';
+import { Input as DsInput } from '@/components/ds/input';
 import { EmptyState } from '@/components/ui/empty-state';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { WorkspaceFrameLoading } from '@/components/workspace/workspace-frame-loading';
@@ -263,27 +265,33 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
               className="h-auto bg-background dark:bg-background"
             />
           </div>
+          {/* story #4888(UI-5 스프린트 화면, 유나 ds 부품) — 시작일 · 종료일: 예전엔 <label>이 칸과 이어지지 않아(htmlFor 없음) 날짜 칸에 접근 이름이 없었다. ds Field가 이름을 칸에 잇고,
+              ds Input이 칸 모양을 쥔다(폰 높이 44는 pointer-coarse로). 값(`YYYY-MM-DD` 문자열) · 초안 · 전송 모양은 그대로. */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">{t('startDate')}</label>
-              <Input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                required
-                className="h-auto bg-background dark:bg-background"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">{t('endDate')}</label>
-              <Input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                required
-                className="h-auto bg-background dark:bg-background"
-              />
-            </div>
+            <Field label={t('startDate')}>
+              {(control) => (
+                <DsInput
+                  {...control}
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  required
+                  className="pointer-coarse:h-11"
+                />
+              )}
+            </Field>
+            <Field label={t('endDate')}>
+              {(control) => (
+                <DsInput
+                  {...control}
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  required
+                  className="pointer-coarse:h-11"
+                />
+              )}
+            </Field>
           </div>
           {/* 실행 계획(calm 라벨·Target lucide·장식 글리프 제거) */}
           <div className="space-y-2 rounded-xl border border-border bg-muted/20 p-3">
