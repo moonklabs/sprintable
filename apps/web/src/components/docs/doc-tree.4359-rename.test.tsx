@@ -47,7 +47,7 @@ async function mount(onRename = vi.fn(async () => {})) {
   return onRename;
 }
 // «⋮» = 행의 마지막 role=button div(첫째는 dnd-kit 끌기 손잡이).
-const trigger = () => Array.from(container.querySelector<HTMLElement>('[data-doc-id="d1"]')!.parentElement!.querySelectorAll<HTMLElement>(':scope > div[role="button"]')).at(-1)!;
+const trigger = () => container.querySelector<HTMLElement>('[data-doc-id="d1"]')!.parentElement!.querySelector<HTMLElement>('[data-slot="ds-tree-trailing"] button')!;
 const input = () => document.querySelector<HTMLInputElement>('[data-testid="doc-rename-input"]');
 const dialog = () => document.querySelector<HTMLElement>('[data-testid="doc-rename-dialog"]');
 

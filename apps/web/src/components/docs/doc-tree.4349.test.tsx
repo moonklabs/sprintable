@@ -63,7 +63,7 @@ function mount(doc: typeof DOC = DOC, locale: 'ko' | 'en' = 'ko') {
 }
 const menu = () => document.querySelector<HTMLElement>('[data-dropdown-panel="doc-tree-menu"]');
 // «⋮» = 행의 마지막 role=button div(첫째는 dnd-kit 끌기 손잡이 — attributes가 role=button · tabIndex 0을 준다).
-const trigger = () => Array.from(container.querySelector<HTMLElement>('[data-doc-id="d1"]')!.parentElement!.querySelectorAll<HTMLElement>(':scope > div[role="button"]')).at(-1)!;
+const trigger = () => container.querySelector<HTMLElement>('[data-doc-id="d1"]')!.parentElement!.querySelector<HTMLElement>('[data-slot="ds-tree-trailing"] button')!;
 const items = () => Array.from(menu()!.querySelectorAll('button'));
 const key = (el: Element, k: string, shiftKey = false) => act(() => { el.dispatchEvent(new KeyboardEvent('keydown', { key: k, shiftKey, bubbles: true })); });
 const openByKey = () => { trigger().focus(); key(trigger(), 'Enter'); };

@@ -1,7 +1,9 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, FileText } from 'lucide-react';
+import { Button } from '@/components/ds/button';
+import { SectionHeader } from '@/components/ds/section-header';
+import { TreeRow } from '@/components/ds/tree-row';
 import { cn } from '@/lib/utils';
 import { bucketDocsByTime, computeDocGroups, type DocGroup, type GroupableDoc } from './lib/doc-groups';
 import { DOC_STATUS_TONE, toDocStatusFilter } from './lib/doc-status-tone';
@@ -48,35 +50,25 @@ function GroupMemberList({ members, moreLabel, selectedSlug, onSelect }: {
   const hiddenCount = members.length - visible.length;
 
   return (
-    <ul className="space-y-0.5">
+    <ul>
       {visible.map((doc) => (
         <li key={doc.id}>
-          <button
-            type="button"
-            onClick={() => onSelect(doc.slug)}
-            aria-current={selectedSlug === doc.slug ? 'page' : undefined}
-            className={cn(
-              'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold transition-colors',
-              selectedSlug === doc.slug
-                ? 'bg-primary/10 text-primary'
-                : 'text-foreground/80 hover:bg-muted hover:text-foreground',
-            )}
-          >
-            <StatusDot status={doc.status} />
-            <FileText className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="truncate">{doc.title}</span>
-          </button>
+          {/* story 4892 (UI-9 문서 트리) — 묶음 안 문서 줄 = ds TreeRow(잎). 상태 점 · 문서 아이콘 · 제목 · 열린 문서 aria-current는 그대로. 끌기 · «⋮»는 이 읽기 전용 보기엔 없다(그대로). */}
+          <TreeRow
+            depth={0}
+            title={doc.title}
+            icon="description"
+            statusMark={<StatusDot status={doc.status} />}
+            selected={selectedSlug === doc.slug}
+            controlProps={{ onClick: () => onSelect(doc.slug) }}
+          />
         </li>
       ))}
       {hiddenCount > 0 && (
         <li>
-          <button
-            type="button"
-            onClick={() => setExpanded(true)}
-            className="w-full rounded-lg px-2.5 py-1 text-left text-editorial-meta text-primary hover:underline"
-          >
+          <Button variant="quiet" onClick={() => setExpanded(true)} className="w-full justify-start">
             {moreLabel(hiddenCount)}
-          </button>
+          </Button>
         </li>
       )}
     </ul>
@@ -99,29 +91,24 @@ function GroupHeader({ group, inFolderLabel, looseAtRootLabel, moreLabel, select
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-        className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left hover:bg-muted"
-      >
-        {expanded ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />}
-        {/* rebase 발견(2026-08-23, #2973/#3391 rebase 중) — group.label이 한글(예: "제품")이라
-            mono uppercase가 2967과 동일 결함(흐림)을 낸다 — sans로(숫자 total은 이미 별도라 영향 없음). */}
-        <span className="flex-1 truncate text-micro font-semibold text-muted-foreground">
-          {group.label} <span className="text-border">·</span> {total}
-        </span>
-      </button>
+      {/* story 4892 — 묶음 머리 = ds SectionHeader(접는 머리글 = 단추 · aria-expanded · 제목 + 건수). 한글 이름이라 mono · uppercase는 쓰지 않는다(2967 결함 그대로 피함). */}
+      <SectionHeader
+        title={group.label}
+        count={<span className="text-ds-small text-ds-ink-3">{total}</span>}
+        collapsed={!expanded}
+        onToggle={() => setExpanded((v) => !v)}
+        level={3}
+      />
       {expanded && (
-        <div className="space-y-1.5 pb-1 pl-4">
+        <div className="space-y-1.5 pb-1 pl-4 pt-1">
           {showSplit ? (
             <>
               <div>
-                <p className="px-2.5 pb-0.5 text-micro uppercase tracking-wide text-muted-foreground">{inFolderLabel} · {group.inFolder.length}</p>
+                <p className="px-2.5 pb-0.5 text-ds-small text-ds-ink-3">{inFolderLabel} · {group.inFolder.length}</p>
                 <GroupMemberList members={group.inFolder} moreLabel={moreLabel} selectedSlug={selectedSlug} onSelect={onSelect} />
               </div>
               <div>
-                <p className="px-2.5 pb-0.5 text-micro uppercase tracking-wide text-muted-foreground opacity-75">{looseAtRootLabel} · {group.looseAtRoot.length}</p>
+                <p className="px-2.5 pb-0.5 text-ds-small text-ds-ink-3">{looseAtRootLabel} · {group.looseAtRoot.length}</p>
                 <GroupMemberList members={group.looseAtRoot} moreLabel={moreLabel} selectedSlug={selectedSlug} onSelect={onSelect} />
               </div>
             </>
@@ -168,7 +155,7 @@ export function DocAutoGroups({
   );
 
   return (
-    <nav className="space-y-0.5">
+    <nav>
       {groups.map((group) => (
         <GroupHeader key={group.key} group={group} inFolderLabel={inFolderLabel} looseAtRootLabel={looseAtRootLabel} moreLabel={moreLabel} selectedSlug={selectedSlug} onSelect={onSelect} />
       ))}

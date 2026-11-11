@@ -83,7 +83,7 @@ function mount(initial: TestDoc[], { sortMode = 'manual', hasMore = false, local
 const row = (id: string) => container.querySelector<HTMLElement>(`button[data-doc-id="${id}"]`);
 const rowOrder = () => Array.from(container.querySelectorAll<HTMLElement>('button[data-doc-id]')).map((b) => b.dataset.docId);
 const menu = () => document.querySelector<HTMLElement>('[data-dropdown-panel="doc-tree-menu"]');
-const trigger = (id: string) => Array.from(row(id)!.parentElement!.querySelectorAll<HTMLElement>(':scope > div[role="button"]')).at(-1)!;
+const trigger = (id: string) => row(id)!.parentElement!.querySelector<HTMLElement>('[data-slot="ds-tree-trailing"] button')!;
 const open = (id: string) => act(() => { trigger(id).dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 const moveItem = (kind: 'up' | 'down' | 'into') => menu()!.querySelector<HTMLElement>(`[data-move="${kind}"]`)!;
 const click = (el: Element) => act(() => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })); });

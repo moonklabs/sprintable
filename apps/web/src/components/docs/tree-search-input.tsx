@@ -10,11 +10,8 @@ interface TreeSearchInputProps {
   onChange: (value: string) => void;
   onClear: () => void;
   isSearching: boolean;
-  matchCount: number;
   placeholder: string;
   clearLabel: string;
-  noResultsLabel: string;
-  resultCountLabel: (n: number) => string;
 }
 
 export function TreeSearchInput({
@@ -22,11 +19,8 @@ export function TreeSearchInput({
   onChange,
   onClear,
   isSearching,
-  matchCount,
   placeholder,
   clearLabel,
-  noResultsLabel,
-  resultCountLabel,
 }: TreeSearchInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -52,11 +46,8 @@ export function TreeSearchInput({
           />
         )}
       </div>
-      {isSearching && (
-        <p className="mt-1 px-1 text-ds-small text-ds-ink-3">
-          {matchCount === 0 ? noResultsLabel : resultCountLabel(matchCount)}
-        </p>
-      )}
+      {/* story 4892 (UI-9 문서 트리) — 개수 줄 «N개 문서 일치» · «검색 결과가 없어요»는 이 칸 아래에도, 결과 목록 맨 위(DocSearchResults)에도 있어 한 화면에 두 번 보였다(결과를 기다리는 동안에도
+          «없음»이 먼저 떴다). 결과 쪽이 답을 아는 자리라 여기 것을 걷는다 — 한 번만. */}
     </div>
   );
 }

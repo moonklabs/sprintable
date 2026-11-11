@@ -470,11 +470,8 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         onChange={setSearchQuery}
         onClear={() => setSearchQuery('')}
         isSearching={isSearching}
-        matchCount={searchResults.length}
         placeholder={t('searchTree')}
         clearLabel={t('clearSearch')}
-        noResultsLabel={t('searchNoResults')}
-        resultCountLabel={(n) => t('searchResultCount', { count: n })}
       />
       {/* story #1950 — 새 폴더 인라인 폼(팝오버 아님, #1942 결함 클래스 회피). 검색 중이어도
           "새 폴더" 버튼은 항상 접근 가능하므로 isSearching과 무관하게 렌더한다. */}
