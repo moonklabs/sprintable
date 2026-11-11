@@ -56,13 +56,14 @@ describe('앱 셸 표지(data-sprintable-shell)', () => {
     expect(css).not.toContain('[data-sprintable-shell="macos"]');
   });
 
-  it('⭐루트 layout의 <head> 맨 앞에 이 스크립트가 실린다(글꼴 요청보다 먼저)', () => {
+  it('⭐루트 layout의 <head> 안에 동기 인라인 스크립트로 실린다(<body> 앞 — async · defer · src 없음)', () => {
     const src = readFileSync(resolve(__dirname, '../app/layout.tsx'), 'utf-8');
     const head = src.slice(src.indexOf('<head>'), src.indexOf('</head>'));
     const withoutComments = head.replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
-    const firstTag = /<(script|link|meta)\b/.exec(withoutComments)![1];
-    expect(firstTag).toBe('script');
-    expect(withoutComments).toContain('dangerouslySetInnerHTML={{ __html: SHELL_ATTRIBUTE_SCRIPT }}');
+    const tag = /<script\b[^>]*dangerouslySetInnerHTML=\{\{ __html: SHELL_ATTRIBUTE_SCRIPT \}\}[^>]*\/>/.exec(withoutComments);
+    expect(tag, '<head> 안에 SHELL_ATTRIBUTE_SCRIPT 스크립트').not.toBeNull();
+    expect(tag![0]).not.toMatch(/\b(async|defer|src)\b/);
+    expect(src.indexOf('<head>')).toBeLessThan(src.indexOf('<body'));
   });
 
   it('⭐CSP script-src가 인라인 스크립트를 허용한다(막히면 속성이 영영 안 달린다)', () => {

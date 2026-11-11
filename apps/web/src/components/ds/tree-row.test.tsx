@@ -136,7 +136,10 @@ describe('ds TreeRow', () => {
     const h = row().querySelector('[data-slot="ds-tree-handle"]') as HTMLElement;
     expect(h.querySelector('[data-testid="grip"]')).not.toBeNull();
     expect(has(h, 'pointer-events-none')).toBe(true);
-    expect(has(h, 'touch:hidden')).toBe(true);
+    // 마우스 전용 손잡이는 «기기 분류»로만 숨긴다 — touch:(앱 셸 표지 포함)를 쓰면 앱 안 블루투스 마우스에서도 사라진다.
+    expect(has(h, 'pointer-coarse:hidden')).toBe(true);
+    expect(has(h, '[@media(hover:none)]:hidden')).toBe(true);
+    expect(has(h, 'touch:hidden')).toBe(false);
     expect(has(h, 'opacity-0')).toBe(true);
     expect(has(h, 'pointer-fine:group-hover:opacity-100')).toBe(true);
     expect((h.firstElementChild as HTMLElement).className).toContain('w-8');

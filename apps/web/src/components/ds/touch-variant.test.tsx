@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { compile } from 'tailwindcss';
 import { Button } from './button';
+import { IconButton } from './icon-button';
 import { Input } from './input';
 import { NativeSelect } from './select';
 
@@ -78,6 +79,7 @@ function whereApplies(selector: string, env: Env): boolean {
   });
 }
 
+const SIZE_PROPS = ['height', 'min-height', 'width', 'min-width'];
 type Decl = { prop: string; value: string; env: (e: Env) => boolean };
 function indexByClass(css: string): Map<string, Decl[]> {
   const out = new Map<string, Decl[]>();
@@ -86,7 +88,7 @@ function indexByClass(css: string): Map<string, Decl[]> {
     if (!rule.head.startsWith('.')) continue; // :root 등
     const cls = rule.head.slice(1).replace(/\\(.)/g, '$1');
     // 누름 높이(height · min-height)만 읽는다 — 색 · 초점 같은 다른 속성의 상태 선택자(:hover · :focus-visible …)는 이 시험의 물음이 아니다.
-    const isHeight = ([prop]: [string, string]) => prop === 'height' || prop === 'min-height';
+    const isHeight = ([prop]: [string, string]) => SIZE_PROPS.includes(prop);
     for (const [prop, value] of rule.decls.filter(isHeight)) add(cls, { prop, value, env: () => true });
     for (const child of rule.children) {
       const decls = child.decls.filter(isHeight);
@@ -109,14 +111,17 @@ function px(value: string): number {
   return Number(m[1]) * SPACING_PX;
 }
 
-/** 클래스 목록과 기기 꼴로 누름 높이 = max(height, min-height). 같은 속성은 CSS 나온 순서에서 뒤가 이긴다(전부 단일 클래스 힘). */
-function pressHeight(classes: string, index: Map<string, Decl[]>, env: Env): number {
+/** 클래스 목록과 기기 꼴로 누름 크기 = max(size, min-size). 같은 속성은 CSS 나온 순서에서 뒤가 이긴다(전부 단일 클래스 힘). */
+function press(classes: string, index: Map<string, Decl[]>, env: Env, axis: 'height' | 'width'): number {
   const win: Record<string, string> = {};
   const order = [...index.keys()];
   const present = classes.split(/\s+/).filter((c) => index.has(c)).sort((a, b) => order.indexOf(a) - order.indexOf(b));
-  for (const c of present) for (const d of index.get(c)!) if (d.env(env) && (d.prop === 'height' || d.prop === 'min-height')) win[d.prop] = d.value;
-  return Math.max(win.height ? px(win.height) : 0, win['min-height'] ? px(win['min-height']) : 0);
+  for (const c of present) for (const d of index.get(c)!) if (d.env(env) && SIZE_PROPS.includes(d.prop)) win[d.prop] = d.value;
+  const min = `min-${axis}`;
+  return Math.max(win[axis] ? px(win[axis]) : 0, win[min] ? px(win[min]) : 0);
 }
+const pressHeight = (classes: string, index: Map<string, Decl[]>, env: Env) => press(classes, index, env, 'height');
+const pressWidth = (classes: string, index: Map<string, Decl[]>, env: Env) => press(classes, index, env, 'width');
 
 // ─── ds 부품이 실제로 내는 클래스 ──────────────────────────────────────────────
 let index: Map<string, Decl[]>;
@@ -133,6 +138,7 @@ beforeAll(async () => {
   parts = {
     'Button(md)': await grab(<Button>확인</Button>, '[data-slot="ds-button"]'),
     'Button(lg)': await grab(<Button size="lg">확인</Button>, '[data-slot="ds-button"]'),
+    IconButton: await grab(<IconButton icon="close" label="닫기" />, '[data-slot="ds-icon-button"]'),
     Input: await grab(<Input aria-label="이름" />, '[data-slot="ds-input"]'),
     NativeSelect: await grab(<NativeSelect aria-label="역할"><option>x</option></NativeSelect>, 'select'),
   };
@@ -172,6 +178,16 @@ describe('touch: 변형 — 44 바닥', () => {
     expect(pressHeight(parts.Input!, index, APP_MAC)).toBe(36);
     expect(pressHeight(parts.NativeSelect!, index, APP_MAC)).toBe(36);
     expect(pressHeight(parts['Button(md)']!, index, APP_MAC)).toBe(28);
+  });
+
+  it('⭐누르는 부품(Button · IconButton)은 가로도 44 — 에뮬 · 앱 셸 꼴에서도, 데스크톱은 44 아래', () => {
+    for (const name of ['Button(md)', 'Button(lg)', 'IconButton']) {
+      const cls = parts[name]!;
+      for (const env of [EMULATOR, PHONE, APP_ANDROID, APP_IOS]) expect(pressWidth(cls, index, env), `${name} ${JSON.stringify(env)}`).toBe(44);
+      expect(pressWidth(cls, index, DESKTOP), name).toBeLessThan(44);
+      expect(pressWidth(cls, index, APP_MAC), name).toBeLessThan(44);
+    }
+    expect(pressHeight(parts.IconButton!, index, DESKTOP)).toBe(28);
   });
 
   it('ds 부품은 pointer-coarse:를 더 쓰지 않는다(쓰면 에뮬 꼴에서 44가 빠진다)', () => {

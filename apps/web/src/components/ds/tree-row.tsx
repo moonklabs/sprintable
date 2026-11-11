@@ -60,7 +60,7 @@ export function TreeRow({ depth, title, icon, emoji, statusMark, selected = fals
   return (
     <div {...rest} data-slot="ds-tree-row" data-depth={depth} className={cn('group relative', className)}>
       {dragHandle ? (
-        <div data-slot="ds-tree-handle" className="pointer-events-none absolute inset-y-0 left-0 z-10 flex items-center opacity-0 pointer-fine:group-hover:opacity-100 touch:hidden">
+        <div data-slot="ds-tree-handle" className="pointer-events-none absolute inset-y-0 left-0 z-10 flex items-center opacity-0 pointer-fine:group-hover:opacity-100 pointer-coarse:hidden [@media(hover:none)]:hidden">
           <span aria-hidden="true" className={cn('shrink-0', HANDLE_GAP[lv])} />
           <span className="pointer-events-auto">{dragHandle}</span>
         </div>
