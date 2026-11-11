@@ -131,7 +131,7 @@ describe('[SID:4762] OnboardingForm — the phone shell is told when the organiz
     expect(form.match(/await refreshSessionAfterChange\(\)\.catch\(\(\) => null\)/g)?.length).toBe(2);
     expect(form.match(/refreshAuthTokens\(\)/g)).toBeNull(); // the direct call is gone from the form (the ratchet in lib/db/refresh-single-flight.4776.test.ts holds the whole tree)
     expect(form.match(/refreshSessionOnce\(\)/g)?.length).toBe(1); // the helper joins the page's ONE flight (the one `fetchWithAuth` joins on a 401)
-    expect(form.match(/renewSession\(\)/g)?.length).toBe(2);
+    expect(form.match(/renewSession\(\)/g)?.length).toBe(3); // the arrival's · the organization-deleted screen's · story 4904: the plan-limit answer's «is the organization there now?» re-read (`readExistingOrg`)
     expect(form).toMatch(/import \{ fetchWithAuth, refreshSessionAfterChange, refreshSessionOnce \} from '@\/lib\/db\/client';/);
   });
 

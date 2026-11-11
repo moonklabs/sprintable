@@ -116,6 +116,8 @@ export function OnboardingForm({
   const arriving = useRef(false);
   // the person's choice «초대와 따로 내 조직 만들기» — kept across the arrival's retries (a retry never asks the invites again)
   const ownOrgChosen = useRef(false);
+  // story 4904: one «does the person already have an organization?» re-read at a time (the limit answer of createOrg)
+  const joiningExisting = useRef(false);
 
   const progress = onboardingProgress(step);
 
@@ -155,6 +157,19 @@ export function OnboardingForm({
         }
         // story #2470 — BE의 구조화 에러(code:PLAN_LIMIT_EXCEEDED·limit·upgrade_required)는 UpgradeModal로 안내한다.
         if (json?.error?.code === 'PLAN_LIMIT_EXCEEDED' && json?.error?.upgrade_required) {
+          // story 4904: the limit can be the person's OWN organization, made a moment ago by another window of the same account (a sign-up on the web, the Mac app's login while the web
+          // arrival is still making it): the arrival's read (renew, ask again) came before that window's organization was committed, this POST after. «Free plan: 1 organization» is then wrong
+          // — they have exactly the one. Ask the database once more through a renewed token (as the arrival does) and, if the organization is there, go on with it. Only when the person
+          // chose «초대와 따로 내 조직 만들기» (a second one on purpose) is the limit the answer.
+          if (!ownOrgChosen.current && !joiningExisting.current) {
+            joiningExisting.current = true;
+            try {
+              const joined = await readExistingOrg();
+              if (joined) { setOrgId(joined); setStep('first'); return; }
+            } finally {
+              joiningExisting.current = false;
+            }
+          }
           setUpgradeReason(t('orgLimitExceededError', { limit: json.error.limit ?? 1 }));
           setShowUpgrade(true);
           setArrival('failed');
@@ -178,6 +193,19 @@ export function OnboardingForm({
     } catch {
       setError(t('networkError'));
       setArrival('failed');
+    }
+  };
+
+  // story 4904: the person's organization as the DATABASE says it now — renew the token once (the same shared call as the arrival), ask who they are, take the organization only when its
+  // membership is live (`existingOrgIdFromMe`). Anything that cannot be read answers null («not known to exist»), so the limit stays the answer it was.
+  const readExistingOrg = async (): Promise<string | null> => {
+    if ((await renewSession()) === 'failed') return null;
+    try {
+      const res = await fetchWithAuth('/api/auth/me');
+      if (!res.ok) return null;
+      return existingOrgIdFromMe(await res.json());
+    } catch {
+      return null;
     }
   };
 
