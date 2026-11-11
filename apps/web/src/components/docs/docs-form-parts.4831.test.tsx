@@ -138,7 +138,7 @@ describe('TreeSearchInput — 문서 트리 검색 칸', () => {
   function mount(isSearching: boolean, onChange = vi.fn(), onClear = vi.fn()) {
     return act(async () => {
       root.render(
-        <TreeSearchInput value="abc" onChange={onChange} onClear={onClear} isSearching={isSearching} matchCount={2} placeholder="검색" clearLabel="지우기" noResultsLabel="없음" resultCountLabel={(n) => `${n}건`} />,
+        <TreeSearchInput value="abc" onChange={onChange} onClear={onClear} isSearching={isSearching} placeholder="검색" clearLabel="지우기" />,
       );
     });
   }
@@ -160,6 +160,5 @@ describe('TreeSearchInput — 문서 트리 검색 칸', () => {
     await act(async () => { clear.click(); });
     expect(onClear).toHaveBeenCalledTimes(1);
     expect(document.activeElement).toBe(container.querySelector('input[data-slot="ds-input"]'));
-    expect(container.textContent).toContain('2건');
   });
 });

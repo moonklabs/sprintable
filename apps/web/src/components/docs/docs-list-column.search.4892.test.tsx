@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // story 4892 (UI-9 문서 목록 열) — the search field and the search results wear the ds parts: the field is a ds Input with a ds search glyph and a ds IconButton clear button, the results are ds ListRows
-// that are themselves the buttons. The behaviour stays: typing calls onChange, clear calls onClear and the focus returns to the field, the match count / «없음» line follows the state, a result
+// that are themselves the buttons. The behaviour stays: typing calls onChange, clear calls onClear and the focus returns to the field, the match count / «없음» line lives above the results only (never under the field), a result
 // shows its title, its slug (mono) and the matched words (<b> from the server → <mark>), only the open doc carries aria-current="page", loading / empty / cap lines.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
@@ -25,7 +25,7 @@ describe('TreeSearchInput — ds Input + ds Icon + ds IconButton (4892)', () => 
   async function mount(over: Partial<React.ComponentProps<typeof TreeSearchInput>> = {}) {
     const onChange = vi.fn(); const onClear = vi.fn();
     await act(async () => {
-      root.render(<TreeSearchInput value="abc" onChange={onChange} onClear={onClear} isSearching={false} matchCount={2} placeholder="검색" clearLabel="지우기" noResultsLabel="없음" resultCountLabel={(n) => `${n}건`} {...over} />);
+      root.render(<TreeSearchInput value="abc" onChange={onChange} onClear={onClear} isSearching={false} placeholder="검색" clearLabel="지우기" {...over} />);
     });
     return { onChange, onClear };
   }
@@ -57,13 +57,12 @@ describe('TreeSearchInput — ds Input + ds Icon + ds IconButton (4892)', () => 
     expect(document.activeElement).toBe(input());
   });
 
-  it('the count line follows the state: «N건» for matches, «없음» for none, nothing while not searching', async () => {
-    await mount({ isSearching: true, matchCount: 2 });
-    expect(container.textContent).toContain('2건');
-    await mount({ isSearching: true, matchCount: 0 });
-    expect(container.textContent).toContain('없음');
-    await mount({ isSearching: false, matchCount: 2 });
-    expect(container.textContent).not.toContain('2건');
+  it('⭐the field draws NO count / «없음» line under it — those live above the results (one line on screen, not two) · while searching too', async () => {
+    await mount({ isSearching: true });
+    expect(container.querySelector('p')).toBeNull();
+    expect(container.textContent).toBe('');
+    await mount({ isSearching: false });
+    expect(container.querySelector('p')).toBeNull();
   });
 });
 

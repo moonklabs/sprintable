@@ -21,9 +21,9 @@ import { Icon } from '@/components/ds/icon';
 import { Input } from '@/components/ds/input';
 import { CountBadge } from '@/components/ds/count-badge';
 import { SectionHeader } from '@/components/ds/section-header';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { ChevronDown, ChevronLeft, ChevronRight, FileText, X } from 'lucide-react';
 import { DocsLayoutContext, type Doc, type DocSortMode, type DocUpdate } from './docs-context';
 import { closedDrawerProps, useSwipeDrawer } from '@/lib/use-swipe-drawer';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
@@ -446,12 +446,18 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     [handleNewDoc, isCreating, handleNewFolder, folderSubmitting, t, sidebarCollapsed]
   );
 
+  const listCount = docsHasMore && docsTotal !== null ? docsTotal : tree.length;
+
   const sidebarContent = (
     <>
       {/* story 4892 (UI-9 목록 열) — 열 머리: 제목 + 새 폴더 · 새 문서(ds). 예전 에디토리얼 마스트헤드(kicker · 큰 제목 · 시그니처 선)는 걷었다.
           두 동작은 lg(레일이 보일 때)에만 여기 있고, lg 미만은 상단 바가 같은 두 동작을 갖는다 — 한 동작이 한 화면에 한 자리. */}
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-ds-line px-3 lg:pr-11">
-        <h2 className="m-0 min-w-0 flex-1 truncate text-ds-card-title font-semibold text-ds-ink">{t('title')}</h2>
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-ds-line px-3 touch:h-11 lg:pr-11">
+        {/* story 4892 (UI-9 문서 화면 배치) — 시안 목록 열 머리(«대화 5 · +»)처럼 이름 옆에 개수. 다 받았으면 받은 수(만들기 · 지우기에 늘 맞는다), 상한을 넘겨 «더 보기»가 남은 프로젝트만 서버 총량. 받기 전 · 0건이면 숨김. */}
+        <div className="flex min-w-0 flex-1 items-baseline gap-2">
+          <h2 className="m-0 min-w-0 truncate text-ds-card-title font-semibold text-ds-ink">{t('title')}</h2>
+          {listCount > 0 ? <span data-testid="docs-list-count" className="shrink-0 font-mono text-ds-mono-md text-ds-ink-3">{listCount}</span> : null}
+        </div>
         <IconButton icon="create_new_folder" label={t('newFolder')} onClick={handleNewFolder} disabled={folderSubmitting} className="hidden lg:inline-flex" />
         <DsButton
           type="button"
@@ -470,11 +476,8 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         onChange={setSearchQuery}
         onClear={() => setSearchQuery('')}
         isSearching={isSearching}
-        matchCount={searchResults.length}
         placeholder={t('searchTree')}
         clearLabel={t('clearSearch')}
-        noResultsLabel={t('searchNoResults')}
-        resultCountLabel={(n) => t('searchResultCount', { count: n })}
       />
       {/* story #1950 — 새 폴더 인라인 폼(팝오버 아님, #1942 결함 클래스 회피). 검색 중이어도
           "새 폴더" 버튼은 항상 접근 가능하므로 isSearching과 무관하게 렌더한다. */}
@@ -561,7 +564,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         if (allTags.length === 0) return null;
         return (
           // the ds SectionHeader draws its own bottom line; the wrapper adds one only under the open chips (a collapsed heading would show two)
-          <div className={tagsCollapsed ? undefined : 'border-b border-border'}>
+          <div className={tagsCollapsed ? undefined : 'border-b border-ds-line'}>
             {/* story 4892 (UI-9 목록 열) — 머리글이 ds SectionHeader: 접기 단추(`aria-expanded`) + 제목 + (접혔고 고른 태그가 있으면) 건수. 접기 상태 · 태그 고르기는 무변경. */}
             <SectionHeader
               title={t('tagFilter')}
@@ -579,11 +582,11 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
                   // story #3053(2984-S5) — 선택 상태는 subtle 헤어라인 채택, bg-proof-blue-soft
                   // 채움 폐지(비선택 bg-proof-sunk는 무채 중립 배경이라 SHIFT 대상 밖 — S1
                   // 선례와 동형).
-                  <button key={tag} type="button" onClick={() => setSelectedTags((prev) => prev.includes(tag) ? prev.filter((tg) => tg !== tag) : [...prev, tag])} className={`proof-surface proof-surface-press px-2 py-0.5 text-editorial-meta font-semibold transition ${selectedTags.includes(tag) ? 'border border-proof-line bg-transparent text-foreground' : 'bg-proof-sunk text-proof-ink-3 hover:bg-muted'}`}>
+                  <DsButton key={tag} variant={selectedTags.includes(tag) ? 'secondary' : 'quiet'} aria-pressed={selectedTags.includes(tag)} onClick={() => setSelectedTags((prev) => prev.includes(tag) ? prev.filter((tg) => tg !== tag) : [...prev, tag])}>
                     #{tag}
-                  </button>
+                  </DsButton>
                 ))}
-                {selectedTags.length > 0 && <button type="button" onClick={() => setSelectedTags([])} className="text-editorial-meta text-muted-foreground underline hover:text-foreground">{t('clearFilter')}</button>}
+                {selectedTags.length > 0 && <DsButton variant="quiet" onClick={() => setSelectedTags([])}>{t('clearFilter')}</DsButton>}
               </div>
             )}
           </div>
@@ -603,14 +606,16 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             cap={DOC_SEARCH_LIMIT}
           />
         ) : loading ? (
-          <p className="px-2 py-4 text-xs text-muted-foreground">{t('loading')}</p>
+          <SkeletonGroup label={t('loading')} className="space-y-1 px-2 py-3">
+            {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-9" />)}
+          </SkeletonGroup>
         ) : loadError ? (
           // story #3784(유나 짚음) — 오른쪽 DocsIndex가 실패 배너로 갈라졌는데 이 트리가
           // "0건"으로 남으면 한 화면이 두 말을 하는 자리가 그대로 남는다. 같은 키
           // (indexLoadError, "문서 목록")를 쓰되 폭이 좁아 Alert 대신 로딩 문구가 서던
           // 그 자리에 한 줄 + 텍스트 재시도로.
           <div className="px-2 py-4">
-            <p className="text-xs text-muted-foreground">{t('indexLoadError')}</p>
+            <p className="text-ds-small text-ds-ink-3">{t('indexLoadError')}</p>
             {/* 유나 정정(10:01Z) — raw 버튼 요소가 DS 게이트 A(verify-no-new-raw-button)를
                 건드렸다. 이 레일 자리의 정본은 variant="link"(hover 배경 자체가 없음 —
                 content/page.tsx:248 실측 그대로, ghost는 좁은 레일에서 hover 사각형이
@@ -626,7 +631,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           // 빈 상태+상단 바에 이미 「새 문서」 둘이 있어 여기까지 셋이면 과함).
           // `selectDoc`은 그대로 둔다 — docs-shell-client.tsx의 "문서는 있는데 미선택"
           // 자리는 이 분기가 아니라 별도 자리다.
-          <p className="px-2 py-4 text-xs text-muted-foreground">{t('emptyTitle')}</p>
+          <p className="px-2 py-4 text-ds-small text-ds-ink-3">{t('emptyTitle')}</p>
         ) : (
           <>
             <RecentsSection
@@ -657,7 +662,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             {docsHasMore && (
               <div className="px-2 py-1">
                 {docsTotal !== null && (
-                  <p className="px-2 pb-1 text-center text-editorial-meta text-muted-foreground">{t('treeLoadedOfTotal', { loaded: tree.length, total: docsTotal })}</p>
+                  <p className="px-2 pb-1 text-center text-ds-small text-ds-ink-3">{t('treeLoadedOfTotal', { loaded: tree.length, total: docsTotal })}</p>
                 )}
                 <DsButton variant="quiet" className="w-full" disabled={docsLoadingMore} onClick={() => { if (!docsNextCursor || docsLoadingMore) return; setDocsLoadingMore(true); void fetchTree(selectedTags.length ? selectedTags : undefined, docsNextCursor); }}>
                   {docsLoadingMore ? tc('loading') : tc('loadMore')}
@@ -699,24 +704,17 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         {!sidebarCollapsed && (
           /* story 4892 (5533 정정, PO 11-10) — 236px at lg (1024~1279: the reading column keeps its width — 544 at 1100), 300px from xl (≥1280, where 300 still leaves the body 820 at 1440) */
           <aside className="focus-inset relative hidden w-[236px] flex-shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r border-ds-line bg-ds-background lg:flex xl:w-[300px]">
-            <button
-              type="button"
-              onClick={handleToggleSidebar} aria-expanded={!sidebarCollapsed}
-              title={t('hideSidebar')}
-              className="absolute right-2 top-2 z-10 rounded-md border border-border p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <ChevronLeft className="size-4" />
-            </button>
+            <IconButton icon="chevron_left" label={t('hideSidebar')} aria-expanded={!sidebarCollapsed} onClick={handleToggleSidebar} className="absolute right-1 top-1.5 z-10 touch:top-0" />
             {sidebarContent}
           </aside>
         )}
-        <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
+        <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-ds-background">
           {/* 박스1: 모바일 칩 띠는 리스트뷰(문서 미선택)서만 노출 — doc 상세는 슬림 헤더 트리 아이콘이
               트리 트리거 대체(중복 빈 띠 제거·문서명은 헤더 제목이 흡수). 리스트뷰는 칩이 유일 트리 접근이라 보존. */}
           {!currentSlug && (
           <div
             className={cn(
-              'flex-shrink-0 flex items-center gap-2 border-b border-border/80 bg-background px-4 py-2 lg:hidden',
+              'flex-shrink-0 flex items-center gap-2 border-b border-ds-line bg-ds-background px-4 py-2 lg:hidden',
               'sticky top-12 z-20 transition-transform',
               '[transition-duration:var(--gnb-hide-duration)]',
               '[transition-timing-function:var(--gnb-hide-easing)]',
@@ -724,23 +722,15 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
               gnbHidden && '-translate-y-[calc(100%+var(--gnb-mobile-height))] focus-within:translate-y-0',
             )}
           >
-            <button type="button" onClick={() => setTreeDrawerOpen(true)} className="flex min-h-[44px] min-w-0 max-w-full items-center gap-2 rounded-lg border border-border px-3 text-sm text-foreground transition-colors hover:bg-accent" aria-label={t('openDocTree')}>
-              <FileText className="size-4 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 truncate font-medium">{currentDocTitle ?? t('title')}</span>
-              <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-            </button>
+            <DsButton variant="secondary" size="lg" onClick={() => setTreeDrawerOpen(true)} aria-label={t('openDocTree')} iconStart={<Icon name="description" size={16} />} className="min-w-0 max-w-full justify-start">
+              <span className="min-w-0 truncate">{currentDocTitle ?? t('title')}</span>
+              <Icon name="expand_more" size={14} className="shrink-0 text-ds-ink-3" />
+            </DsButton>
           </div>
           )}
           {/* Desktop collapsed sidebar open button */}
           {sidebarCollapsed && (
-            <button
-              type="button"
-              onClick={handleToggleSidebar} aria-expanded={!sidebarCollapsed}
-              title={t('openSidebar')}
-              className="absolute left-2 top-2 z-10 hidden rounded-md border border-border p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:block"
-            >
-              <ChevronRight className="size-4" />
-            </button>
+            <IconButton icon="chevron_right" label={t('openSidebar')} aria-expanded={!sidebarCollapsed} onClick={handleToggleSidebar} className="absolute left-1 top-1.5 z-10 hidden touch:top-0 lg:inline-flex" />
           )}
           {children}
         </section>
@@ -763,17 +753,17 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           aria-modal="true"
           aria-label={t('title')}
           // story #3007(로드맵 P2·PR-E, L1) — 모바일 드로어는 floating이라 --elev-overlay.
-          className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden border-r border-border bg-background shadow-[var(--elev-overlay)] outline-none lg:hidden"
+          className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden border-r border-ds-line bg-ds-background shadow-[var(--elev-overlay)] outline-none lg:hidden"
           style={{
             transform: `translateX(${(drawerProgress - 1) * 100}%)`,
             transition: drawerDragging ? 'none' : 'transform 280ms cubic-bezier(0.4,0,0.2,1)',
           }}
           {...closedDrawerProps(drawerProgress, treeDrawerOpen)}
         >
-          <div className="flex flex-shrink-0 items-center justify-between border-b border-border/80 px-4 py-3">
-            <span className="text-sm font-medium text-foreground">{t('title')}</span>
+          <div className="flex flex-shrink-0 items-center justify-between border-b border-ds-line px-4 py-2">
+            <span className="text-ds-card-title font-semibold text-ds-ink">{t('title')}</span>
             {/* story #3776(1층B) — "닫기", common ns의 기존 close 키 재사용. */}
-            <button type="button" onClick={closeDrawer} className="rounded p-1 text-muted-foreground hover:text-foreground" aria-label={tc('close')}><X className="size-4" /></button>
+            <IconButton icon="close" label={tc('close')} onClick={closeDrawer} />
           </div>
           <div className="focus-inset flex-1 overflow-y-auto">{sidebarContent}</div>
         </div>

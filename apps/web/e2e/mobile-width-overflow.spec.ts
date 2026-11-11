@@ -330,19 +330,21 @@ test('402폭 — 이름 없는 소유자: 일감 목록 · 담당자 필터 정�
 test('320 · 360 · 390 — 문서 읽기 빵부스러기: 짧은 분류는 통째로 · 긴 분류는 말줄임 · «지식» 한 줄(story #4356)', async ({ page }) => {
   test.setTimeout(5 * 60_000);
   expect(crumbShortSlug && crumbLongSlug, '빵부스러기 문서 시드').toBeTruthy();
+  // story 4892 — 머리줄이 둘째 줄(경로 · 메타)과 첫 줄(제목 h1)로 갈렸다: «지식» · 분류는 둘째 줄 `docs-reader-subline`, 제목은 머리 첫 줄 h1.
   const measure = (category: string) => page.evaluate((cat) => {
-    const root = [...document.querySelectorAll('a')].find((a) => a.textContent === '지식' && (a.parentElement?.textContent ?? '').includes(cat));
-    const row = root?.parentElement;
-    const kids = row ? ([...row.children] as HTMLElement[]) : [];
+    const sub = document.querySelector('[data-testid="docs-reader-subline"]');
+    const root = sub ? [...sub.querySelectorAll('a')].find((a) => a.textContent === '지식') : undefined;
+    const kids = sub ? ([...sub.children] as HTMLElement[]) : [];
     const catEl = kids.find((el) => el.textContent === cat);
     if (!root || !catEl) return null;
-    const title = kids[kids.indexOf(catEl) + 2];
+    const title = document.querySelector('[data-testid="docs-reader-head"] h1') as HTMLElement | null;
     const range = (el: Element) => { const r = document.createRange(); r.selectNodeContents(el); return r; };
     // 줄 수 = 글자 조각 사각형의 서로 다른 윗변 수(블록이 된 flex 항목도 글자 줄은 따로 센다).
     const lines = (el: Element) => new Set([...range(el).getClientRects()].map((q) => Math.round(q.top))).size;
     return {
       rootLines: lines(root),
       catW: catEl.clientWidth, catScroll: catEl.scrollWidth, catText: range(catEl).getBoundingClientRect().width, catOverflow: getComputedStyle(catEl).textOverflow,
+      catRight: catEl.getBoundingClientRect().right, subRight: sub!.getBoundingClientRect().right,
       titleW: title?.clientWidth ?? 0, titleScroll: title?.scrollWidth ?? 0,
     };
   }, category);
@@ -356,8 +358,10 @@ test('320 · 360 · 390 — 문서 읽기 빵부스러기: 짧은 분류는 통�
       const at = `${width} · ${isLong ? '긴' : '짧은'} 분류`;
       expect(m.rootLines, `${at} — «지식» 한 줄`).toBe(1);
       if (isLong) {
-        expect(m.catOverflow, `${at} — 말줄임(…)`).toBe('ellipsis');
-        expect(m.catScroll, `${at} — 줄어서 말줄임`).toBeGreaterThan(m.catW);
+        // story 4892 — 분류는 이제 둘째 줄(경로 · 메타)에서 제 줄을 가진다(제목과 한 줄을 나누지 않음): 줄보다 넓을 때만 줄어든다. 의도(긴 분류가 줄 밖으로 삐져나오지 않고 말줄임 규칙을 쥔다)는 그대로 —
+        // 말줄임 규칙(text-overflow: ellipsis)이 걸려 있고, 어떤 폭에서도 분류의 오른쪽 끝이 둘째 줄 안에 있다. 넓이 넘침이 생기면(scroll > client) 그때 말줄임이 실제로 보인다.
+        expect(m.catOverflow, `${at} — 말줄임(…) 규칙`).toBe('ellipsis');
+        expect(m.catRight, `${at} — 분류가 줄 밖으로 안 나감`).toBeLessThanOrEqual(m.subRight + 1);
       } else {
         expect(m.catScroll, `${at} — 통째로(잘림 0)`).toBeLessThanOrEqual(m.catW + 1);
         expect(m.catW, `${at} — 폭 ≥ 글자 폭`).toBeGreaterThanOrEqual(Math.floor(m.catText));

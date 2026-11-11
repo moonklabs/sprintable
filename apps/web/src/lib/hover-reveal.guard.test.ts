@@ -87,11 +87,6 @@ export function hoverRevealRingProblems(src: string, file = 'sample.tsx'): { pro
 // 이유가 있는 제외 — 자리마다 조각 안 글자(needle)로 짚고, 짚은 자리가 사라지면(낡음) RED.
 const EXEMPT: { file: string; needle: string; reason: string }[] = [
   {
-    file: 'components/docs/doc-tree.tsx',
-    needle: 'cursor-grab touch-none opacity-0',
-    reason: '끌기 손잡이 = 마우스 전용: 센서가 터치를 안 받고(#1988) 키보드 센서도 없다 → tabIndex -1 · aria-hidden(PO 08:45Z · 렌더 테스트가 핀)',
-  },
-  {
     file: 'components/ds/tree-row.tsx',
     needle: 'z-10 flex items-center opacity-0',
     reason: '끌기 손잡이 자리 = 마우스 전용(UI-3 4886 TreeRow가 doc-tree 줄 구조를 부품으로 옮긴 것): 센서가 터치를 안 받고 키보드 센서도 없다 → 터치(pointer-coarse)에서는 아예 없고(hidden) 마우스에서만 호버 때 보인다. 손잡이 노드(aria-hidden · tabIndex -1)는 호출부가 준다 · 키보드 대체 길은 줄 «⋮» 메뉴(위로/아래로/폴더로)',
