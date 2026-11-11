@@ -111,7 +111,7 @@ export function ApprovalCard({ label, title, onTitleClick, level = 3, requester,
         <>
           <Heading className="m-0 min-w-0 text-ds-card-title font-semibold text-ds-ink break-keep [overflow-wrap:anywhere]">
             {onTitleClick ? (
-              // 폰(coarse)에서는 Button이 쥔 누름 영역 44(pointer-coarse:min-h-11)를 그대로 둔다 — 한 줄 제목이어도 손가락이 닿는 높이는 ≥ 44. `min-h-0`을 주지 않는다.
+              // 폰(coarse)에서는 Button이 쥔 누름 영역 44(touch:min-h-11)를 그대로 둔다 — 한 줄 제목이어도 손가락이 닿는 높이는 ≥ 44. `min-h-0`을 주지 않는다.
               <Button type="button" variant="quiet" onClick={onTitleClick} className="h-auto w-full justify-start whitespace-normal px-0 py-0 text-left text-ds-card-title text-ds-action-text hover:bg-transparent">
                 {title}
               </Button>

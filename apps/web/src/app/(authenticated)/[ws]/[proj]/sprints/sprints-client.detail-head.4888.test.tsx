@@ -59,8 +59,8 @@ describe('스프린트 상세 패널 머리 — ds 부품(story #4888)', () => {
       const b = container.querySelector(`button[aria-label="${label}"]`) as HTMLButtonElement;
       expect(b, label).not.toBeNull();
       expect(b.getAttribute('data-slot')).toBe('ds-icon-button');
-      expect(b.className.split(/\s+/)).toContain('pointer-coarse:min-h-11');
-      expect(b.className.split(/\s+/)).toContain('pointer-coarse:min-w-11');
+      expect(b.className.split(/\s+/)).toContain('touch:min-h-11');
+      expect(b.className.split(/\s+/)).toContain('touch:min-w-11');
     }
   });
 

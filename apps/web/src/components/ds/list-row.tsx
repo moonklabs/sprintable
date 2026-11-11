@@ -56,7 +56,7 @@ export function ListRow({ leading, title, subtitle, trailing, needsHand = false,
       className={cn(
         'relative flex items-center gap-3 border-b border-ds-line px-4 text-left outline-none transition-colors duration-100 motion-reduce:transition-none',
         'hover:bg-ds-surface-high focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ds-action',
-        density === 'compact' ? 'min-h-9 py-1 pointer-coarse:min-h-11' : 'min-h-14 py-2',
+        density === 'compact' ? 'min-h-9 py-1 touch:min-h-11' : 'min-h-14 py-2',
         selected && 'bg-ds-surface-high',
         needsHand && 'before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-ds-needs-hand-bar',
         className,

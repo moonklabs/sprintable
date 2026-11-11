@@ -68,6 +68,22 @@
   --ds-scrim: #000000;
 }
 
+/*
+ * `touch:` 변형 — «손가락으로 누르는 기기»의 44 바닥(UI-3 4886 · PO 결정 11-11). `pointer-coarse:` 하나는 안드로이드 에뮬 웹뷰(pointer fine · hover none)와
+ * 스타일러스 소스가 붙은 폰(S펜 등)에서 44가 통째로 빠졌다 → `(pointer: coarse)` 또는 `(hover: none)`이면 건다.
+ * 데스크톱 마우스(pointer fine · hover)는 그대로 36. ds 부품의 44는 `pointer-coarse:`가 아니라 이 변형만 쓴다(touch-variant.test.tsx가 컴파일된 CSS로 지킨다).
+ * 셋째 조건 = 앱 셸(iOS · Android) 안: <html data-sprintable-shell="ios|android">(루트 layout head 인라인 스크립트 · lib/shell-attribute.ts)이면 기기 분류와 상관없이 건다.
+ * 맥 데스크톱 앱(macos)에는 속성이 안 달려 마우스 36 그대로.
+ */
+@custom-variant touch {
+  @media (pointer: coarse), (hover: none) {
+    @slot;
+  }
+  &:where([data-sprintable-shell="ios"] *, [data-sprintable-shell="android"] *) {
+    @slot;
+  }
+}
+
 @theme inline {
   --color-ds-surface-sunk: var(--ds-surface-sunk);
   --color-ds-background: var(--ds-background);

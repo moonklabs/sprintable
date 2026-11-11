@@ -10,7 +10,7 @@ const iconButtonVariants = cva(
     'inline-flex shrink-0 select-none items-center justify-center rounded-ds-control border border-transparent bg-transparent text-ds-ink-2 outline-none',
     'transition-[filter,background-color] duration-100 motion-reduce:transition-none hover:bg-ds-surface-high hover:text-ds-ink',
     'focus-visible:ring-2 focus-visible:ring-ds-action focus-visible:ring-offset-1 focus-visible:ring-offset-ds-background',
-    'active:brightness-90 disabled:pointer-events-none disabled:text-ds-ink-3 aria-disabled:pointer-events-none aria-disabled:text-ds-ink-3 pointer-coarse:min-h-11 pointer-coarse:min-w-11',
+    'active:brightness-90 disabled:pointer-events-none disabled:text-ds-ink-3 aria-disabled:pointer-events-none aria-disabled:text-ds-ink-3 touch:min-h-11 touch:min-w-11',
   ],
   {
     variants: {

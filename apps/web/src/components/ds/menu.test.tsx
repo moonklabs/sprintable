@@ -63,7 +63,7 @@ describe('ds Menu', () => {
     await render(<Demo />);
     const cls = items()[0]!.className;
     expect(cls).toContain('min-h-8');
-    expect(cls).toContain('pointer-coarse:min-h-11');
+    expect(cls).toContain('touch:min-h-11');
     expect(cls).toContain('focus-visible:ring-inset');
     expect(cls).toContain('focus-visible:ring-ds-action');
     expect(items()[1]!.getAttribute('aria-disabled')).toBe('true');

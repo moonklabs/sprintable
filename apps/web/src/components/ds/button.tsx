@@ -19,7 +19,7 @@ export const buttonVariants = cva(
     'active:brightness-90 disabled:pointer-events-none disabled:border-dashed disabled:border-ds-line-control disabled:bg-transparent disabled:text-ds-ink-3 disabled:brightness-100',
     // asChild(링크 등)는 native :disabled가 없다 — aria-disabled가 같은 «비활성» 모양을 입는다.
     'aria-disabled:pointer-events-none aria-disabled:border-dashed aria-disabled:border-ds-line-control aria-disabled:bg-transparent aria-disabled:text-ds-ink-3 aria-disabled:brightness-100',
-    'aria-busy:pointer-events-none pointer-coarse:min-h-11 pointer-coarse:min-w-11',
+    'aria-busy:pointer-events-none touch:min-h-11 touch:min-w-11',
   ],
   {
     variants: {

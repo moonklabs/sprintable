@@ -99,7 +99,7 @@ describe('ds Tabs', () => {
   it('폰(coarse)은 누름 영역 44 · 초점 링 action · 비활성은 눌리지 않는 모양', async () => {
     await render(<Demo />);
     const cls = tabs()[0]!.className;
-    expect(cls).toContain('pointer-coarse:min-h-11');
+    expect(cls).toContain('touch:min-h-11');
     expect(cls).toContain('focus-visible:ring-ds-action');
     expect(tabs()[2]!.hasAttribute('disabled') || tabs()[2]!.getAttribute('aria-disabled') === 'true').toBe(true);
   });

@@ -58,7 +58,7 @@ describe('ds Dialog', () => {
 
   it('⭐닫기(X)가 없으면 머리 줄 · 제목은 오른쪽을 비우지 않는다 — 여백은 «닫기 표지가 있을 때만» 걸린다(무조건 pr-9 금지)', async () => {
     await render(<Dialog open><DialogContent aria-label="창" showCloseButton={false}><DialogHeader><DialogTitle>제목</DialogTitle></DialogHeader><DialogTitle>곧장</DialogTitle></DialogContent></Dialog>);
-    const unconditional = /(^|\s)(pointer-coarse:)?pr-(9|14)(\s|$)/;
+    const unconditional = /(^|\s)(touch:)?pr-(9|14)(\s|$)/;
     expect(document.querySelector('[data-slot="ds-dialog-header"]')!.className).not.toMatch(unconditional);
     for (const title of document.querySelectorAll('[data-slot="ds-dialog-title"]')) expect(title.className).not.toMatch(unconditional);
     expect(popup()!.hasAttribute('data-close-button')).toBe(false);
@@ -81,7 +81,7 @@ describe('ds Dialog', () => {
     await render(<Dialog open><DialogContent aria-label="창"><DialogTitle>곧장 제목</DialogTitle></DialogContent></Dialog>);
     const cls = document.querySelector('[data-slot="ds-dialog-title"]')!.className;
     expect(cls).toContain('group-data-[close-button]/dialog:not-in-data-[slot=ds-dialog-header]:pr-9');
-    expect(cls).toContain('pointer-coarse:pr-14');
+    expect(cls).toContain('touch:pr-14');
     expect(popup()!.hasAttribute('data-close-button')).toBe(true);
   });
 
@@ -200,6 +200,6 @@ describe('ds Dialog — Esc 규칙([SID:4369] 현행 Dialog와 같은 갈래)', 
     // 제목이 «머리 줄 안» 판정(not-in-data-[slot=ds-dialog-header])을 받으려면 머리 줄이 ds-dialog-header 표지를 그대로 가져야 한다.
     expect(header.getAttribute('data-slot')).toBe('ds-dialog-header');
     expect(header.className).toContain('group-data-[close-button]/dialog:pr-9');
-    expect(header.className).toContain('pointer-coarse:pr-14');
+    expect(header.className).toContain('touch:pr-14');
   });
 });

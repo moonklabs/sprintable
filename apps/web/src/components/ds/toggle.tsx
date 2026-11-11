@@ -22,7 +22,7 @@ export function Toggle({ label, onText, offText, className, checked, defaultChec
   const [inner, setInner] = useState(!!defaultChecked);
   const on = checked ?? inner;
   return (
-    <label data-slot="ds-toggle-field" className={cn('inline-flex min-h-7 cursor-pointer items-center gap-2 text-ds-body text-ds-ink pointer-coarse:min-h-11 has-data-disabled:cursor-not-allowed has-data-disabled:text-ds-ink-3', className)}>
+    <label data-slot="ds-toggle-field" className={cn('inline-flex min-h-7 cursor-pointer items-center gap-2 text-ds-body text-ds-ink touch:min-h-11 has-data-disabled:cursor-not-allowed has-data-disabled:text-ds-ink-3', className)}>
       <SwitchPrimitive.Root
         data-slot="ds-toggle"
         aria-labelledby={labelId}

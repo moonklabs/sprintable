@@ -88,7 +88,7 @@ describe('ds ListRow', () => {
     expect(row().className).not.toContain('min-h-9');
     await act(async () => { root.render(<ListRow title="줄" density="compact" />); });
     expect(row().className).toContain('min-h-9');
-    expect(row().className).toContain('pointer-coarse:min-h-11');
+    expect(row().className).toContain('touch:min-h-11');
     expect(row().className).not.toContain('min-h-14');
     expect(row().getAttribute('data-density')).toBe('compact');
   });

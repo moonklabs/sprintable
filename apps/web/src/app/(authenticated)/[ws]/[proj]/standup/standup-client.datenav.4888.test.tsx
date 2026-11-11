@@ -68,10 +68,10 @@ describe('StandupClient — 날짜 줄은 ds DateNav(story #4888)', () => {
       const b = btn(label)!;
       expect(b, label).toBeTruthy();
       expect(b.getAttribute('data-slot')).toBe('ds-icon-button');
-      expect(b.className.split(/\s+/)).toContain('pointer-coarse:min-h-11');
+      expect(b.className.split(/\s+/)).toContain('touch:min-h-11');
     }
     expect(btn(koMessages.standup.today)).toBeTruthy();
-    expect(dateInput().className.split(/\s+/)).toContain('pointer-coarse:h-11');
+    expect(dateInput().className.split(/\s+/)).toContain('touch:h-11');
     // 예전 글자 단추(←/→)는 없다
     expect([...nav().querySelectorAll('button')].map((b) => b.textContent)).not.toContain('←');
   });

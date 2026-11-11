@@ -89,8 +89,8 @@ describe('PushRegisterNotice — drawn only when the phone says it failed', () =
     // story 4891: the ds Button's secondary look (the quiet outline on the line-control border) — not the primary, not red
     expect(button()!.className).toContain('border-ds-line-control');
     expect(button()!.className).not.toContain('bg-ds-action');
-    // the 44px touch target (the line's only action; shown only in the phone app): the ds Button carries the touch floor (pointer-coarse) — the big size, not the 28px one
-    expect(button()!.className).toContain('pointer-coarse:min-h-11');
+    // the 44px touch target (the line's only action; shown only in the phone app): the ds Button carries the touch floor (touch:) — the big size, not the 28px one
+    expect(button()!.className).toContain('touch:min-h-11');
     expect(button()!.className).toContain('h-9');
     expect(button()!.className).not.toContain('h-7');
     expect(button()!.className).not.toContain('bg-primary');

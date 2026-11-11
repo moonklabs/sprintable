@@ -50,7 +50,7 @@ describe('스프린트 만들기 폼 — 시작일 · 종료일(story #4888)', (
     expect(dates()).toHaveLength(2);
     for (const input of dates()) {
       expect(input.getAttribute('data-slot')).toBe('ds-input');
-      expect(input.className.split(/\s+/)).toContain('pointer-coarse:h-11');
+      expect(input.className.split(/\s+/)).toContain('touch:h-11');
       expect(input.required).toBe(true);
     }
     expect(dates()[0]!.labels?.[0]?.textContent).toBe(koMessages.sprints.startDate);

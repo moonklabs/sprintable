@@ -66,12 +66,12 @@ export function DialogContent({ className, children, showCloseButton = true, ...
 }
 
 export function DialogHeader({ className, ...props }: ComponentProps<'div'>) {
-  return <div data-slot="ds-dialog-header" className={cn('flex flex-col gap-1 group-data-[close-button]/dialog:pr-9 group-data-[close-button]/dialog:pointer-coarse:pr-14', className)} {...props} />;
+  return <div data-slot="ds-dialog-header" className={cn('flex flex-col gap-1 group-data-[close-button]/dialog:pr-9 group-data-[close-button]/dialog:touch:pr-14', className)} {...props} />;
 }
 
 export function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
   // 머리 줄(DialogHeader) 밖에서 곧장 쓰면 닫기(X) 밑으로 들어가지 않게 제목이 오른쪽을 비운다(머리 줄 안이면 줄이 이미 비웠으므로 이중으로 안 비운다).
-  return <DialogPrimitive.Title data-slot="ds-dialog-title" className={cn('text-ds-card-title font-semibold text-ds-ink break-keep [overflow-wrap:anywhere] group-data-[close-button]/dialog:not-in-data-[slot=ds-dialog-header]:pr-9 group-data-[close-button]/dialog:not-in-data-[slot=ds-dialog-header]:pointer-coarse:pr-14', className as string)} {...props} />;
+  return <DialogPrimitive.Title data-slot="ds-dialog-title" className={cn('text-ds-card-title font-semibold text-ds-ink break-keep [overflow-wrap:anywhere] group-data-[close-button]/dialog:not-in-data-[slot=ds-dialog-header]:pr-9 group-data-[close-button]/dialog:not-in-data-[slot=ds-dialog-header]:touch:pr-14', className as string)} {...props} />;
 }
 
 export function DialogDescription({ className, ...props }: DialogPrimitive.Description.Props) {

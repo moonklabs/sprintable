@@ -10,6 +10,7 @@ import { FetchGateInstaller } from '@/components/providers/fetch-gate-installer'
 import { PhoneBridgeClaim } from '@/components/providers/phone-bridge-claim';
 import { AnalyticsGate } from '@/components/analytics-gate';
 import { resolveAppUrl } from '@/services/app-url';
+import { SHELL_ATTRIBUTE_SCRIPT } from '@/lib/shell-attribute';
 import "./globals.css";
 
 // story #2745(선생님 지적 2026-08-18, PR#3202 리뷰 유나 확認) — "PM tool"/"AI-powered sprint
@@ -80,6 +81,8 @@ export default async function RootLayout({
       suppressHydrationWarning
     >
       <head>
+        {/* UI-3 touch: 변형의 셋째 조건 — 앱 셸(iOS · Android)이면 <html data-sprintable-shell>을 첫 페인트 前에 단다(lib/shell-attribute.ts). 인라인 동기 스크립트라 파서가 <body>를 읽기 前에 돈다(React가 아래 preload 링크를 앞으로 끌어올릴 수는 있어 «head의 첫 자식»은 아니다). */}
+        <script dangerouslySetInnerHTML={{ __html: SHELL_ATTRIBUTE_SCRIPT }} />
         {/* story #2026: 라틴+코어만 preload — 확장(907.8KB)까지 걸면 unicode-range 판정을
             건너뛰고 항상 받아버려 §3-4의 겹침-우선권 구성 자체가 무력화된다(유나 지적). */}
         <link rel="preload" href="/fonts/pretendard-latin.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />

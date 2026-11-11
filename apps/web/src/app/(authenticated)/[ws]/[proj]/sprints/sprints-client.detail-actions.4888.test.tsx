@@ -78,7 +78,7 @@ describe('스프린트 상세 패널 행동 단추 — ds Button(story #4888)', 
     for (const b of [start, cancel]) {
       expect(b.getAttribute('data-slot')).toBe('ds-button');
       expect(cls(b)).toContain('w-full');
-      expect(cls(b)).toContain('pointer-coarse:min-h-11');
+      expect(cls(b)).toContain('touch:min-h-11');
     }
     expect(cls(start)).toContain('bg-ds-action');          // primary
     expect(cls(cancel)).not.toContain('bg-ds-action');     // secondary
@@ -91,7 +91,7 @@ describe('스프린트 상세 패널 행동 단추 — ds Button(story #4888)', 
     expect(close).toBeTruthy();
     expect(close.getAttribute('data-slot')).toBe('ds-button');
     expect(cls(close)).toContain('w-full');
-    expect(cls(close)).toContain('pointer-coarse:min-h-11');
+    expect(cls(close)).toContain('touch:min-h-11');
     expect(cls(close)).not.toContain('bg-ds-action');
     expect(btn(S.activate)).toBeUndefined();
   });

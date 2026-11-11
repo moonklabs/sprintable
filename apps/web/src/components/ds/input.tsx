@@ -20,7 +20,7 @@ export type InputProps = Omit<ComponentProps<typeof InputPrimitive>, 'className'
  * 오류는 색만으로 말하지 않는다 — 보이는 글과 아이콘은 `Field`가 칸 아래에 붙인다(Input 혼자 쓰면 호출부가 오류 글을 준다).
  */
 export function Input({ className, ...props }: InputProps) {
-  return <InputPrimitive data-slot="ds-input" className={cn(FIELD, 'h-9 pointer-coarse:h-11', className)} {...props} />;
+  return <InputPrimitive data-slot="ds-input" className={cn(FIELD, 'h-9 touch:h-11', className)} {...props} />;
 }
 
 export type TextareaProps = ComponentProps<'textarea'>;

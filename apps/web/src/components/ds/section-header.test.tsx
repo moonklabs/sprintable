@@ -71,6 +71,6 @@ describe('ds SectionHeader', () => {
 
   it('폰(coarse 포인터)은 줄 높이가 44 이상이다', async () => {
     await act(async () => { root.render(<SectionHeader title="구역" collapsed={false} onToggle={() => {}} />); });
-    expect((container.querySelector('[data-slot="ds-section-header"]') as HTMLElement).className).toContain('pointer-coarse:min-h-11');
+    expect((container.querySelector('[data-slot="ds-section-header"]') as HTMLElement).className).toContain('touch:min-h-11');
   });
 });

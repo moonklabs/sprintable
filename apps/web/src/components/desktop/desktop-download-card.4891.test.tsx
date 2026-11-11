@@ -63,7 +63,7 @@ describe('[SID:4891] DesktopDownloadCard on ds parts', () => {
     expect(primary.tagName).toBe('A');
     expect(primary.getAttribute('data-slot')).toBe('ds-button');
     expect(primary.className.split(/\s+/)).toContain('bg-ds-action');
-    expect(primary.className).toContain('pointer-coarse:min-h-11');
+    expect(primary.className).toContain('touch:min-h-11');
     await act(async () => { root.unmount(); });
     root = createRoot(container);
     await draw(<DesktopDownloadCard ctaVariant="outline" />);
