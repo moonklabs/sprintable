@@ -15,11 +15,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { SectionCard, SectionCardBody } from '@/components/ui/section-card';
+import { cardVariants } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { useChatsHref } from '@/app/dashboard/dashboard-shell';
 import { cn } from '@/lib/utils';
+import { Stepper } from '@/components/ds/stepper'; // story 4889 (W3)
 import { pickEulReulJosa, pickEunNeunJosa } from '@/lib/korean-particle';
 import { VerifyRail, useVerificationRail } from '@/app/onboarding/verify-rail';
 import { emitOnboardingEvent, beaconOnboardingEvent } from '@/app/onboarding/onboarding-telemetry';
@@ -215,26 +217,23 @@ function downloadTextFile(filename: string, content: string) {
 
 // ─── 재사용 하위 컴포넌트 ────────────────────────────────────────────────────
 
-function StepperHeader({ step, stages }: { step: Step; stages: { n: Step; label: string }[] }) {
+/**
+ * story 4889 (W3 · AC3 §2 모집 화면째): «지금까지 고른 것» — the side column of the recruit screen. It only SHOWS what the person already chose in the steps (role · scope · runtime · the agent made);
+ * nothing in it can be pressed, nothing is new data. Wide: a sticky column at the right of the step panel; phone: a wrapping row of chips above the panel.
+ */
+function RecruitSummary({ title, empty, items }: { title: string; empty: string; items: { key: string; label: string; value: string | null }[] }) {
   return (
-    <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-1 pb-3">
-      {stages.map((s, i) => (
-        <div key={s.n} className="flex items-center gap-1.5">
-          <span
-            className={cn(
-              'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold',
-              s.n === step && 'border-transparent bg-foreground text-background',
-              s.n < step && 'border-success/40 text-success',
-              s.n > step && 'border-border text-muted-foreground',
-            )}
-          >
-            {s.n < step ? <Check className="h-3 w-3" aria-hidden /> : s.n}
-            {s.label}
-          </span>
-          {i < stages.length - 1 && <span className="text-muted-foreground">›</span>}
-        </div>
-      ))}
-    </div>
+    <aside aria-label={title} data-testid="recruit-summary" className={cn(cardVariants({ surface: 'solid', radius: 'card' }), 'px-3 py-3 lg:sticky lg:top-4 lg:order-2')}>
+      <p className="mb-2 text-xs font-semibold text-muted-foreground">{title}</p>
+      <ul className="m-0 flex list-none flex-wrap gap-2 p-0 lg:flex-col lg:gap-3">
+        {items.map((it) => (
+          <li key={it.key} data-summary-key={it.key} data-filled={it.value ? 'true' : 'false'} className="min-w-0 rounded-lg bg-muted/40 px-2.5 py-1.5 lg:bg-transparent lg:p-0">
+            <span className="block text-xs text-muted-foreground">{it.label}</span>
+            <span className={cn('block break-keep text-sm wrap-anywhere', it.value ? 'font-medium text-foreground' : 'text-muted-foreground')}>{it.value ?? empty}</span>
+          </li>
+        ))}
+      </ul>
+    </aside>
   );
 }
 
@@ -1151,8 +1150,16 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
       </div>
   );
 
+  // story 4889 (W3): what the person has chosen so far — read from the state the steps already hold (nothing new is asked or saved)
+  const summaryItems: { key: string; label: string; value: string | null }[] = [
+    { key: 'role', label: t('stepRole'), value: equipSkip ? t('summaryNoRole') : selectedRole?.name ?? null },
+    { key: 'scope', label: t('stepScope'), value: step >= 3 ? (scopeMode === 'org' ? t('summaryScopeOrg') : t('summaryScopeProjects', { count: scopeProjectIds.length })) : null },
+    ...(equipSkip ? [] : [{ key: 'runtime', label: t('stepRuntime'), value: step >= 4 ? currentRuntimeDisplayName : null }]),
+    { key: 'agent', label: t('summaryAgent'), value: recruitResult ? (activeAgentName || t('deployedAgentFallback')) : equipResult ? equipResult.name || null : null },
+  ];
+
   return (
-    <div className="mx-auto flex max-w-2xl flex-1 flex-col gap-4 p-4">
+    <div className={cn('mx-auto flex w-full flex-1 flex-col gap-4 p-4', oneScreen ? 'max-w-2xl' : 'max-w-5xl')}>
       {showTopBar ? (
         <TopBarSlot title={<h1 className="flex items-center gap-2 text-sm font-medium"><IdCard className="h-4 w-4" aria-hidden />{t('title')}</h1>} showContextChip />
       ) : null}
@@ -1167,12 +1174,21 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
         </button>
       ) : null}
 
-      <SectionCard>
-        {oneScreen ? null : (
-          <SectionCardHeader>
-            <StepperHeader step={step} stages={stages} />
-          </SectionCardHeader>
-        )}
+      {/* story 4889 (W3 · AC3 §2 모집 화면째 · UI-1 «한 번에 한 장»): the progress is the PAGE's strip (the ds Stepper), the step is ONE panel, and what was chosen so far stands beside it —
+          before this the Stepper header, the step and everything were one long card in a 672px column. The equip-skip way has three steps; the app's one-screen start has no strip and no side column. */}
+      {oneScreen ? null : (
+        <SectionCard className="px-3 py-3" data-testid="recruit-progress">
+          <Stepper
+            aria-label={t('stepperLabel')}
+            steps={stages.map((st) => ({ id: st.n, label: st.label }))}
+            current={Math.max(0, stages.findIndex((st) => st.n === step))}
+            stateLabels={{ done: t('stepStateDone'), current: t('stepStateCurrent'), upcoming: t('stepStateUpcoming') }}
+          />
+        </SectionCard>
+      )}
+      <div className={cn('grid items-start gap-4', oneScreen ? 'grid-cols-1' : 'lg:grid-cols-[minmax(0,1fr)_16rem]')}>
+      {oneScreen ? null : <RecruitSummary title={t('summaryTitle')} empty={t('summaryEmpty')} items={summaryItems} />}
+      <SectionCard className="min-w-0">
         <SectionCardBody className="space-y-4">
 
           {/* ── STEP 1 : 직무 선택 ── */}
@@ -1976,6 +1992,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
           )}
         </SectionCardBody>
       </SectionCard>
+      </div>
     </div>
   );
 }

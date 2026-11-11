@@ -332,7 +332,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
 
       {loadFailed ? (
         <div className="mb-3 flex flex-wrap items-center gap-3" data-testid="agent-api-key-load-failed">
-          <p role="status" className="text-sm text-muted-foreground">{t('agentApiKeyLoadFailed')}</p>
+          <p role="status" className="text-sm text-foreground">{t('agentApiKeyLoadFailed')}</p>
           {/* the retry button goes away once the read works — the focus goes to [새로고침] then (never to the page) */}
           <Button variant="outline" disabled={loading} onClick={() => { setRefocus(true); void loadApiKeys(); }}>{tc('retry')}</Button>
         </div>
