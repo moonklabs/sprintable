@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Plus, Webhook } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
 import { PhoneAppCard } from '@/components/desktop/phone-app-card';
 import { ThisPhoneCard } from '@/components/settings/this-phone-card';
@@ -13,6 +13,7 @@ import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { UsageDashboard } from '@/components/settings/usage-dashboard';
 import { OrgMembersSection } from '@/components/settings/org-members-section';
 import { AddMemberModal } from '@/components/settings/add-member-modal';
+import { MemberWebhooksSection } from '@/components/settings/member-webhooks-section';
 import { ProjectAccessSection } from '@/components/settings/project-access-section';
 
 import { MyProfileSection } from '@/components/settings/my-profile-section';
@@ -64,7 +65,6 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { memberRowLabels } from '@/lib/member-display';
-import { RowName } from '@/components/shared/row-name';
 
 // TypeScript 정적 해석을 위해 unconditional import — 조건부 렌더링은 JSX isEEEnabled() 체크로 처리
 const BillingTab = dynamic(
@@ -1043,11 +1043,11 @@ export default function SettingsPage() {
               {/* 에이전트 관리 IA 통일(story d63d3f73) — Members는 People 전용, 서브탭 제거.
                   에이전트 목록·추가·상세는 `/agents`(관리 탭)로 흡수. */}
               <div className="mb-6 flex items-center justify-between gap-3">
-                <h2 className="text-base font-semibold text-foreground">{t('membersTabPeople')}</h2>
+                <h2 className="text-ds-card-title font-semibold text-ds-ink">{t('membersTabPeople')}</h2>
                 {isAdmin ? (
-                  <Button variant="hero" size="sm" className="shrink-0 gap-1.5" onClick={() => setAddMemberOpen(true)}>
+                  <DsButton variant="primary" className="shrink-0 gap-1.5" onClick={() => setAddMemberOpen(true)}>
                     <Plus className="size-3.5" /> {t('addMember')}
-                  </Button>
+                  </DsButton>
                 ) : null}
               </div>
 
@@ -1058,57 +1058,19 @@ export default function SettingsPage() {
                       projectId={currentProjectId}
                     />
                     {/* 7519c3ea: 팀원 webhook inline — flat 탭 폐기분을 멤버별 surface(handleSaveWebhookUrl 재사용·status 한눈에). */}
-                    <SectionCard>
-                      <SectionCardHeader>
-                        <div className="space-y-1">
-                          <h2 className="text-base font-semibold text-foreground">{t('webhooks')}</h2>
-                          <p className="text-sm text-muted-foreground">{t('webhookDescription')}</p>
-                        </div>
-                      </SectionCardHeader>
-                      <SectionCardBody className="space-y-2">
-                        {projectMembers.filter((m) => m.type === 'human').map((member) => {
-                          // 휴먼 webhook도 canonical webhook_configs(member_id) 기준 — 에이전트와 통일.
-                          const config = webhooks.find((w) => w.member_id === member.id);
-                          const draft = webhookEditing[member.id] ?? config?.url ?? '';
-                          const webhookStatus: 'active' | 'inactive' | 'empty' = !config?.url
-                            ? 'empty'
-                            : config.is_active ? 'active' : 'inactive';
-                          const err = webhookErrors[member.id];
-                          return (
-                            <div key={member.id} className="rounded-md border border-border bg-muted/30 px-3 py-3">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <RowName className="flex-1 text-sm font-medium text-foreground" label={webhookRowLabels.get(member.id)} id={member.id} />
-                                <Badge variant={webhookStatus === 'active' ? 'success' : webhookStatus === 'inactive' ? 'secondary' : 'outline'} className="gap-1">
-                                  <Webhook className="size-3" aria-hidden />
-                                  {webhookStatus === 'active' ? t('webhookStatusActive') : webhookStatus === 'inactive' ? t('webhookStatusInactive') : t('webhookStatusEmpty')}
-                                </Badge>
-                              </div>
-                              <div className="mt-2 flex flex-wrap items-center gap-2">
-                                <OperatorInput
-                                  type="url"
-                                  value={draft}
-                                  onChange={(e) => setWebhookEditing((prev) => ({ ...prev, [member.id]: e.target.value }))}
-                                  placeholder={t('webhookUrlPlaceholder')}
-                                  className="min-w-0 flex-1 font-mono"
-                                />
-                                <Button
-                                  variant="hero"
-                                  size="sm"
-                                  onClick={() => void handleSaveWebhookUrl(member.id)}
-                                  disabled={webhookSaving === member.id}
-                                >
-                                  {webhookSaving === member.id ? '...' : tc('save')}
-                                </Button>
-                              </div>
-                              {err ? <p role="alert" aria-live="assertive" aria-atomic="true" className="mt-1 text-xs text-destructive">{err}</p> : null}
-                            </div>
-                          );
-                        })}
-                      </SectionCardBody>
-                    </SectionCard>
+                    <MemberWebhooksSection
+                      members={projectMembers.filter((m) => m.type === 'human')}
+                      webhooks={webhooks}
+                      editing={webhookEditing}
+                      errors={webhookErrors}
+                      savingId={webhookSaving}
+                      rowLabels={webhookRowLabels}
+                      onEdit={(memberId, value) => setWebhookEditing((prev) => ({ ...prev, [memberId]: value }))}
+                      onSave={(memberId) => void handleSaveWebhookUrl(memberId)}
+                    />
                   </div>
                 ) : (
-                  <p className="text-sm text-muted-foreground">{t('noProject')}</p>
+                  <p className="text-ds-body text-ds-ink-3">{t('noProject')}</p>
                 )}
               </div>
             </TabsContent>

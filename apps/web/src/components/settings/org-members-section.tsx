@@ -290,7 +290,7 @@ export function OrgMembersSection({ orgId, currentRole }: OrgMembersSectionProps
               className="md:w-40"
               value={inviteRole}
               onChange={(e) => setInviteRole(e.target.value as 'admin' | 'member')}
-              aria-label={`${t('roleMember')} / ${t('roleAdmin')}`}
+              aria-label={t('agentRoleLabel')}
             >
               <option value="member">{t('roleMember')}</option>
               <option value="admin">{t('roleAdmin')}</option>

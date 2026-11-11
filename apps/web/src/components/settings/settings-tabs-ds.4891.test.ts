@@ -8,6 +8,7 @@ const TABS: Record<string, Record<string, string>> = {
   appearance: { ThemeSettings: 'settings/theme-settings', LanguageSettings: 'settings/language-settings' },
   'this-phone': { ThisPhoneCard: 'settings/this-phone-card' },
   desktop: { DesktopDownloadCard: 'desktop/desktop-download-card', PhoneAppCard: 'desktop/phone-app-card' },
+  members: { ProjectAccessSection: 'settings/project-access-section', MemberWebhooksSection: 'settings/member-webhooks-section' },
   'org-members': { OrgMembersSection: 'settings/org-members-section' }, // the remove dialog is reached through its imports
   organization: { OrganizationSection: 'settings/organization-section', OrgDangerSection: 'settings/organization-section', GateLevelMatrix: 'settings/gate-level-matrix', OrgGatePolicySection: 'settings/org-gate-policy-section' },
 };
@@ -15,6 +16,7 @@ const TABS: Record<string, Record<string, string>> = {
 /** tabs whose block in page.tsx also draws JSX of its own (not only components): every capitalised name there must come from a ds part (or the settings frame / parts), and the block must hold no hand-drawn old pieces */
 const INLINE: Record<string, string[]> = {
   'org-members': ['Skeleton', 'SkeletonGroup'],
+  members: ['DsButton', 'Plus'], // the «멤버 추가» button and its lucide icon
 };
 const OLD_PIECES = /animate-pulse|<input\b|<select\b|<button\b|<label\b|\btext-(xs|sm)\b|text-muted-foreground|text-foreground|text-destructive|<Alert\b|<SectionCard/;
 
@@ -35,9 +37,14 @@ describe('settings tabs on ds parts: nothing old in what they draw', () => {
       expect(named.filter((n) => n in comps).length).toBe(Object.keys(comps).length);
       for (const n of inline) {
         const from = pageImportSource(n);
-        expect(from, `${n} (used inline in the «${tab}» tab) is imported from a ds part / the settings parts`).toMatch(/^@\/components\/(ds\/|settings\/settings-(section|parts))/);
+        expect(from, `${n} (used inline in the «${tab}» tab) is imported from a ds part / the settings parts`).toMatch(/^(@\/components\/(ds\/|settings\/settings-(section|parts))|lucide-react$)/);
       }
       expect(block.match(OLD_PIECES)?.[0] ?? null, `the «${tab}» tab block still draws an old piece`).toBeNull();
     });
   }
+
+  it('the «멤버 추가» dialog (opened from the members tab, rendered by the page outside the tab block) has no old ui/ part either', () => {
+    const { olds } = walkOldUi([componentFile('settings/add-member-modal')]);
+    expect(olds, `old ui/ imports in the add-member dialog:\n${olds.join('\n')}`).toEqual([]);
+  });
 });
