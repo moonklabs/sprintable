@@ -161,86 +161,78 @@ describe('ThreadPanel — story #2911 좌측 rail(R4 위계 시각화)', () => {
     });
     await flush();
 
-    const railed = container.querySelectorAll('.border-l-2.border-border');
-    // 원본 메시지 블록 1 + 답글 목록 wrapper 1 = 최소 2곳(개별 ChatBubble마다 따로 안 생김 —
-    // AC3: 그룹핑된 답글이 rail을 분절시키지 않는다는 것 자체가 "wrapper 하나"라는 뜻).
-    expect(railed.length).toBeGreaterThanOrEqual(2);
+    // story 4887 (UI-4 screen PR · the approved thread) — no left rail any more: the original sits at the top as the thread's subject and the replies are PLAIN ROWS (no bubble) under it
+    expect(container.querySelectorAll('.border-l-2.border-border')).toHaveLength(0);
+    expect(container.querySelector('[data-testid="thread-original"]')).not.toBeNull();
+    const rows = container.querySelectorAll('[data-testid="thread-replies"] [data-testid="chat-bubble-text"]');
+    expect(rows.length).toBe(2);
+    for (const r of rows) expect(r.getAttribute('data-bubble'), 'every reply reads as a plain row').toBe('plain');
     expect(container.textContent).toContain('답글 1');
     expect(container.textContent).toContain('답글 2(같은 발신자 — 그룹핑)');
   });
 });
 
-// story #2911(S2e②③/R4) — 「s2e-thread-depth-grammar」 확定 회귀가드. ThreadPanel 헤더가
-// ReadingPanel과 같은 칩 브레드크럼 문법(칩 버튼 + `›` 구분자)으로 통일됐는지, 세그먼트가
-// 정확히 2개(대화 › 원 메시지 요약)인지, 원 메시지 칩은 비클릭(span, 버튼 아님)인지 잰다.
-describe('ThreadPanel — story #2911(S2e②③) 헤더 칩 브레드크럼(대화 › 원 메시지 요약)', () => {
-  async function mountWithNoReplies() {
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
-    await act(async () => { root.render(wrap(<Harness />)); });
+// story 4887 (UI-4 screen PR · the approved thread) — the thread head is ONE line: «스레드» at the left, «{what it is about} · N개의 답글» at the right, a close button; the phone also has a back arrow.
+// (It replaces the story #2911 chip breadcrumb «대화 › 원 메시지 요약»: the original message itself sits right under the head now.)
+describe('ThreadPanel — the thread head (story 4887 · approved layout)', () => {
+  async function mountWith(parent: ChatMessage, replies: unknown[] = [], onClose: () => void = () => {}) {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: replies }) })));
+    await act(async () => {
+      root.render(wrap(<ThreadPanel parentMessage={parent} conversationId="conv-1" currentTeamMemberId="member-1" projectId="proj-1" onClose={onClose} />));
+    });
     await flush();
   }
+  const head = () => container.querySelector('[data-testid="thread-head"]') as HTMLElement;
 
-  it('「스레드」 평문 폐기 — 헤더에 그 문구가 없다', async () => {
-    await mountWithNoReplies();
-    const header = container.querySelector('.border-b.border-border\\/80');
-    expect(header?.textContent).not.toContain('스레드');
+  it('⭐ the head says «스레드» (an h2) and, at the right, what the thread is about and how many replies it has', async () => {
+    await mountWith(parentMessage);
+    expect(head().querySelector('h2')?.textContent).toBe('스레드'); // reverted (the chip breadcrumb) → null
+    expect(container.querySelector('[data-testid="thread-meta"]')?.textContent).toBe('메시지 · 0개의 답글');
   });
 
-  it('세그먼트 정확히 2개(대화·원 메시지 요약) — 구분자 `›`가 정확히 1개', async () => {
-    await mountWithNoReplies();
-    const header = container.querySelector('.border-b.border-border\\/80')!;
-    const seps = Array.from(header.querySelectorAll('span')).filter((s) => s.textContent === '›');
-    expect(seps).toHaveLength(1);
-    expect(header.textContent).toContain('대화');
-    expect(header.textContent).toContain('원본 메시지'); // parentMessage.content 그대로(마크다운 없음)
+  it('the count follows the replies; an approval request names itself', async () => {
+    const replies = [
+      { id: 'r1', created_by: 'agent-2', sender: { id: 'agent-2', name: '유나', type: 'agent' }, content: '답글 1', created_at: '2026-08-08T00:01:00.000Z' },
+      { id: 'r2', created_by: 'agent-2', sender: { id: 'agent-2', name: '유나', type: 'agent' }, content: '답글 2', created_at: '2026-08-08T00:02:00.000Z' },
+    ];
+    await mountWith({ ...parentMessage, approval_target: { work_item_type: 'story', work_item_id: 'w-1', gate_id: 'g-1', actions: ['approve', 'reject'] } } as ChatMessage, replies);
+    expect(container.querySelector('[data-testid="thread-meta"]')?.textContent).toBe('결재 요청 · 2개의 답글');
   });
 
-  it('「대화」 칩은 버튼(클릭 시 onClose) — 원 메시지 요약 칩은 span(비클릭, 현재 위치)', async () => {
+  it('the original message is under the head, as the subject — no «원본 메시지» label, no summary chip in the head', async () => {
+    await mountWith(parentMessage);
+    expect(container.querySelector('[data-testid="thread-original"]')?.textContent).toContain('원본 메시지'); // the message itself
+    expect(head().textContent).not.toContain('원본 메시지');
+    expect(container.textContent).not.toContain('›');
+  });
+
+  it('⭐ EVERY reply is a plain row — a person\'s and my own too: no bubble fill, left-aligned (not only the agent\'s)', async () => {
+    const replies = [
+      { id: 'p1', created_by: 'human-2', sender: { id: 'human-2', name: '지우', type: 'human' }, content: '사람 답글', created_at: '2026-08-08T00:01:00.000Z' },
+      { id: 'p2', created_by: 'member-1', sender: { id: 'member-1', name: '나', type: 'human' }, content: '내 답글', created_at: '2026-08-08T00:02:00.000Z' },
+    ];
+    await mountWith(parentMessage, replies);
+    const texts = [...container.querySelectorAll('[data-testid="thread-replies"] [data-testid="chat-bubble-text"]')] as HTMLElement[];
+    expect(texts).toHaveLength(2);
+    for (const el of texts) {
+      expect(el.className, 'no bubble fill').not.toMatch(/bg-proof|rounded-xl/); // reverted (a person gets the grey bubble, I get the blue one) → fails
+      expect(el.getAttribute('data-bubble')).toBe('plain');
+    }
+    const rows = [...container.querySelectorAll('[data-testid="thread-replies"] .group\\/bubble')] as HTMLElement[];
+    expect(rows.some((r) => r.className.includes('flex-row-reverse')), 'my reply is not pushed to the right').toBe(false);
+  });
+
+  it('⭐ the close button and the phone back arrow both call onClose', async () => {
     const onClose = vi.fn();
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
-    await act(async () => {
-      root.render(wrap(
-        <ThreadPanel parentMessage={parentMessage} conversationId="conv-1" currentTeamMemberId="member-1" projectId="proj-1" onClose={onClose} />,
-      ));
-    });
-    await flush();
-    const header = container.querySelector('.border-b.border-border\\/80')!;
-    const convChip = Array.from(header.querySelectorAll('button')).find((b) => b.textContent?.includes('대화'));
-    expect(convChip).toBeTruthy();
-    await act(async () => { convChip!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(onClose).toHaveBeenCalled();
-    // 원 메시지 요약은 버튼이 아니라 span이어야(비클릭) 한다.
-    const summarySpan = Array.from(header.querySelectorAll('span')).find((s) => s.textContent?.includes('원본 메시지'));
-    expect(summarySpan?.tagName).toBe('SPAN');
-  });
-
-  it('원 메시지 요약 칩은 native title로 전문을 갖는다(truncate 대비 접근성 폴백)', async () => {
-    const longMessage: ChatMessage = { ...parentMessage, content: '이것은 아주 길어서 truncate가 실제로 적용될 만한 원본 메시지 본문입니다' };
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
-    await act(async () => {
-      root.render(wrap(
-        <ThreadPanel parentMessage={longMessage} conversationId="conv-1" currentTeamMemberId="member-1" projectId="proj-1" onClose={() => {}} />,
-      ));
-    });
-    await flush();
-    const header = container.querySelector('.border-b.border-border\\/80')!;
-    const summarySpan = Array.from(header.querySelectorAll('span')).find((s) => s.getAttribute('title')?.includes('아주 길어서'));
-    expect(summarySpan).toBeTruthy();
-  });
-
-  it('원 메시지가 마크다운 링크(sole-link 등)면 요약 칩에는 라벨만 남는다(카드/칩 중첩 방지)', async () => {
-    const linkMessage: ChatMessage = { ...parentMessage, content: '[작업 A](entity:task:33333333-3333-3333-3333-333333333333)' };
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
-    await act(async () => {
-      root.render(wrap(
-        <ThreadPanel parentMessage={linkMessage} conversationId="conv-1" currentTeamMemberId="member-1" projectId="proj-1" onClose={() => {}} />,
-      ));
-    });
-    await flush();
-    const header = container.querySelector('.border-b.border-border\\/80')!;
-    expect(header.textContent).toContain('작업 A');
-    expect(header.textContent).not.toContain('entity:task:');
-    expect(header.querySelector('button[type="button"]')).toBeTruthy(); // 대화 칩만 버튼(요약은 span)
+    await mountWith(parentMessage, [], onClose);
+    const close = head().querySelector('button[aria-label="스레드 닫기"]') as HTMLButtonElement | null ?? Array.from(head().querySelectorAll('button')).find((b) => /닫기|close/i.test(b.getAttribute('aria-label') ?? '')) as HTMLButtonElement;
+    expect(close).toBeTruthy();
+    await act(async () => { close.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    const back = container.querySelector('[data-testid="thread-back"]') as HTMLButtonElement;
+    expect(back.className).toContain('lg:hidden'); // phone only
+    await act(async () => { back.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onClose).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -328,9 +320,9 @@ describe('ThreadPanel — 답글 열람 시 mark-read(onMarkRead) 배선(2026-08
   });
 });
 
-// story #4182 — 원 메시지 요약 칩도 미리보기 자리라 내부 HTML 주석을 벗긴다(toPlainPreview 경유).
-describe('ThreadPanel — 원 메시지 요약 칩 HTML 주석 평문화(story #4182)', () => {
-  it('원 메시지 본문의 <!-- … --> 마커가 헤더 칩에 안 보인다', async () => {
+// story #4182 — an internal HTML comment never shows. (The head's summary chip it first guarded is gone — story 4887's approved thread head — so the check follows the original message block.)
+describe('ThreadPanel — HTML 주석 마커는 보이지 않는다(story #4182)', () => {
+  it('원 메시지 본문의 <!-- … --> 마커가 스레드 어디에도 안 보인다', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: [] }) })));
     const commented = { ...parentMessage, content: '<!-- linear-comment-id: abc-123 -->\n\n원본 메시지' };
     await act(async () => {
@@ -339,9 +331,9 @@ describe('ThreadPanel — 원 메시지 요약 칩 HTML 주석 평문화(story #
       ));
     });
     await flush();
-    const header = container.querySelector('.border-b.border-border\\/80')!;
-    expect(header.textContent).not.toContain('<!--');
-    expect(header.textContent).toContain('원본 메시지');
+    const original = container.querySelector('[data-testid="thread-original"]')!;
+    expect(container.textContent).not.toContain('<!--');
+    expect(original.textContent).toContain('원본 메시지');
   });
 });
 

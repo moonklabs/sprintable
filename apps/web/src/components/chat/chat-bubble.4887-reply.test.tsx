@@ -32,11 +32,11 @@ const message = (o: Partial<ChatMessage> = {}): ChatMessage => ({
   id: 'm1', memo_id: 'conv-1', created_by: 'agent-1', sender_name: '개발 에이전트', sender_type: 'agent', sender_avatar_url: null, sender_runtime_type: null,
   content: '안녕하세요', attachments: [], created_at: '2026-11-10T01:00:00.000Z', ...o,
 });
-async function render(o: { message?: ChatMessage; isMine?: boolean; isGrouped?: boolean; onOpenThread?: ((m: ChatMessage) => void) | null; locale?: 'ko' | 'en' } = {}) {
+async function render(o: { message?: ChatMessage; plainRow?: boolean; isMine?: boolean; isGrouped?: boolean; onOpenThread?: ((m: ChatMessage) => void) | null; locale?: 'ko' | 'en' } = {}) {
   const loc = o.locale ?? 'ko'; const msgs = loc === 'ko' ? koMessages : enMessages;
   const m = o.message ?? message();
   await act(async () => {
-    root.render(<NextIntlClientProvider locale={loc} messages={msgs} timeZone="Asia/Seoul"><ChatBubble message={m} isMine={o.isMine ?? false} isGrouped={o.isGrouped ?? false} onOpenThread={o.onOpenThread === null ? undefined : (o.onOpenThread ?? (() => {}))} /></NextIntlClientProvider>);
+    root.render(<NextIntlClientProvider locale={loc} messages={msgs} timeZone="Asia/Seoul"><ChatBubble message={m} plainRow={o.plainRow} isMine={o.isMine ?? false} isGrouped={o.isGrouped ?? false} onOpenThread={o.onOpenThread === null ? undefined : (o.onOpenThread ?? (() => {}))} /></NextIntlClientProvider>);
   });
 }
 const btn = () => container.querySelector('[data-testid="chat-bubble-reply-button"]') as HTMLButtonElement | null;
@@ -103,17 +103,17 @@ describe('ChatBubble — the reply button (story 4887 · UI-4 P6-a)', () => {
     expect(cls).toContain('pointer-fine:group-hover/bubble:opacity-100'); // …the row is hovered
     expect(cls).toContain('pointer-fine:group-focus-within/bubble:opacity-100'); // …or holds keyboard focus
     expect(cls).toContain('pointer-fine:focus-visible:opacity-100');
-    expect(cls).toContain('pointer-coarse:hidden'); expect(cls).toContain('[@media(hover:none)]:hidden'); // the touch twin takes over there — the SAME two conditions as «⋯»
+    expect(cls).toContain('touch:hidden'); // the touch twin takes over there — the SAME `touch:` variant as «⋯»
     expect(cls, 'opacity-0 only under pointer-fine').not.toMatch(/(^|\s)opacity-0(\s|$)/);
     expect(btn()!.getAttribute('tabindex'), 'in the tab order (never -1)').not.toBe('-1');
   });
 
-  it('⭐ the touch twin: 44 × 44, shown exactly where «⋯» is shown (the same two media conditions), hidden otherwise', async () => {
+  it('⭐ the touch twin: 44 × 44, shown exactly where «⋯» is shown (the same `touch:` variant), hidden otherwise', async () => {
     await render();
     const cls = btnTouch()!.className; const more = (container.querySelector('[data-testid="chat-bubble-menu-button"]') as HTMLElement).className;
     expect(cls).toContain('h-11'); expect(cls).toContain('w-11'); // reverted (a 28 px size) → fails
     expect(cls).toMatch(/(^|\s)hidden(\s|$)/);
-    for (const cond of ['pointer-coarse:inline-flex', '[@media(hover:none)]:inline-flex']) { expect(cls).toContain(cond); expect(more, '«⋯» uses it too').toContain(cond); }
+    expect(cls).toContain('touch:inline-flex'); expect(more, '«⋯» uses it too').toContain('touch:inline-flex');
     expect(cls, 'the cluster sits row-local: centred on the time line').toContain('top-1/2');
   });
 
@@ -145,5 +145,45 @@ describe('ChatBubble — the reply button (story 4887 · UI-4 P6-a)', () => {
     expect(meta.className).toContain(`${MOUSE}:group-hover/bubble:ml-[var(--reply-room,8px)]`); // reverted → ml-2: the time sits under the button
     await render({ isGrouped: true, isMine: true, message: message({ created_by: 'member-1', sender_type: 'human', sender_name: '민서' }) });
     expect((container.querySelector('[data-testid="bubble-meta-line"]') as HTMLElement).className).toContain(`${MOUSE}:group-hover/bubble:mr-[var(--reply-room,8px)]`);
+  });
+});
+
+describe('story 4887 (codex round 1) — a plain row keeps its touch «⋯» on the same side whoever wrote it', () => {
+  it('⭐ my message as a plain row (a thread reply): the «⋯» is at the left like everyone else\'s; as a bubble it stays on the bubble\'s outer (left) side when mine', async () => {
+    await render({ isMine: true, plainRow: true });
+    const more = container.querySelector('[data-testid="chat-bubble-menu-button"]') as HTMLElement;
+    expect(more.className).toContain('left-full');
+    expect(more.className).not.toContain('right-full'); // reverted (isMine alone) → right-full: the opposite side from the other rows
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await render({ isMine: true });
+    expect((container.querySelector('[data-testid="chat-bubble-menu-button"]') as HTMLElement).className).toContain('right-full');
+  });
+});
+
+describe('story 4887 (codex round 2) — a plain row is left-aligned whoever wrote it: the grouped hover time and the touch menu follow', () => {
+  it('⭐ a grouped plain row of mine shows its hover time at the right of the text (left-full) — as a bubble it stays at the left of it (right-full)', async () => {
+    await render({ isMine: true, plainRow: true, isGrouped: true });
+    const meta = () => container.querySelector('[data-testid="bubble-meta-line"]') as HTMLElement;
+    expect(meta().className).toContain('group-hover/bubble:left-full');
+    expect(meta().className).not.toContain('group-hover/bubble:right-full'); // reverted (isMine alone) → right-full: the time floats on the wrong side of a left-aligned row
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await render({ isMine: true, isGrouped: true });
+    expect(meta().className).toContain('group-hover/bubble:right-full');
+  });
+
+  it('⭐ the touch «⋯» opens the menu from the button\'s LEFT edge for a plain row of mine (a bubble of mine opens it right-aligned, ending at the button\'s right edge)', async () => {
+    const open = async (plainRow: boolean) => {
+      await render({ isMine: true, plainRow });
+      const more = container.querySelector('[data-testid="chat-bubble-menu-button"]') as HTMLElement;
+      more.getBoundingClientRect = () => ({ left: 300, right: 340, top: 10, bottom: 50, width: 40, height: 40, x: 300, y: 10, toJSON() {} }) as DOMRect;
+      await act(async () => { more.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      return (document.querySelector('[role="menu"]') as HTMLElement).style.left;
+    };
+    expect(await open(true)).toBe('300px'); // reverted (isMine alone) → 180px: detached from the button
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    expect(await open(false)).toBe('180px'); // 340 − 160
   });
 });

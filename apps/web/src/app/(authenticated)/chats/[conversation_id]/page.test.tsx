@@ -100,7 +100,7 @@ describe('ConversationPage — 뒤로가기 복귀 (story #2168 PR-② AC④)', 
     }));
     await mount();
 
-    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('대화'));
+    const backBtn = container.querySelector('[data-testid="room-head-back"]'); // the head's phone back arrow (an icon button named «대화»)
     await act(async () => { backBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     expect(replaceMock).toHaveBeenCalledWith(`/chats?p=${FROM_PROJECT_UUID}`);
@@ -111,7 +111,7 @@ describe('ConversationPage — 뒤로가기 복귀 (story #2168 PR-② AC④)', 
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ title: null, type: 'dm', participants: [] }) })));
     await mount();
 
-    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('대화'));
+    const backBtn = container.querySelector('[data-testid="room-head-back"]'); // the head's phone back arrow (an icon button named «대화»)
     await act(async () => { backBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     // story #4231 — 현재 프로젝트(`?p=`)를 싣고 복귀(착지한 flat 목록이 셸 ?p= 정규화로 다시 요청하지 않게).
@@ -122,7 +122,7 @@ describe('ConversationPage — 뒤로가기 복귀 (story #2168 PR-② AC④)', 
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ title: null, type: 'dm', participants: [] }) })));
     await mount();
 
-    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('대화'));
+    const backBtn = container.querySelector('[data-testid="room-head-back"]'); // the head's phone back arrow (an icon button named «대화»)
     await act(async () => { backBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     // story #4231 — 현재 프로젝트(`?p=`)를 싣고 복귀(착지한 flat 목록이 셸 ?p= 정규화로 다시 요청하지 않게).
@@ -171,7 +171,8 @@ describe('ConversationPage — 헤더 아바타(story #2968)', () => {
     }));
     await mount();
 
-    const img = container.querySelector('img');
+    // story 4887 (UI-4 screen PR) — the head shows each participant as a chip with its own avatar: the other person's real photo is in their chip
+    const img = container.querySelector('[data-testid="room-head-chips"] img');
     expect(img).not.toBeNull();
     expect(img!.getAttribute('src')).toBe('https://storage.googleapis.com/bucket/avatar/a.png');
   });
@@ -194,15 +195,14 @@ describe('ConversationPage — 헤더 아바타(story #2968)', () => {
     }));
     await mount();
 
-    expect(container.querySelector('img')).toBeNull();
+    // story 4887 (UI-4 screen PR) — no single representative photo in the title (a group has many); each participant has their own chip below it
+    expect(container.querySelector('[data-testid="room-head"] h1 img')).toBeNull();
+    expect(container.querySelectorAll('[data-testid="room-head-chip"]')).toHaveLength(2);
   });
 
-  // story #2988(선생님 실사용 지적, 스크린샷) — top-bar.tsx의 `[&>*]:truncate`가 title 루트
-  // div 자신에 overflow:hidden을 건다(빌드 CSS 실측). agent Avatar의 ring-2 ring-offset-1은
-  // box-shadow라 레이아웃 박스 밖 3px까지 번지는데, 그 div가 overflow:hidden이면서 자기
-  // 자식(24px Avatar)에 딱 맞는 높이라 링이 상하로 잘렸다. py-1(4px, 3px보다 여유)로 클립
-  // 경계를 밀어내는 fix의 회귀가드 — 실제 DOM에서 padding 클래스가 걸려있는지 고정한다.
-  it('agent 상대 헤더의 title 루트가 py-1을 가져 ring(box-shadow)이 overflow:hidden에 안 잘린다', async () => {
+  // story 4887 (UI-4 screen PR · the approved room head) — the old test here pinned the shell top bar's clipping of an agent avatar's ring (#2988); the head is its own block now and the
+  // clipping is gone. What the head owes instead: one chip per participant, an AGENT's chip saying how it is connected, and no button of its own besides «⋯» and the chip row's «+».
+  it('⭐ the head: name (h1) · tag · one line of facts · a chip per participant — an agent\'s chip carries its connection word', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/conversations/conv-1')) {
         return {
@@ -216,13 +216,45 @@ describe('ConversationPage — 헤더 아바타(story #2968)', () => {
           }),
         };
       }
+      if (url.includes('/api/team-members')) return { ok: true, json: async () => ({ data: [{ id: 'them-1', presence_status: 'online' }] }) };
       return { ok: true, json: async () => ({ data: [] }) };
     }));
     await mount();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    const backBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('대화'));
-    const titleRoot = backBtn?.parentElement;
-    expect(titleRoot?.className).toContain('py-1');
+    const head = container.querySelector('[data-testid="room-head"]') as HTMLElement;
+    expect(head, 'the room head').not.toBeNull();
+    expect(head.querySelector('h1')?.textContent).toBe('페드루');
+    expect(head.querySelector('[data-testid="room-head-tag"]')?.textContent).toBe('DM');
+    expect(head.querySelector('[data-testid="room-head-subline"]')?.textContent).toContain('2명');
+    const chips = [...head.querySelectorAll('[data-testid="room-head-chip"]')];
+    expect(chips).toHaveLength(2);
+    expect(chips[0]!.textContent).toContain('나(나)'.replace('나(나)', '(나)')); // «name(나)» for the person themself
+    expect(chips[1]!.textContent).toContain('페드루');
+    expect(chips[1]!.querySelector('[data-status="online"]')?.textContent, 'the agent\'s connection word').toBe(koMessages.chats.presenceOnline);
+    expect(chips[0]!.querySelector('[data-slot="ds-status-label"]'), 'a person has no connection word (no presence exists for people)').toBeNull();
+  });
+
+  it('⭐ while the room\'s data is not there (the lookup fails) the head draws no «+» — a button that does nothing is not drawn', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/conv-1')) return { ok: false, status: 500, json: async () => ({}) };
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await mount();
+    expect(container.querySelector('[data-testid="room-head-add"]')).toBeNull(); // reverted (always drawn) → a dead «+»
+  });
+
+  it('the head has no button of its own: the phone back arrow, the «+» of the chip row and the «⋯» menu — nothing else', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/conv-1')) {
+        return { ok: true, json: async () => ({ title: '팀 채널', type: 'group', muted: false, lastReadAt: null, freeResponse: false, participants: [{ member_id: 'me-1', name: '나', avatar_url: null, type: 'human' }] }) };
+      }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await mount();
+    const head = container.querySelector('[data-testid="room-head"]') as HTMLElement;
+    const names = [...head.querySelectorAll('button')].map((b) => b.getAttribute('data-testid') ?? b.getAttribute('aria-label'));
+    expect([...names].sort(), `the head's buttons: ${JSON.stringify(names)}`).toEqual(['room-head-add', 'room-head-back', 'room-head-menu', koMessages.chats.editRoomName].sort()); // the group's name is editable in place
   });
 });
 
@@ -247,7 +279,7 @@ describe('ConversationPage — 헤더 타이틀 Claim 무게(story #2969 PR-5)',
     }));
     await mount();
 
-    const titleEl = [...container.querySelectorAll('span')].find((el) => el.textContent === '유나');
+    const titleEl = container.querySelector('[data-testid="room-head"] h1'); // story 4887 — the name's weight sits on the head's h1
     expect(titleEl).not.toBeUndefined();
     expect(titleEl?.className).toContain('font-semibold');
     expect(titleEl?.className).not.toContain('font-medium');
@@ -273,8 +305,8 @@ describe('ConversationPage — 헤더 타이틀 Claim 무게(story #2969 PR-5)',
     }));
     await mount();
 
-    const titleEl = [...container.querySelectorAll('span')].find((el) => el.textContent === '팀 채널');
-    expect(titleEl).not.toBeUndefined();
+    const titleEl = container.querySelector('[data-testid="room-head"] h1');
+    expect(titleEl?.textContent).toBe('팀 채널');
     expect(titleEl?.className).toContain('font-semibold');
     expect(titleEl?.className).not.toContain('font-medium');
   });

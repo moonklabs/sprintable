@@ -397,7 +397,7 @@ describe('ChatInput — STEER 모드(story #2942)', () => {
       ));
     });
     await act(async () => { toggleBtn()!.click(); });
-    const sendBtn = [...container.querySelectorAll('button')].find((b) => b.querySelector('svg.lucide-send')) as HTMLButtonElement;
+    const sendBtn = container.querySelector('[data-testid="chat-send"]') as HTMLButtonElement;
     expect(sendBtn.disabled).toBe(true);
 
     // 지시 텍스트만 채움 — 여전히 비활성(대상·작업 미선택).
@@ -447,7 +447,7 @@ describe('ChatInput — STEER 모드(story #2942)', () => {
     const candidate = [...container.querySelectorAll('[role="listbox"] button')][0] as HTMLButtonElement;
     await act(async () => { candidate.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
 
-    const sendBtn = [...container.querySelectorAll('button')].find((b) => b.querySelector('svg.lucide-send')) as HTMLButtonElement;
+    const sendBtn = container.querySelector('[data-testid="chat-send"]') as HTMLButtonElement;
     await act(async () => { sendBtn.click(); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
@@ -488,7 +488,7 @@ describe('ChatInput — STEER 모드(story #2942)', () => {
     const candidate = [...container.querySelectorAll('[role="listbox"] button')][0] as HTMLButtonElement;
     await act(async () => { candidate.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
 
-    const sendBtn = [...container.querySelectorAll('button')].find((b) => b.querySelector('svg.lucide-send')) as HTMLButtonElement;
+    const sendBtn = container.querySelector('[data-testid="chat-send"]') as HTMLButtonElement;
     await act(async () => { sendBtn.click(); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
@@ -528,7 +528,7 @@ describe('ChatInput — STEER 모드(story #2942)', () => {
     const candidate = [...container.querySelectorAll('[role="listbox"] button')][0] as HTMLButtonElement;
     await act(async () => { candidate.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
 
-    const sendBtn = [...container.querySelectorAll('button')].find((b) => b.querySelector('svg.lucide-send')) as HTMLButtonElement;
+    const sendBtn = container.querySelector('[data-testid="chat-send"]') as HTMLButtonElement;
     await act(async () => { sendBtn.click(); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 

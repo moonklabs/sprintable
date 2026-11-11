@@ -109,7 +109,8 @@ function startOnFilter(value: string) {
   window.sessionStorage.setItem(CHAT_PROJECT_FILTER_KEY, value);
 }
 async function chooseFilter(value: string) {
-  const select = container.querySelector('[data-testid="project-filter"]') as HTMLSelectElement;
+  await openListOptions();
+  const select = document.querySelector('[data-testid="project-filter"]') as HTMLSelectElement;
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, value);
     select.dispatchEvent(new Event('change', { bubbles: true }));
@@ -121,6 +122,13 @@ async function chooseFilter(value: string) {
 // /api/conversations/recent-outside-project는 별개 축(마운트 1회 전용, 이 스토리 스코프 밖)이라 안 센다.
 function countMyConversationsFetchCalls(fetchMock: ReturnType<typeof vi.fn>): number {
   return fetchMock.mock.calls.filter(([url]) => (url as string).includes('/api/conversations?') && !(url as string).includes('recent-outside-project')).length;
+}
+
+// story 4887 (UI-4 screen PR) — the list head's «⋯» popover holds the project filter, the two-list switch and the strips: open it (once) before reaching for them
+async function openListOptions() {
+  if (document.querySelector('[data-testid="chat-list-now"]')) return;
+  const trigger = container.querySelector('[data-testid="chat-list-options"]') as HTMLElement;
+  await act(async () => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
 }
 
 async function mount() {
@@ -306,7 +314,8 @@ describe('ChatListView — 리스트 아바타 실사진(story #2968)', () => {
     }));
     await mount();
 
-    const agentTab = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes('에이전트'));
+    await openListOptions();
+    const agentTab = [...document.querySelectorAll('[data-testid="chat-list-tabs"] button')].find((el) => el.textContent?.includes('에이전트'));
     expect(agentTab).not.toBeUndefined();
     await act(async () => { agentTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
@@ -889,7 +898,8 @@ describe('ChatListView — 참가자 name="" 폴백(story #3791, 카디르 재�
     }));
     await mount();
 
-    const agentTab = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes('에이전트'));
+    await openListOptions();
+    const agentTab = [...document.querySelectorAll('[data-testid="chat-list-tabs"] button')].find((el) => el.textContent?.includes('에이전트'));
     expect(agentTab).not.toBeUndefined();
     await act(async () => { agentTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
@@ -1019,7 +1029,8 @@ describe('ChatListView — ChatRailContext 탭 게이트(story #3788 B-③ 후�
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
-    const agentTab = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes('에이전트'));
+    await openListOptions();
+    const agentTab = [...document.querySelectorAll('[data-testid="chat-list-tabs"] button')].find((el) => el.textContent?.includes('에이전트'));
     expect(agentTab).not.toBeUndefined();
     await act(async () => { agentTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
@@ -1063,7 +1074,8 @@ describe('ChatListView — ChatRailContext 탭 게이트(story #3788 B-③ 후�
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
-    const agentTab = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes('에이전트'));
+    await openListOptions();
+    const agentTab = [...document.querySelectorAll('[data-testid="chat-list-tabs"] button')].find((el) => el.textContent?.includes('에이전트'));
     await act(async () => { agentTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     expect(readRailCapture(container).activeList).toBe('agent');
@@ -1139,7 +1151,8 @@ describe('ChatListView — 목록 fetch 실패 축(story #3790)', () => {
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
-    const agentTab = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes('에이전트'));
+    await openListOptions();
+    const agentTab = [...document.querySelectorAll('[data-testid="chat-list-tabs"] button')].find((el) => el.textContent?.includes('에이전트'));
     await act(async () => { agentTab!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 

@@ -39,9 +39,16 @@ vi.mock('next/navigation', () => ({
 // 그대로 받는지만 확認하는 얕은 스텁.
 const chatListViewProps: Array<{ projectId: string | null }> = [];
 vi.mock('@/components/chat/chat-list-view', () => ({
-  ChatListView: (props: { open?: boolean; projectId: string | null }) => {
+  // story 4887 (UI-4 screen PR) — the list head («대화 · + · ⋯») is the list's own now: the layout hands it `canStartRoom` and the modal's open / onOpenChange; this stub draws the head's heading and the «+» as the real list does
+  ChatListView: (props: { open?: boolean; onOpenChange?: (v: boolean) => void; canStartRoom?: boolean; headingLevel?: 1 | 2; projectId: string | null }) => {
     chatListViewProps.push({ projectId: props.projectId });
-    return <div data-testid="chat-list-view">chat-list-view(open={String(props.open)})</div>;
+    return (
+      <div data-testid="chat-list-view">
+        {props.headingLevel === 2 ? <h2 id="chat-rail-heading">대화</h2> : <h1 id="chat-rail-heading">대화</h1>}
+        {props.canStartRoom ? <button type="button" onClick={() => props.onOpenChange?.(true)}>새 대화</button> : null}
+        chat-list-view(open={String(props.open)})
+      </div>
+    );
   },
 }));
 
@@ -131,6 +138,16 @@ describe('ChatsLayout — story #2921 S1(영구 스플릿뷰 shell)', () => {
     expect(rail?.className).toMatch(/(^|\s)hidden(\s|$)/);
     expect(outlet?.className).toContain('flex');
     expect(outlet?.className).not.toMatch(/(^|\s)hidden(\s|$)/);
+  });
+
+  it('⭐ one h1 per page: the list is the page\'s h1 on /chats, and an h2 on /chats/[id] (the room head owns the h1 there — the rail stays beside it on desktop)', async () => {
+    for (const [pathname, tag] of [['/chats', 'H1'], ['/chats/conv-123', 'H2']] as const) {
+      usePathnameMock.mockReturnValue(pathname);
+      await act(async () => { root.unmount(); });
+      root = createRoot(container);
+      await act(async () => { root.render(wrap(<ChatsLayout><div>outlet</div></ChatsLayout>)); });
+      expect(container.querySelector('#chat-rail-heading')?.tagName, pathname).toBe(tag); // reverted (always h1) → H1 on the room route too
+    }
   });
 
   it('두 경로 다 lg:flex(데스크톱 항상 병렬)를 갖는다 — 반응형 토글은 모바일 전용', async () => {

@@ -3,8 +3,7 @@
 import { useCallback, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Plus, PanelLeftOpen } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { PanelLeftOpen } from 'lucide-react';
 import { ChatListView } from '@/components/chat/chat-list-view';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
@@ -127,21 +126,15 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
         aria-labelledby={railMode === 'overlay' ? 'chat-rail-heading' : undefined}
         className={`${isListRoute ? 'flex' : 'hidden'} lg:flex min-h-0 w-full flex-col overflow-hidden border-border outline-none lg:w-[248px] xl:w-[270px] lg:shrink-0 lg:border-r ${railHiddenClass} xl:flex ${railOverlayClass}`}
       >
-        <div className="flex flex-shrink-0 items-center justify-between border-b border-border px-3 py-2.5">
-          <h1 id="chat-rail-heading" className="text-sm font-medium text-foreground">{t('title')}</h1>
-          {canStartRoom ? (
-            <Button size="sm" variant="outline" onClick={() => setShowModal(true)}>
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
-              {t('newConversation')}
-            </Button>
-          ) : null}
-        </div>
+        {/* story 4887 (UI-4 screen PR) — the head «대화 N · + · ⋯» lives in the list itself now (it owns the count, the filters and the new-room modal state) */}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <ChatListView
             projectId={projectId || null}
             currentTeamMemberId={currentTeamMemberId}
             open={showModal}
             onOpenChange={setShowModal}
+            headingLevel={isListRoute ? 1 : 2}
+            canStartRoom={canStartRoom}
           />
         </div>
       </div>

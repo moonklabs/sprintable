@@ -48,7 +48,7 @@ describe('ServerCommandResultCard — ROOM_HAS_NO_PROJECT(story 4847)', () => {
     expect(container.querySelector('[data-testid="server-command-way"]')?.textContent).toContain('프로젝트가 있는 방에서 명령을 쳐 주세요');
     expect(container.textContent).not.toContain(FALLBACK);
     expect(container.textContent).toContain('서버 집행'); // the badge stays: it is the server who answers
-    expect(container.querySelector('.bg-destructive')).not.toBeNull(); // denied
+    expect(container.querySelector('[data-testid="server-command-card"]')?.getAttribute('data-outcome')).toBe('denied'); // denied
   });
 
   it('⭐명령 이름은 친 것을 따른다(done · priority)', async () => {

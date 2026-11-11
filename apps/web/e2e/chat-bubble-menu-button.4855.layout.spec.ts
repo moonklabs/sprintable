@@ -30,8 +30,8 @@ function classesFromSource() {
     // the meta cell's base class: where a mouse can hover the first message of a run has no time line at all (its head carries the time), so this measures the cell as touch and as a continuation see it — the base class — in both modes
     wrap: pick(/: '(relative inline-block) \[@media\(pointer:fine\)_and_\(hover:hover\)\]:hidden'\}[^<]*>\s*<time/, 'the time wrapper'),
     buttonBase: button.replace(/\$\{[^}]*\}/, '').trim(),
-    mine: pick(/\$\{isMine \? '([^']+)' : '[^']+'\}`\}\s*>\s*<MoreHorizontal/, 'the button side (mine)'),
-    theirs: pick(/\$\{isMine \? '[^']+' : '([^']+)'\}`\}\s*>\s*<MoreHorizontal/, 'the button side (others)'),
+    mine: pick(/\$\{isMine(?: && !plainRow)? \? '([^']+)' : '[^']+'\}`\}\s*>\s*<MoreHorizontal/, 'the button side (mine)'),
+    theirs: pick(/\$\{isMine(?: && !plainRow)? \? '[^']+' : '([^']+)'\}`\}\s*>\s*<MoreHorizontal/, 'the button side (others)'),
   };
 }
 

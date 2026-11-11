@@ -3,13 +3,13 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import { AttachmentNeedsProjectError } from '@/lib/chat-attachment-error';
 import Link from 'next/link';
-import { AlertTriangle, ChevronDown, Compass, FolderOpen, Loader2, Send, Terminal, Type, X, Hash } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Compass, FolderOpen, Loader2, Terminal, Type, X, Hash } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
-import { Button } from '@/components/ui/button';
 import { IconButton } from '@/components/ds/icon-button';
 import { Chip } from '@/components/ds/chip';
+import { Button as DsButton } from '@/components/ds/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -632,7 +632,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
   return (
     <div
-      className="relative flex-shrink-0 border-t border-border/80 bg-background px-3 py-2"
+      className="relative flex-shrink-0 border-t border-ds-line bg-background px-3 py-3"
       onDragOver={(e) => e.preventDefault()}
       onDrop={handleDrop}
     >
@@ -816,7 +816,8 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
         </div>
       )}
 
-      <div className="relative flex items-end gap-2">
+      {/* story 4887 (UI-4 screen PR · the approved composer): the controls and the field are ONE bordered box — the clip (+ its ▾), the steer compass when there is someone to steer, the text and a «⏎ 보내기» at the right end. */}
+      <div className="relative flex items-end gap-1 rounded-ds-control border border-ds-line-control bg-ds-surface-sunk px-0.5 py-1.5 focus-within:border-ds-action focus-within:ring-2 focus-within:ring-ds-action" data-testid="chat-composer-box">
         {/* Command dropdown (선생님 B·mockup #3) — mention/entity 셸·키보드 nav 동일·command 활성=info 신호 토큰 */}
         {/* story #92f00dc4 — w-72→w-80: 서버 카탈로그 인자 힌트(예: `<스토리#> <멤버명>`)가
             추가되며 한 줄에 명령+힌트+설명이 안 맞아 줄바꿈되던 것 보정. */}
@@ -945,7 +946,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
               data-testid="chat-attach-more"
               disabled={disabled}
               aria-label={t('attachMenuLabel')}
-              className="inline-flex items-center justify-center rounded-r-md px-1.5 py-1.5 transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-40 pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+              className="inline-flex items-center justify-center rounded-r-md px-1.5 py-1.5 transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-40 touch:min-h-11 touch:min-w-11"
             >
               <ChevronDown className="h-3.5 w-3.5" aria-hidden />
             </DropdownMenuTrigger>
@@ -1024,20 +1025,23 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           }}
           disabled={disabled || sending || steerSending}
           placeholder={steerMode ? t('steerPanelInstructionPlaceholder') : (placeholder ?? t('inputPlaceholderMobile'))}
-          className="min-h-0 flex-1 resize-none bg-muted/30 disabled:opacity-40 dark:bg-muted/30"
+          className="min-h-0 flex-1 resize-none border-0 bg-transparent px-1 py-1.5 shadow-none focus-visible:border-transparent focus-visible:ring-0 disabled:opacity-40 dark:bg-transparent"
           style={{ minHeight: '36px', maxHeight: '160px' }}
         />
 
-        {/* Send */}
-        <Button
-          size="icon"
-          className="h-9 w-9 flex-shrink-0 rounded-xl"
+        {/* Send — a words button at the right end of the box (the Enter key still sends; Shift+Enter breaks the line) */}
+        <DsButton
+          type="button"
+          variant={(steerMode ? canSteerSend : canSend) ? 'primary' : 'quiet'}
+          className="flex-shrink-0 disabled:border-transparent"
           onClick={() => void (steerMode ? handleSendSteer() : handleSend())}
           disabled={steerMode ? !canSteerSend : !canSend}
           aria-label={t('sendAction')}
+          data-testid="chat-send"
         >
-          <Send className="h-4 w-4" />
-        </Button>
+          <span aria-hidden>⏎</span>
+          <span className="max-sm:sr-only">{t('sendAction')}</span>
+        </DsButton>
       </div>
     </div>
   );

@@ -761,10 +761,10 @@ describe('ChatBubble — story #2604 P2 결재 요청(approval_target) 카드', 
     await act(async () => {
       root.render(wrap(<ChatBubble message={approvalMessage} isMine={false} />));
     });
-    // story #2926(P0-F F1) — 「결재 요청」 정적 라벨 행은 ProofCapsule 셸로 전환되며
-    // 빠졌다(카드 정체성은 이제 컷코너+레일 모양이 진다). 대신 stateLabel(pending=
-    // 「결재 대기」)이 그 자리를 잇는다 — 텍스트 내용은 더 구체적으로 유지.
-    expect(container.textContent).toContain('결재 대기');
+    // story 4887 (UI-4 P4-c) — the card is the ds ApprovalCard: its label is «결재 요청», and a card that needs MY hand carries the amber bar + the off-screen name
+    // «내 결재가 필요해요» (the ProofCapsule's visible «결재 대기» state word is not part of the new part).
+    expect(container.textContent).toContain('결재 요청');
+    expect(container.querySelector('[data-slot="ds-approval-card"][data-tone="needs-hand"]')?.textContent).toContain('내 결재가 필요해요');
     expect(container.textContent).toContain('제안서.md');
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('승인'))).toBe(true);
     expect(Array.from(container.querySelectorAll('button')).some((b) => b.textContent?.includes('반려'))).toBe(true);

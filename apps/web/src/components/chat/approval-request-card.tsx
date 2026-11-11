@@ -1,16 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, FileText, Forward, X } from 'lucide-react';
+import { Forward } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { Button as DsButton } from '@/components/ds/button';
+import { ApprovalActions, ApprovalCard, type ApprovalResolution, type ApprovalState } from '@/components/ds/approval-card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Badge } from '@/components/ui/badge';
 import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
 import { GateSignatureApproval } from '@/components/cage/gate-signature-approval';
 import { GateUndoButton, isUndoEligible } from '@/components/cage/gate-undo-button';
 import { GateDiscussDialog } from '@/components/cage/gate-discuss-dialog';
-import { deriveRiskLevel, usesSignatureFlow, deriveGateProofState, isRecipePublishGate, reviewedDraftOf } from '@/components/cage/gate-risk';
+import { deriveRiskLevel, usesSignatureFlow, isRecipePublishGate, reviewedDraftOf } from '@/components/cage/gate-risk';
 import { buildGateTransitionBody } from '@/lib/gate-decision-payload';
 import { memberLookup } from '@/lib/member-display';
 import { pickIGaJosa } from '@/lib/korean-particle';
@@ -20,7 +21,6 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
 import { parseBlockTemplate, renderBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
 import { renderStaticEventBlock } from '@/components/chat/event-block-card';
-import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 
 import { escapeMarkdownLinkText } from '@/components/chat/chat-input-entity-tokens';
@@ -103,6 +103,8 @@ const RESOLVED_STATUS_LABEL_KEYS: Record<string, string> = {
   rejected: 'approvalRequestStatusRejected',
   held: 'approvalRequestStatusHeld',
   voided: 'approvalRequestStatusVoided',
+  // story 4887 (UI-4 P4-c) — a merge gate can pass by itself (backend GATE_STATUSES · allow_auto / the re-evaluation of a pending gate): the card used to print the raw word «auto_passed» with the rejection's X icon.
+  auto_passed: 'approvalRequestStatusAutoPassed',
 };
 
 /**
@@ -131,6 +133,7 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
   // story #2926(P0-F 잔여 fast-follow, 카디르 F2 QA LOW①) — 아래 stateLabel 유도가
   // deriveGateProofState()의 통일 키(gateStatus*)를 쓴다 — 그 키들은 'cage' 네임스페이스.
   const tCage = useTranslations('cage');
+  const tc = useTranslations('common');
   const [state, setState] = useState<CardState>({ kind: 'loading' });
   const [resolving, setResolving] = useState(false);
   const [transitionError, setTransitionError] = useState<string | null>(null);
@@ -290,25 +293,18 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
     }
   };
 
-  // story #2926(P0-F F1) — loading/not-found/error는 claim(제목)이 아직 없는 과도 상태라
-  // Proof Capsule 셸을 억지로 씌우지 않는다(claim이 빈 이야기를 지어내는 게 되므로) — 기존
-  // 가벼운 placeholder 그대로 유지. AC1(3서피스 단일 ProofCapsule 소비)의 대상은 실 데이터가
-  // 있는 'ready' 상태다.
+  // story 4887 (UI-4 P4-c) — loading / not-found / error are the ds ApprovalCard's own states (the label stays so the card is still recognisable; no title is invented while the gate is unknown).
   if (state.kind !== 'ready') {
     return (
-      <div className="min-w-0 max-w-full rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">
-        <div className="mb-1.5 flex items-center gap-1.5 text-editorial-meta font-medium text-foreground">
-          <FileText className="h-3 w-3" aria-hidden />
-          {t('approvalRequestLabel')}
-        </div>
-        {state.kind === 'loading' ? (
-          <div className="h-8 animate-pulse rounded-lg bg-muted" />
-        ) : state.kind === 'not-found' ? (
-          <p className="text-xs text-muted-foreground">{t('approvalRequestNotFound')}</p>
-        ) : (
-          <p className="text-xs text-muted-foreground">{t('approvalRequestLoadError')}</p>
-        )}
-      </div>
+      <ApprovalCard
+        label={t('approvalRequestLabel')}
+        title=""
+        state={state.kind === 'loading'
+          ? { kind: 'loading', loadingLabel: tc('loading') }
+          : state.kind === 'not-found'
+            ? { kind: 'not-found', message: t('approvalRequestNotFound') }
+            : { kind: 'error', message: t('approvalRequestLoadError') }}
+      />
     );
   }
 
@@ -316,12 +312,6 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
   const title = gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`;
   const previewEntityType = toEntityType(gate.work_item_type);
   const canPreview = canPreviewEntity(previewEntityType);
-  // story #2926(P0-F 잔여 fast-follow, 카디르 F2 QA LOW①·② 처방) — F1/F2/F3 3곳 중복 판정
-  // 로직을 gate-risk.ts의 deriveGateProofState()로 승격, stateLabel 문구도 'cage' 네임스페이스
-  // 통일 키로 수렴(F1↔F2 held/approved 문구 불일치 해소). 매핑 안 된 값은 원문 그대로(지어내지
-  // 않음, 기존 관례 유지).
-  const { proofState, statusKey } = deriveGateProofState(gate.status);
-  const stateLabel = statusKey ? tCage(statusKey) : gate.status;
   // story #3258(customer-zero 2차) AC1/AC4 — doc.py transition_doc()이 심은 gate.neutral_facts.
   // doc_diff({add,del})를 카드 헤더(claim 바로 아래)에 새 컴포넌트 없이 기존 ProofCapsule
   // evidence 슬롯으로 노출한다(사본 분화 금지 — proof-capsule.tsx CardVariant가 이미
@@ -342,13 +332,11 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
   const gateProjectHref = gate.project_id ? (h: string) => withProjectParam(h, gate.project_id ?? null) : flatHref;
   return (
     <>
-      <ProofCapsule
-        density="card"
-        proofState={proofState}
-        stateLabel={stateLabel}
-        claim={title}
-        evidence={docDiff ? { diff: docDiff } : undefined}
-        onClaimClick={canPreview ? () => {
+      <ApprovalRequestBody
+        gate={gate}
+        title={title}
+        docDiff={docDiff}
+        onTitleClick={canPreview ? () => {
           if (readingPanel) {
             readingPanel.open({
               kind: 'entity', entityType: previewEntityType, entityId: gate.work_item_id,
@@ -358,21 +346,15 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
           }
           setShowPreview(true);
         } : undefined}
-        className="max-w-full"
-        footer={
-          <ApprovalRequestBody
-            gate={gate}
-            resolving={resolving}
-            transitionError={transitionError}
-            onApprove={(reason, evidenceViewed) => transition('approved', reason, evidenceViewed)}
-            onReject={(reason) => transition('rejected', reason)}
-            onDiscuss={(reason) => void discuss(reason)}
-            onDiscussClick={() => setDiscussDialogOpen(true)}
-            onUndone={() => void fetchGate()}
-            eventDefinitionsByKey={eventDefinitionsByKey}
-            addToast={addToast}
-          />
-        }
+        resolving={resolving}
+        transitionError={transitionError}
+        onApprove={(reason, evidenceViewed) => transition('approved', reason, evidenceViewed)}
+        onReject={(reason) => transition('rejected', reason)}
+        onDiscuss={(reason) => void discuss(reason)}
+        onDiscussClick={() => setDiscussDialogOpen(true)}
+        onUndone={() => void fetchGate()}
+        eventDefinitionsByKey={eventDefinitionsByKey}
+        addToast={addToast}
       />
       <GateDiscussDialog
         open={discussDialogOpen}
@@ -397,10 +379,15 @@ export function ApprovalRequestCard({ target, eventDefinitionsByKey, gateByKey }
 }
 
 function ApprovalRequestBody({
-  gate, resolving, transitionError, onApprove, onReject, onDiscuss, onDiscussClick, onUndone, eventDefinitionsByKey,
+  gate, title, docDiff, onTitleClick, resolving, transitionError, onApprove, onReject, onDiscuss, onDiscussClick, onUndone, eventDefinitionsByKey,
   addToast,
 }: {
   gate: GateItem;
+  title: string;
+  /** story #3258 AC4 — the re-submitted doc's diff size (add / del), shown as a line in the card's material. */
+  docDiff: { add: number; del: number } | null;
+  /** The title becomes a button that opens the body preview (reading panel or modal) — only for a type that can be previewed. */
+  onTitleClick?: () => void;
   resolving: boolean;
   transitionError: string | null;
   onApprove: (reason?: string, evidenceViewed?: boolean) => void | Promise<boolean | void>;
@@ -425,7 +412,6 @@ function ApprovalRequestBody({
   const tDashboard = useTranslations('dashboard');
   const tEventCard = useTranslations('eventCard');
   const { currentTeamMemberId, projectId } = useDashboardContext();
-  const title = gate.work_item_summary?.title ?? `#${gate.work_item_id.slice(0, 8)}`;
 
   // story #3084(2026-08-25, 유나 픽셀 규격 v1 §부록A — 상태 파생표 SSOT) — «대기·requester»/
   // «대기·관찰자»/토스 시트 문구가 필요로 하는 이름 2종(designated_approver_id·resolver_id)을
@@ -501,11 +487,12 @@ function ApprovalRequestBody({
   // 번역을 그대로 재사용(raw "approved"/"rejected" 영문 노출은 시각 퇴보 — Q2가 work_item_id
   // 건에서 확定한 "시각 동일 우선" 원칙을 verdict 필드에도 동형 적용). 템플릿 없음/파싱 실패는
   // 조용히 죽지 않고 아래 기존 하드코딩 렌더로 폴백(AC2 폴백 원칙과 동형 방어).
+  const verdictLabel = RESOLVED_STATUS_LABEL_KEYS[gate.status] ? t(RESOLVED_STATUS_LABEL_KEYS[gate.status]!) : gate.status;
+  const gateTypeLabelValue = gateTypeLabel(tDashboard, gate.gate_type);
   const resolvedStaticBlocks = gate.status !== 'pending' ? (() => {
     const definition = eventDefinitionsByKey?.['preset.gate.verdict'];
     const parsed = definition?.block_template ? parseBlockTemplate(definition.block_template) : null;
     if (!parsed) return null;
-    const verdictLabel = RESOLVED_STATUS_LABEL_KEYS[gate.status] ? t(RESOLVED_STATUS_LABEL_KEYS[gate.status]!) : gate.status;
     const payload: Record<string, unknown> = {
       resolution_note: gate.resolution_note ?? null,
     };
@@ -517,7 +504,6 @@ function ApprovalRequestBody({
     // 같은 값을 여기서도 만들어 labels/translations로 넘겨야 한다(둘이 갈리면 한쪽만
     // 고쳐진 "쌍둥이 체계 약한 쪽" 결함 — 실측: 이 손 안 대면 gate_type/verdict가
     // ⟨missing: label.gate_type⟩ 그대로 새는 걸 node repro로 확認).
-    const gateTypeLabelValue = gateTypeLabel(tDashboard, gate.gate_type);
     // story #3332 — 0301 마이그가 preset.gate.verdict의 "대상" 필드를 참조 토큰으로
     // 바꿨다(지금은 0376의 {{label.work_item_target}} 경유). 이 카드는 서버가 계산해
     // 주는 refs를 못 받으므로(자체 fetchGate() 데이터로 합성하는 카드) 여기서 직접
@@ -611,252 +597,192 @@ function ApprovalRequestBody({
   const escalationReason = isEscalationGate && typeof gate.neutral_facts?.['reason'] === 'string'
     ? (gate.neutral_facts['reason'] as string) : null;
 
-  return (
-    <div className="space-y-2">
-      {/* story #2926(P0-F F1) — 제목(claim)·미리보기 진입점·EntityPreviewModal은 이제 바깥
-          ApprovalRequestCard의 ProofCapsule 셸이 소유한다(claim=onClaimClick). 이 body는
-          claim 아래의 실 기능(위험 배지·서명 플로우·회신 상태·액션 버튼)만 담당. */}
-      {gate.status === 'pending' && (riskLevel === 'high' || riskLevel === 'unknown') ? (
-        <Badge variant={riskLevel === 'high' ? 'warning' : 'outline'} className={riskLevel === 'unknown' ? 'text-muted-foreground' : undefined}>
-          {riskLevel === 'high' ? tCage('riskHigh') : tCage('riskUnknown')}
-        </Badge>
-      ) : null}
+  // story 4887 (UI-4 P4-c) — the card is the ds ApprovalCard (a presentational part); every gate fetch, signature flow, undo, delegate, toss and discuss below is the same code as before and only feeds its slots.
+  const resolution: ApprovalResolution = (['approved', 'rejected', 'auto_passed', 'held', 'voided', 'expired'] as const).includes(gate.status as ApprovalResolution)
+    ? gate.status as ApprovalResolution
+    : 'voided'; // an unmapped status keeps its raw word as the label (nothing invented) with the neutral icon
+  const pending = gate.status === 'pending';
+  const riskBadge = pending && (riskLevel === 'high' || riskLevel === 'unknown')
+    ? { level: riskLevel, label: riskLevel === 'high' ? tCage('riskHigh') : tCage('riskUnknown') }
+    : undefined;
+  const discussNotice = pending && discussionRequested
+    // [SID:4286] 요청자 이름을 불러오는 중이면 이름 없는 배너 문구로 선다(id 조각 0).
+    ? (needsDiscussRequesterName && discussRequester !== null
+      ? t(discussRequester.fallback ? 'approvalRequestDiscussionRequestedByFallback' : 'approvalRequestDiscussionRequestedBy', {
+        name: discussRequester.label,
+        josa: pickIGaJosa(discussRequester.label),
+        reason: discussionRequested.reason,
+      })
+      : t('approvalRequestDiscussionRequestedBanner', { reason: discussionRequested.reason }))
+    : undefined;
+  const waitingOnText = designatedApprover === null
+    ? <Skeleton as="span" variant="text" className="h-3 w-28" aria-hidden />
+    : t(designatedApprover.fallback ? 'approvalRequestWaitingOnFallback' : 'approvalRequestWaitingOn', { name: designatedApprover.label });
+  const tossButton = (
+    <DsButton type="button" variant="quiet" onClick={() => setTossOpen(true)} iconStart={<Forward className="h-3.5 w-3.5" aria-hidden />}>
+      {t('approvalRequestTossTrigger')}
+    </DsButton>
+  );
 
-      {/* story #3258(customer-zero 2차) AC1 — doc 결재 카드 요약. decisionQuestion과 형제
-          블록(같은 스타일, 다른 work_item_type). */}
-      {docSummary ? (
-        <div className="min-w-0 rounded-lg border border-border bg-muted/40 p-2 text-xs text-foreground [overflow-wrap:anywhere]">
-          {docSummary}
-        </div>
+  // the decision material (summary · question · options · assumption · escalation · the resolved template's own blocks) goes in the card's body
+  const material = (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      {docDiff ? (
+        <p data-testid="approval-doc-diff" className="font-mono text-ds-mono-md text-ds-ink-3">diff +{docDiff.add} / −{docDiff.del}</p>
       ) : null}
-
-      {/* story #3263(지원v1·5에스컬레이션) AC1 — 고객 지원 에스컬레이션 티켓 초안. 페드루 PO
-          조건② "카드 본문에 요약·org·reason이 실물로 실려야"(스텁 금지) — docSummary와
-          동일 원칙, no-fiction(support_gateway_token.py::receive_escalation_event가 심은
-          값만 그대로). 고객 개인정보는
-          org명만(PO 확定, PII 0) — escalation_id는 상세 추적용(사람이 직접 읽는 정보 아님,
-          카드엔 안 보임). */}
+      {docSummary ? <p>{docSummary}</p> : null}
+      {/* story #3263 — support escalation ticket draft: org · reason · detail · summary, only the values that exist (no-fiction) */}
       {isEscalationGate ? (
-        <div className="min-w-0 space-y-1 rounded-lg border border-border bg-muted/40 p-2 [overflow-wrap:anywhere]">
-          {escalationOrgName ? (
-            <p className="text-xs font-medium text-foreground">{t('approvalRequestEscalationOrg', { orgName: escalationOrgName })}</p>
-          ) : null}
-          {escalationReason ? (
-            <p className="text-editorial-meta text-muted-foreground">{t('approvalRequestEscalationReason', { reason: escalationReason })}</p>
-          ) : null}
-          {escalationDetail ? (
-            <p className="text-xs text-foreground">{escalationDetail}</p>
-          ) : null}
-          {escalationSummary ? (
-            <p className="text-editorial-meta text-muted-foreground [white-space:pre-wrap]">{escalationSummary}</p>
-          ) : null}
+        <div className="flex min-w-0 flex-col gap-1">
+          {escalationOrgName ? <p className="font-medium">{t('approvalRequestEscalationOrg', { orgName: escalationOrgName })}</p> : null}
+          {escalationReason ? <p className="text-ds-small text-ds-ink-2">{t('approvalRequestEscalationReason', { reason: escalationReason })}</p> : null}
+          {escalationDetail ? <p>{escalationDetail}</p> : null}
+          {escalationSummary ? <p className="text-ds-small text-ds-ink-2 [white-space:pre-wrap]">{escalationSummary}</p> : null}
         </div>
       ) : null}
-
-      {/* story #3151 — 결정 재료(질문 전문·선택지·요청자). no-fiction: neutral_facts에 실린
-          값만 그대로 보이고, 없는 필드(assumption 등)는 그 줄 자체를 안 그린다. */}
+      {/* story #3151 — the full question, the options, the assumption; a field that is not in neutral_facts is not drawn */}
       {decisionQuestion ? (
-        <div className="min-w-0 space-y-1 rounded-lg border border-border bg-muted/40 p-2 [overflow-wrap:anywhere]">
-          <p className="text-xs font-medium text-foreground">{decisionQuestion}</p>
+        <div className="flex min-w-0 flex-col gap-1">
+          <p className="font-medium">{decisionQuestion}</p>
           {decisionOptions.length > 0 ? (
-            <ul className="space-y-0.5 pl-3 text-xs text-foreground">
+            <ul className="flex flex-col gap-0.5 pl-4">
               {decisionOptions.map((opt, i) => (
                 <li key={i} className="list-disc">{opt}</li>
               ))}
             </ul>
           ) : null}
-          {decisionAssumption ? (
-            <p className="text-editorial-meta text-muted-foreground">{t('approvalRequestAssumption', { assumption: decisionAssumption })}</p>
-          ) : null}
-          {requesterId ? (
-            <p className="text-editorial-meta text-muted-foreground">{requester ? t('approvalRequestRequestedBy', { name: requester.label }) : nameSkeleton}</p>
-          ) : null}
+          {decisionAssumption ? <p className="text-ds-small text-ds-ink-2">{t('approvalRequestAssumption', { assumption: decisionAssumption })}</p> : null}
         </div>
       ) : null}
+      {/* story #2637 AC4 — the resolved card consumes the verdict template's static blocks (text · fields): the target chip and the reason */}
+      {!pending && resolvedStaticBlocks ? (
+        <div className="flex min-w-0 flex-col gap-1">
+          {resolvedStaticBlocks.filter((b) => b.type === 'text').map((b, i) => renderStaticEventBlock(b, i, gateProjectHref))}
+          {resolvedStaticBlocks.filter((b) => b.type === 'fields').map((b, i) => renderStaticEventBlock(b, i, gateProjectHref))}
+        </div>
+      ) : null}
+    </div>
+  );
+  const hasMaterial = !!(docDiff || docSummary || isEscalationGate || decisionQuestion || (!pending && resolvedStaticBlocks));
 
-      {/* story #3258(customer-zero 2차) — 논의 요청 성공을 알리는 유일한 지속 신호. 토스트는
-          그 순간을 놓치면 사라지지만, 이 배너는 fetchGate() 재조회 때마다(재마운트·재오픈 포함)
-          그대로 남아 "이미 요청했다"는 사실을 재확인시킨다 — 3연발 클릭의 근본 처방. */}
-      {gate.status === 'pending' && discussionRequested ? (
-        <div className="min-w-0 rounded-lg border border-warning/30 bg-warning/8 p-2 [overflow-wrap:anywhere]">
-          <p className="text-editorial-meta font-medium text-warning-strong">
-            {/* [SID:4286] 요청자 이름을 불러오는 중이면 이름 없는 배너 문구로 선다(id 조각 0). */}
-            {needsDiscussRequesterName && discussRequester !== null
-              ? t(discussRequester.fallback ? 'approvalRequestDiscussionRequestedByFallback' : 'approvalRequestDiscussionRequestedBy', {
-                name: discussRequester.label,
-                josa: pickIGaJosa(discussRequester.label),
-                reason: discussionRequested.reason,
-              })
-              : t('approvalRequestDiscussionRequestedBanner', { reason: discussionRequested.reason })}
-          </p>
-        </div>
-      ) : null}
+  // the decision gate keeps its «요청자» line (story #3151); other gates never drew one
+  const requesterLine = decisionQuestion && requesterId
+    ? (requester ? t('approvalRequestRequestedBy', { name: requester.label }) : nameSkeleton)
+    : undefined;
 
-      {gate.status !== 'pending' ? (
-        <>
-          {resolvedStaticBlocks ? (
-            // story #2637 AC4 — 아이콘은 그대로 뱃지처럼 앞에 두고(어휘 4종 밖의 순수 UI 크롬,
-            // 템플릿이 대신할 수 없다), text·fields 블록은 EventBlockCard와 동일한 자기 고유
-            // 크기(text-sm/text-xs)로 그대로 둔다 — 억지로 기존 text-xs 한 줄에 욱여넣지 않는다
-            // (사이즈 클래스 충돌로 인한 시각 왜곡 방지).
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-1.5">
-                {gate.status === 'approved' ? <Check className="h-3.5 w-3.5 text-primary" /> : <X className="h-3.5 w-3.5 text-destructive" />}
-                {/* story #4253(까디르 codex 01a0d316) — 풀린 템플릿의 엔티티 칩(work_item_target = 게이트 대상 작업 항목)도 게이트 자기 프로젝트 */}
-                {resolvedStaticBlocks.filter((b) => b.type === 'text').map((b, i) => renderStaticEventBlock(b, i, gateProjectHref))}
-              </div>
-              {resolvedStaticBlocks.filter((b) => b.type === 'fields').map((b, i) => renderStaticEventBlock(b, i, gateProjectHref))}
-            </div>
-          ) : (
-            <div className="space-y-1">
-              <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
-                {gate.status === 'approved' ? <Check className="h-3.5 w-3.5 text-primary" /> : <X className="h-3.5 w-3.5 text-destructive" />}
-                {t('approvalRequestResolvedStatus', {
-                  status: RESOLVED_STATUS_LABEL_KEYS[gate.status] ? t(RESOLVED_STATUS_LABEL_KEYS[gate.status]!) : gate.status,
-                })}
-              </div>
-              {/* story #2624 — 상신자가 결과를 회신 카드로 받아도 사유(resolution_note)가 안
-                  보이면 "사유는 남겨놨는데" 인시던트가 human 웹 표면에서 재발한다. gate는 항상
-                  fetchGate()로 실측한 최신 값이라 어느 메시지(request/result)를 눌러 들어왔든
-                  같은 값을 보여준다.
-                  story #2637 AC4 — 템플릿 없음/파싱실패 시 폴백(비회귀 안전망, AC2와 동형). */}
-              {/* story #3084(2026-08-25, 유나 픽셀 규격 부록A) — 「남이 처리」 상태만 처리자
-                  이름 표기(「내가 처리」는 굳이 이름을 안 붙여도 자명 — 상태 어휘표 그대로).
-                  gates/[id]/page.tsx의 gateDetailResolvedByStatus를 그대로 재사용(동일 개념=
-                  동일 어휘, DS 원칙 — 새 키 안 만듦). */}
-              {gate.resolver_id && gate.resolver_id !== currentTeamMemberId ? (
-                <p className="text-editorial-meta text-muted-foreground">
-                  {resolver
-                    ? tCage(resolver.fallback ? 'gateDetailResolvedByStatusFallback' : 'gateDetailResolvedByStatus', {
-                      name: resolver.label,
-                      josa: pickIGaJosa(resolver.label),
-                      status: RESOLVED_STATUS_LABEL_KEYS[gate.status] ? t(RESOLVED_STATUS_LABEL_KEYS[gate.status]!) : gate.status,
-                    })
-                    : nameSkeleton}
-                </p>
-              ) : null}
-              {gate.resolution_note ? (
-                <p className="text-editorial-meta text-muted-foreground">{t('approvalRequestResolutionNote', { note: gate.resolution_note })}</p>
-              ) : null}
-            </div>
-          )}
-          {/* story #2631 — 오클릭 정정. 방금 본인이 해소한 게이트만(5분 창) — 두 렌더 분기
-              공통으로 하나만 둔다(중복 방지). */}
-          {isUndoEligible(gate, currentTeamMemberId) ? (
-            <GateUndoButton gateId={gate.id} onUndone={onUndone} compact />
-          ) : null}
-        </>
-      ) : isRequesterViewer ? (
-        // story #3084(2026-08-25, 유나 픽셀 규격 부록A) — 「대기·requester」. requesterId를
-        // gate.neutral_facts에서 확실히 아는 경우에만(⚠️아래 관찰자 분기와 함께, requesterId가
-        // null인 legacy/무기록 게이트는 이 분기 자체가 안 걸려 그대로 isDelegatedAway로
-        // 폴백한다 — #3001 당시엔 이 구분이 없었던 것과 동형 안전망, 회귀 0).
-        <>
-          <div className="flex items-center gap-1.5 text-xs font-medium text-warning-strong">
-            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden />
-            {/* [SID:4286] 지정 승인자 이름을 불러오는 중엔 문장 대신 글자 없는 자리표시(«님의 결재를…» 빈칸 방지). */}
-            {designatedApprover === null
-              ? <Skeleton as="span" variant="text" className="h-3 w-28" aria-hidden />
-              : t(designatedApprover.fallback ? 'approvalRequestWaitingOnFallback' : 'approvalRequestWaitingOn', { name: designatedApprover.label })}
-          </div>
-          <Button type="button" size="sm" variant="secondary" onClick={() => setTossOpen(true)} className="w-full">
-            {t('approvalRequestTossTrigger')}
-          </Button>
-        </>
-      ) : requesterId && hasDesignatedLine && !isDesignatedViewer ? (
-        // story #3084 — 「대기·관찰자」(그룹방 3자). requesterId를 알고 있고 그게 나도 아니고
-        // designated도 내가 아닌, 진짜 제3자 시점 — 액션 없음(#3001 delegate와 무관한 축이라
-        // "위임됨" 문구는 부정확해 안 쓴다).
-        <div className="flex items-center gap-1.5 text-xs font-medium text-warning-strong">
-          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden />
-          {designatedApprover === null
-            ? <Skeleton as="span" variant="text" className="h-3 w-28" aria-hidden />
-            : t(designatedApprover.fallback ? 'approvalRequestWaitingOnFallback' : 'approvalRequestWaitingOn', { name: designatedApprover.label })}
-        </div>
-      ) : isDelegatedAway ? (
-        // story #3001(선생님 정책 확定) — 이 카드의 원 수신자(=지금 보고 있는 나)가 위임으로
-        // 밀려났다. "위임됨"은 BE rule A상 여전히 canAct===true로 잡힐 수 있어도(transition
-        // authz는 이 스토리 스코프 밖 — designated_approver_id는 카드 배달만 좌우) 화면에서는
-        // 무조건 읽기전용으로 좁힌다 — 결정 권한이 여기 남아있는 것처럼 보이는 UI 자체가
-        // "승계는 튕겨내기로만" 원칙(선생님)의 시각적 위반이라(누구 이름인지는 지어내지
-        // 않는다 — GateResponse가 현재 지정자 이름을 안 실어 보낸다).
-        // story #3084 — requesterId를 모르는(legacy/무기록) 게이트의 「대기·requester/관찰자」
-        // 판정 불가 케이스도 이 분기로 안전 폴백(위 두 분기가 requesterId 존재를 전제).
-        <p className="text-xs text-muted-foreground">{t('approvalRequestDelegatedAway')}</p>
-      ) : !canAct ? (
-        // story #2091(P0)과 동일 fail-closed 규율 — can_approve=false(무권한 뷰어)는 액션을
-        // 렌더하지 않는다. 고위험도 이제 챗 안에서 완결되므로(#2625) 여기 남는 유일한
-        // "액션 불가" 사유는 무권한뿐이다.
-        <p className="text-editorial-meta text-muted-foreground">{tCage('gateReadonlyNotAuthorized')}</p>
-      ) : needsFullFlow || rejectPanelOpen || signPanelOpen ? (
-        // story #2975(유나양 design 판정 2026-08-24) 갭 자체발견(#2982 작업 중) — 그 블로커
-        // 처방(key={SHA}로 재조회 後 evidenceViewed/reason 강제 리셋)이 gates/[id]/page.tsx
-        // 에만 적용되고 이 챗 카드는 빠져 있었다. 같은 컴포넌트·같은 취약(SHA 바뀐 뒤에도
-        // 열람체크가 살아있어 재확認 없이 재승인 가능)이라 동형 처방.
-        <div className="space-y-1.5">
-          <GateSignatureApproval
-            // story #4190 — 409 뒤 재조회로 초안 버전이 바뀌어도 같은 리셋(새 버전을 다시 보고 서명).
-            key={`${gate.id}:${gate.github_check_run_sha ?? ''}:${reviewedDraftOf(gate)?.version ?? ''}`}
-            gate={gate}
-            resolving={resolving}
-            error={transitionError}
-            // story #2027 AC2: GateSignatureApproval의 canSign이 evidenceViewed&&reason로 버튼을
-            // 막아서 이 콜백에 닿았다는 사실 자체가 열람 확인 — gates/[id]/page.tsx와 동일 계약.
-            onApprove={(reason) => onApprove(reason, true)}
-            onReject={onReject}
-            onDiscuss={onDiscuss}
-            compact
-            // story #3334 — 저위험 게이트는 «변경 요청» 클릭으로만 이 패널에 들어온다(원래 근거열람+사유 요구가 없는 등급) — 잘못
-            // 눌렀을 때 원탭 승인 화면으로 되돌아갈 길. 고위험(needsFullFlow)은 이 패널이 유일한 경로라 취소 없음.
-            // story #4370 — 취소는 컴포넌트 안에서 사유 초안도 지운다.
-            onCancel={!needsFullFlow ? () => { setRejectPanelOpen(false); setSignPanelOpen(false); } : undefined}
-          />
-        </div>
-      ) : (
-        <>
-          {transitionError ? (
-            <p role="alert" aria-live="assertive" className="text-editorial-meta text-foreground">
-              {tCage('gateTransitionError', { reason: transitionError })}
-            </p>
-          ) : null}
-          <div className="flex flex-wrap gap-1.5">
-            {/* story #4190(유나 «본 버전 대조» 3) — 레시피 발행 게이트는 원탭으로 승인하지 않고 초안 카드가 있는 서명 패널을
-                연다 — 이름도 «초안 보고 승인». en 라벨이 길어 390에서 줄이 넘치면 flex-wrap으로 다음 줄로. */}
-            {isRecipePublishGate(gate) ? (
-              <Button type="button" size="sm" onClick={() => setSignPanelOpen(true)} disabled={resolving} className="flex-1">
-                <Check className="h-3.5 w-3.5" aria-hidden />
-                {tCage('gateReviewDraftToApprove')}
-              </Button>
-            ) : (
-              <Button type="button" size="sm" onClick={() => onApprove()} disabled={resolving} className="flex-1">
-                <Check className="h-3.5 w-3.5" aria-hidden />
-                {tCage('gateApprove')}
-              </Button>
-            )}
-            <Button type="button" size="sm" variant="destructive" onClick={() => setRejectPanelOpen(true)} disabled={resolving} className="flex-1">
-              <X className="h-3.5 w-3.5" aria-hidden />
-              {tCage('gateReject')}
-            </Button>
-          </div>
-          {/* story #2631 — 「보류(논의 필요)」. 저위험 경로엔 사유 입력창이 없어 다이얼로그로. */}
-          <Button type="button" size="sm" variant="ghost" onClick={onDiscussClick} disabled={resolving} className="w-full text-muted-foreground">
-            {tCage('gateDiscussSubmit')}
-          </Button>
-        </>
-      )}
-      {/* story #3084(층3) — designated 본인의 토스 진입점. 승인/반려 판단 여부와 무관하게
-          (서명 고위험 플로우 아래서도) 항상 같은 자리 — 토스는 "판단"이 아니라 "도달 경로
-          추가"라 evidence 확인 게이트(needsFullFlow)·delegate와 별개 축. */}
-      {canToss && isDesignatedViewer ? (
-        <Button type="button" size="sm" variant="ghost" onClick={() => setTossOpen(true)} className="w-full text-muted-foreground">
-          <Forward className="h-3.5 w-3.5" aria-hidden />
-          {t('approvalRequestTossTrigger')}
-        </Button>
-      ) : null}
-      {/* story #3001 — 위임(튕겨내기). 승인/반려 판단 여부와 무관하게(서명 고위험 플로우
-          아래서도) 항상 같은 자리에 둔다 — 위임은 "판단을 남에게 넘기는" 행위라 evidence
-          확인 게이트(needsFullFlow)와는 별개 축. */}
-      {canDelegate ? <DelegateApprovalControl gateId={gate.id} onDelegated={onUndone} /> : null}
+  let state: ApprovalState;
+  let simplePathError: string | null = null;
+  if (!pending) {
+    state = {
+      kind: 'resolved',
+      resolution,
+      // with the template the sentence lives in the template's text block below; the part's own line is the short verdict (icon + words)
+      statusLabel: resolvedStaticBlocks ? verdictLabel : t('approvalRequestResolvedStatus', { status: verdictLabel }),
+      // 「남이 처리」 only — 「내가 처리」 needs no name (story #3084)
+      by: gate.resolver_id && gate.resolver_id !== currentTeamMemberId
+        ? (resolver
+          ? tCage(resolver.fallback ? 'gateDetailResolvedByStatusFallback' : 'gateDetailResolvedByStatus', {
+            name: resolver.label,
+            josa: pickIGaJosa(resolver.label),
+            status: verdictLabel,
+          })
+          : nameSkeleton)
+        : undefined,
+      // story #2624 — the reason is never lost; with the template it is one of the template's fields (drawn in the material)
+      note: !resolvedStaticBlocks && gate.resolution_note ? t('approvalRequestResolutionNote', { note: gate.resolution_note }) : undefined,
+      // story #2631 — the 5-minute undo of one's own mistaken decision
+      extra: isUndoEligible(gate, currentTeamMemberId) ? <GateUndoButton gateId={gate.id} onUndone={onUndone} compact /> : undefined,
+    };
+  } else if (isRequesterViewer) {
+    // story #3084 「대기·requester」 — who we wait for + the toss to another room
+    state = { kind: 'pending', view: 'waiting', waitingOn: waitingOnText, action: tossButton };
+  } else if (requesterId && hasDesignatedLine && !isDesignatedViewer) {
+    // story #3084 「대기·관찰자」 — a third party: no action
+    state = { kind: 'pending', view: 'waiting', waitingOn: waitingOnText };
+  } else if (isDelegatedAway) {
+    // story #3001 — delegated away: read-only, no name invented
+    state = { kind: 'pending', view: 'readonly', note: t('approvalRequestDelegatedAway') };
+  } else if (!canAct) {
+    // story #2091 fail-closed — no right to decide: no action. A designated viewer still keeps the toss (story #3084), so that case reads as «waiting» with the toss as its one action.
+    state = canToss && isDesignatedViewer
+      ? { kind: 'pending', view: 'waiting', waitingOn: tCage('gateReadonlyNotAuthorized'), action: tossButton }
+      : { kind: 'pending', view: 'readonly', note: tCage('gateReadonlyNotAuthorized') };
+  } else {
+    const extraNodes = [
+      // story #3084 — the toss entry of the designated person, whether or not they judge
+      canToss && isDesignatedViewer ? <span key="toss">{tossButton}</span> : null,
+      // story #3001 — delegating (bouncing) is a separate axis from the evidence gate
+      canDelegate ? <span key="delegate"><DelegateApprovalControl gateId={gate.id} onDelegated={onUndone} /></span> : null,
+    ].filter(Boolean);
+    // the two extras sit in one small left-aligned row (not full-width stacked buttons)
+    const extras = extraNodes.length > 0 ? <div className="flex flex-wrap items-center gap-1" data-testid="approval-extras">{extraNodes}</div> : null;
+    if (needsFullFlow || rejectPanelOpen || signPanelOpen) {
+      state = {
+        kind: 'pending',
+        view: 'act',
+        needsHandLabel: t('approvalRequestNeedsHand'),
+        actions: (
+          <>
+            <GateSignatureApproval
+              // story #2975 — the key resets the evidence check / reason when the head SHA (or the recipe draft version, story #4190) changes under the card
+              key={`${gate.id}:${gate.github_check_run_sha ?? ''}:${reviewedDraftOf(gate)?.version ?? ''}`}
+              gate={gate}
+              resolving={resolving}
+              error={transitionError}
+              // story #2027 AC2 — reaching this callback IS the evidence confirmation (the panel blocks the button until the evidence is viewed and a reason is given)
+              onApprove={(reason) => onApprove(reason, true)}
+              onReject={onReject}
+              onDiscuss={onDiscuss}
+              compact
+              // story #3334 / #4370 — a low-risk gate enters this panel only by «변경 요청» and may leave it (the cancel also clears the reason draft); a high-risk gate has no other path
+              onCancel={!needsFullFlow ? () => { setRejectPanelOpen(false); setSignPanelOpen(false); } : undefined}
+            />
+            {extras}
+          </>
+        ),
+      };
+    } else {
+      simplePathError = transitionError;
+      state = {
+        kind: 'pending',
+        view: 'act',
+        needsHandLabel: t('approvalRequestNeedsHand'),
+        actions: (
+          <>
+            {/* story #4190 — a recipe-publish gate is not approved in one tap: it opens the signature panel with the draft card («초안 보고 승인») */}
+            <ApprovalActions
+              approveLabel={isRecipePublishGate(gate) ? tCage('gateReviewDraftToApprove') : tCage('gateApprove')}
+              rejectLabel={tCage('gateReject')}
+              onApprove={() => { if (isRecipePublishGate(gate)) setSignPanelOpen(true); else void onApprove(); }}
+              onReject={() => setRejectPanelOpen(true)}
+              disabled={resolving}
+            >
+              {/* story #2631 — 「보류(논의 필요)」: the low-risk path has no reason box, so a dialog */}
+              <DsButton type="button" variant="quiet" onClick={onDiscussClick} disabled={resolving}>
+                {tCage('gateDiscussSubmit')}
+              </DsButton>
+            </ApprovalActions>
+            {extras}
+          </>
+        ),
+      };
+    }
+  }
+
+  return (
+    <>
+      <ApprovalCard
+        label={t('approvalRequestLabel')}
+        title={title}
+        onTitleClick={onTitleClick}
+        requester={requesterLine}
+        risk={riskBadge}
+        notice={discussNotice}
+        error={simplePathError ? tCage('gateTransitionError', { reason: simplePathError }) : undefined}
+        state={state}
+      >
+        {hasMaterial ? material : null}
+      </ApprovalCard>
       {canToss && projectId ? (
         <TossSheet
           open={tossOpen}
@@ -882,7 +808,7 @@ function ApprovalRequestBody({
           }}
         />
       ) : null}
-    </div>
+    </>
   );
 }
 
@@ -955,9 +881,9 @@ function DelegateApprovalControl({ gateId, onDelegated }: { gateId: string; onDe
 
   if (!open) {
     return (
-      <Button type="button" size="sm" variant="ghost" onClick={() => void openPicker()} className="w-full text-muted-foreground">
+      <DsButton type="button" variant="quiet" onClick={() => void openPicker()}>
         {t('approvalRequestDelegate')}
-      </Button>
+      </DsButton>
     );
   }
 

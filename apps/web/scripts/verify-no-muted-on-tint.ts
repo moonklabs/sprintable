@@ -993,7 +993,6 @@ export const GRANDFATHER_BASELINE = new Map<string, number>([
   // section류와 동형 오탐(그룹 정밀화로 해소). story #3869 — 남았던 1건(138-141행,
   // bg-destructive-tint literal div(withdraw==='confirming') 안 Cancel 버튼)을
   // text-foreground로 교정, baseline에서 완전히 제거(양성대조=원복 시 RED, 뮤테이션 확인 済).
-  ['components/chat/command-hint-notice.tsx::muted-on-info-tint', 1],
   ['components/chat/hitl-approval-card.tsx::muted-on-warning-tint', 3],
   ['components/chat/reference-drop-notice.tsx::muted-on-warning-tint', 2],
   ['components/epics/hypothesis-declaration-card.tsx::muted-on-info-tint', 1],

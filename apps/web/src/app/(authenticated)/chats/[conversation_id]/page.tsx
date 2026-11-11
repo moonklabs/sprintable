@@ -3,14 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ChevronLeft, UserPlus, Pencil } from 'lucide-react';
+import { Pencil } from 'lucide-react';
 import { Icon } from '@/components/ds/icon';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { RoomHead } from '@/components/chat/room-head';
+import { StatusLabel } from '@/components/ds/status-label';
 import { AgentSessionStrip } from '@/components/chat/agent-session-strip';
 import { AgentsPausedBand, type AgentsPausedState } from '@/components/chat/agents-paused-band';
 import { ChatView } from '@/components/chat/chat-view';
 import type { PresenceStatus } from '@/components/chat/presence-dot';
+
+// the one word an agent's chip carries (the keys the presence dot already speaks with)
+const PRESENCE_WORD: Record<PresenceStatus, string> = { online: 'presenceOnline', idle: 'presenceIdle', offline: 'presenceOffline' };
 import { AddParticipantModal } from '@/components/chat/add-participant-modal';
 import { DeliveryContractModal } from '@/components/chat/delivery-contract-modal';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -285,134 +289,106 @@ export default function ConversationPage() {
   const roomProjectId = meta ? (meta.projectId ?? (meta.projectId === null ? (chosenProjectId ?? (projectMemberships.length === 1 ? projectMemberships[0]!.projectId : undefined)) : undefined)) : undefined;
   const askRoomProject = Boolean(meta) && meta!.projectId === null && projectMemberships.length > 1;
 
+  // story 4887 (UI-4 screen PR · the approved layout B3) — the room head: name · tag · one line of facts · a chip per participant (an agent's chip says how it is connected, from the presence the page already polls)
+  const roomProjectName = meta?.projectId ? (projectMemberships.find((m) => m.projectId === meta.projectId)?.projectName ?? null) : null;
+  const headTag = meta ? (meta.projectId ? t('roomTagProject') : meta.type === 'dm' ? t('dmSection') : t('groupSection')) : null;
+  const headSubline = meta ? [roomProjectName, t('roomHeadPeople', { count: meta.participants.length })].filter(Boolean).join(' · ') : null;
+  const HEAD_CHIP_MAX = 8;
+  const headChips = (meta?.participants ?? []).slice(0, HEAD_CHIP_MAX).map((p) => {
+    const name = participantDisplayLabel(p, tc);
+    const status = p.type === 'agent' ? presenceById[p.member_id] : undefined;
+    return {
+      id: p.member_id,
+      who: (
+        <>
+          <Avatar name={p.name ?? null} label={name} avatarUrl={p.avatar_url ?? null} actorType={p.type === 'agent' ? 'agent' : 'human'} size={18} className="flex-shrink-0" runtimeType={p.type === 'agent' ? (p.runtime_type ?? null) : null} />
+          <span className="min-w-0 truncate">{p.member_id === currentTeamMemberId ? `${name}(${t('you')})` : name}</span>
+        </>
+      ),
+      state: status ? <StatusLabel status={status} label={t(PRESENCE_WORD[status])} /> : undefined,
+    };
+  });
+  const headMoreCount = Math.max(0, (meta?.participants.length ?? 0) - HEAD_CHIP_MAX);
+  // the room's name: a group's is editable in place (story #2969 · #1990), a DM's is the other's name, an unknown room says «대화» / «불러오는 중»
+  const headTitle = editingTitle && meta?.type === 'group' ? (
+    <Input
+      autoFocus
+      value={titleDraft}
+      onChange={(e) => setTitleDraft(e.target.value)}
+      onKeyDown={(e) => {
+        // 한글 등 입력기 조합 중의 엔터(글자 확정) · 에스케이프(조합 취소)는 저장 · 닫기로 읽지 않는다 — 반쯤 쓴 방 이름이 저장되던 것(4831 측정 중 발견).
+        if (isImeComposing(e)) return;
+        if (e.key === 'Enter') void handleSaveTitle();
+        else if (e.key === 'Escape') setEditingTitle(false);
+      }}
+      onBlur={() => void handleSaveTitle()}
+      aria-label={t('editRoomName')}
+      className="h-auto w-auto min-w-0 px-1.5 py-0.5 font-medium"
+    />
+  ) : meta?.type === 'group' ? (
+    <button
+      type="button"
+      onClick={() => { setTitleDraft(meta.title ?? ''); setEditingTitle(true); }}
+      className="group/title flex min-w-0 items-center gap-1"
+      aria-label={t('editRoomName')}
+    >
+      <span className="min-w-0 truncate">{headerTitle}</span>
+      <Pencil className="size-3 flex-shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/title:opacity-100" aria-hidden />
+    </button>
+  ) : (
+    <span className="min-w-0 truncate">{headerTitle}</span>
+  );
+  const headTrailing = meta ? (
+    <>
+      {/* per-대화 알림 mute (270c87e6): the muted STATE stays visible — a person must see a room is muted without opening anything (story 4887 · P3-a) */}
+      {meta.muted ? (
+        <span className="flex items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground" role="status" data-testid="room-muted-indicator">
+          <Icon name="notifications_off" size={14} />
+          {/* the words stay for assistive tech below sm (sr-only) and show from sm up — a phone screen reader must still hear that the room is muted */}
+          <span className="sr-only sm:not-sr-only">{t('notificationsMuted')}</span>
+        </span>
+      ) : null}
+      <DropdownMenu open={headMenuOpen} onOpenChange={setHeadMenuOpen}>
+        <DropdownMenuTrigger
+          ref={headMenuTriggerRef}
+          type="button"
+          aria-label={t('roomMoreActions')}
+          title={t('roomMoreActions')}
+          data-testid="room-head-menu"
+          className="flex items-center rounded-md p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+        >
+          <Icon name="more_horiz" size={16} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" sideOffset={6} className="w-52">
+          <DropdownMenuItem onClick={() => void handleToggleMute()} data-testid="room-head-mute">
+            <Icon name={meta.muted ? 'notifications' : 'notifications_off'} size={16} className="text-muted-foreground" />
+            {meta.muted ? t('unmuteNotifications') : t('muteNotifications')}
+          </DropdownMenuItem>
+          {/* story #2621 v1 — 전달 계약 편집 진입점(대화 설정). */}
+          <DropdownMenuItem onClick={() => setShowDeliveryContract(true)} data-testid="room-head-settings">
+            <Icon name="settings" size={16} className="text-muted-foreground" />
+            {t('deliveryContractTitle')}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
+  ) : null;
+
   return (
     <>
-      <TopBarSlot
-        title={
-          // story #2988(선생님 실사용 지적) — top-bar.tsx의 `[&>*]:min-w-0 [&>*]:truncate`가
-          // 이 title 루트 div 자신에 `overflow:hidden`을 건다(빌드 CSS 실측:
-          // `.truncate{overflow:hidden;...}`). 텍스트 말줄임(6df91dce)이 원 의도였는데, 이
-          // div의 자연 높이는 가장 큰 자식(Avatar 24px)에 맞춰지고, agent Avatar의
-          // `ring-2 ring-offset-1`은 box-shadow라 레이아웃 박스 밖으로 3px 번진다(빌드 CSS
-          // 실측: `calc(2px + 1px)` 링 반경) — overflow:hidden이 그 3px를 상하로 그대로
-          // 잘라 "위아래가 잘려 렌더"됐다. py-1(4px)로 클립 경계를 링 밖까지 밀어낸다(회귀
-          // 0 — 텍스트 말줄임 동작은 overflow:hidden이 여전히 걸려있어 그대로 유지).
-          <div className="flex min-w-0 items-center gap-1 py-1">
-            <button
-              type="button"
-              // story #1990: replace(), not push() — 콜드-진입 합성 스택에 세번째 엔트리를
-              // 쌓지 않아 브라우저 BACK 재진입 트랩을 구조적으로 없앤다(§3.2). back()류 직접
-              // 호출은 하지 않는다([[feedback-history-back-nextjs]]).
-              // story #2168 PR-② AC④ — "다른 프로젝트" 경유로 왔으면(`from` 존재) 원래
-              // 프로젝트로 `?p=`를 실어 복귀시킨다(R2 SSOT가 그대로 헤더·스위처를 되돌린다 —
-              // "전환이 일방통행이 아니다"). 새 되돌리기 UI를 만들지 않고 기존 뒤로가기 버튼이
-              // 그 역할을 겸한다.
-              onClick={() => router.replace(fromProjectId ? flatHref(`/chats?p=${fromProjectId}`) : flatHref('/chats'))}
-              className="flex flex-shrink-0 items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-            >
-              <ChevronLeft className="h-4 w-4" />
-              {/* story #3776(1층B) — "대화", chats ns의 기존 title 키 재사용(위 225행과 동형). */}
-              <span className="lg:hidden">{t('title')}</span>
-            </button>
-            {headerAvatarParticipant && (
-              <Avatar
-                // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, 사람언어 폴백 통일.
-                // story #3758(9번째) — resolved 비트로 갈라 그린다.
-                // story #3791(페드루 재검토 12:23Z) — name(이니셜 재료)에 표시-폴백 문구를
-                // 넘기면 그 문구 첫 글자가 가짜 이니셜로 뜬다(「이름 없는 구성원」→「이」 등)
-                // — name은 원시, 표시 문구는 label로.
-                name={headerAvatarParticipant.name ?? null}
-                label={participantDisplayLabel(headerAvatarParticipant, tc)}
-                avatarUrl={headerAvatarParticipant.avatar_url ?? null}
-                actorType={headerAvatarParticipant.type === 'agent' ? 'agent' : 'human'}
-                size={24}
-                className="flex-shrink-0"
-                runtimeType={headerAvatarParticipant.type === 'agent' ? (headerAvatarParticipant.runtime_type ?? null) : null}
-              />
-            )}
-            {editingTitle && meta?.type === 'group' ? (
-              <Input
-                autoFocus
-                value={titleDraft}
-                onChange={(e) => setTitleDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  // 한글 등 입력기 조합 중의 엔터(글자 확정) · 에스케이프(조합 취소)는 저장 · 닫기로 읽지 않는다 — 반쯤 쓴 방 이름이 저장되던 것(4831 측정 중 발견).
-                  if (isImeComposing(e)) return;
-                  if (e.key === 'Enter') void handleSaveTitle();
-                  else if (e.key === 'Escape') setEditingTitle(false);
-                }}
-                onBlur={() => void handleSaveTitle()}
-                aria-label={t('editRoomName')}
-                className="h-auto w-auto min-w-0 px-1.5 py-0.5 font-medium"
-              />
-            ) : meta?.type === 'group' ? (
-              <button
-                type="button"
-                onClick={() => { setTitleDraft(meta.title ?? ''); setEditingTitle(true); }}
-                className="group/title flex min-w-0 items-center gap-1"
-                aria-label={t('editRoomName')}
-              >
-                {/* story #2969 §1.3-b(doc proofline-system-layer-2969, PR-5) — 헤더 상대명/
-                    방이름=Claim(600)로 재분류(리스트 대화명과 동일 처방, 구조·크기 불변). */}
-                <span className="min-w-0 truncate text-sm font-semibold text-foreground">{headerTitle}</span>
-                <Pencil className="size-3 flex-shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/title:opacity-100" aria-hidden />
-              </button>
-            ) : (
-              <span className="min-w-0 truncate text-sm font-semibold text-foreground">{headerTitle}</span>
-            )}
-          </div>
-        }
-        actions={
-          meta && (
-            <div className="flex items-center gap-1">
-              {/* story 4887 (UI-4 P3-a) — the room head shows what the person reaches for (add participants) and keeps the rest in one named «⋯» menu (mute · notification settings): three small icon buttons — one of them (the gear) with no name but a title — became «two shown + a menu».
-                  The muted STATE stays visible (a person must see a room is muted without opening anything). per-대화 알림 mute 토글 (270c87e6): mute=BellOff + "알림 꺼짐" 시각 표시. */}
-              {meta.muted ? (
-                <span className="flex items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground" role="status" data-testid="room-muted-indicator">
-                  <Icon name="notifications_off" size={14} />
-                  {/* the words stay for assistive tech below sm (sr-only) and show from sm up — a phone screen reader must still hear that the room is muted */}
-                  <span className="sr-only sm:not-sr-only">{t('notificationsMuted')}</span>
-                </span>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => setShowAddParticipant(true)}
-                className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                // story #3776(1층B) — "참여자 추가", chats ns의 기존 addParticipants 키 재사용.
-                title={t('addParticipants')}
-              >
-                <UserPlus className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">{t('addParticipants')}</span>
-              </button>
-              <DropdownMenu open={headMenuOpen} onOpenChange={setHeadMenuOpen}>
-                <DropdownMenuTrigger
-                  ref={headMenuTriggerRef}
-                  type="button"
-                  aria-label={t('roomMoreActions')}
-                  title={t('roomMoreActions')}
-                  data-testid="room-head-menu"
-                  className="flex items-center rounded-md p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                >
-                  <Icon name="more_horiz" size={16} />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" sideOffset={6} className="w-52">
-                  <DropdownMenuItem
-                    onClick={() => void handleToggleMute()}
-                    data-testid="room-head-mute"
-                  >
-                    <Icon name={meta.muted ? 'notifications' : 'notifications_off'} size={16} className="text-muted-foreground" />
-                    {meta.muted ? t('unmuteNotifications') : t('muteNotifications')}
-                  </DropdownMenuItem>
-                  {/* story #2621 v1 — 전달 계약 편집 진입점(대화 설정). */}
-                  <DropdownMenuItem onClick={() => setShowDeliveryContract(true)} data-testid="room-head-settings">
-                    <Icon name="settings" size={16} className="text-muted-foreground" />
-                    {t('deliveryContractTitle')}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          )
-        }
+      <RoomHead
+        backLabel={t('title')}
+        // story #1990: replace(), not push() — 콜드-진입 합성 스택에 세번째 엔트리를 쌓지 않아 브라우저 BACK 재진입 트랩을 구조적으로 없앤다(§3.2). back()류 직접 호출은 하지 않는다([[feedback-history-back-nextjs]]).
+        // story #2168 PR-② AC④ — "다른 프로젝트" 경유로 왔으면(`from` 존재) 원래 프로젝트로 `?p=`를 실어 복귀시킨다: 이 뒤로가기가 그 역할을 겸한다.
+        onBack={() => router.replace(fromProjectId ? flatHref(`/chats?p=${fromProjectId}`) : flatHref('/chats'))}
+        title={headTitle}
+        tag={headTag}
+        subline={headSubline}
+        chips={headChips}
+        moreCount={headMoreCount}
+        addLabel={t('addParticipants')}
+        onAdd={meta ? () => setShowAddParticipant(true) : undefined}
+        trailing={meta ? headTrailing : null}
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
         {blocked ? (

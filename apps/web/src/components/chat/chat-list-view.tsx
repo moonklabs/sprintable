@@ -7,7 +7,9 @@ import { MessageSquare, Users } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { EmptyState } from '@/components/ui/empty-state';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { IconButton } from '@/components/ds/icon-button';
+import { Button as DsButton } from '@/components/ds/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select } from '@/components/ui/select';
 import { NewConversationModal } from './new-conversation-modal';
 import { ConnectionLostBanner } from './connection-lost-banner';
@@ -91,6 +93,10 @@ interface ChatListViewProps {
   currentTeamMemberId: string;
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
+  /** story 4887 (UI-4 screen PR) — whether the person can start a room here: the «+» in the list head (it used to be the layout's «새 대화» button). */
+  canStartRoom?: boolean;
+  /** the list's heading level: 1 on the list route (it is the page's h1), 2 beside an open room (the room head owns the h1) */
+  headingLevel?: 1 | 2;
 }
 
 // story #2168 PR-② — 현재 프로젝트 밖에서 caller가 참여 중인 최근 대화(BE
@@ -396,7 +402,7 @@ const PAGE_LIMIT = 30;
 /** story 4847 — the tab's own «걸러 보기» choice (a tab-scoped convenience: it never reaches the server and never changes the current project) */
 export const CHAT_PROJECT_FILTER_KEY = 'sprintable.chats.projectFilter';
 
-export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChange }: ChatListViewProps) {
+export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChange, canStartRoom = false, headingLevel = 1 }: ChatListViewProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('chats');
   // story #3783 — "불러오는 중…", common ns의 기존 loading 키 재사용.
@@ -814,8 +820,6 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     return c.project_name ?? projectMemberships.find((m) => m.projectId === c.project_id)?.projectName ?? undefined;
   };
 
-  const dmConvs = conversations.filter((c) => c.type === 'dm');
-  const groupConvs = conversations.filter((c) => c.type === 'group');
 
   const myConvIds = new Set(conversations.map((c) => c.id));
   const agentOnlyConvs = allConversations.filter((c) => !myConvIds.has(c.id));
@@ -907,27 +911,11 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       </div>
     )
   ) : (
-    <div className="space-y-4">
-      {dmConvs.length > 0 && (
-        <div>
-          <p className="mb-1 px-3 text-editorial-meta font-medium text-muted-foreground">
-            {t('dmSection')}
-          </p>
-          {dmConvs.map((conv) => (
-            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} projectLabel={projectLabelOf(conv)} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
-          ))}
-        </div>
-      )}
-      {groupConvs.length > 0 && (
-        <div>
-          <p className="mb-1 px-3 text-editorial-meta font-medium text-muted-foreground">
-            {t('groupSection')}
-          </p>
-          {groupConvs.map((conv) => (
-            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} projectLabel={projectLabelOf(conv)} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
-          ))}
-        </div>
-      )}
+    <div className="space-y-1">
+      {/* story 4887 (UI-4 screen PR · the approved layout) — ONE list: the «DM» / «그룹» sub-heads are gone (the room's own glyph says which it is), in the order the server gave them */}
+      {conversations.map((conv) => (
+        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} projectLabel={projectLabelOf(conv)} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
+      ))}
       {conversations.length < myTotal && (
         <Button
           type="button"
@@ -1022,11 +1010,30 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
 
   if (needsProject) {
     return (
-      <div className="flex h-64 items-center justify-center px-6 text-center" data-testid="chats-no-project">
-        {projectsFailed ? <ProjectsLoadFailed t={t} /> : <p className="text-sm text-muted-foreground">{projectMemberships.length === 0 ? t('noProjectYet') : t('pickProject')}</p>}
-      </div>
+      <>
+        {/* the overlay rail is labelled by this id — the fallback keeps the name (codex round 1); outside the box so the box's own words stay exactly the instruction */}
+        {headingLevel === 2 ? <h2 id="chat-rail-heading" className="sr-only">{t('title')}</h2> : <h1 id="chat-rail-heading" className="sr-only">{t('title')}</h1>}
+        <div className="flex h-64 items-center justify-center px-6 text-center" data-testid="chats-no-project">
+          {projectsFailed ? <ProjectsLoadFailed t={t} /> : <p className="text-sm text-muted-foreground">{projectMemberships.length === 0 ? t('noProjectYet') : t('pickProject')}</p>}
+        </div>
+      </>
     );
   }
+
+  // the list head: the count of the list that is SHOWN (the same number the rail context lifts for the outlet), a switch between the two lists, and the narrowing chip
+  const headCount = isAdminOrOwner && activeList === 'agent' ? agentOnlyConvs.length : conversations.length;
+  const selectList = (v: 'my' | 'agent') => {
+    if (v === 'agent') loadAgentConversationsOnce();
+    setActiveList(v);
+  };
+  const filteredProjectName = projectFilter && projectFilter !== 'none' ? projectMemberships.find((m) => m.projectId === projectFilter)?.projectName ?? null : null;
+  const activeFilterLabel = isAdminOrOwner && activeList === 'agent'
+    ? t('agentChatsTab')
+    : projectFilter === 'none' ? t('roomNoProject') : filteredProjectName;
+  const clearListFilter = () => {
+    if (activeList === 'agent') setActiveList('my');
+    else handleProjectFilterChange('');
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -1040,58 +1047,67 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
           (대화 스크롤과 분리, 훑기 밀도 보존). Tabs 밖에 둔다 — my/agent 탭 전환과 무관하게
           항상 상단 고정. AC2 합산 불변식(#3178) — expandedSurface 하나로 둘 중 최대 1개만
           펼쳐지게 끌어올린다(하나를 펼치면 다른 하나는 자동 접힘). */}
-      <div className="space-y-2 px-2 pt-2">
-        <NowStrip
-          expanded={expandedSurface === 'strip'}
-          onExpandedChange={(v) => setExpandedSurface(v ? 'strip' : null)}
-        />
-        <PulseCard
-          expanded={expandedSurface === 'pulse'}
-          onExpandedChange={(v) => setExpandedSurface(v ? 'pulse' : null)}
-        />
+      {/* story 4887 (UI-4 screen PR · the approved layout) — the list head is ONE line: «대화 N» + «+» (a new room) + «⋯». Everything that used to sit above the rooms and eat ~230 px —
+          the «지금» strip and the project card, the project filter, the «내 대화 / 에이전트 대화» tabs — lives in the «⋯» popover now (none is removed); a narrowing that is ON shows as one chip under the head so it is never forgotten. */}
+      <div className="flex flex-shrink-0 items-center gap-2 border-b border-ds-line px-4 py-2" data-testid="chat-list-head">
+        {/* one h1 per page: the list owns it on /chats only; beside an open room the room head owns it and this is an h2 (codex round 1) */}
+        {headingLevel === 2 ? <h2 id="chat-rail-heading" className="text-ds-body font-semibold text-ds-ink">{t('title')}</h2> : <h1 id="chat-rail-heading" className="text-ds-body font-semibold text-ds-ink">{t('title')}</h1>}
+        <span className="font-mono text-ds-mono-md text-ds-ink-3" data-testid="chat-list-count">{headCount}</span>
+        <div className="ml-auto flex items-center gap-1">
+          {canStartRoom ? <IconButton icon="add" label={t('newConversation')} data-testid="chat-list-new" onClick={() => setShowModal(true)} /> : null}
+          <Popover>
+            <PopoverTrigger render={<IconButton icon="more_horiz" label={t('listOptions')} data-testid="chat-list-options" />} />
+            <PopoverContent align="end" aria-label={t('listOptions')} className="flex w-80 flex-col gap-3 p-3">
+              {/* story #3177 · #3178 — the «지금» strip and the project card (one of the two open at a time) */}
+              <div className="flex flex-col gap-2" data-testid="chat-list-now">
+                <NowStrip
+                  expanded={expandedSurface === 'strip'}
+                  onExpandedChange={(v) => setExpandedSurface(v ? 'strip' : null)}
+                />
+                <PulseCard
+                  expanded={expandedSurface === 'pulse'}
+                  onExpandedChange={(v) => setExpandedSurface(v ? 'pulse' : null)}
+                />
+              </div>
+              {/* story 4847 (AC1) — 프로젝트로 걸러 보기: the organization's rooms are all here; this narrows them to one project's (or to the ones with none) without moving the person */}
+              {!projectOnly && projectMemberships.length > 1 && activeList === 'my' ? (
+                <div className="flex flex-col gap-1">
+                  <label htmlFor="chat-list-project-filter" className="text-ds-small font-semibold text-ds-ink-2">{t('projectFilterLabel')}</label>
+                  <Select
+                    id="chat-list-project-filter"
+                    aria-label={t('projectFilterLabel')}
+                    data-testid="project-filter"
+                    value={projectFilter}
+                    onChange={(e) => handleProjectFilterChange(e.target.value)}
+                  >
+                    <option value="">{t('projectFilterAll')}</option>
+                    {projectMemberships.map((m) => (
+                      <option key={m.projectId} value={m.projectId}>{m.projectName}</option>
+                    ))}
+                    <option value="none">{t('roomNoProject')}</option>
+                  </Select>
+                </div>
+              ) : null}
+              {/* an organization owner / admin also reads the agents' rooms: the two lists are one switch */}
+              {isAdminOrOwner ? (
+                <div role="group" aria-label={t('title')} className="flex gap-1" data-testid="chat-list-tabs">
+                  <DsButton type="button" variant={activeList === 'my' ? 'primary' : 'secondary'} aria-pressed={activeList === 'my'} onClick={() => selectList('my')}>{t('myChatsTab')}</DsButton>
+                  <DsButton type="button" variant={activeList === 'agent' ? 'primary' : 'secondary'} aria-pressed={activeList === 'agent'} onClick={() => selectList('agent')}>{t('agentChatsTab')}</DsButton>
+                </div>
+              ) : null}
+            </PopoverContent>
+          </Popover>
+        </div>
       </div>
-      {/* story 4847 (AC1) — 프로젝트로 걸러 보기: the organization's rooms are all here; this narrows them to one project's (or to the ones with none) without moving the person */}
-      {!projectOnly && projectMemberships.length > 1 && activeList === 'my' ? (
-        <div className="px-4 pt-2">
-          <Select
-            aria-label={t('projectFilterLabel')}
-            data-testid="project-filter"
-            value={projectFilter}
-            onChange={(e) => handleProjectFilterChange(e.target.value)}
-          >
-            <option value="">{t('projectFilterAll')}</option>
-            {projectMemberships.map((m) => (
-              <option key={m.projectId} value={m.projectId}>{m.projectName}</option>
-            ))}
-            <option value="none">{t('roomNoProject')}</option>
-          </Select>
+      {activeFilterLabel ? (
+        <div className="flex flex-shrink-0 items-center gap-1.5 border-b border-ds-line px-4 py-1.5" data-testid="chat-list-active-filter">
+          <span className="min-w-0 truncate text-ds-small text-ds-ink-2">{activeFilterLabel}</span>
+          <IconButton icon="close" label={t('clearListFilter')} className="ml-auto" onClick={clearListFilter} />
         </div>
       ) : null}
-      {isAdminOrOwner ? (
-        <Tabs
-          defaultValue="my"
-          onValueChange={(v) => {
-            if (v === 'agent') loadAgentConversationsOnce();
-            setActiveList(v as 'my' | 'agent');
-          }}
-          className="flex min-h-0 flex-1 flex-col"
-        >
-          <TabsList className="mx-4 mt-2 w-auto self-start">
-            <TabsTrigger value="my">{t('myChatsTab')}</TabsTrigger>
-            <TabsTrigger value="agent">{t('agentChatsTab')}</TabsTrigger>
-          </TabsList>
-          <TabsContent value="my" className="flex-1 overflow-y-auto px-2 py-2">
-            {myConversationList}
-          </TabsContent>
-          <TabsContent value="agent" className="flex-1 overflow-y-auto px-2 py-2">
-            {agentConversationList}
-          </TabsContent>
-        </Tabs>
-      ) : (
-        <div className="flex-1 overflow-y-auto px-2 py-2">
-          {myConversationList}
-        </div>
-      )}
+      <div className="flex-1 overflow-y-auto px-2 py-2" data-testid="chat-list-rooms">
+        {isAdminOrOwner && activeList === 'agent' ? agentConversationList : myConversationList}
+      </div>
 
       {showModal && (
         <NewConversationModal
