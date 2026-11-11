@@ -65,6 +65,35 @@ const head = () => container.querySelector('[data-testid="board-head"]') as HTML
 const cls = (e: Element) => e.className.split(/\s+/);
 const controls = () => [...head().querySelectorAll('button, [role="tab"]')].filter((e) => !e.closest('[data-testid="lens-lead"]')) as HTMLElement[];
 
+describe('보드 머리 — 첫 불러오는 동안에도 렌즈 칩이 선다(story #4888 · codex 1바퀴)', () => {
+  it('⭐스토리를 아직 못 받은 첫 불러오기 동안에도 렌즈 칩이 머리 줄 자리에 있다(없다가 나타나지 않는다) · 다 불러온 뒤에도 정확히 하나', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.startsWith('/api/stories?')) { await gate; return { ok: true, json: async () => ({ data: [], meta: { nextCursor: null, hasMore: false } }) }; }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await mount(true);
+    expect(container.querySelectorAll('[data-testid="lens-lead"]')).toHaveLength(1);        // 로딩 중
+    expect(head().firstElementChild!.getAttribute('data-testid')).toBe('lens-lead');
+    expect(head().className).toContain('overflow-x-auto');                                  // 같은 틀(자리 표시도 실제 머리와 같은 줄 틀)
+    await act(async () => { release(); });
+    await act(async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); });
+    expect(container.querySelectorAll('[data-testid="lens-lead"]')).toHaveLength(1);        // 다 불러온 뒤
+    expect(head().querySelector(`button[aria-label="${B.searchPlaceholder}"]`)).not.toBeNull();
+  });
+
+  it('headLead가 없으면(다른 호출처) 첫 불러오는 동안은 예전처럼 스켈레톤만 — 머리 줄 틀을 만들지 않는다', async () => {
+    const gate = new Promise<void>(() => {});
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.startsWith('/api/stories?')) { await gate; }
+      return { ok: true, json: async () => ({ data: [] }) };
+    }));
+    await mount(false);
+    expect(container.querySelector('[data-testid="board-head"]')).toBeNull();
+  });
+});
+
 describe('보드 머리 — 렌즈 + 필터 + 보기 전환이 한 줄(story #4888)', () => {
   it('⭐렌즈(headLead)가 보드 머리 줄 안 맨 앞에 서고, 그 뒤에 필터 · 오른쪽 묶음이 같은 줄에 있다', async () => {
     await mount(true);

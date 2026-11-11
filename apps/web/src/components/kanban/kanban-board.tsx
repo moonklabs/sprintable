@@ -82,6 +82,9 @@ interface KanbanBoardProps {
   headLead?: React.ReactNode;
 }
 
+// story #4888 — 보드 머리 줄의 틀(불러오는 동안의 자리 표시와 실제 머리가 같은 틀이라 칩이 안 흔들린다)
+const BOARD_HEAD_CLASS = 'focus-inset flex min-h-11 flex-shrink-0 flex-nowrap items-center gap-2 overflow-x-auto border-b border-border/80 px-4 py-1.5 lg:flex-wrap lg:overflow-visible';
+
 // WIP limit localStorage 키
 function wipLimitKey(projectId: string | undefined, status: string): string {
   return `wip_limit_${projectId ?? 'default'}_${status}`;
@@ -1358,7 +1361,16 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
 
   // story #4307(유나 확정) — 전면 스켈레톤은 첫 불러오기만. 다시 불러오는 동안은 툴바 · 필터 버튼이 남고 컬럼(목록) 자리만 같은 스켈레톤 부품 +
   // aria-busy(툴바엔 안 검). 도중에 또 바꾸면 마지막 조건 응답만 반영된다(fetchData의 runId · stale 판정).
-  if (loading && !hasLoadedOnce) return <KanbanSkeleton />;
+  // story #4888 — 첫 불러오는 동안에도 렌즈 칩(headLead)은 머리 줄 자리에 선다: 칩이 잠깐 사라졌다 나타나지 않고(링크 · 렌즈 이동이 끊기지 않고), 줄 틀이 같아 아래가 밀리지 않는다.
+  if (loading && !hasLoadedOnce) {
+    if (!headLead) return <KanbanSkeleton />;
+    return (
+      <div className="flex h-full flex-col overflow-hidden">
+        <div data-testid="board-head" className={BOARD_HEAD_CLASS}>{headLead}</div>
+        <div className="min-h-0 flex-1 overflow-hidden"><KanbanSkeleton /></div>
+      </div>
+    );
+  }
   const refetching = loading && hasLoadedOnce;
 
   return (
@@ -1383,10 +1395,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
 
       {/* Board header — story #4888(보드 머리 통째): 렌즈 칩(headLead) + 필터 + 검색 · 보기 전환이 **한 줄**이다. 넓은 화면(lg)은 모자라면 줄바꿈, 폰은 줄바꿈 없이 가로로 미는 한 줄
           (예전엔 폰에서 3줄로 접혀 113px · 첫 카드가 화면의 74% 아래). 눌리는 것은 터치에서 44. */}
-      <div
-        data-testid="board-head"
-        className="focus-inset flex min-h-11 flex-shrink-0 flex-nowrap items-center gap-2 overflow-x-auto border-b border-border/80 px-4 py-1.5 lg:flex-wrap lg:overflow-visible"
-      >
+      <div data-testid="board-head" className={BOARD_HEAD_CLASS}>
         {headLead ? (
           <>
             {headLead}
