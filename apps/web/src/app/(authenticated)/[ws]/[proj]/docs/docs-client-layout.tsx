@@ -446,15 +446,17 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     [handleNewDoc, isCreating, handleNewFolder, folderSubmitting, t, sidebarCollapsed]
   );
 
+  const listCount = docsHasMore && docsTotal !== null ? docsTotal : tree.length;
+
   const sidebarContent = (
     <>
       {/* story 4892 (UI-9 목록 열) — 열 머리: 제목 + 새 폴더 · 새 문서(ds). 예전 에디토리얼 마스트헤드(kicker · 큰 제목 · 시그니처 선)는 걷었다.
           두 동작은 lg(레일이 보일 때)에만 여기 있고, lg 미만은 상단 바가 같은 두 동작을 갖는다 — 한 동작이 한 화면에 한 자리. */}
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-ds-line px-3 lg:pr-11">
-        {/* story 4892 (UI-9 문서 화면 배치) — 시안 목록 열 머리(«대화 5 · +»)처럼 이름 옆에 개수: 서버가 알려 준 총량(없으면 받은 수). 받기 전 · 0건이면 숨김. */}
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-ds-line px-3 touch:h-11 lg:pr-11">
+        {/* story 4892 (UI-9 문서 화면 배치) — 시안 목록 열 머리(«대화 5 · +»)처럼 이름 옆에 개수. 다 받았으면 받은 수(만들기 · 지우기에 늘 맞는다), 상한을 넘겨 «더 보기»가 남은 프로젝트만 서버 총량. 받기 전 · 0건이면 숨김. */}
         <div className="flex min-w-0 flex-1 items-baseline gap-2">
           <h2 className="m-0 min-w-0 truncate text-ds-card-title font-semibold text-ds-ink">{t('title')}</h2>
-          {(docsTotal ?? tree.length) > 0 ? <span data-testid="docs-list-count" className="shrink-0 font-mono text-ds-mono-md text-ds-ink-3">{docsTotal ?? tree.length}</span> : null}
+          {listCount > 0 ? <span data-testid="docs-list-count" className="shrink-0 font-mono text-ds-mono-md text-ds-ink-3">{listCount}</span> : null}
         </div>
         <IconButton icon="create_new_folder" label={t('newFolder')} onClick={handleNewFolder} disabled={folderSubmitting} className="hidden lg:inline-flex" />
         <DsButton
@@ -702,7 +704,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         {!sidebarCollapsed && (
           /* story 4892 (5533 정정, PO 11-10) — 236px at lg (1024~1279: the reading column keeps its width — 544 at 1100), 300px from xl (≥1280, where 300 still leaves the body 820 at 1440) */
           <aside className="focus-inset relative hidden w-[236px] flex-shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r border-ds-line bg-ds-background lg:flex xl:w-[300px]">
-            <IconButton icon="chevron_left" label={t('hideSidebar')} aria-expanded={!sidebarCollapsed} onClick={handleToggleSidebar} className="absolute right-2 top-2 z-10" />
+            <IconButton icon="chevron_left" label={t('hideSidebar')} aria-expanded={!sidebarCollapsed} onClick={handleToggleSidebar} className="absolute right-1 top-1.5 z-10 touch:top-0" />
             {sidebarContent}
           </aside>
         )}
@@ -728,7 +730,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           )}
           {/* Desktop collapsed sidebar open button */}
           {sidebarCollapsed && (
-            <IconButton icon="chevron_right" label={t('openSidebar')} aria-expanded={!sidebarCollapsed} onClick={handleToggleSidebar} className="absolute left-2 top-2 z-10 hidden lg:inline-flex" />
+            <IconButton icon="chevron_right" label={t('openSidebar')} aria-expanded={!sidebarCollapsed} onClick={handleToggleSidebar} className="absolute left-1 top-1.5 z-10 hidden touch:top-0 lg:inline-flex" />
           )}
           {children}
         </section>

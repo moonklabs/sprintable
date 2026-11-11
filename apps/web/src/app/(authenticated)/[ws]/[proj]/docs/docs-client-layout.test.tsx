@@ -729,3 +729,63 @@ describe('DocsClientLayout — 새 폴더 칸 · 다시 시도 · 건수는 ds �
     expect(layoutSource).not.toMatch(/<Button\b/);   // every button is a DsButton / IconButton now
   });
 });
+
+// story 4892 (UI-9 문서 화면 배치) — 열 머리 개수 · 접기 단추 · 폰 서랍이 ds 부품이고, 겹침이 없다(codex: 접기 단추가 폰에서 44가 되어 머리 40을 넘거나 읽기 머리 제목을 덮던 자리).
+describe('DocsClientLayout — 열 머리 개수 · 접기 단추 · 폰 서랍 (4892 배치)', () => {
+  const count = () => container.querySelector('[data-testid="docs-list-count"]');
+  const stubWithMeta = (meta: Record<string, unknown>) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (typeof url === 'string' && url.includes('/api/docs')
+      ? { ok: true, json: async () => ({ data: [DOC_A, DOC_B], meta }) }
+      : { ok: false, json: async () => null })));
+  };
+
+  it('⭐개수: 다 받았으면 받은 수(서버 총량이 더 커도 — 만들기 · 지우기에 늘 맞는다) · «더 보기»가 남았으면 서버 총량', async () => {
+    stubWithMeta({ hasMore: false, nextCursor: null, totalCount: 5 });
+    await mount();
+    expect(count()?.textContent).toBe('2');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    stubWithMeta({ hasMore: true, nextCursor: 'c1', totalCount: 99 });
+    await mount();
+    expect(count()?.textContent).toBe('99');
+  });
+
+  it('⭐개수는 0건이면 숨고, 열 머리는 폰(touch)에서 44로 자란다(접기 단추 44가 머리 밖으로 안 나가게)', async () => {
+    stubWithMeta({ hasMore: false, nextCursor: null, totalCount: 0 });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (typeof url === 'string' && url.includes('/api/docs')
+      ? { ok: true, json: async () => ({ data: [], meta: { hasMore: false, nextCursor: null, totalCount: 0 } }) }
+      : { ok: false, json: async () => null })));
+    await mount();
+    expect(count()).toBeNull();
+    const header = container.querySelector('aside h2')!.parentElement!.parentElement as HTMLElement;
+    expect(header.className.split(/\s+/)).toEqual(expect.arrayContaining(['h-10', 'touch:h-11']));
+  });
+
+  it('⭐접기 · 펴기 단추는 ds IconButton(aria-expanded) — 열 머리 안에 있고(top-1.5 · 폰 top-0) 읽기 머리 제목을 덮지 않는 자리(left-1)', async () => {
+    stubFetch();
+    await mount();
+    const hide = container.querySelector<HTMLButtonElement>(`aside button[aria-label="${koMessages.docs.hideSidebar}"]`)!;
+    expect(hide.getAttribute('data-slot')).toBe('ds-icon-button');
+    expect(hide.getAttribute('aria-expanded')).toBe('true');
+    expect(hide.className.split(/\s+/)).toEqual(expect.arrayContaining(['absolute', 'right-1', 'top-1.5', 'touch:top-0']));
+    await act(async () => { hide.click(); });
+    const open = container.querySelector<HTMLButtonElement>(`button[aria-label="${koMessages.docs.openSidebar}"]`)!;
+    expect(open.getAttribute('data-slot')).toBe('ds-icon-button');
+    expect(open.getAttribute('aria-expanded')).toBe('false');
+    expect(open.className.split(/\s+/)).toEqual(expect.arrayContaining(['absolute', 'left-1', 'top-1.5', 'touch:top-0']));
+    expect(open.className.split(/\s+/)).not.toContain('left-2');
+  });
+
+  it('⭐폰: «문서 목록 열기»는 ds Button · 서랍 닫기는 ds IconButton(이름 «닫기»)', async () => {
+    stubFetch();
+    await mount();
+    const opener = container.querySelector<HTMLButtonElement>(`button[aria-label="${koMessages.docs.openDocTree}"]`)!;
+    expect(opener.getAttribute('data-slot')).toBe('ds-button');
+    await act(async () => { opener.click(); });
+    const drawer = [...container.querySelectorAll('[role="dialog"][aria-modal="true"]')].find((el) => el.className.includes('w-[280px]'))!;
+    const close = drawer.querySelector<HTMLButtonElement>(`button[aria-label="${koMessages.common.close}"]`)!;
+    expect(close.getAttribute('data-slot')).toBe('ds-icon-button');
+    expect(drawer.className).toContain('border-ds-line');
+    expect(drawer.className).not.toContain('border-border');
+  });
+});
