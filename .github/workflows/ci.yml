@@ -31,7 +31,10 @@ on:
 # 반복될 수 있다)는 그대로 남는다 — 정확성(산 run이 안 죽는다)과 맞바꾼 것.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}${{ (github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null) && format('-edited-only-{0}', github.run_id) || '' }}
-  cancel-in-progress: true
+  # story 4898 (PO 2026-11-11): a push to develop / main is NOT cancelled by the next push. With merges a few minutes apart every running develop CI was cancelled by the following merge (01:28-01:48Z: four develop
+  # heads, all «cancelled», no green head), and the dev rollout — which takes green CI heads only — starved. For a push the running CI now finishes; GitHub keeps ONE pending run per group (a newer pending run
+  # replaces the older pending one), so the Actions minutes follow «one CI per CI duration», not «one CI per merge». A pull request still cancels the superseded run, as before (and the `edited-only` group rule above is untouched).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # story #2555 — 선생님 플래그(2026-08-10): docs/FE-only PR도 백엔드 무거운 잡(alembic·
