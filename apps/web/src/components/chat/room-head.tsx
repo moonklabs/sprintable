@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Button } from '@/components/ds/button';
 import { Chip } from '@/components/ds/chip';
 import { Icon } from '@/components/ds/icon';
@@ -81,12 +81,13 @@ export interface RoomBarTitleProps {
  * (390 × 844: 635 → 482). The participants (chips with their connection words) and the «+» are one press away in a popover instead of a row of their own.
  */
 export function RoomBarTitle({ backLabel, onBack, title, tag, subline, peopleLabel, peopleCount, chips, moreCount = 0, addLabel, onAdd }: RoomBarTitleProps) {
+  const [open, setOpen] = useState(false); // controlled: the «+» must close the popover BEFORE the add dialog opens (two layers stacked = two Escape presses)
   return (
     // the shell's title slot clips its direct child (truncate): this wrapper lets the focus rings out; the name itself truncates
     <div data-testid="room-bar" className="flex min-w-0 items-center gap-1 !overflow-visible">
       <IconButton icon="arrow_back" label={backLabel} onClick={onBack} className="-ml-2 shrink-0" data-testid="room-bar-back" />
       <h1 className="m-0 min-w-0 truncate text-ds-body font-semibold text-ds-ink">{title}</h1>
-      <Popover>
+      <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger render={<Button variant="quiet" title={peopleLabel} data-testid="room-bar-people" iconStart={<Icon name="groups" size={16} />} className="shrink-0 px-2" />}>
           {/* the name the reader hears is «참여자 보기 3»: the fixed label (sr-only) + the number (visible) */}
           <span className="sr-only">{peopleLabel} </span>
@@ -108,7 +109,7 @@ export function RoomBarTitle({ backLabel, onBack, title, tag, subline, peopleLab
             ))}
             {moreCount > 0 ? <li data-testid="room-head-more" className="font-mono text-ds-mono-md text-ds-ink-3">+{moreCount}</li> : null}
           </ul>
-          {onAdd ? <Button variant="secondary" iconStart={<Icon name="add" size={16} />} onClick={onAdd} data-testid="room-head-add">{addLabel}</Button> : null}
+          {onAdd ? <Button variant="secondary" iconStart={<Icon name="add" size={16} />} onClick={() => { setOpen(false); onAdd(); }} data-testid="room-head-add">{addLabel}</Button> : null}
         </PopoverContent>
       </Popover>
     </div>

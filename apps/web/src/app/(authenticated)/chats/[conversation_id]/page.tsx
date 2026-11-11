@@ -8,7 +8,7 @@ import { Icon } from '@/components/ds/icon';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { RoomHead, RoomBarTitle } from '@/components/chat/room-head';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { useIsMobile } from '@/hooks/use-mobile';
+import { useIsBelowLg } from '@/hooks/use-mobile';
 import { StatusLabel } from '@/components/ds/status-label';
 import { AgentSessionStrip } from '@/components/chat/agent-session-strip';
 import { AgentsPausedBand, type AgentsPausedState } from '@/components/chat/agents-paused-band';
@@ -102,7 +102,7 @@ export default function ConversationPage() {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const { conversation_id } = useParams<{ conversation_id: string }>();
   const router = useRouter();
-  const isBelowLg = useIsMobile(); // the phone shell's width (below lg = 1024): the room head goes into the shell's header row there
+  const isBelowLg = useIsBelowLg(); // the phone shell's width (below lg = 1024), read at the first client render: the room head goes into the shell's header row there
   // story #1959(P2-S3): 딥링크 매니페스트(chat_thread→parentTab=chat) — 콜드 진입 시 "채팅"
   // 탭 루트를 BACK 대상으로 선주입. 목록에서 클릭해 온 경우(history.length>1)는 no-op.
   useSyntheticParentTabHistory('/chats');
@@ -358,7 +358,7 @@ export default function ConversationPage() {
           aria-label={t('roomMoreActions')}
           title={t('roomMoreActions')}
           data-testid="room-head-menu"
-          className="flex items-center rounded-md p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+          className="flex items-center rounded-md p-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground touch:min-h-11 touch:min-w-11 touch:justify-center"
         >
           <Icon name="more_horiz" size={16} />
         </DropdownMenuTrigger>

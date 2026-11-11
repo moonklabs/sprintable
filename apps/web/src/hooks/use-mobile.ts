@@ -48,3 +48,18 @@ export function useIsTablet() {
 
   return !!isTablet
 }
+
+// story 4887 (UI-4) — «is this the phone shell's width (below lg)?» read at the FIRST client render, not after an effect. `useIsMobile()` above starts false and flips in an effect: a page that puts its title into the shell's header row only below lg
+// showed a titleless row for a frame on a cold phone load (codex round 1 on the phone room head). The server snapshot is false (no window); a client without matchMedia (jsdom) is false too.
+export function useIsBelowLg(): boolean {
+  return React.useSyncExternalStore(
+    (onChange) => {
+      if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {};
+      const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
+      mql.addEventListener('change', onChange);
+      return () => mql.removeEventListener('change', onChange);
+    },
+    () => (typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`).matches : false),
+    () => false,
+  );
+}

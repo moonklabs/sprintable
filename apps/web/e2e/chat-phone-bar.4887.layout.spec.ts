@@ -13,6 +13,8 @@ import { layoutStubPlugin } from './support/layout-stubs';
 const req = createRequire(__filename);
 const WEB = path.join(__dirname, '..');
 const APP = path.join(WEB, 'src', 'app');
+// the REAL room-menu trigger's classes, read from the page source (a stand-in button passed the «every press ≥ 44» rule while the real trigger was a 28 px raw button — codex round 1)
+const TRIGGER_CLASS = (() => { const src = readFileSync(path.join(APP, '(authenticated)', 'chats', '[conversation_id]', 'page.tsx'), 'utf8'); const m = /data-testid="room-head-menu"\s*\n\s*className="([^"]+)"/.exec(src); if (!m) throw new Error('the room menu trigger classes were not found in page.tsx'); return m[1]!; })();
 
 let built: { js: string; css: string } | null = null;
 async function build() {
@@ -41,6 +43,7 @@ async function build() {
         import { RoomBarTitle, RoomHead } from './src/components/chat/room-head';
         import { ChatInput } from './src/components/chat/chat-input';
         import { IconButton } from './src/components/ds/icon-button';
+        import { Icon } from './src/components/ds/icon';
         import { StatusLabel } from './src/components/ds/status-label';
         import { Avatar } from './src/components/shared/avatar';
         const intl = (child) => React.createElement(NextIntlClientProvider, { locale: 'ko', messages: ko, timeZone: 'Asia/Seoul' }, child);
@@ -53,7 +56,7 @@ async function build() {
                 <TopBar />
                 <TopBarSlot
                   title={<RoomBarTitle backLabel="대화" onBack={() => {}} title={title} tag="프로젝트 방" subline="AC4 project · 3명" peopleLabel="참여자 보기" peopleCount={3} chips={[chip('m1', '지우(나)'), chip('a1', '개발 에이전트', 'online'), chip('a2', '검수 에이전트', 'idle')]} addLabel="참여자 추가" onAdd={() => {}} />}
-                  actions={<IconButton icon="more_horiz" label="방 더보기" data-testid="room-head-menu" />}
+                  actions={<button type="button" aria-label="방 더보기" data-testid="room-head-menu" className={${JSON.stringify(TRIGGER_CLASS)}}><Icon name="more_horiz" size={16} /></button>}
                 />
                 <div id="col" className="flex min-h-0 flex-1 flex-col overflow-hidden">
                   {/* the page draws this in the room column as well — below lg it must be display:none (the bar in the shell row replaces it) */}

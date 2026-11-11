@@ -23,7 +23,7 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
 
 // story 4887 — the page asks «is this a phone (below lg)?»; each test says so (default: a desktop)
 const belowLg = vi.hoisted(() => ({ current: false }));
-vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => belowLg.current }));
+vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => belowLg.current, useIsBelowLg: () => belowLg.current }));
 
 vi.mock('next/navigation', () => ({
   useParams: () => ({ conversation_id: 'conv-1' }),
@@ -283,6 +283,18 @@ describe('ConversationPage — 헤더 아바타(story #2968)', () => {
     const popup = document.querySelector('[data-testid="room-bar-people-popup"]') as HTMLElement;
     expect(popup.querySelectorAll('[data-testid="room-head-chip"]')).toHaveLength(2);
     expect(popup.querySelector('[data-testid="room-head-add"]')).not.toBeNull();
+    // the «+» closes the popover and opens the add dialog — never both layers at once (two Escape presses)
+    await act(async () => { (popup.querySelector('[data-testid="room-head-add"]') as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    expect(document.querySelector('[data-testid="room-bar-people-popup"]'), 'the people popover is closed once the add dialog is asked for').toBeNull(); // reverted (the «+» only calls onAdd) → the popover stays open behind the dialog
+  });
+
+  it('the room menu\'s trigger is a 44 px press on touch (it rides in the phone\'s shell row now: it was a 28 px raw trigger)', async () => {
+    belowLg.current = true;
+    groupRoom();
+    await mount();
+    const trigger = container.querySelector('[data-testid="room-head-menu"]') as HTMLElement;
+    expect(trigger.className).toContain('touch:min-h-11');
+    expect(trigger.className).toContain('touch:min-w-11');
   });
 });
 
