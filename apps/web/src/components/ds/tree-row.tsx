@@ -60,7 +60,7 @@ export function TreeRow({ depth, title, icon, emoji, statusMark, selected = fals
   return (
     <div {...rest} data-slot="ds-tree-row" data-depth={depth} className={cn('group relative', className)}>
       {dragHandle ? (
-        <div data-slot="ds-tree-handle" className="pointer-events-none absolute inset-y-0 left-0 z-10 flex items-center opacity-0 pointer-fine:group-hover:opacity-100 pointer-coarse:hidden">
+        <div data-slot="ds-tree-handle" className="pointer-events-none absolute inset-y-0 left-0 z-10 flex items-center opacity-0 pointer-fine:group-hover:opacity-100 touch:hidden">
           <span aria-hidden="true" className={cn('shrink-0', HANDLE_GAP[lv])} />
           <span className="pointer-events-auto">{dragHandle}</span>
         </div>
@@ -72,9 +72,9 @@ export function TreeRow({ depth, title, icon, emoji, statusMark, selected = fals
         aria-current={selected ? 'page' : undefined}
         aria-expanded={isFolder ? expanded : undefined}
         data-drop-zone={dropZone}
-        // ds Button(조용 변형)이 폰 누름 영역 44(pointer-coarse:min-h-11)와 초점 링을 이미 쥔다 — 줄 모양만 덮는다(오른쪽 여백: 마우스 40 = right-2 + 24 «⋮», 폰 56 = right-2 + 44 누름 영역 + 숨): 높이는 내용을 따르되 36 이상, 가득 폭, 왼쪽 정렬, 글 굵기는 제목에만.
+        // ds Button(조용 변형)이 폰 누름 영역 44(touch:min-h-11)와 초점 링을 이미 쥔다 — 줄 모양만 덮는다(오른쪽 여백: 마우스 40 = right-2 + 24 «⋮», 폰 56 = right-2 + 44 누름 영역 + 숨): 높이는 내용을 따르되 36 이상, 가득 폭, 왼쪽 정렬, 글 굵기는 제목에만.
         className={cn(
-          'h-auto min-h-9 w-full justify-start gap-2 whitespace-normal py-1 pr-10 pointer-coarse:pr-14 text-left text-ds-body font-normal focus-visible:ring-inset focus-visible:ring-offset-0',
+          'h-auto min-h-9 w-full justify-start gap-2 whitespace-normal py-1 pr-10 touch:pr-14 text-left text-ds-body font-normal focus-visible:ring-inset focus-visible:ring-offset-0',
           PAD[lv],
           selected ? 'border-transparent bg-ds-action-soft text-ds-action-text hover:bg-ds-action-soft hover:text-ds-action-text' : 'text-ds-ink',
           dropZone === 'into' && 'bg-ds-action-soft ring-1 ring-inset ring-ds-action',

@@ -46,7 +46,7 @@ describe('ds Button', () => {
     await act(async () => { root.render(<Button>확인</Button>); });
     expect(btn().className).toContain('focus-visible:ring-2');
     expect(btn().className).toContain('focus-visible:ring-ds-action');
-    expect(btn().className).toContain('pointer-coarse:min-h-11');
+    expect(btn().className).toContain('touch:min-h-11');
   });
 
   it('비활성은 disabled + 점선 윤곽 + 글 ink-3(색만으로 비활성을 말하지 않는다)', async () => {

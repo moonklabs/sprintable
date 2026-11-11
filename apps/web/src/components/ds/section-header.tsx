@@ -40,7 +40,7 @@ export function SectionHeader({ title, count, trailing, tone = 'default', collap
   return (
     // 가로 여백(px-3)은 줄이 아니라 «조각마다» 준다 — 접는 머리글은 접기 단추가 줄의 남는 폭 전체를 채워 줄 어디를 눌러도 접힌다(글 폭만 눌리면 옛 머리글보다 누름 영역이 줄어드는 퇴행).
     // 단추 안쪽 가로 여백은 Button 크기(md)의 px-3가 이미 준다. 오른쪽 보조(trailing)는 단추 «밖»이라 따로 눌린다.
-    <div data-slot="ds-section-header" data-tone={tone} className={cn('flex min-h-8 items-stretch border-b border-ds-line bg-ds-surface-sunk pointer-coarse:min-h-11', className)}>
+    <div data-slot="ds-section-header" data-tone={tone} className={cn('flex min-h-8 items-stretch border-b border-ds-line bg-ds-surface-sunk touch:min-h-11', className)}>
       <Heading className="m-0 flex min-w-0 flex-1 items-stretch">
         {collapsible ? (
           <Button

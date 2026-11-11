@@ -33,8 +33,8 @@ describe('ds TreeRow', () => {
     expect(ctl().querySelector('[data-testid="st"]')).not.toBeNull();
     expect(ctl().textContent).toBe('문서');
     expect(has(ctl(), 'min-h-9')).toBe(true);
-    // 폰 누름 영역 44는 ds Button이 쥔 값(pointer-coarse:min-h-11)을 그대로 — 줄 모양이 지우지 않는다.
-    expect(has(ctl(), 'pointer-coarse:min-h-11')).toBe(true);
+    // 폰 누름 영역 44는 ds Button이 쥔 값(touch:min-h-11)을 그대로 — 줄 모양이 지우지 않는다.
+    expect(has(ctl(), 'touch:min-h-11')).toBe(true);
     expect(has(ctl(), 'min-h-0')).toBe(false);
     expect(has(ctl(), 'w-full')).toBe(true);
   });
@@ -112,9 +112,9 @@ describe('ds TreeRow', () => {
   });
 
   it('⭐폰: 줄 단추 오른쪽 여백이 44 누름 영역 «⋮»를 비켜 간다(pr-14 = 56 ≥ right-2 8 + 44) — 마우스는 pr-10', async () => {
-    await render(<TreeRow depth={0} title="아주 긴 문서 이름" trailing={<button type="button" aria-label="더보기" className="pointer-coarse:size-11">⋮</button>} />);
+    await render(<TreeRow depth={0} title="아주 긴 문서 이름" trailing={<button type="button" aria-label="더보기" className="touch:size-11">⋮</button>} />);
     expect(has(ctl(), 'pr-10')).toBe(true);
-    expect(has(ctl(), 'pointer-coarse:pr-14')).toBe(true);
+    expect(has(ctl(), 'touch:pr-14')).toBe(true);
   });
 
   it('⭐오른쪽 행동은 줄 오른쪽 끝에 얹히고(줄 단추는 그만큼 pr-10) 공용 HOVER_REVEAL — 호버 없는 기기에서는 늘 보이고 마우스에서만 호버 · 초점 때 드러난다', async () => {
@@ -136,7 +136,7 @@ describe('ds TreeRow', () => {
     const h = row().querySelector('[data-slot="ds-tree-handle"]') as HTMLElement;
     expect(h.querySelector('[data-testid="grip"]')).not.toBeNull();
     expect(has(h, 'pointer-events-none')).toBe(true);
-    expect(has(h, 'pointer-coarse:hidden')).toBe(true);
+    expect(has(h, 'touch:hidden')).toBe(true);
     expect(has(h, 'opacity-0')).toBe(true);
     expect(has(h, 'pointer-fine:group-hover:opacity-100')).toBe(true);
     expect((h.firstElementChild as HTMLElement).className).toContain('w-8');

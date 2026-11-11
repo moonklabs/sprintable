@@ -53,7 +53,7 @@ export function MenuItem({ className, children, icon, shortcut, variant = 'defau
       data-slot="ds-menu-item"
       data-variant={variant}
       className={cn(
-        'relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-ds-control px-2 text-ds-body outline-none pointer-coarse:min-h-11',
+        'relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-ds-control px-2 text-ds-body outline-none touch:min-h-11',
         'data-highlighted:bg-ds-surface-high focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ds-action',
         'data-disabled:pointer-events-none data-disabled:text-ds-ink-3',
         variant === 'danger' ? 'text-ds-failed' : 'text-ds-ink',
