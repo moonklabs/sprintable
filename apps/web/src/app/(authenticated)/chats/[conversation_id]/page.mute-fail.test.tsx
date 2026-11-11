@@ -113,9 +113,15 @@ async function openHeadMenuItem(testId: string): Promise<HTMLElement> {
   expect(trigger, 'the room head «⋯» menu').not.toBeNull();
   await act(async () => { trigger!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); trigger!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-  const item = document.querySelector(`[data-testid="${testId}"]`) as HTMLElement | null;
-  expect(item, `the «⋯» menu item ${testId}`).not.toBeNull();
-  return item!;
+  // Wait for STATE, not for a fixed number of ticks: the popup mounts after the click, and opens in a first frame (`data-starting-style`) in which a pressed item is dropped by the library.
+  // (Two flushes and one lookup passed on a quiet machine and failed 3 runs of 5 under load: «the ⋯ menu item room-head-mute: expected null not to be null» — the same race page.4887-head-menu.test.tsx's openMenu() already waits out.)
+  await vi.waitFor(() => {
+    const popup = document.querySelector('[role=menu]');
+    expect(popup, 'the menu popup is there').not.toBeNull();
+    expect(popup!.hasAttribute('data-starting-style'), 'the popup has left its opening frame').toBe(false);
+    expect(document.querySelector(`[data-testid="${testId}"]`), `the «⋯» menu item ${testId}`).not.toBeNull();
+  });
+  return document.querySelector(`[data-testid="${testId}"]`) as HTMLElement;
 }
 
 describe('ConversationPage — 뮤트 토글 실패 시 문장(story #3638)', () => {
