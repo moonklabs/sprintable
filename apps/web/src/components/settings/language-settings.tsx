@@ -20,7 +20,7 @@ export function LanguageSettings() {
     <SettingsSection title={t('languageSettingsTitle')}>
       <Field label={t('languageSelectLabel')}>
         {(control) => (
-          <NativeSelect {...control} className="pointer-coarse:[&_select]:h-11" value={current} onChange={(e) => { if (e.target.value !== current) applyLocale(e.target.value); }}>
+          <NativeSelect {...control} value={current} onChange={(e) => { if (e.target.value !== current) applyLocale(e.target.value); }}>
             <option value="ko">{t('languageOptionKo')}</option>
             <option value="en">{t('languageOptionEn')}</option>
           </NativeSelect>

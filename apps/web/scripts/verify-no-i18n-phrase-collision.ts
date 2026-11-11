@@ -703,10 +703,8 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 라벨/탭 제목/버튼 동사고, 헷갈리는 건 «두 개의 서로 다른 수»가 아니라 그 라벨을
   // 포함하는 긴 안내 문장 하나뿐이다(docs.title<->docs.indexDocCount류 정상 패턴).
   // (story 4891: `settings.orgDeleteImpactProjects <-> settings.tabProjects` removed for the same reason — see above.)
-  // orgPlanLabel="플랜"(조직 탭 필드 라벨) <-> onboarding.projectLimitExceededError
-  // ("무료 플랜은 프로젝트를 {limit}개까지...", 온보딩 플랜-한도 토스트) — 두 화면이
-  // 동시에 뜨는 자리가 아니고, "플랜"이라는 공통 명사 하나만 겹친다.
-  'onboarding.projectLimitExceededError <-> settings.orgPlanLabel',
+  // (story 4891 ⑤a: `onboarding.projectLimitExceededError <-> settings.orgPlanLabel` removed — the organization card moved out of settings/page.tsx
+  // into organization-section.tsx, where the page's limit toast is not read any more, so the pair no longer collides (the guard names a dead exemption).)
   // deleteProject="삭제"(프로젝트 관리 섹션의 다른 행 버튼) <-> orgDeleteImpactProjects
   // ("프로젝트 {count}개 영구 삭제", 조직 삭제 영향도 문장 안의 "영구 삭제") — 서로
   // 다른 대상(프로젝트 행 삭제 버튼 vs 조직 전체 삭제 영향도 서술)이 우연히 "삭제"

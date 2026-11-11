@@ -29,7 +29,7 @@ export function ThemeSettings() {
     <SettingsSection title={t('themeSettingsTitle')} description={t('themeFollowSystemDesc')}>
       <Field label={t('themeSelectLabel')}>
         {(control) => (
-          <NativeSelect {...control} className="pointer-coarse:[&_select]:h-11" value={theme || 'system'} onChange={(e) => setTheme(e.target.value as 'light' | 'dark' | 'system')}>
+          <NativeSelect {...control} value={theme || 'system'} onChange={(e) => setTheme(e.target.value as 'light' | 'dark' | 'system')}>
             <option value="light">{t('themeLight')}</option>
             <option value="dark">{t('themeDark')}</option>
             <option value="system">{t('themeSystem')}</option>

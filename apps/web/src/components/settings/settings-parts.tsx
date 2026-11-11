@@ -1,7 +1,7 @@
 'use client';
 
 // story 4891 (UI-8 · settings) — two small parts the settings cards share, on ds tokens, built for a phone: a 12 px status tag (the ds Chip is the 11 px mono kind) and a 44 px switch (the ds Button's touch floor around the 24 px track).
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import { Button } from '@/components/ds/button';
 import { cn } from '@/lib/utils';
 
@@ -35,5 +35,17 @@ export function SwitchButton({ checked, onCheckedChange, disabled, className, ..
         <span className={cn('absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-[left]', checked ? 'left-[22px]' : 'left-0.5')} />
       </span>
     </Button>
+  );
+}
+
+/** a read-only value under a visible name (the slug · the plan · my role): the name is tied to the value with aria-labelledby; an optional hint line goes under it */
+export function ReadOnlyField({ label, children, hint, mono = false, className }: { label: ReactNode; children: ReactNode; hint?: ReactNode; mono?: boolean; className?: string }) {
+  const id = useId();
+  return (
+    <div className="flex flex-col gap-1">
+      <span id={id} className="text-ds-small font-semibold text-ds-ink">{label}</span>
+      <p aria-labelledby={id} className={cn('rounded-ds-control border border-ds-line bg-ds-surface-sunk px-3 py-2 text-ds-body text-ds-ink', mono && 'font-mono text-ds-ink-3', className)}>{children}</p>
+      {hint ? <p className="text-ds-small text-ds-ink-3">{hint}</p> : null}
+    </div>
   );
 }

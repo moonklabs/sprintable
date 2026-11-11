@@ -29,6 +29,7 @@ import { RefreshSettings } from '@/components/settings/refresh-settings';
 import { StandupDeadlineSection } from '@/components/settings/standup-deadline-section';
 import { GateLevelMatrix } from '@/components/settings/gate-level-matrix';
 import { OrgGatePolicySection } from '@/components/settings/org-gate-policy-section';
+import { OrganizationSection, OrgDangerSection } from '@/components/settings/organization-section';
 import { TwoFactorSection } from '@/components/settings/two-factor-section';
 import { OtherSessionsSection } from '@/components/settings/other-sessions-section';
 import { SetPasswordSection } from '@/components/settings/set-password-section';
@@ -55,6 +56,7 @@ import { SettingsNav } from './settings-nav-list';
 import { IconButton } from '@/components/ds/icon-button';
 import { Banner } from '@/components/ds/banner';
 import { Button as DsButton } from '@/components/ds/button';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { SupportSettingsTabPanel } from '@/components/settings/support-tab-panel';
 import { HumanOnlyAction } from '@/components/ui/human-only-action';
 import dynamic from 'next/dynamic';
@@ -877,117 +879,40 @@ export default function SettingsPage() {
             </TabsContent>
 
             <TabsContent value="organization">
-              <SectionCard>
-                <SectionCardHeader>
-                  <div className="space-y-1">
-                    <h2 className="text-base font-semibold text-foreground">{t('orgSectionTitle')}</h2>
-                    <p className="text-sm text-muted-foreground">{t('orgSectionDescription')}</p>
-                  </div>
-                </SectionCardHeader>
-                <SectionCardBody className="space-y-6">
-                  {orgInfo ? (
-                    <>
-                      <div className="space-y-4">
-                        <div className="space-y-1.5">
-                          {/* story #3776(1층B) — "이름", settings ns의 기존 profileName 키 재사용. */}
-                          <label className="text-sm font-medium text-foreground">{t('profileName')}</label>
-                          {(currentOrgRole === 'owner' || currentOrgRole === 'admin') ? (
-                            <div className="flex items-center gap-2">
-                              <input
-                                className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                                value={editOrgName}
-                                onChange={(e) => setEditOrgName(e.target.value)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveOrgName(); }}
-                              />
-                              <Button
-                                variant="hero"
-                                size="sm"
-                                disabled={!editOrgName.trim() || editOrgName === orgInfo.name || savingOrgName}
-                                onClick={() => void handleSaveOrgName()}
-                              >
-                                {/* story #3776(1층B) — "저장", common ns의 기존 save 키 재사용(유나 정정 — 폼 크롬은 common 소관). */}
-                                {savingOrgName ? tc('saving') : tc('save')}
-                              </Button>
-                            </div>
-                          ) : (
-                            <p className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-foreground">{orgInfo.name}</p>
-                          )}
-                          {orgNameError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-xs text-destructive">{orgNameError}</p>}
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="text-sm font-medium text-foreground">{t('orgSlugLabel')}</label>
-                          <p className="rounded-md border border-input bg-muted/30 px-3 py-2 font-mono text-sm text-muted-foreground">{orgInfo.slug}</p>
-                          <p className="text-xs text-muted-foreground">{t('orgSlugImmutable')}</p>
-                        </div>
-
-                        {orgInfo.plan && (
-                          <div className="space-y-1.5">
-                            <label className="text-sm font-medium text-foreground">{t('orgPlanLabel')}</label>
-                            <p className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-foreground capitalize">{orgInfo.plan}</p>
-                          </div>
-                        )}
-
-                        {currentOrgRole && (
-                          <div className="space-y-1.5">
-                            <label className="text-sm font-medium text-foreground">{t('orgMyRoleLabel')}</label>
-                            <p className="rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-foreground capitalize">{currentOrgRole}</p>
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="space-y-3">
-                      {[1, 2, 3].map((i) => (
-                        <div key={i} className="h-10 animate-pulse rounded-md bg-muted" />
-                      ))}
-                    </div>
-                  )}
-                </SectionCardBody>
-              </SectionCard>
-              {/* S-GATE-4: 조직 게이트 정책(기본값) surface. #1571 clean org-PUT(/organizations/{id})로
-                  org-scoped 설정 — 대표 project 경유 워크어라운드·project-0 엣지 제거. canEdit=org admin/owner. */}
-              {orgInfo ? (
-                <div className="mt-6">
+              <div className="space-y-6">
+                <OrganizationSection
+                  orgInfo={orgInfo}
+                  role={currentOrgRole}
+                  name={editOrgName}
+                  onNameChange={setEditOrgName}
+                  onSave={() => void handleSaveOrgName()}
+                  saving={savingOrgName}
+                  nameError={orgNameError}
+                />
+                {/* S-GATE-4: 조직 게이트 정책(기본값) surface. #1571 clean org-PUT(/organizations/{id})로
+                    org-scoped 설정 — 대표 project 경유 워크어라운드·project-0 엣지 제거. canEdit=org admin/owner. */}
+                {orgInfo ? (
                   <GateLevelMatrix
                     surface="org"
                     orgId={orgInfo.id}
                     canEdit={currentOrgRole === 'owner' || currentOrgRole === 'admin'}
                   />
-                </div>
-              ) : null}
-              {/* story e0c1b24c — org 게이트 정책(posture·머지 게이트 기본 승인자). #3319/PR#3716로
-                  백엔드(GET/PUT /api/v2/gate-config/policy)는 착지했으나 값 넣을 화면이 없었다 —
-                  GateLevelMatrix(work_type×actor_type 매트릭스, 별개 개념)와 나란히 둔다. */}
-              {orgInfo ? (
-                <div className="mt-6">
-                  <OrgGatePolicySection canEdit={currentOrgRole === 'owner' || currentOrgRole === 'admin'} />
-                </div>
-              ) : null}
-              {currentOrgRole === 'owner' && (
-                <SectionCard className="border-destructive/20 bg-destructive-tint mt-6">
-                  <SectionCardHeader className="border-b border-destructive/20">
-                    <div className="space-y-1">
-                      <h2 className="text-base font-semibold text-destructive">{t('dangerZone')}</h2>
-                      <p className="text-sm text-foreground">{t('orgDeleteWarning')}</p>
-                    </div>
-                  </SectionCardHeader>
-                  <SectionCardBody>
-                    <Button variant="destructive" onClick={() => void handleOpenDeleteOrg()}>
-                      {t('orgDeleteTitle')}
-                    </Button>
-                  </SectionCardBody>
-                </SectionCard>
-              )}
+                ) : null}
+                {/* story e0c1b24c — org 게이트 정책(posture·머지 게이트 기본 승인자). #3319/PR#3716로
+                    백엔드(GET/PUT /api/v2/gate-config/policy)는 착지했으나 값 넣을 화면이 없었다 —
+                    GateLevelMatrix(work_type×actor_type 매트릭스, 별개 개념)와 나란히 둔다. */}
+                {orgInfo ? <OrgGatePolicySection canEdit={currentOrgRole === 'owner' || currentOrgRole === 'admin'} /> : null}
+                {currentOrgRole === 'owner' && <OrgDangerSection onOpenDelete={() => void handleOpenDeleteOrg()} />}
+              </div>
             </TabsContent>
 
             <TabsContent value="org-members">
               {orgId && orgInfo ? (
                 <OrgMembersSection orgId={orgId} currentRole={currentOrgRole} />
               ) : (
-                <div className="space-y-3">
-                  {[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />)}
-                </div>
+                <SkeletonGroup label={tc('loading')} className="space-y-3">
+                  {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12" />)}
+                </SkeletonGroup>
               )}
             </TabsContent>
 
