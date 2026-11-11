@@ -56,6 +56,8 @@ interface ChatBubbleProps {
   /** [SID:4311 PR 3] 목록이 actorRowLabels로 지은 발신자 라벨(같은 이름 둘이면 «· ID 앞 8자») — 머리글자 · 아바타는 원래 이름. */
   senderLabel?: string;
   onOpenThread?: (message: ChatMessage) => void;
+  /** the context menu's «답글 달기» where there is no reply button to draw — a message INSIDE a thread (its replies are flat: «reply» means «write in this thread»). Never draws a button. */
+  onMenuReply?: (message: ChatMessage) => void;
   onDelete?: (messageId: string) => void;
   /** story #2349 — 생략하면(undefined) 컨텍스트 메뉴에 「사용자 차단」 항목 자체가 안 뜬다
    * (자기 메시지엔 호출부가 안 넘긴다). 실제 차단 확認/API 호출은 호출부(ChatView) 몫 —
@@ -482,7 +484,7 @@ export function visibleMessageText(root: HTMLElement | null, fallback: string): 
 }
 
 export function ChatBubble({
-  message, isMine, plainRow = false, isGrouped = false, senderLabel, onOpenThread, onDelete, onBlockUser, presenceStatus, isWorking = false,
+  message, isMine, plainRow = false, isGrouped = false, senderLabel, onOpenThread, onMenuReply, onDelete, onBlockUser, presenceStatus, isWorking = false,
   highlight = false, projectId, isCiteAnchor = false, isCiteInRange = false, citeAction, entityStatusByKey,
   hitlAnswer = null, onRespondHitl, eventDefinitionsByKey, onOpenReadingPanel, onFillComposer, gateByKey,
 }: ChatBubbleProps) {
@@ -671,8 +673,8 @@ export function ChatBubble({
   }, [message.id, onDelete]);
 
   const handleOpenThread = useCallback(() => {
-    onOpenThread?.(message);
-  }, [message, onOpenThread]);
+    (onOpenThread ?? onMenuReply)?.(message);
+  }, [message, onOpenThread, onMenuReply]);
 
 
   return (

@@ -30,6 +30,9 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: () => {} }),
 }));
 
+// story 4887 — the panel reports a failed delete through the shell's toast (the real provider lives in the dashboard shell)
+vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast: () => {} }) }));
+
 // story #4430 — the reply send is driven through ChatInput's onSend (the real input's typing isn't what these tests watch).
 vi.mock('./chat-input', () => ({
   ChatInput: ({ onSend }: { onSend: (content: string) => Promise<void> | void }) => (

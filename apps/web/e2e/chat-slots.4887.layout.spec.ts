@@ -110,10 +110,11 @@ async function build() {
         import React from 'react'; import { createRoot } from 'react-dom/client'; import { NextIntlClientProvider } from 'next-intl';
         import ko from './messages/ko.json';
         import { ThreadPanel } from './src/components/chat/thread-panel';
+        import { ToastProvider } from './src/components/ui/toast';
         window.__mount = (w) => {
-          createRoot(document.getElementById('root')).render(React.createElement(NextIntlClientProvider, { locale: 'ko', messages: ko, timeZone: 'Asia/Seoul' },
+          createRoot(document.getElementById('root')).render(React.createElement(NextIntlClientProvider, { locale: 'ko', messages: ko, timeZone: 'Asia/Seoul' }, React.createElement(ToastProvider, null,
             React.createElement('div', { id: 'slot', className: 'flex flex-col overflow-hidden', style: { width: w + 'px', height: '640px' } },
-              React.createElement(ThreadPanel, { parentMessage: ${JSON.stringify(PARENT)}, conversationId: 'c1', currentTeamMemberId: 'me-1', projectId: 'p1', onClose() {} }))));
+              React.createElement(ThreadPanel, { parentMessage: ${JSON.stringify(PARENT)}, conversationId: 'c1', currentTeamMemberId: 'me-1', projectId: 'p1', onClose() {} })))));
         };`,
       resolveDir: WEB, loader: 'tsx',
     },
