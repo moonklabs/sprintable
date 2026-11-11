@@ -9,7 +9,8 @@
  *  2. What counts as «my hand is needed»: the approvals/answers the today snapshot already lists (`needsMe`) + the UNREAD notifications whose `type` says a person must act
  *     (mention · assignment · permission request · stopped · limit paused). `gate.pending_approval` is NEVER counted on top — it is the same thing as the approval row
  *     (counting both would break rule 1). `conversation.message` belongs to the chat badge; status changes · system dispatches · «limit lifted» are information, not a task.
- *  3. Longest wait first (`since` ascending, ties by key) — the order of the existing `needs_me` list; the first 5 are shown and «N more» says how many are folded.
+ *  3. Two groups, then longest wait first inside each (`since` ascending, ties by key): what an agent waits for a person to press (approval · signature · answer) goes BEFORE the notifications that went by
+ *     (mention · assignment · permission request · stopped · limit paused) — a blocked agent is freed first (PO 11-11). The first 5 are shown and «N more» says how many are folded.
  *  4. «일하는 중» = the agent runs of the snapshot + the in-progress stories assigned to me or to an agent (the old screen showed 0 of 14 stories — AC1 problem 5).
  *  5. «방금 끝남» = what finished today, most recent first.
  *  6. After an action the next row is selected (3 taps → 1): `selectAfterHandled`.
