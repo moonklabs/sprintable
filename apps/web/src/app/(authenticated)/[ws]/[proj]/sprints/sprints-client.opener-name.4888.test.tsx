@@ -58,8 +58,8 @@ describe('스프린트 화면 — 상단 «새 스프린트» 열기 단추(stor
   it('⭐폰(coarse)에서 누름 영역 44 이상 — min-h-11 · min-w-11 클래스를 가진다', async () => {
     await mount();
     const cls = opener()!.className.split(/\s+/);
-    expect(cls).toContain('pointer-coarse:min-h-11');
-    expect(cls).toContain('pointer-coarse:min-w-11');
+    expect(cls).toContain('touch:min-h-11');
+    expect(cls).toContain('touch:min-w-11');
   });
 
   it('누르면 만들기 폼이 열린다(동작은 그대로)', async () => {

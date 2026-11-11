@@ -43,8 +43,8 @@ afterEach(async () => {
 });
 
 const settle = async () => { await act(async () => { await new Promise((r) => setTimeout(r, 50)); }); };
-const titleInput = () => document.body.querySelector<HTMLInputElement>(`input[data-slot="input"][placeholder="${sp.sprintTitlePlaceholder}"]`);
-const goalInput = () => document.body.querySelector<HTMLInputElement>(`input[data-slot="input"][placeholder="${sp.goalPlaceholder}"]`);
+const titleInput = () => document.body.querySelector<HTMLInputElement>(`input[data-slot="ds-input"][placeholder="${sp.sprintTitlePlaceholder}"]`);
+const goalInput = () => document.body.querySelector<HTMLInputElement>(`input[data-slot="ds-input"][placeholder="${sp.goalPlaceholder}"]`);
 const button = (label: string) => Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.trim() === label);
 
 const ctl: { setShow?: (v: boolean) => void } = {};
@@ -107,7 +107,7 @@ describe('스프린트 만들기 창 폼 초안(story #4370)', () => {
 });
 
 describe('스프린트 만들기 창 — 용량 · 인원이 만들기 요청에 실린다(story 4831 바탕 부품)', () => {
-  const numberInputs = () => [...document.body.querySelectorAll<HTMLInputElement>('input[data-slot="input"][type=number]')];
+  const numberInputs = () => [...document.body.querySelectorAll<HTMLInputElement>('input[data-slot="ds-input"][type=number]')];
   it('쓴 용량 · 인원 · 목표가 요청 본문에 숫자로 실리고, 비워 두면 그 필드는 아예 빠진다', async () => {
     await mount();
     await open();

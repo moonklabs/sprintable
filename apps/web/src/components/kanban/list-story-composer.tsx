@@ -71,7 +71,7 @@ export function ListStoryComposer({ onCreate }: { onCreate: (title: string) => P
           }
         }}
         placeholder={t('addStoryPlaceholder')}
-        className="pointer-coarse:min-h-11"
+        className="touch:min-h-11"
       />
       <div className="mt-2 flex items-center gap-2">
         <Button type="button" variant="primary" loading={submitting} disabled={!draft.trim()} onClick={() => void submit()}>

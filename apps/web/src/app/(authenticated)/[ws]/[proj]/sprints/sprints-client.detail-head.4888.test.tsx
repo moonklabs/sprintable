@@ -102,7 +102,7 @@ describe('스프린트 상세 패널 머리 — ds 부품(story #4888)', () => {
     const link = rowOf('수치 있는 스프린트').querySelector('a') as HTMLAnchorElement;
     expect(link).not.toBeNull();
     const cls = link.className.split(/\s+/);
-    expect(cls).toContain('pointer-coarse:min-h-11');
-    expect(cls).toContain('pointer-coarse:inline-flex');
+    expect(cls).toContain('touch:min-h-11');
+    expect(cls).toContain('touch:inline-flex');
   });
 });

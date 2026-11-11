@@ -3,9 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Plus, X, Play, StopCircle, ChevronRight, Trash2, AlertTriangle, Target, Clock, Users, Ban } from 'lucide-react';
+import { Plus, Play, StopCircle, ChevronRight, Trash2, AlertTriangle, Target, Clock, Users, Ban } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Button as DsButton } from '@/components/ds/button';
 import { Card } from '@/components/ds/card';
 import { Chip } from '@/components/ds/chip';
@@ -13,7 +12,6 @@ import { IconButton } from '@/components/ds/icon-button';
 import { Metric } from '@/components/ds/metric';
 import { ListRow } from '@/components/ds/list-row';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Field } from '@/components/ds/field';
 import { Input as DsInput } from '@/components/ds/input';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -255,22 +253,24 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
       <DialogContent className="max-h-[90vh] max-w-lg" showCloseButton={false}>
         <div className="mb-4 flex items-center justify-between">
           <DialogTitle className="text-base font-bold text-foreground">{t('newSprint')}</DialogTitle>
-          <button type="button" onClick={onClose} aria-label={tc('close')} className="rounded-xl p-1.5 text-muted-foreground hover:bg-muted">
-            <X className="size-4" />
-          </button>
+          {/* story #4888 — 닫기: 손으로 만든 raw button → 이름 있는 ds IconButton(폰 44). */}
+          <IconButton icon="close" label={tc('close')} onClick={onClose} />
         </div>
         <div className="space-y-3">
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">{t('sprintTitle')}</label>
-            <Input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              required
-              placeholder={t('sprintTitlePlaceholder')}
-              className="h-auto bg-background dark:bg-background"
-            />
-          </div>
+          {/* story #4888 — 이름 · 목표 · 용량 · 인원: 이름이 칸에 이어지지 않던 label + 옛 Input → ds Field + ds Input(이름 연결 · 폰 44). 값 · 초안 · 전송 모양은 그대로. */}
+          <Field label={t('sprintTitle')}>
+            {(control) => (
+              <DsInput
+                {...control}
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                required
+                placeholder={t('sprintTitlePlaceholder')}
+                className="touch:h-11"
+              />
+            )}
+          </Field>
           {/* story #4888(UI-5 스프린트 화면, 유나 ds 부품) — 시작일 · 종료일: 예전엔 <label>이 칸과 이어지지 않아(htmlFor 없음) 날짜 칸에 접근 이름이 없었다. ds Field가 이름을 칸에 잇고,
               ds Input이 칸 모양을 쥔다(폰 높이 44는 pointer-coarse로). 값(`YYYY-MM-DD` 문자열) · 초안 · 전송 모양은 그대로. */}
           <div className="grid grid-cols-2 gap-3">
@@ -282,7 +282,7 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
                   required
-                  className="pointer-coarse:h-11"
+                  className="touch:h-11"
                 />
               )}
             </Field>
@@ -294,59 +294,61 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
                   required
-                  className="pointer-coarse:h-11"
+                  className="touch:h-11"
                 />
               )}
             </Field>
           </div>
           {/* 실행 계획(calm 라벨·Target lucide·장식 글리프 제거) */}
-          <div className="space-y-2 rounded-xl border border-border bg-muted/20 p-3">
-            <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><Target className="size-3.5" />{t('planSection')}</p>
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">{t('goalLabel')}</label>
-              <Input
-                type="text"
-                value={goal}
-                onChange={(e) => setGoal(e.target.value)}
-                placeholder={t('goalPlaceholder')}
-                className="h-auto bg-background dark:bg-background"
-              />
-            </div>
+          <Card className="space-y-2 p-3">
+            <p className="flex items-center gap-1.5 text-ds-small font-medium text-ds-ink-3"><Target className="size-3.5" />{t('planSection')}</p>
+            <Field label={t('goalLabel')}>
+              {(control) => (
+                <DsInput
+                  {...control}
+                  type="text"
+                  value={goal}
+                  onChange={(e) => setGoal(e.target.value)}
+                  placeholder={t('goalPlaceholder')}
+                  className="touch:h-11"
+                />
+              )}
+            </Field>
             <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
-                  <Clock className="size-3.5" />{t('capacityLabel')}
-                </label>
-                <div className="relative">
-                  <Input
-                    type="number"
-                    min="0"
-                    value={capacity}
-                    onChange={(e) => setCapacity(e.target.value)}
-                    placeholder="0"
-                    className="h-auto pr-8 tabular-nums bg-background dark:bg-background"
-                  />
-                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-micro text-muted-foreground">SP</span>
-                </div>
-              </div>
-              <div className="space-y-1">
-                <label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
-                  <Users className="size-3.5" />{t('teamSizeLabel')}
-                </label>
-                <div className="relative">
-                  <Input
-                    type="number"
-                    min="1"
-                    value={teamSize}
-                    onChange={(e) => setTeamSize(e.target.value)}
-                    placeholder="0"
-                    className="h-auto pr-6 tabular-nums bg-background dark:bg-background"
-                  />
-                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-micro text-muted-foreground">{t('personCountUnit')}</span>
-                </div>
-              </div>
+              <Field label={<span className="flex items-center gap-1"><Clock className="size-3.5" />{t('capacityLabel')}</span>}>
+                {(control) => (
+                  <div className="relative">
+                    <DsInput
+                      {...control}
+                      type="number"
+                      min="0"
+                      value={capacity}
+                      onChange={(e) => setCapacity(e.target.value)}
+                      placeholder="0"
+                      className="pr-8 tabular-nums touch:h-11"
+                    />
+                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ds-small text-ds-ink-3">SP</span>
+                  </div>
+                )}
+              </Field>
+              <Field label={<span className="flex items-center gap-1"><Users className="size-3.5" />{t('teamSizeLabel')}</span>}>
+                {(control) => (
+                  <div className="relative">
+                    <DsInput
+                      {...control}
+                      type="number"
+                      min="1"
+                      value={teamSize}
+                      onChange={(e) => setTeamSize(e.target.value)}
+                      placeholder="0"
+                      className="pr-6 tabular-nums touch:h-11"
+                    />
+                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ds-small text-ds-ink-3">{t('personCountUnit')}</span>
+                  </div>
+                )}
+              </Field>
             </div>
-          </div>
+          </Card>
 
           {/* E-SPRINT-LOOP FE(278314e9) — sprint-open 定: N-가설 선언(≥1 필수 — 단, 이 시점엔
               임시저장 자유·활성화 시에만 강제). 기존 단일 OutcomeIntentFields 대체(흡수, §7 KEEP). */}
@@ -364,20 +366,20 @@ export function CreateDialog({ projectId, onCreated, onClose }: CreateDialogProp
           <div className="flex items-center justify-between gap-2 pt-1">
             <span className="text-editorial-meta text-muted-foreground">
               {declaredCount > 0 ? (
-                <span className="flex items-center gap-1"><Badge variant="success" className="text-micro">{t('declareCount', { count: declaredCount })}</Badge></span>
+                <span className="flex items-center gap-1"><Chip tone="done">{t('declareCount', { count: declaredCount })}</Chip></span>
               ) : t('activateBlocked')}
             </span>
             <div className="flex gap-2">
-              <Button type="button" variant="ghost" size="sm" onClick={() => { clearFormDraft(); onClose(); }}>{t('cancel')}</Button>
+              <DsButton type="button" variant="quiet" onClick={() => { clearFormDraft(); onClose(); }}>{t('cancel')}</DsButton>
               {/* story #2755 — disabled를 submitting만으로 좁혀 «클릭이 항상 handleSubmit을 실행»
                   하게 한다(무설명 disabled 제거). 미충족 필드는 handleSubmit이 setError로 사유를
                   띄운다. 연타/중복 제출은 submitting 가드로 커버. */}
-              <Button type="button" variant="outline" size="sm" disabled={submitting} onClick={() => void handleSubmit(false)}>
+              <DsButton type="button" variant="secondary" disabled={submitting} onClick={() => void handleSubmit(false)}>
                 {t('saveDraft')}
-              </Button>
-              <Button type="button" size="sm" disabled={submitting} onClick={() => void handleSubmit(true)}>
+              </DsButton>
+              <DsButton type="button" variant="primary" disabled={submitting} onClick={() => void handleSubmit(true)}>
                 {submitting ? '...' : t('activate')}
-              </Button>
+              </DsButton>
             </div>
           </div>
         </div>
@@ -413,11 +415,10 @@ function DeleteConfirmDialog({ sprintTitle, deleting, error, onConfirm, onClose 
         <p className="mb-4 text-sm text-muted-foreground">{t('deleteConfirmBody')}</p>
         {error ? <p className="mb-3 text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={deleting}>{t('cancel')}</Button>
-          <Button type="button" variant="destructive" size="sm" onClick={onConfirm} disabled={deleting}>
-            <Trash2 className="size-4" />
+          <DsButton type="button" variant="quiet" onClick={onClose} disabled={deleting}>{t('cancel')}</DsButton>
+          <DsButton type="button" variant="danger" iconStart={<Trash2 className="size-4" />} onClick={onConfirm} disabled={deleting}>
             {deleting ? '...' : t('deleteConfirm')}
-          </Button>
+          </DsButton>
         </div>
       </DialogContent>
     </Dialog>
@@ -791,10 +792,9 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         title={<h1 className="text-sm font-medium">{t('title')}</h1>}
         actions={
           // story #4888 — 폰 폭에서는 글자(span)가 숨어 아이콘(+)만 남는다: aria-label이 이름을 주고, 폰 누름 영역은 44 이상.
-          <Button size="sm" aria-label={t('newSprint')} className="pointer-coarse:min-h-11 pointer-coarse:min-w-11" onClick={() => setShowCreate(true)}>
-            <Plus className="size-4" />
+          <DsButton variant="primary" aria-label={t('newSprint')} iconStart={<Plus className="size-4" />} onClick={() => setShowCreate(true)}>
             <span className="hidden sm:inline">{t('newSprint')}</span>
-          </Button>
+          </DsButton>
         }
         showContextChip
       />
@@ -824,10 +824,9 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
               <div className="flex flex-col items-center gap-4">
                 <SprintCycleBar startLabel={t('noSprintsBarStart')} endLabel={t('noSprintsBarEnd')} />
                 <div className="flex flex-col items-center gap-1.5">
-                  <Button size="sm" onClick={() => setShowCreate(true)}>
-                    <Plus className="size-3.5" />
+                  <DsButton variant="primary" iconStart={<Plus className="size-3.5" />} onClick={() => setShowCreate(true)}>
                     {t('noSprintsCta')}
-                  </Button>
+                  </DsButton>
                   <p className="text-xs text-muted-foreground">{t('noSprintsHint')}</p>
                 </div>
               </div>
@@ -851,7 +850,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
                         <a
                           href={flatHref(`/docs?id=${sprint.report_doc_id}`)}
                           onClick={(e) => e.stopPropagation()}
-                          className="text-xs font-medium text-primary hover:underline pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
+                          className="text-xs font-medium text-primary hover:underline touch:inline-flex touch:min-h-11 touch:items-center"
                         >
                           📄 {t('viewReport')}
                         </a>

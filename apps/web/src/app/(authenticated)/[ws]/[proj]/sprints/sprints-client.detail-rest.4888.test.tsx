@@ -51,7 +51,7 @@ beforeEach(() => {
     if (url.includes('/hypotheses')) return { ok: true, json: async () => ({ data: hypotheses }) };
     if (url.includes('/burndown')) return { ok: false, json: async () => null };
     if (url.includes('/api/stories/backlog')) return { ok: true, json: async () => ({ data: BACKLOG }) };
-    if (url.includes('/api/stories')) return { ok: true, json: async () => ({ data: url.includes('sprint_id=s2') ? [] : SPRINT_STORIES, meta: sprintStoriesMeta }) };
+    if (url.includes('/api/stories')) return { ok: true, json: async () => ({ data: url.includes('sprint_id=s2') ? [{ id: 'st-9', title: '닫힌 스프린트의 스토리', story_points: 3, sprint_id: 's2' }] : SPRINT_STORIES, meta: sprintStoriesMeta }) };
     return { ok: false, json: async () => null };
   }));
 });
@@ -94,7 +94,7 @@ describe('스프린트 상세 패널 남은 칸 — ds 부품(story #4888)', () 
     const add = btn(gate, S.declareAddCta)!;
     expect(add).toBeTruthy();
     expect(add.getAttribute('data-slot')).toBe('ds-button');
-    expect(cls(add)).toContain('pointer-coarse:min-h-11');
+    expect(cls(add)).toContain('touch:min-h-11');
   });
 
   it('가설이 이미 있으면 가설 게이트가 나오지 않는다(예전과 같은 조건)', async () => {
@@ -118,7 +118,7 @@ describe('스프린트 상세 패널 남은 칸 — ds 부품(story #4888)', () 
     const un = row.querySelector(`button[aria-label="${S.unassign}"]`) as HTMLButtonElement;
     expect(un).toBeTruthy();
     expect(un.getAttribute('data-slot')).toBe('ds-icon-button');
-    expect(cls(un)).toContain('pointer-coarse:min-h-11');
+    expect(cls(un)).toContain('touch:min-h-11');
     await act(async () => { un.click(); });
     await flush();
     expect(patches).toEqual([{ url: '/api/stories/st-1', body: { sprint_id: null } }]);
@@ -132,7 +132,7 @@ describe('스프린트 상세 패널 남은 칸 — ds 부품(story #4888)', () 
     expect(row).toBeTruthy();
     const assign = btn(row, S.assign)!;
     expect(assign.getAttribute('data-slot')).toBe('ds-button');
-    expect(cls(assign)).toContain('pointer-coarse:min-h-11');
+    expect(cls(assign)).toContain('touch:min-h-11');
     await act(async () => { assign.click(); });
     await flush();
     expect(patches).toEqual([{ url: '/api/stories/bk-1', body: { sprint_id: 's1' } }]);
@@ -141,9 +141,10 @@ describe('스프린트 상세 패널 남은 칸 — ds 부품(story #4888)', () 
 
   it('⭐닫힌 스프린트에는 백로그 배정도 연결 해제도 없다(예전과 같은 조건)', async () => {
     await open('끝난 스프린트');
+    // 줄은 있는데(스토리 1개) 연결 해제는 없다 — 단언이 비어 있지 않다
+    expect(rows(detail()).some((r) => (r.textContent ?? '').includes('닫힌 스프린트의 스토리'))).toBe(true);
     expect(detail().querySelector(`button[aria-label="${S.unassign}"]`)).toBeNull();
     expect(rows(detail()).some((r) => (r.textContent ?? '').includes('뉴스레터 첫 글'))).toBe(false);
-    expect(detail().textContent).toContain(S.noSprintStories);
   });
 
   it('⭐스프린트 스토리가 더 있으면 «더 보기»가 ds Button(폭 가득)이다', async () => {
