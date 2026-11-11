@@ -77,6 +77,16 @@ describe('팀 목록 행의 실시간 상태(story 4889 · W1)', () => {
     expect(container.textContent).toContain('일하는 에이전트');
   });
 
+  it('⭐끝난 세션(«끝» = stopped)은 세션이 없는 것과 같다 — 표시를 안 단다. 연결 끊김 · 오류 · 손 필요 · 일하는 중 · 쉼은 그대로 단다(PO 11-11)', async () => {
+    statesRef.current = [row('a-work', { state: 'stopped', activity: null }), row('a-hand', { state: 'unknown', activity: null })];
+    stubFetch();
+    await mount();
+    expect(mark('a-work')).toBeNull(); // ended: no mark (the row itself stays)
+    expect(container.textContent).toContain('일하는 에이전트');
+    expect(mark('a-hand')?.getAttribute('data-status')).toBe('offline'); // «연결 끊김 · 상태 모름» still shown
+    expect(mark('a-hand')?.textContent).toBe(koMessages.chats.agentSession.state.unknown);
+  });
+
   it('⭐세션 줄이 state=null이면(컴퓨터에 묶였지만 아직 안 돎) 표시를 만들어 내지 않는다', async () => {
     statesRef.current = [row('a-work', { state: null, activity: null, bound_setup_id: 'b1', bound_device_name: 'Mac' })];
     stubFetch();

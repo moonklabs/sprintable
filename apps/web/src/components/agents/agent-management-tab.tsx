@@ -434,6 +434,8 @@ function AgentStateMark({ row }: { row: AgentStateRow | null }) {
   const tState = useTranslations('chats.agentSession');
   if (!row || row.state === null) return null;
   const word = shownState(row);
+  // story 4889 (PO 11-11): a FINISHED session («끝») reads the same as no session in this list — it is the place to find who is running or needs a hand, and ~60 hollow dots only made noise. (The Today list keeps its «끝» line — that screen's own call.)
+  if (word === 'stopped') return null;
   const limitRests = limitHeld(word, row.limit) || limitLooksAgain(word, row.limit) || (word === 'waiting_input' && !!row.limit?.self_resume);
   const mark = stateMark(word, { ask: !!row.first_screen?.ask, limitRests });
   return <StatusLabel status={mark} label={sessionStateLabel(row, tState)} data-testid="agent-state-mark" data-agent-id={row.agent_id} className="shrink-0 text-ds-small" />;
