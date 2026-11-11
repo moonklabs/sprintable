@@ -358,7 +358,7 @@ describe('옮기기 항목 = 디자인 Button(ghost) · 같은 메뉴 줄 모양
     for (const el of [...main, ...rows]) {
       const cls = el.className.split(/\s+/);
       expect(el.tagName).toBe('BUTTON');
-      expect(cls).toEqual(expect.arrayContaining(['justify-start', 'font-normal', 'h-auto', 'min-h-0', 'border-0', 'text-left']));
+      expect(cls).toEqual(expect.arrayContaining(['justify-start', 'font-normal', 'h-auto', 'min-h-8', 'border-0', 'text-left']));
       expect(cls).not.toContain('bg-primary');
       expect(cls).not.toContain('justify-center');
     }
@@ -374,25 +374,28 @@ describe('옮기기 항목 = 디자인 Button(ghost) · 같은 메뉴 줄 모양
       const plain = items.filter((el) => el.textContent !== KO.docTreeDelete);
       const del = items.find((el) => el.textContent === KO.docTreeDelete);
       for (const el of items) {
-        expect(el.getAttribute('data-slot'), el.textContent ?? '').toBe('button');
+        expect(el.getAttribute('data-slot'), el.textContent ?? '').toBe('ds-button');
         seen.add(el.textContent ?? '');
       }
       for (const el of plain) expect(tokens(el), el.textContent ?? '').toEqual(tokens(plain[0]!));
       if (del) {
-        const swap = (t: string[]) => t.filter((c) => c !== 'hover:bg-muted' && c !== 'dark:hover:bg-muted/50');
-        expect(swap(tokens(del))).toEqual([...swap(tokens(plain[0]!)), 'hover:bg-destructive-tint', 'dark:hover:bg-destructive-tint'].sort());
-        expect(tokens(del)).not.toContain('hover:bg-muted');
+        // 삭제만 위험 색(글 · 호버 면)을 더 입는다 — 나머지 묶음은 같다. 글 크기(text-ds-body)는 색 덮어쓰기에 지워지지 않는다.
+        const extra = ['text-ds-failed', 'hover:bg-ds-failed-soft', 'hover:text-ds-failed'];
+        // (그 색 덮어쓰기가 조용 변형의 글 · 호버 색 셋을 대신한다 — 나머지는 같은 묶음)
+        const replaced = ['text-ds-ink-2', 'hover:bg-ds-surface-high', 'hover:text-ds-ink'];
+        expect(tokens(del).filter((c) => !extra.includes(c))).toEqual(tokens(plain[0]!).filter((c) => !replaced.includes(c)));
+        expect(tokens(del)).toEqual(expect.arrayContaining([...extra, 'text-ds-body']));
       }
       return tokens(plain[0]!);
     };
     const items = () => Array.from(menu()!.querySelectorAll<HTMLElement>('[role="menuitem"]'));
     open('f'); // 폴더 — 이름 변경 · 위로 · 아래로 · 폴더로 · 하위 문서 추가 · 하위 폴더 추가 · 삭제
     const base = check(items());
-    // Button 기본 transition-all이면 열리는 순간 물려받은 visibility도 전이라 첫 항목 focus()가 헛돈다(실 브라우저 판 · jsdom은 못 봄) → 색만 전이.
-    expect(base).toContain('transition-colors');
+    // transition-all이면 열리는 순간 물려받은 visibility도 전이라 첫 항목 focus()가 헛돈다(실 브라우저 판 · jsdom은 못 봄) — ds Button은 색 · 필터만 전이한다(transition-all 아님).
+    expect(base).toContain('transition-[filter,background-color]');
     expect(base).not.toContain('transition-all');
-    // 꺼진 항목은 다크에서도 호버 배경 없음(ghost의 dark:hover:bg-muted/50을 덮음).
-    expect(base).toEqual(expect.arrayContaining(['aria-disabled:hover:bg-transparent', 'dark:aria-disabled:hover:bg-transparent']));
+    // 꺼진 항목: 초점은 받고(aria-disabled) 눌러도 안 가는 모양은 ds Button의 aria-disabled 모양이 입힌다 + 눌림 금지 커서.
+    expect(base).toEqual(expect.arrayContaining(['aria-disabled:cursor-not-allowed', 'aria-disabled:pointer-events-none', 'aria-disabled:text-ds-ink-3']));
     click(moveItem('into'));
     expect(check(items())).toEqual(base); // 고르개 줄도 같은 정의
     expect([...seen]).toEqual(expect.arrayContaining([KO.docTreeRename, KO.docTreeMoveUp, KO.docTreeMoveDown, KO.docTreeMoveInto, KO.docTreeAddChild, KO.docTreeAddChildFolder, KO.docTreeDelete]));

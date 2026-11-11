@@ -142,7 +142,7 @@ describe('DocTree 끌어 떨굼 — 상자 = 행 · 표시 = 결과(story #4366)
     await move('a', 'F', y);
     expect(zones()).toEqual(['F:into']);
     expect(lines()).toHaveLength(0);
-    expect(container.querySelector('button[data-doc-id="F"]')!.className).toContain('ring-primary');
+    expect(container.querySelector('button[data-doc-id="F"]')!.className).toContain('ring-ds-action');
     await drop('a', 'F', y);
     expect(onMove).toHaveBeenCalledWith({ docId: 'a', parentId: 'F' });
     expect(zones()).toEqual([]);

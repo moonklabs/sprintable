@@ -9,7 +9,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
-import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING } from '@/lib/hover-reveal';
+import { HOVER_REVEAL } from '@/lib/hover-reveal';
 import { DocTree } from './doc-tree';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -47,38 +47,42 @@ function renderTree() {
   });
   const row = container.querySelector<HTMLButtonElement>('[data-doc-id="d1"]')!.parentElement!;
   const handle = row.querySelector<HTMLElement>('[data-drag-handle]')!;
-  const more = [...row.querySelectorAll<HTMLElement>(':scope > [role="button"]')].find((el) => !el.hasAttribute('data-drag-handle'))!;
-  return { row, handle, more };
+  // story 4892 — «⋮» = ds IconButton(진짜 button) in the TreeRow's trailing slot; the slot (not the button) carries the hover-reveal classes.
+  const trailing = row.querySelector<HTMLElement>('[data-slot="ds-tree-trailing"]')!;
+  const more = trailing.querySelector<HTMLElement>('button')!;
+  const handleSlot = row.querySelector<HTMLElement>('[data-slot="ds-tree-handle"]')!;
+  return { row, handle, more, trailing, handleSlot };
 }
 
 const tokens = (el: Element) => el.className.split(/\s+/);
 
 describe('DocTree 행 «⋮» · 끌기 손잡이([SID:4345])', () => {
-  it('«⋮» = HOVER_REVEAL(호버 없는 기기에선 늘 · 마우스는 행 호버 · 초점) + 초점 링 · 맨 opacity-0 없음 · 탭 순서 안', () => {
-    const { row, more } = renderTree();
+  it('«⋮» = ds IconButton(진짜 단추) · 보임 규칙은 TreeRow 자리가 쥔다: HOVER_REVEAL(호버 없는 기기에선 늘 · 마우스는 행 호버 · 초점) · 맨 opacity-0 없음 · 탭 순서 안', () => {
+    const { row, more, trailing } = renderTree();
     expect(tokens(row)).toContain('group');
-    for (const t of [...HOVER_REVEAL.split(' '), ...HOVER_REVEAL_FOCUS_RING.split(' ')]) expect(tokens(more), t).toContain(t);
-    expect(tokens(more)).not.toContain('opacity-0');
-    expect(tokens(more)).not.toContain('group-hover:opacity-100');
+    expect(more.tagName).toBe('BUTTON');
+    expect(more.getAttribute('data-slot')).toBe('ds-icon-button');
+    for (const t of HOVER_REVEAL.split(' ')) expect(tokens(trailing), t).toContain(t);
+    expect(tokens(trailing)).not.toContain('opacity-0');
+    expect(tokens(trailing)).not.toContain('group-hover:opacity-100');
     expect(more.tabIndex).toBe(0);
   });
 
-  it('상수가 비거나 바뀌어도 잡히게 — 글자로 핀(터치 늘 보임 · 마우스만 숨김 · 행 호버 · 행 안 초점 · 제 초점 · citron 링)', () => {
-    const { more } = renderTree();
-    expect(tokens(more)).toEqual(expect.arrayContaining([
+  it('상수가 비거나 바뀌어도 잡히게 — 글자로 핀(터치 늘 보임 · 마우스만 숨김 · 행 호버 · 행 안 초점 · 제 초점) · 초점 링은 ds IconButton의 action 링', () => {
+    const { more, trailing } = renderTree();
+    expect(tokens(trailing)).toEqual(expect.arrayContaining([
       'opacity-100', 'mouse:opacity-0', 'mouse:group-hover:opacity-100',
       'mouse:group-focus-within:opacity-100', 'mouse:focus-within:opacity-100',
-      'focus-visible:ring-3', 'focus-visible:ring-proof-citron',
-      // PO · 유나 10:01Z — 누르는 자리 24×24(아이콘 그대로)
-      'inline-flex', 'min-h-6', 'min-w-6', 'items-center', 'justify-center',
     ]));
+    expect(tokens(more)).toEqual(expect.arrayContaining(['focus-visible:ring-2', 'focus-visible:ring-ds-action', 'touch:min-h-11']));
   });
 
-  it('행 버튼 오른쪽 여백 pr-8 — «⋮» 누르는 자리(right-2 + 24px)와 행 글자가 안 겹침', () => {
+  it('행 버튼 오른쪽 여백 pr-10(폰 touch:pr-14) — «⋮» 자리(right-2 + 24px · 폰은 44 누름 영역)와 행 글자가 안 겹침', () => {
     const { row } = renderTree();
     const rowBtn = row.querySelector<HTMLElement>('[data-doc-id="d1"]')!;
-    expect(tokens(rowBtn)).toContain('pr-8');
-    expect(tokens(rowBtn)).not.toContain('pr-7');
+    expect(tokens(rowBtn)).toContain('pr-10');
+    expect(tokens(rowBtn)).toContain('touch:pr-14');
+    expect(tokens(rowBtn)).not.toContain('pr-8');
   });
 
   it('«⋮»에 Enter → 메뉴가 열린다(키보드로 닿는 조작 — 지금처럼)', () => {
@@ -92,18 +96,20 @@ describe('DocTree 행 «⋮» · 끌기 손잡이([SID:4345])', () => {
   });
 
   it('끌기 손잡이 = 마우스 전용: 탭 순서 밖(tabIndex -1) · 화면 읽기 밖(aria-hidden) · 호버로만 보임(터치엔 안 보임 — 눌러도 안 끌림)', () => {
-    const { handle } = renderTree();
+    const { handle, handleSlot } = renderTree();
     expect(handle.tabIndex).toBe(-1);
     expect(handle.getAttribute('aria-hidden')).toBe('true');
     expect(handle.getAttribute('data-drag-handle')).toBe('mouse-only');
     // 터치에서 늘 보이게 하지 않는다 — 센서가 터치를 받지 않아서(#1988).
-    expect(tokens(handle)).not.toContain('opacity-100');
-    expect(tokens(handle)).toContain('group-hover:opacity-100');
+    expect(tokens(handleSlot)).not.toContain('opacity-100');
+    expect(tokens(handleSlot)).toContain('opacity-0');
+    expect(tokens(handleSlot)).toContain('pointer-fine:group-hover:opacity-100');
+    expect(tokens(handleSlot)).toContain('pointer-coarse:hidden');
   });
 
   it('행 안 탭 순서 = 행 버튼 → «⋮»(손잡이는 건너뜀)', () => {
     const { row } = renderTree();
     const focusables = [...row.querySelectorAll<HTMLElement>('button, [tabindex]')].filter((el) => el.tabIndex >= 0 && !el.closest('.hidden'));
-    expect(focusables.map((el) => (el.hasAttribute('data-doc-id') ? 'row' : el.getAttribute('role') === 'button' ? 'more' : el.tagName))).toEqual(['row', 'more']);
+    expect(focusables.map((el) => (el.hasAttribute('data-doc-id') ? 'row' : el.getAttribute('data-slot') === 'ds-icon-button' ? 'more' : el.tagName))).toEqual(['row', 'more']);
   });
 });

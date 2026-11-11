@@ -129,7 +129,7 @@ export function isDescendant(docs: Doc[], ancestorId: string, nodeId: string): b
  * `transition-colors`(Button 기본 transition-all 대신): 팝오버는 붙는 순간 visibility:hidden → 자리 잡고 보임(AnchoredPopover)인데, transition-all이면
  * 물려받은 visibility도 전이라 열리는 그 순간 첫 항목이 아직 hidden → usePortalMenuKeys의 첫 항목 focus()가 헛돌아 초점이 «⋮»에 남았다(실 브라우저 · jsdom은 못 봄).
  */
-const DOC_MENU_ITEM = 'h-auto min-h-8 w-full justify-start gap-2 rounded-ds-control border-0 px-3 py-2 text-left text-ds-body font-normal whitespace-normal transition-colors aria-disabled:cursor-not-allowed';
+const DOC_MENU_ITEM = 'h-auto min-h-8 w-full justify-start gap-2 rounded-ds-control border-0 px-3 py-2 text-left text-ds-body font-normal whitespace-normal aria-disabled:cursor-not-allowed';
 const DOC_MENU_ITEM_DESTRUCTIVE = cn(DOC_MENU_ITEM, 'text-ds-failed hover:bg-ds-failed-soft hover:text-ds-failed');
 
 const DOC_MOVE_ANNOUNCE_KEY: Record<string, string> = {

@@ -12,7 +12,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
 import { DocTree } from './doc-tree';
-import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
+import { HOVER_REVEAL, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -178,10 +178,13 @@ describe('DocTree 행 메뉴 — 목록 밖(body)에 · 모자라면 위로 · �
   // 계산된 값(불투명도 · 링 · 24×24)은 jsdom이 못 재서 실브라우저 판으로 따로 쟀다(PR 댓글).
   it('«⋮»는 develop 보임 규칙 그대로 — 터치 쉴 때 보임 · 초점 때 보임 + 링 · 24 누르는 자리(맨 opacity-0 · group-hover만 0)', () => {
     mount();
-    const cls = trigger().className.split(/\s+/);
-    for (const token of `${HOVER_REVEAL} ${HOVER_REVEAL_FOCUS_RING} ${HOVER_REVEAL_HIT}`.split(' ')) expect(cls).toContain(token);
-    expect(cls).not.toContain('opacity-0');
-    expect(cls).not.toContain('group-hover:opacity-100');
+    // story 4892 — 보임 규칙(HOVER_REVEAL · 누르는 자리 HIT)은 TreeRow의 오른쪽 자리가 쥐고, 단추는 ds IconButton(초점 링 = action 2px · 폰 44).
+    const slot = trigger().closest('[data-slot="ds-tree-trailing"]')!;
+    const slotCls = slot.className.split(/\s+/);
+    for (const token of `${HOVER_REVEAL} ${HOVER_REVEAL_HIT}`.split(' ')) expect(slotCls).toContain(token);
+    expect(slotCls).not.toContain('opacity-0');
+    expect(slotCls).not.toContain('group-hover:opacity-100');
+    expect(trigger().className.split(/\s+/)).toEqual(expect.arrayContaining(['focus-visible:ring-2', 'focus-visible:ring-ds-action', 'touch:min-h-11']));
     expect(trigger().tabIndex).toBe(0);
   });
 });

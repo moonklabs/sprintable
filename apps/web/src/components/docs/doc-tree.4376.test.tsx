@@ -47,8 +47,8 @@ function render(docs: ReturnType<typeof doc>[]) {
 }
 
 describe('DocTree 뿌리 — 부모가 목록에 없는 문서도 보인다(story #4376)', () => {
-  // 깊이 = 행 왼쪽 여백(depth * 14 + 8px) — 뿌리 8px · 한 층 아래 22px.
-  const indent = (id: string) => (container.querySelector<HTMLElement>(`[data-doc-id="${id}"]`)?.style.paddingLeft ?? null);
+  // 깊이 = ds TreeRow의 data-depth(깊이당 16px 들여쓰기는 TreeRow 표) — 뿌리 0 · 한 층 아래 1.
+  const indent = (id: string) => container.querySelector<HTMLElement>(`[data-doc-id="${id}"]`)?.closest('[data-slot="ds-tree-row"]')?.getAttribute('data-depth') ?? null;
 
   it('부모가 목록에 없는 문서는 뿌리에(깊이 0) · 부모가 있는 문서는 그 밑(깊이 1)', () => {
     render([
@@ -56,8 +56,8 @@ describe('DocTree 뿌리 — 부모가 목록에 없는 문서도 보인다(stor
       doc('child', 'folder', '폴더 속 문서'),
       doc('orphan', 'gone-parent', '부모 지워진 문서'),
     ]);
-    expect(indent('orphan')).toBe('8px');  // 예전(뿌리 = !parent_id)엔 아예 안 그려져 null
-    expect(indent('folder')).toBe('8px');
-    expect(indent('child')).toBe('22px');
+    expect(indent('orphan')).toBe('0');  // 예전(뿌리 = !parent_id)엔 아예 안 그려져 null
+    expect(indent('folder')).toBe('0');
+    expect(indent('child')).toBe('1');
   });
 });

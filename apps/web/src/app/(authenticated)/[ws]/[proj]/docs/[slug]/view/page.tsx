@@ -166,7 +166,7 @@ export default function DocViewPage() {
           {/* story 4892 — share and the ⋯ menu are on the reading screen too (they used to exist only on the editing screen). Below lg «공유» is inside the menu. */}
           <IconButton icon="share" label={ts('share')} onClick={() => setShareDialogOpen(true)} className="hidden lg:inline-flex" data-testid="docs-reader-share" />
           <DropdownMenu>
-            <DropdownMenuTrigger aria-label={t('moreActions')} className="inline-flex size-7 items-center justify-center rounded-ds-control text-ds-ink-2 transition-colors hover:bg-ds-surface-high hover:text-ds-ink pointer-coarse:size-11">
+            <DropdownMenuTrigger aria-label={t('moreActions')} className="inline-flex size-7 items-center justify-center rounded-ds-control text-ds-ink-2 transition-colors hover:bg-ds-surface-high hover:text-ds-ink touch:size-11">
               <Icon name="more_horiz" size={16} />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
