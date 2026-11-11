@@ -159,6 +159,8 @@ describe('행 메뉴 · 창 — ds 부품 (4892)', () => {
     expect(input.getAttribute('data-slot')).toBe('ds-input');
     const save = dialog.querySelector<HTMLButtonElement>('[data-testid="doc-rename-save"]')!;
     expect(save.getAttribute('data-slot')).toBe('ds-button');
+    expect(save.className).toContain('bg-ds-action');                                                  // 저장 = 주 단추(primary) · 취소 = 보조
+    expect(dialog.querySelector<HTMLButtonElement>('button:not([data-testid="doc-rename-save"])[data-slot="ds-button"]')!.className).not.toContain('bg-ds-action');
     expect(save.disabled).toBe(true);                                                                 // 이름이 그대로면 잠김
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '새 이름'); input.dispatchEvent(new Event('input', { bubbles: true })); });
     expect(save.disabled).toBe(false);
