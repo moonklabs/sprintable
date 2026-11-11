@@ -314,8 +314,10 @@ describe('the relay behind the Host guard', () => {
 
 describe('the entrance file, started as the app starts it', () => {
   const dir = () => mkdtempSync(path.join(tmpdir(), 'entry4844-'));
+  // The stub says it is listening with a marker that cannot be part of a path: the bare word «up» is also inside a random temp-directory name now and then (`/tmp/entry4844-kOswup/…`), which broke the NEGATIVE assertion below about 1 run in 800.
+  const READY = 'STUB-LISTENING-4844';
   const stubServer = `const http = require('node:http');
-http.createServer((req, res) => { res.end('next'); }).listen(Number(process.env.PORT), '127.0.0.1', () => console.log('up'));
+http.createServer((req, res) => { res.end('next'); }).listen(Number(process.env.PORT), '127.0.0.1', () => console.log('${READY}'));
 `;
   async function start(files: string[], extra: Record<string, string> = {}, relayBody?: string): Promise<{ proc: ChildProcess; port: number; out: () => string; exited: Promise<number | null> }> {
     const tmp = dir();
@@ -333,14 +335,14 @@ http.createServer((req, res) => { res.end('next'); }).listen(Number(process.env.
     proc.stderr!.on('data', (d: Buffer) => { log += d.toString(); });
     const exited = new Promise<number | null>((r) => proc.on('exit', (c) => r(c)));
     cleanups.push(() => { proc.kill('SIGKILL'); });
-    for (let i = 0; i < 100 && !log.includes('up'); i++) { await sleep(50); if (proc.exitCode !== null) break; }
+    for (let i = 0; i < 100 && !log.includes(READY); i++) { await sleep(50); if (proc.exitCode !== null) break; }
     return { proc, port, out: () => log, exited };
   }
 
   it('the real entry file, guard and relay: /api/v2 goes to the backend through the guard; a foreign Host is refused; a cut stream ends', async () => {
     const be = await backend('reset', 300);
     const app = await start(['embedded-entry.cjs', 'embedded-host-guard.cjs', 'embedded-api-relay.cjs'], { SPRINTABLE_API_ORIGIN: `http://127.0.0.1:${be.port}` });
-    expect(app.out()).toContain('up');
+    expect(app.out()).toContain(READY);
     expect(status(await raw(app.port, get(app.port, '/page')))).toBe('200');
     expect(status(await raw(app.port, get(app.port, '/api/v2/agent/stream', '', 'evil.example')))).toBe('400');
     expect(be.seen).toEqual([]);
@@ -353,7 +355,7 @@ http.createServer((req, res) => { res.end('next'); }).listen(Number(process.env.
   it('an app build that does not carry the relay file starts as before (the guard works, /api/v2 goes to Next)', async () => {
     const be = await backend();
     const app = await start(['embedded-entry.cjs', 'embedded-host-guard.cjs'], { SPRINTABLE_API_ORIGIN: `http://127.0.0.1:${be.port}` });
-    expect(app.out()).toContain('up');
+    expect(app.out()).toContain(READY);
     expect(status(await raw(app.port, get(app.port, '/api/v2/x')))).toBe('200');
     expect(be.seen).toEqual([]);
     expect(status(await raw(app.port, get(app.port, '/api/v2/x', '', 'evil.example')))).toBe('400');
@@ -363,6 +365,6 @@ http.createServer((req, res) => { res.end('next'); }).listen(Number(process.env.
     const app = await start(['embedded-entry.cjs', 'embedded-host-guard.cjs'], {}, "require('./some-other-file-that-is-missing.cjs');\n");
     expect(await app.exited).not.toBe(0);
     expect(app.out()).toContain('some-other-file-that-is-missing');
-    expect(app.out()).not.toContain('up');
+    expect(app.out()).not.toContain(READY);
   });
 });
