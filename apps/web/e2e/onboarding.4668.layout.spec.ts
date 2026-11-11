@@ -277,6 +277,8 @@ test.describe('the first screen on a touch phone (390 × 844) — story 4891', (
   test('a Mac: [Mac 앱 받기] · «앱 열기» · «고급» · the way out are all ≥44 (the fold closed)', async ({ page }) => {
     await open(page, { width: 390, theme: 'L' });
     await toFirst(page);
+    // the card's download button comes with the manifest answer (an async read) — measure after it is drawn (a slower runner counted the page before it, 2 presses)
+    await expect(page.getByTestId('desktop-download-button')).toBeVisible();
     const m = await expectFirstClean(page, 'mac · closed');
     expect(m.presses).toBeGreaterThanOrEqual(4);
     for (const id of ['desktop-download-button', 'onboarding-first-open-app', 'onboarding-first-advanced-summary', 'onboarding-first-finish']) {
@@ -288,6 +290,7 @@ test.describe('the first screen on a touch phone (390 × 844) — story 4891', (
   test('a Mac: the «고급» fold opened — the program lines\' [복사] ×2 and the one press are ≥44', async ({ page }) => {
     await open(page, { width: 390, theme: 'L' });
     await toFirst(page);
+    await expect(page.getByTestId('desktop-download-button')).toBeVisible();
     await page.getByTestId('onboarding-first-advanced-summary').tap();
     await page.getByTestId('advanced-make').waitFor();
     const m = await expectFirstClean(page, 'mac · fold open');
@@ -298,6 +301,7 @@ test.describe('the first screen on a touch phone (390 × 844) — story 4891', (
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://preview.test' });
     await open(page, { width: 390, theme: 'L' });
     await toFirst(page);
+    await expect(page.getByTestId('desktop-download-button')).toBeVisible();
     await page.getByTestId('onboarding-first-advanced-summary').tap();
     await page.getByTestId('advanced-make').tap();
     await expect(page.getByTestId('advanced-line')).toBeVisible();
