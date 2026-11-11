@@ -239,4 +239,42 @@ describe('GoalsClient — 스윔레인 보기는 목록 읽기를 기다리지�
     expect(container.textContent).not.toContain('E-CANVAS'); // 이전 프로젝트의 목록이 남지 않는다
     expect(container.textContent).toContain(koMessages.goals.loading);
   });
+
+  // codex 5543-epics 2차 BLOCKING — 프로젝트를 옮기는 사이 응답이 뒤섞이는 경우. 위 시험은 새 프로젝트의 읽기를 «영영 안 끝나게»만 해서 못 잡았다.
+  function deferredGoals() {
+    const pending = new Map<string, (r: { ok: boolean; json: () => Promise<unknown> }) => void>();
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (typeof url === 'string' && url.includes('/api/goals?')) {
+        const pid = new URL(url, 'http://x').searchParams.get('project_id')!;
+        return new Promise((resolve) => { pending.set(pid, resolve as never); });
+      }
+      return Promise.resolve({ ok: false, json: async () => null });
+    }));
+    const goals = (title: string) => ({ ok: true, json: async () => ({ data: [{ id: `id-${title}`, title, status: 'active', story_count: 1, is_ai_generated: false }] }) });
+    return { pending, goals };
+  }
+
+  it('⭐새 프로젝트(B)의 읽기가 먼저 끝나고 이전 프로젝트(A)의 늦은 응답이 나중에 와도 B의 목록이 서고 · A가 덮지 않고 · B가 로딩 자리에 갇히지 않는다', async () => {
+    const { pending, goals } = deferredGoals();
+    const { GoalsClient } = await import('./goals-client');
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-A" />)); });
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-B" />)); });
+    await act(async () => { pending.get('proj-B')!(goals('E-B-GOAL')); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('E-B-GOAL');
+    await act(async () => { pending.get('proj-A')!(goals('E-A-GOAL')); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('E-B-GOAL');
+    expect(container.textContent).not.toContain('E-A-GOAL');
+    expect(container.textContent).not.toContain(koMessages.goals.loading); // 로딩 자리에 갇히지 않는다
+  });
+
+  it('⭐새 프로젝트(B)의 읽기가 실패해도 이전 프로젝트(A)의 목록이 B 아래 남지 않는다', async () => {
+    const { pending, goals } = deferredGoals();
+    const { GoalsClient } = await import('./goals-client');
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-A" />)); });
+    await act(async () => { pending.get('proj-A')!(goals('E-A-GOAL')); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).toContain('E-A-GOAL');
+    await act(async () => { root.render(wrap(<GoalsClient projectId="proj-B" />)); });
+    await act(async () => { pending.get('proj-B')!({ ok: false, json: async () => null }); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).not.toContain('E-A-GOAL');
+  });
 });

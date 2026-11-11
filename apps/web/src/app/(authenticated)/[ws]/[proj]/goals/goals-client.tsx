@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChevronLeft, GripVertical, Plus, Send, Trash2, X, Flag } from 'lucide-react';
@@ -1049,7 +1049,12 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
 
   // wedge #2: order_by=position 옵트인 — 큐레이션 prefix + 자동(NULL) tail. position 모드는 BE가
   // 커서를 발행하지 않으므로 이어달리기(cursor pagination) 없이 전량(상위 STEER_LIMIT) 로드한다(AC4).
+  // story #4888 — 응답 뒤섞임 방어(codex): 프로젝트를 옮기는 사이 먼저 보낸 읽기가 늦게 돌아와도 «지금 프로젝트»의 화면을 덮지 않고, 현재 프로젝트의 읽기가 실패해도 이전 프로젝트의 목록이 이 프로젝트 아래 남지 않는다.
+  const currentProjectRef = useRef(projectId);
+  useEffect(() => { currentProjectRef.current = projectId; }, [projectId]);
+  const listProjectRef = useRef<string | null>(null); // `epics` 상태가 어느 프로젝트의 목록인가
   const fetchGoals = useCallback(async () => {
+    let applied = false;
     try {
       // story #3126 — include=glance로 latest_story_activity_at을 같이 받는다(신규 round-trip
       // 없음, 이미 하던 이 fetch에 옵트인 파라미터만 추가).
@@ -1059,13 +1064,20 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
       const res = await fetchWithAuth(`/api/goals?${params.toString()}`);
       if (!res.ok) throw new Error(`Failed to fetch epics: ${res.status}`);
       const { data } = await res.json() as { data: Goal[] };
+      if (currentProjectRef.current !== projectId) return; // 이미 다른 프로젝트로 옮겼다 — 늦게 온 응답은 버린다
       setGoals(data ?? []);
       setCapped((data?.length ?? 0) >= STEER_LIMIT);
+      listProjectRef.current = projectId;
+      applied = true;
     } catch (err) {
       // AC3: silent-swallow 금지 — 최소 로깅.
       console.error('[epics] 목록을 불러오지 못했습니다', err);
     } finally {
-      setLoadedProject(projectId);
+      if (currentProjectRef.current === projectId) {
+        // 실패했는데 상태에 남은 목록이 다른 프로젝트 것이면 비운다(이 프로젝트 아래 남의 목록을 보이지 않게). 같은 프로젝트의 이전 목록은 예전처럼 둔다.
+        if (!applied && listProjectRef.current !== projectId) { setGoals([]); setCapped(false); listProjectRef.current = projectId; }
+        setLoadedProject(projectId);
+      }
     }
     // orgSyncVersion은 콜백 안에서 안 읽는다 — switch-org 성공 直後 이 콜백 새 참조를
     // 강제해 재요청시키기 위한 의도적 invalidation 트리거다(story #2545, project-context-
