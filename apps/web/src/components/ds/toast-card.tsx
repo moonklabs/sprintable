@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import type { HTMLAttributes, ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { Button } from './button';
@@ -24,6 +24,10 @@ export interface ToastCardProps {
   actionLabel?: string;
   onAction?: () => void;
   onDismiss: () => void;
+  /** 둘째 줄을 한 줄 말줄임으로(파일 이름 등). 기본은 어디서나 끊어 감는다. */
+  bodySingleLine?: boolean;
+  /** 붙잡기(포인터 · 초점이 카드 안에 있으면 안 닫힘)를 제공자가 카드 뿌리에 거는 자리 — 수명 코드는 제공자(`useToastLifecycle`)에 있다. */
+  holdProps?: Pick<HTMLAttributes<HTMLDivElement>, 'onPointerEnter' | 'onPointerLeave' | 'onFocus' | 'onBlur'>;
   className?: string;
 }
 
@@ -32,11 +36,12 @@ export interface ToastCardProps {
  * 모양만 이 부품이 맡는다 — 쌓기 · 8초 타이머 · 호버/초점 중 유지 · 닫힌 까닭(onClose)은 지금의 `ToastProvider`가 그대로 맡고,
  * 영역 주인이 새 화면을 지을 때 그 Provider의 카드 자리에 이 카드를 끼운다(타이머를 두 곳에 두지 않는다).
  */
-export function ToastCard({ kind = 'info', title, body, actionLabel, onAction, onDismiss, className }: ToastCardProps) {
+export function ToastCard({ kind = 'info', title, body, actionLabel, onAction, onDismiss, bodySingleLine = false, holdProps, className }: ToastCardProps) {
   const t = useTranslations('common');
   const spec = KINDS[kind];
   return (
     <div
+      {...holdProps}
       role={spec.role}
       aria-live={spec.role === 'alert' ? 'assertive' : 'polite'}
       aria-atomic="true"
@@ -47,7 +52,7 @@ export function ToastCard({ kind = 'info', title, body, actionLabel, onAction, o
       <Icon name={spec.icon} className={cn('mt-0.5 shrink-0', spec.iconColor)} />
       <div className="min-w-0 flex-1">
         <p className="text-ds-body font-semibold break-keep [overflow-wrap:anywhere]">{title}</p>
-        {body ? <p className="mt-0.5 text-ds-small text-ds-ink-2 break-keep [overflow-wrap:anywhere]">{body}</p> : null}
+        {body ? <p className={cn('mt-0.5 text-ds-small text-ds-ink-2', bodySingleLine ? 'truncate' : 'break-keep [overflow-wrap:anywhere]')}>{body}</p> : null}
       </div>
       {actionLabel && onAction ? (
         <Button variant="secondary" onClick={onAction} className="shrink-0">
