@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Plus, X, Play, StopCircle, ChevronRight, Trash2, AlertTriangle, Target, Clock, Users, Calendar, Ban } from 'lucide-react';
+import { Plus, X, Play, StopCircle, ChevronRight, Trash2, AlertTriangle, Target, Clock, Users, Ban } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Button as DsButton } from '@/components/ds/button';
+import { Chip } from '@/components/ds/chip';
+import { IconButton } from '@/components/ds/icon-button';
 import { ListRow } from '@/components/ds/list-row';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -847,7 +849,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
                         <a
                           href={flatHref(`/docs?id=${sprint.report_doc_id}`)}
                           onClick={(e) => e.stopPropagation()}
-                          className="text-xs font-medium text-primary hover:underline"
+                          className="text-xs font-medium text-primary hover:underline pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
                         >
                           📄 {t('viewReport')}
                         </a>
@@ -894,20 +896,15 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
               조작). 에이전트 계정에도 트리거를 열어두면 #2091/#2103과 같은 결함이라 미리
               숨긴다. */}
           <HumanOnlyAction>
-            <Button
-              variant="ghost"
-              size="sm"
+            {/* story #4888 — ds IconButton: 이름이 있고 폰(coarse)에서 누름 영역 44(옛 ghost sm은 높이 28). */}
+            <IconButton
+              icon="delete"
+              label={t('delete')}
               onClick={() => { setDeleteError(null); setShowDeleteConfirm(true); }}
-              aria-label={t('delete')}
-              title={t('delete')}
-              className="text-muted-foreground hover:text-destructive"
-            >
-              <Trash2 className="size-4" />
-            </Button>
+              className="hover:text-ds-failed"
+            />
           </HumanOnlyAction>
-          <Button variant="ghost" size="sm" onClick={() => setSelected(null)} aria-label={t('cancel')}>
-            <X className="size-4" />
-          </Button>
+          <IconButton icon="close" label={t('cancel')} onClick={() => setSelected(null)} />
         </div>
       </div>
 
@@ -920,25 +917,12 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
         </p>
       ) : null}
 
-      {/* Plan stats */}
+      {/* Plan stats — story #4888: 손으로 만든 rounded-md border 칸 → ds Chip(아이콘은 장식, 뜻은 글이 싣는다). 값이 있을 때만(예전과 같은 조건). */}
       {(selected.capacity != null || selected.team_size != null) ? (
         <div className="mb-4 flex flex-wrap gap-2">
-          {selected.capacity != null ? (
-            <span className="flex items-center gap-1 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-xs font-medium tabular-nums text-foreground">
-              <Clock className="size-3.5 text-muted-foreground" />
-              {selected.capacity}<span className="ml-0.5 text-muted-foreground">SP</span>
-            </span>
-          ) : null}
-          {selected.team_size != null ? (
-            <span className="flex items-center gap-1 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-xs font-medium tabular-nums text-foreground">
-              <Users className="size-3.5 text-muted-foreground" />
-              {selected.team_size}<span className="ml-0.5 text-muted-foreground">{t('personCountUnit')}</span>
-            </span>
-          ) : null}
-          <span className="flex items-center gap-1 rounded-md border border-border bg-muted/30 px-2.5 py-1 text-xs font-medium tabular-nums text-foreground">
-            <Calendar className="size-3.5 text-muted-foreground" />
-            {sprintDurationDays(selected.start_date, selected.end_date)}{t('days')}
-          </span>
+          {selected.capacity != null ? <Chip icon="schedule">{selected.capacity} SP</Chip> : null}
+          {selected.team_size != null ? <Chip icon="groups">{selected.team_size}{t('personCountUnit')}</Chip> : null}
+          <Chip icon="calendar_month">{sprintDurationDays(selected.start_date, selected.end_date)}{t('days')}</Chip>
         </div>
       ) : null}
 
