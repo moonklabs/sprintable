@@ -64,6 +64,9 @@ describe('(authenticated) layout — a 404 of /api/v2/me is read by its reason (
       req.cookies = new Map([['sp_renew_tried', '1']]);
       expect(await outcomeFor('/chats')).toBe('redirect:/login?next=%2Fchats&reason=session_expired');
       expect(await outcomeFor('/glance?story=abc')).toBe('redirect:/login?next=%2Fglance%3Fstory%3Dabc&reason=session_expired');
+      // the page's own query is encoded exactly once on the way to the road (the road decodes once): an `%26` inside a value stays an `%26`
+      req.cookies = new Map();
+      expect(await outcomeFor('/glance?story=a%26b')).toBe('redirect:/api/auth/renew?next=%2Fglance%3Fstory%3Da%2526b');
     });
 
     it('…also on the desktop setup page, which otherwise stays for an organization-less person (its «새 조직» mode would create a second organization)', async () => {

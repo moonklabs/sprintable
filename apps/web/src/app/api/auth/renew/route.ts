@@ -5,9 +5,12 @@
 // Loop guard: the road leaves `sp_renew_tried` (60 s) — while it is there the layout does not come back here.
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
+import { decodeJwt } from 'jose';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { cookieBase, markSessionChanged, SP_AT_MAX_AGE_SECONDS, SP_RENEW_TRIED_COOKIE, SP_RENEW_TRIED_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
-import { buildLoginRedirect, safeNextPath } from '@/lib/auth/session-redirect';
+import { buildLoginRedirect } from '@/lib/auth/session-redirect';
+import { ACTIVE_ACCOUNT_COOKIE } from '@/lib/auth/account-vault';
+import { isRecentlySuperseded } from '@/lib/auth/switch-epoch';
 import { safeJsonParse } from '@/lib/api-response';
 import { backendFetch } from '@/lib/backend-fetch';
 import { fastapiBaseUrl } from '@/lib/fastapi-url';
@@ -15,14 +18,27 @@ import { resolveAppUrl } from '@/services/app-url';
 
 const TOKEN_SUPERSEDED = 'TOKEN_SUPERSEDED';
 
-/** GET /api/auth/renew?next=<path> — one refresh, then back to `next` (an internal path only; anything else is the chat home) */
+/**
+ * The page to go back to: an internal path (`/x…`, not `//` · `/\\`) that is not an API road. `searchParams.get` has already decoded the value ONCE (the layout encoded it once),
+ * so it is used as it is — a second decode (what `safeNextPath` does for the login page's own param) would turn `?story=a%26b` into `?story=a&b`. Anything else is the chat home.
+ * An `/api/…` target is refused so `next=/api/auth/renew` can never send the road back to itself.
+ */
+function internalPage(raw: string | null): string {
+  if (!raw || !raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\') || raw.startsWith('/api/') || /[\r\n]/.test(raw)) return '/chats';
+  return raw;
+}
+
+/** GET /api/auth/renew?next=<path> — one refresh, then back to `next` (an internal page only; anything else is the chat home) */
 export async function GET(request: Request) {
   // the base is the app's own origin, not request.url (on Cloud Run request.url holds the internal bind address — same reason as auth/oauth-handoff)
   const base = resolveAppUrl(null);
-  const next = safeNextPath(new URL(request.url).searchParams.get('next'));
+  const next = internalPage(new URL(request.url).searchParams.get('next'));
   const toLogin = () => NextResponse.redirect(`${base}${buildLoginRedirect(next)}`, 303);
 
   const cookieStore = await cookies();
+  // the marker means «one renewal was just done for this browser»: the road itself honours it, so a link that points at the road (or a cross-site page that fires it again and again)
+  // cannot rotate the refresh token more than once a minute, and the layout↔road pair cannot loop whatever the layout does.
+  if (cookieStore.get(SP_RENEW_TRIED_COOKIE)?.value) return toLogin();
   const refreshToken = cookieStore.get(SP_RT_COOKIE)?.value;
   if (!refreshToken) return toLogin();
 
@@ -51,6 +67,12 @@ export async function GET(request: Request) {
     }
     return res;
   }
+
+  // multi-account (the proxy's `refreshMatchesActive`, same two checks): a renewal whose account is not the active one — the person switched accounts while this request was in flight,
+  // or the account was just superseded by a switch — must not overwrite the cookies of the account they are on now. The cookies stay; the layout's old answer (the sign-in) applies.
+  const sub = (() => { try { return decodeJwt(accessToken).sub; } catch { return undefined; } })();
+  const pointer = cookieStore.get(ACTIVE_ACCOUNT_COOKIE)?.value;
+  if (!sub || isRecentlySuperseded(sub) || (pointer && pointer !== sub)) return toLogin();
 
   const res = NextResponse.redirect(`${base}${next}`, 303);
   res.cookies.set(SP_AT_COOKIE, accessToken, { ...cookieBase(), maxAge: SP_AT_MAX_AGE_SECONDS });
