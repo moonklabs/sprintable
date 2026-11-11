@@ -286,6 +286,9 @@ describe('DocEvidenceRail — 증거 레일(§3/§6, 접힌 audit 리스트→�
     const text = container.textContent ?? '';
     expect(text).toContain('송윤재 · e75ca548');
     expect(text).toContain('송윤재 · 2fd14616');
+    // 꼬리는 RowName 안(이름만 truncate · 꼬리 shrink-0)이라 긴 이름에서도 꼬리가 말줄임에 안 먹힌다
+    const parts = [...container.querySelectorAll('[data-row-name-part="tail"]')].map((el) => el.textContent);
+    expect(parts.sort()).toEqual([' · 2fd14616', ' · e75ca548']);
   });
 
   it('이력이 전혀 없으면(draft, gate/revision 0건) 아무것도 렌더하지 않는다(노이즈 0)', async () => {

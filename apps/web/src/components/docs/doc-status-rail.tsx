@@ -10,6 +10,7 @@ import { Icon, type IconName } from '@/components/ds/icon';
 import { Card } from '@/components/ds/card';
 import { SectionHeader } from '@/components/ds/section-header';
 import { cn } from '@/lib/utils';
+import { RowName } from '@/components/shared/row-name';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import type { GateItem } from '@/components/kanban/types';
 import { deriveRiskLevel, usesSignatureFlow } from '@/components/cage/gate-risk';
@@ -285,7 +286,11 @@ export function DocEvidenceRail({ docId, status }: { docId: string; status: stri
             <Icon name={kindIcon[ev.kind]} size={16} className={cn('mt-0.5 shrink-0', kindTone[ev.kind])} />
             <div className="min-w-0 flex-1">
               <div className="break-keep text-ds-body text-ds-ink">{`${auditKindLabel[ev.kind]}${ev.version ? ` (v${ev.version})` : ''}`}</div>
-              <div className="truncate text-ds-small text-ds-ink-3">{(ev.actorId ? auditLabels.get(ev.actorId) : undefined) ?? ev.name} · {fmtDate(ev.at)}</div>
+              {/* [SID:4311 PR 3] 꼬리 붙은 행 라벨(«이름 · ID 앞 8자»)은 RowName으로 — 이름만 잘리고 동명이인을 가르는 꼬리는 늘 보인다(한 덩어리 truncate 금지 · row-name 가드). */}
+              <div className="flex min-w-0 items-baseline text-ds-small text-ds-ink-3">
+                <RowName label={(ev.actorId ? auditLabels.get(ev.actorId) : undefined) ?? ev.name} id={ev.actorId} />
+                <span className="shrink-0 whitespace-pre">{` · ${fmtDate(ev.at)}`}</span>
+              </div>
               {ev.note?.trim() ? (
                 <p className="mt-1 whitespace-pre-wrap break-keep border-l-2 border-ds-failed bg-ds-surface-sunk px-2 py-1 text-ds-small text-ds-ink-2 [overflow-wrap:anywhere]">{ev.note}</p>
               ) : null}
