@@ -13,6 +13,7 @@
  */
 import { expect, request as playwrightRequest, test, type APIRequestContext } from '@playwright/test';
 import { findHorizontalOverflow } from './helpers/horizontal-overflow';
+import { storageAssetList } from './helpers/storage-list';
 
 // 민 기기와 같은 조건: 402×874 · 한국어(글자 버튼 폭이 로케일마다 달라 en만 재면 «새 실행 시작하기» 같은 긴 한국어 라벨을 놓친다).
 test.use({ storageState: 'playwright/.auth/owner.json', viewport: { width: 402, height: 874 }, locale: 'ko-KR' });
@@ -207,22 +208,23 @@ test('402폭 — 스토리지 한 단 · 상단바 벨 화면 안 · 일감 바�
   const storage = pick('/storage');
   expect(storage, '스토리지 메뉴 링크').toBeTruthy();
   await page.goto(withProject(storage!), { waitUntil: 'domcontentloaded' });
-  await page.locator('[data-testid="storage-asset-list"]').waitFor({ timeout: 60_000 });
+  // the list is looked up inside `main` (see helpers/storage-list.ts): the bare testid also matched a hidden streaming holder outside `main` in a CI run (strict-mode violation)
+  await storageAssetList(page).waitFor({ timeout: 60_000 });
   await page.waitForTimeout(1500);
   await expect.soft(page.locator('[data-testid="storage-folder-drawer-trigger"]')).toBeVisible();
-  const listWidth = await page.locator('[data-testid="storage-asset-list"]').evaluate((e) => e.getBoundingClientRect().width);
+  const listWidth = await storageAssetList(page).evaluate((e) => e.getBoundingClientRect().width);
   expect.soft(listWidth, '스토리지 목록 폭(402폭)').toBeGreaterThan(300);
   // story #4277(PO 라이브 반려) — 목록 폭만 보면 이름 칸이 0px여도 초록이었다(행 고정 칸 합 462 > 402). 행이 있으면 첫 행의 이름 블록 실제 폭을 잰다.
   // 시드: 로컬 저장소 공급자는 업로드(PUT)를 아직 못 받아(story dc3d62f4) 이 스펙이 자산을 만들 수 없다 — 칸 예산은 단위 테스트
   // (storage-asset-row.grid-budget.test.tsx)가 결정적으로 잡고, 여기선 자산이 있는 환경에서만 실측한다.
   // CI 36138526074 — 예전엔 `.first().evaluate()`가 행 **출현을 기다려** 자산 0이면 테스트 제한시간까지 걸린 뒤(~6분) 실패 · 재시도했다.
   // 행을 기다리지 않는다: 목록 몸통이 «불러오는 중»을 벗어나길 짧게 기다려 상태를 **한 번** 읽고, 행이 있을 때만 잰다.
-  const listBody = page.locator('[data-testid="storage-asset-list-body"]:not([data-state="loading"])');
+  const listBody = storageAssetList(page).locator('[data-testid="storage-asset-list-body"]:not([data-state="loading"])');
   await listBody.waitFor({ timeout: 30_000 });
   const listState = await listBody.getAttribute('data-state');
   expect.soft(listState, '스토리지 목록 불러오기 실패').not.toBe('error');
   const firstNameWidth = listState === 'rows'
-    ? await page.locator('[data-testid="storage-asset-list"] [role="button"][aria-pressed] > div.min-w-0').first()
+    ? await storageAssetList(page).locator('[role="button"][aria-pressed] > div.min-w-0').first()
       .evaluate((e) => e.getBoundingClientRect().width, undefined, { timeout: 10_000 }).catch(() => null)
     : null;
   if (firstNameWidth !== null) {
