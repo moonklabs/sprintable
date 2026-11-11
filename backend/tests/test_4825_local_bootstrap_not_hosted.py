@@ -45,6 +45,7 @@ ALLOWED = {
     "turbo.json",
     # story 4829: tests that must SET the switch to show a page in local mode and in hosted mode (the pages themselves ask `isEmbeddedServer()` and name nothing)
     "apps/web/src/app/(authenticated)/desktop/page.4829.test.tsx",
+    "apps/web/src/app/(authenticated)/desktop/page.4889.test.tsx",  # story 4889: the «이 컴퓨터» page shape in local and in hosted mode (same reason)
     "apps/web/src/app/(authenticated)/desktop/pair/page.4829.test.tsx",
 }
 _SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".next", "dist", "build", ".pytest_cache", ".mypy_cache"}
