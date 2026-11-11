@@ -1,6 +1,8 @@
 'use client';
 
-import { useToast, ToastContainer } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/toast';
+// UI-3(a9d56577): 토스트 «카드»는 ds 카드다(ds/toast.tsx). 쌓는 구조 · 수명 · 컨텍스트(useToast)는 옛 ui/toast와 같은 것이라 이 열의 자리 · 겹침은 그대로다.
+import { ToastContainer } from '@/components/ds/toast';
 import { SupportWidgetLauncher } from '@/components/support-widget/support-widget-launcher';
 import { isSupportWidgetEnabled } from '@/lib/support-widget-flag';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
