@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
 import { fetchWithAuth } from '@/lib/db/client';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ds/button';
+import { Card } from '@/components/ds/card';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { usePairHref } from '@/hooks/use-pair-href';
 import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
@@ -54,20 +54,20 @@ export function PhoneAppGet({ body, scanHint = false }: { body?: string; scanHin
     <div key={key} className="flex items-center gap-3" data-testid={`phone-app-link-${key}`} data-kind={kind}>
       {/* Yuna 5060: the QR is decoration for a camera — the link's words are the row's name */}
       <QRCodeSVG value={url} size={72} aria-hidden="true" />
-      <a className="text-sm underline" href={url} target="_blank" rel="noreferrer">{label}</a>
+      <a className="inline-flex items-center text-ds-body text-ds-ink underline underline-offset-2 pointer-coarse:min-h-11" href={url} target="_blank" rel="noreferrer">{label}</a>
     </div>
   );
   return (
     <div className="flex flex-col gap-3" data-testid="phone-app-get">
-      <p className="text-sm">{t('getApp')}</p>
-      {body ? <p className="text-xs text-muted-foreground" data-testid="phone-app-body">{body}</p> : null}
+      <p className="text-ds-body text-ds-ink">{t('getApp')}</p>
+      {body ? <p className="text-ds-small text-ds-ink-3" data-testid="phone-app-body">{body}</p> : null}
       {/* Yuna §D (ux1-copy-1013): on a Mac, how the QR is used — right under the body, before the rows */}
-      {scanHint ? <p className="text-xs text-muted-foreground" data-testid="phone-app-scan-hint">{t('scanWithPhone')}</p> : null}
+      {scanHint ? <p className="text-ds-small text-ds-ink-3" data-testid="phone-app-scan-hint">{t('scanWithPhone')}</p> : null}
       {links.flatMap((l) => {
-        if (l.kind === 'soon') return [<p key={l.store} className="text-sm text-muted-foreground" data-testid="phone-app-ios-soon">{t('getAppIosSoon')}</p>];
+        if (l.kind === 'soon') return [<p key={l.store} className="text-ds-body text-ds-ink-3" data-testid="phone-app-ios-soon">{t('getAppIosSoon')}</p>];
         // Yuna §D: the two-step note right above the two rows — scanning ② alone is a dead end at Play until ① is joined
         if (l.kind === 'invite') return [
-          <p key="android-note" className="text-xs text-muted-foreground" data-testid="phone-app-invite-note">{t('getAppInviteNote')}</p>,
+          <p key="android-note" className="text-ds-small text-ds-ink-3" data-testid="phone-app-invite-note">{t('getAppInviteNote')}</p>,
           row('android-group', l.group, t('getAppGroupJoin'), 'invite'),
           row('android', l.url, t('getAppAndroidInvite'), 'invite'),
         ];
@@ -83,7 +83,7 @@ export function PhonePairing({ returnTo = null }: { returnTo?: string | null } =
   if (!phone) {
     return (
       <Card className="break-keep flex flex-col gap-4 p-6">
-        <p className="text-sm text-muted-foreground">{t('notInApp')}</p>
+        <p className="text-ds-body text-ds-ink-3">{t('notInApp')}</p>
         <PhoneAppGet />
       </Card>
     );
@@ -187,17 +187,17 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
       case 'failed': return t('failed');
     }
   };
-  const settings = <Button variant="outline" onClick={() => void phoneCall('app.settings')}>{tp('openSettings')}</Button>;
-  const rescan = <Button onClick={() => void scan()}>{t('rescan')}</Button>;
+  const settings = <Button variant="secondary" onClick={() => void phoneCall('app.settings')}>{tp('openSettings')}</Button>;
+  const rescan = <Button variant="primary" onClick={() => void scan()}>{t('rescan')}</Button>;
   // story 4780: [Close] goes back where the pairing was started from (`returnTo` is the entry's page, checked by the page); with none it is the Mac screen as it always was
-  const close = <Button variant="outline" asChild><a href={flat(returnTo ?? '/desktop')}>{t('close')}</a></Button>;
+  const close = <Button variant="secondary" asChild><a href={flat(returnTo ?? '/desktop')}>{t('close')}</a></Button>;
 
   switch (view.kind) {
     case 'start':
       return (
         <Shell>
-          <p className="text-sm">{t('start')}</p>
-          <Actions><Button onClick={() => void scan()}>{t('scan')}</Button></Actions>
+          <p className="text-ds-body text-ds-ink">{t('start')}</p>
+          <Actions><Button variant="primary" onClick={() => void scan()}>{t('scan')}</Button></Actions>
         </Shell>
       );
     case 'busy':
@@ -207,8 +207,8 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
         <Shell>
           <Line focus={pressed} strong>{t('confirm', { device: view.head.device_name })}</Line>
           <Actions>
-            <Button onClick={() => void pair(view.head)}>{t('pair')}</Button>
-            <Button variant="outline" onClick={cancel}>{t('cancel')}</Button>
+            <Button variant="primary" onClick={() => void pair(view.head)}>{t('pair')}</Button>
+            <Button variant="secondary" onClick={cancel}>{t('cancel')}</Button>
           </Actions>
         </Shell>
       );
@@ -216,7 +216,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
       return (
         <Shell>
           <Line focus>{t('checking')}</Line>
-          <Actions><Button variant="outline" onClick={cancel}>{t('cancel')}</Button></Actions>
+          <Actions><Button variant="secondary" onClick={cancel}>{t('cancel')}</Button></Actions>
         </Shell>
       );
     case 'number':
@@ -224,11 +224,11 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
         <Shell>
           {/* Yuna 07:48Z ②: three lines in the one status — the lead (small) · the number alone on its line · what to do with it */}
           <Line focus>
-            <span className="block text-xs" data-testid="pairing-number-lead">{t('numberLead')}</span>
-            <span className="block font-mono text-display font-semibold tracking-wider text-foreground" data-testid="pairing-number">{view.number}</span>
+            <span className="block text-ds-small" data-testid="pairing-number-lead">{t('numberLead')}</span>
+            <span className="block font-mono text-display font-semibold tracking-wider text-ds-ink" data-testid="pairing-number">{view.number}</span>
             <span className="block" data-testid="pairing-number-hint">{t('numberHint')}</span>
           </Line>
-          <Actions><Button variant="outline" onClick={cancel}>{t('cancel')}</Button></Actions>
+          <Actions><Button variant="secondary" onClick={cancel}>{t('cancel')}</Button></Actions>
         </Shell>
       );
     case 'paired':
@@ -254,7 +254,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
           <Line focus>{t('limit.title')}</Line>
           <Line>{t('limit.why')}</Line>
           <Line>{t('limit.todo')}</Line>
-          <p className="text-xs text-muted-foreground">{t('limit.listHead')}</p>
+          <p className="text-ds-small text-ds-ink-3">{t('limit.listHead')}</p>
           {phones === null ? <Loader2 className="size-4 animate-spin" aria-label={t('checking')} /> : (
             <ul className="flex flex-col gap-3">
               {phones.map((p) => (
@@ -271,7 +271,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
           )}
           {view.freed ? <Line>{tr('phoneRemoved', { phone: view.freed })}</Line> : null}
           {view.freed ? <Line>{t('limit.after')}</Line> : null}
-          <Actions>{rescan}<a href={flat('/desktop')} className="text-sm underline underline-offset-2" data-testid="pairing-limit-web-link">{t('limit.webLink')}</a></Actions>
+          <Actions>{rescan}<a href={flat('/desktop')} className="inline-flex items-center text-ds-body text-ds-ink underline underline-offset-2 pointer-coarse:min-h-11" data-testid="pairing-limit-web-link">{t('limit.webLink')}</a></Actions>
         </Shell>
       );
     }
@@ -286,7 +286,7 @@ type RetryLine = Extract<View, { kind: 'retry' }>['line'];
 export function PhonePairEntry() {
   const t = useTranslations('phonePairing');
   const pairHref = usePairHref();
-  return <div><Button size="sm" variant="outline" asChild><a href={pairHref}>{t('entry')}</a></Button></div>;
+  return <div><Button variant="secondary" asChild><a href={pairHref}>{t('entry')}</a></Button></div>;
 }
 
 function Shell({ children }: { children: ReactNode }) {
@@ -303,7 +303,7 @@ function Line({ focus = false, strong = false, children }: { focus?: boolean; st
   useEffect(() => { if (focus) ref.current?.focus(); }, [focus]);
   return (
     <p ref={ref} tabIndex={-1} role="status" data-testid="phone-pairing-line"
-      className={`${strong ? 'text-sm font-medium text-foreground' : 'text-sm text-muted-foreground'} break-keep text-pretty outline-none`}>
+      className={`${strong ? 'text-ds-body font-medium text-ds-ink' : 'text-ds-body text-ds-ink-3'} break-keep text-pretty outline-none`}>
       {children}
     </p>
   );

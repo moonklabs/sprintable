@@ -1,7 +1,7 @@
 'use client';
 
 import { useLocale, useTranslations } from 'next-intl';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ds/button';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 
 /** story #4624 — one phone of the person's account on the limit screen (its pairs are the computers it is paired to now). */
@@ -27,16 +27,16 @@ export function LimitPhoneRow({ phone, asking, onAsk, onConfirm, onCancel }: {
   return (
     <li className="flex flex-col gap-1" data-testid="pairing-limit-phone">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-medium">{phone.label}</span>
-        {asking ? null : <Button variant="outline" size="sm" onClick={onAsk}>{tr('removePhone')}</Button>}
+        <span className="text-ds-body font-medium text-ds-ink">{phone.label}</span>
+        {asking ? null : <Button variant="secondary" onClick={onAsk}>{tr('removePhone')}</Button>}
       </div>
-      <span className="text-xs text-muted-foreground">{typeof phone.last_used_at === 'string' ? tr('lastUsed', { used: formatViewerRelativeTime(phone.last_used_at, locale, viewerTz) }) : t('limit.neverUsed')}</span>
+      <span className="text-ds-small text-ds-ink-3">{typeof phone.last_used_at === 'string' ? tr('lastUsed', { used: formatViewerRelativeTime(phone.last_used_at, locale, viewerTz) }) : t('limit.neverUsed')}</span>
       {asking ? (
         <div className="flex flex-col gap-2">
-          <p className="text-sm">{pairs > 0 ? tr('confirmRemovePhone', { phone: phone.label, n: pairs }) : tr('confirmRemovePhoneUnpaired', { phone: phone.label })}</p>
+          <p className="text-ds-body text-ds-ink">{pairs > 0 ? tr('confirmRemovePhone', { phone: phone.label, n: pairs }) : tr('confirmRemovePhoneUnpaired', { phone: phone.label })}</p>
           <div className="flex gap-2">
-            <Button variant="destructive" size="sm" onClick={onConfirm}>{tr('removePhone')}</Button>
-            <Button variant="outline" size="sm" onClick={onCancel}>{tr('cancel')}</Button>
+            <Button variant="danger" onClick={onConfirm}>{tr('removePhone')}</Button>
+            <Button variant="secondary" onClick={onCancel}>{tr('cancel')}</Button>
           </div>
         </div>
       ) : null}

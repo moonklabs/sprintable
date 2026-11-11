@@ -7,8 +7,8 @@
 import { useEmbeddedServer } from '@/components/embedded-server-context';
 import { useId, useState, useSyncExternalStore } from 'react';
 import { useTranslations } from 'next-intl';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ds/card';
+import { Button } from '@/components/ds/button';
 import { ListRow } from '@/components/ds/list-row';
 import { Icon } from '@/components/ds/icon';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
@@ -38,7 +38,7 @@ export function PhoneAppRow() {
   return (
     <div data-testid="phone-app-row">
       <ListRow asChild className="rounded-ds-control border-b-0">
-        <Button type="button" variant="ghost" aria-expanded={open} aria-controls={regionId} onClick={() => setOpen((v) => !v)} data-testid="phone-app-row-toggle" className="h-auto w-full justify-start">
+        <Button type="button" variant="quiet" aria-expanded={open} aria-controls={regionId} onClick={() => setOpen((v) => !v)} data-testid="phone-app-row-toggle" className="h-auto w-full justify-start">
           <span className="min-w-0 flex-1 truncate text-left text-ds-body font-semibold text-ds-ink">{t('useOnPhone')}</span>
           <Icon name={open ? 'expand_less' : 'chevron_right'} size={18} className="text-ds-ink-3" />
         </Button>
@@ -60,7 +60,7 @@ export function PhoneAppCard({ elsewhere: forced }: { elsewhere?: boolean }) {
     <Card className="break-keep flex flex-col gap-3 p-6" data-testid="phone-app-card">
       {/* a Mac → how the QR is used, under the body (Yuna §D); not a Mac → where the Mac app is, at the bottom; unknown (server · before the read) → neither */}
       <PhoneAppGet body={t('needPhoneAppBody')} scanHint={elsewhere === false} />
-      {elsewhere === true ? <p className="text-xs text-muted-foreground" data-testid="phone-app-mac-aux">{t('macAppAux')}</p> : null}
+      {elsewhere === true ? <p className="text-ds-small text-ds-ink-3" data-testid="phone-app-mac-aux">{t('macAppAux')}</p> : null}
     </Card>
   );
 }

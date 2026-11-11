@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { AlertTriangle, Loader2 } from 'lucide-react';
-import { Alert, AlertTitle } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Loader2 } from 'lucide-react';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Card } from '@/components/ds/card';
 import { DESKTOP_DOWNLOAD_BUCKET_HEADER, ourDownloadUrl } from '@/lib/desktop-downloads';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 
@@ -97,8 +97,8 @@ export function DesktopDownloadCard({ hideTitle = false, ctaVariant = 'default',
   if (loading) {
     return (
       <Card className="flex items-center gap-2 p-4" data-testid="desktop-download-card">
-        <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
-        <span className="text-xs text-muted-foreground">{t('loading')}</span>
+        <Loader2 className="size-3.5 animate-spin text-ds-ink-3" />
+        <span className="text-ds-small text-ds-ink-3">{t('loading')}</span>
       </Card>
     );
   }
@@ -109,8 +109,8 @@ export function DesktopDownloadCard({ hideTitle = false, ctaVariant = 'default',
   if (!manifest) {
     return (
       <Card className="space-y-2 p-4" data-testid="desktop-download-card">
-        {hideTitle ? null : <p className="text-sm font-medium text-foreground">{t('title')}</p>}
-        <p className="text-xs text-muted-foreground" data-testid="desktop-download-unavailable">
+        {hideTitle ? null : <p className="text-ds-body font-medium text-ds-ink">{t('title')}</p>}
+        <p className="text-ds-small text-ds-ink-3" data-testid="desktop-download-unavailable">
           {t('unavailable')}
         </p>
       </Card>
@@ -122,11 +122,11 @@ export function DesktopDownloadCard({ hideTitle = false, ctaVariant = 'default',
 
   return (
     <Card className="space-y-2 p-4" data-testid="desktop-download-card">
-      {hideTitle ? null : <p className="text-sm font-medium text-foreground">{t('title')}</p>}
-      <p className="text-xs text-muted-foreground" data-testid="desktop-download-target">
+      {hideTitle ? null : <p className="text-ds-body font-medium text-ds-ink">{t('title')}</p>}
+      <p className="text-ds-small text-ds-ink-3" data-testid="desktop-download-target">
         {t('targetLabel')}
       </p>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-ds-small text-ds-ink-3">
         {/* [SID:4619] Yuna 04:0xZ: the app's own name first — macOS names it so when it blocks (its «… was blocked to protect
             your Mac» names «Sprintable Dev Setup»), and the card and System Settings must use the same word. From the manifest; none → the line as before */}
         {manifest.product ? <span data-testid="desktop-download-product">{manifest.product}{' · '}</span> : null}
@@ -142,32 +142,30 @@ export function DesktopDownloadCard({ hideTitle = false, ctaVariant = 'default',
       {/* story #4547: not a Mac — nothing to do here: no warning, no button, one line where they were (no link either: no way to
           open the Mac's screen from here). The unavailable state above keeps its own line (a Mac could not get it either) */}
       {elsewhere ? (
-        <p className="break-keep text-xs text-muted-foreground" data-testid="desktop-download-open-on-mac">{t('openOnMac')}</p>
+        <p className="break-keep text-ds-small text-ds-ink-3" data-testid="desktop-download-open-on-mac">{t('openOnMac')}</p>
       ) : (
       <>
       {/* [SID:4619] 유나 정본 — 제목 = 지금 할 일 · 손순서 두 줄(번호가 뜻) · macOS 12 덧줄 · 까닭(공증 전) */}
       {/* story 4655 (PO 14405): the guide is for an un-notarized build only; a notarized one opens without it (the button stays) */}
       {manifest.notarized === true ? null : (
-      <Alert variant="warning">
-        <AlertTriangle className="h-4 w-4" />
-        <AlertTitle className="break-keep" data-testid="desktop-download-gatekeeper-title">{t('gatekeeperTitle')}</AlertTitle>
-        {/* AlertDescription is a <p> — an <ol> and <p>s inside it are invalid nesting (Yuna 5004): a div with its classes */}
-        <div className="col-start-2 space-y-1 text-xs leading-relaxed break-keep [overflow-wrap:anywhere]">
+      <Banner tone="note" className="items-start">
+        <p className="break-keep font-semibold text-ds-ink" data-testid="desktop-download-gatekeeper-title">{t('gatekeeperTitle')}</p>
+        {/* an <ol> and <p>s in a div (not inside a <p>) — the warning's body, at the same 12 px as the card's other lines */}
+        <div className="mt-1 space-y-1 text-ds-small leading-relaxed break-keep [overflow-wrap:anywhere]">
           <ol className="list-decimal space-y-1 pl-4" data-testid="desktop-download-install-steps">
             <li>{t('installStepDrag')}</li>
             {/* the settings panel's name in one piece (it split over two lines at 390; one piece is easier to find in Settings) */}
             {/* <nw> = «no wrap»: two letters, so the ko value holds no English word (verify:no-ascii-token-in-ko-value) */}
             <li>{t.rich('installStepOpen', { nw: (chunks) => <span className="whitespace-nowrap" data-testid="desktop-download-settings-panel">{chunks}</span> })}</li>
           </ol>
-          {/* text-xs only — muted on the warning tint is below AA (verify:no-muted-on-tint · story #3839) */}
-          <p className="text-xs" data-testid="desktop-download-old-mac">{t('installOldMac')}</p>
-          <p className="text-xs" data-testid="desktop-download-notarization-notice">
+          <p data-testid="desktop-download-old-mac">{t('installOldMac')}</p>
+          <p data-testid="desktop-download-notarization-notice">
             {t('notarizationNotice')}
           </p>
         </div>
-      </Alert>
+      </Banner>
       )}
-      <Button asChild size="sm" variant={ctaVariant} data-testid="desktop-download-button">
+      <Button asChild variant={ctaVariant === 'outline' ? 'secondary' : 'primary'} data-testid="desktop-download-button">
         {/* story 4891: a middle-click (open in a new tab) starts the download too — it is an auxclick, not a click, so the press is counted on both (the first screen says «after the download…» from the press) */}
         <a href={downloadUrl} download onClick={onCta} onAuxClick={(e) => { if (e.button === 1) onCta?.(); }}>{ctaLabel ?? t('downloadCta')}</a>
       </Button>

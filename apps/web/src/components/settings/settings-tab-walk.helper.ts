@@ -37,8 +37,8 @@ export function walkOldUi(rootFiles: string[]) {
   return { seen: [...seen].map((f) => path.relative(SRC, f)), olds };
 }
 
-/** `components/settings/<name>.tsx` */
-export const settingsFile = (name: string) => path.join(SRC, 'components', 'settings', `${name}.tsx`);
+/** `components/<rel>.tsx` — a tab's root component may live outside components/settings (e.g. `desktop/phone-app-card`) */
+export const componentFile = (rel: string) => path.join(SRC, 'components', `${rel}.tsx`);
 
 const PAGE = path.join(SRC, 'app', '(authenticated)', 'settings', 'page.tsx');
 /** the JSX source of one tab's `<TabsContent value="…">` block in the settings page */

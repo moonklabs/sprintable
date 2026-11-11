@@ -8,7 +8,7 @@
 import { useEmbeddedServer } from '@/components/embedded-server-context';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ds/button';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { connectedSetupsOf, useOrgRemoteControl } from '@/lib/org-remote-control';
@@ -122,7 +122,7 @@ export function RemoteControlLink({ variant = 'link' }: { variant?: 'link' | 'bu
   const flat = useFlatHref();
   const href = `${flat('/desktop')}#${REMOTE_CONTROL_ANCHOR}`;
   if (variant === 'button') {
-    return <Button asChild><Link href={href} onClick={markPlainClick} data-testid="remote-off-link">{t('goTo')}</Link></Button>;
+    return <Button variant="primary" asChild><Link href={href} onClick={markPlainClick} data-testid="remote-off-link">{t('goTo')}</Link></Button>;
   }
-  return <Link href={href} onClick={markPlainClick} className="text-sm underline" data-testid="remote-off-link">{t('goTo')}</Link>;
+  return <Link href={href} onClick={markPlainClick} className="inline-flex items-center text-ds-body text-ds-ink underline underline-offset-2 pointer-coarse:min-h-11" data-testid="remote-off-link">{t('goTo')}</Link>;
 }
