@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
+import { fetchWithAuth } from '@/lib/db/client';
 import type { Goal, GoalEditDraft, GoalPriority } from './goal-model';
 
 // story #4888(UI-5 목표 화면) — goals-client.tsx에서 옮김(동작 무변경): 상세 열의 «편집»이 같은 폼을 쓴다.
@@ -58,7 +59,7 @@ export function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
       if (targetDate) body.target_date = targetDate;
       if (targetSp) body.target_sp = Number(targetSp);
 
-      const res = await fetch(`/api/goals/${epic.id}`, {
+      const res = await fetchWithAuth(`/api/goals/${epic.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

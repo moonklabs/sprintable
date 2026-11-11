@@ -46,15 +46,6 @@ export interface Goal {
   latest_story_activity_at?: string | null;
 }
 
-// story #2017: epic-status-transition.tsx의 LABEL_KEY와 동일 키(statusDraft 등) 재사용 —
-// 신규 i18n 키 0.
-export const STATUS_FILTER_LABEL_KEY: Record<GoalStatus, string> = {
-  draft: 'statusDraft',
-  active: 'statusActive',
-  done: 'statusDone',
-  archived: 'statusArchived',
-};
-
 export function calcStoryProgress(stories: Story[]): { done: number; total: number } {
   const total = stories.length;
   const done = stories.filter((s) => s.status === 'done').length;

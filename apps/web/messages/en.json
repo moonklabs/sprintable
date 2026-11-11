@@ -5084,6 +5084,7 @@
     "spExceededDetail": "{total}SP / target {target}SP exceeded",
     "noStories": "No stories linked to this goal.",
     "storiesLoadFailed": "Couldn't load the stories.",
+    "storyPointsShort": "{count} SP",
     "deleteGoal": "Delete Goal",
     "deleteConfirmTitle": "Delete Goal?",
     "deleteConfirmDescription": "This is permanent and cannot be undone. All stories in this goal will be unlinked.",

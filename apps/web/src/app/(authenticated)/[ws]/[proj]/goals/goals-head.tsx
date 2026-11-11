@@ -2,7 +2,7 @@
 
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ds/button';
-import { STATUS_FILTER_LABEL_KEY, type GoalStatus } from './goal-model';
+import type { GoalStatus } from './goal-model';
 
 /**
  * story #4888 (UI-5, the goals screen) — the head of the goals screen as ONE block (AC3 §4-2): the title with the two counts beside it, and under it one line of controls — the view switch
@@ -13,7 +13,13 @@ import { STATUS_FILTER_LABEL_KEY, type GoalStatus } from './goal-model';
 export type GoalsView = 'list' | 'swimlane';
 export type GoalsFilter = GoalStatus | 'all';
 
-const FILTERS = ['all', 'draft', 'active', 'done', 'archived'] as const;
+function FilterButton({ value, current, onPick, children }: { value: GoalsFilter; current: GoalsFilter; onPick: (next: GoalsFilter) => void; children: string }) {
+  return (
+    <Button type="button" variant={current === value ? 'secondary' : 'quiet'} aria-pressed={current === value} onClick={() => onPick(value)}>
+      {children}
+    </Button>
+  );
+}
 
 export function GoalsHead({
   view,
@@ -56,11 +62,11 @@ export function GoalsHead({
               <div className="h-5 w-px shrink-0 bg-ds-line" aria-hidden="true" />
               {/* story #2017: 'all' 아닌 나머지는 배지 · 드롭다운이 쓰는 기존 statusXxx 키를 그대로 쓴다(신규 키 0) · story #4388: 고른 것은 눌린 상태로 알린다 */}
               <div className="flex shrink-0 items-center gap-1" data-testid="goals-status-filter">
-                {FILTERS.map((s) => (
-                  <Button key={s} type="button" variant={filter === s ? 'secondary' : 'quiet'} aria-pressed={filter === s} onClick={() => onFilterChange(s)}>
-                    {s === 'all' ? t('filterAll') : t(STATUS_FILTER_LABEL_KEY[s])}
-                  </Button>
-                ))}
+                <FilterButton value="all" current={filter} onPick={onFilterChange}>{t('filterAll')}</FilterButton>
+                <FilterButton value="draft" current={filter} onPick={onFilterChange}>{t('statusDraft')}</FilterButton>
+                <FilterButton value="active" current={filter} onPick={onFilterChange}>{t('statusActive')}</FilterButton>
+                <FilterButton value="done" current={filter} onPick={onFilterChange}>{t('statusDone')}</FilterButton>
+                <FilterButton value="archived" current={filter} onPick={onFilterChange}>{t('statusArchived')}</FilterButton>
               </div>
             </>
           ) : null}

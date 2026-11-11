@@ -114,7 +114,8 @@ export function ScaleLadder({ activeLevel = 'earth' }: { activeLevel?: LadderLev
           const question = t(`ladderQuestion_${level}`);
           const questionId = `ladder-question-${level}`;
           const chipClassName = cn(
-            'shrink-0 rounded-full px-2 py-0.5 text-editorial-meta font-medium transition',
+            // story #4888 — 폰(터치) 누름 영역 44: 칩 줄이 보드 머리로 들어와 같은 줄의 단추들(44)과 높이가 갈렸다. 터치에서만 높이를 올린다(마우스는 34 그대로).
+            'inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-editorial-meta font-medium transition touch:min-h-11',
             active ? 'bg-brand/10 text-brand-text' : 'text-muted-foreground',
             behavior.kind === 'dead' && 'cursor-not-allowed opacity-60',
             behavior.kind === 'reserved' && 'cursor-help',

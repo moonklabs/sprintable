@@ -181,19 +181,24 @@ export function GoalDetailColumn({ goal, projectId, onUpdate }: { goal: Goal; pr
               ) : (
                 <div>
                   {stories.map((story) => (
-                    <ListRow
-                      key={story.id}
-                      density="compact"
-                      asChild
-                    >
-                      <button type="button" className="w-full" onClick={() => router.push(flatHref(`/flow?story=${story.id}`))}>
-                        <span className="min-w-0 flex-1 truncate text-ds-body text-ds-ink">{story.title}</span>
-                        <span className="flex shrink-0 items-center gap-2">
-                          {story.story_points !== undefined ? <span className="font-mono text-ds-mono-md text-ds-ink-3">{story.story_points} SP</span> : null}
-                          <Chip tone="neutral">{storyLabel(story.status)}</Chip>
-                        </span>
-                      </button>
-                    </ListRow>
+                    // a click on the row opens the story on the board; the title is a real button so Tab reaches it and Enter does the same
+                    <div key={story.id} onClick={() => router.push(flatHref(`/flow?story=${story.id}`))}>
+                      <ListRow
+                        density="compact"
+                        className="has-[button:focus-visible]:ring-2 has-[button:focus-visible]:ring-inset has-[button:focus-visible]:ring-ds-action"
+                        title={
+                          <Button type="button" variant="quiet" className="h-auto max-w-full justify-start px-0 text-left text-ds-body font-normal text-ds-ink hover:bg-transparent hover:text-ds-ink focus-visible:ring-0">
+                            <span className="truncate">{story.title}</span>
+                          </Button>
+                        }
+                        trailing={
+                          <>
+                            {story.story_points !== undefined ? <span className="font-mono text-ds-mono-md text-ds-ink-3">{t('storyPointsShort', { count: story.story_points })}</span> : null}
+                            <Chip tone="neutral">{storyLabel(story.status)}</Chip>
+                          </>
+                        }
+                      />
+                    </div>
                   ))}
                 </div>
               )}
