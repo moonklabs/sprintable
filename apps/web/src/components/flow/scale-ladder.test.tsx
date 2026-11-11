@@ -110,6 +110,17 @@ describe('ScaleLadder — 칩 한 줄(story #4888)', () => {
     expect(document.getElementById('ladder-question-city')?.textContent).toBe(koMessages.flow.ladderQuestion_city);
   });
 
+  // story #4888 — 보드 머리로 들어온 칩도 폰(터치)에서 누름 영역 44를 가진다: 렌즈 칩(버튼) · 이동 칸(링크) · 안내 칸(버튼) 전부.
+  it('⭐모든 칩이 터치에서 최소 높이 44(touch:min-h-11)를 가진다 — 렌즈 · 이동 링크 · 안내', () => {
+    act(() => { root.render(wrap(<ScaleLadder />)); });
+    const all = chips();
+    expect(all).toHaveLength(5);
+    // 안내 칸(작업)은 팝오버 기준점 래퍼(div) 안의 버튼이다 — 눌리는 것은 그 버튼
+    for (const c of all) { const hit = c.tagName === 'DIV' ? c.querySelector('button')! : c; expect(hit.className, hit.textContent ?? '').toContain('touch:min-h-11'); }
+    expect(all.some((c) => c.tagName === 'A')).toBe(true);
+    expect(all.some((c) => c.tagName === 'BUTTON')).toBe(true);
+  });
+
   it('legend 줄("지구"류 행성 이름표)은 렌더되지 않는다', () => {
     act(() => { root.render(wrap(<ScaleLadder />)); });
     expect(container.textContent).not.toContain('지구');

@@ -1,25 +1,20 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ChevronLeft, GripVertical, Plus, Send, Trash2, X, Flag } from 'lucide-react';
+import { Plus, Send, X, Flag } from 'lucide-react';
 import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core';
-import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
+import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { computeReorderPatch } from '@/lib/epic-steer';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { useGoalsRoute } from './goals-context';
-import { formatViewerScheduledAt } from '@/lib/schedule-format';
 import { Button } from '@/components/ui/button';
-import { Button as DsButton } from '@/components/ds/button';
 import { EpicSwimlaneBoard } from '@/components/epics/epic-swimlane-board';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { Badge } from '@/components/ui/badge';
-import { MaterialChip } from '@/components/ui/material-chip';
 import { EmptyState } from '@/components/ui/empty-state';
 
 // story 3995840c(doc resource-view-firsttouch-identity-pattern §4 "에픽" 행 — 정체성=하나의 큰
@@ -45,20 +40,22 @@ import {
   DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/toast';
-import { OutcomeStatusBadge } from '@/components/outcome/outcome-status-badge';
-import { HypothesesSummary } from '@/components/hypotheses/hypotheses-summary';
 import { EpicHypothesisDeclarationSection } from '@/components/epics/hypothesis-declaration-section';
 import type { HypothesisDeclarationValue } from '@/services/hypothesis-declaration';
 import { toEpicHypothesisCreatePayload, toEpicHypothesisLink } from '@/services/hypothesis-declaration-epic';
 import { SteerDispatchModal } from './steer-dispatch-modal';
-import { HumanOnlyAction } from '@/components/ui/human-only-action';
+import { Banner } from '@/components/ds/banner';
+import { Button as DsButton } from '@/components/ds/button';
+import { useMediaQuery } from '@/hooks/use-media-query';
+import { handleListKeys } from '@/lib/list-keys';
+import { GoalDetailColumn } from './goal-detail-column';
+import { GoalListRow } from './goal-list-row';
+import { GoalsHead } from './goals-head';
+import type { Goal, GoalEditDraft, GoalPriority, GoalStatus } from './goal-model';
 
 import { fetchWithAuth } from '@/lib/db/client';
-import { useFlatHref } from '@/hooks/use-flat-href';
 import { GoalsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
-import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
 import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
-import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 // ─── Drag sensor ──────────────────────────────────────────────────────────────
 
@@ -80,49 +77,7 @@ class MousePointerSensor extends PointerSensor {
 const STEER_LIMIT = 100;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-type GoalStatus = 'draft' | 'active' | 'done' | 'archived';
-type GoalPriority = 'critical' | 'high' | 'medium' | 'low';
-
-interface Story {
-  id: string;
-  title: string;
-  status: string;
-  story_points?: number;
-}
-
-interface Goal {
-  id: string;
-  title: string;
-  description?: string;
-  status: GoalStatus;
-  priority: GoalPriority;
-  target_date?: string;
-  target_sp?: number;
-  created_at: string;
-  stories?: Story[];
-  success_hypothesis?: string | null;
-  metric_definition?: Record<string, unknown> | null;
-  measure_after?: string | null;
-  // story #2958 — outcome-status-badge.tsx는 이미 unmeasured/unmeasurable을 지원했으나 이 타입엔
-  // 없었다(타입 갭, 실 BE 값은 이미 이 4종 전부 낼 수 있음).
-  outcome_status?: 'n_a' | 'pending' | 'hit' | 'miss' | 'unmeasured' | 'unmeasurable' | null;
-  outcome_result?: Record<string, unknown> | null;
-  // E1 S8b: BE EpicResponse가 list 응답에 부착하는 연결 가설 집계(미부착 경로는 기본값).
-  hypothesis_count?: number;
-  risky_status?: string | null;
-  // 0d4c89e8: BE list 응답 story count 집계(#1527). detail/미부착 경로는 stories 폴백.
-  total_stories?: number;
-  done_stories?: number;
-  // wedge #2(로드맵 조타·BE #2076): 큐레이션 순서(null=미조타·자동도출). source_loop_id는 Loop
-  // 제안 hook — 실 배선 P3/v2, v1은 미표시(no-fiction).
-  position?: number | null;
-  source_loop_id?: string | null;
-  // story #3126(#2341 AC1 후속) — `?include=glance` 옵트인 시에만 실린다. 이 goal 소속
-  // non-done story의 updated_at 최댓값(없으면 null) — "status='active' 52개 중 몇 개가
-  // «정말» 움직이는가"를 이 필드+dormancy_threshold_hours로 가른다("active" 미포함 이름).
-  latest_story_activity_at?: string | null;
-}
+// (목표 · 스토리 타입과 순수 도우미는 ./goal-model.ts로 옮겼다 — story #4888)
 
 // story #3126 — epics-progress-lane fetch가 실패했을 때만 쓰는 폴백(옛 코드가 이 신호 자체가
 // 없던 시절과 동일하게 «전부 active로 인정»하지 않기 위한 최소값이 아니라, next-maker-screen.tsx
@@ -139,98 +94,6 @@ function isDormantActiveGoal(goal: Goal, dormancyThresholdHours: number, nowMs: 
   return nowMs - t > dormancyThresholdHours * 3600_000;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-// story #2017: epic-status-transition.tsx의 LABEL_KEY와 동일 키(statusDraft 등) 재사용 —
-// 신규 i18n 키 0.
-const STATUS_FILTER_LABEL_KEY: Record<GoalStatus, string> = {
-  draft: 'statusDraft',
-  active: 'statusActive',
-  done: 'statusDone',
-  archived: 'statusArchived',
-};
-
-function statusBadgeVariant(status: GoalStatus): 'secondary' | 'info' | 'success' | 'outline' {
-  switch (status) {
-    case 'active':
-      return 'info';
-    case 'done':
-      return 'success';
-    case 'draft':
-    case 'archived':
-    default:
-      return 'secondary';
-  }
-}
-
-function priorityBadgeVariant(priority: GoalPriority): 'destructive' | 'secondary' | 'outline' | 'chip' {
-  switch (priority) {
-    case 'critical':
-      return 'destructive';
-    case 'high':
-      return 'secondary';
-    case 'medium':
-      return 'outline';
-    case 'low':
-    default:
-      return 'chip';
-  }
-}
-
-function calcStoryProgress(stories: Story[]): { done: number; total: number } {
-  const total = stories.length;
-  const done = stories.filter((s) => s.status === 'done').length;
-  return { done, total };
-}
-
-function calcSpProgress(stories: Story[]): { done: number; total: number } {
-  const total = stories.reduce((sum, s) => sum + (s.story_points ?? 0), 0);
-  const done = stories
-    .filter((s) => s.status === 'done')
-    .reduce((sum, s) => sum + (s.story_points ?? 0), 0);
-  return { done, total };
-}
-
-// story #3493 — measure_after/target_date는 둘 다 "약속"(측정 예정일·목표 완료일,
-// 아직 안 온 미래 시점) — §11-2 정본(formatScheduledAt)으로 통일한다. locale
-// 하드코딩(구 #2084 근본원인) 자체가 사라진다 — 이 정본은 tz만 받고 로케일 무관
-// 고정 포맷이라 en/ko 분기가 원천적으로 없다.
-function formatDate(dateStr: string | undefined, displayTimezone: string | null): string {
-  if (!dateStr) return '—';
-  return formatViewerScheduledAt(dateStr, displayTimezone).display;
-}
-
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-interface ProgressBarProps {
-  done: number;
-  total: number;
-  label?: string;
-}
-
-function ProgressBar({ done, total, label }: ProgressBarProps) {
-  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-  return (
-    <div className="space-y-1">
-      {label ? (
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>{label}</span>
-          <span>{done} / {total}</span>
-        </div>
-      ) : null}
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-border">
-        {/* story #3005(로드맵 P2·PR-C, L2) — done/total은 물리량 게이지라 proof-blue(정체성
-            신호) 대신 무채 명도. 같은 화면의 "작업(Claimed)" 바(§2)가 이미 쓰는
-            bg-proof-ink-3 관례 그대로 재사용(신규 하드코딩 색 0, §7 규율). */}
-        <div
-          className="h-full rounded-full bg-proof-ink-3 transition-all duration-300"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
 // ─── Epic Create Form ─────────────────────────────────────────────────────────
 
 interface GoalCreateFormProps {
@@ -240,7 +103,6 @@ interface GoalCreateFormProps {
   onCancel: () => void;
 }
 
-interface GoalEditDraft { title: string; description: string; priority: GoalPriority; targetDate: string; targetSp: string }
 interface GoalCreateDraft extends GoalEditDraft { declarations: HypothesisDeclarationValue[] }
 /** 목표 만들기 폼 초안의 빈 값(안정 참조 — 같은 값이면 초안 없음). */
 const EMPTY_GOAL_CREATE: GoalCreateDraft = { title: '', description: '', priority: 'medium', targetDate: '', targetSp: '', declarations: [] };
@@ -410,541 +272,7 @@ function GoalCreateForm({ projectId, orgId, onCreated, onCancel }: GoalCreateFor
   );
 }
 
-// ─── Epic Edit Form ───────────────────────────────────────────────────────────
 
-interface GoalEditFormProps {
-  epic: Goal;
-  onSaved: (epic: Goal) => void;
-  onCancel: () => void;
-}
-
-function GoalEditForm({ epic, onSaved, onCancel }: GoalEditFormProps) {
-  const t = useTranslations('goals');
-  // story #4370(유나 판정 (가)) — 설명(여러 줄)이 든 폼이라 폼 전체가 목표별 초안 하나 · 서버 값이 처음 값(같아지면 초안 없음) ·
-  // 저장 성공과 «취소»에서만 지운다.
-  const serverForm = useMemo<GoalEditDraft>(() => ({
-    title: epic.title,
-    description: epic.description ?? '',
-    priority: epic.priority,
-    targetDate: epic.target_date?.slice(0, 10) ?? '',
-    targetSp: epic.target_sp !== undefined ? String(epic.target_sp) : '',
-  }), [epic.title, epic.description, epic.priority, epic.target_date, epic.target_sp]);
-  const [form, setForm, clearFormDraft] = useJsonFieldDraft<GoalEditDraft>(
-    { surface: 'goal-edit', targetId: epic.id, field: 'form' }, serverForm,
-  );
-  const { title, description, priority, targetDate, targetSp } = form;
-  const setTitle = (v: string) => setForm({ ...form, title: v });
-  const setDescription = (v: string) => setForm({ ...form, description: v });
-  const setPriority = (v: GoalPriority) => setForm({ ...form, priority: v });
-  const setTargetDate = (v: string) => setForm({ ...form, targetDate: v });
-  const setTargetSp = (v: string) => setForm({ ...form, targetSp: v });
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleSubmit = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim()) return;
-
-    setSubmitting(true);
-    setError(null);
-
-    try {
-      const body: Record<string, unknown> = {
-        title: title.trim(),
-        description: description.trim() || undefined,
-        priority,
-        // RC#2: status 제외 — generic PATCH서 봉인(BE #1651 422)·전용 transition endpoint 전용.
-      };
-      if (targetDate) body.target_date = targetDate;
-      if (targetSp) body.target_sp = Number(targetSp);
-
-      const res = await fetch(`/api/goals/${epic.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) throw new Error('Failed to update epic');
-
-      const { data } = await res.json() as { data: Goal };
-      clearFormDraft();
-      onSaved({ ...data, stories: epic.stories });
-    } catch {
-      setError(t('updateError'));
-    } finally {
-      setSubmitting(false);
-    }
-  }, [title, description, priority, targetDate, targetSp, epic.id, epic.stories, onSaved, t, clearFormDraft]);
-
-  return (
-    <form onSubmit={(e) => { void handleSubmit(e); }} className="space-y-4">
-      <div className="space-y-1.5">
-        <label className="text-xs font-medium text-muted-foreground">{t('fieldTitle')}</label>
-        <Input
-          type="text"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          required
-        />
-      </div>
-
-      <div className="space-y-1.5">
-        <label className="text-xs font-medium text-muted-foreground">{t('fieldDescription')}</label>
-        <Textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          rows={3}
-          className="resize-none"
-        />
-      </div>
-
-      {/* RC#2: status는 편집 폼서 제거 — 전용 POST /epics/{id}/transition(상세 헤더 transition 컨트롤·⓶)·일반 PATCH서 봉인(BE #1651·hypothesis/story 선례 동형). 편집=title/desc/priority/target만. */}
-      <div className="space-y-1.5">
-        <label className="text-xs font-medium text-muted-foreground">{t('fieldPriority')}</label>
-        <Select
-          value={priority}
-          onChange={(e) => setPriority(e.target.value as GoalPriority)}
-        >
-          <option value="critical">{t('priorityCritical')}</option>
-          <option value="high">{t('priorityHigh')}</option>
-          <option value="medium">{t('priorityMedium')}</option>
-          <option value="low">{t('priorityLow')}</option>
-        </Select>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">{t('fieldTargetDate')}</label>
-          <Input
-            type="date"
-            value={targetDate}
-            onChange={(e) => setTargetDate(e.target.value)}
-          />
-        </div>
-
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">{t('fieldTargetSp')}</label>
-          <Input
-            type="number"
-            min="0"
-            value={targetSp}
-            onChange={(e) => setTargetSp(e.target.value)}
-            placeholder="0"
-          />
-        </div>
-      </div>
-
-      {error ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
-
-      <div className="flex justify-end gap-2 pt-2">
-        <Button type="button" variant="ghost" size="sm" onClick={() => { clearFormDraft(); onCancel(); }}>
-          {t('cancel')}
-        </Button>
-        <Button type="submit" size="sm" disabled={submitting || !title.trim()}>
-          {submitting ? '...' : t('saveChanges')}
-        </Button>
-      </div>
-    </form>
-  );
-}
-
-// ─── Epic List Row ────────────────────────────────────────────────────────────
-
-interface GoalRowProps {
-  epic: Goal;
-  isSelected: boolean;
-  onClick: () => void;
-  onDeleteRequest: (id: string) => void;
-  /** 조타 모드(status 필터=전체)일 때만 드래그 핸들·큐레이션 마커 노출. */
-  sortable: boolean;
-}
-
-// story #2958 §2(doc goals-outcome-ledger-redesign-handoff) — 목표별 "결과" 텍스트 줄. 실
-// outcome_result는 비정형(Record<string,unknown>)이라 수치를 지어내지 않는다(§8 "데이터 있는
-// 만큼만") — 라벨 재사용 + measure_after가 있으면 그 날짜만 덧붙인다(허구 금지).
-function outcomeLineText(
-  t: ReturnType<typeof useTranslations<'goals'>>,
-  tOutcome: ReturnType<typeof useTranslations<'outcomeLoop'>>,
-  status: Goal['outcome_status'],
-  measureAfter: string | null | undefined,
-  displayTimezone: string | null,
-): { text: string; tone: 'green' | 'blue' | 'neutral' } {
-  if (status === 'hit') return { text: tOutcome('statusHit'), tone: 'green' };
-  if (status === 'miss') return { text: tOutcome('statusMiss'), tone: 'neutral' };
-  if (status === 'unmeasured') return { text: tOutcome('statusUnmeasured'), tone: 'neutral' };
-  if (status === 'unmeasurable') return { text: tOutcome('statusUnmeasurable'), tone: 'neutral' };
-  // pending/n_a/null — 아직 결과 없음. measure_after가 있으면 "측정 예정 · 날짜"까지만(추측 금지).
-  if (measureAfter) return { text: `${t('outcomeAwaitingMeasure')} · ${formatDate(measureAfter, displayTimezone)}`, tone: 'blue' };
-  return { text: tOutcome('statusPending'), tone: 'neutral' };
-}
-
-function GoalRow({ epic, isSelected, onClick, onDeleteRequest, sortable }: GoalRowProps) {
-  const t = useTranslations('goals');
-  const tOutcome = useTranslations('outcomeLoop');
-  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: epic.id,
-    disabled: !sortable,
-  });
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    ...(isDragging ? { zIndex: 20, opacity: 0.9 } : {}),
-  };
-  const curated = typeof epic.position === 'number';
-  const stories = epic.stories ?? [];
-  // 0d4c89e8: BE 집계(total_stories/done_stories·#1527) 우선·detail-shape(집계 미부착)는 stories 폴백.
-  // list 응답은 stories 미부착이라 폴백만으론 0/0 → BE 집계로 카드 카운트/진행바 정상화.
-  const fb = calcStoryProgress(stories);
-  const total = epic.total_stories ?? fb.total;
-  const done = epic.done_stories ?? fb.done;
-  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-  const spProgress = calcSpProgress(stories);
-  const spExceeded = typeof epic.target_sp === 'number' && epic.target_sp > 0 && spProgress.total > epic.target_sp;
-  const outcomeLine = outcomeLineText(t, tOutcome, epic.outcome_status, epic.measure_after, displayTimezone);
-
-  const statusLabel: Record<GoalStatus, string> = {
-    draft: t('statusDraft'),
-    active: t('statusActive'),
-    done: t('statusDone'),
-    archived: t('statusArchived'),
-  };
-
-  const priorityLabel: Record<GoalPriority, string> = {
-    critical: t('priorityCritical'),
-    high: t('priorityHigh'),
-    medium: t('priorityMedium'),
-    low: t('priorityLow'),
-  };
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={`group relative flex w-full items-start gap-2 rounded-xl border px-3 py-3.5 text-left transition-all duration-150 ${
-        isSelected
-          ? 'border-primary/40 bg-primary/5'
-          : 'border-border bg-card hover:border-primary/30 hover:bg-primary/5'
-      } ${
-        // story #3005(로드맵 P2·PR-C, L1) — 드래그로 «들린» 상태는 일시적 floating이라
-        // --elev-overlay, rest 복귀 시 인라인 카드 기본값 --elev-card(PO 판정 2026-08-24).
-        isDragging ? 'shadow-[var(--elev-overlay)]' : 'shadow-[var(--elev-card)]'
-      }`}
-    >
-      {sortable ? (
-        <button
-          type="button"
-          aria-label={t('steerReorderAria', { title: epic.title })}
-          onClick={(e) => e.stopPropagation()}
-          className="mt-0.5 flex shrink-0 cursor-grab items-center text-muted-foreground transition-colors hover:text-muted-foreground active:cursor-grabbing"
-          {...attributes}
-          {...listeners}
-        >
-          <GripVertical className="size-4" aria-hidden="true" />
-        </button>
-      ) : null}
-      <div
-        className="min-w-0 flex-1 cursor-pointer space-y-2.5"
-        onClick={onClick}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(); }}
-      >
-        <div className="flex items-start justify-between gap-2">
-          {/* story #2958 §2/§3 — 상태 칩+결과 필이 이중 신호의 «상태·결과» 열. status 배지
-              (원래 shadcn Badge)는 그대로 두되(우측 무리에 존속, 회귀 없음), 왼쪽에 proof
-              색규율을 따르는 신규 칩을 하나 더 앞세운다 — outcome은 기존 OutcomeStatusBadge를
-              그대로 재사용(발명 0, 색 의미 불변). ⚠️상태 칩 자체는 story #3053(2984-S5)이 아래
-              MaterialChip으로 대체해 컷코너(proof-cut-xs)는 이 자리에서 이미 죽은 얘기다(주석만
-              #2969 PR-1의 원 버그·#2958 원 커밋 실수 이력을 참고용으로 남겨둠) — story
-              #7d7634ee(P0) 컷코너 전면 폐지와도 무관(여기는 애초에 clip-path가 없었음).
-              ⚠️PR#3387 카디르 QA(2026-08-23)·유나 원작자 정본 채택(PO 갱신 지시) — **상태 칩은
-              green을 아예 안 쓴다**(done+hit이어도). green은 결과(Verified) 필(OutcomeStatusBadge)
-              전용 — 두 축이 색에서도 안 섞여야 "일 끝≠목표 달성"이 시각으로 선다(작업 축의 첫
-              처방 "done&&hit만 green"조차 두 축을 섞는 것이라 유나 판정으로 대체됨). */}
-          <div className="flex shrink-0 flex-col items-start gap-1">
-            {/* story #3053(2984-S5) — MaterialChip(S1, 헤어라인+fill 0) 채택, 상태별
-                bg-proof-blue-soft/bg-proof-sunk 채움 폐지. dot 신호(active=blue·비active=
-                faint)는 이미 있던 신호라 그대로 KEEP. */}
-            <MaterialChip className="gap-1 text-micro">
-              <span className={`size-1.5 rounded-full ${epic.status === 'active' ? 'bg-proof-blue' : 'bg-proof-faint'}`} />
-              {statusLabel[epic.status]}
-            </MaterialChip>
-            {epic.outcome_status && epic.outcome_status !== 'n_a' ? <OutcomeStatusBadge status={epic.outcome_status} /> : null}
-          </div>
-          <p className="min-w-0 flex-1 text-lg font-editorial-claim leading-snug text-foreground">{epic.title}</p>
-          <div className="flex shrink-0 items-center gap-1.5">
-            {/* story #2e583f9e(2984-S7, 유나 확定 2026-08-25) — soft-fill(bg-proof-amber-soft)
-                SHIFT→헤어라인(MaterialChip). 색 신호(unconfirmed/제안 의미)는 dot로 KEEP —
-                계열색 텍스트를 헤어라인 위에 그대로 두면 라이트 AA 미달이라 text-foreground로
-                이전(대비표 정본 — 옅은 배경+같은 계열 글자 조합 자체가 문제). */}
-            {sortable ? (
-              curated ? (
-                <MaterialChip className="gap-1 text-micro text-foreground">
-                  <span className="size-1.5 rounded-full bg-proof-amber" aria-hidden="true" />
-                  {t('steerCurated')} {epic.position}
-                </MaterialChip>
-              ) : (
-                <span className="text-micro font-medium text-muted-foreground">{t('steerAuto')}</span>
-              )
-            ) : null}
-            {/* Loop 제안 hook — source_loop_id 배선(P3/v2) 전엔 미표시(no-fiction·sparkle 0). */}
-            {epic.source_loop_id ? (
-              <MaterialChip className="gap-1 text-micro text-foreground">
-                <span className="size-1 rounded-full bg-proof-amber" aria-hidden="true" />
-                {t('steerLoopSuggest')}
-              </MaterialChip>
-            ) : null}
-            <Badge variant={priorityBadgeVariant(epic.priority)}>{priorityLabel[epic.priority]}</Badge>
-            {/* story #2104 — BE goals.py:352가 human-only로 삭제를 403 거부한다(되돌릴 수 없는
-                조작). 에이전트 계정에도 트리거를 열어두면 #2091/#2103과 같은 결함이라 미리
-                숨긴다. */}
-            <HumanOnlyAction>
-              <button
-                type="button"
-                aria-label={t('deleteGoal')}
-                onClick={(e) => { e.stopPropagation(); onDeleteRequest(epic.id); }}
-                // story #4345 — `hidden`(탭 순서에서 빠짐) → 호버 없는 기기에선 늘 · 마우스는 행 호버 · 초점에서(HOVER_REVEAL).
-                // 누르는 자리 24(HIT)는 `-my-1`로 줄 높이에 안 얹는다(전엔 숨김이라 줄 높이 0 기여 · 까디르 4718).
-                className={`-my-1 rounded-md p-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60 transition-colors ${HOVER_REVEAL_HIT} ${HOVER_REVEAL} ${HOVER_REVEAL_FOCUS_RING}`}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </HumanOnlyAction>
-          </div>
-        </div>
-
-        {epic.description?.trim() ? (
-          <p className="text-xs text-muted-foreground line-clamp-1">{epic.description.split('\n')[0]?.replace(/^#+\s*/, '')}</p>
-        ) : null}
-
-        {/* story #2958 §2 핵심 이동 — 단일 진척바 → 이중 신호(작업 Claimed 중립 / 결과 Verified).
-            작업 바는 반드시 중립색(proof-ink-3) — green은 outcome=hit에만(§8 설계 확定, soul-lock). */}
-        {total > 0 ? (
-          <div className="flex items-center gap-2">
-            <span className="w-8 shrink-0 font-mono text-micro text-muted-foreground">{t('taskLabel')}</span>
-            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-border">
-              <div className="h-full rounded-full bg-proof-ink-3 transition-all duration-300" style={{ width: `${pct}%` }} />
-            </div>
-            <span className="shrink-0 font-mono text-micro text-muted-foreground">{done}/{total}</span>
-          </div>
-        ) : null}
-        <div className="flex items-center gap-2">
-          <span className="w-8 shrink-0 font-mono text-micro text-muted-foreground">{t('outcomeLabel')}</span>
-          {/* story #3099(DS·AA 후속, #3090과 동형) — green/blue 소형텍스트(12px) AA 미달(라이트
-              green 3.49), 별도 dot 없는 자리라 text-proof-ink로 중립화(일관성 위해 blue도 동형
-              처리 — #3090 선례). 의미는 텍스트 자체(outcomeLine.text)가 이미 병기. */}
-          <span className={`text-xs font-semibold ${
-            outcomeLine.tone === 'green' || outcomeLine.tone === 'blue' ? 'text-proof-ink' : 'text-muted-foreground'
-          }`}
-          >
-            {outcomeLine.text}
-          </span>
-        </div>
-
-        {/* 가설요약 추가로 메타 항목이 늘어 고밀도 카드(마감일+SP초과 동반)가 narrow 폭서
-            가로 오버플로 잠재 → flex-wrap 헤지(가디언 라이브게이트 선제·기존 행 robustness↑). */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          {epic.target_date ? (
-            <span>{t('targetDate')}: {formatDate(epic.target_date, displayTimezone)}</span>
-          ) : null}
-          <HypothesesSummary count={epic.hypothesis_count ?? 0} riskyStatus={epic.risky_status ?? null} />
-          {spExceeded ? (
-            <span className="rounded-full bg-destructive-tint px-1.5 py-0.5 text-xs font-semibold text-foreground">
-              {t('spExceeded')}
-            </span>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Epic Detail Panel ────────────────────────────────────────────────────────
-
-interface GoalDetailPanelProps {
-  epic: Goal;
-  onUpdate: (epic: Goal) => void;
-  onClose: () => void;
-}
-
-function GoalDetailPanel({ epic, onUpdate, onClose }: GoalDetailPanelProps) {
-  const flatHref = useFlatHref(); // story #4231 4차 B — 옛 자원 경로(flat 목적지)에 프로젝트
-  const t = useTranslations('goals');
-  // story #3878(§⑤ 낱말 드리프트) — 스토리 목록 배지의 story.status(canonical slug)를
-  // t() 없이 그대로 그리던 자리 정본화. story-detail-panel.tsx의 statusKeyMap→t() 관례
-  // 그대로 재사용(§②-1 기존 상태 낱말, 새 키 0).
-  const tBoard = useTranslations('board');
-  const tc = useTranslations('common');
-  const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
-  const router = useRouter();
-  const { wsSlug, projSlug } = useGoalsRoute();
-  const [isEditing, setIsEditing] = useState(false);
-
-  const stories = epic.stories ?? [];
-  const storyProgress = calcStoryProgress(stories);
-  const spProgress = calcSpProgress(stories);
-  const spExceeded = typeof epic.target_sp === 'number' && epic.target_sp > 0 && spProgress.total > epic.target_sp;
-
-  const statusLabel: Record<GoalStatus, string> = {
-    draft: t('statusDraft'),
-    active: t('statusActive'),
-    done: t('statusDone'),
-    archived: t('statusArchived'),
-  };
-
-  const storyStatusKeyMap: Record<string, 'backlog' | 'readyForDev' | 'inProgress' | 'inReview' | 'done'> = {
-    backlog: 'backlog',
-    'ready-for-dev': 'readyForDev',
-    'in-progress': 'inProgress',
-    'in-review': 'inReview',
-    done: 'done',
-  };
-  const storyStatusLabel = (slug: string): string => {
-    const key = storyStatusKeyMap[slug];
-    return key ? tBoard(key) : slug;
-  };
-
-  const priorityLabel: Record<GoalPriority, string> = {
-    critical: t('priorityCritical'),
-    high: t('priorityHigh'),
-    medium: t('priorityMedium'),
-    low: t('priorityLow'),
-  };
-
-  return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
-      {/* Header */}
-      <div className="flex shrink-0 items-center justify-between border-b border-border/80 px-5 py-4">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground lg:hidden"
-          >
-            <ChevronLeft className="size-3.5" />
-            {t('backToList')}
-          </button>
-          <div className="flex items-center gap-1.5">
-            <Badge variant={statusBadgeVariant(epic.status)}>{statusLabel[epic.status]}</Badge>
-            <Badge variant={priorityBadgeVariant(epic.priority)}>{priorityLabel[epic.priority]}</Badge>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {!isEditing ? (
-            <>
-              <Button size="sm" variant="outline" onClick={() => router.push(`/${wsSlug}/${projSlug}/goals/${epic.id}`)}>
-                {t('viewFull')}
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => setIsEditing(true)}>
-                {t('editGoal')}
-              </Button>
-            </>
-          ) : null}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={tc('close')}
-            className="hidden rounded-xl p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:block"
-          >
-            <X className="size-4" />
-          </button>
-        </div>
-      </div>
-
-      {/* Body */}
-      <div className="flex-1 overflow-y-auto px-5 py-5">
-        {isEditing ? (
-          <div className="space-y-4">
-            <GoalEditForm
-              epic={epic}
-              onSaved={(updated) => { onUpdate(updated); setIsEditing(false); }}
-              onCancel={() => setIsEditing(false)}
-            />
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {/* Title */}
-            <h2 className="text-base font-bold text-foreground">{epic.title}</h2>
-
-            {/* Meta grid */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-xl bg-muted px-3 py-2.5">
-                <p className="text-xs font-medium text-muted-foreground">{t('targetDate')}</p>
-                <p className="mt-1 text-sm font-medium text-foreground">{formatDate(epic.target_date, displayTimezone)}</p>
-              </div>
-              <div className="rounded-xl bg-muted px-3 py-2.5">
-                <p className="text-xs font-medium text-muted-foreground">{t('targetSp')}</p>
-                <div className="mt-1 flex items-center gap-1.5">
-                  <p className="text-sm font-medium text-foreground">{epic.target_sp !== undefined ? epic.target_sp : '—'}</p>
-                  {spExceeded ? (
-                    <span className="rounded-full bg-destructive-tint px-1.5 py-0.5 text-xs font-semibold text-foreground">{t('spExceeded')}</span>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-
-            {/* Description */}
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-muted-foreground">{t('description')}</p>
-              <p className="text-sm leading-relaxed text-foreground">
-                {epic.description?.trim() ? epic.description : <span className="italic text-muted-foreground">{t('noDescription')}</span>}
-              </p>
-            </div>
-
-            {/* Progress */}
-            <div className="space-y-3">
-              <p className="text-xs font-medium text-muted-foreground">{t('storiesProgress')}</p>
-              <ProgressBar done={storyProgress.done} total={storyProgress.total} label={`${t('doneStories')} / ${t('totalStories')}`} />
-              {spProgress.total > 0 ? (
-                <>
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs font-medium text-muted-foreground">{t('spProgress')}</p>
-                    {spExceeded ? (
-                      <span className="rounded-full bg-destructive-tint px-1.5 py-0.5 text-xs font-semibold text-foreground">
-                        {t('spExceededDetail', { total: spProgress.total, target: epic.target_sp ?? 0 })}
-                      </span>
-                    ) : null}
-                  </div>
-                  <ProgressBar done={spProgress.done} total={spProgress.total} label={`${t('doneSp')} / ${t('totalSp')}`} />
-                </>
-              ) : null}
-            </div>
-
-            {/* Story list */}
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-muted-foreground">{t('stories')}</p>
-              {stories.length > 0 ? (
-                <div className="space-y-1.5">
-                  {stories.map((story) => (
-                    <button
-                      key={story.id}
-                      type="button"
-                      onClick={() => router.push(flatHref(`/flow?story=${story.id}`))}
-                      className="flex w-full items-center justify-between rounded-xl border border-border px-3 py-2 text-left transition-colors hover:border-primary/30 hover:bg-primary/5"
-                    >
-                      <p className="text-sm text-foreground">{story.title}</p>
-                      <div className="flex shrink-0 items-center gap-2">
-                        {story.story_points !== undefined ? (
-                          <span className="text-xs text-muted-foreground">{story.story_points} SP</span>
-                        ) : null}
-                        <Badge variant={story.status === 'done' ? 'success' : 'secondary'} className="text-micro">
-                          {storyStatusLabel(story.status)}
-                        </Badge>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm italic text-muted-foreground">{t('noStories')}</p>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 // ─── Create Modal ─────────────────────────────────────────────────────────────
 
@@ -1028,12 +356,13 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
   }, [projectId, initialView]);
   const { addToast } = useToast();
   const [epics, setGoals] = useState<Goal[]>([]);
-  const [selectedEpic, setSelectedEpic] = useState<Goal | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // story #4888 — wide screens (≥1024, the `lg` breakpoint) carry the detail column beside the list; narrower ones open the goal's own page, as they always did
+  const isWide = useMediaQuery('(min-width: 1024px)');
   // story #4888 — «이 프로젝트의 목표 목록을 읽었나». 예전엔 한 번 읽으면 끝나는 `loading` 불리언이었는데, 스윔레인 보기는 이 목록을 읽지 않고(보드가 자기 읽기를 쥔다) 프로젝트가 바뀌면 이전 프로젝트의
   // 목록이 남을 수 있어, 어느 프로젝트의 목록인지를 같이 든다 — 목록 보기는 이 값이 지금 프로젝트일 때만 서고, 마스트헤드 수도 그때만 보인다.
   const [loadedProject, setLoadedProject] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
   const [statusFilter, setStatusFilter] = useState<GoalStatus | 'all'>('all');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -1136,15 +465,16 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
   // (silent-catch sweep) `_fetchEpicDetail`(dead·호출처 0·handleSelectEpic이 /epics/[id]
   // 딥링크로 대체)는 제거했다 — 실행되지 않던 silent catch였으므로 toast가 아니라 dead code 삭제.
 
-  const handleSelectEpic = useCallback((epic: Goal) => {
-    // AC5: 모든 디바이스에서 /epics/[id] 딥링크로 이동
-    router.push(`/${wsSlug}/${projSlug}/goals/${epic.id}`);
-  }, [router, wsSlug, projSlug]);
+  // story #4888 — a click on a row: wide → it is chosen and its detail stands in the column beside the list; narrow (phone · small window) → the goal's own page (the deep link `/goals/[id]`, as before).
+  const handleSelectGoal = useCallback((goal: Goal) => {
+    if (isWide) setSelectedId(goal.id);
+    else router.push(`/${wsSlug}/${projSlug}/goals/${goal.id}`);
+  }, [isWide, router, wsSlug, projSlug]);
 
   const handleDeleteEpic = useCallback(async (id: string) => {
     setDeleting(true);
     setGoals((prev) => prev.filter((e) => e.id !== id));
-    setSelectedEpic((prev) => prev?.id === id ? null : prev);
+    setSelectedId((prev) => (prev === id ? null : prev));
     try {
       const res = await fetch(`/api/goals/${id}`, { method: 'DELETE' });
       if (!res.ok) {
@@ -1168,13 +498,14 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
     setGoals((prev) => [epic, ...prev]);
     createdRef.current.push({ goal: epic, atSeq: fetchSeqRef.current });
     listProjectRef.current = projectId; // 상태에 이 프로젝트의 목표가 들어왔다 — 프로젝트를 옮길 때 비워야 할 대상
-    setSelectedEpic(epic);
-    setMobileView('detail');
-  }, [projectId]);
+    // wide: the new goal is chosen and stands in the detail column · narrow: its own page opens (what a tap on its row does)
+    if (isWide) setSelectedId(epic.id);
+    else router.push(`/${wsSlug}/${projSlug}/goals/${epic.id}`);
+  }, [projectId, isWide, router, wsSlug, projSlug]);
 
+  // the edit's answer has no story counts (BE puts those on the list only) — merged over the row so the row keeps its progress
   const handleUpdate = useCallback((updated: Goal) => {
-    setSelectedEpic(updated);
-    setGoals((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
+    setGoals((prev) => prev.map((e) => (e.id === updated.id ? { ...e, ...updated } : e)));
   }, []);
 
   // story #4888 — 목록 읽기는 «목록 보기»일 때만. 스윔레인 보기(= `/epics` 진입 포함)는 보드가 자기 읽기 · 시간초과 · 실패 표시를 쥐므로, 여기서 또 읽거나 그 읽기를 기다리면
@@ -1188,7 +519,7 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
     if (listProjectRef.current !== null && listProjectRef.current !== projectId) {
       setGoals([]);
       setCapped(false);
-      setSelectedEpic(null);
+      setSelectedId(null);
       listProjectRef.current = null;
     }
     // «읽음» 표시도 같이 비운다 — 비운 목록을 «이 프로젝트의 목록을 읽은 것»으로 보고 0 · 0을 정확한 수처럼 보이는 구멍(A → B(스윔레인) → A)을 막는다. 처음 열 때는 이미 null이다.
@@ -1253,143 +584,90 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
   ).length;
   const doneCount = epics.filter((e) => e.status === 'done').length;
 
-  const masthead = (
-      <div className="shrink-0 border-b border-border px-4 pb-4 pt-5 sm:px-6">
-        <div className="font-mono text-editorial-meta font-semibold uppercase tracking-[0.16em] text-proof-blue">{t('indexKicker')}</div>
-        {/* story #2974(PR-D0) delta — font-display(페이스)+font-editorial-heading(무게 유틸,
-            --font-weight-editorial-heading:820) 병기. docs-index.tsx 마스트헤드 주석 참고. */}
-        <h1 className="mt-1.5 font-display font-editorial-heading text-2xl leading-none tracking-[-0.03em] text-foreground sm:text-display">{t('title')}</h1>
-        {/* story #2983(유나 확定) — 정적 장식 citron 퇴출(citron=live pulse 신호 전용).
-            시그니처는 무채 두께(3px)·길이로 유지. */}
-        <hr className="my-3 h-[3px] w-16 border-0 bg-proof-line-strong" />
-        <p className="text-editorial-ui text-muted-foreground">
-          {t('indexDek')}{' '}
-          {/* story #4888 — 수는 이 프로젝트의 목록을 읽은 뒤에만(스윔레인 보기로 곧장 열렸으면 아직 안 읽어 0 · 0이 «정확한 수»처럼 보이지 않게) */}
-          {goalsReady ? <span className="text-muted-foreground">{t('indexCountActive', { count: activeCount })} · {t('indexCountDone', { count: doneCount })}</span> : null}
-        </p>
-      </div>
-  );
+  // story #4888 (UI-5, the goals screen · AC3 §4-2) — list + detail, like home: on a wide screen the goals stand in a 420px list column and the goal chosen stands in the detail column beside it
+  // (the first goal is chosen when none is — never an empty column); on a phone the list is the whole screen and a row opens the goal's own page. One DOM for both (no hidden second copy).
+  const showDetail = isWide && filteredGoals.length > 0;
+  const effectiveSelectedId = showDetail ? (filteredGoals.some((e) => e.id === selectedId) ? selectedId : filteredGoals[0]!.id) : null;
+  const selectedGoal = effectiveSelectedId ? epics.find((e) => e.id === effectiveSelectedId) ?? null : null;
+  const counts = goalsReady ? { active: activeCount, done: doneCount } : null;
+  // one head for both views — the head itself decides that the state filter belongs to the list view only
+  const head = <GoalsHead view={view} onViewChange={setView} counts={counts} filter={statusFilter} onFilterChange={setStatusFilter} />;
+  // the frame's height: the window minus the shell and the work-tabs band (so the screen does not scroll the page by the band's height)
+  const frame = 'h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))] min-h-0 flex-col overflow-hidden bg-ds-background';
 
-  // story #4888 — 보기 전환: 같은 화면 안에서 목록 ↔ 스윔레인을 갈아 끼우는 두 단추(켜진 쪽 `aria-pressed`). 패널을 가진 탭이 아니라 «보기 토글»이라 role=tab은 안 쓴다.
-  const viewSwitch = (
-    <div className="flex shrink-0 items-center gap-2 px-4 pt-3 sm:px-6" role="group" aria-label={t('viewLabel')} data-testid="goals-view-switch">
-      <span className="text-ds-small text-ds-ink-3">{t('viewLabel')}</span>
-      <DsButton type="button" variant={view === 'list' ? 'secondary' : 'quiet'} aria-pressed={view === 'list'} onClick={() => setView('list')}>
-        {t('viewList')}
-      </DsButton>
-      <DsButton type="button" variant={view === 'swimlane' ? 'secondary' : 'quiet'} aria-pressed={view === 'swimlane'} onClick={() => setView('swimlane')}>
-        {t('viewSwimlane')}
-      </DsButton>
-    </div>
-  );
-
-  const listPanel = (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-muted/35">
-
-      {/* story #2958 §3 — 에디토리얼 마스트헤드(docs 재조립 #2955와 동형 언어, editorial 타이포
-          스케일 goals 첫 소비처). TopBarSlot(아래)은 얇은 전역 브레드크럼 칩이라 존속 — 이
-          마스트헤드가 실질 콘텐츠 헤더. */}
-      {masthead}
-
-      {viewSwitch}
-
-      {/* Status filter — story #2017: 'all' 아닌 나머지는 raw status 값을 그대로 렌더해(t() 미호출)
-          KO 로케일에서도 draft/active/done/archived 영문 그대로 보였음. 배지·드롭다운(epic-status-
-          transition.tsx)이 쓰는 기존 statusXxx 키를 그대로 재사용(신규 키 0). */}
-      <div className="flex shrink-0 gap-1 px-4 pt-3 pb-1 flex-wrap">
-        {(['all', 'draft', 'active', 'done', 'archived'] as const).map((s) => (
-          <button
-            key={s}
-            type="button"
-            onClick={() => setStatusFilter(s)}
-            aria-pressed={statusFilter === s}
-            className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors ${
-              statusFilter === s
-                ? 'border-primary/40 bg-primary/10 text-primary'
-                : 'border-border text-muted-foreground hover:bg-muted/50'
-            }`}
-          >
-            {s === 'all' ? t('filterAll') : t(STATUS_FILTER_LABEL_KEY[s])}
-          </button>
-        ))}
-      </div>
-
-      {/* STEER v2 조타 보내기(커밋) — 드래그(조용한 초안)와 분리된 명시적 발화. 큐레이션이 있고
-          전체 뷰일 때만. 누르면 수신자 선택 모달 → POST /epics/steer-dispatch. */}
+  const listColumn = (
+    <div data-testid="goals-list-column" className={`flex min-h-0 w-full min-w-0 flex-col ${showDetail ? 'lg:w-[420px] lg:shrink-0 lg:border-r lg:border-ds-line' : ''}`}>
+      {/* STEER v2 조타 보내기(커밋) — 드래그(조용한 초안)와 분리된 명시적 발화. 큐레이션이 있고 전체 뷰일 때만. 누르면 수신자 선택 모달 → POST /epics/steer-dispatch. */}
       {sortable && hasCurated ? (
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-proof-line-soft px-4 py-2">
-          <span className="min-w-0 truncate text-editorial-meta text-muted-foreground">{t('steerCommitHint')}</span>
-          <Button size="sm" variant="outline" className="shrink-0" onClick={() => setShowDispatch(true)}>
-            <Send className="mr-1.5 h-3.5 w-3.5" />
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-ds-line px-4 py-2">
+          <span className="min-w-0 truncate text-ds-small text-ds-ink-3">{t('steerCommitHint')}</span>
+          <DsButton type="button" variant="secondary" className="shrink-0" iconStart={<Send className="size-3.5" aria-hidden="true" />} onClick={() => setShowDispatch(true)}>
             {t('steerCommit')}
-          </Button>
+          </DsButton>
         </div>
       ) : null}
 
-      {/* 조타→핸드오프 confirm — "감시 아니라 신뢰": 신뢰단계 1개만("받았고 움직인다"). STEER v2에선
-          **커밋 성공 後에만** 표시(드래그 아님·no-fiction). 지정 수신자만 표기·활동량/타임스탬프 0.
-          Proof Blue·부드러운 호흡·reduced-motion 대응. */}
+      {/* 조타→핸드오프 confirm — "감시 아니라 신뢰": 신뢰단계 1개만("받았고 움직인다"). STEER v2에선 **커밋 성공 後에만** 표시(드래그 아님·no-fiction). 지정 수신자만 표기·활동량/타임스탬프 0. */}
       {justDispatched ? (
-        // story #3053(2984-S5) — 헤어라인+elev(S1 재질 언어) 채택, bg-proof-blue-soft 채움
-        // 폐지. pulse dot(라이브 신호)은 그대로 KEEP — proof-blue.
-        <div className="flex shrink-0 items-center gap-2 border-y border-proof-line bg-proof-panel px-4 py-2 text-editorial-meta font-semibold text-foreground shadow-[var(--elev-card)]">
-          <span className="size-1.5 shrink-0 rounded-full bg-proof-blue motion-safe:animate-pulse" aria-hidden="true" />
-          <span>{t('steerHandoffReceived')} · <b className="font-bold">{t('steerHandoffOrchestrating')}</b></span>
-          {dispatchedTo.length > 0 ? (
-            <span className="ml-auto max-w-[45%] truncate text-micro font-bold text-muted-foreground">{dispatchedTo.join(', ')}</span>
-          ) : null}
-        </div>
+        <Banner tone="info" className="shrink-0 border-x-0">
+          <span>{t('steerHandoffReceived')} · <b className="font-semibold">{t('steerHandoffOrchestrating')}</b></span>
+          {dispatchedTo.length > 0 ? <span className="ml-2 font-mono text-ds-mono-md text-ds-ink-3">{dispatchedTo.join(', ')}</span> : null}
+        </Banner>
       ) : null}
 
-      {/* List body */}
-      <div className="flex-1 overflow-y-auto p-4" aria-busy={reordering}>
+      {/* List body — story #4888: j / k / ↑ / ↓ walk the rows on a wide screen (the same keys as home); Enter on a row's title chooses it */}
+      <div
+        data-testid="goals-list"
+        className="focus-inset min-h-0 flex-1 overflow-y-auto"
+        aria-busy={reordering}
+        onKeyDown={isWide ? (e) => handleListKeys(e, (key) => setSelectedId(key)) : undefined}
+      >
         {filteredGoals.length === 0 ? (
-          // story 3995840c — 정체성 explainer는 "진짜 빈 프로젝트"(epics.length===0)에만.
-          // 필터 적용 중 결과 0건(예: 전부 done인데 draft 필터)은 "아직 시작 안 함"이 거짓이라
-          // 별개의 중립 카피 유지(no-fiction — resource-view-firsttouch-identity-pattern §3
-          // "이 패턴은 빈상태 전용" 규율).
-          epics.length === 0 ? (
-            <EmptyState
-              icon={<Flag className="size-8" />}
-              title={t('noGoals')}
-              description={t('noGoalsDescription')}
-              action={
-                <div className="flex flex-col items-center gap-4">
-                  <GoalGroupHint />
+          // story 3995840c — 정체성 explainer는 "진짜 빈 프로젝트"(epics.length===0)에만. 필터 적용 중 결과 0건은 "아직 시작 안 함"이 거짓이라 별개의 중립 카피 유지(no-fiction).
+          <div className="p-4">
+            {epics.length === 0 ? (
+              <EmptyState
+                icon={<Flag className="size-8" />}
+                title={t('noGoals')}
+                description={t('noGoalsDescription')}
+                action={
+                  <div className="flex flex-col items-center gap-4">
+                    <GoalGroupHint />
+                    <Button size="sm" onClick={() => setShowCreate(true)}>
+                      <Plus className="size-4" />
+                      {t('newGoal')}
+                    </Button>
+                  </div>
+                }
+              />
+            ) : (
+              <EmptyState
+                title={t('noGoalsFiltered')}
+                action={
                   <Button size="sm" onClick={() => setShowCreate(true)}>
                     <Plus className="size-4" />
                     {t('newGoal')}
                   </Button>
-                </div>
-              }
-            />
-          ) : (
-            <EmptyState
-              title={t('noGoalsFiltered')}
-              action={
-                <Button size="sm" onClick={() => setShowCreate(true)}>
-                  <Plus className="size-4" />
-                  {t('newGoal')}
-                </Button>
-              }
-            />
-          )
+                }
+              />
+            )}
+          </div>
         ) : (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => void handleDragEnd(e)}>
             <SortableContext items={filteredGoals.map((e) => e.id)} strategy={verticalListSortingStrategy}>
-              <div className="space-y-2">
+              <div>
                 {filteredGoals.map((epic) => (
-                  <GoalRow
+                  <GoalListRow
                     key={epic.id}
-                    epic={epic}
+                    goal={epic}
                     sortable={sortable}
-                    isSelected={selectedEpic?.id === epic.id}
-                    onClick={() => { void handleSelectEpic(epic); }}
+                    selected={effectiveSelectedId === epic.id}
+                    onSelect={handleSelectGoal}
                     onDeleteRequest={(id) => setDeleteConfirmId(id)}
                   />
                 ))}
                 {capped ? (
-                  <p className="pt-1 text-center text-editorial-meta text-muted-foreground">{t('steerCappedNote', { count: STEER_LIMIT })}</p>
+                  <p className="m-0 px-4 py-3 text-center text-ds-small text-ds-ink-3">{t('steerCappedNote', { count: STEER_LIMIT })}</p>
                 ) : null}
               </div>
             </SortableContext>
@@ -1414,61 +692,25 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
       />
 
       {view === 'swimlane' ? (
-        // story #4888 — 스윔레인 보기: 보드는 «한 곳에만» 그린다(아래 목록 보기는 데스크톱 · 모바일 두 배치를 CSS로 가려 둘 다 DOM에 있어 거기에 넣으면 보드가 두 번 서 두 번 불러온다).
-        // 마스트헤드(h1) · 보기 전환은 목록 보기와 같은 것을 그대로 쓰고, 상단바 슬롯은 위의 것(목표 제목 + 새 목표) 하나만 — 보드는 embedded로 자기 슬롯을 안 그린다.
-        <div className="flex h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))] min-h-0 flex-col overflow-hidden bg-muted/35" data-testid="goals-swimlane-view">
-          {masthead}
-          {viewSwitch}
+        // story #4888 — 스윔레인 보기: 보드는 «한 곳에만» 그린다. 머리(h1 · 보기 전환)는 목록 보기와 같은 것, 상단바 슬롯은 위의 것(목표 제목 + 새 목표) 하나만 — 보드는 embedded로 자기 슬롯을 안 그린다.
+        <div className={`flex ${frame}`} data-testid="goals-swimlane-view">
+          {head}
           <div className="focus-inset min-h-0 flex-1 overflow-y-auto">
             <EpicSwimlaneBoard projectId={projectId} embedded />
           </div>
         </div>
       ) : (
-        <>
-      {/* Desktop layout: list + slide-in detail panel.
-          story #4130 — 셸이 더 이상 뷰포트 높이 캡을 안 주므로(min-h-0 제거, #4121 게이트
-          상세 sticky 픽스) 이 2열 split(리스트+상세, 각자 독립 overflow-y-auto)이 뷰포트
-          기준 고정 높이를 잃는다 — 여기서 직접 앵커(h-[calc(100svh-var(--shell-chrome-h))] —
-          story #4131, --shell-chrome-h가 TopBar 표시 여부+모바일 탭바를 CSS만으로 합성한
-          SSOT). ActivationChecklistBanner 표시 시엔 그만큼 못 미침(페이지 스크롤로 보정,
-          기능 파손 아님) — PO 라이브 확認 요청. */}
-      <div className="hidden h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))] min-h-0 overflow-hidden lg:flex lg:items-stretch lg:gap-0">
-        <div className={`transition-all duration-300 ${selectedEpic ? 'w-[380px] shrink-0 border-r border-border/80' : 'w-full'}`}>
-          {listPanel}
-        </div>
-        {selectedEpic ? (
-          <div className="flex-1 min-w-0">
-            <GoalDetailPanel
-              epic={selectedEpic}
-              onUpdate={handleUpdate}
-              onClose={() => setSelectedEpic(null)}
-            />
-          </div>
-        ) : null}
-      </div>
-
-      {/* Mobile layout */}
-      {/* min-h-0 필수 — 없으면 flex item 기본 min-height:auto가 content 높이만큼 커져
-          이 wrapper의 overflow-hidden이 하단 콘텐츠를 스크롤 불가하게 clip한다(desktop
-          분기 L893의 min-h-0와 동형·모바일 스크롤 불가 재현+근본 확인 후 정정).
-          story #4130/#4131 — 같은 이유로 h-[calc(100svh-var(--shell-chrome-h))] 앵커 추가
-          (위 desktop 분기와 동형). */}
-      <div className="flex h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))] min-h-0 flex-col overflow-hidden lg:hidden">
-        {mobileView === 'list' ? (
-          <div className="min-h-0 flex-1">{listPanel}</div>
-        ) : (
-          <div className="min-h-0 flex-1">
-            {selectedEpic ? (
-              <GoalDetailPanel
-                epic={selectedEpic}
-                onUpdate={handleUpdate}
-                onClose={() => { setSelectedEpic(null); setMobileView('list'); }}
-              />
+        <div className={`flex ${frame}`} data-testid="goals-screen">
+          {head}
+          <div className="flex min-h-0 flex-1">
+            {listColumn}
+            {showDetail && selectedGoal ? (
+              <aside data-testid="goals-detail-column" className="flex min-h-0 min-w-0 flex-1">
+                <GoalDetailColumn key={selectedGoal.id} goal={selectedGoal} projectId={projectId} onUpdate={handleUpdate} />
+              </aside>
             ) : null}
           </div>
-        )}
-      </div>
-        </>
+        </div>
       )}
 
       {/* Create modal */}

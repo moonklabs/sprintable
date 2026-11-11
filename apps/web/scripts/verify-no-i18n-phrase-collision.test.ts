@@ -326,8 +326,8 @@ describe('GRANDFATHER_BASELINE — 기존 채무는 통과, 새 충돌만 막는
 // dashboard.ccQueueTruncated/dashboard.ccWaitingTitle 둘 다 삭제돼 그 쌍 자체가 없어졌다.
 // story 4887(UI-4 P2-e, 2026-11-11) — 16→15. chats.agentCount <-> chats.you: 방 목록 DM 줄이 «나 ↔ 상대»를 더는 안 그려(제목과 겹치는 정보 — 제목이 상대 이름이면 줄에 이름을 안 씀) 그 쌍이 한 줄에 같이 나오던 자리가 없어졌다.
 describe('GRANDFATHER_BASELINE_COUNT_TEST — 41번째부터는 PO 승인, 조용한 증감을 막는다', () => {
-  it('정리 후(4887 P2-e) 크기는 정확히 15건이다', () => {
-    expect(GRANDFATHER_BASELINE.size).toBe(15);
+  it('정리 후(4888 목표 화면) 크기는 정확히 13건이다', () => {
+    expect(GRANDFATHER_BASELINE.size).toBe(13);
   });
 });
 
@@ -341,16 +341,17 @@ describe('GRANDFATHER_BASELINE_COUNT_TEST — 41번째부터는 PO 승인, 조�
 // COUNT_TEST와 동형 갱신, 선언=실걸림 계속 일치).
 // story #3918(ActionZone 은퇴 코드 정리, 2026-09-15) — 17→16(위와 동형 갱신).
 // story 4887(UI-4 P2-e, 2026-11-11) — 16→15(위와 동형 갱신, 선언=실걸림 계속 일치).
+// story #4888(UI-5 목표 화면, 2026-11-11) — 15→13(위와 동형 갱신 — goals.spExceededDetail<->goals.title · goals.steerCappedNote<->goals.steerCurated가 파일이 나뉘어 함께 쓰이지 않게 됨).
 describe('GRANDFATHER_LIVE_COUNT_TEST — 「선언된 수」와 「지금 실제로 걸리는 수」는 다른 축이다', () => {
   // story #3902 — 이 파일은 scanRepository()(실 apps/web/src 전수 스캔, 메모이즈 없음)를
   // 여러 it()이 독립적으로 다시 호출한다 — 부하 시 vitest 기본 5000ms를 넘길 수 있어 각
   // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
-  it('실제 저장소 스캔에서 지금 걸리는 grandfather는 15건이다(정리 후 선언 수와 일치)', () => {
+  it('실제 저장소 스캔에서 지금 걸리는 grandfather는 13건이다(정리 후 선언 수와 일치)', () => {
     const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepository());
     const { grandfatherHit } = __scan;
     expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
     expect(__filesRead, '읽기를 실제로 셌다(헛돌지 않게)').toBeGreaterThan(0);
-    expect(grandfatherHit.size).toBe(15);
+    expect(grandfatherHit.size).toBe(13);
   });
 
   // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).

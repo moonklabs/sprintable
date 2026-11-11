@@ -961,6 +961,9 @@ export const EXEMPT_PAIRS = new Set<string>([
 // 둘 다 삭제(ActionZone(command-center) 은퇴 코드 정리 — /dashboard는 이미 /chats로
 // 리다이렉트돼 실 소비처 0, story #3179). "판단 보류"가 아니라 그 쌍 자체가 없어진 것 —
 // 재확認: 삭제 前후 재스캔, 이 1건이 grandfatherHit에서 정확히 빠지고 newFindings는 그대로 0.
+// story #4888(UI-5 목표 화면, 2026-11-11) — 15→13. goals.spExceededDetail <-> goals.title · goals.steerCappedNote <-> goals.steerCurated:
+// 목표 화면을 머리 · 행 · 상세 열 파일로 나누면서 두 키가 «같은 파일에서 함께 쓰이던 자리»가 없어졌다(제목은 머리, 포인트 초과 문구는 상세 열 / 조타 개수 안내는 목록, 조타 마커는 행).
+// «판단 보류»가 아니라 그 쌍 자체가 없어진 것 — 선언 수와 실걸림 수가 계속 일치한다.
 export const GRANDFATHER_BASELINE = new Set<string>([
   'cage.pendingSummary <-> cage.trustScorePending',
   'chats.agentCount <-> chats.agentSection',
@@ -968,8 +971,6 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'chats.participantsOthers <-> chats.personCount',
   'docs.searchResultCount <-> docs.title',
   'goals.fieldPriority <-> goals.steerCappedNote',
-  'goals.spExceededDetail <-> goals.title',
-  'goals.steerCappedNote <-> goals.steerCurated',
   'hypotheses.target <-> retro.hTargetLine',
   'inbox.bellAriaLabelCount <-> inbox.panelTitle',
   'presence.fabLabelWorking <-> presence.panelTitle',

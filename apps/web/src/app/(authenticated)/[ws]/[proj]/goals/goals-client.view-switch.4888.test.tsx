@@ -181,14 +181,16 @@ describe('GoalsClient — initialView(주소가 보기를 정함, story #4888 �
   });
 
   // /epics는 일감 탭줄 아래에 서므로(WorkTabsFrame의 sticky 띠) 화면 높이 앵커가 그 띠 높이(--work-tabs-h)를 빼야 셸이 한 번 더 스크롤되지 않는다(스프린트 화면과 같은 관례).
-  it('⭐세 높이 앵커(스윔레인 · 데스크톱 · 모바일)가 모두 탭 띠 높이를 뺀다 — 빼지 않으면 /epics에서 띠 높이만큼 셸이 더 스크롤된다', async () => {
+  it('⭐두 높이 앵커(스윔레인 · 목록 한 장)가 모두 탭 띠 높이를 뺀다 — 빼지 않으면 /epics에서 띠 높이만큼 셸이 더 스크롤된다', async () => {
     await mount('proj-1', koMessages, 'swimlane');
     const swim = container.querySelector('[data-testid="goals-swimlane-view"]') as HTMLElement;
     expect(swim.className).toContain('h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))]');
     await click(viewBtn(koMessages.goals.viewList)!);
+    // story #4888(목표 화면) — 목록 보기는 데스크톱 · 모바일 두 사본이 아니라 한 장(goals-screen)이다
+    const screen = container.querySelector('[data-testid="goals-screen"]') as HTMLElement;
+    expect(screen.className).toContain('h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))]');
     const anchored = [...container.querySelectorAll('div')].filter((d) => d.className.includes('100svh-var(--shell-chrome-h)'));
-    expect(anchored.length).toBeGreaterThanOrEqual(2); // 데스크톱 · 모바일 배치
-    for (const d of anchored) expect(d.className).toContain('var(--work-tabs-h,0px)');
+    expect(anchored).toHaveLength(1);
   });
 });
 
@@ -213,10 +215,10 @@ describe('GoalsClient — 스윔레인 보기는 목록 읽기를 기다리지�
   it('⭐읽지 않은 동안 마스트헤드는 수를 «정확한 수»처럼 보이지 않는다 — 진행 중 · 완료 수 글이 없다(0 · 0이 아님)', async () => {
     hangGoalsList();
     await mount('proj-1', koMessages, 'swimlane');
-    const masthead = container.querySelector('h1')!.parentElement!.textContent ?? '';
-    expect(masthead).toContain(koMessages.goals.indexDek);
-    expect(masthead).not.toMatch(/진행 중\s*\d|완료\s*\d|active\s*\d/);
-    expect(masthead).not.toContain('0 ·');
+    const head = container.querySelector('h1')!.parentElement!.textContent ?? '';
+    expect(head).toContain(koMessages.goals.title);
+    expect(head).not.toMatch(/진행 중\s*\d|활성\s*\d|완료\s*\d|active\s*\d/);
+    expect(head).not.toContain('0 ·');
   });
 
   it('⭐스윔레인에서 목록 보기로 넘어오면 그때 «딱 한 번» 읽는다 · 읽은 뒤에 목록과 수가 선다', async () => {
@@ -380,10 +382,10 @@ describe('GoalsClient — 스윔레인 보기는 목록 읽기를 기다리지�
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(titleInput, 'E-NEW-GOAL'); titleInput.dispatchEvent(new Event('input', { bubbles: true })); });
     await act(async () => { ([...document.body.querySelectorAll('button')].find((b) => b.textContent?.trim() === gm.createGoal)!).click(); });
     await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
-    // 새 목표의 제목은 목록 줄에도 오른쪽 상세 패널에도 뜬다 — 글자가 있다는 것만으로는 목록에서 사라져도 통과해 버리니, 글자가 «몇 군데» 뜨는지로 잰다.
+    // 새 목표의 제목이 «몇 군데» 뜨는지로 잰다 — story #4888: 목록은 한 장이라 목록 줄 한 군데(좁은 화면이라 상세 열은 없고, 만든 직후 그 목표의 페이지로 간다). 사라지면 0이 되어 RED.
     const copies = () => [...container.querySelectorAll('*')].filter((e) => e.children.length === 0 && e.textContent === 'E-NEW-GOAL').length;
     const before = copies();
-    expect(before).toBeGreaterThanOrEqual(2); // 목록 줄(데스크톱 · 모바일 배치) + 상세 패널
+    expect(before).toBe(1); // 목록 줄 한 군데
     // 이제 «만들기 전에 시작한» 읽기의 응답이 온다 — 새 목표가 없다
     await act(async () => { calls.filter((c) => c.pid === 'proj-1')[1]!.resolve(goals('E-OLD-GOAL')); await Promise.resolve(); await Promise.resolve(); });
     expect(copies()).toBe(before); // 목록 줄에서 사라지지 않았다

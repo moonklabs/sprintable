@@ -11,6 +11,7 @@ import { ListRow } from '@/components/ds/list-row';
 import { SectionHeader } from '@/components/ds/section-header';
 import { hrefForNeedsMeItem } from '@/components/org-briefing/derive-today';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { handleListKeys } from '@/lib/list-keys';
 import { withProjectParam } from '@/lib/with-project-param';
 import type { HomeModel, HomeRow, HomeRowKind } from './derive-home';
 import type { HomeSources } from './home-model-provider';
@@ -141,22 +142,6 @@ function FoldableSection({ title, rows, sources, defaultCollapsed, emptyText, se
   );
 }
 
-/** the move keys: a letter or arrow pressed while the focus is inside the list (never while someone types in a field) walks the rows that are on screen */
-function handleListKeys(e: React.KeyboardEvent<HTMLElement>, onSelect: (key: string) => void) {
-  const target = e.target as HTMLElement;
-  if (target.closest('input, textarea, select, [contenteditable="true"]')) return;
-  if (e.metaKey || e.ctrlKey || e.altKey) return;
-  const dir = e.key === 'ArrowDown' || e.key === 'j' ? 1 : e.key === 'ArrowUp' || e.key === 'k' ? -1 : 0;
-  if (dir === 0) return;
-  const rows = [...e.currentTarget.querySelectorAll<HTMLElement>('[data-row-key]')];
-  const here = rows.findIndex((r) => r.contains(target));
-  const next = rows[here === -1 ? (dir === 1 ? 0 : rows.length - 1) : here + dir];
-  if (!next) return;
-  e.preventDefault();
-  const key = next.getAttribute('data-row-key');
-  if (key) onSelect(key);
-  next.querySelector<HTMLElement>('button')?.focus();
-}
 
 export function HomeList({ model, sources, partial = false, selectedKey = null, onSelect = () => {} }: { model: HomeModel; sources: HomeSources; partial?: boolean; selectedKey?: string | null; onSelect?: (key: string) => void }) {
   const t = useTranslations('home');
