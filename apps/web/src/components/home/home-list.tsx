@@ -22,6 +22,14 @@ import type { HomeSources } from './home-model-provider';
  * (the approval details · the notification's own destination · the story on the flow board); nothing new is invented.
  */
 
+/**
+ * story #4888 — a row whose server title is blank (a decision request that came without its question, an old gate) still has a name: «제목이 없는 요청». The row, the detail and the sheet's label
+ * all read the title through this one function, so the three never disagree and an assistive-technology name is never empty (the sheet used to be named « 자세히»).
+ */
+export function rowTitle(t: ReturnType<typeof useTranslations>, row: { title: string }): string {
+  return row.title.trim() !== '' ? row.title : t('titleFallback');
+}
+
 /** the word under a row's title that says what kind of thing it is (literal keys, so each one is visibly read) */
 export function kindLabel(t: ReturnType<typeof useTranslations>, kind: HomeRowKind): string {
   switch (kind) {
@@ -104,7 +112,7 @@ function HomeRowView({ row, sources, needsHand, selected, onSelect }: { row: Hom
   const common = {
     leading: row.actor ? <Avatar name={row.actor.name} actorType={row.actor.type} size={24} /> : undefined,
     // story #4888 — the title is a real button: Tab reaches it, Enter selects (the same as a click on the row). The row's action link stays where it was (the right slot).
-    title: <Button type="button" variant="quiet" className="h-auto max-w-full justify-start px-0 text-left text-ds-body font-semibold text-ds-ink hover:bg-transparent hover:text-ds-ink focus-visible:ring-0"><span className="truncate">{row.title}</span></Button>,
+    title: <Button type="button" variant="quiet" className="h-auto max-w-full justify-start px-0 text-left text-ds-body font-semibold text-ds-ink hover:bg-transparent hover:text-ds-ink focus-visible:ring-0"><span className="truncate">{rowTitle(t, row)}</span></Button>,
     subtitle,
     trailing: link || conversationHref ? (
       <>

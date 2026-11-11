@@ -467,6 +467,7 @@
     "detailUndo": "Undo",
     "detailRequestedBy": "Requested by {name}",
     "detailNoReason": "No reason was left",
+    "titleFallback": "Untitled request",
     "detailWhat": "What are you approving?",
     "detailKind": "Kind",
     "detailSheetLabel": "Details of {title}"

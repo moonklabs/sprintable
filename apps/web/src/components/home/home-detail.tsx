@@ -11,7 +11,7 @@ import { useFlatHref } from '@/hooks/use-flat-href';
 import { withProjectParam } from '@/lib/with-project-param';
 import type { HomeModel, HomeRow } from './derive-home';
 import type { HomeSources } from './home-model-provider';
-import { actionLabel, AGENT_STATUS_KEY, kindLabel, useRowLink } from './home-list';
+import { actionLabel, AGENT_STATUS_KEY, kindLabel, rowTitle, useRowLink } from './home-list';
 import { waitedSince } from './waited';
 
 /**
@@ -61,7 +61,7 @@ export function HomeDetail({ row, model, sources, now, partial = false }: { row:
       <header className="flex items-start gap-3 border-b border-ds-line px-4 py-3">
         {row.actor ? <Avatar name={row.actor.name} actorType={row.actor.type} size={32} /> : null}
         <div className="min-w-0 flex-1">
-          <h2 className="m-0 break-keep text-ds-title font-semibold text-ds-ink [overflow-wrap:anywhere]">{row.title}</h2>
+          <h2 className="m-0 break-keep text-ds-title font-semibold text-ds-ink [overflow-wrap:anywhere]">{rowTitle(t, row)}</h2>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-ds-small text-ds-ink-3">
             <Chip tone={isNeed ? 'needs-hand' : 'neutral'}>{kindLabel(t, row.kind)}</Chip>
             <span data-testid="home-detail-waited">{t('detailWaited', { waited: waitedText })}</span>
@@ -80,7 +80,7 @@ export function HomeDetail({ row, model, sources, now, partial = false }: { row:
             </Card>
             <Card className="p-3" data-testid="home-detail-target">
               <p className="m-0 text-ds-small font-semibold text-ds-ink-3">{t('detailTarget')}</p>
-              <p className="m-0 mt-1 break-keep text-ds-body text-ds-ink [overflow-wrap:anywhere]">{need.workItemTitle}</p>
+              <p className="m-0 mt-1 break-keep text-ds-body text-ds-ink [overflow-wrap:anywhere]">{rowTitle(t, row)}</p>
             </Card>
             {need.state === 'signature' ? (
               <Card className="p-3" data-testid="home-detail-undo">
@@ -99,7 +99,7 @@ export function HomeDetail({ row, model, sources, now, partial = false }: { row:
 
       {link || conversationHref ? (
         <footer className="border-t border-ds-line bg-ds-surface px-4 py-3" data-testid="home-detail-actions">
-          {need ? <p className="m-0 mb-2 text-ds-small text-ds-ink-3">{t('detailWhat')} <span className="text-ds-ink">{need.workItemTitle}</span></p> : null}
+          {need ? <p className="m-0 mb-2 text-ds-small text-ds-ink-3">{t('detailWhat')} <span className="text-ds-ink">{rowTitle(t, row)}</span></p> : null}
           <div className="flex flex-wrap items-center gap-2">
             {link ? (
               <Button asChild variant={isNeed ? 'primary' : 'secondary'}>

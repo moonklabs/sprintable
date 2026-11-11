@@ -8,7 +8,7 @@ import { useMediaQuery } from '@/hooks/use-media-query';
 import type { HomeModel } from './derive-home';
 import type { HomeSources } from './home-model-provider';
 import { HomeDetail } from './home-detail';
-import { HomeList } from './home-list';
+import { HomeList, rowTitle } from './home-list';
 import { useHomeSelection } from './use-home-selection';
 import { useMinuteClock } from './use-minute-clock';
 
@@ -40,8 +40,8 @@ export function HomeScreen({ model, sources, partial = false }: { model: HomeMod
         </aside>
       ) : (
         <Panel open={sheetOpen && selectedRow !== null} onOpenChange={setSheetOpen}>
-          <PanelContent aria-label={t('detailSheetLabel', { title: selectedRow?.title ?? '' })} data-testid="home-detail-sheet">
-            <PanelHeader><DialogTitle className="sr-only">{t('detailSheetLabel', { title: selectedRow?.title ?? '' })}</DialogTitle></PanelHeader>
+          <PanelContent aria-label={t('detailSheetLabel', { title: selectedRow ? rowTitle(t, selectedRow) : '' })} data-testid="home-detail-sheet">
+            <PanelHeader><DialogTitle className="sr-only">{t('detailSheetLabel', { title: selectedRow ? rowTitle(t, selectedRow) : '' })}</DialogTitle></PanelHeader>
             <PanelBody className="p-0"><HomeDetail row={selectedRow} model={model} sources={sources} now={now} partial={partial} /></PanelBody>
           </PanelContent>
         </Panel>
