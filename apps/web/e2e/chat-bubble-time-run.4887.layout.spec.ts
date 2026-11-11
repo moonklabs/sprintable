@@ -19,7 +19,7 @@ function classesFromSource() {
   if (!cont) throw new Error('the continuation time line classes not found');
   return {
     row: pick(/className=\{`(group\/bubble flex scroll-mt-4 gap-2 transition-shadow )\$\{isMine/, 'the row'),
-    column: pick(/<div (?:data-chat-content="" )?className=\{`((?:relative )?flex min-w-0 max-w-\[72%\] flex-col gap-0\.5 )\$\{isMine/, 'the message column'),
+    column: pick(/<div (?:data-chat-content="" )?className=\{`((?:relative )?flex min-w-0 max-w-\[72%\] (?:\S+ )*?flex-col gap-0\.5 )\$\{isMine/, 'the message column'),
     text: pick(/<div data-testid="chat-bubble-text" className=\{`([^$`]+)\$\{/, 'the bubble text box').trim(),
     // story 4887 (UI-4 P4-b): the fill · rounding · padding are per-sender variants now — measure a person's bubble (mine / another's), the geometry the time rules were written against
     textMine: pick(/isMine\s*\?\s*'([^']+)'\s*:\s*isAgent\s*\?\s*'([^']+)'\s*:\s*'([^']+)'\s*\}`\}\s*data-bubble=/, 'the bubble variant (mine)'),
@@ -83,8 +83,8 @@ for (const mine of [false, true]) {
     expect(await shown('#meta'), 'drawn while the row is hovered').toBe(true); // reverted (the stacked variant not generated) → stays clipped
     const meta = (await box('#meta'))!;
     // beside the bubble — on the outer side AND close to it (without the column as the positioned parent the time flies to the edge of the screen: «right of the bubble» alone would still pass)
-    if (mine) { expect(meta.x + meta.width, 'my time is left of the bubble').toBeLessThanOrEqual(col.x + 1); expect(col.x - (meta.x + meta.width), 'and within 24 px of it').toBeLessThanOrEqual(24); }
-    else { expect(meta.x, 'their time is right of the bubble').toBeGreaterThanOrEqual(col.x + col.width - 1); expect(meta.x - (col.x + col.width), 'and within 24 px of it').toBeLessThanOrEqual(24); }
+    if (mine) { expect(meta.x + meta.width, 'my time is left of the bubble').toBeLessThanOrEqual(col.x + 1); expect(col.x - (meta.x + meta.width), 'and within 48 px of it (P6-a: the reply button takes the first 36)').toBeLessThanOrEqual(48); }
+    else { expect(meta.x, 'their time is right of the bubble').toBeGreaterThanOrEqual(col.x + col.width - 1); expect(meta.x - (col.x + col.width), 'and within 48 px of it (P6-a: the reply button takes the first 36)').toBeLessThanOrEqual(48); }
     expect((await box('#below'))!.y, 'nothing moved').toBeCloseTo(belowBefore, 0);
     expect((await box('#col'))!.height).toBeCloseTo(col.height, 0);
     await context.close();
@@ -97,8 +97,8 @@ for (const mine of [false, true]) {
     expect(await shown('#meta'), 'shown while the row holds focus').toBe(true); // reverted (hover only) → stays clipped
     const col = (await box('#col'))!;
     const meta = (await box('#meta'))!;
-    if (mine) expect(col.x - (meta.x + meta.width), 'within 24 px, left of my bubble').toBeLessThanOrEqual(24);
-    else expect(meta.x - (col.x + col.width), 'within 24 px, right of their bubble').toBeLessThanOrEqual(24);
+    if (mine) expect(col.x - (meta.x + meta.width), 'within 48 px, left of my bubble (P6-a: the reply button takes the first 36)').toBeLessThanOrEqual(48);
+    else expect(meta.x - (col.x + col.width), 'within 48 px, right of their bubble (P6-a: the reply button takes the first 36)').toBeLessThanOrEqual(48);
     await context.close();
   });
 

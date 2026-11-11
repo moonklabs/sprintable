@@ -5851,6 +5851,8 @@
     "formatNoPreview": "This format doesn't have an in-app preview yet.",
     "textContentLoadFailed": "Failed to load the text content.",
     "replyToMessage": "Reply",
+    "replyToMessageFrom": "Reply to {name}'s message",
+    "replyToMyMessage": "Reply to your message",
     "copyMessage": "Copy whole message",
     "copySelection": "Copy selection",
     "messageActions": "Message actions",
