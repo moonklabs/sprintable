@@ -2546,6 +2546,7 @@
     "projectSelectDescription": "Choose the current project from the header switcher to activate this surface."
   },
   "standup": {
+    "dateLabel": "Date",
     "orgLevelTitle": "Today's standup",
     "orgLevelDesc": "Write once a day and it's shared across every project you can access.",
     "orgWriteBanner": "Organization-level entry — write once and it automatically appears in every project you have access to. No project selection needed.",

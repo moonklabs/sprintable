@@ -7,11 +7,12 @@ import { useTranslations } from 'next-intl';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { DateNav } from '@/components/ds/date-nav';
 import { Card } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
-import { OperatorInput, OperatorTextarea } from '@/components/ui/operator-control';
+import { OperatorTextarea } from '@/components/ui/operator-control';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { shiftDayKey, teamDayKey } from '@/lib/viewer-time-zone';
+import { teamDayKey } from '@/lib/viewer-time-zone';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { BoardBridgeModal, type BoardBridgeStory } from '@/components/standup/board-bridge-modal';
@@ -105,11 +106,6 @@ function buildStorySummary(
     task_count: progress.taskCount,
     done_task_count: progress.doneTaskCount,
   };
-}
-
-// story #4443 PR3a — a day key moved by calendar days (no zone: was a runtime-zone Date then Seoul's zone)
-function shiftDate(dateStr: string, days: number): string {
-  return shiftDayKey(dateStr, days);
 }
 
 interface StandupClientProps {
@@ -494,26 +490,16 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
   // full-width row below the header so the wide date input never crushes the fixed-height
   // (h-12) TopBar title (the title and the shrink-0 controls competed for one row).
   const dateNavControls = (
-    <>
-      {/* story #4443 PR3a (Kadir 4871 ④) — the day is not known yet (no zone): nothing to move from — locked, not «NaN-NaN-NaN».
-          The arrows' names are aria-label (was title: a hover-only name a locked button would not give touch · keyboard · readers) */}
-      <Button variant="ghost" size="icon" className="shrink-0" disabled={!date} onClick={() => setDate((d) => shiftDate(d, -1))} aria-label={t('previousDay')} data-testid="standup-prev-day">
-        ←
-      </Button>
-      <OperatorInput
-        type="date"
-        value={date}
-        disabled={!date}
-        onChange={(event) => setDate(event.target.value)}
-        className="w-auto shrink-0"
-      />
-      <Button variant="ghost" size="icon" className="shrink-0" disabled={!date} onClick={() => setDate((d) => shiftDate(d, 1))} aria-label={t('nextDay')} data-testid="standup-next-day">
-        →
-      </Button>
-      <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setDate(null)}>
-        {t('today')}
-      </Button>
-    </>
+    // story #4888(UI-5 스프린트 화면, 유나 ds DateNav 5566) — 손으로 만든 «← 날짜 → 오늘» 줄을 ds DateNav로 갈아 끼운다: 화살표는 이름 있는 IconButton(폰 44) · 날짜 칸은 이름(«날짜») 있는
+    // ds Input · 하루를 아직 모르면(시간대 모름: story #4443 PR3a) 칸 · 화살표를 잠근다(«NaN-NaN-NaN»을 만들지 않는다) · «오늘»은 고른 날을 지워 팀의 오늘로 돌아간다(null).
+    // 예전 줄은 날짜 칸에 이름이 없었고 화살표가 글자 ←/→ 단추였다.
+    <DateNav
+      value={date || null}
+      onChange={(next) => setDate(next)}
+      onToday={() => setDate(null)}
+      labels={{ date: t('dateLabel'), previousDay: t('previousDay'), nextDay: t('nextDay'), today: t('today') }}
+      className="shrink-0"
+    />
   );
 
   return (
