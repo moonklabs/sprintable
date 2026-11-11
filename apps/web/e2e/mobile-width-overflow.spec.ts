@@ -344,6 +344,7 @@ test('320 · 360 · 390 — 문서 읽기 빵부스러기: 짧은 분류는 통�
     return {
       rootLines: lines(root),
       catW: catEl.clientWidth, catScroll: catEl.scrollWidth, catText: range(catEl).getBoundingClientRect().width, catOverflow: getComputedStyle(catEl).textOverflow,
+      catRight: catEl.getBoundingClientRect().right, subRight: sub!.getBoundingClientRect().right,
       titleW: title?.clientWidth ?? 0, titleScroll: title?.scrollWidth ?? 0,
     };
   }, category);
@@ -357,8 +358,10 @@ test('320 · 360 · 390 — 문서 읽기 빵부스러기: 짧은 분류는 통�
       const at = `${width} · ${isLong ? '긴' : '짧은'} 분류`;
       expect(m.rootLines, `${at} — «지식» 한 줄`).toBe(1);
       if (isLong) {
-        expect(m.catOverflow, `${at} — 말줄임(…)`).toBe('ellipsis');
-        expect(m.catScroll, `${at} — 줄어서 말줄임`).toBeGreaterThan(m.catW);
+        // story 4892 — 분류는 이제 둘째 줄(경로 · 메타)에서 제 줄을 가진다(제목과 한 줄을 나누지 않음): 줄보다 넓을 때만 줄어든다. 의도(긴 분류가 줄 밖으로 삐져나오지 않고 말줄임 규칙을 쥔다)는 그대로 —
+        // 말줄임 규칙(text-overflow: ellipsis)이 걸려 있고, 어떤 폭에서도 분류의 오른쪽 끝이 둘째 줄 안에 있다. 넓이 넘침이 생기면(scroll > client) 그때 말줄임이 실제로 보인다.
+        expect(m.catOverflow, `${at} — 말줄임(…) 규칙`).toBe('ellipsis');
+        expect(m.catRight, `${at} — 분류가 줄 밖으로 안 나감`).toBeLessThanOrEqual(m.subRight + 1);
       } else {
         expect(m.catScroll, `${at} — 통째로(잘림 0)`).toBeLessThanOrEqual(m.catW + 1);
         expect(m.catW, `${at} — 폭 ≥ 글자 폭`).toBeGreaterThanOrEqual(Math.floor(m.catText));
