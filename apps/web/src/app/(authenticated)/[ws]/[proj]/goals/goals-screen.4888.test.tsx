@@ -73,6 +73,16 @@ beforeEach(() => {
   useDashboardContextMock.mockReturnValue({ currentMemberType: 'human' });
   pushMock.mockReset();
   hypothesesMock.mockReset();
+  // Each test gets its OWN browser storage. The screen remembers the chosen view per project (`goals-view:<project>`): the «스윔레인» test leaves `swimlane` behind, and
+  // wherever storage really persists inside one file (Node 22 jsdom · CI) the NEXT test would open the swimlane — head but no detail column (5623's CI red on the en test).
+  // Where it does not persist (Node >= 25 here) the order dependence never showed. A fresh Map per test makes the result the same on both.
+  const lsStore = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => lsStore.get(k) ?? null,
+    setItem: (k: string, v: string) => { lsStore.set(k, v); },
+    removeItem: (k: string) => { lsStore.delete(k); },
+    clear: () => { lsStore.clear(); },
+  });
 });
 afterEach(async () => {
   await act(async () => { root.unmount(); });
