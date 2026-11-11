@@ -39,7 +39,6 @@ import { NotificationsPane } from './notifications-pane';
 import { SettingsSection } from '@/components/settings/settings-section';
 import { canSubmitOrgDelete } from './org-delete-gate';
 import { DeleteAccountDialog } from '@/components/settings/delete-account-dialog';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
 import { LegalLinks, BusinessInfoBlock } from '@/components/legal/legal-footer';
 import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { useToast } from '@/components/ui/toast';
@@ -984,18 +983,10 @@ export default function SettingsPage() {
 
             {adminChecked && isAdmin ? (
             <TabsContent value="workflow-policies">
-              <SectionCard>
-                <SectionCardHeader>
-                  <div className="space-y-1">
-                    <h2 className="text-base font-semibold text-foreground">{t('tabWorkflowPolicies')}</h2>
-                    <p className="text-sm text-muted-foreground">{t('workflowPoliciesDescription')}</p>
-                  </div>
-                </SectionCardHeader>
-                <SectionCardBody>
-                  {/* S34: 4모드(View[S29 active+simulator]/Edit/History/Diff) 라인 에디터 — View 내부에 기존 2-pane 포함 */}
-                  <WorkflowLineEditorSection projectId={currentProjectId} />
-                </SectionCardBody>
-              </SectionCard>
+              <SettingsSection title={t('tabWorkflowPolicies')} description={t('workflowPoliciesDescription')} id="workflow-policies">
+                {/* S34: 4모드(View[S29 active+simulator]/Edit/History/Diff) 라인 에디터 — View 내부에 기존 2-pane 포함 */}
+                <WorkflowLineEditorSection projectId={currentProjectId} />
+              </SettingsSection>
             </TabsContent>
             ) : null}
 

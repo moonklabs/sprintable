@@ -18,12 +18,15 @@ const TABS: Record<string, Record<string, string>> = {
   'api-keys': { ApiKeysMovedCard: 'settings/api-keys-moved-card' },
   projects: { ProjectsSection: 'settings/projects-section' }, // the page keeps the state and the requests; the part draws
   danger: { AccountDangerSection: 'settings/account-danger-section' },
+  // story 4891 (second piece)
+  'workflow-policies': { WorkflowLineEditorSection: 'settings/workflow-line-editor-section' }, // the active-line view and the simulator are reached through its imports
 };
 
 /** tabs whose block in page.tsx also draws JSX of its own (not only components): every capitalised name there must come from a ds part (or the settings frame / parts), and the block must hold no hand-drawn old pieces */
 const INLINE: Record<string, string[]> = {
   'org-members': ['Skeleton', 'SkeletonGroup'],
   members: ['DsButton', 'Plus'], // the «멤버 추가» button and its lucide icon
+  'workflow-policies': ['SettingsSection'], // the card frame around the line editor
 };
 const OLD_PIECES = /animate-pulse|<input\b|<select\b|<button\b|<label\b|\btext-(xs|sm)\b|text-muted-foreground|text-foreground|text-destructive|<Alert\b|<SectionCard/;
 
@@ -64,16 +67,14 @@ describe('settings tabs on ds parts: nothing old in what they draw', () => {
   }
 });
 
-// story 4891 — the settings FRAME (settings/page.tsx itself, outside every tab block): which old `ui/` parts the page still imports. Exactly two are left, each named with its reason; a third one, or a leftover of the four tabs' own, fails here.
+// story 4891 — the settings FRAME (settings/page.tsx itself, outside every tab block): which old `ui/` parts the page still imports. Exactly two are left, each named with its reason; a third one, or a leftover of any tab's own, fails here.
 describe('the settings frame (page.tsx): the old ui/ parts it still imports are the named ones', () => {
   const page = readFileSync(path.join(SRC, 'app', '(authenticated)', 'settings', 'page.tsx'), 'utf8');
   const olds = [...page.matchAll(IMPORT_RE)].map((m) => m[1]!).filter((spec) => /^@\/components\/ui\//.test(spec)).sort();
-  it('only the Tabs mechanism (a vertical list + panels — ds Tabs is the horizontal kind and carries no panel text size the untouched tabs rely on), the toast hook, and the section card the workflow-policies tab still draws', () => {
-    expect(olds).toEqual(['@/components/ui/section-card', '@/components/ui/tabs', '@/components/ui/toast']);
+  it('only the Tabs mechanism (a vertical list + panels — ds Tabs is the horizontal kind and carries no panel text size the untouched tabs rely on) and the toast hook', () => {
+    expect(olds).toEqual(['@/components/ui/tabs', '@/components/ui/toast']);
   });
-  it('the page draws no hand-made old piece outside the workflow-policies tab: no <Button>/<Dialog>/<Alert>/<Badge>/<OperatorInput>/<input>/<select>/<button> of its own', () => {
-    const wf = tabBlock('workflow-policies');
-    const rest = page.replace(wf, '');
-    expect(rest.match(/<(Button|Dialog|DialogContent|Alert|Badge|OperatorInput|input|select|button)\b/)?.[0] ?? null).toBeNull();
+  it('the page draws no hand-made old piece: no <Button>/<Dialog>/<Alert>/<Badge>/<OperatorInput>/<input>/<select>/<button> of its own', () => {
+    expect(page.match(/<(Button|Dialog|DialogContent|Alert|Badge|OperatorInput|input|select|button)\b/)?.[0] ?? null).toBeNull();
   });
 });

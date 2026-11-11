@@ -6,8 +6,9 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { loginWithPassword } from '@/lib/db/client';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Input } from '@/components/ui/input';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Input } from '@/components/ds/input';
 import { safeNextPath, SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
 import { FIREBASE_AUTH_ENABLED } from '@/lib/auth/firebase-client';
 import { signInAndExchangeFirebaseSession } from '@/lib/auth/firebase-login-flow';
@@ -122,8 +123,8 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-8 bg-muted px-4 py-8">
-      <div className="w-full max-w-sm space-y-6 rounded-2xl bg-background p-4 shadow-lg sm:p-8">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-8 bg-ds-background px-4 py-8">
+      <div className="w-full max-w-sm space-y-6 rounded-2xl border border-ds-line bg-ds-surface p-4 shadow-lg sm:p-8">
         <div className="flex flex-col items-center gap-3 text-center">
           <SprintableLogo
             variant="stacked"
@@ -131,21 +132,17 @@ export default function LoginPage() {
             markClassName="h-14"
             wordmarkClassName="h-5"
           />
-          <p className="text-sm text-muted-foreground">{t('subtitle')}</p>
+          <p className="text-ds-body text-ds-ink-3">{t('subtitle')}</p>
         </div>
 
-        {sessionExpired && (
-          <Alert variant="warning">
-            <AlertDescription>{t('sessionExpired')}</AlertDescription>
-          </Alert>
-        )}
+        {sessionExpired && <Banner tone="note">{t('sessionExpired')}</Banner>}
 
         <div className="space-y-3">
           <Input
             type="email"
             placeholder={t('email')}
+            aria-label={t('email')}
             autoComplete="email"
-            className="h-auto px-4 py-3"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
@@ -154,8 +151,8 @@ export default function LoginPage() {
           <Input
             type="password"
             placeholder={t('password')}
+            aria-label={t('password')}
             autoComplete="current-password"
-            className="h-auto px-4 py-3"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
@@ -167,7 +164,8 @@ export default function LoginPage() {
               inputMode="numeric"
               maxLength={6}
               placeholder={t('totpPlaceholder')}
-              className="h-auto px-4 py-3 text-center text-lg font-mono tracking-widest lg:text-lg"
+              aria-label={t('totpPlaceholder')}
+              className="text-center font-mono text-lg tracking-widest lg:text-lg"
               value={totpCode}
               onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
               onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
@@ -180,31 +178,23 @@ export default function LoginPage() {
               handleLogin/handleFirebaseLogin이 재시도 시 setError(null)을 먼저 호출해 이
               단락이 매 시도마다 언마운트→리마운트되므로(토스트의 "나타남"과 동형), 동일한
               실패 사유가 연속으로 떠도 매번 새 DOM 노드로 안착해 안정적으로 낭독된다. */}
-          {error && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive">{error}</p>}
-          <button
-            onClick={handleLogin}
-            disabled={loading || !email.trim() || !password.trim()}
-            className="flex w-full min-h-[44px] items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90 disabled:opacity-50"
-          >
+          {error && <Banner tone="failed">{error}</Banner>}
+          <Button type="button" variant="primary" size="lg" className="w-full" onClick={handleLogin} disabled={loading || !email.trim() || !password.trim()}>
             {loading ? t('signingIn') : t('signIn')}
-          </button>
+          </Button>
           {FIREBASE_AUTH_ENABLED && (
-            <button
-              onClick={handleFirebaseLogin}
-              disabled={firebaseLoading || !email.trim() || !password.trim()}
-              className="flex w-full min-h-[44px] items-center justify-center rounded-lg border border-border bg-background px-4 py-3 text-sm font-medium text-foreground/80 transition hover:bg-muted/50 disabled:opacity-50"
-            >
+            <Button type="button" variant="secondary" size="lg" className="w-full" onClick={handleFirebaseLogin} disabled={firebaseLoading || !email.trim() || !password.trim()}>
               {firebaseLoading ? t('signingIn') : t('firebaseSignIn')}
-            </button>
+            </Button>
           )}
         </div>
 
         {process.env.NEXT_PUBLIC_OAUTH_ENABLED === 'true' && (
           <div className="space-y-3">
             <div className="relative flex items-center">
-              <div className="flex-grow border-t border-border/50" />
-              <span className="mx-3 flex-shrink text-xs text-muted-foreground">{t('orContinueWith')}</span>
-              <div className="flex-grow border-t border-border/50" />
+              <div className="flex-grow border-t border-ds-line" />
+              <span className="mx-3 flex-shrink text-ds-small text-ds-ink-3">{t('orContinueWith')}</span>
+              <div className="flex-grow border-t border-ds-line" />
             </div>
 
             {/* story #3118 AC0/AC2 — iOS/macOS 셸에서만 노출(showAppleLogin), Apple HIG
@@ -226,7 +216,8 @@ export default function LoginPage() {
               </a>
             )}
 
-            <a href={`/auth/login?provider=google&tos_accepted=true${nextParam ? `&next=${encodeURIComponent(nextParam)}` : ''}`} className="flex w-full min-h-[44px] items-center justify-center gap-3 rounded-lg border border-border bg-background px-4 py-3 text-sm font-medium text-foreground/80 transition hover:bg-muted/50">
+            <Button asChild variant="secondary" size="lg" className="w-full gap-3">
+            <a href={`/auth/login?provider=google&tos_accepted=true${nextParam ? `&next=${encodeURIComponent(nextParam)}` : ''}`}>
               <svg className="h-5 w-5" viewBox="0 0 24 24">
                 <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
                 <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
@@ -235,31 +226,32 @@ export default function LoginPage() {
               </svg>
               {t('google')}
             </a>
+            </Button>
 
             {/* the notice for the button above: continuing with Google (or Apple) on a first visit makes the account and records the terms (tos_accepted=true) — it stays the next sibling of those buttons */}
-            <p className="text-center text-xs text-muted-foreground" data-testid="login-terms-line">
-              {t('termsPrefix')}{' '}
-              <a href="/terms" target="_blank" className="underline hover:text-foreground/60">{t('termsOfService')}</a>
-              {' '}{t('and')}{' '}
-              <a href="/privacy" target="_blank" className="underline hover:text-foreground/60">{t('privacyPolicy')}</a>
+            <p className="flex flex-wrap items-center justify-center gap-x-1 text-center text-ds-small text-ds-ink-3" data-testid="login-terms-line">
+              <span>{t('termsPrefix')}</span>
+              <a href="/terms" target="_blank" className="inline-flex min-h-11 min-w-11 items-center justify-center underline hover:text-ds-ink">{t('termsOfService')}</a>
+              <span>{t('and')}</span>
+              <a href="/privacy" target="_blank" className="inline-flex min-h-11 min-w-11 items-center justify-center underline hover:text-ds-ink">{t('privacyPolicy')}</a>
             </p>
 
           </div>
         )}
 
-        <p className="text-center text-sm text-muted-foreground">
-          <Link href="/forgot-password" className="font-medium text-brand-text hover:text-brand-text/85">
+        <p className="flex flex-wrap items-center justify-center gap-x-1 text-center text-ds-body text-ds-ink-3">
+          <Link href="/forgot-password" className="inline-flex min-h-11 items-center font-medium text-brand-text hover:text-brand-text/85">
             {t('forgotPassword')}
           </Link>
         </p>
-        <p className="text-center text-sm text-muted-foreground">
-          {t('noAccount')}{' '}
+        <p className="flex flex-wrap items-center justify-center gap-x-1 text-center text-ds-body text-ds-ink-3">
+          <span>{t('noAccount')}</span>
           {/* story #3220 — 이 링크가 nextParam을 안 실어 비로그인 초대수락→회원가입 경로에서
               복귀 목적지가 여기서 끊겼다(로그인 페이지 자체는 next를 이미 들고 있었는데
               "회원가입"으로 넘어가는 순간 버려짐). OAuth 버튼들(위)과 동일 패턴으로 전파. */}
           <Link
             href={nextParam ? `/register?next=${encodeURIComponent(nextParam)}` : '/register'}
-            className="font-medium text-brand-text hover:text-brand-text/85"
+            className="inline-flex min-h-11 items-center font-medium text-brand-text hover:text-brand-text/85"
           >
             {t('signUp')}
           </Link>

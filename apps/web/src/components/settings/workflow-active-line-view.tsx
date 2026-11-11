@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { GitBranch, ArrowRight, ShieldOff } from 'lucide-react';
 
+import { NativeSelect } from '@/components/ds/select';
 import { fetchWithAuth } from '@/lib/db/client';
 
 /**
@@ -46,38 +47,35 @@ export function WorkflowActiveLineView({ projectId }: { projectId?: string | nul
   const steps = data?.config?.steps ?? [];
 
   return (
-    <div className="space-y-3 rounded-xl border border-border bg-muted/10 p-3">
+    <div className="space-y-3 rounded-ds-control border border-ds-line p-3">
       <div className="flex items-center gap-2">
-        <GitBranch className="size-4 shrink-0 text-muted-foreground" />
-        <p className="text-[11px] font-medium text-muted-foreground">{t('simActiveLine')}</p>
-        <select
-          value={entityType}
-          onChange={(e) => setEntityType(e.target.value)}
-          className="ml-auto h-7 rounded-md border border-border bg-background px-2 text-base lg:text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-        >
+        <GitBranch className="size-4 shrink-0 text-ds-ink-3" aria-hidden />
+        <p className="text-ds-small font-semibold text-ds-ink-2">{t('simActiveLine')}</p>
+        {/* the box that picks the line this card shows — named by the card's own title (no new word) */}
+        <NativeSelect aria-label={t('simActiveLine')} value={entityType} onChange={(e) => setEntityType(e.target.value)} className="ml-auto w-32">
           {ENTITY_TYPES.map((et) => <option key={et} value={et}>{et}</option>)}
-        </select>
+        </NativeSelect>
       </div>
 
       {loading ? (
-        <p className="text-xs text-muted-foreground">…</p>
+        <p className="text-ds-small text-ds-ink-3">…</p>
       ) : !data || !data.has_active ? (
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <ShieldOff className="size-3.5 shrink-0" />
+        <div className="flex items-center gap-1.5 text-ds-small text-ds-ink-3">
+          <ShieldOff className="size-3.5 shrink-0" aria-hidden />
           {t('activeLineNone')}
         </div>
       ) : steps.length ? (
-        <ul className="space-y-0.5">
+        <ul className="space-y-1">
           {steps.map((s, i) => (
-            <li key={i} className="flex flex-wrap items-center gap-1.5 text-xs text-foreground">
+            <li key={i} className="flex flex-wrap items-center gap-1.5 text-ds-small text-ds-ink">
               <span className="font-mono">{s.from_status ?? '—'}</span>
-              <ArrowRight className="size-3 shrink-0 text-muted-foreground" />
+              <ArrowRight className="size-3 shrink-0 text-ds-ink-3" aria-hidden />
               <span className="font-mono">{s.to_status ?? '—'}</span>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="text-xs text-muted-foreground">{t('activeLineNoSteps')}</p>
+        <p className="text-ds-small text-ds-ink-3">{t('activeLineNoSteps')}</p>
       )}
     </div>
   );

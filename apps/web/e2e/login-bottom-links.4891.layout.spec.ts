@@ -119,3 +119,44 @@ test.describe('on a desktop width · a Mac user agent', () => {
     expect(m.macOfferTop).toBeGreaterThanOrEqual(m.cardBottom);
   });
 });
+
+// story 4891 (second piece · the login on the ds parts) — the WHOLE first screen on a touch phone: every press ≥ 44 × 44 (the two fields, [로그인], [Google], the terms and privacy links, «비밀번호를 잊으셨나요?», «회원가입», the Mac app block's two links),
+// no visible text under 12 px, every box has a name, no old (non-ds) part drawn, nothing sideways — before a try and after a failed one (the failure line is the ds failed Banner).
+// Before (dev, 390 touch): 44-floor misses 4 (이용약관 41 × 14 · 개인정보처리방침 83 × 14 · 비밀번호를 잊으셨나요? 131 × 16 · 회원가입 48 × 16), 2 unnamed boxes (이메일 · 비밀번호), the old `input` part and a hand-made sign-in `<button>`.
+const measureAll = (page: Page) => page.evaluate(() => {
+  const root = document.querySelector('#root')!;
+  const vis = (e: Element) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden' && !e.closest('[aria-hidden="true"]'); };
+  const presses = [...root.querySelectorAll('button, a[href], input, select, textarea, summary')].filter(vis);
+  const small = presses.filter((e) => { const r = e.getBoundingClientRect(); return r.width < 43.5 || r.height < 43.5; }).map((e) => `${(e.getAttribute('aria-label') || e.textContent || e.tagName).trim().slice(0, 18)} ${Math.round(e.getBoundingClientRect().width)}x${Math.round(e.getBoundingClientRect().height)}`);
+  const leaves = [...root.querySelectorAll('*')].filter((e) => e.children.length === 0 && (e.textContent || '').trim() && vis(e));
+  const tiny = leaves.filter((e) => parseFloat(getComputedStyle(e).fontSize) < 12).map((e) => `${(e.textContent || '').trim().slice(0, 14)} ${getComputedStyle(e).fontSize}`);
+  const unnamed = [...root.querySelectorAll('input, select, textarea')].filter(vis).filter((e) => !(e.getAttribute('aria-label') || e.getAttribute('aria-labelledby') || ((e as HTMLInputElement).labels?.length ?? 0) > 0)).map((e) => e.getAttribute('placeholder') || e.tagName);
+  const oldSlots = [...root.querySelectorAll('[data-slot]')].map((e) => e.getAttribute('data-slot')!).filter((s) => !s.startsWith('ds-'));
+  const rawButtons = [...root.querySelectorAll('button')].filter(vis).filter((e) => !e.getAttribute('data-slot')).map((e) => (e.textContent || '').trim());
+  return { presses: presses.length, small, tiny, unnamed, oldSlots, rawButtons, overflowX: document.documentElement.scrollWidth > innerWidth + 1 };
+});
+async function expectLoginClean(page: Page, label: string) {
+  const m = await measureAll(page);
+  expect(m.small, `${label}: presses under 44 px: ${m.small.join(' · ')}`).toEqual([]);
+  expect(m.tiny, `${label}: text under 12 px: ${m.tiny.join(' · ')}`).toEqual([]);
+  expect(m.unnamed, `${label}: boxes without a name`).toEqual([]);
+  expect(m.oldSlots, `${label}: old (non-ds) parts drawn`).toEqual([]);
+  expect(m.rawButtons, `${label}: hand-made buttons`).toEqual([]);
+  expect(m.overflowX, `${label}: overflow`).toBe(false);
+  return m;
+}
+
+test.describe('the whole login on a touch phone (390 × 844) · a Mac user agent', () => {
+  test.use({ hasTouch: true, isMobile: true, userAgent: MAC_UA });
+
+  test('[SID:4891] every press is ≥ 44, every box named, nothing old — before a try and after a failed one', async ({ page }) => {
+    await open(page, 390, 844);
+    const m = await expectLoginClean(page, 'login');
+    expect(m.presses).toBeGreaterThanOrEqual(10); // 2 fields · [로그인] · [Google] · 2 notice links · 비밀번호 찾기 · 가입 · 2 Mac app links (+ the legal footer links)
+    await page.getByRole('textbox', { name: '이메일' }).fill('a@b.co');
+    await page.getByRole('textbox', { name: '비밀번호' }).fill('pw');
+    await page.getByRole('button', { name: '로그인', exact: true }).tap();
+    await expect(page.getByRole('alert')).toContainText('로그인에 실패했어요');
+    await expectLoginClean(page, 'login after a failed try');
+  });
+});
