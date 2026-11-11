@@ -26,10 +26,10 @@ async function build() {
     stdin: {
       contents: `
         import React from 'react'; import { createRoot } from 'react-dom/client'; import { NextIntlClientProvider } from 'next-intl';
-        import ko from './messages/ko.json';
+        import ko from './messages/ko.json'; import en from './messages/en.json';
         import RegisterPage from './src/app/register/page';
-        window.__mount = () => {
-          createRoot(document.getElementById('root')).render(React.createElement(NextIntlClientProvider, { locale: 'ko', messages: ko, timeZone: 'Asia/Seoul' }, React.createElement(RegisterPage)));
+        window.__mount = (l) => {
+          createRoot(document.getElementById('root')).render(React.createElement(NextIntlClientProvider, { locale: l, messages: l === 'en' ? en : ko, timeZone: 'Asia/Seoul' }, React.createElement(RegisterPage)));
         };`,
       resolveDir: WEB, loader: 'tsx',
     },
@@ -52,21 +52,21 @@ async function build() {
   return built;
 }
 
-async function open(page: Page, width: number, height: number) {
+async function open(page: Page, width: number, height: number, locale: 'ko' | 'en' = 'ko') {
   const { js, css } = await build();
   await page.setViewportSize({ width, height });
   await page.unrouteAll();
   await page.route('http://preview.test/**', async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === '/') {
-      return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body class="bg-background text-foreground"><div id="root"></div></body></html>` });
+      return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="${locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body class="bg-background text-foreground"><div id="root"></div></body></html>` });
     }
     return route.fulfill({ status: 404, body: '{}' });
   });
   await page.goto('about:blank');
   await page.goto('http://preview.test/');
   await page.addScriptTag({ content: js });
-  await page.evaluate(() => (window as unknown as { __mount: () => void }).__mount());
+  await page.evaluate((l) => (window as unknown as { __mount: (l: string) => void }).__mount(l), locale);
   await page.getByTestId('register-submit').waitFor();
 }
 
@@ -154,5 +154,28 @@ test.describe('the consent line on a phone (390 × 844)', () => {
     await page.locator('[data-testid="register-consent"]').getByRole('link', { name: '이용약관' }).tap();
     await popup;
     await expect(box).toHaveAttribute('aria-checked', 'false');
+  });
+});
+
+// story 4891 (dev «후» 11-11): the English screen is longer than the Korean one — on dev (en-US) the page was 864 px on a 844 px phone (the consent row + the documents wrapped); the one-screen rule holds in BOTH languages.
+test.describe('the same one screen in English (390 × 844)', () => {
+  test.use({ hasTouch: true, isMobile: true });
+  test('[SID:4891] en: the terms line, Google, the three fields, [Sign up] and the footer links are all on the first screen — no scroll', async ({ page }) => {
+    await open(page, 390, 844, 'en');
+    const m = await where(page);
+    expect(m.submit!.bottom, `the sign-up button ends at ${m.submit!.bottom}px of a ${m.vh}px screen`).toBeLessThanOrEqual(m.vh);
+    expect(m.docH, `the page is ${m.docH}px on a ${m.vh}px screen`).toBeLessThanOrEqual(m.vh + 1);
+    expect(m.overflowX).toBe(false);
+  });
+
+  // dev's real fonts are wider than this harness's: the footer's business-info lines wrap more there (dev 11-11: footer 158 px → page 864 on a 844 screen). The harness page must therefore leave slack, not just fit.
+  test('[SID:4891] en + ko: the page leaves ≥ 24 px of slack under the one screen (a wider real font wraps the footer more)', async ({ page }) => {
+    for (const locale of ['en', 'ko'] as const) {
+      await open(page, 390, 844, locale);
+      // the page fills the screen (min-h-screen), so its own height says nothing — the content's extent is what counts: the footer's bottom edge + the page's bottom padding
+      const content = await page.evaluate(() => { const root = document.querySelector('[data-testid="register-consent"]')!.closest('.min-h-screen') as HTMLElement; const last = root.lastElementChild as HTMLElement; return Math.round(last.getBoundingClientRect().bottom + scrollY + parseFloat(getComputedStyle(root).paddingBottom)); });
+      const m = await where(page);
+      expect(content, `${locale}: the content ends at ${content}px of a ${m.vh}px screen`).toBeLessThanOrEqual(m.vh - 24);
+    }
   });
 });
