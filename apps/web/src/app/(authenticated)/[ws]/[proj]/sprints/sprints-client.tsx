@@ -7,6 +7,7 @@ import { Plus, X, Play, StopCircle, ChevronRight, Trash2, AlertTriangle, Target,
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Button as DsButton } from '@/components/ds/button';
+import { Card } from '@/components/ds/card';
 import { Chip } from '@/components/ds/chip';
 import { IconButton } from '@/components/ds/icon-button';
 import { Metric } from '@/components/ds/metric';
@@ -911,11 +912,12 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
 
       {/* Goal */}
       {selected.goal ? (
-        <p className="mb-3 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm text-foreground">
+        // story #4888 — 손 카드(rounded-lg border bg-muted/20) → ds Card + 토큰(ds에 짝이 없는 자리라 장 주인이 꼴을 정함: 한 단계 올린 면 + 헤어라인, 라벨은 ink-3).
+        <Card className="mb-3 px-3 py-2 text-ds-body">
           {/* story #3776(1층B) — "목표", sprints ns의 기존 goalLabel 키 재사용(같은 화면의 스프린트 목표). */}
-          <span className="mr-1.5 inline-flex items-center gap-1 align-middle text-xs font-medium text-muted-foreground"><Target className="size-3 shrink-0" />{t('goalLabel')}</span>
+          <span className="mr-1.5 inline-flex items-center gap-1 align-middle text-ds-small font-medium text-ds-ink-3"><Target className="size-3 shrink-0" />{t('goalLabel')}</span>
           {selected.goal}
-        </p>
+        </Card>
       ) : null}
 
       {/* Plan stats — story #4888: 손으로 만든 rounded-md border 칸 → ds Chip(아이콘은 장식, 뜻은 글이 싣는다). 값이 있을 때만(예전과 같은 조건). */}
@@ -951,13 +953,14 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       {/* E-SPRINT-LOOP FE(278314e9) §4④ — 활성화 게이트: planning + 생존 가설 0이면 질문 안내(마찰
           아님). 422 HYPOTHESIS_REQUIRED_FOR_ACTIVATION을 맞은 뒤에도 동일 배너로 graceful 흡수. */}
       {selected.status === 'planning' && (hypotheses.length === 0 || activateGateBlocked) ? (
-        <div className="mb-4 space-y-2 rounded-xl border border-dashed border-info-border bg-info-tint/20 p-3">
+        // story #4888 — 손 카드(rounded-xl 점선) → 점선 ds Card(안내 토큰 info). 안의 단추는 ds Button.
+        <Card className="mb-4 space-y-2 border-dashed border-ds-info/40 bg-ds-info-soft p-3">
           <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
             ✦ {t('declareGateQuestion')}
           </p>
           <p className="text-editorial-meta leading-snug text-muted-foreground">{t('declareGateHint')}</p>
           {!addingHypothesis ? (
-            <Button size="sm" variant="outline" onClick={() => setAddingHypothesis(true)}>{t('declareAddCta')}</Button>
+            <DsButton variant="secondary" onClick={() => setAddingHypothesis(true)}>{t('declareAddCta')}</DsButton>
           ) : (
             <div className="space-y-2">
               <HypothesisDeclarationSection
@@ -969,16 +972,16 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
               />
               <div className="flex gap-2">
                 {/* story #4370 — 선언 초안을 버릴 보이는 길(패널을 닫거나 옮겨도 초안은 남는다). */}
-                <Button size="sm" variant="ghost" onClick={() => { clearQuickDeclarationsDraft(); setAddingHypothesis(false); }} disabled={activating}>
+                <DsButton variant="quiet" onClick={() => { clearQuickDeclarationsDraft(); setAddingHypothesis(false); }} disabled={activating}>
                   {t('cancel')}
-                </Button>
-                <Button size="sm" className="flex-1" onClick={() => void handleQuickAddHypotheses()} disabled={activating || quickDeclarations.filter(isDeclarationComplete).length === 0}>
+                </DsButton>
+                <DsButton variant="primary" className="flex-1" onClick={() => void handleQuickAddHypotheses()} disabled={activating || quickDeclarations.filter(isDeclarationComplete).length === 0}>
                   {activating ? '...' : t('declareSectionTitle')}
-                </Button>
+                </DsButton>
               </div>
             </div>
           )}
-        </div>
+        </Card>
       ) : null}
 
       {/* sprint 상세 loop cockpit 최소(§10 P0) — hypotheses 있으면 신규 cockpit이 레거시 단일
@@ -1042,36 +1045,34 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
           <p className="text-xs italic text-muted-foreground">{t('noSprintStories')}</p>
         ) : (
           <>
-            <ul className="space-y-1.5">
+            {/* story #4888 — 손 카드 li → ds ListRow(compact): 제목 + SP + (닫히지 않은 스프린트면) 이름 있는 연결 해제 아이콘 단추(폰 44). */}
+            <ul>
               {sprintStories.map((story) => (
-                <li key={story.id} className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
-                  <span className="text-sm text-foreground truncate">{story.title}</span>
-                  <div className="flex shrink-0 items-center gap-2">
-                    {story.story_points != null ? <span className="text-xs text-muted-foreground">{story.story_points}SP</span> : null}
-                    {selected.status !== 'closed' ? (
-                      <button
-                        type="button"
-                        onClick={() => void handleUnassignStory(story)}
-                        className="text-xs text-muted-foreground hover:text-destructive"
-                        title={t('unassign')}
-                      >
-                        <X className="size-3" />
-                      </button>
-                    ) : null}
-                  </div>
+                <li key={story.id}>
+                  <ListRow
+                    density="compact"
+                    title={story.title}
+                    trailing={
+                      <>
+                        {story.story_points != null ? <span className="font-mono text-ds-mono-md text-ds-ink-3">{story.story_points}SP</span> : null}
+                        {selected.status !== 'closed' ? (
+                          <IconButton icon="close" label={t('unassign')} onClick={() => void handleUnassignStory(story)} className="hover:text-ds-failed" />
+                        ) : null}
+                      </>
+                    }
+                  />
                 </li>
               ))}
             </ul>
             {sprintStoriesHasMore && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="mt-1 w-full text-xs text-muted-foreground"
+              <DsButton
+                variant="quiet"
+                className="mt-1 w-full"
                 disabled={sprintStoriesLoadingMore}
                 onClick={() => void loadMoreSprintStories()}
               >
                 {sprintStoriesLoadingMore ? tc('loading') : tc('loadMore')}
-              </Button>
+              </DsButton>
             )}
             {sprintStoriesLoadMoreError ? (
               <p className="mt-1 text-xs text-destructive" role="alert">{t('loadMoreError')}</p>
@@ -1084,30 +1085,27 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       {selected.status !== 'closed' && backlogStories.length > 0 ? (
         <div className="space-y-2">
           <p className="text-xs font-medium text-muted-foreground">{t('backlog')}</p>
-          <ul className="space-y-1.5">
+          {/* story #4888 — 점선 손 카드 li → ds ListRow(compact) + 배정 ds Button. */}
+          <ul>
             {backlogStories.map((story) => (
-              <li key={story.id} className="flex items-center justify-between rounded-lg border border-dashed border-border px-3 py-2 hover:border-primary/40 hover:bg-primary/5 transition-colors">
-                <span className="text-sm text-muted-foreground truncate">{story.title}</span>
-                <button
-                  type="button"
-                  onClick={() => void handleAssignStory(story)}
-                  className="shrink-0 text-xs font-medium text-primary hover:underline"
-                >
-                  {t('assign')}
-                </button>
+              <li key={story.id}>
+                <ListRow
+                  density="compact"
+                  title={story.title}
+                  trailing={<DsButton variant="secondary" onClick={() => void handleAssignStory(story)}>{t('assign')}</DsButton>}
+                />
               </li>
             ))}
           </ul>
           {backlogHasMore && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-full text-xs text-muted-foreground"
+            <DsButton
+              variant="quiet"
+              className="w-full"
               disabled={backlogLoadingMore}
               onClick={() => void loadMoreBacklog()}
             >
               {backlogLoadingMore ? tc('loading') : tc('loadMore')}
-            </Button>
+            </DsButton>
           )}
           {backlogLoadMoreError ? (
             <p className="text-xs text-destructive" role="alert">{t('loadMoreError')}</p>

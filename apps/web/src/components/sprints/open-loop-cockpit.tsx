@@ -1,7 +1,8 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ds/card';
+import { Chip } from '@/components/ds/chip';
 import { cn } from '@/lib/utils';
 import type { RetroHypothesisResult as SprintHypothesisResult } from '@/services/retro-session';
 
@@ -52,31 +53,32 @@ export function OpenLoopCockpit({
           const remaining = h.measure_after ? daysUntil(h.measure_after) : null;
           const isMeasuring = h.status === 'measuring';
           return (
-            <div key={h.id} className={cn('rounded-lg border border-border bg-card p-2.5', isMeasuring && 'border-dashed')}>
+            // story #4888 — 손 카드(rounded-lg border bg-card) → ds Card(측정 중은 점선), 판정 배지 → ds Chip(SOUL-LOCK: 검증됨만 done 색, 반증 · 폐기는 실패색을 입히지 않는 중립), 지표 · 실험 → ds Chip.
+            <Card key={h.id} className={cn('p-2.5', isMeasuring && 'border-dashed')}>
               <div className="flex items-start justify-between gap-2">
-                <p className="flex-1 text-xs font-medium leading-snug text-foreground">{h.statement}</p>
-                <Badge variant={h.status === 'verified' ? 'success' : isMeasuring ? 'outline' : 'chip'} className={isMeasuring ? 'border-dashed text-micro' : 'text-micro'}>
+                <p className="flex-1 text-ds-small font-medium leading-snug text-ds-ink">{h.statement}</p>
+                <Chip tone={h.status === 'verified' ? 'done' : 'neutral'} className={isMeasuring ? 'border-dashed' : undefined}>
                   {tr(VERDICT_KEY[h.status])}
-                </Badge>
+                </Chip>
               </div>
-              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-micro text-muted-foreground">
-                {h.metric ? <span className="rounded bg-muted/50 px-1.5 py-0.5 font-medium text-foreground">{h.metric}</span> : null}
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-ds-small text-ds-ink-3">
+                {h.metric ? <Chip>{h.metric}</Chip> : null}
                 {remaining != null ? (
                   <span className="flex items-center gap-1">
-                    <span className="size-1.5 rounded-full border border-dashed border-muted-foreground" aria-hidden />
+                    <span className="size-1.5 rounded-full border border-dashed border-ds-ink-3" aria-hidden />
                     {remaining > 0 ? t('cockpitMeasureCountdown', { days: remaining }) : t('cockpitMeasureOverdue')}
                   </span>
                 ) : null}
               </div>
-            </div>
+            </Card>
           );
         })}
       </div>
       {storyTitles.length > 0 ? (
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-micro font-semibold uppercase tracking-[0.16em] text-muted-foreground">{t('cockpitExperimentsLabel')}</span>
+          <span className="text-ds-small font-semibold text-ds-ink-3">{t('cockpitExperimentsLabel')}</span>
           {storyTitles.map((title) => (
-            <span key={title} className="rounded-md border border-border bg-background px-1.5 py-0.5 text-micro text-muted-foreground">{title}</span>
+            <Chip key={title} className="max-w-full overflow-hidden text-ellipsis">{title}</Chip>
           ))}
         </div>
       ) : null}
