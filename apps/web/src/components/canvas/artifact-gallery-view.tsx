@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { ArtifactsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 import { PageFrame } from '@/components/ds/page-frame';
 import { PageHead } from '@/components/ds/page-head';
 import { Button } from '@/components/ds/button';
@@ -80,9 +81,6 @@ async function fetchGalleryData(projectId: string): Promise<{ artifacts: BeVisua
     },
   };
 }
-
-/** 4910 — 갤러리 틀 한 곳: 위 막대 제목(`TopBarSlot` — 모든 갈래에서 그린다) + 한 쪽 틀(`PageFrame wide`) + 머리(설명 + 개수 + «그리기 · 가져오기» 늘). 본문에 제목(h1)은 없다. */
-const galleryTitle = (label: string) => <h1 className="text-sm font-medium">{label}</h1>;
 
 /** 카드 얼굴 · 썸네일 우물 · 바탕 칸의 층 — 층 표 이름 그대로(styles/layer-rule.test.ts가 같은 이름과 층 사이 간격을 지킨다). */
 export const ARTIFACT_CARD_FACE = LAYER.rowOthers;
@@ -327,7 +325,8 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
 
   return (
     <PageFrame width="wide" data-testid="artifact-gallery">
-      <TopBarSlot title={galleryTitle(t('galleryTitle'))} showContextChip />
+      {/* 4910 — 제목은 위 막대 한 곳(`ArtifactsTopBarTitle` — 로딩 폴백 loading.tsx와 같은 정의). 본문에 제목(h1)은 없다. */}
+      <TopBarSlot title={<ArtifactsTopBarTitle />} showContextChip />
 
       {creating ? (
         <ArtifactEditor
@@ -379,7 +378,7 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
                   className="w-auto min-w-44 max-w-full"
                 >
                   {groups.map((g) => (
-                    <option key={g.id} value={g.id}>{g.label} ({g.artifacts.length})</option>
+                    <option key={g.id} value={g.id}>{t('galleryGroupOption', { label: g.label, count: g.artifacts.length })}</option>
                   ))}
                 </NativeSelect>
               </div>

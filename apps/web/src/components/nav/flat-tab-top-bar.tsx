@@ -160,6 +160,15 @@ export function StorageTopBarTitle() {
   );
 }
 
+/**
+ * «산출물»(`[ws]/[proj]/artifacts`) 상단바 제목 — 이름 하나(4910 · 4913 규칙: 제목은 위 막대 한 곳). 본문 머리에는 설명 · 개수 · «그리기 · 가져오기»만 선다.
+ * 화면(`artifact-gallery-view`)과 로딩 폴백(`loading.tsx`)이 이 한 정의를 같이 쓴다.
+ */
+export function ArtifactsTopBarTitle() {
+  const tCanvas = useTranslations('canvas');
+  return <h1 className="text-sm font-medium">{tCanvas('galleryTitle')}</h1>;
+}
+
 /** 결재 폴백 제목 — 도착 탭(?tab=)의 이름(수는 아직 모름 → 안 붙임). */
 function InboxFallbackTitle() {
   const tab = useSearchParams().get('tab') ?? 'notifications';
@@ -183,6 +192,7 @@ export const FLAT_ROUTE_TOP_BAR = {
   '[ws]/[proj]/loops': { Title: LoopsTopBarTitle, showContextChip: true },
   '[ws]/[proj]/docs': { Title: DocsTopBarTitle, showContextChip: true },
   '[ws]/[proj]/storage': { Title: () => <StorageTopBarTitle />, showContextChip: true },
+  '[ws]/[proj]/artifacts': { Title: () => <ArtifactsTopBarTitle />, showContextChip: true },
   activity: { Title: ActivityTopBarTitle, showContextChip: true },
   'organization/workforce': { Title: AgentsTopBarTitle, showContextChip: true },
   // 4913 — 조직 구역 «한 쪽 틀» 화면: 제목은 위 막대 · 칩은 조직 화면이라 없음(화면의 OrgScreenTitle과 같다).

@@ -6868,6 +6868,7 @@
     "galleryCount": "{count}개",
     "galleryGroupBy": "묶어서 보기",
     "galleryGroupSelectLabel": "그룹",
+    "galleryGroupOption": "{label} · {count}개",
     "viewerCanvasHint": "드래그로 이동, 휠로 확대·축소해요",
     "viewerCanvasHintTouch": "한 손가락으로 이동하고, 두 손가락으로 확대·축소해요. 더블탭하면 화면에 맞춰요.",
     "viewerFitAction": "전체 보기",

@@ -178,7 +178,7 @@ describe('ArtifactGalleryView (story a15cea4f)', () => {
     const select = filters.querySelector('select') as HTMLSelectElement;
     expect(select).not.toBeNull();
     expect(document.querySelector(`label[for="${select.id}"]`)?.textContent).toBe('그룹');
-    expect([...select.options].map((o) => o.textContent)).toEqual(['온보딩 캠페인 (1)', '무소속 (1)']);
+    expect([...select.options].map((o) => o.textContent)).toEqual(['온보딩 캠페인 · 1개', '무소속 · 1개']);
   });
 
   it('4910 — picking another group in the select shows that group\'s cards only', async () => {
