@@ -181,7 +181,7 @@ export function StorageFolderTree({
   );
 
   return (
-    <aside className="flex min-h-0 flex-col border-r border-ds-line bg-ds-surface">
+    <aside className="flex min-h-0 w-full flex-col border-r border-ds-line bg-ds-surface">
       {/* 프로젝트 필터(어포던스 — 전환은 앱 레벨 switcher 담당) */}
       <div className="px-3 pb-2 pt-3">
         <button

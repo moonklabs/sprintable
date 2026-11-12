@@ -43,7 +43,7 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
 
   if (!asset) {
     return (
-      <section className="flex h-full min-h-0 flex-col items-center justify-center border-l border-ds-line bg-ds-surface p-6">
+      <section className="flex h-full min-h-0 flex-col items-center justify-center bg-ds-surface p-6">
         <EmptyState title={t('selectPrompt')} className="bg-transparent" />
       </section>
     );
@@ -54,7 +54,7 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
   const isImage = asset.content_type.startsWith('image/');
 
   return (
-    <section className="flex h-full min-h-0 flex-col border-l border-ds-line bg-ds-surface">
+    <section className="flex h-full min-h-0 flex-col bg-ds-surface">
       {/* preview */}
       <div className="relative grid h-[168px] shrink-0 place-items-center overflow-hidden border-b border-ds-line bg-ds-surface-highest">
         {isImage ? (

@@ -17,7 +17,7 @@ import { ListRow } from '../list-row';
 import { PageFrame } from '../page-frame';
 import { PageHead } from '../page-head';
 import { RowList, RowListItem } from '../row-list';
-import { Menu, MenuContent, MenuGroup, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from '../menu';
+import { ContextMenu, ContextMenuTrigger, Menu, MenuContent, MenuGroup, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from '../menu';
 import { NativeSelect } from '../select';
 import { Radio, RadioGroup } from '../radio';
 import { SectionHeader } from '../section-header';
@@ -221,6 +221,18 @@ export function ShowcasePartsA() {
           </Menu>
           <span className="text-ds-small text-ds-ink-3">단축키 표기:</span>
           <Kbd>⌘</Kbd><Kbd>K</Kbd>
+        </Row>
+        <Row>
+          {/* 우클릭 메뉴 — 같은 Menu 부품(MenuContent · MenuItem)을 마우스 자리에 연다(데스크톱 손길; 같은 항목은 늘 ⋯ 단추에도 있어야 한다). */}
+          <ContextMenu>
+            <ContextMenuTrigger className="rounded-ds-panel border border-dashed border-ds-line-control px-4 py-3 text-ds-small text-ds-ink-2">여기를 오른쪽 단추로 누르기</ContextMenuTrigger>
+            <MenuContent>
+              <MenuItem icon="open_in_full">열기</MenuItem>
+              <MenuItem icon="download">내려받기</MenuItem>
+              <MenuSeparator />
+              <MenuItem icon="delete" variant="danger">삭제</MenuItem>
+            </MenuContent>
+          </ContextMenu>
         </Row>
       </Block>
       <Block title="Skeleton — 불러오는 중(장식 막대 + 읽히는 안내 하나)">

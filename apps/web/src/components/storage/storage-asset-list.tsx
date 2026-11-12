@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
@@ -40,6 +40,8 @@ interface StorageAssetListProps {
   hasMore: boolean;
   loadingMore: boolean;
   onLoadMore: () => void;
+  /** 4910 — 왼쪽 폴더 나무(lg 이상). 머리 줄 · 필터 줄 «아래», 목록 «옆»에 서서 한 장의 내용 칸 안에 들어간다. */
+  sidebar?: ReactNode;
 }
 
 // story #4277 — 칸 정의는 행과 한 상수(ASSET_ROW_GRID · storage-asset-row.tsx).
@@ -76,6 +78,7 @@ export function StorageAssetList({
   hasMore,
   loadingMore,
   onLoadMore,
+  sidebar,
 }: StorageAssetListProps) {
   const t = useTranslations('storage');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -126,7 +129,7 @@ export function StorageAssetList({
   };
 
   return (
-    <section className={cn('relative flex min-h-0 min-w-0 flex-col', LAYER.panel)} data-testid="storage-asset-list">
+    <section className={cn('relative flex h-full min-h-0 min-w-0 flex-col', LAYER.panel)} data-testid="storage-asset-list">
       {/* 머리 줄 — «N개 자산 · 용량» + 주 행동(업로드). 제목은 위 막대 한 곳. */}
       <div className="flex items-center gap-3 border-b border-ds-line px-4 py-3" data-testid="storage-head">
         <p className="m-0 min-w-0 truncate text-ds-body font-semibold text-ds-ink-2" data-testid="storage-summary" title={summaryText}>
@@ -197,10 +200,12 @@ export function StorageAssetList({
         </div>
       </div>
 
+      <div className="flex min-h-0 flex-1">
+        {sidebar ? <div className="hidden w-[248px] shrink-0 lg:flex" data-testid="storage-folder-tree-column">{sidebar}</div> : null}
       {/* body */}
       {/* story #4277 — e2e가 행 출현을 기다리지 않고 «다 불러온 뒤 한 번 세도록» 지금 상태를 싣는다(행 0이면 즉시 건너뜀). */}
       <div
-        className="focus-inset min-h-0 flex-1 overflow-auto p-4"
+        className="focus-inset min-h-0 min-w-0 flex-1 overflow-auto p-4"
         data-testid="storage-asset-list-body"
         data-state={loading ? 'loading' : error ? 'error' : assets.length === 0 ? 'empty' : 'rows'}
       >
@@ -280,6 +285,7 @@ export function StorageAssetList({
             ) : null}
           </>
         )}
+      </div>
       </div>
 
       {dragCount !== null ? (

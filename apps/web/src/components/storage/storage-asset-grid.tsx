@@ -37,7 +37,8 @@ export function StorageAssetGrid({ assets, selectedAssetId, onSelect, onDelete, 
         return (
           <ContextMenu key={asset.id}>
             <ContextMenuTrigger
-              render={<button type="button" />}
+              // 이름 = 파일 이름(카드 안 글은 사용처 수 · 용량 · 올린 사람이라 이름에 섞이지 않게) — 카드마다 다른 이름.
+              render={<button type="button" aria-label={asset.name} />}
               onClick={() => onSelect(asset)}
               onDoubleClick={() => onSelect(asset)}
               onKeyDown={(e: React.KeyboardEvent<HTMLElement>) => {

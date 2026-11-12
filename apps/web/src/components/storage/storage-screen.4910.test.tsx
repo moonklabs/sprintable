@@ -145,6 +145,9 @@ describe('층 · 크기', () => {
     expect(c1).toEqual(expect.arrayContaining(['bg-ds-action-soft', 'ring-ds-action']));
     expect(c1).not.toContain('bg-ds-surface-high');
     expect(r1!.getAttribute('aria-pressed')).toBe('true');
+    // 폰 눌림: ⋯ 단추는 겉 26이지만 ::after가 사방 9px 넓혀 44×44(칸 폭 30 안에서)
+    const kebab = r0!.querySelector<HTMLElement>('[aria-label$="작업"]')!;
+    expect(kebab.className.split(/\s+/)).toEqual(expect.arrayContaining(['size-[26px]', "after:content-['']", 'after:-inset-[9px]']));
   });
 
   it('⭐목록 틀 = 내용 칸(ds-surface) · 옛 토큰(bg-card · border-border · text-muted-foreground) 없음', async () => {
@@ -159,6 +162,7 @@ describe('층 · 크기', () => {
     const card = container.querySelector<HTMLElement>('[data-testid="storage-asset-grid"] > button')!;
     expect(card.className.split(/\s+/)).toEqual(expect.arrayContaining(['bg-ds-surface-high', 'min-h-ds-touch']));
     expect(card.querySelector('.bg-ds-surface-highest')).not.toBeNull();
+    expect(card.getAttribute('aria-label')).toBe('brief.pdf'); // 카드마다 다른 이름(반복 행 액션 이름 가드)
   });
 });
 

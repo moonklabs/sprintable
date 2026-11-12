@@ -418,58 +418,60 @@ export function StorageView({ projectId }: { projectId: string }) {
         </Button>
       </div>
 
+      {/* 4910 — 층: 바탕(ds-background) 위에 «내용 칸» 한 장(머리 줄 → 필터 줄 → 폴더 나무 + 목록)과 오른쪽 상세 칸. 칸마다 둥근 틀 + 경계. */}
       <div
         className={cn(
-          'grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)]',
-          supportsInlinePanel
-            ? 'lg:grid-cols-[248px_minmax(0,1fr)_372px]'
-            : 'lg:grid-cols-[248px_minmax(0,1fr)]',
+          'grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] gap-2 p-2',
+          supportsInlinePanel && 'lg:grid-cols-[minmax(0,1fr)_372px]',
         )}
       >
-        <div className="hidden min-h-0 lg:contents" data-testid="storage-folder-tree-column">
-          <StorageFolderTree
-            folders={folders}
-            selectedFolderId={selectedFolderId}
-            onSelectFolder={setSelectedFolderId}
-            projectId={projectId}
-            projectName={projectName}
-            folderSearch={folderSearch}
-            onFolderSearchChange={setFolderSearch}
-            onCreateFolder={handleCreateFolder}
+        <div className="min-h-0 min-w-0 overflow-hidden rounded-ds-panel border border-ds-line" data-testid="storage-panel">
+          <StorageAssetList
+            assets={items}
+            summaryText={summaryText}
+            sidebar={
+              <StorageFolderTree
+                folders={folders}
+                selectedFolderId={selectedFolderId}
+                onSelectFolder={setSelectedFolderId}
+                projectId={projectId}
+                projectName={projectName}
+                folderSearch={folderSearch}
+                onFolderSearchChange={setFolderSearch}
+                onCreateFolder={handleCreateFolder}
+              />
+            }
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+            search={search}
+            onSearchChange={setSearch}
+            sort={sort}
+            onSortChange={handleSortChange}
+            selectedAssetId={selectedAssetId}
+            onSelectAsset={handleSelectAsset}
+            onDeleteAsset={handleRequestDelete}
+            onDownloadAsset={handleDownloadAsset}
+            onUploadFile={handleUploadFile}
+            resolveFolderLabel={resolveFolderLabel}
+            loading={loading}
+            error={error}
+            onRetry={handleRetry}
+            isSearchActive={effectiveSearch.length > 0}
+            hasMore={nextCursor != null}
+            loadingMore={loadingMore}
+            onLoadMore={handleLoadMore}
           />
         </div>
 
-        <StorageAssetList
-          assets={items}
-          summaryText={summaryText}
-          viewMode={viewMode}
-          onViewModeChange={setViewMode}
-          search={search}
-          onSearchChange={setSearch}
-          sort={sort}
-          onSortChange={handleSortChange}
-          selectedAssetId={selectedAssetId}
-          onSelectAsset={handleSelectAsset}
-          onDeleteAsset={handleRequestDelete}
-          onDownloadAsset={handleDownloadAsset}
-          onUploadFile={handleUploadFile}
-          resolveFolderLabel={resolveFolderLabel}
-          loading={loading}
-          error={error}
-          onRetry={handleRetry}
-          isSearchActive={effectiveSearch.length > 0}
-          hasMore={nextCursor != null}
-          loadingMore={loadingMore}
-          onLoadMore={handleLoadMore}
-        />
-
         {supportsInlinePanel ? (
-          <StorageDetailPanel
-            asset={selectedAsset}
-            folderLabel={resolveFolderLabel(selectedAsset?.folder_id ?? null)}
-            onDownload={handleDownloadAsset}
-            onRequestDelete={handleRequestDelete}
-          />
+          <div className="min-h-0 overflow-hidden rounded-ds-panel border border-ds-line">
+            <StorageDetailPanel
+              asset={selectedAsset}
+              folderLabel={resolveFolderLabel(selectedAsset?.folder_id ?? null)}
+              onDownload={handleDownloadAsset}
+              onRequestDelete={handleRequestDelete}
+            />
+          </div>
         ) : null}
       </div>
 
