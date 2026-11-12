@@ -87,9 +87,12 @@ function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
 
   return (
     // story #4762 (AC3) — the round support button (support-widget-launcher.tsx · 48px · fixed bottom-right) sat on [Send] on a phone; the row keeps
-    // that corner free below `lg` (the content is centered with room on both sides from `lg`). 16px column padding + 56px = 72px ≥ 48px + 16px offset + 8px gap.
+    // that corner free below `lg`. 16px column padding + 56px = 72px ≥ 48px + 16px offset + 8px gap.
+    // story 4906 — «the content is centered with room on both sides from `lg`» was only true on a wide screen: at 1100px (the Mac app's default window) the row runs to the
+    // right edge and the button sat on [Send] again. From `lg` the same 56px is kept free, but only while the button is drawn (`<html data-support-launcher>`, the
+    // launcher's SUPPORT_LAUNCHER_ATTR — a class literal on purpose, Tailwind reads it as written): a person who finished the onboarding has no button and loses no width.
     <>
-    <form onSubmit={handleSubmit} className="flex items-center gap-2 border-t border-border pt-4 pe-14 lg:pe-0" data-testid="today-instruction-form">
+    <form onSubmit={handleSubmit} className="flex items-center gap-2 border-t border-border pt-4 pe-14 lg:pe-0 lg:[:root[data-support-launcher]_&]:pe-14" data-testid="today-instruction-form">
       <Input
         ref={inputRef}
         value={value}
@@ -101,7 +104,7 @@ function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
       />
       <Button type="submit" size="sm" disabled={!value.trim() || sending} aria-busy={sending}>{t('instructionSendButton')}</Button>
     </form>
-    {failed ? <p role={failed === 'elsewhere' ? 'status' : 'alert'} data-testid="today-instruction-failed" className={`mt-2 pe-14 text-xs lg:pe-0 ${failed === 'elsewhere' ? 'text-muted-foreground' : 'text-destructive'}`}>{failed === 'unknown' ? t('instructionSendUnknown') : failed === 'elsewhere' ? t('instructionSentElsewhere') : t('instructionSendFailed')}</p> : null}
+    {failed ? <p role={failed === 'elsewhere' ? 'status' : 'alert'} data-testid="today-instruction-failed" className={`mt-2 pe-14 text-xs lg:pe-0 lg:[:root[data-support-launcher]_&]:pe-14 ${failed === 'elsewhere' ? 'text-muted-foreground' : 'text-destructive'}`}>{failed === 'unknown' ? t('instructionSendUnknown') : failed === 'elsewhere' ? t('instructionSentElsewhere') : t('instructionSendFailed')}</p> : null}
     </>
   );
 }

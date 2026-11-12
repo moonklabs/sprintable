@@ -661,6 +661,9 @@ describe('OrgBriefingShell — story #4762 AC3 지원 버튼이 [보내기]를 �
     const form = container.querySelector('[data-testid="today-instruction-form"]') as HTMLElement;
     expect(form.className).toMatch(/(^|\s)pe-14(\s|$)/);
     expect(form.className).toMatch(/(^|\s)lg:pe-0(\s|$)/);
+    // story 4906 — «from lg the row is free» was only true on a wide screen: at 1100px (the Mac app's default window) the row runs to the right edge and the button sat on [Send].
+    // From lg the same 56px is kept free while the button is drawn (`<html data-support-launcher>`), and only then.
+    expect(form.className).toContain('lg:[:root[data-support-launcher]_&]:pe-14');
     // the input is w-full: a wrapping row would push [Send] to a second line (codex 4762) — one row, the failure line sits BELOW the form
     expect(form.className).not.toMatch(/flex-wrap/);
   });
