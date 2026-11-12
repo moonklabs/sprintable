@@ -2,7 +2,8 @@
 
 import { useState, useCallback, useEffect, useRef, useId } from 'react';
 import { useTranslations } from 'next-intl';
-import { Node, mergeAttributes } from '@tiptap/core';
+import { mergeAttributes } from '@tiptap/core';
+import CodeBlock from '@tiptap/extension-code-block';
 import { ReactNodeViewRenderer, NodeViewWrapper, NodeViewContent, type ReactNodeViewProps } from '@tiptap/react';
 import { ChevronDown } from 'lucide-react';
 import {
@@ -266,14 +267,16 @@ function CodeBlockView(props: ReactNodeViewProps) {
   return <ShikiBlockView {...props} />;
 }
 
-export const CodeBlockWithCopy = Node.create({
-  name: 'codeBlock',
-  group: 'block',
-  content: 'text*',
-  marks: '',
-  code: true,
-  defining: true,
-
+/**
+ * 4914 — 코드 블록 = 복사 단추 · 언어 고르개 · Mermaid 보기를 입힌 «코드 블록 확장 자체의 이어받음(extend)».
+ * 예전(2026-04-18 218ed0cea)엔 `Node.create`로 노드를 새로 만들었다 — 그러면 TipTap 코드 블록이 거저 주는 것(`toggleCodeBlock` · `setCodeBlock` 명령, ``` · ~~~ 입력 규칙,
+ * Mod-Alt-c · Backspace · 세 번 Enter · ↓ 로 나가기, VS Code 붙여넣기)이 하나도 없어 «/코드 블록» · 도구줄 단추가 `toggleCodeBlock is not a function`으로 던졌고
+ * ```로도 새 코드 블록을 못 만들었다(기존 문서에서 불러온 것만 보임 — 7개월).
+ * 그래서 명령 · 규칙 · 단축키는 손으로 덧붙이지 않고 확장에서 그대로 받고, 여기서는 이 화면이 «다르게» 하는 것만 덮는다:
+ * 언어 속성을 `data-language`(pre)와 `<code class="language-…">` 양쪽에서 읽고 쓰는 것(FIX-3b — Turndown이 펜스 언어를 `<code>` 클래스에서 읽는다) · 노드 뷰.
+ * 노드 이름은 `codeBlock` 그대로(저장된 문서 · 왕복 시험 · `editor.isActive('codeBlock')`).
+ */
+export const CodeBlockWithCopy = CodeBlock.extend({
   addAttributes() {
     return {
       language: {
@@ -304,12 +307,6 @@ export const CodeBlockWithCopy = Node.create({
     const language = (node.attrs as { language?: string }).language;
     const codeAttrs = language ? { class: `language-${language}` } : {};
     return ['pre', mergeAttributes(HTMLAttributes), ['code', codeAttrs, 0]];
-  },
-
-  addKeyboardShortcuts() {
-    return {
-      'Mod-Alt-c': () => this.editor.commands.toggleNode(this.name, 'paragraph'),
-    };
   },
 
   addNodeView() {
