@@ -222,7 +222,7 @@ export function ApprovalsQueue() {
   const [selectedOptionByGateId, setSelectedOptionByGateId] = useState<Record<string, string>>({});
   // 4909 (라) — 서명 창으로 승인해도 «어느 안이었는지»가 메모에 남는다. 한 번에 승인 길은 선택안을 note에 싣는데(위 primaryOnClick) 서명 창 길(고위험 결정 게이트)은
   // 사유만 실어 고른 안이 어디에도 기록되지 않았다. 안이 있는 결정 게이트면 «선택: …» 줄 + 사유 줄. (반려는 «요청 자체를 반려»라 안을 싣지 않는다 — 한 번에 길과 같은 규칙.)
-  const signatureSelectedOption = signatureGate && isDecisionGate(signatureGate) && deriveDecisionFacts(signatureGate).options.length > 0
+  const signatureSelectedOption = signatureGate && isDecisionGate(signatureGate) && (deriveDecisionFacts(signatureGate)?.options.length ?? 0) > 0
     ? selectedOptionByGateId[signatureGate.id]
     : undefined;
   const toggleDecisionExpanded = (id: string) => {
