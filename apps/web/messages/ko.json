@@ -2298,6 +2298,7 @@
     "activeLineNone": "활성 게시된 라인이 없어요 (기본 꺼짐).",
     "activeLineNoSteps": "정의된 전이 단계가 없어요.",
     "simEntityType": "엔티티 유형",
+    "lineEntityType": "라인 대상 유형",
     "simEntityId": "엔티티 ID",
     "simFromStatus": "이전 상태",
     "simToStatus": "다음 상태",

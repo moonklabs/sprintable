@@ -85,7 +85,9 @@ describe('[SID:4891] 결재 라인 정책 on ds parts', () => {
     const boxes = [...container.querySelectorAll('input, select, textarea')] as HTMLElement[];
     expect(boxes.length).toBe(6); // 2 selects (editor · active card) + simulator (select · 3 inputs)
     expect(boxes.every((b) => nameOf(b) !== ''), `unnamed: ${boxes.filter((b) => nameOf(b) === '').length}`).toBe(true);
-    expect(boxes.map(nameOf)).toEqual([T.simEntityType, T.simActiveLine, T.simEntityType, T.simEntityId, T.simFromStatus, T.simToStatus]);
+    expect(boxes.map(nameOf)).toEqual([T.lineEntityType, T.simActiveLine, T.simEntityType, T.simEntityId, T.simFromStatus, T.simToStatus]);
+    // PO 11-12: the line's entity-type box (what the four modes are about) and the simulator's entity-type box (an input to the preview) do different jobs — they must not read the same
+    expect(new Set(boxes.map(nameOf)).size, 'two boxes carry the same name').toBe(boxes.length);
     await click(tab(T.lineModeEdit));
     await click(btn(T.lineEditorNewDraft));
     expect(nameOf(container.querySelector('textarea')!)).toBe(T.lineModeEdit);

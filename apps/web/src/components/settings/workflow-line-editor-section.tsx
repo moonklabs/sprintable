@@ -196,7 +196,7 @@ export function WorkflowLineEditorSection({ projectId }: { projectId?: string | 
           ))}
         </TabsList>
 
-        <Field label={t('simEntityType')} className="sm:max-w-xs">
+        <Field label={t('lineEntityType')} className="sm:max-w-xs">
           {(c) => (
             <NativeSelect {...c} value={entityType} onChange={(e) => setEntityType(e.target.value)}>
               {ENTITY_TYPES.map((et) => <option key={et} value={et}>{et}</option>)}
