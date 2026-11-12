@@ -2460,7 +2460,7 @@ async def delete_message(
         await db.flush()
     from app.services.deleted_message_scrub import scrub_stored_copies_of_deleted_message
     await scrub_stored_copies_of_deleted_message(
-        db, message_id=msg.id, conversation_id=conversation_id, created_at=msg.created_at, old_content=old_content,
+        db, org_id=org_id, message_id=msg.id, conversation_id=conversation_id, created_at=msg.created_at, old_content=old_content,
         summary_without_words=_build_message_summary("", member.name, False),
     )
     await db.commit()

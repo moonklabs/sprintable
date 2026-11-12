@@ -28,8 +28,10 @@ from app.models.event import Event
 from app.models.notification import Notification
 from app.services.text_preview import NOTIFICATION_BODY_PREVIEW_MAX, plain_text_preview
 
-# a copy is made in the request that created the message: its clock is the message's, give or take the request's own duration
+# a copy is made in the request that created the message: its clock is the message's, give or take the request's own duration.
+# OLD rows (found by words) are matched inside a tight window; a row that names its message is exact, its window only keeps the query on an index.
 MATCH_WINDOW = timedelta(seconds=60)
+ID_WINDOW = timedelta(minutes=10)
 # the notification types a chat message makes (an old-form row is matched among these only — another kind of notification can share the room id)
 CONVERSATION_NOTIFICATION_TYPES = ("conversation.mention", "conversation.message")
 
@@ -62,6 +64,7 @@ def _scrubbed_body(payload: dict | None) -> dict | None:
 async def scrub_stored_copies_of_deleted_message(
     db: AsyncSession,
     *,
+    org_id: uuid.UUID,
     message_id: uuid.UUID,
     conversation_id: uuid.UUID,
     created_at: datetime,
@@ -75,11 +78,15 @@ async def scrub_stored_copies_of_deleted_message(
     mid = str(message_id)
     preview = plain_text_preview(old_content, NOTIFICATION_BODY_PREVIEW_MAX) if old_content else ""
     window = (created_at - MATCH_WINDOW, created_at + MATCH_WINDOW)
+    id_window = (created_at - ID_WINDOW, created_at + ID_WINDOW)
     counts = {"events": 0, "bell_events": 0, "activity_events": 0, "notifications": 0, "delivery_jobs": 0}
 
     # (1) the message_created event rows, found by the message they copy
     for event in (await db.execute(
-        select(Event).where(Event.source_entity_type == "conversation_message", Event.source_entity_id == message_id)
+        select(Event).where(
+            Event.org_id == org_id, Event.source_entity_type == "conversation_message", Event.source_entity_id == message_id,
+            Event.created_at >= id_window[0], Event.created_at <= id_window[1],
+        )
     )).scalars().all():
         new = _scrubbed_message_payload(event.payload, summary_without_words)
         if new is not None:
@@ -87,8 +94,10 @@ async def scrub_stored_copies_of_deleted_message(
             counts["events"] += 1
 
     # (2) the dispatched bell rows: by the id they carry (a row made since #4903), else — an OLD row only — by room · moment · preview
-    bell_where = [Event.event_type == "dispatched", Event.source_entity_type == "conversation", Event.source_entity_id == conversation_id]
-    bells = list((await db.execute(select(Event).where(*bell_where, Event.payload["message_id"].as_string() == mid))).scalars().all())
+    bell_where = [Event.org_id == org_id, Event.event_type == "dispatched", Event.source_entity_type == "conversation", Event.source_entity_id == conversation_id]
+    bells = list((await db.execute(
+        select(Event).where(*bell_where, Event.created_at >= id_window[0], Event.created_at <= id_window[1], Event.payload["message_id"].as_string() == mid)
+    )).scalars().all())
     if preview:
         bells += list((await db.execute(
             select(Event).where(
@@ -107,24 +116,35 @@ async def scrub_stored_copies_of_deleted_message(
             event.payload = new
             counts["bell_events"] += 1
 
-    # (3) the activity stream's copies: of the message's own events (object = the message), and of the bell rows scrubbed above (they name them in `source_event_ids`)
+    # (3) the activity stream's copies — every query goes through `ix_activity_events_object_time (org_id, object_type, object_id, occurred_at)`: the org first, then the
+    # object (the message itself, or — for the bell rows — the room), and for the room a time window; the array overlap is checked on those few candidates only
     for activity in (await db.execute(
-        select(ActivityEvent).where(ActivityEvent.object_type == "conversation_message", ActivityEvent.object_id == message_id)
+        select(ActivityEvent).where(
+            ActivityEvent.org_id == org_id, ActivityEvent.object_type == "conversation_message", ActivityEvent.object_id == message_id,
+        )
     )).scalars().all():
         new = _scrubbed_message_payload(activity.payload, summary_without_words)
         if new is not None:
             activity.payload = new
             counts["activity_events"] += 1
     if bell_ids:
-        for activity in (await db.execute(select(ActivityEvent).where(ActivityEvent.source_event_ids.overlap(bell_ids)))).scalars().all():
+        for activity in (await db.execute(
+            select(ActivityEvent).where(
+                ActivityEvent.org_id == org_id, ActivityEvent.object_type == "conversation", ActivityEvent.object_id == conversation_id,
+                ActivityEvent.occurred_at >= id_window[0], ActivityEvent.occurred_at <= id_window[1],
+                ActivityEvent.source_event_ids.overlap(bell_ids),
+            )
+        )).scalars().all():
             new = _scrubbed_body(activity.payload)
             if new is not None:
                 activity.payload = new
                 counts["activity_events"] += 1
 
     # (4) the notification rows
-    note_where = [Notification.reference_type == "conversation", Notification.reference_id == conversation_id]
-    notes = list((await db.execute(select(Notification).where(*note_where, Notification.event["message_id"].as_string() == mid))).scalars().all())
+    note_where = [Notification.org_id == org_id, Notification.reference_type == "conversation", Notification.reference_id == conversation_id]
+    notes = list((await db.execute(
+        select(Notification).where(*note_where, Notification.created_at >= id_window[0], Notification.created_at <= id_window[1], Notification.event["message_id"].as_string() == mid)
+    )).scalars().all())
     if preview:
         notes += list((await db.execute(
             select(Notification).where(
@@ -144,8 +164,10 @@ async def scrub_stored_copies_of_deleted_message(
         counts["notifications"] += 1
 
     # (5) the outbox: a push / personal-webhook job that has not gone out yet would still carry the words
-    job_where = [DeliveryJob.kind == "personal_webhook"]
-    jobs = list((await db.execute(select(DeliveryJob).where(*job_where, DeliveryJob.payload["message_id"].as_string() == mid))).scalars().all())
+    job_where = [DeliveryJob.org_id == org_id, DeliveryJob.kind == "personal_webhook"]
+    jobs = list((await db.execute(
+        select(DeliveryJob).where(*job_where, DeliveryJob.created_at >= id_window[0], DeliveryJob.created_at <= id_window[1], DeliveryJob.payload["message_id"].as_string() == mid)
+    )).scalars().all())
     if preview:
         jobs += list((await db.execute(
             select(DeliveryJob).where(

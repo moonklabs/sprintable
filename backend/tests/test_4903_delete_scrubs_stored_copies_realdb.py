@@ -414,3 +414,39 @@ async def test_an_old_form_match_never_blanks_another_kind_of_pending_job_with_t
         assert not [j for j in jobs if j.payload.get("event_type") != "agent.turn_ended" and j.payload.get("body")], "the message's own old-form jobs lost the words"
     finally:
         await engine.dispose()
+
+
+async def test_the_activity_queries_of_a_delete_stay_on_the_index_shape():
+    """PO review: a delete must not walk the whole activity table (dev: 134k rows · 328 MB — a sequential scan read 15,545 pages ≈ 650 ms, and the object lookup without the org
+    ≈ 135 ms). Every statement the delete sends to `activity_events` names the org FIRST and then the object (`ix_activity_events_object_time`: org_id · object_type · object_id ·
+    occurred_at) — the array overlap runs only on those few candidates, behind the room and a time window."""
+    engine, Session = await _session_factory()
+    try:
+        org_id, conv_id, (a_id, a_user), (b_id, b_user), (_c_id, _c_user) = await _room(Session)
+        from sqlalchemy import event as sa_event
+
+        from app.main import app
+
+        msg_id = await _send(app, Session, a_user, org_id, conv_id, WORDS, [b_id])
+        seen: list[str] = []
+
+        def capture(conn, cursor, statement, parameters, context, executemany):
+            if "FROM activity_events" in statement:
+                seen.append(statement)
+
+        sa_event.listen(engine.sync_engine, "before_cursor_execute", capture)
+        try:
+            d = await _as(app, Session, a_user, org_id, lambda c: c.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}"))
+            assert d.status_code == 200, d.text
+        finally:
+            sa_event.remove(engine.sync_engine, "before_cursor_execute", capture)
+        assert seen, "the delete reads the activity stream's copies"
+        for stmt in seen:
+            where = stmt.split("WHERE", 1)[1]
+            assert "activity_events.org_id" in where, f"an activity query without the org (it would not use the index): {stmt}"
+            assert "activity_events.object_type" in where and "activity_events.object_id" in where, f"an activity query without the object: {stmt}"
+        overlap = [stmt for stmt in seen if "&&" in stmt]
+        for stmt in overlap:
+            assert "activity_events.occurred_at >=" in stmt, f"the array overlap runs behind a time window: {stmt}"
+    finally:
+        await engine.dispose()
