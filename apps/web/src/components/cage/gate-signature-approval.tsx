@@ -105,7 +105,7 @@ export function GateSignatureApproval({
   return (
     <div className="space-y-4">
       {chosenOption && !rejectOnly ? (
-        <p className="rounded-xl border border-border bg-muted/40 px-3 py-2 text-sm font-medium text-foreground" data-testid="gate-sig-chosen-option">{t('sigChosenOption', { option: chosenOption })}</p>
+        <p className="border-l-2 border-border pl-3 text-sm font-medium text-foreground" data-testid="gate-sig-chosen-option">{t('sigChosenOption', { option: chosenOption })}</p>
       ) : null}
       <div>
         <p className="mb-2 text-editorial-meta font-semibold text-muted-foreground">{t('sigEvidenceLabel')}</p>
