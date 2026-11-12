@@ -157,6 +157,7 @@ describe('a new organization with no project yet', () => {
     await mount(<ChatListEmptyState />, 'owner', []);
     expect(document.body.textContent).toContain(koMessages.chats.noPeersBodyNoProject);
     expect(q('chat-no-peers-create-project')!.getAttribute('href')).toContain('/settings?tab=projects');
+    expect(q('chat-no-peers-create-project')!.getAttribute('href')).toContain('return=chats'); // the project made there sends the person back to the list
     expect(q('chat-no-peers-add-agent')).toBeNull();
     expect(q('chat-no-peers-invite')!.getAttribute('href')).toContain('/organization/members');
   });
