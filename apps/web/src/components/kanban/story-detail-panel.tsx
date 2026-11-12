@@ -51,6 +51,7 @@ import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel
 import { RecipeStartSection } from '@/components/kanban/recipe-start-section';
 import { PrLinkSection } from '@/components/integrations/pr-link-section';
 import { Button } from '@/components/ui/button';
+import { LAYER } from '@/components/ds/layers';
 import { Input } from '@/components/ui/input';
 import { isImeComposing } from '@/lib/ime-composition';
 import { Textarea } from '@/components/ui/textarea';
@@ -1633,8 +1634,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
         // story #3007(로드맵 P2·PR-E, L1) — 모바일 시트/데스크톱 사이드시트 둘 다 floating이라
         // --elev-overlay.
         className={overlayPosition
-          ? 'fixed inset-x-4 z-50 mx-auto max-w-xl overflow-hidden rounded-lg border border-border bg-background shadow-[var(--elev-overlay)] outline-none backdrop-blur-xl sm:inset-x-auto sm:right-4 sm:w-full'
-          : 'fixed inset-0 z-50 bg-background shadow-[var(--elev-overlay)] outline-none backdrop-blur-xl lg:inset-y-0 lg:left-auto lg:right-0 lg:w-full lg:max-w-4xl lg:border-l lg:border-border'}
+          ? `fixed inset-x-4 z-50 mx-auto max-w-xl overflow-hidden rounded-lg border border-border ${LAYER.panel} shadow-[var(--elev-overlay)] outline-none backdrop-blur-xl sm:inset-x-auto sm:right-4 sm:w-full`
+          : `fixed inset-0 z-50 ${LAYER.panel} shadow-[var(--elev-overlay)] outline-none backdrop-blur-xl lg:inset-y-0 lg:left-auto lg:right-0 lg:w-full lg:max-w-4xl lg:border-l lg:border-border`}
         style={overlayPosition ? { top: overlayPosition.top, height: overlayPosition.heightPx } : undefined}
       >
       <div className="flex h-full flex-col">
@@ -1819,7 +1820,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
 
             {/* 4908 — 본문 / 속성 칸 분리. 좁은 폭(<lg)에서는 속성 칸이 본문 앞에 서고(예전 순서와 같다: 담당 · 레시피 · 디스패치 · 포인트 · 라벨 · PR), lg 이상에서는 오른쪽 칸이 된다. */}
             <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_16rem] lg:items-start lg:gap-6">
-              <aside data-testid="story-detail-properties" aria-label={t('detailProperties')} className="order-first min-w-0 space-y-5 lg:order-last">
+              {/* 4908 — 서랍 = 내용 칸 층(LAYER.panel) · 속성 칸 = 한 단 다른 면(LAYER.rowOthers) + 경계: 자리만 나뉘지 않고 눈으로 갈린다(서랍 → 속성 칸 ≥ 0.05, layer-rule.test). 이 면 위에서 옛 흐린 글(muted-foreground)이 다크 4.44:1로 모자라 속성 칸 안에서만 ds-ink-3(다크 4.56:1)로 바꾼다. */}
+              <aside data-testid="story-detail-properties" aria-label={t('detailProperties')} className={`order-first min-w-0 space-y-5 rounded-lg border border-ds-line ${LAYER.rowOthers} p-3 [--muted-foreground:var(--ds-ink-3)] lg:order-last`}>
             <div>
               <div className="flex items-center justify-between">
                 <span className="text-micro font-mono uppercase tracking-wider text-muted-foreground">{t('assignee')}</span>

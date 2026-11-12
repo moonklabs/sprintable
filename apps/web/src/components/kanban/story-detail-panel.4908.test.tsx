@@ -10,6 +10,7 @@ import { StoryDetailPanel } from './story-detail-panel';
 import type { KanbanStory } from './types';
 import koMessages from '../../../messages/ko.json';
 import { ToastProvider } from '@/components/ui/toast';
+import { LAYER } from '@/components/ds/layers';
 
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => ({ currentMemberType: 'human' }) }));
 vi.mock('@/hooks/use-sse-notifications', () => ({ useSseNotifications: vi.fn() }));
@@ -57,6 +58,36 @@ describe('4908 카드 상세 — 본문 / 속성 칸', () => {
   });
 
   const B = koMessages.board;
+
+  it('⭐서랍은 내용 칸 층(LAYER.panel)이고 옛 bg-background가 아니다 · 속성 칸은 한 단 다른 면(LAYER.rowOthers) + 경계', async () => {
+    const { rail } = await mount();
+    const drawer = container.querySelector<HTMLElement>('[role="dialog"]')!;
+    const dc = drawer.className.split(/\s+/);
+    expect(dc).toContain(LAYER.panel);
+    expect(dc).not.toContain('bg-background');
+    const rc = rail!.className.split(/\s+/);
+    expect(rc).toContain(LAYER.rowOthers);
+    expect(rc).toEqual(expect.arrayContaining(['border', 'border-ds-line']));
+    expect(rc).not.toContain(LAYER.panel);
+  });
+
+  it('⭐지도 위 소형 서랍(overlayPosition)도 내용 칸 층이다 — 옛 bg-background가 아니다', async () => {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ToastProvider><StoryDetailPanel story={story} tasks={[]} onClose={() => {}} projectId="p1" overlayPosition={{ top: 10, heightPx: 400 }} /></ToastProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    const dc = container.querySelector<HTMLElement>('[role="dialog"]')!.className.split(/\s+/);
+    expect(dc).toContain(LAYER.panel);
+    expect(dc).not.toContain('bg-background');
+  });
+
+  it('⭐속성 칸 안의 흐린 글(muted-foreground)은 ds-ink-3로 — 속성 칸 면 위 다크 대비 4.5:1', async () => {
+    const { rail } = await mount();
+    expect(rail!.className).toContain('[--muted-foreground:var(--ds-ink-3)]');
+  });
   // 속성 칸의 머리글(바꾸는 값) · 본문 칸의 머리글(읽고 쓰는 글) — 구역 이름을 하나씩 짚는다.
   const RAIL_HEADS = [B.assignee, B.storyPoints, B.labelsSectionTitle];
   const MAIN_HEADS = [B.description, B.acceptanceCriteria, B.attachments, B.dependenciesSectionTitle];

@@ -54,6 +54,11 @@ describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
     expect(step(t, 'panel', 'field')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.fieldOnPanel);
   });
 
+  it.each(themes)('⭐%s: 카드 상세(4908) — 서랍(panel) → 속성 칸(rowOthers) 밝기차 ≥ 0.05, 그 칸 안 흐린 글(ink-3)은 4.5:1 이상', (_name, t) => {
+    expect(step(t, 'panel', 'rowOthers'), '서랍 → 속성 칸').toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPanel);
+    expect(contrast(t['ink-3']!, t[LAYER_TOKEN.rowOthers]!), '속성 칸 안 ink-3').toBeGreaterThanOrEqual(4.5);
+  });
+
   it.each(themes)('⭐%s: 열린 카드(4908) — 내용 칸과 ΔL ≥ 0.03, 같은 줄 층 글 줄과 채도차 ≥ 0.01(밝기는 거의 같아 왼쪽 막대와 함께 가른다)', (_name, t) => {
     expect(step(t, 'panel', 'rowSelected')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowSelectedOnPanel);
     expect(chroma(t[LAYER_TOKEN.rowSelected]!) - chroma(t[LAYER_TOKEN.rowOthers]!)).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowSelectedVsOthersChroma);
