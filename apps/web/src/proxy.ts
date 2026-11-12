@@ -165,6 +165,7 @@ const CURRENT_PROJECT_COOKIE = 'sprintable_current_project_id';
  * What `/api/v2/me` says about this session's organization — three answers, not two (story 4714 AC6):
  *  · `org`     the server answered and the person works in `orgId`;
  *  · `none`    the server answered 404 NOT_FOUND with `reason: 'no_membership'` (`me.py`): the account exists but has no organization yet — a brand-new person;
+ *  · `unauthenticated` story 4890 — the server answered 401: it does not know this session (an access token that still verifies by its signature, but whose account is gone — a deleted account's old phone session — or whose session the server ended). That is an EXPIRY, not «unknown»: a page load goes to the sign-in like any other ended session;
  *  · `unknown` anything else (a 5xx, a network error, a 200 without an org, a 404 that is not that answer): the call did not tell us — `why` names which
  *    (a fixed word, never a value: it goes to the log), `transient` says whether it is the kind that a second look can mend (a 5xx · a network
  *    error) as opposed to an answer the server meant (a 4xx — e.g. `membership_elsewhere`: the session names an organization the person does not belong to — or a 200 that names
@@ -174,7 +175,7 @@ const CURRENT_PROJECT_COOKIE = 'sprintable_current_project_id';
  * picks the road again) — see `redirectLegacyResourcePath`. A meant answer passes through as before (`/` would send that person to the authenticated layout's
  * own `/me` 404 → onboarding, where they could create an organization they do not need).
  */
-type OrgLookup = { kind: 'org'; orgId: string } | { kind: 'none' } | { kind: 'unknown'; why: string; transient: boolean };
+type OrgLookup = { kind: 'org'; orgId: string } | { kind: 'none' } | { kind: 'unauthenticated' } | { kind: 'unknown'; why: string; transient: boolean };
 async function lookupVerifiedOrg(fastapiUrl: string, accessToken: string): Promise<OrgLookup> {
   try {
     const res = await fetch(`${fastapiUrl}/api/v2/me`, { headers: { Authorization: `Bearer ${accessToken}` } });
@@ -185,6 +186,7 @@ async function lookupVerifiedOrg(fastapiUrl: string, accessToken: string): Promi
       const body = await res.json().catch(() => null) as { error?: { code?: unknown; reason?: unknown } } | null;
       return body?.error?.code === 'NOT_FOUND' && body?.error?.reason === 'no_membership' ? { kind: 'none' } : { kind: 'unknown', why: 'me_404_other', transient: false };
     }
+    if (res.status === 401) return { kind: 'unauthenticated' };
     if (!res.ok) return { kind: 'unknown', why: `me_status_${res.status}`, transient: res.status >= 500 };
     // a 200 whose body cannot be read (empty · not JSON) is NOT a transport failure: it must not fall into the catch below (that one is «transient» → `/`) — the server answered,
     // so it is a meant answer like the 4xx ones (pass through). `null` · `{}` · an empty id are the same: no organization named.
@@ -302,6 +304,11 @@ async function redirectLegacyResourcePath(
   // (no-store)이고 쿼리는 뗀다(조직이 없는 사람에겐 옮겨 갈 스토리 · 프로젝트가 없다). «모름»(me 5xx · 네트워크 · 모양이 다른 404)은 아래처럼
   // 개입 없이 통과 — 조직이 있는 사람을 순간의 실패로 온보딩에 튕기지 않는다.
   if (orgLookup.kind === 'none') return redirectToOnboarding(request);
+  // story 4890 (item 15) — «a deleted account = an ended session». The phone opens `/glance` with the old session of an account that was deleted: the access token still verifies by its
+  // signature (so the checks above let it through) but `/api/v2/me` answers 401 — and the old reading («a meant answer passes through») left a page that does not exist: a Next 404, with no step
+  // to take (measured on dev: `/glance` → 404, while `/chats` with the same cookies → 307 → /login?reason=session_expired). A page load now goes where every ended session goes. Only a page load
+  // (the same line as the transient «unknown» below: a fetch · RSC · prefetch · POST passes through untouched); the cookies are left as the layout's own 401 path leaves them.
+  if (orgLookup.kind === 'unauthenticated') return isDocumentRead(request) ? loginRedirect(request, true) : null;
   // story 4762 (AC7) — 일시적인 «모름»은 «통과»가 아니라 «세션으로 길을 다시 고르기»다. 폰 앱은 늘 `/glance`로 열고, 가입 직후의 몇 분 동안 me가 «모름»을 낸 적이 있다
   // (Android 실측 10-24: 같은 세션이 3분 동안 `/glance` → Next 404 «This page could not be found.» · 다음 걸음 없음 · 다시 로그인하면 정상). 통과시키면
   // 이 주소엔 페이지가 없어서 그 자체가 막다른 곳이다. `/`는 세션이 오늘 길(org-briefing)로 보내는 실 페이지(이 표의 이름이 아님 · 되돌이 없음).
