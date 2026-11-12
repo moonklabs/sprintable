@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react';
 import { Menu as MenuPrimitive } from '@base-ui/react/menu';
+import { ContextMenu as ContextMenuPrimitive } from '@base-ui/react/context-menu';
 import { cn } from '@/lib/utils';
 import { Icon, type IconName } from './icon';
 import { useDsPortalContainer } from './portal-container';
@@ -10,6 +11,14 @@ import { useDsPortalContainer } from './portal-container';
 export const Menu = MenuPrimitive.Root;
 export const MenuTrigger = MenuPrimitive.Trigger;
 export const MenuGroup = MenuPrimitive.Group;
+
+/**
+ * 4910 — 우클릭 메뉴. 데스크톱(마우스)에서 «이 자리에서 오른쪽 단추» = ⋯ 단추와 같은 목록을 마우스 자리에 연다.
+ * 안 목록(`MenuContent` · `MenuItem` · `MenuGroup`…)은 `Menu`와 같은 부품을 그대로 쓴다(Base UI가 같은 Menu 부품을 다시 내보낸다) — 그래서 호출부가 ⋯ 메뉴와 우클릭 메뉴에 «같은 항목 목록»을 한 곳에서 넘길 수 있다.
+ * ⚠️ 우클릭만으로만 닿는 동작을 만들지 않는다: 폰 · 키보드 사용자를 위해 같은 항목은 항상 ⋯ 단추에도 있어야 한다(호출부 책임).
+ */
+export const ContextMenu = ContextMenuPrimitive.Root;
+export const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
 
 export type MenuContentProps = Omit<MenuPrimitive.Popup.Props, 'className'> &
   Pick<MenuPrimitive.Positioner.Props, 'align' | 'alignOffset' | 'side' | 'sideOffset'> & { className?: string };

@@ -4,7 +4,6 @@ import { useLayoutEffect, type ReactNode } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useTopBar } from '@/components/nav/top-bar-context';
-import { Badge } from '@/components/ui/badge';
 import { OrgTitle } from '@/components/organization/org-screen-title';
 
 /**
@@ -134,29 +133,17 @@ export function AgentRunsTopBarTitle() {
 }
 
 /**
- * «스토리지»(`[ws]/[proj]/storage`) 상단바 제목 — 브레드크럼 · 이름은 고정, «N개 자산 · 용량» 알약은 데이터라 화면만 넘긴다(폴백은 알약 없이 ·
- * PO 규칙: 폴백은 도착 화면과 글자가 똑같은 부분만). 폰은 브레드크럼을 숨기고 알약이 먼저 양보해 말줄임(story #4277).
+ * «스토리지»(`[ws]/[proj]/storage`) 상단바 제목 — 브레드크럼 · 이름뿐(4910 · 4913 규칙: 제목은 위 막대 한 곳).
+ * 예전엔 «N개 자산 · 용량» 알약이 여기 붙었다(데이터라 화면만 넘김) — 그 개수는 본문 머리 줄로 내려갔고(`storage-asset-list` 머리), 그래서 폴백과 도착 화면이 글자까지 똑같다.
+ * 폰은 브레드크럼을 숨긴다(story #4277).
  */
-export function StorageTopBarTitle({ summaryText }: { summaryText?: string }) {
+export function StorageTopBarTitle() {
   const tStorage = useTranslations('storage');
   return (
-    // grow — 남는 폭을 알약 칸까지 내려보낸다(기준 폭은 안 바뀌어 칩 · 제목 자리 그대로). 없으면 칸이 받을 폭이 0이라 1440에서도 알약이 «…»(실측 18px).
     <div className="flex min-w-0 grow items-center">
       <span className="mr-2.5 hidden shrink-0 text-xs text-muted-foreground sm:inline">{tStorage('breadcrumb')}</span>
       <span className="mr-2.5 hidden shrink-0 text-xs text-muted-foreground sm:inline">/</span>
       <h1 className="shrink-0 text-base font-[650] tracking-[-0.01em] text-foreground">{tStorage('title')}</h1>
-      {/* 유나 4688 — 알약이 붙으며 제목 묶음의 기준 폭이 커져 칩이 자리를 내주고 제목이 62px 왼쪽으로 튀었다(390 · 폴백이 먼저 서며 보이게 됨).
-          알약 칸은 너비 0에서 남는 폭만 채운다(`w-0 grow` — 묶음의 기준 폭에 안 섞임) · 알약 자체는 글자 폭 그대로 · 모자라면 말줄임(4672 의도).
-          제목과의 간격도 칸 **안**(알약의 왼쪽 여백)에 둔다 — 묶음의 gap · 칸의 margin은 너비 0 칸이어도 기준 폭에 14px를 더해 제목이 그만큼 튀었다(실측).
-          폰(sm 미만)에선 알약을 안 그린다(유나 판단 (b)) — 칩이 기준 폭을 지키면 남는 폭이 ~18px라 «…»만 남아 내용이 있는 모양만 보이는 거짓이
-          되고, 전체 글자(`title`)는 호버 전용이라 폰에선 닿을 길이 없다. «지금 어디인가»(칩)가 요약 수보다 우선. */}
-      {summaryText !== undefined ? (
-        <span className="hidden w-0 min-w-0 grow sm:flex" data-testid="storage-summary-slot">
-          <Badge variant="info" className="ml-3.5 min-w-0 max-w-[calc(100%-0.875rem)] shrink font-bold" title={summaryText} data-testid="storage-summary-badge">
-            <span className="min-w-0 truncate">{summaryText}</span>
-          </Badge>
-        </span>
-      ) : null}
     </div>
   );
 }

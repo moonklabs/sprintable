@@ -234,27 +234,32 @@ test('402폭 — 스토리지 한 단 · 상단바 벨 화면 안 · 일감 바�
     test.info().annotations.push({ type: 'skipped-check', description: `스토리지 이름 칸 폭: 자산 행 0(목록 상태 ${listState} · 로컬 업로드 불가 · story dc3d62f4) — 칸 예산 단위 테스트가 가드` });
     console.log(`[mobile-width-overflow] SKIPPED storage name-width check: no asset rows (list state ${listState} · seed upload unsupported · story dc3d62f4)`);
   }
-  // 4277(PO 402 라이브) — 상단 «N개 자산 · 용량» 알약이 상단바 밖으로 말줄임 없이 잘리던 것: 화면 이름(h1)은 온전 · 알약은 화면 안에서
-  // 끝나거나(다 보임) 말줄임으로 줄어든다(잘린 채 숨지 않음).
+  // 4277(PO 402 라이브) → 4910: «N개 자산 · 용량»은 위 막대 알약이 아니라 본문 머리 줄로 내려왔다. 화면 이름(h1)은 온전 · 개수 글은 화면 안에서
+  // 끝나거나 말줄임으로 줄어든다(잘린 채 숨지 않음 · 업로드 단추를 밀어내지 않음).
   expect.soft(await topBarInsideViewport(true), '/storage 상단바 — 화면 밖으로 밀린 버튼 · 제목 잘림').toBe('ok');
-  // CI 시드는 자산 0이라 알약 글자가 짧다(«0개 자산 · 0 B» — 늘 들어맞음). 글자 길이와 무관하게 재도록 **구조**를 단언한다:
-  // 브레드크럼이 폰에서 빠짐 · 알약이 줄어들 수 있음(flex-shrink ≠ 0) · 넘치면 말줄임(text-overflow) · 화면 안에서 끝남.
-  const pill = await page.locator('[data-testid="storage-summary-badge"]').evaluate((b) => {
-    const inner = b.querySelector('span') as HTMLElement;
-    const row = b.parentElement as HTMLElement;
+  // CI 시드는 자산 0이라 글자가 짧다(«0개 자산 · 0 B» — 늘 들어맞음). 글자 길이와 무관하게 재도록 **구조**를 단언한다:
+  // 브레드크럼이 폰에서 빠짐 · 개수 글이 줄어들 수 있음(min-width 0) · 넘치면 말줄임(text-overflow) · 화면 안에서 끝남 · 위 막대에 알약 없음.
+  const summary = await page.locator('[data-testid="storage-summary"]').evaluate((p) => {
+    const head = p.parentElement as HTMLElement;
+    const h1 = document.querySelector('h1') as HTMLElement;
+    const row = h1.parentElement as HTMLElement;
     return {
-      inside: b.getBoundingClientRect().right <= window.innerWidth + 1,
-      shrinks: getComputedStyle(b).flexShrink !== '0',
-      ellipsis: getComputedStyle(inner).textOverflow === 'ellipsis' && getComputedStyle(inner).overflow === 'hidden',
-      // 브레드크럼 = 제목 줄의 알약 아닌 span들(알약 자신도 span이라 뺀다).
-      breadcrumbHidden: [...row.children].filter((c) => c.tagName === 'SPAN' && c !== b).every((c) => getComputedStyle(c).display === 'none'),
-      text: inner.textContent ?? '',
+      inside: p.getBoundingClientRect().right <= window.innerWidth + 1,
+      ellipsis: getComputedStyle(p).textOverflow === 'ellipsis' && getComputedStyle(p).overflow === 'hidden',
+      shrinks: getComputedStyle(p).minWidth === '0px',
+      headInside: head.scrollWidth <= head.clientWidth + 1,
+      // 브레드크럼 = 제목(h1) 줄의 h1 아닌 span들.
+      breadcrumbHidden: [...row.children].filter((c) => c.tagName === 'SPAN').every((c) => getComputedStyle(c).display === 'none'),
+      pillInTopBar: document.querySelector('[data-testid="storage-summary-badge"]') !== null,
+      text: p.textContent ?? '',
     };
   });
-  expect.soft(pill.inside, `스토리지 요약 알약이 화면 안에서 끝난다(${pill.text})`).toBe(true);
-  expect.soft(pill.shrinks, '스토리지 요약 알약이 줄어들 수 있다(flex-shrink ≠ 0)').toBe(true);
-  expect.soft(pill.ellipsis, '스토리지 요약 알약 — 넘치면 말줄임').toBe(true);
-  expect.soft(pill.breadcrumbHidden, '폰에서 브레드크럼(«작업 공간 /») 숨김').toBe(true);
+  expect.soft(summary.inside, `스토리지 개수 글이 화면 안에서 끝난다(${summary.text})`).toBe(true);
+  expect.soft(summary.headInside, '스토리지 머리 줄이 옆으로 넘치지 않는다').toBe(true);
+  expect.soft(summary.shrinks, '스토리지 개수 글이 줄어들 수 있다(min-width 0)').toBe(true);
+  expect.soft(summary.ellipsis, '스토리지 개수 글 — 넘치면 말줄임').toBe(true);
+  expect.soft(summary.breadcrumbHidden, '폰에서 브레드크럼(«작업 공간 /») 숨김').toBe(true);
+  expect.soft(summary.pillInTopBar, '위 막대에 개수 알약 없음(제목은 위 막대 한 곳)').toBe(false);
 
   // 20번 — 일감 맨 아래 «승인 흐름에서 멈춘 것» 상자와 탭바 사이 여백(예전 0). 판정(PO 4639 · 까디르 검수 P2):
   // - 명시 높이 틀(flow-board-frame) 안에서 보드가 넘치지 않는다(틀 scrollHeight − clientHeight ≤ 1 — 자동 높이 부모 기준이면 0이 당연해 뜻이 없다).

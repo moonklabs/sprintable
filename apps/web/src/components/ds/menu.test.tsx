@@ -105,3 +105,23 @@ describe('ds Menu', () => {
     expect(onOpenChange.mock.calls.at(-1)![0]).toBe(false);
   });
 });
+
+// 4910 — 우클릭 메뉴(ContextMenu): 같은 Menu 부품(MenuContent · MenuItem)을 그대로 쓴다.
+import { ContextMenu, ContextMenuTrigger } from './menu';
+describe('ds ContextMenu', () => {
+  it('⭐트리거 위 우클릭 → role=menu에 항목이 뜬다 · 항목을 누르면 onClick', async () => {
+    const onDelete = vi.fn();
+    await render(
+      <ContextMenu>
+        <ContextMenuTrigger><span data-testid="area">영역</span></ContextMenuTrigger>
+        <MenuContent><MenuItem>열기</MenuItem><MenuItem variant="danger" onClick={onDelete}>삭제</MenuItem></MenuContent>
+      </ContextMenu>,
+    );
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    await act(async () => { document.querySelector('[data-testid="area"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 10, clientY: 10 })); });
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+    expect(items().map((i) => i.textContent)).toEqual(['열기', '삭제']);
+    await act(async () => { items()[1]!.click(); });
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+});

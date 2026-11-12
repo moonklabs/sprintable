@@ -379,8 +379,8 @@ export function StorageView({ projectId }: { projectId: string }) {
   const totalBytes = useMemo(() => items.reduce((sum, a) => sum + (a.size_bytes || 0), 0), [items]);
 
   const summaryText = storageSummaryText(t, items.length, totalBytes, nextCursor !== null);
-  // story #4277 폭 관례 · #4326 폴백과 같은 모양은 StorageTopBarTitle 한 곳(알약만 화면이 넘긴다).
-  const topBarTitle = useMemo(() => <StorageTopBarTitle summaryText={summaryText} />, [summaryText]);
+  // 4910 — 위 막대는 제목 한 곳(폴백 `RouteTopBarFallback`과 글자까지 같다). «N개 자산 · 용량»은 본문 머리 줄(StorageAssetList)로 내려갔다.
+  const topBarTitle = useMemo(() => <StorageTopBarTitle />, []);
 
   const supportsInlinePanel = detailPanel.supportsInlinePanel;
   // story #4277(민 기기 #2) — 402폭에서도 데스크톱 2단(폴더 칸 248px 고정)이라 목록이 약 150px로 찌그러져 «정렬: 최근 수정»이 한 자씩
@@ -441,6 +441,7 @@ export function StorageView({ projectId }: { projectId: string }) {
 
         <StorageAssetList
           assets={items}
+          summaryText={summaryText}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
           search={search}
