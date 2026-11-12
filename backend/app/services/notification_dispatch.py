@@ -58,6 +58,7 @@ async def _deliver_personal_webhooks(
     context: dict | None = None,
     muted_member_ids: set[uuid.UUID] | None = None,
     via_outbox: bool = True,
+    message_id: str | None = None,
 ) -> None:
     """story #2696([클래스 마감]) — 기본값을 outbox(``via_outbox=True``)로 뒤집었다.
     #2687→#2688→#373cfaa1→#2694로 「호출부 트랜잭션 안에서 동기 개인 webhook POST(최대 3회
@@ -92,6 +93,8 @@ async def _deliver_personal_webhooks(
                     "muted_member_ids": (
                         [str(m) for m in muted_member_ids] if muted_member_ids is not None else None
                     ),
+                    # story #4903 — a chat message's notification names its message (an id): a delete finds the job that still carries the words
+                    **({"message_id": message_id} if message_id else {}),
                 },
             )
         )
@@ -238,7 +241,12 @@ def _bell_extras(event: dict | None) -> dict:
     """What the bell line reads from a person's dispatched Event besides title/body/event_type: the gate's name (story #4520),
     the waiting agent's name (story #4533 «권한 대기 · {에이전트}»)."""
     payload = (event or {}).get("payload") or {}
-    return {k: payload[k] for k in ("gate_name", "agent_name") if isinstance(payload.get(k), str) and payload[k]}
+    extras = {k: payload[k] for k in ("gate_name", "agent_name") if isinstance(payload.get(k), str) and payload[k]}
+    # story #4903 — a chat message's card carries the message's id (an id, never words): the bell row names its message, so deleting the message finds it
+    message_id = (event or {}).get("message_id")
+    if isinstance(message_id, str) and message_id:
+        extras["message_id"] = message_id
+    return extras
 
 
 async def dispatch_notification(
@@ -606,6 +614,7 @@ async def dispatch_notification(
                 db, org_id, webhook_deliver_ids, title=title, body=body, event_type=event_type,
                 reference_type=reference_type, reference_id=reference_id, context=context,
                 muted_member_ids=muted_member_ids, via_outbox=via_outbox,
+                message_id=(event or {}).get("message_id") if isinstance((event or {}).get("message_id"), str) else None,
             )
 
             # E-MOBILE M0·S3: EE 푸시 채널(웹훅과 나란한 별개 채널) — 등록 push_devices 로 Expo 발송.

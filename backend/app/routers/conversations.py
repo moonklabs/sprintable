@@ -678,13 +678,12 @@ def _msg_payload(
         payload["delivery_withheld"] = withheld
     # E-ACTIVATION S1: typed activation 필드 top-level 노출(없으면 None). connector 헤더 주입용.
     payload.update(_activation_payload(msg))
-    # story #2604 P2: approval-request 카드 스키마 top-level 노출(없으면 None·additive).
-    payload.update(_approval_payload(msg))
-    # story #2637 AC 0-a: 이벤트 발행 메시지 스키마 top-level 노출(없으면 None·additive).
-    payload.update(_event_payload(msg))
-    # story #3143(9a5abc24) PO 리뷰 델타: 서버 집행 커맨드 결과 카드 스키마 top-level
-    # 노출(없으면 None·additive) — FE가 텍스트 휴리스틱 없이 이 카드를 식별하는 축.
-    payload.update(_server_command_payload(msg))
+    # story #4903 — a tombstone serves NO card: the approval / event / server-command cards live in `msg_metadata` and carry words of their own
+    # (an approval's resolution note, an event's payload…) that the tombstone (`content = ""`) did not clear. The keys stay, empty (the shape is the same).
+    _cards = (_approval_payload, _event_payload, _server_command_payload)
+    for _card in _cards:
+        _fields = _card(msg)
+        payload.update({k: None for k in _fields} if msg.deleted_at is not None else _fields)
     return payload
 
 
@@ -808,7 +807,8 @@ def _notification_event(msg: "ConversationMessage", sender_name: str) -> dict:
     out. The name is written LAST: it was written first and the card spread after it, so a sender that put `sender_name` in its `event_context` replaced it (and 4875's withheld copy, which keeps only
     the name, kept the forged one). Every other key is as the sender sent it."""
     card = _event_payload(msg).get("event") or {}
-    return {**card, "sender_name": sender_name}
+    # story #4903 — the message's id rides on the card (an id, never words): a delete finds ITS notification rows by it (the row has no other link to the message). Written last, like the name.
+    return {**card, "sender_name": sender_name, "message_id": str(msg.id)}
 
 
 def _server_command_payload(msg: "ConversationMessage") -> dict:
@@ -1881,7 +1881,7 @@ async def list_conversations(
                 # raw content(발행 시점 slug) 대신 렌더 시점 「헤더 · 요약」으로 조립하려면
                 # event_key/payload가 필요하다. _event_payload()(기존 함수, 전체 메시지
                 # 목록이 이미 씀·additive)를 그대로 재사용 — 새 스키마·새 조회 0.
-                **_event_payload(latest_msg),
+                **({"event": None} if latest_msg.deleted_at is not None else _event_payload(latest_msg)),  # story #4903: a deleted message's card is not served
             } if latest_msg else None,
             "updated_at": conv.updated_at.isoformat(),
             "free_response": conv.free_response,  # story #4179 — 단건 GET과 같은 값(additive).
@@ -2450,11 +2450,20 @@ async def delete_message(
     # Event insert·recipient_seq·webhook-dedup까지 얽힌 별도 배선이라, 이 스토리 하나로 같이
     # 만들면 그 정합성까지 새로 떠안는다 — 여기서는 안 한다. 새로고침/재조회 시에는 정확히
     # 반영된다(AC5 ①의 실측 기준). 실시간 전파가 필요해지면 별도 스토리로 뗀다.
+    # story #4903 AC1 — the words were also copied when the message was sent (event rows · bell rows · notification rows · delivery jobs · activity rows):
+    # they go too, in this same transaction; the rows stay, only the words are removed. A REPEAT delete runs the id-based part again (it repairs a tombstone
+    # that was made before this scrub existed); the old-form match needs the words, which only the first delete still has.
+    old_content = msg.content if msg.deleted_at is None else None
     if msg.deleted_at is None:
         msg.deleted_at = datetime.now(timezone.utc)
         msg.content = ""  # ③ 오발송 스크럽 — 플레이스홀더 문구는 FE가 deleted_at 보고 렌더(i18n).
         await db.flush()
-        await db.commit()
+    from app.services.deleted_message_scrub import scrub_stored_copies_of_deleted_message
+    await scrub_stored_copies_of_deleted_message(
+        db, org_id=org_id, message_id=msg.id, conversation_id=conversation_id, created_at=msg.created_at, old_content=old_content,
+        summary_without_words=_build_message_summary("", member.name, False),
+    )
+    await db.commit()
 
     return {"id": str(msg.id), "deleted_at": msg.deleted_at.isoformat() if msg.deleted_at else None}
 

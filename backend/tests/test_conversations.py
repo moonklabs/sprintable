@@ -52,6 +52,7 @@ def _make_msg(msg_id: uuid.UUID | None = None) -> MagicMock:
     m.sender_id = MEMBER_ID
     m.content = "테스트 메시지"
     m.mentioned_ids = []
+    m.deleted_at = None  # a live message (a bare MagicMock attribute is «not None» — it would read as deleted; story #4903 reads deleted_at to drop a tombstone's cards)
     m.created_at = datetime(2026, 5, 14, 12, 0, tzinfo=timezone.utc)
     m.updated_at = datetime(2026, 5, 14, 12, 0, tzinfo=timezone.utc)
     return m
