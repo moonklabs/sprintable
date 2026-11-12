@@ -17,6 +17,8 @@ const APP = path.join(__dirname, '../src/app');
 /** the class strings of the column, the bubble text, the time and the «⋯» button (drift-proof: read from the source, not copied) */
 function classesFromSource() {
   const src = readFileSync(BUBBLE, 'utf8');
+  const variants = bubbleVariants(src);
+  if (!variants) throw new Error('the bubble variants not found');
   const pick = (re: RegExp, what: string) => { const m = re.exec(src); if (!m) throw new Error(`${what} not found`); return m[1]!; };
   const button = pick(/data-testid="chat-bubble-menu-button"[\s\S]*?className=\{`([^`]+)`\}/, 'the menu button className');
   return {

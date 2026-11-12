@@ -70,4 +70,4 @@ export const ENTITY_COLORS: Record<string, string> = {
 
 // ⛔AC4 색 규율: 노랑 금지 — 노랑은 "기다리면 풀리는 것"인데 ②/③은 사용자가 기다려서 풀 수
 // 있는 상태가 아니다(담긴 곳으로 보내거나, 애초에 갈 곳이 없는 것). 구별은 색이 아니라 말로.
-export const GRAY_STATE_COLOR = 'border-border bg-muted/40 text-muted-foreground';
+export const GRAY_STATE_COLOR = 'border-border bg-muted/40 text-ds-ink-2';
