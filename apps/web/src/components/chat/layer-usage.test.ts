@@ -26,6 +26,16 @@ describe('대화 방은 화면 층 규칙의 토큰을 쓴다 (4906)', () => {
     expect(src).not.toMatch(/rounded-xl px-3\.5 py-2 text-sm italic text-muted-foreground/);
   });
 
+  it('⭐스레드 칸: 바닥은 내용 칸 층 LAYER.panel(옛 bg-background 0), 답글 줄(plainRow)도 글 줄 층 — 맨글로 바탕에 서지 않는다', () => {
+    const thread = read('thread-panel.tsx');
+    expect(thread).toContain("import { LAYER } from '@/components/ds/layers'");
+    expect(thread).toContain('border-border ${LAYER.panel}`}');
+    expect(thread).not.toMatch(/border-l border-border bg-background/);
+    const bubble = read('chat-bubble.tsx');
+    expect(bubble).toContain('plainRow\n                ? `rounded-lg ${isMine ? LAYER.rowMine : LAYER.rowOthers} px-3 py-2`');
+    expect(bubble).not.toContain("? 'py-0.5'\n                : isMine");
+  });
+
   it('⭐에이전트 글은 맨글(py-0.5만)로 바탕에 서지 않는다 — 말풍선 분기에 층 클래스가 있다(plainRow만 맨글)', () => {
     const src = read('chat-bubble.tsx');
     expect(src).toMatch(/isAgent\s*\?\s*`rounded-lg rounded-tl-sm \$\{LAYER\.rowOthers\}/);

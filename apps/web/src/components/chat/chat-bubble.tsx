@@ -872,7 +872,7 @@ export function ChatBubble({
             // story 4887 (UI-4 P4-b · AC3 B3) — an AGENT's message has no bubble: the head line above (name · tag · time) says who, and the text sits on the page. A person's message (mine or another person's) keeps its bubble — it is the bubble that tells the two kinds apart at a glance (B3: «에이전트 글만 말풍선 없는 평문»).
             <div data-testid="chat-bubble-text" className={`min-w-0 max-w-full text-sm leading-relaxed text-foreground [overflow-wrap:anywhere] ${
               plainRow
-                ? 'py-0.5'
+                ? `rounded-lg ${isMine ? LAYER.rowMine : LAYER.rowOthers} px-3 py-2`
                 : isMine
                   ? `rounded-xl rounded-tr-sm ${LAYER.rowMine} px-3.5 py-2`
                   : isAgent

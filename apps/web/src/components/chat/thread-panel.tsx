@@ -17,6 +17,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { useToast } from '@/components/ui/toast';
 import { announceChatMessageDeleted } from '@/lib/chat-message-deleted';
 import { actorRowLabels } from '@/lib/member-display';
+import { LAYER } from '@/components/ds/layers';
 
 // story #2262 PR② — 배치조회가 꺼진(구 호출부) 경우 훅에 넘길 안정적인 빈 배열 참조(매
 // 렌더 새 배열을 만들면 useEntityStatusBatchFetch의 effect가 messages 변경으로 오인해
@@ -219,7 +220,7 @@ export function ThreadPanel({
   }, [conversationId, addToast, t]);
 
   return (
-    <div ref={panelRef} className="flex h-full flex-col overflow-hidden border-l border-border bg-background" data-testid="thread-panel">
+    <div ref={panelRef} className={`flex h-full flex-col overflow-hidden border-l border-border ${LAYER.panel}`} data-testid="thread-panel">
       {/* Header — story #2911(S2e②③/R4) 「s2e-thread-depth-grammar」 확定: ReadingPanel과
           «같은 칩 브레드크럼» 문법(칩 버튼 + `›` text-border 구분자, 동일 토큰/스타일).
           「스레드」 평문 폐기. 스레드는 단일 레벨이라 세그먼트는 정확히 2개 — [대화](뒤로
