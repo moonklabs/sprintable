@@ -10,7 +10,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { ThreadPanel } from './thread-panel';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import koMessages from '../../../messages/ko.json';
-import { CHAT_MESSAGE_DELETED_EVENT } from '@/lib/chat-message-deleted';
+import { CHAT_MESSAGE_DELETED_EVENT, forgetKnownDeletedForTests } from '@/lib/chat-message-deleted';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -56,7 +56,7 @@ const menuItem = (label: string) => [...document.querySelectorAll('[role="menuit
 const click = async (el: Element) => { await act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); }); };
 
 beforeEach(() => { Element.prototype.scrollIntoView = vi.fn(); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); addToast.mockReset(); });
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+afterEach(() => { forgetKnownDeletedForTests(); act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
 
 describe('ThreadPanel — the message menu works (story 4887)', () => {
   it('⭐ «답글 달기» on a reply puts the focus in this thread\'s composer', async () => {
@@ -81,7 +81,7 @@ describe('ThreadPanel — the message menu works (story 4887)', () => {
     await openMenu('내 답글');
     await click(menuItem(koMessages.common.delete)!);
     window.removeEventListener(CHAT_MESSAGE_DELETED_EVENT, listen);
-    expect(heard, 'the panel announces the delete so the room LIST blanks a preview that showed this reply').toEqual([{ conversationId: 'conv-1', createdAt: '2026-11-11T00:01:00.000Z' }]);
+    expect(heard, 'the panel announces the delete so the room LIST blanks a preview that showed this reply').toEqual([{ conversationId: 'conv-1', createdAt: '2026-11-11T00:01:00.000Z', messageId: 'r-mine', threadId: 'p1', deletedAt: '2026-11-11T01:00:00.000Z' }]); // story 4903 (codex on 5664): with the message's id
     const del = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE');
     expect(String(del?.[0])).toBe('/api/conversations/conv-1/messages/r-mine'); // reverted → no DELETE at all
     expect(container.textContent).not.toContain('내 답글');

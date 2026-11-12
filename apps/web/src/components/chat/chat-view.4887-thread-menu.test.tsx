@@ -7,7 +7,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
-import { CHAT_MESSAGE_DELETED_EVENT } from '@/lib/chat-message-deleted';
+import { CHAT_MESSAGE_DELETED_EVENT, forgetKnownDeletedForTests } from '@/lib/chat-message-deleted';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }), usePathname: () => '/chats/thread-1' }));
 vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => false }));
@@ -29,7 +29,7 @@ beforeEach(() => {
   vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} takeRecords() { return []; } });
   vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
 });
-afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); vi.resetModules(); });
+afterEach(async () => { forgetKnownDeletedForTests(); await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); vi.resetModules(); });
 
 
 const mine = { id: 'm1', memo_id: 'thread-1', created_by: 'me-1', sender_name: '나', sender_type: 'human', sender_avatar_url: null, sender_runtime_type: null, content: '내 원본 글', attachments: [], created_at: new Date(Date.UTC(2026, 10, 10, 1, 0, 0)).toISOString(), reply_count: 1 };
@@ -67,7 +67,7 @@ describe('ChatView — the thread\'s original message can be deleted from its me
     await act(async () => { del.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
     const sent = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE');
     window.removeEventListener(CHAT_MESSAGE_DELETED_EVENT, listen);
-    expect(heard, 'the room announces the delete so its LIST blanks the preview').toEqual([{ conversationId: 'thread-1', createdAt: mine.created_at }]); // reverted (nothing announced) → []
+    expect(heard, 'the room announces the delete so its LIST blanks the preview').toEqual([{ conversationId: 'thread-1', createdAt: mine.created_at, messageId: 'm1', threadId: null, deletedAt: '2026-11-10T02:00:00.000Z' }]); // story 4903 (codex on 5664): with the message's id, so the list matches by it and remembers it // reverted (nothing announced) → []
     expect(String(sent?.[0])).toBe('/api/conversations/thread-1/messages/m1'); // reverted (the panel is not handed the room's handler) → no DELETE at all
     const roomRow = container.querySelector('.group\\/bubble') as HTMLElement; // the first row of the ROOM's list
     expect(roomRow.textContent).toContain(koMessages.chats.deletedMessagePlaceholder);
