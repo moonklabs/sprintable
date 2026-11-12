@@ -6182,6 +6182,8 @@
     "queueDetailLabel": "결재 상세",
     "queueSheetLabel": "{title} 자세히",
     "queueDetailEmpty": "왼쪽에서 결재를 골라 주세요",
+    "queueMenuApproveChoose": "승인 — 안 고르러 열기",
+    "queueMenuOpen": "자세히 열기",
     "gateRejectedHistory": "최근 반려 사유",
     "voidAction": "무효화",
     "voidConfirmTitle": "결재 무효화",

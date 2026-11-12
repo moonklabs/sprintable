@@ -7,6 +7,8 @@ import { Chip } from '@/components/ds/chip';
 import { CountBadge } from '@/components/ds/count-badge';
 import { ListRow } from '@/components/ds/list-row';
 import { SectionHeader } from '@/components/ds/section-header';
+import { ContextMenu, ContextMenuTrigger, MenuContent, MenuItem, MenuSeparator } from '@/components/ds/menu';
+import type { IconName } from '@/components/ds/icon-paths';
 import { handleListKeys } from '@/lib/list-keys';
 
 /**
@@ -14,6 +16,15 @@ import { handleListKeys } from '@/lib/list-keys';
  * sections the AC2 sheet drew («내 손이 필요해요» · «보류 중»). Pure display: the screen decides which row is picked and what each row says; the detail column shows everything about the picked row.
  * j / k / ↑ / ↓ walk the rows (the same helper the home uses — no new command key); a click anywhere on a row, or Enter on its title, picks it.
  */
+/** one entry of a row's right-click menu — an action the detail column ALSO has (never a right-click-only action) */
+export interface GateQueueMenuItem {
+  id: 'approve' | 'reject' | 'hold' | 'open';
+  label: string;
+  icon: IconName;
+  onSelect: () => void;
+  disabled?: boolean;
+}
+
 export interface GateQueueRow {
   key: string;
   /** the kind chip («판단 요청» · «PR 리뷰» · a gate type word · «승인 요청») */
@@ -23,6 +34,8 @@ export interface GateQueueRow {
   subtitle: string;
   /** what already happened to it in this session («승인 완료» · «반려됨») — shown instead of the age chip */
   doneLabel?: string;
+  /** the right-click menu of this row (empty / absent → the browser's own menu stays) — the screen decides what the request allows */
+  menu?: GateQueueMenuItem[];
 }
 
 export interface GateQueueSection {
@@ -45,12 +58,27 @@ function GateQueueRowView({ row, section, selected, onSelect, onOpen }: { row: G
     subtitle: row.subtitle,
     trailing: row.doneLabel ? <Chip tone="done">{row.doneLabel}</Chip> : undefined,
   } as const;
-  return (
-    <div data-row-key={row.key} data-testid="gate-queue-row" onClick={() => onSelect(row.key)} onDoubleClick={onOpen ? () => onOpen(row.key) : undefined}>
+  const rowEl = (
+    <>
       {needsHand
         ? <ListRow {...common} selected={selected} needsHand needsHandLabel={t('needsHandLabel')} className="has-[button:focus-visible]:ring-2 has-[button:focus-visible]:ring-inset has-[button:focus-visible]:ring-ds-action" />
         : <ListRow {...common} selected={selected} className="has-[button:focus-visible]:ring-2 has-[button:focus-visible]:ring-inset has-[button:focus-visible]:ring-ds-action" />}
-    </div>
+    </>
+  );
+  const rowProps = { 'data-row-key': row.key, 'data-testid': 'gate-queue-row', onClick: () => onSelect(row.key), onDoubleClick: onOpen ? () => onOpen(row.key) : undefined };
+  if (!row.menu || row.menu.length === 0) return <div {...rowProps}>{rowEl}</div>;
+  const decide = row.menu.filter((m) => m.id !== 'open');
+  const open = row.menu.filter((m) => m.id === 'open');
+  return (
+    // the right-click menu — the same ds ContextMenu the storage screen uses; its entries are actions the detail column has too (approve · reject · hold · open the page)
+    <ContextMenu>
+      <ContextMenuTrigger render={<div {...rowProps} />}>{rowEl}</ContextMenuTrigger>
+      <MenuContent align="start">
+        {decide.map((m) => <MenuItem key={m.id} icon={m.icon} disabled={m.disabled} onClick={m.onSelect}>{m.label}</MenuItem>)}
+        {decide.length > 0 && open.length > 0 ? <MenuSeparator /> : null}
+        {open.map((m) => <MenuItem key={m.id} icon={m.icon} disabled={m.disabled} onClick={m.onSelect}>{m.label}</MenuItem>)}
+      </MenuContent>
+    </ContextMenu>
   );
 }
 
