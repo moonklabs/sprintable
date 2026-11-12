@@ -2451,9 +2451,17 @@ async def delete_message(
     # 만들면 그 정합성까지 새로 떠안는다 — 여기서는 안 한다. 새로고침/재조회 시에는 정확히
     # 반영된다(AC5 ①의 실측 기준). 실시간 전파가 필요해지면 별도 스토리로 뗀다.
     if msg.deleted_at is None:
+        old_content = msg.content
         msg.deleted_at = datetime.now(timezone.utc)
         msg.content = ""  # ③ 오발송 스크럽 — 플레이스홀더 문구는 FE가 deleted_at 보고 렌더(i18n).
         await db.flush()
+        # story #4903 AC1 — the words were also copied when the message was sent (one event row per recipient, one notification row per
+        # person told about it): they go too, in this same transaction. The rows stay; only the words are removed.
+        from app.services.deleted_message_scrub import scrub_stored_copies_of_deleted_message
+        await scrub_stored_copies_of_deleted_message(
+            db, message_id=msg.id, conversation_id=conversation_id, created_at=msg.created_at, old_content=old_content,
+            summary_without_words=_build_message_summary("", member.name, False),
+        )
         await db.commit()
 
     return {"id": str(msg.id), "deleted_at": msg.deleted_at.isoformat() if msg.deleted_at else None}
