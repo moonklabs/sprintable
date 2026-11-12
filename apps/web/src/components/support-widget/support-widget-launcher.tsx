@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { LifeBuoy, X } from 'lucide-react';
@@ -110,7 +110,9 @@ export function SupportWidgetLauncher() {
 
   // story 4853 — the one place that says «the button is drawn»: the early return below and the `<html>` mark read the same value (they can not drift apart).
   const launcherShown = !(allComplete || !activationState || isMobileChatDetailRoute || isSettingsRoute);
-  useEffect(() => {
+  // story 4906 (codex) — a LAYOUT effect, not a passive one: the button is committed in the same pass, and a passive effect would run only after that frame was painted, so for one frame the
+  // button sat on a composer's [Send] with no clearance yet (the clearance wrapper keys off this attribute). A layout effect runs before the browser paints.
+  useLayoutEffect(() => {
     if (!launcherShown) return undefined;
     const html = document.documentElement;
     html.setAttribute(SUPPORT_LAUNCHER_ATTR, '');

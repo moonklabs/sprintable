@@ -36,6 +36,14 @@ describe('SupportLauncherClearance — the composer keeps the support button\'s 
   });
 });
 
+describe('the launcher marks <html> before the first paint (story 4906, codex)', () => {
+  it('⭐the mark is set in a LAYOUT effect — a passive effect would let one frame paint the button on [Send] with no clearance yet', async () => {
+    const src = (await import('./support-widget-launcher.tsx?raw')).default as string;
+    expect(src).toMatch(/useLayoutEffect\(\(\) => \{\s*if \(!launcherShown\) return undefined;\s*const html = document\.documentElement;\s*html\.setAttribute\(SUPPORT_LAUNCHER_ATTR, ''\);/);
+    expect(src).not.toMatch(/useEffect\(\(\) => \{\s*if \(!launcherShown\) return undefined;/);
+  });
+});
+
 describe('the composers that reach the window\'s bottom-right corner sit inside the clearance (story 4906)', () => {
   it('chat room: <ChatInput> is the clearance box\'s child', async () => {
     const src = (await import('../chat/chat-view.tsx?raw')).default as string;
