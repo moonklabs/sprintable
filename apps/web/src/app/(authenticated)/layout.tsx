@@ -3,7 +3,7 @@ import { cookies, headers } from 'next/headers';
 import { ACTIVATION_COLLAPSED_COOKIE, ACTIVATION_HINT_COOKIE, isActivationCollapsed, parseActivationHint } from '@/lib/activation-hint';
 import { getServerSession } from '@/lib/db/server';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
-import { AccountContextFailure } from './account-context-failure';
+import { AccountContextFailure } from '@/components/auth/account-context-failure';
 import { onboardingRedirect, staysForNewOrgSetup } from '@/lib/auth/onboarding-next';
 import { ME_REASON_MEMBERSHIP_ELSEWHERE, readMe404Reason } from '@/lib/auth/me-reason';
 import { resolveProjectMemberships, resolveServerProjectId } from '@/lib/resolve-project-memberships';
@@ -17,7 +17,7 @@ import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { logServerTiming, withServerTiming } from '@/lib/server-timing';
 import { TabOwnerGate } from '@/components/auth/tab-owner-gate';
 import { fastapiBaseUrl } from '@/lib/fastapi-url';
-import { SP_RENEW_TRIED_COOKIE } from '@/lib/auth/cookies';
+import { SP_RENEW_TRIED_COOKIE, SP_RENEW_UNCONFIRMED_COOKIE } from '@/lib/auth/cookies';
 
 interface MemberContext {
   id: string;
@@ -107,6 +107,9 @@ async function AuthenticatedLayoutBody({
       // account in a second window) is one refresh away from the right claim. Renew ONCE, read again; only when the renewal was already tried (the marker the renew road
       // leaves for a minute) and it is still none is it the sign-in.
       const renewTried = (await cookies()).get(SP_RENEW_TRIED_COOKIE)?.value;
+      // story 4915 (PR 2): the renew road could not CONFIRM anything just now (the refresh call was rejected · 5xx; it left this short cookie, cleared nothing) — not a sign-in, not another round
+      // through the road (that would loop): the «다시 시도» screen. A retry after the cookie is gone goes through the road afresh.
+      if (!renewTried && (await cookies()).get(SP_RENEW_UNCONFIRMED_COOKIE)?.value) return { userId: session.user_id, node: <AccountContextFailure /> };
       if (!renewTried) redirect(`/api/auth/renew?next=${encodeURIComponent(currentPath || '/')}`);
       redirect(buildLoginRedirect(currentPath, navV3Flags));
     }

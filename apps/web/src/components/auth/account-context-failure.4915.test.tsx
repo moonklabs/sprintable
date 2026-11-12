@@ -10,7 +10,7 @@ import koMessages from '../../../messages/ko.json';
 
 const refresh = vi.hoisted(() => vi.fn());
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh, push: vi.fn(), replace: vi.fn(), back: vi.fn() }) }));
-const { AccountContextFailure } = await import('./account-context-failure');
+const { AccountContextFailure } = await import('@/components/auth/account-context-failure');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

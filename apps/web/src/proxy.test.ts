@@ -352,7 +352,7 @@ describe('proxy', () => {
   it('일시 장애(503 — rate-limit이나 콜드스타트 등)에서는 sp_at/sp_rt를 지우지 않는다 — 진짜 401이 아니므로(story #2124 ㉯)', async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: { code: 'SERVICE_UNAVAILABLE' } }) });
     const response = await middleware(makeRequest('/dashboard', { sp_rt: 'still-valid-rt-503' }));
-    expect(response.status).toBe(307); // 이 요청 자체는 여전히 미인증 처리(로그인으로) — 다만 쿠키는 살아남는다
+    expect(response.status).toBe(307); // 문서 읽기가 아닌 요청(Accept 없음)은 예전 답 그대로 — 이 요청 자체는 미인증 처리(로그인으로), 다만 쿠키는 살아남는다. 문서 읽기 · 클라이언트 이동은 story 4915 PR 2: 아래 describe(공개 «다시 시도» 페이지로 rewrite)
     const setCookie = response.headers.get('set-cookie') ?? '';
     expect(setCookie).not.toContain('sp_rt=;');
     expect(setCookie).not.toContain('sp_at=;');
@@ -366,6 +366,90 @@ describe('proxy', () => {
     const setCookie = response.headers.get('set-cookie') ?? '';
     expect(setCookie).not.toContain('sp_rt=;');
     expect(setCookie).not.toContain('sp_at=;');
+  });
+
+  // story 4915 (PR 2) — «refresh 호출을 확인 못 함»(거절 · 시간 초과 · 5xx)은 로그아웃이 아니다. sp_at이 만료돼 refresh가 불리는 순간(약 1시간마다)에 교체 창 · 느린 응답이 겹쳐도 살아 있는 세션을 두고 로그인 화면으로 안 보낸다.
+  // 그리고 «그대로 통과»도 아니다(codex 1판 HIGH: 프록시 리다이렉트에만 기대는 핸들러 — /desktop/downloads/macos.json — 가 세션 없이 열림): 공개 «다시 시도» 페이지로 REWRITE(주소 그대로 · 쿠키 그대로).
+  describe('story 4915 — an unconfirmed refresh is not a sign-out, and not a pass-through either', () => {
+    const REWRITE = 'x-middleware-rewrite';
+    const NEXT = 'x-middleware-next';
+    const failing: Array<[string, () => void]> = [
+      ['refresh answers 503', () => mockFetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({}) })],
+      ['refresh answers 502 (a deploy window)', () => mockFetch.mockResolvedValue({ ok: false, status: 502, json: async () => ({}) })],
+      ['refresh is rejected (ECONNRESET)', () => mockFetch.mockRejectedValue(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } }))],
+      ['refresh is refused (ECONNREFUSED)', () => mockFetch.mockRejectedValue(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }))],
+    ];
+    const DOC = { accept: 'text/html,application/xhtml+xml', 'sec-fetch-dest': 'document' };
+
+    it.each(failing)('an EXPIRED sp_at + a live sp_rt, %s → a page load is REWRITTEN to the public «다시 시도» page: no /login, cookies untouched, not cached', async (_name, arrange) => {
+      arrange();
+      const expired = await makeAccessToken({ exp: Math.floor(Date.now() / 1000) - 3600 });
+      const response = await middleware(makeRequestWithHeaders('/chats', DOC, { sp_at: expired, sp_rt: 'live-rt' }));
+      expect(response.status).toBe(200);
+      expect(response.headers.get('location')).toBeNull();
+      expect(response.headers.get(REWRITE)).toBe('https://app.example.com/session-unconfirmed'); // the query is not carried
+      expect(response.headers.get(NEXT)).toBeNull();
+      expect(response.headers.get('cache-control')).toContain('no-store');
+      expect(response.headers.get('set-cookie') ?? '').not.toMatch(/sp_(at|rt)=;/);
+    });
+
+    it('⭐ NOT a pass-through: a handler that does no session check of its own and relies on the proxy (the card\'s /desktop/downloads/macos.json) is never reached without a session', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({}) });
+      for (const headers of [DOC, { rsc: '1' }, {}] as Array<Record<string, string>>) {
+        const response = await middleware(makeRequestWithHeaders('/desktop/downloads/macos.json', headers, { sp_rt: 'live-rt' }));
+        expect(response.headers.get(NEXT)).toBeNull(); // never «continue to the handler»
+      }
+    });
+
+    it('a flat legacy address (/glance · /board) is also answered by the page, not a Next 404 (the rewrite comes before the address resolution)', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({}) });
+      for (const p of ['/glance', '/board', '/docs']) {
+        const response = await middleware(makeRequestWithHeaders(p, DOC, { sp_rt: 'live-rt' }));
+        expect([p, response.headers.get(REWRITE)]).toEqual([p, 'https://app.example.com/session-unconfirmed']);
+      }
+    });
+
+    it('a Next RSC fetch (client navigation) gets the page too — however it shows itself to the proxy: the `RSC` header (hand-made requests), `Accept: text/x-component` or the `_rsc` parameter (what a REAL Next server passes: the `RSC` header is not visible there, measured); a PREFETCH and a plain fetch keep the old answer (the sign-in redirect) — nothing is cached as a «retry» screen', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({}) });
+      for (const [path, headers] of [
+        ['/chats', { rsc: '1', accept: 'text/x-component' }],
+        ['/chats', { accept: 'text/x-component' }],
+        ['/chats?_rsc=abc12', { accept: '*/*' }],
+        ['/chats', { rsc: '1' }],
+      ] as Array<[string, Record<string, string>]>) {
+        const rsc = await middleware(makeRequestWithHeaders(path, headers, { sp_rt: 'live-rt' }));
+        expect([path, JSON.stringify(headers), rsc.headers.get(REWRITE)]).toEqual([path, JSON.stringify(headers), 'https://app.example.com/session-unconfirmed']);
+      }
+      const prefetch = await middleware(makeRequestWithHeaders('/chats', { rsc: '1', 'next-router-prefetch': '1', accept: 'text/x-component' }, { sp_rt: 'live-rt' }));
+      expect(prefetch.status).toBe(307);
+      expect(prefetch.headers.get('location')).toContain('/login');
+      const plainFetch = await middleware(makeRequestWithHeaders('/chats', { accept: '*/*' }, { sp_rt: 'live-rt' }));
+      expect(plainFetch.status).toBe(307);
+    });
+
+    it('an API request stays untouched whatever it asks for (a page-like Accept · an RSC header — no rewrite, no redirect: the route authenticates itself, as before)', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({}) });
+      for (const headers of [{}, DOC, { rsc: '1' }] as Array<Record<string, string>>) {
+        const response = await middleware(makeRequestWithHeaders('/api/v2/stories?limit=1', headers, { sp_rt: 'live-rt' }));
+        expect([JSON.stringify(headers), response.headers.get(REWRITE), response.headers.get('location')]).toEqual([JSON.stringify(headers), null, null]);
+      }
+    });
+
+    it('a DEAD token (401) is still the sign-in with the cookies cleared — only «not confirmed» changed (no sp_at at all, AND an expired sp_at: both refresh call sites)', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: { code: 'TOKEN_REVOKED' } }) });
+      const expired = await makeAccessToken({ exp: Math.floor(Date.now() / 1000) - 3600 });
+      for (const cookies of [{ sp_rt: 'dead-rt' }, { sp_at: expired, sp_rt: 'dead-rt' }] as Array<Record<string, string>>) {
+        const response = await middleware(makeRequestWithHeaders('/chats', DOC, cookies));
+        expect([Object.keys(cookies).join('+'), response.status, response.headers.get('location')?.includes('/login'), response.headers.get(REWRITE)]).toEqual([Object.keys(cookies).join('+'), 307, true, null]);
+        expect(response.headers.get('set-cookie') ?? '').toMatch(/sp_rt=;/);
+      }
+    });
+
+    it('the retry page itself is public: a direct visit is served (it carries no data)', async () => {
+      mockFetch.mockImplementation(() => Promise.resolve({ ok: false, status: 401 }));
+      const response = await middleware(makeRequest('/session-unconfirmed'));
+      expect(response.headers.get('location')).toBeNull();
+    });
   });
 
   it('진짜 401(TOKEN_REVOKED)일 때는 여전히 sp_at/sp_rt를 지운다 — ㉯가 clearAuthCookies를 아예 없앤 게 아니라 조건만 좁힌 것임을 확認(story #2124 ㉯ 회귀가드)', async () => {
