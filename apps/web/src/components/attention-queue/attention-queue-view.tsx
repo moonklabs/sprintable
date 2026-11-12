@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { ShieldCheck, ChevronRight } from 'lucide-react';
 import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
+import { Button } from '@/components/ds/button';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { cn } from '@/lib/utils';
@@ -198,13 +199,9 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
 
   const { shown, overflow, overflowHasGate } = buildAttentionQueue(items, CAP);
   const retryButton = (
-    <button
-      type="button"
-      onClick={() => { void refetchAndDiff(); }}
-      className="inline-flex min-h-8 items-center rounded-md border border-proof-line px-3 text-xs font-semibold text-proof-ink hover:bg-proof-sunk"
-    >
+    <Button type="button" size="md" variant="secondary" onClick={() => { void refetchAndDiff(); }}>
       {t('loadRetry')}
-    </button>
+    </Button>
   );
   // story #4382(유나 CHANGES) — 넘침 줄 «{수} — {자리}». 숨은 행도 보이는 것과 같은 예외라 «흐르는 중»이 아니다. 자리: 숨은 행에 게이트가 있으면
   // 결재함(단추), 아니면 «처리되는 대로 여기 차례로». BE가 gate_pending을 잘랐으면 넘침이 0이어도 숨은 게이트가 있다.
