@@ -4,6 +4,7 @@ What was wrong: gcloud starts by asking the metadata server whether it runs on G
 """
 from __future__ import annotations
 
+import ast
 import re
 import shutil
 import socket
@@ -152,6 +153,82 @@ def test_every_test_that_starts_the_real_gcloud_goes_through_the_helper() -> Non
         if (looks_for or builds_env) and "_real_gcloud" not in src:
             offenders.append(f"{f.relative_to(_TESTS)}: uses gcloud or CLOUDSDK_ without the helper")
     assert offenders == [], offenders
+
+
+_MIN_HANG_BOUND = 90   # seconds: the suite's own limit is 30, and a start of gcloud on a crowded runner took 13-44 s (first of its shard) - the bound only has to catch a real hang
+
+
+def _mark_bound(node: ast.AST) -> float | None:
+    """the seconds of a `pytest.mark.timeout(N)` decorator / `pytestmark` value, or None if `node` is not one"""
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "timeout" and isinstance(node.func.value, ast.Attribute) and node.func.value.attr == "mark":
+        for a in [*node.args, *(k.value for k in node.keywords if k.arg in (None, "timeout"))]:
+            if isinstance(a, ast.Constant) and isinstance(a.value, (int, float)):
+                return float(a.value)
+    return None
+
+
+def _gcloud_tests_without_a_hang_bound(src: str) -> list[str]:
+    """names of tests in `src` that start the REAL gcloud (directly through the helper's `run` / `env`, or through a function of the same file that does) without a `pytest.mark.timeout(>= 90)`
+    on the test or on the whole module (`pytestmark`)"""
+    tree = ast.parse(src)
+    aliases: set[str] = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom) and n.module == "tests":
+            aliases |= {a.asname or a.name for a in n.names if a.name == "_real_gcloud"}
+        elif isinstance(n, ast.Import):
+            aliases |= {a.asname or a.name for a in n.names if a.name == "tests._real_gcloud" and a.asname}
+    if not aliases:
+        return []
+    funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+    def calls(fn: ast.AST) -> tuple[set[str], bool]:
+        names, direct = set(), False
+        for c in ast.walk(fn):
+            if isinstance(c, ast.Call):
+                if isinstance(c.func, ast.Attribute) and isinstance(c.func.value, ast.Name) and c.func.value.id in aliases and c.func.attr in ("run", "env"):
+                    direct = True
+                elif isinstance(c.func, ast.Name):
+                    names.add(c.func.id)
+        return names, direct
+
+    graph = {name: calls(fn) for name, fn in funcs.items()}
+    starts = {name for name, (_, direct) in graph.items() if direct}
+    while True:   # a function that calls one that starts gcloud starts it too
+        more = {name for name, (names, _) in graph.items() if name not in starts and names & starts}
+        if not more:
+            break
+        starts |= more
+    module_bound = max((b for n in tree.body if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "pytestmark" for t in n.targets) for b in [_mark_bound(n.value)] if b is not None), default=0.0)
+    out = []
+    for name, fn in funcs.items():
+        if name.startswith("test") and name in starts:
+            bound = max((b for d in fn.decorator_list for b in [_mark_bound(d)] if b is not None), default=module_bound)
+            if bound < _MIN_HANG_BOUND:
+                out.append(name)
+    return sorted(out)
+
+
+def test_every_test_that_starts_the_real_gcloud_has_a_hang_bound_above_the_suites_30_s() -> None:
+    """a test that starts the real gcloud needs `@pytest.mark.timeout(>= 90)`: the first start on a fresh runner takes 13-44 s (measured over 40 CI runs, 140 jobs - one test per shard, the same test 5 s when it is
+    not first), and two tests without the mark failed develop and a pull request on 2026-11-11 at 30.03 s. The bound is for a hang, not a budget."""
+    offenders = []
+    for f in _test_files():
+        offenders += [f"{f.relative_to(_TESTS)}::{name}" for name in _gcloud_tests_without_a_hang_bound(f.read_text())]
+    assert offenders == [], offenders
+
+
+def test_the_hang_bound_guard_sees_direct_indirect_and_module_wide_starts() -> None:
+    """the guard run on small sources: it must flag a start with no mark / a low mark, follow a helper function of the file, and accept a module-wide mark"""
+    head = "import pytest\nfrom tests import _real_gcloud as _gcloud\n"
+    bare = head + "def test_a(tmp_path):\n    _gcloud.run(['x'], tmp_path)\n"
+    assert _gcloud_tests_without_a_hang_bound(bare) == ["test_a"]
+    assert _gcloud_tests_without_a_hang_bound(head + "@pytest.mark.timeout(30)\ndef test_a(tmp_path):\n    _gcloud.run(['x'], tmp_path)\n") == ["test_a"], "30 is the suite's own limit"
+    assert _gcloud_tests_without_a_hang_bound(head + "@pytest.mark.timeout(120)\ndef test_a(tmp_path):\n    _gcloud.run(['x'], tmp_path)\n") == []
+    assert _gcloud_tests_without_a_hang_bound(head + "def test_a(tmp_path):\n    subprocess.run(['gcloud'], env=_gcloud.env(tmp_path))\n") == ["test_a"], "building the environment by hand is a start too"
+    via_helper = head + "def _parse(a, t):\n    return _gcloud.run(a, t)\n\ndef test_b(tmp_path):\n    _parse(['x'], tmp_path)\n"
+    assert _gcloud_tests_without_a_hang_bound(via_helper) == ["test_b"], "a start through a helper function of the file"
+    assert _gcloud_tests_without_a_hang_bound(head + "pytestmark = pytest.mark.timeout(240)\n" + bare.split("\n", 2)[2]) == []
+    assert _gcloud_tests_without_a_hang_bound("def test_c():\n    pass\n") == [] and _gcloud_tests_without_a_hang_bound(head + "def test_d():\n    pass\n") == []
 
 
 def test_no_test_starts_gcloud_by_hand_or_moves_the_metadata_question() -> None:
