@@ -209,6 +209,12 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
   const renameDoneRef = useRef(false);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 기다리는 «열기»가 불릴 때 늘 최신 onClick을 쓴다(그 사이 카드가 다른 스토리로 바뀌어도 옛 콜백이 열리지 않게).
+  const onClickRef = useRef(onClick);
+  onClickRef.current = onClick;
+  const cancelPendingOpen = useCallback(() => {
+    if (openTimerRef.current) { clearTimeout(openTimerRef.current); openTimerRef.current = null; }
+  }, []);
   const [triggering, setTriggering] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const statusMenuRef = useRef<HTMLDivElement>(null);
@@ -410,30 +416,32 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
   }, [contextMenuOpen, closeContextMenu]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    cancelPendingOpen();
     e.preventDefault();
     e.stopPropagation();
     // 우클릭/롱프레스 지점(뷰포트 좌표)을 그대로 앵커로 쓰고 뷰포트 폭 안으로 clamp — 카드가
     // 어디 있든(가로스크롤로 화면 밖까지 걸쳐 있어도) 메뉴는 항상 화면 안에서 뜬다.
     setMenuPos({ top: clampTopToViewport(e.clientY, menuItemCount), left: clampToViewport(e.clientX) });
     setContextMenuOpen(true);
-  }, [menuItemCount]);
+  }, [menuItemCount, cancelPendingOpen]);
 
   // ── 4908 제목 바로 바꾸기(더블클릭 · F2 · 메뉴 «이름 바꾸기») ─────────────────────────────────────────────
   const startRename = useCallback(() => {
     if (!onRename) return;
-    if (openTimerRef.current) { clearTimeout(openTimerRef.current); openTimerRef.current = null; }
+    cancelPendingOpen();
     renameDoneRef.current = false;
     setDraft(story.title);
     setEditing(true);
-  }, [onRename, story.title]);
+  }, [onRename, story.title, cancelPendingOpen]);
 
-  const finishRename = useCallback((save: boolean) => {
+  // refocus: 키보드로 끝낼 때(Enter · Esc)만 카드로 초점을 돌려준다. 다른 곳을 눌러 빠져나간(blur) 경우엔 그 사람이 옮긴 초점을 가로채지 않는다.
+  const finishRename = useCallback((save: boolean, refocus: boolean) => {
     if (renameDoneRef.current) return;
     renameDoneRef.current = true;
     const next = draft.trim();
     setEditing(false);
     if (save && next && next !== story.title) onRename?.(story.id, next);
-    cardRef.current?.focus();
+    if (refocus) cardRef.current?.focus();
   }, [draft, story.id, story.title, onRename]);
 
   useEffect(() => {
@@ -442,19 +450,22 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     renameInputRef.current?.select();
   }, [editing]);
 
-  useEffect(() => () => { if (openTimerRef.current) clearTimeout(openTimerRef.current); }, []);
+  // 카드가 사라지거나 다른 스토리로 바뀌면 기다리던 «열기»는 버린다.
+  useEffect(() => cancelPendingOpen, [story.id, cancelPendingOpen]);
 
   // 클릭 = 열기, 더블클릭 = 제목 바꾸기. 한 번 눌러 바로 열면 열린 서랍의 막이 두 번째 클릭을 받아 더블클릭이 카드에 닿지 않는다 —
   // 마우스로 처음 누를 때만 짧게(DOUBLE_CLICK_MS) 기다렸다 연다. 터치 · 키보드(Enter) · 이미 열린 카드 · 이름 바꾸기 없는 카드는 기다리지 않는다.
   const handleCardClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (editing) return;
     const pointerType = (e.nativeEvent as PointerEvent).pointerType;
-    const immediate = !onRename || selected || e.detail === 0 || pointerType === 'touch' || pointerType === 'pen';
-    if (immediate) { onClick(); return; }
+    // 터치 · 펜 · 키보드(detail 0)는 기다리지 않는다.
+    if (!onRename || e.detail === 0 || pointerType === 'touch' || pointerType === 'pen') { onClick(); return; }
+    // 두 번째 클릭 = 이름 바꾸기. 이미 열린 카드여도 마찬가지다(첫 클릭은 이미 «열기» 무동작이었다).
     if (e.detail >= 2) { startRename(); return; }
-    if (openTimerRef.current) clearTimeout(openTimerRef.current);
-    openTimerRef.current = setTimeout(() => { openTimerRef.current = null; onClick(); }, DOUBLE_CLICK_MS);
-  }, [editing, onRename, selected, onClick, startRename]);
+    if (selected) { onClick(); return; }
+    cancelPendingOpen();
+    openTimerRef.current = setTimeout(() => { openTimerRef.current = null; onClickRef.current(); }, DOUBLE_CLICK_MS);
+  }, [editing, onRename, selected, onClick, startRename, cancelPendingOpen]);
 
   // story #3664 AC2 — 키보드로 메뉴 열기(Shift+F10 또는 Menu/ContextMenu 키, OS 표준
   // "컨텍스트 메뉴 열기" 제스처). 우클릭과 동형으로 카드의 바운딩 사각형을 앵커로 쓴다
@@ -463,11 +474,18 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
   const handleCardKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
       e.preventDefault();
+      cancelPendingOpen();
       const rect = cardRef.current?.getBoundingClientRect();
       if (rect) {
         setMenuPos({ top: clampTopToViewport(rect.bottom, menuItemCount), left: clampToViewport(rect.left) });
       }
       setContextMenuOpen(true);
+      return;
+    }
+    // Enter = 열기(4908 Q4 — 끌기는 Space). 잠긴(파생) 열 카드는 끌기가 없으니 Space도 열기(단추 역할의 기본 약속). 카드 자신에게 초점이 있을 때만.
+    if (e.target === e.currentTarget && !editing && (e.key === 'Enter' || (locked && e.key === ' '))) {
+      e.preventDefault();
+      onClick();
       return;
     }
     if (e.key === 'F2' && onRename && e.target === e.currentTarget) {
@@ -476,15 +494,16 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       return;
     }
     dndOnKeyDown?.(e);
-  }, [dndOnKeyDown, menuItemCount, onRename, startRename]);
+  }, [dndOnKeyDown, menuItemCount, onRename, startRename, cancelPendingOpen, editing, locked, onClick]);
 
   // 4908 — 카드 «⋯» 버튼: 카드 안 어디서나 같은 메뉴를 연다(우클릭과 같은 메뉴 · 앵커만 버튼 아래).
   const openMenuFromButton = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
+    cancelPendingOpen();
     e.stopPropagation();
     const rect = e.currentTarget.getBoundingClientRect();
     setMenuPos({ top: clampTopToViewport(rect.bottom, menuItemCount), left: clampToViewport(rect.left) });
     setContextMenuOpen(true);
-  }, [menuItemCount]);
+  }, [menuItemCount, cancelPendingOpen]);
 
   // story #3664 — 메뉴/서브메뉴 컨테이너 공용 키보드 순회(위/아래 화살표로 role="menuitem"
   // 사이 이동, wrap). Enter/Space는 네이티브 <button> 활성화로 이미 동작해 별도 처리 0.
@@ -578,6 +597,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       // 잠긴(파생) 열 카드는 끌 수 없지만 키보드로는 닿아야 한다(Tab 초점 · Shift+F10 메뉴 · F2 이름 바꾸기 · Enter 열기): 끌기 속성 대신 단추 역할 + tabIndex만.
       {...(locked ? { role: 'button', tabIndex: 0 } : attributes)}
       {...(locked ? {} : dndListenersWithoutKeyDown)}
+      onPointerDownCapture={cancelPendingOpen}
       onClick={handleCardClick}
       onContextMenu={handleContextMenu}
       onKeyDown={handleCardKeyDown}
@@ -647,13 +667,13 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
           onDoubleClick={(e) => e.stopPropagation()}
-          onBlur={() => finishRename(true)}
+          onBlur={() => finishRename(true, false)}
           onKeyDown={(e) => {
             e.stopPropagation();
             // 한글 등 입력기 조합 중의 엔터는 «글자 확정 키»다 — 저장으로 읽으면 반쯤 쓴 제목이 저장된다(4831).
             if (isImeComposing(e)) return;
-            if (e.key === 'Enter') { e.preventDefault(); finishRename(true); }
-            else if (e.key === 'Escape') finishRename(false);
+            if (e.key === 'Enter') { e.preventDefault(); finishRename(true, true); }
+            else if (e.key === 'Escape') finishRename(false, true);
           }}
           className="mt-0.5 h-7 min-h-0 px-2 py-0 text-base font-semibold lg:text-editorial-ui"
         />

@@ -246,6 +246,114 @@ describe('4908 제목 바로 바꾸기 — 메뉴 · F2 · 더블클릭', () => 
   });
 });
 
+describe('4908 기다리는 «열기» · 이름 바꾸기 — codex 1라운드 반영', () => {
+  const input = () => container.querySelector<HTMLInputElement>('input');
+  const press = (el: Element) => act(() => { el.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); });
+
+  it('⭐이미 열린 카드도 더블클릭이면 이름 바꾸기다(첫 클릭은 무동작이던 열기)', () => {
+    const onClick = vi.fn();
+    const card = render({ onRename: vi.fn(), onClick, selected: true });
+    click(card, 1);
+    click(card, 2);
+    expect(input()).not.toBeNull();
+  });
+
+  it('⭐기다리는 «열기»는 새로 누르면(끌기 시작 포함) 취소된다', () => {
+    vi.useFakeTimers();
+    const onClick = vi.fn();
+    const card = render({ onRename: vi.fn(), onClick });
+    click(card, 1);
+    press(card); // 곧바로 새 누름(끌기 · 두 번째 클릭의 시작)
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('⭐기다리는 «열기»는 우클릭 메뉴를 열면 취소된다', () => {
+    vi.useFakeTimers();
+    const onClick = vi.fn();
+    const card = render({ onRename: vi.fn(), onClick });
+    click(card, 1);
+    act(() => { card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 })); });
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('⭐기다리는 «열기»는 카드가 다른 스토리로 바뀌면(또는 사라지면) 버려진다', () => {
+    vi.useFakeTimers();
+    const onClick = vi.fn();
+    const card = render({ onRename: vi.fn(), onClick });
+    click(card, 1);
+    render({ onRename: vi.fn(), onClick, story: makeStory({ id: 's2', title: '다른 카드' }) });
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('⭐다른 곳을 눌러 빠져나가며(blur) 저장해도 그 사람이 옮긴 초점을 카드로 가로채지 않는다', () => {
+    const onRename = vi.fn();
+    act(() => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <DndContext>
+            <StoryCard story={makeStory()} onClick={() => {}} onRename={onRename} onChangeStatus={() => {}} />
+            <button type="button" id="elsewhere">다른 곳</button>
+          </DndContext>
+        </NextIntlClientProvider>,
+      );
+    });
+    const card = container.firstElementChild as HTMLElement;
+    act(() => { card.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input()!, '다른 제목');
+      input()!.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const other = container.querySelector<HTMLButtonElement>('#elsewhere')!;
+    // jsdom은 blur 핸들러 안의 focus()와 원래 이동 중 어느 쪽이 이기는지 브라우저와 달라, 카드 focus() 호출 자체가 없는지를 본다.
+    const focusSpy = vi.spyOn(card, 'focus');
+    act(() => { other.focus(); });
+    expect(onRename).toHaveBeenCalledWith('s1', '다른 제목');
+    expect(focusSpy).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(other);
+  });
+
+  it('Enter로 끝내면 카드로 초점이 돌아온다(키보드로 이어 쓰는 사람)', () => {
+    const card = render({ onRename: vi.fn() });
+    act(() => { card.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })); });
+    act(() => { input()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+    expect(document.activeElement).toBe(card);
+  });
+});
+
+describe('4908 Enter = 열기(Space는 잠긴 열 카드만 열기 — 안 잠긴 카드의 Space는 끌기 몫)', () => {
+  const key = (el: Element, k: string) => act(() => { el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })); });
+
+  it('⭐안 잠긴 카드: Enter로 열린다 · Space로는 안 열린다', () => {
+    const onClick = vi.fn();
+    const card = render({ onClick });
+    key(card, 'Enter');
+    expect(onClick).toHaveBeenCalledTimes(1);
+    key(card, ' ');
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('⭐잠긴 카드: Enter · Space 둘 다 열린다(단추 역할이면 둘 다 약속) · F2는 이름 바꾸기 입력칸', () => {
+    const onClick = vi.fn();
+    const card = render({ locked: true, onClick, onRename: vi.fn() });
+    key(card, 'Enter');
+    key(card, ' ');
+    expect(onClick).toHaveBeenCalledTimes(2);
+    key(card, 'F2');
+    expect(container.querySelector('input')).not.toBeNull();
+  });
+
+  it('카드 안 단추(«⋯»)의 Enter는 카드 열기로 새지 않는다', () => {
+    const onClick = vi.fn();
+    const card = render({ onClick });
+    const btn = card.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
+    act(() => { btn.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+    expect(onClick).not.toHaveBeenCalled();
+  });
+});
+
 describe('4908 잠긴(파생) 열 카드 — 키보드로 닿는다', () => {
   it('⭐끌기는 못 해도 단추 역할 + tabIndex 0 · Shift+F10으로 메뉴(킥오프 등) · F2 이름 바꾸기', () => {
     const card = render({ locked: true, projectId: 'p1', onRename: vi.fn() });

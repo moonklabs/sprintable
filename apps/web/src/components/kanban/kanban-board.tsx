@@ -1244,45 +1244,86 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
     setSelectedStory((prev) => (prev && prev.id === storyId ? { ...prev, ...patch } : prev));
   }, []);
 
+  // 연타 · 순서가 뒤바뀐 응답에서 새 값을 덮지 않는 규칙(스토리마다): ① 다음 값은 «화면에 이미 그려진 마지막 값»에서 계산한다(직전 요청이 아직 안 끝나도) ② 응답(성공 · 실패)은 «가장 나중에 보낸 요청»의 것만 화면을 바꾼다 — 요청은 매번 전체 값(담당 전체 배열 · 제목)을 실어 마지막 요청이 서버를 결정한다 ③ 마지막 요청이 실패하면 «마지막으로 서버가 받은 값»으로 되돌린다.
+  const pendingRef = useRef(new Map<string, { latestA: number; latestT: number; inflight: number; assigneeIds: string[]; confirmedAssigneeIds: string[]; title: string; confirmedTitle: string }>());
+  const pendingFor = useCallback((story: KanbanStory) => {
+    const map = pendingRef.current;
+    let st = map.get(story.id);
+    const ids = story.assignee_ids && story.assignee_ids.length > 0 ? story.assignee_ids : (story.assignee_id ? [story.assignee_id] : []);
+    if (!st) {
+      st = { latestA: 0, latestT: 0, inflight: 0, assigneeIds: ids, confirmedAssigneeIds: ids, title: story.title, confirmedTitle: story.title };
+      map.set(story.id, st);
+    } else if (st.inflight === 0) {
+      // 진행 중인 요청이 없으면 화면의 값(SSE 등으로 바뀌었을 수 있다)에서 다시 시작한다.
+      st.assigneeIds = ids; st.confirmedAssigneeIds = ids; st.title = story.title; st.confirmedTitle = story.title;
+    }
+    return st;
+  }, []);
+
   const handleToggleAssignee = useCallback(async (storyId: string, memberId: string) => {
     const story = storiesRef.current.find((s) => s.id === storyId);
     if (!story) return;
-    const prevIds = story.assignee_ids && story.assignee_ids.length > 0 ? story.assignee_ids : (story.assignee_id ? [story.assignee_id] : []);
-    const nextIds = prevIds.includes(memberId) ? prevIds.filter((id) => id !== memberId) : [...prevIds, memberId];
+    const st = pendingFor(story);
+    const nextIds = st.assigneeIds.includes(memberId) ? st.assigneeIds.filter((id) => id !== memberId) : [...st.assigneeIds, memberId];
+    st.assigneeIds = nextIds;
+    const mine = ++st.latestA;
+    st.inflight += 1;
     applyStoryPatch(storyId, normalizeAssigneePatch({ assignee_ids: nextIds }));
+    let ok = false;
     try {
       const res = await fetch(`/api/stories/${storyId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ assignee_ids: nextIds }),
       });
-      if (!res.ok) throw new Error('assignee patch failed');
-      const json = await res.json().catch(() => null) as { data?: { assignee_ids?: string[] | null } } | null;
-      // 서버 값이 오면 그대로(손으로 assignee_id를 다시 계산하지 않는다 — normalizeAssigneePatch가 한 곳)
-      if (json?.data?.assignee_ids) applyStoryPatch(storyId, normalizeAssigneePatch({ assignee_ids: json.data.assignee_ids }));
+      ok = res.ok;
+      if (ok && mine === st.latestA) {
+        const json = await res.json().catch(() => null) as { data?: { assignee_ids?: string[] | null } } | null;
+        // 서버 값이 오면 그대로(손으로 assignee_id를 다시 계산하지 않는다 — normalizeAssigneePatch가 한 곳)
+        const serverIds = json?.data?.assignee_ids ?? nextIds;
+        st.assigneeIds = serverIds;
+        applyStoryPatch(storyId, normalizeAssigneePatch({ assignee_ids: serverIds }));
+      }
     } catch {
-      applyStoryPatch(storyId, normalizeAssigneePatch({ assignee_ids: prevIds }));
-      addToast({ type: 'error', title: t('assigneeChangeFailed') });
+      ok = false;
+    } finally {
+      st.inflight -= 1;
     }
-  }, [applyStoryPatch, addToast, t]);
+    if (ok) { st.confirmedAssigneeIds = nextIds; return; }
+    if (mine !== st.latestA) return; // 더 나중 요청이 있다 — 그 요청이 전체 값을 실어 서버를 결정한다
+    st.assigneeIds = st.confirmedAssigneeIds;
+    applyStoryPatch(storyId, normalizeAssigneePatch({ assignee_ids: st.confirmedAssigneeIds }));
+    addToast({ type: 'error', title: t('assigneeChangeFailed') });
+  }, [applyStoryPatch, addToast, t, pendingFor]);
 
   const handleRenameStory = useCallback(async (storyId: string, title: string) => {
     const story = storiesRef.current.find((s) => s.id === storyId);
-    if (!story || story.title === title) return;
-    const prevTitle = story.title;
+    if (!story) return;
+    const st = pendingFor(story);
+    if (st.title === title) return;
+    st.title = title;
+    const mine = ++st.latestT;
+    st.inflight += 1;
     applyStoryPatch(storyId, { title });
+    let ok = false;
     try {
       const res = await fetch(`/api/stories/${storyId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title }),
       });
-      if (!res.ok) throw new Error('title patch failed');
+      ok = res.ok;
     } catch {
-      applyStoryPatch(storyId, { title: prevTitle });
-      addToast({ type: 'error', title: t('titleSaveFailed') });
+      ok = false;
+    } finally {
+      st.inflight -= 1;
     }
-  }, [applyStoryPatch, addToast, t]);
+    if (ok) { st.confirmedTitle = title; return; }
+    if (mine !== st.latestT) return;
+    st.title = st.confirmedTitle;
+    applyStoryPatch(storyId, { title: st.confirmedTitle });
+    addToast({ type: 'error', title: t('titleSaveFailed') });
+  }, [applyStoryPatch, addToast, t, pendingFor]);
 
   // «담당자 ▸» 후보: 시스템 발행 제외 · 중복 없음(패널 «담당자»와 같은 규칙).
   const assignableMembers = useMemo(
