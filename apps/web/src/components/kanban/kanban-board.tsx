@@ -1860,6 +1860,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
               storyLineMap={storyLineMap}
               projectId={projectId}
               getStatusLabel={domainLabels.statusLabel}
+              selectedStoryId={selectedStory?.id ?? null}
               onCreateStory={(title) => createStoryReporting('backlog', title)}
             />
           </div>
@@ -1901,6 +1902,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                     onCreateStory={handleCreateStoryTrust}
                     autoComposeSignal={col.id === 'queued' ? autoComposeNonce : 0}
                     getStatusLabel={domainLabels.statusLabel}
+                    selectedStoryId={selectedStory?.id ?? null}
                     // The derived columns (locked) share their status with a settable column (needs_input ← in-progress, verified / merge_ready ← in-review): they show «N+» (there may be more) but no «더 보기» of their own —
                     // their cards appear as the settable column's pages are loaded (a second button for the same page would only mislead).
                     hasMore={TRUST_COLUMN_FEEDER_STATUSES[col.id].some((st) => !!columnCursors[st])}
@@ -1982,6 +1984,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                     onToggleCollapse={col.id === 'done' ? handleToggleDoneCollapse : undefined}
                     autoComposeSignal={col.id === 'backlog' ? autoComposeNonce : 0}
                     getStatusLabel={domainLabels.statusLabel}
+                    selectedStoryId={selectedStory?.id ?? null}
                   />
                 );
               })}

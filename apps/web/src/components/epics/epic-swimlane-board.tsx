@@ -14,6 +14,7 @@ import { StoryDetailPanel, type Task } from '@/components/kanban/story-detail-pa
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { useToast } from '@/components/ui/toast';
+import { LAYER } from '@/components/ds/layers';
 import {
   COLUMNS, TRUST_COLUMNS, TRUST_COLUMN_TO_STATUS,
   type KanbanEpic, type KanbanMember, type KanbanStory, type TrustColumnId,
@@ -142,6 +143,8 @@ interface SwimlaneCellProps {
   memberMap: Record<string, KanbanMember>;
   onStoryClick: (story: KanbanStory) => void;
   isDragging: boolean;
+  /** 4908 — 상세 패널이 열려 있는 카드(열린 카드 층). */
+  selectedStoryId?: string | null;
   /** story #3299(3687/3694 후속) — org status 라벨 오버라이드(useOrgDomainLabels().statusLabel),
    * kanban-board.tsx의 StoryCard prop threading과 동형. 없으면 canonical t(...) 그대로. */
   getStatusLabel?: (canonicalSlug: string) => string | undefined;
@@ -151,20 +154,23 @@ interface SwimlaneCellProps {
 // (파생) 열이 "지금 못 놓는다"는 게 정적 상태만으론 안 드러났다(handleDragEnd:333의
 // targetLocked 방어는 침묵 실패 — 드롭해도 조용히 무효화). opacity-45로 드래그 중에만
 // 어둡게 해 시각이 그 침묵을 메운다.
-function SwimlaneCell({ laneId, columnId, locked, stories, memberMap, onStoryClick, isDragging, getStatusLabel }: SwimlaneCellProps) {
+function SwimlaneCell({ laneId, columnId, locked, stories, memberMap, onStoryClick, isDragging, getStatusLabel, selectedStoryId = null }: SwimlaneCellProps) {
   const { setNodeRef, isOver } = useDroppable({ id: `${laneId}::${columnId}`, disabled: locked });
   const closedDuringDrag = locked && isDragging;
   return (
     <div
       ref={setNodeRef}
-      className={`flex h-full min-h-[64px] w-[220px] shrink-0 flex-col gap-1.5 rounded-lg p-1.5 transition ${
-        closedDuringDrag ? 'bg-muted/20 opacity-45' : locked ? 'bg-muted/20' : isOver ? 'bg-primary/5 ring-1 ring-primary/20' : 'bg-transparent'
+      // 4908 — 칸은 «내용 칸 층»(LAYER.panel): 카드(글 줄 층)가 바탕 위에 맨몸으로 서지 않는다(열 보드와 같은 규칙).
+      className={`flex h-full min-h-[64px] w-[220px] shrink-0 flex-col gap-1.5 rounded-lg border border-ds-line p-1.5 transition ${LAYER.panel} ${
+        closedDuringDrag ? 'opacity-45' : isOver && !locked ? 'ring-1 ring-ds-action' : ''
       }`}
     >
       {stories.map((story) => (
         <StoryCard
           key={story.id}
           story={story}
+          showStatus
+          selected={selectedStoryId === story.id}
           assignee={story.assignee_id ? memberMap[story.assignee_id] : undefined}
           assignees={(story.assignee_ids ?? []).flatMap((id) => memberMap[id] ? [memberMap[id]] : [])}
           onClick={() => onStoryClick(story)}
@@ -205,11 +211,12 @@ interface SwimlaneRowProps {
   memberMap: Record<string, KanbanMember>;
   onStoryClick: (story: KanbanStory) => void;
   isDragging: boolean;
+  selectedStoryId?: string | null;
   /** story #3299 — SwimlaneCell로 그대로 물려준다(위 주석과 동형). */
   getStatusLabel?: (canonicalSlug: string) => string | undefined;
 }
 
-function SwimlaneRow({ laneId, title, subtitle, columns, stories, axisMode, memberMap, onStoryClick, isDragging, getStatusLabel }: SwimlaneRowProps) {
+function SwimlaneRow({ laneId, title, subtitle, columns, stories, axisMode, memberMap, onStoryClick, isDragging, getStatusLabel, selectedStoryId = null }: SwimlaneRowProps) {
   const byColumn = useMemo(() => {
     const map: Record<string, KanbanStory[]> = {};
     for (const col of columns) map[col.id] = [];
@@ -239,6 +246,7 @@ function SwimlaneRow({ laneId, title, subtitle, columns, stories, axisMode, memb
             onStoryClick={onStoryClick}
             isDragging={isDragging}
             getStatusLabel={getStatusLabel}
+            selectedStoryId={selectedStoryId}
           />
         ))}
       </div>
@@ -626,6 +634,7 @@ export function EpicSwimlaneBoard({ projectId, embedded = false }: { projectId: 
                     onStoryClick={(s) => setSelectedStoryId(s.id)}
                     isDragging={draggingActive}
                     getStatusLabel={domainLabels.statusLabel}
+                    selectedStoryId={selectedStoryId}
                   />
                 ))}
 
@@ -651,6 +660,7 @@ export function EpicSwimlaneBoard({ projectId, embedded = false }: { projectId: 
                         onStoryClick={(s) => setSelectedStoryId(s.id)}
                         isDragging={draggingActive}
                         getStatusLabel={domainLabels.statusLabel}
+                        selectedStoryId={selectedStoryId}
                       />
                     ))}
                   </div>
@@ -666,6 +676,7 @@ export function EpicSwimlaneBoard({ projectId, embedded = false }: { projectId: 
                   onStoryClick={(s) => setSelectedStoryId(s.id)}
                   isDragging={draggingActive}
                   getStatusLabel={domainLabels.statusLabel}
+                  selectedStoryId={selectedStoryId}
                 />
               </div>
             </DndContext>

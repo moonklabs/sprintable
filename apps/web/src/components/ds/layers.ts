@@ -7,6 +7,7 @@
  *   내용 칸        ds-surface             바탕 → 내용 칸      +0.030 / +0.037                ≥ 0.03
  *   남의 글 줄     ds-surface-high        내용 칸 → 글 줄     −0.052 / +0.059                ≥ 0.05 — 에이전트 글도 같은 층(맨글로 바탕 위에 서지 않는다)
  *   내 글 줄       ds-mine                내용 칸 → 글 줄     −0.114 / +0.124                ≥ 0.09 · 남의 글과 밝기차 0.062 / 0.065(≥ 0.05) + 채도차 0.043 / 0.050(≥ 0.03)
+ *   열린 카드      ds-action-soft         내용 칸 → 열린 카드 −0.048 / +0.080                ≥ 0.03 · 같은 줄 층 글 줄과 채도차 0.011 / 0.031(≥ 0.01) — 면만으로 가르지 않고 왼쪽 막대(ds-action)를 함께 둔다(4908)
  *   입력칸         ds-surface-sunk        내용 칸 → 입력칸    −0.064 / −0.062                ≥ 0.05 (+ line-control 경계)
  *   떠 있는 것     ds-surface-raised      면 차이로 가르지 않는다 — 그림자(shadow-ds-popup / overlay) + line-control 경계로 가른다
  * 라이트는 «내용 칸이 바탕보다 밝고 글 줄 · 입력칸이 어둡게 들어가는» 꼴, 다크는 «글 줄이 올라오고 입력칸이 들어가는» 꼴이다 — 부호가 달라도 차이의 크기가 선을 지킨다.
@@ -17,6 +18,7 @@ export const LAYER = {
   panel: 'bg-ds-surface',
   rowOthers: 'bg-ds-surface-high',
   rowMine: 'bg-ds-mine',
+  rowSelected: 'bg-ds-action-soft',
   field: 'bg-ds-surface-sunk',
   floating: 'bg-ds-surface-raised',
 } as const;
@@ -27,6 +29,7 @@ export const LAYER_TOKEN = {
   panel: 'surface',
   rowOthers: 'surface-high',
   rowMine: 'mine',
+  rowSelected: 'action-soft',
   field: 'surface-sunk',
   floating: 'surface-raised',
 } as const satisfies Record<keyof typeof LAYER, string>;
@@ -40,4 +43,7 @@ export const LAYER_MIN_STEP = {
   mineVsOthersLightness: 0.05,
   mineVsOthersChroma: 0.03,
   fieldOnPanel: 0.05,
+  /** 열린 카드(4908): 내용 칸과의 밝기차, 그리고 같은 줄 층(남의 글 줄)과의 채도차 — 밝기는 거의 같아 채도 + 왼쪽 막대로 갈린다. */
+  rowSelectedOnPanel: 0.03,
+  rowSelectedVsOthersChroma: 0.01,
 } as const;

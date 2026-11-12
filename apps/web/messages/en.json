@@ -1416,6 +1416,7 @@
     "searchEpics": "Search goals...",
     "searchAssignees": "Search assignees...",
     "noResults": "No results",
+    "cardMenuButton": "Open menu for {title}",
     "kickoff": "Kickoff",
     "kickoffTriggered": "Workflow triggered",
     "kickoffNoMatch": "No matching rule found",

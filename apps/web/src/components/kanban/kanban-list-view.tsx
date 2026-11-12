@@ -29,6 +29,8 @@ interface KanbanListViewProps {
   /** story #3287 AC4 — org 라벨 오버라이드(useOrgDomainLabels().statusLabel). 없으면
    * 기존 t(col.i18nKey) 그대로(회귀 0). 그룹 헤더+카드 내부 배지 둘 다에 쓰인다. */
   getStatusLabel?: (canonicalSlug: string) => string | undefined;
+  /** 4908 — 상세 패널이 열려 있는 카드(열린 카드 층). */
+  selectedStoryId?: string | null;
   /** story #4888 — 목록 보기에도 «스토리 추가» 입구 한 자리(같은 동작: 상태 backlog로 만든다). 없으면 입구도 없다(옛 호출부 무변). */
   onCreateStory?: (title: string) => Promise<boolean | void> | boolean | void;
 }
@@ -48,11 +50,12 @@ interface StatusGroupProps {
   storyLineMap?: KanbanListViewProps['storyLineMap'];
   projectId?: string;
   getStatusLabel?: KanbanListViewProps['getStatusLabel'];
+  selectedStoryId?: string | null;
 }
 
 function StatusGroup({
   columnId, label, stories, epicMap, memberMap, onStoryClick, onChangeStatus,
-  executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap, projectId, getStatusLabel,
+  executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap, projectId, getStatusLabel, selectedStoryId = null,
 }: StatusGroupProps) {
   const [expanded, setExpanded] = useState(columnId !== 'done');
 
@@ -84,7 +87,6 @@ function StatusGroup({
             stories.map((story) => (
               <div key={story.id} className="w-full">
                 <StoryCard
-                  className="max-w-none"
                   story={story}
                   epicName={story.epic_id ? epicMap[story.epic_id] : undefined}
                   assignee={story.assignee_id ? memberMap[story.assignee_id] : undefined}
@@ -99,6 +101,7 @@ function StatusGroup({
                   lineStatus={storyLineMap?.[story.id]}
                   verifiedBy={story.human_verified_by ? memberMap[story.human_verified_by] : undefined}
                   getStatusLabel={getStatusLabel}
+                  selected={selectedStoryId === story.id}
                 />
               </div>
             ))
@@ -111,7 +114,7 @@ function StatusGroup({
 
 export function KanbanListView({
   stories, epicMap, memberMap, onStoryClick, onChangeStatus,
-  executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap, projectId, getStatusLabel, onCreateStory,
+  executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap, projectId, getStatusLabel, onCreateStory, selectedStoryId = null,
 }: KanbanListViewProps) {
   const t = useTranslations('board');
 
@@ -137,6 +140,7 @@ export function KanbanListView({
             storyLineMap={storyLineMap}
             projectId={projectId}
             getStatusLabel={getStatusLabel}
+            selectedStoryId={selectedStoryId}
           />
         );
       })}

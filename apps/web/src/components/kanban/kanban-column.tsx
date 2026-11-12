@@ -12,6 +12,7 @@ import { VALID_TRANSITIONS } from './types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { LAYER } from '@/components/ds/layers';
 
 
 type SortableContextCompatProps = {
@@ -23,11 +24,11 @@ type SortableContextCompatProps = {
 const SortableContextCompat = SortableContext as unknown as ComponentType<SortableContextCompatProps>;
 
 const STATUS_COLOR: Record<string, { dot: string; tint: string }> = {
-  'backlog': { dot: 'bg-muted-foreground/40', tint: 'bg-muted/40' },
-  'ready-for-dev': { dot: 'bg-muted-foreground/60', tint: 'bg-muted/40' },
-  'in-progress': { dot: 'bg-warning', tint: 'bg-warning-tint' },
-  'in-review': { dot: 'bg-success', tint: 'bg-success-tint' },
-  'done': { dot: 'bg-success', tint: 'bg-success-tint' },
+  'backlog': { dot: 'bg-ds-ink-3', tint: 'bg-muted/40' },
+  'ready-for-dev': { dot: 'bg-ds-ink-3', tint: 'bg-muted/40' },
+  'in-progress': { dot: 'bg-ds-needs-hand-bar', tint: 'bg-warning-tint' },
+  'in-review': { dot: 'bg-ds-info', tint: 'bg-success-tint' },
+  'done': { dot: 'bg-ds-done', tint: 'bg-success-tint' },
 };
 
 interface KanbanColumnProps {
@@ -72,6 +73,8 @@ interface KanbanColumnProps {
   autoComposeSignal?: number;
   /** story #3287 AC4 — StoryCard로 그대로 threading(설명은 story-card.tsx 참고). */
   getStatusLabel?: (canonicalSlug: string) => string | undefined;
+  /** 4908 — 상세 패널이 열려 있는 카드(열린 카드 층). */
+  selectedStoryId?: string | null;
 }
 
 export function KanbanColumn({
@@ -82,7 +85,7 @@ export function KanbanColumn({
   onCreateStory, projectId, onKickoffStory, executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap,
   totalCount, hasMore, loadingMore, onLoadMore,
   collapsed, onToggleCollapse,
-  autoComposeSignal, getStatusLabel,
+  autoComposeSignal, getStatusLabel, selectedStoryId = null,
 }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
   const t = useTranslations('board');
@@ -123,20 +126,21 @@ export function KanbanColumn({
 
   const statusColor = STATUS_COLOR[id] ?? STATUS_COLOR['backlog'];
   // AC1: WIP 초과 시 빨간 강조
+  // 4908 — 열 면은 «내용 칸 층»(LAYER.panel)이 기본이다. WIP 초과(붉은 면) · 놓을 수 있는 열(녹색 테두리)은 같은 속성을 다른 값으로 덮어야 해서(Tailwind 생성 순서상 클래스 두 개가 겹치면 뒤쪽이 이긴다) 면 · 테두리를 한 곳에서 하나만 고른다.
   const colClass = wipExceeded
-    ? 'bg-destructive-tint ring-1 ring-destructive/30'
+    ? 'border-transparent bg-destructive-tint ring-1 ring-destructive/30'
     : isOver && isValidTarget
-      ? 'bg-primary/5 ring-1 ring-primary/20'
+      ? `${LAYER.panel} border-ds-line ring-1 ring-ds-action`
       : isValidTarget
-        ? 'bg-success/5'
+        ? `${LAYER.panel} border-ds-done`
         : isInvalidTarget
-          ? 'bg-muted/20 opacity-45'
-          : 'bg-transparent'; // E-MODERN A: status 색 tint 배경 전면 제거(색=신호만·헤더 dot이 유일 상태색)
+          ? `${LAYER.panel} border-ds-line opacity-45`
+          : `${LAYER.panel} border-ds-line`; // E-MODERN A: status 색 tint 배경 전면 제거(색=신호만·헤더 dot이 유일 상태색)
 
   return (
     <div
       ref={setNodeRef}
-      className={`flex h-full flex-col rounded-xl p-3 transition ${collapsed ? 'w-[52px] min-w-[52px]' : 'w-[280px] min-w-[240px]'} ${colClass}`}
+      className={`flex h-full flex-col rounded-xl border p-3 transition ${collapsed ? 'w-[52px] min-w-[52px]' : 'w-[280px] min-w-[240px]'} ${colClass}`}
     >
       {isDragging && isValidTarget && (
         // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
@@ -336,6 +340,7 @@ export function KanbanColumn({
                   lineStatus={storyLineMap?.[story.id]}
                   verifiedBy={story.human_verified_by ? memberMap[story.human_verified_by] : undefined}
                   getStatusLabel={getStatusLabel}
+                  selected={selectedStoryId === story.id}
                 />
               ))}
             </div>

@@ -1416,6 +1416,7 @@
     "searchEpics": "목표 검색...",
     "searchAssignees": "담당자 검색...",
     "noResults": "결과 없음",
+    "cardMenuButton": "{title} 카드 메뉴 열기",
     "kickoff": "킥오프",
     "kickoffTriggered": "워크플로우가 실행됐어요",
     "kickoffNoMatch": "매칭되는 규칙이 없어요",
