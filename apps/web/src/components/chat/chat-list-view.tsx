@@ -567,34 +567,38 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     }
   }, [scopeProjectId, projectFilter, projectOnly, setRoomsAreOrgWide]);
 
+  const allSeqRef = useRef(0);
   const fetchAllConversations = useCallback(async (nextOffset = 0, append = false) => {
-    // 카디르 QA(#4142) — 위 fetchConversations와 동형 stale-drop 가드(성공/실패 두 경로
-    // 대칭).
-    if (!append) { setAgentLoadError(false); setAgentForbidden(false); }
+    // 카디르 QA(#4142) — 위 fetchConversations와 동형 stale-drop 가드(성공/실패 두 경로 대칭).
+    // story 4903 (PO 결정 on 5664) — 이 PR이 «최신 글 지움 → 다시 불러오기»로 이 목록도 다시 묻는 길을 새로 만들어 겹친 물음의 응답 순서까지 이 PR 몫이다: 성공 · 실패(!res.ok) · catch · finally 네 길이
+    // 상태를 쓰는 자리는 아래 `write` 한 곳뿐이고, 거기서 «몇 번째 물음인가»(밀려난 물음이면 안 씀)와 «어느 프로젝트인가»(떠난 프로젝트면 안 씀)를 함께 본다.
+    const seq = append ? allSeqRef.current : ++allSeqRef.current;
+    const write = (apply: () => void) => { if (seq === allSeqRef.current && projectId === projectIdRef.current) apply(); };
+    write(() => { if (!append) { setAgentLoadError(false); setAgentForbidden(false); } });
     if (!projectId) return; // story 4847 — the agents tab only exists with a current project
     try {
       const res = await fetchWithAuth(
         `/api/conversations?project_id=${projectId}&include_agent_conversations=true&limit=${PAGE_LIMIT}&offset=${nextOffset}`
       );
       if (!res.ok) {
-        if (projectId === projectIdRef.current) {
+        write(() => {
           if (res.status === 403) setAgentForbidden(true); // not a failure to retry: this view is not this person's
           else if (!append) setAgentLoadError(true);
-        }
+        });
         return;
       }
       const json = await res.json() as { data: ConversationItem[]; total: number };
-      if (projectId !== projectIdRef.current) return; // 전환됨 — stale 응답 drop(B 화면 안 덮음)
-      const items = json.data ?? [];
-      setAllConversations((prev) => append ? [...prev, ...items] : items);
-      setAgentOffset(nextOffset + items.length);
-      setAgentTotal(json.total ?? 0);
+      write(() => {
+        const items = json.data ?? [];
+        setAllConversations((prev) => append ? [...prev, ...items] : items);
+        setAgentOffset(nextOffset + items.length);
+        setAgentTotal(json.total ?? 0);
+      });
     } catch {
-      if (!append && projectId === projectIdRef.current) setAgentLoadError(true);
+      write(() => { if (!append) setAgentLoadError(true); });
     } finally {
-      // story #3788(B-③ 후속) — agentLoading을 loading(my 탭)과 동형으로 finally에서 해소.
-      // 페드루 그라운딩(2026-09-10 12:34Z) — 같은 stale-drop 가드를 loading 축에도.
-      if (projectId === projectIdRef.current) setAgentLoading(false);
+      // story #3788(B-③ 후속) — agentLoading을 loading(my 탭)과 동형으로 finally에서 해소(같은 `write`를 거침: 밀려난 물음이 늦게 끝나도 새 물음의 «불러오는 중»을 못 끈다).
+      write(() => setAgentLoading(false));
     }
   }, [projectId]);
 

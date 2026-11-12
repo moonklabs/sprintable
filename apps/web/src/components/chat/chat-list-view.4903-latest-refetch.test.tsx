@@ -56,10 +56,11 @@ function stubList(answers: object[][], hold?: { call: number; gate: Promise<void
     if (url.includes('/api/conversations/recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
     if (url.includes('/api/conversations?')) {
       calls += 1;
-      const gate = holds.get(calls);
+      const n = calls; // THIS call's number — a later call must not change what this one answers while it is held back
+      const gate = holds.get(n);
       if (gate) await gate;
-      if (failSet.has(calls)) return { ok: false, status: 500, json: async () => null };
-      const data = answers[Math.min(calls - 1, answers.length - 1)]!;
+      if (failSet.has(n)) return { ok: false, status: 500, json: async () => null };
+      const data = answers[Math.min(n - 1, answers.length - 1)]!;
       return { ok: true, json: async () => ({ data, total: data.length }) };
     }
     return { ok: false, status: 404, json: async () => null };
@@ -217,6 +218,97 @@ describe('[SID:4903] the delete «window» is two generation numbers (PO decisio
     await flush();
     await act(async () => { newMessage('m-x'); });
     expect(list.listCalls()).toBe(2);
+  });
+});
+
+// ---- the AGENTS tab list: every response of an ask that a newer ask pushed aside writes NOTHING (PO decision on 5664: the delete refetch makes this list's overlapping asks reachable, so their order is this PR's) ----
+const ADMIN = { projectMemberships: [], role: 'admin', orgId: 'org-4903-admin', orgMemberships: [{ orgId: 'org-4903-admin', orgName: 'O', orgSlug: 'o', role: 'admin' }], currentMemberType: 'human' };
+function stubAgentLists(agentAnswers: object[][], extra?: { holds?: Array<{ call: number; gate: Promise<void> }>; fail?: number[]; throws?: number[] }) {
+  let agentCalls = 0;
+  const holds = new Map<number, Promise<void>>();
+  for (const h of extra?.holds ?? []) holds.set(h.call, h.gate);
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.includes('/api/conversations/recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+    if (url.includes('include_agent_conversations=true')) {
+      agentCalls += 1;
+      const n = agentCalls; // THIS call's number (a later call must not change what this one answers while it is held back)
+      const gate = holds.get(n);
+      if (gate) await gate;
+      if (extra?.throws?.includes(n)) throw new Error('network');
+      if (extra?.fail?.includes(n)) return { ok: false, status: 500, json: async () => null };
+      const data = agentAnswers[Math.min(n - 1, agentAnswers.length - 1)]!;
+      return { ok: true, json: async () => ({ data, total: data.length }) };
+    }
+    if (url.includes('/api/conversations?')) return { ok: true, json: async () => ({ data: [], total: 0 }) }; // the project list: no rooms (the agents tab shows what is NOT in it)
+    return { ok: false, status: 404, json: async () => null };
+  }));
+  return { agentCalls: () => agentCalls };
+}
+async function mountAdminAndOpenAgentTab(waitForFirstAnswer = true) {
+  useDashboardContextMock.mockReturnValue(ADMIN);
+  await mount();
+  if (!document.querySelector('[data-testid="chat-list-now"]')) {
+    const trigger = container.querySelector('[data-testid="chat-list-options"]') as HTMLElement;
+    await act(async () => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+  }
+  const tab = [...document.querySelectorAll('[data-testid="chat-list-tabs"] button')].find((el) => el.textContent?.includes('에이전트')) as HTMLElement;
+  await act(async () => { tab.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+  if (waitForFirstAnswer) await flush();
+}
+
+describe('[SID:4903] the agents tab list — the answer of an ask pushed aside by a newer one writes nothing, on every path', () => {
+  const held = () => { let release: () => void = () => {}; const gate = new Promise<void>((resolve) => { release = resolve; }); return { gate, release: () => release() }; };
+  const del = (room: string, id: string, at: string) => announceChatMessageDeleted({ conversationId: room, createdAt: at, messageId: id, threadId: null, deletedAt: '2026-11-12T01:05:00Z' });
+  /** ask A (call 2) and ask B (call 3) are both on their way: a latest-message delete, then the next latest of the same room */
+  async function twoAsksOnTheirWay(extra: { fail?: number[]; throws?: number[] }) {
+    const a = held(); const b = held();
+    const lists = stubAgentLists(
+      [[row('a1', { id: 'm-new', content: '지울 최신 글', created_at: T_NEW })], [row('a1', { id: 'm-mid', content: 'A 옛 응답 글', created_at: T_MID })], [row('a1', { id: 'm-old', content: 'B 새 응답 글', created_at: T_OLD })]],
+      { holds: [{ call: 2, gate: a.gate }, { call: 3, gate: b.gate }], ...extra },
+    );
+    await mountAdminAndOpenAgentTab();
+    expect(container.textContent).toContain('지울 최신 글');
+    await act(async () => { del('a1', 'm-new', T_NEW); }); // ask A — call 2
+    await act(async () => { del('a1', 'm-mid', T_MID); }); // ask B — call 3 (the window is open: a hit although the row no longer holds that message)
+    expect(lists.agentCalls()).toBe(3);
+    return { a, b };
+  }
+
+  it('⭐ a SUCCESS answer: B ends first, A ends late with other data — B stays on screen', async () => {
+    const { a, b } = await twoAsksOnTheirWay({});
+    b.release(); await flush();
+    expect(container.textContent).toContain('B 새 응답 글');
+    a.release(); await flush();
+    expect(container.textContent).toContain('B 새 응답 글'); // mutant (the success path writes without the guard) → A\'s answer replaces it
+    expect(container.textContent).not.toContain('A 옛 응답 글');
+  });
+
+  it('⭐ a FAILURE answer (!ok): A ends late as a failure — B stays, no error state', async () => {
+    const { a, b } = await twoAsksOnTheirWay({ fail: [2] });
+    b.release(); await flush();
+    a.release(); await flush();
+    expect(container.textContent).toContain('B 새 응답 글');
+    expect(container.textContent).not.toContain(koMessages.chats.conversationsLoadFailed); // mutant (the !ok path writes without the guard) → the list is replaced by «불러오지 못했어요»
+  });
+
+  it('⭐ a THROWN failure (catch): A ends late by throwing — B stays, no error state', async () => {
+    const { a, b } = await twoAsksOnTheirWay({ throws: [2] });
+    b.release(); await flush();
+    a.release(); await flush();
+    expect(container.textContent).toContain('B 새 응답 글');
+    expect(container.textContent).not.toContain(koMessages.chats.conversationsLoadFailed); // mutant (the catch path writes without the guard)
+  });
+
+  it('⭐ the FINALLY: the first load is still pending when a newer ask starts; the older one ends late — «불러오는 중» stays until the NEWEST ends', async () => {
+    const a = held(); const b = held();
+    stubAgentLists([[row('a1', { id: 'm-1', content: '첫 응답 글', created_at: T_OLD })], [row('a1', { id: 'm-2', content: '새 응답 글', created_at: T_NEW })]], { holds: [{ call: 1, gate: a.gate }, { call: 2, gate: b.gate }] });
+    await mountAdminAndOpenAgentTab(false); // ask 1 (held)
+    await act(async () => { sse.opts!.onConversationMessage!({ conversation_id: 'zz-unknown', id: 'm-z', content: '모르는 방의 글', created_at: T_NEWER, sender: { id: 'other' } }); }); // an unknown room: the list asks again — ask 2 (held)
+    expect(container.textContent).toContain(koMessages.common.loading);
+    a.release(); await flush(); // ask 1 ends (stale)
+    expect(container.textContent).toContain(koMessages.common.loading); // mutant (finally switches loading off unguarded) → the list shows its empty state while ask 2 is still on its way
+    b.release(); await flush();
+    expect(container.textContent).toContain('새 응답 글');
   });
 });
 
