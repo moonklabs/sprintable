@@ -1194,7 +1194,10 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
       <div className={cn('grid items-start gap-4', oneScreen ? 'grid-cols-1' : 'lg:grid-cols-[minmax(0,1fr)_16rem]')}>
       {oneScreen ? null : <RecruitSummary title={t('summaryTitle')} empty={t('summaryEmpty')} items={summaryItems} />}
       <SectionCard className="min-w-0">
-        <SectionCardBody className="space-y-4">
+        {/* story 4906 (5659 follow-up · PO): the sticky progress row is opaque — a field focused with Tab near the bottom must stop ABOVE it, not under it (WCAG 2.2 «focus not obscured»). The browser keeps a
+            scroll-into-view target clear of its scroll-margin, so every control inside the step gets a bottom margin taller than the tallest sticky row (the hero rows carry a line or two of text). Scoped to this panel:
+            no shell-wide scroll-padding (that would change the scroll of every other screen). */}
+        <SectionCardBody className="space-y-4 [&_:is(input,select,textarea,button,a[href],[tabindex])]:scroll-mb-32" data-testid="recruiter-step-panel">
 
           {/* ── STEP 1 : 직무 선택 ── */}
           {step === 1 && (
