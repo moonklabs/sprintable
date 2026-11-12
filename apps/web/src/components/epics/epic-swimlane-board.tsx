@@ -165,6 +165,7 @@ function SwimlaneCell({ laneId, columnId, locked, stories, memberMap, onStoryCli
         <StoryCard
           key={story.id}
           story={story}
+          showStatus
           assignee={story.assignee_id ? memberMap[story.assignee_id] : undefined}
           assignees={(story.assignee_ids ?? []).flatMap((id) => memberMap[id] ? [memberMap[id]] : [])}
           onClick={() => onStoryClick(story)}

@@ -10,6 +10,7 @@ import { StoryCard } from './story-card';
 import type { KanbanStory, KanbanMember, LineStatusSummary, TrustColumnId } from './types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { LAYER } from '@/components/ds/layers';
 
 type SortableContextCompatProps = {
   children?: React.ReactNode;
@@ -23,13 +24,13 @@ const SortableContextCompat = SortableContext as unknown as ComponentType<Sortab
 // (kanban-column.tsx)와 동형 규율(신규 raw 팔레트 0, 기존 시맨틱 토큰만) — grey=중립·
 // info(=proof-blue 별칭, globals.css)=진행형·warning=주의(파생·대기)·success=깨끗/종결.
 const TRUST_COLUMN_DOT: Record<TrustColumnId, string> = {
-  queued: 'bg-muted-foreground/40',
-  running: 'bg-info',
-  needs_input: 'bg-warning',
-  claimed_done: 'bg-info',
-  verified: 'bg-warning',
-  merge_ready: 'bg-success',
-  done: 'bg-success',
+  queued: 'bg-ds-ink-3',
+  running: 'bg-ds-info',
+  needs_input: 'bg-ds-needs-hand-bar',
+  claimed_done: 'bg-ds-info',
+  verified: 'bg-ds-needs-hand-bar',
+  merge_ready: 'bg-ds-done',
+  done: 'bg-ds-done',
 };
 
 interface KanbanTrustColumnProps {
@@ -82,6 +83,8 @@ interface KanbanTrustColumnProps {
   onLoadMore?: () => void;
   /** hasMore, but this column has no button: its cards arrive with the page of the settable column that shares the status (derived columns). Only the «N+» shows. */
   moreViaFeeder?: boolean;
+  /** 4908 — 상세 패널이 열려 있는 카드(열린 카드 층). */
+  selectedStoryId?: string | null;
 }
 
 /**
@@ -105,7 +108,7 @@ export function KanbanTrustColumn({
   id, label, locked, stories, epicMap, memberMap, onStoryClick, onEditStory, onChangeStatus, onDeleteStory,
   projectId, onKickoffStory, executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap,
   onCreateStory, autoComposeSignal, isDragging = false, getStatusLabel,
-  hasMore = false, loadingMore = false, onLoadMore, moreViaFeeder = false,
+  hasMore = false, loadingMore = false, onLoadMore, moreViaFeeder = false, selectedStoryId = null,
 }: KanbanTrustColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id, disabled: locked });
   const t = useTranslations('board');
@@ -152,12 +155,12 @@ export function KanbanTrustColumn({
         data-testid={`trust-column-strip-${id}`}
         data-trust-column={id}
         title={`${label} · ${t('trustLockedDropHint')}`}
-        className={`flex h-full w-10 min-w-10 shrink-0 flex-col items-center gap-2 rounded-xl bg-muted/20 py-3 transition ${closedDuringDrag ? 'opacity-45' : ''}`}
+        className={`flex h-full w-10 min-w-10 shrink-0 flex-col items-center gap-2 rounded-xl border border-dashed border-ds-line ${LAYER.panel} py-3 transition ${closedDuringDrag ? 'opacity-45' : ''}`}
       >
         <span className={`size-1.5 shrink-0 rounded-full ${dotClass}`} aria-hidden="true" />
-        <Lock className="size-3 text-muted-foreground" aria-hidden="true" />
-        <span className="text-xs font-extrabold text-foreground [writing-mode:vertical-rl]">{label}</span>
-        <span className="text-xs tabular-nums text-muted-foreground">0</span>
+        <Lock className="size-3 text-ds-ink-3" aria-hidden="true" />
+        <span className="text-xs font-extrabold text-ds-ink [writing-mode:vertical-rl]">{label}</span>
+        <span className="text-xs tabular-nums text-ds-ink-3">0</span>
         <span className="sr-only">{t('trustLockedDropHint')}</span>
       </div>
     );
@@ -166,28 +169,29 @@ export function KanbanTrustColumn({
   return (
     <div
       ref={setNodeRef}
-      className={`flex h-full w-[280px] min-w-[240px] flex-col rounded-xl p-3 transition ${
-        closedDuringDrag ? 'bg-muted/20 opacity-45' : locked ? 'bg-muted/20' : isOver ? 'bg-primary/5 ring-1 ring-primary/20' : 'bg-transparent'
+      // 4908 — 열은 «내용 칸 층»(LAYER.panel): 바탕과 카드 사이를 면으로 가른다(바탕 → 열 ≥ 0.03 · 열 → 카드 ≥ 0.05, layer-rule.test). 잠긴 열은 같은 면에 안내 글만 다르다.
+      className={`flex h-full w-[280px] min-w-[240px] flex-col rounded-xl border p-3 transition ${LAYER.panel} ${
+        closedDuringDrag ? 'border-ds-line opacity-45' : isOver ? 'border-ds-action ring-1 ring-ds-action' : 'border-ds-line'
       }`}
     >
       <div className="mb-3 flex items-center justify-between gap-2">
         {/* story #2969 §1.3-b(doc proofline-system-layer-2969, PR-6) — 유나 실픽셀 갭 fix:
             kanban-column.tsx(클래식 축)만 하고 이 파일(6단계 신뢰축=기본 보드 화면)을
             놓쳤던 것. 컬럼헤더=소헤딩(Heading 무게), 크기(text-xs)·sans 불변. */}
-        <h3 className="flex items-center gap-2 text-xs font-extrabold text-foreground">
+        <h3 className="flex items-center gap-2 text-xs font-extrabold text-ds-ink">
           <span className={`size-1.5 shrink-0 rounded-full ${dotClass}`} aria-hidden="true" />
           {label}
-          {locked && <Lock className="size-3 text-muted-foreground" aria-hidden="true" />}
+          {locked && <Lock className="size-3 text-ds-ink-3" aria-hidden="true" />}
         </h3>
         <div className="flex items-center gap-1.5">
-          <span className="text-xs tabular-nums text-muted-foreground">{hasMore ? `${stories.length}+` : stories.length}</span>
+          <span className="text-xs tabular-nums text-ds-ink-3">{hasMore ? `${stories.length}+` : stories.length}</span>
           {!locked && onCreateStory ? (
             <button
               type="button"
               aria-label={t('addStory')}
               title={t('addStory')}
               onClick={startCompose}
-              className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              className="flex h-5 w-5 items-center justify-center rounded text-ds-ink-3 transition hover:bg-ds-surface-high hover:text-ds-ink"
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
@@ -195,7 +199,7 @@ export function KanbanTrustColumn({
         </div>
       </div>
       {locked && (
-        <p className={`mb-2 text-micro leading-snug ${closedDuringDrag ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>
+        <p className={`mb-2 text-micro leading-snug ${closedDuringDrag ? 'font-semibold text-ds-ink' : 'text-ds-ink-3'}`}>
           {t('trustLockedDropHint')}
         </p>
       )}
@@ -244,7 +248,7 @@ export function KanbanTrustColumn({
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto p-1.5 [&>*]:shrink-0">
           {stories.length === 0 && !composing ? (
             <div className="flex min-h-[100px] items-center justify-center px-4 text-center">
-              <p className="text-xs text-muted-foreground">{t('noStories')}</p>
+              <p className="text-xs text-ds-ink-3">{t('noStories')}</p>
             </div>
           ) : null}
           {stories.map((story) => (
@@ -268,6 +272,8 @@ export function KanbanTrustColumn({
               verifiedBy={story.human_verified_by ? memberMap[story.human_verified_by] : undefined}
               locked={locked}
               getStatusLabel={getStatusLabel}
+              selected={selectedStoryId === story.id}
+              showStatus={id === 'queued'}
             />
           ))}
           {hasMore && !moreViaFeeder && onLoadMore ? (

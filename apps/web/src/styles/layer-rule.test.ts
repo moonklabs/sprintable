@@ -52,13 +52,18 @@ describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
     expect(step(t, 'panel', 'field')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.fieldOnPanel);
   });
 
+  it.each(themes)('⭐%s: 열린 카드(4908) — 내용 칸과 ΔL ≥ 0.03, 같은 줄 층 글 줄과 채도차 ≥ 0.01(밝기는 거의 같아 왼쪽 막대와 함께 가른다)', (_name, t) => {
+    expect(step(t, 'panel', 'rowSelected')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowSelectedOnPanel);
+    expect(chroma(t[LAYER_TOKEN.rowSelected]!) - chroma(t[LAYER_TOKEN.rowOthers]!)).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowSelectedVsOthersChroma);
+  });
+
   it('⭐옛 문제 재현 가드: «바탕 ↔ 떠 있는 면»처럼 면 차이로 가르지 않는 쌍(0.009)이 층 표에 이웃으로 들어오지 않는다', () => {
     // 라이트에서 바탕과 떠 있는 면의 밝기차는 0.009(선생님 지적의 뿌리) — 그래서 떠 있는 것은 면이 아니라 그림자 + 경계로 가른다고 표에 적었다.
     expect(step(themes[0]![1], 'page', 'floating')).toBeLessThan(LAYER_MIN_STEP.panelOverPage);
   });
 
   it.each(themes)('⭐%s: 글 줄 면 위의 글자(ink · ink-2 · action-text)는 4.5:1 이상 — 새 면 위에서 옛 muted/primary 글자가 못 읽히던 사고 방지', (_name, t) => {
-    for (const row of ['rowOthers', 'rowMine'] as const) {
+    for (const row of ['rowOthers', 'rowMine', 'rowSelected'] as const) {
       for (const ink of ['ink', 'ink-2', 'action-text']) expect(contrast(t[ink]!, t[LAYER_TOKEN[row]]!), `${ink} on ${row}`).toBeGreaterThanOrEqual(4.5);
     }
   });

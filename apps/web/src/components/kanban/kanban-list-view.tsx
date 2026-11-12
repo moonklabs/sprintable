@@ -84,7 +84,6 @@ function StatusGroup({
             stories.map((story) => (
               <div key={story.id} className="w-full">
                 <StoryCard
-                  className="max-w-none"
                   story={story}
                   epicName={story.epic_id ? epicMap[story.epic_id] : undefined}
                   assignee={story.assignee_id ? memberMap[story.assignee_id] : undefined}
