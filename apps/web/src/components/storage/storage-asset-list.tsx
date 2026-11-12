@@ -51,6 +51,22 @@ function dragHasFiles(e: DragEvent): boolean {
   return Array.from(e.dataTransfer?.types ?? []).includes('Files');
 }
 
+/**
+ * 이 끌어 놓기가 «스토리지 올리기» 몫인가 — 창 전체에서 듣기 때문에 다른 놓을 자리를 가로채지 않게 가른다(codex 1차):
+ *  · 글 칸(input · textarea · 글 편집기) 위 · 대화 상자 안 → 그쪽 몫(폴더 이름 칸에 파일을 놓아도 올라가면 안 된다)
+ *  · 열려 있는 모달(삭제 확인 등)이 있으면 그 뒤 화면은 눌리지 않는 때 — 올리기도 막는다
+ *  · 이미 누가 처리했으면(`defaultPrevented`) 건드리지 않는다
+ */
+const OTHER_DROP_TARGET = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="dialog"], [role="alertdialog"]';
+export function dropBelongsToStorage(e: DragEvent): boolean {
+  if (e.defaultPrevented || !dragHasFiles(e)) return false;
+  const target = e.target instanceof Element ? e.target : null;
+  if (target?.closest(OTHER_DROP_TARGET)) return false;
+  const openModal = Array.from(document.querySelectorAll('[role="dialog"][aria-modal="true"], [role="alertdialog"]'))
+    .some((d) => d.getAttribute('aria-hidden') !== 'true' && !d.hasAttribute('inert'));
+  return !openModal;
+}
+
 /** 파일을 «한 번에 하나씩 차례로» 올린다 — 같은 올리기 길(`onUploadFile`)을 파일마다 한 번(동시에 쏟지 않는다). */
 export async function uploadFilesOneByOne(files: ArrayLike<File>, upload: (file: File) => void | Promise<void>): Promise<void> {
   for (const file of Array.from(files)) await upload(file);
@@ -91,12 +107,12 @@ export function StorageAssetList({
   useEffect(() => {
     let depth = 0;
     const onEnter = (e: DragEvent) => {
-      if (!dragHasFiles(e)) return;
+      if (!dropBelongsToStorage(e)) return;
       depth += 1;
       setDragCount(e.dataTransfer?.items.length ?? 0);
     };
     const onOver = (e: DragEvent) => {
-      if (dragHasFiles(e)) e.preventDefault(); // 놓기를 받는다는 표시(없으면 브라우저가 파일을 «열어» 버린다)
+      if (dropBelongsToStorage(e)) e.preventDefault(); // 놓기를 받는다는 표시(없으면 브라우저가 파일을 «열어» 버린다)
     };
     const onLeave = (e: DragEvent) => {
       if (!dragHasFiles(e)) return;
@@ -104,7 +120,11 @@ export function StorageAssetList({
       if (depth === 0) setDragCount(null);
     };
     const onDrop = (e: DragEvent) => {
-      if (!dragHasFiles(e)) return;
+      if (!dropBelongsToStorage(e)) {
+        depth = 0;
+        setDragCount(null);
+        return;
+      }
       e.preventDefault();
       depth = 0;
       setDragCount(null);

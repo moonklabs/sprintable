@@ -409,12 +409,12 @@ export function StorageView({ projectId }: { projectId: string }) {
           type="button"
           variant="outline"
           onClick={openFolderDrawer}
-          className="h-auto min-h-[44px] min-w-0 max-w-full justify-start gap-2 px-3 text-sm font-normal text-foreground"
+          className="h-auto min-h-[44px] min-w-0 max-w-full justify-start gap-2 px-3 text-sm font-normal text-ds-ink"
           data-testid="storage-folder-drawer-trigger"
         >
-          <FolderIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <FolderIcon className="size-4 shrink-0 text-ds-ink-3" aria-hidden="true" />
           <span className="min-w-0 truncate font-medium">{currentFolderLabel}</span>
-          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <ChevronDown className="size-3.5 shrink-0 text-ds-ink-3" aria-hidden="true" />
         </Button>
       </div>
 
@@ -477,7 +477,7 @@ export function StorageView({ projectId }: { projectId: string }) {
 
       {/* story #4277 — lg 미만 폴더 서랍(문서 화면 docs-client-layout의 모바일 스와이프 서랍과 같은 모양 · 같은 훅). */}
       <div
-        className="fixed inset-0 z-40 bg-foreground/40 lg:hidden"
+        className="fixed inset-0 z-40 bg-ds-scrim lg:hidden"
         style={{
           opacity: folderDrawerProgress,
           pointerEvents: folderDrawerProgress > 0.05 ? 'auto' : 'none',
@@ -492,7 +492,7 @@ export function StorageView({ projectId }: { projectId: string }) {
         role="dialog"
         aria-modal="true"
         aria-label={t('metaFolder')}
-        className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden border-r border-border bg-background shadow-[var(--elev-overlay)] outline-none lg:hidden"
+        className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden border-r border-ds-line bg-ds-surface shadow-ds-overlay outline-none lg:hidden"
         style={{
           transform: `translateX(${(folderDrawerProgress - 1) * 100}%)`,
           transition: folderDrawerDragging ? 'none' : 'transform 280ms cubic-bezier(0.4,0,0.2,1)',
@@ -500,9 +500,9 @@ export function StorageView({ projectId }: { projectId: string }) {
         {...closedDrawerProps(folderDrawerProgress, folderDrawerOpen)}
         data-testid="storage-folder-drawer"
       >
-        <div className="flex flex-shrink-0 items-center justify-between border-b border-border/80 px-4 py-3">
-          <span className="text-sm font-medium text-foreground">{t('metaFolder')}</span>
-          <Button type="button" variant="ghost" size="icon-sm" onClick={closeFolderDrawer} className="text-muted-foreground hover:text-foreground" aria-label={tc('close')}>
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-ds-line px-4 py-3">
+          <span className="text-sm font-medium text-ds-ink">{t('metaFolder')}</span>
+          <Button type="button" variant="ghost" size="icon-sm" onClick={closeFolderDrawer} className="text-ds-ink-3 hover:text-ds-ink" aria-label={tc('close')}>
             <X className="size-4" />
           </Button>
         </div>
@@ -533,7 +533,7 @@ export function StorageView({ projectId }: { projectId: string }) {
           <button
             type="button"
             aria-label={t('cancel')}
-            className="absolute inset-0 bg-black/55 backdrop-blur-[2px]"
+            className="absolute inset-0 bg-ds-scrim"
             onClick={() => detailPanel.setDrawerOpen(false)}
           />
           <div className="absolute inset-y-0 right-0 w-[min(92vw,372px)]">

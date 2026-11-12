@@ -224,6 +224,49 @@ describe('창에 파일 끌어 놓기', () => {
     expect(drop.defaultPrevented).toBe(false);
   });
 
+  it('⭐다른 놓을 자리는 가로채지 않는다(codex 1차): 글 칸 위 · 대화 상자 안 · 열린 모달이 있을 때 · 이미 처리된 놓기는 올리지 않고 틀도 안 띄운다', async () => {
+    const onUpload = vi.fn();
+    await act(async () => { root.render(intl(<div><StorageAssetList {...listProps({ onUploadFile: onUpload })} /><input data-testid="other-input" /></div>)); });
+    const f = [new File(['1'], 'one.png')];
+    const input = container.querySelector('[data-testid="other-input"]')!;
+    // ① 글 칸 위
+    await act(async () => { input.dispatchEvent(dragEvent('dragenter', f)); });
+    expect(container.querySelector('[data-testid="storage-drop-overlay"]')).toBeNull();
+    const overInput = dragEvent('dragover', f);
+    await act(async () => { input.dispatchEvent(overInput); });
+    expect(overInput.defaultPrevented).toBe(false);
+    const dropInput = dragEvent('drop', f);
+    await act(async () => { input.dispatchEvent(dropInput); });
+    expect(onUpload).not.toHaveBeenCalled();
+    expect(dropInput.defaultPrevented).toBe(false);
+    // ② 이미 누가 처리한 놓기
+    const handled = dragEvent('drop', f);
+    handled.preventDefault();
+    await act(async () => { window.dispatchEvent(handled); });
+    expect(onUpload).not.toHaveBeenCalled();
+    // ③ 대화 상자 안
+    const dlg = document.createElement('div');
+    dlg.setAttribute('role', 'dialog');
+    const inner = document.createElement('span');
+    dlg.appendChild(inner);
+    document.body.appendChild(dlg);
+    await act(async () => { inner.dispatchEvent(dragEvent('drop', f)); });
+    expect(onUpload).not.toHaveBeenCalled();
+    dlg.remove();
+    // ④ 열린 모달이 있는 동안(뒤 화면에 놓아도 안 올린다) · 닫히면(aria-hidden) 다시 올린다
+    const modal = document.createElement('div');
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    document.body.appendChild(modal);
+    await act(async () => { window.dispatchEvent(dragEvent('drop', f)); });
+    expect(onUpload).not.toHaveBeenCalled();
+    modal.setAttribute('aria-hidden', 'true');
+    await act(async () => { window.dispatchEvent(dragEvent('drop', f)); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(onUpload).toHaveBeenCalledTimes(1);
+    modal.remove();
+  });
+
   it('화면을 떠나면(unmount) 창 끌어 놓기 귀가 풀린다 — 다른 화면에서 파일을 놓아도 올라가지 않는다', async () => {
     const onUpload = vi.fn();
     await act(async () => { root.render(intl(<StorageAssetList {...listProps({ onUploadFile: onUpload })} />)); });
