@@ -210,14 +210,21 @@ describe('OrgBriefingShell — story #3831 AC1(3구역, 3823 route 단일 소비
     expect(badge!.textContent).toContain('내 손이 필요');
   });
 
-  it('결재 행이 있으면 구역 머리 옆에 «돈·외부 발송은 하나씩 서명해요» 안내가 있고, 행이 없으면 없다', async () => {
+  it('결재 행이 있으면 구역 머리 «아래 한 줄»에 «돈·외부 발송은 하나씩 서명해요» 안내가 있고(머리 안이 아니다), 행이 없으면 없다', async () => {
     stubToday({ ...EMPTY_TODAY, needs_me: [{
       kind: 'approval', risk: 'low', source: 'gate', source_id: 'g1',
       work_item: { type: 'story', id: 's1', title: '블로그 글 발행' },
       requested_by: null, reason: null, created_at: '2026-09-13T05:00:00Z', actions: ['approve'],
     }], needs_me_count: 1 });
     await mount();
-    expect(container.querySelector('[data-testid="home-needs-hand-hint"]')?.textContent).toBe('돈·외부 발송은 하나씩 서명해요');
+    const hint = container.querySelector('[data-testid="home-needs-hand-hint"]') as HTMLElement;
+    expect(hint?.textContent).toBe('돈·외부 발송은 하나씩 서명해요');
+    // 4890 — the hint is NOT in the section header (its trailing slot is shrink-0: ~150px ko / ~330px en took the title's width on a phone — the title folded to 3 lines and the hint ran over it).
+    // It is its own line, the header's next sibling: it wraps by itself and cannot take the title's room.
+    const header = container.querySelector('[data-testid="home-section-needs-hand"] [data-slot="ds-section-header"]') as HTMLElement;
+    expect(header.contains(hint)).toBe(false);
+    expect(header.nextElementSibling).toBe(hint);
+    expect(hint.tagName).toBe('P');
   });
 
   it('결재 행이 없으면 그 안내가 없다', async () => {
