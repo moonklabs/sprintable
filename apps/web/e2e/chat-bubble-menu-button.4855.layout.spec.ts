@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Browser } from '@playwright/test';
 import { compile, optimize } from '@tailwindcss/node';
+import { bubbleVariants } from './bubble-variants';
 
 const BUBBLE = path.join(__dirname, '../src/components/chat/chat-bubble.tsx');
 const APP = path.join(__dirname, '../src/app');
@@ -16,6 +17,8 @@ const APP = path.join(__dirname, '../src/app');
 /** the class strings of the column, the bubble text, the time and the «⋯» button (drift-proof: read from the source, not copied) */
 function classesFromSource() {
   const src = readFileSync(BUBBLE, 'utf8');
+  const variants = bubbleVariants(src);
+  if (!variants) throw new Error('the bubble variants not found');
   const pick = (re: RegExp, what: string) => { const m = re.exec(src); if (!m) throw new Error(`${what} not found`); return m[1]!; };
   const button = pick(/data-testid="chat-bubble-menu-button"[\s\S]*?className=\{`([^`]+)`\}/, 'the menu button className');
   return {
@@ -23,8 +26,8 @@ function classesFromSource() {
     column: pick(/<div (?:data-chat-content="" )?className=\{`((?:relative )?flex min-w-0 max-w-\[72%\] (?:\S+ )*?flex-col gap-0\.5 )\$\{isMine/, 'the message column'),
     text: pick(/<div data-testid="chat-bubble-text" className=\{`([^$`]+)\$\{/, 'the bubble text box').trim(),
     // story 4887 (UI-4 P4-b): the fill · rounding · padding moved into per-sender variants — a person's bubble (mine / another's) is the geometry the «⋯» button must not cover; an agent's plain text has its own spec (chat-bubble-plain.4887)
-    textMine: pick(/isMine\s*\?\s*'([^']+)'\s*:\s*isAgent\s*\?\s*'([^']+)'\s*:\s*'([^']+)'\s*\}`\}\s*data-bubble=/, 'the bubble variant (mine)'),
-    textPerson: ((m) => { if (!m) throw new Error('the bubble variant (person) not found'); return m[3]!; })(/isMine\s*\?\s*'([^']+)'\s*:\s*isAgent\s*\?\s*'([^']+)'\s*:\s*'([^']+)'\s*\}`\}\s*data-bubble=/.exec(src)),
+    textMine: variants.mine,
+    textPerson: variants.person,
     // the time of the META line under the bubble (the head of a run has its own `<time … data-testid="bubble-head-time">` earlier in the file — not this one)
     time: pick(/<time className="([^"]+)" dateTime=\{message\.created_at\}><ViewerDate/, 'the time'),
     // the meta cell's base class: where a mouse can hover the first message of a run has no time line at all (its head carries the time), so this measures the cell as touch and as a continuation see it — the base class — in both modes

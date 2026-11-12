@@ -7,6 +7,7 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Browser } from '@playwright/test';
 import { compile, optimize } from '@tailwindcss/node';
+import { bubbleVariants } from './bubble-variants';
 
 const BUBBLE = path.join(__dirname, '../src/components/chat/chat-bubble.tsx');
 const APP = path.join(__dirname, '../src/app');
@@ -23,12 +24,12 @@ function classesFromSource() {
   const more = /data-testid="chat-bubble-menu-button"[\s\S]*?className=\{`([^`$]+)\$\{isMine(?: && !plainRow)? \? '([^']+)' : '([^']+)'\}`\}/.exec(src);
   if (!more) throw new Error('the «⋯» button classes not found');
   const text = /<div data-testid="chat-bubble-text" className=\{`([^$`]+)\$\{/.exec(src);
-  const tern = /isMine\s*\?\s*'([^']+)'\s*:\s*isAgent\s*\?\s*'([^']+)'\s*:\s*'([^']+)'\s*\}`\}\s*data-bubble=/.exec(src);
+  const tern = bubbleVariants(src);
   if (!text || !tern) throw new Error('the bubble text classes not found');
   return {
     row: pick(/className=\{`(group\/bubble flex scroll-mt-4 gap-2 transition-shadow )\$\{isMine/, 'the row'),
     column: pick(/<div (?:data-chat-content="" )?className=\{`((?:relative )?flex min-w-0 max-w-\[72%\] (?:\S+ )*?flex-col gap-0\.5 )\$\{isMine/, 'the message column'),
-    textBase: text[1]!.trim(), textMine: tern[1]!, textPerson: tern[3]!,
+    textBase: text[1]!.trim(), textMine: tern.mine, textPerson: tern.person,
     metaTime: pick(/<time className="([^"]+)" dateTime=\{message\.created_at\}><ViewerDate/, 'the meta time'),
     contMine: cont[1]!, contTheirs: cont[2]!,
     replyBase: reply[1]!.trim(), replyMine: reply[2]!, replyTheirs: reply[3]!,

@@ -30,8 +30,9 @@ describe('ds Input', () => {
     expect(cls).toContain('h-ds-control');
     expect(cls).toContain('bg-ds-surface-sunk');
     expect(cls).toMatch(/(^|\s)border-ds-line-control(\s|$)/);
-    expect(cls).toContain('focus-visible:ring-ds-action');
-    expect(cls).toContain('focus-visible:border-ds-action');
+    // 4906 · 글 칸의 초점 = 중립 테두리 한 단계 짙어짐 — 파란 틀(action 테두리 · 고리) 0
+    expect(cls).toContain('focus-visible:border-ds-ink-2');
+    expect(cls).not.toMatch(/focus(-visible|-within)?:(ring|border)-ds-action/);
   });
 
   it('⭐폰(coarse 포인터)은 높이 44 — 평소 36(h-9)은 그대로이고 호출부 className이 평소 높이를 줄여도 폰 44는 남는다', async () => {

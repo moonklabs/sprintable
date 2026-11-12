@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { throwForFailedResponse } from '@/lib/chat-attachment-error';
+import { LAYER } from '@/components/ds/layers';
 import { ChevronLeft, RefreshCw, UserX } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -961,7 +962,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
   return (
     <ReadingPanelProvider value={readingPanelContextValue}>
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className={`flex h-full flex-col overflow-hidden ${LAYER.panel}`}>
       {/* Mobile thread back — only while a thread panel is open (closes it). The page
           TopBar owns the conversation header, so this no longer duplicates it (S2). */}
       {isMobileThreadView && (

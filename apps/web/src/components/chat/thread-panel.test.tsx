@@ -209,7 +209,7 @@ describe('ThreadPanel — the thread head (story 4887 · approved layout)', () =
     expect(container.textContent).not.toContain('›');
   });
 
-  it('⭐ EVERY reply is a plain row — a person\'s and my own too: no bubble fill, left-aligned (not only the agent\'s)', async () => {
+  it('⭐ EVERY reply is a flat, left-aligned row on the layers (4906) — a person\'s on the others\' layer, mine on ds-mine; no right-pushed bubble shape', async () => {
     const replies = [
       { id: 'p1', created_by: 'human-2', sender: { id: 'human-2', name: '지우', type: 'human' }, content: '사람 답글', created_at: '2026-08-08T00:01:00.000Z' },
       { id: 'p2', created_by: 'member-1', sender: { id: 'member-1', name: '나', type: 'human' }, content: '내 답글', created_at: '2026-08-08T00:02:00.000Z' },
@@ -217,12 +217,21 @@ describe('ThreadPanel — the thread head (story 4887 · approved layout)', () =
     await mountWith(parentMessage, replies);
     const texts = [...container.querySelectorAll('[data-testid="thread-replies"] [data-testid="chat-bubble-text"]')] as HTMLElement[];
     expect(texts).toHaveLength(2);
+    expect(texts[0]!.className, 'a person\'s reply: the others\' layer').toContain('bg-ds-surface-high'); // reverted (bare text on the page) → fails
+    expect(texts[1]!.className, 'my reply: ds-mine').toContain('bg-ds-mine');
     for (const el of texts) {
-      expect(el.className, 'no bubble fill').not.toMatch(/bg-proof|rounded-xl/); // reverted (a person gets the grey bubble, I get the blue one) → fails
-      expect(el.getAttribute('data-bubble')).toBe('plain');
+      expect(el.className, 'a flat row, not the round bubble').not.toMatch(/rounded-xl|bg-proof/);
+      expect(el.getAttribute('data-bubble')).toBe('plain'); // plain = flat, left-aligned (the fill is the layer)
     }
     const rows = [...container.querySelectorAll('[data-testid="thread-replies"] .group\\/bubble')] as HTMLElement[];
     expect(rows.some((r) => r.className.includes('flex-row-reverse')), 'my reply is not pushed to the right').toBe(false);
+  });
+
+  it('⭐ the thread panel floor is the content-panel layer (4906), not the page background', async () => {
+    await mountWith(parentMessage, []);
+    const panel = container.querySelector('[data-testid="thread-panel"]') as HTMLElement;
+    expect(panel.className).toContain('bg-ds-surface');
+    expect(panel.className).not.toContain('bg-background');
   });
 
   it('⭐ the close button and the phone back arrow both call onClose', async () => {

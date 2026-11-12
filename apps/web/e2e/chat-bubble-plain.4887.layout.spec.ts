@@ -1,11 +1,12 @@
 /**
- * story 4887 (UI-4 P4-b · AC3 B3) — an agent's message has no bubble, measured in Chromium with the component's OWN class strings (read from chat-bubble.tsx) and the real Tailwind build of globals.css.
- * Plain: nothing is drawn behind the text and the text starts exactly where the head line's name starts (no padding box pushes it in). A person's bubble: a drawn fill and the text inset by the bubble's padding.
+ * story 4906 (replaces the plain agent of 4887 P4-b · AC3 B3) — every message sits on a layer of the screen-layer rule, measured in Chromium with the component's OWN class strings (read from chat-bubble.tsx, `${LAYER.x}` resolved from components/ds/layers.ts) and the real Tailwind build of globals.css.
+ * An agent's text, another person's and mine each have a drawn fill and the text inset by the bubble padding; an agent's fill is the SAME layer as another person's (not bare text on the page) and mine is a different one.
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Browser } from '@playwright/test';
 import { compile, optimize } from '@tailwindcss/node';
+import { bubbleVariants } from './bubble-variants';
 
 const BUBBLE = path.join(__dirname, '../src/components/chat/chat-bubble.tsx');
 const APP = path.join(__dirname, '../src/app');
@@ -13,9 +14,9 @@ const APP = path.join(__dirname, '../src/app');
 function classesFromSource() {
   const src = readFileSync(BUBBLE, 'utf8');
   const base = /<div data-testid="chat-bubble-text" className=\{`([^$`]+)\$\{/.exec(src);
-  const pick = /isMine\s*\?\s*'([^']+)'\s*:\s*isAgent\s*\?\s*'([^']+)'\s*:\s*'([^']+)'\s*\}`\}\s*data-bubble=/.exec(src);
-  if (!base || !pick) throw new Error('the bubble text box classes not found');
-  return { base: base[1]!.trim(), mine: pick[1]!, agent: pick[2]!, person: pick[3]! };
+  const variants = bubbleVariants(src);
+  if (!base || !variants) throw new Error('the bubble text box classes not found');
+  return { base: base[1]!.trim(), ...variants };
 }
 
 async function css(classes: string[]): Promise<string> {
@@ -39,12 +40,24 @@ async function scene(browser: Browser, kind: 'agent' | 'person' | 'mine') {
   return { context, x, style };
 }
 
-test('[SID:4887] an agent\'s message is plain: nothing drawn behind the text, and the text starts where the name starts', async ({ browser }) => {
-  const { context, x, style } = await scene(browser, 'agent');
-  expect(['rgba(0, 0, 0, 0)', 'transparent']).toContain(await style('#box', 'background-color')); // reverted (a fill) → a colour
-  expect(await style('#box', 'padding-left')).toBe('0px'); // reverted (the bubble padding) → 14px
-  expect(Math.abs((await x('#t')) - (await x('#name'))), 'the text is flush with the name').toBeLessThanOrEqual(1);
-  await context.close();
+test('[SID:4906] an agent\'s message sits on a layer: a drawn fill, the same fill as another person\'s, the text inset by the padding', async ({ browser }) => {
+  const agent = await scene(browser, 'agent');
+  const agentFill = await agent.style('#box', 'background-color');
+  expect(agentFill, 'a fill is drawn').not.toMatch(/^rgba\(0, 0, 0, 0\)$|^transparent$/); // reverted (plain agent, no fill) → transparent
+  expect(await agent.style('#box', 'padding-left')).toBe('14px'); // reverted (no padding box) → 0px
+  expect((await agent.x('#t')) - (await agent.x('#name')), 'the text is inset by the bubble padding').toBeGreaterThanOrEqual(13);
+  await agent.context.close();
+  const person = await scene(browser, 'person');
+  expect(await person.style('#box', 'background-color'), 'an agent and a person share the layer').toBe(agentFill);
+  await person.context.close();
+});
+
+test('[SID:4906] my message is a different layer from another person\'s (lightness and chroma, not only hue)', async ({ browser }) => {
+  const mine = await scene(browser, 'mine');
+  const person = await scene(browser, 'person');
+  expect(await mine.style('#box', 'background-color')).not.toBe(await person.style('#box', 'background-color'));
+  await mine.context.close();
+  await person.context.close();
 });
 
 for (const kind of ['person', 'mine'] as const) {

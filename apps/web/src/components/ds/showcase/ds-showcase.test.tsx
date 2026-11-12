@@ -51,7 +51,7 @@ describe('ds 견본 화면 (AC3)', () => {
     });
   }
 
-  it('⭐토큰: 색 27종 · 글자 8단 가운데 7 · 모서리 4 · 밀도 6 · 그림자 2 이름이 코드의 이름 그대로 보인다', () => {
+  it('⭐토큰: 색 28종 · 글자 8단 가운데 7 · 모서리 4 · 밀도 6 · 그림자 2 이름이 코드의 이름 그대로 보인다', () => {
     const text = frame('light').textContent ?? '';
     for (const c of ['surface-sunk', 'action-text', 'needs-hand-bar', 'on-needs-hand', 'failed-soft', 'info-soft', 'scrim']) expect(text, c).toContain(c);
     for (const d of ['control-sm 28', 'compact 32', 'control 36', 'touch 44', 'control-xl 48', 'row 56']) expect(text, d).toContain(d);

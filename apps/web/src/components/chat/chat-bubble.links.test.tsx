@@ -78,24 +78,24 @@ describe('[SID:4854] an address with an @ in it (a profile address)', () => {
   it('plain message: the whole address is one anchor, no mention is made inside it', async () => {
     await render('profile https://medium.com/@user/post here');
     expect(hrefs()).toEqual(['https://medium.com/@user/post']);
-    expect(container.querySelectorAll('span.font-medium.text-primary')).toHaveLength(0);
+    expect(container.querySelectorAll('span.font-medium.text-ds-action-text')).toHaveLength(0);
   });
   it('markdown message: same', async () => {
     await render('**profile** https://medium.com/@user/post here');
     expect(hrefs()).toEqual(['https://medium.com/@user/post']);
-    expect(container.querySelectorAll('span.font-medium.text-primary')).toHaveLength(0);
+    expect(container.querySelectorAll('span.font-medium.text-ds-action-text')).toHaveLength(0);
   });
   it('an @ after a query delimiter stays inside the address (plain and markdown link)', async () => {
     await render('go https://example.com/?x=@alice now');
     expect(hrefs()).toEqual(['https://example.com/?x=@alice']);
     await render('[go](https://example.com/?x=@alice)');
     expect(hrefs()).toEqual(['https://example.com/?x=@alice']);
-    expect(container.querySelectorAll('span.font-medium.text-primary')).toHaveLength(0);
+    expect(container.querySelectorAll('span.font-medium.text-ds-action-text')).toHaveLength(0);
   });
   it('a real mention beside it is still a mention', async () => {
     await render('https://medium.com/@user/post cc @alice');
     expect(hrefs()).toEqual(['https://medium.com/@user/post']);
-    expect(Array.from(container.querySelectorAll('span.font-medium.text-primary')).map((m) => m.textContent)).toEqual(['@alice']);
+    expect(Array.from(container.querySelectorAll('span.font-medium.text-ds-action-text')).map((m) => m.textContent)).toEqual(['@alice']);
   });
 });
 
@@ -125,7 +125,7 @@ describe('[SID:4854] markdown links', () => {
   });
   it('an @name that starts a word is still a mention, and the «@example» of an e-mail address beside it is not', async () => {
     await render('**hi** @alice, mail probe@example.org');
-    const mentions = Array.from(container.querySelectorAll('span.font-medium.text-primary'));
+    const mentions = Array.from(container.querySelectorAll('span.font-medium.text-ds-action-text'));
     expect(mentions.map((m) => m.textContent)).toEqual(['@alice']);
     expect(container.textContent).toContain('probe@example.org');
   });
