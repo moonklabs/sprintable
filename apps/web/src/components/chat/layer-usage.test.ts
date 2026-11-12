@@ -19,6 +19,13 @@ describe('대화 방은 화면 층 규칙의 토큰을 쓴다 (4906)', () => {
     for (const legacy of ['bg-proof-panel', 'bg-proof-blue-soft', 'rounded-tr-sm bg-muted/50', 'rounded-tl-sm bg-muted/50']) expect(src, legacy).not.toContain(legacy);
   });
 
+  it('⭐말풍선 안 보조 글 · 링크 · 가림 글은 ds 글자 토큰(옛 muted-foreground/primary는 새 면 위에서 4.5:1 미달)', () => {
+    const src = read('chat-bubble.tsx');
+    expect(src).toContain("const muted = 'text-ds-ink-2'");
+    expect(src).toContain('text-ds-action-text underline decoration-ds-action-text/40');
+    expect(src).not.toMatch(/rounded-xl px-3\.5 py-2 text-sm italic text-muted-foreground/);
+  });
+
   it('⭐에이전트 글은 맨글(py-0.5만)로 바탕에 서지 않는다 — 말풍선 분기에 층 클래스가 있다(plainRow만 맨글)', () => {
     const src = read('chat-bubble.tsx');
     expect(src).toMatch(/isAgent\s*\?\s*`rounded-lg rounded-tl-sm \$\{LAYER\.rowOthers\}/);

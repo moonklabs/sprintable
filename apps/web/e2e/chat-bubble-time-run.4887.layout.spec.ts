@@ -8,12 +8,15 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Browser } from '@playwright/test';
 import { compile, optimize } from '@tailwindcss/node';
+import { bubbleVariants } from './bubble-variants';
 
 const BUBBLE = path.join(__dirname, '../src/components/chat/chat-bubble.tsx');
 const APP = path.join(__dirname, '../src/app');
 
 function classesFromSource() {
   const src = readFileSync(BUBBLE, 'utf8');
+  const variants = bubbleVariants(src);
+  if (!variants) throw new Error('the bubble variants not found');
   const pick = (re: RegExp, what: string, i = 1) => { const m = re.exec(src); if (!m) throw new Error(`${what} not found`); return m[i]!; };
   const cont = /\? \(isMine(?: && !plainRow)?\s*\? '([^']+)'\s*: '([^']+)'\)/.exec(src);
   if (!cont) throw new Error('the continuation time line classes not found');
@@ -22,8 +25,8 @@ function classesFromSource() {
     column: pick(/<div (?:data-chat-content="" )?className=\{`((?:relative )?flex min-w-0 max-w-\[72%\] (?:\S+ )*?flex-col gap-0\.5 )\$\{isMine/, 'the message column'),
     text: pick(/<div data-testid="chat-bubble-text" className=\{`([^$`]+)\$\{/, 'the bubble text box').trim(),
     // story 4887 (UI-4 P4-b): the fill · rounding · padding are per-sender variants now — measure a person's bubble (mine / another's), the geometry the time rules were written against
-    textMine: pick(/isMine\s*\?\s*'([^']+)'\s*:\s*isAgent\s*\?\s*'([^']+)'\s*:\s*'([^']+)'\s*\}`\}\s*data-bubble=/, 'the bubble variant (mine)'),
-    textPerson: ((m) => { if (!m) throw new Error('the bubble variant (person) not found'); return m[3]!; })(/isMine\s*\?\s*'([^']+)'\s*:\s*isAgent\s*\?\s*'([^']+)'\s*:\s*'([^']+)'\s*\}`\}\s*data-bubble=/.exec(src)),
+    textMine: variants.mine,
+    textPerson: variants.person,
     headTime: pick(/<time className="([^"]+)" dateTime=\{message\.created_at\} data-testid="bubble-head-time">/, 'the head time'),
     metaTime: pick(/<time className="([^"]+)" dateTime=\{message\.created_at\}><ViewerDate/, 'the meta time'),
     contMine: cont[1]!,

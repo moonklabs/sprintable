@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Browser } from '@playwright/test';
 import { compile, optimize } from '@tailwindcss/node';
-import { LAYER } from '../src/components/ds/layers';
+import { bubbleVariants } from './bubble-variants';
 
 const BUBBLE = path.join(__dirname, '../src/components/chat/chat-bubble.tsx');
 const APP = path.join(__dirname, '../src/app');
@@ -14,10 +14,9 @@ const APP = path.join(__dirname, '../src/app');
 function classesFromSource() {
   const src = readFileSync(BUBBLE, 'utf8');
   const base = /<div data-testid="chat-bubble-text" className=\{`([^$`]+)\$\{/.exec(src);
-  const pick = /isMine\s*\?\s*`([^`]+)`\s*:\s*isAgent\s*\?\s*`([^`]+)`\s*:\s*`([^`]+)`\s*\}`\}\s*data-bubble=/.exec(src);
-  if (!base || !pick) throw new Error('the bubble text box classes not found');
-  const resolve = (t: string) => t.replace(/\$\{LAYER\.(\w+)\}/g, (_m, k: string) => LAYER[k as keyof typeof LAYER]).trim();
-  return { base: base[1]!.trim(), mine: resolve(pick[1]!), agent: resolve(pick[2]!), person: resolve(pick[3]!) };
+  const variants = bubbleVariants(src);
+  if (!base || !variants) throw new Error('the bubble text box classes not found');
+  return { base: base[1]!.trim(), ...variants };
 }
 
 async function css(classes: string[]): Promise<string> {
