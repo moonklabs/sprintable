@@ -2,9 +2,19 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Frame } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { PageFrame } from '@/components/ds/page-frame';
+import { PageHead } from '@/components/ds/page-head';
+import { Button } from '@/components/ds/button';
+import { Chip } from '@/components/ds/chip';
+import { EmptyState } from '@/components/ds/empty-state';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
+import { NativeSelect } from '@/components/ds/select';
+import { LAYER } from '@/components/ds/layers';
+import { ContextMenu, ContextMenuTrigger, MenuContent, MenuItem } from '@/components/ds/menu';
 import {
   adaptArtifactDetail, createArtifact, getArtifactVersionDetail,
   type ArtifactFormat, type BeVisualArtifactSummary, type BeArtifactVersionSummary,
@@ -71,13 +81,30 @@ async function fetchGalleryData(projectId: string): Promise<{ artifacts: BeVisua
   };
 }
 
-function GroupListSkeleton() {
+/** 4910 — 갤러리 틀 한 곳: 위 막대 제목(`TopBarSlot` — 모든 갈래에서 그린다) + 한 쪽 틀(`PageFrame wide`) + 머리(설명 + 개수 + «그리기 · 가져오기» 늘). 본문에 제목(h1)은 없다. */
+const galleryTitle = (label: string) => <h1 className="text-sm font-medium">{label}</h1>;
+
+/** 카드 얼굴 · 썸네일 우물 · 바탕 칸의 층 — 층 표 이름 그대로(styles/layer-rule.test.ts가 같은 이름과 층 사이 간격을 지킨다). */
+export const ARTIFACT_CARD_FACE = LAYER.rowOthers;
+export const ARTIFACT_CARD_WELL = LAYER.well;
+export const ARTIFACT_PANEL = LAYER.panel;
+
+/** 카드 격자 칸 수: 폰 2 · sm 3 · lg 4(눌림 44 이상을 지키며 한 화면에 더 많이 — 4910 시안). */
+const GALLERY_GRID = 'grid grid-cols-2 gap-3.5 sm:grid-cols-3 lg:grid-cols-4';
+
+function GalleryGridSkeleton({ label }: { label: string }) {
   return (
-    <div className="space-y-1.5 p-1.5">
-      {Array.from({ length: 3 }).map((_, i) => (
-        <div key={i} className="h-9 animate-pulse rounded-lg bg-muted/60" />
+    <SkeletonGroup label={label} className={GALLERY_GRID}>
+      {Array.from({ length: 8 }).map((_, i) => (
+        <div key={i} className={cn('overflow-hidden rounded-ds-panel border border-ds-line', LAYER.rowOthers)}>
+          <div className={cn('p-3', LAYER.well)}><Skeleton className="aspect-[8/5] w-full" /></div>
+          <div className="space-y-2 p-3">
+            <Skeleton variant="text" className="w-3/4" />
+            <Skeleton variant="text" size="small" className="w-1/2" />
+          </div>
+        </div>
       ))}
-    </div>
+    </SkeletonGroup>
   );
 }
 
@@ -85,6 +112,9 @@ function GroupListSkeleton() {
  * story 39313b40 §3 — 카드 그리드. 행 리스트(3d888ba2)를 대체(재사용: ArtifactThumbnail·
  * 크게 보기 모달 — 신규 뷰어/썸네일 컴포넌트 0). 클릭 하나로 바로 모달(변천사는 이제
  * 모달 내부 탭 — 그리드 인라인 펼침 폐지, doc §3 "펼침은 grid reflow 유발" 판정).
+ *
+ * 4910 — 다시 지음: 카드 얼굴 = 글 줄 층(`LAYER.rowOthers`, 내용 칸 위) · 썸네일 칸 = 한 단 더 들어간 우물(`LAYER.well`) · 칩은 ds Chip(정본 = done · 그 밖은 중립) ·
+ * 데스크톱 손길: 우클릭 메뉴 = 이 카드에 «있는» 두 동작(산출물 열기 · 상세 페이지로) — 새 동작 0, 같은 두 동작은 카드의 단추 · 링크로도 늘 닿는다(우클릭 전용 동작 0).
  */
 function ArtifactCard({
   artifact, axisT, onOpen,
@@ -95,52 +125,55 @@ function ArtifactCard({
   onOpen: () => void;
 }) {
   const flatHref = useFlatHref(); // story #4231 4차 B — 옛 자원 경로(flat 목적지)에 프로젝트
+  const router = useRouter();
+  const detailHref = flatHref(`/artifacts/${artifact.id}`);
   return (
     // story #3378(결함·customer-zero, 선생님 실사용) — 카드 전체가 <button>이라 크게 보기
-    // 다이얼로그 말고는 갈 곳이 없었다(다이얼로그 자체도 막다른 길이었다). <a>는 <button>
-    // 안에 못 들어가(중첩 상호작용 콘텐츠, 무효 HTML)라 바깥 컨테이너를 button에서 div로
-    // 내리고, 썸네일만 여전히 다이얼로그를 여는 button, 제목은 실제 <Link>로 상세 페이지에
-    // 간다(스토리 문구 "카드 제목 링크" 그대로).
-    // 유나 design verdict(ad31d9449) — 배지행을 별도 div로 두면 hover:border(카드 전체)가
-    // "눌린다"는 인상을 주면서 실제로는 아무 데도 안 이어지는 죽은 36px 면적(카드의 16.4%)이
-    // 된다. 배지는 전부 span이라 중첩 문제가 없으므로 제목 Link 안으로 옮겨 "제목+메타=상세
-    // 링크 영역" 전체가 실제로 클릭 가능하게 한다(죽은 면적 0).
-    <div className="group flex flex-col overflow-hidden rounded-xl border border-border bg-card transition-colors hover:border-primary/40">
-      <button type="button" onClick={onOpen} title={axisT('galleryOpenArtifactAction')} className="block w-full text-left">
-        <ArtifactThumbnail
-          artifactId={artifact.id}
-          latestVersionNumber={artifact.latestVersionNumber}
-          anchorVersion={artifact.anchorVersion}
-          className="aspect-[8/5] w-full rounded-none border-0 border-b border-border"
-        />
-      </button>
-      <Link
-        href={flatHref(`/artifacts/${artifact.id}`)}
-        title={axisT('galleryOpenDetailAction')}
-        className="flex flex-col gap-1.5 px-3 pt-2.5 pb-3 hover:underline"
+    // 다이얼로그 말고는 갈 곳이 없었다. <a>는 <button> 안에 못 들어가(무효 HTML) 바깥 컨테이너는 div,
+    // 썸네일만 다이얼로그를 여는 button, 제목 + 메타는 실제 <Link>로 상세 페이지에 간다.
+    // 유나 design verdict(ad31d9449) — 배지행도 제목 Link 안에 둬서 «죽은 클릭 면적 0».
+    <ContextMenu>
+      <ContextMenuTrigger
+        data-testid="artifact-card"
+        className={cn('group flex flex-col overflow-hidden rounded-ds-panel border border-ds-line transition-colors hover:bg-ds-surface', ARTIFACT_CARD_FACE)}
       >
-        <span className="min-w-0 truncate text-editorial-ui font-semibold text-foreground">{artifact.title}</span>
-        <span className="flex items-center gap-1.5 no-underline">
-          {artifact.anchorVersion != null ? (
-            <span className="shrink-0 rounded border border-success px-1.5 py-0.5 text-micro font-extrabold text-success">
-              {axisT('galleryAnchorPill', { version: artifact.anchorVersion })}
-            </span>
-          ) : null}
-          <span className="shrink-0 rounded border border-border bg-muted/60 px-1.5 py-0.5 text-editorial-meta font-bold tabular-nums text-muted-foreground">
-            {axisT('galleryLatestChip', { version: artifact.latestVersionNumber })}
+        <div className={cn('p-3', ARTIFACT_CARD_WELL)}>
+          <button
+            type="button"
+            onClick={onOpen}
+            title={axisT('galleryOpenArtifactAction')}
+            aria-label={`${axisT('galleryOpenArtifactAction')} · ${artifact.title}`}
+            className="block min-h-ds-touch w-full rounded-ds-control text-left outline-none focus-visible:ring-2 focus-visible:ring-ds-action"
+          >
+            <ArtifactThumbnail
+              artifactId={artifact.id}
+              latestVersionNumber={artifact.latestVersionNumber}
+              anchorVersion={artifact.anchorVersion}
+              className="aspect-[8/5] w-full rounded-ds-control border border-ds-line"
+            />
+          </button>
+        </div>
+        <Link
+          href={detailHref}
+          title={axisT('galleryOpenDetailAction')}
+          className="flex min-h-ds-touch flex-col gap-2 px-3 pt-2.5 pb-3 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ds-action"
+        >
+          <span className="min-w-0 truncate text-ds-body font-semibold text-ds-ink">{artifact.title}</span>
+          <span className="flex flex-wrap items-center gap-1.5 no-underline">
+            {artifact.anchorVersion != null ? (
+              <Chip tone="done">{axisT('galleryAnchorPill', { version: artifact.anchorVersion })}</Chip>
+            ) : null}
+            <Chip>{axisT('galleryLatestChip', { version: artifact.latestVersionNumber })}</Chip>
+            {/* story #2724(2026-08-17, 페드루 PO 판정) — 카드 레벨 미연결 배지. 그룹 라벨(축 기준)과는 다른 축의 정보(story_id·doc_id 원자값 기준)라 중복 아님. */}
+            {artifact.unlinked ? <Chip className="ml-auto">{axisT('galleryUnlinkedBadge')}</Chip> : null}
           </span>
-          {/* story #2724(2026-08-17, 페드루 PO 판정) — 카드 레벨 미연결 배지. 사이드바 "무소속"
-           * 그룹 라벨(축 기준)과는 다른 축의 정보(story_id·doc_id 원자값 기준, 위 GalleryArtifact
-           * Summary 주석 참조)라 중복 아님 — 그리드 스크롤만으로 바로 보이는 게 목적(발견성).
-           * ⚠️표현(색·아이콘·문구 톤)은 스케치 — 유나 design 게이트에서 다듬어짐 전제. */}
-          {artifact.unlinked ? (
-            <span className="ml-auto shrink-0 rounded border border-border px-1.5 py-0.5 text-micro font-medium italic text-muted-foreground">
-              {axisT('galleryUnlinkedBadge')}
-            </span>
-          ) : null}
-        </span>
-      </Link>
-    </div>
+        </Link>
+      </ContextMenuTrigger>
+      <MenuContent>
+        <MenuItem icon="open_in_full" onClick={onOpen}>{axisT('galleryOpenArtifactAction')}</MenuItem>
+        <MenuItem icon="open_in_new" onClick={() => router.push(detailHref)}>{axisT('galleryOpenDetailAction')}</MenuItem>
+      </MenuContent>
+    </ContextMenu>
   );
 }
 
@@ -155,6 +188,7 @@ function ArtifactCard({
 // 내려준다 — useDashboardContext()(전역 "현재 프로젝트")가 아니라 URL 이 가리키는 project.
 export function ArtifactGalleryView({ projectId }: { projectId: string }) {
   const t = useTranslations('canvas');
+  const tc = useTranslations('common');
   // story #3644(3632 후속) — handleCreateCommit 실패가 console.error만 남기고 사용자
   // 신호가 없었다(artifact-section.tsx와 동일 병).
   const { addToast } = useToast();
@@ -274,64 +308,26 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
 
   const axisLabel = (a: GalleryAxis) => t(`galleryAxis${a[0]!.toUpperCase()}${a.slice(1)}`);
 
-  // story 6d0a0e3a — GROUP BY(축 선택+그룹 목록) 배치를 목업(0d852d24) SSOT대로 좌측 레일에
-  // 통합(#2124 이래 우측 상단 탭으로 어긋나 있던 걸 정정). 로직은 완전 무변경 — axis/setAxis·
-  // groups·selectedGroupId 전부 그대로, 렌더 "위치"만 옮긴다(AC "배치만 변경").
-  const railContent = (
+  const createStart = () => { setPickerIntent('create'); setPickerOpen(true); };
+  const importStart = () => { setPickerIntent('import'); setPickerOpen(true); };
+  // 4910 — «그리기 · 가져오기»는 산출물이 하나라도 있을 때도 늘 머리에 선다(예전엔 빈 상태에만 — 하나라도 있으면 만들 길이 없던 것). 스토리 귀속 피커를 경유(083176e8 · 64010b05 규칙 그대로).
+  const headActions = (
     <>
-      <div className="flex flex-wrap gap-0.5 border-b border-border p-1.5">
-        {GALLERY_AXES.map((a) => (
-          <button
-            key={a}
-            type="button"
-            aria-pressed={axis === a}
-            onClick={() => setAxis(a)}
-            className={cn(
-              'rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors',
-              axis === a ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {axisLabel(a)}
-          </button>
-        ))}
-        <button
-          type="button"
-          disabled
-          title={t('galleryFeatureAxisUnsupported')}
-          className="cursor-not-allowed rounded-md px-2.5 py-1.5 text-xs font-semibold text-muted-foreground"
-        >
-          {t('galleryAxisFeature')}
-        </button>
-      </div>
-      <div className="space-y-1.5 p-1.5">
-        {groups.map((g) => (
-          <button
-            key={g.id}
-            type="button"
-            aria-pressed={selectedGroupId === g.id}
-            onClick={() => setSelectedGroupId(g.id)}
-            className={cn(
-              'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-editorial-ui transition-colors',
-              selectedGroupId === g.id ? 'bg-muted/70' : 'hover:bg-muted/40',
-            )}
-          >
-            <span className={cn('size-1.5 shrink-0 rounded-full', selectedGroupId === g.id ? 'bg-info' : 'bg-muted-foreground/40')} aria-hidden="true" />
-            <span className={cn('min-w-0 flex-1 truncate font-medium', g.unassigned ? 'italic text-muted-foreground' : 'text-foreground')}>
-              {g.label}
-            </span>
-            <span className="shrink-0 text-editorial-meta tabular-nums text-muted-foreground">{g.artifacts.length}</span>
-          </button>
-        ))}
-      </div>
+      <Button onClick={createStart}>{t('createCta')}</Button>
+      <Button onClick={importStart}>{t('importCta')}</Button>
     </>
+  );
+  const head = (
+    <PageHead
+      description={t('gallerySubtitle')}
+      meta={loading ? undefined : t('galleryCount', { count: artifacts.length })}
+      actions={headActions}
+    />
   );
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-6">
-      <div className="mb-4">
-        <h1 className="text-xl font-extrabold tracking-tight text-foreground">{t('galleryTitle')}</h1>
-        <p className="mt-0.5 text-xs text-muted-foreground">{t('gallerySubtitle')}</p>
-      </div>
+    <PageFrame width="wide" data-testid="artifact-gallery">
+      <TopBarSlot title={galleryTitle(t('galleryTitle'))} showContextChip />
 
       {creating ? (
         <ArtifactEditor
@@ -347,73 +343,65 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
           onImport={(nodes) => handleImportCommit(importing.storyId, nodes)}
           targetId={importing.storyId}
         />
-      ) : loading ? (
-        <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[200px_1fr]">
-          <GroupListSkeleton />
-          <div className="h-40 animate-pulse rounded-xl bg-muted/40" />
-        </div>
-      ) : artifacts.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 rounded-xl border border-border bg-card px-6 py-12 text-center">
-          <Frame className="size-6 text-muted-foreground" aria-hidden="true" />
-          <p className="text-sm font-medium text-foreground">{t('galleryEmptyTitle')}</p>
-          <p className="max-w-sm text-xs text-muted-foreground">{t('emptyHint')}</p>
-          {/* story 64010b05 §2 — 임포트=그리기와 co-located 2번째 입구. 갤러리는 스토리 귀속이
-           * 필요해(083176e8 이유 동일) 둘 다 같은 피커를 경유(intent로 분기). */}
-          <div className="mt-1 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => { setPickerIntent('create'); setPickerOpen(true); }}
-              className="rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-            >
-              {t('createCta')}
-            </button>
-            <button
-              type="button"
-              onClick={() => { setPickerIntent('import'); setPickerOpen(true); }}
-              className="rounded-md border border-border px-4 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-            >
-              {t('importCta')}
-            </button>
-          </div>
-        </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[200px_1fr]">
-          {/* 반응형(유나 판정 위임 — 목업은 데스크톱만 명시): 좁은 화면=상단 접이식 셀렉터로
-           * collapse(네이티브 details/summary — 접근성 기본 제공), lg+=상시 노출 레일 유지. */}
-          <details className="rounded-xl border border-border bg-card lg:hidden">
-            <summary className="cursor-pointer select-none rounded-xl px-3 py-2.5 text-editorial-ui font-semibold text-foreground">
-              {axisLabel(axis)} · {selectedGroup?.label ?? ''}
-            </summary>
-            {railContent}
-          </details>
-          <div className="hidden h-fit rounded-xl border border-border bg-card lg:block">
-            {railContent}
-          </div>
-
-          {/* story #7d7634ee(P0·선생님 직접 지시) — 컷코너(clip-path, §2955 §5가 22px 드리프트를
-              24px 정본으로 정정했던 그 자리) 전면 폐지, proof-surface(13px 균일 라운드)+
-              proof-surface-lift(뜬 표면 재질) 채택. 옛 rounded-xl은 흡수. */}
-          <div className="proof-surface proof-surface-lift overflow-hidden border border-border bg-card px-5 py-4">
-            <div className="mb-3 text-editorial-meta font-bold uppercase tracking-wide text-muted-foreground">{axisLabel(axis)}</div>
-            {!selectedGroup || selectedGroup.artifacts.length === 0 ? (
-              <p className="py-8 text-center text-xs text-muted-foreground">{t('galleryGroupEmpty')}</p>
-            ) : (
-              <>
-                <h2 className="mb-3 text-base font-extrabold text-foreground">{selectedGroup.label}</h2>
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3.5">
-                  {selectedGroup.artifacts.map((artifact) => (
-                    <ArtifactCard
-                      key={artifact.id}
-                      artifact={artifact}
-                      axisT={t}
-                      onOpen={() => void handleOpenArtifact(artifact.id, artifact.anchorVersion ?? artifact.latestVersionNumber, artifact.title)}
-                    />
+        <>
+          {head}
+          {loading ? (
+            <GalleryGridSkeleton label={tc('loading')} />
+          ) : artifacts.length === 0 ? (
+            <div className={cn('rounded-ds-panel border border-ds-line', LAYER.panel)}>
+              <EmptyState icon="image" title={t('galleryEmptyTitle')} description={t('emptyHint')} />
+            </div>
+          ) : (
+            <section className={cn('rounded-ds-panel border border-ds-line', ARTIFACT_PANEL)} data-testid="artifact-gallery-panel">
+              {/* 필터 한 줄 — «묶어서 보기»(축) + 그룹 고르기. 예전 왼쪽 200px 레일 · 좁은 화면 접이식(details)을 이 한 줄이 대신한다. */}
+              <div className="flex flex-wrap items-center gap-2 border-b border-ds-line px-4 py-3" data-testid="artifact-gallery-filters">
+                <span className="text-ds-small text-ds-ink-3">{t('galleryGroupBy')}</span>
+                <div role="group" aria-label={t('galleryGroupBy')} className="flex flex-wrap items-center gap-1">
+                  {GALLERY_AXES.map((a) => (
+                    <Button
+                      key={a}
+                      aria-pressed={axis === a}
+                      onClick={() => setAxis(a)}
+                      className={cn(axis === a && 'border-ds-action bg-ds-action-soft text-ds-action-text hover:bg-ds-action-soft')}
+                    >
+                      {axisLabel(a)}
+                    </Button>
                   ))}
+                  <Button disabled aria-describedby="gallery-feature-axis-note">{t('galleryAxisFeature')}</Button>
+                  <span id="gallery-feature-axis-note" className="sr-only">{t('galleryFeatureAxisUnsupported')}</span>
                 </div>
-              </>
-            )}
-          </div>
-        </div>
+                <label htmlFor="gallery-group-select" className="sr-only">{t('galleryGroupSelectLabel')}</label>
+                <NativeSelect
+                  id="gallery-group-select"
+                  value={selectedGroupId ?? ''}
+                  onChange={(e) => setSelectedGroupId(e.target.value)}
+                  className="w-auto min-w-44 max-w-full"
+                >
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>{g.label} ({g.artifacts.length})</option>
+                  ))}
+                </NativeSelect>
+              </div>
+              <div className="p-4">
+                {!selectedGroup || selectedGroup.artifacts.length === 0 ? (
+                  <p className="py-8 text-center text-ds-small text-ds-ink-3">{t('galleryGroupEmpty')}</p>
+                ) : (
+                  <div className={GALLERY_GRID}>
+                    {selectedGroup.artifacts.map((artifact) => (
+                      <ArtifactCard
+                        key={artifact.id}
+                        artifact={artifact}
+                        axisT={t}
+                        onOpen={() => void handleOpenArtifact(artifact.id, artifact.anchorVersion ?? artifact.latestVersionNumber, artifact.title)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+        </>
       )}
       {expandTarget ? (
         <ArtifactExpandDialog
@@ -441,6 +429,6 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
           }}
         />
       ) : null}
-    </div>
+    </PageFrame>
   );
 }
