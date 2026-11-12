@@ -2,14 +2,15 @@
 //
 // The shell starts every top-frame load with `X-Sprintable-Nav` (a number that rises per load · lib/initialSource.js of the mobile shell) — it is the
 // one thing a load the SHELL made carries and a browser's never does. Until now the server ignored it; the proxy reads it for one thing: the shell's
-// own `/glance` (its home address) — once resolved to the person's home — is sent through `/phone-landing?next=<that home>` first.
+// own `/glance` (its home address) is sent through `/phone-landing?next=/` first (story 4906: `next` is the site root — the landing page itself turns it
+// into the person's home, «오늘» — not the address `/glance` resolved to, which was the empty Board).
 export const SHELL_NAV_HEADER = 'x-sprintable-nav';
 export const PHONE_LANDING_PATH = '/phone-landing';
 export const PHONE_START_PATH = '/phone-start';
 export const PHONE_LANDING_NEXT_PARAM = 'next';
 
 /**
- * The home the landing goes to when there is nothing to open instead: the address the proxy resolved (`next`). Only an address of this app — one path,
+ * The home the landing goes to when there is nothing to open instead: `next` (the proxy sends `/`, which the landing page maps to the home). Only an address of this app — one path,
  * no host, no `//`, no backslash (an open redirect must never come out of a link someone sends) — and never the landing itself (`/phone-landing?next=/phone-landing`
  * would send the person round and round); anything else is the site root, which the session sends on to the person's own home.
  */
