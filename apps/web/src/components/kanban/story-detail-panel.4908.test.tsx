@@ -90,7 +90,9 @@ describe('4908 카드 상세 — 검증자 · 검증 시각은 글로 보인다(
         </NextIntlClientProvider>,
       );
     });
-    expect(container.textContent).toContain('송윤재 검증');
-    expect(container.textContent).toMatch(/송윤재 검증 · \S+/); // 검증자 뒤에 시각이 붙는다
+    // 증거 구역의 씰 줄(눌러 펼치는 버튼) 하나를 짚는다 — 다른 구역에도 «검증»이 있어 전체 글이 아니라 이 줄로 잰다.
+    const sealRow = [...container.querySelectorAll('button[aria-expanded]')].find((b) => b.textContent?.includes('송윤재 검증'));
+    expect(sealRow, '증거 구역 씰 줄').toBeTruthy();
+    expect(sealRow!.textContent).toMatch(/송윤재 검증 · \S+/); // 검증자 뒤에 시각이 붙는다 — 시각이 안 내려오면 «송윤재 검증»만 남는다
   });
 });
