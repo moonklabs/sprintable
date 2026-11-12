@@ -441,6 +441,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
   // (진실은 서버). undefined=아직 SSE 오버라이드 없음(story prop의 trust_stage 그대로 씀).
   const [ssePipelineStage, setSsePipelineStage] = useState<WorkcellPipelineStage | null | undefined>(undefined);
   const sseDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 더블클릭 = 열기(저장소 · 결재함 · 에이전트 목록과 같은 뜻, 5690의 꼴): 카드를 두 번 누르면 첫 클릭이 이 서랍을 열고 그 자리에 깔린 배경 막을 둘째 클릭(`detail` ≥ 2)이 눌러 서랍을 곧바로 닫았다.
+  // 시간(ms)이 아니라 브라우저가 세는 클릭 횟수를 쓰되, «카드를 눌러 연 뒤 서랍 안쪽을 안 누른 동안»의 둘째 이후 클릭만 무시한다 — 서랍 안쪽 누름 · 첫 클릭의 막 누름이 표식을 지운다.
+  // 서랍은 카드를 누를 때 새로 서므로(스토리마다 새로 마운트) 서 있는 순간이 곧 «카드로 막 연» 때다.
+  const openedByCardRef = useRef(true);
   // PO 리뷰 MEDIUM(PR#3363, 2026-08-22) — story.id 변경 시 「대기 중 타이머」는 지워져도
   // 「이미 발화해 in-flight인 fetch」는 못 막는다. 늦게 도착한 응답이 새 story 패널에 옛
   // story의 stage를 override로 붙이는 레이스였다 — 해소 시점에 「fetch를 쏜 id == 지금 보고
@@ -1618,7 +1622,11 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
           지도를 시각적으로 가리지 않는다(blur/dim 없음 — AC2 "누른 노드를 가리지 않는다"). */}
       <div
         className={overlayPosition ? 'fixed inset-0 z-40' : 'fixed inset-0 z-40 bg-overlay-backdrop backdrop-blur-sm lg:bg-transparent'}
-        onClick={onClose}
+        onClick={(e) => {
+          if (e.detail > 1 && openedByCardRef.current) return;
+          openedByCardRef.current = false;
+          onClose();
+        }}
         aria-hidden="true"
       />
 
@@ -1627,6 +1635,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
           «재사용»이지 새 컴포넌트가 아니다(story #2354 AC7). */}
       <div
         ref={panelTrapRef}
+        onPointerDownCapture={() => { openedByCardRef.current = false; }}
         tabIndex={-1}
         role="dialog"
         aria-modal="true"

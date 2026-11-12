@@ -123,7 +123,7 @@ describe('4908 카드 메뉴 «담당자 ▸» — 켜고 끄기', () => {
   });
 });
 
-describe('4908 제목 바로 바꾸기 — 메뉴 · F2 · 더블클릭', () => {
+describe('4908 제목 바로 바꾸기 — 메뉴 · F2', () => {
   const input = () => container.querySelector<HTMLInputElement>('input');
   const type = (el: HTMLInputElement, value: string) => act(() => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(el, value);
@@ -169,48 +169,21 @@ describe('4908 제목 바로 바꾸기 — 메뉴 · F2 · 더블클릭', () => 
     expect(input()).not.toBeNull();
   });
 
+  it('⭐클릭은 바로 열린다(기다림 없음) · 더블클릭은 제목 바꾸기가 아니다(더블클릭 = 열기 — 저장소 · 결재함 · 에이전트 목록과 같은 뜻)', () => {
+    vi.useFakeTimers();
+    const onClick = vi.fn();
+    const card = render({ onRename: vi.fn(), onClick });
+    click(card, 1);
+    expect(onClick).toHaveBeenCalledTimes(1); // 시계를 안 돌려도 이미 열렸다
+    click(card, 2);
+    expect(onClick).toHaveBeenCalledTimes(2);
+    expect(input()).toBeNull();
+  });
+
   it('⭐F2(카드에 초점) = 같은 길 · 카드 안 입력칸의 F2는 가로채지 않는다', () => {
     const card = render({ onRename: vi.fn() });
     key(card, 'F2');
     expect(input()).not.toBeNull();
-  });
-
-  it('⭐더블클릭 = 입력칸 · 첫 클릭의 «열기»는 취소된다(열린 서랍 막이 두 번째 클릭을 받지 않게)', () => {
-    vi.useFakeTimers();
-    const onClick = vi.fn();
-    const card = render({ onRename: vi.fn(), onClick });
-    click(card, 1);
-    click(card, 2);
-    act(() => { vi.advanceTimersByTime(1000); });
-    expect(input()).not.toBeNull();
-    expect(onClick).not.toHaveBeenCalled();
-  });
-
-  it('⭐한 번 클릭(마우스) = 짧게 기다렸다 열기 · 기다리는 동안은 안 열린다', () => {
-    vi.useFakeTimers();
-    const onClick = vi.fn();
-    const card = render({ onRename: vi.fn(), onClick });
-    click(card, 1);
-    expect(onClick).not.toHaveBeenCalled();
-    act(() => { vi.advanceTimersByTime(300); });
-    expect(onClick).toHaveBeenCalledTimes(1);
-  });
-
-  it('⭐기다리지 않는 클릭: 터치 · 키보드(detail 0) · 이미 열린 카드 · 이름 바꾸기 없는 카드', () => {
-    const onClick = vi.fn();
-    const touch = render({ onRename: vi.fn(), onClick });
-    click(touch, 1, 'touch');
-    expect(onClick).toHaveBeenCalledTimes(1);
-    click(touch, 0);
-    expect(onClick).toHaveBeenCalledTimes(2);
-    act(() => { root.unmount(); });
-    root = createRoot(container);
-    const sel = render({ onRename: vi.fn(), onClick, selected: true });
-    click(sel, 1);
-    expect(onClick).toHaveBeenCalledTimes(3);
-    const plain = render({ onClick });
-    click(plain, 1);
-    expect(onClick).toHaveBeenCalledTimes(4);
   });
 
   it('입력칸의 누름 · 키 · 클릭은 카드(끌기 · 집기 · 열기)로 새지 않는다', () => {
@@ -246,47 +219,9 @@ describe('4908 제목 바로 바꾸기 — 메뉴 · F2 · 더블클릭', () => 
   });
 });
 
-describe('4908 기다리는 «열기» · 이름 바꾸기 — codex 1라운드 반영', () => {
+describe('4908 이름 바꾸기 초점 — codex 1라운드 반영', () => {
   const input = () => container.querySelector<HTMLInputElement>('input');
   const press = (el: Element) => act(() => { el.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); });
-
-  it('⭐이미 열린 카드도 더블클릭이면 이름 바꾸기다(첫 클릭은 무동작이던 열기)', () => {
-    const onClick = vi.fn();
-    const card = render({ onRename: vi.fn(), onClick, selected: true });
-    click(card, 1);
-    click(card, 2);
-    expect(input()).not.toBeNull();
-  });
-
-  it('⭐기다리는 «열기»는 새로 누르면(끌기 시작 포함) 취소된다', () => {
-    vi.useFakeTimers();
-    const onClick = vi.fn();
-    const card = render({ onRename: vi.fn(), onClick });
-    click(card, 1);
-    press(card); // 곧바로 새 누름(끌기 · 두 번째 클릭의 시작)
-    act(() => { vi.advanceTimersByTime(1000); });
-    expect(onClick).not.toHaveBeenCalled();
-  });
-
-  it('⭐기다리는 «열기»는 우클릭 메뉴를 열면 취소된다', () => {
-    vi.useFakeTimers();
-    const onClick = vi.fn();
-    const card = render({ onRename: vi.fn(), onClick });
-    click(card, 1);
-    act(() => { card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 })); });
-    act(() => { vi.advanceTimersByTime(1000); });
-    expect(onClick).not.toHaveBeenCalled();
-  });
-
-  it('⭐기다리는 «열기»는 카드가 다른 스토리로 바뀌면(또는 사라지면) 버려진다', () => {
-    vi.useFakeTimers();
-    const onClick = vi.fn();
-    const card = render({ onRename: vi.fn(), onClick });
-    click(card, 1);
-    render({ onRename: vi.fn(), onClick, story: makeStory({ id: 's2', title: '다른 카드' }) });
-    act(() => { vi.advanceTimersByTime(1000); });
-    expect(onClick).not.toHaveBeenCalled();
-  });
 
   it('⭐다른 곳을 눌러 빠져나가며(blur) 저장해도 그 사람이 옮긴 초점을 카드로 가로채지 않는다', () => {
     const onRename = vi.fn();

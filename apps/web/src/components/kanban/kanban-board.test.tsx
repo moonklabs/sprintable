@@ -2550,6 +2550,19 @@ describe('KanbanBoard — 카드 메뉴 담당자 · 이름 바꾸기 · 삭제(
     expect(document.body.textContent).not.toContain(koMessages.board.titleSaveFailed);
   });
 
+  it('⭐더블클릭 = 열기: 카드 첫 클릭이 바로 서랍을 열고, 같은 연속 누름의 둘째 클릭이 서랍 막에 닿아도 서랍은 열린 채 — 막을 처음 누르면 닫힌다(시간 0)', async () => {
+    stubFetch(stories, members);
+    await mount();
+    const card = container.querySelector('[title="카드하나"]') as HTMLElement;
+    await act(async () => { card.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[role="dialog"]'), '첫 클릭으로 바로 열림').not.toBeNull();
+    const backdrop = container.querySelector('div[aria-hidden="true"].fixed.inset-0') as HTMLElement;
+    await act(async () => { backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })); });
+    expect(container.querySelector('[role="dialog"]'), '둘째 클릭은 서랍을 닫지 않음').not.toBeNull();
+    await act(async () => { backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); });
+    expect(container.querySelector('[role="dialog"]'), '막을 처음 누르면 닫힘').toBeNull();
+  });
+
   it('⭐삭제는 사람 전용 — human이면 메뉴에 «삭제», agent면 메뉴 항목이 없다(패널과 같은 규칙)', async () => {
     stubFetch(stories, members);
     await mount();

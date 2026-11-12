@@ -193,3 +193,51 @@ describe('4908 카드 상세 — 검증자 · 검증 시각은 글로 보인다(
     expect(sealRow!.textContent).toMatch(/송윤재 검증 · \S+/); // 검증자 뒤에 시각이 붙는다 — 시각이 안 내려오면 «송윤재 검증»만 남는다
   });
 });
+
+// 더블클릭 = 열기(PO 11-12 · 저장소 5668/5690 · 결재함 행 · 에이전트 목록과 같은 뜻): 카드를 두 번 누르면 첫 클릭이 서랍을 열고 그 자리에 깔린 배경 막을 둘째 클릭이 눌러 서랍을 닫던 것을, 시간이 아니라 클릭 횟수로 막는다.
+describe('4908 서랍 배경 막 — 둘째 이후 클릭은 «카드로 막 연» 동안 서랍을 닫지 않는다(5690의 꼴)', () => {
+  const onClose = vi.fn();
+  beforeEach(() => { onClose.mockReset(); });
+  async function mountWith() {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ToastProvider><StoryDetailPanel story={story} tasks={[]} onClose={onClose} projectId="p1" /></ToastProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    return container.querySelector<HTMLElement>('div[aria-hidden="true"].fixed.inset-0')!;
+  }
+  const clickWith = (el: Element, detail: number) => act(() => { el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail })); });
+
+  it('⭐서랍이 막 선 동안 막에 닿는 둘째 이후 클릭(detail 2 · 3)은 서랍을 닫지 않는다 — 더블클릭 = 열기', async () => {
+    const backdrop = await mountWith();
+    clickWith(backdrop, 2);
+    clickWith(backdrop, 3);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('⭐막을 «처음» 누르면(detail 1) 지금처럼 닫힌다 · 키보드로 눌러도(detail 0) 닫힌다', async () => {
+    const backdrop = await mountWith();
+    clickWith(backdrop, 1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    clickWith(backdrop, 0);
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it('⭐서랍 안쪽을 누른 뒤에는(표식이 지워짐) 막에 닿는 detail 2 클릭도 닫는다 — 막 연 직후만 무시', async () => {
+    const backdrop = await mountWith();
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
+    await act(async () => { dialog.dispatchEvent(new Event('pointerdown', { bubbles: true })); });
+    clickWith(backdrop, 2);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('⭐막을 한 번 처음 눌러 표식이 지워진 뒤에는 detail 2도 닫는다', async () => {
+    const backdrop = await mountWith();
+    clickWith(backdrop, 1);
+    onClose.mockReset();
+    clickWith(backdrop, 2);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
