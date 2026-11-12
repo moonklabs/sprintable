@@ -1782,6 +1782,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
             <Workcell
               title={story.title}
               pipelineStage={pipelineStage}
+              // story 4906 ⑩ (PO 11-12 [A]): the three steps that come straight from the status say the STATUS word — the same word as the status chip above (not «Queued» beside «Ready for Dev»)
+              currentStageLabel={pipelineStage === 'queued' || pipelineStage === 'running' || pipelineStage === 'claimed_done' ? statusLabel : undefined}
               brief={{
                 goal: story.description?.trim() || story.title,
                 // story #178c7c6d(3015②) — 예전엔 board 네임스페이스의 옛 DoD 미기재 문자열

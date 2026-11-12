@@ -567,3 +567,14 @@ describe('Workcell — story #5b3aea5e Brief 콘텐츠 층(마크다운 스트�
     expect(tag).not.toContain('shadow-[var(--elev-card)]');
   });
 });
+
+describe('Workcell — story 4906 ⑩ the current-step word under the gauge', () => {
+  it('⭐currentStageLabel replaces the stage word for the current step (the caller passes the story\'s own status word); without it the stage word stays', () => {
+    const withLabel = renderKo(<Workcell {...BASE} pipelineStage="queued" currentStageLabel="개발 대기" />);
+    expect(withLabel).toContain('data-testid="workcell-current-stage">개발 대기<');
+    expect(withLabel).not.toContain('data-testid="workcell-current-stage">대기 중<');
+    const without = renderKo(<Workcell {...BASE} pipelineStage="queued" />);
+    expect(without).toContain('data-testid="workcell-current-stage">대기 중<');
+  });
+});
+

@@ -330,6 +330,37 @@ describe('StoryDetailPanel — Workcell pipelineStage = story.trust_stage 직결
     await mountWithTrustStage(undefined);
     expect(container.querySelector('[aria-current="step"]')).toBeNull();
   });
+
+  // story 4906 ⑩ (PO 11-12 [A]) — one story is not called «개발 대기» on the status chip and «대기 중» under the gauge: the steps that come straight from the status say the STATUS word
+  async function mountWithStatusAndStage(status: KanbanStory['status'], trustStage: KanbanStory['trust_stage']) {
+    stubFetch();
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel
+          story={makeStory({ status, assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID], trust_stage: trustStage })}
+          tasks={[]} onClose={() => {}} memberMap={memberMap}
+        />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('⭐story 4906 ⑩: status ready-for-dev (stage queued) → the caption under the gauge is the STATUS word «개발 대기», not the stage word «대기 중»', async () => {
+    await mountWithStatusAndStage('ready-for-dev', 'queued');
+    expect(currentStageLabel()).toBe(koMessages.board.readyForDev);
+    expect(currentStageLabel()).not.toBe(koMessages.workcell.pipelineQueued);
+  });
+
+  it('⭐story 4906 ⑩: status in-review (stage claimed_done) → «리뷰 중», not «완료 주장»', async () => {
+    await mountWithStatusAndStage('in-review', 'claimed_done');
+    expect(currentStageLabel()).toBe(koMessages.board.inReview);
+    expect(currentStageLabel()).not.toBe(koMessages.workcell.pipelineClaimedDone);
+  });
+
+  it('⭐story 4906 ⑩: a DERIVED stage has no status word and keeps the stage word (in-progress + needs_input → «입력 필요»)', async () => {
+    await mountWithStatusAndStage('in-progress', 'needs_input');
+    expect(currentStageLabel()).toBe(koMessages.workcell.pipelineNeedsInput);
+  });
 });
 
 // story #2993(PO 확定①②, 2026-08-24, 선생님 실사고 「주전장이 안 보인다」) — 이전엔
@@ -605,7 +636,7 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
       root.render(wrap(<StoryDetailPanel story={storyB} tasks={[]} onClose={() => {}} memberMap={memberMap} />));
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(currentStageLabel()).toBe('완료 주장');
+    expect(currentStageLabel()).toBe('리뷰 중'); // story 4906 ⑩ (PO [A]): story-b is in-review/claimed_done — the caption says its STATUS word, the one on its chip (the stage word was «완료 주장»)
 
     // 이제야 story-a의 응답이 늦게 도착 — story-b 패널에 새면 안 된다.
     await act(async () => {
@@ -613,7 +644,7 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
       await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
     });
 
-    expect(currentStageLabel()).toBe('완료 주장');
+    expect(currentStageLabel()).toBe('리뷰 중'); // story 4906 ⑩ (PO [A]): story-b is in-review/claimed_done — the caption says its STATUS word, the one on its chip (the stage word was «완료 주장»)
   });
 
   // PO 리뷰 확장(PR#3363 codex 교차모델, 2026-08-22) — 위 두 테스트가 덮는 "다른 story로

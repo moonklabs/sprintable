@@ -93,6 +93,10 @@ export interface WorkcellProps {
   evidence: ProofCapsuleProps | null;
   conversation: WorkcellConversation;
   className?: string;
+  /** story 4906 ⑩ (PO decision 11-12, [A]): the word for the CURRENT step under the gauge. When the step is one that comes straight from the story's status (queued · running · claimed_done) the
+   * caller passes the story's OWN status word — the one on the status chip beside it — so one story is not called «Ready for Dev» in one place and «Queued» in the next. Derived steps (needs input ·
+   * verified · merge ready) have no status word and keep the stage word; the stage words stay the names of the board's trust-axis COLUMNS (a column groups several statuses). */
+  currentStageLabel?: string;
   /** story #2984 §6(가역성 1급) — bento 형태·재질 재편(§1~§4) 켜기/끄기 단일 스위치.
    * 기본값 true(선생님 결재 confirm으로 라이브 기본). 선생님 라이브 감이 반려되면 이
    * 기본값 한 줄(true→false)만 뒤집으면 균등 2×2 + 색 스테퍼로 전체 복귀(D0 세리프
@@ -188,7 +192,7 @@ function nodePositions(): number[] {
   return PIPELINE_STAGES.map((_, i) => CONFIDENCE_NODE_START_PCT + i * step);
 }
 
-function ConfidenceGauge({ stage }: { stage: WorkcellPipelineStage }) {
+function ConfidenceGauge({ stage, currentLabel }: { stage: WorkcellPipelineStage; currentLabel?: string }) {
   const t = useTranslations('workcell');
   const label: Record<WorkcellPipelineStage, string> = {
     queued: t('pipelineQueued'), running: t('pipelineRunning'), needs_input: t('pipelineNeedsInput'),
@@ -204,7 +208,7 @@ function ConfidenceGauge({ stage }: { stage: WorkcellPipelineStage }) {
     : lastReachedPos + (nextPos! - lastReachedPos) / 2;
 
   return (
-    <div className="mb-2.5" role="progressbar" aria-valuemin={0} aria-valuemax={PIPELINE_STAGES.length} aria-valuenow={reachedCount} aria-valuetext={`${reachedCount}/${PIPELINE_STAGES.length} · ${label[stage]}`}>
+    <div className="mb-2.5" role="progressbar" aria-valuemin={0} aria-valuemax={PIPELINE_STAGES.length} aria-valuenow={reachedCount} aria-valuetext={`${reachedCount}/${PIPELINE_STAGES.length} · ${currentLabel ?? label[stage]}`}>
       <div className="flex items-center gap-2.5">
         <div className="relative h-[22px] flex-1 overflow-hidden rounded-md bg-proof-sunk">
           {/* story #2984 §3 — 물리량 채움. 두 톤 반복 눈금(색 신호 아님, --proof-sunk/--proof-ink-3
@@ -232,7 +236,7 @@ function ConfidenceGauge({ stage }: { stage: WorkcellPipelineStage }) {
           {t('confidenceCaption', { done: reachedCount, total: PIPELINE_STAGES.length })}
         </span>
       </div>
-      <p className="mt-1 text-editorial-meta font-semibold text-proof-ink-2" data-testid="workcell-current-stage">{label[stage]}</p>
+      <p className="mt-1 text-editorial-meta font-semibold text-proof-ink-2" data-testid="workcell-current-stage">{currentLabel ?? label[stage]}</p>
     </div>
   );
 }
@@ -248,7 +252,7 @@ function ConfidenceGauge({ stage }: { stage: WorkcellPipelineStage }) {
  * ④자동화 경계(agent 마커 항상 구분) ⑤인간=책임 주체(Evidence의 Human gate가 결정점).
  * 안티패턴 0 — 진행률 바(%) 자체를 렌더하지 않는 게 Run 구획의 핵심 계약.
  */
-export function Workcell({ title, pipelineStage, brief, run, evidence, conversation, className, bentoLayout = true }: WorkcellProps) {
+export function Workcell({ title, pipelineStage, brief, run, evidence, conversation, className, bentoLayout = true, currentStageLabel }: WorkcellProps) {
   const t = useTranslations('workcell');
   const railState = pipelineStage ? PIPELINE_STAGE_TRUST_COLOR[pipelineStage] : undefined;
   return (
@@ -265,7 +269,7 @@ export function Workcell({ title, pipelineStage, brief, run, evidence, conversat
               story #2993(PO 확定②) — pipelineStage=null이면 게이지/스테퍼 대신 정직한
               "파이프라인 범위 밖" 표시(합성 stage 금지, #2933 H1 조건②). */}
           {pipelineStage
-            ? (bentoLayout ? <ConfidenceGauge stage={pipelineStage} /> : <PipelineStepper stage={pipelineStage} />)
+            ? (bentoLayout ? <ConfidenceGauge stage={pipelineStage} currentLabel={currentStageLabel} /> : <PipelineStepper stage={pipelineStage} />)
             : <p className="text-editorial-meta font-semibold text-proof-ink-3" data-testid="workcell-out-of-pipeline">{t('outOfPipeline')}</p>}
           <span className="text-base font-bold leading-tight tracking-[-0.012em] text-proof-ink">{title}</span>
           {/* story #2922 W4 — 책임자/실행자를 헤더로 승격("10초 리트머스": 스크롤 없이 «누가»가
