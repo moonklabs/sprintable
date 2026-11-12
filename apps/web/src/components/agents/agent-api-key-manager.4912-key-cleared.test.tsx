@@ -8,8 +8,8 @@ import { AgentApiKeyManager } from './agent-api-key-manager';
 
 // story 4912 D4 — the full key is shown once, in the «key shown» dialog. Closing that dialog by ANY way (the [완료] button, Esc) must drop the plaintext key (and the MCP config) from state:
 // before, only [완료] cleared the key (and never the MCP config) — Esc / a click outside left it, so the header's «온보딩 메시지 복사» kept copying the full key.
-const { copied, addToast, copyState } = vi.hoisted(() => ({ copied: [] as string[], addToast: () => {}, copyState: { ok: true } })); // addToast must keep ONE identity: the load effect depends on it
-vi.mock('@/lib/clipboard', () => ({ copyTextSafely: async (text: string) => { copied.push(text); return { ok: copyState.ok }; } }));
+const { copied, addToast, copyState } = vi.hoisted(() => ({ copied: [] as string[], addToast: () => {}, copyState: { ok: true, gate: null as Promise<void> | null } })); // addToast must keep ONE identity: the load effect depends on it
+vi.mock('@/lib/clipboard', () => ({ copyTextSafely: async (text: string) => { copied.push(text); if (copyState.gate) await copyState.gate; return { ok: copyState.ok }; } }));
 vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast }) }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -48,7 +48,7 @@ async function openKeyShownDialog() {
   expect(document.body.textContent).toContain(NEW_KEY); // the key IS shown while the dialog is open
 }
 
-beforeEach(() => { copied.length = 0; copyState.ok = true; container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
+beforeEach(() => { copied.length = 0; copyState.ok = true; copyState.gate = null; container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('AgentApiKeyManager — 4912 D4: the full key does not stay once the key-shown dialog is closed', () => {
@@ -139,5 +139,21 @@ describe('AgentApiKeyManager — 4912 D4: the other things that could hold the k
     await act(async () => { btn(S.agentApiKeyCopyOnboardingCta)?.click(); });
     await settle();
     expect(copied[0]).not.toContain(NEW_KEY);
+  });
+
+  it('⭐a copy still pending when the dialog is closed, then FAILING, does not bring the message (with the key) back — no textarea, nothing in state (codex round 2)', async () => {
+    await openKeyShownDialog();
+    let failCopy!: () => void;
+    copyState.gate = new Promise<void>((res) => { failCopy = res; });
+    copyState.ok = false;
+    const header = Array.from(document.querySelectorAll('[data-testid="agent-api-key-manager"] button')).find((b) => b.textContent?.trim() === S.agentApiKeyCopyOnboardingCta) as HTMLButtonElement | undefined;
+    await act(async () => { header?.click(); });
+    await settle(); // the copy is out
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    await settle(); // dialog closed while it is out
+    await act(async () => { failCopy(); });
+    await settle(); // it fails after the close
+    expect(Array.from(document.querySelectorAll('textarea')).some((t) => t.value.includes(NEW_KEY))).toBe(false);
+    expect(document.body.textContent).not.toContain(NEW_KEY);
   });
 });
