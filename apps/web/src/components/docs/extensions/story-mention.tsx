@@ -160,7 +160,9 @@ export function createStoryMentionSuggestion(
     // popup stayed). But a story link at the start of a line is real use («#4906 끝남», a bullet «- #4906 …» — a list item's paragraph also starts at offset 0), so at the start of a line the
     // picker waits for the first character AFTER the `#`: nothing yet is the heading shortcut («# » · «## » · «### » — a second `#` never matches at all, `#` is not an allowed prefix) and refuses; a digit or a letter opens it. In the middle of a line it opens at once.
     allow: ({ state, range }) => {
-      if (state.doc.resolve(range.from).parentOffset > 0) return true;
+      const $from = state.doc.resolve(range.from);
+      if ($from.parent.type.spec.code) return false; // a code block is code: a `#` there (a comment, a shell prompt) is not a story link (codex)
+      if ($from.parentOffset > 0) return true;
       const afterHash = state.doc.textBetween(range.from + 1, range.to, '', '');
       return afterHash.length > 0;
     },
@@ -191,6 +193,8 @@ export function createStoryMentionSuggestion(
         // exited (onExit ran, nothing to take down), and this late start drew a popup nobody would ever close — it stayed after Enter, after a click elsewhere and after saving.
         // Ask the plugin whether the suggestion is STILL active; a late call for a finished suggestion draws nothing.
         // (a destroyed editor keeps its last plugin state — active — so it is checked on its own)
+        // (a destroyed editor keeps its last plugin state — active — so it is checked on its own.) tiptap's plugin hands every late start the CURRENT suggestion's props (one shared object
+        // that each update overwrites), so «still active» is the whole question — there is no «which suggestion» left to ask (codex wanted an identity check; the props are never the old ones).
         if (props.editor.isDestroyed || !STORY_MENTION_PLUGIN_KEY.getState(props.editor.state)?.active) return;
         teardown();
         popup = document.createElement('div');

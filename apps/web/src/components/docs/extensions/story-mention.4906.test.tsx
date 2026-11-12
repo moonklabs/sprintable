@@ -16,85 +16,116 @@ const popups = () => [...document.body.children].filter((d) => /z-index:\s*9999/
 const flush = async () => { for (let i = 0; i < 12; i += 1) await new Promise((r) => setTimeout(r, 8)); };
 
 let editor: Editor | null = null;
-let release: (() => void) | null = null;
-/** the picker's search stays pending until `release()` — the network latency that made the late start possible */
+const pending: Array<() => void> = [];
+/** the picker's search stays pending until released — the network latency that made the late start possible. Every call is recorded, so a test can wait until the search REALLY started (a negative assertion must exercise the race). */
 function holdSearch() {
-  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => {
-    release = () => resolve(new Response(JSON.stringify({ data: { data: [], types: [] } }), { status: 200 }));
-  })));
+  pending.length = 0;
+  const spy = vi.fn(() => new Promise<Response>((resolve) => {
+    pending.push(() => resolve(new Response(JSON.stringify({ data: { data: [], types: [] } }), { status: 200 })));
+  }));
+  vi.stubGlobal('fetch', spy);
+  return spy;
 }
-function makeEditor(content = '<p></p>') {
+const searchStarted = (spy: ReturnType<typeof holdSearch>, n = 1) => vi.waitFor(() => expect(spy.mock.calls.length).toBeGreaterThanOrEqual(n));
+const releaseAll = () => { while (pending.length) pending.shift()!(); };
+function makeEditor(content = '<p></p>', opts: { codeBlock?: boolean } = {}) {
   editor = new Editor({
-    // the real editor's base (doc-editor-extensions.ts: StarterKit without the code block) + the story picker
-    extensions: [StarterKit.configure({ codeBlock: false }), StoryMentionExtension.configure({ projectId: 'proj-1', emptyLabel: EMPTY })],
+    // the real editor's base (doc-editor-extensions.ts: StarterKit; production swaps the code block for its own, which is a code node too) + the story picker
+    extensions: [StarterKit.configure(opts.codeBlock ? {} : { codeBlock: false }), StoryMentionExtension.configure({ projectId: 'proj-1', emptyLabel: EMPTY })],
     content,
   });
   editor.commands.focus('end');
   return editor;
 }
 
-beforeEach(() => { document.body.innerHTML = ''; release = null; });
+beforeEach(() => { document.body.innerHTML = ''; pending.length = 0; });
 afterEach(() => { editor?.destroy(); editor = null; vi.unstubAllGlobals(); document.body.innerHTML = ''; });
 
 describe('story picker (#) in the doc editor (story 4906)', () => {
   it('⭐a bare # (or ##) at the START of a line never opens the picker — the heading shortcut «# » · «## » · «### »', async () => {
-    holdSearch();
+    const spy = holdSearch();
     const ed = makeEditor();
-    ed.commands.insertContent('#');
-    await flush(); release?.(); await flush();
-    expect(popups()).toHaveLength(0);
-    ed.commands.insertContent('#');
-    await flush(); release?.(); await flush();
-    expect(popups()).toHaveLength(0);
-    ed.commands.insertContent('#');           // «###»
-    await flush(); release?.(); await flush();
-    expect(popups()).toHaveLength(0);
+    for (let i = 0; i < 3; i += 1) {
+      ed.commands.insertContent('#');
+      await flush(); releaseAll(); await flush();
+      expect(popups()).toHaveLength(0);
+    }
+    expect(spy).not.toHaveBeenCalled();         // refused before any search was even asked for
   });
 
   it('⭐«#4906» at the start of a line still opens the picker (a story link at the head of a line is real use)', async () => {
-    holdSearch();
+    const spy = holdSearch();
     const ed = makeEditor();
     ed.commands.insertContent('#4');
-    await flush(); release?.(); await flush();
+    await searchStarted(spy); releaseAll(); await flush();
     expect(popups()).toHaveLength(1);
     expect(popups()[0]!.textContent).toContain(EMPTY);
   });
 
   it('⭐«- #4906» in a bullet list item (its paragraph also starts at offset 0) still opens the picker', async () => {
-    holdSearch();
+    const spy = holdSearch();
     const ed = makeEditor('<ul><li><p></p></li></ul>');
     ed.commands.focus('end');
     ed.commands.insertContent('#4');
-    await flush(); release?.(); await flush();
+    await searchStarted(spy); releaseAll(); await flush();
     expect(popups()).toHaveLength(1);
   });
 
+  it('⭐a code block is code: a # there opens nothing (at the start of a line or in the middle)', async () => {
+    const spy = holdSearch();
+    const ed = makeEditor('<pre><code></code></pre>', { codeBlock: true });
+    ed.commands.setTextSelection(1);           // INSIDE the code block (focus('end') would land in the paragraph the schema adds after it)
+    ed.commands.insertContent('#4906 and echo #x');
+    await flush(); releaseAll(); await flush();
+    expect(popups()).toHaveLength(0);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it('a # in the MIDDLE of a line still opens the picker (after text and a space)', async () => {
-    holdSearch();
+    const spy = holdSearch();
     const ed = makeEditor();
     ed.commands.insertContent('see #');
-    await flush(); release?.(); await flush();
+    await searchStarted(spy); releaseAll(); await flush();
     const p = popups();
     expect(p).toHaveLength(1);
     expect(p[0]!.textContent).toContain(EMPTY);
   });
 
   it('⭐a late start — the suggestion ended while the search was still pending — draws NO popup', async () => {
-    holdSearch();
+    const spy = holdSearch();
     const ed = makeEditor();
-    ed.commands.insertContent('see #');       // suggestion starts, the search is pending
-    await flush();
+    ed.commands.insertContent('see #');        // suggestion starts, the search is pending
+    await searchStarted(spy);
     ed.commands.insertContent(' ');            // a space ends the suggestion (allowSpaces is off) BEFORE the search came back
     await flush();
-    release?.(); await flush();                // the late `onStart`
+    releaseAll(); await flush();               // the late `onStart`
+    expect(popups()).toHaveLength(0);
+  });
+
+  // codex asked for an identity check on the late start. tiptap's plugin keeps ONE shared `props` object that every update overwrites, so a late continuation always hands the renderer the
+  // CURRENT suggestion's props — the draw is for the current suggestion, never the old one; what must hold is «never two popups, never an orphan».
+  it('⭐an old search resolving after a NEW suggestion became active still leaves exactly one popup — the current one — and none after it ends', async () => {
+    const spy = holdSearch();
+    const ed = makeEditor();
+    ed.commands.insertContent('see #a');       // suggestion one: its search is pending
+    await searchStarted(spy, 1);
+    ed.commands.insertContent(' and #b');      // suggestion one ended, suggestion two started: a second search is pending
+    await searchStarted(spy, 2);
+    pending.shift()!();                         // the OLD search resolves first
+    await flush();
+    expect(popups().length).toBeLessThanOrEqual(1);
+    releaseAll(); await flush();
+    expect(popups()).toHaveLength(1);          // exactly the current suggestion's popup
+    ed.commands.insertContent(' ');             // it ends
+    await flush();
     expect(popups()).toHaveLength(0);
   });
 
   it('when the editor is destroyed (save → the reading screen) a popup that is still up is taken down', async () => {
-    holdSearch();
+    const spy = holdSearch();
     const ed = makeEditor();
     ed.commands.insertContent('see #');
-    await flush(); release?.(); await flush();
+    await searchStarted(spy); releaseAll(); await flush();
     expect(popups()).toHaveLength(1);
     ed.destroy(); editor = null;
     await flush();
@@ -102,12 +133,12 @@ describe('story picker (#) in the doc editor (story 4906)', () => {
   });
 
   it('a late start after the editor is destroyed draws nothing either', async () => {
-    holdSearch();
+    const spy = holdSearch();
     const ed = makeEditor();
     ed.commands.insertContent('see #');
-    await flush();
+    await searchStarted(spy);
     ed.destroy(); editor = null;
-    release?.(); await flush();
+    releaseAll(); await flush();
     expect(popups()).toHaveLength(0);
   });
 });
