@@ -12,7 +12,8 @@ import { StoryMentionExtension } from './story-mention';
 
 const EMPTY = '일치하는 스토리가 없어요';
 const popups = () => [...document.body.children].filter((d) => /z-index:\s*9999/.test(d.getAttribute('style') ?? '')) as HTMLElement[];
-const flush = async () => { for (let i = 0; i < 6; i += 1) await new Promise((r) => setTimeout(r, 0)); };
+// enough real time for tiptap's async update + the stubbed fetch's body parsing to settle even on a loaded CI machine (a negative assertion must not pass just because nothing ran yet)
+const flush = async () => { for (let i = 0; i < 12; i += 1) await new Promise((r) => setTimeout(r, 8)); };
 
 let editor: Editor | null = null;
 let release: (() => void) | null = null;

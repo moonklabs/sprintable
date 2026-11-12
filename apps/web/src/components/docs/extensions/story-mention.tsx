@@ -158,11 +158,11 @@ export function createStoryMentionSuggestion(
 
     // story 4906 — «## 제목» (and «# » · «### ») is the HEADING shortcut: a bare `#` at the start of a line must not open the story picker (it opened «일치하는 스토리가 없어요» and the
     // popup stayed). But a story link at the start of a line is real use («#4906 끝남», a bullet «- #4906 …» — a list item's paragraph also starts at offset 0), so at the start of a line the
-    // picker waits for the first character AFTER the `#`: nothing yet, or another `#`, is the heading shortcut and refuses; a digit or a letter opens it. In the middle of a line it opens at once.
+    // picker waits for the first character AFTER the `#`: nothing yet is the heading shortcut («# » · «## » · «### » — a second `#` never matches at all, `#` is not an allowed prefix) and refuses; a digit or a letter opens it. In the middle of a line it opens at once.
     allow: ({ state, range }) => {
       if (state.doc.resolve(range.from).parentOffset > 0) return true;
       const afterHash = state.doc.textBetween(range.from + 1, range.to, '', '');
-      return afterHash.length > 0 && !afterHash.startsWith('#');
+      return afterHash.length > 0;
     },
 
     items: async ({ query }) => {
@@ -190,7 +190,8 @@ export function createStoryMentionSuggestion(
         // story 4906 — tiptap calls onStart / onUpdate only AFTER `await items()` (a network search): if the person typed on meanwhile ("## " → heading) the suggestion has already
         // exited (onExit ran, nothing to take down), and this late start drew a popup nobody would ever close — it stayed after Enter, after a click elsewhere and after saving.
         // Ask the plugin whether the suggestion is STILL active; a late call for a finished suggestion draws nothing.
-        if (!STORY_MENTION_PLUGIN_KEY.getState(props.editor.state)?.active) return;
+        // (a destroyed editor keeps its last plugin state — active — so it is checked on its own)
+        if (props.editor.isDestroyed || !STORY_MENTION_PLUGIN_KEY.getState(props.editor.state)?.active) return;
         teardown();
         popup = document.createElement('div');
         popup.style.cssText = 'position:fixed;z-index:9999';
