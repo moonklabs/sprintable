@@ -652,7 +652,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
   return (
     <div
-      className="relative flex-shrink-0 border-t border-ds-line bg-background px-2 py-3 sm:px-3"
+      className="relative flex-shrink-0 border-t border-ds-line bg-ds-background px-2 py-3 sm:px-3"
       onDragOver={(e) => e.preventDefault()}
       onDrop={handleDrop}
     >

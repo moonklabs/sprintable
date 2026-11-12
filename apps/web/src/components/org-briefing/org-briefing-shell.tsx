@@ -202,7 +202,7 @@ export function OrgBriefingShell() {
           (dashboard-shell.tsx의 overflow-y-auto 스크롤 조상) 하단에 sticky. -mx/px로
           부모의 좌우 패딩을 상쇄해 배경이 그 폭 그대로 깔린다(border-t는 InstructionInput
           자신의 form에 이미 있음 — 경계선 중복 0). */}
-      <div className="sticky bottom-0 -mx-4 bg-background px-4 pb-4 lg:-mx-6 lg:px-6">
+      <div className="sticky bottom-0 -mx-4 bg-ds-background px-4 pb-4 lg:-mx-6 lg:px-6">
         <InstructionInput autoFocus={shouldAutoFocusInstruction} />
       </div>
     </div>

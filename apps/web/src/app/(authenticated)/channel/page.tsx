@@ -183,7 +183,7 @@ export default function ChannelPage() {
           스크롤) 입력 영역을 sticky bottom-0로 바꾼다(#4125가 이미 증명한 sticky 메커니즘
           재사용 — 위쪽 대신 아래쪽 오프셋). scrollIntoView() 기반 자동 스크롤(:116)은 실제
           스크롤 컨테이너가 바뀌어도 DOM API가 스스로 찾아가므로 영향 없음. */}
-      <div className="flex flex-col bg-background">
+      <div className="flex flex-col bg-ds-background">
         {/* 메시지 목록 */}
         <section className="px-4 py-4">
           {messages.length === 0 && (
@@ -244,7 +244,7 @@ export default function ChannelPage() {
         </section>
 
         {/* 입력 영역 */}
-        <div className="sticky bottom-0 border-t border-border bg-background px-4 pb-safe-4 pb-4 pt-3">
+        <div className="sticky bottom-0 border-t border-border bg-ds-background px-4 pb-safe-4 pb-4 pt-3">
           {replyTo && (
             <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-3 py-1.5 text-xs text-muted-foreground">
               <span>

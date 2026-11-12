@@ -165,7 +165,7 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
           h-full이 더는 정의된 조상 높이를 못 받는다 — 로컬 경계를 걷어내고 필터 행을
           sticky top-0로 바꿨다(#4125가 이미 증명한 sticky 메커니즘 재사용). */}
       <div className="flex flex-col">
-        <div className="sticky top-0 z-10 flex flex-wrap gap-1 bg-background px-4 pt-3 pb-1">
+        <div className="sticky top-0 z-10 flex flex-wrap gap-1 bg-ds-background px-4 pt-3 pb-1">
           {STATUS_FILTERS.map((s) => (
             <button
               key={s}

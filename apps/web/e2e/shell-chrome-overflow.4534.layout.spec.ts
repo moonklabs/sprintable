@@ -29,7 +29,7 @@ function classesFromSource() {
   return {
     wrapper: `${pick(sidebar, /"(group\/sidebar-wrapper [^"]+)"/, 'sidebar.tsx: the provider wrapper')} ${pick(shell, /<SidebarProvider className="([^"]+)"/, 'dashboard-shell.tsx: SidebarProvider className')}`,
     peer: pick(sidebar, /className="(group peer [^"]+)"\s*data-state=\{state\}/, 'sidebar.tsx: the sidebar peer'),
-    inset: `${pick(sidebar, /data-slot="sidebar-inset"\s*className=\{cn\(\s*"([^"]+)"/, 'sidebar.tsx: the inset main')} ${pick(shell, /<SidebarInset className="([^"]+)"/, 'dashboard-shell.tsx: SidebarInset className')}`,
+    inset: `${pick(sidebar, /data-slot="sidebar-inset"\s*className=\{cn\(\s*"([^"]+)"/, 'sidebar.tsx: the inset main')} ${pick(shell, /<SidebarInset className=\{cn\('([^']+)'/, 'dashboard-shell.tsx: SidebarInset className')}`,
     scroller: pick(shell, /<div ref=\{setRef\} className="([^"]+)"/, 'dashboard-shell.tsx: the shell scroller'),
     // ContextualPanelLayout between the scroller and the page: its grid (no inline panel) and its content cell — without them the
     // anchored column is a flex item of the scroller and shrinks to fit, hiding the overflow (a first draft of this spec did)
