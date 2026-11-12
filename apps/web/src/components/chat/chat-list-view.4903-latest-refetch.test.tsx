@@ -46,13 +46,19 @@ const rowOf = (title: string) => [...container.querySelectorAll('[data-testid="c
 const flush = async () => { for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve(); }); };
 
 /** the list endpoint answers from a queue (the last answer repeats); every call to it is counted, and the Nth answer can be held back */
-function stubList(answers: object[][], hold?: { call: number; gate: Promise<void> }) {
+function stubList(answers: object[][], hold?: { call: number; gate: Promise<void> }, extra?: { holds?: Array<{ call: number; gate: Promise<void> }>; fail?: number[] }) {
   let calls = 0;
+  const holds = new Map<number, Promise<void>>();
+  if (hold) holds.set(hold.call, hold.gate);
+  for (const h of extra?.holds ?? []) holds.set(h.call, h.gate);
+  const failSet = new Set(extra?.fail ?? []);
   const fetchMock = vi.fn(async (url: string) => {
     if (url.includes('/api/conversations/recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
     if (url.includes('/api/conversations?')) {
       calls += 1;
-      if (hold && calls === hold.call) await hold.gate;
+      const gate = holds.get(calls);
+      if (gate) await gate;
+      if (failSet.has(calls)) return { ok: false, status: 500, json: async () => null };
       const data = answers[Math.min(calls - 1, answers.length - 1)]!;
       return { ok: true, json: async () => ({ data, total: data.length }) };
     }
@@ -170,6 +176,47 @@ describe('[SID:4903] ChatListView — deletes and messages that come while the r
     h.release(); await flush();
     expect(list.listCalls()).toBeGreaterThanOrEqual(2);
     expect(rowOf('방 c1').textContent).not.toContain('지울 최신 글'); // the remembered id blanks the stale copy (reverted: not remembered → it comes back)
+  });
+});
+
+describe('[SID:4903] the delete «window» is two generation numbers (PO decision on 5664)', () => {
+  const held = () => { let release: () => void = () => {}; const gate = new Promise<void>((resolve) => { release = resolve; }); return { gate, release: () => release() }; };
+  const del = (id: string, at: string) => announceChatMessageDeleted({ conversationId: 'c1', createdAt: at, messageId: id, threadId: null, deletedAt: '2026-11-12T01:05:00Z' });
+  const newMessage = (id: string) => sse.opts!.onConversationMessage!({ conversation_id: 'c1', id, content: '새 글', created_at: T_NEWER, sender: { id: 'other' } });
+  const rows = [[row('c1', { id: 'm-new', content: '최신 글', created_at: T_NEW })]];
+
+  it('⭐ ask A starts → a delete → ask B pushes A aside → A ends LATE (B still pending): the window stays OPEN, so the next event asks again', async () => {
+    const a = held(); const b = held();
+    const list = stubList([rows[0]!, rows[0]!, rows[0]!, rows[0]!], undefined, { holds: [{ call: 2, gate: a.gate }, { call: 3, gate: b.gate }] });
+    await mount();
+    await act(async () => { del('m-new', T_NEW); }); // ask A (call 2) — dirty 1
+    await act(async () => { del('m-mid', T_MID); }); // the room's next latest is deleted: a «hit» through the open window → ask B (call 3) — dirty 2
+    expect(list.listCalls()).toBe(3);
+    a.release(); await flush(); // A ends with the generation it held (1): applied 1 < dirty 2
+    await act(async () => { newMessage('m-x'); });
+    expect(list.listCalls()).toBe(4); // reverted (A\'s end closes the window) → 3: the message would be left to the older answer
+    b.release(); await flush();
+  });
+
+  it('⭐ the NEWEST ask ends first and the pushed-aside one ends later: the window stays CLOSED (applied is a max, not an assignment) — a message asks nothing', async () => {
+    const a = held(); const b = held();
+    const list = stubList([rows[0]!, rows[0]!, rows[0]!, rows[0]!], undefined, { holds: [{ call: 2, gate: a.gate }, { call: 3, gate: b.gate }] });
+    await mount();
+    await act(async () => { del('m-new', T_NEW); });
+    await act(async () => { del('m-mid', T_MID); });
+    b.release(); await flush(); // B (generation 2) ends: applied 2 = dirty 2 — closed
+    a.release(); await flush(); // A (generation 1) ends late: applied stays 2
+    await act(async () => { newMessage('m-x'); });
+    expect(list.listCalls()).toBe(3); // reverted (assignment) → applied drops to 1, the window re-opens: a message would ask (4)
+  });
+
+  it('an ask that ENDS IN FAILURE closes the window by the same line: a message asks nothing', async () => {
+    const list = stubList([rows[0]!, rows[0]!, rows[0]!], undefined, { fail: [2] });
+    await mount();
+    await act(async () => { del('m-new', T_NEW); }); // ask (call 2) fails
+    await flush();
+    await act(async () => { newMessage('m-x'); });
+    expect(list.listCalls()).toBe(2);
   });
 });
 

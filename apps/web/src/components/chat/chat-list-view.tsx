@@ -567,11 +567,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     }
   }, [scopeProjectId, projectFilter, projectOnly, setRoomsAreOrgWide]);
 
-  const allSeqRef = useRef(0);
   const fetchAllConversations = useCallback(async (nextOffset = 0, append = false) => {
-    // story 4903 (codex on 5664) — the same «which ask is this» guard as fetchConversations: the delete refetch and the tab's own loads can overlap, and an older answer must not replace a newer one
-    const seq = append ? allSeqRef.current : ++allSeqRef.current;
-    const stale = () => seq !== allSeqRef.current;
     // 카디르 QA(#4142) — 위 fetchConversations와 동형 stale-drop 가드(성공/실패 두 경로
     // 대칭).
     if (!append) { setAgentLoadError(false); setAgentForbidden(false); }
@@ -588,7 +584,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         return;
       }
       const json = await res.json() as { data: ConversationItem[]; total: number };
-      if (projectId !== projectIdRef.current || stale()) return; // 전환됨 · 더 새로운 물음이 있음 — stale 응답 drop(B 화면 안 덮음)
+      if (projectId !== projectIdRef.current) return; // 전환됨 — stale 응답 drop(B 화면 안 덮음)
       const items = json.data ?? [];
       setAllConversations((prev) => append ? [...prev, ...items] : items);
       setAgentOffset(nextOffset + items.length);
@@ -725,16 +721,27 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     if (wasLoaded) { setAgentLoading(true); loadAgentConversationsOnce(); }
   }, [projectId, loadAgentConversationsOnce]);
 
-  // rooms whose list is being asked for again because of a delete, until the NEWEST of those asks has answered: inside that window a second delete of the room (the message that was about to become the preview)
-  // and a new message of any room each start a newer ask too — the older answer is dropped by the asks' own counters, so the last one standing is the server's truth after ALL of them (codex on 5664)
-  const pendingDeleteRoomsRef = useRef<Set<string>>(new Set());
-  const refetchTicketRef = useRef(0);
-  const refetchListsAfterDelete = useCallback(() => {
-    const ticket = ++refetchTicketRef.current;
+  // story 4903 — the «window» in which the list is being asked for again because of a delete, as TWO generation numbers (not a flag): a delete — or, while the window is open, a new message — raises the DIRTY
+  // generation; a refetch holds the dirty generation it started with and, however it ends (an answer · a failure · dropped for a newer ask), raises the APPLIED generation to max(applied, held). The window is
+  // open while dirty > applied: an ask pushed aside by a newer one ends with a LOWER generation and closes nothing; whichever path ends the newest ask closes it, by the same one line.
+  const dirtyGenRef = useRef(0);
+  const appliedGenRef = useRef(0);
+  const dirtyRoomsRef = useRef<Set<string>>(new Set()); // the rooms a delete touched while the window was open (a second delete of the same room is then a «hit» although the row no longer holds that message)
+  const windowOpen = () => dirtyGenRef.current > appliedGenRef.current;
+  const askListsAfterDirty = useCallback(() => {
+    const held = dirtyGenRef.current;
     const asks: Array<Promise<unknown>> = [fetchConversations(0, false)];
     if (agentLoadedRef.current) asks.push(fetchAllConversations(0, false));
-    void Promise.allSettled(asks).then(() => { if (ticket === refetchTicketRef.current) pendingDeleteRoomsRef.current.clear(); });
+    void Promise.allSettled(asks).then(() => {
+      appliedGenRef.current = Math.max(appliedGenRef.current, held);
+      if (!windowOpen()) dirtyRoomsRef.current.clear();
+    });
   }, [fetchConversations, fetchAllConversations]);
+  const markDirtyAndAsk = useCallback((room?: string) => {
+    dirtyGenRef.current += 1;
+    if (room) dirtyRoomsRef.current.add(room);
+    askListsAfterDirty();
+  }, [askListsAfterDirty]);
   const handleConversationMessage = useCallback((payload: { conversation_id?: string; content?: string; created_at?: string } & Record<string, unknown>) => {
     setConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchConversations(0, false), currentTeamMemberId));
     // agent 탭을 아직 안 연 상태에선 allConversations 를 reactive 로드하지 않는다(lazy 유지) —
@@ -742,9 +749,9 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     if (agentLoadedRef.current) {
       setAllConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchAllConversations(0, false), currentTeamMemberId));
     }
-    // story 4903 (codex on 5664) — a message that arrives while a delete's refetch is on its way would be overwritten by that (older) answer: ask once more, the newest ask wins
-    if (pendingDeleteRoomsRef.current.size > 0) refetchListsAfterDelete();
-  }, [fetchConversations, fetchAllConversations, currentTeamMemberId, refetchListsAfterDelete]);
+    // story 4903 (codex on 5664) — a message that arrives while the window is open would be overwritten by the (older) answer on its way: ask once more, the newest ask wins
+    if (windowOpen()) markDirtyAndAsk();
+  }, [fetchConversations, fetchAllConversations, currentTeamMemberId, markDirtyAndAsk]);
 
   // story #1977(트랙B): 다른 탭/기기에서 mark-read → conversation.read SSE(#1976, 본인 타
   // 커넥션 전파)로 이 목록이 열려있는 동안에도 unread 배지가 즉시 서버 truth로 자가정정.
@@ -757,7 +764,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     const { conversationId } = deleted;
     const { projectRooms, allRooms } = listsRef.current;
     const isLatest = (c: ConversationItem) => c.id === conversationId && Boolean(c.latest_message) && isDeletedLatest(c.latest_message!, deleted);
-    const hit = [...projectRooms, ...allRooms].some(isLatest) || pendingDeleteRoomsRef.current.has(conversationId);
+    const hit = [...projectRooms, ...allRooms].some(isLatest) || (windowOpen() && dirtyRoomsRef.current.has(conversationId));
     if (!hit) return;
     const blank = (list: ConversationItem[]) => list.map((c) => (
       isLatest(c)
@@ -766,9 +773,8 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     ));
     setConversations(blank);
     setAllConversations(blank);
-    pendingDeleteRoomsRef.current.add(conversationId);
-    refetchListsAfterDelete();
-  }), [refetchListsAfterDelete]);
+    markDirtyAndAsk(conversationId);
+  }), [markDirtyAndAsk]);
 
   // story 4903 AC3 — a list response that was already in flight when the delete frame arrived must not bring the preview back: what is known to be deleted stays blank, re-applied after every change
   // of the lists (before paint; the same list comes back when nothing changes, so it never loops)
