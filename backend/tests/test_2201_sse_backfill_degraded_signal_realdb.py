@@ -101,6 +101,23 @@ async def _seed(Session, *, with_stale_event: bool = False, with_fresh_event: bo
     return {"org_id": org_id, "project_id": project_id, "member_id": member_id, "event_id": event_id}
 
 
+async def _add_event(Session, seeded, *, created_ago: int, status: str = "pending", delivered_ago: int | None = None) -> uuid.UUID:
+    """story 4906 — one more event for the seeded member, `created_ago` seconds old, in the given state (a delivered one with its delivery `delivered_ago` seconds ago)."""
+    from app.models.event import Event
+
+    now = datetime.now(timezone.utc)
+    eid = uuid.uuid4()
+    async with Session() as s:
+        s.add(Event(
+            id=eid, project_id=seeded["project_id"], org_id=seeded["org_id"], event_type="test.event",
+            recipient_id=seeded["member_id"], recipient_type="agent", payload={}, status=status,
+            created_at=now - timedelta(seconds=created_ago),
+            delivered_at=(now - timedelta(seconds=delivered_ago)) if delivered_ago is not None else None,
+        ))
+        await s.commit()
+    return eid
+
+
 async def _read_sync_status_frame(
     *, org_id: uuid.UUID, member_id: uuid.UUID, last_event_id: uuid.UUID | None = None,
 ) -> dict:
@@ -168,15 +185,118 @@ async def test_cursor_not_found_reconnect():
 
 @pytest.mark.anyio
 async def test_cursor_stale_over_threshold():
-    """커서는 유효한데 300초 초과 → reason=cursor_stale."""
+    """커서는 유효한데 300초 초과 **그리고** 커서 뒤에 «백필 창 밖이라 안 보낸» 사건이 있다 → reason=cursor_stale(진짜로 빠졌을 수 있음 · story 4906 PO 11-12:
+    «커서 뒤 · 창 밖 사건 1건 = 경고 유지»). 사건 하나뿐인 조용한 계정은 아래 테스트처럼 complete."""
     engine, Session = await _session_factory()
     try:
-        seeded = await _seed(Session, with_stale_event=True)
+        seeded = await _seed(Session, with_stale_event=True)  # the cursor: 600 s old
+        await _add_event(Session, seeded, created_ago=500, status="delivered", delivered_ago=450)  # after the cursor, delivered longer ago than the 300 s window → NOT sent
         frame = await _read_sync_status_frame(
             org_id=seeded["org_id"], member_id=seeded["member_id"], last_event_id=seeded["event_id"],
         )
-        assert frame["reason"] == "cursor_stale"
-        assert frame["complete"] is False
+        assert frame == {"complete": False, "reason": "cursor_stale", "returned": 0}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cursor_stale_quiet_account_is_complete(caplog):
+    """story 4906 (D): the cursor is 10 minutes old but NOTHING came after it — a quiet account's reconnect. It was a «warning» (complete=false) and the bell drew «older notifications
+    may be missing» on every phone opening (dev: fresh account · cursor 10 min · returned 0). Nothing was left out → complete, no reason — and no `sse.backfill_degraded` log line."""
+    import logging
+
+    engine, Session = await _session_factory()
+    try:
+        seeded = await _seed(Session, with_stale_event=True)
+        with caplog.at_level(logging.INFO, logger="app.routers.events"):
+            frame = await _read_sync_status_frame(
+                org_id=seeded["org_id"], member_id=seeded["member_id"], last_event_id=seeded["event_id"],
+            )
+        assert frame == {"complete": True, "reason": None, "returned": 0}
+        assert not any("sse.backfill_degraded" in r.message for r in caplog.records), [r.message for r in caplog.records]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cursor_stale_with_new_pending_events_after_it_is_complete():
+    """a stale cursor, a newer event still pending (the backfill SENDS it) and nothing left out → complete (returned = what was sent)."""
+    engine, Session = await _session_factory()
+    try:
+        seeded = await _seed(Session, with_stale_event=True)
+        await _add_event(Session, seeded, created_ago=400, status="pending")
+        await _add_event(Session, seeded, created_ago=100, status="delivered", delivered_ago=30)  # delivered inside the window → also sent
+        frame = await _read_sync_status_frame(
+            org_id=seeded["org_id"], member_id=seeded["member_id"], last_event_id=seeded["event_id"],
+        )
+        assert frame == {"complete": True, "reason": None, "returned": 2}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cursor_stale_cap_reached_stays_degraded():
+    """the backfill returned as many events as its cap (50): more may be behind it → the warning stays even though everything seen was sent."""
+    engine, Session = await _session_factory()
+    try:
+        seeded = await _seed(Session, with_stale_event=True)
+        for i in range(50):
+            await _add_event(Session, seeded, created_ago=400 - i, status="pending")
+        frame = await _read_sync_status_frame(
+            org_id=seeded["org_id"], member_id=seeded["member_id"], last_event_id=seeded["event_id"],
+        )
+        assert frame == {"complete": False, "reason": "cursor_stale", "returned": 50}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cursor_stale_other_state_after_cursor_counts_as_left_out():
+    """an event after the cursor in ANY state the backfill does not send (here: expired) is «left out» → the warning stays (the same complement as the filter, not just «delivered long ago»)."""
+    engine, Session = await _session_factory()
+    try:
+        seeded = await _seed(Session, with_stale_event=True)
+        await _add_event(Session, seeded, created_ago=300, status="expired")
+        frame = await _read_sync_status_frame(
+            org_id=seeded["org_id"], member_id=seeded["member_id"], last_event_id=seeded["event_id"],
+        )
+        assert frame["complete"] is False and frame["reason"] == "cursor_stale"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cursor_stale_events_before_the_cursor_are_not_counted():
+    """only events AFTER the cursor can be missing: an older delivered event (before the cursor) is not «left out» → complete."""
+    engine, Session = await _session_factory()
+    try:
+        seeded = await _seed(Session, with_stale_event=True)  # the cursor: 600 s old
+        await _add_event(Session, seeded, created_ago=900, status="delivered", delivered_ago=850)  # BEFORE the cursor, long delivered
+        frame = await _read_sync_status_frame(
+            org_id=seeded["org_id"], member_id=seeded["member_id"], last_event_id=seeded["event_id"],
+        )
+        assert frame == {"complete": True, "reason": None, "returned": 0}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cursor_stale_events_of_another_member_are_not_counted():
+    """a newer event addressed to ANOTHER member of the SAME organization (delivered long ago) says nothing about this member's backfill → still complete."""
+    from app.models.team import TeamMember
+
+    engine, Session = await _session_factory()
+    try:
+        seeded = await _seed(Session, with_stale_event=True)
+        other_member = uuid.uuid4()
+        async with Session() as s:
+            s.add(TeamMember(id=other_member, org_id=seeded["org_id"], project_id=seeded["project_id"], type="agent", name="other-agent"))
+            await s.commit()
+        await _add_event(Session, {**seeded, "member_id": other_member}, created_ago=500, status="delivered", delivered_ago=400)  # after the cursor (600s old), delivered 400s ago = outside the window — for THIS member it would be «left out»
+        frame = await _read_sync_status_frame(
+            org_id=seeded["org_id"], member_id=seeded["member_id"], last_event_id=seeded["event_id"],
+        )
+        assert frame == {"complete": True, "reason": None, "returned": 0}
     finally:
         await engine.dispose()
 

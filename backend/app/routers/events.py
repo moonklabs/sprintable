@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator
-from sqlalchemy import String, and_, cast, delete, func, literal_column, or_, select, text, update
+from sqlalchemy import String, and_, cast, delete, false, func, literal_column, not_, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.datetime_query import aware_datetime_query
@@ -166,6 +166,12 @@ def _pending_or_recently_delivered_filter(now: "datetime"):
         Event.status == "pending",
         and_(Event.status == "delivered", Event.delivered_at >= cutoff),
     )
+
+
+def _outside_backfill_filter(now: "datetime"):
+    """story 4906 (D · PO 11-12) — EXACTLY what `_pending_or_recently_delivered_filter` leaves out (one definition, so the two never drift apart): an event after the cursor that the backfill
+    did NOT send — already delivered more than N seconds ago (or with no delivery time), or in any other state. NULL answers of the filter count as «left out»."""
+    return not_(func.coalesce(_pending_or_recently_delivered_filter(now), false()))
 
 
 async def _stamp_first_delivery(db: "AsyncSession", batch, now: "datetime") -> None:
@@ -684,12 +690,6 @@ async def agent_event_stream(
                 # read로 실제로 잡히는 것까지 확認해야 완료다. no_cursor(진짜 최초접속)는 정상
                 # 트래픽이라 제외 — 재연결인데 못 따라잡은 두 경우(cursor_not_found·cursor_stale)
                 # 만 센다(강등 «빈도»가 이 신호의 목적이지 최초접속 빈도가 아니다).
-                if _backfill_reason in ("cursor_not_found", "cursor_stale"):
-                    import logging
-                    logging.getLogger(__name__).info(
-                        "sse.backfill_degraded reason=%s org_id=%s member_id=%s",
-                        _backfill_reason, org_id, resolved_member_id,
-                    )
                 # story #2101: pending뿐 아니라 최근 delivered도 포함 — 동일 member의
                 # 다른 연결(탭)이 먼저 받아 delivered로 마킹한 이벤트를, 재연결한 이 연결도
                 # 다시 받게 한다(중복은 클라 dedup이 처리, 영구 유실 0이 목표).
@@ -744,6 +744,31 @@ async def agent_event_stream(
                     )
                     pending_events = result.scalars().all()
 
+                # story 4906 (D · PO 11-12): «the cursor is older than N seconds» says the backfill LOOKED BACK a long way, not that something is missing — a quiet person's reconnect is always
+                # that (the newest event they ever saw is old), and every such phone opening showed the bell's «older notifications may be missing» line (measured on dev: a fresh account,
+                # cursor 10 min old, `returned: 0` → `complete: false`). `cursor_stale` stays a warning only when this backfill could really have left something out: it hit the cap, OR an event
+                # after the cursor was not sent (delivered longer ago than the backfill's window — `_outside_backfill_filter`, the same definition counted, not guessed). Nothing left out → complete.
+                # `cursor_not_found` is untouched: with the cursor gone nothing after it can be proven (a GC'd event may have had followers that are gone too).
+                if _backfill_reason == "cursor_stale" and len(pending_events) < limit:
+                    _after_cursor: list[Any] = []
+                    if _ref is not None:
+                        _after_cursor.append(
+                            or_(Event.created_at > _ref, and_(Event.created_at == _ref, Event.id > last_event_id))
+                            if last_event_id is not None else Event.created_at > _ref
+                        )
+                    _left_out = (await db.execute(
+                        select(func.count()).select_from(Event).where(
+                            Event.org_id == org_id, Event.recipient_id == resolved_member_id, *_after_cursor, _outside_backfill_filter(now),
+                        )
+                    )).scalar_one()
+                    if _left_out == 0:
+                        _backfill_reason = None
+                if _backfill_reason in ("cursor_not_found", "cursor_stale"):
+                    import logging
+                    logging.getLogger(__name__).info(
+                        "sse.backfill_degraded reason=%s org_id=%s member_id=%s",
+                        _backfill_reason, org_id, resolved_member_id,
+                    )
                 # story #2201: heartbeat 다음, backfill 이벤트 스트리밍 시작 前에 전용 이벤트
                 # 타입으로 보낸다 — 응답 헤더/heartbeat 메타에는 못 싣는다(heartbeat은 위에서
                 # 이 판정 前에 이미 나가 헤더를 flush했다, hang 방지 설계라 이 스토리에서 손대지
