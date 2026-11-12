@@ -1847,7 +1847,7 @@ async def list_conversations(
         latest_msg = (await db.execute(
             select(ConversationMessage)
             .where(ConversationMessage.conversation_id == conv.id, ConversationMessage.deleted_at.is_(None))
-            .order_by(ConversationMessage.created_at.desc())
+            .order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc())  # same tie-break as the room's own message list: two messages of one microsecond never pick «any»
             .limit(1)
         )).scalar_one_or_none()
 

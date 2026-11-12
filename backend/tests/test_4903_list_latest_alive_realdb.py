@@ -138,3 +138,39 @@ async def test_deleting_an_older_message_leaves_the_preview_alone():
         assert latest["content"] == "최신 글" and latest["id"] == ids[1], latest
     finally:
         await engine.dispose()
+
+
+async def test_two_messages_of_the_same_microsecond_pick_one_stable_latest_by_id():
+    """codex (5653): `ORDER BY created_at DESC` alone leaves a tie to the planner while the preview names an `id` — the larger id wins, whichever row sits first.
+    The two rows swap which one holds the larger id (an UPDATE moves a row to a new physical place): without the tie-break one of the two cases returns the smaller id."""
+    from sqlalchemy import text, update
+
+    from app.models.conversation import ConversationMessage
+
+    tail = uuid.uuid4().hex[-12:]  # the test database is shared between runs: the ids must not repeat
+    HIGH = f"ffffffff-ffff-4fff-8fff-{tail}"
+    LOW = f"00000000-0000-4000-8000-{tail}"
+    engine, Session = await _session_factory()
+    try:
+        org_id, conv_id, a_user, b_user, ids = await _room_with(Session, ["첫째", "둘째"])
+        await _project(Session, conv_id)
+        async with Session() as session:  # the same microsecond for both
+            moment = datetime.now(timezone.utc) - timedelta(minutes=5)
+            await session.execute(update(ConversationMessage).where(ConversationMessage.conversation_id == conv_id).values(created_at=moment))
+            await session.commit()
+        from app.main import app
+
+        first, second = ids
+        for (id_first, id_second) in ((HIGH, LOW), (LOW, HIGH)):
+            async with Session() as session:
+                # park both ids out of the way first (the primary key cannot hold two equal values mid-swap)
+                await session.execute(text("UPDATE conversation_messages SET id = gen_random_uuid() WHERE conversation_id = :c"), {"c": str(conv_id)})
+                rows = (await session.execute(text("SELECT id FROM conversation_messages WHERE conversation_id = :c ORDER BY ctid"), {"c": str(conv_id)})).scalars().all()
+                assert len(rows) == 2
+                await session.execute(text("UPDATE conversation_messages SET id = :n WHERE id = :o"), {"n": id_first, "o": str(rows[0])})
+                await session.execute(text("UPDATE conversation_messages SET id = :n WHERE id = :o"), {"n": id_second, "o": str(rows[1])})
+                await session.commit()
+            latest = await _latest_of(app, Session, b_user, org_id, conv_id)
+            assert latest["id"] == HIGH, (latest, id_first, id_second)
+    finally:
+        await engine.dispose()
