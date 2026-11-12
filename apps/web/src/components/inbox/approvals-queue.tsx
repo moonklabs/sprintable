@@ -31,6 +31,10 @@ import { fetchGateById } from '@/lib/fetch-gate';
 import { buildGateTransitionBody, buildHitlDecisionBody, classifyGateTransitionErrorCode } from '@/lib/gate-decision-payload';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { ListDetailShell } from '@/components/ds/list-detail-shell';
+import { useListSelection, selectNextAfterLeft } from '@/hooks/use-list-selection';
+import { useListDetailWide } from '@/hooks/use-list-detail-wide';
+import { GateQueueList, type GateQueueRow, type GateQueueSection } from './gate-queue-list';
 import { useTeamTimeZone } from '@/components/team-time-zone';
 
 // story #1960(P2-S4) — 결재함 통합 큐. Gate 3종(게이트·문서결재·머지게이트, gate_type/
@@ -225,6 +229,29 @@ export function ApprovalsQueue() {
   const signatureSelectedOption = signatureGate && isDecisionGate(signatureGate) && (deriveDecisionFacts(signatureGate)?.options.length ?? 0) > 0
     ? selectedOptionByGateId[signatureGate.id]
     : undefined;
+
+  // story 4909 (UI-R1 AC3) — the queue as a «list + detail» screen: which row the detail shows, and (narrow) whether its sheet is up.
+  // The rows are the same items as before, in two sections — what needs a hand (decisions · approvals · signatures · HITL) and what is on hold. Nothing is picked for the person but a ROW:
+  // an option is never chosen in advance (the detail opens «not chosen yet» and approve stays off until the person chooses).
+  const wide = useListDetailWide();
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const handItems = items.filter((it) => isHitl(it) || !isHeld(it));
+  const heldItems = items.filter((it) => !isHitl(it) && isHeld(it));
+  const { selectedKey, select } = useListSelection(
+    [handItems.map((it) => ({ key: it.id })), heldItems.map((it) => ({ key: it.id }))],
+    handItems[0]?.id ?? heldItems[0]?.id ?? null,
+  );
+  // what the person is looking at right now — read when a request finishes (it may finish after they picked another row)
+  const selectedKeyRef = useRef<string | null>(selectedKey);
+  useEffect(() => { selectedKeyRef.current = selectedKey; });
+  // a request was decided here: if its detail is on screen, the detail moves to the NEXT request of the same section that is still undecided (the decided row stays in the list, marked «승인 완료» / «반려됨»,
+  // and can be picked again for the undo line). Nothing to move to → the detail stays.
+  const advanceAfterDecided = (id: string) => {
+    if (selectedKeyRef.current !== id) return;
+    const section = handItems.some((it) => it.id === id) ? handItems : heldItems;
+    const next = selectNextAfterLeft(section.filter((it) => it.id === id || !resolvedGates[it.id]).map((it) => ({ key: it.id })), id);
+    if (next !== null && next !== id) select(next);
+  };
   const toggleDecisionExpanded = (id: string) => {
     setExpandedDecisionIds((prev) => {
       const next = new Set(prev);
@@ -409,6 +436,7 @@ export function ApprovalsQueue() {
       if (res.ok) {
         setResolvedGates((prev) => ({ ...prev, [id]: status }));
         setResolvedAtMs((prev) => ({ ...prev, [id]: Date.now() }));
+        advanceAfterDecided(id);
         // story 22affaf2 — 서명 모달을 거친 성공이면 그 자리서 닫는다(다른 gate의 모달을
         // 잘못 닫지 않도록 대상 id 일치 확認).
         setSignatureTargetId((cur) => (cur === id ? null : cur));
@@ -474,9 +502,8 @@ export function ApprovalsQueue() {
     );
   }
 
-  return (
-    <div className="space-y-2">
-      {items.map((item, index) => {
+  // the card of ONE request — everything the old list showed per card (kind · title · facts · options · the action buttons · the failure line · the undo line). It now lives in the detail column.
+  const renderItemCard = (item: GateInboxItem, index: number) => {
         if (isHitl(item)) {
           return (
             <div key={item.id} className="flex flex-col gap-1.5 rounded-xl border border-info/30 bg-info/5 px-4 py-3">
@@ -878,7 +905,46 @@ export function ApprovalsQueue() {
             ) : null}
           </div>
         );
-      })}
+  };
+
+  const rowOf = (item: GateInboxItem): GateQueueRow => {
+    if (isHitl(item)) return { key: item.id, chip: t('hitlRequestBadge'), title: item.title, subtitle: formatAge(item.created_at, t) };
+    const facts = isDecisionGate(item) ? deriveDecisionFacts(item) : null;
+    const done = resolvedGates[item.id];
+    return {
+      key: item.id,
+      chip: gateTypeLabel(tDashboard, item.gate_type),
+      title: facts?.question ?? item.work_item_summary?.title ?? `#${item.work_item_id.slice(0, 8)}`,
+      subtitle: [`#${item.work_item_id.slice(0, 8)}`, item.pr_number ? `PR #${item.pr_number}${item.github_check_run_sha ? ` · ${item.github_check_run_sha.slice(0, 7)}` : ''}` : null, formatAge(item.created_at, t)].filter(Boolean).join(' · '),
+      doneLabel: done === 'approved' ? t('queueResolvedApproved') : done === 'rejected' ? t('queueResolvedRejected') : undefined,
+    };
+  };
+  const sections: GateQueueSection[] = [
+    { id: 'hand', title: t('queueSectionHand'), rows: handItems.map(rowOf) },
+    { id: 'held', title: t('queueSectionHeld'), rows: heldItems.map(rowOf) },
+  ];
+  const selectedItem = items.find((it) => it.id === selectedKey) ?? null;
+  const onSelectRow = (key: string) => {
+    select(key);
+    if (!wide) setSheetOpen(true);
+  };
+  const detailTitle = selectedItem ? rowOf(selectedItem).title : '';
+  const sheetLabel = t('queueSheetLabel', { title: detailTitle });
+
+  return (
+    <>
+      <ListDetailShell
+        testId="gates-screen"
+        wide={wide}
+        list={<GateQueueList sections={sections} selectedKey={selectedKey} onSelect={onSelectRow} />}
+        detail={selectedItem
+          ? <div className="space-y-2" data-testid="gate-queue-detail">{renderItemCard(selectedItem, items.indexOf(selectedItem))}</div>
+          : <p className="m-0 rounded-ds-control border border-dashed border-ds-line px-4 py-6 text-center text-ds-small text-ds-ink-3">{t('queueDetailEmpty')}</p>}
+        detailLabel={t('queueDetailLabel')}
+        sheetLabel={sheetLabel}
+        sheetOpen={sheetOpen && selectedItem !== null}
+        onSheetOpenChange={setSheetOpen}
+      />
       <GateDiscussDialog
         open={discussTargetId !== null}
         onOpenChange={(open) => { if (!open) setDiscussTargetId(null); }}
@@ -931,6 +997,6 @@ export function ApprovalsQueue() {
           ) : null}
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }
