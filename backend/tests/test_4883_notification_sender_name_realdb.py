@@ -125,6 +125,7 @@ async def test_an_ordinary_message_without_event_context_is_as_before():
         marker = f"n4883p-{uuid.uuid4().hex[:8]}"
         await _send(Session, w, f"plain {marker}")
         rows = _event_of(await _list(Session, w, "lost_project"), w.r_human, marker)
-        assert all(n["event"] == {"sender_name": real} for n in rows), [n["event"] for n in rows]
+        # story #4903 — the card also names the message (an id, never words) so a delete can find ITS rows; the name is still the server's
+        assert all(n["event"]["sender_name"] == real and set(n["event"]) == {"sender_name", "message_id"} for n in rows), [n["event"] for n in rows]
     finally:
         await engine.dispose()

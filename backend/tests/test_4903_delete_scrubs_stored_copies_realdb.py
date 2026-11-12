@@ -244,3 +244,145 @@ async def test_a_notification_row_made_before_the_id_existed_is_still_scrubbed_b
         assert [n for n in rows if n[1] and "keep-me" in n[1]], f"the live message's old-form rows keep their words: {rows}"
     finally:
         await engine.dispose()
+
+
+# ── the other stored copies codex found (round 1): bell events · activity rows · delivery jobs · signed image URLs · the cards on a tombstone ────────────
+
+
+async def _rows(Session, model, *where):
+    async with Session() as session:
+        return (await session.execute(select(model).where(*where))).scalars().all()
+
+
+async def test_the_bell_event_rows_the_activity_rows_and_the_pending_delivery_jobs_lose_the_words_too():
+    engine, Session = await _session_factory()
+    try:
+        org_id, conv_id, (a_id, a_user), (b_id, b_user), (c_id, _c_user) = await _room(Session)
+        from app.main import app
+        from app.models.activity_event import ActivityEvent
+        from app.models.delivery_job import DeliveryJob
+        from app.models.event import Event
+
+        msg_id = await _send(app, Session, a_user, org_id, conv_id, WORDS, [b_id])
+
+        def bells(rows):
+            return [e for e in rows if e.event_type == "dispatched" and e.source_entity_type == "conversation"]
+
+        events_before = await _rows(Session, Event, Event.source_entity_id == conv_id)
+        bell_before = [e for e in bells(events_before) if "scrub-me" in json.dumps(e.payload or {}, ensure_ascii=False)]
+        assert bell_before, "a bell (dispatched) event row carries the words before the delete — otherwise this test proves nothing"
+        assert all((e.payload or {}).get("message_id") == msg_id for e in bell_before), "…and names its message"
+        def this_room(jobs):  # the outbox is shared by every test that ran in this database: this room's jobs only
+            return [j for j in jobs if (j.payload or {}).get("reference_id") == str(conv_id)]
+
+        jobs_before = [j for j in this_room(await _rows(Session, DeliveryJob)) if "scrub-me" in json.dumps(j.payload or {}, ensure_ascii=False)]
+        assert jobs_before and all(j.payload.get("message_id") == msg_id for j in jobs_before), "a delivery job carries the words and names its message"
+        acts_before = [a for a in await _rows(Session, ActivityEvent, ActivityEvent.org_id == org_id) if "scrub-me" in json.dumps(a.payload or {}, ensure_ascii=False)]
+        assert acts_before, "the activity stream copied the words before the delete"
+
+        d = await _as(app, Session, a_user, org_id, lambda c: c.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}"))
+        assert d.status_code == 200, d.text
+
+        for e in await _rows(Session, Event, Event.source_entity_id.in_([conv_id, uuid.UUID(msg_id)])):
+            assert "scrub-me" not in json.dumps(e.payload or {}, ensure_ascii=False), f"an event row still carries the words: {e.event_type} {e.payload}"
+        for j in this_room(await _rows(Session, DeliveryJob)):
+            assert "scrub-me" not in json.dumps(j.payload or {}, ensure_ascii=False), f"a delivery job still carries the words: {j.payload}"
+        for a in await _rows(Session, ActivityEvent, ActivityEvent.org_id == org_id):
+            assert "scrub-me" not in json.dumps(a.payload or {}, ensure_ascii=False), f"an activity row still carries the words: {a.payload}"
+    finally:
+        await engine.dispose()
+
+
+async def test_signed_image_urls_in_a_stored_event_payload_go_too():
+    engine, Session = await _session_factory()
+    try:
+        org_id, conv_id, (a_id, a_user), (b_id, b_user), (_c_id, _c_user) = await _room(Session)
+        from app.main import app
+        from app.models.event import Event
+
+        msg_id = await _send(app, Session, a_user, org_id, conv_id, WORDS, [b_id])
+        async with Session() as session:  # the dispatch adds signed URLs when a message carries images: put one in the way it is stored
+            for e in (await session.execute(select(Event).where(Event.source_entity_id == uuid.UUID(msg_id)))).scalars().all():
+                e.payload = {**(e.payload or {}), "images": ["https://signed.example/private.png?sig=abc"]}
+            await session.commit()
+        d = await _as(app, Session, a_user, org_id, lambda c: c.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}"))
+        assert d.status_code == 200, d.text
+        events = await _event_payloads(Session, msg_id)
+        assert events and all("signed.example" not in e for e in events), events
+    finally:
+        await engine.dispose()
+
+
+async def test_a_tombstone_serves_no_card_the_cards_in_msg_metadata_carry_words_of_their_own():
+    engine, Session = await _session_factory()
+    try:
+        org_id, conv_id, (a_id, a_user), (b_id, b_user), (_c_id, _c_user) = await _room(Session)
+        from app.main import app
+        from app.models.conversation import ConversationMessage
+
+        msg_id = await _send(app, Session, a_user, org_id, conv_id, "card carrier", [])
+        async with Session() as session:
+            row = (await session.execute(select(ConversationMessage).where(ConversationMessage.id == uuid.UUID(msg_id)))).scalar_one()
+            row.msg_metadata = {"event": {"event_key": "probe.k", "payload": {"summary": "card-words scrub-me"}}}
+            await session.commit()
+
+        before = await _as(app, Session, b_user, org_id, lambda c: c.get(f"/api/v2/conversations/{conv_id}/messages/{msg_id}"))
+        assert before.status_code == 200 and "card-words" in before.text, "the card is served before the delete — otherwise this test proves nothing"
+
+        d = await _as(app, Session, a_user, org_id, lambda c: c.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}"))
+        assert d.status_code == 200, d.text
+        after = await _as(app, Session, b_user, org_id, lambda c: c.get(f"/api/v2/conversations/{conv_id}/messages/{msg_id}"))
+        assert after.status_code == 200, after.text
+        assert "card-words" not in after.text, "a deleted message's card is not served"
+        assert after.json().get("event") is None and after.json().get("deleted_at"), after.json()  # the key stays (the shape is the same), empty
+        listed = await _as(app, Session, b_user, org_id, lambda c: c.get(f"/api/v2/conversations/{conv_id}/messages"))
+        assert listed.status_code == 200 and "card-words" not in listed.text, "…nor in the list read"
+    finally:
+        await engine.dispose()
+
+
+async def test_a_repeat_delete_repairs_a_tombstone_made_before_the_scrub_existed():
+    engine, Session = await _session_factory()
+    try:
+        org_id, conv_id, (a_id, a_user), (b_id, b_user), (_c_id, _c_user) = await _room(Session)
+        from datetime import datetime, timezone
+
+        from app.main import app
+        from app.models.conversation import ConversationMessage
+
+        msg_id = await _send(app, Session, a_user, org_id, conv_id, WORDS, [b_id])
+        async with Session() as session:  # a stale tombstone: the row is tombstoned, the stored copies are not
+            row = (await session.execute(select(ConversationMessage).where(ConversationMessage.id == uuid.UUID(msg_id)))).scalar_one()
+            row.deleted_at = datetime.now(timezone.utc)
+            row.content = ""
+            await session.commit()
+        assert [e for e in await _event_payloads(Session, msg_id) if "scrub-me" in e], "the stored copies still carry the words"
+
+        d = await _as(app, Session, a_user, org_id, lambda c: c.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}"))
+        assert d.status_code == 200, d.text
+        assert not [e for e in await _event_payloads(Session, msg_id) if "scrub-me" in e], "the repeat delete scrubs the event rows"
+        assert not [n for n in await _notification_rows(Session, conv_id) if n[1] and "scrub-me" in n[1]], "…and the notification rows (they name their message)"
+    finally:
+        await engine.dispose()
+
+
+async def test_an_old_form_match_never_blanks_another_kind_of_notification_that_shares_the_room_id_and_the_words():
+    engine, Session = await _session_factory()
+    try:
+        org_id, conv_id, (a_id, a_user), (b_id, b_user), (_c_id, _c_user) = await _room(Session)
+        from app.main import app
+        from app.models.notification import Notification
+
+        msg_id = await _send(app, Session, a_user, org_id, conv_id, WORDS, [b_id])
+        await _make_rows_old_form(Session, [conv_id])
+        async with Session() as session:  # another kind of notification about this room, with the same words in its body
+            session.add(Notification(id=uuid.uuid4(), org_id=org_id, user_id=b_user, type="chain.escalation", title="escalation", body=WORDS,
+                                     reference_type="conversation", reference_id=conv_id))
+            await session.commit()
+        d = await _as(app, Session, a_user, org_id, lambda c: c.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}"))
+        assert d.status_code == 200, d.text
+        rows = await _notification_rows(Session, conv_id)
+        assert [n for n in rows if n[3] == "escalation" and n[1] == WORDS], f"the other kind of notification keeps its body: {rows}"
+        assert not [n for n in rows if n[3] != "escalation" and n[1] and "scrub-me" in n[1]], "the message's own old-form rows are scrubbed"
+    finally:
+        await engine.dispose()
