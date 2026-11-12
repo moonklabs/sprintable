@@ -46,7 +46,7 @@ const flush = async () => { for (let i = 0; i < 10; i++) await act(async () => {
 const json = (data: unknown, status = 200) => ({ ok: status < 400, status, json: async () => ({ data }) });
 
 /** `hasProject: false` = a fresh account: /api/current-project has nothing to say. `ctxOrgId: null` = the dashboard context has no organization (the old source is the only one). */
-async function mountPage(query: string, opts: { hasProject: boolean; ctxOrgId: string | null; orgListImpl?: () => unknown }) {
+async function mountPage(query: string, opts: { hasProject: boolean; ctxOrgId: string | null; orgListImpl?: () => unknown; projectsImpl?: (url: string) => unknown }) {
   useDashboardContextMock.mockReturnValue({
     orgId: opts.ctxOrgId, orgMemberships: opts.ctxOrgId ? [{ orgId: opts.ctxOrgId, role: 'owner' }] : [], currentMemberType: 'human', currentTeamMemberId: 'tm-1', projectId: opts.hasProject ? 'p1' : null,
   });
@@ -64,7 +64,7 @@ async function mountPage(query: string, opts: { hasProject: boolean; ctxOrgId: s
   vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
   vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
     const url = String(input); const method = init?.method ?? 'GET';
-    if (url.startsWith('/api/projects') && method === 'GET') { projectListUrls.push(url); return json([]); }
+    if (url.startsWith('/api/projects') && method === 'GET') { projectListUrls.push(url); return (opts.projectsImpl?.(url) ?? json([])) as ReturnType<typeof json>; }
     if (url === '/api/projects' && method === 'POST') {
       projectPosts.push({ url, method, body: JSON.parse(String(init?.body)) });
       return json({ id: 'p3', name: '감마' }, 201);
@@ -164,5 +164,35 @@ describe('[SID:4906] settings › one organization id: a fresh account (organiza
     await switchOrgTo('org-2');
     expect(inputValues()).not.toContain('첫째 조직'); // the name box (edit · delete go by it) is gone until the new details load
     expect(document.body.textContent).not.toContain('첫째 조직');
+  });
+
+  const hasText = (s: string) => (document.body.textContent ?? '').includes(s);
+
+  it('⭐codex round 2: switching organization clears the OLD organization\'s project rows at once (their edit · delete send only a project id)', async () => {
+    await mountPage('tab=projects', {
+      hasProject: false, ctxOrgId: 'org-1',
+      projectsImpl: (url) => (url.includes('org_id=org-1')
+        ? json([{ id: 'p-a', name: '첫째조직프로젝트', description: null }])
+        : new Promise(() => {})), // the new organization's list is still loading
+    });
+    expect(hasText('첫째조직프로젝트')).toBe(true);
+    await switchOrgTo('org-2');
+    expect(hasText('첫째조직프로젝트')).toBe(false); // reverted → the old rows stay and stay actionable
+  });
+
+  it('⭐codex round 2: a LATE project list for the old organization never replaces the new organization\'s list', async () => {
+    let releaseOld: (v: unknown) => void = () => {};
+    await mountPage('tab=projects', {
+      hasProject: false, ctxOrgId: 'org-1',
+      projectsImpl: (url) => (url.includes('org_id=org-1')
+        ? new Promise((resolve) => { releaseOld = resolve; })
+        : json([{ id: 'p-b', name: '둘째조직프로젝트', description: null }])),
+    });
+    await switchOrgTo('org-2');
+    expect(hasText('둘째조직프로젝트')).toBe(true);
+    await act(async () => { releaseOld(json([{ id: 'p-a', name: '첫째조직프로젝트', description: null }])); });
+    await flush();
+    expect(hasText('둘째조직프로젝트')).toBe(true);
+    expect(hasText('첫째조직프로젝트')).toBe(false);
   });
 });

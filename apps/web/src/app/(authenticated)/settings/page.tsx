@@ -363,13 +363,17 @@ export default function SettingsPage() {
     }
   };
 
+  // codex 2라운드 — 조직을 바꾸면(router.refresh, 이 화면은 다시 안 뜬다) 옛 조직의 프로젝트 행이 남아 편집 · 삭제(프로젝트 id만 보낸다)가 옛 조직으로 갈 수 있고,
+  // 옛 조직 응답이 늦게 와 새 목록을 덮을 수도 있다 → 요청마다 번호를 달아 가장 최근 것만 반영하고, 조직이 바뀌면 목록을 비운다(아래 effect).
+  const projectsSeqRef = useRef(0);
   const refreshProjects = async () => {
+    const seq = ++projectsSeqRef.current;
     const endpoint = orgId ? `/api/projects?org_id=${encodeURIComponent(orgId)}` : '/api/projects';
     const res = await fetch(endpoint);
-    if (!res.ok) return;
+    if (!res.ok || seq !== projectsSeqRef.current) return;
 
     const json = await res.json();
-    if (!json?.data) return;
+    if (!json?.data || seq !== projectsSeqRef.current) return;
 
     const nextProjects = (json.data as ProjectOption[]).slice().sort((a, b) => a.name.localeCompare(b.name));
     setProjects(nextProjects);
@@ -386,6 +390,12 @@ export default function SettingsPage() {
       setProjectMembers((json.data ?? []) as ProjectMember[]);
     }
   };
+
+  useEffect(() => {
+    projectsSeqRef.current += 1; // anything still in flight for the previous organization is stale now
+    setProjects([]);
+    setMemberProjectId('');
+  }, [orgId]);
 
   // Fetch org and project context
   useEffect(() => {
