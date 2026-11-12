@@ -12,8 +12,12 @@ import type { PermissionRequest } from '@/lib/agent-permissions';
 
 const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
-const sseSubscriptions = vi.fn();
-vi.mock('@/hooks/use-sse-notifications', () => ({ useSseNotifications: (o: unknown) => { sseSubscriptions(o); } }));
+const { sseSubscriptions, live } = vi.hoisted(() => ({ sseSubscriptions: vi.fn(), live: { n: 0 } }));
+// a subscription that counts itself: `live.n` is how many readers are mounted right now (the hook subscribes on mount, unsubscribes on unmount)
+vi.mock('@/hooks/use-sse-notifications', async () => {
+  const { useEffect } = await import('react');
+  return { useSseNotifications: (o: unknown) => { sseSubscriptions(o); useEffect(() => { live.n += 1; return () => { live.n -= 1; }; }, []); } };
+});
 const { AgentPermissionRequests, PermissionCard, useAgentPermissionRequests } = await import('./agent-permission-requests');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -29,7 +33,7 @@ let root: Root;
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
   vi.setSystemTime(NOW);
-  fetchWithAuth.mockReset(); sseSubscriptions.mockReset();
+  fetchWithAuth.mockReset(); sseSubscriptions.mockReset(); live.n = 0;
   fetchWithAuth.mockImplementation(async (url: string) => (url === '/api/agent-permission-requests'
     ? new Response(JSON.stringify({ requests: [req('r1'), req('r2', { agent_name: 'Writer' })] }), { status: 200 })
     : new Response('{}', { status: 404 })));
@@ -65,16 +69,37 @@ describe('useAgentPermissionRequests (story 4909 · 2d-1)', () => {
     expect(container.querySelectorAll('[data-testid="agent-permission-card"]')).toHaveLength(2);
   });
 
-  it('⭐the group is drawn FROM the hook: the same two requests, the same heading with the count, and ONE SSE subscription carrying the two named frames', async () => {
+  const reads = () => fetchWithAuth.mock.calls.filter((c) => c[0] === '/api/agent-permission-requests').length;
+
+  it('⭐the group is drawn FROM the hook: the same two requests, the same heading with the count, and the two named SSE frames', async () => {
     await act(async () => { root.render(intl(<AgentPermissionRequests />)); });
     await settle();
     expect(container.textContent).toContain('에이전트 권한 요청 · 2');
     expect(container.querySelectorAll('[data-testid="agent-permission-card"]')).toHaveLength(2);
     const lastOptions = sseSubscriptions.mock.calls.at(-1)![0] as { extraEventNames?: string[] };
     expect(lastOptions.extraEventNames).toEqual(['dispatched', 'agent.permission_request.changed']);
-    // every render of the ONE reader subscribes through the same hook — never two readers on one mount
-    const readers = new Set(sseSubscriptions.mock.calls.map((c) => JSON.stringify((c[0] as { extraEventNames?: string[] }).extraEventNames)));
-    expect(readers.size).toBe(1);
+  });
+
+  it('⭐ONE mounted reader = ONE live subscription and ONE 15 s read clock (one read at mount, one more after 15 s — not two clocks)', async () => {
+    await act(async () => { root.render(intl(<AgentPermissionRequests />)); });
+    await settle();
+    expect(live.n).toBe(1); // reverted (the hook subscribing twice) → 2
+    expect(reads()).toBe(1);
+    await act(async () => { vi.advanceTimersByTime(15_000); });
+    await settle();
+    expect(reads()).toBe(2);
+    await act(async () => { root.render(intl(<div />)); });
+    expect(live.n).toBe(0); // unmounting unsubscribes
+  });
+
+  it('a SECOND reader on the same screen doubles both — which is why the approvals list\'s section must be the ONLY reader once the old block is taken out (2d-2 pins this on the whole screen)', async () => {
+    await act(async () => { root.render(intl(<><AgentPermissionRequests /><Probe /></>)); });
+    await settle();
+    expect(live.n).toBe(2);
+    expect(reads()).toBe(2);
+    await act(async () => { vi.advanceTimersByTime(15_000); });
+    await settle();
+    expect(reads()).toBe(4);
   });
 
   it('an empty list draws nothing (the group) while the hook still reports an empty `shown` — a section with no rows draws no heading', async () => {
