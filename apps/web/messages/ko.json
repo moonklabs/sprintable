@@ -4917,6 +4917,7 @@
     "startMeasuringHint": "지금부터 측정 중 상태로 전환해요. 이후 달성/반증으로 닫을 수 있어요.",
     "startMeasuringHintWithDate": "지금 시작하면 즉시 측정 중으로 전환해요. 직접 시작하지 않아도 {date}에 자동으로 전환돼요.",
     "linkStory": "스토리 연결",
+    "linkStoryFailed": "스토리를 연결하지 못했어요. 다시 시도해 주세요.",
     "kill": "검증 중단",
     "killConfirm": "이 가설 검증을 중단할까요?",
     "empty": "아직 가설이 없어요",
