@@ -106,6 +106,8 @@ def test_the_submission_passes_the_same_public_build_values_as_the_cloud_run_bui
 
 @pytest.mark.skipif(shutil.which("gcloud") is None, reason="gcloud not installed here (GitHub runners have it)")
 @pytest.mark.parametrize("which", ["Submit Cloud Build", "vm"])
+# a start of gcloud on a crowded runner took over 30 s by itself (measured over 40 CI runs: the first gcloud test of each shard took 13-44 s, the same test 5 s when it was not first), so the suite's 30 s is no budget for it
+@pytest.mark.timeout(120)   # a hang bound, not a budget (tests/_real_gcloud.py)
 def test_the_submit_command_lines_are_accepted_by_the_real_gcloud_flag_parser(which: str, tmp_path: Path) -> None:
     """a flag gcloud does not know (`--tags` once was one) makes the submission fail every time — and `continue-on-error` would hide it. Flags are parsed before anything is read or sent: the config is /dev/null, so it stops there."""
     step = _submit_vm() if which == "vm" else next(s for s in _job_steps() if s.get("name") == "Submit Cloud Build")

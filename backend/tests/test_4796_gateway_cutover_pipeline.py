@@ -225,6 +225,8 @@ needs_gcloud = pytest.mark.skipif(shutil.which("gcloud") is None, reason="no gcl
 
 
 @needs_gcloud
+# a start of gcloud on a crowded runner took over 30 s by itself (measured over 40 CI runs: the first gcloud test of each shard took 13-44 s, the same test 5 s when it was not first), so the suite's 30 s is no budget for it
+@pytest.mark.timeout(120)   # a hang bound, not a budget (tests/_real_gcloud.py)
 def test_the_real_gcloud_accepts_both_lists_with_the_switch_on(tmp_path: Path) -> None:
     _, svc_calls, _ = _run_service_step(tmp_path, switch="true", pool="3", overflow="2")
     (tmp_path / "j").mkdir()
@@ -236,6 +238,7 @@ def test_the_real_gcloud_accepts_both_lists_with_the_switch_on(tmp_path: Path) -
 
 
 @needs_gcloud
+@pytest.mark.timeout(120)   # a hang bound, not a budget: the first gcloud start of a shard takes 13-44 s on a runner (tests/_real_gcloud.py)
 def test_the_real_gcloud_has_no_clear_flag_for_jobs_but_does_for_services(tmp_path: Path) -> None:
     job = _real_gcloud_parse(["run", "jobs", "deploy", "j", "--image=x", "--region=r", "--clear-cloudsql-instances", "--quiet"], tmp_path)
     assert "unrecognized arguments: --clear-cloudsql-instances" in job
@@ -244,6 +247,7 @@ def test_the_real_gcloud_has_no_clear_flag_for_jobs_but_does_for_services(tmp_pa
 
 
 @needs_gcloud
+@pytest.mark.timeout(120)   # a hang bound, not a budget: the first gcloud start of a shard takes 13-44 s on a runner (tests/_real_gcloud.py)
 def test_the_real_gcloud_accepts_the_off_lists_too(tmp_path: Path) -> None:
     for argv in (_service_off("dev"), _job_off("dev")):
         out = _real_gcloud_parse(argv, tmp_path)
