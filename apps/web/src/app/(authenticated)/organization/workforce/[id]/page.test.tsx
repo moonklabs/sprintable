@@ -28,8 +28,10 @@ vi.mock('next/navigation', () => ({
   useRouter: () => routerMock,
 }));
 
+// story 4912 (A2): the stub keeps the props the page passes it, so a test can play the manager's «keys read» callback
+const { managerProps } = vi.hoisted(() => ({ managerProps: { current: null as null | { onKeysRead?: (n: number) => void } } }));
 vi.mock('@/components/agents/agent-api-key-manager', () => ({
-  AgentApiKeyManager: () => <div data-testid="stub-agent-api-key-manager" />,
+  AgentApiKeyManager: (props: { onKeysRead?: (n: number) => void }) => { managerProps.current = props; return <div data-testid="stub-agent-api-key-manager" />; },
 }));
 vi.mock('@/components/agents/agent-connection-settings-section', () => ({
   AgentConnectionSettingsSection: () => <div data-testid="stub-agent-connection-settings-section" />,
@@ -516,6 +518,7 @@ describe('AgentDetailPage — 상세 머리(story 4912 · A2)', () => {
         return { ok: true, json: async () => ({ data: { ...AGENT, ...agent, ...JSON.parse(String(init.body)) } }) };
       }
       if (url === '/api/team-members/agent-1') return { ok: true, json: async () => ({ data: { ...AGENT, ...agent } }) };
+      if (url === '/api/team-members/agent-2') return { ok: true, json: async () => ({ data: { ...AGENT, ...agent, id: 'agent-2', name: '에이전트2' } }) };
       if (url.startsWith('/api/agents/') && url.endsWith('/api-key')) return { ok: true, json: async () => ({ data: [{ id: 'k1', key_prefix: 'sk_live_ab', created_at: '2026-08-01T00:00:00Z', last_used_at: null, revoked_at: null }] }) };
       if (url.startsWith('/api/agents/') && url.endsWith('/desktop-session')) {
         const v = extra?.(url);
@@ -596,4 +599,75 @@ describe('AgentDetailPage — 상세 머리(story 4912 · A2)', () => {
     expect(container.querySelector('[data-testid="agent-avatar-open"]')).toBeNull();
     expect(container.querySelector('[data-testid="agent-detail-actions"]')).toBeNull();
   });
+
+  it('⭐창 상태는 그 에이전트 것이다 — 비활성화 확인창을 연 채 다른 에이전트로 이동하면 닫힌다(A에서 연 확인이 B를 비활성화하지 않는다)', async () => {
+    stubWithPatch();
+    await mount();
+    await openMenu();
+    await act(async () => { items()[0]!.click(); });
+    await settle();
+    expect(document.body.textContent).toContain(koMessages.settings.deactivateAgentDialogBody);
+    paramId.current = 'agent-2';
+    await act(async () => { const { default: Page } = await import('./page'); root.render(wrap(<Page />)); });
+    await settle();
+    await settle();
+    expect(container.querySelector('[data-testid="agent-detail-head"]')?.textContent).toContain('에이전트2'); // the OTHER agent is on screen now (read answered) — and the dialog is not
+    expect(document.body.textContent).not.toContain(koMessages.settings.deactivateAgentDialogBody);
+    expect(patches).toHaveLength(0);
+  });
+
+  it('⭐비활성화를 두 번 눌러도 PATCH는 한 번만 나간다(확인 단추 · «활성화» 항목 모두 진행 중엔 눌리지 않는다)', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    patches.length = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (typeof url !== 'string') return { ok: false, json: async () => null };
+      if (url === '/api/team-members/agent-1' && init?.method === 'PATCH') { patches.push({ url, body: String(init.body) }); await gate; return { ok: true, json: async () => ({ data: { ...AGENT, is_active: false } }) }; }
+      if (url === '/api/team-members/agent-1') return { ok: true, json: async () => ({ data: AGENT }) };
+      if (url.startsWith('/api/agents/') && url.endsWith('/api-key')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { user_id: 'u1', role: 'admin' } }) };
+      if (url.startsWith('/api/webhooks/config')) return { ok: true, json: async () => ({ data: [] }) };
+      return { ok: false, json: async () => null };
+    }));
+    await mount();
+    await openMenu();
+    await act(async () => { items()[0]!.click(); });
+    await settle();
+    const confirm = [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === koMessages.settings.deactivateAgentDialogConfirm)!;
+    await act(async () => { confirm.click(); confirm.click(); });
+    await settle();
+    expect(patches).toHaveLength(1); // the second press did not send another one
+    await act(async () => { release(); });
+    await settle();
+  });
+
+  it('⭐옆 칸 «활성 키»: 키 목록 읽기가 실패하면 «없음»이라 말하지 않는다(줄 자체가 없다) — 읽기가 되면 있음/없음', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url !== 'string') return { ok: false, json: async () => null };
+      if (url === '/api/team-members/agent-1') return { ok: true, json: async () => ({ data: AGENT }) };
+      if (url.startsWith('/api/agents/') && url.endsWith('/api-key')) return { ok: false, json: async () => null }; // the key read FAILS
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { user_id: 'u1', role: 'admin' } }) };
+      if (url.startsWith('/api/webhooks/config')) return { ok: true, json: async () => ({ data: [] }) };
+      return { ok: false, json: async () => null };
+    }));
+    await mount();
+    const side = container.querySelector('[data-slot="ds-page-split-aside"]')!;
+    expect(side.textContent).not.toContain(koMessages.agents.detailSummaryKey);
+    expect(side.textContent).not.toContain(koMessages.agents.detailSummaryKeyNone);
+  });
+
+  it('⭐마지막 키를 무효화하면(키 관리자가 «읽었더니 활성 0»을 알리면) 옆 칸이 «없음»으로 바뀐다 · 다시 발급해 1이 되면 «있음»', async () => {
+    stubWithPatch(); // the key list read answers one active key → «있음»
+    await mount();
+    const side = () => container.querySelector('[data-slot="ds-page-split-aside"]')!.textContent ?? '';
+    expect(side()).toContain(koMessages.agents.detailSummaryKeyHas);
+    await act(async () => { managerProps.current?.onKeysRead?.(0); });
+    expect(side()).toContain(koMessages.agents.detailSummaryKeyNone);
+    expect(side()).not.toContain(koMessages.agents.detailSummaryKeyHas);
+    await act(async () => { managerProps.current?.onKeysRead?.(1); });
+    expect(side()).toContain(koMessages.agents.detailSummaryKeyHas);
+  });
 });
+

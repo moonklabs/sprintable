@@ -188,6 +188,8 @@ export default function AgentDetailPage() {
   // story 4912 (A2): the avatar's photo card opens from the avatar (a dialog) and the deactivate goes through a confirm like the list's
   const [avatarOpen, setAvatarOpen] = useState(false);
   const [deactivateOpen, setDeactivateOpen] = useState(false);
+  const [togglingActive, setTogglingActive] = useState(false); // one activate / deactivate request at a time (a double press must not send two)
+  const togglingRef = useRef(false); // the same guard, read synchronously: two presses in one tick are both before the next render
   const [editingName, setEditingName] = useState(false);
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState('');
@@ -201,11 +203,15 @@ export default function AgentDetailPage() {
   // story 4889: the id the page shows NOW — a late answer for an older id is dropped (and the per-agent side state is cleared when the id changes)
   const idRef = useRef(id);
   useEffect(() => { idRef.current = id; }, [id]); // (assigned in an effect, not during render — an abandoned concurrent render must not move it; this effect is declared before the loads below, so it runs first)
+  // story 4912 (A2): the two dialogs belong to the agent they were opened for — a route change to another agent closes them (a deactivate confirm opened for A must never confirm against B)
+  useEffect(() => { setAvatarOpen(false); setDeactivateOpen(false); setTogglingActive(false); togglingRef.current = false; }, [id]);
   const [webhookActive, setWebhookActive] = useState(false);
   const [savingWebhook, setSavingWebhook] = useState(false);
 
   const [freshApiKey, setFreshApiKey] = useState<string | null>(null);
   const [hasActiveKey, setHasActiveKey] = useState(false);
+  // story 4912 (A2): the side summary says «활성 키 있음/없음» only once a key-list read really worked (a failed read is not «없음»)
+  const [keysReadOk, setKeysReadOk] = useState(false);
   const [fakechatEnvKeyCopied, setFakechatEnvKeyCopied] = useState(false);
 
   const [projects, setProjects] = useState<ProjectOption[]>([]);
@@ -283,12 +289,13 @@ export default function AgentDetailPage() {
     if (idRef.current !== forId) return;
     const active = (json.data ?? []).find((k) => !k.revoked_at);
     setHasActiveKey(!!active);
+    setKeysReadOk(true);
   }, [id]);
 
   useEffect(() => {
     let current = true; // story 4889: an older id's late answer does not end the newer id's loading
     // story 4889: the previous agent's side state (key presence · webhook · a freshly shown key) does not stay while this id is read
-    setHasActiveKey(false); setWebhookConfigs([]); setWebhookUrl(''); setFreshApiKey(null);
+    setHasActiveKey(false); setKeysReadOk(false); setWebhookConfigs([]); setWebhookUrl(''); setFreshApiKey(null);
     setLoading(true);
     Promise.all([fetchAgent(), fetchActiveApiKey(), fetchOrgContext()])
       .finally(() => { if (current) setLoading(false); });
@@ -497,12 +504,22 @@ export default function AgentDetailPage() {
   };
 
   const handleToggleActive = async () => {
+    if (togglingRef.current) return;
+    togglingRef.current = true;
     const next = !agent.is_active;
-    const res = await fetchWithAuth(`/api/team-members/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ is_active: next }),
-    });
+    const requestedFor = id;
+    setTogglingActive(true);
+    let res: Response;
+    try {
+      res = await fetchWithAuth(`/api/team-members/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: next }),
+      });
+    } finally {
+      if (idRef.current === requestedFor) { togglingRef.current = false; setTogglingActive(false); }
+    }
+    if (idRef.current !== requestedFor) return; // the page moved on to another agent while this was out: its answer is not this page's
     if (res.ok) {
       const json = await res.json() as { data: AgentMember };
       setAgent(json.data);
@@ -541,7 +558,7 @@ export default function AgentDetailPage() {
       ),
     }] : []),
     // the key list is read for the people who may manage keys only (canEditBase); for others «no key» would be a guess
-    ...(showKeysTab ? [{ id: 'key', label: ta('detailSummaryKey'), value: hasActiveKey ? ta('detailSummaryKeyHas') : ta('detailSummaryKeyNone') }] : []),
+    ...(showKeysTab && keysReadOk ? [{ id: 'key', label: ta('detailSummaryKey'), value: hasActiveKey ? ta('detailSummaryKeyHas') : ta('detailSummaryKeyNone') }] : []),
   ];
   const connectorText = runtimeLabel(agent.runtime_type);
 
@@ -583,9 +600,9 @@ export default function AgentDetailPage() {
           ) : (
             <div className="flex min-w-0 flex-1 items-center gap-3">
               {canEdit ? (
-                <button type="button" onClick={() => setAvatarOpen(true)} aria-label={ta('detailAvatarChangeAria')} data-testid="agent-avatar-open" className="shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ds-action">
+                <Button type="button" variant="ghost" onClick={() => setAvatarOpen(true)} aria-label={ta('detailAvatarChangeAria')} data-testid="agent-avatar-open" className="h-auto w-auto shrink-0 rounded-full p-0">
                   <Avatar name={agent.name} avatarUrl={agent.avatar_url} actorType="agent" size={44} runtimeType={agent.runtime_type} />
-                </button>
+                </Button>
               ) : (
                 <Avatar name={agent.name} avatarUrl={agent.avatar_url} actorType="agent" size={44} runtimeType={agent.runtime_type} />
               )}
@@ -627,9 +644,9 @@ export default function AgentDetailPage() {
               <MenuTrigger render={<IconButton icon="more_horiz" label={ta('detailActionsAria')} data-testid="agent-detail-actions" />} />
               <MenuContent align="end">
                 {agent.is_active ? (
-                  <MenuItem variant="danger" icon="block" onClick={() => setDeactivateOpen(true)}>{t('deactivateAgent')}</MenuItem>
+                  <MenuItem variant="danger" icon="block" disabled={togglingActive} onClick={() => setDeactivateOpen(true)}>{t('deactivateAgent')}</MenuItem>
                 ) : (
-                  <MenuItem icon="check_circle" onClick={() => void handleToggleActive()}>{t('activateAgent')}</MenuItem>
+                  <MenuItem icon="check_circle" disabled={togglingActive} onClick={() => void handleToggleActive()}>{t('activateAgent')}</MenuItem>
                 )}
               </MenuContent>
             </Menu>
@@ -663,7 +680,7 @@ export default function AgentDetailPage() {
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setDeactivateOpen(false)}>{tc('cancel')}</Button>
-            <Button variant="destructive" onClick={() => { setDeactivateOpen(false); void handleToggleActive(); }}>{t('deactivateAgentDialogConfirm')}</Button>
+            <Button variant="destructive" disabled={togglingActive} onClick={() => { setDeactivateOpen(false); void handleToggleActive(); }}>{t('deactivateAgentDialogConfirm')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -851,6 +868,7 @@ export default function AgentDetailPage() {
               agentId={id}
               agentName={agent.name}
               onNewKey={(key) => { setFreshApiKey(key); setHasActiveKey(true); }}
+              onKeysRead={(n) => { setHasActiveKey(n > 0); setKeysReadOk(true); }}
             />
           )
         )}

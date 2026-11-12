@@ -57,8 +57,8 @@
     {
       "file": "app/(authenticated)/organization/workforce/[id]/page.tsx",
       "match": "handleToggleActive(",
-      "count": 1,
-      "why": "«비활성화» ↔ «활성화»"
+      "count": 2,
+      "why": "«비활성화» ↔ «활성화» — 머리 «⋯» 메뉴의 «활성화»와 비활성화 확인창의 [비활성화], 방향마다 하나(글자로 하는 일을 말함)"
     },
     {
       "file": "app/(authenticated)/settings/notifications-pane.tsx",
@@ -71,12 +71,6 @@
       "match": "handleToggle(agent.id, project)",
       "count": 1,
       "why": "이름이 지금 상태(«허용됨» ↔ «차단됨»)를 말함"
-    },
-    {
-      "file": "components/agents/agent-management-tab.tsx",
-      "match": "requestToggle(agent)",
-      "count": 1,
-      "why": "«비활성화» ↔ «활성화»(이름에 순번 + 보이는 글)"
     },
     {
       "file": "components/channel-connect/external-publish-pause-card.tsx",
