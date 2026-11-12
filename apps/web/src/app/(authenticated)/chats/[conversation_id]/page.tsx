@@ -261,11 +261,24 @@ export default function ConversationPage() {
     }
   }, [conversation_id, fetchMeta, router, flatHref]);
 
+  // story #1990: replace(), not push() — 콜드-진입 합성 스택에 세번째 엔트리를 쌓지 않아 브라우저 BACK 재진입 트랩을 구조적으로 없앤다(§3.2). back()류 직접 호출은 하지 않는다([[feedback-history-back-nextjs]]).
+  // story #2168 PR-② AC④ — "다른 프로젝트" 경유로 왔으면(`from` 존재) 원래 프로젝트로 `?p=`를 실어 복귀시킨다: 이 뒤로가기가 그 역할을 겸한다.
+  const goBackToList = () => router.replace(fromProjectId ? flatHref(`/chats?p=${fromProjectId}`) : flatHref('/chats'));
+
   if (!currentTeamMemberId) {
     return (
-      <div className="flex h-64 items-center justify-center">
-        <p className="text-sm text-muted-foreground">{tc('loading')}</p>
-      </div>
+      <>
+        {/* story 4887 — a PHONE's shell header row is not left empty while the person's own member id is still on its way (0.30–0.89 s on a cold load, measured on dev): the generic «← 대화» first; the people and the «⋯» follow with the room */}
+        {isBelowLg ? (
+          <TopBarSlot
+            title={<RoomBarTitle backLabel={t('title')} onBack={goBackToList} title={t('title')} tag={null} subline={null} peopleLabel={t('roomPeopleOpen')} peopleCount={0} chips={[]} addLabel={t('addParticipants')} />}
+            actions={null}
+          />
+        ) : null}
+        <div className="flex h-64 items-center justify-center">
+          <p className="text-sm text-muted-foreground">{tc('loading')}</p>
+        </div>
+      </>
     );
   }
 
@@ -385,9 +398,7 @@ export default function ConversationPage() {
           title={(
             <RoomBarTitle
               backLabel={t('title')}
-              // story #1990: replace(), not push() — 콜드-진입 합성 스택에 세번째 엔트리를 쌓지 않아 브라우저 BACK 재진입 트랩을 구조적으로 없앤다(§3.2). back()류 직접 호출은 하지 않는다([[feedback-history-back-nextjs]]).
-              // story #2168 PR-② AC④ — "다른 프로젝트" 경유로 왔으면(`from` 존재) 원래 프로젝트로 `?p=`를 실어 복귀시킨다: 이 뒤로가기가 그 역할을 겸한다.
-              onBack={() => router.replace(fromProjectId ? flatHref(`/chats?p=${fromProjectId}`) : flatHref('/chats'))}
+              onBack={goBackToList}
               title={headTitle}
               tag={headTag}
               subline={headSubline}

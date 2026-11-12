@@ -87,6 +87,8 @@ export function RoomBarTitle({ backLabel, onBack, title, tag, subline, peopleLab
     <div data-testid="room-bar" className="flex min-w-0 items-center gap-1 !overflow-visible">
       <IconButton icon="arrow_back" label={backLabel} onClick={onBack} className="-ml-2 shrink-0" data-testid="room-bar-back" />
       <h1 className="m-0 min-w-0 truncate text-ds-body font-semibold text-ds-ink">{title}</h1>
+      {/* a room always has someone in it: no people yet (the room is still loading) → no «0» button */}
+      {peopleCount > 0 ? (
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger render={<Button variant="quiet" title={peopleLabel} data-testid="room-bar-people" iconStart={<Icon name="groups" size={16} />} className="shrink-0 px-2" />}>
           {/* the name the reader hears is «참여자 보기 3»: the fixed label (sr-only) + the number (visible) */}
@@ -112,6 +114,7 @@ export function RoomBarTitle({ backLabel, onBack, title, tag, subline, peopleLab
           {onAdd ? <Button variant="secondary" iconStart={<Icon name="add" size={16} />} onClick={() => { setOpen(false); onAdd(); }} data-testid="room-head-add">{addLabel}</Button> : null}
         </PopoverContent>
       </Popover>
+      ) : null}
     </div>
   );
 }
