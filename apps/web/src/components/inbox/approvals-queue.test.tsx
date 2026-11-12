@@ -1606,3 +1606,108 @@ describe('ApprovalsQueue — 4909 (다) a failed approve / reject is told, not s
     expect(errorLine()?.textContent).toBe(failedText());
   });
 });
+
+// 4909 (라) — the signature dialog (high-risk decision gate) approved with the reason only: the option the person had chosen was written nowhere. The one-tap path puts «선택: …» into the note;
+// the dialog path now does the same (the option line, then the reason). Reject does not carry an option (it rejects the request itself — same rule as the one-tap path).
+describe('ApprovalsQueue — 4909 (라) the signature dialog approval carries the chosen option into the note', () => {
+  function highRiskDecisionGate(overrides: Partial<GateItem> = {}): GateItem {
+    return gate({
+      id: 'g-sig-decision', work_item_id: 'g-sig-decision', gate_type: 'agent_decision_request', status: 'pending', requires_human: true,
+      can_approve: true, risk_grade: 'high', work_item_summary: null,
+      neutral_facts: { question: '유형을 어느 쪽으로?', assumption: 'PO 권고=A', options: ['A) Organization', 'B) Individual', 'C) 보류'] },
+      ...overrides,
+    });
+  }
+  const setText = async (el: HTMLTextAreaElement, value: string) => {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!.call(el, value);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  };
+  async function chooseOptionAndOpenDialog(index: number) {
+    const expandBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.decisionExpand);
+    await act(async () => { expandBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const radios = [...container.querySelectorAll('[role="radio"]')];
+    await act(async () => { radios[index]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const sign = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.sigApproveAndSign);
+    await act(async () => { sign!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const dialog = document.body.querySelector('[data-slot="dialog-content"]');
+    expect(dialog).toBeTruthy();
+    return dialog!;
+  }
+  const postBody = (calls: { url: string; method?: string; body?: string }[]) => JSON.parse(calls.find((c) => c.method === 'POST' && c.url.includes('/transition'))?.body ?? '{}') as { status: string; note: string | null };
+
+  it('⭐chosen option + reason → the note is «선택: B) Individual» on the first line and the reason on the next (reverted → the reason only)', async () => {
+    const calls = mockFetches([highRiskDecisionGate()], []);
+    await mount();
+    const dialog = await chooseOptionAndOpenDialog(1);
+    await act(async () => { (dialog.querySelector('[role="checkbox"]') as HTMLElement).click(); });
+    await setText(dialog.querySelector('textarea') as HTMLTextAreaElement, '근거 확인 완료');
+    const signButton = [...dialog.querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.sigApproveAndSign) as HTMLButtonElement;
+    await act(async () => { signButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const body = postBody(calls);
+    expect(body.status).toBe('approved');
+    expect(body.note).toBe('선택: B) Individual\n근거 확인 완료');
+  });
+
+  it('a different option is the one recorded (not always the first or the last)', async () => {
+    const calls = mockFetches([highRiskDecisionGate({ id: 'g-sig-decision-2', work_item_id: 'g-sig-decision-2' })], []);
+    await mount();
+    const dialog = await chooseOptionAndOpenDialog(2);
+    await act(async () => { (dialog.querySelector('[role="checkbox"]') as HTMLElement).click(); });
+    await setText(dialog.querySelector('textarea') as HTMLTextAreaElement, '보류하기로 함');
+    const signButton = [...dialog.querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.sigApproveAndSign) as HTMLButtonElement;
+    await act(async () => { signButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(postBody(calls).note).toBe('선택: C) 보류\n보류하기로 함');
+  });
+
+  it('a high-risk gate WITHOUT options (not a decision with a choice) still sends the reason alone — nothing is invented', async () => {
+    const calls = mockFetches([highRiskDecisionGate({ id: 'g-sig-nochoice', work_item_id: 'g-sig-nochoice', neutral_facts: { question: '그냥 확인만 부탁' } })], []);
+    await mount();
+    const sign = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.sigApproveAndSign);
+    await act(async () => { sign!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const dialog = document.body.querySelector('[data-slot="dialog-content"]')!;
+    await act(async () => { (dialog.querySelector('[role="checkbox"]') as HTMLElement).click(); });
+    await setText(dialog.querySelector('textarea') as HTMLTextAreaElement, '사유만');
+    const signButton = [...dialog.querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.sigApproveAndSign) as HTMLButtonElement;
+    await act(async () => { signButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(postBody(calls).note).toBe('사유만');
+  });
+
+  it('⭐two decision gates, an option chosen on each: the dialog of the SECOND gate records the SECOND gate\'s option (not the first one chosen anywhere)', async () => {
+    const calls = mockFetches([
+      highRiskDecisionGate({ id: 'g-first', work_item_id: 'g-first' }),
+      highRiskDecisionGate({ id: 'g-second', work_item_id: 'g-second' }),
+    ], []);
+    await mount();
+    for (const expandBtn of [...container.querySelectorAll('button')].filter((b) => b.textContent === koMessages.cage.decisionExpand)) {
+      await act(async () => { expandBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    }
+    const radios = [...container.querySelectorAll('[role="radio"]')];
+    expect(radios).toHaveLength(6);
+    await act(async () => { radios[1]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); }); // first gate: B
+    await act(async () => { radios[5]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); }); // second gate: C
+    const signButtons = [...container.querySelectorAll('button')].filter((b) => b.textContent === koMessages.cage.sigApproveAndSign);
+    await act(async () => { signButtons[1]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const dialog = document.body.querySelector('[data-slot="dialog-content"]')!;
+    await act(async () => { (dialog.querySelector('[role="checkbox"]') as HTMLElement).click(); });
+    await setText(dialog.querySelector('textarea') as HTMLTextAreaElement, '둘째 게이트 사유');
+    const signButton = [...dialog.querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.sigApproveAndSign) as HTMLButtonElement;
+    await act(async () => { signButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const post = calls.find((c) => c.method === 'POST' && c.url.includes('/transition'));
+    expect(post?.url).toBe('/api/gates/g-second/transition');
+    expect((JSON.parse(post?.body ?? '{}') as { note: string }).note).toBe('선택: C) 보류\n둘째 게이트 사유');
+  });
+
+  it('reject from the dialog carries the reason only (it rejects the request itself — no option line)', async () => {
+    const calls = mockFetches([highRiskDecisionGate({ id: 'g-sig-rej', work_item_id: 'g-sig-rej' })], []);
+    await mount();
+    const dialog = await chooseOptionAndOpenDialog(0);
+    await setText(dialog.querySelector('textarea') as HTMLTextAreaElement, '이 요청 자체를 반려');
+    const rejectButton = [...dialog.querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.sigReject) as HTMLButtonElement;
+    await act(async () => { rejectButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const body = postBody(calls);
+    expect(body.status).toBe('rejected');
+    expect(body.note).toBe('이 요청 자체를 반려');
+  });
+});
