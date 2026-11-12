@@ -9,6 +9,9 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import type { AgentStateRow } from '@/lib/agent-state-list';
 
+// story 4912 — the rows open the detail through the router (Enter / double click): a stub router, the push is not under test here
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
+
 const { statesRef } = vi.hoisted(() => ({ statesRef: { current: [] as AgentStateRow[] } }));
 vi.mock('@/hooks/use-agent-states', () => ({ useAgentStates: () => ({ rows: statesRef.current, loaded: true, readAt: Date.now() }) }));
 

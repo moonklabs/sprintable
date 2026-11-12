@@ -8,6 +8,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 
+// story 4912 — the rows open the detail through the router (Enter / double click): a stub router, the push is not under test here
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
+
 vi.mock('@/hooks/use-agent-states', () => ({ useAgentStates: () => ({ rows: [], loaded: true, readAt: Date.now() }) }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

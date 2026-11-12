@@ -4836,6 +4836,8 @@
     "runProfileErrorGeneric": "Couldn't save — please try again",
     "runProfileBulkTitle": "Change run settings",
     "runProfileBulkApply": "Apply to {count, plural, one {# agent} other {# agents}}",
+    "runProfileChosenCount": "{count} selected",
+    "agentRowActionsAria": "Actions for {name}",
     "runProfileBulkOpen": "Change run settings",
     "runProfileChooseAria": "Choose {name}"
   },
