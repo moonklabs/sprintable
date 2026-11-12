@@ -1921,11 +1921,14 @@ describe('ApprovalsQueue — 4909 AC3 the list + detail screen', () => {
     await mount();
     const bar = container.querySelector('[data-testid="gate-detail-actions"]') as HTMLElement | null;
     expect(bar).toBeTruthy(); // reverted → the buttons were just the card's last lines
-    expect(bar!.className).toContain('sticky');
-    expect(bar!.className).toContain('bottom-0');
-    const labels = [...bar!.querySelectorAll('button')].map((b) => b.textContent?.trim());
-    expect(labels).toEqual(expect.arrayContaining([koMessages.cage.sigReject, koMessages.cage.gateDiscussSubmit, koMessages.cage.gateApprove]));
-    expect(container.querySelector('[data-testid="gate-queue-detail"]')!.className).toContain('overflow-y-auto');
+    const tokens = (el: Element) => el.className.split(/\s+/);
+    expect(tokens(bar!)).toEqual(expect.arrayContaining(['sticky', 'bottom-0'])); // whole class tokens — a substring would also match «not-sticky»
+    // DOM order: reject · hold · approve (the approve button is the last one; on a phone CSS puts it on top)
+    expect([...bar!.querySelectorAll('button')].map((b) => b.textContent?.trim())).toEqual([koMessages.cage.sigReject, koMessages.cage.gateDiscussSubmit, koMessages.cage.gateApprove]);
+    // wide: the column is the scroller (lg: only — narrow, the sheet's own body scrolls, so a bare overflow-y-auto here would break the pinning)
+    const detailTokens = tokens(container.querySelector('[data-testid="gate-queue-detail"]')!);
+    expect(detailTokens).toEqual(expect.arrayContaining(['lg:overflow-y-auto', 'lg:max-h-[calc(100svh-6rem)]']));
+    expect(detailTokens).not.toContain('overflow-y-auto');
   });
 
   it('⭐a decision request: the «choose an option first» hint rides IN the pinned bar (never scrolled away from the approve button it explains)', async () => {

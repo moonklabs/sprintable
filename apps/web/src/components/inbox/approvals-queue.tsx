@@ -959,7 +959,7 @@ export function ApprovalsQueue() {
         wide={wide}
         list={<GateQueueList sections={sections} selectedKey={selectedKey} onSelect={onSelectRow} onOpen={openRow} />}
         detail={selectedItem
-          ? <div className="space-y-2 lg:max-h-[calc(100svh-6rem)] lg:overflow-y-auto" data-testid="gate-queue-detail">{renderItemCard(selectedItem, items.indexOf(selectedItem))}</div>
+          ? <div className="focus-inset space-y-2 lg:max-h-[calc(100svh-6rem)] lg:overflow-y-auto" data-testid="gate-queue-detail">{renderItemCard(selectedItem, items.indexOf(selectedItem))}</div>
           : <p className="m-0 rounded-ds-control border border-dashed border-ds-line px-4 py-6 text-center text-ds-small text-ds-ink-3">{t('queueDetailEmpty')}</p>}
         detailLabel={t('queueDetailLabel')}
         sheetLabel={sheetLabel}
