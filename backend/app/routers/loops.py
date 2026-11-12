@@ -75,6 +75,8 @@ _ERROR_STATUS: dict[str, int] = {
     "INVALID_CREATE_STATUS": 400,
     "CROSS_PROJECT_LINK_FORBIDDEN": 400,
     "HYPOTHESIS_NOT_ACTIVE": 422,
+    # story 4911 — 루프 만들 때 같이 만드는 가설 입력이 틀림(예: metric_definition.direction) = 호출자가 고칠 입력 오류
+    "LOOP_HYPOTHESIS_INVALID": 422,
 }
 
 
