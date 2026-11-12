@@ -37,11 +37,11 @@ function stubFetch(roster: Roster | 'fail' | 'never') {
   }));
 }
 
-async function mount(node: React.ReactNode, role: 'owner' | 'admin' | 'member', projects: unknown[] = [PROJECT]) {
+async function mount(node: React.ReactNode, role: 'owner' | 'admin' | 'member', projects: unknown[] = [PROJECT], extraCtx: Record<string, unknown> = {}) {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-        <DashboardCtx.Provider value={{ projectMemberships: projects, currentTeamMemberId: ME, orgId: ORG, orgMemberships: [{ orgId: ORG, role }] } as never}>
+        <DashboardCtx.Provider value={{ projectMemberships: projects, currentTeamMemberId: ME, orgId: ORG, orgMemberships: [{ orgId: ORG, role }], ...extraCtx } as never}>
           {node}
         </DashboardCtx.Provider>
       </NextIntlClientProvider>,
@@ -172,5 +172,13 @@ describe('a new organization with no project yet', () => {
     await mount(<ChatListEmptyState />, 'member', []);
     expect(document.body.textContent).toContain(koMessages.chats.noPeersBodyMember);
     expect(q('chat-no-peers-create-project')).toBeNull();
+  });
+
+  it('⭐a read of the projects that FAILED is not «no project»: no claim, no link to create one — the recruit tab (which tells the failed state apart) is the way', async () => {
+    stubFetch([ME_ROW]);
+    await mount(<ChatListEmptyState />, 'owner', [], { projectMembershipsFailed: true });
+    expect(q('chat-no-peers-create-project')).toBeNull();
+    expect(document.body.textContent).not.toContain(koMessages.chats.noPeersBodyNoProject);
+    expect(q('chat-no-peers-add-agent')).not.toBeNull();
   });
 });

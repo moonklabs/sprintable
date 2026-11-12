@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Button as DsButton } from '@/components/ds/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { isNoProjectAtAll } from '@/app/(authenticated)/chats/no-project';
+import { isNoProjectAtAll, projectsUnknownBecauseFailed } from '@/app/(authenticated)/chats/no-project';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { useFlatHref } from '@/hooks/use-flat-href';
@@ -42,6 +42,8 @@ function useNextStepKind(): 'admin' | 'admin-no-project' | 'member' {
   const ctx = useDashboardContext();
   const role = (ctx.orgMemberships ?? []).find((o) => o.orgId === ctx.orgId)?.role; // a context that does not carry the list (a partial one) is not an admin
   if (role !== 'admin' && role !== 'owner') return 'member';
+  // the person's projects could not be READ: that is not «no project» (they may have some) — no claim about projects, the recruit tab tells the failed state apart
+  if (projectsUnknownBecauseFailed(ctx)) return 'admin';
   return isNoProjectAtAll(ctx) ? 'admin-no-project' : 'admin';
 }
 
