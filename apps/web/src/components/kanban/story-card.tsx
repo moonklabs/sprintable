@@ -42,6 +42,8 @@ function clampToViewport(x: number): number {
 const MENU_ITEM_HEIGHT = 36;
 // 4908 — 첫 클릭 뒤 두 번째 클릭을 기다리는 시간(운영체제 기본 더블클릭 간격과 같은 자리).
 const DOUBLE_CLICK_MS = 220;
+// 4908 — 새로 더한 메뉴 항목(이름 바꾸기 · 담당자)은 날것 단추 태그가 아니라 디자인 Button(ghost)을 메뉴 항목 모양으로 쓴다(가드 verify:no-new-raw-button).
+const MENU_ITEM_BUTTON = 'h-auto min-h-0 min-w-0 w-full justify-start rounded-sm px-3 py-2 text-left text-sm font-normal whitespace-normal hover:bg-muted';
 function clampTopToViewport(y: number, itemCount: number): number {
   return Math.max(VIEWPORT_MARGIN, Math.min(y, window.innerHeight - (itemCount * MENU_ITEM_HEIGHT + 8) - VIEWPORT_MARGIN));
 }
@@ -651,9 +653,9 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
             // 한글 등 입력기 조합 중의 엔터는 «글자 확정 키»다 — 저장으로 읽으면 반쯤 쓴 제목이 저장된다(4831).
             if (isImeComposing(e)) return;
             if (e.key === 'Enter') { e.preventDefault(); finishRename(true); }
-            else if (e.key === 'Escape') { e.preventDefault(); finishRename(false); }
+            else if (e.key === 'Escape') finishRename(false);
           }}
-          className="mt-0.5 h-7 min-h-0 px-2 py-0 text-editorial-ui font-semibold lg:text-editorial-ui"
+          className="mt-0.5 h-7 min-h-0 px-2 py-0 text-base font-semibold lg:text-editorial-ui"
         />
       ) : (
         <div className="mt-0.5 line-clamp-2 text-editorial-ui font-semibold leading-snug text-ds-ink">{titleLead}</div>
@@ -768,13 +770,15 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
             </button>
           )}
           {onRename && (
-            <button
+            <Button
+              type="button"
+              variant="ghost"
               role="menuitem"
               onClick={() => { closeContextMenu(false); startRename(); }}
-              className="w-full rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
+              className={MENU_ITEM_BUTTON}
             >
               {t('renameStory')}
-            </button>
+            </Button>
           )}
           {onChangeStatus && !locked && (
             <div className="relative">
@@ -824,8 +828,10 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
           )}
           {assignViaSubmenu ? (
             <div className="relative">
-              <button
+              <Button
                 ref={assignTriggerRef}
+                type="button"
+                variant="ghost"
                 role="menuitem"
                 aria-haspopup="menu"
                 aria-expanded={assignMenuOpen}
@@ -835,11 +841,11 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                   setStatusMenuOpen(false);
                   setAssignMenuOpen(!assignMenuOpen);
                 }}
-                className="flex w-full items-center justify-between rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
+                className={cn(MENU_ITEM_BUTTON, 'justify-between')}
               >
                 {t('assignMember')}
                 <ChevronRight className="size-3.5" />
-              </button>
+              </Button>
               {assignMenuOpen && assignMenuPos && createPortal(
                 <div
                   ref={assignMenuRef}
@@ -853,16 +859,18 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                   {assigneeChoices.map((m) => {
                     const checked = assigneeList.some((a) => a.id === m.id);
                     return (
-                      <button
+                      <Button
                         key={m.id}
+                        type="button"
+                        variant="ghost"
                         role="menuitemcheckbox"
                         aria-checked={checked}
                         onClick={() => onToggleAssignee?.(story.id, m.id)}
-                        className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
+                        className={cn(MENU_ITEM_BUTTON, 'gap-2')}
                       >
                         <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{m.label}</span>
                         {checked ? <Check className="size-3.5 shrink-0 text-ds-action-text" strokeWidth={3} aria-hidden="true" /> : null}
-                      </button>
+                      </Button>
                     );
                   })}
                 </div>,

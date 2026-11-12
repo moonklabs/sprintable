@@ -59,6 +59,14 @@ describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
     expect(contrast(t['ink-3']!, t[LAYER_TOKEN.rowOthers]!), '속성 칸 안 ink-3').toBeGreaterThanOrEqual(4.5);
   });
 
+  it.each(themes)('⭐%s: 카드 상세 속성 칸(rowOthers) 안의 입력칸 · 후보 칩은 내용 칸 면(panel)을 쓴다 — 속성 칸 → panel ≥ 0.05', (_name, t) => {
+    expect(step(t, 'rowOthers', 'panel'), '속성 칸 → 입력칸 면').toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPanel);
+  });
+
+  it('⭐옛 문제 재현 가드(4908): 속성 칸 위에 LAYER.field(sunk)를 얹으면 라이트에서 면이 안 갈린다(0.012) — 그래서 입력칸 면은 panel이다', () => {
+    expect(step(themes[0]![1], 'rowOthers', 'field')).toBeLessThan(LAYER_MIN_STEP.rowOthersOnPanel);
+  });
+
   it.each(themes)('⭐%s: 열린 카드(4908) — 내용 칸과 ΔL ≥ 0.03, 같은 줄 층 글 줄과 채도차 ≥ 0.01(밝기는 거의 같아 왼쪽 막대와 함께 가른다)', (_name, t) => {
     expect(step(t, 'panel', 'rowSelected')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowSelectedOnPanel);
     expect(chroma(t[LAYER_TOKEN.rowSelected]!) - chroma(t[LAYER_TOKEN.rowOthers]!)).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowSelectedVsOthersChroma);

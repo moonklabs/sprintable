@@ -1988,7 +1988,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                                 type="button"
                                 variant="ghost"
                                 onClick={() => void handleAttachLabel(label.id)}
-                                className="h-auto min-h-0 min-w-0 max-w-full items-center gap-1.5 whitespace-normal rounded-full border border-border bg-background px-2 py-0.5 text-left text-xs font-normal text-foreground [overflow-wrap:anywhere] hover:bg-muted"
+                                className="h-auto min-h-0 min-w-0 max-w-full items-center gap-1.5 whitespace-normal rounded-full border border-ds-line-strong bg-ds-surface px-2 py-0.5 text-left text-xs font-normal text-foreground [overflow-wrap:anywhere] hover:bg-ds-surface-highest"
                               >
                                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: label.color ?? 'var(--muted-foreground)' }} />
                                 {label.name}
@@ -2019,7 +2019,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           // 조합 중의 엔터는 글자 확정 키 — 만들기로 읽으면 반쯤 쓴 이름의 조직 라벨이 실제로 만들어진다(4831 측정 중 발견).
                           onKeyDown={(e) => { if (isImeComposing(e)) return; if (e.key === 'Enter') void handleCreateLabel(); }}
                           placeholder={t('newLabelNamePlaceholder')}
-                          className="h-auto min-w-0 flex-1 bg-background px-2 py-1 lg:text-xs dark:bg-background"
+                          className="h-auto min-w-0 flex-1 bg-ds-surface px-2 py-1 lg:text-xs dark:bg-ds-surface"
                         />
                         <Button
                           type="button"

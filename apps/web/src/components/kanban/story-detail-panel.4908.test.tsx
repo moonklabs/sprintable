@@ -71,6 +71,25 @@ describe('4908 카드 상세 — 본문 / 속성 칸', () => {
     expect(rc).not.toContain(LAYER.panel);
   });
 
+  it('⭐속성 칸 안의 라벨 후보 칩 · 새 라벨 입력칸은 옛 bg-background가 아니라 내용 칸 면(bg-ds-surface)이다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const u = String(url);
+      if (/\/api\/item-labels/.test(u)) return { ok: true, json: async () => [] };
+      if (/\/api\/labels/.test(u)) return { ok: true, json: async () => [{ id: 'l1', name: '후보라벨', color: '#3E7DC2' }] };
+      return { ok: true, json: async () => (/rejected-relations/.test(u) ? [] : { data: [] }) };
+    }));
+    const { rail } = await mount();
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+    const add = [...rail!.querySelectorAll('button')].find((b) => b.textContent === B.addGeneric)!;
+    await act(async () => { add.click(); });
+    const chip = [...rail!.querySelectorAll('button')].find((b) => b.textContent?.includes('후보라벨'))!;
+    expect(chip.className.split(/\s+/)).toContain('bg-ds-surface');
+    expect(chip.className.split(/\s+/)).not.toContain('bg-background');
+    const input = rail!.querySelector<HTMLInputElement>('input')!;
+    expect(input.className.split(/\s+/)).toEqual(expect.arrayContaining(['bg-ds-surface', 'dark:bg-ds-surface']));
+    expect(input.className.split(/\s+/)).not.toContain('bg-background');
+  });
+
   it('⭐지도 위 소형 서랍(overlayPosition)도 내용 칸 층이다 — 옛 bg-background가 아니다', async () => {
     await act(async () => {
       root.render(
