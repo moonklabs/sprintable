@@ -2033,9 +2033,10 @@ describe('proxy — the phone app opening lands by what the server knows, throug
     return Promise.resolve({ ok: false, status: 404 });
   });
   const SHELL = { 'X-Sprintable-Nav': '3', 'Cache-Control': 'no-cache' }; // what the shell puts on every load it starts (lib/initialSource.js)
-  const LANDING = 'https://app.example.com/phone-landing?next=%2Fmoonklabs%2Fsprintable%2Fflow';
+  // story 4906 (F): the landing's `next` is the site root — the person's HOME (the session sends the root on to «오늘»), not the /flow board `/glance` resolves to for a browser
+  const LANDING = 'https://app.example.com/phone-landing?next=%2F';
 
-  it('the shell\'s own /glance (its header) with an organization → the same 307 (no-store) pointed at /phone-landing?next=<the home it resolved> — not the home itself', async () => {
+  it('the shell\'s own /glance (its header) with an organization → the same 307 (no-store) pointed at /phone-landing?next=/ (the person home — NOT the /flow board the address resolves to) — not the home itself', async () => {
     const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
     mockOrg();
     const res = await middleware(makeRequestWithHeaders('/glance', SHELL, { sp_at: token }));
@@ -2070,7 +2071,7 @@ describe('proxy — the phone app opening lands by what the server knows, throug
     }
   });
 
-  it('the landing\'s next IS the resolved home: a person who picked another project lands on THAT project\'s home (the session decides, as before)', async () => {
+  it('the landing\'s next is the site root whichever project the person picked: the SESSION decides the home («오늘» by the person\'s cookie project), the proxy does not name a project board', async () => {
     mockFetch.mockImplementation((url: string) => {
       if (url.includes('/api/v2/me')) return Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) });
       if (url.includes('/api/v2/organizations/org-1')) return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
@@ -2079,7 +2080,7 @@ describe('proxy — the phone app opening lands by what the server knows, throug
     });
     const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
     const res = await middleware(makeRequestWithHeaders('/glance', SHELL, { sp_at: token, sprintable_current_project_id: 'proj-2' }));
-    expect(res.headers.get('location')).toBe('https://app.example.com/phone-landing?next=%2Fmoonklabs%2Fother%2Fflow');
+    expect(res.headers.get('location')).toBe('https://app.example.com/phone-landing?next=%2F');
   });
 
   it('where the home could not be resolved (no project chosen yet → the project picker) the redirect is the usual one — nothing to land on', async () => {

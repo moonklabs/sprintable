@@ -206,11 +206,11 @@ describe('[4714] the landing door — an empty area, one go, once per launch', (
     });
     await flush();
   };
-  const HOME = '/moonklabs/sprintable/flow'; // what the proxy resolved the shell's home to
+  const HOME = '/moonklabs/sprintable/flow'; // any home the page hands the component (since story 4906 the page maps the proxy's `next=/` to «오늘»; the component just goes to what it is given)
   const door = (next: string | null = HOME) => mount(<PhoneLanding chatsHref="/chats" next={next} />);
   const again = async () => { window.sessionStorage.clear(); replace.mockClear(); await act(async () => { root.unmount(); }); root = createRoot(container); };
 
-  it('an agent that runs → the chat list · paired and none runs → /phone-start · not paired → the home the proxy resolved', async () => {
+  it('an agent that runs → the chat list · paired and none runs → /phone-start · not paired → the home it is given', async () => {
     startable(computer(SETUP_A, '윤재의 맥북', true));
     await door();
     expect(replace).toHaveBeenCalledTimes(1);

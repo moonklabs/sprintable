@@ -426,18 +426,20 @@ function redirectToOnboarding(request: NextRequest): NextResponse {
 
 /**
  * story 4714 (AC3 · AC4) — the phone app opens `/glance` (its home address) with the shell's own load header. For a person WITH an organization and a
- * project the home it resolved to is not gone to at once: the same 307 points at `/phone-landing?next=<that home>` instead, which reads what the server knows
+ * project the home it resolved to is not gone to at once: the same 307 points at `/phone-landing?next=/` (the person's home — story 4906) instead, which reads what the server knows
  * (a paired computer · a live session) and sends the person to the chat list · the start screen · that very home. Only the Location changes — the
  * status, `no-store` and the resolve cache cookie the redirect carried stay.
  */
 function viaPhoneLanding(response: NextResponse, request: NextRequest): NextResponse {
-  const home = response.headers.get('location');
-  if (!home) return response;
-  const target = new URL(home, request.nextUrl.origin);
+  if (!response.headers.get('location')) return response;
   const url = request.nextUrl.clone();
   url.pathname = PHONE_LANDING_PATH;
   url.search = '';
-  url.searchParams.set(PHONE_LANDING_NEXT_PARAM, `${target.pathname}${target.search}`);
+  // story 4906 (F · PO 11-12): the home «nothing to open instead» goes to is the person's HOME — the site root, which the session sends on to «오늘» (the Home tab; where the pairing
+  // entrance for a phone that is not paired lives) — NOT the address `/glance` resolved to. `/glance` is the shell's old home name and the web renamed it to `/flow` (story #2224: «glance is one
+  // piece of /flow»), so a phone with nothing to open landed on the empty 일감 board — one tab away from the Home that carries the first-run pairing banner (measured on dev 11-12, 6 taps to
+  // pair instead of 5). The resolve above still ran (an organization and a project exist — the person is not stranded); its address is just not the place the person lands.
+  url.searchParams.set(PHONE_LANDING_NEXT_PARAM, '/');
   response.headers.set('location', url.toString());
   return response;
 }
