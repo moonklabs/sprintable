@@ -31,6 +31,10 @@ interface KanbanListViewProps {
   getStatusLabel?: (canonicalSlug: string) => string | undefined;
   /** 4908 — 상세 패널이 열려 있는 카드(열린 카드 층). */
   selectedStoryId?: string | null;
+  assignableMembers?: KanbanMember[];
+  onToggleAssignee?: (storyId: string, memberId: string) => void;
+  onRenameStory?: (storyId: string, title: string) => void;
+  onKickoffStory?: (storyId: string, result: 'triggered' | 'no_match' | 'conflict' | 'error') => void;
   /** story #4888 — 목록 보기에도 «스토리 추가» 입구 한 자리(같은 동작: 상태 backlog로 만든다). 없으면 입구도 없다(옛 호출부 무변). */
   onCreateStory?: (title: string) => Promise<boolean | void> | boolean | void;
 }
@@ -51,11 +55,15 @@ interface StatusGroupProps {
   projectId?: string;
   getStatusLabel?: KanbanListViewProps['getStatusLabel'];
   selectedStoryId?: string | null;
+  assignableMembers?: KanbanListViewProps['assignableMembers'];
+  onToggleAssignee?: KanbanListViewProps['onToggleAssignee'];
+  onRenameStory?: KanbanListViewProps['onRenameStory'];
+  onKickoffStory?: KanbanListViewProps['onKickoffStory'];
 }
 
 function StatusGroup({
   columnId, label, stories, epicMap, memberMap, onStoryClick, onChangeStatus,
-  executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap, projectId, getStatusLabel, selectedStoryId = null,
+  executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap, projectId, getStatusLabel, selectedStoryId = null, assignableMembers, onToggleAssignee, onRenameStory, onKickoffStory,
 }: StatusGroupProps) {
   const [expanded, setExpanded] = useState(columnId !== 'done');
 
@@ -102,6 +110,10 @@ function StatusGroup({
                   verifiedBy={story.human_verified_by ? memberMap[story.human_verified_by] : undefined}
                   getStatusLabel={getStatusLabel}
                   selected={selectedStoryId === story.id}
+                  assignableMembers={assignableMembers}
+                  onToggleAssignee={onToggleAssignee}
+                  onRename={onRenameStory}
+                  onKickoff={onKickoffStory}
                 />
               </div>
             ))
@@ -114,7 +126,7 @@ function StatusGroup({
 
 export function KanbanListView({
   stories, epicMap, memberMap, onStoryClick, onChangeStatus,
-  executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap, projectId, getStatusLabel, onCreateStory, selectedStoryId = null,
+  executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap, projectId, getStatusLabel, onCreateStory, selectedStoryId = null, assignableMembers, onToggleAssignee, onRenameStory, onKickoffStory,
 }: KanbanListViewProps) {
   const t = useTranslations('board');
 
@@ -141,6 +153,10 @@ export function KanbanListView({
             projectId={projectId}
             getStatusLabel={getStatusLabel}
             selectedStoryId={selectedStoryId}
+            assignableMembers={assignableMembers}
+            onToggleAssignee={onToggleAssignee}
+            onRenameStory={onRenameStory}
+            onKickoffStory={onKickoffStory}
           />
         );
       })}

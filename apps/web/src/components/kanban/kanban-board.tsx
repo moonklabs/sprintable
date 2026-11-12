@@ -1,13 +1,14 @@
 'use client';
 
 import type { ComponentType } from 'react';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { Check, ChevronDown, LayoutGrid, LayoutList, Search, Workflow, Plus } from 'lucide-react';
 import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, DragOverlay, closestCenter } from '@dnd-kit/core';
 import { Button } from '@/components/ui/button';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { MenuSearchInput } from '@/components/ui/menu-search-input';
@@ -393,7 +394,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
   // 이미 로드된(페이지네이션으로 fetch된) 카드만 in-place 패치 — 전체 재fetch를 하지 않으므로
   // 스크롤 위치·컬럼 순서가 흔들리지 않는다(AC3, #2050에서 배운 레이아웃 시프트 축과 동일 원리).
   // 아직 로드 안 된 카드(다른 컬럼 페이지네이션 밖)의 신규 진입은 이 스토리 스코프 밖으로 둔다.
-  const { currentTeamMemberId, orgId, bottomDockBannerSlot } = useDashboardContext();
+  const { currentTeamMemberId, orgId, bottomDockBannerSlot, currentMemberType } = useDashboardContext();
   // story #3287([도메인탈고정·축1 Phase1]) — org별 표시 라벨 오버라이드. canonical
   // status(col.id, drag/전이/색상 전부 이걸로 판정)는 절대 안 바뀐다 — statusLabel()이
   // 있으면 그 문구로 컬럼 헤더 텍스트만 치환하고, 없으면(오버라이드 미설정) 기존
@@ -1235,6 +1236,62 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
     }
   }, [stories, handleStoryClick]);
 
+  // ── 4908 카드 메뉴: 담당자 켜고 끄기 · 제목 바로 바꾸기 — 패널 «담당자» · 제목과 같은 PATCH(/api/stories/{id}), 같은 실패 문구, 열린 패널의 값도 같이 갱신 ──
+  const storiesRef = useRef(stories);
+  storiesRef.current = stories;
+  const applyStoryPatch = useCallback((storyId: string, patch: Partial<KanbanStory>) => {
+    setStories((prev) => prev.map((s) => (s.id === storyId ? { ...s, ...patch } : s)));
+    setSelectedStory((prev) => (prev && prev.id === storyId ? { ...prev, ...patch } : prev));
+  }, []);
+
+  const handleToggleAssignee = useCallback(async (storyId: string, memberId: string) => {
+    const story = storiesRef.current.find((s) => s.id === storyId);
+    if (!story) return;
+    const prevIds = story.assignee_ids && story.assignee_ids.length > 0 ? story.assignee_ids : (story.assignee_id ? [story.assignee_id] : []);
+    const nextIds = prevIds.includes(memberId) ? prevIds.filter((id) => id !== memberId) : [...prevIds, memberId];
+    applyStoryPatch(storyId, normalizeAssigneePatch({ assignee_ids: nextIds }));
+    try {
+      const res = await fetch(`/api/stories/${storyId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignee_ids: nextIds }),
+      });
+      if (!res.ok) throw new Error('assignee patch failed');
+      const json = await res.json().catch(() => null) as { data?: { assignee_ids?: string[] | null } } | null;
+      // 서버 값이 오면 그대로(손으로 assignee_id를 다시 계산하지 않는다 — normalizeAssigneePatch가 한 곳)
+      if (json?.data?.assignee_ids) applyStoryPatch(storyId, normalizeAssigneePatch({ assignee_ids: json.data.assignee_ids }));
+    } catch {
+      applyStoryPatch(storyId, normalizeAssigneePatch({ assignee_ids: prevIds }));
+      addToast({ type: 'error', title: t('assigneeChangeFailed') });
+    }
+  }, [applyStoryPatch, addToast, t]);
+
+  const handleRenameStory = useCallback(async (storyId: string, title: string) => {
+    const story = storiesRef.current.find((s) => s.id === storyId);
+    if (!story || story.title === title) return;
+    const prevTitle = story.title;
+    applyStoryPatch(storyId, { title });
+    try {
+      const res = await fetch(`/api/stories/${storyId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      });
+      if (!res.ok) throw new Error('title patch failed');
+    } catch {
+      applyStoryPatch(storyId, { title: prevTitle });
+      addToast({ type: 'error', title: t('titleSaveFailed') });
+    }
+  }, [applyStoryPatch, addToast, t]);
+
+  // «담당자 ▸» 후보: 시스템 발행 제외 · 중복 없음(패널 «담당자»와 같은 규칙).
+  const assignableMembers = useMemo(
+    () => members.filter((m, i, arr) => arr.findIndex((x) => x.id === m.id) === i && !isSystemPublisher(m.runtime_type)),
+    [members],
+  );
+  // 삭제는 사람 전용 — 패널(HumanOnlyAction)과 같은 규칙. 에이전트 계정에는 메뉴 항목 자체가 없다(BE도 403).
+  const isHuman = currentMemberType === 'human';
+
   const handleDeleteStory = useCallback(async (storyId: string) => {
     const story = stories.find((s) => s.id === storyId);
     // Optimistic update
@@ -1861,6 +1918,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
               projectId={projectId}
               getStatusLabel={domainLabels.statusLabel}
               selectedStoryId={selectedStory?.id ?? null}
+              assignableMembers={assignableMembers}
+              onToggleAssignee={handleToggleAssignee}
+              onRenameStory={handleRenameStory}
+              onKickoffStory={handleKickoff}
               onCreateStory={(title) => createStoryReporting('backlog', title)}
             />
           </div>
@@ -1890,7 +1951,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                     onStoryClick={handleStoryClick}
                     onEditStory={handleEditStory}
                     onChangeStatus={handleChangeStatus}
-                    onDeleteStory={handleDeleteStory}
+                    onDeleteStory={isHuman ? handleDeleteStory : undefined}
+                    assignableMembers={assignableMembers}
+                    onToggleAssignee={handleToggleAssignee}
+                    onRenameStory={handleRenameStory}
                     projectId={projectId}
                     onKickoffStory={handleKickoff}
                     executionMap={executionMap}
@@ -1959,7 +2023,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
                     onEditStory={handleEditStory}
                     onChangeStatus={handleChangeStatus}
                     onAssignStory={handleAssignStory}
-                    onDeleteStory={handleDeleteStory}
+                    onDeleteStory={isHuman ? handleDeleteStory : undefined}
+                    assignableMembers={assignableMembers}
+                    onToggleAssignee={handleToggleAssignee}
+                    onRenameStory={handleRenameStory}
                     projectId={projectId}
                     onKickoffStory={handleKickoff}
                     wipLimit={wipState.limit}

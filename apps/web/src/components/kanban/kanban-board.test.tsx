@@ -2273,3 +2273,123 @@ describe('KanbanBoard — 열린 카드 표시(4908)', () => {
     expect(selected()).toHaveLength(1);
   });
 });
+
+// 4908 셋째 조각 — 카드 메뉴가 직접 하는 일: 담당자 켜고 끄기(패널과 같은 PATCH) · 제목 바로 바꾸기 · 삭제는 사람 전용.
+describe('KanbanBoard — 카드 메뉴 담당자 · 이름 바꾸기 · 삭제(4908)', () => {
+  const members = [{ id: 'm1', name: '안나', type: 'human' }, { id: 'm2', name: '빌드 에이전트', type: 'agent' }];
+  const stories = [{ id: 's1', title: '카드하나', status: 'backlog', priority: 'medium', trust_stage: 'queued', assignee_id: 'm1', assignee_ids: ['m1'] }];
+
+  /** 보드 fetch 위에 PATCH(/api/stories/s1)만 가로채 기록한다. ok=false면 실패를 돌려준다. */
+  function stubPatch(ok = true) {
+    const base = vi.mocked(fetch);
+    const calls: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url === '/api/stories/s1' && init?.method === 'PATCH') {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        calls.push(body);
+        return ok ? { ok: true, json: async () => ({ data: { id: 's1', ...body } }) } : { ok: false, json: async () => ({}) };
+      }
+      return base(url, init);
+    }));
+    return calls;
+  }
+  const menuFor = async (title: string) => {
+    const card = container.querySelector(`[title="${title}"]`) as HTMLElement;
+    await act(async () => { card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 20 })); });
+    return document.body.querySelector<HTMLElement>('[role="menu"]')!;
+  };
+  const item = (scope: ParentNode, text: string) => [...scope.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"]')].find((e) => e.textContent?.includes(text));
+  const press = (el: Element) => act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+
+  it('⭐«담당자 ▸»에서 한 사람을 켜면 패널과 같은 PATCH(assignee_ids 전체 배열)가 나가고 카드 담당이 바로 바뀐다', async () => {
+    stubFetch(stories, members);
+    await mount();
+    const calls = stubPatch();
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    const agent = [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes('빌드 에이전트'))!;
+    await press(agent);
+    expect(calls).toEqual([{ assignee_ids: ['m1', 'm2'] }]);
+    const checked = [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].map((b) => b.getAttribute('aria-checked'));
+    expect(checked).toEqual(['true', 'true']);
+  });
+
+  it('⭐켠 사람을 다시 누르면 빠진다(전체 배열 교체) · 마지막 한 명을 빼면 빈 배열', async () => {
+    stubFetch(stories, members);
+    await mount();
+    const calls = stubPatch();
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    await press([...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes('안나'))!);
+    expect(calls).toEqual([{ assignee_ids: [] }]);
+  });
+
+  it('⭐담당자 PATCH가 실패하면 직전 값으로 되돌리고 패널과 같은 실패 문구를 띄운다', async () => {
+    stubFetch(stories, members);
+    await mount();
+    stubPatch(false);
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    await press([...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes('빌드 에이전트'))!);
+    const checked = [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].map((b) => b.getAttribute('aria-checked'));
+    expect(checked).toEqual(['true', 'false']);
+    expect(document.body.textContent).toContain(koMessages.board.assigneeChangeFailed);
+  });
+
+  it('⭐제목 바로 바꾸기: 메뉴 «이름 바꾸기» → 새 제목 Enter → PATCH {title} · 카드 제목이 바로 바뀐다', async () => {
+    stubFetch(stories, members);
+    await mount();
+    const calls = stubPatch();
+    await press(item(await menuFor('카드하나'), koMessages.board.renameStory)!);
+    const input = container.querySelector<HTMLInputElement>('input[aria-label^="카드하나"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '새 제목');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    expect(calls).toEqual([{ title: '새 제목' }]);
+    expect(container.textContent).toContain('새 제목');
+  });
+
+  it('⭐제목 PATCH가 실패하면 옛 제목으로 되돌리고 패널과 같은 실패 문구를 띄운다', async () => {
+    stubFetch(stories, members);
+    await mount();
+    stubPatch(false);
+    await press(item(await menuFor('카드하나'), koMessages.board.renameStory)!);
+    const input = container.querySelector<HTMLInputElement>('input[aria-label^="카드하나"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '실패할 제목');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).not.toContain('실패할 제목');
+    expect(container.textContent).toContain('카드하나');
+    expect(document.body.textContent).toContain(koMessages.board.titleSaveFailed);
+  });
+
+  it('⭐그 카드의 상세 패널이 열려 있으면 메뉴에서 바꾼 담당자가 패널에도 바로 보인다(카드와 패널이 어긋나지 않는다)', async () => {
+    stubFetch(stories, members);
+    await mount();
+    stubPatch();
+    const card = container.querySelector('[title="카드하나"]') as HTMLElement;
+    await act(async () => { card.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    const dialog = container.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog.textContent).toContain('안나');
+    expect(dialog.textContent).not.toContain('빌드 에이전트');
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    await press([...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes('빌드 에이전트'))!);
+    expect((container.querySelector('[role="dialog"]') as HTMLElement).textContent).toContain('빌드 에이전트');
+  });
+
+  it('⭐삭제는 사람 전용 — human이면 메뉴에 «삭제», agent면 메뉴 항목이 없다(패널과 같은 규칙)', async () => {
+    stubFetch(stories, members);
+    await mount();
+    expect(item(await menuFor('카드하나'), koMessages.board.deleteStory)).toBeTruthy();
+    await act(async () => { root.unmount(); });
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'agent', bottomDockBannerSlot: bannerSlot });
+    stubFetch(stories, members);
+    await mount();
+    expect(item(await menuFor('카드하나'), koMessages.board.deleteStory)).toBeUndefined();
+  });
+});

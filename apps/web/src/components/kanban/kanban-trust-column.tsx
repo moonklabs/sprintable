@@ -85,6 +85,10 @@ interface KanbanTrustColumnProps {
   moreViaFeeder?: boolean;
   /** 4908 — 상세 패널이 열려 있는 카드(열린 카드 층). */
   selectedStoryId?: string | null;
+  /** 4908 — 카드 메뉴 «담당자 ▸» 후보 · 켜고 끄기 · 제목 바로 바꾸기(호출부 소유). */
+  assignableMembers?: KanbanMember[];
+  onToggleAssignee?: (storyId: string, memberId: string) => void;
+  onRenameStory?: (storyId: string, title: string) => void;
 }
 
 /**
@@ -108,7 +112,7 @@ export function KanbanTrustColumn({
   id, label, locked, stories, epicMap, memberMap, onStoryClick, onEditStory, onChangeStatus, onDeleteStory,
   projectId, onKickoffStory, executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap,
   onCreateStory, autoComposeSignal, isDragging = false, getStatusLabel,
-  hasMore = false, loadingMore = false, onLoadMore, moreViaFeeder = false, selectedStoryId = null,
+  hasMore = false, loadingMore = false, onLoadMore, moreViaFeeder = false, selectedStoryId = null, assignableMembers, onToggleAssignee, onRenameStory,
 }: KanbanTrustColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id, disabled: locked });
   const t = useTranslations('board');
@@ -273,6 +277,9 @@ export function KanbanTrustColumn({
               locked={locked}
               getStatusLabel={getStatusLabel}
               selected={selectedStoryId === story.id}
+              assignableMembers={assignableMembers}
+              onToggleAssignee={onToggleAssignee}
+              onRename={onRenameStory}
               showStatus={id === 'queued'}
             />
           ))}

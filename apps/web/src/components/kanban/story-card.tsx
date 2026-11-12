@@ -21,7 +21,9 @@ import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/h
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { deriveTrustStage } from '@/services/verify';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
-import { memberDisplayLabel } from '@/lib/member-display';
+import { memberDisplayLabel, memberRowLabels } from '@/lib/member-display';
+import { Input } from '@/components/ui/input';
+import { isImeComposing } from '@/lib/ime-composition';
 import { LAYER } from '@/components/ds/layers';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
@@ -38,6 +40,8 @@ function clampToViewport(x: number): number {
 
 // 4908 — 세로도 뷰포트 안으로(화면 아래쪽 카드에서 «⋯»를 눌러도 메뉴 항목이 화면 밖으로 안 나간다). 항목 하나 ≈ 36px(py-2 + text-sm) + 메뉴 안쪽 여백 8px.
 const MENU_ITEM_HEIGHT = 36;
+// 4908 — 첫 클릭 뒤 두 번째 클릭을 기다리는 시간(운영체제 기본 더블클릭 간격과 같은 자리).
+const DOUBLE_CLICK_MS = 220;
 function clampTopToViewport(y: number, itemCount: number): number {
   return Math.max(VIEWPORT_MARGIN, Math.min(y, window.innerHeight - (itemCount * MENU_ITEM_HEIGHT + 8) - VIEWPORT_MARGIN));
 }
@@ -135,9 +139,15 @@ interface StoryCardProps {
   selected?: boolean;
   /** 4908 — 상태 글을 머리 줄에 보인다. 열이 곧 상태인 칸에서는 끈다(같은 것을 두 자리에 안 보인다) — 한 열에 상태가 둘 섞이는 «대기» 열(백로그 / 개발 대기)과 목록 보기만 켠다. */
   showStatus?: boolean;
+  /** 4908 — 메뉴 «담당자 ▸»에 올릴 후보(시스템 발행 제외 · 중복 없음). 없으면 예전 «담당자 지정»(onAssign) 항목 그대로. */
+  assignableMembers?: KanbanMember[];
+  /** 4908 — 메뉴 «담당자 ▸»에서 한 사람을 켜고 끈다(패널 «담당자»와 같은 PATCH — 호출부가 소유). */
+  onToggleAssignee?: (storyId: string, memberId: string) => void;
+  /** 4908 — 제목 바로 바꾸기(더블클릭 · F2 · 메뉴 «이름 바꾸기»). 패널 제목 PATCH와 같은 일 — 호출부가 소유. */
+  onRename?: (storyId: string, title: string) => void;
 }
 
-export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [], lineStatus, verifiedBy, locked = false, className, getStatusLabel, selected = false, showStatus = false }: StoryCardProps) {
+export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdit, onChangeStatus, onAssign, onDelete, projectId, onKickoff, lastExecution, blockedBy = [], labels = [], gates = [], lineStatus, verifiedBy, locked = false, className, getStatusLabel, selected = false, showStatus = false, assignableMembers = [], onToggleAssignee, onRename }: StoryCardProps) {
   const t = useTranslations('board');
   const tc = useTranslations('common');
   const locale = useLocale();
@@ -180,11 +190,23 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
   const lineBadgePromoted = !isBlockedForAction
     && (lineBadge === 'handoff_stuck' || lineBadge === 'waiting_human' || lineBadge === 'pending_gate');
   // 메뉴에 항목이 하나도 없는 카드(에픽 스윔레인 — 조작 콜백을 안 받는다)는 «⋯» 버튼도 없다(빈 메뉴가 열리는 것을 막는다).
-  const menuItemCount = (onEdit ? 1 : 0) + (onChangeStatus && !locked ? 1 : 0) + (onAssign ? 1 : 0) + (projectId ? 1 : 0) + (onDelete ? 1 : 0);
+  const assignViaSubmenu = !!onToggleAssignee && assignableMembers.length > 0;
+  const menuItemCount = (onEdit ? 1 : 0) + (onRename ? 1 : 0) + (onChangeStatus && !locked ? 1 : 0) + (assignViaSubmenu || onAssign ? 1 : 0) + (projectId ? 1 : 0) + (onDelete ? 1 : 0);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   // story #2416 — native confirm() 대체.
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
+  const [assignMenuOpen, setAssignMenuOpen] = useState(false);
+  const [assignMenuPos, setAssignMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const assignMenuRef = useRef<HTMLDivElement>(null);
+  const assignTriggerRef = useRef<HTMLButtonElement>(null);
+  const returnFocusToAssignTriggerRef = useRef(false);
+  // 4908 — 제목 바로 바꾸기: 입력칸이 제목 자리를 대신한다. 두 번 저장되지 않게(Enter 뒤 blur) 끝낸 표시를 ref로.
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const renameDoneRef = useRef(false);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [triggering, setTriggering] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const statusMenuRef = useRef<HTMLDivElement>(null);
@@ -195,6 +217,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
   const closeContextMenu = useCallback((returnFocus: boolean) => {
     setContextMenuOpen(false);
     setStatusMenuOpen(false);
+    setAssignMenuOpen(false);
     if (returnFocus) {
       returnFocusOnCloseRef.current = true;
     }
@@ -208,6 +231,10 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     if (returnFocus) {
       returnFocusToStatusTriggerRef.current = true;
     }
+  }, []);
+  const closeAssignSubmenu = useCallback((returnFocus: boolean) => {
+    setAssignMenuOpen(false);
+    if (returnFocus) returnFocusToAssignTriggerRef.current = true;
   }, []);
   // #1942: 두 메뉴 다 position:fixed + 뷰포트 좌표 clamp(clampToViewport)로 연다 — 트리거(카드/
   // 버튼)의 화면 위치와 무관하게 항상 뷰포트 안에 들어온다(카드-상대 anchor는 카드 자체가 뷰포트
@@ -284,7 +311,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       const target = e.target as Node;
       const insideMenu = menuRef.current?.contains(target);
       const insideStatusMenu = statusMenuRef.current?.contains(target);
-      if (!insideMenu && !insideStatusMenu) {
+      const insideAssignMenu = assignMenuRef.current?.contains(target);
+      if (!insideMenu && !insideStatusMenu && !insideAssignMenu) {
         closeContextMenu(false);
       }
     };
@@ -301,7 +329,9 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       if (e.key === 'Escape') {
         // story #3664 CHANGES — 서브메뉴가 열려 있으면 Esc는 서브메뉴만 닫고 상위(트리거
         // 버튼)로 복귀한다. 상위 메뉴 자체는 그대로 열어 둔다(전체 종료가 아님).
-        if (statusMenuOpen) {
+        if (assignMenuOpen) {
+          closeAssignSubmenu(true);
+        } else if (statusMenuOpen) {
           closeStatusSubmenu(true);
         } else {
           closeContextMenu(true);
@@ -311,7 +341,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
 
     document.addEventListener('keydown', handleEscape);
     return () => document.removeEventListener('keydown', handleEscape);
-  }, [contextMenuOpen, statusMenuOpen, closeContextMenu, closeStatusSubmenu]);
+  }, [contextMenuOpen, statusMenuOpen, assignMenuOpen, closeContextMenu, closeStatusSubmenu, closeAssignSubmenu]);
 
   // story #3664 AC2 — 메뉴가 열리면 첫 항목으로 포커스를 옮긴다(ARIA menu 관례: 열림=포커스
   // 진입). 포털이 이 effect보다 먼저 커밋되므로 querySelector 시점엔 이미 DOM에 있다.
@@ -320,6 +350,18 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     const first = menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]');
     first?.focus();
   }, [contextMenuOpen]);
+
+  // 4908 — 담당자 서브메뉴: 열리면 첫 항목으로 · Esc로 닫히면 트리거로 포커스 복귀(상태 서브메뉴와 같은 관례).
+  useEffect(() => {
+    if (!assignMenuOpen) return;
+    assignMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitemcheckbox"]')?.focus();
+  }, [assignMenuOpen]);
+  useEffect(() => {
+    if (assignMenuOpen) return;
+    if (!returnFocusToAssignTriggerRef.current) return;
+    returnFocusToAssignTriggerRef.current = false;
+    assignTriggerRef.current?.focus();
+  }, [assignMenuOpen]);
 
   // story #3664 AC2 — Esc/항목선택으로 닫힐 때만(closeContextMenu(true)) 포커스를 카드로
   // 되돌린다. contextMenuOpen이 false로 커밋된 *다음* effect 타이밍에 실행돼야 포털이 이미
@@ -374,6 +416,44 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     setContextMenuOpen(true);
   }, [menuItemCount]);
 
+  // ── 4908 제목 바로 바꾸기(더블클릭 · F2 · 메뉴 «이름 바꾸기») ─────────────────────────────────────────────
+  const startRename = useCallback(() => {
+    if (!onRename) return;
+    if (openTimerRef.current) { clearTimeout(openTimerRef.current); openTimerRef.current = null; }
+    renameDoneRef.current = false;
+    setDraft(story.title);
+    setEditing(true);
+  }, [onRename, story.title]);
+
+  const finishRename = useCallback((save: boolean) => {
+    if (renameDoneRef.current) return;
+    renameDoneRef.current = true;
+    const next = draft.trim();
+    setEditing(false);
+    if (save && next && next !== story.title) onRename?.(story.id, next);
+    cardRef.current?.focus();
+  }, [draft, story.id, story.title, onRename]);
+
+  useEffect(() => {
+    if (!editing) return;
+    renameInputRef.current?.focus();
+    renameInputRef.current?.select();
+  }, [editing]);
+
+  useEffect(() => () => { if (openTimerRef.current) clearTimeout(openTimerRef.current); }, []);
+
+  // 클릭 = 열기, 더블클릭 = 제목 바꾸기. 한 번 눌러 바로 열면 열린 서랍의 막이 두 번째 클릭을 받아 더블클릭이 카드에 닿지 않는다 —
+  // 마우스로 처음 누를 때만 짧게(DOUBLE_CLICK_MS) 기다렸다 연다. 터치 · 키보드(Enter) · 이미 열린 카드 · 이름 바꾸기 없는 카드는 기다리지 않는다.
+  const handleCardClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (editing) return;
+    const pointerType = (e.nativeEvent as PointerEvent).pointerType;
+    const immediate = !onRename || selected || e.detail === 0 || pointerType === 'touch' || pointerType === 'pen';
+    if (immediate) { onClick(); return; }
+    if (e.detail >= 2) { startRename(); return; }
+    if (openTimerRef.current) clearTimeout(openTimerRef.current);
+    openTimerRef.current = setTimeout(() => { openTimerRef.current = null; onClick(); }, DOUBLE_CLICK_MS);
+  }, [editing, onRename, selected, onClick, startRename]);
+
   // story #3664 AC2 — 키보드로 메뉴 열기(Shift+F10 또는 Menu/ContextMenu 키, OS 표준
   // "컨텍스트 메뉴 열기" 제스처). 우클릭과 동형으로 카드의 바운딩 사각형을 앵커로 쓴다
   // (마우스 좌표가 없으니 카드 자체의 화면 위치를 대신 쓴다 — statusTriggerRef가 서브메뉴를
@@ -388,8 +468,13 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       setContextMenuOpen(true);
       return;
     }
+    if (e.key === 'F2' && onRename && e.target === e.currentTarget) {
+      e.preventDefault();
+      startRename();
+      return;
+    }
     dndOnKeyDown?.(e);
-  }, [dndOnKeyDown, menuItemCount]);
+  }, [dndOnKeyDown, menuItemCount, onRename, startRename]);
 
   // 4908 — 카드 «⋯» 버튼: 카드 안 어디서나 같은 메뉴를 연다(우클릭과 같은 메뉴 · 앵커만 버튼 아래).
   const openMenuFromButton = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
@@ -411,7 +496,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     // 포커스를 옮긴다. stopPropagation으로 "방향키는 서브메뉴 안에서만 순회"를 보장한다.
     e.stopPropagation();
     const container = e.currentTarget;
-    const items = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+    const items = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="menuitem"], [role="menuitemcheckbox"]'));
     if (items.length === 0) return;
     const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
     const direction = e.key === 'ArrowDown' ? 1 : -1;
@@ -462,6 +547,11 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
 
   // 열린 카드(action-soft 면)에서는 흐린 글(ink-3)이 다크에서 4.29:1로 모자란다(layer-rule.test) — 한 단계 진한 ink-2로.
   const metaInk = selected ? 'text-ds-ink-2' : 'text-ds-ink-3';
+  // 메뉴 «담당자 ▸» 후보 — 이름 없는 구성원이 둘 이상이면 id 꼬리로 가른다(패널 «담당자»와 같은 규칙).
+  const assigneeChoices = (() => {
+    const rowLabels = memberRowLabels(assignableMembers, tc, () => '');
+    return assignableMembers.map((m) => ({ id: m.id, label: rowLabels.get(m.id) ?? memberDisplayLabel(m.name, tc) }));
+  })();
   // 메타 앞 묶음이 잘릴 때 전부 보이는 툴팁(카테고리 · 에픽 · 라벨 전부 · 라인 배지 · 실행 결과)과 씰 문구.
   const lineBadgeText = lineBadgePromoted ? '' : lineBadge === 'pending_gate'
     ? (pendingGateType ? `${pendingGateType} ${tCage('gatePending')}` : tCage('gatePending'))
@@ -483,11 +573,12 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     <div
       ref={setCardRefs}
       style={style}
-      {...(locked ? {} : attributes)}
+      // 잠긴(파생) 열 카드는 끌 수 없지만 키보드로는 닿아야 한다(Tab 초점 · Shift+F10 메뉴 · F2 이름 바꾸기 · Enter 열기): 끌기 속성 대신 단추 역할 + tabIndex만.
+      {...(locked ? { role: 'button', tabIndex: 0 } : attributes)}
       {...(locked ? {} : dndListenersWithoutKeyDown)}
-      onClick={onClick}
+      onClick={handleCardClick}
       onContextMenu={handleContextMenu}
-      onKeyDown={locked ? undefined : handleCardKeyDown}
+      onKeyDown={handleCardKeyDown}
       // story #3664 AC1 — 카드=메뉴 트리거. aria-haspopup/expanded로 "이 카드가 여는 메뉴가
       // 있다·지금 열려 있다"를 스크린리더에 알린다(role은 dnd-kit attributes가 이미
       // "button"으로 준다 — 새로 안 얹는다).
@@ -544,7 +635,29 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       </div>
 
       {/* 줄 2 — 제목(2줄까지) */}
-      <div className="mt-0.5 line-clamp-2 text-editorial-ui font-semibold leading-snug text-ds-ink">{titleLead}</div>
+      {editing ? (
+        <Input
+          ref={renameInputRef}
+          value={draft}
+          aria-label={t('renameStoryInput', { title: story.title })}
+          onChange={(e) => setDraft(e.target.value)}
+          // 카드 바깥 div는 끌기(pointerdown) · 키(Space/Enter = 집기) · 클릭(열기)을 소유한다 — 입력 중인 글자가 거기로 새면 안 된다.
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          onBlur={() => finishRename(true)}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            // 한글 등 입력기 조합 중의 엔터는 «글자 확정 키»다 — 저장으로 읽으면 반쯤 쓴 제목이 저장된다(4831).
+            if (isImeComposing(e)) return;
+            if (e.key === 'Enter') { e.preventDefault(); finishRename(true); }
+            else if (e.key === 'Escape') { e.preventDefault(); finishRename(false); }
+          }}
+          className="mt-0.5 h-7 min-h-0 px-2 py-0 text-editorial-ui font-semibold lg:text-editorial-ui"
+        />
+      ) : (
+        <div className="mt-0.5 line-clamp-2 text-editorial-ui font-semibold leading-snug text-ds-ink">{titleLead}</div>
+      )}
 
       {/* 줄 3 — 메타 한 줄(높이 20px 고정): 앞 묶음 = 카테고리 · 에픽 · 라벨(2개까지 + «+N») · 승격 안 된 라인 배지 · 실행 결과 / 뒤 묶음 = 포인트 · 씰 · 담당.
           좁은 칸(열 최소 240 · 폰 390)에서 다 못 담으면 줄을 늘리지 않고 앞 묶음의 뒤쪽(낮은 순위)이 잘리고, 잘린 것 전부는 앞 묶음의 툴팁에 있다(DOM에는 다 있어 스크린리더는 다 읽는다). 뒤 묶음(누가 · 얼마)은 안 줄어든다. */}
@@ -654,6 +767,15 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
               {t('editStory')}
             </button>
           )}
+          {onRename && (
+            <button
+              role="menuitem"
+              onClick={() => { closeContextMenu(false); startRename(); }}
+              className="w-full rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
+            >
+              {t('renameStory')}
+            </button>
+          )}
           {onChangeStatus && !locked && (
             <div className="relative">
               <button
@@ -666,6 +788,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                   if (rect) {
                     setStatusMenuPos({ top: rect.top, left: clampToViewport(rect.right + 4) });
                   }
+                  setAssignMenuOpen(false);
                   setStatusMenuOpen(!statusMenuOpen);
                 }}
                 className="flex w-full items-center justify-between rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
@@ -699,7 +822,54 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
               )}
             </div>
           )}
-          {onAssign && (
+          {assignViaSubmenu ? (
+            <div className="relative">
+              <button
+                ref={assignTriggerRef}
+                role="menuitem"
+                aria-haspopup="menu"
+                aria-expanded={assignMenuOpen}
+                onClick={() => {
+                  const rect = assignTriggerRef.current?.getBoundingClientRect();
+                  if (rect) setAssignMenuPos({ top: clampTopToViewport(rect.top, Math.min(assignableMembers.length, 8)), left: clampToViewport(rect.right + 4) });
+                  setStatusMenuOpen(false);
+                  setAssignMenuOpen(!assignMenuOpen);
+                }}
+                className="flex w-full items-center justify-between rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
+              >
+                {t('assignMember')}
+                <ChevronRight className="size-3.5" />
+              </button>
+              {assignMenuOpen && assignMenuPos && createPortal(
+                <div
+                  ref={assignMenuRef}
+                  role="menu"
+                  tabIndex={-1}
+                  onKeyDown={handleMenuKeyDown}
+                  style={{ position: 'fixed', top: assignMenuPos.top, left: assignMenuPos.left, width: MENU_WIDTH }}
+                  className="z-50 max-h-72 overflow-y-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-[var(--elev-overlay)]"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {assigneeChoices.map((m) => {
+                    const checked = assigneeList.some((a) => a.id === m.id);
+                    return (
+                      <button
+                        key={m.id}
+                        role="menuitemcheckbox"
+                        aria-checked={checked}
+                        onClick={() => onToggleAssignee?.(story.id, m.id)}
+                        className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
+                      >
+                        <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{m.label}</span>
+                        {checked ? <Check className="size-3.5 shrink-0 text-ds-action-text" strokeWidth={3} aria-hidden="true" /> : null}
+                      </button>
+                    );
+                  })}
+                </div>,
+                document.body,
+              )}
+            </div>
+          ) : onAssign ? (
             <button
               role="menuitem"
               onClick={handleAssign}
@@ -707,7 +877,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
             >
               {t('assignMember')}
             </button>
-          )}
+          ) : null}
           {projectId && (
             // 4908 — kickoff는 예전엔 카드 호버 로켓이었다. 카드 줄 수를 줄이며 «⋯»/우클릭 메뉴로 옮겼다(같은 호출 · 같은 결과 알림).
             <button

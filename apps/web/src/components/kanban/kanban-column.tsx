@@ -75,6 +75,10 @@ interface KanbanColumnProps {
   getStatusLabel?: (canonicalSlug: string) => string | undefined;
   /** 4908 — 상세 패널이 열려 있는 카드(열린 카드 층). */
   selectedStoryId?: string | null;
+  /** 4908 — 카드 메뉴 «담당자 ▸» 후보 · 켜고 끄기 · 제목 바로 바꾸기(호출부 소유). */
+  assignableMembers?: KanbanMember[];
+  onToggleAssignee?: (storyId: string, memberId: string) => void;
+  onRenameStory?: (storyId: string, title: string) => void;
 }
 
 export function KanbanColumn({
@@ -85,7 +89,7 @@ export function KanbanColumn({
   onCreateStory, projectId, onKickoffStory, executionMap, blockedByMap, storyLabelsMap, storyGatesMap, storyLineMap,
   totalCount, hasMore, loadingMore, onLoadMore,
   collapsed, onToggleCollapse,
-  autoComposeSignal, getStatusLabel, selectedStoryId = null,
+  autoComposeSignal, getStatusLabel, selectedStoryId = null, assignableMembers, onToggleAssignee, onRenameStory,
 }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
   const t = useTranslations('board');
@@ -341,6 +345,9 @@ export function KanbanColumn({
                   verifiedBy={story.human_verified_by ? memberMap[story.human_verified_by] : undefined}
                   getStatusLabel={getStatusLabel}
                   selected={selectedStoryId === story.id}
+                  assignableMembers={assignableMembers}
+                  onToggleAssignee={onToggleAssignee}
+                  onRename={onRenameStory}
                 />
               ))}
             </div>
