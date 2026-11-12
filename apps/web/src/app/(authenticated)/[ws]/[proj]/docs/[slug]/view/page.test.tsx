@@ -192,8 +192,6 @@ describe('DocViewPage — 빵부스러기 좁은 폭(4356)', () => {
 });
 
 describe('DocViewPage — 상세 열 읽기 화면이 ds 부품을 입는다 (4892)', () => {
-  const editLink = () => [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('고치기')) as HTMLAnchorElement | undefined;
-
   it('⭐«고치기»는 «읽기 | 고치기» 한 쌍의 한쪽이고 편집기 주소로 간다 — 읽기 쪽이 지금 쪽(aria-current)', async () => {
     await mount();
     const group = container.querySelector('[data-slot="doc-mode-switch"]')!;
@@ -286,7 +284,7 @@ describe('DocViewPage — 상세 열 읽기 화면이 ds 부품을 입는다 (48
   it('오른쪽 레일의 선도 ds 선이다', async () => {
     await mount();
     const aside = container.querySelector('aside')!;
-    expect(aside.className.split(/\s+/)).toContain('lg:border-ds-line');
+    expect(aside.className.split(/\s+/)).toContain('@min-[50rem]:border-ds-line');
   });
 });
 
@@ -341,33 +339,75 @@ describe('DocViewPage — 에이전트가 ⋯ 메뉴를 열면 (4892)', () => {
   });
 });
 
-// story 4892 (UI-9 문서 상세 열) — 오른쪽 열 = 상태 · 목차 · 이력 패널(시안의 스레드 열처럼 본문 옆 상시 열). 상태 머리는 DOM에 한 번, 자리는 CSS 격자가 정한다(lg = 오른쪽 열 맨 위 · 그 아래 = 본문 위) —
+// story 4892 (UI-9 문서 상세 열) — 오른쪽 열 = 상태 · 목차 · 이력 패널(시안의 스레드 열처럼 본문 옆 상시 열). 상태 머리는 DOM에 한 번, 자리는 CSS 격자가 정한다(읽기 칸 800px 이상 = 오른쪽 열 맨 위 · 그 아래 = 본문 위) —
 // 미디어 쿼리 상태로 옮기면 첫 그림이 아래 폭으로 그려졌다 옮겨져 깜빡이고 이력 요청이 두 번 나갔다(codex).
 describe('DocViewPage — 상태 머리 자리(CSS 격자 · 한 번만) · 목록 접힘 여백 (4892)', () => {
   const cls = (el: Element | null) => (el?.getAttribute('class') ?? '').split(/\s+/);
 
-  it('⭐상태 머리는 DOM에 정확히 하나 · 본문(article) 앞에 서고(그 아래 폭에서 본문 위) lg에서는 오른쪽 열 1행에 앉는다', async () => {
+  it('⭐상태 머리는 DOM에 정확히 하나 · 본문(article) 앞에 서고(그 아래 폭에서 본문 위) 읽기 칸이 넉넉하면 오른쪽 열 1행에 앉는다', async () => {
     await mount();
     expect(container.querySelectorAll('[data-testid="status-header"]').length).toBe(1);
     const block = container.querySelector('[data-testid="docs-reader-status-block"]')!;
     const article = container.querySelector('article')!;
     expect(block.contains(container.querySelector('[data-testid="status-header"]'))).toBe(true);
     expect(block.compareDocumentPosition(article) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();   // DOM 순서: 상태 머리 → 본문
-    expect(cls(block)).toEqual(expect.arrayContaining(['lg:col-start-2', 'lg:row-start-1', 'lg:border-l', 'lg:border-ds-line']));
+    expect(cls(block)).toEqual(expect.arrayContaining(['@min-[50rem]:col-start-2', '@min-[50rem]:row-start-1', '@min-[50rem]:border-l', '@min-[50rem]:border-ds-line']));
     expect(article.contains(container.querySelector('[data-testid="status-header"]'))).toBe(false);
   });
 
-  it('⭐lg 격자: 본문은 1열(2행에 걸침) · 오른쪽 열은 «상태(1행) → 목차 · 이력(2행)» — 같은 왼쪽 선이 이어진다', async () => {
+  it('⭐읽기 칸이 넉넉할 때(2단) 격자: 본문은 1열(2행에 걸침) · 오른쪽 열은 «상태(1행) → 목차 · 이력(2행)» — 같은 왼쪽 선이 이어진다', async () => {
     await mount();
     const article = container.querySelector('article')!;
-    expect(cls(article)).toEqual(expect.arrayContaining(['lg:col-start-1', 'lg:row-span-2', 'lg:row-start-1']));
+    expect(cls(article)).toEqual(expect.arrayContaining(['@min-[50rem]:col-start-1', '@min-[50rem]:row-span-2', '@min-[50rem]:row-start-1']));
     const rail = container.querySelector('[data-testid="docs-reader-rail"]')!;
-    expect(cls(rail)).toEqual(expect.arrayContaining(['lg:col-start-2', 'lg:row-start-2', 'lg:border-l', 'lg:border-ds-line']));
+    expect(cls(rail)).toEqual(expect.arrayContaining(['@min-[50rem]:col-start-2', '@min-[50rem]:row-start-2', '@min-[50rem]:border-l', '@min-[50rem]:border-ds-line']));
     expect(rail.querySelector('[data-testid="evidence-rail"]')).not.toBeNull();
     const grid = article.parentElement!;
-    expect(cls(grid)).toEqual(expect.arrayContaining(['lg:grid-cols-[minmax(0,1fr)_316px]', 'lg:gap-y-0']));    // 행 사이 틈 0 → 선이 끊기지 않음
+    expect(cls(grid)).toEqual(expect.arrayContaining(['@min-[50rem]:grid-cols-[minmax(0,1fr)_316px]', '@min-[50rem]:gap-y-0']));    // 행 사이 틈 0 → 선이 끊기지 않음
     // dev 실측(5621 직후): 본문이 두 행에 걸치면 auto 두 행이 남는 높이를 나눠 받아 상태 머리 행이 수천 px로 늘고 목차 · 이력(aside)이 y=2400에서 시작했다 → 1행은 내용 높이 · 2행이 나머지.
-    expect(cls(grid)).toContain('lg:grid-rows-[auto_1fr]');
+    expect(cls(grid)).toContain('@min-[50rem]:grid-rows-[auto_1fr]');
+  });
+
+
+  // story 4892 (맥 앱 기본 창 폭 1100에서 읽기 본문 132px) — dev 실측(Electron 1100×768, 목록 열 열림): 읽기 칸 552px 안에 오른쪽 열(316) + 틈 + 가장자리가 먼저 서서 본문이 132px(한 줄 약 10자)였다.
+  // 이제 2단은 «뷰포트 lg»가 아니라 «읽기 칸 자체 폭»(컨테이너 쿼리)이 정한다 — 좁은 칸은 1단(본문 = 칸 − 가장자리 32).
+  it('⭐2단 배치는 읽기 칸 폭(컨테이너 쿼리)을 보고, 칸 552(1100 창 · 목록 열 열림)에서는 본문이 480 이상인 1단이다', async () => {
+    await mount();
+    const root = container.querySelector('article')!.parentElement!.parentElement!;
+    expect(cls(root)).toContain('@container');                                   // 읽기 칸(스크롤 영역)이 컨테이너
+    const grid = container.querySelector('article')!.parentElement!;
+    const names = cls(grid);
+    const gate = names.find((c) => c.startsWith('@min-[') && c.includes(':grid-cols-'))!;
+    const m = /^@min-\[([\d.]+)(rem|px)\]:/.exec(gate)!;
+    const gatePx = Number(m[1]) * (m[2] === 'rem' ? 16 : 1);
+    // 2단 클래스는 전부 같은 컨테이너 문턱 하나로만 걸린다 · 뷰포트 lg: 문턱으로 오른쪽 열을 세우지 않는다
+    for (const el of [grid, container.querySelector('article'), container.querySelector('[data-testid="docs-reader-status-block"]'), container.querySelector('[data-testid="docs-reader-rail"]')]) {
+      expect(cls(el).some((c) => /^lg:(col-|row-|grid-cols|grid-rows|border-l|pl-6|pb-6|gap-y-0|px-8)/.test(c))).toBe(false);
+      expect(cls(el).filter((c) => c.startsWith('@min-[')).every((c) => c.startsWith(`@min-[${m[1]}${m[2]}]:`))).toBe(true);
+    }
+    const RAIL = 316, GAP = 32, EDGES_2COL = 64, EDGES_1COL = 32, MIN_BODY_2COL = 384, TARGET_1100 = 480, COLUMN_AT_1100_LIST_OPEN = 552, COLUMN_AT_1440_LIST_OPEN = 820;
+    expect(gatePx - EDGES_2COL - GAP - RAIL).toBeGreaterThanOrEqual(MIN_BODY_2COL);        // 2단이 서는 가장 좁은 칸에서도 본문이 384 이상
+    expect(COLUMN_AT_1100_LIST_OPEN).toBeLessThan(gatePx);                               // 1100 · 목록 열 열림(칸 552)은 1단
+    expect(COLUMN_AT_1100_LIST_OPEN - EDGES_1COL).toBeGreaterThanOrEqual(TARGET_1100);      // 그 칸의 본문 ≥ 480
+    expect(names).toEqual(expect.arrayContaining(['px-4', '@min-[50rem]:px-8']));          // 1단은 좁은 가장자리(16) — 넓은 가장자리(32)는 2단에서만
+    expect(COLUMN_AT_1440_LIST_OPEN).toBeGreaterThanOrEqual(gatePx);                     // 1440 · 목록 열 열림(칸 820)은 받아 둔 2단(오른쪽 열 y 279 · 목차 첫 화면) 그대로
+  });
+
+  // container-type을 건 칸은 그 안의 position: fixed 자손의 «기준 상자»가 되어 잘린다(5635: 머리줄 @container 안 알림창이 47px로 잘렸던 것).
+  // 읽기 칸(스크롤 영역) 안에 그려지는 컴포넌트에 포털 안 된 fixed가 0임을 소스로 못박는다 — 팝업 · 대화창은 body 포털(ds Dialog / Menu · anchored-popover) · sticky(미니 목차)는 기준 상자가 안 바뀐다.
+  it('⭐읽기 칸 안에 포털 안 된 position: fixed 자손이 0이다(컨테이너가 기준 상자가 되어 잘리는 함정 방지)', async () => {
+    const files: Record<string, string> = {
+      'view/page.tsx': (await import('./page.tsx?raw')).default as string,
+      'doc-content-renderer.tsx': (await import('@/components/docs/doc-content-renderer.tsx?raw')).default as string,
+      'doc-mini-toc.tsx': (await import('@/components/docs/doc-mini-toc.tsx?raw')).default as string,
+      'doc-status-rail.tsx': (await import('@/components/docs/doc-status-rail.tsx?raw')).default as string,
+      'entity-backlinks-section.tsx': (await import('@/components/shared/entity-backlinks-section.tsx?raw')).default as string,
+    };
+    for (const [name, src] of Object.entries(files)) {
+      const code = src.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*|\{\/\*)/.test(l)).join('\n');
+      expect(code, `${name} 에 fixed 클래스`).not.toMatch(/['"`\s]fixed['"`\s]/);
+      expect(code, `${name} 에 position:fixed 스타일`).not.toMatch(/position:\s*['"]?fixed/);
+    }
   });
 
   it('미디어 쿼리 상태로 옮기지 않는다(첫 그림 깜빡임 · 이력 요청 두 번 방지)', async () => {
