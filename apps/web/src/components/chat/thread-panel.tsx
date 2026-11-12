@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { useTranslations } from 'next-intl';
 import { IconButton } from '@/components/ds/icon-button';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
@@ -16,7 +16,7 @@ import type { EventDefinitionSummary } from '@/lib/block-template';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { useToast } from '@/components/ui/toast';
-import { announceChatMessageDeleted, onChatMessageDeleted, withMessageTombstoned } from '@/lib/chat-message-deleted';
+import { announceChatMessageDeleted, onChatMessageDeleted, tombstoneKnownDeleted, withMessageTombstoned } from '@/lib/chat-message-deleted';
 import { actorRowLabels } from '@/lib/member-display';
 import { LAYER } from '@/components/ds/layers';
 
@@ -202,6 +202,8 @@ export function ThreadPanel({
 
   // story 4903 AC3 — ANOTHER person deleted a reply of this thread: the server's frame reaches this open panel (see the room's own listener) and the reply becomes the tombstone at once.
   // (The thread's original is the room's copy: the room tombstones it and hands the panel the new copy.)
+  // a replies fetch that was already in flight (or the replies a closed panel kept while it was closed) must not bring the text back: re-applied after every change, before paint
+  useLayoutEffect(() => { setMessages((prev) => tombstoneKnownDeleted(prev, conversationId)); }, [messages, conversationId]);
   useEffect(() => onChatMessageDeleted((d) => {
     if (d.conversationId !== conversationId || !d.messageId) return;
     setMessages((prev) => withMessageTombstoned(prev, d.messageId!, d.deletedAt));

@@ -43,6 +43,29 @@ async function mount(convs: object[]) {
 }
 const rowOf = (title: string) => [...container.querySelectorAll('[data-testid="chat-list-rooms"] button')].find((b) => b.textContent?.includes(title)) as HTMLElement;
 
+describe('[SID:4903] ChatListView — a delete frame that arrives while the list fetch is in flight', () => {
+  it('⭐ the room list resolves AFTER the frame: the late response does not bring the preview back', async () => {
+    const { forgetKnownDeletedForTests } = await import('@/lib/chat-message-deleted');
+    forgetKnownDeletedForTests();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const convs = [conv('c1', '지운 글 본문', T), conv('c2', '다른 방 글', T)];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/api/conversations?')) { await gate; return { ok: true, json: async () => ({ data: convs, total: convs.length }) }; }
+      return { ok: false, status: 404, json: async () => null };
+    }));
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><ChatListView projectId="proj-current" currentTeamMemberId="me-1" /></NextIntlClientProvider>); });
+    await act(async () => { announceChatMessageDeleted({ conversationId: 'c1', createdAt: T, messageId: 'm1', threadId: null, deletedAt: '2026-10-13T09:05:00Z' }); });
+    release();
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    expect(rowOf('방 c1').textContent).not.toContain('지운 글 본문'); // reverted (the list only blanks what it already holds) → the late response puts the preview back
+    expect(rowOf('방 c1').textContent).toContain(koMessages.chats.noMessages);
+    expect(rowOf('방 c2').textContent).toContain('다른 방 글');
+    forgetKnownDeletedForTests();
+  });
+});
+
 describe('[SID:4887] ChatListView — a deleted latest message does not stay in the list preview', () => {
   it('⭐ the room whose LATEST message was deleted shows «메시지 없음» at once (as the server\'s refetch would) — another room, and an older message of the same room, keep their text', async () => {
     await mount([conv('c1', '지운 글 본문', T), conv('c2', '다른 방 글', T), conv('c3', '이 방의 최신 글', '2026-10-13T10:00:00Z')]);

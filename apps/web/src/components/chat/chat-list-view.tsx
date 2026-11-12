@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { MessageSquare, Users } from 'lucide-react';
@@ -34,7 +34,7 @@ import { useOrgDomainLabels, type OrgDomainLabels } from '@/hooks/use-org-domain
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { DeviceChip } from '@/components/desktop/device-chip';
-import { isoToMicros, onChatMessageDeleted, sameInstant } from '@/lib/chat-message-deleted';
+import { blankKnownDeletedPreviews, isoToMicros, onChatMessageDeleted, sameInstant } from '@/lib/chat-message-deleted';
 
 interface Participant {
   member_id: string;
@@ -736,6 +736,13 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     setConversations(blank);
     setAllConversations(blank);
   }), []);
+
+  // story 4903 AC3 — a list response that was already in flight when the delete frame arrived must not bring the preview back: what is known to be deleted stays blank, re-applied after every change
+  // of the lists (before paint; the same list comes back when nothing changes, so it never loops)
+  useLayoutEffect(() => {
+    setConversations(blankKnownDeletedPreviews);
+    setAllConversations(blankKnownDeletedPreviews);
+  }, [conversations, allConversations]);
 
   const handleConversationRead = useCallback((payload: SseConversationReadPayload) => {
     const applyRead = (list: ConversationItem[]) =>

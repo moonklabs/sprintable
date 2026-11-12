@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { throwForFailedResponse } from '@/lib/chat-attachment-error';
 import { LAYER } from '@/components/ds/layers';
 import { ChevronLeft, RefreshCw, UserX } from 'lucide-react';
@@ -38,7 +38,7 @@ import { CitationComposeBar, type CitationSaveState } from './citation-compose-b
 import { StoryPickerDialog } from '@/components/canvas/story-picker-dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useToast } from '@/components/ui/toast';
-import { announceChatMessageDeleted, onChatMessageDeleted, withMessageTombstoned } from '@/lib/chat-message-deleted';
+import { announceChatMessageDeleted, knownDeletedAt, onChatMessageDeleted, tombstoneKnownDeleted, withMessageTombstoned } from '@/lib/chat-message-deleted';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { actorRowLabels } from '@/lib/member-display';
@@ -645,6 +645,16 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // story 4903 AC3 — ANOTHER person deleted a message of this room: the server's frame (`useChatMessageDeletedSse`, mounted by the chats layout) reaches this open room as the same
   // «message deleted» announcement — with the message's id (a delete made on THIS screen announces none: it has already tombstoned its own copies). The row turns into the tombstone
   // at once, and so does the open thread's COPY of its original.
+  // …and a fetch that was already in flight when the frame arrived (the first load · an older page · a reconnect's backfill) must not bring the text back: after every change of the list — before it
+  // is painted — what is known to be deleted is a tombstone again. The same list comes back when nothing changes, so this never loops.
+  useLayoutEffect(() => {
+    setMessages((prev) => tombstoneKnownDeleted(prev, threadId));
+    setActiveThread((prev) => {
+      if (!prev || prev.deleted_at) return prev;
+      const at = knownDeletedAt(threadId, prev.id);
+      return at === undefined ? prev : { ...prev, content: '', deleted_at: at ?? new Date().toISOString() };
+    });
+  }, [messages, activeThread, threadId]);
   useEffect(() => onChatMessageDeleted((d) => {
     if (d.conversationId !== threadId || !d.messageId) return;
     setMessages((prev) => withMessageTombstoned(prev, d.messageId!, d.deletedAt));

@@ -8,7 +8,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { ThreadPanel } from './thread-panel';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import koMessages from '../../../messages/ko.json';
-import { announceChatMessageDeleted } from '@/lib/chat-message-deleted';
+import { announceChatMessageDeleted, forgetKnownDeletedForTests } from '@/lib/chat-message-deleted';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -30,6 +30,7 @@ const REPLIES = [
 ] as ChatMessage[];
 
 beforeEach(async () => {
+  forgetKnownDeletedForTests(); // what an earlier test deleted is remembered by the module: each test starts clean
   Element.prototype.scrollIntoView = vi.fn();
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   vi.stubGlobal('fetch', vi.fn(async (url: string) => (String(url).includes('thread_id=') ? { ok: true, status: 200, json: async () => ({ data: REPLIES }) } : { ok: true, status: 200, json: async () => ({ data: [] }) })));

@@ -51,8 +51,71 @@ export function withMessageTombstoned<T extends { id: string; content?: string; 
 
 export function announceChatMessageDeleted(detail: ChatMessageDeletedDetail): void {
   if (typeof window === 'undefined') return;
+  if (detail.messageId) rememberDeleted(detail);
   window.dispatchEvent(new CustomEvent<ChatMessageDeletedDetail>(CHAT_MESSAGE_DELETED_EVENT, { detail }));
 }
+
+/**
+ * story 4903 AC3 — what has been deleted lately (from the server's frames), kept so that a fetch which was already IN FLIGHT when the frame arrived cannot bring the text back:
+ * the room, its thread panel and the list re-apply it after every state change (`tombstoneKnownDeleted` · `blankKnownDeletedPreviews`). Bounded (the newest 500) and it expires
+ * (30 minutes — a response older than that is not in flight any more).
+ */
+interface KnownDeleted { conversationId: string; messageId: string; createdAt: string; deletedAt: string | null; at: number }
+const KNOWN_DELETED_MAX = 500;
+const KNOWN_DELETED_TTL_MS = 30 * 60 * 1000;
+const knownDeleted = new Map<string, KnownDeleted>();
+
+function rememberDeleted(d: ChatMessageDeletedDetail): void {
+  if (!d.messageId) return;
+  knownDeleted.delete(d.messageId); // re-insert: the map keeps insertion order, the oldest is dropped first
+  knownDeleted.set(d.messageId, { conversationId: d.conversationId, messageId: d.messageId, createdAt: d.createdAt, deletedAt: d.deletedAt ?? null, at: Date.now() });
+  while (knownDeleted.size > KNOWN_DELETED_MAX) knownDeleted.delete(knownDeleted.keys().next().value as string);
+}
+
+function liveKnownDeleted(): KnownDeleted[] {
+  if (knownDeleted.size === 0) return [];
+  const cutoff = Date.now() - KNOWN_DELETED_TTL_MS;
+  const out: KnownDeleted[] = [];
+  for (const [id, k] of knownDeleted) {
+    if (k.at < cutoff) knownDeleted.delete(id);
+    else out.push(k);
+  }
+  return out;
+}
+
+/** the deletion time when this message of this room is known to be deleted (from a server frame), else null */
+export function knownDeletedAt(conversationId: string, messageId: string): string | null | undefined {
+  const k = knownDeleted.get(messageId);
+  if (!k || k.conversationId !== conversationId || k.at < Date.now() - KNOWN_DELETED_TTL_MS) return undefined;
+  return k.deletedAt;
+}
+
+/** the list with every message this room is known to have had deleted turned into a tombstone — the SAME list when there is nothing to change */
+export function tombstoneKnownDeleted<T extends { id: string; content?: string; deleted_at?: string | null }>(list: T[], conversationId: string): T[] {
+  let next = list;
+  for (const k of liveKnownDeleted()) {
+    if (k.conversationId === conversationId) next = withMessageTombstoned(next, k.messageId, k.deletedAt);
+  }
+  return next;
+}
+
+/** the room rows whose latest-message preview is a message known to be deleted, blanked as the server's refetch would — the SAME list when there is nothing to change */
+export function blankKnownDeletedPreviews<C extends { id: string; latest_message?: { content: string; created_at: string; has_attachments?: boolean; event?: unknown } | null }>(rows: C[]): C[] {
+  const known = liveKnownDeleted();
+  if (known.length === 0) return rows;
+  let changed = false;
+  const next = rows.map((c) => {
+    const latest = c.latest_message;
+    if (!latest || (latest.content === '' && !latest.has_attachments && !latest.event)) return c; // already blank
+    if (!known.some((k) => k.conversationId === c.id && sameInstant(latest.created_at, k.createdAt))) return c;
+    changed = true;
+    return { ...c, latest_message: { content: '', created_at: latest.created_at, event: null } }; // as the server's refetch gives it: no words, no attachment flag, no event card
+  });
+  return changed ? next : rows;
+}
+
+/** test-only: forget everything */
+export function forgetKnownDeletedForTests(): void { knownDeleted.clear(); }
 
 /** subscribe; returns the unsubscribe */
 export function onChatMessageDeleted(handler: (detail: ChatMessageDeletedDetail) => void): () => void {
