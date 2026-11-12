@@ -77,3 +77,20 @@ describe('4908 카드 상세 — 본문 / 속성 칸', () => {
     for (const needle of [koMessages.board.assignee, '설명 본문', '완료 조건 본문']) expect(all, needle).toContain(needle);
   });
 });
+
+// PO 11-12 — 카드의 씰이 아이콘 + 툴팁이 됐다. 호버 없는 폰에서 «누가 · 언제 검증»은 카드를 눌러 연 상세에서 글로 보여야 한다.
+describe('4908 카드 상세 — 검증자 · 검증 시각은 글로 보인다(카드 씰은 아이콘뿐)', () => {
+  it('⭐human_verified → 상세 머리에 «{이름} 검증 · {언제}»가 글로 있다', async () => {
+    const verified = { ...story, status: 'done', human_verified: true, human_verified_by: 'h1', human_verified_at: '2026-11-12T01:00:00Z' } as KanbanStory;
+    const memberMap = { h1: { id: 'h1', name: '송윤재', type: 'human' } } as never;
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ToastProvider><StoryDetailPanel story={verified} tasks={[]} onClose={() => {}} projectId="p1" memberMap={memberMap} /></ToastProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    expect(container.textContent).toContain('송윤재 검증');
+    expect(container.textContent).toMatch(/송윤재 검증 · \S+/); // 검증자 뒤에 시각이 붙는다
+  });
+});
