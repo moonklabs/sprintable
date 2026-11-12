@@ -51,6 +51,7 @@ import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel
 import { RecipeStartSection } from '@/components/kanban/recipe-start-section';
 import { PrLinkSection } from '@/components/integrations/pr-link-section';
 import { Button } from '@/components/ui/button';
+import { LAYER } from '@/components/ds/layers';
 import { Input } from '@/components/ui/input';
 import { isImeComposing } from '@/lib/ime-composition';
 import { Textarea } from '@/components/ui/textarea';
@@ -1633,8 +1634,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
         // story #3007(로드맵 P2·PR-E, L1) — 모바일 시트/데스크톱 사이드시트 둘 다 floating이라
         // --elev-overlay.
         className={overlayPosition
-          ? 'fixed inset-x-4 z-50 mx-auto max-w-xl overflow-hidden rounded-lg border border-border bg-background shadow-[var(--elev-overlay)] outline-none backdrop-blur-xl sm:inset-x-auto sm:right-4 sm:w-full'
-          : 'fixed inset-0 z-50 bg-background shadow-[var(--elev-overlay)] outline-none backdrop-blur-xl lg:inset-y-0 lg:left-auto lg:right-0 lg:w-full lg:max-w-3xl lg:border-l lg:border-border'}
+          ? `fixed inset-x-4 z-50 mx-auto max-w-xl overflow-hidden rounded-lg border border-border ${LAYER.panel} shadow-[var(--elev-overlay)] outline-none backdrop-blur-xl sm:inset-x-auto sm:right-4 sm:w-full`
+          : `fixed inset-0 z-50 ${LAYER.panel} shadow-[var(--elev-overlay)] outline-none backdrop-blur-xl lg:inset-y-0 lg:left-auto lg:right-0 lg:w-full lg:max-w-4xl lg:border-l lg:border-border`}
         style={overlayPosition ? { top: overlayPosition.top, height: overlayPosition.heightPx } : undefined}
       >
       <div className="flex h-full flex-col">
@@ -1814,6 +1815,13 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               evidence={workcellEvidence}
               conversation={{ view: 'run', messages: workcellMessages, chatProof: chatProofSummary }}
             />
+            {/* E-DG S12: handoff stuck UX — DISPATCH 직후·handoff_stuck일 때만 조건부 렌더(자체 게이트) */}
+            <StuckHandoffSection storyId={story.id} memberMap={memberMap} />
+
+            {/* 4908 — 본문 / 속성 칸 분리. 좁은 폭(<lg)에서는 속성 칸이 본문 앞에 서고(예전 순서와 같다: 담당 · 레시피 · 디스패치 · 포인트 · 라벨 · PR), lg 이상에서는 오른쪽 칸이 된다. */}
+            <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_16rem] lg:items-start lg:gap-6">
+              {/* 4908 — 서랍 = 내용 칸 층(LAYER.panel) · 속성 칸 = 한 단 다른 면(LAYER.rowOthers) + 경계: 자리만 나뉘지 않고 눈으로 갈린다(서랍 → 속성 칸 ≥ 0.05, layer-rule.test). 이 면 위에서 옛 흐린 글(muted-foreground)이 다크 4.44:1로 모자라 속성 칸 안에서만 ds-ink-3(다크 4.56:1)로 바꾼다. */}
+              <aside data-testid="story-detail-properties" aria-label={t('detailProperties')} className={`order-first min-w-0 space-y-5 rounded-lg border border-ds-line ${LAYER.rowOthers} p-3 [--muted-foreground:var(--ds-ink-3)] lg:order-last`}>
             <div>
               <div className="flex items-center justify-between">
                 <span className="text-micro font-mono uppercase tracking-wider text-muted-foreground">{t('assignee')}</span>
@@ -1864,7 +1872,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         </span>
                         {/* [SID:4362 · PO 18:11Z 전수] 디자인 Button 기본 nowrap이라 긴 구성원 이름이 줄 밖으로 넘쳤다(390에서 글 483px · 줄 338px) → 줄바꿈 · 긴 낱말 꺾음. */}
                         <span data-assignee-name="" className="min-w-0 flex-1 [overflow-wrap:anywhere]">{m.label}</span>
-                        {selected && <span className="ml-auto shrink-0 text-primary">✓</span>}
+                        {selected && <span className="ml-auto shrink-0 text-ds-action-text">✓</span>}
                       </Button>
                     );
                   })}
@@ -1912,33 +1920,6 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               </div>
             )}
 
-            {/* E-DG S12: handoff stuck UX — DISPATCH 직후·handoff_stuck일 때만 조건부 렌더(자체 게이트) */}
-            <StuckHandoffSection storyId={story.id} memberMap={memberMap} />
-
-            {/* story #2267(C-9): 「무엇에서 만들었나」(출처) — 컨테이너(epic/sprint/meeting_id,
-                위 필드들)와 다른 축이라 별도 섹션. EntityBacklinksSection과 나란히 두되 먼저
-                — 출처가 "이 항목이 왜 여기 있는지"에 더 가까운 질문이라 위쪽에 둔다. */}
-            <StoryOriginSection storyId={story.id} />
-
-            {/* story #3560(제작 작업대 컨셉 카드, 페드루 PO 確定 2026-09-06) — 「이것을
-                가리키는 것들」(아래)과 같은 API를 재사용하되 doc만 걸러 별 블록 —
-                컨셉 승인이 무엇을 승인하는지 검증 시트보다 먼저 보인다.
-                story #3584 — gates는 새로 안 부르고 위(P0-04 in-flight 칩)가 이미
-                fetch한 chipGates를 그대로 넘긴다("새 fetch 0", PO 確定).
-                gatesLoaded도 같이 내려 backlinks·gates 둘 다 도착 前엔 판정을
-                보류한다(§3584 CHANGES — chipGates 초기값 []가 "로딩 중"과 "0건"을
-                못 가른다). */}
-            <ConceptCardSection workItemId={story.id} gates={chipGates} gatesLoaded={gatesLoaded} />
-
-            {/* story #2299(E-CONNECT): 이것을 가리키는 것들 — doc/chat_message 참조 목록 첫 자리
-                (doc [slug]/view는 후속 판). */}
-            <EntityBacklinksSection entityType="story" entityId={story.id} />
-
-            {/* story #2357 — 이 스토리가 기각한 관계 목록 + 되살리기(doc `flow-port-slot-spec`
-                ㉣, "되살리기 UI용" BE가 이미 있었는데 FE 소비처가 0건이었다). 빈 목록이면
-                아무것도 안 그린다(AC4). */}
-            <RejectedRelationsSection storyId={story.id} />
-
             {story.story_points != null ? (
               <div>
                 <span className="text-micro font-mono uppercase tracking-wider text-muted-foreground">{t('storyPoints')}</span>
@@ -1946,6 +1927,121 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               </div>
             ) : null}
 
+            {/* Labels */}
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-micro font-mono uppercase tracking-wider text-muted-foreground">
+                  <Tag className="size-3" />
+                  <span>{t('labelsSectionTitle')}</span>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setShowLabelPicker((v) => !v)}
+                  className="h-auto min-h-0 min-w-0 rounded px-1.5 py-0.5 text-micro font-normal text-muted-foreground hover:bg-muted"
+                >
+                  {showLabelPicker ? tc('close') : t('addGeneric')}
+                </Button>
+              </div>
+
+              {loadingLabels ? (
+                <p className="text-xs text-muted-foreground">{t('loading')}</p>
+              ) : (
+                <>
+                  {storyLabels.length > 0 ? (
+                    <div className="mb-2 flex flex-wrap gap-4 pt-3.5">
+                      {storyLabels.map((label) => (
+                        <span key={label.itemLabelId} className="group relative inline-flex max-w-full">
+                          <LabelChip label={label} className="max-w-full" />
+                          {/* story #4345 — 누르는 자리 24×24: 투명 버튼 안쪽 모서리에 예전 14px 원을 그대로 둔다(원 자리 · 크기 무변 · 칩 쪽으로 안 넓힘 —
+                              모서리 자리 그대로 바깥쪽으로). 칩 줄 간격(gap · 위 여백)이 그 바깥 몫을 받아 옆 칩과 겹침 0. */}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={() => void handleDetachLabel(label.itemLabelId)}
+                            className={cn('h-auto absolute -right-3.5 -top-3.5 rounded-full p-0 hover:bg-transparent', HOVER_REVEAL, HOVER_REVEAL_HIT, 'items-end justify-start')}
+                            aria-label={t('removeItemAction', { item: label.name })}
+                          >
+                            {/* story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는 이 테마에 매핑이 없는 no-op.
+                                trust-seal.tsx 선례로 hover 상태도 테마별 반전(dark:). 이제 원이 안쪽 span이라 버튼 hover를 group으로 받는다. */}
+                            <span aria-hidden="true" className="flex size-3.5 items-center justify-center rounded-full bg-muted-foreground/20 text-foreground group-hover/button:bg-destructive/80 group-hover/button:text-on-scrim dark:group-hover/button:text-proof-bg">
+                              <X className="size-2" />
+                            </span>
+                          </Button>
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mb-2 text-xs text-muted-foreground">{t('noLabel')}</p>
+                  )}
+
+                  {showLabelPicker && (
+                    <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-2">
+                      {/* Existing org labels */}
+                      {orgLabels.filter((l) => !storyLabels.some((sl) => sl.id === l.id)).length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {orgLabels
+                            .filter((l) => !storyLabels.some((sl) => sl.id === l.id))
+                            .map((label) => (
+                              <Button
+                                key={label.id}
+                                type="button"
+                                variant="ghost"
+                                onClick={() => void handleAttachLabel(label.id)}
+                                className="h-auto min-h-0 min-w-0 max-w-full items-center gap-1.5 whitespace-normal rounded-full border border-border bg-background px-2 py-0.5 text-left text-xs font-normal text-foreground [overflow-wrap:anywhere] hover:bg-muted"
+                              >
+                                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: label.color ?? 'var(--muted-foreground)' }} />
+                                {label.name}
+                              </Button>
+                            ))}
+                        </div>
+                      )}
+                      {/* New label form */}
+                      <div className="flex items-center gap-1.5">
+                        <div className="flex gap-1">
+                          {LABEL_PRESET_COLORS.map((hex) => (
+                            <Button
+                              key={hex}
+                              type="button"
+                              variant="ghost"
+                              aria-pressed={newLabelColor === hex}
+                              onClick={() => setNewLabelColor(hex)}
+                              className={`h-4 min-h-0 w-4 min-w-0 rounded-full border-2 p-0 ${newLabelColor === hex ? 'border-foreground' : 'border-transparent'}`}
+                              style={{ backgroundColor: hex }}
+                              aria-label={hex}
+                            />
+                          ))}
+                        </div>
+                        <Input
+                          type="text"
+                          value={newLabelName}
+                          onChange={(e) => setNewLabelName(e.target.value)}
+                          // 조합 중의 엔터는 글자 확정 키 — 만들기로 읽으면 반쯤 쓴 이름의 조직 라벨이 실제로 만들어진다(4831 측정 중 발견).
+                          onKeyDown={(e) => { if (isImeComposing(e)) return; if (e.key === 'Enter') void handleCreateLabel(); }}
+                          placeholder={t('newLabelNamePlaceholder')}
+                          className="h-auto min-w-0 flex-1 bg-background px-2 py-1 lg:text-xs dark:bg-background"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => void handleCreateLabel()}
+                          disabled={!newLabelName.trim() || creatingLabel}
+                          className="h-auto min-h-0 min-w-0 rounded bg-primary px-2 py-1 text-xs font-normal text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                        >
+                          {creatingLabel ? '...' : t('createLabel')}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* E-GHAPP Bot-L.2: PR↔story 명시연결 관리(2-tier·connect-prompt 자체 처리) */}
+            <PrLinkSection storyId={story.id} />
+
+              </aside>
+              <div data-testid="story-detail-main" className="min-w-0 space-y-5">
             {/* Description */}
             <div ref={descriptionSectionRef}>
               <div className="flex items-center justify-between">
@@ -2143,116 +2239,6 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   호출해(위 정의) 매 시도마다 언마운트→리마운트된다. */}
               {attachError && (
                 <p role="alert" aria-live="assertive" aria-atomic="true" className="mt-1 text-xs text-destructive">{t('attachmentUploadFailed')}</p>
-              )}
-            </div>
-
-            {/* Labels */}
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-micro font-mono uppercase tracking-wider text-muted-foreground">
-                  <Tag className="size-3" />
-                  <span>{t('labelsSectionTitle')}</span>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => setShowLabelPicker((v) => !v)}
-                  className="h-auto min-h-0 min-w-0 rounded px-1.5 py-0.5 text-micro font-normal text-muted-foreground hover:bg-muted"
-                >
-                  {showLabelPicker ? tc('close') : t('addGeneric')}
-                </Button>
-              </div>
-
-              {loadingLabels ? (
-                <p className="text-xs text-muted-foreground">{t('loading')}</p>
-              ) : (
-                <>
-                  {storyLabels.length > 0 ? (
-                    <div className="mb-2 flex flex-wrap gap-4 pt-3.5">
-                      {storyLabels.map((label) => (
-                        <span key={label.itemLabelId} className="group relative inline-flex">
-                          <LabelChip label={label} />
-                          {/* story #4345 — 누르는 자리 24×24: 투명 버튼 안쪽 모서리에 예전 14px 원을 그대로 둔다(원 자리 · 크기 무변 · 칩 쪽으로 안 넓힘 —
-                              모서리 자리 그대로 바깥쪽으로). 칩 줄 간격(gap · 위 여백)이 그 바깥 몫을 받아 옆 칩과 겹침 0. */}
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            onClick={() => void handleDetachLabel(label.itemLabelId)}
-                            className={cn('h-auto absolute -right-3.5 -top-3.5 rounded-full p-0 hover:bg-transparent', HOVER_REVEAL, HOVER_REVEAL_HIT, 'items-end justify-start')}
-                            aria-label={t('removeItemAction', { item: label.name })}
-                          >
-                            {/* story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는 이 테마에 매핑이 없는 no-op.
-                                trust-seal.tsx 선례로 hover 상태도 테마별 반전(dark:). 이제 원이 안쪽 span이라 버튼 hover를 group으로 받는다. */}
-                            <span aria-hidden="true" className="flex size-3.5 items-center justify-center rounded-full bg-muted-foreground/20 text-foreground group-hover/button:bg-destructive/80 group-hover/button:text-on-scrim dark:group-hover/button:text-proof-bg">
-                              <X className="size-2" />
-                            </span>
-                          </Button>
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mb-2 text-xs text-muted-foreground">{t('noLabel')}</p>
-                  )}
-
-                  {showLabelPicker && (
-                    <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-2">
-                      {/* Existing org labels */}
-                      {orgLabels.filter((l) => !storyLabels.some((sl) => sl.id === l.id)).length > 0 && (
-                        <div className="flex flex-wrap gap-1">
-                          {orgLabels
-                            .filter((l) => !storyLabels.some((sl) => sl.id === l.id))
-                            .map((label) => (
-                              <Button
-                                key={label.id}
-                                type="button"
-                                variant="ghost"
-                                onClick={() => void handleAttachLabel(label.id)}
-                                className="h-auto min-h-0 min-w-0 items-center gap-1.5 rounded-full border border-border bg-background px-2 py-0.5 text-xs font-normal text-foreground hover:bg-muted"
-                              >
-                                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: label.color ?? 'var(--muted-foreground)' }} />
-                                {label.name}
-                              </Button>
-                            ))}
-                        </div>
-                      )}
-                      {/* New label form */}
-                      <div className="flex items-center gap-1.5">
-                        <div className="flex gap-1">
-                          {LABEL_PRESET_COLORS.map((hex) => (
-                            <Button
-                              key={hex}
-                              type="button"
-                              variant="ghost"
-                              aria-pressed={newLabelColor === hex}
-                              onClick={() => setNewLabelColor(hex)}
-                              className={`h-4 min-h-0 w-4 min-w-0 rounded-full border-2 p-0 ${newLabelColor === hex ? 'border-foreground' : 'border-transparent'}`}
-                              style={{ backgroundColor: hex }}
-                              aria-label={hex}
-                            />
-                          ))}
-                        </div>
-                        <Input
-                          type="text"
-                          value={newLabelName}
-                          onChange={(e) => setNewLabelName(e.target.value)}
-                          // 조합 중의 엔터는 글자 확정 키 — 만들기로 읽으면 반쯤 쓴 이름의 조직 라벨이 실제로 만들어진다(4831 측정 중 발견).
-                          onKeyDown={(e) => { if (isImeComposing(e)) return; if (e.key === 'Enter') void handleCreateLabel(); }}
-                          placeholder={t('newLabelNamePlaceholder')}
-                          className="h-auto min-w-0 flex-1 bg-background px-2 py-1 lg:text-xs dark:bg-background"
-                        />
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          onClick={() => void handleCreateLabel()}
-                          disabled={!newLabelName.trim() || creatingLabel}
-                          className="h-auto min-h-0 min-w-0 rounded bg-primary px-2 py-1 text-xs font-normal text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                        >
-                          {creatingLabel ? '...' : t('createLabel')}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </>
               )}
             </div>
 
@@ -2460,8 +2446,29 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               )}
             </div>
 
-            {/* E-GHAPP Bot-L.2: PR↔story 명시연결 관리(2-tier·connect-prompt 자체 처리) */}
-            <PrLinkSection storyId={story.id} />
+            {/* story #2267(C-9): 「무엇에서 만들었나」(출처) — 컨테이너(epic/sprint/meeting_id,
+                위 필드들)와 다른 축이라 별도 섹션. EntityBacklinksSection과 나란히 두되 먼저
+                — 출처가 "이 항목이 왜 여기 있는지"에 더 가까운 질문이라 위쪽에 둔다. */}
+            <StoryOriginSection storyId={story.id} />
+
+            {/* story #3560(제작 작업대 컨셉 카드, 페드루 PO 確定 2026-09-06) — 「이것을
+                가리키는 것들」(아래)과 같은 API를 재사용하되 doc만 걸러 별 블록 —
+                컨셉 승인이 무엇을 승인하는지 검증 시트보다 먼저 보인다.
+                story #3584 — gates는 새로 안 부르고 위(P0-04 in-flight 칩)가 이미
+                fetch한 chipGates를 그대로 넘긴다("새 fetch 0", PO 確定).
+                gatesLoaded도 같이 내려 backlinks·gates 둘 다 도착 前엔 판정을
+                보류한다(§3584 CHANGES — chipGates 초기값 []가 "로딩 중"과 "0건"을
+                못 가른다). */}
+            <ConceptCardSection workItemId={story.id} gates={chipGates} gatesLoaded={gatesLoaded} />
+
+            {/* story #2299(E-CONNECT): 이것을 가리키는 것들 — doc/chat_message 참조 목록 첫 자리
+                (doc [slug]/view는 후속 판). */}
+            <EntityBacklinksSection entityType="story" entityId={story.id} />
+
+            {/* story #2357 — 이 스토리가 기각한 관계 목록 + 되살리기(doc `flow-port-slot-spec`
+                ㉣, "되살리기 UI용" BE가 이미 있었는데 FE 소비처가 0건이었다). 빈 목록이면
+                아무것도 안 그린다(AC4). */}
+            <RejectedRelationsSection storyId={story.id} />
 
             {/* Outcome result (read-only) + 연결 가설 chip/picker — 인라인 intent 입력은
                 S8c서 연결 가설 affordance로 대체(스토리서 가설 생성 금지·AC①). 결과 카드는
@@ -2657,6 +2664,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 )}
               </TabsContent>
             </Tabs>
+              </div>
+            </div>
           </div>
         </div>
       </div>

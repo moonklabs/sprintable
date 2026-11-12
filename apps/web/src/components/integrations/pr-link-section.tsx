@@ -268,7 +268,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
       {/* 추가 — owner는 installation account(account_login)로 고정(타owner 불가·anti-IDOR), repo명+PR# 입력 */}
       <div className="flex flex-wrap items-end gap-2 pt-1">
         <div className="flex min-w-0 flex-1 items-center gap-1 text-editorial-meta">
-          <span className="shrink-0 font-mono text-muted-foreground">{status.account_login}/</span>
+          <span className="min-w-0 max-w-[60%] truncate font-mono text-muted-foreground" title={status.account_login ?? undefined}>{status.account_login}/</span>
           <Input
             value={repoName}
             onChange={(e) => setRepoName(e.target.value)}
@@ -303,7 +303,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
       <p className="text-micro text-muted-foreground">{t('riskHint')}</p>
       {error ? (
         <p
-          className="inline-flex items-center gap-1 text-editorial-meta text-destructive"
+          className="inline-flex items-center gap-1 text-editorial-meta text-ds-failed"
           role="alert"
           aria-live="assertive"
           aria-atomic="true"
