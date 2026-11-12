@@ -58,8 +58,8 @@ export function NoPeersNextSteps({ withText = true }: { withText?: boolean }) {
       {kind !== 'member' ? (
         <div className="flex flex-wrap items-center justify-center gap-2">
           {kind === 'admin-no-project' ? (
-            // an agent belongs to a project and there is none yet: go straight to where one is made (the recruit tab would only say so and send the person here — one press more)
-            <DsButton asChild variant="primary" size="md"><Link href={flatHref('/settings?tab=projects')} data-testid="chat-no-peers-create-project">{t('noPeersCreateProject')}</Link></DsButton>
+            // an agent belongs to a project and there is none yet: go straight to where one is made — and come BACK here when it is (`return=chats`) (the recruit tab would only say so and send the person here — one press more)
+            <DsButton asChild variant="primary" size="md"><Link href={flatHref('/settings?tab=projects&return=chats')} data-testid="chat-no-peers-create-project">{t('noPeersCreateProject')}</Link></DsButton>
           ) : (
             <DsButton asChild variant="primary" size="md"><Link href={flatHref('/organization/workforce?tab=recruit')} data-testid="chat-no-peers-add-agent">{t('noPeersAddAgent')}</Link></DsButton>
           )}

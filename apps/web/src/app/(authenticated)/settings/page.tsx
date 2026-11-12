@@ -62,6 +62,8 @@ import dynamic from 'next/dynamic';
 import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { withProjectParam } from '@/lib/with-project-param';
+import { resolveChatsHref } from '@/lib/nav-v3-destinations';
 import { memberRowLabels } from '@/lib/member-display';
 
 // TypeScript 정적 해석을 위해 unconditional import — 조건부 렌더링은 JSX isEEEnabled() 체크로 처리
@@ -149,7 +151,10 @@ export default function SettingsPage() {
   const tOnboarding = useTranslations('onboarding');
   const router = useRouter();
   const searchParamsHook = useSearchParams();
-  const { orgId: ctxOrgId, orgMemberships } = useDashboardContext();
+  // story 4906 (PO 11-12): a project made from the chat list's empty state («프로젝트 만들기» there) sends the person BACK where they came from — the list, where «에이전트 추가» already stands. A whitelist of one
+  // word (not a free address: no open redirect); made from settings itself (no `return`) the person stays here as before.
+  const returnToChats = searchParamsHook.get('return') === 'chats';
+  const { orgId: ctxOrgId, orgMemberships, navV3Flags } = useDashboardContext();
   const { inPhoneApp } = usePhoneBridge(); // story 4762 — the «이 폰» tab exists only inside the phone app
   const [activeTab, setActiveTab] = useState(() => resolveSettingsTab(searchParamsHook.get('tab'), inPhoneApp));
   // story #3772 — 프로필 탭 섹션 넷(내 프로필·비밀번호·연결된 계정·2FA)이 각자 /api/me를
@@ -667,6 +672,9 @@ export default function SettingsPage() {
     await refreshProjects().catch((err) => { console.error('프로젝트 생성 후 목록 갱신 실패', err); });
     router.refresh();
     setCreatingProject(false);
+    // a WHOLE-PAGE load, not router.push: a client push would supersede the pending router.refresh() above and `/chats?p=<new>` could meet the old (stale) project memberships — and the v3 chat screen reads its
+    // project from /api/me, not from `p`. A fresh load re-reads both; this happens once (the first project of a new organization).
+    if (returnToChats) window.location.assign(withProjectParam(resolveChatsHref(navV3Flags), project.id));
   };
 
   const handleDeleteProject = async (projectId: string) => {
