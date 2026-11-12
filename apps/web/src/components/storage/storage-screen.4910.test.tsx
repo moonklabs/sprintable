@@ -76,10 +76,17 @@ describe('우클릭 메뉴 — ⋯ 메뉴와 같은 항목(새 동작 0)', () =>
     expect(menuItems()).toEqual(viaKebab);
   });
 
-  it('⋯ 단추를 우클릭해도 행의 우클릭 메뉴가 겹쳐 열리지 않는다(메뉴 하나)', async () => {
+  it('⭐행 오른쪽 끝 ⋯ 칸(단추 · 단추를 감싼 칸)에서 우클릭해도 행의 우클릭 메뉴가 «정확히 하나» 뜬다 — 열기 · 다운로드 · 삭제(예전엔 칸이 이벤트를 막아 브라우저 기본 메뉴가 뜸 — 11-12 실측)', async () => {
     await act(async () => { root.render(intl(<StorageAssetList {...listProps()} />)); });
-    await rightClick(container.querySelector('[aria-label$="작업"]')!);
-    expect(document.querySelectorAll('[role="menu"]').length).toBeLessThanOrEqual(1);
+    const kebab = container.querySelector<HTMLElement>('[aria-label$="작업"]')!;
+    for (const target of [kebab, kebab.parentElement!]) {
+      await rightClick(target);
+      expect(document.querySelectorAll('[role="menu"]').length, '메뉴는 하나').toBe(1);
+      expect(menuItems()).toEqual(KIND);
+      await key(document.activeElement ?? document.body, 'Escape');
+      await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+      expect(document.querySelectorAll('[role="menu"]').length, '닫힘').toBe(0);
+    }
   });
 
   it('⭐격자 카드도 우클릭 = 열기 · 다운로드 · 삭제 · 더블클릭 = 열기', async () => {
