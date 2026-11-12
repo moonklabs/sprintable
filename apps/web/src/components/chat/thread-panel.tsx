@@ -16,7 +16,7 @@ import type { EventDefinitionSummary } from '@/lib/block-template';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { useToast } from '@/components/ui/toast';
-import { announceChatMessageDeleted } from '@/lib/chat-message-deleted';
+import { announceChatMessageDeleted, onChatMessageDeleted, withMessageTombstoned } from '@/lib/chat-message-deleted';
 import { actorRowLabels } from '@/lib/member-display';
 import { LAYER } from '@/components/ds/layers';
 
@@ -199,6 +199,13 @@ export function ThreadPanel({
   const focusReply = useCallback(() => {
     panelRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus();
   }, []);
+
+  // story 4903 AC3 — ANOTHER person deleted a reply of this thread: the server's frame reaches this open panel (see the room's own listener) and the reply becomes the tombstone at once.
+  // (The thread's original is the room's copy: the room tombstones it and hands the panel the new copy.)
+  useEffect(() => onChatMessageDeleted((d) => {
+    if (d.conversationId !== conversationId || !d.messageId) return;
+    setMessages((prev) => withMessageTombstoned(prev, d.messageId!, d.deletedAt));
+  }), [conversationId]);
 
   // the same tombstone the room's list uses (the row stays as a placeholder; a failure is always shown — story #2319 AC②)
   const handleDeleteReply = useCallback(async (messageId: string) => {

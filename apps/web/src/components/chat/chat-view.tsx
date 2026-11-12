@@ -38,7 +38,7 @@ import { CitationComposeBar, type CitationSaveState } from './citation-compose-b
 import { StoryPickerDialog } from '@/components/canvas/story-picker-dialog';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useToast } from '@/components/ui/toast';
-import { announceChatMessageDeleted } from '@/lib/chat-message-deleted';
+import { announceChatMessageDeleted, onChatMessageDeleted, withMessageTombstoned } from '@/lib/chat-message-deleted';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { actorRowLabels } from '@/lib/member-display';
@@ -641,6 +641,15 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       addToast({ type: 'error', title: t('deleteMessageErrorTitle'), body: t('deleteMessageErrorBody') });
     }
   }, [apiPrefix, threadId, addToast, t]);
+
+  // story 4903 AC3 — ANOTHER person deleted a message of this room: the server's frame (`useChatMessageDeletedSse`, mounted by the chats layout) reaches this open room as the same
+  // «message deleted» announcement — with the message's id (a delete made on THIS screen announces none: it has already tombstoned its own copies). The row turns into the tombstone
+  // at once, and so does the open thread's COPY of its original.
+  useEffect(() => onChatMessageDeleted((d) => {
+    if (d.conversationId !== threadId || !d.messageId) return;
+    setMessages((prev) => withMessageTombstoned(prev, d.messageId!, d.deletedAt));
+    setActiveThread((prev) => (prev && prev.id === d.messageId && !prev.deleted_at ? { ...prev, content: '', deleted_at: d.deletedAt ?? new Date().toISOString() } : prev));
+  }), [threadId]);
 
   // story #2349 — 사용자 차단. 낙관적 오버레이(blockedMemberIds)는 이미 로드된 메시지 목록을
   // 새로고침 없이 즉시 마스킹하려는 것 — 서버 is_blocked_sender는 다음 fetch부터 반영된다.

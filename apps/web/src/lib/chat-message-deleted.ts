@@ -2,7 +2,7 @@
  * story 4887 (UI-4) — «a message was deleted» as a window event between the places that hold copies of the conversation's latest message.
  * The room (ChatView) and its thread panel delete a message; the room LIST (ChatListView, another component tree) keeps the latest message of each room as a one-line preview — and kept showing a deleted message's text
  * until its next refetch. The server scrubs it on refetch (content «» · no attachment flag); this event lets the list do the same at once. The list's latest-message record has no id, so the event carries the message's `created_at`.
- * Only THIS person's own screens hear it: the server publishes no live delete signal to other participants (its own comment: «AC7 blind spot — out of scope»).
+ * Two sources: this screen's own delete (the room · the thread panel announce it) and — story 4903 AC3 — the server's `conversation.message_deleted` frame (another person's delete; `useChatMessageDeletedSse`).
  */
 export const CHAT_MESSAGE_DELETED_EVENT = 'sprintable:chat-message-deleted';
 
@@ -10,6 +10,43 @@ export interface ChatMessageDeletedDetail {
   conversationId: string;
   /** the deleted message's `created_at`, as the server sent it */
   createdAt: string;
+  /** story 4903 AC3 — present when the announcement came from the SERVER (`conversation.message_deleted`: another person deleted it): which message, in which thread, when.
+   *  A delete made on THIS screen (the room · the thread panel) has already tombstoned its own copies and announces only the two fields above. */
+  messageId?: string;
+  threadId?: string | null;
+  deletedAt?: string | null;
+}
+
+/**
+ * story 4903 AC3 — the server's `conversation.message_deleted` frame (ids and moments only — never words) as a bus announcement; null when it is not one.
+ * The frame: `{ event_type, conversation_id, id, thread_id, created_at, deleted_at, recipient_id }`.
+ */
+export function parseMessageDeletedFrame(raw: string | Record<string, unknown>): ChatMessageDeletedDetail | null {
+  let data: unknown = raw;
+  if (typeof raw === 'string') {
+    try { data = JSON.parse(raw); } catch { return null; }
+  }
+  if (!data || typeof data !== 'object') return null;
+  const f = data as Record<string, unknown>;
+  if (typeof f.conversation_id !== 'string' || typeof f.id !== 'string' || typeof f.created_at !== 'string') return null;
+  return {
+    conversationId: f.conversation_id,
+    createdAt: f.created_at,
+    messageId: f.id,
+    threadId: typeof f.thread_id === 'string' ? f.thread_id : null,
+    deletedAt: typeof f.deleted_at === 'string' ? f.deleted_at : null,
+  };
+}
+
+/** the list with that message turned into a tombstone (what the room and its thread do for a delete made here); the same list when there is nothing to change */
+export function withMessageTombstoned<T extends { id: string; content?: string; deleted_at?: string | null }>(list: T[], messageId: string, deletedAt: string | null | undefined): T[] {
+  let changed = false;
+  const next = list.map((m) => {
+    if (m.id !== messageId || m.deleted_at) return m;
+    changed = true;
+    return { ...m, content: '', deleted_at: deletedAt ?? new Date().toISOString() };
+  });
+  return changed ? next : list;
 }
 
 export function announceChatMessageDeleted(detail: ChatMessageDeletedDetail): void {

@@ -34,7 +34,7 @@ import { useOrgDomainLabels, type OrgDomainLabels } from '@/hooks/use-org-domain
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { DeviceChip } from '@/components/desktop/device-chip';
-import { onChatMessageDeleted, sameInstant } from '@/lib/chat-message-deleted';
+import { isoToMicros, onChatMessageDeleted, sameInstant } from '@/lib/chat-message-deleted';
 
 interface Participant {
   member_id: string;
@@ -387,6 +387,11 @@ export function applyConversationMessageUpdate(
     onRefetch();
     return prev;
   }
+  // story 4903 AC3 — an OLDER message never takes the place of a newer latest message: a re-delivered event (a reconnect's backfill gives the last few events, in any order) used to put
+  // an earlier message into the row — after a delete it showed the one before the deleted message. Compared to the microsecond (the server's clock); an unreadable time keeps the old behaviour.
+  const incomingAt = isoToMicros(created_at);
+  const currentAt = isoToMicros(prev[idx]!.latest_message?.created_at);
+  if (incomingAt !== null && currentAt !== null && incomingAt < currentAt) return prev;
   const updated = [...prev];
   const item = { ...updated[idx]! };
   // story #4442 — an attachment-only message (no text) updates the row too: «첨부 파일» and its time
