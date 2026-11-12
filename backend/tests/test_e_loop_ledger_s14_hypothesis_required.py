@@ -43,6 +43,7 @@ def test_error_status_map_covers_s14_codes():
     assert expected <= set(r._ERROR_STATUS)
     assert r._ERROR_STATUS["LOOP_HYPOTHESIS_REQUIRED"] == 400
     assert r._ERROR_STATUS["HYPOTHESIS_NOT_ACTIVE"] == 422
+    assert r._ERROR_STATUS["LOOP_HYPOTHESIS_INVALID"] == 422  # story 4911
 
 
 # ── realdb ───────────────────────────────────────────────────────────────────
@@ -193,6 +194,44 @@ async def test_create_loop_full_trio_human_caller_auto_creates_proposed_hypothes
             assert row.statement == "가입 전환율 개선"
             assert row.status == "proposed"
             assert row.owner_member_id == OM  # 휴먼 caller 기본값(자기 자신)
+    finally:
+        await eng.dispose()
+
+
+@pytestmark_db
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "bad_metric, field",
+    [
+        ({"metric": "signup_rate", "source": "manual", "target": 10, "direction": "increase"}, "direction"),
+        ({"metric": "signup_rate", "source": "manual", "target": 10}, "direction"),
+        # 리스트/객체 값은 `in frozenset`이 TypeError(unhashable)로 터져 ValidationError로 안 감싸졌다(codex 11-12)
+        ({"metric": "signup_rate", "source": "manual", "target": 10, "direction": []}, "direction"),
+        ({"metric": "signup_rate", "source": {}, "target": 10, "direction": "up"}, "source"),
+    ],
+)
+async def test_create_loop_invalid_metric_definition_is_422_not_500(bad_metric, field):
+    """story 4911 — trio 경로에서 metric_definition이 가설 스키마에 안 맞으면(direction이 up/down이 아님 · 빠짐) 처리 안 된
+    ValidationError가 500으로 나갔다(dev 11-12). 호출자가 고칠 입력 오류라 422 + code LOOP_HYPOTHESIS_INVALID + 어느 칸인지."""
+    eng, Session = await _engine()
+    try:
+        async with Session() as s:
+            await _seed(s)
+        async with Session() as s:
+            with pytest.raises(HTTPException) as ei:
+                await r.create_loop(
+                    body=LoopCreate(
+                        project_id=PROJ_A, title="bad-metric", goal="가입 전환율 개선", metric_definition=bad_metric,
+                        measure_after=datetime(2026, 8, 1, tzinfo=timezone.utc),
+                    ),
+                    session=s, auth=_auth(), org_id=ORG,
+                )
+            assert ei.value.status_code == 422
+            assert ei.value.detail["code"] == "LOOP_HYPOTHESIS_INVALID"
+            assert field in ei.value.detail["message"]
+        async with Session() as s:  # 거절된 요청은 가설도 루프도 남기지 않는다
+            n = (await s.execute(text(f"SELECT (SELECT count(*) FROM hypotheses WHERE org_id='{ORG}') + (SELECT count(*) FROM loop_runs WHERE org_id='{ORG}')"))).scalar_one()
+            assert n == 0
     finally:
         await eng.dispose()
 
