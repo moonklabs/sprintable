@@ -34,7 +34,7 @@ import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { ListDetailShell } from '@/components/ds/list-detail-shell';
 import { useListSelection, selectNextAfterLeft } from '@/hooks/use-list-selection';
 import { useListDetailWide } from '@/hooks/use-list-detail-wide';
-import { GateQueueList, type GateQueueRow, type GateQueueSection } from './gate-queue-list';
+import { GateQueueList, type GateQueueMenuItem, type GateQueueRow, type GateQueueSection } from './gate-queue-list';
 import { useTeamTimeZone } from '@/components/team-time-zone';
 
 // story #1960(P2-S4) — 결재함 통합 큐. Gate 3종(게이트·문서결재·머지게이트, gate_type/
@@ -922,8 +922,44 @@ export function ApprovalsQueue() {
         );
   };
 
+  const onSelectRow = (key: string) => {
+    select(key);
+    if (!wide) setSheetOpen(true);
+  };
+  // the right-click menu of ONE row (Mac / desktop): the actions the detail column's card ALSO has — approve · reject · hold · open the page — never a right-click-only action.
+  // An approval that needs an option NEVER decides from the menu: «승인» picks the row (its detail opens) so the option is chosen there; a signature-flow approval opens the signature dialog, as its button does.
+  const menuFor = (item: GateInboxItem): GateQueueMenuItem[] => {
+    if (isHitl(item)) {
+      if (!canResolveHitl) return []; // an agent account sees no approve / reject here (and gets the browser's own menu)
+      return [
+        { id: 'approve', icon: 'check_circle', label: t('gateApprove'), disabled: resolvingIds.has(item.id), onSelect: () => void resolveHitl(item.id, 'approved') },
+        { id: 'reject', icon: 'cancel', label: t('gateReject'), disabled: resolvingIds.has(item.id), onSelect: () => void resolveHitl(item.id, 'rejected') },
+      ];
+    }
+    const gate = item;
+    const open: GateQueueMenuItem = { id: 'open', icon: 'open_in_new', label: t('queueMenuOpen'), onSelect: () => router.push(gateHref(gate)) };
+    if (isHeld(gate) || resolvedGates[gate.id] || !canInlineResolve(gate)) return [open];
+    const decisionFacts = isDecisionGate(gate) ? deriveDecisionFacts(gate) : null;
+    const needsOption = decisionFacts !== null && decisionFacts.options.length > 0;
+    const isSigFlow = usesSignatureFlow(deriveRiskLevel(gate));
+    const opensDraftReview = !isSigFlow && isRecipePublishGate(gate);
+    const blocked = resolvingIds.has(gate.id) || gate.reapproval_required === true;
+    return [
+      needsOption
+        ? { id: 'approve', icon: 'check_circle', label: t('queueMenuApproveChoose'), disabled: resolvingIds.has(gate.id), onSelect: () => onSelectRow(gate.id) }
+        : {
+          id: 'approve', icon: 'check_circle', disabled: blocked,
+          label: isSigFlow ? t(sigApproveAndSignLabelKey(gate)) : opensDraftReview ? t('gateReviewDraftToApprove') : t(gateApproveLabelKey(gate)),
+          onSelect: () => { if (isSigFlow || opensDraftReview) setSignatureTargetId(gate.id); else void resolveGate(gate.id, 'approved', null); },
+        },
+      { id: 'reject', icon: 'cancel', label: t('sigReject'), disabled: blocked, onSelect: () => setSignatureTargetId(gate.id) },
+      { id: 'hold', icon: 'pause', label: t('gateDiscussSubmit'), disabled: blocked, onSelect: () => setDiscussTargetId(gate.id) },
+      open,
+    ];
+  };
+
   const rowOf = (item: GateInboxItem): GateQueueRow => {
-    if (isHitl(item)) return { key: item.id, chip: t('hitlRequestBadge'), title: item.title, subtitle: formatAge(item.created_at, t) };
+    if (isHitl(item)) return { key: item.id, chip: t('hitlRequestBadge'), title: item.title, subtitle: formatAge(item.created_at, t), menu: menuFor(item) };
     const facts = isDecisionGate(item) ? deriveDecisionFacts(item) : null;
     const done = resolvedGates[item.id];
     return {
@@ -932,6 +968,7 @@ export function ApprovalsQueue() {
       title: facts?.question ?? item.work_item_summary?.title ?? `#${item.work_item_id.slice(0, 8)}`,
       subtitle: [`#${item.work_item_id.slice(0, 8)}`, item.pr_number ? `PR #${item.pr_number}${item.github_check_run_sha ? ` · ${item.github_check_run_sha.slice(0, 7)}` : ''}` : null, formatAge(item.created_at, t)].filter(Boolean).join(' · '),
       doneLabel: done === 'approved' ? t('queueResolvedApproved') : done === 'rejected' ? t('queueResolvedRejected') : undefined,
+      menu: menuFor(item),
     };
   };
   const sections: GateQueueSection[] = [
@@ -939,10 +976,6 @@ export function ApprovalsQueue() {
     { id: 'held', title: t('queueSectionHeld'), rows: heldItems.map(rowOf) },
   ];
   const selectedItem = items.find((it) => it.id === selectedKey) ?? null;
-  const onSelectRow = (key: string) => {
-    select(key);
-    if (!wide) setSheetOpen(true);
-  };
   // a double-click on a row opens the request's own page (`/gates/{id}`, the project it belongs to) — the same place the card's click-through button goes; a HITL request has no page
   const openRow = (key: string) => {
     const target = items.find((it) => it.id === key);

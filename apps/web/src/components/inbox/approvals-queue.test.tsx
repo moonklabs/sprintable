@@ -1949,6 +1949,112 @@ describe('ApprovalsQueue — 4909 AC3 the list + detail screen', () => {
     expect(card.className).not.toContain('bg-card');
   });
 
+  // ---- the right-click menu (Mac / desktop): the ds ContextMenu the storage screen uses; entries = actions the detail column ALSO has
+  const rowEl = (key: string) => rowsIn().find((r) => r.getAttribute('data-row-key') === key) as HTMLElement;
+  const rightClick = async (key: string) => {
+    await act(async () => { rowEl(key).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 120, clientY: 80 })); });
+  };
+  const menuLabels = () => [...document.querySelectorAll('[role="menuitem"]')].map((e) => e.textContent?.trim());
+  const menuItem = (label: string) => [...document.querySelectorAll('[role="menuitem"]')].find((e) => e.textContent?.trim() === label) as HTMLElement;
+  const clickMenuItem = async (label: string) => { await act(async () => { menuItem(label).click(); }); await act(async () => { await Promise.resolve(); await Promise.resolve(); }); };
+
+  it('⭐right-click a row → approve · reject · hold · open — and «approve» decides THAT row (not the one picked in the detail)', async () => {
+    const calls = mockFetches([lowGate('g1', '첫째 결재 항목'), lowGate('g2', '둘째 결재 항목')], []);
+    await mount();
+    expect(detailText()).toContain('첫째 결재 항목'); // g1 is the picked one
+    await rightClick('g2');
+    expect(menuLabels()).toEqual([koMessages.cage.gateApprove, koMessages.cage.sigReject, koMessages.cage.gateDiscussSubmit, koMessages.cage.queueMenuOpen]);
+    await clickMenuItem(koMessages.cage.gateApprove);
+    expect(calls.filter((c) => c.method === 'POST').map((c) => c.url)).toEqual(['/api/gates/g2/transition']); // reverted → no menu at all
+    expect(rowEl('g2').textContent).toContain(koMessages.cage.queueResolvedApproved);
+    expect(rowEl('g1').textContent).not.toContain(koMessages.cage.queueResolvedApproved);
+  });
+
+  it('⭐nothing here is right-click-only: the same approve · reject · hold buttons are in the detail card, and its title button opens the page', async () => {
+    mockFetches([lowGate('g1', '첫째 결재 항목')], []);
+    await mount();
+    const labels = [...scope().querySelectorAll('button')].map((b) => b.textContent?.trim());
+    expect(labels).toEqual(expect.arrayContaining([koMessages.cage.sigReject, koMessages.cage.gateDiscussSubmit, koMessages.cage.gateApprove]));
+  });
+
+  it('⭐an approval that needs an OPTION never decides from the menu: «승인» opens that row\'s detail (the option is chosen there) and sends nothing', async () => {
+    const calls = mockFetches([lowGate('g1', '첫째 결재 항목'), decision('d1', '랜딩 문구를 가격 먼저로 바꿔도 될까요?')], []);
+    await mount();
+    await rightClick('d1');
+    expect(menuLabels()[0]).toBe(koMessages.cage.queueMenuApproveChoose);
+    await clickMenuItem(koMessages.cage.queueMenuApproveChoose);
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0); // reverted (a direct approve) → a POST with no option chosen
+    expect(detailText()).toContain('랜딩 문구를 가격 먼저로 바꿔도 될까요?'); // the row's detail opened
+    const approve = [...scope().querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true); // still «not chosen yet»
+  });
+
+  it('a high-risk (signature-flow) approval opens the signature dialog, as its button does — nothing is sent', async () => {
+    const calls = mockFetches([lowGate('g1', '고위험 항목', { risk_grade: 'high' })], []);
+    await mount();
+    await rightClick('g1');
+    expect(menuLabels()[0]).toBe(koMessages.cage.sigApproveAndSign);
+    await clickMenuItem(koMessages.cage.sigApproveAndSign);
+    expect(document.body.querySelector('[data-slot="dialog-content"]')).toBeTruthy();
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+  });
+
+  it('reject opens the signature dialog (a reason is required) and hold opens the discuss dialog — the same windows the card\'s buttons open', async () => {
+    mockFetches([lowGate('g1', '첫째 결재 항목')], []);
+    await mount();
+    await rightClick('g1');
+    await clickMenuItem(koMessages.cage.sigReject);
+    expect(document.body.querySelector('[data-slot="dialog-content"] #gate-sig-reason')).toBeTruthy();
+  });
+
+  it('hold opens the discuss dialog', async () => {
+    mockFetches([lowGate('g1', '첫째 결재 항목')], []);
+    await mount();
+    await rightClick('g1');
+    await clickMenuItem(koMessages.cage.gateDiscussSubmit);
+    expect(document.body.querySelector('[data-slot="dialog-title"]')?.textContent).toBe(koMessages.cage.gateDiscussTitle);
+  });
+
+  it('a request that cannot be decided here (on hold · already decided · no permission) only offers «자세히 열기», which opens its page', async () => {
+    mockFetches([lowGate('g1', '첫째 결재 항목'), lowGate('g2', '권한 없는 항목', { can_approve: false })], [lowGate('g3', '보류된 항목', { status: 'held', held_until: null })]);
+    await mount();
+    for (const key of ['g2', 'g3']) {
+      await rightClick(key);
+      expect(menuLabels()).toEqual([koMessages.cage.queueMenuOpen]);
+      pushMock.mockClear();
+      await clickMenuItem(koMessages.cage.queueMenuOpen);
+      expect(pushMock).toHaveBeenCalledWith(`/gates/${key}`);
+    }
+  });
+
+  it('after a request is decided its row\'s menu is only «자세히 열기» (it cannot be decided twice from the menu)', async () => {
+    mockFetches([lowGate('g1', '첫째 결재 항목'), lowGate('g2', '둘째 결재 항목')], []);
+    await mount();
+    await rightClick('g1');
+    await clickMenuItem(koMessages.cage.gateApprove);
+    await rightClick('g1');
+    expect(menuLabels()).toEqual([koMessages.cage.queueMenuOpen]);
+  });
+
+  it('a HITL request: approve · reject from the menu send the PATCH for THAT request; an agent account gets no menu', async () => {
+    const calls = mockFetches([hitl({ id: 'h1', title: '첫째 승인 요청' }), hitl({ id: 'h2', title: '둘째 승인 요청' })], []);
+    await mount();
+    await rightClick('h2');
+    expect(menuLabels()).toEqual([koMessages.cage.gateApprove, koMessages.cage.gateReject]);
+    await clickMenuItem(koMessages.cage.gateReject);
+    const patch = calls.find((c) => c.method === 'PATCH');
+    expect(patch?.url).toBe('/api/v1/hitl-requests/h2');
+    expect(JSON.parse(patch?.body ?? '{}')).toEqual({ status: 'rejected' });
+  });
+
+  it('an agent account has no right-click menu on a HITL row (the browser\'s own menu stays)', async () => {
+    useDashboardContextMock.mockReturnValue({ orgMemberships: [{ orgId: 'org-1', orgName: '뭉클랩' }], projectMemberships: [], currentMemberType: 'agent', currentTeamMemberId: 'm-1', projectId: 'p1' });
+    mockFetches([hitl({ id: 'h1', title: '첫째 승인 요청' })], []);
+    await mount();
+    await rightClick('h1');
+    expect(menuLabels()).toEqual([]);
+  });
+
   it('⭐a double-click on a row opens that request\'s own page (/gates/{id}); a single click only picks it; a HITL row has no page', async () => {
     mockFetches([lowGate('g1', '첫째 결재 항목'), lowGate('g2', '둘째 결재 항목'), hitl({ id: 'h1', title: '승인 요청 하나' })], []);
     await mount();

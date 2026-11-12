@@ -6181,6 +6181,8 @@
     "queueDetailLabel": "Approval detail",
     "queueSheetLabel": "Details of {title}",
     "queueDetailEmpty": "Pick a request on the left",
+    "queueMenuApproveChoose": "Approve — open to choose an option",
+    "queueMenuOpen": "Open the page",
     "gateRejectedHistory": "Recent rejection reasons",
     "voidAction": "Void",
     "voidConfirmTitle": "Void approval gate",
