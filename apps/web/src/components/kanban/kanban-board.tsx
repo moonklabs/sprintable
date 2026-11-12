@@ -1245,17 +1245,18 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
   }, []);
 
   // 연타 · 순서가 뒤바뀐 응답에서 새 값을 덮지 않는 규칙(스토리마다): ① 다음 값은 «화면에 이미 그려진 마지막 값»에서 계산한다(직전 요청이 아직 안 끝나도) ② 응답(성공 · 실패)은 «가장 나중에 보낸 요청»의 것만 화면을 바꾼다 — 요청은 매번 전체 값(담당 전체 배열 · 제목)을 실어 마지막 요청이 서버를 결정한다 ③ 마지막 요청이 실패하면 «마지막으로 서버가 받은 값»으로 되돌린다.
-  const pendingRef = useRef(new Map<string, { latestA: number; latestT: number; inflight: number; assigneeIds: string[]; confirmedAssigneeIds: string[]; title: string; confirmedTitle: string }>());
+  const pendingRef = useRef(new Map<string, { latestA: number; latestT: number; inflightA: number; inflightT: number; confirmedSeqA: number; confirmedSeqT: number; assigneeIds: string[]; confirmedAssigneeIds: string[]; title: string; confirmedTitle: string }>());
   const pendingFor = useCallback((story: KanbanStory) => {
     const map = pendingRef.current;
     let st = map.get(story.id);
     const ids = story.assignee_ids && story.assignee_ids.length > 0 ? story.assignee_ids : (story.assignee_id ? [story.assignee_id] : []);
     if (!st) {
-      st = { latestA: 0, latestT: 0, inflight: 0, assigneeIds: ids, confirmedAssigneeIds: ids, title: story.title, confirmedTitle: story.title };
+      st = { latestA: 0, latestT: 0, inflightA: 0, inflightT: 0, confirmedSeqA: 0, confirmedSeqT: 0, assigneeIds: ids, confirmedAssigneeIds: ids, title: story.title, confirmedTitle: story.title };
       map.set(story.id, st);
-    } else if (st.inflight === 0) {
-      // 진행 중인 요청이 없으면 화면의 값(SSE 등으로 바뀌었을 수 있다)에서 다시 시작한다.
-      st.assigneeIds = ids; st.confirmedAssigneeIds = ids; st.title = story.title; st.confirmedTitle = story.title;
+    } else {
+      // 필드마다 진행 중인 요청이 없으면 화면의 값(SSE 등으로 바뀌었을 수 있다)에서 다시 시작한다 — 담당자 요청이 진행 중이어도 제목은 따로 다시 시작한다(그 반대도).
+      if (st.inflightA === 0) { st.assigneeIds = ids; st.confirmedAssigneeIds = ids; }
+      if (st.inflightT === 0) { st.title = story.title; st.confirmedTitle = story.title; }
     }
     return st;
   }, []);
@@ -1267,7 +1268,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
     const nextIds = st.assigneeIds.includes(memberId) ? st.assigneeIds.filter((id) => id !== memberId) : [...st.assigneeIds, memberId];
     st.assigneeIds = nextIds;
     const mine = ++st.latestA;
-    st.inflight += 1;
+    st.inflightA += 1;
     applyStoryPatch(storyId, normalizeAssigneePatch({ assignee_ids: nextIds }));
     let ok = false;
     try {
@@ -1279,17 +1280,24 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
       ok = res.ok;
       if (ok && mine === st.latestA) {
         const json = await res.json().catch(() => null) as { data?: { assignee_ids?: string[] | null } } | null;
-        // 서버 값이 오면 그대로(손으로 assignee_id를 다시 계산하지 않는다 — normalizeAssigneePatch가 한 곳)
-        const serverIds = json?.data?.assignee_ids ?? nextIds;
-        st.assigneeIds = serverIds;
-        applyStoryPatch(storyId, normalizeAssigneePatch({ assignee_ids: serverIds }));
+        // 본문을 읽는 사이 더 나중 토글이 시작됐을 수 있다 — 다시 확인한 뒤에만 화면을 바꾼다.
+        if (mine === st.latestA) {
+          // 서버 값이 오면 그대로(손으로 assignee_id를 다시 계산하지 않는다 — normalizeAssigneePatch가 한 곳)
+          const serverIds = json?.data?.assignee_ids ?? nextIds;
+          st.assigneeIds = serverIds;
+          applyStoryPatch(storyId, normalizeAssigneePatch({ assignee_ids: serverIds }));
+        }
       }
     } catch {
       ok = false;
     } finally {
-      st.inflight -= 1;
+      st.inflightA -= 1;
     }
-    if (ok) { st.confirmedAssigneeIds = nextIds; return; }
+    if (ok) {
+      // 서버가 받은 값은 «더 나중에 보낸» 요청의 것만 갱신한다(먼저 보낸 요청의 응답이 늦게 와도 확인값이 뒤로 가지 않는다).
+      if (mine > st.confirmedSeqA) { st.confirmedSeqA = mine; st.confirmedAssigneeIds = nextIds; }
+      return;
+    }
     if (mine !== st.latestA) return; // 더 나중 요청이 있다 — 그 요청이 전체 값을 실어 서버를 결정한다
     st.assigneeIds = st.confirmedAssigneeIds;
     applyStoryPatch(storyId, normalizeAssigneePatch({ assignee_ids: st.confirmedAssigneeIds }));
@@ -1303,7 +1311,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
     if (st.title === title) return;
     st.title = title;
     const mine = ++st.latestT;
-    st.inflight += 1;
+    st.inflightT += 1;
     applyStoryPatch(storyId, { title });
     let ok = false;
     try {
@@ -1316,9 +1324,12 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
     } catch {
       ok = false;
     } finally {
-      st.inflight -= 1;
+      st.inflightT -= 1;
     }
-    if (ok) { st.confirmedTitle = title; return; }
+    if (ok) {
+      if (mine > st.confirmedSeqT) { st.confirmedSeqT = mine; st.confirmedTitle = title; }
+      return;
+    }
     if (mine !== st.latestT) return;
     st.title = st.confirmedTitle;
     applyStoryPatch(storyId, { title: st.confirmedTitle });
