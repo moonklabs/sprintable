@@ -1604,6 +1604,8 @@ describe('ApprovalsQueue — 4909 (다) a failed approve / reject is told, not s
     await mount();
     await press(koMessages.cage.gateApprove);
     expect(errorLine()?.textContent).toBe(failedText());
+  });
+});
 
 // 4909 (라) — the signature dialog (high-risk decision gate) approved with the reason only: the option the person had chosen was written nowhere. The one-tap path puts «선택: …» into the note;
 // the dialog path now does the same (the option line, then the reason). Reject does not carry an option (it rejects the request itself — same rule as the one-tap path).
