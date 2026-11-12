@@ -113,7 +113,7 @@ describe('[SID:4380] 폴더 검색칸 초점', () => {
     });
     const input = container.querySelector<HTMLInputElement>(`input[placeholder="${koMessages.storage.folderSearchPlaceholder}"]`)!;
     const box = input.parentElement!.className.split(/\s+/);
-    expect(box).toContain('focus-within:ring-2');
-    expect(box).toContain('focus-within:ring-ds-action');
+    expect(box).toContain('focus-within:border-ds-ink-2'); // 4910 — 글 칸 초점 규칙(테두리만 중립으로 짙어짐 · 파란 고리 없음 · FIELD_FOCUS_WITHIN)
+    expect(box).not.toContain('focus-within:ring-ds-action');
   });
 });

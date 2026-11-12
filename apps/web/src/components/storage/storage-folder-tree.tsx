@@ -198,7 +198,7 @@ export function StorageFolderTree({
       {/* 폴더 검색 + 새 폴더 */}
       <div className="mx-3 mb-1.5 flex items-center gap-1.5">
         {/* [SID:4380 · 유나] 안의 input은 outline-none — 초점은 감싸는 상자의 제품 링(focus-within)으로 보인다(예전엔 글자 커서뿐). */}
-        <div className="flex min-w-0 flex-1 items-center gap-[7px] rounded-[0.5rem] bg-ds-surface-high/60 px-[9px] py-[7px] text-[12px] text-ds-ink-3 focus-within:ring-2 focus-within:ring-ds-action">
+        <div className="flex min-w-0 flex-1 items-center gap-[7px] rounded-ds-control border border-ds-line-control bg-ds-surface-sunk px-[9px] py-[7px] text-[12px] text-ds-ink-3 focus-within:border-ds-ink-2">
           <Search className="size-3.5 shrink-0 opacity-60" />
           <input
             value={folderSearch}
