@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // story #3934(실사고 — 3928 라이브 실측, 유나) — 목표(epic_id) 미할당 스토리가 「목록」 탭
-// 그룹핑에서 통째로 빠져 실제로 스토리가 있어도 "표시할 일감이 없어요"로 오독됐다. 소스
+// 그룹핑에서 통째로 빠져 실제로 스토리가 있어도 "표시할 스토리가 없어요"로 오독됐다. 소스
 // 텍스트/순수함수 가드만으로는 렌더 결함을 못 잡는다(memory feedback-render-test-over-
 // source-grep) — org-briefing-shell.test.tsx 선례를 따라 실제로 mount해 헤더 문구를 본다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -98,7 +98,7 @@ describe('WorkListShell — 목표 미할당 스토리(story #3934)', () => {
   it('미할당 스토리만 있어도 빈 상태가 아니라 「미분류」 그룹으로 그려진다', async () => {
     fetchWorkListMock.mockResolvedValue(unassignedOnlyPayload());
     await mount();
-    expect(container.textContent).not.toContain('표시할 일감이 없어요');
+    expect(container.textContent).not.toContain('표시할 스토리가 없어요');
     expect(container.textContent).toContain('미분류');
     expect(container.textContent).toContain('미할당 스토리');
   });
@@ -106,7 +106,7 @@ describe('WorkListShell — 목표 미할당 스토리(story #3934)', () => {
   it('그룹이 정말 0개면(실제로 일이 없으면) 여전히 빈 상태를 보인다', async () => {
     fetchWorkListMock.mockResolvedValue({ workList: { groups: [], partial: false, totalStoryCount: 0 }, hypotheses: [] });
     await mount();
-    expect(container.textContent).toContain('표시할 일감이 없어요');
+    expect(container.textContent).toContain('표시할 스토리가 없어요');
   });
 
   // story #3976(AC3, PO 확定) — 「목표 없음」 그룹에만 안내 문장(그 외 목표는 문장 0).
@@ -148,7 +148,7 @@ describe('WorkListShell — 목표 진행률 단위 낱말(story #3976 · 4888: 
 });
 
 // story #3934(재판정 — PO Test Org deploy92 실사고, 페드루 PO AC2(b) 2026-09-16 03:47Z) —
-// "표시할 일감이 없어요"(전체 부정)가 스토리는 있지만(totalStoryCount>0) task로 안 쪼개진
+// "표시할 스토리가 없어요"(전체 부정)가 스토리는 있지만(totalStoryCount>0) task로 안 쪼개진
 // 경우에도 그대로 떠서 "프로젝트에 일이 없다"고 오독시켰다. 필터 없이 groups가 0개인데
 // totalStoryCount>0이면 사실대로 정정된 문구를 보여야 한다.
 describe('WorkListShell — 일이 없는 스토리도 행이다(story #3934 재판정 → #4888 스토리 단위)', () => {
@@ -222,11 +222,11 @@ describe('WorkListShell — 일이 없는 스토리도 행이다(story #3934 재
     expect(story.querySelector('[data-testid="story-work-rows"]')?.textContent).toContain('할일1');
   });
 
-  it('필터가 걸려 groups가 0개일 때는 «조건에 맞는 일감이 없어요» + 필터 안내를 보인다', async () => {
+  it('필터가 걸려 groups가 0개일 때는 «조건에 맞는 스토리가 없어요» + 필터 안내를 보인다', async () => {
     searchParamsValueRef.current = 'goal=some-goal-id';
     fetchWorkListMock.mockResolvedValue({ workList: { groups: [], partial: false, totalStoryCount: 20 }, hypotheses: [] });
     await mount();
-    expect(container.textContent).toContain('조건에 맞는 일감이 없어요');
+    expect(container.textContent).toContain('조건에 맞는 스토리가 없어요');
     expect(container.textContent).toContain('필터를 바꾸거나 풀어 보세요');
   });
 
