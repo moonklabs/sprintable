@@ -288,13 +288,23 @@ export function StorageView({ projectId }: { projectId: string }) {
     setOrder(s === 'name' ? 'asc' : 'desc');
   }, []);
 
+  // 5668의 결함(둘째) — 서랍을 «행을 눌러 막 연 직후»인가. 행 더블클릭의 둘째 클릭(detail ≥ 2)이 그 자리에 깔린 배경 막에 닿아도 서랍을 안 닫기 위한 표식(코덱스 1차:
+  // 클릭 횟수만 보면 서랍 안쪽을 빠르게 누른 뒤의 막 클릭이 닫히지 않을 수 있어, «행을 눌러 연 뒤 다른 곳을 안 누른 동안»으로 좁힌다 — 서랍 안쪽 누름 · 첫 클릭의 막 누름 · 서랍 닫힘이 표식을 지운다).
+  const openedByRowClickRef = useRef(false);
   const handleSelectAsset = useCallback(
     (asset: Asset) => {
       setSelectedAssetId(asset.id);
-      if (!detailPanel.supportsInlinePanel) detailPanel.setDrawerOpen(true);
+      if (!detailPanel.supportsInlinePanel) {
+        if (!detailPanel.drawerOpen) openedByRowClickRef.current = true;
+        detailPanel.setDrawerOpen(true);
+      }
     },
     [detailPanel],
   );
+  const detailDrawerIsOpen = detailPanel.drawerOpen;
+  useEffect(() => {
+    if (!detailDrawerIsOpen) openedByRowClickRef.current = false;
+  }, [detailDrawerIsOpen]);
 
   const handleRequestDelete = useCallback((asset: Asset) => {
     setAssetToDelete(asset);
@@ -537,9 +547,16 @@ export function StorageView({ projectId }: { projectId: string }) {
             type="button"
             aria-label={t('cancel')}
             className="absolute inset-0 bg-ds-scrim"
-            onClick={() => detailPanel.setDrawerOpen(false)}
+            // 5668의 결함(둘째) — 행을 «더블클릭»하면 첫 클릭이 서랍을 열고 그 자리에 배경 막이 깔려, 같은 연속 누름의 둘째 클릭(`detail` ≥ 2)이 막을 눌러 서랍을 곧바로 닫았다
+            // (서랍 방식 = 1536 미만 · 맥 앱 1100 포함 — 더블클릭 = 열기가 안 됨, dev 실측 11-12). 시간(ms)이 아니라 브라우저가 세는 클릭 횟수를 쓴다.
+            // 단 «행을 눌러 연 뒤 서랍 안쪽을 안 누른 동안»의 둘째 이후 클릭만 무시한다(그 밖의 막 누름은 늘 닫는다).
+            onClick={(e) => {
+              if (e.detail > 1 && openedByRowClickRef.current) return;
+              openedByRowClickRef.current = false;
+              detailPanel.setDrawerOpen(false);
+            }}
           />
-          <div className="absolute inset-y-0 right-0 w-[min(92vw,372px)]">
+          <div className="absolute inset-y-0 right-0 w-[min(92vw,372px)]" onPointerDownCapture={() => { openedByRowClickRef.current = false; }}>
             <StorageDetailPanel
               asset={selectedAsset}
               folderLabel={resolveFolderLabel(selectedAsset?.folder_id ?? null)}
