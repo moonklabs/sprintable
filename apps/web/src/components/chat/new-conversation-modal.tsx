@@ -21,6 +21,7 @@ import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { RowName } from '@/components/shared/row-name';
 import { DeviceChip } from '@/components/desktop/device-chip';
+import { NoPeersNextSteps } from './no-peers-next-steps';
 
 interface Member {
   id: string;
@@ -98,6 +99,8 @@ export function NewConversationModal({ projectId, allowNoProject = false, onClos
   const [selected, setSelected] = useState<string[]>([]);
   const [groupTitle, setGroupTitle] = useState('');
   const [loading, setLoading] = useState(true);
+  // story 4906 — an UNANSWERED roster read is not «nobody to talk to»: the next steps are drawn only when the read answered and left no one but me
+  const [membersRead, setMembersRead] = useState<'pending' | 'ok' | 'failed'>('pending');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<ModalError | null>(null);
 
@@ -109,8 +112,9 @@ export function NewConversationModal({ projectId, allowNoProject = false, onClos
         // 대상이 아닌 내부 멤버) — 선택지에서 제외.
         const list = (json.data ?? []) as Member[];
         setMembers(list.filter((m) => !isSystemPublisher(m.runtime_type)));
+        setMembersRead('ok');
       })
-      .catch(() => {})
+      .catch(() => { setMembersRead('failed'); })
       .finally(() => setLoading(false));
     // story #3194 — 연결 상태(발명 0, #2751 get_verified_map)는 /api/members가 안 실어주는
     // 필드라 team-members 쪽에서 따로 받는다. 별개 state로 둬 위 members fetch와의 완료
@@ -186,6 +190,9 @@ export function NewConversationModal({ projectId, allowNoProject = false, onClos
           <p className="mb-2 text-xs text-muted-foreground">{t('selectMembers')}</p>
           {loading ? (
             <div className="py-6 text-center text-sm text-muted-foreground">{tc('loading')}</div>
+          ) : membersRead === 'ok' && people.length === 0 ? (
+            // story 4906 — a new organization has nobody but the person: say what to do next (the screens that make somebody to talk to), not an empty list under «대화 상대 선택»
+            <div className="py-4"><NoPeersNextSteps /></div>
           ) : (
             <ul className="space-y-1">
               {people.map((m) => (

@@ -12,6 +12,7 @@ import { Button as DsButton } from '@/components/ds/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select } from '@/components/ui/select';
 import { NewConversationModal } from './new-conversation-modal';
+import { ChatListEmptyState } from './no-peers-next-steps';
 import { ConnectionLostBanner } from './connection-lost-banner';
 import { isOwnMessage, useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -919,7 +920,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       </div>
     ) : (
       <div className="flex h-full items-center justify-center">
-        <EmptyState title={t('noConversations')} description={t('startNewConversation')} className="w-full max-w-xs" />
+        <ChatListEmptyState />
       </div>
     )
   ) : (
