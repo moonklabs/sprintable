@@ -177,6 +177,17 @@ describe('GoalsClient — 결과 원장 재조립(§2 이중 신호 · story #48
     expect(container.textContent).toContain('활성 1');
   });
 
+  it('⭐story 4906: a goal made just now (no stories yet, no movement) counts in 활성 — the head must not say «활성 0» beside a list whose one goal is «Active»; one made long ago with no movement stays out', async () => {
+    stubFetch([
+      { id: 'e1', title: '방금 만든 목표', status: 'active', total_stories: 0, done_stories: 0, created_at: new Date().toISOString() },
+      { id: 'e2', title: '오래전에 만든 조용한 목표', status: 'active', total_stories: 0, done_stories: 0, created_at: new Date(Date.now() - 100 * 24 * 60 * 60 * 1000).toISOString() },
+    ]);
+    await mount();
+    expect(container.textContent).toContain('활성 1');
+    expect(container.textContent).not.toContain('활성 2');
+    expect(container.textContent).not.toContain('활성 0');
+  });
+
   // 두 축(작업 / 결과)은 섞이지 않는다 — 작업 막대는 100%여도 «완료 초록»이 아니고, 초록은 결과 «적중» 칩 하나에만 있다(soul-lock).
   const tones = () => [...container.querySelectorAll('[data-slot="ds-chip"]')].map((c) => c.getAttribute('data-tone'));
   const rowChips = () => [...container.querySelectorAll('[data-testid="goal-row"] [data-slot="ds-chip"]')];
