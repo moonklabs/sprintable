@@ -130,6 +130,26 @@ describe('4908 카드 — codex 검수 반영', () => {
     });
     expect(outerPointer).not.toHaveBeenCalled();
     expect(outerKey).not.toHaveBeenCalled();
+    // Esc · Tab 같은 그 밖의 키는 막지 않는다(메뉴 닫기 · 초점 이동이 문서까지 닿아야 한다).
+    act(() => { btn.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    expect(outerKey).toHaveBeenCalledTimes(1);
+  });
+
+  it('⭐메뉴 항목이 하나도 없는 카드(에픽 스윔레인 — 조작 콜백이 없다)에는 «⋯» 버튼이 없다 — 빈 메뉴가 열리지 않는다', () => {
+    const card = render({ projectId: undefined, onChangeStatus: undefined });
+    expect(card.querySelector('button[aria-haspopup="menu"]')).toBeNull();
+  });
+
+  it('⭐«⋯»로 연 메뉴는 화면 아래쪽에서도 뷰포트 안에 선다(세로 clamp)', () => {
+    vi.stubGlobal('innerHeight', 600);
+    const card = render();
+    const btn = card.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
+    btn.getBoundingClientRect = () => ({ top: 570, bottom: 590, left: 10, right: 34, width: 24, height: 20, x: 10, y: 570, toJSON: () => ({}) });
+    act(() => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const menu = document.body.querySelector<HTMLElement>('[role="menu"]')!;
+    const items = menu.querySelectorAll('[role="menuitem"]').length;
+    expect(parseFloat(menu.style.top)).toBeLessThanOrEqual(600 - (items * 36 + 8) - 8);
+    vi.unstubAllGlobals();
   });
 
   it('«⋯» 버튼이 메뉴가 열렸는지(aria-expanded)를 말한다', () => {

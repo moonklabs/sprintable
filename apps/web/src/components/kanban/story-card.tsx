@@ -37,6 +37,12 @@ function clampToViewport(x: number): number {
   return Math.min(Math.max(x, VIEWPORT_MARGIN), window.innerWidth - MENU_WIDTH - VIEWPORT_MARGIN);
 }
 
+// 4908 — 세로도 뷰포트 안으로(화면 아래쪽 카드에서 «⋯»를 눌러도 메뉴 항목이 화면 밖으로 안 나간다). 항목 하나 ≈ 36px(py-2 + text-sm) + 메뉴 안쪽 여백 8px.
+const MENU_ITEM_HEIGHT = 36;
+function clampTopToViewport(y: number, itemCount: number): number {
+  return Math.max(VIEWPORT_MARGIN, Math.min(y, window.innerHeight - (itemCount * MENU_ITEM_HEIGHT + 8) - VIEWPORT_MARGIN));
+}
+
 // E-MODERN A: 에픽 식별 dot — 기존 시맨틱 토큰만(신규 토큰/raw 팔레트 0). 신호색(warning=blocked·
 // accent-claim=agent·destructive) 회피해 의미 충돌 0. 랜덤 5색 채움 배지(loud)는 퇴출.
 const EPIC_DOT_CLASSES = ['bg-info', 'bg-success', 'bg-secondary', 'bg-muted-foreground'] as const;
@@ -174,6 +180,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
   // 여전히 별개 사실이라 meta row에 남을 수 있다(중복 아님).
   const lineBadgePromoted = !isBlockedForAction
     && (lineBadge === 'handoff_stuck' || lineBadge === 'waiting_human' || lineBadge === 'pending_gate');
+  // 메뉴에 항목이 하나도 없는 카드(에픽 스윔레인 — 조작 콜백을 안 받는다)는 «⋯» 버튼도 없다(빈 메뉴가 열리는 것을 막는다).
+  const menuItemCount = (onEdit ? 1 : 0) + (onChangeStatus && !locked ? 1 : 0) + (onAssign ? 1 : 0) + (projectId ? 1 : 0) + (onDelete ? 1 : 0);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   // story #2416 — native confirm() 대체.
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -363,9 +371,9 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     e.stopPropagation();
     // 우클릭/롱프레스 지점(뷰포트 좌표)을 그대로 앵커로 쓰고 뷰포트 폭 안으로 clamp — 카드가
     // 어디 있든(가로스크롤로 화면 밖까지 걸쳐 있어도) 메뉴는 항상 화면 안에서 뜬다.
-    setMenuPos({ top: e.clientY, left: clampToViewport(e.clientX) });
+    setMenuPos({ top: clampTopToViewport(e.clientY, menuItemCount), left: clampToViewport(e.clientX) });
     setContextMenuOpen(true);
-  }, []);
+  }, [menuItemCount]);
 
   // story #3664 AC2 — 키보드로 메뉴 열기(Shift+F10 또는 Menu/ContextMenu 키, OS 표준
   // "컨텍스트 메뉴 열기" 제스처). 우클릭과 동형으로 카드의 바운딩 사각형을 앵커로 쓴다
@@ -376,21 +384,21 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       e.preventDefault();
       const rect = cardRef.current?.getBoundingClientRect();
       if (rect) {
-        setMenuPos({ top: rect.bottom, left: clampToViewport(rect.left) });
+        setMenuPos({ top: clampTopToViewport(rect.bottom, menuItemCount), left: clampToViewport(rect.left) });
       }
       setContextMenuOpen(true);
       return;
     }
     dndOnKeyDown?.(e);
-  }, [dndOnKeyDown]);
+  }, [dndOnKeyDown, menuItemCount]);
 
   // 4908 — 카드 «⋯» 버튼: 카드 안 어디서나 같은 메뉴를 연다(우클릭과 같은 메뉴 · 앵커만 버튼 아래).
   const openMenuFromButton = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     const rect = e.currentTarget.getBoundingClientRect();
-    setMenuPos({ top: rect.bottom, left: clampToViewport(rect.left) });
+    setMenuPos({ top: clampTopToViewport(rect.bottom, menuItemCount), left: clampToViewport(rect.left) });
     setContextMenuOpen(true);
-  }, []);
+  }, [menuItemCount]);
 
   // story #3664 — 메뉴/서브메뉴 컨테이너 공용 키보드 순회(위/아래 화살표로 role="menuitem"
   // 사이 이동, wrap). Enter/Space는 네이티브 <button> 활성화로 이미 동작해 별도 처리 0.
@@ -500,6 +508,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
           </span>
         ) : null}
         <span className="flex-1" />
+        {menuItemCount > 0 ? (
         <Button
           type="button"
           variant="ghost"
@@ -509,14 +518,15 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
           title={t('cardMenuButton', { title: story.title })}
           aria-expanded={contextMenuOpen}
           onClick={openMenuFromButton}
-          // 카드 바깥 div가 dnd-kit 끌기(pointerdown)와 키 처리(Space/Enter = 집기)를 소유한다 — 이 버튼의 누름 · 키가 거기로 새면 끌기가 시작되거나 집기로 읽힌다.
+          // 카드 바깥 div가 dnd-kit 끌기(pointerdown)와 키 처리(Space/Enter = 집기)를 소유한다 — 이 버튼의 누름 · Enter/Space가 거기로 새면 끌기가 시작되거나 집기로 읽힌다. 그 밖의 키(Esc · Tab · Shift+F10)는 그대로 흘려 보낸다.
           onPointerDown={(e) => e.stopPropagation()}
-          onKeyDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') e.stopPropagation(); }}
           // 터치 폰은 누르는 자리 44×44(음수 margin으로 줄 높이는 그대로) — 호버 없는 기기는 늘 보이고, 마우스는 카드 호버 · 초점 때 보인다.
           className={cn('-my-0.5 -mr-1', metaInk, 'hover:bg-ds-surface-sunk hover:text-ds-ink touch:-my-3 touch:size-11', HOVER_REVEAL_HIT, HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING)}
         >
           <MoreHorizontal className="size-4" aria-hidden="true" />
         </Button>
+        ) : null}
       </div>
 
       {/* 줄 2 — 제목(2줄까지) */}
