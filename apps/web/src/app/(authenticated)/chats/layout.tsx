@@ -7,6 +7,7 @@ import { PanelLeftOpen } from 'lucide-react';
 import { ChatListView } from '@/components/chat/chat-list-view';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
+import { useChatMessageDeletedSse } from '@/hooks/use-chat-message-deleted-sse';
 import { ChatRailProvider, useChatRail } from './chat-rail-context';
 import { isNoProjectAtAll } from './no-project';
 
@@ -35,6 +36,7 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
   const t = useTranslations('chats');
   const tc = useTranslations('common');
   const pathname = usePathname();
+  useChatMessageDeletedSse(); // story 4903 AC3 — another person's delete reaches the open room · thread · list (mounted once, here)
   const dashboardCtx = useDashboardContext();
   const { currentTeamMemberId, projectId } = dashboardCtx;
   const [showModal, setShowModal] = useState(false);

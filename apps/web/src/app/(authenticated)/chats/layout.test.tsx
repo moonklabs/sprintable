@@ -52,6 +52,13 @@ vi.mock('@/components/chat/chat-list-view', () => ({
   },
 }));
 
+// story 4903 AC3 — the layout mounts the server's «message deleted» subscription ONCE (the hook's own behaviour is pinned in use-chat-message-deleted-sse.test.tsx)
+const deletedSse = vi.hoisted(() => ({ mounts: 0, unmounts: 0 }));
+vi.mock('@/hooks/use-chat-message-deleted-sse', async () => {
+  const { useEffect: useEffectInMock } = await import('react');
+  return { useChatMessageDeletedSse: () => { useEffectInMock(() => { deletedSse.mounts += 1; return () => { deletedSse.unmounts += 1; }; }, []); } };
+});
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -108,6 +115,17 @@ afterEach(async () => {
 });
 
 describe('ChatsLayout — story #2921 S1(영구 스플릿뷰 shell)', () => {
+  it('⭐ story 4903 AC3 — the layout subscribes to another person\'s deletes exactly ONCE for the whole chats screen (list + room + thread listen to the announcement it makes), and lets go when it goes away', async () => {
+    deletedSse.mounts = 0; deletedSse.unmounts = 0;
+    usePathnameMock.mockReturnValue('/chats/c-1');
+    await act(async () => { root.render(wrap(<ChatsLayout><div>children</div></ChatsLayout>)); });
+    expect(deletedSse.mounts).toBe(1); // reverted (the layout does not mount it) → 0
+    await act(async () => { root.render(wrap(<ChatsLayout><div>other children</div></ChatsLayout>)); });
+    expect(deletedSse.mounts, 'a re-render does not subscribe again').toBe(1);
+    await act(async () => { root.render(wrap(<div />)); });
+    expect(deletedSse.unmounts).toBe(1);
+  });
+
   it('ChatListView는 정확히 1곳만 마운트된다(리스트 경로·대화 경로 둘 다 — 이중 구독 방지가 이 story의 핵심 근거)', async () => {
     usePathnameMock.mockReturnValue('/chats');
     await act(async () => {
