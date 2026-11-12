@@ -356,6 +356,9 @@ interface RecruiterClientProps {
   onExit?: () => void;
 }
 
+/** story 4906 (customer lap ②) — the step's progress row («다음» · «채용하기») sticks to the bottom of the viewport so it is on the first screen and stays in view while the step scrolls (one scroll: the page) */
+const STEP_ACTIONS_STICKY = 'sticky bottom-0 z-10 border-t border-border bg-card py-3'; // bg-card = the step card's own surface (no band when it sticks)
+
 export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }: RecruiterClientProps) {
   const flatHref = useFlatHref(); // story #4231 4차 B — 옛 자원 경로(flat 목적지)에 프로젝트
   // story #4017(PO 확定 2026-09-17) — 아래 「완료」 CTA(/chats)를 목적지 모듈로.
@@ -1229,9 +1232,9 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                       className="bg-card pl-8 dark:bg-card"
                     />
                   </div>
-                  {/* 다음 버튼이 긴 리스트 하단에 묻히지 않도록 리스트 자체를 bounded-height 스크롤로 격리 —
-                      버튼은 이 영역 밖(항상 보임)에 위치. */}
-                  <div className="focus-inset max-h-[55vh] space-y-4 overflow-y-auto pr-0.5">
+                  {/* story 4906 (customer lap ②) — the list used to be its own bounded scroller so the «다음» button under it stayed in view; on a 1440×900 screen that left TWO scrolls (the page, and the list: 495px of 6850)
+                      and the button still sat below the first screen (y 987). The button row is now sticky at the bottom of the viewport (STEP_ACTIONS_STICKY): ONE scroll — the page — and the button is always in view. */}
+                  <div className="space-y-4" data-testid="recruiter-role-list">
                     {roleGroups.length === 0 ? (
                       <p className="py-6 text-center text-sm text-muted-foreground">{t('roleSearchEmpty')}</p>
                     ) : roleGroups.map((group) => (
@@ -1342,7 +1345,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   </div>
                 </div>
               ) : (
-              <div className="flex justify-end border-t border-border pt-3">
+              <div className={`flex justify-end ${STEP_ACTIONS_STICKY}`} data-testid="recruiter-step-actions">
                 <Button
                   variant="hero"
                   disabled={!selectedRoleSlug && !equipSkip}
@@ -1392,7 +1395,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 </div>
               ) : null}
 
-              <div className="flex justify-between gap-2 pt-2">
+              <div className={`flex justify-between gap-2 ${STEP_ACTIONS_STICKY}`} data-testid="recruiter-step-actions">
                 <Button variant="ghost" onClick={() => setStep(1)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
                 {equipSkip ? (
                   <Button
@@ -1538,7 +1541,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   </div>
                 </div>
               ) : (
-              <div className="flex justify-between gap-2 pt-2">
+              <div className={`flex justify-between gap-2 ${STEP_ACTIONS_STICKY}`} data-testid="recruiter-step-actions">
                 <Button variant="ghost" onClick={() => setStep(2)}><ChevronLeft className="h-4 w-4" />{t('back')}</Button>
                 <Button variant="hero" disabled={recruiting} onClick={() => void handleRecruit()}>
                   {recruiting ? t('recruiting') : t('recruitCta')}
