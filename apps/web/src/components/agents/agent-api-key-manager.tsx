@@ -281,7 +281,6 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
 
 
   const activeKeys = apiKeys.filter((k) => !k.revoked_at);
-  const hasActiveKey = activeKeys.length > 0 || generatedKey !== null;
 
   return (
     <SectionCard className="p-6" data-testid="agent-api-key-manager">
@@ -300,8 +299,9 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
             </Button>
             <Button
               variant="outline"
-              disabled={!hasActiveKey || copiedOnboarding}
-              onClick={() => void copyOnboardingMessage(generatedKey ?? (activeKeys[0] ? `${activeKeys[0].key_prefix}...` : ''), generatedMcpConfig, generatedKey !== null)}
+              // story 4912 D5 — the onboarding message needs the FULL key. Without a fresh key this button copied «{prefix}...» (a message the agent cannot use), so it is only on while a fresh key is held.
+              disabled={generatedKey === null || copiedOnboarding}
+              onClick={() => { if (generatedKey !== null) void copyOnboardingMessage(generatedKey, generatedMcpConfig, true); }}
               className="gap-1.5"
             >
               {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}

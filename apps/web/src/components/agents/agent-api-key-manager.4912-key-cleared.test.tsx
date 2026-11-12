@@ -33,6 +33,15 @@ function stubFetch() {
 }
 const btn = (label: string) => Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
 const settle = async () => { await act(async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); }); };
+// after the dialog is closed no fresh key is held: the header «온보딩 메시지 복사» is OFF (story 4912 D5), a click copies nothing — and never the full key (D4)
+const headerBtn = () => Array.from(document.querySelectorAll('[data-testid="agent-api-key-manager"] button')).find((b) => b.textContent?.trim() === S.agentApiKeyCopyOnboardingCta) as HTMLButtonElement | undefined;
+async function expectHeaderCopyOffAndNothingCopied() {
+  expect(headerBtn()?.disabled).toBe(true);
+  await act(async () => { headerBtn()?.click(); });
+  await settle();
+  expect(copied.length).toBe(0);
+  expect(copied.some((c) => c.includes(NEW_KEY))).toBe(false);
+}
 
 // render → [API 키 발급] (a key is active, so the revoke-confirm opens first) → [무효화하고 새 키 발급] → the key shown dialog is open with the full key in it
 async function openKeyShownDialog() {
@@ -57,22 +66,14 @@ describe('AgentApiKeyManager — 4912 D4: the full key does not stay once the ke
     await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
     await settle();
     expect(document.body.textContent).not.toContain(NEW_KEY); // dialog gone
-    await act(async () => { btn(S.agentApiKeyCopyOnboardingCta)?.click(); });
-    await settle();
-    expect(copied.length).toBe(1);
-    expect(copied[0]).not.toContain(NEW_KEY);
-    expect(copied[0]).not.toContain('https://example.test/mcp'); // the MCP config the create answer brought goes too
+    await expectHeaderCopyOffAndNothingCopied();
   });
 
   it('⭐the [완료] button clears the key AND the MCP config (before, the MCP config stayed)', async () => {
     await openKeyShownDialog();
     await act(async () => { btn(S.agentApiKeyDone)?.click(); });
     await settle();
-    await act(async () => { btn(S.agentApiKeyCopyOnboardingCta)?.click(); });
-    await settle();
-    expect(copied.length).toBe(1);
-    expect(copied[0]).not.toContain(NEW_KEY);
-    expect(copied[0]).not.toContain('https://example.test/mcp');
+    await expectHeaderCopyOffAndNothingCopied();
   });
 
   it('while the dialog is OPEN the header copy still carries the full key (the normal path is unchanged)', async () => {
@@ -124,10 +125,7 @@ describe('AgentApiKeyManager — 4912 D4: the other things that could hold the k
     await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
     await settle();
     expect(document.body.textContent).not.toContain(NEW_KEY);
-    await act(async () => { btn(S.agentApiKeyCopyOnboardingCta)?.click(); });
-    await settle();
-    expect(copied.length).toBe(1);
-    expect(copied[0]).not.toContain(NEW_KEY); // and nothing of it stays in state with the dialog shut
+    await expectHeaderCopyOffAndNothingCopied();
   });
 
   it('the dialog\'s own X (the primitive close button) clears it the same way', async () => {
@@ -136,9 +134,7 @@ describe('AgentApiKeyManager — 4912 D4: the other things that could hold the k
     expect(x, 'the dialog has its own close button').toBeTruthy();
     await act(async () => { x?.click(); });
     await settle();
-    await act(async () => { btn(S.agentApiKeyCopyOnboardingCta)?.click(); });
-    await settle();
-    expect(copied[0]).not.toContain(NEW_KEY);
+    await expectHeaderCopyOffAndNothingCopied();
   });
 
   it('⭐a copy still pending when the dialog is closed, then FAILING, does not bring the message (with the key) back — no textarea, nothing in state (codex round 2)', async () => {
