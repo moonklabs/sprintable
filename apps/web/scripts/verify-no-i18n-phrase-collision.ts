@@ -508,11 +508,6 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 전환"/"채널에서 보기")이 들어가 렌더 결과는 갈린다, 템플릿 문자열 자체의
   // 우연한 형태 일치일 뿐.
   'content.commentsResubmitAriaLabel <-> content.commentsRetryAriaLabel',
-  // 위와 같은 이유 — 둘 다 "{n}번째 댓글 {label}" 템플릿 공유(§22-18 표 그대로).
-  'settings.agentMember <-> settings.agentToggleAriaLabel',
-  // agentMember="에이전트"(행 안 배지 라벨, 보간 없음) <-> agentToggleAriaLabel
-  // ("{n}번째 에이전트 {label}") — 배지는 시각 요소, aria-label은 그 옆 토글
-  // 버튼의 보조기술 전용 이름이라 화면상 겹쳐 읽힐 자리가 없다.
   // story #4049(E-RECIPE-1 ①) — events/page.tsx가 마케팅 적용 성공 토스트에
   // eventApplySuccessToast("배정 {count}건 저장 완료")를 새로 쓰면서 같은 파일 안
   // eventEditSubmit("저장", 기존 EventFormDialog 저장 버튼)과 부분문자열로 겹친다.

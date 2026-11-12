@@ -2436,7 +2436,6 @@
     "agentActionFailed": "Agent operation failed",
     "deactivateAgent": "Deactivate",
     "activateAgent": "Activate",
-    "agentToggleAriaLabel": "{label} — agent {n}",
     "agentToggling": "Changing…",
     "deactivateAgentDialogTitle": "Deactivate {name}",
     "deactivateAgentDialogBody": "All requests from this agent will be rejected immediately. Work in progress may be interrupted. The API key itself remains valid, so there's no need to reissue it.",
@@ -4836,6 +4835,8 @@
     "runProfileErrorGeneric": "Couldn't save — please try again",
     "runProfileBulkTitle": "Change run settings",
     "runProfileBulkApply": "Apply to {count, plural, one {# agent} other {# agents}}",
+    "runProfileChosenCount": "{count} selected",
+    "agentRowActionsAria": "Actions for {name}",
     "runProfileBulkOpen": "Change run settings",
     "runProfileChooseAria": "Choose {name}"
   },

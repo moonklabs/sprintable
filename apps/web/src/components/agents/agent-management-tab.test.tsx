@@ -11,6 +11,9 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { AgentManagementTab } from './agent-management-tab';
 
+// story 4912 — the rows open the detail through the router (Enter / double click): a stub router, the push is not under test here
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -53,6 +56,17 @@ async function mount() {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
+// story 4912 — the row's actions live in the «⋯» / right-click menu (one array): open a row's menu and read its items
+const rowEl = (id: string) => container.querySelector(`[data-testid="agent-row-${id}"]`)!;
+const openMenu = async (id: string) => {
+  const more = rowEl(id).querySelector('[data-slot="ds-row-actions-trigger"]') as HTMLElement | null;
+  if (more) await act(async () => { more.click(); });
+  return [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+};
+const closeMenu = async () => { await act(async () => { document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); }); };
+const chips = () => [...container.querySelectorAll('[data-slot="ds-chip"]')].map((el) => el.textContent?.trim());
+const subtitleOf = (id: string) => rowEl(id).querySelector('[data-slot="ds-list-row"] .font-mono')?.textContent ?? '';
+
 // story #3994(«거짓 경고» 클래스, PO 확定) — 「시스템 발행」(runtime_type==='system-
 // publisher')은 verified가 항상 false지만 연결 대상이 아니다. 행은 남기되(선생님
 // 3107) 경고 배지·연결 설정 CTA는 뗀다. 일반 verified=false 에이전트는 회귀 0으로
@@ -61,11 +75,11 @@ describe('AgentManagementTab — 시스템 발행 거짓 경고 중립화(story 
   it('⭐일반 에이전트 verified=false면 「연결 안 됨」 배지+「연결 설정 보기」 CTA가 그대로 뜬다(회귀 0)', async () => {
     stubFetch({ agents: [{ id: 'a1', name: '일반 에이전트', role: 'member', is_active: true, verified: false, runtime_type: 'claude-code' }] });
     await mount();
-    expect(container.textContent).toContain('연결 안 됨');
-    expect(container.textContent).toContain('연결 설정 보기');
-    // [SID:4282 · 유나 추가 결정] 카드 · 화살표와 같은 곳으로 가는 중복 링크는 lg 미만에서 숨김(390 이름 칸 확보).
-    const link = Array.from(container.querySelectorAll('a')).find((a) => a.textContent === '연결 설정 보기');
-    expect(link?.className.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', 'lg:inline']));
+    expect(chips()).toContain('연결 안 됨');
+    // story 4912 — «연결 설정 보기» is now an item of the row menu (the duplicate link and the arrow are gone)
+    const items = await openMenu('a1');
+    expect(items.map((i) => i.textContent)).toContain('연결 설정 보기');
+    await closeMenu();
   });
 
   it('⭐「시스템 발행」(runtime_type=system-publisher, verified=false)은 행은 뜨되 경고·CTA 0, 중립 설명 1줄', async () => {
@@ -73,7 +87,8 @@ describe('AgentManagementTab — 시스템 발행 거짓 경고 중립화(story 
     await mount();
     expect(container.textContent).toContain('시스템 발행');
     expect(container.textContent).not.toContain('연결 안 됨');
-    expect(container.textContent).not.toContain('연결 설정 보기');
+    expect((await openMenu('sp1')).map((i) => i.textContent)).not.toContain('연결 설정 보기');
+    await closeMenu();
     expect(container.textContent).toContain('Sprintable이 자동으로 남기는 알림·기록의 보낸 이예요');
   });
 });
@@ -82,8 +97,8 @@ describe('AgentManagementTab — 시스템 발행 거짓 경고 중립화(story 
 // «inactive»가 글자 그대로 이름 줄에 붙어 이름을 5자로 밀었다. 조직 역할 라벨(소유자 · 관리자 · 구성원 · 모르는 값만 원문) ·
 // 비활성은 칩 줄로(secondary) · 이름 줄엔 이름만.
 describe('AgentManagementTab — 역할 · 비활성 칩(SID:4282)', () => {
-  const badges = () => Array.from(container.querySelectorAll('[data-slot="badge"]'));
-  const badgeTexts = () => badges().map((el) => el.textContent?.trim());
+  // story 4912 — the org role is part of the row's second line now (a chip used to say it): the texts of the second lines
+  const badgeTexts = () => [...container.querySelectorAll('[role="listitem"][data-testid^="agent-row-"]')].flatMap((r) => (r.querySelector('[data-slot="ds-list-row"] .font-mono')?.textContent ?? '').split(' · '));
   it('member → «구성원» · admin → «관리자» · owner → «소유자», 원문 0', async () => {
     stubFetch({ agents: [
       { id: 'a1', name: '멤버 에이전트', role: 'member', is_active: true },
@@ -130,17 +145,14 @@ describe('AgentManagementTab — 역할 · 비활성 칩(SID:4282)', () => {
     expect(chips).toContain('viewer');
     expect(container.textContent ?? '').not.toContain('function');
   });
-  it('비활성: «비활성» 칩이 칩 줄(범위 칩 뒤)에 secondary로 · 이름 줄엔 이름만 · 원문 «inactive» 0', async () => {
+  it('비활성: «비활성» 칩이 오른쪽 상태 자리에 중립 칩으로 · 이름 줄엔 이름만 · 원문 «inactive» 0', async () => {
     stubFetch({ agents: [{ id: 'a1', name: 'Backend-agent-with-a-long-name', role: 'member', is_active: false }] });
     await mount();
-    const inactive = badges().find((el) => el.textContent?.trim() === koMessages.settings.agentInactiveBadge);
+    const inactive = [...container.querySelectorAll('[data-slot="ds-chip"]')].find((el) => el.textContent?.trim() === koMessages.settings.agentInactiveBadge);
     expect(inactive).toBeTruthy();
-    expect(inactive?.getAttribute('data-variant')).toBe('secondary');
+    expect(inactive?.getAttribute('data-tone')).toBe('neutral'); // a state that can be undone: not red
     const nameLine = container.querySelector('a .truncate')?.parentElement;
     expect(nameLine?.textContent?.trim()).toBe('Backend-agent-with-a-long-name');
-    const chipRow = inactive?.parentElement;
-    const order = Array.from(chipRow?.querySelectorAll('[data-slot="badge"]') ?? []).map((el) => el.textContent?.trim());
-    expect(order.indexOf(koMessages.settings.agentInactiveBadge)).toBeGreaterThan(order.findIndex((x) => /프로젝트/.test(x ?? '')));
     expect(container.textContent ?? '').not.toContain('inactive');
   });
 });
@@ -155,8 +167,8 @@ describe('AgentManagementTab — meRes/projectsRes 격리(story #3519)', () => {
 
 // story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「비활성화」 접근 이름이라 보조기술
 // 버튼 목록에서 어느 에이전트 행인지 못 가른다.
-describe('AgentManagementTab — 토글 버튼 접근 이름 전수(story #3592)', () => {
-  it('⭐#3592 — 2건이면 두 「비활성화」 버튼의 접근 이름이 서로 다르고 각자 순번을 품는다', async () => {
+describe('AgentManagementTab — 토글 행동의 접근 이름 전수(story #3592)', () => {
+  it('⭐#3592 — 2건이면 두 행의 «⋯» 단추 접근 이름이 서로 다르고 각자 그 행의 이름을 품는다 · 메뉴 항목은 «비활성화»', async () => {
     stubFetch({
       agents: [
         { id: 'a1', name: '에이전트 하나', role: 'member', is_active: true },
@@ -165,14 +177,14 @@ describe('AgentManagementTab — 토글 버튼 접근 이름 전수(story #3592)
     });
     await mount();
 
-    const buttons = Array.from(container.querySelectorAll('button')).filter((b) => b.textContent === '비활성화');
-    expect(buttons).toHaveLength(2);
-    const names = buttons.map((b) => b.getAttribute('aria-label'));
+    const triggers = [...container.querySelectorAll('[data-slot="ds-row-actions-trigger"]')];
+    expect(triggers).toHaveLength(2);
+    const names = triggers.map((b) => b.getAttribute('aria-label'));
     expect(names[0]).not.toBe(names[1]);
-    expect(names[0]).toContain('1번째');
-    expect(names[0]).toContain('비활성화');
-    expect(names[1]).toContain('2번째');
-    expect(names[1]).toContain('비활성화');
+    expect(names[0]).toContain('에이전트 하나');
+    expect(names[1]).toContain('에이전트 둘');
+    expect((await openMenu('a1')).map((i) => i.textContent)).toContain('비활성화');
+    await closeMenu();
   });
 });
 
@@ -198,17 +210,18 @@ describe('AgentManagementTab — pending 라벨 낱말화(story #3608)', () => {
     }));
     await mount();
 
-    const toggleBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '활성화');
-    expect(toggleBtn).not.toBeUndefined();
+    // story 4912 — the toggle is a row menu item now: activate it (no confirm — the undoable direction), then look at the same item while the PATCH is out
+    const activate = (await openMenu('a1')).find((i) => i.textContent === '활성화');
+    expect(activate).not.toBeUndefined();
     await act(async () => {
-      toggleBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      activate!.click();
       await Promise.resolve();
     });
-    expect(toggleBtn!.textContent).not.toContain('...');
-    expect(toggleBtn!.textContent).toContain('변경 중');
-    const ariaLabel = toggleBtn!.getAttribute('aria-label');
-    expect(ariaLabel).not.toContain('...');
-    expect(ariaLabel).toContain('변경 중');
+    const pending = (await openMenu('a1'))[0]!;
+    expect(pending.textContent).not.toContain('...');
+    expect(pending.textContent).toContain('변경 중');
+    expect(pending.hasAttribute('data-disabled') || pending.getAttribute('aria-disabled') === 'true').toBe(true); // the same action cannot be pressed twice
+    await closeMenu();
     resolvePatch();
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
   });

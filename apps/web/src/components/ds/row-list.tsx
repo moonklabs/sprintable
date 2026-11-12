@@ -127,6 +127,11 @@ export type RowListItemProps = RowActionsProps & Omit<HTMLAttributes<HTMLElement
   detail?: ReactNode;
   /** 주면 오른쪽에 기본 펼침 단추(▸/▾ · `aria-expanded`)가 선다. 안 주면 호출부가 `trailing`에 자기 단추를 둔다(키보드 Enter/Esc는 둘 다 된다). */
   expandLabel?: string;
+  /**
+   * 4912 «행 열기» — 줄 «자체»를 여는 한 가지 길(상세 쪽으로 가기 · 패널 열기). 행에 초점이 있을 때 **Enter**, 그리고 줄을 **더블클릭**하면 불린다(Enter의 포인터판).
+   * 펼침 칸(`detail`)이 있는 행은 Enter가 여전히 «펼침/접힘»이다. 줄 안의 단추 · 링크 · 입력 · 체크를 더블클릭한 것은 줄을 여는 뜻이 아니라 건드리지 않는다.
+   */
+  onOpen?: () => void;
 };
 
 /**
@@ -134,7 +139,7 @@ export type RowListItemProps = RowActionsProps & Omit<HTMLAttributes<HTMLElement
  * 행 자체가 초점을 받는다(`data-row-main`): Enter = 펼침/접힘, Esc = 닫기(펼쳐 있을 때), 안쪽 단추 · 입력에서는 건드리지 않는다.
  */
 export function RowListItem({
-  leading, title, subtitle, statusMark, trailing, actions, actionsLabel, expanded = false, onExpandedChange, detail, expandLabel, className, 'data-testid': testId, ...rest
+  leading, title, subtitle, statusMark, trailing, actions, actionsLabel, expanded = false, onExpandedChange, detail, expandLabel, onOpen, className, 'data-testid': testId, onDoubleClick, ...rest
 }: RowListItemProps) {
   const detailId = useId();
   const hasDetail = detail !== undefined && detail !== null && detail !== false;
@@ -146,7 +151,15 @@ export function RowListItem({
   const onRowKeyDown = (e: KeyboardEvent<HTMLElement>) => {
     if (e.target !== e.currentTarget) return;
     if (e.key === 'Enter' && hasDetail) { e.preventDefault(); onExpandedChange?.(!expanded); }
+    else if (e.key === 'Enter' && onOpen) { e.preventDefault(); onOpen(); }
     else if (e.key === 'Escape' && open) { e.preventDefault(); e.stopPropagation(); closeDetail(); }
+  };
+  // 더블클릭 = Enter의 포인터판. 줄 안의 단추 · 링크 · 입력 · 체크 · 메뉴 항목을 더블클릭한 것은 줄 열기가 아니다.
+  const onRowDoubleClick = (e: React.MouseEvent<HTMLElement>) => {
+    onDoubleClick?.(e);
+    if (e.defaultPrevented || !onOpen) return;
+    if ((e.target as HTMLElement).closest('button, a, input, textarea, select, label, [role="checkbox"], [role="menuitem"], [role="switch"]')) return;
+    onOpen();
   };
   // 펼친 칸 안에서 Esc — 글 입력 · 선택 칸은 자기 Esc를 쓰니 건드리지 않고, 그 밖(빈 곳 · 글)에서만 접고 초점을 행으로 돌려준다.
   const onItemKeyDown = (e: KeyboardEvent<HTMLElement>) => {
@@ -165,6 +178,7 @@ export function RowListItem({
       data-row-main=""
       tabIndex={-1}
       onKeyDown={onRowKeyDown}
+      onDoubleClick={onRowDoubleClick}
       leading={leading}
       title={title}
       subtitle={subtitle}

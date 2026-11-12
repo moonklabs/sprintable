@@ -165,3 +165,63 @@ describe('ds RowList', () => {
     expect(btn.getAttribute('aria-controls')).toBe(container.querySelector('[data-slot="ds-row-detail"]')!.id);
   });
 });
+
+// 4912 «행 열기» — Enter와 더블클릭이 줄 «자체»를 여는 한 길(`onOpen`). 펼침 칸이 있는 행은 Enter가 여전히 펼침/접힘.
+describe('ds RowListItem — onOpen (4912 행 열기)', () => {
+  const dbl = (el: Element) => act(async () => { el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true })); });
+  function Opens({ onOpen, withDetail = false }: { onOpen: (id: string) => void; withDetail?: boolean }) {
+    return (
+      <RowList aria-label="열기">
+        <RowListItem data-testid="row-a" title="행 a" onOpen={() => onOpen('a')} trailing={<button type="button" data-testid="inner-btn">안쪽 단추</button>} />
+        <RowListItem data-testid="row-b" title={<a href="#x" data-testid="inner-link">행 b</a>} onOpen={() => onOpen('b')} {...(withDetail ? { detail: <div>상세</div>, expanded: false, onExpandedChange: () => {} } : {})} />
+        <RowListItem data-testid="row-c" title="열 수 없는 행" />
+      </RowList>
+    );
+  }
+  it('⭐Enter = 줄 열기 · 더블클릭 = 같은 일(Enter의 포인터판) — onOpen이 없는 행은 아무 일도 없다', async () => {
+    const onOpen = vi.fn();
+    await render(<Opens onOpen={onOpen} />);
+    const [a, , c] = rows() as [HTMLElement, HTMLElement, HTMLElement];
+    a.focus();
+    await key(a, 'Enter');
+    expect(onOpen).toHaveBeenLastCalledWith('a');
+    await dbl(a);
+    expect(onOpen).toHaveBeenCalledTimes(2);
+    await key(c, 'Enter'); await dbl(c);
+    expect(onOpen).toHaveBeenCalledTimes(2);
+  });
+
+  it('⭐줄 안의 단추 · 링크를 더블클릭한 것은 줄 열기가 아니다(그 단추 · 링크 자기 일)', async () => {
+    const onOpen = vi.fn();
+    await render(<Opens onOpen={onOpen} />);
+    await dbl(container.querySelector('[data-testid="inner-btn"]')!);
+    await dbl(container.querySelector('[data-testid="inner-link"]')!);
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it('⭐단추 «안의 글»을 더블클릭해도 줄 열기가 아니다 · 안쪽 단추에 초점이 있을 때의 Enter도 줄 열기가 아니다', async () => {
+    const onOpen = vi.fn();
+    function Nested() {
+      return (
+        <RowList aria-label="안쪽">
+          <RowListItem data-testid="row-n" title="행" onOpen={onOpen} trailing={<button type="button" data-testid="nb"><span data-testid="nb-text">안쪽 글</span></button>} />
+        </RowList>
+      );
+    }
+    await render(<Nested />);
+    await dbl(container.querySelector('[data-testid="nb-text"]')!); // the target is the span INSIDE the button
+    expect(onOpen).not.toHaveBeenCalled();
+    const inner = container.querySelector('[data-testid="nb"]') as HTMLElement;
+    inner.focus();
+    await key(inner, 'Enter'); // Enter on the inner control is that control's own business
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it('⭐펼침 칸이 있는 행은 Enter가 여전히 펼침/접힘이다(onOpen은 안 불린다)', async () => {
+    const onOpen = vi.fn();
+    await render(<Opens onOpen={onOpen} withDetail />);
+    const b = rows()[1]!;
+    await key(b, 'Enter');
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+});

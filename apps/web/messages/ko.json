@@ -2436,7 +2436,6 @@
     "agentActionFailed": "에이전트 처리에 실패했어요",
     "deactivateAgent": "비활성화",
     "activateAgent": "활성화",
-    "agentToggleAriaLabel": "{n}번째 에이전트 {label}",
     "agentToggling": "변경 중…",
     "deactivateAgentDialogTitle": "{name} 비활성화",
     "deactivateAgentDialogBody": "이 에이전트의 모든 요청이 즉시 거부돼요. 진행 중인 작업이 끊길 수 있어요. API 키는 그대로 유지되니 재발급은 필요 없어요.",
@@ -4836,6 +4835,8 @@
     "runProfileErrorGeneric": "저장하지 못했어요 — 다시 시도해 주세요",
     "runProfileBulkTitle": "실행 설정 바꾸기",
     "runProfileBulkApply": "에이전트 {count}개에 적용",
+    "runProfileChosenCount": "{count}개 골랐어요",
+    "agentRowActionsAria": "{name} 행동",
     "runProfileBulkOpen": "실행 설정 바꾸기",
     "runProfileChooseAria": "{name} 고르기"
   },
