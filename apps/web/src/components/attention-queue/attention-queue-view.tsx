@@ -30,14 +30,21 @@ const HIGHLIGHT_MS = 900;
  * BE 신호 하나만 소비한다(gate_pending dedup·memo slug 해소 등 inbox 전용 로직도 전부 제거). */
 async function fetchAttentionQueue(
   projectId: string, t: AttentionQueueTranslator,
-): Promise<{ items: AttentionQueueItem[]; truncatedKinds: string[] }> {
-  const beJson = await fetchWithAuth(`/api/glance/attention?project_id=${projectId}`)
-    .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+): Promise<{ items: AttentionQueueItem[]; truncatedKinds: string[]; failed: boolean }> {
+  // 4909 (가) — 읽기 실패(네트워크 예외 · 비정상 응답 · JSON 아님)는 «빈 목록»이 아니다. 예전엔 셋 다 null로 뭉개져
+  // «안전 · 지금 개입할 것 없음»으로 보였다 — 실패는 따로 알려 화면이 «안전»이라 말하지 않게 한다.
+  let beJson: unknown = null;
+  let failed = false;
+  try {
+    const r = await fetchWithAuth(`/api/glance/attention?project_id=${projectId}`);
+    if (r.ok) beJson = await r.json(); else failed = true;
+  } catch { failed = true; }
   const signals = parseAttentionQueueSignals(beJson);
   return {
     items: buildAttentionQueueFromBe(signals, t, (href) => withProjectParam(href, projectId)),
     // story #4382 — BE가 한 신호를 100건에서 잘랐으면 남은 수는 «이상»으로만 말한다.
     truncatedKinds: parseAttentionTruncatedKinds(beJson),
+    failed,
   };
 }
 
@@ -125,6 +132,7 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<AttentionQueueItem[]>([]);
   const [truncatedKinds, setTruncatedKinds] = useState<string[]>([]);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [highlightedIds, setHighlightedIds] = useState<Set<string>>(new Set());
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -132,7 +140,10 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
   useEffect(() => { itemsRef.current = items; }, [items]);
 
   const refetchAndDiff = useCallback(async () => {
-    const { items: result, truncatedKinds: nextTruncatedKinds } = await fetchAttentionQueue(projectId, t);
+    const { items: result, truncatedKinds: nextTruncatedKinds, failed } = await fetchAttentionQueue(projectId, t);
+    // 읽기에 실패하면 지금 보이는 목록을 비우지 않는다(비우면 «안전»으로 보임) — 실패만 표시한다.
+    if (failed) { setLoadFailed(true); return; }
+    setLoadFailed(false);
     const changed = diffAttentionQueueItemIds(itemsRef.current, result);
     setItems(result);
     setTruncatedKinds(nextTruncatedKinds);
@@ -147,10 +158,11 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
     let cancelled = false;
     async function load() {
       setLoading(true);
-      const { items: result, truncatedKinds: nextTruncatedKinds } = await fetchAttentionQueue(projectId, t);
+      const { items: result, truncatedKinds: nextTruncatedKinds, failed } = await fetchAttentionQueue(projectId, t);
       if (cancelled) return;
       setItems(result);
       setTruncatedKinds(nextTruncatedKinds);
+      setLoadFailed(failed);
       setLoading(false);
     }
     void load();
@@ -178,6 +190,15 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
   });
 
   const { shown, overflow, overflowHasGate } = buildAttentionQueue(items, CAP);
+  const retryButton = (
+    <button
+      type="button"
+      onClick={() => { void refetchAndDiff(); }}
+      className="inline-flex min-h-8 items-center rounded-md border border-proof-line px-3 text-xs font-semibold text-proof-ink hover:bg-proof-sunk"
+    >
+      {t('loadRetry')}
+    </button>
+  );
   // story #4382(유나 CHANGES) — 넘침 줄 «{수} — {자리}». 숨은 행도 보이는 것과 같은 예외라 «흐르는 중»이 아니다. 자리: 숨은 행에 게이트가 있으면
   // 결재함(단추), 아니면 «처리되는 대로 여기 차례로». BE가 gate_pending을 잘랐으면 넘침이 0이어도 숨은 게이트가 있다.
   const truncated = truncatedKinds.length > 0;
@@ -204,7 +225,7 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
               교체. 크기는 글자 눈금의 lg(18px) (story 4831: 눈금에 없는 19px에서). */}
           <h2 className="text-lg font-editorial-heading leading-tight tracking-[-0.014em] text-proof-ink">{t('title')}</h2>
         </div>
-        {!loading ? (
+        {!loading && !(loadFailed && shown.length === 0) ? (
           <div className="shrink-0 text-editorial-ui font-medium text-proof-ink-3">
             {t.rich('count', { count: shown.length, b: (chunks) => <b className="text-proof-ink">{chunks}</b> })}
           </div>
@@ -213,6 +234,13 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
 
       {loading ? (
         <div>{Array.from({ length: 3 }).map((_, i) => <RowSkeleton key={i} />)}</div>
+      ) : loadFailed && shown.length === 0 ? (
+        // 4909 (가) — 읽기 실패 얼굴. «안전»이 아니라 «못 불러왔어요»(role=alert) + 다시 시도.
+        <div role="alert" data-testid="attention-load-failed" className="flex flex-col items-center gap-2 px-5 py-10 text-center">
+          <p className="text-base font-semibold text-proof-ink">{t('loadFailedTitle')}</p>
+          <p className="text-xs text-proof-ink-3">{t('loadFailedBody')}</p>
+          {retryButton}
+        </div>
       ) : shown.length === 0 ? (
         <div className="flex flex-col items-center gap-2 px-5 py-10 text-center">
           {/* story #3099(DS·AA 후속) — green 소형텍스트(11px bold) AA 미달, 텍스트는 중립화
@@ -226,6 +254,12 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
         </div>
       ) : (
         <div>
+          {loadFailed ? (
+            <div role="alert" data-testid="attention-load-stale" className="flex items-center gap-3 border-b border-proof-line-soft bg-proof-sunk px-5 py-2.5 text-xs text-proof-ink-2">
+              <span className="flex-1 break-keep">{t('loadStaleLine')}</span>
+              {retryButton}
+            </div>
+          ) : null}
           {shown.map((item) => (
             <AttentionRow
               key={item.id} item={item} highlighted={highlightedIds.has(item.id)}
