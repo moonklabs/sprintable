@@ -5,6 +5,12 @@
 // own `/glance` (its home address) is sent through `/phone-landing?next=/` first (story 4906: `next` is the site root — the landing page itself turns it
 // into the person's home, «오늘» — not the address `/glance` resolved to, which was the empty Board).
 export const SHELL_NAV_HEADER = 'x-sprintable-nav';
+// story 4906 (F · PO 11-12) — the header above rides only on a load the SHELL starts. The next steps of the same phone app — a login form's `router.replace('/glance')`, a sign-up that ends
+// there, an in-page move — are client-side requests (RSC · fetch) with no such header, so the shell was invisible to the server exactly where a new customer's first screen is decided
+// (measured on dev 11-12: the first screen after login was the empty Board, while a cold open landed correctly). The proxy therefore plants this cookie on the first shell load (the header
+// is the proof) and reads it on every later request of that webview: ONE place that knows «this is the phone app», not one patch per road that ends at `/glance`.
+export const SHELL_COOKIE = 'sp_shell';
+export const SHELL_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 export const PHONE_LANDING_PATH = '/phone-landing';
 export const PHONE_START_PATH = '/phone-start';
 export const PHONE_LANDING_NEXT_PARAM = 'next';

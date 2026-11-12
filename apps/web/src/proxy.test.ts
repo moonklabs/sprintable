@@ -2105,6 +2105,80 @@ describe('proxy — the phone app opening lands by what the server knows, throug
     expect(unknown.headers.get('location')).toBe('https://app.example.com/'); // the session picks the road again; the app is not left on a page that does not exist
   });
 
+  // story 4906 (F · PO 11-12) — the shell's header rides only on a load the SHELL starts. Every later request of the same webview that reaches `/glance` (a login form's `router.replace`,
+  // a sign-up that ends there, an in-page move, a prefetch) is client-side and has no header: the proxy knows the phone app by a cookie it planted on the first shell load.
+  const SHELL_COOKIE_JAR = { sp_shell: '1' };
+
+  it('a shell-started load (the header) plants the shell cookie — HttpOnly · Lax · Path=/ · 30 days (Secure on https) — whatever the response is (here: the login redirect of a logged-out person)', async () => {
+    mockFetch.mockImplementation(() => Promise.resolve({ ok: false, status: 401 }));
+    const res = await middleware(makeRequestWithHeaders('/glance', SHELL));
+    expect(res.status).toBe(307);
+    // read THIS cookie's own line (the login redirect also clears the session cookies — their attributes must not satisfy these checks)
+    const set = res.headers.getSetCookie().find((c) => c.startsWith('sp_shell=')) ?? '';
+    expect(set).toContain('sp_shell=1');
+    expect(set).toContain('Path=/');
+    expect(set).toContain(`Max-Age=${30 * 24 * 60 * 60}`);
+    expect(set).toContain('HttpOnly');
+    expect(set).toContain('SameSite=Lax');
+    expect(set).toContain('Secure');
+  });
+
+  it('the cookie is planted on whatever the shell-started load gets back — a public page, a public rewrite, the API — and every such response is made private (no shared cache may replay `sp_shell=1` to a browser)', async () => {
+    mockFetch.mockImplementation(() => Promise.resolve({ ok: false, status: 401 }));
+    for (const path of ['/login', '/terms', '/connect-guide.txt', '/api/v2/stories?limit=1']) {
+      const res = await middleware(makeRequestWithHeaders(path, SHELL));
+      const planted = res.headers.getSetCookie().some((c) => c.startsWith('sp_shell=1'));
+      expect([path, planted, /\b(no-store|private)\b/i.test(res.headers.get('cache-control') ?? '')]).toEqual([path, true, true]);
+    }
+    // a response that already guards itself keeps its own guard
+    const guarded = await middleware(makeRequestWithHeaders('/glance', SHELL));
+    expect(guarded.headers.get('cache-control')).toMatch(/no-store/);
+  });
+
+  it('a browser (no header, no cookie) gets no shell cookie; a request that already carries it is not given it again', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    mockOrg();
+    const browser = await middleware(makeRequest('/glance', { sp_at: token }));
+    expect(browser.headers.get('set-cookie') ?? '').not.toContain('sp_shell');
+    const again = await middleware(makeRequestWithHeaders('/glance', SHELL, { sp_at: token, ...SHELL_COOKIE_JAR }));
+    expect(again.headers.get('set-cookie') ?? '').not.toContain('sp_shell');
+  });
+
+  it.each([
+    ['a login form\'s router.replace (a Next RSC fetch)', { rsc: '1', 'next-url': '/login', accept: 'text/x-component' }],
+    ['a sign-up / in-page move (a Next prefetch)', { rsc: '1', 'next-router-prefetch': '1', accept: 'text/x-component' }],
+    ['a client fetch of the home (accept */*)', { accept: '*/*' }],
+    ['a full reload after login (a document read, no shell header — the webview reloaded itself)', { accept: 'text/html,application/xhtml+xml', 'sec-fetch-dest': 'document' }],
+  ])('%s → /glance with only the shell COOKIE (no header) lands through /phone-landing?next=/ like the shell\'s own load', async (_name, headers) => {
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    mockOrg();
+    const res = await middleware(makeRequestWithHeaders('/glance', headers as Record<string, string>, { sp_at: token, ...SHELL_COOKIE_JAR }));
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe(LANDING);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('the same requests WITHOUT the cookie (a browser) keep the usual redirect to the /flow home — the landing stays the phone app\'s alone; a query on /glance is still a deep link', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    mockOrg();
+    const browserShapes: Array<Record<string, string>> = [{ rsc: '1', accept: 'text/x-component' }, { accept: '*/*' }];
+    for (const headers of browserShapes) {
+      const res = await middleware(makeRequestWithHeaders('/glance', headers, { sp_at: token }));
+      expect(res.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
+    }
+    const deep = await middleware(makeRequestWithHeaders('/glance?story=abc', { rsc: '1' }, { sp_at: token, ...SHELL_COOKIE_JAR }));
+    expect(deep.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow?story=abc');
+    const other = await middleware(makeRequestWithHeaders('/docs/my-doc', { rsc: '1' }, { sp_at: token, ...SHELL_COOKIE_JAR }));
+    expect(other.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/docs/my-doc');
+  });
+
+  it('a forged cookie value is not the shell: only the exact planted value counts', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    mockOrg();
+    const res = await middleware(makeRequestWithHeaders('/glance', { rsc: '1' }, { sp_at: token, sp_shell: '0' }));
+    expect(res.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
+  });
+
   it('/phone-landing and /phone-start are behind the session like the onboarding: no session → /login', async () => {
     for (const path of ['/phone-landing', '/phone-start']) {
       mockFetch.mockImplementation(() => Promise.resolve({ ok: false, status: 401 }));
