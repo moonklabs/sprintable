@@ -134,7 +134,7 @@ export function StorageAssetRow({ asset, selected, folderLabel, onSelect, onDele
         </div>
 
         {/* (6) 케밥 — 우클릭 메뉴와 같은 항목(폰 · 키보드는 이 단추로만 닿는다: 우클릭 전용 동작 0) */}
-        <div className="flex justify-end" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}>
+        <div className="flex justify-end" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
           <Menu>
             <MenuTrigger
               // story #4277(유나 판정) — 행 버튼과 같은 이름이면 화면 읽기가 두 번 읽는다 → «{name} 작업».
