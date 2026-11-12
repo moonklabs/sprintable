@@ -1530,3 +1530,79 @@ describe('ApprovalsQueue — 서명 창 «취소»는 사유 초안을 지운다
   });
 });
 
+
+// 4909 (다) — an approve / reject that FAILED said nothing: the HITL card (PATCH /api/v1/hitl-requests/{id}) ignored a non-OK answer and had no catch for a thrown request, and the gate card's
+// one-tap path had no catch for a thrown request either — the person pressed the button and nothing at all happened. Now the card keeps itself (the button can be pressed again) and says so.
+describe('ApprovalsQueue — 4909 (다) a failed approve / reject is told, not swallowed', () => {
+  const failedText = () => `${koMessages.cage.gateTransitionError.replace('{reason}', koMessages.cage.gateTransitionErrorGeneric)}`;
+  const press = async (label: string) => {
+    const b = [...container.querySelectorAll('button')].find((x) => x.textContent?.includes(label));
+    await act(async () => { b?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  };
+  /** the PATCH / transition request answers per `mode`; every list read answers normally */
+  function mockWith(pending: (GateItem | HitlInboxItem)[], mode: { current: 'ok' | 'http-error' | 'throws' | 'hang' }) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'PATCH' || String(url).endsWith('/transition')) {
+        if (mode.current === 'throws') throw new TypeError('Failed to fetch');
+        if (mode.current === 'hang') return new Promise(() => {}); // the request is still in flight
+        return { ok: mode.current === 'ok', status: mode.current === 'ok' ? 200 : 500, json: async () => ({}) };
+      }
+      if (String(url).includes('status=pending')) return { ok: true, json: async () => pending };
+      if (String(url).includes('status=held')) return { ok: true, json: async () => [] };
+      return { ok: true, json: async () => [] };
+    }));
+  }
+  const errorLine = () => container.querySelector('[data-testid="hitl-resolve-error"]') ?? container.querySelector('[role="alert"]');
+
+  it('⭐HITL approve answered with an error → «처리하지 못했어요» on the card, the card stays, the buttons work again', async () => {
+    const mode = { current: 'http-error' as const } as { current: 'ok' | 'http-error' | 'throws' | 'hang' };
+    mockWith([hitl({ id: 'h-fail', title: '실패할 승인 요청' })], mode);
+    await mount();
+    await press(koMessages.cage.gateApprove);
+    expect(container.querySelector('[data-testid="hitl-resolve-error"]')?.textContent).toBe(failedText()); // reverted → no line at all
+    expect(container.textContent).toContain('실패할 승인 요청'); // not removed
+    const approve = [...container.querySelectorAll('button')].find((x) => x.textContent?.includes(koMessages.cage.gateApprove));
+    expect(approve?.hasAttribute('disabled')).toBe(false);
+  });
+
+  it('⭐HITL reject whose request THROWS (network) → the same line (reverted → an unhandled rejection and a silent card)', async () => {
+    const mode = { current: 'throws' as const } as { current: 'ok' | 'http-error' | 'throws' | 'hang' };
+    mockWith([hitl({ id: 'h-throw', title: '네트워크 끊긴 요청' })], mode);
+    await mount();
+    await press(koMessages.cage.gateReject);
+    expect(container.querySelector('[data-testid="hitl-resolve-error"]')?.textContent).toBe(failedText());
+    expect(container.textContent).toContain('네트워크 끊긴 요청');
+  });
+
+  it('a retry that succeeds takes the card away and the old failure line is gone with it (a new press also clears the old line first)', async () => {
+    const mode = { current: 'http-error' } as { current: 'ok' | 'http-error' | 'throws' | 'hang' };
+    mockWith([hitl({ id: 'h-retry', title: '다시 누를 요청' })], mode);
+    await mount();
+    await press(koMessages.cage.gateApprove);
+    expect(container.querySelector('[data-testid="hitl-resolve-error"]')).toBeTruthy();
+    mode.current = 'ok';
+    await press(koMessages.cage.gateApprove);
+    expect(container.querySelector('[data-testid="hitl-resolve-error"]')).toBeNull();
+    expect(container.textContent).not.toContain('다시 누를 요청');
+  });
+
+  it('⭐pressing again clears the OLD failure line at once — while the new request is still in flight the card does not still say «failed»', async () => {
+    const mode = { current: 'http-error' } as { current: 'ok' | 'http-error' | 'throws' | 'hang' };
+    mockWith([hitl({ id: 'h-clear', title: '줄 지우기 요청' })], mode);
+    await mount();
+    await press(koMessages.cage.gateApprove);
+    expect(container.querySelector('[data-testid="hitl-resolve-error"]')).toBeTruthy();
+    mode.current = 'hang';
+    await press(koMessages.cage.gateApprove);
+    expect(container.querySelector('[data-testid="hitl-resolve-error"]')).toBeNull(); // reverted → the stale «failed» stays next to a request that has not answered
+  });
+
+  it('⭐a gate card\'s one-tap approve whose request THROWS shows the failure line too (reverted → nothing happened on screen)', async () => {
+    const mode = { current: 'throws' } as { current: 'ok' | 'http-error' | 'throws' | 'hang' };
+    mockWith([gate({ id: 'g-throw', can_approve: true, requires_human: true, risk_grade: 'low', work_item_summary: { title: '저위험 항목', slug: null } })], mode);
+    await mount();
+    await press(koMessages.cage.gateApprove);
+    expect(errorLine()?.textContent).toBe(failedText());
+  });
+});

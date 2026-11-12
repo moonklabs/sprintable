@@ -350,6 +350,7 @@ export function ApprovalsQueue() {
   // 승인 후 원래 작업(report-done)이 통과하는지는 사용자 왕복(재시도)으로 확認된다.
   const resolveHitl = async (id: string, status: 'approved' | 'rejected') => {
     setResolvingIds((prev) => new Set(prev).add(id));
+    setGateErrors((prev) => { const next = { ...prev }; delete next[id]; return next; });
     try {
       const res = await fetch(`/api/v1/hitl-requests/${id}`, {
         method: 'PATCH',
@@ -357,6 +358,10 @@ export function ApprovalsQueue() {
         body: JSON.stringify(buildHitlDecisionBody({ status })),
       });
       if (res.ok) setItems((prev) => prev.filter((it) => it.id !== id));
+      // 4909 (다) — 실패(비정상 응답 · 네트워크 예외)가 화면에 아무 말 없이 지나가던 것: 카드에 «처리하지 못했어요» 한 줄을 남기고 카드는 그대로 둔다(다시 누를 수 있게).
+      else setGateErrors((prev) => ({ ...prev, [id]: t('gateTransitionErrorGeneric') }));
+    } catch {
+      setGateErrors((prev) => ({ ...prev, [id]: t('gateTransitionErrorGeneric') }));
     } finally {
       setResolvingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
     }
@@ -430,6 +435,9 @@ export function ApprovalsQueue() {
         // 승인). 문장은 다음 승인·반려까지 남는다(resolveGate 첫 줄이 지운다).
         if (errorKind === 'draft_changed') void refetchGateRow(id);
       }
+    } catch {
+      // 4909 (다) — fetch 자체가 던진 경우(네트워크)도 같은 줄: 예전엔 try/finally뿐이라 아무 말 없이 «눌렀는데 아무 일도 없는» 화면이었다(서명 창은 error prop으로 같은 문장을 보인다).
+      setGateErrors((prev) => ({ ...prev, [id]: t('gateTransitionErrorGeneric') }));
     } finally {
       setResolvingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
     }
@@ -473,6 +481,16 @@ export function ApprovalsQueue() {
               </div>
               <p className="text-sm text-foreground">{item.title}</p>
               <p className="line-clamp-2 text-editorial-meta text-muted-foreground">{item.prompt}</p>
+              {gateErrors[item.id] ? (
+                <p
+                  className="rounded-lg border border-destructive/30 bg-destructive-tint px-2.5 py-1.5 text-editorial-meta text-foreground"
+                  role="alert"
+                  aria-live="assertive"
+                  data-testid="hitl-resolve-error"
+                >
+                  {t('gateTransitionError', { reason: gateErrors[item.id] })}
+                </p>
+              ) : null}
               {canResolveHitl ? (
                 // story #3592(§17-20 ⑧·§22-18 동형)·story #3606(잔여, 페드루 PO 確定
                 // 2026-09-07) — gateApprove도 gateReject와 같은 자리(같은 map·같은
