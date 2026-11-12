@@ -34,7 +34,7 @@ import { useOrgDomainLabels, type OrgDomainLabels } from '@/hooks/use-org-domain
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { DeviceChip } from '@/components/desktop/device-chip';
-import { blankKnownDeletedPreviews, isoToMicros, knownDeletedAt, onChatMessageDeleted, sameInstant } from '@/lib/chat-message-deleted';
+import { blankKnownDeletedPreviews, isDeletedLatest, isoToMicros, knownDeletedAt, onChatMessageDeleted } from '@/lib/chat-message-deleted';
 
 interface Participant {
   member_id: string;
@@ -71,6 +71,8 @@ interface ConversationItem {
   // 이 타입 선언에 없어 여태 FE가 못 읽었을 뿐 — preset.work.assigned 미리보기(담당자
   // 이름)가 처음으로 이 값을 소비한다.
   latest_message: {
+    /** story 4903 — which message it is (the server sends it since 5653): a delete names its message by id; an older server sends none and the moment decides */
+    id?: string;
     content: string;
     created_at: string;
     // story #4442 — the list row reads «첨부 파일» when the latest message has no text but files (the server already sends it)
@@ -400,7 +402,7 @@ export function applyConversationMessageUpdate(
   const item = { ...updated[idx]! };
   // story #4442 — an attachment-only message (no text) updates the row too: «첨부 파일» and its time
   if (created_at && (content || hasAttachments)) {
-    item.latest_message = { content: content ?? '', created_at, ...(hasAttachments ? { has_attachments: true } : {}) };
+    item.latest_message = { ...(eventMessageId ? { id: eventMessageId } : {}), content: content ?? '', created_at, ...(hasAttachments ? { has_attachments: true } : {}) };
     item.updated_at = created_at;
     // story #4440 — my own message (sent from another tab or device) moves the row up but is never unread
     if (!isOwnMessage(payload, meId)) item.unread_count = (item.unread_count ?? 0) + 1;
@@ -565,34 +567,38 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     }
   }, [scopeProjectId, projectFilter, projectOnly, setRoomsAreOrgWide]);
 
+  const allSeqRef = useRef(0);
   const fetchAllConversations = useCallback(async (nextOffset = 0, append = false) => {
-    // 카디르 QA(#4142) — 위 fetchConversations와 동형 stale-drop 가드(성공/실패 두 경로
-    // 대칭).
-    if (!append) { setAgentLoadError(false); setAgentForbidden(false); }
+    // 카디르 QA(#4142) — 위 fetchConversations와 동형 stale-drop 가드(성공/실패 두 경로 대칭).
+    // story 4903 (PO 결정 on 5664) — 이 PR이 «최신 글 지움 → 다시 불러오기»로 이 목록도 다시 묻는 길을 새로 만들어 겹친 물음의 응답 순서까지 이 PR 몫이다: 성공 · 실패(!res.ok) · catch · finally 네 길이
+    // 상태를 쓰는 자리는 아래 `write` 한 곳뿐이고, 거기서 «몇 번째 물음인가»(밀려난 물음이면 안 씀)와 «어느 프로젝트인가»(떠난 프로젝트면 안 씀)를 함께 본다.
+    const seq = append ? allSeqRef.current : ++allSeqRef.current;
+    const write = (apply: () => void) => { if (seq === allSeqRef.current && projectId === projectIdRef.current) apply(); };
+    write(() => { if (!append) { setAgentLoadError(false); setAgentForbidden(false); } });
     if (!projectId) return; // story 4847 — the agents tab only exists with a current project
     try {
       const res = await fetchWithAuth(
         `/api/conversations?project_id=${projectId}&include_agent_conversations=true&limit=${PAGE_LIMIT}&offset=${nextOffset}`
       );
       if (!res.ok) {
-        if (projectId === projectIdRef.current) {
+        write(() => {
           if (res.status === 403) setAgentForbidden(true); // not a failure to retry: this view is not this person's
           else if (!append) setAgentLoadError(true);
-        }
+        });
         return;
       }
       const json = await res.json() as { data: ConversationItem[]; total: number };
-      if (projectId !== projectIdRef.current) return; // 전환됨 — stale 응답 drop(B 화면 안 덮음)
-      const items = json.data ?? [];
-      setAllConversations((prev) => append ? [...prev, ...items] : items);
-      setAgentOffset(nextOffset + items.length);
-      setAgentTotal(json.total ?? 0);
+      write(() => {
+        const items = json.data ?? [];
+        setAllConversations((prev) => append ? [...prev, ...items] : items);
+        setAgentOffset(nextOffset + items.length);
+        setAgentTotal(json.total ?? 0);
+      });
     } catch {
-      if (!append && projectId === projectIdRef.current) setAgentLoadError(true);
+      write(() => { if (!append) setAgentLoadError(true); });
     } finally {
-      // story #3788(B-③ 후속) — agentLoading을 loading(my 탭)과 동형으로 finally에서 해소.
-      // 페드루 그라운딩(2026-09-10 12:34Z) — 같은 stale-drop 가드를 loading 축에도.
-      if (projectId === projectIdRef.current) setAgentLoading(false);
+      // story #3788(B-③ 후속) — agentLoading을 loading(my 탭)과 동형으로 finally에서 해소(같은 `write`를 거침: 밀려난 물음이 늦게 끝나도 새 물음의 «불러오는 중»을 못 끈다).
+      write(() => setAgentLoading(false));
     }
   }, [projectId]);
 
@@ -719,6 +725,27 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     if (wasLoaded) { setAgentLoading(true); loadAgentConversationsOnce(); }
   }, [projectId, loadAgentConversationsOnce]);
 
+  // story 4903 — the «window» in which the list is being asked for again because of a delete, as TWO generation numbers (not a flag): a delete — or, while the window is open, a new message — raises the DIRTY
+  // generation; a refetch holds the dirty generation it started with and, however it ends (an answer · a failure · dropped for a newer ask), raises the APPLIED generation to max(applied, held). The window is
+  // open while dirty > applied: an ask pushed aside by a newer one ends with a LOWER generation and closes nothing; whichever path ends the newest ask closes it, by the same one line.
+  const dirtyGenRef = useRef(0);
+  const appliedGenRef = useRef(0);
+  const dirtyRoomsRef = useRef<Set<string>>(new Set()); // the rooms a delete touched while the window was open (a second delete of the same room is then a «hit» although the row no longer holds that message)
+  const windowOpen = () => dirtyGenRef.current > appliedGenRef.current;
+  const askListsAfterDirty = useCallback(() => {
+    const held = dirtyGenRef.current;
+    const asks: Array<Promise<unknown>> = [fetchConversations(0, false)];
+    if (agentLoadedRef.current) asks.push(fetchAllConversations(0, false));
+    void Promise.allSettled(asks).then(() => {
+      appliedGenRef.current = Math.max(appliedGenRef.current, held);
+      if (!windowOpen()) dirtyRoomsRef.current.clear();
+    });
+  }, [fetchConversations, fetchAllConversations]);
+  const markDirtyAndAsk = useCallback((room?: string) => {
+    dirtyGenRef.current += 1;
+    if (room) dirtyRoomsRef.current.add(room);
+    askListsAfterDirty();
+  }, [askListsAfterDirty]);
   const handleConversationMessage = useCallback((payload: { conversation_id?: string; content?: string; created_at?: string } & Record<string, unknown>) => {
     setConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchConversations(0, false), currentTeamMemberId));
     // agent 탭을 아직 안 연 상태에선 allConversations 를 reactive 로드하지 않는다(lazy 유지) —
@@ -726,20 +753,32 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     if (agentLoadedRef.current) {
       setAllConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchAllConversations(0, false), currentTeamMemberId));
     }
-  }, [fetchConversations, fetchAllConversations, currentTeamMemberId]);
+    // story 4903 (codex on 5664) — a message that arrives while the window is open would be overwritten by the (older) answer on its way: ask once more, the newest ask wins
+    if (windowOpen()) markDirtyAndAsk();
+  }, [fetchConversations, fetchAllConversations, currentTeamMemberId, markDirtyAndAsk]);
 
   // story #1977(트랙B): 다른 탭/기기에서 mark-read → conversation.read SSE(#1976, 본인 타
   // 커넥션 전파)로 이 목록이 열려있는 동안에도 unread 배지가 즉시 서버 truth로 자가정정.
   // story 4887 — a message deleted on THIS screen (the room or its thread) that is a room's latest message: blank its preview now, as the server's refetch would (content «» · no attachment flag · no event card) — it kept showing the deleted text until the next refetch
-  useEffect(() => onChatMessageDeleted(({ conversationId, createdAt }) => {
+  // story 4903 — …and then the list asks the server again: the preview is the newest message that is STILL THERE (the server skips the deleted one and sends it with its id), «메시지 없음» only when none is left.
+  // Matched by the message id when both sides have one (else by the moment); a delete of a message that is not a room's latest changes nothing and asks nothing.
+  const listsRef = useRef<{ projectRooms: ConversationItem[]; allRooms: ConversationItem[] }>({ projectRooms: [], allRooms: [] });
+  useLayoutEffect(() => { listsRef.current = { projectRooms: conversations, allRooms: allConversations }; }, [conversations, allConversations]);
+  useEffect(() => onChatMessageDeleted((deleted) => {
+    const { conversationId } = deleted;
+    const { projectRooms, allRooms } = listsRef.current;
+    const isLatest = (c: ConversationItem) => c.id === conversationId && Boolean(c.latest_message) && isDeletedLatest(c.latest_message!, deleted);
+    const hit = [...projectRooms, ...allRooms].some(isLatest) || (windowOpen() && dirtyRoomsRef.current.has(conversationId));
+    if (!hit) return;
     const blank = (list: ConversationItem[]) => list.map((c) => (
-      c.id === conversationId && c.latest_message && sameInstant(c.latest_message.created_at, createdAt)
-        ? { ...c, latest_message: { content: '', created_at: c.latest_message.created_at, event: null } }
+      isLatest(c)
+        ? { ...c, latest_message: { ...(c.latest_message!.id ? { id: c.latest_message!.id } : {}), content: '', created_at: c.latest_message!.created_at, event: null } }
         : c
     ));
     setConversations(blank);
     setAllConversations(blank);
-  }), []);
+    markDirtyAndAsk(conversationId);
+  }), [markDirtyAndAsk]);
 
   // story 4903 AC3 — a list response that was already in flight when the delete frame arrived must not bring the preview back: what is known to be deleted stays blank, re-applied after every change
   // of the lists (before paint; the same list comes back when nothing changes, so it never loops)

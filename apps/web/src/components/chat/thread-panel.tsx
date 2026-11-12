@@ -220,14 +220,14 @@ export function ThreadPanel({
       const body = (await res.json()) as { deleted_at?: string | null };
       // the room LIST may hold this reply as the room's latest message (its one-line preview): tell it
       const gone = messagesRef.current.find((m) => m.id === messageId);
-      if (gone) announceChatMessageDeleted({ conversationId, createdAt: gone.created_at });
+      if (gone) announceChatMessageDeleted({ conversationId, createdAt: gone.created_at, messageId, threadId: parentMessage.id, deletedAt: body.deleted_at ?? null }); // with the id (5664 codex): matched by it, remembered for a response in flight
       setMessages((prev) => prev.map((m) => (
         m.id === messageId ? { ...m, content: '', deleted_at: body.deleted_at ?? new Date().toISOString() } : m
       )));
     } catch {
       addToast({ type: 'error', title: t('deleteMessageErrorTitle'), body: t('deleteMessageErrorBody') });
     }
-  }, [conversationId, addToast, t]);
+  }, [conversationId, parentMessage.id, addToast, t]);
 
   return (
     <div ref={panelRef} className={`flex h-full flex-col overflow-hidden border-l border-border ${LAYER.panel}`} data-testid="thread-panel">

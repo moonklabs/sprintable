@@ -32,10 +32,12 @@ const conv = (id: string, content: string, createdAt: string) => ({
   id, type: 'group', title: `방 ${id}`, latest_message: { content, created_at: createdAt, has_attachments: true }, updated_at: createdAt, unread_count: 0, participants: [],
 });
 
-async function mount(convs: object[]) {
+// story 4903: a delete of a room's latest message makes the list ask the server again, and the server no longer has that message — so a call after the first answers with `afterDelete` (default: the same rooms)
+async function mount(convs: object[], afterDelete?: object[]) {
+  let listCalls = 0;
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (url.includes('/api/conversations/recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
-    if (url.includes('/api/conversations?')) return { ok: true, json: async () => ({ data: convs, total: convs.length }) };
+    if (url.includes('/api/conversations?')) { listCalls += 1; const data = listCalls > 1 && afterDelete ? afterDelete : convs; return { ok: true, json: async () => ({ data, total: data.length }) }; }
     return { ok: false, status: 404, json: async () => null };
   }));
   await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><ChatListView projectId="proj-current" currentTeamMemberId="me-1" /></NextIntlClientProvider>); });
@@ -68,7 +70,10 @@ describe('[SID:4903] ChatListView — a delete frame that arrives while the list
 
 describe('[SID:4887] ChatListView — a deleted latest message does not stay in the list preview', () => {
   it('⭐ the room whose LATEST message was deleted shows «메시지 없음» at once (as the server\'s refetch would) — another room, and an older message of the same room, keep their text', async () => {
-    await mount([conv('c1', '지운 글 본문', T), conv('c2', '다른 방 글', T), conv('c3', '이 방의 최신 글', '2026-10-13T10:00:00Z')]);
+    await mount(
+      [conv('c1', '지운 글 본문', T), conv('c2', '다른 방 글', T), conv('c3', '이 방의 최신 글', '2026-10-13T10:00:00Z')],
+      [{ ...conv('c1', '', T), latest_message: null }, conv('c2', '다른 방 글', T), conv('c3', '이 방의 최신 글', '2026-10-13T10:00:00Z')], // the server after the delete: that room has nothing left
+    );
     expect(rowOf('방 c1').textContent).toContain('지운 글 본문');
     // the same instant spelled the other way (+00:00, fractional digits) — the room sent it that way
     await act(async () => { announceChatMessageDeleted({ conversationId: 'c1', createdAt: '2026-10-13T09:00:00.000+00:00' }); });

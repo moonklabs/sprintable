@@ -631,7 +631,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       const deletedAt = body.deleted_at ?? new Date().toISOString();
       // the room LIST keeps this room's latest message as a one-line preview: tell it (the server scrubs it on refetch — the list does the same now, not at the next refetch)
       const gone = messagesRef.current.find((m) => m.id === messageId);
-      if (gone) announceChatMessageDeleted({ conversationId: threadId, createdAt: gone.created_at });
+      if (gone) announceChatMessageDeleted({ conversationId: threadId, createdAt: gone.created_at, messageId, threadId: gone.parent_id ?? null, deletedAt }); // with the id: the list matches by it, and remembers it for a response already in flight (5664 codex)
       setMessages((prev) => prev.map((m) => (
         m.id === messageId ? { ...m, content: '', deleted_at: deletedAt } : m
       )));
