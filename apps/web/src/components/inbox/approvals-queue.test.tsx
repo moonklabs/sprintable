@@ -2051,8 +2051,40 @@ describe('ApprovalsQueue — 4909 AC3 the list + detail screen', () => {
     useDashboardContextMock.mockReturnValue({ orgMemberships: [{ orgId: 'org-1', orgName: '뭉클랩' }], projectMemberships: [], currentMemberType: 'agent', currentTeamMemberId: 'm-1', projectId: 'p1' });
     mockFetches([hitl({ id: 'h1', title: '첫째 승인 요청' })], []);
     await mount();
-    await rightClick('h1');
+    const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 120, clientY: 80 });
+    await act(async () => { rowEl('h1').dispatchEvent(ev); });
     expect(menuLabels()).toEqual([]);
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(ev.defaultPrevented).toBe(false); // the browser's OWN menu is not suppressed — an empty custom menu would swallow it
+  });
+
+  const disabledOf = (label: string) => menuItem(label).getAttribute('aria-disabled') === 'true' || menuItem(label).hasAttribute('data-disabled');
+
+  it('⭐the menu follows the card\'s rules: while the author must resubmit (reapproval waiting) approve · reject · hold are DISABLED (open stays on) — also for an approval that needs an option', async () => {
+    mockFetches([lowGate('g1', '재상신 기다리는 항목', { reapproval_required: true }), { ...decision('d1', '선택지 있는 재상신 요청'), reapproval_required: true } as GateItem], []);
+    await mount();
+    for (const key of ['g1', 'd1']) {
+      await rightClick(key);
+      const labels = menuLabels();
+      expect(labels).toHaveLength(4);
+      for (const label of labels.slice(0, 3)) expect(disabledOf(label as string)).toBe(true); // reverted → the option-approval entry stays enabled
+      expect(disabledOf(labels[3] as string)).toBe(false);
+      await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    }
+  });
+
+  it('while a request is in flight its menu entries are disabled (no second decision from the menu)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'POST') return new Promise(() => {}); // never answers
+      if (url.includes('status=pending')) return { ok: true, json: async () => [lowGate('g1', '첫째 결재 항목')] };
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+    const approve = [...scope().querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    await act(async () => { approve.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await rightClick('g1');
+    const labels = menuLabels();
+    for (const label of labels.slice(0, 3)) expect(disabledOf(label as string)).toBe(true);
   });
 
   it('⭐a double-click on a row opens that request\'s own page (/gates/{id}); a single click only picks it; a HITL row has no page', async () => {

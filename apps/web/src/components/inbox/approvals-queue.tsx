@@ -946,7 +946,7 @@ export function ApprovalsQueue() {
     const blocked = resolvingIds.has(gate.id) || gate.reapproval_required === true;
     return [
       needsOption
-        ? { id: 'approve', icon: 'check_circle', label: t('queueMenuApproveChoose'), disabled: resolvingIds.has(gate.id), onSelect: () => onSelectRow(gate.id) }
+        ? { id: 'approve', icon: 'check_circle', label: t('queueMenuApproveChoose'), disabled: blocked, onSelect: () => onSelectRow(gate.id) }
         : {
           id: 'approve', icon: 'check_circle', disabled: blocked,
           label: isSigFlow ? t(sigApproveAndSignLabelKey(gate)) : opensDraftReview ? t('gateReviewDraftToApprove') : t(gateApproveLabelKey(gate)),
