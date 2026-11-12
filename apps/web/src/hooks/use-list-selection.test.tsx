@@ -13,16 +13,17 @@ afterEach(async () => { await act(async () => { root?.unmount(); }); root = null
 const rows = (...keys: string[]): SelectableRow[] => keys.map((key) => ({ key }));
 let api: ReturnType<typeof useListSelection>;
 let renders = 0;
-function Probe({ sections, initial }: { sections: SelectableRow[][]; initial: string | null }) {
+// `onRender` counts the render passes from OUTSIDE the component (the callback is built in the test, so the component never reassigns an outer variable while rendering)
+function Probe({ sections, initial, onRender }: { sections: SelectableRow[][]; initial: string | null; onRender: () => void }) {
   const a = useListSelection(sections, initial);
-  renders += 1;
+  onRender();
   useEffect(() => { api = a; });
   return <span data-testid="k">{a.selectedKey ?? 'none'}</span>;
 }
 const key = () => document.body.querySelector('[data-testid="k"]')!.textContent;
 async function show(sections: SelectableRow[][], initial: string | null) {
   if (!root) { const el = document.createElement('div'); document.body.appendChild(el); root = createRoot(el); }
-  await act(async () => { root!.render(<Probe sections={sections} initial={initial} />); });
+  await act(async () => { root!.render(<Probe sections={sections} initial={initial} onRender={() => { renders += 1; }} />); });
 }
 
 describe('selectNextAfterLeft', () => {
