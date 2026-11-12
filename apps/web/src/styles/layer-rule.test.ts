@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { LAYER, LAYER_MIN_STEP, LAYER_TOKEN } from '../components/ds/layers';
 import { ASSET_ROW_FACE } from '../components/storage/storage-asset-row';
 import { ASSET_CARD_FACE, ASSET_CARD_WELL } from '../components/storage/storage-asset-grid';
+import { ARTIFACT_CARD_FACE, ARTIFACT_CARD_WELL, ARTIFACT_PANEL } from '../components/canvas/artifact-gallery-view';
 
 const css = readFileSync(join(__dirname, 'design-system.css'), 'utf8');
 
@@ -118,5 +119,12 @@ describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
   it.each(themes)('⭐%s: 스토리지 — 내용 칸 → 행/카드 면 ≥ 0.05 · 카드 면 → 썸네일 우물 ≥ 0.03 · 호버(내용 칸 색)와 행 면도 같은 0.05로 갈린다', (_name, t) => {
     expect(step(t, 'panel', 'rowOthers')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPanel); // 행 얼굴 ↔ 내용 칸(= 호버 색)
     expect(step(t, 'rowOthers', 'well')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.wellOnRow);
+  });
+
+  // 4910 — 산출물 갤러리의 층: 카드 얼굴 = rowOthers · 썸네일 우물 = well · 바탕 칸 = panel. 스토리지와 같은 세 층이라 같은 간격 시험(위)이 이 화면도 덮는다.
+  it('⭐산출물 갤러리: 카드 얼굴 = rowOthers · 썸네일 우물 = well · 칸 = panel — 화면이 층 표 이름을 그대로 쓴다', () => {
+    expect(ARTIFACT_CARD_FACE).toBe(LAYER.rowOthers);
+    expect(ARTIFACT_CARD_WELL).toBe(LAYER.well);
+    expect(ARTIFACT_PANEL).toBe(LAYER.panel);
   });
 });

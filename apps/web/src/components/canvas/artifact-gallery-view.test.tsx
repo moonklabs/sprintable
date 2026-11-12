@@ -13,7 +13,19 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { ArtifactGalleryView } from './artifact-gallery-view';
+import { LAYER } from '@/components/ds/layers';
 import koMessagesRaw from '../../../messages/ko.json';
+
+// 4910 — 위 막대 제목 칸(TopBarSlot)은 위 막대 문맥이 있어야 서니, 그 자리에 제목을 그대로 그리는 대역으로 바꿔 «제목은 위 막대에만»을 잰다. 나머지(ds · 갤러리 · 썸네일 · 다이얼로그)는 실물.
+const pushMock = vi.fn();
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: pushMock, replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => '/artifacts',
+}));
+vi.mock('@/components/nav/top-bar-slot', () => ({
+  TopBarSlot: ({ title }: { title?: React.ReactNode }) => <div data-testid="top-bar-slot-stub">{title}</div>,
+}));
 
 type LooseMessages = { [key: string]: string | LooseMessages };
 const koMessages = koMessagesRaw as unknown as LooseMessages;
@@ -49,6 +61,7 @@ function versionDetail(
 interface StubOverrides {
   artifacts?: unknown[];
   stories?: unknown[];
+  goals?: unknown[];
   exportsByArtifact?: Record<string, unknown[]>;
   versionDetailByArtifact?: Record<string, unknown>;
 }
@@ -73,7 +86,7 @@ function stubFetch(overrides: StubOverrides = {}) {
       return jsonRes(overrides.exportsByArtifact?.[exportsMatch[1]!] ?? []);
     }
     if (url.startsWith('/api/visual-artifacts')) return jsonRes(overrides.artifacts ?? ARTIFACTS);
-    if (url.startsWith('/api/goals')) return jsonRes([{ id: 'e1', title: '온보딩 캠페인' }]);
+    if (url.startsWith('/api/goals')) return jsonRes(overrides.goals ?? [{ id: 'e1', title: '온보딩 캠페인' }]);
     if (url.startsWith('/api/stories')) return jsonRes(overrides.stories ?? []);
     if (url.startsWith('/api/sprints')) return jsonRes([]);
     if (url.startsWith('/api/docs')) return jsonRes([]);
@@ -124,7 +137,10 @@ describe('ArtifactGalleryView (story a15cea4f)', () => {
     const featureBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '기능');
     expect(featureBtn).toBeDefined();
     expect(featureBtn?.hasAttribute('disabled')).toBe(true);
-    expect(featureBtn?.getAttribute('title')).toBe('기능별 모아보기는 아직 지원하지 않아요');
+    // 이유는 title 한 줄이 아니라 읽는 곳(aria-describedby → 화면 읽기용 글)에 선다 — verify:no-title-only-disabled-reason.
+    const noteId = featureBtn?.getAttribute('aria-describedby');
+    expect(noteId).toBeTruthy();
+    expect(document.getElementById(noteId!)?.textContent).toBe('기능별 모아보기는 아직 지원하지 않아요');
   });
 
   it('shows the anchor pill only for artifacts that actually have an anchor version (no fabricated anchors)', async () => {
@@ -150,31 +166,126 @@ describe('ArtifactGalleryView (story a15cea4f)', () => {
     expect(container.textContent).not.toContain('미연결');
   });
 
-  it('story 6d0a0e3a — GROUP BY(axis segment + group list) is integrated into the same left rail container, not split into a header-top tab row (목업 0d852d24 배치 SSOT)', async () => {
+  it('4910 — «묶어서 보기» is ONE filter row (axis buttons with aria-pressed + a group select); the old left rail and the narrow <details> are gone', async () => {
     await mount();
-    // 둘 다 같은 좌 레일 컨테이너 안에 있다(desktop lg:block 사본 기준) — 서로 다른 컨테이너로
-    // 쪼개져 있던 #2124 이래의 배치 오류(우측 상단 탭)가 아니다.
-    const desktopRail = container.querySelector('.hidden.h-fit.lg\\:block');
-    expect(desktopRail).not.toBeNull();
-    const epicBtn = [...(desktopRail?.querySelectorAll('button') ?? [])].find((b) => b.textContent === '목표');
-    const groupBtn = [...(desktopRail?.querySelectorAll('button') ?? [])].find((b) => b.textContent?.includes('온보딩 캠페인'));
-    expect(epicBtn).toBeDefined();
-    expect(groupBtn).toBeDefined();
+    expect(container.querySelector('details')).toBeNull();
+    expect(container.querySelector('.lg\\:block')).toBeNull();
+    const filters = container.querySelector('[data-testid="artifact-gallery-filters"]')!;
+    expect(filters).not.toBeNull();
+    const axisButtons = [...filters.querySelectorAll('[role="group"] button')];
+    expect(axisButtons.map((b) => b.textContent)).toEqual(['목표', '스토리', '스프린트', '문서', '기능']);
+    expect(axisButtons[0]!.getAttribute('aria-pressed')).toBe('true');
+    expect(axisButtons[1]!.getAttribute('aria-pressed')).toBe('false');
+    const select = filters.querySelector('select') as HTMLSelectElement;
+    expect(select).not.toBeNull();
+    expect(document.querySelector(`label[for="${select.id}"]`)?.textContent).toBe('그룹');
+    expect([...select.options].map((o) => o.textContent)).toEqual(['온보딩 캠페인 · 1개', '무소속 · 1개']);
   });
 
-  it('story 6d0a0e3a — provides a native collapsible top selector for narrow viewports (details/summary), in addition to the always-visible desktop rail', async () => {
+  it('4910 — picking another group in the select shows that group\'s cards only', async () => {
     await mount();
-    const details = container.querySelector('details.lg\\:hidden');
-    expect(details).not.toBeNull();
-    expect(details?.querySelector('summary')).not.toBeNull();
-    // 접이식 셀렉터 안에도 동일한 축 세그먼트+그룹 목록이 있다(데스크톱 사본과 동일 내용).
-    const collapsibleEpicBtn = [...(details?.querySelectorAll('button') ?? [])].find((b) => b.textContent === '목표');
-    expect(collapsibleEpicBtn).toBeDefined();
+    const select = container.querySelector('select') as HTMLSelectElement;
+    expect(container.querySelectorAll('[data-testid="artifact-card"]').length).toBe(1);
+    expect(container.textContent).toContain('웰컴 이메일 시안');
+    const setValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setValue.call(select, select.options[1]!.value);
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(container.querySelectorAll('[data-testid="artifact-card"]').length).toBe(1);
+    expect(container.textContent).toContain('배너 세트 A');
+    expect(container.textContent).not.toContain('웰컴 이메일 시안');
+  });
+
+  it('4910 (codex 1차) — when a refetch replaces the selected group (same group count), the first group is shown instead of an empty panel with a blank select', async () => {
+    await mount();
+    expect(container.textContent).toContain('웰컴 이메일 시안');
+    // 같은 수(2)의 그룹이되 고른 그룹(e1)이 사라진 자료: 목표 e2 + 무소속.
+    vi.stubGlobal('fetch', stubFetch({
+      artifacts: [
+        { id: 'b1', title: '새 목표의 시안', story_id: null, epic_id: 'e2', doc_id: null, source: 'created', latest_version_number: 1, anchor_version: null, created_by: 'm1', created_at: '2026-07-01T00:00:00Z' },
+        { id: 'b2', title: '또 다른 배너', story_id: null, epic_id: null, doc_id: null, source: 'created', latest_version_number: 1, anchor_version: null, created_by: 'm1', created_at: '2026-07-01T00:00:00Z' },
+      ],
+      goals: [{ id: 'e2', title: '새 캠페인' }],
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ArtifactGalleryView projectId="proj-2" />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const select = container.querySelector('select') as HTMLSelectElement;
+    expect([...select.options].map((o) => o.textContent)).toEqual(['새 캠페인 · 1개', '무소속 · 1개']);
+    expect(select.selectedOptions[0]?.textContent).toBe('새 캠페인 · 1개');
+    expect(container.textContent).toContain('새 목표의 시안');
+    expect(container.querySelectorAll('[data-testid="artifact-card"]').length).toBe(1);
+  });
+
+  it('4910 — the title lives only in the top bar slot; the body has no heading of its own', async () => {
+    await mount();
+    const stub = container.querySelector('[data-testid="top-bar-slot-stub"]')!;
+    expect(stub.textContent).toBe('산출물');
+    expect(container.querySelectorAll('h1').length).toBe(1); // 위 막대 대역 안의 것 하나뿐
+    expect(stub.querySelector('h1')).not.toBeNull();
+    // 머리 칸에는 설명 + 개수가 서고 제목 글은 다시 서지 않는다.
+    const page = container.querySelector('[data-testid="artifact-gallery"]')!;
+    expect(page.textContent).toContain('2개');
+  });
+
+  it('4910 — «산출물 그리기 · 임포트» stand in the head even when artifacts exist (they used to exist only in the empty state)', async () => {
+    await mount();
+    expect(container.querySelectorAll('[data-testid="artifact-card"]').length).toBeGreaterThan(0);
+    const head = [...container.querySelectorAll('button')].filter((b) => b.textContent === '산출물 그리기' || b.textContent === '임포트');
+    expect(head.map((b) => b.textContent)).toEqual(['산출물 그리기', '임포트']);
+  });
+
+  it('4910 — layer faces: the panel is LAYER.panel, a card is LAYER.rowOthers, its thumbnail well is LAYER.well (the three differ — styles/layer-rule.test.ts measures the steps)', async () => {
+    await mount();
+    const panel = container.querySelector('[data-testid="artifact-gallery-panel"]')!;
+    for (const cls of LAYER.panel.split(' ')) expect(panel.classList.contains(cls)).toBe(true);
+    const card = container.querySelector('[data-testid="artifact-card"]')!;
+    for (const cls of LAYER.rowOthers.split(' ')) expect(card.classList.contains(cls)).toBe(true);
+    const well = card.firstElementChild!;
+    for (const cls of LAYER.well.split(' ')) expect(well.classList.contains(cls)).toBe(true);
+    expect(well.querySelector('[data-artifact-thumbnail]')).not.toBeNull();
+  });
+
+  it('4910 — right-click on a card opens a menu with ONLY the two existing actions (산출물 열기 · 상세 페이지로); the second goes to the detail route', async () => {
+    pushMock.mockClear();
+    vi.stubGlobal('fetch', stubFetch({ versionDetailByArtifact: { a1: versionDetail('a1', 3) } }));
+    await mount();
+    const card = container.querySelector('[data-testid="artifact-card"]') as HTMLElement;
+    await act(async () => { card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40, button: 2 })); });
+    const menu = document.body.querySelector('[role="menu"]')!;
+    expect(menu).not.toBeNull();
+    const items = [...menu.querySelectorAll('[role="menuitem"]')];
+    expect(items.map((i) => i.textContent)).toEqual(['산출물 열기', '상세 페이지로']);
+    await act(async () => { items[1]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pushMock).toHaveBeenCalledWith('/artifacts/a1');
+  });
+
+  it('4910 — the same two actions stay reachable without a right-click (thumbnail button + title link): no right-click-only action', async () => {
+    await mount();
+    const card = container.querySelector('[data-testid="artifact-card"]')!;
+    expect(card.querySelector('button[title="산출물 열기"]')).not.toBeNull();
+    expect(card.querySelector('a[href="/artifacts/a1"]')).not.toBeNull();
+  });
+
+  it('4910 — the loading state is a labelled skeleton group, not an empty panel', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})) as unknown as typeof fetch);
+    await mount();
+    const sk = container.querySelector('[role="status"][aria-busy="true"]');
+    expect(sk).not.toBeNull();
+    expect(sk!.getAttribute('aria-label')).toBe('불러오는 중…');
+    expect(container.querySelector('[data-testid="artifact-card"]')).toBeNull();
   });
 
   it('story 39313b40 — renders artifacts as a responsive multi-column card grid, not a row list (doc §3, no row/grid toggle in v1)', async () => {
     await mount();
-    const grid = container.querySelector('.grid.grid-cols-\\[repeat\\(auto-fill\\,minmax\\(220px\\,1fr\\)\\)\\]');
+    // 4910 — 칸 수: 폰 2 · sm 3 · lg 4.
+    const grid = container.querySelector('.grid.grid-cols-2.sm\\:grid-cols-3.lg\\:grid-cols-4');
     expect(grid).not.toBeNull();
     expect(grid?.children.length).toBeGreaterThan(0);
     // 행 리스트(3d888ba2) 잔재가 남아있지 않다 — role="button" 행+펼침 토글은 폐지됐다.

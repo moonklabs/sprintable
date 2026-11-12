@@ -6,7 +6,6 @@
   ],
   "counts": {
     "app/(authenticated)/channel/page.tsx::Button::{t('send')}": 1,
-    "components/canvas/artifact-gallery-view.tsx::button::{t('galleryFeatureAxisUnsupported')}": 1,
     "components/canvas/edit-canvas.tsx::button::{artifactId ? undefined : t('specPinToolUnavailableForNewArtifact')}": 1,
     "components/canvas/export-dialog.tsx::button::{f === 'png' && !pngAllowed ? t('exportPngUnavailableForHtml') : undefined}": 1,
     "components/chat/event-block-card.tsx::Button::{t('eventActionUnauthorized')}": 1,
