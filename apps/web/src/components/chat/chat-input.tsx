@@ -223,8 +223,21 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   const blurCloseTimer = useRef<number | null>(null);
   useEffect(() => () => { if (blurCloseTimer.current !== null) window.clearTimeout(blurCloseTimer.current); }, []);
   const [isTouchDevice] = useState(() => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches);
-  // story #2032 AC2/AC3: 대화별 초안 복원(lazy initializer — 마운트 시 1회, 리마운트당 재평가).
-  const [text, setText] = useState(() => loadDraft(threadId));
+  // story #2032 AC2/AC3: 대화별 초안 복원 — 마운트 시 1회, 리마운트당 재평가.
+  // story 4906 — AFTER the mount, not in the useState initializer: the server draws the box without a draft (there is no localStorage there), and a first client render that reads the
+  // draft differs from that HTML — React does not patch an attribute that differs, so on a reload the box showed the draft while [보내기] stayed `disabled` (measured on dev: React's prop
+  // `disabled=false`, the DOM button `disabled`). The first client render now equals the server's; the restore is an ordinary state update (the effect below), and the DOM follows.
+  const [text, setText] = useState('');
+  // true from the restore until the save effect has run once: that first save would write the still-empty `text` and REMOVE the stored draft for the instant before the restored text is written
+  // back (a tab closing in that instant lost the draft — codex on 5657)
+  const restoringDraftRef = useRef(false);
+  useEffect(() => {
+    const draft = loadDraft(threadId);
+    if (!draft) return;
+    restoringDraftRef.current = true;
+    setText(draft);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per mount (a room switch remounts the input: key={conversation_id})
+  }, []);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   // story #4474: how many files the last add left out over the cap — said out loud instead of dropped in silence
   const [droppedFiles, setDroppedFiles] = useState(0);
@@ -349,11 +362,17 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   useEffect(() => {
     adjustHeight();
   }, []);
+  // …and again when the restored draft arrives (story 4906: it is set after the mount now)
+  useEffect(() => {
+    adjustHeight();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- adjustHeight is a plain closure over the ref
+  }, [text === '']);
 
   // story #2032 AC2/AC6: 대화별 초안 자동저장 — text가 바뀔 때마다 그 대화의 슬롯에 쓴다.
   // 전송 성공 시 handleSend가 setText('')를 부르면 이 effect가 뒤이어 빈 문자열을 써서
   // saveDraft 내부 분기가 자동으로 항목을 지운다(AC6, 별도 clearDraft 호출 불요).
   useEffect(() => {
+    if (restoringDraftRef.current) { restoringDraftRef.current = false; return; } // the mount pass of a restore: the stored draft is not touched
     saveDraft(threadId, text);
   }, [threadId, text]);
 
