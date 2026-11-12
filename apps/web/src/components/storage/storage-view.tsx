@@ -14,6 +14,7 @@ import { closedDrawerProps, useSwipeDrawer } from '@/lib/use-swipe-drawer';
 import { ChevronDown, Folder as FolderIcon, X } from 'lucide-react';
 import { formatTotalSize } from '@/lib/storage/format';
 import { uploadStorageAsset } from '@/lib/storage/storage-upload';
+import { uploadFileAndReport } from './storage-upload-report';
 import { StorageCapacityBanner } from './storage-capacity-banner';
 import { StorageFolderTree } from './storage-folder-tree';
 import { StorageAssetList } from './storage-asset-list';
@@ -338,15 +339,17 @@ export function StorageView({ projectId }: { projectId: string }) {
   // (Content-Type+required_put_headers)→confirm. 성공 시 신규 Asset을 목록 선두에(id 중복 가드 —
   // confirm이 on_conflict로 기존 row 반환 가능), 실패는 무신호 금지(toast). 현재 폴더 컨텍스트로 confirm.
   const handleUploadFile = useCallback(
-    async (file: File) => {
-      try {
-        const asset = await uploadStorageAsset({ file, projectId, folderId: selectedFolderId });
-        setItems((prev) => (prev.some((a) => a.id === asset.id) ? prev : [asset, ...prev]));
-        addToast({ title: t('uploadSuccessTitle'), body: file.name, type: 'success' });
-      } catch {
-        addToast({ title: t('uploadErrorTitle'), body: t('uploadErrorDesc'), type: 'error' });
-      }
-    },
+    (file: File) =>
+      uploadFileAndReport(
+        file,
+        (f) => uploadStorageAsset({ file: f, projectId, folderId: selectedFolderId }),
+        (asset) => setItems((prev) => (prev.some((a) => a.id === asset.id) ? prev : [asset, ...prev])),
+        {
+          success: (f) => addToast({ title: t('uploadSuccessTitle'), body: f.name, type: 'success' }),
+          // 4910 — 여러 파일 중 하나가 실패해도 어느 것인지 알도록 알림에 파일 이름(성공 알림과 같은 자리 · 문구 안에 이름).
+          failure: (f) => addToast({ title: t('uploadErrorTitle'), body: t('uploadErrorDesc', { name: f.name }), type: 'error' }),
+        },
+      ),
     [projectId, selectedFolderId, addToast, t],
   );
 

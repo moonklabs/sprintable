@@ -299,7 +299,7 @@
     "downloadErrorDesc": "파일을 받지 못했어요. 다시 시도해 주세요.",
     "uploadSuccessTitle": "업로드 완료",
     "uploadErrorTitle": "업로드하지 못했어요",
-    "uploadErrorDesc": "파일을 업로드하지 못했어요. 다시 시도해 주세요.",
+    "uploadErrorDesc": "{name} — 파일을 업로드하지 못했어요. 다시 시도해 주세요.",
     "delete": "삭제",
     "cancel": "취소",
     "deleteTitle": "자산을 삭제할까요?",

@@ -142,7 +142,7 @@ export function StorageAssetRow({ asset, selected, folderLabel, onSelect, onDele
               // 눌림 영역: 겉 크기는 26(칸 폭 30 안)이지만 ::after가 사방 9px 넓혀 44×44 — 폰 눌림 기준(행 높이 ≥ 56이라 이웃 행과 안 겹친다).
               className="relative grid size-[26px] place-items-center rounded-ds-control text-ds-ink-3 opacity-100 outline-none transition-opacity after:absolute after:-inset-[9px] after:content-[''] hover:bg-ds-surface-highest focus-visible:ring-2 focus-visible:ring-ds-action mouse:opacity-0 mouse:group-hover:opacity-100 mouse:focus-visible:opacity-100 data-[popup-open]:opacity-100"
             >
-              <Icon name="more_vert" />
+              <Icon name="more_horiz" />
             </MenuTrigger>
             <StorageAssetMenuContent asset={asset} labelled onOpen={onSelect} onDownload={onDownload} onDelete={onDelete} />
           </Menu>

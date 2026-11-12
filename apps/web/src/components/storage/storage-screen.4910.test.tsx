@@ -166,6 +166,14 @@ describe('층 · 크기', () => {
   });
 });
 
+describe('행 메뉴 단추 아이콘 — 가로 «⋯»(보드 카드와 같은 아이콘, PO 11-12)', () => {
+  it('⭐행 ⋯ 단추 안 아이콘 = more_horiz(세로 «⋮» more_vert 아님)', async () => {
+    await act(async () => { root.render(intl(<StorageAssetList {...listProps()} />)); });
+    const icon = container.querySelector('[aria-label$="작업"] svg')!;
+    expect(icon.getAttribute('data-icon')).toBe('more_horiz');
+  });
+});
+
 describe('필터 줄 — 폰 폭(실측: 한 줄에 다 넣으면 검색칸이 «이름» 글자 폭으로 쪼그라듦)', () => {
   it('⭐필터 줄은 줄바꿈 · 검색칸은 폰에서 줄 전체(basis-full), sm 이상에서 한 줄(최대 300)', async () => {
     await act(async () => { root.render(intl(<StorageAssetList {...listProps()} />)); });
