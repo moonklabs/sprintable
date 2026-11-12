@@ -2402,6 +2402,39 @@ async def get_message(
     )
 
 
+MESSAGE_DELETED_EVENT = "conversation.message_deleted"
+
+
+async def _announce_message_deleted(
+    db: AsyncSession, *, conversation_id: uuid.UUID, message_id: uuid.UUID, thread_id: uuid.UUID | None, created_at: datetime, deleted_at: datetime | None,
+) -> None:
+    """story #4903 AC2 — tell the room's people that a message was deleted, so a screen that stays open turns it into a tombstone without a reload.
+
+    - **who**: the people (not agents) in the room NOW — the same set a new message reaches — each through their open streams (`_push_to_agent`: every tab and device).
+      An agent reads the tombstone when it reads the room; a person who left the room hears nothing.
+    - **what**: ids and moments only — `id` · `conversation_id` · `thread_id` · `created_at` (the message's own moment: a list row says which message is its latest by it) ·
+      `deleted_at`. Never the words, a summary or an attachment (the frame is also kept in the stream's replay buffer, and a person who reconnects gets it).
+    - **when**: after the commit (the message is a tombstone before anyone hears of it), once — the first delete only.
+    - a failure here never fails the delete: the tombstone is committed, a reload still shows it."""
+    try:
+        participant_ids = set((await db.execute(
+            select(ConversationParticipant.member_id).where(ConversationParticipant.conversation_id == conversation_id)
+        )).scalars().all())
+        people = await filter_human_member_ids(participant_ids, db)
+        frame = {
+            "event_type": MESSAGE_DELETED_EVENT,
+            "conversation_id": str(conversation_id),
+            "id": str(message_id),
+            "thread_id": str(thread_id) if thread_id else None,
+            "created_at": created_at.isoformat() if created_at else None,
+            "deleted_at": deleted_at.isoformat() if deleted_at else None,
+        }
+        for pid in sorted(people, key=str):
+            _push_to_agent(str(pid), {**frame, "recipient_id": str(pid)})
+    except Exception:
+        logger.warning("conversation.message_deleted announce failed conversation_id=%s message_id=%s", conversation_id, message_id, exc_info=True)
+
+
 @router.delete("/{conversation_id}/messages/{message_id}", status_code=200)
 async def delete_message(
     conversation_id: uuid.UUID,
@@ -2445,11 +2478,9 @@ async def delete_message(
     if msg.sender_id != member.id:
         raise HTTPException(status_code=403, detail="Not the message owner")
 
-    # ⛔AC7 블라인드스팟(의도적 범위 밖, 선언) — 이 삭제는 다른 참가자의 이미 열려 있는 화면에
-    # 실시간(SSE) 반영되지 않는다. send_message의 실시간 fan-out(_dispatch_conversation_event)은
-    # Event insert·recipient_seq·webhook-dedup까지 얽힌 별도 배선이라, 이 스토리 하나로 같이
-    # 만들면 그 정합성까지 새로 떠안는다 — 여기서는 안 한다. 새로고침/재조회 시에는 정확히
-    # 반영된다(AC5 ①의 실측 기준). 실시간 전파가 필요해지면 별도 스토리로 뗀다.
+    # story #4903 AC2 — this delete used to reach no other open screen (the old «AC7 blind spot»: reload showed it, a screen that stayed open did not). It is announced now:
+    # after the commit, the room's people (their open streams) are told which message was deleted — ids and moments only, never words (see `_announce_message_deleted`).
+    first_delete = msg.deleted_at is None
     # story #4903 AC1 — the words were also copied when the message was sent (event rows · bell rows · notification rows · delivery jobs · activity rows):
     # they go too, in this same transaction; the rows stay, only the words are removed. A REPEAT delete runs the id-based part again (it repairs a tombstone
     # that was made before this scrub existed); the old-form match needs the words, which only the first delete still has.
@@ -2464,6 +2495,8 @@ async def delete_message(
         summary_without_words=_build_message_summary("", member.name, False),
     )
     await db.commit()
+    if first_delete:
+        await _announce_message_deleted(db, conversation_id=conversation_id, message_id=msg.id, thread_id=msg.thread_id, created_at=msg.created_at, deleted_at=msg.deleted_at)
 
     return {"id": str(msg.id), "deleted_at": msg.deleted_at.isoformat() if msg.deleted_at else None}
 
