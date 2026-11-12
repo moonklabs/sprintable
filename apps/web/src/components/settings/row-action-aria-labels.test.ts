@@ -31,7 +31,6 @@ function translatorsFor(namespace: string) {
 // 버튼의 두 상태)은 표본을 여러 개 준다.
 const CASES: { namespace: string; key: string; ko: string[]; en: string[] }[] = [
   { namespace: 'settings', key: 'unblockUserAriaLabel', ko: ['차단 해제'], en: ['Unblock'] },
-  { namespace: 'settings', key: 'agentToggleAriaLabel', ko: ['비활성화', '활성화'], en: ['Deactivate', 'Activate'] },
   { namespace: 'settings', key: 'lineEditorEditAriaLabel', ko: ['편집'], en: ['Edit'] },
   // story #3606(잔여, 페드루 PO 確定 2026-09-07) — edit/delete/confirm/cancel/save
   // (tc(...) 공용 common 키)도 같은 workflowToggleAriaLabel 템플릿을 재사용해
