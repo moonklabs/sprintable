@@ -7,7 +7,7 @@ import { carryOnToTarget, embeddedApiTarget, embeddedHostRefusal } from '@/lib/e
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { MIGRATED_RESOURCES, RENAMED_RESOURCES, RETIRED_RESOURCES } from '@/lib/legacy-resource-tables';
-import { PHONE_LANDING_NEXT_PARAM, PHONE_LANDING_PATH, SHELL_NAV_HEADER } from '@/lib/phone-landing-address';
+import { PHONE_LANDING_NEXT_PARAM, PHONE_LANDING_PATH, SHELL_COOKIE, SHELL_COOKIE_MAX_AGE_SECONDS, SHELL_NAV_HEADER } from '@/lib/phone-landing-address';
 import {
   fetchResolve,
   looksLikeWorkspaceSegment,
@@ -319,7 +319,7 @@ async function redirectLegacyResourcePath(
   // 뿌리를 다음 맥 바퀴에서 같이 잡는다.
   if (orgLookup.kind === 'unknown') {
     if (!isDocumentRead(request)) return null;
-    console.warn(JSON.stringify({ message: 'proxy_org_lookup_unknown', why: orgLookup.why, resource: resourceName, shell: request.headers.has(SHELL_NAV_HEADER), redirected: orgLookup.transient }));
+    console.warn(JSON.stringify({ message: 'proxy_org_lookup_unknown', why: orgLookup.why, resource: resourceName, shell: isShellRequest(request), redirected: orgLookup.transient }));
     return orgLookup.transient ? redirectToSessionHome(request) : null;
   }
   // 위에서 org · none · unknown을 다 다뤘으므로 여기는 org뿐(타입 좁히기).
@@ -376,10 +376,10 @@ async function redirectLegacyResourcePath(
   }
 
   const home = await legacyResourceRedirect(request, resourceName, pathname, slugs, orgId, projectId);
-  // story 4714 (AC3 · AC4): the shell's own home load (the header only a shell-started load carries) — the bare address only, no query (a notification's org hint or a
+  // story 4714 (AC3 · AC4): the phone app's own home request (the header only a shell-started load carries, or the cookie planted on it — story 4906: a login's client-side move to `/glance` carries only the cookie) — the bare address only, no query (a notification's org hint or a
   // link's `?story=` is a deep link, not the app opening) — is the phone app OPENING: it lands by
   // what the server knows, not always on the home. Another flat address a shell started (a notification's path) is the usual redirect, untouched.
-  return pathname === '/glance' && !request.nextUrl.search && request.headers.has(SHELL_NAV_HEADER) ? viaPhoneLanding(home, request) : home;
+  return pathname === '/glance' && !request.nextUrl.search && isShellRequest(request) ? viaPhoneLanding(home, request) : home;
 }
 
 /**
@@ -422,6 +422,25 @@ function redirectToOnboarding(request: NextRequest): NextResponse {
   url.pathname = '/onboarding';
   url.search = '';
   return sessionDependentRedirect(url);
+}
+
+/**
+ * story 4906 (F · PO 11-12) — «this request comes from the phone app»: the shell's own load header (only a shell-started load carries it) OR the cookie the proxy planted on that first load
+ * (`SHELL_COOKIE` — every later request of the same webview carries it: a login form's client-side move to `/glance`, an RSC fetch, a prefetch). A browser has neither.
+ */
+function isShellRequest(request: NextRequest): boolean {
+  return request.headers.has(SHELL_NAV_HEADER) || request.cookies.get(SHELL_COOKIE)?.value === '1';
+}
+
+/** Plant the shell cookie on a response to a shell-started load (the header is the proof; a client cannot gain anything from forging it — the only effect is the landing redirect for `/glance`). */
+function markShell(request: NextRequest, response: Response): Response {
+  if (!request.headers.has(SHELL_NAV_HEADER) || request.cookies.get(SHELL_COOKIE)?.value === '1') return response;
+  const secure = request.nextUrl.protocol === 'https:' ? '; Secure' : '';
+  response.headers.append('set-cookie', `${SHELL_COOKIE}=1; Path=/; Max-Age=${SHELL_COOKIE_MAX_AGE_SECONDS}; HttpOnly; SameSite=Lax${secure}`);
+  // a response that sets a cookie must not be replayed to someone else by a shared cache (a CDN would hand `sp_shell=1` to ordinary browsers): keep a guard the response already has,
+  // otherwise make it private + no-store (a shell-started load is a dynamic page load; the shell sends `Cache-Control: no-cache` on it anyway — lib/initialSource.js)
+  if (!/\b(no-store|private)\b/i.test(response.headers.get('cache-control') ?? '')) response.headers.set('cache-control', 'private, no-store');
+  return response;
 }
 
 /**
@@ -876,7 +895,7 @@ export async function proxy(request: NextRequest) {
   // (requests Next answers before the proxy is reached are covered at the server's entrance — story 4824 AC7)
   const foreignHost = embeddedHostRefusal(request);
   if (foreignHost) return foreignHost;
-  const response = await proxyWithTiming(request);
+  const response = markShell(request, await proxyWithTiming(request)) as Awaited<ReturnType<typeof proxyWithTiming>>;
   const target = embeddedApiTarget(request.nextUrl.pathname, request.nextUrl.search);
   return target ? carryOnToTarget(response, target) : response;
 }
