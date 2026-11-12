@@ -14,6 +14,7 @@ import { StorageAssetList, uploadFilesOneByOne } from './storage-asset-list';
 import { StorageAssetRow } from './storage-asset-row';
 import { StorageAssetGrid } from './storage-asset-grid';
 import type { Asset } from '@/lib/storage/types';
+import { LAYER } from '@/components/ds/layers';
 
 vi.mock('./storage-uploader-avatar', () => ({ StorageUploaderAvatar: () => <span data-testid="uploader-avatar" /> }));
 
@@ -142,9 +143,16 @@ describe('층 · 크기', () => {
     expect(c0).toContain('hover:bg-ds-surface');
     expect(c0).toEqual(expect.arrayContaining(['min-h-ds-row', 'touch:min-h-ds-touch']));
     expect(c0.some((c) => /^h-\[52px\]$/.test(c))).toBe(false);
-    expect(c1).toEqual(expect.arrayContaining(['bg-ds-action-soft', 'ring-ds-action']));
-    expect(c1).not.toContain('bg-ds-surface-high');
+    // 고른 행 = 다른 화면(보드 카드 · 결재함 · 홈)과 같은 모양: 열린 카드 층(LAYER.rowSelected) + 왼쪽 막대 — 네 변 테두리(ring)가 아니다
+    expect(c1).toContain(LAYER.rowSelected);
+    expect(c1).not.toContain(LAYER.rowOthers);
+    expect(c1.some((c) => c.startsWith('ring-') && c !== 'ring-ds-action')).toBe(false);
+    expect(c1).not.toEqual(expect.arrayContaining(['ring-1', 'ring-inset', 'ring-ds-action']));
     expect(r1!.getAttribute('aria-pressed')).toBe('true');
+    expect(r1!.getAttribute('aria-current')).toBe('true');
+    expect(r1!.querySelector('[data-testid="storage-row-selected-bar"]')).not.toBeNull();
+    expect(r0!.querySelector('[data-testid="storage-row-selected-bar"]')).toBeNull();
+    expect(r0!.getAttribute('aria-current')).toBeNull();
     // 폰 눌림: ⋯ 단추는 겉 26이지만 ::after가 사방 9px 넓혀 44×44(칸 폭 30 안에서)
     const kebab = r0!.querySelector<HTMLElement>('[aria-label$="작업"]')!;
     expect(kebab.className.split(/\s+/)).toEqual(expect.arrayContaining(['size-[26px]', "after:content-['']", 'after:-inset-[9px]']));
@@ -181,6 +189,18 @@ describe('필터 줄 — 폰 폭(실측: 한 줄에 다 넣으면 검색칸이 �
     expect(filters.className.split(/\s+/)).toContain('flex-wrap');
     const input = filters.querySelector<HTMLInputElement>('input[type="search"]')!;
     expect(input.className.split(/\s+/)).toEqual(expect.arrayContaining(['basis-full', 'min-w-0', 'sm:basis-auto', 'sm:flex-1', 'sm:max-w-[300px]']));
+  });
+});
+
+describe('고른 카드(격자)', () => {
+  it('⭐격자: 고른 카드도 같은 모양 — LAYER.rowSelected 면 + 왼쪽 막대 + aria-current(고르지 않은 카드는 없음)', async () => {
+    await act(async () => { root.render(intl(<StorageAssetGrid assets={[A, B]} selectedAssetId="a2" onSelect={noop} onDelete={noop} onDownload={noop} />)); });
+    const [c0, c1] = [...container.querySelectorAll<HTMLElement>('[data-testid="storage-asset-grid"] > button')];
+    expect(c1!.className.split(/\s+/)).toContain(LAYER.rowSelected);
+    expect(c1!.getAttribute('aria-current')).toBe('true');
+    expect(c1!.querySelector('[data-testid="storage-card-selected-bar"]')).not.toBeNull();
+    expect(c0!.querySelector('[data-testid="storage-card-selected-bar"]')).toBeNull();
+    expect(c0!.className.split(/\s+/)).toContain(LAYER.rowOthers);
   });
 });
 

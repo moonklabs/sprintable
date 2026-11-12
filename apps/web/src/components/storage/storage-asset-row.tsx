@@ -56,6 +56,7 @@ export function StorageAssetRow({ asset, selected, folderLabel, onSelect, onDele
         role="button"
         tabIndex={0}
         aria-pressed={selected}
+        aria-current={selected || undefined}
         {...{ [ASSET_ROW_ATTR]: '' }}
         onClick={() => onSelect(asset)}
         // 4910 — 더블클릭 = 열기(상세 패널). 한 번 누름이 이미 고르므로 «열기»가 한 번 더 불려도 같은 결과다.
@@ -77,10 +78,11 @@ export function StorageAssetRow({ asset, selected, folderLabel, onSelect, onDele
           ASSET_ROW_GRID,
           // [SID:4380 · PO] 초점 = 제품 링(안쪽) — 배경만 바꾸던 초점은 안 보였고 고른 행의 고름 색을 덮었다(폴더 나무 행과 같은 규칙).
           'group relative min-h-ds-row cursor-pointer border-b border-ds-line py-2 text-ds-ink focus-visible:-outline-offset-2 touch:min-h-ds-touch',
-          selected ? 'bg-ds-action-soft ring-1 ring-inset ring-ds-action' : cn(ASSET_ROW_FACE, 'hover:bg-ds-surface'),
+          // 고른 행 = 화면들과 같은 모양(보드 카드 · 결재함 · 홈): 열린 카드 층(LAYER.rowSelected) + 왼쪽 막대. 면 밝기차만으로 안 가르고(글 줄과 거의 같음) 막대와 함께 — 초점 고리는 따로 그대로.
+          selected ? LAYER.rowSelected : cn(ASSET_ROW_FACE, 'hover:bg-ds-surface'),
         )}
       >
-        {selected ? <span className="absolute inset-y-0 left-0 w-0.5 bg-ds-action" aria-hidden /> : null}
+        {selected ? <span aria-hidden="true" data-testid="storage-row-selected-bar" className="absolute inset-y-1.5 left-0 w-[3px] rounded-r-full bg-ds-action" /> : null}
 
         {/* (1) 파일 아이콘 */}
         <span className={cn('grid size-[26px] shrink-0 place-items-center rounded-ds-control', FILE_TINT_DS_CLASS[fileTypeTint(asset.content_type)])}>

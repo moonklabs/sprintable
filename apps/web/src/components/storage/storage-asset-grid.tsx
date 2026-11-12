@@ -56,11 +56,13 @@ export function StorageAssetGrid({ assets, selectedAssetId, onSelect, onDelete, 
                 }
               }}
               aria-pressed={selected}
+              aria-current={selected || undefined}
               className={cn(
-                'group flex min-h-ds-touch flex-col overflow-hidden rounded-ds-panel border text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ds-action',
-                selected ? 'border-ds-action bg-ds-action-soft' : cn('border-ds-line hover:bg-ds-surface', ASSET_CARD_FACE),
+                'group relative flex min-h-ds-touch flex-col overflow-hidden rounded-ds-panel border text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ds-action',
+                selected ? cn('border-ds-line', LAYER.rowSelected) : cn('border-ds-line hover:bg-ds-surface', ASSET_CARD_FACE),
               )}
             >
+              {selected ? <span aria-hidden="true" data-testid="storage-card-selected-bar" className="absolute inset-y-1.5 left-0 z-10 w-[3px] rounded-r-full bg-ds-action" /> : null}
               <div className={cn('grid h-[112px] place-items-center', ASSET_CARD_WELL)}>
                 <span className={cn('grid size-12 place-items-center rounded-ds-control', FILE_TINT_DS_CLASS[fileTypeTint(asset.content_type)])}>
                   <Icon className="size-6" />
