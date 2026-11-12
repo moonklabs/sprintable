@@ -184,6 +184,20 @@ describe('«전체» · «결재» · «대화» 로딩 사이 상단바 폴백(
     expect(probe().textContent).toBe('');
   });
 
+  it('⭐4913 조직 화면의 로딩 폴백 제목은 화면 제목과 «같은 모양·같은 글»이다(권한 · 신뢰 센터) — 도착 때 막대가 깜빡이며 바뀌지 않는다', async () => {
+    const { OrgScreenTitle } = await import('@/components/organization/org-screen-title');
+    for (const [route, loadingPath, key] of [['organization/roles', '@/app/(authenticated)/organization/roles/loading', 'rolesTitle'], ['organization/trust', '@/app/(authenticated)/organization/trust/loading', 'trustSlotTitle']] as const) {
+      const { default: Loading } = await import(/* @vite-ignore */ loadingPath);
+      nav.pathname = `/${route}`;
+      await render(<Loading />);
+      const fallbackHtml = probe().innerHTML;
+      const text = (koMessages.organization as Record<string, string>)[key]!;
+      await render(<OrgScreenTitle>{text}</OrgScreenTitle>);
+      expect(fallbackHtml, route).toBe(probe().innerHTML);
+      expect(fallbackHtml, route).toContain(`>${text}</h1>`);
+    }
+  });
+
   it('⭐표의 모든 경로가 자기 loading.tsx에서 그 표로 폴백을 쥔다(새 경로를 표에만 넣고 로딩을 빠뜨리면 RED)', async () => {
     const { FLAT_ROUTE_TOP_BAR } = await import('./flat-tab-top-bar');
     const { readFileSync } = await import('node:fs');

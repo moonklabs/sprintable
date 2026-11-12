@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ds/button';
+import { Chip } from '@/components/ds/chip';
+import { Icon } from '@/components/ds/icon';
+import { Skeleton } from '@/components/ds/skeleton';
 import { formatViewerScheduledAt } from '@/lib/schedule-format';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
@@ -190,9 +191,9 @@ export function disambiguatedNames(
 // hit_rate=null(콜드스타트)은 0%와 시각적으로 구분되는 "데이터 부족" 표기로 대체.
 export function TrustBadge({ hitRate, resolved, t }: { hitRate: number | null; resolved: number | null; t: Translator }) {
   if (isColdStart(hitRate, resolved) || hitRate === null) {
-    return <Badge variant="chip">{t('trustColdStart')}</Badge>;
+    return <Chip>{t('trustColdStart')}</Chip>;
   }
-  return <Badge variant="chip">{t('trustHitRate', { rate: Math.round(hitRate * 100) })}</Badge>;
+  return <Chip>{t('trustHitRate', { rate: Math.round(hitRate * 100) })}</Chip>;
 }
 
 // story #3749(유나 定 — "적중 막대") — Sparkline과 같은 E-VERIFY 톤 규율: 단일 중립색
@@ -205,9 +206,9 @@ export function HitRateBar({ hitRate }: { hitRate: number }) {
       aria-valuenow={pct}
       aria-valuemin={0}
       aria-valuemax={100}
-      className="h-1.5 w-12 shrink-0 overflow-hidden rounded-full bg-muted"
+      className="h-1.5 w-12 shrink-0 overflow-hidden rounded-full bg-ds-surface-high"
     >
-      <div className="h-full rounded-full bg-muted-foreground" style={{ width: `${pct}%` }} />
+      <div className="h-full rounded-full bg-ds-ink-3" style={{ width: `${pct}%` }} />
     </div>
   );
 }
@@ -243,7 +244,7 @@ export function sparklinePoints(values: number[], width = 120, height = 24, pad 
 export function Sparkline({ values }: { values: number[] }) {
   if (values.length < 2) return null;
   return (
-    <svg width={120} height={24} viewBox="0 0 120 24" className="text-muted-foreground" aria-hidden="true">
+    <svg width={120} height={24} viewBox="0 0 120 24" className="text-ds-ink-3" aria-hidden="true">
       <polyline points={sparklinePoints(values)} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
@@ -285,14 +286,13 @@ export function HistoryDrilldownTrigger({
   return (
     <Button
       type="button"
-      variant="outline"
-      size="sm"
+      variant="secondary"
       onClick={() => void toggle()} aria-expanded={open}
       data-testid="trust-history-toggle"
       aria-label={t('trustHistoryToggleAriaLabel', { n: index + 1, label: t('trustHistoryToggle') })}
     >
       {t('trustHistoryToggle')}
-      {open ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+      <Icon name={open ? 'expand_less' : 'expand_more'} size={14} />
     </Button>
   );
 }
@@ -304,11 +304,11 @@ export function HistoryDrilldownPanel({
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   if (!open) return null;
   return (
-    <div className="mt-2 space-y-1" data-testid="trust-history-panel">
+    <div className="space-y-1" data-testid="trust-history-panel">
       {snapshots === null ? (
-        <div className="h-8 animate-pulse rounded-md bg-muted" />
+        <Skeleton className="h-8 w-full" />
       ) : snapshots.length === 0 ? (
-        <p className="text-xs text-muted-foreground">{t('trustHistoryEmpty')}</p>
+        <p className="m-0 text-ds-small text-ds-ink-2">{t('trustHistoryEmpty')}</p>
       ) : (
         <>
           <Sparkline values={extractSparklineValues(snapshots)} />
@@ -320,7 +320,7 @@ export function HistoryDrilldownPanel({
               같은 §11-2 정본 절대 포맷으로 통일 — 한 화면 안에 두 표기 규율을
               안 둔다. */}
           {snapshots.map((s) => (
-            <div key={s.computed_at} className="flex items-center justify-between text-xs text-muted-foreground">
+            <div key={s.computed_at} className="flex items-center justify-between text-ds-small text-ds-ink-2">
               <span>{formatViewerScheduledAt(s.computed_at, displayTimezone).display}</span>
               <TrustBadge hitRate={s.hit_rate} resolved={s.resolved} t={t} />
             </div>

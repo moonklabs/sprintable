@@ -19,16 +19,23 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
 }));
 
 import OrganizationTrustPage from './page';
+import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
 let root: Root;
 
+// 4913 — 화면 제목은 앱 틀 위 막대(TopBarSlot)로 간다: 막대 자리를 이 프로브가 그려 본문과 같은 문서에서 h1을 센다.
+function TopBarTitleProbe() {
+  const { title } = useTopBar();
+  return <div data-testid="topbar-probe">{title}</div>;
+}
+
 function wrap(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      {node}
+      <TopBarProvider><TopBarTitleProbe />{node}</TopBarProvider>
     </NextIntlClientProvider>
   );
 }
@@ -252,11 +259,10 @@ describe('OrganizationTrustPage — 정상 행 부제·값(story #3749 定②)',
     expect(container.querySelector('[data-testid="trust-roster-row"]')?.textContent).not.toContain(koMessages.organization.trustColdStart);
   });
 
-  // story #3749 CHANGES(유나 定①, 2026-09-09 17:28Z) — 사람 표식은 `bg-muted`+
-  // `text-muted-foreground` 원(team-activity-view.tsx ActorAvatar·chat-list-view.tsx
+  // story #3749 CHANGES(유나 定①, 2026-09-09 17:28Z) — 사람 표식은 연한 면 + 중립 글자 원(4913: 옛 bg-muted/text-muted-foreground → ds 토큰 bg-ds-surface-high/text-ds-ink-2, 뜻은 그대로)(team-activity-view.tsx ActorAvatar·chat-list-view.tsx
   // 참여자 표식과 동형) — 채널 목록(#3743) 전용 `ListRowMark`(채운 배경+흰 글자·
   // rounded-md 사각)를 사람 자리에 재사용하지 않는다.
-  it('⭐사람 표식이 원(rounded-full)+bg-muted/text-muted-foreground다(사각·흰 글자 아님)', async () => {
+  it('⭐사람 표식이 원(rounded-full)+bg-ds-surface-high/text-ds-ink-2다(사각·흰 글자 아님)', async () => {
     mountAsAdmin();
     stubFetchAdmin([
       { member_id: 'm1', role_key: 'dev', role_label: '개발', hit_rate: 0.82, resolved: 11, computed_at: '2026-09-08T00:00:00Z', pending: 0 },
@@ -267,8 +273,8 @@ describe('OrganizationTrustPage — 정상 행 부제·값(story #3749 定②)',
     const mark = container.querySelector('[data-testid="trust-roster-row"] [aria-hidden="true"]');
     expect(mark).not.toBeNull();
     expect(mark?.className).toContain('rounded-full');
-    expect(mark?.className).toContain('bg-muted');
-    expect(mark?.className).toContain('text-muted-foreground');
+    expect(mark?.className).toContain('bg-ds-surface-high');
+    expect(mark?.className).toContain('text-ds-ink-2');
     // ListRowMark(채널 색 표식)의 흔적 — 인라인 backgroundColor·흰 글자 클래스가 없어야 한다.
     expect((mark as HTMLElement)?.style.backgroundColor).toBe('');
     expect(mark?.className).not.toContain('text-white');
@@ -340,7 +346,9 @@ describe('OrganizationTrustPage — 「추이 보기」 펼침(HistoryDrilldown 
     const row = container.querySelector('[data-testid="trust-roster-row"]');
     const panel = row?.querySelector('[data-testid="trust-history-panel"]');
     expect(panel).not.toBeNull();
-    expect(panel?.parentElement).toBe(row);
+    // 4913 — 펼침 칸(ds-row-detail)이 행 래퍼의 직계 자식이고, 행 줄(ds-list-row) «안»(트리거 칸)에는 없다.
+    expect(panel?.closest('[data-slot="ds-row-detail"]')?.parentElement).toBe(row);
+    expect(row?.querySelector('[data-slot="ds-list-row"]')?.contains(panel as Node)).toBe(false);
   });
 
   // story #3749 CHANGES(페드루 PO, 유나 픽셀 캡처 e7410279 지적 2026-09-09 17:48Z) —
@@ -415,6 +423,23 @@ describe('OrganizationTrustPage — 하단 참고 문장(定③)', () => {
   });
 });
 
+describe('OrganizationTrustPage — 빈 상태는 패널 안(4913 틀: 빈 상태 꼴 하나 = Card + EmptyState)', () => {
+  it('⭐admin 빈 명단 · self 빈 점수 둘 다 EmptyState가 Card(패널) 안에 선다', async () => {
+    mountAsAdmin();
+    stubFetchAdmin([]);
+    await act(async () => { root.render(wrap(<OrganizationTrustPage />)); });
+    await flush();
+    expect(container.querySelector('[data-slot="ds-card"] [data-slot="ds-empty-state"]')).not.toBeNull();
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    mountAsSelf();
+    stubFetchSelf([]);
+    await act(async () => { root.render(wrap(<OrganizationTrustPage />)); });
+    await flush();
+    expect(container.querySelector('[data-slot="ds-card"] [data-slot="ds-empty-state"]')).not.toBeNull();
+  });
+});
+
 describe('OrganizationTrustPage — 「내 신뢰」 self 뷰(story #3749 §6, 같은 행 부품)', () => {
   it('⭐self 뷰는 역할 칩이 없다(칩은 admin 전용)', async () => {
     mountAsSelf();
@@ -424,6 +449,17 @@ describe('OrganizationTrustPage — 「내 신뢰」 self 뷰(story #3749 §6, �
 
     expect(container.querySelector('[data-testid="trust-role-filter"]')).toBeNull();
     expect(container.querySelector('[data-testid="trust-self-row"]')).not.toBeNull();
+  });
+
+  it('⭐self 뷰의 구획 제목 «내 신뢰»는 h2다(옛 화면과 같은 단계 — 4913 틀로 옮기며 h3로 내려가지 않는다) · h1은 위 막대 하나', async () => {
+    mountAsSelf();
+    stubFetchSelf([{ role_key: 'dev', role_label: '개발', hit_rate: 0.9, resolved: 5, pending: 0 }]);
+    await act(async () => { root.render(wrap(<OrganizationTrustPage />)); });
+    await flush();
+
+    const h2 = container.querySelector('[data-slot="ds-row-list"] [data-slot="ds-section-header"] h2');
+    expect(h2?.textContent).toBe(koMessages.organization.trustSelfTitle);
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
   });
 
   it('⭐self 콜드스타트 행 부제는 역할 접두 없이 사유 문장만(title이 이미 역할명이라 중복 방지)', async () => {
@@ -456,7 +492,8 @@ describe('OrganizationTrustPage — PageHeader(⓪, story #3749)', () => {
     await act(async () => { root.render(wrap(<OrganizationTrustPage />)); });
     await flush();
 
-    expect(container.querySelector('h1')?.textContent).toBe(koMessages.organization.trustSlotTitle);
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
+    expect(container.querySelector('[data-testid="topbar-probe"] h1')?.textContent).toBe(koMessages.organization.trustSlotTitle);
     expect(container.textContent).toContain(koMessages.organization.trustPurposeFraming);
     // 定① 옛 값("오케스트레이션")은 걷었다.
     expect(container.textContent).not.toContain('오케스트레이션');

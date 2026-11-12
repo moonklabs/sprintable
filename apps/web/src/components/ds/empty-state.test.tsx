@@ -31,4 +31,15 @@ describe('ds EmptyState', () => {
     await act(async () => { root.render(<EmptyState title="비었어요" icon="inbox" />); });
     expect(container.querySelector('[data-icon="inbox"]')).not.toBeNull();
   });
+
+  it('⭐4913 inline — 목록 사이에 끼는 짧은 빈 칸: 아이콘을 안 그리고 위아래 16(py-4)', async () => {
+    await act(async () => { root.render(<EmptyState size="inline" icon="inbox" title="구성원이 없어요" />); });
+    const el = container.querySelector('[data-slot="ds-empty-state"]')!;
+    expect(el.getAttribute('data-size')).toBe('inline');
+    expect(el.className).toContain('py-4');
+    expect(el.className).not.toContain('py-10');
+    expect(container.querySelector('svg')).toBeNull();
+    await act(async () => { root.render(<EmptyState title="기본" />); });
+    expect(container.querySelector('[data-slot="ds-empty-state"]')!.className).toContain('py-10');
+  });
 });
