@@ -356,8 +356,8 @@ interface RecruiterClientProps {
   onExit?: () => void;
 }
 
-/** story 4906 (customer lap ②) — the step's progress row («다음» · «채용하기») sticks to the bottom of the viewport so it is on the first screen and stays in view while the step scrolls (one scroll: the page) */
-const STEP_ACTIONS_STICKY = 'sticky bottom-0 z-10 border-t border-border bg-card py-3'; // bg-card = the step card's own surface (no band when it sticks)
+/** story 4906 (customer lap ②) — the step's progress row (the right 56px stay free below `lg`: the round support button is fixed at the bottom right of a phone, as in the Today instruction row, story 4762) («다음» · «채용하기») sticks to the bottom of the viewport so it is on the first screen and stays in view while the step scrolls (one scroll: the page) */
+const STEP_ACTIONS_STICKY = 'sticky bottom-0 z-10 border-t border-border bg-card py-3 pe-14 lg:pe-0'; // bg-card = the step card's own surface (no band when it sticks)
 
 export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }: RecruiterClientProps) {
   const flatHref = useFlatHref(); // story #4231 4차 B — 옛 자원 경로(flat 목적지)에 프로젝트
@@ -1316,7 +1316,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                   </div>
                   {recruitLimit ? <AgentLimitBanner limit={recruitLimit.limit} free={recruitLimit.free} />
                     : recruitError && <p role="alert" aria-live="assertive" aria-atomic="true" className="text-sm text-destructive" data-testid="recruiter-hire-failed">{recruitError}</p>}
-                  <div className="space-y-2">
+                  <div className={`space-y-2 ${STEP_ACTIONS_STICKY}`} data-testid="recruiter-step-actions">
                     <Button
                       variant="hero"
                       onClick={pressHero}
@@ -1511,7 +1511,7 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                 // story 4710 (AC2 · Yuna §3): a browser whose account has a Mac app connected — [이 컴퓨터에서 시작] (hire, then the app link
                 // with `?agent=`) is the primary; the key and settings screens are the secondary text link, as before
                 <div className="space-y-3 border-t border-border pt-3" data-testid="recruiter-browser-hero">
-                  <div className="space-y-2">
+                  <div className={`space-y-2 ${STEP_ACTIONS_STICKY}`} data-testid="recruiter-step-actions">
                     <Button variant="hero" onClick={pressHero} disabled={recruiting || startHere.kind === 'busy' || scopeEmpty} data-testid="recruiter-start-here-link-button">
                       {recruiting ? t('hiringShort') : t('startHere')}
                     </Button>
@@ -1522,8 +1522,8 @@ export function RecruiterClient({ projectId, orgId, showTopBar = true, onExit }:
                     {startHere.kind === 'failed' ? (
                       <p role="alert" aria-live="assertive" className="text-xs text-foreground" data-testid="recruiter-start-here-failed">{t('startHereFailed')}</p>
                     ) : null}
-                    <DesktopDownloadCard ctaVariant="outline" />
                   </div>
+                  <DesktopDownloadCard ctaVariant="outline" />
                   <div className="space-y-1">
                     <Button
                       variant="link"

@@ -86,9 +86,10 @@ describe('[SID:4906 ②] RecruiterClient — the progress row is on the first sc
     expect(rows[0]!.className).toContain('bottom-0');
   });
 
-  it('source pin: the three progress rows (step 1 «다음» · step 2 «다음» · step 3 «채용하기») all carry STEP_ACTIONS_STICKY — the step 3 row needs a chosen role and runtime to draw, so it is pinned in the source', () => {
+  it('source pin: the five progress rows (step 1 «다음» · step 2 «다음» · step 3 «채용하기» · the two hero blocks) all carry STEP_ACTIONS_STICKY — the step 3 and hero rows need a chosen role / a bridge to draw, so they are pinned in the source (the hero ones also in recruiter-client.hire-in-app.4710.test.tsx)', () => {
     const src = readFileSync(join(__dirname, 'recruiter-client.tsx'), 'utf8');
-    expect((src.match(/\$\{STEP_ACTIONS_STICKY\}/g) ?? []).length).toBe(3);
-    expect((src.match(/data-testid="recruiter-step-actions"/g) ?? []).length).toBe(3);
+    expect((src.match(/\$\{STEP_ACTIONS_STICKY\}/g) ?? []).length).toBe(5); // + the two hero blocks (the desktop-app one screen, and the browser hero with a Mac app connected)
+    expect((src.match(/data-testid="recruiter-step-actions"/g) ?? []).length).toBe(5);
+    expect(src).toContain('pe-14 lg:pe-0'); // the phone's round support button stays clear of the right-hand CTA
   });
 });
