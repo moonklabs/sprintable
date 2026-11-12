@@ -52,3 +52,12 @@ describe('applyConversationMessageUpdate — time order', () => {
     }
   });
 });
+
+describe('[SID:4903] the list row carries the message id', () => {
+  it('a new message event puts its id on the row (the key a later delete is matched by)', () => {
+    const prev = [row({ content: '옛 글', created_at: T1 })];
+    const next = applyConversationMessageUpdate(prev, { conversation_id: 'c1', id: 'm-new', content: '새 글', created_at: T3, sender: { id: 'other' } }, vi.fn(), 'me') as unknown as Array<{ latest_message: { id?: string; content: string } }>;
+    expect(next[0]!.latest_message).toMatchObject({ id: 'm-new', content: '새 글' }); // reverted (the id is not kept) → no id
+  });
+});
+

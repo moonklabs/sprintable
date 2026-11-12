@@ -99,17 +99,26 @@ export function tombstoneKnownDeleted<T extends { id: string; content?: string; 
   return next;
 }
 
+/**
+ * story 4903 — is the room's latest message (`latest`: the list row's) the message a delete announcement is about? By the message's `id` when BOTH sides have one (two messages of one microsecond are told apart);
+ * otherwise — an older server that sends no id on the row, or a delete made on this very screen that announces only the moment — by the instant, to the microsecond.
+ */
+export function isDeletedLatest(latest: { id?: string; created_at: string }, deleted: { messageId?: string | null; createdAt: string }): boolean {
+  if (latest.id && deleted.messageId) return latest.id === deleted.messageId;
+  return sameInstant(latest.created_at, deleted.createdAt);
+}
+
 /** the room rows whose latest-message preview is a message known to be deleted, blanked as the server's refetch would — the SAME list when there is nothing to change */
-export function blankKnownDeletedPreviews<C extends { id: string; latest_message?: { content: string; created_at: string; has_attachments?: boolean; event?: unknown } | null }>(rows: C[]): C[] {
+export function blankKnownDeletedPreviews<C extends { id: string; latest_message?: { id?: string; content: string; created_at: string; has_attachments?: boolean; event?: unknown } | null }>(rows: C[]): C[] {
   const known = liveKnownDeleted();
   if (known.length === 0) return rows;
   let changed = false;
   const next = rows.map((c) => {
     const latest = c.latest_message;
     if (!latest || (latest.content === '' && !latest.has_attachments && !latest.event)) return c; // already blank
-    if (!known.some((k) => k.conversationId === c.id && sameInstant(latest.created_at, k.createdAt))) return c;
+    if (!known.some((k) => k.conversationId === c.id && isDeletedLatest(latest, k))) return c;
     changed = true;
-    return { ...c, latest_message: { content: '', created_at: latest.created_at, event: null } }; // as the server's refetch gives it: no words, no attachment flag, no event card
+    return { ...c, latest_message: { ...(latest.id ? { id: latest.id } : {}), content: '', created_at: latest.created_at, event: null } }; // as the server's refetch gives it: no words, no attachment flag, no event card
   });
   return changed ? next : rows;
 }

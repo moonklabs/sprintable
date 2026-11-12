@@ -34,7 +34,7 @@ import { useOrgDomainLabels, type OrgDomainLabels } from '@/hooks/use-org-domain
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { DeviceChip } from '@/components/desktop/device-chip';
-import { blankKnownDeletedPreviews, isoToMicros, knownDeletedAt, onChatMessageDeleted, sameInstant } from '@/lib/chat-message-deleted';
+import { blankKnownDeletedPreviews, isDeletedLatest, isoToMicros, knownDeletedAt, onChatMessageDeleted } from '@/lib/chat-message-deleted';
 
 interface Participant {
   member_id: string;
@@ -71,6 +71,8 @@ interface ConversationItem {
   // 이 타입 선언에 없어 여태 FE가 못 읽었을 뿐 — preset.work.assigned 미리보기(담당자
   // 이름)가 처음으로 이 값을 소비한다.
   latest_message: {
+    /** story 4903 — which message it is (the server sends it since 5653): a delete names its message by id; an older server sends none and the moment decides */
+    id?: string;
     content: string;
     created_at: string;
     // story #4442 — the list row reads «첨부 파일» when the latest message has no text but files (the server already sends it)
@@ -400,7 +402,7 @@ export function applyConversationMessageUpdate(
   const item = { ...updated[idx]! };
   // story #4442 — an attachment-only message (no text) updates the row too: «첨부 파일» and its time
   if (created_at && (content || hasAttachments)) {
-    item.latest_message = { content: content ?? '', created_at, ...(hasAttachments ? { has_attachments: true } : {}) };
+    item.latest_message = { ...(eventMessageId ? { id: eventMessageId } : {}), content: content ?? '', created_at, ...(hasAttachments ? { has_attachments: true } : {}) };
     item.updated_at = created_at;
     // story #4440 — my own message (sent from another tab or device) moves the row up but is never unread
     if (!isOwnMessage(payload, meId)) item.unread_count = (item.unread_count ?? 0) + 1;
@@ -731,15 +733,25 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // story #1977(트랙B): 다른 탭/기기에서 mark-read → conversation.read SSE(#1976, 본인 타
   // 커넥션 전파)로 이 목록이 열려있는 동안에도 unread 배지가 즉시 서버 truth로 자가정정.
   // story 4887 — a message deleted on THIS screen (the room or its thread) that is a room's latest message: blank its preview now, as the server's refetch would (content «» · no attachment flag · no event card) — it kept showing the deleted text until the next refetch
-  useEffect(() => onChatMessageDeleted(({ conversationId, createdAt }) => {
+  // story 4903 — …and then the list asks the server again: the preview is the newest message that is STILL THERE (the server skips the deleted one and sends it with its id), «메시지 없음» only when none is left.
+  // Matched by the message id when both sides have one (else by the moment); a delete of a message that is not a room's latest changes nothing and asks nothing.
+  const listsRef = useRef<{ projectRooms: ConversationItem[]; allRooms: ConversationItem[] }>({ projectRooms: [], allRooms: [] });
+  useLayoutEffect(() => { listsRef.current = { projectRooms: conversations, allRooms: allConversations }; }, [conversations, allConversations]);
+  useEffect(() => onChatMessageDeleted((deleted) => {
+    const { conversationId } = deleted;
+    const { projectRooms, allRooms } = listsRef.current;
+    const hit = [...projectRooms, ...allRooms].some((c) => c.id === conversationId && c.latest_message && isDeletedLatest(c.latest_message, deleted));
+    if (!hit) return;
     const blank = (list: ConversationItem[]) => list.map((c) => (
-      c.id === conversationId && c.latest_message && sameInstant(c.latest_message.created_at, createdAt)
-        ? { ...c, latest_message: { content: '', created_at: c.latest_message.created_at, event: null } }
+      c.id === conversationId && c.latest_message && isDeletedLatest(c.latest_message, deleted)
+        ? { ...c, latest_message: { ...(c.latest_message.id ? { id: c.latest_message.id } : {}), content: '', created_at: c.latest_message.created_at, event: null } }
         : c
     ));
     setConversations(blank);
     setAllConversations(blank);
-  }), []);
+    void fetchConversations(0, false);
+    if (agentLoadedRef.current) void fetchAllConversations(0, false);
+  }), [fetchConversations, fetchAllConversations]);
 
   // story 4903 AC3 — a list response that was already in flight when the delete frame arrived must not bring the preview back: what is known to be deleted stays blank, re-applied after every change
   // of the lists (before paint; the same list comes back when nothing changes, so it never loops)
