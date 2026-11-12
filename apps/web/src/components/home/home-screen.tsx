@@ -2,9 +2,8 @@
 
 import { useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Panel, PanelBody, PanelContent, PanelHeader } from '@/components/ds/panel';
-import { DialogTitle } from '@/components/ds/dialog';
-import { useMediaQuery } from '@/hooks/use-media-query';
+import { ListDetailShell } from '@/components/ds/list-detail-shell';
+import { useListDetailWide } from '@/hooks/use-list-detail-wide';
 import type { HomeModel } from './derive-home';
 import type { HomeSources } from './home-model-provider';
 import { HomeDetail } from './home-detail';
@@ -19,7 +18,7 @@ import { useMinuteClock } from './use-minute-clock';
  */
 export function HomeScreen({ model, sources, partial = false }: { model: HomeModel; sources: HomeSources; partial?: boolean }) {
   const t = useTranslations('home');
-  const wide = useMediaQuery('(min-width: 1024px)');
+  const wide = useListDetailWide();
   const { selectedKey, select } = useHomeSelection(model);
   const [sheetOpen, setSheetOpen] = useState(false);
   const rows = useMemo(() => [...model.needsHand, ...model.working, ...model.justDone], [model]);
@@ -31,21 +30,20 @@ export function HomeScreen({ model, sources, partial = false }: { model: HomeMod
     if (!wide) setSheetOpen(true);
   };
 
+  const sheetLabel = t('detailSheetLabel', { title: selectedRow ? rowTitle(t, selectedRow) : '' });
+
   return (
-    <div className="lg:grid lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] lg:items-start lg:gap-4" data-testid="home-screen">
-      <HomeList model={model} sources={sources} partial={partial} selectedKey={selectedKey} onSelect={onSelect} />
-      {wide ? (
-        <aside className="sticky top-4 max-h-[calc(100svh-6rem)]" aria-label={t('detailRequest')} data-testid="home-detail-column">
-          <HomeDetail row={selectedRow} model={model} sources={sources} now={now} partial={partial} />
-        </aside>
-      ) : (
-        <Panel open={sheetOpen && selectedRow !== null} onOpenChange={setSheetOpen}>
-          <PanelContent aria-label={t('detailSheetLabel', { title: selectedRow ? rowTitle(t, selectedRow) : '' })} data-testid="home-detail-sheet">
-            <PanelHeader><DialogTitle className="sr-only">{t('detailSheetLabel', { title: selectedRow ? rowTitle(t, selectedRow) : '' })}</DialogTitle></PanelHeader>
-            <PanelBody className="p-0"><HomeDetail row={selectedRow} model={model} sources={sources} now={now} partial={partial} /></PanelBody>
-          </PanelContent>
-        </Panel>
-      )}
-    </div>
+    <ListDetailShell
+      testId="home-screen"
+      columnTestId="home-detail-column"
+      sheetTestId="home-detail-sheet"
+      wide={wide}
+      list={<HomeList model={model} sources={sources} partial={partial} selectedKey={selectedKey} onSelect={onSelect} />}
+      detail={<HomeDetail row={selectedRow} model={model} sources={sources} now={now} partial={partial} />}
+      detailLabel={t('detailRequest')}
+      sheetLabel={sheetLabel}
+      sheetOpen={sheetOpen && selectedRow !== null}
+      onSheetOpenChange={setSheetOpen}
+    />
   );
 }
