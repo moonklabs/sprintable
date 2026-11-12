@@ -287,12 +287,18 @@ export function AdvancedConnect({ orgId, onFinish, todayV3Enabled = false, onWor
       <p className="break-keep text-xs text-muted-foreground">{t('prereqBody')}</p>
       <ul className="space-y-1">
         {(['claude', 'codex'] as const).map((rt, i) => (
-          <li key={rt} className="flex flex-wrap items-center gap-2" data-testid={`advanced-install-${rt}`}>
-            <span className="w-24 shrink-0 text-xs text-foreground">{RUNTIME_LABEL[rt]}</span>
-            <code className="min-w-0 flex-1 break-all rounded bg-background px-2 py-1 font-mono text-xs text-foreground">{INSTALL[rt]}</code>
-            <Button variant="secondary" onClick={() => void copyInstall(rt)} data-testid={`advanced-install-copy-${rt}`} aria-label={t('installCopyAria', { n: i + 1, label: RUNTIME_LABEL[rt] })}>
-              {installCopied === rt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copy')}</>}
-            </Button>
+          <li key={rt} className="space-y-1.5" data-testid={`advanced-install-${rt}`}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-foreground">{RUNTIME_LABEL[rt]}</span>
+              <Button variant="secondary" onClick={() => void copyInstall(rt)} data-testid={`advanced-install-copy-${rt}`} aria-label={t('installCopyAria', { n: i + 1, label: RUNTIME_LABEL[rt] })}>
+                {installCopied === rt ? <><Check className="h-3.5 w-3.5" />{t('copied')}</> : <><Copy className="h-3.5 w-3.5" />{t('copy')}</>}
+              </Button>
+            </div>
+            {/* SID:4906 — the command used to share one narrow line with the label and the button and broke inside a word («http» / «s://claude.ai/ins» / «tall.sh»). It has its own full-width line now and may break only after a «/»
+                or at a space (a <wbr> is not text: the copied and the tested text stay the exact command). */}
+            <code className="block w-full rounded bg-background px-2 py-1 font-mono text-xs text-foreground [overflow-wrap:normal]" data-testid={`advanced-install-line-${rt}`}>
+              {INSTALL[rt].split('/').map((part, k, all) => (k < all.length - 1 ? <span key={k}>{part}/<wbr /></span> : <span key={k}>{part}</span>))}
+            </code>
           </li>
         ))}
       </ul>

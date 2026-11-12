@@ -37,7 +37,7 @@ export function PhoneAppRow() {
   if (!available) return null;
   return (
     <div data-testid="phone-app-row">
-      <ListRow asChild className="rounded-ds-control border-b-0">
+      <ListRow asChild className="rounded-ds-control">
         <Button type="button" variant="quiet" aria-expanded={open} aria-controls={regionId} onClick={() => setOpen((v) => !v)} data-testid="phone-app-row-toggle" className="h-auto w-full justify-start">
           <span className="min-w-0 flex-1 truncate text-left text-ds-body font-semibold text-ds-ink">{t('useOnPhone')}</span>
           <Icon name={open ? 'expand_less' : 'chevron_right'} size={18} className="text-ds-ink-3" />

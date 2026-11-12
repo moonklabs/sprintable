@@ -7,7 +7,9 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { OperatorInput, OperatorTextarea, OperatorSelect } from '@/components/ui/operator-control';
 import { useTranslations } from 'next-intl';
-import { fetchWithAuth, refreshSessionAfterChange, refreshSessionOnce } from '@/lib/db/client';
+import { fetchWithAuth, logoutUser, refreshSessionAfterChange, refreshSessionOnce } from '@/lib/db/client';
+import { Button as DsButton } from '@/components/ds/button';
+import { DeleteAccountDialog } from '@/components/settings/delete-account-dialog';
 import { defaultOrgName } from '@/lib/default-org-name';
 import { fetchMyInvites, type MyInvite } from '@/lib/my-invites';
 import { InvitedCard } from '@/components/desktop/desktop-setup';
@@ -85,9 +87,11 @@ export function OnboardingForm({
   const t = useTranslations('onboarding');
   const tc = useTranslations('common');
   const tNewOrg = useTranslations('desktopOnboarding');
+  const tSettings = useTranslations('settings');
 
   const [step, setStep] = useState<Step>(initialStep ?? (afterOrgDelete ? 'deleted' : 'arrive'));
   const [arrival, setArrival] = useState<Arrival>('working');
+  const [showDeleteAccount, setShowDeleteAccount] = useState(false); // story #4906: the way out of a person who has no organization any more
   const [invites, setInvites] = useState<MyInvite[]>([]);
   // the organization's name when this page made it — shown on the one screen; null when not known here (never made up)
   const [orgName, setOrgName] = useState<string | null>(null);
@@ -468,6 +472,13 @@ export function OnboardingForm({
           <h1 className="text-base font-semibold">{t('orgDeletedTitle')}</h1>
           <p className="break-keep text-sm text-muted-foreground">{t('orgDeletedBody')}</p>
           <Button onClick={() => { forgetOrgDeletedMarker(); setStep('arrive'); void arrive(); }} data-testid="onboarding-org-deleted-new">{t('orgDeletedNew')}</Button>
+          {/* story #4906 (PO 11-12): a person who deleted their only organization had ONE press here — «new organization» — and /settings sends them back to this page, so «delete account» was out of reach
+              (they had to make an organization again first). Two quiet ways out: sign out · delete the account (the same confirmation window as Settings › 계정 삭제). */}
+          <div className="flex flex-wrap items-center justify-center gap-2 border-t border-border pt-4">
+            <DsButton variant="quiet" onClick={() => { void logoutUser().catch(() => undefined).finally(() => window.location.assign('/login')); }} data-testid="onboarding-org-deleted-logout">{tc('logout')}</DsButton>
+            <DsButton variant="quiet" onClick={() => setShowDeleteAccount(true)} data-testid="onboarding-org-deleted-delete-account">{tSettings('deleteAccount')}</DsButton>
+          </div>
+          {showDeleteAccount ? <DeleteAccountDialog onClose={() => setShowDeleteAccount(false)} onDeleted={() => window.location.assign('/login')} /> : null}
         </Card>
       </div>
     );

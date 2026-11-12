@@ -140,6 +140,8 @@ export function AppSidebar({
   // 접두 비교라 `/organization/workforce/runs`가 «에이전트»와 «실행 기록»을 함께 켜고 `/content/channel-posts`가 «블로그 포스트»와 «채널 포스트»를 함께 켰다.
   // 이제 lib/nav-active.ts 한 곳(아이콘 막대와 같은 판정): ① 쿼리는 경로와 따로 보고 ② 맞는 항목이 여럿이면 가장 구체적인 하나만 ③ 정확히 맞는 항목이 없으면 같은 화면의 가장 구체적인 항목(탭만 다른 경우).
   const activeStaticItemId = findActiveStaticItemId([...navGroups.flatMap((g) => g.items), ALL_SCREENS_ITEM], pathname, searchParams);
+  // story #4906 — the chat card is outside the groups (2930), so «here» is asked of it on its own, by the same rule as every other static item
+  const chatCenterActive = findActiveStaticItemId([chatCenterItem], pathname, searchParams) === chatCenterItem.id;
   const t = useTranslations('nav');
   const { isMobile, setOpenMobile } = useSidebar();
   // ⌘K 액션 확장(story 4f991165) — 스토리 상세(`/flow?view=list&story={id}`)에서 열렸을
@@ -299,9 +301,9 @@ export function AppSidebar({
 
   // story #2930(P0-G) I2, doc ia-4zone-redesign-2930 — 챗 「center(중심 꽃)」. 4구역
   // «밖» 1급으로 승격(선생님 확定) — NAV_GROUPS 순회에 안 실린다(구역에 묻으면 강등이라는
-  // 게 이 승격의 요점). 시안 아티팩트(6242dffb .chatc) 그대로: 상시 blue-soft 카드,
-  // active/inactive로 톤이 안 바뀐다(항상 눈에 띄어야 하는 1급 자리라 일반 nav 항목의
-  // "현재 페이지만 강조" 관례를 안 따름 — 시안에도 active 변형이 없다).
+  // 게 이 승격의 요점). «항상 눈에 띄어야 하는 1급 자리» — 이 뜻은 그대로다.
+  // story #4906(PO 11-12): 처음엔 시안(6242dffb .chatc) 그대로 상시 파란 테두리 카드(active/inactive 톤 동일)였으나, 그 테두리가 모든 화면에서 «지금 이 화면»으로 읽혀
+  // 진짜 현재 페이지 표시와 두 군데가 강조됐다 — 지금은 /chats일 때만 다른 항목과 같은 «현재 페이지» 채움 + aria-current, 아닐 때는 테두리 · 그림자 없이 아이콘 · 글자만 파랑.
   // story #3824 CHANGES①(페드루 PO 確定, 2026-09-13 09:01Z) — 정본 순서는 오늘→대화→
   // 일감→결과→연결·규칙(「오늘」=첫 화면). NAV_GROUPS는 계속 "구역 밖 1급"이라 순회
   // 대상은 아니지만(승격 자체는 무변경), 렌더 위치만 옮겨 NAV_GROUPS[0](오늘) 바로
@@ -316,7 +318,11 @@ export function AppSidebar({
         // 헤어라인+elev 채택, bg-proof-blue-soft 채움 폐지. hover는 이제 solid 전환 대신
         // bg-sidebar-accent(기존 다른 nav 항목의 hover 관례와 정합) — AA 대비 이슈였던
         // hover:text-white/sidebar-primary-foreground 분기 자체가 불필요해졌다.
-        className="flex items-center gap-2 rounded-xl border border-proof-blue bg-transparent px-2.5 py-2 text-proof-blue shadow-[var(--elev-card)] transition hover:bg-sidebar-accent"
+        aria-current={chatCenterActive ? 'page' : undefined}
+        // story #4906 (PO 11-12): the card stays the always-conspicuous first-class place (2930's meaning) but its blue outline read as «you are here» on every screen, next to the real current-page mark. Now: the filled
+        // look of the current page ONLY on /chats; anywhere else no outline — the icon and the word are blue, nothing more.
+        className={`flex items-center gap-2 rounded-xl px-2.5 py-2 text-proof-blue transition hover:bg-sidebar-accent ${chatCenterActive ? 'bg-sidebar-accent' : 'bg-transparent'}`}
+        data-chat-center-active={chatCenterActive ? 'true' : 'false'}
       >
         <MessageSquare className="size-[18px] shrink-0" />
         <span className="flex-1 truncate text-editorial-ui font-bold">{t(chatCenterItem.labelKey)}</span>
