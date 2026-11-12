@@ -164,9 +164,14 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
   // 체인 안에서 setState가 일어나도 react-hooks/set-state-in-effect가 useCallback 체인만큼
   // 깊이 추적하지 않는다(AgentPerformancePanel·AgentProjectAccessSection은 위임 없이 자체
   // setState라 통과, 여기선 refreshAgents/refreshGrantCounts로 위임하므로 plain fn 유지).
-  const refreshAgents = async () => {
+  // story 4912 D1 — a failed FIRST read used to return silently, so the list said «조직에 등록된 에이전트가 없어요» (an error read as «none»). The mount load passes `strict`, so a non-OK answer
+  // throws into the load's catch (→ the error state with [다시 시도], which was already there for a rejected request). The re-reads after a toggle / bulk save stay quiet: the list already on screen is kept.
+  const refreshAgents = async (strict = false) => {
     const res = await fetchWithAuth('/api/team-members?type=agent&include_inactive=true');
-    if (!res.ok) return;
+    if (!res.ok) {
+      if (strict) throw new Error('agent list read failed');
+      return;
+    }
     const json = await res.json() as { data?: OrgAgent[] };
     setAgents(json.data ?? []);
   };
@@ -213,7 +218,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
           const json = await projectsRes.json() as { data?: ProjectOption[] };
           projectList = (json.data ?? []).slice().sort((a, b) => a.name.localeCompare(b.name));
         }
-        await Promise.all([refreshAgents(), refreshGrantCounts(projectList)]);
+        await Promise.all([refreshAgents(true), refreshGrantCounts(projectList)]);
       } catch {
         setLoadError(true);
       } finally {
