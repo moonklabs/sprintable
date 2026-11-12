@@ -99,6 +99,9 @@ export default function DocSlugPage() {
   // revisions.count 직접 소비(미enrich/legacy 응답엔 null → 메타 서브라인 숨김·기존 동작 동일).
   // (DocGateSection의 revision 타임라인 fetch는 full history용이라 별개·유지.)
   const revisionCount = selectedDoc?.revisions?.count ?? null;
+  // story 4906 — «revisions» are the saved copies of a version that was REJECTED and then taken back to a draft to be fixed (backend DocRevision: one snapshot on denied → draft), not a count of
+  // saves: three saves of a fresh doc are 0, correctly. «수정 이력 0 / 0 revisions» read as «0 edits» (a customer saved three times and saw 0). The header now says what the number is
+  // («이전 판 N개 / N earlier versions») and says nothing while there is none (the reading header already hid the zero).
 
   const handleDocSaved = useCallback((doc: DocDetail) => {
     setSelectedDoc(doc);
@@ -448,7 +451,7 @@ export default function DocSlugPage() {
           ) : undefined}
           metaSlot={
             <>
-              {revisionCount != null ? (
+              {revisionCount != null && revisionCount > 0 ? (
                 <>
                   <span className="tabular-nums">{t('docMetaRevisions', { count: revisionCount })}</span>
                   {selectedDoc.updated_at ? <span aria-hidden> · </span> : null}

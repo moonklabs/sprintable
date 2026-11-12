@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { FileText, MessageSquare, Calendar, BookOpen, ClipboardCheck, Frame } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
-import { pickEunNeunJosa } from '@/lib/korean-particle';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { fetchWithAuth } from '@/lib/db/client';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
@@ -97,37 +96,8 @@ function backlinkLabel(item: BacklinkItem, tOrg: (key: string) => string): strin
   }
 }
 
-interface CollectionScope {
-  source_types: string[];
-  forms: string;
-  excludes: string[];
-}
-
-interface BacklinksMeta {
-  collection_scope?: CollectionScope;
-}
-
-/** excludes 코드 → i18n 키. BE가 사실만 주고 문안은 FE 몫(collection_scope 주석 그대로).
- * story #4141 — evidence_free_text_reference는 BE가 더는 안 보낸다(evidence가 이제
- * 정식 source_type이라 이 exclude 사유 자체가 소멸 — backlinks.py::list_entity_backlinks
- * 응답 참조). 소비처 0인 키를 죽은 채 남기지 않는다(i18n 키=소비처 1:1 규율). */
-const EXCLUDE_LABEL_KEYS: Record<string, string> = {
-  pr_sid_text_convention: 'backlinksExcludePrSid',
-};
-
-// story #4096(리허설 1호 실측, 2026-09-21) — collection_scope.source_types 코드(BE
-// app/services/backlinks.py::BACKLINKS_ALLOWED_SOURCE_TYPES, 4종 고정)가 EXCLUDE_LABEL_KEYS
-// 와 달리 사람 낱말 매핑 없이 원문 그대로(«source=chat_message» 등) 화면에 샜다 — 같은
-// 패턴(코드→i18n 키 조회 테이블)으로 처방. 매핑에 없는 코드(향후 BE가 늘릴 경우)는 excludes와
-// 동일 원칙으로 원문 코드 그대로(번역 키 오조회 대신 "정상 경로").
-const SOURCE_TYPE_LABEL_KEYS: Record<string, string> = {
-  chat_message: 'backlinksSourceChatMessage',
-  doc: 'backlinksSourceDoc',
-  meeting: 'backlinksSourceMeeting',
-  story: 'backlinksSourceStory',
-  evidence: 'backlinksSourceEvidence',
-  artifact: 'backlinksSourceArtifact',
-};
+// story 4906 — the empty line used to carry the collection scope (which sources were read, «PR/commit [SID:XXX] text convention not collected») — the server's
+// bookkeeping, not something a customer can act on. The response still has `meta.collection_scope`; the screen no longer reads it: one plain sentence.
 
 /** BacklinksEntityType → BE 라우트 세그먼트. 불규칙복수(story→stories)라 순수 접미사 파생이
  * 아닌 조회 테이블로 연다 — PROJECT_ID_RESOLVERS와 같은 성격(종류-분기가 아니라 표기 파생).
@@ -184,7 +154,6 @@ interface LoadedResult {
   entityType: BacklinksEntityType;
   entityId: string;
   items: BacklinkItem[];
-  scope: CollectionScope | null;
 }
 
 export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinksSectionProps) {
@@ -203,11 +172,11 @@ export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinks
     let cancelled = false;
     const segment = ENTITY_ROUTE_SEGMENT[entityType];
     fetchWithAuth(`/api/${segment}/${entityId}/backlinks`, { cache: 'no-store' })
-      .then((r) => (r.ok ? (r.json() as Promise<{ data?: BacklinkItem[]; meta?: BacklinksMeta }>) : null))
+      .then((r) => (r.ok ? (r.json() as Promise<{ data?: BacklinkItem[] }>) : null))
       .then((json) => {
         if (cancelled) return;
         if (!json) { setResult('failed'); return; }
-        setResult({ entityType, entityId, items: json.data ?? [], scope: json.meta?.collection_scope ?? null });
+        setResult({ entityType, entityId, items: json.data ?? [] });
       })
       .catch(() => { if (!cancelled) setResult('failed'); });
     return () => { cancelled = true; };
@@ -215,7 +184,7 @@ export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinks
 
   // 조용한 폴백 — 다른 애드온 섹션(stuck-handoff-section 등)과 동형, 로딩/실패/전환-중으로 노이즈를 안 낸다.
   if (result === null || result === 'failed' || result.entityType !== entityType || result.entityId !== entityId) return null;
-  const { items, scope } = result;
+  const { items } = result;
   // story #2267(C-9) AC4 — relation==='created_from'인 항목은 「출처」(story-origin-section.tsx
   // 전용)이지 「이것을 가리키는 것들」(멘션)이 아니다. 같은 응답을 두 섹션이 각자 걸러 쓴다.
   const mentionItems = items.filter((item) => item.relation !== 'created_from');
@@ -224,28 +193,7 @@ export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinks
     <div className="border-t border-border/60 px-4 py-3">
       <p className="mb-2 text-xs font-medium text-muted-foreground">{t('backlinksTitle')}</p>
       {mentionItems.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          {scope
-            ? (() => {
-                // story #4096 — excludes 목록(마지막 항목 기준)에 맞는 「은/는」을 렌더
-                // 시점에 결정적으로 고른다(korean-particle.ts, more/page.tsx::moreTabHint와
-                // 동일 패턴) — 조사를 메시지 문자열에 고정하지 않는다.
-                const excludesText = scope.excludes
-                  .map((k) => (EXCLUDE_LABEL_KEYS[k] ? t(EXCLUDE_LABEL_KEYS[k]!) : k))
-                  .join('·');
-                return t('backlinksEmptyScoped', {
-                  // 매핑에 없는 코드(향후 BE가 source_types를 늘릴 경우)는 원문 코드
-                  // 그대로 — 번역 키 오조회 대신 "정상 경로"로 보여준다(#2263 ㉢와 같은
-                  // 원칙, excludes와 동형).
-                  sources: scope.source_types
-                    .map((k) => (SOURCE_TYPE_LABEL_KEYS[k] ? t(SOURCE_TYPE_LABEL_KEYS[k]!) : k))
-                    .join('·'),
-                  excludes: excludesText,
-                  particle: pickEunNeunJosa(excludesText),
-                });
-              })()
-            : t('backlinksEmptyFallback')}
-        </p>
+        <p className="text-xs text-muted-foreground">{t('backlinksEmpty')}</p>
       ) : (
         <ul className="flex flex-col gap-1.5">
           {mentionItems.map((item) => {

@@ -91,9 +91,7 @@ export const ALLOWLIST: ReadonlySet<string> = new Set<string>([
 //  - 이 제품 자체의 고유 기능명(coined term, 브랜드명과 동형): BYOM·BYO(Bring Your Own *).
 //    ⚠️story #4201(PO·유나) — BYOA는 사용자 화면에 쓰지 않는 내부 전략 약어로 판정돼 목록에서 뺐다
 //    (verify-no-internal-jargon.test.ts가 금지 — 되살리면 거기서 RED).
-//  - board.backlinksExcludePrSid="PR/커밋의 [SID:XXX] 텍스트 관례"의 SID·XXX — 이
-//    프로젝트 자체 PR 제목 관례([SID:XXX], CLAUDE.md에 명문화)를 설명하는 플레이스홀더
-//    표기 — 번역 대상 낱말이 아니라 구문 표기.
+//  - (story 4906: board.backlinksExcludePrSid — «PR/커밋의 [SID:XXX] 텍스트 관례» — 는 고객 화면에서 걷혔다. 예외 한 건과 이 설명이 함께 사라진다.)
 //
 // story #3922(§⑤ 낱말 드리프트 전량 정리) — 위 34건 잔존분을 PO 判定으로 전량 종결:
 //  - QA·PO·PM(·DevOps, 축2 전용) — 조직 role-badge 패밀리(trustRoleLabelQa/Po·
@@ -115,7 +113,7 @@ export const ALLOWLIST: ReadonlySet<string> = new Set<string>([
 export const TOKEN_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'API', 'AI', 'URL', 'MCP', 'ID', 'SSE', 'UTM', 'HTML', 'JSON', 'LLM', 'CI', 'SHA', 'DM',
   'STT', 'CSV', 'SLA', 'PDF', 'HTTP', 'SDK', 'HTTPS', 'POST', 'BYOM', 'PC',
-  'UI', 'SID', 'XXX', 'PNG', 'OS', 'CTA', 'SNS', 'GB', 'SSO', 'BYO', 'TOTP', 'QR', 'MB', 'PR',
+  'UI', 'PNG', 'OS', 'CTA', 'SNS', 'GB', 'SSO', 'BYO', 'TOTP', 'QR', 'MB', 'PR',
   'QA', 'PO', 'PM', 'AU',
   // story #4427(유나 ⑥ 문구 채택 2026-09-29 07:16Z) — «회사 IT 관리자»(데스크톱 첫 실행 설정 실패 ⑥ · 유나 확정 문구). 한국어에서 굳은
   // 말이고 «전산 관리자»가 오히려 낯설다 — 낱말을 바꾸지 않고 토큰을 허용.
@@ -323,7 +321,6 @@ export const LOWERCASE_WORD_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   // story #4359 — 버튼이 복사하는 셸 `export KEY=…` 줄의 명령어 그대로(유나 문구 판정 · PO 2026-09-27 22:42Z 전달).
   'agents.fakechatEnvCopyExport::export',
   'agents.toolPermissions.coreAlways::ping',
-  'board.backlinksEmptyScoped::source',
   'cage.boostStartFailedConnection::link', // story #4447 — the <link> markup tag (the same «연결 확인» link shape as content.commentsReplyFailureConnectionBlocked)
   'cage.boostStartFailedConnectionRetry::link', // story #4447 (Yuna) — the same «연결 확인» link, with the retry tail
   'cage.boostStartBlockedOriginConnection::link', // story #4447 (Yuna 06:12Z) — the «채널 연결» link
