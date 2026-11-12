@@ -954,6 +954,8 @@ describe('ApprovalsQueue', () => {
     expect(approveB).not.toBe(approveA);
     await act(async () => { approveB.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2);
+    // each press acted on the request that was SHOWN when it was pressed
+    expect(calls.filter((c) => c.method === 'POST').map((c) => c.url)).toEqual(['/api/gates/g-a/transition', '/api/gates/g-b/transition']);
 
     // A만 먼저 끝난다 — B는 여전히 in-flight.
     await act(async () => { resolveA?.(); await Promise.resolve(); await Promise.resolve(); });
@@ -1794,11 +1796,12 @@ describe('ApprovalsQueue — 4909 AC3 the list + detail screen', () => {
   });
 
   it('⭐deciding the picked request moves the detail to the NEXT undecided one of its section; the decided row stays in the list marked «승인 완료»', async () => {
-    mockFetches([lowGate('g1', '첫째 결재 항목'), lowGate('g2', '둘째 결재 항목')], []);
+    const calls = mockFetches([lowGate('g1', '첫째 결재 항목'), lowGate('g2', '둘째 결재 항목')], []);
     await mount();
     const approve = [...scope().querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
     await act(async () => { approve.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(calls.filter((c) => c.method === 'POST').map((c) => c.url)).toEqual(['/api/gates/g1/transition']); // the request that was shown
     expect(detailText()).toContain('둘째 결재 항목'); // moved on
     expect(rowsIn()[0]!.textContent).toContain(koMessages.cage.queueResolvedApproved);
     expect(rowsIn()).toHaveLength(2); // still in the list
@@ -1833,7 +1836,9 @@ describe('ApprovalsQueue — 4909 AC3 the list + detail screen', () => {
 
   it('⭐a request that finishes AFTER the person picked another row does not drag the detail away from what they are reading', async () => {
     let releaseFirst: (() => void) | null = null;
+    const posts: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'POST') posts.push(url);
       if (init?.method === 'POST' && url.includes('g1')) return new Promise((resolve) => { releaseFirst = () => resolve({ ok: true, json: async () => ({}) }); });
       if (url.includes('status=pending')) return { ok: true, json: async () => [lowGate('g1', '첫째 결재 항목'), lowGate('g2', '둘째 결재 항목'), lowGate('g3', '셋째 결재 항목')] };
       return { ok: true, json: async () => [] };
@@ -1846,6 +1851,20 @@ describe('ApprovalsQueue — 4909 AC3 the list + detail screen', () => {
     expect(detailText()).toContain('셋째 결재 항목'); // reverted → pulled to the second (the one after g1)
     expect(detailText()).not.toContain('둘째 결재 항목');
     expect(rowsIn()[0]!.textContent).toContain(koMessages.cage.queueResolvedApproved);
+    expect(posts).toEqual(['/api/gates/g1/transition']); // only the first was decided — picking the third did not decide anything
+  });
+
+  it('⭐after picking the SECOND row, approve decides the SECOND request (not the first one that was picked on open)', async () => {
+    const calls = mockFetches([lowGate('g1', '첫째 결재 항목'), lowGate('g2', '둘째 결재 항목')], []);
+    await mount();
+    await pickRow('g2');
+    const approve = [...scope().querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    await act(async () => { approve.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const posts = calls.filter((c) => c.method === 'POST');
+    expect(posts.map((c) => c.url)).toEqual(['/api/gates/g2/transition']); // reverted/mixed up → g1
+    expect(rowsIn()[1]!.textContent).toContain(koMessages.cage.queueResolvedApproved);
+    expect(rowsIn()[0]!.textContent).not.toContain(koMessages.cage.queueResolvedApproved);
   });
 
   it('a request that leaves the list (decided elsewhere · a HITL card answered) while picked: the detail moves to the next row of its section — never an empty detail while rows remain', async () => {
