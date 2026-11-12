@@ -99,46 +99,32 @@ describe('EntityBacklinksSection', () => {
     expect(matches.length).toBe(2); // 두 항목 모두 같은 문구 한 벌
   });
 
-  it('빈 목록이면 수집범위를 실은 0건 문구를 보인다(미수집을 없음으로 표시하지 않는다)', async () => {
-    // story #4141 — evidence_free_text_reference는 BE가 더는 안 보낸다(evidence가 이제
-    // 정식 source_type이라 그 exclude 사유 자체가 소멸, backlinks.py 참조). 픽스처를 BE가
-    // 실제로 낼 수 있는 값(pr_sid_text_convention뿐)으로 되돌리고, evidence는 source_types
-    // 쪽에 새로 넣어 사람 낱말 매핑을 같이 확認한다.
+  // story 4906 — the empty line used to read «관찰된 참조 0건 (수집범위: … PR/커밋의 [SID:XXX] 텍스트 관례는 미수집 …)»: the server's bookkeeping, in the house's own words, on a customer screen
+  // (PO: «고객 말로 — 아직 이 문서를 가리키는 곳이 없어요 정도»). One plain sentence; the section is shared by stories · docs · artifacts, so «이것», not «이 문서».
+  it('⭐빈 목록이면 고객 말 한 줄만 보인다 — 수집범위 · 내부 규약 · 원문 코드가 화면에 없다', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       data: [],
       meta: {
         next_cursor: null, has_more: false,
-        collection_scope: { source_types: ['chat_message', 'doc', 'evidence'], forms: 'all', excludes: ['pr_sid_text_convention'] },
+        collection_scope: { source_types: ['chat_message', 'doc', 'evidence', 'future_source_type'], forms: 'all', excludes: ['pr_sid_text_convention', 'future_exclude_code'] },
       },
     }))));
     await render('story', 's1');
-    expect(container.textContent).toContain('관찰된 참조 0건');
-    // story #4096(리허설 1호 실측) — source_types 원문 코드(내부어)는 안 보이고 사람 낱말로만.
-    expect(container.textContent).not.toContain('chat_message');
-    expect(container.textContent).toContain('대화');
-    expect(container.textContent).toContain('문서');
-    expect(container.textContent).toContain('증거');
-    expect(container.textContent).toContain('PR/커밋');
-    // 조사 플레이스홀더(«참조은(는)»류)가 그대로 안 남고, 결정적으로 고른 조사(여기선 "PR/
-    // 커밋의 [SID:XXX] 텍스트 관례"의 «관례»=받침 없음 → "는")가 실제로 붙는다.
-    expect(container.textContent).not.toContain('은(는)');
-    expect(container.textContent).toContain('관례는 미수집');
+    expect(container.textContent).toContain('아직 이것을 가리키는 곳이 없어요');
+    for (const internal of ['관찰', '수집', 'PR/커밋', 'SID', 'XXX', '관례', 'chat_message', 'future_source_type', 'future_exclude_code', '0건', '은(는)']) {
+      expect(container.textContent, internal).not.toContain(internal);
+    }
   });
 
-  it('source_types/excludes 매핑에 없는 미지 코드는 원문 코드 그대로 보인다(지어내지 않는다)', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
-      data: [],
-      meta: {
-        next_cursor: null, has_more: false,
-        collection_scope: { source_types: ['future_source_type'], forms: 'all', excludes: ['future_exclude_code'] },
-      },
-    }))));
-    await render('story', 's1');
-    expect(container.textContent).toContain('future_source_type');
-    expect(container.textContent).toContain('future_exclude_code');
-    // 받침 있는 미지 코드("_code"의 「e」는 한글이 아니므로 lastHangulChar가 한글만 훑는다 —
-    // 이 케이스는 완전 비한글이라 「는」으로 폴백(korean-particle.ts 관례).
-    expect(container.textContent).toContain('future_exclude_code는 미수집');
+  it('⭐빈 목록 문구는 en에서도 고객 말이다(내부 규약 말 없음)', async () => {
+    const en = (await import('../../../messages/en.json')).default as unknown as { board: Record<string, string> };
+    const ko = (await import('../../../messages/ko.json')).default as unknown as { board: Record<string, string> };
+    expect(en.board.backlinksEmpty).toBe('Nothing points here yet.');
+    expect(ko.board.backlinksEmpty).toBe('아직 이것을 가리키는 곳이 없어요');
+    for (const dead of ['backlinksEmptyFallback', 'backlinksEmptyScoped', 'backlinksExcludePrSid', 'backlinksSourceChatMessage', 'backlinksSourceDoc', 'backlinksSourceMeeting', 'backlinksSourceStory', 'backlinksSourceEvidence', 'backlinksSourceArtifact']) {
+      expect(en.board[dead], dead).toBeUndefined();
+      expect(ko.board[dead], dead).toBeUndefined();
+    }
   });
 
   it('story #4141 — evidence·artifact 항목이 라벨·아이콘과 함께 실제로 렌더된다(source_type=doc/meeting/story와 동형)', async () => {
@@ -306,7 +292,7 @@ describe('EntityBacklinksSection', () => {
     expect(container.textContent).toContain('그냥 멘션 문서');
   });
 
-  it('story #2267(C-9) — relation==="created_from" 항목만 있으면(멘션 0건) 수집범위 0건 문구를 보인다', async () => {
+  it('story #2267(C-9) — relation==="created_from" 항목만 있으면(멘션 0건) 빈 목록 문구를 보인다', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       data: [
         { id: 'r1', source_type: 'doc', source_id: 'd1', created_by: null, created_at: '2026-07-28T00:00:00Z', relation: 'created_from', still_exists: true, doc: { id: 'd1', title: '출처 문서' }, message: null, meeting: null, story: null },
@@ -315,12 +301,12 @@ describe('EntityBacklinksSection', () => {
     }))));
     await render('story', 's1');
     expect(container.textContent).not.toContain('출처 문서');
-    expect(container.textContent).toContain('관찰된 참조 0건');
+    expect(container.textContent).toContain('아직 이것을 가리키는 곳이 없어요');
   });
 
   describe('entityType="doc" — 두 번째 자리 재사용 확인(불규칙복수 파생·재-mount 없이 컴포넌트 변경 0)', () => {
     it('doc 대상이면 /api/docs/{id}/backlinks를 부른다(story→stories와 다른 불규칙복수)', async () => {
-      const fetchMock = vi.fn(async (url: string) => new Response(JSON.stringify({
+      const fetchMock = vi.fn(async (_url: string) => new Response(JSON.stringify({
         data: [{ id: 'r1', source_type: 'chat_message', source_id: 'm1', created_by: null, created_at: '2026-07-28T00:00:00Z', still_exists: true, doc: null, message: { id: 'm1', conversation_id: 'c1', content_snippet: '문서를 가리킨 메시지', sender: null } }],
         meta: { next_cursor: null, has_more: false, collection_scope: { source_types: ['chat_message', 'doc'], forms: 'all', excludes: [] } },
       })));
