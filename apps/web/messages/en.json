@@ -1419,6 +1419,7 @@
     "searchEpics": "Search goals...",
     "searchAssignees": "Search assignees...",
     "noResults": "No results",
+    "detailProperties": "Properties",
     "cardMenuButton": "Open menu for {title}",
     "kickoff": "Kickoff",
     "kickoffTriggered": "Workflow triggered",
