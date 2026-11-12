@@ -248,7 +248,8 @@ def _gcloud_tests_without_a_hang_bound(src: str) -> list[str]:
     for name, fns in funcs.items():
         if name.startswith("test") and name in starts:
             for fn in fns:
-                bound = max([module_bound, *(b for d in fn.decorator_list for b in [_mark_bound(d)] if b is not None)])
+                own = [b for d in fn.decorator_list for b in [_mark_bound(d)] if b is not None]
+                bound = own[-1] if own else module_bound   # pytest-timeout uses the CLOSEST mark: a 30 on the test beats a 120 on the module
                 if bound < _MIN_HANG_BOUND:
                     out.add(name)
     return sorted(out)
@@ -286,6 +287,7 @@ def test_the_hang_bound_guard_sees_direct_indirect_and_module_wide_starts() -> N
     assert _gcloud_tests_without_a_hang_bound(fixture) == ["test_h"], "a fixture the test asks for"
     assert _gcloud_tests_without_a_hang_bound(head + "pytestmark = [pytest.mark.anyio, pytest.mark.timeout(120)]\n" + bare.split("\n", 2)[2]) == [], "a list of marks"
     assert _gcloud_tests_without_a_hang_bound(head + "pytestmark = [pytest.mark.anyio]\n" + bare.split("\n", 2)[2]) == ["test_a"], "a list without the timeout mark"
+    assert _gcloud_tests_without_a_hang_bound(head + "pytestmark = pytest.mark.timeout(120)\n@pytest.mark.timeout(30)\ndef test_a(tmp_path):\n    _gcloud.run(['x'], tmp_path)\n") == ["test_a"], "the closest mark wins: 30 on the test beats 120 on the module"
 
 
 def test_no_test_starts_gcloud_by_hand_or_moves_the_metadata_question() -> None:
