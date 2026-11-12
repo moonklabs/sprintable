@@ -303,7 +303,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
       <p className="text-micro text-muted-foreground">{t('riskHint')}</p>
       {error ? (
         <p
-          className="inline-flex items-center gap-1 text-editorial-meta text-destructive"
+          className="inline-flex items-center gap-1 text-editorial-meta text-ds-failed"
           role="alert"
           aria-live="assertive"
           aria-atomic="true"

@@ -1872,7 +1872,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         </span>
                         {/* [SID:4362 · PO 18:11Z 전수] 디자인 Button 기본 nowrap이라 긴 구성원 이름이 줄 밖으로 넘쳤다(390에서 글 483px · 줄 338px) → 줄바꿈 · 긴 낱말 꺾음. */}
                         <span data-assignee-name="" className="min-w-0 flex-1 [overflow-wrap:anywhere]">{m.label}</span>
-                        {selected && <span className="ml-auto shrink-0 text-primary">✓</span>}
+                        {selected && <span className="ml-auto shrink-0 text-ds-action-text">✓</span>}
                       </Button>
                     );
                   })}
