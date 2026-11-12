@@ -1,15 +1,12 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Editor } from '@tiptap/core';
-import Document from '@tiptap/extension-document';
-import Paragraph from '@tiptap/extension-paragraph';
-import Text from '@tiptap/extension-text';
-import Heading from '@tiptap/extension-heading';
+import StarterKit from '@tiptap/starter-kit';
 import { StoryMentionExtension } from './story-mention';
 
 // story 4906 — «## 제목» in the doc editor opened the story picker («일치하는 스토리가 없어요») and the popup stayed after Enter, after a click elsewhere and after saving.
 // Two causes, both pinned here with a REAL editor + the real extension (the picker's search is a stubbed fetch we hold open on purpose):
-//  1. `#` at the start of a line is the heading shortcut → it must never open the picker (a `#` in the middle of a line still does).
+//  1. a bare `#` at the start of a line is the heading shortcut → it does not open the picker; «#4906» at the start of a line or of a bullet («- #4906 …») still does, and a `#` in the middle of a line opens it at once.
 //  2. tiptap calls onStart only after `await items()`; if the suggestion ended meanwhile (the person typed on) that late start drew a popup nobody closed.
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -25,10 +22,11 @@ function holdSearch() {
     release = () => resolve(new Response(JSON.stringify({ data: { data: [], types: [] } }), { status: 200 }));
   })));
 }
-function makeEditor() {
+function makeEditor(content = '<p></p>') {
   editor = new Editor({
-    extensions: [Document, Paragraph, Text, Heading, StoryMentionExtension.configure({ projectId: 'proj-1', emptyLabel: EMPTY })],
-    content: '<p></p>',
+    // the real editor's base (doc-editor-extensions.ts: StarterKit without the code block) + the story picker
+    extensions: [StarterKit.configure({ codeBlock: false }), StoryMentionExtension.configure({ projectId: 'proj-1', emptyLabel: EMPTY })],
+    content,
   });
   editor.commands.focus('end');
   return editor;
@@ -38,7 +36,7 @@ beforeEach(() => { document.body.innerHTML = ''; release = null; });
 afterEach(() => { editor?.destroy(); editor = null; vi.unstubAllGlobals(); document.body.innerHTML = ''; });
 
 describe('story picker (#) in the doc editor (story 4906)', () => {
-  it('⭐a # at the START of a line never opens the picker (the heading shortcut: «# » · «## » · «### »)', async () => {
+  it('⭐a bare # (or ##) at the START of a line never opens the picker — the heading shortcut «# » · «## » · «### »', async () => {
     holdSearch();
     const ed = makeEditor();
     ed.commands.insertContent('#');
@@ -47,6 +45,27 @@ describe('story picker (#) in the doc editor (story 4906)', () => {
     ed.commands.insertContent('#');
     await flush(); release?.(); await flush();
     expect(popups()).toHaveLength(0);
+    ed.commands.insertContent('#');           // «###»
+    await flush(); release?.(); await flush();
+    expect(popups()).toHaveLength(0);
+  });
+
+  it('⭐«#4906» at the start of a line still opens the picker (a story link at the head of a line is real use)', async () => {
+    holdSearch();
+    const ed = makeEditor();
+    ed.commands.insertContent('#4');
+    await flush(); release?.(); await flush();
+    expect(popups()).toHaveLength(1);
+    expect(popups()[0]!.textContent).toContain(EMPTY);
+  });
+
+  it('⭐«- #4906» in a bullet list item (its paragraph also starts at offset 0) still opens the picker', async () => {
+    holdSearch();
+    const ed = makeEditor('<ul><li><p></p></li></ul>');
+    ed.commands.focus('end');
+    ed.commands.insertContent('#4');
+    await flush(); release?.(); await flush();
+    expect(popups()).toHaveLength(1);
   });
 
   it('a # in the MIDDLE of a line still opens the picker (after text and a space)', async () => {

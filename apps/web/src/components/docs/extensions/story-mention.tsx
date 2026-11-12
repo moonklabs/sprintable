@@ -156,9 +156,14 @@ export function createStoryMentionSuggestion(
     allowSpaces: false,
     startOfLine: false,
 
-    // story 4906 — «## 제목» (and «# » · «### ») is the HEADING shortcut: a `#` at the start of a line must never open the story picker (it opened «일치하는 스토리가 없어요» and the
-    // popup stayed). The picker is for a `#` in the middle of a line only (after some text and a space), where a story link makes sense.
-    allow: ({ state, range }) => state.doc.resolve(range.from).parentOffset > 0,
+    // story 4906 — «## 제목» (and «# » · «### ») is the HEADING shortcut: a bare `#` at the start of a line must not open the story picker (it opened «일치하는 스토리가 없어요» and the
+    // popup stayed). But a story link at the start of a line is real use («#4906 끝남», a bullet «- #4906 …» — a list item's paragraph also starts at offset 0), so at the start of a line the
+    // picker waits for the first character AFTER the `#`: nothing yet, or another `#`, is the heading shortcut and refuses; a digit or a letter opens it. In the middle of a line it opens at once.
+    allow: ({ state, range }) => {
+      if (state.doc.resolve(range.from).parentOffset > 0) return true;
+      const afterHash = state.doc.textBetween(range.from + 1, range.to, '', '');
+      return afterHash.length > 0 && !afterHash.startsWith('#');
+    },
 
     items: async ({ query }) => {
       if (!projectId) return [];
