@@ -50,13 +50,18 @@ export function AgentsPageTabs() {
   return (
     <>
       <TopBarSlot title={<AgentsTopBarTitle />} showContextChip />
+      {/* story 4912 D6 — the statistics are per project: without a project the panel never loads and stayed on «불러오는 중…» for good. Same notice as the Recruit tab (create a project / try again / pick one). */}
       {tab === 'stats' ? (
-        <>
-          <div className="flex items-center gap-2 border-b border-border px-6 py-2">
-            <Badge variant="info">{t('scopeThisProject')}</Badge>
-          </div>
-          <AgentPerformancePanel />
-        </>
+        !projectId ? (
+          <RecruitNoProject state={recruitNoProjectState(dashboardCtx)} createHref={flatHref('/settings?tab=projects')} onRetry={() => window.location.reload()} />
+        ) : (
+          <>
+            <div className="flex items-center gap-2 border-b border-border px-6 py-2">
+              <Badge variant="info">{t('scopeThisProject')}</Badge>
+            </div>
+            <AgentPerformancePanel />
+          </>
+        )
       ) : null}
       {tab === 'manage' ? <AgentManagementTab onAddAgent={() => goTab('recruit')} /> : null}
       {tab === 'recruit' ? (
