@@ -250,6 +250,14 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
     window.setTimeout(() => setCopiedOnboarding(false), 1500);
   };
 
+  // story 4912 D4 — the whole key lives only while the «key shown» dialog is open. Every way of closing it (the [완료] button, Esc, a click outside)
+  // goes through here, so the plaintext key and its MCP config do not stay in state afterwards (the header's onboarding copy used to keep copying the full key).
+  const closeNewKeyDialog = () => {
+    setNewKeyDialog(false);
+    setGeneratedKey(null);
+    setGeneratedMcpConfig(null);
+  };
+
   const activeKeys = apiKeys.filter((k) => !k.revoked_at);
   const hasActiveKey = activeKeys.length > 0 || generatedKey !== null;
 
@@ -433,7 +441,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
         }}
       />
 
-      <Dialog open={newKeyDialog} onOpenChange={setNewKeyDialog}>
+      <Dialog open={newKeyDialog} onOpenChange={(open) => { if (open) setNewKeyDialog(true); else closeNewKeyDialog(); }}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{t('agentApiKeyGeneratedTitle')}</DialogTitle>
@@ -487,10 +495,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
           )}
           <DialogFooter>
             <Button
-              onClick={() => {
-                setNewKeyDialog(false);
-                setGeneratedKey(null);
-              }}
+              onClick={closeNewKeyDialog}
             >
               {t('agentApiKeyDone')}
             </Button>
