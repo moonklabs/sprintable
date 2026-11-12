@@ -17,6 +17,7 @@ import { AgentWakeNotice } from './agent-wake-notice';
 import { agentsStillToWake, recalledAgentWake } from '@/lib/chat/agent-wake';
 import { ReferenceDropNotice, parseDroppedReferences, type DroppedReference } from './reference-drop-notice';
 import { ChatInput, type CommandTarget } from './chat-input';
+import { SupportLauncherClearance } from '@/components/support-widget/support-launcher-clearance';
 import { ThreadPanel } from './thread-panel';
 import { ReadingPanel, type ReadingPanelTarget } from './reading-panel';
 import { useReadingPanelStack } from './use-reading-panel-stack';
@@ -1195,19 +1196,21 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             />
           )}
 
-          {/* Input */}
-          <ChatInput
-            threadId={threadId}
-            onSend={handleSend}
-            onUploadFile={handleUploadFile}
-            projectId={projectId}
-            commandTargets={commandTargets}
-            placeholder={isMobile ? t('inputPlaceholderMobile') : t('inputPlaceholderFull')}
-            onEscape={() => router.replace(backHref)}
-            currentTeamMemberId={currentTeamMemberId}
-            participants={participants}
-            prefillCommand={prefillCommand}
-          />
+          {/* Input — story 4906: while the round support button is drawn the composer keeps its right 64px free, so [Send] is not under it */}
+          <SupportLauncherClearance>
+            <ChatInput
+              threadId={threadId}
+              onSend={handleSend}
+              onUploadFile={handleUploadFile}
+              projectId={projectId}
+              commandTargets={commandTargets}
+              placeholder={isMobile ? t('inputPlaceholderMobile') : t('inputPlaceholderFull')}
+              onEscape={() => router.replace(backHref)}
+              currentTeamMemberId={currentTeamMemberId}
+              participants={participants}
+              prefillCommand={prefillCommand}
+            />
+          </SupportLauncherClearance>
 
           {/* story #2265(C-7) — 확定된 범위를 어느 스토리에 붙일지 고르는 자리. 기존
               StoryPickerDialog 재사용(새 피커 0). projectId 없으면(비-프로젝트 DM 등)
