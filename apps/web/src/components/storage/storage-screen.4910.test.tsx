@@ -166,6 +166,16 @@ describe('층 · 크기', () => {
   });
 });
 
+describe('필터 줄 — 폰 폭(실측: 한 줄에 다 넣으면 검색칸이 «이름» 글자 폭으로 쪼그라듦)', () => {
+  it('⭐필터 줄은 줄바꿈 · 검색칸은 폰에서 줄 전체(basis-full), sm 이상에서 한 줄(최대 300)', async () => {
+    await act(async () => { root.render(intl(<StorageAssetList {...listProps()} />)); });
+    const filters = container.querySelector<HTMLElement>('[data-testid="storage-filters"]')!;
+    expect(filters.className.split(/\s+/)).toContain('flex-wrap');
+    const input = filters.querySelector<HTMLInputElement>('input[type="search"]')!;
+    expect(input.className.split(/\s+/)).toEqual(expect.arrayContaining(['basis-full', 'min-w-0', 'sm:basis-auto', 'sm:flex-1', 'sm:max-w-[300px]']));
+  });
+});
+
 describe('머리 줄 · 올리기', () => {
   it('⭐머리 줄 = 개수 글 + 업로드 단추(제목 없음 — 제목은 위 막대 한 곳) · 파일 칸은 여러 개 고르기', async () => {
     await act(async () => { root.render(intl(<StorageAssetList {...listProps()} />)); });

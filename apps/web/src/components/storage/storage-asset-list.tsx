@@ -175,14 +175,15 @@ export function StorageAssetList({
       </div>
 
       {/* 필터 한 줄 — 검색 · 정렬 · 보기 */}
-      <div className="flex items-center gap-2 border-b border-ds-line px-4 py-2.5" data-testid="storage-filters">
+      <div className="flex flex-wrap items-center gap-2 border-b border-ds-line px-4 py-2.5" data-testid="storage-filters">
         <Input
           type="search"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder={t('searchPlaceholder')}
           aria-label={t('searchPlaceholder')}
-          className="max-w-[300px] flex-1"
+          // 폰(390): 검색칸이 줄 전체를 쓰고 정렬 · 보기는 아래 줄로 — 한 줄에 다 넣으면 검색칸이 글자 하나 폭(실측 «이름»)으로 쪼그라든다. sm 이상은 한 줄.
+          className="min-w-0 basis-full sm:max-w-[300px] sm:flex-1 sm:basis-auto"
         />
 
         <Menu>
@@ -201,8 +202,8 @@ export function StorageAssetList({
           </MenuContent>
         </Menu>
 
-        <span className="flex-1" />
-        <div className="flex shrink-0 overflow-hidden rounded-ds-control border border-ds-line-control">
+        <span className="hidden flex-1 sm:block" />
+        <div className="ml-auto flex shrink-0 overflow-hidden rounded-ds-control border border-ds-line-control sm:ml-0">
           <IconButton
             label={t('viewList')}
             icon="view_list"
