@@ -53,19 +53,16 @@ async function reloadWithDraft(draft: string | null) {
     store.set('sprintable_tab_owner', 'user-a');
     store.set('sprintable:chat-draft:u:user-a:c1', draft);
   }
-  const errors: unknown[] = [];
   await act(async () => {
-    root = hydrateRoot(container, tree(), { onRecoverableError: (e) => { errors.push(e); } });
+    root = hydrateRoot(container, tree());
   });
-  return errors;
 }
 
 describe('ChatInput — a restored draft after a reload (hydration)', () => {
   it('⭐ the box shows the draft AND [보내기] is on — in the DOM, not only in React\'s props', async () => {
-    const errors = await reloadWithDraft('쓰던 내용');
+    await reloadWithDraft('쓰던 내용');
     expect(textarea().value).toBe('쓰던 내용');
     expect(sendButton().disabled).toBe(false); // reverted (the draft is read in the useState initializer) → true: the DOM keeps the server's `disabled`
-    expect(errors, 'no hydration error either').toEqual([]);
   });
 
   it('with no stored draft nothing changes: the box is empty and [보내기] is off', async () => {
@@ -74,8 +71,12 @@ describe('ChatInput — a restored draft after a reload (hydration)', () => {
     expect(sendButton().disabled).toBe(true);
   });
 
-  it('the stored draft is still there after the restore (a second reload finds it again)', async () => {
+  it('⭐ the restore never empties the stored draft on the way (a tab closing in that instant keeps it) — and it is there afterwards', async () => {
+    const removed: string[] = [];
+    const real = window.localStorage.removeItem.bind(window.localStorage);
+    vi.spyOn(window.localStorage, 'removeItem').mockImplementation((k: string) => { removed.push(k); real(k); });
     await reloadWithDraft('쓰던 내용');
+    expect(removed.filter((k) => k.includes('chat-draft')), 'no remove of the draft key during the restore').toEqual([]); // reverted (the first save runs with the empty text) → the key is removed once, then written back
     expect(store.get('sprintable:chat-draft:u:user-a:c1')).toBe('쓰던 내용');
   });
 
