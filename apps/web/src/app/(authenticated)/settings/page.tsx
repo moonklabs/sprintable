@@ -200,7 +200,11 @@ export default function SettingsPage() {
     if (!inPhoneApp) setActiveTab((current) => (current === 'this-phone' ? resolveSettingsTab('this-phone', false) : current)); // functional: a link change queued in the same pass keeps winning
   }, [inPhoneApp]);
 
-  const [orgId, setOrgId] = useState<string | null>(null);
+  // 4906 — ONE organization id for the whole screen: the dashboard's organization context first (it is there even when the account has no project yet),
+  // the organization of the current project only as the fallback. The id used to be filled ONLY from /api/current-project, so a fresh account
+  // (an organization but no project) had none: «프로젝트 만들기» said «조직 컨텍스트를 찾지 못했어요», and the organization panes (members · billing · …) never mounted.
+  const [projectOrgId, setProjectOrgId] = useState<string | null>(null);
+  const orgId = ctxOrgId ?? projectOrgId;
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [orgInfo, setOrgInfo] = useState<{ id: string; name: string; slug: string; plan?: string; role?: string } | null>(null);
   const [editOrgName, setEditOrgName] = useState('');
@@ -256,7 +260,7 @@ export default function SettingsPage() {
   const [webhookErrors, setWebhookErrors] = useState<Record<string, string>>({});
 
   // DashboardCtx에서 현재 org의 role을 derive — fetch 완료 전에도 올바른 role 반영
-  const ctxRole = orgMemberships.find(o => o.orgId === (orgId ?? ctxOrgId))?.role;
+  const ctxRole = orgMemberships.find(o => o.orgId === orgId)?.role;
   const currentOrgRole = (orgInfo?.role ?? ctxRole ?? 'member') as string;
 
   // story #2092(P0) — 삭제 다이얼로그를 열 때·재시도할 때 공통으로 쓰는 영향도 조회.
@@ -359,13 +363,17 @@ export default function SettingsPage() {
     }
   };
 
+  // codex 2라운드 — 조직을 바꾸면(router.refresh, 이 화면은 다시 안 뜬다) 옛 조직의 프로젝트 행이 남아 편집 · 삭제(프로젝트 id만 보낸다)가 옛 조직으로 갈 수 있고,
+  // 옛 조직 응답이 늦게 와 새 목록을 덮을 수도 있다 → 요청마다 번호를 달아 가장 최근 것만 반영하고, 조직이 바뀌면 목록을 비운다(아래 effect).
+  const projectsSeqRef = useRef(0);
   const refreshProjects = async () => {
+    const seq = ++projectsSeqRef.current;
     const endpoint = orgId ? `/api/projects?org_id=${encodeURIComponent(orgId)}` : '/api/projects';
     const res = await fetch(endpoint);
-    if (!res.ok) return;
+    if (!res.ok || seq !== projectsSeqRef.current) return;
 
     const json = await res.json();
-    if (!json?.data) return;
+    if (!json?.data || seq !== projectsSeqRef.current) return;
 
     const nextProjects = (json.data as ProjectOption[]).slice().sort((a, b) => a.name.localeCompare(b.name));
     setProjects(nextProjects);
@@ -382,6 +390,12 @@ export default function SettingsPage() {
       setProjectMembers((json.data ?? []) as ProjectMember[]);
     }
   };
+
+  useEffect(() => {
+    projectsSeqRef.current += 1; // anything still in flight for the previous organization is stale now
+    setProjects([]);
+    setMemberProjectId('');
+  }, [orgId]);
 
   // Fetch org and project context
   useEffect(() => {
@@ -406,22 +420,8 @@ export default function SettingsPage() {
         if (projectRes.ok) {
           const projectJson = await projectRes.json();
           const projectId = projectJson?.data?.project_id ?? null;
-          const orgId = projectJson?.data?.org_id ?? null;
           setCurrentProjectId(projectId);
-          setOrgId(orgId);
-
-          // org 상세 정보 로드 — list API에서 orgId로 필터 (단건 API 미구현)
-          if (orgId) {
-            const orgListRes = await fetchWithAuth('/api/organizations').catch(() => null);
-            if (orgListRes?.ok) {
-              const orgListJson = await orgListRes.json() as { data?: Array<{ id: string; name: string; slug: string; plan?: string; role?: string }> };
-              const found = (orgListJson.data ?? []).find((o) => o.id === orgId);
-              if (found) {
-                setOrgInfo(found);
-                setEditOrgName(found.name);
-              }
-            }
-          }
+          setProjectOrgId(projectJson?.data?.org_id ?? null);
 
           // Get notification settings
           const settingsRes = await fetchWithAuth('/api/notification-settings');
@@ -455,6 +455,28 @@ export default function SettingsPage() {
     void refreshProjects().catch((err) => { console.error('프로젝트 목록 로드 실패', err); });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProjectId, orgId]);
+
+  // 4906 — the organization's details (name · plan · role) load from the ONE organization id, not from the project: an account with no project has them too.
+  useEffect(() => {
+    // codex 1라운드 — orgInfo.id로 조직 삭제 · 이름 저장이 간다: 조직이 바뀌면 옛 조직의 상세를 먼저 비우고(새 응답이 올 때까지 빈 칸 > 옛 조직),
+    // 늦게 도착한 옛 응답(본문 읽기가 늦은 경우 포함)이 새 조직의 상세를 덮지 못하게 «읽은 뒤»에도 취소를 본다.
+    setOrgInfo((current) => (current && current.id !== orgId ? null : current));
+    if (!orgId) return;
+    let cancelled = false;
+    void (async () => {
+      // org 상세 정보 로드 — list API에서 orgId로 필터 (단건 API 미구현)
+      const orgListRes = await fetchWithAuth('/api/organizations').catch(() => null);
+      if (cancelled || !orgListRes?.ok) return;
+      const orgListJson = await orgListRes.json() as { data?: Array<{ id: string; name: string; slug: string; plan?: string; role?: string }> };
+      if (cancelled) return;
+      const found = (orgListJson.data ?? []).find((o) => o.id === orgId);
+      if (found) {
+        setOrgInfo(found);
+        setEditOrgName(found.name);
+      }
+    })().catch((err) => { console.error('조직 상세 로드 실패', err); });
+    return () => { cancelled = true; };
+  }, [orgId]);
 
   // S-GATE-4 RC: 현재 프로젝트의 내 role 을 **그 프로젝트의 team-members**에서 도출(/api/me 는 JWT
   // project_id 기준이라 탭≠JWT 면 부정확). team-members 는 project_id 쿼리 기준·user_id 로 매칭 가능·
