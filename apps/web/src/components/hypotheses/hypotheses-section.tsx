@@ -9,6 +9,7 @@ import { HypothesisVerdictCard } from './hypothesis-verdict-card';
 import { HypothesisForm, type HypothesisFormValue } from './hypothesis-form';
 import { HypothesisGateBadge } from './hypothesis-gate-badge';
 import { HypothesisResolveDialog, type HypothesisResolveResult } from './hypothesis-resolve-dialog';
+import { StoryPickerDialog } from '@/components/canvas/story-picker-dialog';
 import type { GateItem } from '@/components/kanban/types';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
@@ -101,6 +102,10 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
   const [draft, setDraft] = useState<HypothesisDraft | null>(null);
   const [drafting, setDrafting] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // 4909 (마) — 행 메뉴 «스토리 연결»: 어느 가설에 스토리를 이을지(대화상자 열림) · 연결 요청 중 · 실패 표시.
+  const [linkTarget, setLinkTarget] = useState<Hypothesis | null>(null);
+  const [linking, setLinking] = useState(false);
+  const [linkFailed, setLinkFailed] = useState(false);
   // S24: gate approval 축 — hypGatesMap(per-hyp gate·work_item_type=hypothesis) + 멤버 이름맵.
   const [hypGatesMap, setHypGatesMap] = useState<Record<string, GateItem>>({});
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
@@ -218,6 +223,26 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
     }
   }, [draft, epicId, projectId, load]);
 
+  // 4909 (마) — 고른 스토리를 그 가설에 잇는다: 스토리 쪽 «연결된 가설» 패널과 같은 요청(POST /api/hypotheses/{id}/links · link_type=supports).
+  const handleLinkStory = useCallback(async (storyId: string | null) => {
+    const target = linkTarget;
+    if (!target || !storyId || linking) return;
+    setLinking(true);
+    try {
+      const res = await fetch(`/api/hypotheses/${target.id}/links`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ story_ids: [storyId], link_type: 'supports' }),
+      });
+      if (res.ok) { setLinkTarget(null); await load(); } else { setLinkTarget(null); setLinkFailed(true); }
+    } catch {
+      setLinkTarget(null);
+      setLinkFailed(true);
+    } finally {
+      setLinking(false);
+    }
+  }, [linkTarget, linking, load]);
+
   const actions: HypothesisRowActions = {
     // 초안 확인 = 상태 전이 아님 (PO §12.2): PATCH로 draft_metadata.confirmed=true 기록.
     onConfirmDraft: async (h) => {
@@ -259,10 +284,8 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
       });
       await load();
     },
-    onLinkStory: (h) => {
-      // Story picker는 별도 affordance(§6.5 story 패널 picker와 공유) — 후속 배선.
-      void h;
-    },
+    // 4909 (마) — 죽어 있던 항목(눌러도 아무 일 없음)을 이미 있는 스토리 고르기 대화상자 + 이미 있는 연결 API에 배선한다(새 부품 · 새 API 0).
+    onLinkStory: (h) => { setLinkFailed(false); setLinkTarget(h); },
     // story #2036 — 다이얼로그를 여는 것까지만. 실제 transition은 handleResolveSubmit.
     onResolve: (h, target) => setResolving({ hypothesis: h, target }),
   };
@@ -356,6 +379,12 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
         </div>
       ) : null}
 
+      {linkFailed ? (
+        <p role="alert" data-testid="hypothesis-link-failed" className="mt-3 rounded-lg border border-destructive/30 bg-destructive-tint px-2.5 py-1.5 text-editorial-meta text-foreground">
+          {t('linkStoryFailed')}
+        </p>
+      ) : null}
+
       <div className="mt-3 space-y-2">
         {items === null ? (
           <p className="text-xs text-muted-foreground">…</p>
@@ -381,6 +410,13 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
           ))
         )}
       </div>
+
+      <StoryPickerDialog
+        open={linkTarget !== null}
+        onOpenChange={(next) => { if (!next) setLinkTarget(null); }}
+        projectId={projectId}
+        onSelect={(storyId) => void handleLinkStory(storyId)}
+      />
 
       {resolving ? (
         <HypothesisResolveDialog
