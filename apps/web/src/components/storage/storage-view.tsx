@@ -537,7 +537,9 @@ export function StorageView({ projectId }: { projectId: string }) {
             type="button"
             aria-label={t('cancel')}
             className="absolute inset-0 bg-ds-scrim"
-            onClick={() => detailPanel.setDrawerOpen(false)}
+            // 5668의 결함(둘째) — 행을 «더블클릭»하면 첫 클릭이 서랍을 열고 그 자리에 배경 막이 깔려, 같은 연속 누름의 둘째 클릭(`detail` ≥ 2)이 막을 눌러 서랍을 곧바로 닫았다
+            // (서랍 방식 = 1536 미만 · 맥 앱 1100 포함 — 더블클릭 = 열기가 안 됨, dev 실측 11-12). 시간(ms)이 아니라 브라우저가 세는 클릭 횟수를 쓴다: 막을 «처음» 누른 클릭(detail 1)만 닫는다.
+            onClick={(e) => { if (e.detail > 1) return; detailPanel.setDrawerOpen(false); }}
           />
           <div className="absolute inset-y-0 right-0 w-[min(92vw,372px)]">
             <StorageDetailPanel
