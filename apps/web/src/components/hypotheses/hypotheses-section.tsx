@@ -190,21 +190,33 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
     }
   }, [epicId, projectId]);
 
-  // 휴먼 확인(AC②): persist=true → status='proposed' row 생성(drafted_by_member_id 기록·AC④).
-  // active로 만들지 않는다 — 활성화는 별도 onActivate(휴먼 1스텝).
+  // 휴먼 확인(AC②): status='proposed' row 생성 — active로 만들지 않는다(활성화는 별도 onActivate, 휴먼 1스텝).
+  // 4909 (나) — 저장하는 것은 «지금 화면에 미리 보인 그 초안»이다. 예전엔 여기서 /draft를 persist:true로 «다시» 불러 서버가 새 초안을 만들었다
+  // (문장은 LLM이라 매번 다르고 측정일도 그 시각 기준) — 사람이 읽고 «확인»한 것과 저장된 것이 달랐다. 이제 미리본 값을 그대로 기존 생성 API로 보낸다.
   const handleAcceptDraft = useCallback(async () => {
+    if (!draft) return;
     setConfirming(true);
     try {
-      const res = await fetch('/api/hypotheses/draft', {
+      const res = await fetch('/api/hypotheses', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, source_type: 'epic', source_id: epicId, persist: true }),
+        body: JSON.stringify({
+          project_id: projectId,
+          epic_ids: [epicId],
+          statement: draft.statement,
+          metric_definition: draft.metric_definition,
+          measure_after: new Date(draft.measure_after).toISOString(),
+          status: 'proposed',
+          source_type: 'epic',
+          source_id: epicId,
+          draft_metadata: { source_snapshot: draft.source_snapshot },
+        }),
       });
       if (res.ok) { setDraft(null); await load(); }
     } finally {
       setConfirming(false);
     }
-  }, [epicId, projectId, load]);
+  }, [draft, epicId, projectId, load]);
 
   const actions: HypothesisRowActions = {
     // 초안 확인 = 상태 전이 아님 (PO §12.2): PATCH로 draft_metadata.confirmed=true 기록.
