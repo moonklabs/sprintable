@@ -198,17 +198,19 @@ export default function DocViewPage() {
         </div>
       </div>
 
-      <div ref={scrollRootRef} className="focus-inset flex-1 overflow-y-auto">
+      <div ref={scrollRootRef} className="@container focus-inset flex-1 overflow-y-auto">
         {/* story 4892 (UI-9 문서 상세 열) — 오른쪽 열 = «상태 · 목차 · 이력» 패널(시안의 스레드 열처럼 본문 옆 상시 열). 상태 머리는 DOM에 한 번만 두고 자리는 CSS 격자가 정한다:
-            lg(1024+)에서는 오른쪽 열 맨 위(2열 1행), 그 아래 폭에서는 DOM 순서대로 본문 맨 위. 미디어 쿼리 상태로 옮기면 첫 그림이 «아래 폭»으로 그려졌다 옮겨져 깜빡이고 이력 요청이 두 번 나가서(codex) 격자로 바꿨다.
-            행은 «상태 머리 = 내용 높이 · 목차 · 이력 = 나머지 전부»(lg:grid-rows-[auto_1fr]) — 본문(article)이 두 행에 걸쳐 남는 높이가 생기면 auto 행이 그 높이를 나눠 받아 상태 행이 수천 px로 늘고 목차 · 이력이 본문 한참 아래에서 시작했다(dev 실측: aside y=2400, 전 197). */}
-        <div className="grid grid-cols-1 gap-x-8 gap-y-8 px-4 py-8 lg:grid-cols-[minmax(0,1fr)_316px] lg:grid-rows-[auto_1fr] lg:gap-y-0 lg:px-8">
-          <div data-testid="docs-reader-status-block" className="lg:col-start-2 lg:row-start-1 lg:border-l lg:border-ds-line lg:pb-6 lg:pl-6">
+            읽기 칸이 넉넉할 때(@min-[50rem] = 800px 이상)는 오른쪽 열 맨 위(2열 1행), 좁으면 DOM 순서대로 본문 맨 위 · 목차 · 이력은 본문 아래. 미디어 쿼리 상태로 옮기면 첫 그림이 «좁은 쪽»으로 그려졌다 옮겨져 깜빡이고 이력 요청이 두 번 나가서(codex) 격자로 바꿨다.
+            2단의 기준은 «뷰포트 lg»가 아니라 «읽기 칸 자체 폭»(CSS 컨테이너 쿼리): 칸 폭은 목록 열이 열렸는지 · 사이드바 폭에 따라 달라 뷰포트로는 못 안다 — dev 실측(맥 앱 기본 창 폭 1100, 목록 열 열림): 칸 552 → 본문 132px(한 줄 약 10자)이었다.
+            2단은 본문 ≥ 384 + 오른쪽 열 316 + 틈 32 + 가장자리 64 = 796 ≤ 800일 때만, 그 아래는 1단(본문이 칸 − 32).
+            행은 «상태 머리 = 내용 높이 · 목차 · 이력 = 나머지 전부»(grid-rows-[auto_1fr]) — 본문(article)이 두 행에 걸쳐 남는 높이가 생기면 auto 행이 그 높이를 나눠 받아 상태 행이 수천 px로 늘고 목차 · 이력이 본문 한참 아래에서 시작했다(dev 실측: aside y=2400, 전 197). */}
+        <div className="grid grid-cols-1 gap-x-8 gap-y-8 px-4 py-8 @min-[50rem]:grid-cols-[minmax(0,1fr)_316px] @min-[50rem]:grid-rows-[auto_1fr] @min-[50rem]:gap-y-0 @min-[50rem]:px-8">
+          <div data-testid="docs-reader-status-block" className="@min-[50rem]:col-start-2 @min-[50rem]:row-start-1 @min-[50rem]:border-l @min-[50rem]:border-ds-line @min-[50rem]:pb-6 @min-[50rem]:pl-6">
             <DocStatusHeader docId={doc.id} status={doc.status} editHref={docUrl(wsSlug, projSlug, slug)} onTransitioned={refetch} />
           </div>
 
           {/* 리딩 컬럼(§3) — 68ch 정본(§8 확定), 본문 렌더는 무변경(DocContentRenderer). */}
-          <article className="mx-auto w-full max-w-[68ch] lg:col-start-1 lg:row-span-2 lg:row-start-1">
+          <article className="mx-auto w-full max-w-[68ch] @min-[50rem]:col-start-1 @min-[50rem]:row-span-2 @min-[50rem]:row-start-1">
             <div>
               <DocContentRenderer
                 content={doc.content}
@@ -236,7 +238,7 @@ export default function DocViewPage() {
           </article>
 
           {/* 수직 증거 레일(§3/§6) — 접힌 gate 박스를 상시 공간으로 승격. */}
-          <aside data-testid="docs-reader-rail" className="lg:col-start-2 lg:row-start-2 lg:border-l lg:border-ds-line lg:pl-6">
+          <aside data-testid="docs-reader-rail" className="@min-[50rem]:col-start-2 @min-[50rem]:row-start-2 @min-[50rem]:border-l @min-[50rem]:border-ds-line @min-[50rem]:pl-6">
             {/* story #f546601e(v2 5호) — 긴 문서(N헤딩↑)만 자동 노출, 짧은 문서는 무변경
                 (MINI_TOC_MIN_HEADINGS 가드는 컴포넌트 내부). */}
             <DocMiniToc headings={headings} activeId={activeHeadingId} onHeadingClick={scrollToHeading} className="mb-6" />
