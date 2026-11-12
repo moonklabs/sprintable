@@ -161,11 +161,11 @@ describe('RecipeCardGrid — 역할·연결 행(story #4173)', () => {
     payload_schema: {}, stage_metadata: {}, enabled: true,
   };
 
-  it('영상 레시피(실 seed) — 디렉터(사람) · 크리에이터 · 연산 · 발행자 / 발행 채널 · 연산 커넥터(선택)', async () => {
+  it('영상 레시피(실 seed) — 디렉터(사람) · 크리에이터 · 연산 · 발행자 / 발행 채널 · 생성 연결(선택)', async () => {
     const card = await renderCards([VIDEO_PRODUCTION_RECIPE]);
     expect(card(VIDEO_PRODUCTION_RECIPE.id)).toEqual({
-      roles: '디렉터(사람) · 크리에이터 · 연산 · 발행자',
-      connections: '발행 채널 · 연산 커넥터(선택)',
+      roles: '디렉터(사람) · 크리에이터 · 생성 · 발행자',
+      connections: '발행 채널 · 생성 연결(선택)',
     });
   });
 

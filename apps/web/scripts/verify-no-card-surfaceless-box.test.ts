@@ -109,10 +109,10 @@ describe('AC — 양성대조(main()과 같은 computeOverages()가 실제로 FA
 describe('story #3785 회귀 pin — 이번 PR이 고친 자리는 baseline에서 사라졌다', () => {
   it('rewards 구역 카드 3자리(리더보드·포상벌금·거래내역)는 baseline에 없다(bg-card로 전환됨)', () => {
     const content = readFileSync(path.resolve(__dirname, '../src/app/(authenticated)/rewards/page.tsx'), 'utf8');
-    // 구역 카드 자체(rounded-xl border border-border bg-background)는 이제 Card로 바뀌어
-    // 이 정적 스캔에 안 걸린다. 남는 2건은 행(rounded-lg border border-border/60, 의도적으로
-    // 손 안 댐 — 2층 자동 승계, 라이브 하네스 몫).
-    expect(countSurfacelessBoxClasses(content, 'app/(authenticated)/rewards/page.tsx')).toBe(2);
+    // 구역 카드 자체(rounded-xl border border-border bg-background)는 Card로 바뀌어 이 정적 스캔에 안 걸린다.
+    // 4913(UI-R5 B판): 남아 있던 2건(행 — rounded-lg border border-border/60)도 틀의 행(RowListItem)으로 옮겨 이제 0이다 —
+    // 이 핀이 지키던 것(구역 카드가 면 없는 상자로 되돌아가지 않는다)은 그대로, 행까지 면 없는 상자가 아닌 것으로 한 칸 더 조여졌다.
+    expect(countSurfacelessBoxClasses(content, 'app/(authenticated)/rewards/page.tsx')).toBe(0);
   });
 
   it('standup 구역 카드 1자리(현재 스프린트)는 baseline에 없다(bg-card로 전환됨)', () => {

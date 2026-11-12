@@ -88,7 +88,7 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
     const cards = [...container.querySelectorAll('[data-testid="more-section-card"]')];
     expect(cards).toHaveLength(7);
     expect(cards.map((c) => c.querySelector('[data-testid="more-menu-link"] span span')?.textContent)).toEqual(
-      ['구성원', '문서', '설정', '결재', '목표', '결과', '리워드'],
+      ['구성원', '문서', '설정', '결재', '목표', '성과 보드', '리워드'],
     );
     // story #4291(PO) — 머리 없는 카드에 group 이름을 붙이지 않는다(구역 이름 = 그 한 항목 이름이라 화면 읽기가 같은 낱말을 두 번 읽음).
     expect(cards.map((c) => [c.getAttribute('role'), c.getAttribute('aria-label')])).toEqual(cards.map(() => [null, null]));
@@ -150,10 +150,10 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
     expect(goalsLink?.getAttribute('href')).toBe('/goals');
   });
 
-  it('doc a0da40c9 §21-1(2026-09-05) — 조직 그룹에 새로 추가됐던 성과 보드 항목(현 라벨 「결과」, story #3824 navResults 개명)이 이 모바일 허브에도 뜬다(하나만 서면 모바일 진입점이 아예 없다는 규율의 회귀가드)', async () => {
+  it('doc a0da40c9 §21-1(2026-09-05) — 조직 그룹에 새로 추가됐던 성과 보드 항목(현 라벨 「성과 보드」, 4913 이름 통일 — 옛 「결과」, story #3824 navResults 개명)이 이 모바일 허브에도 뜬다(하나만 서면 모바일 진입점이 아예 없다는 규율의 회귀가드)', async () => {
     await mount();
     const insightsBoardLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/organization/insights-board');
-    expect(insightsBoardLink?.textContent).toContain('결과');
+    expect(insightsBoardLink?.textContent).toContain('성과 보드');
   });
 
   // story #4885 — «설정»은 머리 없는 자기 구역(카드)이고 «그 밖의 화면» 맨 아래엔 메뉴 입구를 따로 안 만드는 화면들이 선다(리워드 · 채널 채팅).

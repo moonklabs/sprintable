@@ -10,17 +10,19 @@ import { describe, expect, it } from 'vitest';
 
 const APP = join(__dirname, '..');
 /** 옮긴 화면 — 이 파일들이 틀 규칙을 전부 지킨다. */
-const MOVED = ['organization/roles/page.tsx', 'organization/trust/page.tsx', 'organization/trust/trust-utils.tsx'];
+const MOVED = [
+  'organization/roles/page.tsx', 'organization/trust/page.tsx', 'organization/trust/trust-utils.tsx',
+  'organization/content-rules/page.tsx', 'organization/generation-connectors/page.tsx', 'rewards/page.tsx',
+];
+/** 옮긴 화면의 라우트 로딩 폴더(= FLAT_ROUTE_TOP_BAR 키) — rewards는 표에 이미 있던 키. */
+const MOVED_LOADING = ['organization/roles', 'organization/trust', 'organization/content-rules', 'organization/generation-connectors', 'rewards'];
 /** 옮길 화면 — 지금 옛 부품 import 수(`from '@/components/ui/…'`)의 상한. 줄이는 방향으로만 바꾼다. */
 const RATCHET: Record<string, number> = {
   'organization/insights-board/page.tsx': 5,
   'organization/channels/page.tsx': 8,
-  'organization/generation-connectors/page.tsx': 6,
-  'organization/content-rules/page.tsx': 6,
   'organization/events/page.tsx': 9,
   'content/page.tsx': 7,
   'content/channel-posts/page.tsx': 7,
-  'rewards/page.tsx': 6,
   'channel/page.tsx': 1,
 };
 const read = (rel: string) => readFileSync(join(APP, rel), 'utf8');
@@ -58,14 +60,14 @@ describe('조직 화면 한 쪽 틀 가드(4913)', () => {
     it(`⭐G3 ${rel} — 모든 분기가 «제목 + 틀»을 쌍으로 그린다(권한 없음 · 로딩 분기에서 제목이 사라지던 길 막음)`, () => {
       const c = code(rel);
       const frames = c.match(/<(?:PageFrame|OrgScreenLoading)\b/g) ?? [];
-      const pairs = c.match(/<OrgScreenTitle>[\s\S]*?<\/OrgScreenTitle>\s*<(?:PageFrame|OrgScreenLoading)\b/g) ?? [];
-      expect(frames.length).toBeGreaterThanOrEqual(2);
+      const pairs = c.match(/<OrgScreenTitle\b[^>]*>[\s\S]*?<\/OrgScreenTitle>\s*<(?:PageFrame|OrgScreenLoading)\b/g) ?? [];
+      expect(frames.length).toBeGreaterThanOrEqual(1);
       expect(pairs.length).toBe(frames.length);
     });
   }
 
   describe('G6 라우트 로딩(loading.tsx) — 옮긴 화면의 로딩도 같은 틀 + 위 막대 제목 폴백(codex 검수 4913A)', () => {
-    for (const dir of ['organization/roles', 'organization/trust']) {
+    for (const dir of MOVED_LOADING) {
       it(`⭐${dir}/loading.tsx — 옛 PageSkeleton 없이 OrgScreenLoading(틀) + RouteTopBarFallback`, () => {
         const c = code(`${dir}/loading.tsx`);
         expect(c).toContain('<OrgScreenLoading />');

@@ -121,7 +121,7 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
   { labelKey: null, labels: ['일감', '목표', '실행'] },
   { labelKey: 'zoneTeam', labels: ['구성원', '에이전트', '실행 기록', 'API 키'] },
   { labelKey: 'zoneKnowledge', labels: ['문서', '산출물', '스토리지'] },
-  { labelKey: 'zoneOrganization', labels: ['결과', '채널 연결', '연산 커넥터', '콘텐츠 규칙', '레시피', '신뢰 센터', '권한', '활동 로그', '블로그 포스트', '채널 포스트'] },
+  { labelKey: 'zoneOrganization', labels: ['성과 보드', '채널 연결', '생성 연결', '콘텐츠 규칙', '레시피', '신뢰 센터', '권한', '활동 로그', '블로그 포스트', '채널 포스트'] },
   { labelKey: null, labels: ['설정'] },
   { labelKey: null, labels: ['전체'] },
 ];
@@ -141,11 +141,11 @@ const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
   '실행 기록': '/organization/workforce/runs',
   'API 키': '/organization/workforce/api-keys',
   '문서': '/docs',
-  '결과': '/organization/insights-board',
+  '성과 보드': '/organization/insights-board',
   '설정': '/settings',
   '전체': '/more',
   '채널 연결': '/organization/channels',
-  '연산 커넥터': '/organization/generation-connectors',
+  '생성 연결': '/organization/generation-connectors',
   '콘텐츠 규칙': '/organization/content-rules',
 };
 

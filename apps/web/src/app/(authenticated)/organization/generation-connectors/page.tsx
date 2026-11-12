@@ -3,12 +3,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { PageHeader } from '@/components/ui/page-header';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { EmptyState } from '@/components/ui/empty-state';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Card } from '@/components/ds/card';
+import { Chip } from '@/components/ds/chip';
+import { ConfirmDialog } from '@/components/ds/dialog';
+import { EmptyState } from '@/components/ds/empty-state';
+import { PageFrame } from '@/components/ds/page-frame';
+import { PageHead } from '@/components/ds/page-head';
+import { RowList, RowListItem } from '@/components/ds/row-list';
+import { NativeSelect } from '@/components/ds/select';
+import { OrgScreenTitle } from '@/components/organization/org-screen-title';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { pickEulReulJosa } from '@/lib/korean-particle';
@@ -52,11 +57,6 @@ interface GenerationConnector {
   created_at: string;
   revoked_at: string | null;
 }
-
-const STATUS_TONE: Record<string, { bg: string; dot: string; text: string }> = {
-  active: { bg: 'bg-success-tint', dot: 'bg-success', text: 'text-foreground' },
-  revoked: { bg: 'bg-destructive-tint', dot: 'bg-destructive', text: 'text-foreground' },
-};
 
 export default function OrganizationGenerationConnectorsPage() {
   const { orgId, orgMemberships } = useDashboardContext();
@@ -153,164 +153,135 @@ export default function OrganizationGenerationConnectorsPage() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6 p-6">
-      <PageHeader
-        title={t('gcTitle')}
-        description={t('gcDescription')}
-        actions={isOwnerOrAdmin && connectors.length > 0 && !registering ? (
-          <Button onClick={() => setRegistering(true)} data-testid="gc-register-action">{t('gcRegisterAction')}</Button>
-        ) : undefined}
-      />
-
-      {/* story #4116 — 못 쓰는 컨트롤은 비활성이 아니라 안 그림 + muted 사유(형제 화면
-          동일 규율). 목록 자체는 사람 org 멤버 전원이 본다(BE _require_human). */}
-      {!isOwnerOrAdmin ? (
-        <p className="rounded-md border border-input bg-muted px-3 py-2 text-xs text-muted-foreground" data-testid="gc-owner-only-reason">
-          {t('gcOwnerOnlyReason')}
-        </p>
-      ) : null}
-
-      {registering && isOwnerOrAdmin && orgId ? (
-        <GenerationConnectorRegisterForm
-          orgId={orgId}
-          onRegistered={() => { setRegistering(false); load(); }}
-          onCancel={() => setRegistering(false)}
-          t={t}
-          tc={tc}
-          tChannel={tChannel}
-        />
-      ) : null}
-
-      {locationPatchError ? (
-        <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
-          <AlertDescription>{locationPatchError}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      {status === 'failed' ? (
-        <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
-          <AlertDescription className="flex items-center justify-between gap-2">
-            <span>{t('gcListLoadError')}</span>
-            <Button variant="outline" size="sm" onClick={load}>{t('eventApplyAgentsRetry')}</Button>
-          </AlertDescription>
-        </Alert>
-      ) : status === 'loaded' && connectors.length === 0 ? (
-        <EmptyState
-          title={t('gcEmptyTitle')}
-          description={t('gcEmptyDesc')}
-          action={isOwnerOrAdmin && !registering ? (
-            <Button onClick={() => setRegistering(true)} data-testid="gc-first-register-action">{t('gcFirstRegisterAction')}</Button>
+    <>
+      {/* 4913 — 제목은 위 막대, 본문은 한 쪽 틀(reading). 이름은 «생성 연결»(PO 11-12 · 옛 «연산 커넥터»). */}
+      <OrgScreenTitle>{t('gcTitle')}</OrgScreenTitle>
+      <PageFrame width="reading">
+        <PageHead
+          description={t('gcDescription')}
+          actions={isOwnerOrAdmin && connectors.length > 0 && !registering ? (
+            <Button variant="primary" onClick={() => setRegistering(true)} data-testid="gc-register-action">{t('gcRegisterAction')}</Button>
           ) : undefined}
         />
-      ) : status === 'loaded' ? (
-        <Card className="divide-y divide-border overflow-hidden">
-          {connectors.map((c, index) => {
-            const tone = STATUS_TONE[c.status] ?? STATUS_TONE.active!;
-            // story #4116 — model_config_json은 provider마다 자유 형식이라(§3-1 "공급자
-            // 편애 없이") 값 있는 키 개수만 센다(어느 모달리티인지는 등록 폼에서 이미
-            // 봄, 목록 행은 요약 1줄).
-            const modalityCount = Object.values(c.model_config_json ?? {})
-              .filter((v) => typeof v === 'string' && v.trim().length > 0).length;
-            return (
-              <div key={c.id} className="flex items-center gap-3 p-4" data-testid="gc-row">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground">
-                    <span>{c.label}</span>
-                    <span className="rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-                      {c.provider_key}
-                    </span>
-                    {/* story #4140 — 제품 리전 정책값 가시화(crew가 이 값으로만 호출).
-                        story #4166 — owner/admin·active 커넥터는 칩 대신 select(값
-                        자체가 즉시-적용 행 액션, 자격 무접촉). 그 외는 기존 읽기전용
-                        칩 그대로. */}
-                    {isOwnerOrAdmin && c.status === 'active' ? (
-                      <select
-                        aria-label={t('gcLocationChangeAriaLabel', { n: index + 1, label: c.label })}
-                        data-testid={`gc-location-select-${c.id}`}
-                        className="rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-base lg:text-[10px] text-muted-foreground disabled:opacity-60"
-                        value={locationDraft[c.id] ?? c.location}
-                        disabled={locationPatchTargetId === c.id}
-                        onChange={(e) => void handleLocationChange(c.id, e.target.value)}
-                      >
-                        {GENERATION_CONNECTOR_LOCATIONS.map((loc) => (
-                          <option key={loc} value={loc}>{loc}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <span
-                        data-testid="gc-location-chip"
-                        className="rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
-                      >
-                        {c.location}
-                      </span>
-                    )}
-                    <span
-                      data-status-chip={c.status}
-                      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${tone.bg} ${tone.text}`}
-                    >
-                      <span data-chip-dot className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} aria-hidden="true" />
-                      {c.status === 'active' ? t('gcStatusActive') : t('gcStatusRevoked')}
-                    </span>
-                  </div>
-                  {modalityCount > 0 ? (
-                    <p className="mt-0.5 text-[11px] text-muted-foreground">
-                      {t('gcModelCountSummary', { count: modalityCount })}
-                    </p>
-                  ) : null}
-                  {/* story #4117 FE 라이더 — #4112 시안 프레임①의 "등록 시각" 행.
-                      해지된 커넥터는 해지 시각도 같이(자격 소실 시점을 확認할 수 있게). */}
-                  <p className="mt-0.5 text-[11px] text-muted-foreground">
-                    {t('gcRegisteredAt', { time: formatViewerRelativeTime(c.created_at, locale, displayTimezone) })}
-                    {c.status === 'revoked' && c.revoked_at
-                      ? ` · ${t('gcRevokedAt', { time: formatViewerRelativeTime(c.revoked_at, locale, displayTimezone) })}`
-                      : null}
-                  </p>
-                  {/* story #4166 CHANGES-1(페드루 PO 리뷰) — 등록 폼의 gcLocationHint를
-                      재사용(AC3 문구: "gcLocationHint 재사용") — 새 문구 발명 0, select가
-                      뜨는 행에서만(등록 폼과 동일 노출 조건: owner/admin·active). */}
-                  {isOwnerOrAdmin && c.status === 'active' ? (
-                    <p className="mt-0.5 text-[10.5px] text-muted-foreground">{t('gcLocationHint')}</p>
-                  ) : null}
-                </div>
-                {isOwnerOrAdmin && c.status === 'active' ? (
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => setRevokeTarget({ id: c.id, label: c.label })}
-                    data-testid={`gc-revoke-${c.id}`}
-                    // story #4116 CI RED(페드루 PO 지적, verify-repeated-row-action-names.ts
-                    // story #3592) — 행마다 같은 정적 라벨("해지")뿐이면 스크린리더가 항목을
-                    // 못 가른다. channels/page.tsx::channelRowActionAriaLabel과 동형(순번+
-                    // 그 행의 현재 라벨).
-                    aria-label={t('gcRevokeAriaLabel', { n: index + 1, label: c.label })}
-                  >
-                    {t('gcRevokeAction')}
-                  </Button>
-                ) : null}
-              </div>
-            );
-          })}
-        </Card>
-      ) : null}
 
-      {/* story #4116(시안 §4) — 해지는 자격 소실+레시피 영향이라(채널의 인라인 해제와
-          다르게) 확認 다이얼로그를 둔다. */}
-      <ConfirmDialog
-        open={revokeTarget !== null}
-        onOpenChange={(open) => { if (!open) setRevokeTarget(null); }}
-        title={t('gcRevokeConfirmTitle', {
-          name: revokeTarget?.label ?? '',
-          // story #4117 FE 라이더(유나 4491 앵커 비차단, 페드루 PO 확定) — 조사를
-          // 문자열에 고정하지 않고(#4096류 재발) pickEulReulJosa로 값의 받침 유무에
-          // 맞춘다(pickEunNeunJosa 계열과 동형 원칙).
-          josa: pickEulReulJosa(revokeTarget?.label ?? ''),
-        })}
-        description={t('gcRevokeConfirmBody')}
-        cancelLabel={tc('cancel')}
-        confirmLabel={t('gcRevokeAction')}
-        onConfirm={() => void handleRevoke()}
-        confirmDisabled={revoking}
-      />
-    </div>
+        {/* story #4116 — 못 쓰는 컨트롤은 비활성이 아니라 안 그림 + muted 사유(형제 화면 동일 규율). 목록 자체는 사람 org 멤버 전원이 본다(BE _require_human). */}
+        {!isOwnerOrAdmin ? (
+          <div data-testid="gc-owner-only-reason"><Banner tone="info">{t('gcOwnerOnlyReason')}</Banner></div>
+        ) : null}
+
+        {registering && isOwnerOrAdmin && orgId ? (
+          <GenerationConnectorRegisterForm
+            orgId={orgId}
+            onRegistered={() => { setRegistering(false); load(); }}
+            onCancel={() => setRegistering(false)}
+            t={t}
+            tc={tc}
+            tChannel={tChannel}
+          />
+        ) : null}
+
+        {locationPatchError ? <Banner tone="failed">{locationPatchError}</Banner> : null}
+
+        {status === 'failed' ? (
+          <Banner tone="failed" action={<Button variant="secondary" onClick={load}>{t('eventApplyAgentsRetry')}</Button>}>
+            {t('gcListLoadError')}
+          </Banner>
+        ) : status === 'loaded' && connectors.length === 0 ? (
+          <Card>
+            <EmptyState
+              title={t('gcEmptyTitle')}
+              description={t('gcEmptyDesc')}
+              action={isOwnerOrAdmin && !registering ? (
+                <Button variant="primary" onClick={() => setRegistering(true)} data-testid="gc-first-register-action">{t('gcFirstRegisterAction')}</Button>
+              ) : undefined}
+            />
+          </Card>
+        ) : status === 'loaded' ? (
+          <RowList aria-label={t('gcTitle')}>
+            {connectors.map((c, index) => {
+              // story #4116 — model_config_json은 provider마다 자유 형식이라(§3-1 "공급자 편애 없이") 값 있는 키 개수만 센다(어느 모달리티인지는 등록 폼에서 이미 봄, 목록 행은 요약 1줄).
+              const modalityCount = Object.values(c.model_config_json ?? {})
+                .filter((v) => typeof v === 'string' && v.trim().length > 0).length;
+              const canEdit = isOwnerOrAdmin && c.status === 'active';
+              return (
+                <RowListItem
+                  key={c.id}
+                  data-testid="gc-row"
+                  // 이름 + 제공자 + 리전 + 상태가 한 줄에 서되 좁은 화면에서는 줄바꿈(제목 칸의 한 줄 말줄임을 이 글 상자가 되살린다).
+                  title={
+                    <span className="flex flex-wrap items-center gap-2 whitespace-normal">
+                      <span>{c.label}</span>
+                      <Chip>{c.provider_key}</Chip>
+                      {/* story #4140 — 제품 리전 정책값 가시화(crew가 이 값으로만 호출). story #4166 — owner/admin·active 커넥터는 칩 대신 select(값 자체가 즉시-적용 행 액션, 자격 무접촉). 그 외는 읽기전용 칩. */}
+                      {canEdit ? (
+                        <NativeSelect
+                          className="w-40"
+                          aria-label={t('gcLocationChangeAriaLabel', { n: index + 1, label: c.label })}
+                          data-testid={`gc-location-select-${c.id}`}
+                          value={locationDraft[c.id] ?? c.location}
+                          disabled={locationPatchTargetId === c.id}
+                          onChange={(e) => void handleLocationChange(c.id, e.target.value)}
+                        >
+                          {GENERATION_CONNECTOR_LOCATIONS.map((loc) => (
+                            <option key={loc} value={loc}>{loc}</option>
+                          ))}
+                        </NativeSelect>
+                      ) : (
+                        <Chip data-testid="gc-location-chip">{c.location}</Chip>
+                      )}
+                      <Chip tone={c.status === 'active' ? 'done' : 'failed'} dot data-status-chip={c.status}>
+                        {c.status === 'active' ? t('gcStatusActive') : t('gcStatusRevoked')}
+                      </Chip>
+                    </span>
+                  }
+                  subtitle={
+                    <div className="space-y-0.5 whitespace-normal break-keep font-sans [overflow-wrap:anywhere]">
+                      {modalityCount > 0 ? <p className="m-0">{t('gcModelCountSummary', { count: modalityCount })}</p> : null}
+                      {/* story #4117 FE 라이더 — #4112 시안 프레임①의 "등록 시각" 행. 해지된 커넥터는 해지 시각도 같이(자격 소실 시점을 확認할 수 있게). */}
+                      <p className="m-0">
+                        {t('gcRegisteredAt', { time: formatViewerRelativeTime(c.created_at, locale, displayTimezone) })}
+                        {c.status === 'revoked' && c.revoked_at
+                          ? ` · ${t('gcRevokedAt', { time: formatViewerRelativeTime(c.revoked_at, locale, displayTimezone) })}`
+                          : null}
+                      </p>
+                      {/* story #4166 CHANGES-1 — 등록 폼의 gcLocationHint 재사용(새 문구 발명 0), select가 뜨는 행에서만. */}
+                      {canEdit ? <p className="m-0">{t('gcLocationHint')}</p> : null}
+                    </div>
+                  }
+                  trailing={canEdit ? (
+                    <Button
+                      variant="danger"
+                      onClick={() => setRevokeTarget({ id: c.id, label: c.label })}
+                      data-testid={`gc-revoke-${c.id}`}
+                      // story #4116 CI RED — 행마다 같은 정적 라벨("해지")뿐이면 스크린리더가 항목을 못 가른다(순번+그 행의 현재 라벨 · verify-repeated-row-action-names).
+                      aria-label={t('gcRevokeAriaLabel', { n: index + 1, label: c.label })}
+                    >
+                      {t('gcRevokeAction')}
+                    </Button>
+                  ) : undefined}
+                />
+              );
+            })}
+          </RowList>
+        ) : null}
+
+        {/* story #4116(시안 §4) — 해지는 자격 소실+레시피 영향이라(채널의 인라인 해제와 다르게) 확認 다이얼로그를 둔다. */}
+        <ConfirmDialog
+          open={revokeTarget !== null}
+          onOpenChange={(open) => { if (!open) setRevokeTarget(null); }}
+          title={t('gcRevokeConfirmTitle', {
+            name: revokeTarget?.label ?? '',
+            // story #4117 FE 라이더 — 조사를 문자열에 고정하지 않고 pickEulReulJosa로 값의 받침 유무에 맞춘다.
+            josa: pickEulReulJosa(revokeTarget?.label ?? ''),
+          })}
+          description={t('gcRevokeConfirmBody')}
+          cancelLabel={tc('cancel')}
+          confirmLabel={t('gcRevokeAction')}
+          tone="danger"
+          onConfirm={() => void handleRevoke()}
+          loading={revoking}
+        />
+      </PageFrame>
+    </>
   );
 }

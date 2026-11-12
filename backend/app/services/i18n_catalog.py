@@ -809,13 +809,13 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "다음 행동: 할 일 없음 — 서버가 발송하고, 발송에 성공하면 워크플로우가 다음 단계로 넘어가요. 이 단계에서는 publish_event를 부르지 마세요.",
         "en": "Next action: nothing — the server sends it, and the workflow moves to the next stage once the send succeeds. Don't call publish_event at this stage.",
     },
-    # story #4111(#4110 BE 후속, 페드루 PO 지시 2026-09-21) — 연산 단계 자기설명 멘션에
+    # story #4111(#4110 BE 후속, 페드루 PO 지시 2026-09-21) — 생성(옛 «연산») 단계 자기설명 멘션에
     # get_generation_connector(#4110 REST를 부르는 플러그인 도구, sprintable-agent-plugins
     # PR #52) 안내 1줄 추가. 기존 마스터컷 evidence 문장은 무변(별개 사실 — "무엇을 남겨야
     # 하는지"와 "무엇으로 실행하는지"는 다른 축) · 새 문장을 그 뒤에 붙인다.
     "events.capability_hint_master_cut_evidence": {
         "ko": "type=url·ref=live-run:master-cut evidence를 남겨야 계보가 생겨요."
-        " 연산 단계에서는 get_generation_connector로 org 커넥터 config·자격을 받아 자기 실행해요.",
+        " 생성 단계에서는 get_generation_connector로 org 커넥터 config·자격을 받아 자기 실행해요.",
         "en": "Record evidence with type=url and ref=live-run:master-cut so lineage gets created."
         " For the generation stage, call get_generation_connector to get the org connector's"
         " config and credentials, then run it yourself.",
@@ -853,7 +853,7 @@ _CATALOG: dict[str, dict[str, str]] = {
     "events.stage_role.Agent": {"ko": "에이전트", "en": "Agent"},
     "events.stage_role.Any": {"ko": "누구나", "en": "Any"},
     "events.stage_role.Approver": {"ko": "승인자", "en": "Approver"},
-    "events.stage_role.Compute": {"ko": "연산", "en": "Compute"},
+    "events.stage_role.Compute": {"ko": "생성", "en": "Compute"},
     "events.stage_role.Creator": {"ko": "크리에이터", "en": "Creator"},
     "events.stage_role.Dev": {"ko": "개발자", "en": "Dev"},
     "events.stage_role.Director": {"ko": "디렉터", "en": "Director"},
