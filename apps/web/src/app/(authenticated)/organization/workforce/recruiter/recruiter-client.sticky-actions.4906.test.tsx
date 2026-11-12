@@ -92,4 +92,16 @@ describe('[SID:4906 ②] RecruiterClient — the progress row is on the first sc
     expect((src.match(/data-testid="recruiter-step-actions"/g) ?? []).length).toBe(5);
     expect(src).toContain('pe-14 lg:pe-0'); // the phone's round support button stays clear of the right-hand CTA
   });
+
+  it('⭐focus clearance: every control inside the step panel carries a bottom scroll-margin taller than the sticky row (Tab near the bottom stops above the bar, not under it) — scoped to the panel (no shell-wide scroll-padding)', async () => {
+    await mount();
+    const panel = container.querySelector('[data-testid="recruiter-step-panel"]') as HTMLElement;
+    expect(panel).not.toBeNull();
+    expect(panel.className).toContain('scroll-mb-32');
+    expect(panel.className).toContain('input,select,textarea,button,a[href],[tabindex]');
+    // the margin must outweigh the sticky row (py-3 + a 36px button ≈ 64px; the hero rows add a line or two of text): scroll-mb-32 = 128px
+    const sticky = actionRows()[0]!;
+    expect(sticky.className).toContain('py-3');
+  });
 });
+
