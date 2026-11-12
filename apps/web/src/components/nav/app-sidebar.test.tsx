@@ -318,12 +318,11 @@ describe('AppSidebar — story #3824 → #4885 새 구조 렌더 회귀가드(�
 
   // story #3054(2984-S6) — Chat Center CTA가 헤어라인+elev를 쓰고 bg-proof-blue-soft는
   // 안 쓴다.
-  it('Chat Center CTA가 헤어라인+elev를 쓰고 bg-proof-blue-soft는 안 쓴다', async () => {
+  it('Chat Center CTA는 bg-proof-blue-soft를 안 쓰고 글자는 늘 파랑이다(story #4906: 테두리 · 그림자는 «현재 페이지»가 아닐 때 없다 — 아래 «대화 카드는 지금 페이지일 때만» 묶음)', async () => {
     await mount();
     const link = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/chats');
     expect(link).toBeDefined();
-    expect(link!.className).toContain('border-proof-blue');
-    expect(link!.className).toContain('shadow-[var(--elev-card)]');
+    expect(link!.className).toContain('text-proof-blue'); // 2930's meaning stays: always conspicuous
     expect(link!.className).not.toContain('bg-proof-blue-soft');
   });
 
@@ -679,5 +678,45 @@ describe('AppSidebar — 줄 순서가 ⌘K 팔레트 «이동» 순서와 같�
     // 대화 카드는 첫 구역(홈 · 결재) 바로 뒤, 일감보다 앞이다.
     expect(sidebarIds.indexOf('chats')).toBe(sidebarIds.indexOf('inbox') + 1);
     expect(sidebarIds.indexOf('chats')).toBeLessThan(sidebarIds.indexOf('board'));
+  });
+});
+
+// story #4906 (PO 11-12) — the «대화» card is always conspicuous (2930's meaning) but its blue OUTLINE read as «you are here» on every screen, next to the real current-page mark: two places looked current.
+// Now the filled current-page look and `aria-current` are on the card only on /chats; anywhere else it has no outline and no shadow — just the blue icon and word.
+describe('AppSidebar — «대화» 카드는 지금 페이지일 때만 «현재 페이지» 꼴(story #4906)', () => {
+  const chatCard = () => container.querySelector('a[data-nav-id="chats"]') as HTMLAnchorElement;
+
+  it('⭐/chats가 아닐 때(문서): 테두리 · 그림자 없음 · aria-current 없음 · 글자는 파랑 그대로(늘 눈에 띔)', async () => {
+    expandAllGroups();
+    pathnameRef.current = '/docs';
+    await mount();
+    const cls = chatCard().className.split(/\s+/);
+    expect(chatCard().getAttribute('aria-current')).toBeNull();
+    expect(chatCard().getAttribute('data-chat-center-active')).toBe('false');
+    expect(cls).not.toContain('border');
+    expect(cls).not.toContain('border-proof-blue');
+    expect(cls.some((c) => c.startsWith('shadow'))).toBe(false);
+    expect(cls).not.toContain('bg-sidebar-accent');
+    expect(cls).toContain('text-proof-blue');
+  });
+
+  it('⭐/chats 와 /chats/<방>에서: aria-current=page + 다른 항목과 같은 «현재 페이지» 채움(bg-sidebar-accent)', async () => {
+    expandAllGroups();
+    for (const path of ['/chats', '/chats/room-1']) {
+      pathnameRef.current = path;
+      await mount();
+      expect(chatCard().getAttribute('aria-current')).toBe('page');
+      expect(chatCard().getAttribute('data-chat-center-active')).toBe('true');
+      expect(chatCard().className.split(/\s+/)).toContain('bg-sidebar-accent');
+      expect(chatCard().className.split(/\s+/)).not.toContain('border-proof-blue');
+    }
+  });
+
+  it('«현재 페이지» 표시는 한 번에 한 곳: 문서 화면에서 켜진 것은 «문서»이고 «대화»가 아니다', async () => {
+    expandAllGroups();
+    pathnameRef.current = '/docs';
+    await mount();
+    const current = [...container.querySelectorAll('a[aria-current="page"]')].map((a) => a.getAttribute('data-nav-id') ?? a.textContent?.trim());
+    expect(current).not.toContain('chats');
   });
 });
