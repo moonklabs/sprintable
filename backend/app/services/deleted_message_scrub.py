@@ -3,8 +3,8 @@
 The delete (#2319) tombstones the message row (`content = ""`), but a message is copied when it is sent:
 - one `events` row per recipient (`payload` carries `content`, `summary`, `attachments` — a new stream connection backfills the last few events, so
   a reload put the deleted words back into the room list's row);
-- one `notifications` row per person who was mentioned or told about it (`body` is a preview made at send time; the row has no link to the message,
-  only `reference_id = conversation_id`).
+- one `notifications` row per person who was mentioned or told about it (`body` is a preview made at send time; since #4903 its `event` names the
+  message — `event.message_id`; a row made before that has only `reference_id = conversation_id`).
 
 Both are scrubbed here, in the delete's own transaction (the caller commits). The rows stay — the bell and the backfill still know a message
 existed — only the words go. A push or a webhook already delivered is outside the server and cannot be taken back.
@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.event import Event
@@ -40,8 +40,7 @@ async def scrub_stored_copies_of_deleted_message(
 ) -> dict[str, int]:
     """remove the deleted message's words from its event rows and its notification rows; returns how many of each were scrubbed.
 
-    `old_content` is the content as it was BEFORE the tombstone (the notification body is matched against its preview: the row carries no message
-    id). `summary_without_words` is what the event `summary` becomes («sender» alone). Caller: the delete route, inside its transaction."""
+    `old_content` is the content as it was BEFORE the tombstone (an OLD notification row, one without `event.message_id`, is matched against its preview). `summary_without_words` is what the event `summary` becomes («sender» alone). Caller: the delete route, inside its transaction."""
     scrubbed_events = 0
     events = (await db.execute(
         select(Event).where(Event.source_entity_type == "conversation_message", Event.source_entity_id == message_id)
@@ -61,23 +60,34 @@ async def scrub_stored_copies_of_deleted_message(
             scrubbed_events += 1
 
     scrubbed_notifications = 0
+    # (1) a row made since story #4903 names its message: `event.message_id` — found exactly, whatever else the room said in that minute
+    by_id = (await db.execute(
+        select(Notification).where(
+            Notification.reference_type == "conversation",
+            Notification.reference_id == conversation_id,
+            Notification.event["message_id"].as_string() == str(message_id),
+        )
+    )).scalars().all()
+    # (2) a row made BEFORE it has no id: found by the room, the moment and the preview (an older row only — a row that names a message is never matched by words)
     preview = plain_text_preview(old_content, NOTIFICATION_BODY_PREVIEW_MAX)
+    legacy = []
     if preview:  # an empty preview carried no words
-        rows = (await db.execute(
+        legacy = (await db.execute(
             select(Notification).where(
                 Notification.reference_type == "conversation",
                 Notification.reference_id == conversation_id,
                 Notification.body == preview,
+                or_(Notification.event.is_(None), Notification.event["message_id"].as_string().is_(None)),
                 Notification.created_at >= created_at - NOTIFICATION_MATCH_WINDOW,
                 Notification.created_at <= created_at + NOTIFICATION_MATCH_WINDOW,
             )
         )).scalars().all()
-        for row in rows:
-            row.body = None
-            event = row.event if isinstance(row.event, dict) else None
-            if event:
-                # the card of an ordinary message is only `sender_name`; anything else on it was copied from the message
-                row.event = {"sender_name": event["sender_name"]} if "sender_name" in event else None
-            scrubbed_notifications += 1
+    for row in [*by_id, *legacy]:
+        row.body = None
+        event = row.event if isinstance(row.event, dict) else None
+        if event:
+            # the card of an ordinary message is only `sender_name` (+ the message id); anything else on it was copied from the message
+            row.event = {"sender_name": event["sender_name"]} if "sender_name" in event else None
+        scrubbed_notifications += 1
     await db.flush()
     return {"events": scrubbed_events, "notifications": scrubbed_notifications}

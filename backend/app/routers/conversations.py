@@ -808,7 +808,8 @@ def _notification_event(msg: "ConversationMessage", sender_name: str) -> dict:
     out. The name is written LAST: it was written first and the card spread after it, so a sender that put `sender_name` in its `event_context` replaced it (and 4875's withheld copy, which keeps only
     the name, kept the forged one). Every other key is as the sender sent it."""
     card = _event_payload(msg).get("event") or {}
-    return {**card, "sender_name": sender_name}
+    # story #4903 — the message's id rides on the card (an id, never words): a delete finds ITS notification rows by it (the row has no other link to the message). Written last, like the name.
+    return {**card, "sender_name": sender_name, "message_id": str(msg.id)}
 
 
 def _server_command_payload(msg: "ConversationMessage") -> dict:

@@ -82,6 +82,16 @@ async def _send(app, Session, user, org_id, conv_id, text, mention_ids):
     return r.json()["data"]["id"]
 
 
+async def _make_rows_old_form(Session, conv_ids):
+    """make the notification rows of these rooms look like the ones made before #4903: the card without the message id"""
+    from app.models.notification import Notification
+
+    async with Session() as session:
+        for row in (await session.execute(select(Notification).where(Notification.reference_id.in_(conv_ids)))).scalars().all():
+            row.event = {"sender_name": row.event["sender_name"]} if row.event else None
+        await session.commit()
+
+
 async def _event_payloads(Session, message_id):
     from app.models.event import Event
 
@@ -112,6 +122,7 @@ async def test_deleting_a_message_scrubs_its_notification_rows_and_event_rows_fo
         notes = await _notification_rows(Session, conv_id)
         assert [n for n in notes if n[1] and "scrub-me" in n[1]], f"two mention rows carry the words before the delete: {notes}"
         assert len([n for n in notes if n[1] and "scrub-me" in n[1]]) == 2, notes
+        assert all(msg_id in n[2] for n in notes if n[1] and "scrub-me" in n[1]), f"a notification row made now names its message (event.message_id): {notes}"
         events = await _event_payloads(Session, msg_id)
         assert events and all("scrub-me" in e for e in events), "the event rows carry the words before the delete"
 
@@ -176,11 +187,60 @@ async def test_the_same_words_in_another_room_are_not_touched():
 
         gone = await _send(app, Session, a_user, org_id, conv_id, WORDS, [b_id])
         await _send(app, Session, a_user, org_id, other_conv, WORDS, [b_id])  # the same words, another room
+        await _make_rows_old_form(Session, [conv_id, other_conv])  # the old-form rows are matched by room · moment · words: the room condition is what keeps the other room safe
         d = await _as(app, Session, a_user, org_id, lambda c: c.delete(f"/api/v2/conversations/{conv_id}/messages/{gone}"))
         assert d.status_code == 200, d.text
 
         assert not [n for n in await _notification_rows(Session, conv_id) if n[1] and "scrub-me" in n[1]]
         other = [n for n in await _notification_rows(Session, other_conv) if n[1] and "scrub-me" in n[1]]
         assert other, "the other room's message was not deleted: its notification row keeps its words"
+    finally:
+        await engine.dispose()
+
+
+async def test_the_same_short_words_twice_in_a_minute_deleting_one_leaves_the_others_notification():
+    """the room says «ok» twice within a minute (two messages, two notification rows with the same preview): deleting ONE scrubs only ITS row —
+    the other message's notification is somebody else's live notification and stays (PO review: a match by words + time would blank it too)."""
+    engine, Session = await _session_factory()
+    try:
+        org_id, conv_id, (a_id, a_user), (b_id, b_user), (_c_id, _c_user) = await _room(Session)
+        from app.main import app
+
+        first = await _send(app, Session, a_user, org_id, conv_id, "ok", [b_id])
+        second = await _send(app, Session, a_user, org_id, conv_id, "ok", [b_id])
+        before = await _notification_rows(Session, conv_id)
+        n_first = len([n for n in before if first in n[2]])
+        n_second = len([n for n in before if second in n[2]])
+        assert n_first >= 1 and n_second >= 1 and all(n[1] == "ok" for n in before), f"each message has its own rows, all with the same preview: {before}"
+
+        d = await _as(app, Session, a_user, org_id, lambda c: c.delete(f"/api/v2/conversations/{conv_id}/messages/{first}"))
+        assert d.status_code == 200, d.text
+
+        after = await _notification_rows(Session, conv_id)
+        kept = [n for n in after if n[1] == "ok"]
+        assert len(kept) == n_second and all(second in n[2] for n in kept), f"the SECOND message's rows keep their words, every one: {after}"
+        assert len([n for n in after if n[1] is None]) == n_first, f"and the first message's rows lost them: {after}"
+    finally:
+        await engine.dispose()
+
+
+async def test_a_notification_row_made_before_the_id_existed_is_still_scrubbed_by_room_moment_and_words():
+    """a row without `event.message_id` (made before #4903) has only the old link: the room, the moment and the preview — and a live message's
+    old-form rows in the same room and minute (other words) are left alone"""
+    engine, Session = await _session_factory()
+    try:
+        org_id, conv_id, (a_id, a_user), (b_id, b_user), (_c_id, _c_user) = await _room(Session)
+        from app.main import app
+
+        msg_id = await _send(app, Session, a_user, org_id, conv_id, WORDS, [b_id])
+        await _send(app, Session, a_user, org_id, conv_id, KEEP, [b_id])
+        await _make_rows_old_form(Session, [conv_id])
+        assert not [n for n in await _notification_rows(Session, conv_id) if msg_id in n[2]], "no row names its message now"
+
+        d = await _as(app, Session, a_user, org_id, lambda c: c.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}"))
+        assert d.status_code == 200, d.text
+        rows = await _notification_rows(Session, conv_id)
+        assert not [n for n in rows if n[1] and "scrub-me" in n[1]], "the old-form rows of the deleted message are scrubbed too"
+        assert [n for n in rows if n[1] and "keep-me" in n[1]], f"the live message's old-form rows keep their words: {rows}"
     finally:
         await engine.dispose()
