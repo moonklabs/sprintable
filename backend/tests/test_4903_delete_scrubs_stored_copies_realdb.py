@@ -386,3 +386,31 @@ async def test_an_old_form_match_never_blanks_another_kind_of_notification_that_
         assert not [n for n in rows if n[3] != "escalation" and n[1] and "scrub-me" in n[1]], "the message's own old-form rows are scrubbed"
     finally:
         await engine.dispose()
+
+
+async def test_an_old_form_match_never_blanks_another_kind_of_pending_job_with_the_same_words():
+    """an OLD delivery job (no `message_id`) is matched among a chat message's own notification kinds only — an escalation / agent-turn job about the same room can carry the same words"""
+    engine, Session = await _session_factory()
+    try:
+        org_id, conv_id, (a_id, a_user), (b_id, b_user), (_c_id, _c_user) = await _room(Session)
+        from app.main import app
+        from app.models.delivery_job import DeliveryJob
+
+        msg_id = await _send(app, Session, a_user, org_id, conv_id, WORDS, [b_id])
+        async with Session() as session:
+            # make this message's own jobs old-form (no id), and add another kind of job about the room with the same body
+            for job in (await session.execute(select(DeliveryJob))).scalars().all():
+                if (job.payload or {}).get("reference_id") == str(conv_id):
+                    job.payload = {k: v for k, v in job.payload.items() if k != "message_id"}
+            session.add(DeliveryJob(org_id=org_id, kind="personal_webhook", payload={
+                "member_ids": [str(b_id)], "title": "turn ended", "body": WORDS, "event_type": "agent.turn_ended",
+                "reference_type": "conversation", "reference_id": str(conv_id)}))
+            await session.commit()
+        d = await _as(app, Session, a_user, org_id, lambda c: c.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}"))
+        assert d.status_code == 200, d.text
+        jobs = [j for j in await _rows(Session, DeliveryJob) if (j.payload or {}).get("reference_id") == str(conv_id)]
+        other = [j for j in jobs if j.payload.get("event_type") == "agent.turn_ended"]
+        assert other and other[0].payload.get("body") == WORDS, f"the other kind of job keeps its body: {[j.payload for j in jobs]}"
+        assert not [j for j in jobs if j.payload.get("event_type") != "agent.turn_ended" and j.payload.get("body")], "the message's own old-form jobs lost the words"
+    finally:
+        await engine.dispose()

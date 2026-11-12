@@ -152,6 +152,7 @@ async def scrub_stored_copies_of_deleted_message(
                 *job_where,
                 DeliveryJob.payload["reference_id"].as_string() == str(conversation_id),
                 DeliveryJob.payload["message_id"].as_string().is_(None),
+                DeliveryJob.payload["event_type"].as_string().in_(CONVERSATION_NOTIFICATION_TYPES),
                 DeliveryJob.payload["body"].as_string() == preview,
                 DeliveryJob.created_at >= window[0], DeliveryJob.created_at <= window[1],
             )
