@@ -56,25 +56,72 @@ describe('4908 카드 상세 — 본문 / 속성 칸', () => {
     expect(rail!.contains(main!)).toBe(false);
   });
 
-  it('⭐속성 칸: 담당 · 포인트가 들어 있고, 본문 칸에는 없다', async () => {
+  const B = koMessages.board;
+  // 속성 칸의 머리글(바꾸는 값) · 본문 칸의 머리글(읽고 쓰는 글) — 구역 이름을 하나씩 짚는다.
+  const RAIL_HEADS = [B.assignee, B.storyPoints, B.labelsSectionTitle];
+  const MAIN_HEADS = [B.description, B.acceptanceCriteria, B.attachments, B.dependenciesSectionTitle];
+
+  it('⭐속성 칸에는 담당 · 포인트 · 라벨이, 본문 칸에는 없다', async () => {
     const { rail, main } = await mount();
-    expect(rail!.textContent).toContain(koMessages.board.assignee);
-    expect(main!.textContent).not.toContain(koMessages.board.assignee);
+    for (const h of RAIL_HEADS) {
+      expect(rail!.textContent, `속성 칸: ${h}`).toContain(h);
+      expect(main!.textContent, `본문 칸에 새면 안 됨: ${h}`).not.toContain(h);
+    }
   });
 
-  it('⭐본문 칸: 설명 · 완료 조건 · 탭(Tasks / 댓글 / 활동)이 들어 있고, 속성 칸에는 없다', async () => {
+  it('⭐본문 칸에는 설명 · 완료 조건 · 첨부 · 의존성 · 탭이 있고, 속성 칸에는 없다', async () => {
     const { rail, main } = await mount();
+    for (const h of MAIN_HEADS) {
+      expect(main!.textContent, `본문 칸: ${h}`).toContain(h);
+      expect(rail!.textContent, `속성 칸에 새면 안 됨: ${h}`).not.toContain(h);
+    }
     expect(main!.textContent).toContain('설명 본문');
     expect(main!.textContent).toContain('완료 조건 본문');
     expect(main!.querySelector('[role="tablist"]')).not.toBeNull();
-    expect(rail!.textContent).not.toContain('설명 본문');
     expect(rail!.querySelector('[role="tablist"]')).toBeNull();
   });
 
-  it('구역을 없앤 것은 없다 — 두 칸을 합치면 옛 판의 구역이 전부 있다(담당 · 설명 · 완료 조건 · 탭)', async () => {
+  it('구역을 없앤 것은 없다 — 두 칸을 합치면 옛 판의 구역 머리글이 전부 있다', async () => {
     const { rail, main } = await mount();
     const all = `${rail!.textContent}${main!.textContent}`;
-    for (const needle of [koMessages.board.assignee, '설명 본문', '완료 조건 본문']) expect(all, needle).toContain(needle);
+    for (const h of [...RAIL_HEADS, ...MAIN_HEADS]) expect(all, h).toContain(h);
+  });
+
+  it('⭐디스패치(projectId가 있을 때)는 속성 칸에 있다', async () => {
+    const { rail, main } = await mount();
+    expect(rail!.textContent).toContain(B.dispatch);
+    expect(main!.textContent).not.toContain(B.dispatch);
+  });
+
+  async function settle() { await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); }); }
+  const LONG = '아주아주아주아주아주아주아주아주아주아주아주아주긴조직라벨이름';
+  const stubLabels = (attached: boolean) => vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    const u = String(url);
+    if (/\/api\/item-labels/.test(u)) return { ok: true, json: async () => (attached ? [{ id: 'il1', label_id: 'l1' }] : []) };
+    if (/\/api\/labels/.test(u)) return { ok: true, json: async () => [{ id: 'l1', name: LONG, color: '#3E7DC2' }] };
+    return { ok: true, json: async () => (/rejected-relations/.test(u) ? [] : { data: [] }) };
+  }));
+
+  it('⭐긴 조직 라벨 이름이 16rem 속성 칸 밖으로 안 나간다 — 라벨 후보 버튼은 줄바꿈 · 꺾임', async () => {
+    stubLabels(false);
+    const { rail } = await mount();
+    await settle();
+    const add = [...rail!.querySelectorAll('button')].find((b) => b.textContent === B.addGeneric);
+    expect(add, '라벨 추가 버튼').toBeTruthy();
+    await act(async () => { add!.click(); });
+    const pick = [...rail!.querySelectorAll('button')].find((b) => b.textContent?.includes(LONG));
+    expect(pick, '라벨 후보 버튼').toBeTruthy();
+    expect(pick!.className.split(/\s+/)).toEqual(expect.arrayContaining(['max-w-full', 'whitespace-normal', '[overflow-wrap:anywhere]']));
+  });
+
+  it('⭐붙은 긴 라벨 칩은 칸 폭까지(max-w-full)만 — 칩 자체는 이름을 줄임표로 줄인다', async () => {
+    stubLabels(true);
+    const { rail } = await mount();
+    await settle();
+    const chipWrap = [...rail!.querySelectorAll('span.group')].find((n) => n.textContent?.includes(LONG));
+    expect(chipWrap, '붙은 라벨 칩 묶음').toBeTruthy();
+    expect(chipWrap!.className.split(/\s+/)).toContain('max-w-full');
+    expect(chipWrap!.querySelector('.truncate')?.textContent).toBe(LONG);
   });
 });
 

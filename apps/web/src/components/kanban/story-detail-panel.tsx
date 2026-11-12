@@ -1949,8 +1949,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   {storyLabels.length > 0 ? (
                     <div className="mb-2 flex flex-wrap gap-4 pt-3.5">
                       {storyLabels.map((label) => (
-                        <span key={label.itemLabelId} className="group relative inline-flex">
-                          <LabelChip label={label} />
+                        <span key={label.itemLabelId} className="group relative inline-flex max-w-full">
+                          <LabelChip label={label} className="max-w-full" />
                           {/* story #4345 — 누르는 자리 24×24: 투명 버튼 안쪽 모서리에 예전 14px 원을 그대로 둔다(원 자리 · 크기 무변 · 칩 쪽으로 안 넓힘 —
                               모서리 자리 그대로 바깥쪽으로). 칩 줄 간격(gap · 위 여백)이 그 바깥 몫을 받아 옆 칩과 겹침 0. */}
                           <Button
@@ -1986,7 +1986,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                                 type="button"
                                 variant="ghost"
                                 onClick={() => void handleAttachLabel(label.id)}
-                                className="h-auto min-h-0 min-w-0 items-center gap-1.5 rounded-full border border-border bg-background px-2 py-0.5 text-xs font-normal text-foreground hover:bg-muted"
+                                className="h-auto min-h-0 min-w-0 max-w-full items-center gap-1.5 whitespace-normal rounded-full border border-border bg-background px-2 py-0.5 text-left text-xs font-normal text-foreground [overflow-wrap:anywhere] hover:bg-muted"
                               >
                                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: label.color ?? 'var(--muted-foreground)' }} />
                                 {label.name}
