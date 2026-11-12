@@ -18,7 +18,8 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => u
 const T = koMessages.settings;
 let container: HTMLDivElement;
 let root: Root;
-const pushMock = vi.fn();
+const pushMock = vi.fn(); // the router must NOT be used for the return (a client push supersedes router.refresh)
+const assignMock = vi.fn();
 type Call = { url: string; method: string; body: unknown };
 let projectCalls: Call[];
 let orgCalls: Call[];
@@ -31,6 +32,8 @@ beforeEach(() => {
   projectCalls = [];
   orgCalls = [];
   pushMock.mockClear();
+  assignMock.mockClear();
+  Object.defineProperty(window, 'location', { configurable: true, value: { ...window.location, assign: assignMock } });
   impactOk = true;
   useDashboardContextMock.mockReturnValue({
     orgId: 'org-1', orgMemberships: [{ orgId: 'org-1', role: 'owner' }], currentMemberType: 'human', currentTeamMemberId: 'tm-1', projectId: 'p1',
@@ -108,23 +111,25 @@ describe('[SID:4906] settings › 프로젝트: a project made from the chat lis
     await mountPage('tab=projects&return=chats');
     await createProjectNamed('감마');
     expect(projectCalls).toHaveLength(1);
-    expect(pushMock).toHaveBeenCalledTimes(1);
-    expect(pushMock).toHaveBeenCalledWith('/chats?p=p3'); // reverted (no return) → never called
+    expect(assignMock).toHaveBeenCalledTimes(1);
+    expect(assignMock).toHaveBeenCalledWith('/chats?p=p3'); // reverted (no return) → never called
+    expect(pushMock).not.toHaveBeenCalled(); // a WHOLE-PAGE load (fresh memberships · fresh /api/me), not a client push that supersedes router.refresh
   });
 
   it('⭐started in settings itself (no return): the person stays — nothing is pushed', async () => {
     await mountPage('tab=projects');
     await createProjectNamed('감마');
     expect(projectCalls).toHaveLength(1);
+    expect(assignMock).not.toHaveBeenCalled();
     expect(pushMock).not.toHaveBeenCalled();
   });
 
   it('⭐the word is a whitelist of ONE value, not an address: return=//evil.com · return=/organization · return=chats2 send nobody anywhere', async () => {
     for (const q of ['tab=projects&return=//evil.com', 'tab=projects&return=/organization', 'tab=projects&return=chats2']) {
-      pushMock.mockClear();
+      assignMock.mockClear();
       await mountPage(q);
       await createProjectNamed('감마');
-      expect(pushMock).not.toHaveBeenCalled();
+      expect(assignMock).not.toHaveBeenCalled();
       await act(async () => { root.unmount(); });
       container.remove(); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
       projectCalls = [];
@@ -137,6 +142,6 @@ describe('[SID:4906] settings › 프로젝트: a project made from the chat lis
     f.mockImplementationOnce(async () => ({ ok: false, status: 500, json: async () => ({}) }) as Response);
     await createProjectNamed('감마');
     expect(projectCalls).toHaveLength(0); // the intercepted call WAS the POST (the normal mock records it)
-    expect(pushMock).not.toHaveBeenCalled();
+    expect(assignMock).not.toHaveBeenCalled();
   });
 });

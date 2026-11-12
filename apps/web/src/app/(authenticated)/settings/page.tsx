@@ -672,7 +672,9 @@ export default function SettingsPage() {
     await refreshProjects().catch((err) => { console.error('프로젝트 생성 후 목록 갱신 실패', err); });
     router.refresh();
     setCreatingProject(false);
-    if (returnToChats) router.push(withProjectParam(resolveChatsHref(navV3Flags), project.id)); // the new project is the one the list opens on
+    // a WHOLE-PAGE load, not router.push: a client push would supersede the pending router.refresh() above and `/chats?p=<new>` could meet the old (stale) project memberships — and the v3 chat screen reads its
+    // project from /api/me, not from `p`. A fresh load re-reads both; this happens once (the first project of a new organization).
+    if (returnToChats) window.location.assign(withProjectParam(resolveChatsHref(navV3Flags), project.id));
   };
 
   const handleDeleteProject = async (projectId: string) => {
