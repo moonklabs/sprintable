@@ -76,6 +76,16 @@ export interface EventNotification {
   target_doc_slug?: string | null;
   // story 4890 — the room's name for a chat line (the list carries it only for a named room the person can read now; a live (SSE) line has none until the list is read again)
   target_conversation_title?: string | null;
+  // story 4890 — a live (SSE) chat frame has no `source` ids and no nested payload: its room id is a top-level key, carried here so the line can open the room
+  conversation_id?: string | null;
+  // story 4890 — the same for the «cannot read this room now» flag: a live frame carries it at the top level, a listed row inside `payload`
+  content_withheld?: boolean;
+}
+
+/** story 4890 — the room id of a live (SSE) chat frame: the BE pushes the message's keys at the top level (no `source` ids, no nested `payload`). null for any other frame. */
+function liveRoomId(frame: SseEventNotification): string | null {
+  const id = (frame as { conversation_id?: unknown }).conversation_id;
+  return typeof id === 'string' && id ? id : null;
 }
 
 /** story 4890 — who wrote a chat line, when the row carries it (the message_created / mention payload's `sender`): the bell draws that person's Avatar instead of the generic bell, and the room's name under the line */
@@ -94,9 +104,21 @@ export function chatLineSender(n: Pick<EventNotification, 'event_type' | 'payloa
 // export — story #2956 QA changes(카디르+codex, 2026-08-23) 회귀가드(notification-bell.test.tsx)가
 // 전체 컴포넌트 마운트 없이 딥링크 판정만 직접 검증.
 export function getEntityHref(
-  notification: Pick<EventNotification, 'source_entity_type' | 'source_entity_id' | 'payload' | 'target_project_id' | 'target_doc_slug'> & { event_type?: string },
+  notification: Pick<EventNotification, 'source_entity_type' | 'source_entity_id' | 'payload' | 'target_project_id' | 'target_doc_slug'> & { event_type?: string; conversation_id?: string | null; content_withheld?: boolean },
 ): string | null {
   const { source_entity_type, source_entity_id } = notification;
+  // story 4890 (UI-7 AC5 «알림에서 들어가기») — a chat line (a message · a mention) opens its ROOM. Before this it had no link: tapping it only marked it read and closed the panel (dev 11-12 emulator: the
+  // address did not change). It is decided BEFORE the entity check: a live (SSE) frame carries no `source` ids — only the room id (top level). A line for a room the person cannot read now
+  // (`content_withheld`: an outside-room mention, a room they left) opens nothing: the room answers 404. The room page works out its own project (story 4847), so no `?p=` is needed — one on the row is kept.
+  const chatEvent = dispatchedInnerType(notification.event_type ?? '', notification.payload) ?? notification.event_type;
+  if (source_entity_type === 'conversation_message' || source_entity_type === 'conversation' || chatEvent === 'conversation.message_created' || chatEvent === 'conversation:mention') {
+    if (notification.payload?.content_withheld === true || notification.content_withheld === true) return null;
+    const fromPayload = notification.payload?.conversation_id;
+    const roomId = typeof fromPayload === 'string' && fromPayload ? fromPayload
+      : notification.conversation_id ? notification.conversation_id
+      : (source_entity_type === 'conversation' ? source_entity_id : null);
+    return roomId ? withProjectParam(`/chats/${roomId}`, notification.target_project_id ?? null) : null;
+  }
   if (!source_entity_id) return null;
   // story #4244 — 링크는 대상 자기 프로젝트(target_project_id)를 싣는다(모르면 주소 그대로 — 틀린 p를 만들지 않는다).
   const p = notification.target_project_id ?? null;
@@ -454,6 +476,8 @@ export function NotificationBell() {
         source_entity_type: incoming.source_entity_type,
         source_entity_id: incoming.source_entity_id,
         payload: incoming.payload,
+        conversation_id: liveRoomId(incoming),
+        content_withheld: (incoming as { content_withheld?: unknown }).content_withheld === true,
         read_at: null,
         created_at: incoming.created_at,
       };
