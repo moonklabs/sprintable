@@ -241,7 +241,8 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
     setSelectedGroupId(groups[0]?.id ?? null);
   }, [axis, groups.length]); // eslint-disable-line react-hooks/exhaustive-deps -- 축 전환 시에만 초기화
 
-  const selectedGroup = groups.find((g) => g.id === selectedGroupId) ?? null;
+  // 4910(codex 1차) — 고른 그룹이 다시 받은 자료에서 사라지면(만들기 · 가져오기 뒤 새로 받음, 그룹 수는 그대로) 첫 그룹으로 — 빈 화면 + 어느 칸도 안 고른 select로 남지 않게.
+  const selectedGroup = groups.find((g) => g.id === selectedGroupId) ?? groups[0] ?? null;
 
   /**
    * story 3d888ba2(실물 열람) + 39313b40(모달 내 버전 탭) — 콘텐츠와 버전 목록을 함께 lazy
@@ -373,7 +374,7 @@ export function ArtifactGalleryView({ projectId }: { projectId: string }) {
                 <label htmlFor="gallery-group-select" className="sr-only">{t('galleryGroupSelectLabel')}</label>
                 <NativeSelect
                   id="gallery-group-select"
-                  value={selectedGroupId ?? ''}
+                  value={selectedGroup?.id ?? ''}
                   onChange={(e) => setSelectedGroupId(e.target.value)}
                   className="w-auto min-w-44 max-w-full"
                 >

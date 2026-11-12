@@ -61,6 +61,7 @@ function versionDetail(
 interface StubOverrides {
   artifacts?: unknown[];
   stories?: unknown[];
+  goals?: unknown[];
   exportsByArtifact?: Record<string, unknown[]>;
   versionDetailByArtifact?: Record<string, unknown>;
 }
@@ -85,7 +86,7 @@ function stubFetch(overrides: StubOverrides = {}) {
       return jsonRes(overrides.exportsByArtifact?.[exportsMatch[1]!] ?? []);
     }
     if (url.startsWith('/api/visual-artifacts')) return jsonRes(overrides.artifacts ?? ARTIFACTS);
-    if (url.startsWith('/api/goals')) return jsonRes([{ id: 'e1', title: '온보딩 캠페인' }]);
+    if (url.startsWith('/api/goals')) return jsonRes(overrides.goals ?? [{ id: 'e1', title: '온보딩 캠페인' }]);
     if (url.startsWith('/api/stories')) return jsonRes(overrides.stories ?? []);
     if (url.startsWith('/api/sprints')) return jsonRes([]);
     if (url.startsWith('/api/docs')) return jsonRes([]);
@@ -194,6 +195,32 @@ describe('ArtifactGalleryView (story a15cea4f)', () => {
     expect(container.querySelectorAll('[data-testid="artifact-card"]').length).toBe(1);
     expect(container.textContent).toContain('배너 세트 A');
     expect(container.textContent).not.toContain('웰컴 이메일 시안');
+  });
+
+  it('4910 (codex 1차) — when a refetch replaces the selected group (same group count), the first group is shown instead of an empty panel with a blank select', async () => {
+    await mount();
+    expect(container.textContent).toContain('웰컴 이메일 시안');
+    // 같은 수(2)의 그룹이되 고른 그룹(e1)이 사라진 자료: 목표 e2 + 무소속.
+    vi.stubGlobal('fetch', stubFetch({
+      artifacts: [
+        { id: 'b1', title: '새 목표의 시안', story_id: null, epic_id: 'e2', doc_id: null, source: 'created', latest_version_number: 1, anchor_version: null, created_by: 'm1', created_at: '2026-07-01T00:00:00Z' },
+        { id: 'b2', title: '또 다른 배너', story_id: null, epic_id: null, doc_id: null, source: 'created', latest_version_number: 1, anchor_version: null, created_by: 'm1', created_at: '2026-07-01T00:00:00Z' },
+      ],
+      goals: [{ id: 'e2', title: '새 캠페인' }],
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ArtifactGalleryView projectId="proj-2" />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const select = container.querySelector('select') as HTMLSelectElement;
+    expect([...select.options].map((o) => o.textContent)).toEqual(['새 캠페인 · 1개', '무소속 · 1개']);
+    expect(select.selectedOptions[0]?.textContent).toBe('새 캠페인 · 1개');
+    expect(container.textContent).toContain('새 목표의 시안');
+    expect(container.querySelectorAll('[data-testid="artifact-card"]').length).toBe(1);
   });
 
   it('4910 — the title lives only in the top bar slot; the body has no heading of its own', async () => {
