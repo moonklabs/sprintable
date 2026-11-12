@@ -136,14 +136,20 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
   const [highlightedIds, setHighlightedIds] = useState<Set<string>>(new Set());
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 4909 (가) · codex 1라운드 — 읽기가 겹칠 때(처음 읽기 + SSE 재조회) 오래된 응답이 나중에 도착해 새 실패 표시를 지우고
+  // «안전»을 그리면 안 된다. 요청마다 번호를 달고 가장 최근 번호의 응답만 화면에 반영한다.
+  const requestSeqRef = useRef(0);
   const itemsRef = useRef(items);
   useEffect(() => { itemsRef.current = items; }, [items]);
 
   const refetchAndDiff = useCallback(async () => {
+    const seq = ++requestSeqRef.current;
     const { items: result, truncatedKinds: nextTruncatedKinds, failed } = await fetchAttentionQueue(projectId, t);
+    if (seq !== requestSeqRef.current) return;
     // 읽기에 실패하면 지금 보이는 목록을 비우지 않는다(비우면 «안전»으로 보임) — 실패만 표시한다.
-    if (failed) { setLoadFailed(true); return; }
+    if (failed) { setLoadFailed(true); setLoading(false); return; }
     setLoadFailed(false);
+    setLoading(false);
     const changed = diffAttentionQueueItemIds(itemsRef.current, result);
     setItems(result);
     setTruncatedKinds(nextTruncatedKinds);
@@ -158,8 +164,9 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
     let cancelled = false;
     async function load() {
       setLoading(true);
+      const seq = ++requestSeqRef.current;
       const { items: result, truncatedKinds: nextTruncatedKinds, failed } = await fetchAttentionQueue(projectId, t);
-      if (cancelled) return;
+      if (cancelled || seq !== requestSeqRef.current) return;
       setItems(result);
       setTruncatedKinds(nextTruncatedKinds);
       setLoadFailed(failed);

@@ -137,6 +137,51 @@ describe('AttentionQueueView — 4909 (가) 읽기 실패는 «안전»이 아�
     expect(text()).toContain('최신 상태를 불러오지 못했어요');
   });
 
+  it('⭐겹친 읽기: 오래된 처음 읽기(빈 목록)가 더 새로운 실패 뒤에 도착해도 실패 표시를 지우지 않는다(«안전»으로 안 바뀜)', async () => {
+    let call = 0;
+    let releaseFirst: (v: FetchResult) => void = () => {};
+    await mount(() => {
+      call += 1;
+      if (call === 1) return new Promise<FetchResult>((resolve) => { releaseFirst = resolve; }); // 처음 읽기: 늦게 도착
+      return Promise.reject(new Error('refetch failed'));
+    });
+    await act(async () => {
+      sseHandlers.onExtraEvent?.('story.trust_stage_changed', { project_id: 'proj-1' });
+      await new Promise((r) => setTimeout(r, 650));
+    });
+    await flush();
+    expect(container.querySelector('[data-testid="attention-load-failed"]')).toBeTruthy();
+    await act(async () => { releaseFirst({ ok: true, json: async () => emptyBody }); });
+    await flush();
+    expect(container.querySelector('[data-testid="attention-load-failed"]')).toBeTruthy();
+    expect(text()).not.toContain('안전');
+  });
+
+  it('⭐겹친 재조회: 오래된 재조회(빈 목록)가 더 새로운 실패 뒤에 도착해도 «최신 상태를 못 불러왔어요»가 남고 목록도 그대로다', async () => {
+    let call = 0;
+    let releaseSecond: (v: FetchResult) => void = () => {};
+    await mount(() => {
+      call += 1;
+      if (call === 1) return Promise.resolve({ ok: true, json: async () => goodBody });
+      if (call === 2) return new Promise<FetchResult>((resolve) => { releaseSecond = resolve; }); // 첫 재조회: 늦게 도착
+      return Promise.reject(new Error('second refetch failed'));
+    });
+    expect(text()).toContain('가격 콘솔');
+    for (let i = 0; i < 2; i += 1) {
+      await act(async () => {
+        sseHandlers.onExtraEvent?.('story.trust_stage_changed', { project_id: 'proj-1' });
+        await new Promise((r) => setTimeout(r, 650));
+      });
+      await flush();
+    }
+    expect(container.querySelector('[data-testid="attention-load-stale"]')).toBeTruthy();
+    await act(async () => { releaseSecond({ ok: true, json: async () => emptyBody }); });
+    await flush();
+    expect(container.querySelector('[data-testid="attention-load-stale"]')).toBeTruthy();
+    expect(text()).toContain('가격 콘솔');
+    expect(text()).not.toContain('안전');
+  });
+
   it('en에서도 같은 얼굴(문구 키가 둘 다 있다)', async () => {
     await mount(async () => { throw new Error('down'); }, 'en');
     expect(text()).toContain("Couldn't load what needs your call");
