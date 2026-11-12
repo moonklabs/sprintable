@@ -357,6 +357,12 @@ describe('StoryDetailPanel — Workcell pipelineStage = story.trust_stage 직결
     expect(currentStageLabel()).not.toBe(koMessages.workcell.pipelineClaimedDone);
   });
 
+  it('⭐story 4906 ⑩ (codex): status and stage that DISAGREE (the live stage refresh ran ahead of the status) → the stage word, never a stale status word (ready-for-dev + running → «진행 중», not «개발 대기»)', async () => {
+    await mountWithStatusAndStage('ready-for-dev', 'running');
+    expect(currentStageLabel()).toBe(koMessages.workcell.pipelineRunning);
+    expect(currentStageLabel()).not.toBe(koMessages.board.readyForDev);
+  });
+
   it('⭐story 4906 ⑩: a DERIVED stage has no status word and keeps the stage word (in-progress + needs_input → «입력 필요»)', async () => {
     await mountWithStatusAndStage('in-progress', 'needs_input');
     expect(currentStageLabel()).toBe(koMessages.workcell.pipelineNeedsInput);

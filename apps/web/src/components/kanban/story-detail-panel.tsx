@@ -380,6 +380,12 @@ function isOlderStory(incoming: Pick<KanbanStory, 'updated_at'>, current: Pick<K
   return Number.isFinite(a) && Number.isFinite(b) && a < b;
 }
 
+/** story 4906 ⑩ — the trust-pipeline step a status comes straight from (backend trust_pipeline.derive_trust_stage: queued ← backlog / ready-for-dev · running ← in-progress · claimed_done ← in-review).
+ * The Workcell gauge caption uses the story's STATUS word only while the pipeline stage is the one this status maps to. */
+const STATUS_BACKED_STAGE: Record<string, WorkcellPipelineStage | undefined> = {
+  backlog: 'queued', 'ready-for-dev': 'queued', 'in-progress': 'running', 'in-review': 'claimed_done',
+};
+
 export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLoading = false, nextTasksCursor = null, loadingMoreTasks = false, onLoadMoreTasks, onClose, onStoryUpdate, onDeleteSuccess, memberMap: projectMemberMap = {}, memberMapLoaded = true, members = [], storyMap = {}, epicMap = {}, sprintMap = {}, onNavigate, projectId, overlayPosition, getStatusLabel, getEntityTypeLabel }: StoryDetailPanelProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('board');
@@ -1783,7 +1789,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               title={story.title}
               pipelineStage={pipelineStage}
               // story 4906 ⑩ (PO 11-12 [A]): the three steps that come straight from the status say the STATUS word — the same word as the status chip above (not «Queued» beside «Ready for Dev»)
-              currentStageLabel={pipelineStage === 'queued' || pipelineStage === 'running' || pipelineStage === 'claimed_done' ? statusLabel : undefined}
+              // — only while status and stage AGREE (the live stage refresh updates the stage first; a status word for a stage the status does not map to would be stale): then the stage word stays
+              currentStageLabel={STATUS_BACKED_STAGE[localStatus] === pipelineStage ? statusLabel : undefined}
               brief={{
                 goal: story.description?.trim() || story.title,
                 // story #178c7c6d(3015②) — 예전엔 board 네임스페이스의 옛 DoD 미기재 문자열
