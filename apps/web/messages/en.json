@@ -2298,6 +2298,7 @@
     "activeLineNone": "No active published line (default-off).",
     "activeLineNoSteps": "No transition steps defined.",
     "simEntityType": "Entity type",
+    "lineEntityType": "Line entity type",
     "simEntityId": "Entity ID",
     "simFromStatus": "From status",
     "simToStatus": "To status",
