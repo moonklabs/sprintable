@@ -8,8 +8,8 @@ import { AgentApiKeyManager } from './agent-api-key-manager';
 
 // story 4912 D4 — the full key is shown once, in the «key shown» dialog. Closing that dialog by ANY way (the [완료] button, Esc) must drop the plaintext key (and the MCP config) from state:
 // before, only [완료] cleared the key (and never the MCP config) — Esc / a click outside left it, so the header's «온보딩 메시지 복사» kept copying the full key.
-const { copied, addToast } = vi.hoisted(() => ({ copied: [] as string[], addToast: () => {} })); // addToast must keep ONE identity: the load effect depends on it
-vi.mock('@/lib/clipboard', () => ({ copyTextSafely: async (text: string) => { copied.push(text); return { ok: true }; } }));
+const { copied, addToast, copyState } = vi.hoisted(() => ({ copied: [] as string[], addToast: () => {}, copyState: { ok: true } })); // addToast must keep ONE identity: the load effect depends on it
+vi.mock('@/lib/clipboard', () => ({ copyTextSafely: async (text: string) => { copied.push(text); return { ok: copyState.ok }; } }));
 vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast }) }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -48,7 +48,7 @@ async function openKeyShownDialog() {
   expect(document.body.textContent).toContain(NEW_KEY); // the key IS shown while the dialog is open
 }
 
-beforeEach(() => { copied.length = 0; container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
+beforeEach(() => { copied.length = 0; copyState.ok = true; container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('AgentApiKeyManager — 4912 D4: the full key does not stay once the key-shown dialog is closed', () => {
@@ -82,5 +82,62 @@ describe('AgentApiKeyManager — 4912 D4: the full key does not stay once the ke
     await act(async () => { header?.click(); });
     await settle();
     expect(copied.some((c) => c.includes(NEW_KEY))).toBe(true);
+  });
+});
+
+describe('AgentApiKeyManager — 4912 D4: the other things that could hold the key, and a late answer', () => {
+  it('⭐a failed onboarding copy leaves the whole message (with the key) in a textarea — closing the dialog removes it', async () => {
+    await openKeyShownDialog();
+    copyState.ok = false;
+    const header = Array.from(document.querySelectorAll('[data-testid="agent-api-key-manager"] button')).find((b) => b.textContent?.trim() === S.agentApiKeyCopyOnboardingCta) as HTMLButtonElement | undefined;
+    await act(async () => { header?.click(); });
+    await settle();
+    expect(Array.from(document.querySelectorAll('textarea')).some((t) => t.value.includes(NEW_KEY))).toBe(true); // the failed copy shows the message
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    await settle();
+    expect(Array.from(document.querySelectorAll('textarea')).some((t) => t.value.includes(NEW_KEY))).toBe(false);
+  });
+
+  it('⭐the dialog closed while the key request was still out → the late answer is NOT dropped (the old key is already revoked): the dialog opens and shows the key; closing it clears it again', async () => {
+    let answerPost!: (r: Response) => void;
+    const postGate = new Promise<Response>((res) => { answerPost = res; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/api-key') && init?.method === 'POST') return postGate;
+      if (String(url).includes('/api-key') && (!init?.method || init.method === 'GET')) {
+        return new Response(JSON.stringify({ data: [{ id: 'key-1', key_prefix: 'sk_live_abcd', created_at: '2026-08-01T00:00:00Z', last_used_at: null, revoked_at: null, expires_at: null, scope: ['stories'] }] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    }));
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" /></NextIntlClientProvider>); });
+    await settle();
+    await act(async () => { btn(S.agentApiKeyGenerate)?.click(); });
+    await settle();
+    const confirmBtn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('새 키 발급') && b !== btn(S.agentApiKeyGenerate));
+    await act(async () => { confirmBtn?.click(); });
+    await settle(); // the key dialog is open, the POST is still out
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    await settle(); // closed before the answer
+    expect(document.body.textContent).not.toContain(NEW_KEY);
+    await act(async () => { answerPost(new Response(JSON.stringify({ data: { api_key: NEW_KEY, mcp_config: MCP } }), { status: 201 })); });
+    await settle();
+    expect(document.body.textContent).toContain(NEW_KEY); // opened again to show it once
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    await settle();
+    expect(document.body.textContent).not.toContain(NEW_KEY);
+    await act(async () => { btn(S.agentApiKeyCopyOnboardingCta)?.click(); });
+    await settle();
+    expect(copied.length).toBe(1);
+    expect(copied[0]).not.toContain(NEW_KEY); // and nothing of it stays in state with the dialog shut
+  });
+
+  it('the dialog\'s own X (the primitive close button) clears it the same way', async () => {
+    await openKeyShownDialog();
+    const x = document.querySelector('[data-slot="dialog-close"]') as HTMLButtonElement | null;
+    expect(x, 'the dialog has its own close button').toBeTruthy();
+    await act(async () => { x?.click(); });
+    await settle();
+    await act(async () => { btn(S.agentApiKeyCopyOnboardingCta)?.click(); });
+    await settle();
+    expect(copied[0]).not.toContain(NEW_KEY);
   });
 });

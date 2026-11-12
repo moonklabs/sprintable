@@ -160,6 +160,9 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
       const mcpConfigStr = rawMcp == null ? null : typeof rawMcp === 'string' ? rawMcp : JSON.stringify(rawMcp, null, 2);
       setGeneratedKey(rawKey);
       setGeneratedMcpConfig(mcpConfigStr);
+      // story 4912 D4 — the new key lives only inside the «key shown» dialog. If the person closed it while this request was still out, the old key is already revoked, so the answer is not dropped:
+      // the dialog opens again to show it once (closing it clears it through closeNewKeyDialog). What must never happen is the key sitting in state with the dialog shut.
+      setNewKeyDialog(true);
       onNewKey?.(rawKey, mcpConfigStr);
       await loadApiKeys();
     } catch (error) {
@@ -256,6 +259,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
     setNewKeyDialog(false);
     setGeneratedKey(null);
     setGeneratedMcpConfig(null);
+    setCopyFailedOnboardingMessage(null); // a failed copy leaves the whole onboarding message (it carries the key) in a textarea — it goes with the dialog
   };
 
   const activeKeys = apiKeys.filter((k) => !k.revoked_at);
