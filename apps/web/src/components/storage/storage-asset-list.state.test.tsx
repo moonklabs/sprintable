@@ -28,7 +28,7 @@ async function stateFor(opts: { loading?: boolean; error?: boolean; assets?: rea
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
         <StorageAssetList
-          assets={[...(opts.assets ?? [])]} viewMode="list" onViewModeChange={noop} search="" onSearchChange={noop} sort="date" onSortChange={noop}
+          assets={[...(opts.assets ?? [])]} summaryText="0" viewMode="list" onViewModeChange={noop} search="" onSearchChange={noop} sort="date" onSortChange={noop}
           selectedAssetId={null} onSelectAsset={noop} onDeleteAsset={noop} onDownloadAsset={noop} onUploadFile={noop}
           resolveFolderLabel={() => null} loading={opts.loading ?? false} error={opts.error ?? false} onRetry={noop}
           isSearchActive={false} hasMore={false} loadingMore={false} onLoadMore={noop}

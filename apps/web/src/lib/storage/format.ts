@@ -22,6 +22,18 @@ export const FILE_TINT_CLASS: Record<FileTint, string> = {
   code: 'bg-muted text-muted-foreground',
 };
 
+/**
+ * 4910 — 같은 5종을 새 디자인 시스템 뜻 이름으로(스토리지 행 · 격자 · 상세가 쓴다). 칩 색 규칙과 같다: 이미지 = info · PDF = failed · 문서 = done · 그 밖은 중립(색만으로 뜻을 싣지 않는다 — 확장자 글이 같이 간다).
+ * 행 얼굴(`ds-surface-high`) 위에서도 갈리게 «옅은 뜻 색»을 쓰고 중립은 한 단 위 `ds-surface-highest`.
+ */
+export const FILE_TINT_DS_CLASS: Record<FileTint, string> = {
+  img: 'bg-ds-info-soft text-ds-info',
+  pdf: 'bg-ds-failed-soft text-ds-failed',
+  doc: 'bg-ds-done-soft text-ds-done',
+  zip: 'bg-ds-surface-highest text-ds-ink',
+  code: 'bg-ds-surface-highest text-ds-ink-2',
+};
+
 export function fileTypeTint(contentType: string): FileTint {
   const ct = (contentType ?? '').toLowerCase();
   if (ct.startsWith('image/')) return 'img';

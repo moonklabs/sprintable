@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { LAYER, LAYER_MIN_STEP, LAYER_TOKEN } from '../components/ds/layers';
+import { ASSET_ROW_FACE } from '../components/storage/storage-asset-row';
+import { ASSET_CARD_FACE, ASSET_CARD_WELL } from '../components/storage/storage-asset-grid';
 
 const css = readFileSync(join(__dirname, 'design-system.css'), 'utf8');
 
@@ -99,5 +101,17 @@ describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
     expect(src('row-list.tsx')).toContain('LAYER.rowOthers');
     expect(src('row-list.tsx')).toMatch(/<Card\b/);
     expect(src('card.tsx')).toContain(LAYER.panel);
+  });
+
+  // 4910 — 스토리지 화면의 층(행 · 카드 · 썸네일 우물). 화면 코드가 층 표의 이름을 «그대로» 쓰는지(층 표를 두고 따로 색을 고르지 않는지)와 그 층 사이가 눈으로 갈리는지를 함께 지킨다.
+  it('⭐스토리지: 행 얼굴 · 카드 얼굴 = 남의 글 줄과 같은 층(rowOthers), 썸네일 우물 = well — 화면이 층 표 이름을 그대로 쓴다', () => {
+    expect(ASSET_ROW_FACE).toBe(LAYER.rowOthers);
+    expect(ASSET_CARD_FACE).toBe(LAYER.rowOthers);
+    expect(ASSET_CARD_WELL).toBe(LAYER.well);
+  });
+
+  it.each(themes)('⭐%s: 스토리지 — 내용 칸 → 행/카드 면 ≥ 0.05 · 카드 면 → 썸네일 우물 ≥ 0.03 · 호버(내용 칸 색)와 행 면도 같은 0.05로 갈린다', (_name, t) => {
+    expect(step(t, 'panel', 'rowOthers')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPanel); // 행 얼굴 ↔ 내용 칸(= 호버 색)
+    expect(step(t, 'rowOthers', 'well')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.wellOnRow);
   });
 });

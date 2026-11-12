@@ -7,8 +7,8 @@ import { cn } from '@/lib/utils';
 import { getFileIcon } from '@/lib/file-icon';
 import { formatFileSize } from '@/components/docs/extensions/file-node';
 import { fileExtLabel, formatDate, formatViewerRelativeTime } from '@/lib/storage/format';
-import { Button } from '@/components/ui/button';
-import { EmptyState } from '@/components/ui/empty-state';
+import { Button } from '@/components/ds/button';
+import { EmptyState } from '@/components/ds/empty-state';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { StorageUploaderAvatar } from './storage-uploader-avatar';
 import { StorageSourceUsageList } from './storage-source-usage-list';
@@ -28,9 +28,9 @@ interface StorageDetailPanelProps {
 
 function MetaRow({ label, value, last = false }: { label: string; value: ReactNode; last?: boolean }) {
   return (
-    <div className={cn('flex items-center justify-between py-[7px] text-[12.5px]', last ? '' : 'border-b border-dashed border-border')}>
-      <span className="text-muted-foreground">{label}</span>
-      <span className="flex items-center gap-1.5 font-[550] text-foreground">{value}</span>
+    <div className={cn('flex items-center justify-between py-[7px] text-[12.5px]', last ? '' : 'border-b border-dashed border-ds-line')}>
+      <span className="text-ds-ink-3">{label}</span>
+      <span className="flex items-center gap-1.5 font-[550] text-ds-ink">{value}</span>
     </div>
   );
 }
@@ -43,7 +43,7 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
 
   if (!asset) {
     return (
-      <section className="flex h-full min-h-0 flex-col items-center justify-center border-l border-border bg-card p-6">
+      <section className="flex h-full min-h-0 flex-col items-center justify-center bg-ds-surface p-6">
         <EmptyState title={t('selectPrompt')} className="bg-transparent" />
       </section>
     );
@@ -54,17 +54,17 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
   const isImage = asset.content_type.startsWith('image/');
 
   return (
-    <section className="flex h-full min-h-0 flex-col border-l border-border bg-card">
+    <section className="flex h-full min-h-0 flex-col bg-ds-surface">
       {/* preview */}
-      <div className="relative grid h-[168px] shrink-0 place-items-center overflow-hidden border-b border-border bg-gradient-to-br from-info/10 to-brand/[0.06]">
+      <div className="relative grid h-[168px] shrink-0 place-items-center overflow-hidden border-b border-ds-line bg-ds-surface-highest">
         {isImage ? (
           <StorageThumbnail key={asset.id} asset={asset} />
         ) : (
           <div
-            className="grid size-[96px] w-[128px] place-items-center rounded-[0.5rem] text-info shadow-lg"
+            className="grid size-[96px] w-[128px] place-items-center rounded-[0.5rem] text-ds-info shadow-lg"
             style={{
               backgroundImage:
-                'repeating-linear-gradient(45deg, var(--info-tint), var(--info-tint) 9px, transparent 9px, transparent 18px)',
+                'repeating-linear-gradient(45deg, var(--ds-info-soft), var(--ds-info-soft) 9px, transparent 9px, transparent 18px)',
             }}
           >
             <StorageFileGlyph icon={getFileIcon(asset.content_type)} className="size-[30px]" />
@@ -75,7 +75,7 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
             type="button"
             onClick={onClose}
             aria-label={t('cancel')}
-            className="absolute right-2 top-2 z-10 grid size-7 place-items-center rounded-md bg-card/70 text-muted-foreground backdrop-blur-sm hover:bg-muted"
+            className="absolute right-2 top-2 z-10 grid size-7 place-items-center rounded-md bg-ds-surface/70 text-ds-ink-3 backdrop-blur-sm hover:bg-ds-surface-high"
           >
             <X className="size-4" />
           </button>
@@ -84,8 +84,8 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
 
       {/* dhead */}
       <div className="px-4 pb-[6px] pt-[14px]">
-        <div className="truncate text-[14px] font-[650] tracking-[-0.01em] text-foreground">{asset.name}</div>
-        <div className="mt-[3px] text-[11.5px] text-muted-foreground">
+        <div className="truncate text-[14px] font-[650] tracking-[-0.01em] text-ds-ink">{asset.name}</div>
+        <div className="mt-[3px] text-[11.5px] text-ds-ink-3">
           {ext} · {formatFileSize(asset.size_bytes)}
         </div>
       </div>
@@ -95,20 +95,20 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
           The shared TabsContent sets text-sm, whose line-height ratio (1.25/0.875) is below the inherited 1.5: the 12.5px meta rows
           each came out 0.91px shorter (5.44px over six rows, Chromium). The panels inherit font-size and line-height instead. */}
       <Tabs value={tab} onValueChange={(v) => setTab(v as 'detail' | 'usage')} className="contents">
-      <div className="border-b border-border px-[14px] pt-[6px] pb-[5px]">
+      <div className="border-b border-ds-line px-[14px] pt-[6px] pb-[5px]">
         <TabsList variant="line" activateOnFocus>
           <TabsTrigger value="detail">{t('tabDetail')}</TabsTrigger>
           <TabsTrigger value="usage">
             {t('tabUsage')}
-            {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
-            <span className="rounded-full bg-info/10 px-[5px] text-[10px] font-bold text-foreground">{usageCount}</span>
+            {/* story #2590(TIER3) — tint 위 계열색 글자는 text-ds-ink(#2420 규칙). */}
+            <span className="rounded-full bg-ds-action-soft px-[5px] text-[10px] font-bold text-ds-ink">{usageCount}</span>
           </TabsTrigger>
         </TabsList>
       </div>
 
       {/* body */}
       <div className="min-h-0 flex-1 overflow-auto px-4 py-[14px]">
-        <TabsContent value="detail" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ring">
+        <TabsContent value="detail" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ds-action">
             <MetaRow label={t('metaFormat')} value={asset.content_type} />
             <MetaRow label={t('metaSize')} value={formatFileSize(asset.size_bytes)} />
             <MetaRow label={t('metaFolder')} value={folderLabel ?? t('usageNone')} />
@@ -130,31 +130,26 @@ export function StorageDetailPanel({ asset, folderLabel, onDownload, onRequestDe
 
             {usageCount > 0 ? (
               <>
-                <div className="mb-[6px] mt-[14px] text-[11px] font-bold tracking-[0.03em] text-muted-foreground">
+                <div className="mb-[6px] mt-[14px] text-[11px] font-bold tracking-[0.03em] text-ds-ink-3">
                   {t('usageSectionLabel')}
                 </div>
                 <StorageSourceUsageList links={asset.source_links} />
               </>
             ) : null}
         </TabsContent>
-        <TabsContent value="usage" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ring">
+        <TabsContent value="usage" className="rounded-sm text-[length:inherit] leading-[inherit] focus-visible:ring-2 focus-visible:ring-ds-action">
           <StorageSourceUsageList links={asset.source_links} />
         </TabsContent>
       </div>
       </Tabs>
 
       {/* footer */}
-      <div className="flex gap-2 border-t border-border px-4 py-3">
-        <Button variant="ghost" size="sm" className="flex-1 justify-center" onClick={() => onDownload(asset)}>
+      <div className="flex gap-2 border-t border-ds-line px-4 py-3">
+        <Button variant="quiet" className="flex-1 justify-center" onClick={() => onDownload(asset)}>
           <Download className="size-4" />
           {t('download')}
         </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="flex-1 justify-center border-destructive text-destructive hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
-          onClick={() => onRequestDelete(asset)}
-        >
+        <Button variant="danger" className="flex-1 justify-center" onClick={() => onRequestDelete(asset)}>
           <Trash2 className="size-4" />
           {t('delete')}
         </Button>

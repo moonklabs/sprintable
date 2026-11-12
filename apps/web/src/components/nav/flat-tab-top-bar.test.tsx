@@ -126,37 +126,18 @@ describe('«전체» · «결재» · «대화» 로딩 사이 상단바 폴백(
     });
   }
 
-  it('⭐«스토리지» 폴백엔 데이터 알약(N개 자산 · 용량)이 없다 — 화면만 붙인다(PO 규칙: 도착 화면과 글자가 똑같은 부분만)', async () => {
+  it('⭐«스토리지» 위 막대는 제목뿐 — 폴백과 도착 화면이 글자까지 같고, «N개 자산 · 용량»은 막대에 없다(4910 · 4913: 제목은 위 막대 한 곳, 개수는 본문 머리)', async () => {
     const { default: Loading } = await import('@/app/(authenticated)/[ws]/[proj]/storage/loading');
     nav.pathname = '/my-ws/my-proj/storage';
     await render(<Loading />);
-    expect(probe().querySelector('[data-testid="storage-summary-badge"]')).toBeNull();
+    const fallback = probe().textContent;
     const { StorageTopBarTitle } = await import('./flat-tab-top-bar');
-    await render(<TopBarSlot title={<StorageTopBarTitle summaryText="3개 자산 · 1 KB" />} showContextChip />);
-    expect(probe().querySelector('[data-testid="storage-summary-badge"]')?.textContent).toBe('3개 자산 · 1 KB');
-  });
-
-  it('⭐«스토리지» 알약은 제목 묶음의 기준 폭에 안 섞인다 — 칸은 너비 0에서 남는 폭만 · 알약은 글자 폭 그대로(유나 4688 · 390 제목 62px 튐)', async () => {
-    const { StorageTopBarTitle } = await import('./flat-tab-top-bar');
-    await render(<TopBarSlot title={<StorageTopBarTitle summaryText="3개 자산 · 1 KB" />} showContextChip />);
-    const slot = probe().querySelector('[data-testid="storage-summary-slot"]') as HTMLElement;
-    const pill = probe().querySelector('[data-testid="storage-summary-badge"]') as HTMLElement;
-    expect(slot.contains(pill)).toBe(true);
-    const slotClasses = slot.className.split(/\s+/);
-    for (const c of ['w-0', 'min-w-0', 'grow']) expect(slotClasses, `칸 ${c}`).toContain(c);
-    // 유나 판단 (b) — 폰(sm 미만)에선 알약 0(«…»만 남는 거짓 · title은 호버 전용) · sm 이상에서만 보인다.
-    expect(slotClasses, 'sm 미만 숨김').toContain('hidden');
-    expect(slotClasses, 'sm 이상 보임').toContain('sm:flex');
-    expect(slotClasses, 'sm 미만에서 보이게 하는 flex 없음').not.toContain('flex');
-    const pillClasses = pill.className.split(/\s+/);
-    // 알약이 늘면 색 배경이 남는 폭 전부로 번진다 — 알약 자체는 자라지 않고 칸 안에서 말줄임만.
-    for (const c of ['grow', 'basis-0', 'flex-1']) expect(pillClasses, `알약 ${c} 없음`).not.toContain(c);
-    expect(pillClasses, '알약 min-w-0').toContain('min-w-0');
-    // 간격은 칸 안(알약 왼쪽 여백) — 칸 · 묶음 쪽 간격은 너비 0 칸이어도 기준 폭에 더해져 제목을 민다(실측 14px).
-    expect(slotClasses.some((c) => /^(m[lx]?|p[lx]?)-/.test(c)), '칸에 여백 없음').toBe(false);
-    const group = slot.parentElement as HTMLElement;
-    expect(group.className.split(/\s+/).some((c) => /^gap-/.test(c)), '묶음에 gap 없음').toBe(false);
-    expect(group.className.split(/\s+/), '묶음이 남는 폭을 칸까지 내려보낸다(없으면 1440에서도 알약 «…»)').toContain('grow');
+    await render(<TopBarSlot title={<StorageTopBarTitle />} showContextChip />);
+    expect(probe().textContent, '폴백 = 도착 화면(글자까지)').toBe(fallback);
+    expect(probe().querySelector('[data-testid="storage-summary-badge"]'), '막대에 알약 없음').toBeNull();
+    expect(probe().querySelector('[data-testid="storage-summary-slot"]'), '막대에 알약 칸 없음').toBeNull();
+    expect(probe().textContent).not.toMatch(/\d+\+?개 자산/);
+    expect(probe().querySelector('h1')?.textContent).toBe(koMessages.storage.title);
   });
 
   it('⭐동적 layout 자원(실행 · 문서)도 부모 경계가 같은 폴백을 쥔다', async () => {
