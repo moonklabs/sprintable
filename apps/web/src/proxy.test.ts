@@ -1292,6 +1292,82 @@ describe('proxy — a person with no organization yet is sent to the onboarding,
     }
   });
 
+  // story 4890 (item 15) — a deleted account's old phone session: the access token still verifies by its signature, `/api/v2/me` answers 401 (the server does not know the session).
+  // Measured on dev: `/glance` → a Next 404 with no step to take, while `/chats` with the same cookies → 307 → /login?reason=session_expired. «Not known to the server» is an ended session.
+  describe('a session the server does not know (/api/v2/me 401 — e.g. a deleted account) is an ended session: the sign-in, not a Next 404 (story 4890)', () => {
+    const me401 = () => new Response(JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'User not found' } }), { status: 401 });
+
+    it('/glance page load → 307 to the sign-in with the page kept as `next` and the session-expired reason (not the onboarding, not `/`, not a 404)', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1' });
+      withMe(me401);
+      const res = await middleware(page('/glance', token));
+      expect([res.status, res.headers.get('location')]).toEqual([307, 'https://app.example.com/login?next=%2Fglance&reason=session_expired']);
+    });
+
+    it('the query the link carried rides in `next` (the person lands on it after signing in)', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1' });
+      withMe(me401);
+      const res = await middleware(page('/glance?story=abc', token));
+      expect(res.headers.get('location')).toBe('https://app.example.com/login?next=%2Fglance%3Fstory%3Dabc&reason=session_expired');
+    });
+
+    it('every flat address of the table gets the same answer, not only /glance (one place)', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1' });
+      withMe(me401);
+      for (const key of Object.keys(MIGRATED_RESOURCES)) {
+        const res = await middleware(page(`/${key}`, token));
+        expect([key, res.status, res.headers.get('location')]).toEqual([key, 307, `https://app.example.com/login?next=${encodeURIComponent(`/${key}`)}&reason=session_expired`]);
+      }
+    });
+
+    it('only a page load: a POST, a HEAD, a Next RSC fetch, a prefetch, a fetch() and a JSON call pass through untouched (their own 401 handling stays)', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1' });
+      const on = (headers: Record<string, string>, init: { method?: string; body?: string } = {}) => { const r = new NextRequest('https://app.example.com/glance', { headers, ...init }); r.cookies.set('sp_at', token); return r; };
+      const cases: Array<[string, () => NextRequest]> = [
+        ['POST', () => on(HTML, { method: 'POST', body: '{}' })],
+        ['HEAD', () => on(HTML, { method: 'HEAD' })],
+        ['RSC fetch', () => on({ ...HTML, rsc: '1' })],
+        ['prefetch', () => on({ ...HTML, 'next-router-prefetch': '1' })],
+        ['fetch() with */*', () => on({ Accept: '*/*', 'Sec-Fetch-Dest': 'empty' })],
+        ['JSON call', () => on({ Accept: 'application/json' })],
+      ];
+      for (const [label, build] of cases) {
+        mockFetch.mockReset();
+        withMe(me401);
+        const res = await middleware(build());
+        expect([label, res.status, res.headers.get('location')]).toEqual([label, 200, null]);
+      }
+    });
+
+    it('it is not a log-noise or a cookie event: nothing is logged as «unknown», and the session cookies are left as the layout\'s own 401 path leaves them', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1' });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        withMe(me401);
+        const res = await middleware(page('/glance', token));
+        expect(warn).not.toHaveBeenCalled();
+        expect(res.headers.get('set-cookie') ?? '').not.toContain('sp_at=;');
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('other answers keep their reading: a 403, a 500 and a person with an organization are unchanged (the 401 door is only 401)', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1' });
+      withMe(() => new Response('{}', { status: 403 }));
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const forbidden = await middleware(page('/glance', token));
+        expect([forbidden.status, forbidden.headers.get('location')]).toEqual([200, null]);
+        withMe(() => new Response('{}', { status: 503 }));
+        const ill = await middleware(page('/glance', token));
+        expect([ill.status, ill.headers.get('location')]).toEqual([307, 'https://app.example.com/']);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  });
+
   it('where `/` leads is never asked about the organization either: `/`, `/org-briefing`, `/today` are not flat addresses of the table, so the redirect cannot loop back into the lookup', async () => {
     const token = await makeAccessToken({ orgId: 'org-1' });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
