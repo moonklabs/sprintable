@@ -184,3 +184,28 @@ async def test_a_failing_push_never_fails_the_delete(monkeypatch):
         assert msg.status_code == 200 and msg.json().get("deleted_at"), "the tombstone is committed"
     finally:
         await engine.dispose()
+
+
+async def test_a_person_whose_participant_row_belongs_to_another_org_is_not_told(pushes):
+    """the same recipients a NEW message reaches (`conversation_member_ids_in_org`: this org's conversation, this org's members): a participant row planted from another org gets no frame"""
+    engine, Session = await _session_factory()
+    try:
+        org_id, conv_id, w = await _world(Session)
+        from app.main import app
+        from app.models.conversation import ConversationParticipant
+
+        async with Session() as session:
+            other_org = await _make_org(session)
+            other_project = await _make_project(session, other_org.id)
+            stranger_id, _stranger_user = await _make_human_member(session, other_org.id, other_project.id)
+            session.add(ConversationParticipant(conversation_id=conv_id, member_id=stranger_id))  # a row from another org in this room
+            await session.commit()
+
+        msg_id = await _send(app, Session, w["a"][1], org_id, conv_id, WORDS)
+        d = await _as(app, Session, w["a"][1], org_id, lambda c: c.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}"))
+        assert d.status_code == 200, d.text
+        got = {m for m, _ in deleted_frames(pushes)}
+        assert str(stranger_id) not in got, f"a person of another org is not told: {got}"
+        assert got == {str(w["a"][0]), str(w["b"][0]), str(w["c"][0])}, f"this org's people still are: {got}"
+    finally:
+        await engine.dispose()

@@ -2406,21 +2406,22 @@ MESSAGE_DELETED_EVENT = "conversation.message_deleted"
 
 
 async def _announce_message_deleted(
-    db: AsyncSession, *, conversation_id: uuid.UUID, message_id: uuid.UUID, thread_id: uuid.UUID | None, created_at: datetime, deleted_at: datetime | None,
+    db: AsyncSession, *, org_id: uuid.UUID, conversation_id: uuid.UUID, message_id: uuid.UUID, thread_id: uuid.UUID | None, created_at: datetime, deleted_at: datetime | None,
 ) -> None:
     """story #4903 AC2 — tell the room's people that a message was deleted, so a screen that stays open turns it into a tombstone without a reload.
 
-    - **who**: the people (not agents) in the room NOW — the same set a new message reaches — each through their open streams (`_push_to_agent`: every tab and device).
-      An agent reads the tombstone when it reads the room; a person who left the room hears nothing.
+    - **who**: the people (not agents) in the room NOW, by the SAME resolver a new message uses (`conversation_member_ids_in_org(…, humans_only=True)`: only when the
+      conversation is this org's, only this org's members, an old aliased id resolved to the live one — stories #4500 / #4505) — each through their open streams
+      (`_push_to_agent`: every tab and device). An agent reads the tombstone when it reads the room; a person who left the room, or whose participant row belongs to
+      another org, hears nothing.
     - **what**: ids and moments only — `id` · `conversation_id` · `thread_id` · `created_at` (the message's own moment: a list row says which message is its latest by it) ·
       `deleted_at`. Never the words, a summary or an attachment (the frame is also kept in the stream's replay buffer, and a person who reconnects gets it).
     - **when**: after the commit (the message is a tombstone before anyone hears of it), once — the first delete only.
     - a failure here never fails the delete: the tombstone is committed, a reload still shows it."""
     try:
-        participant_ids = set((await db.execute(
-            select(ConversationParticipant.member_id).where(ConversationParticipant.conversation_id == conversation_id)
-        )).scalars().all())
-        people = await filter_human_member_ids(participant_ids, db)
+        from app.services.member_resolver import conversation_member_ids_in_org
+
+        people = await conversation_member_ids_in_org(db, conversation_id, org_id, humans_only=True)
         frame = {
             "event_type": MESSAGE_DELETED_EVENT,
             "conversation_id": str(conversation_id),
@@ -2496,7 +2497,7 @@ async def delete_message(
     )
     await db.commit()
     if first_delete:
-        await _announce_message_deleted(db, conversation_id=conversation_id, message_id=msg.id, thread_id=msg.thread_id, created_at=msg.created_at, deleted_at=msg.deleted_at)
+        await _announce_message_deleted(db, org_id=org_id, conversation_id=conversation_id, message_id=msg.id, thread_id=msg.thread_id, created_at=msg.created_at, deleted_at=msg.deleted_at)
 
     return {"id": str(msg.id), "deleted_at": msg.deleted_at.isoformat() if msg.deleted_at else None}
 
