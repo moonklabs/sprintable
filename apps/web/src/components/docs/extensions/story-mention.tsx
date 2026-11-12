@@ -75,6 +75,9 @@ export const EntityLinkExtension = LinkExtension.extend({
 // sprintable reference_token이 쓰는 백슬래시 이스케이프 형식)를 링크 텍스트로 허용하도록
 // 고쳤다(그 파일 460행 부근). title 변형은 이제 필요 0.
 
+/** story 4906 — the suggestion plugin's key is shared by the extension and the popup renderer: the renderer asks the plugin «is the suggestion still active?» before it draws (see `onStart`). */
+export const STORY_MENTION_PLUGIN_KEY = new PluginKey('storyMentionSuggestion');
+
 export interface StoryResult {
   id: string;
   title: string;
@@ -146,11 +149,23 @@ export function createStoryMentionSuggestion(
 ): Partial<SuggestionOptions> {
   let popup: HTMLElement | null = null;
   let root: Root | null = null;
+  const teardown = () => { popup?.remove(); popup = null; root?.unmount(); root = null; };
 
   return {
     char: '#',
     allowSpaces: false,
     startOfLine: false,
+
+    // story 4906 — «## 제목» (and «# » · «### ») is the HEADING shortcut: a bare `#` at the start of a line must not open the story picker (it opened «일치하는 스토리가 없어요» and the
+    // popup stayed). But a story link at the start of a line is real use («#4906 끝남», a bullet «- #4906 …» — a list item's paragraph also starts at offset 0), so at the start of a line the
+    // picker waits for the first character AFTER the `#`: nothing yet is the heading shortcut («# » · «## » · «### » — a second `#` never matches at all, `#` is not an allowed prefix) and refuses; a digit or a letter opens it. In the middle of a line it opens at once.
+    allow: ({ state, range }) => {
+      const $from = state.doc.resolve(range.from);
+      if ($from.parent.type.spec.code) return false; // a code block is code: a `#` there (a comment, a shell prompt) is not a story link (codex)
+      if ($from.parentOffset > 0) return true;
+      const afterHash = state.doc.textBetween(range.from + 1, range.to, '', '');
+      return afterHash.length > 0;
+    },
 
     items: async ({ query }) => {
       if (!projectId) return [];
@@ -174,6 +189,14 @@ export function createStoryMentionSuggestion(
 
     render: () => ({
       onStart(props) {
+        // story 4906 — tiptap calls onStart / onUpdate only AFTER `await items()` (a network search): if the person typed on meanwhile ("## " → heading) the suggestion has already
+        // exited (onExit ran, nothing to take down), and this late start drew a popup nobody would ever close — it stayed after Enter, after a click elsewhere and after saving.
+        // Ask the plugin whether the suggestion is STILL active; a late call for a finished suggestion draws nothing.
+        // (a destroyed editor keeps its last plugin state — active — so it is checked on its own)
+        // (a destroyed editor keeps its last plugin state — active — so it is checked on its own.) tiptap's plugin hands every late start the CURRENT suggestion's props (one shared object
+        // that each update overwrites), so «still active» is the whole question — there is no «which suggestion» left to ask (codex wanted an identity check; the props are never the old ones).
+        if (props.editor.isDestroyed || !STORY_MENTION_PLUGIN_KEY.getState(props.editor.state)?.active) return;
+        teardown();
         popup = document.createElement('div');
         popup.style.cssText = 'position:fixed;z-index:9999';
         document.body.appendChild(popup);
@@ -211,14 +234,14 @@ export function createStoryMentionSuggestion(
 
       onKeyDown(props) {
         if (props.event.key === 'Escape') {
-          popup?.remove(); popup = null; root?.unmount(); root = null;
+          teardown();
           return true;
         }
         return false;
       },
 
       onExit() {
-        popup?.remove(); popup = null; root?.unmount(); root = null;
+        teardown();
       },
     }),
 
@@ -259,7 +282,7 @@ export const StoryMentionExtension = Extension.create<StoryMentionOptions>({
     return [
       Suggestion({
         editor: this.editor,
-        pluginKey: new PluginKey('storyMentionSuggestion'),
+        pluginKey: STORY_MENTION_PLUGIN_KEY,
         ...createStoryMentionSuggestion(this.options.projectId, this.options.emptyLabel),
       }),
     ];
