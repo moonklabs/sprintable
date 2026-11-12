@@ -6403,6 +6403,7 @@
     "sigConsequenceNote": "Approving records your signature",
     "sigReject": "Reject",
     "sigApproveAndSign": "Approve & sign",
+    "sigChosenOption": "Option to approve: {option}",
     "sigApproveAndSignNewsletterSend": "Approve send & sign",
     "sigApproveAndSignCampaign": "Approve campaign & sign",
     "gateReapprovalResubmitWaiting": "The author is revising the content and needs to resubmit for approval.",

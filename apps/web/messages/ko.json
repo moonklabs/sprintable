@@ -6403,6 +6403,7 @@
     "sigConsequenceNote": "승인은 내 서명으로 기록돼요",
     "sigReject": "반려",
     "sigApproveAndSign": "승인하고 서명",
+    "sigChosenOption": "승인할 안: {option}",
     "sigApproveAndSignNewsletterSend": "발송 승인하고 서명",
     "sigApproveAndSignCampaign": "캠페인 승인하고 서명",
     "gateReapprovalResubmitWaiting": "작성자가 본문을 수정해 재상신을 기다리는 중이에요.",

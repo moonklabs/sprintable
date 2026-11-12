@@ -1675,6 +1675,14 @@ describe('ApprovalsQueue — 4909 (라) the signature dialog approval carries th
     expect(body.note).toBe('선택: B) Individual\n근거 확인 완료');
   });
 
+  it('⭐the signature dialog SAYS which option is being approved (above the evidence), and it is the option chosen on THIS gate', async () => {
+    mockFetches([highRiskDecisionGate()], []);
+    await mount();
+    const dialog = await chooseOptionAndOpenDialog(1);
+    const line = dialog.querySelector('[data-testid="gate-sig-chosen-option"]');
+    expect(line?.textContent).toBe(koMessages.cage.sigChosenOption.replace('{option}', 'B) Individual')); // reverted → no line: the signature does not say what it approves
+  });
+
   it('a different option is the one recorded (not always the first or the last)', async () => {
     const calls = mockFetches([highRiskDecisionGate({ id: 'g-sig-decision-2', work_item_id: 'g-sig-decision-2' })], []);
     await mount();
@@ -1693,6 +1701,7 @@ describe('ApprovalsQueue — 4909 (라) the signature dialog approval carries th
     await act(async () => { sign!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const dialog = document.body.querySelector('[data-slot="dialog-content"]')!;
     await act(async () => { (dialog.querySelector('[role="checkbox"]') as HTMLElement).click(); });
+    expect(dialog.querySelector('[data-testid="gate-sig-chosen-option"]')).toBeNull(); // nothing chosen → no line is invented
     await setText(dialog.querySelector('textarea') as HTMLTextAreaElement, '사유만');
     const signButton = [...dialog.querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.sigApproveAndSign) as HTMLButtonElement;
     await act(async () => { signButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
@@ -1721,6 +1730,7 @@ describe('ApprovalsQueue — 4909 (라) the signature dialog approval carries th
     const signButton2 = [...scope().querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.sigApproveAndSign);
     await act(async () => { signButton2!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const dialog = document.body.querySelector('[data-slot="dialog-content"]')!;
+    expect(dialog.querySelector('[data-testid="gate-sig-chosen-option"]')?.textContent).toBe(koMessages.cage.sigChosenOption.replace('{option}', 'C) 보류')); // the SECOND gate's own choice, not the first one chosen anywhere
     await act(async () => { (dialog.querySelector('[role="checkbox"]') as HTMLElement).click(); });
     await setText(dialog.querySelector('textarea') as HTMLTextAreaElement, '둘째 게이트 사유');
     const signButton = [...dialog.querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.sigApproveAndSign) as HTMLButtonElement;
@@ -1755,7 +1765,8 @@ describe('ApprovalsQueue — 4909 AC3 the list + detail screen', () => {
     neutral_facts: { question, assumption: '가격 문의가 많아요', options: ['가격 먼저', '지금처럼'] },
   });
   const rowsIn = (section?: 'hand' | 'held') => [...container.querySelectorAll(`${section ? `[data-testid="gate-queue-section-${section}"] ` : ''}[data-testid="gate-queue-row"]`)];
-  const detailText = () => (scope() as HTMLElement).textContent ?? '';
+  // the detail column's own text — EMPTY when no request's card is drawn (never the whole screen: an empty detail must not look like a detail that shows a title the list also has)
+  const detailText = () => container.querySelector('[data-testid="gate-queue-detail"]')?.textContent ?? '';
 
   it('⭐wide: the list has a row per request in two sections, the FIRST row is picked and its card is the detail — the others\' cards are not drawn', async () => {
     mockFetches([lowGate('g1', '첫째 결재 항목'), lowGate('g2', '둘째 결재 항목')], [lowGate('g3', '보류된 항목', { status: 'held', held_until: null })]);
@@ -1865,6 +1876,57 @@ describe('ApprovalsQueue — 4909 AC3 the list + detail screen', () => {
     expect(posts.map((c) => c.url)).toEqual(['/api/gates/g2/transition']); // reverted/mixed up → g1
     expect(rowsIn()[1]!.textContent).toContain(koMessages.cage.queueResolvedApproved);
     expect(rowsIn()[0]!.textContent).not.toContain(koMessages.cage.queueResolvedApproved);
+  });
+
+  it('⭐two requests in flight at once: the one that finishes LAST moves the detail to a request that is still undecided — never to the one that finished a moment before', async () => {
+    const releases: Record<string, () => void> = {};
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'POST') { const id = /\/api\/gates\/([^/]+)\/transition/.exec(url)?.[1] ?? ''; return new Promise((resolve) => { releases[id] = () => resolve({ ok: true, json: async () => ({}) }); }); }
+      if (url.includes('status=pending')) return { ok: true, json: async () => [lowGate('g1', '첫째 결재 항목'), lowGate('g2', '둘째 결재 항목'), lowGate('g3', '셋째 결재 항목')] };
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+    const approve = () => [...scope().querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    await act(async () => { approve().dispatchEvent(new MouseEvent('click', { bubbles: true })); }); // g1 in flight
+    await pickRow('g2');
+    await act(async () => { approve().dispatchEvent(new MouseEvent('click', { bubbles: true })); }); // g2 in flight
+    await pickRow('g1'); // the person is looking at g1 again
+    await act(async () => { releases['g2']!(); await Promise.resolve(); await Promise.resolve(); }); // g2 is decided first (not on screen → the detail stays on g1)
+    expect(detailText()).toContain('첫째 결재 항목');
+    await act(async () => { releases['g1']!(); await Promise.resolve(); await Promise.resolve(); }); // g1 is decided last
+    expect(detailText()).toContain('셋째 결재 항목'); // reverted (the render-time closure) → the second, already decided
+    expect(detailText()).not.toContain('둘째 결재 항목');
+  });
+
+  it('⭐a row that left the list (delegated away) WHILE a request was in flight is not the «next» one: the detail moves to a request that is still in the list', async () => {
+    let releaseFirst: (() => void) | null = null;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'POST') return new Promise((resolve) => { releaseFirst = () => resolve({ ok: true, json: async () => ({}) }); });
+      if (url.includes('status=pending')) return { ok: true, json: async () => [lowGate('g1', '첫째 결재 항목'), lowGate('g2', '둘째 결재 항목'), lowGate('g3', '셋째 결재 항목')] };
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+    const approve = [...scope().querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    await act(async () => { approve.dispatchEvent(new MouseEvent('click', { bubbles: true })); }); // g1 in flight
+    const delegated = muxSubscribeMock.mock.calls.find(([eventName]) => eventName === 'conversation.gate_delegated')![1] as (raw: string) => void;
+    await act(async () => { delegated(JSON.stringify({ gate_id: 'g2', new_approver_id: 'member-3' })); }); // g2 leaves the list meanwhile
+    await act(async () => { await Promise.resolve(); });
+    expect(rowsIn()).toHaveLength(2);
+    await act(async () => { releaseFirst?.(); await Promise.resolve(); await Promise.resolve(); });
+    expect(detailText()).toContain('셋째 결재 항목'); // reverted (the sections of the render that SENT the request) → «g2», a request that is gone → an empty detail
+  });
+
+  it('⭐a double-click on a row opens that request\'s own page (/gates/{id}); a single click only picks it; a HITL row has no page', async () => {
+    mockFetches([lowGate('g1', '첫째 결재 항목'), lowGate('g2', '둘째 결재 항목'), hitl({ id: 'h1', title: '승인 요청 하나' })], []);
+    await mount();
+    await pickRow('g2');
+    expect(pushMock).not.toHaveBeenCalled(); // a single click: pick only
+    const row = (key: string) => rowsIn().find((r) => r.getAttribute('data-row-key') === key) as HTMLElement;
+    await act(async () => { row('g2').dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); });
+    expect(pushMock).toHaveBeenCalledWith('/gates/g2');
+    pushMock.mockClear();
+    await act(async () => { row('h1').dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); });
+    expect(pushMock).not.toHaveBeenCalled();
   });
 
   it('a request that leaves the list (decided elsewhere · a HITL card answered) while picked: the detail moves to the next row of its section — never an empty detail while rows remain', async () => {

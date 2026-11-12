@@ -31,7 +31,7 @@ export interface GateQueueSection {
   rows: GateQueueRow[];
 }
 
-function GateQueueRowView({ row, section, selected, onSelect }: { row: GateQueueRow; section: GateQueueSection['id']; selected: boolean; onSelect: (key: string) => void }) {
+function GateQueueRowView({ row, section, selected, onSelect, onOpen }: { row: GateQueueRow; section: GateQueueSection['id']; selected: boolean; onSelect: (key: string) => void; onOpen?: (key: string) => void }) {
   const t = useTranslations('home');
   const needsHand = section === 'hand' && !row.doneLabel;
   const common = {
@@ -46,7 +46,7 @@ function GateQueueRowView({ row, section, selected, onSelect }: { row: GateQueue
     trailing: row.doneLabel ? <Chip tone="done">{row.doneLabel}</Chip> : undefined,
   } as const;
   return (
-    <div data-row-key={row.key} data-testid="gate-queue-row" onClick={() => onSelect(row.key)}>
+    <div data-row-key={row.key} data-testid="gate-queue-row" onClick={() => onSelect(row.key)} onDoubleClick={onOpen ? () => onOpen(row.key) : undefined}>
       {needsHand
         ? <ListRow {...common} selected={selected} needsHand needsHandLabel={t('needsHandLabel')} className="has-[button:focus-visible]:ring-2 has-[button:focus-visible]:ring-inset has-[button:focus-visible]:ring-ds-action" />
         : <ListRow {...common} selected={selected} className="has-[button:focus-visible]:ring-2 has-[button:focus-visible]:ring-inset has-[button:focus-visible]:ring-ds-action" />}
@@ -54,13 +54,13 @@ function GateQueueRowView({ row, section, selected, onSelect }: { row: GateQueue
   );
 }
 
-export function GateQueueList({ sections, selectedKey, onSelect, footer }: { sections: GateQueueSection[]; selectedKey: string | null; onSelect: (key: string) => void; footer?: ReactNode }) {
+export function GateQueueList({ sections, selectedKey, onSelect, onOpen, footer }: { sections: GateQueueSection[]; selectedKey: string | null; onSelect: (key: string) => void; /** a double-click on a row opens the request's own page (the screen decides where) */ onOpen?: (key: string) => void; footer?: ReactNode }) {
   return (
     <div className="overflow-hidden rounded-ds-control border border-ds-line bg-ds-surface" data-testid="gate-queue-list" onKeyDown={(e) => handleListKeys(e, onSelect)}>
       {sections.filter((s) => s.rows.length > 0).map((section) => (
         <section key={section.id} aria-label={section.title} data-testid={`gate-queue-section-${section.id}`}>
           <SectionHeader title={section.title} count={<CountBadge count={section.rows.length} />} tone={section.id === 'hand' ? 'needs-hand' : 'default'} level={2} />
-          <div>{section.rows.map((row) => <GateQueueRowView key={row.key} row={row} section={section.id} selected={row.key === selectedKey} onSelect={onSelect} />)}</div>
+          <div>{section.rows.map((row) => <GateQueueRowView key={row.key} row={row} section={section.id} selected={row.key === selectedKey} onSelect={onSelect} onOpen={onOpen} />)}</div>
         </section>
       ))}
       {footer}

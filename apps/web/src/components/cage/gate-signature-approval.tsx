@@ -30,6 +30,7 @@ export function GateSignatureApproval({
   compact = false,
   onCancel,
   mode = 'decide',
+  chosenOption,
 }: {
   gate: GateItem;
   resolving: boolean;
@@ -58,6 +59,8 @@ export function GateSignatureApproval({
    * [반려](주 · destructive) · [취소]뿐. «승인하고 서명»·«보류»·«승인은 내 서명으로 기록돼요»는 두지 않는다(승인은 원래
    * 화면에 있고, [반려]로 들어온 사람에게 다른 일을 주 단추로 주지 않는다). 근거 확인 체크 · 사유 칸은 두 모드 같다. */
   mode?: 'decide' | 'reject';
+  /** story 4909 (UI-R1 AC3 step 2) — a decision request with options: the option the person chose (it goes into the note with the reason). Shown above the evidence so the signature says WHAT is being approved. Absent → nothing is drawn. */
+  chosenOption?: string | null;
 }) {
   const t = useTranslations('cage');
   const rejectOnly = mode === 'reject';
@@ -101,6 +104,9 @@ export function GateSignatureApproval({
 
   return (
     <div className="space-y-4">
+      {chosenOption && !rejectOnly ? (
+        <p className="rounded-xl border border-border bg-muted/40 px-3 py-2 text-sm font-medium text-foreground" data-testid="gate-sig-chosen-option">{t('sigChosenOption', { option: chosenOption })}</p>
+      ) : null}
       <div>
         <p className="mb-2 text-editorial-meta font-semibold text-muted-foreground">{t('sigEvidenceLabel')}</p>
         <GateEvidence gate={gate} />

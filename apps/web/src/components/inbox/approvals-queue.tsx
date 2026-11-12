@@ -198,7 +198,14 @@ export function ApprovalsQueue() {
   // 완료 상태+서명 기록 링크 즉시"가 재조회나 페이지 전환 없이 서야 하기 때문. resolvingIds에
   // id가 있는 동안 버튼이 비활성화되고, 성공하면 이 맵에 값이 생겨 버튼 자체가 사라지므로(아래
   // 렌더 분기) 중복 탭이 두 번째 요청을 만들 수 없다(요청 자체가 안 나감).
-  const [resolvedGates, setResolvedGates] = useState<Record<string, 'approved' | 'rejected'>>({});
+  const [resolvedGates, setResolvedGatesState] = useState<Record<string, 'approved' | 'rejected'>>({});
+  // the decided requests as of THIS moment: a request that finishes reads who else has been decided meanwhile (two requests can be in flight at once), so the value is kept in a ref that is updated
+  // synchronously with every change — a render's closure would still hold the value from when the request was SENT.
+  const resolvedRef = useRef(resolvedGates);
+  const setResolvedGates = (update: (prev: Record<string, 'approved' | 'rejected'>) => Record<string, 'approved' | 'rejected'>) => {
+    resolvedRef.current = update(resolvedRef.current);
+    setResolvedGatesState(resolvedRef.current);
+  };
   const [gateErrors, setGateErrors] = useState<Record<string, string>>({});
   // story #2631 — 오클릭 정정 5분 창. items[]의 gate 객체는 resolveGate() 성공 후에도
   // 갱신되지 않는 스냅샷(status=pending 그대로) — resolver_id/resolved_at을 못 믿으므로
@@ -246,10 +253,14 @@ export function ApprovalsQueue() {
   useEffect(() => { selectedKeyRef.current = selectedKey; });
   // a request was decided here: if its detail is on screen, the detail moves to the NEXT request of the same section that is still undecided (the decided row stays in the list, marked «승인 완료» / «반려됨»,
   // and can be picked again for the undo line). Nothing to move to → the detail stays.
+  const sectionsRef = useRef({ hand: handItems, held: heldItems });
+  useEffect(() => { sectionsRef.current = { hand: handItems, held: heldItems }; });
   const advanceAfterDecided = (id: string) => {
     if (selectedKeyRef.current !== id) return;
-    const section = handItems.some((it) => it.id === id) ? handItems : heldItems;
-    const next = selectNextAfterLeft(section.filter((it) => it.id === id || !resolvedGates[it.id]).map((it) => ({ key: it.id })), id);
+    // the sections and the decided set as they are NOW (not as they were when the request was sent) — a request that finished a moment ago is not a «next» one
+    const { hand, held } = sectionsRef.current;
+    const section = hand.some((it) => it.id === id) ? hand : held;
+    const next = selectNextAfterLeft(section.filter((it) => it.id === id || !resolvedRef.current[it.id]).map((it) => ({ key: it.id })), id);
     if (next !== null && next !== id) select(next);
   };
   const toggleDecisionExpanded = (id: string) => {
@@ -928,6 +939,11 @@ export function ApprovalsQueue() {
     select(key);
     if (!wide) setSheetOpen(true);
   };
+  // a double-click on a row opens the request's own page (`/gates/{id}`, the project it belongs to) — the same place the card's click-through button goes; a HITL request has no page
+  const openRow = (key: string) => {
+    const target = items.find((it) => it.id === key);
+    if (target && !isHitl(target)) router.push(gateHref(target));
+  };
   const detailTitle = selectedItem ? rowOf(selectedItem).title : '';
   const sheetLabel = t('queueSheetLabel', { title: detailTitle });
 
@@ -936,7 +952,7 @@ export function ApprovalsQueue() {
       <ListDetailShell
         testId="gates-screen"
         wide={wide}
-        list={<GateQueueList sections={sections} selectedKey={selectedKey} onSelect={onSelectRow} />}
+        list={<GateQueueList sections={sections} selectedKey={selectedKey} onSelect={onSelectRow} onOpen={openRow} />}
         detail={selectedItem
           ? <div className="space-y-2" data-testid="gate-queue-detail">{renderItemCard(selectedItem, items.indexOf(selectedItem))}</div>
           : <p className="m-0 rounded-ds-control border border-dashed border-ds-line px-4 py-6 text-center text-ds-small text-ds-ink-3">{t('queueDetailEmpty')}</p>}
@@ -985,6 +1001,7 @@ export function ApprovalsQueue() {
               gate={signatureGate}
               resolving={resolvingIds.has(signatureGate.id)}
               error={gateErrors[signatureGate.id]}
+              chosenOption={signatureSelectedOption ?? null}
               onApprove={(reason) => resolveGate(
                 signatureGate.id, 'approved',
                 signatureSelectedOption ? `${t('decisionSelectedNote', { option: signatureSelectedOption })}${reason ? `\n${reason}` : ''}` : reason,
