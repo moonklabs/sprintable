@@ -248,6 +248,8 @@ describe('[SID:4710] RecruiterClient — hiring starts the agent here', () => {
       expect(row).not.toBeNull();
       expect(row!.className).toContain('sticky');
       expect(row!.className).toContain('bottom-0');
+      // a sticky box cannot leave its parent: the one-screen wrapper starts AFTER the role list, so it must not be a box (display: contents) — the step panel is then the hero's containing block
+      expect(testid(container, 'recruiter-one-screen')!.className).toContain('contents');
     });
   });
 
@@ -267,6 +269,7 @@ describe('[SID:4710] RecruiterClient — hiring starts the agent here', () => {
       const heroRow = testid(container, 'recruiter-start-here-link-button')!.closest('[data-testid="recruiter-step-actions"]') as HTMLElement | null;
       expect(heroRow).not.toBeNull();
       expect(heroRow!.className).toContain('sticky');
+      expect(testid(container, 'recruiter-browser-hero')!.className).toContain('contents'); // same reason as the one-screen wrapper
       const card = testid(container, 'desktop-download-card');
       if (card) expect(heroRow!.contains(card)).toBe(false);
       expect(testid(container, 'recruiter-connect-elsewhere')!.textContent).toBe('recruiter.connectElsewhere');
