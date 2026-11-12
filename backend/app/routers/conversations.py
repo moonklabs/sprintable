@@ -1842,9 +1842,11 @@ async def list_conversations(
 
     result = []
     for conv in convs:
+        # story #4903 — the room's latest message is the newest one that is NOT deleted (a tombstone is not «the latest message»: it used to be chosen, so a room whose last message was deleted
+        # showed «no message» while older messages were still there). All deleted → None («no message», as for an empty room).
         latest_msg = (await db.execute(
             select(ConversationMessage)
-            .where(ConversationMessage.conversation_id == conv.id)
+            .where(ConversationMessage.conversation_id == conv.id, ConversationMessage.deleted_at.is_(None))
             .order_by(ConversationMessage.created_at.desc())
             .limit(1)
         )).scalar_one_or_none()
@@ -1869,6 +1871,7 @@ async def list_conversations(
             # story #2925(2921-S2 선행) — 참조 없으면 null(fail-safe, 거짓 색 금지).
             "linked_proof": linked_proof_map.get(conv.id),
             "latest_message": {
+                "id": str(latest_msg.id),  # story #4903 — which message it is (two messages of one microsecond are told apart; a delete names its message by id)
                 "content": latest_msg.content,
                 "created_at": latest_msg.created_at.isoformat(),
                 # story #3973(E-UX-OVERHAUL·「대화」 3/N) — 목록 행 클립 아이콘용. tombstone
