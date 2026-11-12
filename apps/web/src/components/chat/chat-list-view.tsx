@@ -34,7 +34,7 @@ import { useOrgDomainLabels, type OrgDomainLabels } from '@/hooks/use-org-domain
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { DeviceChip } from '@/components/desktop/device-chip';
-import { blankKnownDeletedPreviews, isoToMicros, onChatMessageDeleted, sameInstant } from '@/lib/chat-message-deleted';
+import { blankKnownDeletedPreviews, isoToMicros, knownDeletedAt, onChatMessageDeleted, sameInstant } from '@/lib/chat-message-deleted';
 
 interface Participant {
   member_id: string;
@@ -382,6 +382,10 @@ export function applyConversationMessageUpdate(
   const { conversation_id, content, created_at } = payload;
   const hasAttachments = Array.isArray(payload.attachments) && payload.attachments.length > 0;
   if (!conversation_id) return prev;
+  // story 4903 AC3 — a (re-delivered) event of a message already known to be deleted changes nothing: no preview, no unread count, no «updated» moment (the ordering guard below accepts an EQUAL moment,
+  // which is what such a replay of the latest message carries)
+  const eventMessageId = typeof payload.id === 'string' ? payload.id : typeof payload.message_id === 'string' ? payload.message_id : null;
+  if (eventMessageId && knownDeletedAt(conversation_id, eventMessageId) !== undefined) return prev;
   const idx = prev.findIndex((c) => c.id === conversation_id);
   if (idx === -1) {
     onRefetch();
