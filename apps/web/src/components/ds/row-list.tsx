@@ -43,7 +43,11 @@ const ROW_MAIN = '[data-row-main]';
 
 export interface RowListProps {
   /** 구획 머리(제목 + 건수 + 오른쪽 보조). 없으면 머리 없이 행만. */
-  header?: Pick<SectionHeaderProps, 'title' | 'count' | 'trailing' | 'level'>;
+  header?: Pick<SectionHeaderProps, 'title' | 'count' | 'trailing' | 'level'> & {
+    /** 구획 머리 바로 아래 한 줄 설명 — 목록(role=list) «밖»의 작은 글(구획이 무엇을 담는지). */
+    description?: ReactNode;
+  };
+  'data-testid'?: string;
   /** 목록의 접근성 이름 — 필수(한 화면에 목록이 여럿이다). */
   'aria-label': string;
   className?: string;
@@ -54,7 +58,7 @@ export interface RowListProps {
  * 4913(UI-R5) RowList — 구획 머리 + 행 목록이 **한 패널(`Card`)** 안에 선다. 행은 `RowListItem`.
  * 키보드: 행에 초점이 있으면 ↑↓ 다음/이전 행 · Home/End 처음/끝 행 · Enter 펼침/접힘 · Esc 닫기. 탭 정지는 행 하나(초점 있던 행)뿐이다 — 행이 백 개여도 Tab 백 번이 아니다.
  */
-export function RowList({ header, 'aria-label': ariaLabel, className, children }: RowListProps) {
+export function RowList({ header, 'aria-label': ariaLabel, className, children, 'data-testid': testId }: RowListProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const rovingRef = useRef<HTMLElement | null>(null);
 
@@ -81,8 +85,9 @@ export function RowList({ header, 'aria-label': ariaLabel, className, children }
   };
 
   return (
-    <Card data-slot="ds-row-list" className={cn('overflow-hidden', className)}>
-      {header ? <SectionHeader {...header} level={header.level ?? 3} /> : null}
+    <Card data-slot="ds-row-list" data-testid={testId} className={cn('overflow-hidden', className)}>
+      {header ? <SectionHeader title={header.title} count={header.count} trailing={header.trailing} level={header.level ?? 3} /> : null}
+      {header?.description ? <p className="m-0 border-b border-ds-line px-4 py-2 text-ds-small text-ds-ink-3">{header.description}</p> : null}
       <div
         ref={listRef}
         role="list"

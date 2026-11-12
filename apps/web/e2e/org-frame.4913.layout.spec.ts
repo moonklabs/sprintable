@@ -1,7 +1,7 @@
 /**
- * story 4913 (UI-R5 · «한 쪽 틀» wave A) — the organization frame, measured in Chromium on the REAL screens (roles · trust center), bundled with esbuild (not copied) and the real Tailwind build.
+ * story 4913 (UI-R5 · «한 쪽 틀» waves A + B) — the organization frame, measured in Chromium on the REAL screens (roles · trust center · generation connectors · content rules · rewards), bundled with esbuild (not copied) and the real Tailwind build.
  * Rules: the title is the ONE heading and lives in the app bar (not in the body) · the body is the `reading` frame (768 px at 1440, never wider than the phone at 390, no sideways scroll) ·
- * the panel is one step brighter than the page (OKLab ΔL ≥ 0.03 light and dark) and an opened row is one step off the panel (≥ 0.05) · rows are ≥ 56 px tall · both screens start their body at the same y.
+ * the panel is one step brighter than the page (OKLab ΔL ≥ 0.03 light and dark) and an opened row is one step off the panel (≥ 0.05) · rows are ≥ 56 px tall · every screen starts its body at the same distance from the frame top.
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -26,11 +26,15 @@ async function build() {
         import { TopBarProvider, useTopBar } from './src/components/nav/top-bar-context';
         import Roles from './src/app/(authenticated)/organization/roles/page';
         import Trust from './src/app/(authenticated)/organization/trust/page';
+        import Gc from './src/app/(authenticated)/organization/generation-connectors/page';
+        import Rules from './src/app/(authenticated)/organization/content-rules/page';
+        import Rewards from './src/app/(authenticated)/rewards/page';
+        import { ToastProvider } from './src/components/ui/toast';
         function Bar() { const { title } = useTopBar(); return React.createElement('header', { 'data-testid': 'app-bar', style: { height: '48px', display: 'flex', alignItems: 'center', padding: '0 16px', borderBottom: '1px solid #8884' } }, title); }
         window.__mount = (which) => {
-          const Screen = which === 'roles' ? Roles : Trust;
+          const Screen = { roles: Roles, trust: Trust, gc: Gc, rules: Rules, rewards: Rewards }[which];
           createRoot(document.getElementById('root')).render(React.createElement(NextIntlClientProvider, { locale: 'ko', messages: ko, timeZone: 'Asia/Seoul' },
-            React.createElement(TopBarProvider, null, React.createElement(Bar), React.createElement('main', { 'data-testid': 'main' }, React.createElement(Screen)))));
+            React.createElement(TopBarProvider, null, React.createElement(ToastProvider, null, React.createElement(Bar), React.createElement('main', { 'data-testid': 'main' }, React.createElement(Screen))))));
         };`,
       resolveDir: WEB, loader: 'tsx',
     },
@@ -58,7 +62,14 @@ const SUMMARY = [
   { member_id: 'm3', role_key: 'dev', role_label: '개발', hit_rate: 0.5, resolved: 4, computed_at: '2026-11-10T00:00:00Z', pending: 1, name: 'A very long member display name that must be cut inside its row', member_type: 'agent', member_deleted: false },
 ];
 
-async function open(page: Page, which: 'roles' | 'trust', scheme: 'light' | 'dark', width: number, height: number) {
+type Which = 'roles' | 'trust' | 'gc' | 'rules' | 'rewards';
+const GC = [
+  { id: 'g1', provider_key: 'vertex_gemini', label: 'A very long connector name that must wrap inside its row and never push the revoke press out', model_config_json: { image: 'imagen-3', video: 'veo-2' }, location: 'global', status: 'active', created_by: 'm1', created_at: '2026-11-01T00:00:00Z', revoked_at: null },
+  { id: 'g2', provider_key: 'vertex_gemini', label: '지난 캠페인', model_config_json: {}, location: 'asia-northeast3', status: 'revoked', created_by: 'm1', created_at: '2026-10-01T00:00:00Z', revoked_at: '2026-10-20T00:00:00Z' },
+];
+const RULES = { banned_terms: ['무료체험', '100% 보장'], require_utm: true, tone: '친근하게', taxonomy: ['공지', '이벤트'], channel_priority: ['threads', 'wordpress'], brand_kit: { logo_url: 'https://x.example/logo.png', colors: ['#111', '#5b4be0'], fonts: ['Pretendard'] }, generation_budget: { limit_minor: 5000000, currency: 'KRW', period: 'month' }, utm_rules: { enabled: true, default_source: 'sprintable', default_medium: 'social', campaign_from: 'campaign_slug', content_from: 'draft_id' } };
+
+async function open(page: Page, which: Which, scheme: 'light' | 'dark', width: number, height: number) {
   const { js, css } = await build();
   await page.emulateMedia({ colorScheme: scheme });
   await page.setViewportSize({ width, height });
@@ -69,6 +80,12 @@ async function open(page: Page, which: 'roles' | 'trust', scheme: 'light' | 'dar
     if (url.pathname === '/') {
       return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="ko" class="${scheme === 'dark' ? 'dark' : ''}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body class="bg-ds-background text-ds-ink" style="margin:0"><div id="root"></div></body></html>` });
     }
+    if (url.pathname === '/api/organizations/org-1/generation-connectors') return json({ data: { connectors: GC } });
+    if (url.pathname === '/api/organizations/org-1/content-rules') return json({ data: { org_id: 'org-1', rules: RULES, version: 3, updated_at: '2026-11-10T00:00:00Z', updated_by: { member_id: 'm1', name: '송윤재' } } });
+    if (url.pathname === '/api/organizations/org-1/generation-budget') return json({ data: { limit_minor: 5000000, spent_minor: 1200000, remaining_minor: 3800000, currency: 'KRW', period: 'month' } });
+    if (url.pathname === '/api/rewards/leaderboard') return json({ data: [{ member_id: 'm1', balance: 120 }, { member_id: 'm2', balance: -30 }] });
+    if (url.pathname === '/api/rewards') return json({ data: [{ id: 'r1', member_id: 'm1', amount: 50, reason: 'A very long reason that has to wrap inside its row and never push the amount out of the panel on a phone', created_at: '2026-11-11T00:00:00Z' }] });
+    if (url.pathname === '/api/team-members') return json({ data: [{ id: 'm1', name: '오너 하나', type: 'human' }, { id: 'm2', name: '관리자 둘', type: 'human' }] });
     if (url.pathname === '/api/org-members') return json({ data: MEMBERS });
     if (url.pathname === '/api/me') return json({ data: { user_id: 'u-me' } });
     if (url.pathname === '/api/trust-scores/org-summary') return json({ members: SUMMARY });
@@ -101,8 +118,7 @@ const lightnessOf = (css: string) => {
 for (const scheme of ['light', 'dark'] as const) {
   for (const [width, height] of [[1440, 900], [390, 844]] as const) {
     test.describe(`${scheme} ${width}`, () => {
-      const bodyTops: Record<string, number> = {};
-      for (const which of ['roles', 'trust'] as const) {
+      for (const which of ['roles', 'trust', 'gc', 'rules', 'rewards'] as const) {
         test(`${which} — one heading in the app bar · reading frame · no sideways scroll · layers`, async ({ page }) => {
           await open(page, which, scheme, width, height);
           // one heading, in the bar, none in the body
@@ -119,10 +135,11 @@ for (const scheme of ['light', 'dark'] as const) {
           }
           expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
           // the body starts at the same y on both screens (frame top + outer padding, then the head)
-          const head = (await page.locator('[data-slot="ds-page-head"]').first().boundingBox())!;
-          bodyTops[which] = Math.round(head.y);
-          expect(Math.round(head.y - frame.y)).toBe(width >= 640 ? 24 : 16);
-          if (bodyTops.roles !== undefined && bodyTops.trust !== undefined) expect(bodyTops.roles).toBe(bodyTops.trust);
+          // every screen's body starts at the frame padding (24 / 16): the page head, or — rewards, no description — the first panel
+          const first = (await page.locator(which === 'rewards' ? '[data-slot="ds-row-list"]' : '[data-slot="ds-page-head"]').first().boundingBox())!;
+          expect(Math.round(first.y - frame.y)).toBe(width >= 640 ? 24 : 16);
+          // the frame paints no background of its own (the shell owns the page layer — a painted frame shows as a block of another colour)
+          expect(await page.locator('[data-slot="ds-page-frame"]').first().evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
           // layers: the panel is one step brighter than the page
           const lPage = lightnessOf(await page.evaluate(() => getComputedStyle(document.body).backgroundColor));
           const lPanel = lightnessOf(await page.locator('[data-slot="ds-row-list"]').first().evaluate((el) => getComputedStyle(el).backgroundColor));

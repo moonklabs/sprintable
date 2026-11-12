@@ -38,7 +38,7 @@ describe('NavV3ItemList — story #4004 AC1(목적지 5항목·라벨)', () => {
   it('플래그 전부 OFF — connectRules 제외 4항목만 렌더, 라벨은 레거시 사이드바와 동일한 낱말', async () => {
     await mount(DEFAULT_NAV_V3_FLAGS, 'today');
     const links = [...container.querySelectorAll('a')];
-    expect(links.map((a) => a.textContent?.replace(/\d+$/, '').trim())).toEqual(['홈', '대화', '일감', '결과']);
+    expect(links.map((a) => a.textContent?.replace(/\d+$/, '').trim())).toEqual(['홈', '대화', '일감', '성과 보드']);
     expect(links.map((a) => a.getAttribute('href'))).toEqual(['/org-briefing', '/chats', '/flow', '/organization/insights-board']);
   });
 

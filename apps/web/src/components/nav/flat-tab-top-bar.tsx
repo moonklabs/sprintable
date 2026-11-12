@@ -105,14 +105,26 @@ export function DocsTopBarTitle() {
 /** «활동 로그»(/activity 첫 탭 = 감사 로그) 상단바 제목. */
 /** «권한»(`organization/roles`) 상단바 제목 — 화면(OrgScreenTitle)과 폴백이 같은 모양(OrgTitle)을 쓴다. */
 export function OrgRolesTopBarTitle() {
-  const t = useTranslations('organization');
-  return <OrgTitle>{t('rolesTitle')}</OrgTitle>;
+  const tOrgRoles = useTranslations('organization');
+  return <OrgTitle>{tOrgRoles('rolesTitle')}</OrgTitle>;
 }
 
 /** «신뢰 센터»(`organization/trust`) 상단바 제목 — 화면(OrgScreenTitle)과 폴백이 같은 모양(OrgTitle)을 쓴다. */
 export function OrgTrustTopBarTitle() {
-  const t = useTranslations('organization');
-  return <OrgTitle>{t('trustSlotTitle')}</OrgTitle>;
+  const tOrgTrust = useTranslations('organization');
+  return <OrgTitle>{tOrgTrust('trustSlotTitle')}</OrgTitle>;
+}
+
+/** «생성 연결»(`organization/generation-connectors`) 상단바 제목 — 화면(OrgScreenTitle)과 폴백이 같은 모양을 쓴다. */
+export function OrgGenerationConnectorsTopBarTitle() {
+  const tOrgGc = useTranslations('organization');
+  return <OrgTitle>{tOrgGc('gcTitle')}</OrgTitle>;
+}
+
+/** «콘텐츠 규칙»(`organization/content-rules`) 상단바 제목 — 화면(OrgScreenTitle)과 폴백이 같은 모양을 쓴다. */
+export function OrgContentRulesTopBarTitle() {
+  const tContentRules = useTranslations('contentRules');
+  return <OrgTitle>{tContentRules('pageTitle')}</OrgTitle>;
 }
 
 export function ActivityTopBarTitle() {
@@ -176,6 +188,8 @@ export const FLAT_ROUTE_TOP_BAR = {
   // 4913 — 조직 구역 «한 쪽 틀» 화면: 제목은 위 막대 · 칩은 조직 화면이라 없음(화면의 OrgScreenTitle과 같다).
   'organization/roles': { Title: OrgRolesTopBarTitle, showContextChip: false },
   'organization/trust': { Title: OrgTrustTopBarTitle, showContextChip: false },
+  'organization/generation-connectors': { Title: OrgGenerationConnectorsTopBarTitle, showContextChip: false },
+  'organization/content-rules': { Title: OrgContentRulesTopBarTitle, showContextChip: false },
   // 까디르 4688 — 부모 workforce/loading이 덮던 하위 목록(마지막 조각 runs ≠ workforce라 «상세»로 봐서 빈 채였다) · 자기 loading.tsx로 쥔다.
   'organization/workforce/runs': { Title: AgentRunsTopBarTitle, showContextChip: true },
 } as const satisfies Record<string, { Title: () => ReactNode; showContextChip: boolean }>;

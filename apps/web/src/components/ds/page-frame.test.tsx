@@ -3,7 +3,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { LAYER } from './layers';
 import { PageFrame } from './page-frame';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -25,10 +24,10 @@ describe('ds PageFrame', () => {
     expect(frame().getAttribute('data-width')).toBe('reading');
   });
 
-  it('⭐바탕 층(LAYER.page) · 가운데 · 칸 간격 24 · 바깥 여백 폰 16 / 데스크톱 24', async () => {
+  it('⭐자기 바탕을 칠하지 않는다(쪽 바탕은 셸 몫 — 틀이 칠하면 셸 색과 어긋난 네모가 뜬다) · 가운데 · 칸 간격 24 · 바깥 여백 폰 16 / 데스크톱 24', async () => {
     await act(async () => { root.render(<PageFrame>x</PageFrame>); });
     const cls = frame().className;
-    expect(cls).toContain(LAYER.page);
+    expect(cls).not.toMatch(/(?:^|\s)bg-/);
     for (const c of ['mx-auto', 'w-full', 'flex-col', 'gap-6', 'p-4', 'sm:p-6']) expect(cls).toContain(c);
   });
 

@@ -762,7 +762,7 @@ describe('AC1 — 영상 레시피(실 seed) 적용 회귀 0(story #4173)', () =
     expect(slots).toEqual([
       { testid: 'slot-director', role: 'Director', header: `디렉터 ${ORG.recipeApplyV2DirectorBadge}` },
       { testid: 'slot-creator', role: 'Creator', header: `크리에이터 ${ORG.recipeApplyV2CreatorBadge}` },
-      { testid: 'slot-compute', role: 'Compute', header: `연산 ${ORG.recipeApplyV2ComputeBadge}` },
+      { testid: 'slot-compute', role: 'Compute', header: `생성 ${ORG.recipeApplyV2ComputeBadge}` },
       { testid: 'slot-publisher', role: 'Publisher', header: `발행자 ${ORG.recipeApplyV2PublisherBadge}` },
     ]);
     expect(document.body.querySelector('[data-testid="director-approver"]')?.textContent).toBe(ORG.recipeGateApproverOrgOwner);

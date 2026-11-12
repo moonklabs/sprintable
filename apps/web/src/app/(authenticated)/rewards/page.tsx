@@ -3,17 +3,23 @@
 import { useState, useEffect } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { memberOptionLabels } from '@/lib/member-display';
-import { EmptyState } from '@/components/ui/empty-state';
-import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
-import { OperatorInput } from '@/components/ui/operator-control';
-import { useDashboardContext } from '../../dashboard/dashboard-shell';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Card } from '@/components/ds/card';
+import { Chip } from '@/components/ds/chip';
+import { EmptyState } from '@/components/ds/empty-state';
+import { Field } from '@/components/ds/field';
+import { Input } from '@/components/ds/input';
+import { PageFrame } from '@/components/ds/page-frame';
+import { RowList, RowListItem } from '@/components/ds/row-list';
+import { NativeSelect } from '@/components/ds/select';
+import { SectionHeader } from '@/components/ds/section-header';
+import { Skeleton } from '@/components/ds/skeleton';
+import { OrgScreenTitle } from '@/components/organization/org-screen-title';
+import { cn } from '@/lib/utils';
+import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
-import { RewardsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface LedgerEntry { id: string; member_id: string; amount: number; reason: string; created_at: string }
@@ -99,156 +105,126 @@ export default function RewardsPage() {
     { value: 'daily', label: t('periodDaily') },
   ];
 
+  // 4913 — 제목은 위 막대(프로젝트 칩 켬 · 폴백 표의 rewards와 같은 모양), 본문은 한 쪽 틀(reading). 모든 분기에서 제목 유지.
   if (!projectId) {
     return (
       <>
-        <TopBarSlot title={<RewardsTopBarTitle />} showContextChip />
-        <div className="flex h-64 items-center justify-center p-6">
-          <EmptyState title={shellT('projectSelectPrompt')} description={shellT('projectSelectDescription')} />
-        </div>
+        <OrgScreenTitle showContextChip>{t('title')}</OrgScreenTitle>
+        <PageFrame width="reading">
+          <Card>
+            <EmptyState title={shellT('projectSelectPrompt')} description={shellT('projectSelectDescription')} />
+          </Card>
+        </PageFrame>
       </>
     );
   }
 
+  const balanceClass = (n: number) => cn('font-mono text-ds-body font-semibold', n >= 0 ? 'text-ds-done' : 'text-ds-failed');
+
   return (
     <>
-      <TopBarSlot title={<RewardsTopBarTitle />} showContextChip />
-
-      {/* story #4130 — 고정 툴바 없음(TopBarSlot은 포털) — 로컬 스크롤 경계를 걷어내고
-          셸의 단일 스크롤러(:199)가 스크롤하게 둔다. */}
-      <div className="focus-inset flex flex-col">
-        <div className="mx-auto w-full max-w-3xl space-y-5 p-6">
-
-          {/* 리더보드 */}
-          {/* story #3785(유나 定, 페드루 재측定 10:47Z) — bg-background는 페이지 배경을
-              그대로 덧칠한 것이라 border-only와 같은 결함(배경과 한 색). 1층 규칙: Card
-              (surface='solid'). 안의 행(rounded-lg border border-border/60)은 손대지
-              않는다 — 이 Card가 표면을 지면 행의 nearest opaque ancestor가 body가 아니게
-              되어 자동으로 2층이 된다(2층 기본값 = 테두리만, 지금 그 모양 그대로). */}
-          <Card>
-            <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
-              <h2 className="text-sm font-semibold text-foreground">🏆 {t('leaderboard')}</h2>
-              <div className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
+      <OrgScreenTitle showContextChip>{t('title')}</OrgScreenTitle>
+      <PageFrame width="reading">
+        {/* 리더보드 — 기간 고르기는 구획 머리 오른쪽(켜진 칸은 aria-pressed + 선택 면 · 색만으로 뜻을 싣지 않는다). */}
+        <RowList
+          aria-label={t('leaderboard')}
+          header={{
+            title: t('leaderboard'),
+            level: 2,
+            trailing: (
+              <span className="flex items-center gap-1">
                 {PERIOD_OPTIONS.map((opt) => (
-                  <button
+                  <Button
                     key={opt.value}
                     type="button"
+                    variant="quiet"
                     aria-pressed={period === opt.value}
                     onClick={() => setPeriod(opt.value)}
-                    className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-                      period === opt.value
-                        ? 'bg-background text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
+                    className={cn(period === opt.value && 'bg-ds-action-soft text-ds-action-text hover:bg-ds-action-soft')}
                   >
                     {opt.label}
-                  </button>
+                  </Button>
                 ))}
-              </div>
+              </span>
+            ),
+          }}
+        >
+          {loading ? (
+            <div role="listitem" className="space-y-2 p-4">
+              {[1, 2, 3].map((i) => <Skeleton key={i} className="h-10 w-full" />)}
             </div>
-            <div className="p-4">
-              {loading ? (
-                <div className="space-y-2">
-                  {[1, 2, 3].map((i) => <div key={i} className="h-10 animate-pulse rounded-lg bg-muted/50" />)}
-                </div>
-              ) : leaderboard.length === 0 ? (
-                <p className="text-sm text-muted-foreground">{t('noData')}</p>
-              ) : (
-                <div className="space-y-2">
-                  {leaderboard.map((e, i) => (
-                    <div key={e.member_id} className="flex items-center justify-between rounded-lg border border-border/60 px-4 py-2">
-                      <div className="flex items-center gap-3">
-                        <Badge variant="outline">#{i + 1}</Badge>
-                        <span className="text-sm font-medium text-foreground">{memberMap[e.member_id] ?? t('unknown')}</span>
-                      </div>
-                      <span className={`text-sm font-bold ${e.balance >= 0 ? 'text-success' : 'text-destructive'}`}>
-                        {e.balance >= 0 ? '+' : ''}{e.balance.toLocaleString()} TJSB
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </Card>
+          ) : leaderboard.length === 0 ? (
+            <div role="listitem"><EmptyState size="inline" title={t('noData')} /></div>
+          ) : (
+            leaderboard.map((e, i) => (
+              <RowListItem
+                key={e.member_id}
+                leading={<Chip>#{i + 1}</Chip>}
+                title={memberMap[e.member_id] ?? t('unknown')}
+                statusMark={(
+                  <span className={balanceClass(e.balance)}>
+                    {e.balance >= 0 ? '+' : ''}{e.balance.toLocaleString()} TJSB
+                  </span>
+                )}
+              />
+            ))
+          )}
+        </RowList>
 
-          {/* 포상/벌금 지급 */}
-          {/* story #3785 — 위와 같은 이유(bg-background=배경 재도색). 이 섹션은 목록이
-              아니라 폼이라 divide-y 대상 행이 없다. */}
-          <Card>
-            <div className="border-b border-border/60 px-4 py-3">
-              <h2 className="text-sm font-semibold text-foreground">💰 {t('grantReward')}</h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">{t('adminOnlyHint')}</p>
+        {/* 포상/벌금 지급 — 목록이 아니라 폼이라 행이 없는 패널 */}
+        <Card>
+          <SectionHeader title={t('grantReward')} level={2} />
+          <div className="flex flex-col gap-3 p-4">
+            <p className="m-0 text-ds-small text-ds-ink-3">{t('adminOnlyHint')}</p>
+            {grantError ? <Banner tone="failed">{grantError}</Banner> : null}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label={t('selectMember')}>
+                {(c) => (
+                  <NativeSelect {...c} value={memberId} onChange={(e) => setMemberId(e.target.value)}>
+                    <option value="" />
+                    {((labels) => members.map((m) => <option key={m.id} value={m.id}>{labels.get(m.id) ?? ''}</option>))(memberOptionLabels(members, tc))}
+                  </NativeSelect>
+                )}
+              </Field>
+              <Field label={t('amountPlaceholder')}>
+                {(c) => <Input {...c} type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />}
+              </Field>
             </div>
-            <div className="p-4">
-              {grantError ? <p className="mb-3 text-xs text-destructive">{grantError}</p> : null}
-              <div className="flex flex-wrap gap-2">
-                <div className="w-40">
-                  <OperatorDropdownSelect
-                    value={memberId}
-                    onValueChange={setMemberId}
-                    options={[
-                      { value: '', label: t('selectMember') },
-                      ...((labels) => members.map((m) => ({ value: m.id, label: labels.get(m.id) ?? '' })))(memberOptionLabels(members, tc)),
-                    ]}
-                  />
-                </div>
-                <OperatorInput
-                  type="number"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  placeholder={t('amountPlaceholder')}
-                  className="w-28"
-                />
-                <OperatorInput
-                  type="text"
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder={t('reasonPlaceholder')}
-                  className="flex-1 min-w-32"
-                />
-                <Button
-                  variant="default"
-                  onClick={handleGrant}
-                  disabled={!memberId || !amount || !reason.trim() || granting}
-                >
-                  {granting ? t('granting') : t('grant')}
-                </Button>
-              </div>
+            {/* 자리표시 글("사유...")의 말줄임만 걷어 보이는 이름으로 쓴다 — 새 낱말 0. */}
+            <Field label={t('reasonPlaceholder').replace(/[.…]+$/, '')}>
+              {(c) => <Input {...c} type="text" value={reason} onChange={(e) => setReason(e.target.value)} />}
+            </Field>
+            <div className="flex justify-end">
+              <Button variant="primary" onClick={handleGrant} disabled={!memberId || !amount || !reason.trim() || granting}>
+                {granting ? t('granting') : t('grant')}
+              </Button>
             </div>
-          </Card>
+          </div>
+        </Card>
 
-          {/* 거래 내역 */}
-          {/* story #3785 — 위 리더보드와 같은 이유·같은 처방(행은 안 건드림). */}
-          <Card>
-            <div className="border-b border-border/60 px-4 py-3">
-              <h2 className="text-sm font-semibold text-foreground">📋 {t('history')}</h2>
-            </div>
-            <div className="p-4">
-              {ledger.length === 0 ? (
-                <p className="text-sm text-muted-foreground">{t('noHistory')}</p>
-              ) : (
-                <div className="space-y-2">
-                  {ledger.slice(0, 20).map((e) => (
-                    <div key={e.id} className="flex items-center justify-between rounded-lg border border-border/60 px-4 py-2">
-                      <div>
-                        <p className="text-sm font-medium text-foreground">{memberMap[e.member_id] ?? t('unknown')}</p>
-                        <p className="text-xs text-muted-foreground">{e.reason}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className={`text-sm font-bold ${e.amount >= 0 ? 'text-success' : 'text-destructive'}`}>
-                          {e.amount >= 0 ? '+' : ''}{e.amount.toLocaleString()} TJSB
-                        </p>
-                        <p className="text-xs text-muted-foreground">{formatViewerRelativeTime(e.created_at, locale, displayTimezone)}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </Card>
-
-        </div>
-      </div>
+        {/* 거래 내역 */}
+        <RowList aria-label={t('history')} header={{ title: t('history'), level: 2 }}>
+          {ledger.length === 0 ? (
+            <div role="listitem"><EmptyState size="inline" title={t('noHistory')} /></div>
+          ) : (
+            ledger.slice(0, 20).map((e) => (
+              <RowListItem
+                key={e.id}
+                title={memberMap[e.member_id] ?? t('unknown')}
+                subtitle={<span className="whitespace-normal break-keep font-sans [overflow-wrap:anywhere]">{e.reason}</span>}
+                statusMark={
+                  <span className="flex flex-col items-end">
+                    <span className={balanceClass(e.amount)}>
+                      {e.amount >= 0 ? '+' : ''}{e.amount.toLocaleString()} TJSB
+                    </span>
+                    <span className="text-ds-small text-ds-ink-3">{formatViewerRelativeTime(e.created_at, locale, displayTimezone)}</span>
+                  </span>
+                }
+              />
+            ))
+          )}
+        </RowList>
+      </PageFrame>
     </>
   );
 }

@@ -2,9 +2,13 @@
 
 import { useState } from 'react';
 import type { useTranslations } from 'next-intl';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Card } from '@/components/ds/card';
+import { Chip } from '@/components/ds/chip';
+import { Field } from '@/components/ds/field';
+import { Input, Textarea } from '@/components/ds/input';
+import { NativeSelect } from '@/components/ds/select';
 import { fetchWithAuth } from '@/lib/db/client';
 
 /**
@@ -110,115 +114,63 @@ export function GenerationConnectorRegisterForm({
   };
 
   return (
-    <Card className="space-y-3 p-4" data-testid="gc-register-form">
-      {error ? (
-        <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      ) : null}
+    <Card className="flex flex-col gap-4 p-4" data-testid="gc-register-form">
+      {error ? <Banner tone="failed">{error}</Banner> : null}
 
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground">{t('gcFieldProvider')}</label>
-        <div className="flex items-center justify-between rounded-md border border-input bg-muted px-3 py-1.5 text-sm text-muted-foreground">
-          <span>{t('gcProviderVertexGeminiLabel')} <span className="ml-1 rounded border border-input bg-background px-1 py-0.5 font-mono text-[10px]">vertex_gemini</span></span>
-          <span className="text-[11px] text-muted-foreground">{t('gcFieldProviderCurrentNote')}</span>
+      {/* provider는 지금 1종 고정 — 고를 수 없는 값은 칸이 아니라 읽기 전용 줄(4913 틀: 칸처럼 보이는 가짜 입력 0). */}
+      <div className="flex flex-col gap-1">
+        <span className="text-ds-small font-semibold text-ds-ink">{t('gcFieldProvider')}</span>
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-ds-control border border-ds-line bg-ds-surface-high px-3 py-2 text-ds-body text-ds-ink-2">
+          <span className="flex items-center gap-2">{t('gcProviderVertexGeminiLabel')} <Chip>vertex_gemini</Chip></span>
+          <span className="text-ds-small text-ds-ink-3">{t('gcFieldProviderCurrentNote')}</span>
         </div>
       </div>
 
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground" htmlFor="gc-field-location">{t('gcFieldLocation')}</label>
-        <select
-          id="gc-field-location"
-          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-base lg:text-sm"
-          value={location}
-          onChange={(e) => setLocation(e.target.value)}
-          data-testid="gc-field-location"
-        >
-          {GENERATION_CONNECTOR_LOCATIONS.map((loc) => (
-            <option key={loc} value={loc}>{loc}</option>
-          ))}
-        </select>
-        <p className="text-[10.5px] text-muted-foreground">{t('gcLocationHint')}</p>
-      </div>
+      <Field label={t('gcFieldLocation')} hint={t('gcLocationHint')}>
+        {(c) => (
+          <NativeSelect {...c} value={location} onChange={(e) => setLocation(e.target.value)} data-testid="gc-field-location">
+            {GENERATION_CONNECTOR_LOCATIONS.map((loc) => (
+              <option key={loc} value={loc}>{loc}</option>
+            ))}
+          </NativeSelect>
+        )}
+      </Field>
 
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground" htmlFor="gc-field-label">{t('gcFieldLabel')}</label>
-        <input
-          id="gc-field-label"
-          type="text"
-          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-base lg:text-sm"
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          placeholder={t('gcFieldLabelPlaceholder')}
-          autoComplete="off"
-        />
-        <p className="text-[10.5px] text-muted-foreground">{t('gcLabelHint')}</p>
-      </div>
+      <Field label={t('gcFieldLabel')} hint={t('gcLabelHint')}>
+        {(c) => (
+          <Input {...c} type="text" value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t('gcFieldLabelPlaceholder')} autoComplete="off" />
+        )}
+      </Field>
 
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground">{t('gcFieldModelIds')}</label>
-        <div className="grid grid-cols-3 gap-2">
-          <div>
-            <p className="mb-1 text-[10px] text-muted-foreground">{t('gcFieldModelImage')}</p>
-            <input
-              id="gc-field-model-image"
-              type="text"
-              className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 font-mono text-base lg:text-xs"
-              value={modelImage}
-              onChange={(e) => setModelImage(e.target.value)}
-              autoComplete="off"
-            />
-          </div>
-          <div>
-            <p className="mb-1 text-[10px] text-muted-foreground">{t('gcFieldModelVideo')}</p>
-            <input
-              id="gc-field-model-video"
-              type="text"
-              className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 font-mono text-base lg:text-xs"
-              value={modelVideo}
-              onChange={(e) => setModelVideo(e.target.value)}
-              autoComplete="off"
-            />
-          </div>
-          <div>
-            <p className="mb-1 text-[10px] text-muted-foreground">{t('gcFieldModelVoice')}</p>
-            <input
-              id="gc-field-model-voice"
-              type="text"
-              className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 font-mono text-base lg:text-xs"
-              value={modelVoice}
-              onChange={(e) => setModelVoice(e.target.value)}
-              autoComplete="off"
-            />
-          </div>
+      <fieldset className="m-0 flex min-w-0 flex-col gap-1 border-0 p-0">
+        <legend className="mb-1 p-0 text-ds-small font-semibold text-ds-ink">{t('gcFieldModelIds')}</legend>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <Field label={t('gcFieldModelImage')}>
+            {(c) => <Input {...c} type="text" className="font-mono" value={modelImage} onChange={(e) => setModelImage(e.target.value)} autoComplete="off" />}
+          </Field>
+          <Field label={t('gcFieldModelVideo')}>
+            {(c) => <Input {...c} type="text" className="font-mono" value={modelVideo} onChange={(e) => setModelVideo(e.target.value)} autoComplete="off" />}
+          </Field>
+          <Field label={t('gcFieldModelVoice')}>
+            {(c) => <Input {...c} type="text" className="font-mono" value={modelVoice} onChange={(e) => setModelVoice(e.target.value)} autoComplete="off" />}
+          </Field>
         </div>
-        <p className="text-[10.5px] text-muted-foreground">{t('gcModelHint')}</p>
-      </div>
+        <p className="m-0 text-ds-small text-ds-ink-3">{t('gcModelHint')}</p>
+      </fieldset>
 
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground" htmlFor="gc-field-credential">{t('gcFieldCredential')}</label>
-        <textarea
-          id="gc-field-credential"
-          className="min-h-20 w-full rounded-md border border-input bg-background px-3 py-1.5 font-mono text-base lg:text-xs"
-          value={credentials}
-          onChange={(e) => setCredentials(e.target.value)}
-          placeholder={t('gcCredentialPlaceholder')}
-          autoComplete="off"
-        />
-        {/* 기존 channelConnect 마스킹 노트 재사용(디자인 지시·신규 발명 0). */}
-        <p className="text-[11px] text-warning-strong" data-testid="gc-credential-mask-note">
-          {tChannel('channelConnectPastedSecretRewriteNote')}
-        </p>
-      </div>
+      <Field label={t('gcFieldCredential')}>
+        {(c) => (
+          <Textarea {...c} className="min-h-20 font-mono" value={credentials} onChange={(e) => setCredentials(e.target.value)} placeholder={t('gcCredentialPlaceholder')} autoComplete="off" />
+        )}
+      </Field>
+      {/* 기존 channelConnect 마스킹 노트 재사용(디자인 지시·신규 발명 0). */}
+      <p className="m-0 text-ds-small text-ds-needs-hand" data-testid="gc-credential-mask-note">
+        {tChannel('channelConnectPastedSecretRewriteNote')}
+      </p>
 
       <div className="flex justify-end gap-2">
-        <Button variant="outline" size="sm" onClick={onCancel} disabled={saving}>{tc('cancel')}</Button>
-        <Button
-          size="sm"
-          onClick={() => void handleSubmit()}
-          disabled={saving || !canSubmit}
-          data-testid="gc-register-submit"
-        >
+        <Button variant="secondary" onClick={onCancel} disabled={saving}>{tc('cancel')}</Button>
+        <Button variant="primary" onClick={() => void handleSubmit()} disabled={saving || !canSubmit} data-testid="gc-register-submit">
           {tc('save')}
         </Button>
       </div>

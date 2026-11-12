@@ -9,6 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../messages/ko.json';
 import { ToastProvider, ToastContainer, useToast } from '@/components/ui/toast';
+import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
 
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
@@ -28,13 +29,22 @@ function TestToastRenderer() {
   return <ToastContainer toasts={toasts} onDismiss={dismissToast} />;
 }
 
+// 4913 — 화면 제목은 앱 틀 위 막대(TopBarSlot)로 간다: 막대 자리를 이 프로브가 그려 본문과 같은 문서에서 h1을 센다.
+function TopBarTitleProbe() {
+  const { title } = useTopBar();
+  return <div data-testid="topbar-probe">{title}</div>;
+}
+
 function wrap(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      <ToastProvider>
-        {node}
-        <TestToastRenderer />
-      </ToastProvider>
+      <TopBarProvider>
+        <TopBarTitleProbe />
+        <ToastProvider>
+          {node}
+          <TestToastRenderer />
+        </ToastProvider>
+      </TopBarProvider>
     </NextIntlClientProvider>
   );
 }
@@ -693,5 +703,80 @@ describe('ContentRulesPage — 하단 문구(story #3747)', () => {
     stubFetch({});
     await mount('owner');
     expect(container.textContent).toContain(koMessages.contentRules.contentRulesFooterNote);
+  });
+});
+
+// 4913(UI-R5 · 한 쪽 틀 B판) — 제목은 위 막대, 본문은 reading 틀, 구획 넷은 RowList(h2 머리 + 설명), 행 우측에 «고치기/정하기», 펼침은 행 아래 칸.
+describe('ContentRulesPage — 한 쪽 틀(4913)', () => {
+  it('⭐h1 하나(위 막대) · reading 틀 · 본문 h1 없음 · 「마지막 변경」은 쪽 머리의 보조 글', async () => {
+    stubFetch({});
+    await mount('owner');
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
+    expect(container.querySelector('[data-testid="topbar-probe"] h1')?.textContent).toBe(koMessages.contentRules.pageTitle);
+    const frame = container.querySelector('[data-slot="ds-page-frame"]');
+    expect(frame?.getAttribute('data-width')).toBe('reading');
+    expect(frame?.querySelector('h1')).toBeNull();
+    expect(frame?.querySelector('[data-slot="ds-page-head"] [data-testid="content-rules-last-changed"]')).not.toBeNull();
+  });
+
+  it('⭐구획 넷 = RowList 넷(h2 머리 + 한 줄 설명) · 행 여덟', async () => {
+    stubFetch({});
+    await mount('owner');
+    const lists = container.querySelectorAll('[data-slot="ds-row-list"]');
+    expect(lists).toHaveLength(4);
+    for (const l of lists) expect(l.querySelector('[data-slot="ds-section-header"] h2')).not.toBeNull();
+    expect(lists[0]!.textContent).toContain(koMessages.contentRules.contentRulesInspectionSectionDescription);
+    expect(container.querySelectorAll('[data-slot="ds-row-list-item"]')).toHaveLength(8);
+  });
+
+  it('⭐펼친 폼은 그 행 래퍼의 펼침 칸(ds-row-detail) 안에 있다(행 줄 밖 · 한 단 올린 면)', async () => {
+    stubFetch({});
+    await mount('owner');
+    await expandRow('tone');
+    const detail = row('tone').querySelector('[data-slot="ds-row-detail"]');
+    expect(detail?.querySelector('#content-rules-tone')).not.toBeNull();
+    expect(row('tone').querySelector('[data-slot="ds-list-row"]')?.contains(container.querySelector('#content-rules-tone'))).toBe(false);
+  });
+
+  it('⭐키보드: 행에서 Enter = 펼침 · Esc = 닫기 (고칠 수 없는 member는 안 열린다)', async () => {
+    stubFetch({});
+    await mount('owner');
+    const main = row('tone').querySelector('[data-row-main]') as HTMLElement;
+    main.focus();
+    await act(async () => { main.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+    expect(container.querySelector('#content-rules-tone')).not.toBeNull();
+    await act(async () => { main.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
+    expect(container.querySelector('#content-rules-tone')).toBeNull();
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    stubFetch({});
+    await mount('member');
+    const mainM = row('tone').querySelector('[data-row-main]') as HTMLElement;
+    await act(async () => { mainM.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+    expect(container.querySelector('#content-rules-tone')).toBeNull();
+  });
+
+  it('⭐불러오는 중 · 오류 분기에도 위 막대 제목이 남는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    await mount('owner');
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
+  });
+
+  it('⭐«고치기/정하기» 단추는 펼침 상태를 aria-expanded로 말한다(codex 검수 4913B — 키보드 · 스크린리더가 열린 줄을 안다)', async () => {
+    stubFetch({});
+    await mount('owner');
+    const btn = () => container.querySelector('[data-testid="content-rules-row-action-tone"]') as HTMLElement;
+    expect(btn().getAttribute('aria-expanded')).toBe('false');
+    await expandRow('tone');
+    expect(btn().getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('⭐조직을 아직 모를 때도 위 막대 제목이 남는다(예전엔 빈 화면)', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: undefined, orgMemberships: [], projectMemberships: [] });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
+    await act(async () => { root.render(wrap(<ContentRulesPage />)); });
+    await flush();
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
+    expect(container.querySelector('[data-testid="topbar-probe"] h1')?.textContent).toBe(koMessages.contentRules.pageTitle);
   });
 });

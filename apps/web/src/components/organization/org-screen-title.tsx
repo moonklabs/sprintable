@@ -15,6 +15,6 @@ export function OrgTitle({ children }: { children: ReactNode }) {
  * 라우트 로딩(`loading.tsx`)은 같은 제목을 `RouteTopBarFallback`(FLAT_ROUTE_TOP_BAR)으로 쥔다 — 화면이 뜨기 전에도 막대가 비지 않는다.
  * 화면 제목 글은 사이드바 이름과 같은 한 가지 이름이다(`verify-nav-label-matches-title`).
  */
-export function OrgScreenTitle({ children }: { children: ReactNode }) {
-  return <TopBarSlot title={<OrgTitle>{children}</OrgTitle>} />;
+export function OrgScreenTitle({ children, showContextChip = false }: { children: ReactNode; /** 프로젝트 안 화면(리워드)은 프로젝트 칩을 켠다 — 조직 화면은 기본 꺼짐. */ showContextChip?: boolean }) {
+  return <TopBarSlot title={<OrgTitle>{children}</OrgTitle>} showContextChip={showContextChip} />;
 }

@@ -19,8 +19,20 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
 let container: HTMLDivElement;
 let root: Root;
 
-function wrap(node: React.ReactNode) {
-  return <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">{node}</NextIntlClientProvider>;
+// 4913 — 화면 제목은 앱 틀 위 막대(TopBarSlot)로 간다: 막대 컨텍스트는 화면과 같은 번(모듈 비움 뒤)에 불러온다 — 정적으로 불러오면 컨텍스트가 둘이 된다.
+async function wrap(node: React.ReactNode) {
+  const { TopBarProvider, useTopBar } = await import('@/components/nav/top-bar-context');
+  function TopBarTitleProbe() {
+    const { title } = useTopBar();
+    return <div data-testid="topbar-probe">{title}</div>;
+  }
+  return <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><TopBarProvider><TopBarTitleProbe />{node}</TopBarProvider></NextIntlClientProvider>;
+}
+
+/** 이름(label)으로 칸을 찾는다 — ds Field는 칸 id를 만들어 쓰므로 고정 id(#gc-field-…)에 기대지 않는다. */
+function byLabel<T extends HTMLElement>(text: string): T {
+  const label = [...document.body.querySelectorAll('label')].find((l) => l.textContent === text);
+  return document.getElementById(label!.getAttribute('for')!) as T;
 }
 
 const ORG_ID = 'org-1';
@@ -49,7 +61,8 @@ afterEach(async () => {
 
 async function mount() {
   const { default: OrganizationGenerationConnectorsPage } = await import('./page');
-  await act(async () => { root.render(wrap(<OrganizationGenerationConnectorsPage />)); });
+  const tree = await wrap(<OrganizationGenerationConnectorsPage />);
+  await act(async () => { root.render(tree); });
   await flush();
 }
 
@@ -182,8 +195,8 @@ describe('OrganizationGenerationConnectorsPage — 등록 폼(AC2)', () => {
     await flush();
     expect(document.body.querySelector('[data-testid="gc-register-form"]')).toBeTruthy();
 
-    const labelInput = document.body.querySelector<HTMLInputElement>('#gc-field-label')!;
-    const credInput = document.body.querySelector<HTMLTextAreaElement>('#gc-field-credential')!;
+    const labelInput = byLabel<HTMLInputElement>(koMessages.organization.gcFieldLabel);
+    const credInput = byLabel<HTMLTextAreaElement>(koMessages.organization.gcFieldCredential);
     await act(async () => {
       setInputValue(labelInput, '메인 연산 커넥터');
       setInputValue(credInput, '{"type":"service_account"}');
@@ -214,8 +227,8 @@ describe('OrganizationGenerationConnectorsPage — 등록 폼(AC2)', () => {
     await act(async () => { registerBtn.click(); });
     await flush();
 
-    const labelInput = document.body.querySelector<HTMLInputElement>('#gc-field-label')!;
-    const credInput = document.body.querySelector<HTMLTextAreaElement>('#gc-field-credential')!;
+    const labelInput = byLabel<HTMLInputElement>(koMessages.organization.gcFieldLabel);
+    const credInput = byLabel<HTMLTextAreaElement>(koMessages.organization.gcFieldCredential);
     await act(async () => {
       setInputValue(labelInput, '메인 연산 커넥터');
       setInputValue(credInput, '{"type":"service_account"}');
@@ -225,7 +238,7 @@ describe('OrganizationGenerationConnectorsPage — 등록 폼(AC2)', () => {
     await flush();
 
     expect(document.body.textContent).toContain(koMessages.organization.gcErrorProviderUnsupported);
-    expect((document.body.querySelector<HTMLTextAreaElement>('#gc-field-credential'))?.value).toBe('');
+    expect(byLabel<HTMLTextAreaElement>(koMessages.organization.gcFieldCredential).value).toBe('');
   });
 
   // story #4117 FE 라이더 — #4117-BE(PR #4492)가 이름 중복을 409
@@ -250,8 +263,8 @@ describe('OrganizationGenerationConnectorsPage — 등록 폼(AC2)', () => {
     await act(async () => { registerBtn.click(); });
     await flush();
 
-    const labelInput = document.body.querySelector<HTMLInputElement>('#gc-field-label')!;
-    const credInput = document.body.querySelector<HTMLTextAreaElement>('#gc-field-credential')!;
+    const labelInput = byLabel<HTMLInputElement>(koMessages.organization.gcFieldLabel);
+    const credInput = byLabel<HTMLTextAreaElement>(koMessages.organization.gcFieldCredential);
     await act(async () => {
       setInputValue(labelInput, '메인 연산 커넥터');
       setInputValue(credInput, '{"type":"service_account"}');
@@ -262,7 +275,7 @@ describe('OrganizationGenerationConnectorsPage — 등록 폼(AC2)', () => {
 
     expect(document.body.textContent).toContain(koMessages.organization.gcErrorLabelDuplicate);
     expect(document.body.textContent).not.toContain(koMessages.organization.gcErrorGeneric);
-    expect((document.body.querySelector<HTMLTextAreaElement>('#gc-field-credential'))?.value).toBe('');
+    expect(byLabel<HTMLTextAreaElement>(koMessages.organization.gcFieldCredential).value).toBe('');
   });
 });
 
@@ -480,5 +493,55 @@ describe('OrganizationGenerationConnectorsPage — 리전 변경 행 액션(#416
     await act(async () => { resolvePatch?.(); });
     await flush();
     expect(document.body.querySelector<HTMLSelectElement>('[data-testid="gc-location-select-gen-1"]')?.value).toBe('asia-northeast3');
+  });
+});
+
+// 4913(UI-R5 · 한 쪽 틀 B판) — 제목은 위 막대 한 곳, 본문은 reading 틀, 목록은 한 패널(RowList), 빈 상태 · 오류는 틀의 부품, 이름은 «생성 연결».
+describe('OrganizationGenerationConnectorsPage — 한 쪽 틀(4913)', () => {
+  it('⭐h1이 정확히 1개(위 막대) · 글은 «생성 연결» · 본문에 h1 없음 · reading 틀 안에서 시작', async () => {
+    stubList([CONNECTOR_ACTIVE]);
+    await mount();
+    expect(document.body.querySelectorAll('h1')).toHaveLength(1);
+    expect(document.body.querySelector('[data-testid="topbar-probe"] h1')?.textContent).toBe('생성 연결');
+    expect(koMessages.organization.gcTitle).toBe('생성 연결');
+    const frame = document.body.querySelector('[data-slot="ds-page-frame"]');
+    expect(frame?.getAttribute('data-width')).toBe('reading');
+    expect(frame?.querySelector('h1')).toBeNull();
+    expect(frame?.querySelector('[data-slot="ds-page-head"]')?.textContent).toContain(koMessages.organization.gcDescription);
+  });
+
+  it('⭐옛 낱말 «연산 커넥터»가 화면에 없다(이름 통일 — 이 화면이 그리는 모든 글 · 사람이 지은 커넥터 이름은 빼고)', async () => {
+    stubList([{ ...CONNECTOR_ACTIVE, label: '메인' }, { ...CONNECTOR_REVOKED, label: '지난' }]);
+    await mount();
+    expect(document.body.textContent).not.toContain('연산 커넥터');
+  });
+
+  it('⭐목록은 한 패널(RowList) 안의 행들이고, 해지 단추는 행 줄 안(trailing)에 있다', async () => {
+    stubList([CONNECTOR_ACTIVE, CONNECTOR_REVOKED]);
+    await mount();
+    const list = document.body.querySelector('[data-slot="ds-row-list"]');
+    expect(list).not.toBeNull();
+    expect(list?.querySelectorAll('[data-slot="ds-row-list-item"]')).toHaveLength(2);
+    const line = document.body.querySelector('[data-testid="gc-row"] [data-slot="ds-list-row"]');
+    expect(line?.querySelector('[data-testid="gc-revoke-gen-1"]')).not.toBeNull();
+  });
+
+  it('⭐빈 상태는 패널(Card) 안의 EmptyState · 불러오기 실패는 Banner(role=alert) + 다시 시도', async () => {
+    stubList([]);
+    await mount();
+    expect(document.body.querySelector('[data-slot="ds-card"] [data-slot="ds-empty-state"]')).not.toBeNull();
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({}) })));
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await mount();
+    const banner = document.body.querySelector('[data-slot="ds-banner"]');
+    expect(banner?.getAttribute('role')).toBe('alert');
+    expect(banner?.textContent).toContain(koMessages.organization.gcListLoadError);
+  });
+
+  it('⭐불러오는 중·빈·오류 분기 모두 위 막대 제목이 남는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    await mount();
+    expect(document.body.querySelectorAll('h1')).toHaveLength(1);
   });
 });
