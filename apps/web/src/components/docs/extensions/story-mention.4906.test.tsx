@@ -16,18 +16,24 @@ const popups = () => [...document.body.children].filter((d) => /z-index:\s*9999/
 const flush = async () => { for (let i = 0; i < 12; i += 1) await new Promise((r) => setTimeout(r, 8)); };
 
 let editor: Editor | null = null;
-const pending: Array<() => void> = [];
+const pending: Array<{ q: string; resolve: (titles?: string[]) => void }> = [];
 /** the picker's search stays pending until released — the network latency that made the late start possible. Every call is recorded, so a test can wait until the search REALLY started (a negative assertion must exercise the race). */
 function holdSearch() {
   pending.length = 0;
-  const spy = vi.fn(() => new Promise<Response>((resolve) => {
-    pending.push(() => resolve(new Response(JSON.stringify({ data: { data: [], types: [] } }), { status: 200 })));
+  const spy = vi.fn((url: string) => new Promise<Response>((resolve) => {
+    const q = new URL(`http://x${url}`).searchParams.get('q') ?? '';
+    pending.push({
+      q,
+      resolve: (titles = []) => resolve(new Response(JSON.stringify({
+        data: { data: titles.map((title, i) => ({ entity_type: 'story', entity_id: `${q}-${i}`, title })), types: [] },
+      }), { status: 200 })),
+    });
   }));
   vi.stubGlobal('fetch', spy);
   return spy;
 }
 const searchStarted = (spy: ReturnType<typeof holdSearch>, n = 1) => vi.waitFor(() => expect(spy.mock.calls.length).toBeGreaterThanOrEqual(n));
-const releaseAll = () => { while (pending.length) pending.shift()!(); };
+const releaseAll = () => { while (pending.length) pending.shift()!.resolve(); };
 function makeEditor(content = '<p></p>', opts: { codeBlock?: boolean } = {}) {
   editor = new Editor({
     // the real editor's base (doc-editor-extensions.ts: StarterKit; production swaps the code block for its own, which is a code node too) + the story picker
@@ -111,7 +117,7 @@ describe('story picker (#) in the doc editor (story 4906)', () => {
     await searchStarted(spy, 1);
     ed.commands.insertContent(' and #b');      // suggestion one ended, suggestion two started: a second search is pending
     await searchStarted(spy, 2);
-    pending.shift()!();                         // the OLD search resolves first
+    pending.shift()!.resolve();                 // the OLD search resolves first
     await flush();
     expect(popups().length).toBeLessThanOrEqual(1);
     releaseAll(); await flush();
@@ -120,6 +126,27 @@ describe('story picker (#) in the doc editor (story 4906)', () => {
     await flush();
     expect(popups()).toHaveLength(0);
   });
+
+  // codex (last round): «the old search resolving AFTER the new one overwrites props.items and the popup is redrawn with the OLD results». `props.items = await items(...)` evaluates its
+  // target (the props object of THAT update) before the await, so the old continuation writes onto the old object and the shared current props keep the NEW results. Measured here with two searches
+  // that return different stories, resolved in both orders.
+  for (const order of ['new-then-old', 'old-then-new'] as const) {
+    it(`⭐two searches in flight (${order}): the popup shows the CURRENT query's stories, never the old query's`, async () => {
+      const spy = holdSearch();
+      const ed = makeEditor();
+      ed.commands.insertContent('see #a');
+      await searchStarted(spy, 1);
+      ed.commands.insertContent(' and #b');
+      await searchStarted(spy, 2);
+      const [oldS, newS] = [pending.find((p) => p.q === 'a')!, pending.find((p) => p.q === 'b')!];
+      expect(oldS).toBeTruthy(); expect(newS).toBeTruthy();
+      if (order === 'new-then-old') { newS.resolve(['NEW story']); await flush(); oldS.resolve(['OLD story']); } else { oldS.resolve(['OLD story']); await flush(); newS.resolve(['NEW story']); }
+      await flush();
+      expect(popups()).toHaveLength(1);
+      expect(popups()[0]!.textContent).toContain('NEW story');
+      expect(popups()[0]!.textContent).not.toContain('OLD story');
+    });
+  }
 
   it('when the editor is destroyed (save → the reading screen) a popup that is still up is taken down', async () => {
     const spy = holdSearch();
