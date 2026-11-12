@@ -101,17 +101,28 @@ async def _seed(Session, *, with_stale_event: bool = False, with_fresh_event: bo
     return {"org_id": org_id, "project_id": project_id, "member_id": member_id, "event_id": event_id}
 
 
-async def _add_event(Session, seeded, *, created_ago: int, status: str = "pending", delivered_ago: int | None = None) -> uuid.UUID:
-    """story 4906 — one more event for the seeded member, `created_ago` seconds old, in the given state (a delivered one with its delivery `delivered_ago` seconds ago)."""
+async def _add_event(
+    Session, seeded, *, created_ago: int = 0, status: str = "pending", delivered_ago: int | None = None,
+    sibling_of_cursor: str | None = None,
+) -> uuid.UUID:
+    """story 4906 — one more event for the seeded member, `created_ago` seconds old, in the given state (a delivered one with its delivery `delivered_ago` seconds ago).
+    story 4911 follow-up — `sibling_of_cursor="larger"|"smaller"`: born at EXACTLY the cursor event's `created_at` (a chat message creates its events in one transaction) with an id above / below the cursor's."""
     from app.models.event import Event
+    from sqlalchemy import select
 
     now = datetime.now(timezone.utc)
     eid = uuid.uuid4()
+    created_at = now - timedelta(seconds=created_ago)
+    if sibling_of_cursor:
+        async with Session() as s:
+            created_at = (await s.execute(select(Event.created_at).where(Event.id == seeded["event_id"]))).scalar_one()
+        while (eid > seeded["event_id"]) != (sibling_of_cursor == "larger"):
+            eid = uuid.uuid4()
     async with Session() as s:
         s.add(Event(
             id=eid, project_id=seeded["project_id"], org_id=seeded["org_id"], event_type="test.event",
             recipient_id=seeded["member_id"], recipient_type="agent", payload={}, status=status,
-            created_at=now - timedelta(seconds=created_ago),
+            created_at=created_at,
             delivered_at=(now - timedelta(seconds=delivered_ago)) if delivered_ago is not None else None,
         ))
         await s.commit()
@@ -297,6 +308,39 @@ async def test_cursor_stale_events_of_another_member_are_not_counted():
             org_id=seeded["org_id"], member_id=seeded["member_id"], last_event_id=seeded["event_id"],
         )
         assert frame == {"complete": True, "reason": None, "returned": 0}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("which", ["larger", "smaller"])
+async def test_cursor_stale_same_instant_sibling_is_not_counted(which):
+    """story 4911 follow-up (dev 11-12 «후» 측정) — 글 하나가 만드는 두 사건(message_created + dispatched)은 같은 created_at이다. 커서의 같은 시각 형제는 id가 크든 작든(UUID 순서는
+    받은 순서와 무관) 이미 오래전에 delivered였어도 «빠짐»으로 세지 않는다 → complete."""
+    engine, Session = await _session_factory()
+    try:
+        seeded = await _seed(Session, with_stale_event=True)
+        await _add_event(Session, seeded, status="delivered", delivered_ago=590, sibling_of_cursor=which)
+        frame = await _read_sync_status_frame(
+            org_id=seeded["org_id"], member_id=seeded["member_id"], last_event_id=seeded["event_id"],
+        )
+        assert frame == {"complete": True, "reason": None, "returned": 0}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_cursor_stale_same_instant_sibling_plus_strictly_later_left_out_stays_degraded():
+    """대조: 같은 시각 형제는 안 세지만 «엄밀히 뒤» 빼먹은 사건 1건은 여전히 경고를 지킨다."""
+    engine, Session = await _session_factory()
+    try:
+        seeded = await _seed(Session, with_stale_event=True)
+        await _add_event(Session, seeded, status="delivered", delivered_ago=590, sibling_of_cursor="larger")
+        await _add_event(Session, seeded, created_ago=300, status="expired")
+        frame = await _read_sync_status_frame(
+            org_id=seeded["org_id"], member_id=seeded["member_id"], last_event_id=seeded["event_id"],
+        )
+        assert frame == {"complete": False, "reason": "cursor_stale", "returned": 0}
     finally:
         await engine.dispose()
 

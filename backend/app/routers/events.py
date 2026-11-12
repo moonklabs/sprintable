@@ -750,12 +750,14 @@ async def agent_event_stream(
                 # after the cursor was not sent (delivered longer ago than the backfill's window — `_outside_backfill_filter`, the same definition counted, not guessed). Nothing left out → complete.
                 # `cursor_not_found` is untouched: with the cursor gone nothing after it can be proven (a GC'd event may have had followers that are gone too).
                 if _backfill_reason == "cursor_stale" and len(pending_events) < limit:
+                    # «After the cursor» here is STRICTLY later in time — not the backfill's `(created_at, id)` tiebreak. A chat message creates its events (`conversation.message_created` +
+                    # `dispatched`) in ONE transaction, so they share `created_at`, and UUID order says nothing about which one the client received last: counting the same-instant sibling with
+                    # the larger id made half of the quiet accounts keep the warning (measured on dev 11-12: cursor = the message, sibling `dispatched` delivered 0.09 s after creation).
+                    # `events.recipient_seq` would order them exactly, but it is filled only for agent recipients (dev: 32 of 7,096 human-recipient events), and the stream's cursor is an event id.
+                    # Limit (stated in the PR): a same-instant sibling this connection really never received is not reported — the backfill never re-sent it either once the cursor is stale.
                     _after_cursor: list[Any] = []
                     if _ref is not None:
-                        _after_cursor.append(
-                            or_(Event.created_at > _ref, and_(Event.created_at == _ref, Event.id > last_event_id))
-                            if last_event_id is not None else Event.created_at > _ref
-                        )
+                        _after_cursor.append(Event.created_at > _ref)
                     _left_out = (await db.execute(
                         select(func.count()).select_from(Event).where(
                             Event.org_id == org_id, Event.recipient_id == resolved_member_id, *_after_cursor, _outside_backfill_filter(now),
