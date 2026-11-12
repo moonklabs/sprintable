@@ -11,7 +11,7 @@ import type { KanbanStory, KanbanMember, LineStatusSummary } from './types';
 import { parseStoryCardTitle } from '@/lib/story-card-title';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle, ChevronRight, EyeOff, History, MoreHorizontal, Pause, Zap, ZapOff, type LucideIcon } from 'lucide-react';
+import { AlertTriangle, Check, ChevronRight, Clock, EyeOff, History, MoreHorizontal, Pause, Zap, ZapOff, type LucideIcon } from 'lucide-react';
 import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import { LabelChip } from '@/components/ui/label-chip';
@@ -19,7 +19,6 @@ import { MaterialChip } from '@/components/ui/material-chip';
 import { cn } from '@/lib/utils';
 import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { TrustSeal } from '@/components/verify/trust-seal';
 import { deriveTrustStage } from '@/services/verify';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { memberDisplayLabel } from '@/lib/member-display';
@@ -149,8 +148,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
   // verified는 human_verified_by 실 resolve 성공 시만(없으면 "누가"를 지어내지 않고 무표시로
   // 후퇴 — claimed는 특정 신원 없이도 범용 봇 아이콘으로 정직 렌더 가능해 후퇴 불필요).
   const trustStage = deriveTrustStage(story);
-  const trustAgent = assigneeList.find((m) => m.type === 'agent');
   const tCage = useTranslations('cage');
+  const tv = useTranslations('verify');
   // S11 ①: line badge — 신규 4상태(LineStatusSummary) + 기존 pending gate merge, boy-scout 1배지.
   const hasPendingGate = gates.some((g) => g.status === 'pending');
   const lineBadge = deriveLineBadge(lineStatus, hasPendingGate);
@@ -463,6 +462,21 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
 
   // 열린 카드(action-soft 면)에서는 흐린 글(ink-3)이 다크에서 4.29:1로 모자란다(layer-rule.test) — 한 단계 진한 ink-2로.
   const metaInk = selected ? 'text-ds-ink-2' : 'text-ds-ink-3';
+  // 메타 앞 묶음이 잘릴 때 전부 보이는 툴팁(카테고리 · 에픽 · 라벨 전부 · 라인 배지 · 실행 결과)과 씰 문구.
+  const lineBadgeText = lineBadgePromoted ? '' : lineBadge === 'pending_gate'
+    ? (pendingGateType ? `${pendingGateType} ${tCage('gatePending')}` : tCage('gatePending'))
+    : lineBadgeMeta ? tCage(lineBadgeMeta.labelKey) : '';
+  const execTitle = lastExecution
+    ? [
+        lastExecution.rule_name ?? t('workflowExecuted'),
+        lastExecution.completed_at ? formatViewerRelativeTime(lastExecution.completed_at, locale, displayTimezone) : '',
+        lastExecution.status === 'matched' ? `✅ ${t('ruleMatched')}` : `⊘ ${t('ruleNone')}`,
+      ].filter(Boolean).join(' · ')
+    : '';
+  const metaFoldTitle = [categoryTag, epicName && story.epic_id ? epicName : '', labels.map((l) => l.name).join(', '), lineBadgeText, execTitle].filter(Boolean).join(' · ');
+  const sealTitle = story.status === 'done' && trustStage === 'verified' && verifiedBy
+    ? [tv('trustSealVerifiedBy', { name: verifiedBy.name ?? memberDisplayLabel(null, tc) }), story.human_verified_at ? formatViewerRelativeTime(story.human_verified_at, locale, displayTimezone) : '', tv('trustSealSignedOff')].filter(Boolean).join(' · ')
+    : `${tv('trustSealClaimedBy')} · ${tv('trustSealAwaitingVerificationLong')}`;
   const proofStateLabel = statuses.find((s) => s.id === story.status)?.label ?? story.status;
 
   return (
@@ -532,93 +546,91 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       {/* 줄 2 — 제목(2줄까지) */}
       <div className="mt-0.5 line-clamp-2 text-editorial-ui font-semibold leading-snug text-ds-ink">{titleLead}</div>
 
-      {/* 줄 3 — 메타 한 줄: 카테고리 · 에픽 · 라벨(2개까지 + «+N») · 승격 안 된 라인 배지 ········· 실행 결과 · 포인트 · 씰 · 담당 */}
-      <div className="mt-1 flex min-h-5 items-center gap-1.5">
-        {categoryTag ? <MaterialChip>{categoryTag}</MaterialChip> : null}
-        {epicName && story.epic_id ? (
-          <span className={cn('flex min-w-0 max-w-[40%] items-center gap-1 text-editorial-meta', metaInk)}>
-            <span className={`size-1.5 shrink-0 rounded-sm ${getEpicDotClass(story.epic_id)}`} aria-hidden="true" />
-            <span className="min-w-0 truncate">{epicName}</span>
-          </span>
-        ) : null}
-        {labels.slice(0, 2).map((label) => (
-          <LabelChip key={label.id} label={label} />
-        ))}
-        {labels.length > 2 ? <span className={cn('shrink-0 text-editorial-meta', metaInk)}>+{labels.length - 2}</span> : null}
-        {lineBadgePromoted ? null : lineBadge === 'pending_gate' ? (
-          <Badge variant="outline" className="gap-1">
-            <Pause className="size-3 shrink-0" />
-            <span>{pendingGateType ? `${pendingGateType} ${tCage('gatePending')}` : tCage('gatePending')}</span>
-          </Badge>
-        ) : lineBadgeMeta ? (
-          // 실 alert(handoff_stuck=destructive · waiting_human=warning)는 색 = 신호 유지, 정보성(engine_degraded · grandfathered)만 outline.
-          <Badge variant={lineBadgeMeta.variant} className="gap-1">
-            <lineBadgeMeta.Icon className="size-3 shrink-0" />
-            <span>{tCage(lineBadgeMeta.labelKey)}</span>
-          </Badge>
-        ) : null}
-        <span className="flex-1" />
-        {lastExecution ? (
-          <span
-            title={[
-              lastExecution.rule_name ?? t('workflowExecuted'),
-              lastExecution.completed_at ? formatViewerRelativeTime(lastExecution.completed_at, locale, displayTimezone) : '',
-              lastExecution.status === 'matched' ? `✅ ${t('ruleMatched')}` : `⊘ ${t('ruleNone')}`,
-            ].filter(Boolean).join(' · ')}
-            className="flex h-5 w-5 shrink-0 items-center justify-center"
-          >
-            {lastExecution.status === 'matched' ? (
-              <Zap className="h-3 w-3 text-ds-needs-hand" />
-            ) : (
-              <ZapOff className={cn('h-3 w-3', metaInk)} />
-            )}
-          </span>
-        ) : null}
-        {story.story_points != null ? (
-          <span className={cn('shrink-0 text-editorial-meta tabular-nums', metaInk)}>{t('storyPointsBadge', { count: story.story_points })}</span>
-        ) : null}
-        {/* E-VERIFY P0-04 — 증거 있는 done 카드에만(무증거 = 완전 무표시). human_verified → verified · self_reported만 → claimed. */}
-        {story.status === 'done' && trustStage === 'verified' && verifiedBy ? (
-          <TrustSeal
-            variant="verified"
-            humanName={verifiedBy.name}
-            humanLabel={verifiedBy.name ? undefined : memberDisplayLabel(null, tc)}
-            when={story.human_verified_at ? formatViewerRelativeTime(story.human_verified_at, locale, displayTimezone) : ''}
-          />
-        ) : story.status === 'done' && trustStage === 'claimed' ? (
-          <TrustSeal variant="claimed" agentInitial={trustAgent?.name ? getInitials(trustAgent.name) : undefined} />
-        ) : null}
-        {assigneeList.length > 0 ? (
-          <div className="flex shrink-0 -space-x-1.5">
-            {assigneeList.slice(0, 3).map((m) => (
-              <div
-                key={m.id}
-                // 에이전트 = 네모에 가까운 채움 마크 · 사람 = 동그라미(story #3049 규칙 그대로). «에이전트» 글은 아바타의 스크린리더 글로.
-                className={cn(
-                  'relative flex h-5 w-5 items-center justify-center rounded-full border text-micro font-medium ring-1 ring-ds-surface-high',
-                  m.type === 'agent'
-                    ? cn('border-proof-blue/30', AGENT_MARK_FILL_CLASS)
-                    : 'border-ds-line bg-ds-surface-sunk text-ds-ink-2',
-                )}
-                title={memberDisplayLabel(m.name, tc)}
-              >
-                {m.name ? getInitials(m.name) : <UnnamedMemberIcon type={m.type} />}
-                {m.type === 'agent' ? (
-                  <>
-                    <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-info ring-1 ring-ds-surface-high" />
-                    <span className="sr-only">{t('filterAgents')}</span>
-                  </>
-                ) : null}
-              </div>
-            ))}
-            {assigneeList.length > 3 && (
-              <div className="flex h-5 w-5 items-center justify-center rounded-full border border-ds-line bg-ds-surface-sunk text-micro font-medium text-ds-ink-2 ring-1 ring-ds-surface-high">
-                +{assigneeList.length - 3}
-                {assigneeList.slice(3).some((m) => m.type === 'agent') ? <span className="sr-only">{t('filterAgents')}</span> : null}
-              </div>
-            )}
-          </div>
-        ) : null}
+      {/* 줄 3 — 메타 한 줄(높이 20px 고정): 앞 묶음 = 카테고리 · 에픽 · 라벨(2개까지 + «+N») · 승격 안 된 라인 배지 · 실행 결과 / 뒤 묶음 = 포인트 · 씰 · 담당.
+          좁은 칸(열 최소 240 · 폰 390)에서 다 못 담으면 줄을 늘리지 않고 앞 묶음의 뒤쪽(낮은 순위)이 잘리고, 잘린 것 전부는 앞 묶음의 툴팁에 있다(DOM에는 다 있어 스크린리더는 다 읽는다). 뒤 묶음(누가 · 얼마)은 안 줄어든다. */}
+      <div className="mt-1 flex h-5 items-center gap-1.5 overflow-hidden">
+        <div data-testid="story-card-meta-lead" title={metaFoldTitle || undefined} className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+          {categoryTag ? <MaterialChip className="shrink-0 py-px">{categoryTag}</MaterialChip> : null}
+          {epicName && story.epic_id ? (
+            <span className={cn('flex min-w-0 max-w-[40%] shrink-0 items-center gap-1 text-editorial-meta', metaInk)}>
+              <span className={`size-1.5 shrink-0 rounded-sm ${getEpicDotClass(story.epic_id)}`} aria-hidden="true" />
+              <span className="min-w-0 truncate">{epicName}</span>
+            </span>
+          ) : null}
+          {labels.slice(0, 2).map((label) => (
+            <LabelChip key={label.id} label={label} className="shrink-0" />
+          ))}
+          {labels.length > 2 ? <span className={cn('shrink-0 text-editorial-meta', metaInk)}>+{labels.length - 2}</span> : null}
+          {lineBadgePromoted ? null : lineBadge === 'pending_gate' ? (
+            <Badge variant="outline" className="gap-1">
+              <Pause className="size-3 shrink-0" />
+              <span>{pendingGateType ? `${pendingGateType} ${tCage('gatePending')}` : tCage('gatePending')}</span>
+            </Badge>
+          ) : lineBadgeMeta ? (
+            // 실 alert(handoff_stuck=destructive · waiting_human=warning)는 색 = 신호 유지, 정보성(engine_degraded · grandfathered)만 outline.
+            <Badge variant={lineBadgeMeta.variant} className="gap-1">
+              <lineBadgeMeta.Icon className="size-3 shrink-0" />
+              <span>{tCage(lineBadgeMeta.labelKey)}</span>
+            </Badge>
+          ) : null}
+          {lastExecution ? (
+            <span title={execTitle} className="flex h-5 w-5 shrink-0 items-center justify-center">
+              {lastExecution.status === 'matched' ? (
+                <Zap className="h-3 w-3 text-ds-needs-hand" />
+              ) : (
+                <ZapOff className={cn('h-3 w-3', metaInk)} />
+              )}
+            </span>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {story.story_points != null ? (
+            <span className={cn('shrink-0 text-editorial-meta tabular-nums', metaInk)}>{t('storyPointsBadge', { count: story.story_points })}</span>
+          ) : null}
+          {/* E-VERIFY P0-04 — 증거 있는 done 카드에만(무증거 = 완전 무표시). 카드에서는 작은 표시 한 알(긴 «씰» 띠는 상세에 있다 — 카드 3줄을 지킨다): 검증됨 = 체크(done 색) · 주장만 = 시계(주의 색 — 초록 아님, 에이전트 주장 단독은 초록이 될 수 없다). 전체 문구는 툴팁 + 스크린리더 글. */}
+          {story.status === 'done' && trustStage === 'verified' && verifiedBy ? (
+            <span data-testid="story-card-seal" data-seal="verified" title={sealTitle} className="inline-flex h-5 shrink-0 items-center text-ds-done">
+              <Check className="size-3.5" strokeWidth={3} aria-hidden="true" />
+              <span className="sr-only">{sealTitle}</span>
+            </span>
+          ) : story.status === 'done' && trustStage === 'claimed' ? (
+            <span data-testid="story-card-seal" data-seal="claimed" title={sealTitle} className="inline-flex h-5 shrink-0 items-center text-ds-needs-hand">
+              <Clock className="size-3.5" aria-hidden="true" />
+              <span className="sr-only">{sealTitle}</span>
+            </span>
+          ) : null}
+          {assigneeList.length > 0 ? (
+            <div className="flex shrink-0 -space-x-1.5">
+              {assigneeList.slice(0, 3).map((m) => (
+                <div
+                  key={m.id}
+                  // 에이전트 = 네모에 가까운 채움 마크 · 사람 = 동그라미(story #3049 규칙 그대로). «에이전트» 글은 아바타의 스크린리더 글로.
+                  className={cn(
+                    'relative flex h-5 w-5 items-center justify-center rounded-full border text-micro font-medium ring-1 ring-ds-surface-high',
+                    m.type === 'agent'
+                      ? cn('border-proof-blue/30', AGENT_MARK_FILL_CLASS)
+                      : 'border-ds-line bg-ds-surface-sunk text-ds-ink-2',
+                  )}
+                  title={memberDisplayLabel(m.name, tc)}
+                >
+                  {m.name ? getInitials(m.name) : <UnnamedMemberIcon type={m.type} />}
+                  {m.type === 'agent' ? (
+                    <>
+                      <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-info ring-1 ring-ds-surface-high" />
+                      <span className="sr-only">{t('filterAgents')}</span>
+                    </>
+                  ) : null}
+                </div>
+              ))}
+              {assigneeList.length > 3 && (
+                <div className="flex h-5 w-5 items-center justify-center rounded-full border border-ds-line bg-ds-surface-sunk text-micro font-medium text-ds-ink-2 ring-1 ring-ds-surface-high">
+                  +{assigneeList.length - 3}
+                  {assigneeList.slice(3).some((m) => m.type === 'agent') ? <span className="sr-only">{t('filterAgents')}</span> : null}
+                </div>
+              )}
+            </div>
+          ) : null}
+        </div>
       </div>
 
       {/* Context Menu — body portal + position:fixed(뷰포트 좌표 clamp), 카드 위치와 무관하게 항상 화면 안 */}

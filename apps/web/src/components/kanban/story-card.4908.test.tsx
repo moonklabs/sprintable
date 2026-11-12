@@ -73,10 +73,10 @@ describe('4908 카드 — 줄 구성', () => {
     expect(render({ showStatus: true }).textContent).toContain(koMessages.board.inProgress);
   });
 
-  it('제목은 2줄까지(line-clamp-2) · 메타 줄은 늘 서 있다(min-h-5)', () => {
+  it('제목은 2줄까지(line-clamp-2) · 메타 줄은 늘 서 있다(h-5 고정)', () => {
     const card = render();
     expect(card.querySelector('div.line-clamp-2')?.textContent).toBe('보드 재건축');
-    expect(card.querySelector('div.mt-1.min-h-5')).not.toBeNull();
+    expect(card.querySelector('div.mt-1.h-5')).not.toBeNull();
   });
 });
 
@@ -174,5 +174,64 @@ describe('4908 카드 — codex 검수 반영', () => {
   it('열린 카드의 글자는 한 단계 진한 ink-2(흐린 ink-3 아님)', () => {
     expect(render({ selected: true }).querySelector('div.min-h-5')?.className).toContain('text-ds-ink-2');
     expect(render({ selected: false }).querySelector('div.min-h-5')?.className).toContain('text-ds-ink-3');
+  });
+});
+
+describe('4908 카드 — 가장 붐비는 카드(PO 11-12): 줄을 늘리지 않고 뒤쪽 낮은 순위는 툴팁으로', () => {
+  const busy = {
+    story: makeStory({ title: '[Workcell·콘텐츠 ③] goal/DoD 구조화 소스 트랙', epic_id: 'e1', status: 'done', self_reported: true } as Partial<KanbanStory>),
+    epicName: '첫 경험 · 가입 온보딩',
+    labels: [{ id: 'l1', name: '디자인 바탕', color: '#3E7DC2' }, { id: 'l2', name: '첫 경험', color: '#4C9A6A' }, { id: 'l3', name: '글', color: null }],
+    lineStatus: { story_id: 's1', has_active: true, mode: 'x', status: 'running', engine_degraded: true, grandfathered: false, handoff_stuck: false, delivery_status: null },
+    lastExecution: { status: 'matched', rule_name: '킥오프 규칙', completed_at: null },
+  };
+
+  it('⭐메타 줄은 높이 20px 고정(h-5)에 넘침은 잘림(overflow-hidden) — 줄이 늘어 카드가 커지지 않는다', () => {
+    const card = render(busy);
+    const lead = card.querySelector<HTMLElement>('[data-testid="story-card-meta-lead"]')!;
+    const row = lead.parentElement!;
+    expect(row.className.split(/\s+/)).toEqual(expect.arrayContaining(['h-5', 'overflow-hidden']));
+    expect(lead.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-w-0', 'flex-1', 'overflow-hidden']));
+  });
+
+  it('⭐잘리는 앞 묶음의 툴팁에 카테고리 · 에픽 · 라벨 전부 · 라인 배지 · 실행 결과가 다 있다(잘려도 잃지 않는다)', () => {
+    const title = render(busy).querySelector('[data-testid="story-card-meta-lead"]')!.getAttribute('title')!;
+    for (const needle of ['Workcell·콘텐츠 ③', '첫 경험 · 가입 온보딩', '디자인 바탕, 첫 경험, 글', '킥오프 규칙']) expect(title, needle).toContain(needle);
+  });
+
+  it('뒤 묶음(포인트 · 씰 · 담당)은 줄지 않는다(shrink-0) — 누가 · 얼마는 항상 보인다', () => {
+    const card = render({ ...busy, assignees: [{ id: 'a', name: '가', type: 'human' }] as never });
+    const lead = card.querySelector('[data-testid="story-card-meta-lead"]')!;
+    expect(lead.nextElementSibling?.className.split(/\s+/)).toContain('shrink-0');
+  });
+
+  it('⭐카테고리 칩이 줄 높이(20px)를 안 넘는다 — py-px로 눌렀다(기본 py-1은 23px)', () => {
+    const chip = render(busy).querySelector('[data-slot="material-chip"]')!;
+    expect(chip.className.split(/\s+/)).toContain('py-px');
+  });
+});
+
+describe('4908 카드 — 씰은 작은 표시 한 알', () => {
+  it('⭐검증됨 = 체크(done 색) · 툴팁에 검증자 · 책임 서명', () => {
+    const card = render({ story: makeStory({ status: 'done', human_verified: true, human_verified_by: 'h1', human_verified_at: '2026-11-12T01:00:00Z' } as Partial<KanbanStory>), verifiedBy: { id: 'h1', name: '송윤재', type: 'human' } as never });
+    const seal = card.querySelector('[data-testid="story-card-seal"]')!;
+    expect(seal.getAttribute('data-seal')).toBe('verified');
+    expect(seal.className).toContain('text-ds-done');
+    expect(seal.getAttribute('title')).toContain('송윤재');
+    expect(seal.getAttribute('title')).toContain(koMessages.verify.trustSealSignedOff);
+  });
+
+  it('⭐주장만 = 시계(주의 색) — 초록이 아니다(에이전트 주장 단독은 초록이 될 수 없다 · SOUL-LOCK)', () => {
+    const card = render({ story: makeStory({ status: 'done', self_reported: true } as Partial<KanbanStory>) });
+    const seal = card.querySelector('[data-testid="story-card-seal"]')!;
+    expect(seal.getAttribute('data-seal')).toBe('claimed');
+    expect(seal.className).toContain('text-ds-needs-hand');
+    expect(seal.className).not.toContain('ds-done');
+    expect(seal.getAttribute('title')).toContain(koMessages.verify.trustSealClaimedBy);
+  });
+
+  it('증거가 없는 done 카드 · 끝나지 않은 카드는 씰이 없다(무표시)', () => {
+    expect(render({ story: makeStory({ status: 'done' }) }).querySelector('[data-testid="story-card-seal"]')).toBeNull();
+    expect(render({ story: makeStory({ status: 'in-progress', self_reported: true } as Partial<KanbanStory>) }).querySelector('[data-testid="story-card-seal"]')).toBeNull();
   });
 });

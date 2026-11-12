@@ -276,14 +276,14 @@ describe('StoryCard — 이름 없는 검증자 씰(story #4284)', () => {
 });
 
 
-// [SID:4300 → 4908] 담당 아바타가 조직 보충 뒤 늦게 붙어도 카드 줄이 늘어 카드가 흔들리면 안 된다. 4908 카드의 메타 줄(마지막 줄)은 아바타 높이(h-5 = 20px)와 같은 min-h-5를 처음부터 잡는다 — 아바타 없을 때(받는 중) · 있을 때 같은 줄.
+// [SID:4300 → 4908] 담당 아바타가 조직 보충 뒤 늦게 붙어도 카드 줄이 늘어 카드가 흔들리면 안 된다. 4908 카드의 메타 줄(마지막 줄)은 아바타 높이(h-5 = 20px)와 같은 h-5로 처음부터 고정이다 — 아바타 없을 때(받는 중) · 있을 때 같은 줄.
 describe('StoryCard — 메타 줄 최소 높이(아바타가 늦게 붙어도 카드가 안 흔들린다)', () => {
   const rowOf = (markup: string) => {
     const d = document.createElement('div');
     d.innerHTML = markup;
-    return d.querySelector('div.mt-1.min-h-5');
+    return d.querySelector('div.mt-1.h-5');
   };
-  it('아바타 없을 때(받는 중) · 있을 때 모두 메타 줄이 min-h-5 · 아바타는 그 줄 안', () => {
+  it('아바타 없을 때(받는 중) · 있을 때 모두 메타 줄이 h-5 고정 · 아바타는 그 줄 안', () => {
     expect(rowOf(render(makeStory({ story_points: 3 }))), '아바타 없는 카드의 메타 줄').not.toBeNull();
     const withAvatar = rowOf(render(makeStory({ story_points: 3 }), [{ id: 'm1', name: '안나', type: 'human' } as KanbanMember]));
     expect(withAvatar, '아바타 있는 카드의 메타 줄').not.toBeNull();
