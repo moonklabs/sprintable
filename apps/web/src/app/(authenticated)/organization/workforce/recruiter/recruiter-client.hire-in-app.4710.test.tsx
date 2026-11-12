@@ -240,6 +240,19 @@ describe('[SID:4710] RecruiterClient — hiring starts the agent here', () => {
     });
   });
 
+  describe('story 4906 ② — the progress / hero rows are sticky', () => {
+    it('⭐inside the app the hero sits in a STICKY row (bottom of the viewport) — a long role catalog must not push it below the first screen', async () => {
+      inApp(bridgeWith(async () => ({ ok: true })));
+      await mount();
+      const row = (testid(container, 'recruiter-start-here-button') as HTMLElement).closest('[data-testid="recruiter-step-actions"]') as HTMLElement | null;
+      expect(row).not.toBeNull();
+      expect(row!.className).toContain('sticky');
+      expect(row!.className).toContain('bottom-0');
+      // a sticky box cannot leave its parent: the one-screen wrapper starts AFTER the role list, so it must not be a box (display: contents) — the step panel is then the hero's containing block
+      expect(testid(container, 'recruiter-one-screen')!.className).toContain('contents');
+    });
+  });
+
   describe('in a browser', () => {
     async function toRuntimeStep() {
       await mount();
@@ -252,6 +265,13 @@ describe('[SID:4710] RecruiterClient — hiring starts the agent here', () => {
       connectedSetups = 1;
       await toRuntimeStep();
       expect(testid(container, 'recruiter-browser-hero')).not.toBeNull(); // reverted (no hero) → fails
+      // story 4906 ②: the hero is in a sticky row; the (tall) download card is NOT in it
+      const heroRow = testid(container, 'recruiter-start-here-link-button')!.closest('[data-testid="recruiter-step-actions"]') as HTMLElement | null;
+      expect(heroRow).not.toBeNull();
+      expect(heroRow!.className).toContain('sticky');
+      expect(testid(container, 'recruiter-browser-hero')!.className).toContain('contents'); // same reason as the one-screen wrapper
+      const card = testid(container, 'desktop-download-card');
+      if (card) expect(heroRow!.contains(card)).toBe(false);
       expect(testid(container, 'recruiter-connect-elsewhere')!.textContent).toBe('recruiter.connectElsewhere');
       expect(buttonsWithText(container, (t) => t === 'recruiter.recruitCta')).toHaveLength(0); // no key-path button beside it
       await click(testid(container, 'recruiter-start-here-link-button')!);
