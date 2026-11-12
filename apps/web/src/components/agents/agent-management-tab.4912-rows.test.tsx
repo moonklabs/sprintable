@@ -7,6 +7,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
+import { EmbeddedServerProvider } from '@/components/embedded-server-context';
 
 const { push } = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push, replace: vi.fn() }) }));
@@ -109,4 +110,59 @@ describe('에이전트 목록 줄(story 4912 · PR A1)', () => {
     await act(async () => { (row('a1').querySelector('[data-slot="ds-row-actions-trigger"]') as HTMLElement).click(); });
     expect(items()).toEqual(['연결 설정 보기']);
   });
+
+  it('⭐실행 설정 일괄 창에는 «고른 줄만» 간다 — 하나 고르면 «에이전트 1개에 적용»(둘 다가 아니다)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/me') return new Response(JSON.stringify({ data: { role: 'admin' } }), { status: 200 });
+      if (url === '/api/projects') return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      if (url.startsWith('/api/team-members?')) return new Response(JSON.stringify({ data: [
+        { id: 'a1', name: '조사', role: 'member', is_active: true, runtime_type: 'claude-code' },
+        { id: 'a2', name: '작성', role: 'member', is_active: true, runtime_type: 'codex' },
+      ] }), { status: 200 });
+      if (url === '/api/agent-run-profile/options') return new Response(JSON.stringify({ data: { runtimes: [] } }), { status: 200 });
+      return new Response('{}', { status: 404 });
+    }));
+    const { AgentManagementTab } = await import('./agent-management-tab');
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><AgentManagementTab /></NextIntlClientProvider>); });
+    await settle();
+    await act(async () => { (row('a1').querySelector('[role="checkbox"]') as HTMLElement).click(); });
+    const bulk = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.agents.runProfileBulkOpen))!;
+    await act(async () => { bulk.click(); });
+    await settle();
+    expect(document.body.textContent).toContain(koMessages.agents.runProfileBulkApply.replace('{count}', '1'));
+    expect(document.body.textContent).not.toContain(koMessages.agents.runProfileBulkApply.replace('{count}', '2'));
+  });
+
+  it('⭐컴퓨터 이름은 둘째 줄에 있다 — 컴퓨터가 하나뿐인 자리(내장 서버)에서는 안 그린다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/me') return new Response(JSON.stringify({ data: { role: 'admin' } }), { status: 200 });
+      if (url === '/api/projects') return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      if (url.startsWith('/api/team-members?')) return new Response(JSON.stringify({ data: [{ id: 'a1', name: '조사', role: 'member', is_active: true, runtime_type: 'claude-code', device_name: '스튜디오 맥' }] }), { status: 200 });
+      return new Response('{}', { status: 404 });
+    }));
+    const { AgentManagementTab } = await import('./agent-management-tab');
+    const render = (embedded: boolean) => act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><EmbeddedServerProvider embedded={embedded}><AgentManagementTab /></EmbeddedServerProvider></NextIntlClientProvider>); });
+    await render(false);
+    await settle();
+    expect(row('a1').textContent).toContain('스튜디오 맥');
+    await render(true);
+    await settle();
+    expect(row('a1').textContent).not.toContain('스튜디오 맥');
+  });
+
+  it('⭐줄 오른쪽 상태 칩은 «폭이 묶이고 줄바꿈»한다 — 402폭에서 줄이 화면보다 넓어지지 않게(클래스 계약 · 실제 폭은 402 가로 넘침 e2e가 잰다)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/me') return new Response(JSON.stringify({ data: { role: 'admin' } }), { status: 200 });
+      if (url === '/api/projects') return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      if (url.startsWith('/api/team-members?')) return new Response(JSON.stringify({ data: [{ id: 'a1', name: '조사', role: 'member', is_active: false, runtime_type: 'claude-code', verified: false, needs_restart: true }] }), { status: 200 });
+      return new Response('{}', { status: 404 });
+    }));
+    const { AgentManagementTab } = await import('./agent-management-tab');
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><AgentManagementTab /></NextIntlClientProvider>); });
+    await settle();
+    const wrap = row('a1').querySelector('[data-slot="ds-chip"]')!.parentElement!;
+    expect(wrap.querySelectorAll('[data-slot="ds-chip"]')).toHaveLength(3); // inactive · not connected · restart needed
+    expect(wrap.className.split(/\s+/)).toEqual(expect.arrayContaining(['flex-wrap', 'max-w-56']));
+  });
 });
+

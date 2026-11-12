@@ -199,6 +199,24 @@ describe('ds RowListItem — onOpen (4912 행 열기)', () => {
     expect(onOpen).not.toHaveBeenCalled();
   });
 
+  it('⭐단추 «안의 글»을 더블클릭해도 줄 열기가 아니다 · 안쪽 단추에 초점이 있을 때의 Enter도 줄 열기가 아니다', async () => {
+    const onOpen = vi.fn();
+    function Nested() {
+      return (
+        <RowList aria-label="안쪽">
+          <RowListItem data-testid="row-n" title="행" onOpen={onOpen} trailing={<button type="button" data-testid="nb"><span data-testid="nb-text">안쪽 글</span></button>} />
+        </RowList>
+      );
+    }
+    await render(<Nested />);
+    await dbl(container.querySelector('[data-testid="nb-text"]')!); // the target is the span INSIDE the button
+    expect(onOpen).not.toHaveBeenCalled();
+    const inner = container.querySelector('[data-testid="nb"]') as HTMLElement;
+    inner.focus();
+    await key(inner, 'Enter'); // Enter on the inner control is that control's own business
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
   it('⭐펼침 칸이 있는 행은 Enter가 여전히 펼침/접힘이다(onOpen은 안 불린다)', async () => {
     const onOpen = vi.fn();
     await render(<Opens onOpen={onOpen} withDetail />);
