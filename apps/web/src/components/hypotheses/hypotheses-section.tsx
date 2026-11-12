@@ -300,10 +300,12 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
 
   return (
     <section aria-label={t('sectionTitle')} className="rounded-xl border border-border bg-muted/20 p-3">
-      <div className="flex items-center justify-between gap-2">
+      {/* story 4906 (customer lap ⑨) — the title + two buttons did not fit the 360px goal-detail card in English («Hypotheses» · «Review draft» · «Add hypothesis»): the buttons group was shrink-0 on a
+          no-wrap row and ran past the card's right edge (button right 1091 · card 1059 at a 1100 window). The row and the group now WRAP — beside the title when they fit, under it when they do not. */}
+      <div className="flex flex-wrap items-center justify-between gap-2" data-testid="hypotheses-head">
         <h2 className="text-sm font-semibold text-foreground">{t('sectionTitle')}</h2>
         {!formOpen && !draft ? (
-          <div className="flex shrink-0 items-center gap-1.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5" data-testid="hypotheses-head-actions">
             <button
               type="button"
               onClick={() => void handleDraft()}

@@ -88,10 +88,12 @@ const DEFAULT_DORMANCY_THRESHOLD_HOURS = 720;
 // 임계 밖(또는 아예 없음)인 것을 "잠든 active"로 판별. status 자체의 뜻은 안 건드린다(lifecycle
 // SSOT는 무변경) — 이 판별은 오직 표시용 카운트에만 쓰인다.
 function isDormantActiveGoal(goal: Goal, dormancyThresholdHours: number, nowMs: number): boolean {
-  if (!goal.latest_story_activity_at) return true;
-  const t = new Date(goal.latest_story_activity_at).getTime();
-  if (Number.isNaN(t)) return true;
-  return nowMs - t > dormancyThresholdHours * 3600_000;
+  // story 4906 (customer lap ⑧) — «dormant» is «nothing has happened for the threshold»: the goal's last sign of life is its last story movement, or — when no story ever moved — the day it was
+  // made. A goal made a minute ago (no stories yet) is not asleep: the head said «활성 0» beside a list whose one goal was «Active» (and kept saying it after a reload, for 30 days). A goal with
+  // no sign of life at all (no activity, no creation time) stays dormant, as before.
+  const stamps = [goal.latest_story_activity_at, goal.created_at].map((v) => (v ? new Date(v).getTime() : Number.NaN)).filter((n) => !Number.isNaN(n));
+  if (stamps.length === 0) return true;
+  return nowMs - Math.max(...stamps) > dormancyThresholdHours * 3600_000;
 }
 
 // ─── Epic Create Form ─────────────────────────────────────────────────────────
