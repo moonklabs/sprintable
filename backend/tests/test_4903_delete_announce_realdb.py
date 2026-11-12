@@ -209,3 +209,94 @@ async def test_a_person_whose_participant_row_belongs_to_another_org_is_not_told
         assert got == {str(w["a"][0]), str(w["b"][0]), str(w["c"][0])}, f"this org's people still are: {got}"
     finally:
         await engine.dispose()
+
+
+async def test_a_person_who_blocked_the_sender_is_not_told(pushes):
+    """a new message leaves out the people who blocked its sender; so does the frame about its deletion (it would tell them a hidden message existed)"""
+    engine, Session = await _session_factory()
+    try:
+        org_id, conv_id, w = await _world(Session)
+        from app.main import app
+
+        block = await _as(app, Session, w["b"][1], org_id, lambda c: c.post("/api/v2/user-blocks", json={"blocked_member_id": str(w["a"][0])}))
+        assert block.status_code == 201, block.text
+        msg_id = await _send(app, Session, w["a"][1], org_id, conv_id, WORDS)
+        d = await _as(app, Session, w["a"][1], org_id, lambda c: c.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}"))
+        assert d.status_code == 200, d.text
+        got = {m for m, _ in deleted_frames(pushes)}
+        assert str(w["b"][0]) not in got, f"the person who blocked the sender is not told: {got}"
+        assert got == {str(w["a"][0]), str(w["c"][0])}, f"the others are: {got}"
+    finally:
+        await engine.dispose()
+
+
+async def test_a_database_error_inside_the_announce_never_fails_the_delete(monkeypatch, pushes):
+    engine, Session = await _session_factory()
+    try:
+        org_id, conv_id, w = await _world(Session)
+        from sqlalchemy import text
+
+        from app.main import app
+
+        async def broken(db, conversation_id, org_id, **kwargs):
+            await db.execute(text("SELECT * FROM a_table_that_does_not_exist"))
+
+        msg_id = await _send(app, Session, w["a"][1], org_id, conv_id, WORDS)  # a send uses the same resolver: break it only AFTER the message exists
+        monkeypatch.setattr("app.services.member_resolver.conversation_member_ids_in_org", broken)
+        d = await _as(app, Session, w["a"][1], org_id, lambda c: c.delete(f"/api/v2/conversations/{conv_id}/messages/{msg_id}"))
+        assert d.status_code == 200, d.text
+        assert d.json().get("deleted_at") and d.json().get("id") == msg_id, d.json()
+        assert deleted_frames(pushes) == [], "nobody was told (the lookup failed) — and the delete still stands"
+        msg = await _as(app, Session, w["b"][1], org_id, lambda c: c.get(f"/api/v2/conversations/{conv_id}/messages/{msg_id}"))
+        assert msg.status_code == 200 and msg.json().get("deleted_at"), "the tombstone is committed and the session still works"
+    finally:
+        await engine.dispose()
+
+
+async def test_a_thread_reply_names_its_thread_and_the_frame_carries_the_messages_own_moment(pushes):
+    engine, Session = await _session_factory()
+    try:
+        org_id, conv_id, w = await _world(Session)
+        from app.main import app
+
+        parent_id = await _send(app, Session, w["a"][1], org_id, conv_id, "the thread's first message")
+        r = await _as(app, Session, w["a"][1], org_id, lambda c: c.post(f"/api/v2/conversations/{conv_id}/messages", json={"content": WORDS, "thread_id": parent_id}))
+        assert r.status_code == 201, r.text
+        reply_id = r.json()["data"]["id"]
+        before = await _as(app, Session, w["b"][1], org_id, lambda c: c.get(f"/api/v2/conversations/{conv_id}/messages/{reply_id}"))
+        created_at = before.json()["created_at"]
+        d = await _as(app, Session, w["a"][1], org_id, lambda c: c.delete(f"/api/v2/conversations/{conv_id}/messages/{reply_id}"))
+        assert d.status_code == 200, d.text
+        frames = deleted_frames(pushes)
+        assert frames and all(f["id"] == reply_id and f["thread_id"] == parent_id for _, f in frames), frames
+        assert all(f["created_at"] == created_at for _, f in frames), f"the frame says the message's own moment: {created_at} vs {[f['created_at'] for _, f in frames]}"
+    finally:
+        await engine.dispose()
+
+
+async def test_a_failed_lookup_inside_the_announce_leaves_the_session_usable(monkeypatch, pushes):
+    """the announce runs AFTER the commit, on the request's own session: a database error in its lookups must not leave that session in a failed transaction (the request's
+    teardown commits it) — the reads run in a savepoint, so only the savepoint is rolled back"""
+    engine, Session = await _session_factory()
+    try:
+        org_id, conv_id, w = await _world(Session)
+        import uuid as _uuid
+        from datetime import datetime, timezone
+
+        from sqlalchemy import select, text
+
+        from app.routers.conversations import _announce_message_deleted
+
+        async def broken(db, conversation_id, org_id, **kwargs):
+            await db.execute(text("SELECT * FROM a_table_that_does_not_exist"))
+
+        monkeypatch.setattr("app.services.member_resolver.conversation_member_ids_in_org", broken)
+        async with Session() as session:
+            await _announce_message_deleted(
+                session, org_id=org_id, conversation_id=conv_id, message_id=_uuid.uuid4(), sender_id=w["a"][0], thread_id=None,
+                created_at=datetime.now(timezone.utc), deleted_at=datetime.now(timezone.utc),
+            )
+            assert (await session.execute(select(1))).scalar_one() == 1, "the session is still usable after the failed lookup"
+        assert deleted_frames(pushes) == []
+    finally:
+        await engine.dispose()
