@@ -1916,6 +1916,39 @@ describe('ApprovalsQueue — 4909 AC3 the list + detail screen', () => {
     expect(detailText()).toContain('셋째 결재 항목'); // reverted (the sections of the render that SENT the request) → «g2», a request that is gone → an empty detail
   });
 
+  it('⭐the action bar is PINNED: reject · hold · approve sit in ONE sticky bottom bar of the detail column (the card scrolls under it), and the detail column itself scrolls', async () => {
+    mockFetches([lowGate('g1', '첫째 결재 항목')], []);
+    await mount();
+    const bar = container.querySelector('[data-testid="gate-detail-actions"]') as HTMLElement | null;
+    expect(bar).toBeTruthy(); // reverted → the buttons were just the card's last lines
+    const tokens = (el: Element) => el.className.split(/\s+/);
+    expect(tokens(bar!)).toEqual(expect.arrayContaining(['sticky', 'bottom-0'])); // whole class tokens — a substring would also match «not-sticky»
+    // DOM order: reject · hold · approve (the approve button is the last one; on a phone CSS puts it on top)
+    expect([...bar!.querySelectorAll('button')].map((b) => b.textContent?.trim())).toEqual([koMessages.cage.sigReject, koMessages.cage.gateDiscussSubmit, koMessages.cage.gateApprove]);
+    // wide: the column is the scroller (lg: only — narrow, the sheet's own body scrolls, so a bare overflow-y-auto here would break the pinning)
+    const detailTokens = tokens(container.querySelector('[data-testid="gate-queue-detail"]')!);
+    expect(detailTokens).toEqual(expect.arrayContaining(['lg:overflow-y-auto', 'lg:max-h-[calc(100svh-6rem)]']));
+    expect(detailTokens).not.toContain('overflow-y-auto');
+  });
+
+  it('⭐a decision request: the «choose an option first» hint rides IN the pinned bar (never scrolled away from the approve button it explains)', async () => {
+    mockFetches([decision('d1', '랜딩 문구를 가격 먼저로 바꿔도 될까요?')], []);
+    await mount();
+    const bar = container.querySelector('[data-testid="gate-detail-actions"]') as HTMLElement;
+    expect(bar.textContent).toContain(koMessages.cage.decisionSelectHint);
+    const approve = [...bar.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+  });
+
+  it('the detail card is a panel on the page layer (ds tokens), not the old card colors', async () => {
+    mockFetches([lowGate('g1', '첫째 결재 항목')], []);
+    await mount();
+    const card = container.querySelector('[data-testid="gate-queue-detail"] > div') as HTMLElement;
+    expect(card.className).toContain('bg-ds-surface');
+    expect(card.className).toContain('border-ds-line');
+    expect(card.className).not.toContain('bg-card');
+  });
+
   it('⭐a double-click on a row opens that request\'s own page (/gates/{id}); a single click only picks it; a HITL row has no page', async () => {
     mockFetches([lowGate('g1', '첫째 결재 항목'), lowGate('g2', '둘째 결재 항목'), hitl({ id: 'h1', title: '승인 요청 하나' })], []);
     await mount();

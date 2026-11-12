@@ -722,7 +722,7 @@ export function ApprovalsQueue() {
         if (!inlineResolvable) {
           if (resolved) {
             return (
-              <div key={gate.id} className="rounded-xl border border-border bg-card px-4 py-3">
+              <div key={gate.id} className="rounded-ds-control border border-ds-line bg-ds-surface px-4 py-3">
                 <button
                   type="button"
                   onClick={() => router.push(gateHref(gate))}
@@ -834,7 +834,7 @@ export function ApprovalsQueue() {
         const rejectOnClick = () => setSignatureTargetId(gate.id);
 
         return (
-          <div key={gate.id} className="rounded-xl border border-border bg-card px-4 py-3">
+          <div key={gate.id} className="rounded-ds-control border border-ds-line bg-ds-surface px-4 py-3">
             <button
               type="button"
               onClick={() => router.push(gateHref(gate))}
@@ -866,7 +866,10 @@ export function ApprovalsQueue() {
                 행2=변경요청+보류 각 flex-1. 데스크톱(≥sm)=단일 우측정렬 행, primary 최우측.
                 order 유틸+wrapper의 sm:contents로 DOM은 한 세트만 유지한다(버튼 중복 렌더
                 금지 — 테스트·접근성 트리 둘 다 단일 소스여야 함). */}
-            <div className="mt-2 flex flex-col gap-1.5 border-t border-border pt-2 sm:flex-row sm:items-center sm:justify-end">
+            {/* story 4909 (UI-R1 AC3 step 2b) — the action bar is PINNED to the bottom of the detail column: when the card is taller than the column (a decision with a long question, options, facts)
+                the person scrolls the card and the buttons stay in reach. The select hint rides in the same bar, so «안을 골라야 승인할 수 있어요» is never scrolled away from the button it explains. */}
+            <div className="sticky bottom-0 z-10 -mx-4 -mb-3 mt-2 bg-ds-surface px-4 pb-3" data-testid="gate-detail-actions">
+            <div className="flex flex-col gap-1.5 border-t border-ds-line pt-2 sm:flex-row sm:items-center sm:justify-end">
               {/* story #3592(§17-20 ⑧·§22-18 동형)·story #3606(잔여, 페드루 PO 確定
                   2026-09-07) — primaryLabel(승인류) 버튼도 같은 기존 키로 마감.
                   disabled 중엔 화면이 "..."를 보이므로 label도 그 값 그대로(그때
@@ -914,6 +917,7 @@ export function ApprovalsQueue() {
             {requiresOptionChoice && !selectedOption ? (
               <p className="mt-1.5 text-right text-editorial-meta text-muted-foreground">{t('decisionSelectHint')}</p>
             ) : null}
+            </div>
           </div>
         );
   };
@@ -944,6 +948,7 @@ export function ApprovalsQueue() {
     const target = items.find((it) => it.id === key);
     if (target && !isHitl(target)) router.push(gateHref(target));
   };
+  // the detail block: wide → THIS column is the scroller (the pinned action bar sticks to its bottom); narrow → the sheet's own body scrolls, so it stays a plain block and the bar sticks to the sheet's bottom
   const detailTitle = selectedItem ? rowOf(selectedItem).title : '';
   const sheetLabel = t('queueSheetLabel', { title: detailTitle });
 
@@ -954,7 +959,7 @@ export function ApprovalsQueue() {
         wide={wide}
         list={<GateQueueList sections={sections} selectedKey={selectedKey} onSelect={onSelectRow} onOpen={openRow} />}
         detail={selectedItem
-          ? <div className="space-y-2" data-testid="gate-queue-detail">{renderItemCard(selectedItem, items.indexOf(selectedItem))}</div>
+          ? <div className="focus-inset space-y-2 lg:max-h-[calc(100svh-6rem)] lg:overflow-y-auto" data-testid="gate-queue-detail">{renderItemCard(selectedItem, items.indexOf(selectedItem))}</div>
           : <p className="m-0 rounded-ds-control border border-dashed border-ds-line px-4 py-6 text-center text-ds-small text-ds-ink-3">{t('queueDetailEmpty')}</p>}
         detailLabel={t('queueDetailLabel')}
         sheetLabel={sheetLabel}
