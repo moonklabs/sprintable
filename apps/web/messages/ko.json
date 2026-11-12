@@ -6865,7 +6865,7 @@
     "detailLoading": "불러오는 중…",
     "detailNotFound": "산출물을 찾을 수 없어요",
     "galleryBackAction": "갤러리로 돌아가기",
-    "galleryCount": "{count}개",
+    "galleryCount": "산출물 {count}개",
     "galleryGroupBy": "묶어서 보기",
     "galleryGroupSelectLabel": "그룹",
     "galleryGroupOption": "{label} · {count}개",

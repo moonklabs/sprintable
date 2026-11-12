@@ -222,7 +222,8 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
     // story 4763 — `login/layout.tsx`(서버 레이아웃: 받기 스위치를 로그인 화면으로 내림 · default export만)로 135→136.
     // story #4885(«팀» 탭줄) — `organization/workforce/layout.tsx` · `organization/members/layout.tsx`(서버 레이아웃: 탭줄 + children · default export만) 둘로 136→138.
     // story 4886 — `design-system/page.tsx`(ds 견본 화면: default · generateMetadata) 하나로 138→139.
-    expect(fileCount).toBe(139);
+    // story 4910 — `[ws]/[proj]/artifacts/loading.tsx`(상단바 폴백 · default export만) 하나로 139→140.
+    expect(fileCount).toBe(140);
     expect(violations).toEqual([]);
   });
 });
