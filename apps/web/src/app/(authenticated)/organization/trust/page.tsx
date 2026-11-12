@@ -3,14 +3,18 @@
 import { firstGraphemes } from '@/lib/first-graphemes';
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { HeartHandshake } from 'lucide-react';
 import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { EmptyState } from '@/components/ui/empty-state';
-import { ListRow } from '@/components/ui/list-row';
-import { PageHeader } from '@/components/ui/page-header';
+import { Button } from '@/components/ds/button';
+import { Card } from '@/components/ds/card';
+import { EmptyState } from '@/components/ds/empty-state';
+import { FilterBar } from '@/components/ds/filter-bar';
+import { PageFrame } from '@/components/ds/page-frame';
+import { PageHead } from '@/components/ds/page-head';
+import { RowList, RowListItem } from '@/components/ds/row-list';
+import { OrgScreenLoading } from '@/components/organization/org-screen-loading';
+import { OrgScreenTitle } from '@/components/organization/org-screen-title';
+import { cn } from '@/lib/utils';
 import { formatViewerScheduledAt } from '@/lib/schedule-format';
 import {
   coldStartReason,
@@ -59,7 +63,7 @@ function PersonMark({ label, icon }: { label?: string; icon?: 'agent' | 'person'
   return (
     <span
       aria-hidden="true"
-      className="flex size-[30px] shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground"
+      className="flex size-[30px] shrink-0 items-center justify-center rounded-full bg-ds-surface-high text-ds-small font-semibold text-ds-ink-2"
     >
       {icon ? <UnnamedMemberIcon type={icon === 'agent' ? 'agent' : 'human'} className="size-3.5" data-testid={`trust-mark-icon-${icon}`} /> : label}
     </span>
@@ -116,9 +120,10 @@ export default function OrganizationTrustPage() {
 
   if (loading) {
     return (
-      <div className="mx-auto w-full max-w-3xl space-y-3 p-6">
-        {[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />)}
-      </div>
+      <>
+        <OrgScreenTitle>{t('trustSlotTitle')}</OrgScreenTitle>
+        <OrgScreenLoading />
+      </>
     );
   }
 
@@ -171,82 +176,79 @@ export default function OrganizationTrustPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6 p-6">
-      {/* story #3749(⓪ 화면 머리, page-header.tsx 개정 절) — PageHeader가 title+
-          설명을 갖는다. 주 액션 0(읽는 화면 — 시안·계약 둘 다 컨트롤을 안 요구한다).
-          title 키는 그대로 trustSlotTitle(verify-nav-label-matches-title PAIRINGS
-          org-trust↔trustSlotTitle — 옮기며 키를 갈면 그 가드가 RED된다). */}
-      <PageHeader title={t('trustSlotTitle')} description={t('trustPurposeFraming')} />
+    <>
+      {/* 4913 — 제목은 위 막대(title 키는 그대로 trustSlotTitle — verify-nav-label-matches-title PAIRINGS org-trust↔trustSlotTitle). 본문 머리 = 설명 한 줄만(주 액션 0 · 읽는 화면). */}
+      <OrgScreenTitle>{t('trustSlotTitle')}</OrgScreenTitle>
+      <PageFrame width="reading">
+        <PageHead description={t('trustPurposeFraming')} />
 
-      {isAdmin ? (
-        rosterRows.length === 0 ? (
-          <EmptyState
-            icon={<HeartHandshake className="size-8" />}
-            title={t('trustEmptyTitle')}
-            description={t('trustEmptyRoster')}
-          />
-        ) : (
-          <>
-            {/* story #3749 — 역할 칩(필터 하나뿐이라 맨 pill 허용, 유나 定 — 늘어나면
-                라벨: 값 드롭다운으로). 「모든 역할」은 수 0(행 수=쌍 수라 사람 수로
-                읽히면 거짓), 역할별 칩만 "{역할} {n}명"(행 키가 사람×역할 쌍이라
-                참). */}
-            <div className="flex flex-wrap items-center gap-2" data-testid="trust-role-filter">
-              <Button
-                type="button"
-                variant={roleFilter === ALL_ROLES ? 'secondary' : 'outline'}
-                size="sm"
-                onClick={() => setRoleFilter(ALL_ROLES)}
-                data-testid="trust-role-filter-all"
-              >
-                {t('trustAllRolesFilter')}
-              </Button>
-              {groupedByRole.map(([roleLabel, rows]) => (
-                <Button
-                  key={roleLabel}
-                  type="button"
-                  variant={roleFilter === roleLabel ? 'secondary' : 'outline'}
-                  size="sm"
-                  onClick={() => setRoleFilter(roleLabel)}
-                  data-testid="trust-role-filter-role"
-                  // §22-18(유나의 자) — 칩마다 눈에 보이는 라벨 자체가 이미 역할+수로
-                  // 갈리지만(정적 텍스트 아님), 이 가드는 소스 정적 분석이라 그 사실을
-                  // 못 본다. aria-label에 같은 값을 그대로 실어 통과(새 키 발명 없음
-                  // — 보이는 라벨=접근성 이름, 중복이지만 무해).
-                  aria-label={t('trustRoleFilter', { role: roleLabel, n: rows.length })}
-                >
-                  {t('trustRoleFilter', { role: roleLabel, n: rows.length })}
-                </Button>
-              ))}
-            </div>
-            {/* story #3785(유나 定) — 1층 규칙: Card(surface='solid'). */}
-            <Card className="divide-y divide-border">
-              {visibleRows.map(renderAdminRow)}
+        {isAdmin ? (
+          rosterRows.length === 0 ? (
+            <Card>
+              <EmptyState icon="volunteer_activism" title={t('trustEmptyTitle')} description={t('trustEmptyRoster')} />
             </Card>
-          </>
-        )
-      ) : selfScores.length === 0 ? (
-        <EmptyState
-          icon={<HeartHandshake className="size-8" />}
-          title={t('trustEmptyTitle')}
-        />
-      ) : (
-        <>
-          <h2 className="text-base font-semibold text-foreground">{t('trustSelfTitle')}</h2>
-          <Card className="divide-y divide-border">
-            {selfScores.map(renderSelfRow)}
+          ) : (
+            <>
+              {/* story #3749 — 역할 칩(필터 하나뿐이라 맨 pill 허용, 유나 定 — 늘어나면 라벨: 값 드롭다운으로). 「모든 역할」은 수 0(행 수=쌍 수라 사람 수로 읽히면 거짓),
+                  역할별 칩만 "{역할} {n}명"(행 키가 사람×역할 쌍이라 참). 4913 — 거르기 줄은 FilterBar 한 가지 꼴. */}
+              <FilterBar
+                aria-label={t('trustSlotTitle')}
+                leading={
+                  <div className="flex flex-wrap items-center gap-2" data-testid="trust-role-filter">
+                    <RoleFilterButton active={roleFilter === ALL_ROLES} onClick={() => setRoleFilter(ALL_ROLES)} testId="trust-role-filter-all">
+                      {t('trustAllRolesFilter')}
+                    </RoleFilterButton>
+                    {groupedByRole.map(([roleLabel, rows]) => (
+                      <RoleFilterButton
+                        key={roleLabel}
+                        active={roleFilter === roleLabel}
+                        onClick={() => setRoleFilter(roleLabel)}
+                        testId="trust-role-filter-role"
+                        // §22-18(유나의 자) — 보이는 라벨=접근성 이름(중복이지만 무해 · 새 키 발명 없음).
+                        ariaLabel={t('trustRoleFilter', { role: roleLabel, n: rows.length })}
+                      >
+                        {t('trustRoleFilter', { role: roleLabel, n: rows.length })}
+                      </RoleFilterButton>
+                    ))}
+                  </div>
+                }
+              />
+              <RowList aria-label={t('trustSlotTitle')}>{visibleRows.map(renderAdminRow)}</RowList>
+            </>
+          )
+        ) : selfScores.length === 0 ? (
+          <Card>
+            <EmptyState icon="volunteer_activism" title={t('trustEmptyTitle')} />
           </Card>
-        </>
-      )}
+        ) : (
+          <RowList aria-label={t('trustSelfTitle')} header={{ title: t('trustSelfTitle'), level: 2 }}>{selfScores.map(renderSelfRow)}</RowList>
+        )}
 
-      {/* story #3749(定③) — 하단 참고 문장. 시안 둘째 문장(낮은 이유 추측)은 화면이
-          모르는 것이라 안 옮긴다 — "평가가 아니다"는 헤더가 이미 말한다. */}
-      {(isAdmin ? rosterRows.length > 0 : selfScores.length > 0) ? (
-        <p className="text-xs text-muted-foreground" data-testid="trust-hit-rate-meaning">
-          {t('trustHitRateMeaning')}
-        </p>
-      ) : null}
-    </div>
+        {/* story #3749(定③) — 하단 참고 문장. 시안 둘째 문장(낮은 이유 추측)은 화면이 모르는 것이라 안 옮긴다 — "평가가 아니다"는 헤더가 이미 말한다. */}
+        {(isAdmin ? rosterRows.length > 0 : selfScores.length > 0) ? (
+          <p className="m-0 text-ds-small text-ds-ink-3" data-testid="trust-hit-rate-meaning">
+            {t('trustHitRateMeaning')}
+          </p>
+        ) : null}
+      </PageFrame>
+    </>
+  );
+}
+
+/** 역할 거르기 단추 — 켜진 칸은 `aria-pressed` + 선택 면(색만으로 뜻을 싣지 않는다). */
+function RoleFilterButton({ active, onClick, testId, ariaLabel, children }: { active: boolean; onClick: () => void; testId: string; ariaLabel?: string; children: React.ReactNode }) {
+  return (
+    <Button
+      type="button"
+      variant="secondary"
+      className={cn(active && 'border-ds-action bg-ds-action-soft text-ds-action-text hover:bg-ds-action-soft')}
+      aria-pressed={active}
+      aria-label={ariaLabel}
+      onClick={onClick}
+      data-testid={testId}
+    >
+      {children}
+    </Button>
   );
 }
 
@@ -261,24 +263,25 @@ function AdminRow({
   const coldStart = isColdStart(row.hit_rate, row.resolved);
   const drilldown = useHistoryDrilldown({ memberId: row.member_id, roleKey: row.role_key });
   return (
-    <ListRow
+    <RowListItem
       data-testid="trust-roster-row"
-      mark={hasRealName ? <PersonMark label={initial(name)} /> : <PersonMark icon={row.member_type === 'agent' ? 'agent' : 'person'} />}
+      leading={hasRealName ? <PersonMark label={initial(name)} /> : <PersonMark icon={row.member_type === 'agent' ? 'agent' : 'person'} />}
       title={name}
       subtitle={coldStart ? (
         <ColdStartSubtitle roleLabel={roleLabel} pending={row.pending} t={t} />
       ) : (
-        t('trustRoleComputedAt', { role: roleLabel, time: formatViewerScheduledAt(row.computed_at, displayTimezone).display })
+        <p className="m-0 whitespace-normal break-keep [overflow-wrap:anywhere]">{t('trustRoleComputedAt', { role: roleLabel, time: formatViewerScheduledAt(row.computed_at, displayTimezone).display })}</p>
       )}
-      status={coldStart ? (
+      statusMark={coldStart ? (
         <TrustBadge hitRate={row.hit_rate} resolved={row.resolved} t={t} />
       ) : (
         <HitRateCell hitRate={row.hit_rate as number} t={t} />
       )}
-      action={<HistoryDrilldownTrigger open={drilldown.open} toggle={drilldown.toggle} index={index} t={t} />}
-    >
-      <HistoryDrilldownPanel open={drilldown.open} snapshots={drilldown.snapshots} t={t} />
-    </ListRow>
+      trailing={<HistoryDrilldownTrigger open={drilldown.open} toggle={drilldown.toggle} index={index} t={t} />}
+      expanded={drilldown.open}
+      onExpandedChange={(next) => { if (next !== drilldown.open) void drilldown.toggle(); }}
+      detail={<HistoryDrilldownPanel open={drilldown.open} snapshots={drilldown.snapshots} t={t} />}
+    />
   );
 }
 
@@ -292,9 +295,9 @@ function SelfRow({
   // 하되(rules-of-hooks) 빈 문자열로 fetch를 무해화하고 트리거 자체를 안 그린다.
   const drilldown = useHistoryDrilldown({ memberId: currentTeamMemberId ?? '', roleKey: score.role_key });
   return (
-    <ListRow
+    <RowListItem
       data-testid="trust-self-row"
-      mark={<PersonMark label={initial(roleLabel)} />}
+      leading={<PersonMark label={initial(roleLabel)} />}
       title={roleLabel}
       // self 뷰는 title이 이미 role_label이라(누구인지가 아니라 어느 역할인지가
       // 축) 定②의 "{role} · {time} 기준"을 그대로 못 쓴다 — GET /trust-scores
@@ -302,15 +305,16 @@ function SelfRow({
       // 없음). 콜드스타트 사유 문장에도 role 접두를 안 붙인다(title에 이미 있어
       // 중복) — admin 행과 다른 자리(showRole=false).
       subtitle={coldStart ? <ColdStartSubtitle pending={score.pending} t={t} /> : null}
-      status={coldStart ? (
+      statusMark={coldStart ? (
         <TrustBadge hitRate={score.hit_rate} resolved={score.resolved} t={t} />
       ) : (
         <HitRateCell hitRate={score.hit_rate as number} t={t} />
       )}
-      action={currentTeamMemberId ? <HistoryDrilldownTrigger open={drilldown.open} toggle={drilldown.toggle} index={index} t={t} /> : undefined}
-    >
-      {currentTeamMemberId ? <HistoryDrilldownPanel open={drilldown.open} snapshots={drilldown.snapshots} t={t} /> : null}
-    </ListRow>
+      trailing={currentTeamMemberId ? <HistoryDrilldownTrigger open={drilldown.open} toggle={drilldown.toggle} index={index} t={t} /> : undefined}
+      expanded={drilldown.open}
+      onExpandedChange={(next) => { if (next !== drilldown.open) void drilldown.toggle(); }}
+      detail={currentTeamMemberId ? <HistoryDrilldownPanel open={drilldown.open} snapshots={drilldown.snapshots} t={t} /> : null}
+    />
   );
 }
 
@@ -323,7 +327,8 @@ function SelfRow({
 function ColdStartSubtitle({ roleLabel, pending, t }: { roleLabel?: string; pending: number | null; t: ReturnType<typeof useTranslations> }) {
   const { key, values } = coldStartReason(pending);
   const reason = t(key, values);
-  return roleLabel ? <>{roleLabel} · {reason}</> : <>{reason}</>;
+  // [SID:4282] 좁은 칸에서 낱말 중간 줄바꿈(«판정한 가/설이») 방지 — ds 행의 둘째 줄은 한 줄 말줄임이 기본이라 사유 문장은 이 글 상자가 줄바꿈을 되살린다(문장이 잘리지 않게).
+  return <p className="m-0 whitespace-normal break-keep [overflow-wrap:anywhere]">{roleLabel ? <>{roleLabel} · {reason}</> : reason}</p>;
 }
 
 // story #3749(定 — 「적중 {rate}%」 칸 nowrap·72px, 유나 렌더 실측: 56px면 두 줄로
@@ -332,7 +337,7 @@ function HitRateCell({ hitRate, t }: { hitRate: number; t: ReturnType<typeof use
   return (
     <div className="flex items-center gap-2">
       <HitRateBar hitRate={hitRate} />
-      <span className="w-[72px] shrink-0 text-right text-xs whitespace-nowrap text-muted-foreground" data-testid="trust-hit-rate-text">
+      <span className="w-[72px] shrink-0 text-right text-ds-small whitespace-nowrap text-ds-ink-2" data-testid="trust-hit-rate-text">
         {t('trustHitRate', { rate: Math.round(hitRate * 100) })}
       </span>
     </div>

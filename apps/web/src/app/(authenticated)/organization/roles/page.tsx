@@ -3,11 +3,16 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
-import { MemberRow } from '@/components/ui/member-row';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
-import { CountBadge } from '@/components/ui/count-badge';
+import { Banner } from '@/components/ds/banner';
+import { Card } from '@/components/ds/card';
+import { Chip } from '@/components/ds/chip';
+import { EmptyState } from '@/components/ds/empty-state';
+import { PageFrame } from '@/components/ds/page-frame';
+import { PageHead } from '@/components/ds/page-head';
+import { RowList, RowListItem } from '@/components/ds/row-list';
+import { NativeSelect } from '@/components/ds/select';
+import { OrgScreenLoading } from '@/components/organization/org-screen-loading';
+import { OrgScreenTitle } from '@/components/organization/org-screen-title';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
@@ -108,92 +113,76 @@ export default function OrganizationRolesPage() {
 
   if (loading) {
     return (
-      <div className="mx-auto w-full max-w-3xl space-y-3 p-6">
-        {[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />)}
-      </div>
+      <>
+        <OrgScreenTitle>{t('rolesTitle')}</OrgScreenTitle>
+        <OrgScreenLoading />
+      </>
     );
   }
 
   if (!canView) {
     return (
-      <div className="mx-auto w-full max-w-3xl p-6">
-        <SectionCard>
-          <SectionCardBody>
-            <p className="text-sm font-medium text-foreground">{t('rolesAdminOnly')}</p>
-            <p className="mt-1 text-sm text-muted-foreground">{t('rolesAdminOnlyHint')}</p>
-          </SectionCardBody>
-        </SectionCard>
-      </div>
+      <>
+        <OrgScreenTitle>{t('rolesTitle')}</OrgScreenTitle>
+        <PageFrame width="reading">
+          <Card>
+            <EmptyState title={t('rolesAdminOnly')} description={t('rolesAdminOnlyHint')} />
+          </Card>
+        </PageFrame>
+      </>
     );
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6 p-6">
-      <div className="space-y-1">
-        <h1 className="text-lg font-semibold text-foreground">{t('rolesTitle')}</h1>
-        <p className="text-sm text-muted-foreground">{t('rolesDescription')}</p>
-      </div>
+    <>
+      <OrgScreenTitle>{t('rolesTitle')}</OrgScreenTitle>
+      <PageFrame width="reading">
+        <PageHead description={t('rolesDescription')} />
 
-      {actionError ? (
-        <Alert variant="destructive" role="alert" aria-live="assertive">
-          <AlertDescription>{actionError}</AlertDescription>
-        </Alert>
-      ) : null}
+        {actionError ? <Banner tone="failed">{actionError}</Banner> : null}
 
-      {ROLE_ORDER.map((role) => {
-        const group = members.filter((m) => m.role === role);
-        return (
-          <SectionCard key={role}>
-            <SectionCardHeader>
-              {/* story #3735(UI 점검 B·E절, 유나 定) — 수를 제목 문자열 안에 넣지 않는다.
-                  제목 고정 + 수는 옆 CountBadge로(이벤트 화면 events/page.tsx와 동형). */}
-              <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
-                {t(ROLE_LABEL_KEY[role])}
-                <CountBadge count={group.length} />
-              </h2>
-            </SectionCardHeader>
-            <SectionCardBody>
+        {ROLE_ORDER.map((role) => {
+          const group = members.filter((m) => m.role === role);
+          return (
+            // story #3735(UI 점검 B·E절, 유나 定) — 수를 제목 문자열 안에 넣지 않는다: 제목 고정 + 수는 구획 머리 오른쪽에.
+            <RowList key={role} aria-label={t(ROLE_LABEL_KEY[role])} header={{ title: t(ROLE_LABEL_KEY[role]), trailing: String(group.length), level: 2 }}>
               {group.length > 0 ? (
-                <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
-                  {group.map((member) => {
-                    const isThisOwner = member.role === 'owner';
-                    const canEdit = canEditOrgMemberRole({ currentRole, currentUserId, member });
-                    return (
-                      <MemberRow
-                        key={member.id}
-                        name={memberDisplayLabel(member.name, tc)}
-                        email={member.email}
-                        className="border-0 rounded-none bg-transparent"
-                        actions={
-                          canEdit ? (
-                            <select
-                              className="rounded-md border border-input bg-background px-2 py-1 text-base lg:text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-                              value={member.role}
-                              disabled={changingId === member.id}
-                              onChange={(e) => void handleChangeRole(member.id, e.target.value as 'admin' | 'member')}
-                            >
-                              <option value="admin">{t(ROLE_LABEL_KEY.admin)}</option>
-                              <option value="member">{t(ROLE_LABEL_KEY.member)}</option>
-                            </select>
-                          ) : (
-                            // story #3758(페드루 그라운딩 지적 — 캡처 리뷰 중 발견) — select와
-                            // 동형, 이 화면이 이미 갖고 있던 ROLE_LABEL_KEY 재사용(그룹 헤더와
-                            // 같은 정본 낱말, 새 키 발명 없음). "Admin"/"Member" 원문 리터럴 +
-                            // raw enum capitalize는 t() 없이 그리던 미번역 자리였다.
-                            <Badge variant={isThisOwner ? 'info' : 'secondary'}>{t(ROLE_LABEL_KEY[member.role])}</Badge>
-                          )
-                        }
-                      />
-                    );
-                  })}
-                </div>
+                group.map((member) => {
+                  const isThisOwner = member.role === 'owner';
+                  const canEdit = canEditOrgMemberRole({ currentRole, currentUserId, member });
+                  const name = memberDisplayLabel(member.name, tc);
+                  return (
+                    <RowListItem
+                      key={member.id}
+                      title={name}
+                      subtitle={member.email}
+                      statusMark={
+                        canEdit ? (
+                          <NativeSelect
+                            className="w-32"
+                            aria-label={name}
+                            value={member.role}
+                            disabled={changingId === member.id}
+                            onChange={(e) => void handleChangeRole(member.id, e.target.value as 'admin' | 'member')}
+                          >
+                            <option value="admin">{t(ROLE_LABEL_KEY.admin)}</option>
+                            <option value="member">{t(ROLE_LABEL_KEY.member)}</option>
+                          </NativeSelect>
+                        ) : (
+                          // story #3758 — select와 동형, 이 화면이 이미 갖고 있던 ROLE_LABEL_KEY 재사용(그룹 헤더와 같은 정본 낱말, 새 키 발명 없음).
+                          <Chip tone={isThisOwner ? 'info' : 'neutral'}>{t(ROLE_LABEL_KEY[member.role])}</Chip>
+                        )
+                      }
+                    />
+                  );
+                })
               ) : (
-                <p className="text-sm text-muted-foreground">{t('roleGroupEmpty')}</p>
+                <div role="listitem"><EmptyState size="inline" title={t('roleGroupEmpty')} /></div>
               )}
-            </SectionCardBody>
-          </SectionCard>
-        );
-      })}
-    </div>
+            </RowList>
+          );
+        })}
+      </PageFrame>
+    </>
   );
 }

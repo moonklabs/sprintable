@@ -75,4 +75,19 @@ describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
     expect(Math.abs(lightness(mine) - lightness(others))).toBeGreaterThanOrEqual(LAYER_MIN_STEP.mineVsOthersLightness);
     expect(chroma(mine) - chroma(others)).toBeGreaterThanOrEqual(LAYER_MIN_STEP.mineVsOthersChroma);
   });
+
+  // 4913(UI-R5) 한 쪽 틀 — 틀 부품이 이 층 표를 «그대로» 쓴다: 쪽 바탕 = page, 패널(Card) = panel, 행 안 펼침 = rowOthers, 입력칸 = field. 부품이 다른 면을 쓰면 아래가 빨개진다.
+  it.each(themes)('⭐%s: 한 쪽 틀 — 패널(RowList=Card)이 쪽 바탕(PageFrame)보다 한 층 올라온다(≥ 0.03) · 열린 행 면이 패널과 갈린다(≥ 0.05)', (_name, t) => {
+    expect(step(t, 'page', 'panel')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.panelOverPage);
+    expect(step(t, 'panel', 'rowOthers')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPanel);
+  });
+
+  it('⭐한 쪽 틀 부품의 면 클래스가 층 표와 같다: PageFrame=page · Card(RowList)=panel · 열린 행=rowOthers', () => {
+    const dir = join(__dirname, '..', 'components', 'ds');
+    const src = (f: string) => readFileSync(join(dir, f), 'utf8');
+    expect(src('page-frame.tsx')).toContain('LAYER.page');
+    expect(src('row-list.tsx')).toContain('LAYER.rowOthers');
+    expect(src('row-list.tsx')).toMatch(/<Card\b/);
+    expect(src('card.tsx')).toContain(LAYER.panel);
+  });
 });

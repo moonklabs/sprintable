@@ -25,10 +25,17 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
 let container: HTMLDivElement;
 let root: Root;
 
-function wrap(node: React.ReactNode) {
+// 4913 — 화면 제목은 앱 틀 위 막대(TopBarSlot)로 간다: 막대 자리를 이 프로브가 그려 본문과 같은 문서에서 h1을 센다.
+// (afterEach가 모듈을 비우므로 막대 컨텍스트도 화면과 같은 번에 불러온다 — 따로 정적으로 불러오면 컨텍스트가 둘이 된다.)
+async function wrap(node: React.ReactNode) {
+  const { TopBarProvider, useTopBar } = await import('@/components/nav/top-bar-context');
+  function TopBarTitleProbe() {
+    const { title } = useTopBar();
+    return <div data-testid="topbar-probe">{title}</div>;
+  }
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      {node}
+      <TopBarProvider><TopBarTitleProbe />{node}</TopBarProvider>
     </NextIntlClientProvider>
   );
 }
@@ -59,7 +66,8 @@ afterEach(async () => {
 
 async function mount() {
   const { default: OrganizationRolesPage } = await import('./page');
-  await act(async () => { root.render(wrap(<OrganizationRolesPage />)); });
+  const tree = await wrap(<OrganizationRolesPage />);
+  await act(async () => { root.render(tree); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
@@ -171,11 +179,63 @@ describe('OrganizationRolesPage — 이름 칸 폴백(story #4286)', () => {
       throw new Error('unexpected fetch: ' + url);
     }));
     await mount();
-    const nameCells = Array.from(container.querySelectorAll('div.font-medium')).map((el) => el.textContent ?? '');
+    const nameCells = Array.from(container.querySelectorAll('[data-slot="ds-list-row"] div.font-semibold')).map((el) => el.textContent ?? '');
     expect(nameCells).toContain(koMessages.common.memberUnnamed);
     expect(nameCells).not.toContain('noname');
     expect(nameCells).not.toContain('?');
     expect(container.textContent).not.toContain('u-abcdef');
     expect(container.textContent).toContain('noname@moonklabs.com');
+  });
+});
+
+// 4913(UI-R5 · 한 쪽 틀 A판) — 제목은 위 막대 한 곳, 본문은 틀 안에서 시작하고, 모든 분기에서 머리가 남는다.
+describe('OrganizationRolesPage — 한 쪽 틀(4913)', () => {
+  const roster = { ok: true, json: async () => ({ data: [{ id: 'm-1', user_id: 'u-1', name: '오너 하나', email: 'o@x.com', role: 'owner' }] }) };
+
+  it('⭐admin — h1이 정확히 1개(위 막대 제목) · 본문은 reading 틀 안 · 본문에 h1을 따로 안 그린다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => roster));
+    await mount();
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
+    expect(container.querySelector('[data-testid="topbar-probe"] h1')?.textContent).toBe(koMessages.organization.rolesTitle);
+    const frame = container.querySelector('[data-slot="ds-page-frame"]');
+    expect(frame?.getAttribute('data-width')).toBe('reading');
+    expect(frame?.querySelector('h1')).toBeNull();
+    expect(frame?.querySelector('[data-slot="ds-page-head"]')?.textContent).toContain(koMessages.organization.rolesDescription);
+  });
+
+  it('⭐member(권한 없음 분기) — 위 막대 제목이 남는다(예전엔 이 분기에서 머리가 사라졌다) · 안내는 EmptyState', async () => {
+    asRole('member');
+    vi.stubGlobal('fetch', vi.fn(async () => roster));
+    await mount();
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
+    expect(container.querySelector('[data-testid="topbar-probe"] h1')?.textContent).toBe(koMessages.organization.rolesTitle);
+    expect(container.querySelector('[data-slot="ds-empty-state"]')?.textContent).toContain(koMessages.organization.rolesAdminOnly);
+  });
+
+  it('⭐불러오는 중 분기 — 위 막대 제목이 남는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    const { default: OrganizationRolesPage } = await import('./page');
+    const tree = await wrap(<OrganizationRolesPage />);
+  await act(async () => { root.render(tree); });
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
+    expect(container.querySelector('[data-slot="ds-page-frame"]')).not.toBeNull();
+  });
+
+  it('구획 셋(소유자 · 관리자 · 구성원)이 RowList이고 구획 머리에 건수가 붙는다 · 빈 구획은 inline 빈 상태', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => roster));
+    await mount();
+    const lists = container.querySelectorAll('[data-slot="ds-row-list"]');
+    expect(lists).toHaveLength(3);
+    expect(lists[0]!.querySelector('[data-slot="ds-section-header"]')?.textContent).toContain('1');
+    expect(lists[1]!.querySelector('[data-slot="ds-empty-state"]')?.getAttribute('data-size')).toBe('inline');
+  });
+
+  it('⭐빈 구획의 건수 0도 그려진다(0은 거짓값이라 빠지던 길 · 옛 CountBadge는 늘 그렸다) · 구획 제목은 h2(옛 화면과 같은 단계)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => roster));
+    await mount();
+    const lists = container.querySelectorAll('[data-slot="ds-row-list"]');
+    expect(lists[1]!.querySelector('[data-slot="ds-section-header"]')?.textContent).toContain('0');
+    expect(lists[2]!.querySelector('[data-slot="ds-section-header"]')?.textContent).toContain('0');
+    expect([...container.querySelectorAll('[data-slot="ds-section-header"]')].every((h) => h.querySelector('h2'))).toBe(true);
   });
 });

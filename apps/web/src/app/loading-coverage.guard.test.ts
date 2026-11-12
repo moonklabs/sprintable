@@ -176,8 +176,6 @@ const EXPECTED_ON = [
 // source = 그 컨테이너 className이 실제로 선언된 파일(app/ 기준 상대 · `../`는 src/). 표에 없는 목적지는 NO_CONTAINER에 이유와 함께.
 const EXPECTED_CONTAINERS: Record<string, { source: string; container: string }> = {
   '/organization/members': { source: '(authenticated)/organization/members/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-3 p-6' },
-  '/organization/roles': { source: '(authenticated)/organization/roles/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-3 p-6' },
-  '/organization/trust': { source: '(authenticated)/organization/trust/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-3 p-6' },
   '/organization/events': { source: '(authenticated)/organization/events/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-6 p-6' },
   '/organization/channels': { source: '(authenticated)/organization/channels/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-6 p-6' },
   '/organization/content-rules': { source: '(authenticated)/organization/content-rules/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-6 p-6' },
@@ -197,6 +195,8 @@ const NO_CONTAINER: Record<string, string> = {
   '/chats': '대화 목록 전폭 · 전용 스켈레톤(chats/loading.tsx)',
   '/inbox': '결재함 전폭 목록',
   '/organization/workforce': '에이전트 화면 전폭',
+  '/organization/roles': '4913 한 쪽 틀 — 폭 · 여백은 PageFrame(ds) 한 곳이 정한다 · 로딩도 같은 틀(OrgScreenLoading = PageFrame)이라 갈릴 수 없다(org-frame.guard가 로딩 파일이 그 틀을 쓰는지 본다)',
+  '/organization/trust': '4913 한 쪽 틀 — 폭 · 여백은 PageFrame(ds) 한 곳이 정한다 · 로딩도 같은 틀(OrgScreenLoading = PageFrame)이라 갈릴 수 없다(org-frame.guard가 로딩 파일이 그 틀을 쓰는지 본다)',
   '/organization/workforce/runs': '에이전트 실행 기록 전폭 목록(story #4885 새 입구 — 화면 자체는 그대로)',
   '/organization/workforce/api-keys': '에이전트 키 관리 화면(story #4885 새 입구 — 화면 자체는 그대로)',
   '/rewards': '리워드 화면(story #4885 «그 밖» — 화면 자체는 그대로)',

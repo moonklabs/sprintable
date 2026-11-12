@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useTopBar } from '@/components/nav/top-bar-context';
 import { Badge } from '@/components/ui/badge';
+import { OrgTitle } from '@/components/organization/org-screen-title';
 
 /**
  * story #4326 — «전체» · «결재» · «대화»로 옮기는 사이(옛 화면 언마운트 → 도착 화면 마운트 전 · loading.tsx가 뜬 동안) 상단바 제목 · 칩이
@@ -103,6 +104,18 @@ export function DocsTopBarTitle() {
 }
 
 /** «활동 로그»(/activity 첫 탭 = 감사 로그) 상단바 제목. */
+/** «권한»(`organization/roles`) 상단바 제목 — 화면(OrgScreenTitle)과 폴백이 같은 모양(OrgTitle)을 쓴다. */
+export function OrgRolesTopBarTitle() {
+  const t = useTranslations('organization');
+  return <OrgTitle>{t('rolesTitle')}</OrgTitle>;
+}
+
+/** «신뢰 센터»(`organization/trust`) 상단바 제목 — 화면(OrgScreenTitle)과 폴백이 같은 모양(OrgTitle)을 쓴다. */
+export function OrgTrustTopBarTitle() {
+  const t = useTranslations('organization');
+  return <OrgTitle>{t('trustSlotTitle')}</OrgTitle>;
+}
+
 export function ActivityTopBarTitle() {
   const tActivityLog = useTranslations('activityLog');
   return <h1 className="text-sm font-medium">{tActivityLog('title')}</h1>;
@@ -173,6 +186,9 @@ export const FLAT_ROUTE_TOP_BAR = {
   '[ws]/[proj]/storage': { Title: () => <StorageTopBarTitle />, showContextChip: true },
   activity: { Title: ActivityTopBarTitle, showContextChip: true },
   'organization/workforce': { Title: AgentsTopBarTitle, showContextChip: true },
+  // 4913 — 조직 구역 «한 쪽 틀» 화면: 제목은 위 막대 · 칩은 조직 화면이라 없음(화면의 OrgScreenTitle과 같다).
+  'organization/roles': { Title: OrgRolesTopBarTitle, showContextChip: false },
+  'organization/trust': { Title: OrgTrustTopBarTitle, showContextChip: false },
   // 까디르 4688 — 부모 workforce/loading이 덮던 하위 목록(마지막 조각 runs ≠ workforce라 «상세»로 봐서 빈 채였다) · 자기 loading.tsx로 쥔다.
   'organization/workforce/runs': { Title: AgentRunsTopBarTitle, showContextChip: true },
 } as const satisfies Record<string, { Title: () => ReactNode; showContextChip: boolean }>;
