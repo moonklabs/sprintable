@@ -75,7 +75,12 @@ async function readRequests(): Promise<PermissionRequest[] | null> {
   }
 }
 
-export function AgentPermissionRequests() {
+/**
+ * story 4909 (UI-R1 AC3, 2d-1) — everything the group KNOWS, in one hook: the read clocks (mount · a new request's notice · 15 s / 30 s · the page seen again), the two named SSE frames, the answers given on this page
+ * (and how long they stay), the phone bridge and how the phone confirms, and the «remote control is off» line. The group below and (next step) the approvals list's «에이전트 권한 요청» section both read it —
+ * one source, so the two never hold two lists. PURE MOVE: not a line of behavior changed (the three test files of this group run unchanged).
+ */
+export function useAgentPermissionRequests() {
   const t = useTranslations('agentPermissions');
   const remoteOff = useRemoteOff(); // story #4583: why none come — only while off and with a connected computer
   const [requests, setRequests] = useState<PermissionRequest[] | null>(null);
@@ -170,6 +175,12 @@ export function AgentPermissionRequests() {
     </div>
   ) : null;
 
+  return { shown, now, phone, auth, offLine, answerFor: (r: PermissionRequest): Answer | null => answerFor(answers, r), onAnswer: (r: PermissionRequest, decision: 'allow' | 'deny') => void answer(r, decision) };
+}
+
+export function AgentPermissionRequests() {
+  const t = useTranslations('agentPermissions');
+  const { shown, now, phone, auth, offLine, answerFor: answerOf, onAnswer } = useAgentPermissionRequests();
   if (shown.length === 0) return offLine; // nothing waiting: the inbox as it was (+ the off line)
 
   return (
@@ -180,8 +191,8 @@ export function AgentPermissionRequests() {
         {t('groupTitle')} · {shown.length}
       </h2>
       {shown.map((r) => (
-        <PermissionCard key={`${r.id}:${r.stage ?? 'ask'}`} request={r} now={now} phone={phone} auth={auth} answer={answerFor(answers, r)}
-          onAnswer={(decision) => void answer(r, decision)} />
+        <PermissionCard key={`${r.id}:${r.stage ?? 'ask'}`} request={r} now={now} phone={phone} auth={auth} answer={answerOf(r)}
+          onAnswer={(decision) => onAnswer(r, decision)} />
       ))}
     </section>
     </>
@@ -221,7 +232,7 @@ function answerFor(answers: ReadonlyMap<string, Kept>, r: PermissionRequest): An
   return a && (a.row.stage ?? 'ask') === (r.stage ?? 'ask') ? a.answer : null;
 }
 
-function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
+export function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
   request: PermissionRequest; now: number; phone: boolean; auth: PhoneAuth | null; answer: Answer | null;
   onAnswer: (decision: 'allow' | 'deny') => void;
 }) {
