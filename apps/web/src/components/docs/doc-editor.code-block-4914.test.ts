@@ -7,9 +7,11 @@
  * 4339 왕복(HTML 문서의 코드 부분을 잃지 않음 · 언어 속성)은 doc-editor-roundtrip.test.ts · doc-markdown-save-parts.test.tsx가 그대로 지킨다.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import type { Editor } from '@tiptap/core';
+import { Editor } from '@tiptap/core';
+import { createDocEditorExtensions } from './doc-editor-extensions';
 import { makeDocEditor } from './doc-editor-roundtrip.fixture';
-import { buildSlashMenuCategories } from './extensions/slash-command';
+import { buildSlashMenuCategories, type SlashMenuStrings } from './extensions/slash-command';
+import koMessages from '../../../messages/ko.json';
 import { CodeBlockWithCopy } from './extensions/code-block-copy';
 import { createWikiLinkSuggestion } from './extensions/wiki-link';
 
@@ -17,6 +19,30 @@ let editor: Editor | null = null;
 afterEach(() => { editor?.destroy(); editor = null; });
 
 const SLASH_STRINGS = new Proxy({}, { get: () => 'x' }) as never;
+/** 실제 ko 메시지로 만든 슬래시 메뉴 글(doc-editor.tsx가 `tSlash`로 만드는 것과 같은 모양) — 제안이 열리면 항목 제목으로 거르고 메뉴를 그리므로 글이 진짜여야 한다. */
+function realSlashStrings(): SlashMenuStrings {
+  const sm = koMessages.docs.slashMenu as unknown as {
+    categories: SlashMenuStrings['categories'];
+    items: Record<string, { title: string; description: string }>;
+    embedPrompt: string; mermaidDefault: { start: string; end: string }; toggleDefaultTitle: string; columnsSearchAlias?: string; listLabel: string;
+  };
+  const titles: Record<string, string> = {}; const items: Record<string, string> = {};
+  for (const [k, v] of Object.entries(sm.items)) { titles[k] = v.title; items[k] = v.description; }
+  return {
+    categories: sm.categories, titles, items, embedPrompt: sm.embedPrompt, mermaidDefault: sm.mermaidDefault,
+    toggleDefaultTitle: sm.toggleDefaultTitle, columnsSearchAlias: sm.columnsSearchAlias ?? '', listLabel: sm.listLabel,
+  } as unknown as SlashMenuStrings;
+}
+function makeEditorWithRealSlashItems(content: string): Editor {
+  return new Editor({
+    extensions: createDocEditorExtensions({
+      placeholder: '', projectId: 'p1', currentDocId: 'doc-self', onNavigate: () => {},
+      wikiLinkNotFoundLabel: 'not found', storyPickerEmptyLabel: 'empty', slashMenuStrings: realSlashStrings(),
+    }),
+    content,
+  });
+}
+
 /** 편집기는 맨 끝에 빈 문단을 자동으로 두므로(끝 노드) «첫 블록»과 «코드 블록 개수»로 판정한다. */
 const first = (e: Editor) => e.state.doc.firstChild!.type.name;
 const codeBlockCount = (e: Editor) => { let n = 0; e.state.doc.descendants((node) => { if (node.type.name === 'codeBlock') n += 1; }); return n; };
@@ -111,17 +137,28 @@ describe('코드 블록 안에서는 «/» · «[[» 제안이 열리지 않는�
     return (plugin?.getState(e.state) as { active?: boolean } | undefined)?.active;
   };
 
-  it('⭐코드 블록 안에서 «/co»를 쳐도 슬래시 메뉴가 안 열린다 — 문단에서는 열린다(대조)', () => {
-    editor = makeDocEditor('<p></p>');
-    editor.commands.focus('end');
-    editor.commands.insertContent('/co');
-    expect(slashActive(editor), '문단(대조)').toBe(true);
-    editor.commands.setContent('<pre><code></code></pre>');
-    editor.commands.setTextSelection(1); // 코드 블록 안(맨 앞)
-    expect(editor.isActive('codeBlock')).toBe(true);
-    editor.commands.insertContent('/co');
-    expect(editor.state.selection.$from.parent.type.name).toBe('codeBlock');
-    expect(slashActive(editor), '코드 블록').toBeFalsy();
+  it('⭐코드 블록 안에서 «/co»를 쳐도 슬래시 메뉴가 안 열린다 — 문단에서는 열린다(대조)', async () => {
+    // 문단에서 메뉴가 «열리면» 후보를 거른 뒤(비동기) 위치를 재려고 `getClientRects`를 부르는데 jsdom에는 없다 — 그 비동기가 끝날 때까지만 빈 값을 준다(레이아웃은 재지 않는다).
+    const proto = Element.prototype as unknown as { getClientRects?: () => unknown[] };
+    const had = Object.prototype.hasOwnProperty.call(proto, 'getClientRects');
+    const prev = proto.getClientRects;
+    proto.getClientRects = () => [];
+    try {
+      editor = makeEditorWithRealSlashItems('<p></p>');
+      editor.commands.focus('end');
+      editor.commands.insertContent('/co');
+      expect(slashActive(editor), '문단(대조)').toBe(true);
+      await new Promise((r) => setTimeout(r, 50)); // 후보 거르기 · 메뉴 그리기가 끝나도록(끝나기 전에 시험이 끝나면 «처리 안 된 오류»가 시험 뒤에 터진다)
+      editor.commands.setContent('<pre><code></code></pre>');
+      editor.commands.setTextSelection(1); // 코드 블록 안(맨 앞)
+      expect(editor.isActive('codeBlock')).toBe(true);
+      editor.commands.insertContent('/co');
+      expect(editor.state.selection.$from.parent.type.name).toBe('codeBlock');
+      expect(slashActive(editor), '코드 블록').toBeFalsy();
+      await new Promise((r) => setTimeout(r, 50));
+    } finally {
+      if (had) proto.getClientRects = prev; else delete proto.getClientRects;
+    }
   });
 
   it('⭐코드 블록 안의 «[[»는 위키 링크 제안의 allow가 거절한다 — 문단에서는 허용(대조)', () => {
