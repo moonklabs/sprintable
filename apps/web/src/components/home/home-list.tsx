@@ -170,9 +170,13 @@ export function HomeList({ model, sources, partial = false, selectedKey = null, 
           tone="needs-hand"
           level={2}
           count={<CountBadge kind="needs-hand" label={t('needsHandLabel')} count={model.header.needsHand} data-testid="home-needs-hand-count" />}
-          // the old section said it beside its title when there were rows: money and outbound sends are signed one at a time
-          trailing={model.needsHand.length > 0 ? <span data-testid="home-needs-hand-hint">{tb('needsMeHint')}</span> : undefined}
         />
+        {/* the old section said this beside its title when there were rows (money and outbound sends are signed one at a time). It is its OWN line under the header: as the header's trailing slot
+            it is shrink-0 and ~150px (ko) / ~330px (en) wide, so on a phone (and in the 360–420 list column) it took the title's width — «내 손이 필요해요» folded to 3 lines and the hint ran over it
+            (en, 320–412: title 41.7px wide, hint overlapping it 41.7 × 16px; ko 320: 3 lines). A line of its own wraps by itself and can never take the title's room. */}
+        {model.needsHand.length > 0 ? (
+          <p className="m-0 border-b border-ds-line px-3 py-1.5 text-ds-small text-ds-ink-3" data-testid="home-needs-hand-hint">{tb('needsMeHint')}</p>
+        ) : null}
         {model.needsHand.length === 0 && hiddenNeedsMe === 0 && partial ? (
           // some of what feeds this list could not be read: an empty list is not «all caught up»
           <p className="m-0 px-4 py-6 text-center text-ds-small text-ds-ink-2" data-testid="home-partial-empty">{tb('loadErrorTitle')}</p>
