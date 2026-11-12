@@ -10,6 +10,7 @@ import { DndContext } from '@dnd-kit/core';
 import { LAYER } from '@/components/ds/layers';
 import { KanbanColumn } from './kanban-column';
 import { KanbanTrustColumn } from './kanban-trust-column';
+import { KanbanListView } from './kanban-list-view';
 import type { KanbanStory } from './types';
 import koMessages from '../../../messages/ko.json';
 
@@ -96,5 +97,31 @@ describe('4908 열 → 카드 전달', () => {
       root.render(wrap(<KanbanTrustColumn id="running" label="실행 중" locked={false} stories={[story({ id: 'a', status: 'ready-for-dev' })]} epicMap={{}} memberMap={{}} onStoryClick={() => {}} />));
     });
     expect(container.textContent).not.toContain(label);
+  });
+});
+
+describe('4908 열 — codex 검수 반영', () => {
+  it('⭐WIP 초과 열은 붉은 면을 유지한다 — 내용 칸 층(bg-ds-surface)이 같은 속성을 덮어 붉은 면이 사라지지 않는다', async () => {
+    await act(async () => {
+      root.render(wrap(<KanbanColumn id="in-progress" label="진행 중" stories={[]} epicMap={{}} memberMap={{}} onStoryClick={() => {}} wipExceeded wipLimit={1} />));
+    });
+    expect(columnDiv().className).toContain('bg-destructive-tint');
+    expect(columnDiv().className).not.toContain(LAYER.panel);
+  });
+
+  it('⭐놓을 수 있는 열은 녹색 테두리를 유지한다 — 평소 테두리(border-ds-line)와 겹치지 않는다', async () => {
+    await act(async () => {
+      root.render(wrap(<KanbanColumn id="ready-for-dev" label="개발 대기" stories={[]} epicMap={{}} memberMap={{}} onStoryClick={() => {}} dragStatus="backlog" />));
+    });
+    const cls = columnDiv().className.split(/\s+/);
+    expect(cls).toContain('border-ds-done');
+    expect(cls).not.toContain('border-ds-line');
+  });
+
+  it('⭐목록 보기도 열린 카드를 표시한다(selectedStoryId)', async () => {
+    await act(async () => {
+      root.render(wrap(<KanbanListView stories={[story({ id: 'a' }), story({ id: 'b' })]} epicMap={{}} memberMap={{}} onStoryClick={() => {}} onChangeStatus={async () => {}} selectedStoryId="a" />));
+    });
+    expect([...container.querySelectorAll('[data-selected]')]).toHaveLength(1);
   });
 });

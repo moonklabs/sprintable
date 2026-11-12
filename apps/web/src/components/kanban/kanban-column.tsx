@@ -126,20 +126,21 @@ export function KanbanColumn({
 
   const statusColor = STATUS_COLOR[id] ?? STATUS_COLOR['backlog'];
   // AC1: WIP 초과 시 빨간 강조
+  // 4908 — 열 면은 «내용 칸 층»(LAYER.panel)이 기본이다. WIP 초과(붉은 면) · 놓을 수 있는 열(녹색 테두리)은 같은 속성을 다른 값으로 덮어야 해서(Tailwind 생성 순서상 클래스 두 개가 겹치면 뒤쪽이 이긴다) 면 · 테두리를 한 곳에서 하나만 고른다.
   const colClass = wipExceeded
-    ? 'bg-destructive-tint ring-1 ring-destructive/30'
+    ? 'border-transparent bg-destructive-tint ring-1 ring-destructive/30'
     : isOver && isValidTarget
-      ? 'ring-1 ring-ds-action'
+      ? `${LAYER.panel} border-ds-line ring-1 ring-ds-action`
       : isValidTarget
-        ? 'border-ds-done'
+        ? `${LAYER.panel} border-ds-done`
         : isInvalidTarget
-          ? 'opacity-45'
-          : ''; // E-MODERN A: status 색 tint 배경 전면 제거(색=신호만·헤더 dot이 유일 상태색). 4908 — 열 면은 «내용 칸 층»(아래 className)
+          ? `${LAYER.panel} border-ds-line opacity-45`
+          : `${LAYER.panel} border-ds-line`; // E-MODERN A: status 색 tint 배경 전면 제거(색=신호만·헤더 dot이 유일 상태색)
 
   return (
     <div
       ref={setNodeRef}
-      className={`flex h-full flex-col rounded-xl border border-ds-line p-3 transition ${LAYER.panel} ${collapsed ? 'w-[52px] min-w-[52px]' : 'w-[280px] min-w-[240px]'} ${colClass}`}
+      className={`flex h-full flex-col rounded-xl border p-3 transition ${collapsed ? 'w-[52px] min-w-[52px]' : 'w-[280px] min-w-[240px]'} ${colClass}`}
     >
       {isDragging && isValidTarget && (
         // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).

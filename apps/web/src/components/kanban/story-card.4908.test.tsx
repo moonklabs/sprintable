@@ -106,3 +106,53 @@ describe('4908 카드 — «⋯» 버튼과 메뉴', () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 });
+
+describe('4908 카드 — codex 검수 반영', () => {
+  it('⭐«⋯» 버튼은 누름 · 키를 카드(끌기 · 집기를 소유)로 흘리지 않는다 — 누르다 8px 움직여 끌기가 시작되거나 Enter/Space가 집기로 읽히지 않게', () => {
+    const outerPointer = vi.fn();
+    const outerKey = vi.fn();
+    act(() => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <DndContext>
+            <div onPointerDown={outerPointer} onKeyDown={outerKey}>
+              <StoryCard story={makeStory()} onClick={() => {}} projectId="p1" />
+            </div>
+          </DndContext>
+        </NextIntlClientProvider>,
+      );
+    });
+    const btn = container.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
+    act(() => {
+      btn.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      btn.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      btn.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    });
+    expect(outerPointer).not.toHaveBeenCalled();
+    expect(outerKey).not.toHaveBeenCalled();
+  });
+
+  it('«⋯» 버튼이 메뉴가 열렸는지(aria-expanded)를 말한다', () => {
+    const card = render();
+    const btn = card.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
+    expect(btn.getAttribute('aria-expanded')).toBe('false');
+    act(() => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(btn.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('⭐에이전트가 담당 넷째 이후에 있어도 스크린리더 글(«에이전트»)이 남는다(예전 hasAgent는 전원을 봤다)', () => {
+    const members = [
+      { id: 'h1', name: '가', type: 'human' }, { id: 'h2', name: '나', type: 'human' }, { id: 'h3', name: '다', type: 'human' },
+      { id: 'a4', name: '에이전트넷', type: 'agent' },
+    ];
+    const card = render({ assignees: members as never });
+    expect(card.textContent).toContain(koMessages.board.filterAgents);
+    const noAgent = render({ assignees: members.slice(0, 3) as never });
+    expect(noAgent.textContent).not.toContain(koMessages.board.filterAgents);
+  });
+
+  it('열린 카드의 글자는 한 단계 진한 ink-2(흐린 ink-3 아님)', () => {
+    expect(render({ selected: true }).querySelector('div.min-h-5')?.className).toContain('text-ds-ink-2');
+    expect(render({ selected: false }).querySelector('div.min-h-5')?.className).toContain('text-ds-ink-3');
+  });
+});

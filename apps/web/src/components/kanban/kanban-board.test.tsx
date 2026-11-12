@@ -2227,3 +2227,49 @@ describe('KanbanBoard — 카드 담당 이름 조직 범위 보충([SID:4300])'
     expect(calls.filter((u) => u.startsWith('/api/team-members'))).toHaveLength(0);
   });
 });
+
+// 4908 — 상세 패널이 열려 있는 카드가 «열린 카드»(층 + 왼쪽 막대 + aria-current)로 표시된다: 신뢰축 · 클래식 · 목록 세 길 모두 보드가 selectedStoryId를 내려보낸다.
+describe('KanbanBoard — 열린 카드 표시(4908)', () => {
+  async function openCard(title: string) {
+    const card = container.querySelector(`[title="${title}"]`) as HTMLElement | null;
+    expect(card, `${title} 카드`).not.toBeNull();
+    await act(async () => {
+      card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+  const selected = () => [...container.querySelectorAll<HTMLElement>('[data-selected="true"]')];
+  const stories = [
+    { id: 's1', title: '카드하나', status: 'backlog', priority: 'medium', trust_stage: 'queued' },
+    { id: 's2', title: '카드둘', status: 'backlog', priority: 'medium', trust_stage: 'queued' },
+  ];
+
+  it('⭐신뢰축: 누른 카드 하나만 열린 카드가 된다', async () => {
+    stubFetch(stories);
+    await mount();
+    expect(selected()).toHaveLength(0);
+    await openCard('카드둘');
+    expect(selected()).toHaveLength(1);
+    expect(selected()[0]!.getAttribute('title')).toBe('카드둘');
+    expect(selected()[0]!.getAttribute('aria-current')).toBe('true');
+  });
+
+  it('⭐클래식 5단계: 누른 카드 하나만 열린 카드가 된다', async () => {
+    stubFetch(stories);
+    await mount();
+    const classicBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '5단계 클래식');
+    await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await openCard('카드하나');
+    expect(selected()).toHaveLength(1);
+    expect(selected()[0]!.getAttribute('title')).toBe('카드하나');
+  });
+
+  it('⭐목록 보기(폰): 누른 카드 하나만 열린 카드가 된다', async () => {
+    isMobileMock = true;
+    stubFetch(stories);
+    await mount();
+    await openCard('카드하나');
+    expect(selected()).toHaveLength(1);
+  });
+});

@@ -41,6 +41,6 @@ describe('StoryCard «⋯» 버튼 — 호버 전용 아님([SID:4345] → 4908)
     expect(tokens.filter((t) => /^(sm|md|lg|xl):(opacity-0|group-hover:opacity-100)$/.test(t))).toEqual([]);
     expect(tokens).not.toContain('opacity-0');
     for (const t of HOVER_REVEAL_FOCUS_RING.split(' ')) expect(tokens, t).toContain(t);
-    expect(tokens).toEqual(expect.arrayContaining(['min-h-6', 'min-w-6', 'touch:min-h-11', 'touch:min-w-11']));
+    expect(tokens).toEqual(expect.arrayContaining(['size-6', 'min-h-6', 'min-w-6', 'touch:size-11']));
   });
 });

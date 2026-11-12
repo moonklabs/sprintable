@@ -10,6 +10,7 @@ import { pickEulReulJosa } from '@/lib/korean-particle';
 import type { KanbanStory, KanbanMember, LineStatusSummary } from './types';
 import { parseStoryCardTitle } from '@/lib/story-card-title';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { AlertTriangle, ChevronRight, EyeOff, History, MoreHorizontal, Pause, Zap, ZapOff, type LucideIcon } from 'lucide-react';
 import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
@@ -452,6 +453,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     { id: 'done', label: getStatusLabel?.('done') ?? t('done') },
   ];
 
+  // 열린 카드(action-soft 면)에서는 흐린 글(ink-3)이 다크에서 4.29:1로 모자란다(layer-rule.test) — 한 단계 진한 ink-2로.
+  const metaInk = selected ? 'text-ds-ink-2' : 'text-ds-ink-3';
   const proofStateLabel = statuses.find((s) => s.id === story.status)?.label ?? story.status;
 
   return (
@@ -482,7 +485,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       {selected ? <span aria-hidden="true" data-testid="story-card-selected-bar" className="absolute inset-y-1.5 left-0 w-[3px] rounded-r-full bg-ds-action" /> : null}
 
       {/* 줄 1 — 번호 · (대기 열만) 상태 글 · 경고 칩 1개 · ⋯. «다음: …» 경고는 예전 그대로 우선순위 1개만(문구 · 규칙 불변) */}
-      <div className="flex min-h-5 items-center gap-1.5 text-editorial-meta text-ds-ink-3">
+      <div className={cn('flex min-h-5 items-center gap-1.5 text-editorial-meta', metaInk)}>
         {story.story_number ? <span className="shrink-0 font-mono">#{story.story_number}</span> : null}
         {showStatus ? (
           <span className="inline-flex shrink-0 items-center gap-1 text-ds-ink-2">
@@ -497,17 +500,23 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
           </span>
         ) : null}
         <span className="flex-1" />
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-xs"
           aria-haspopup="menu"
           aria-label={t('cardMenuButton', { title: story.title })}
           title={t('cardMenuButton', { title: story.title })}
+          aria-expanded={contextMenuOpen}
           onClick={openMenuFromButton}
+          // 카드 바깥 div가 dnd-kit 끌기(pointerdown)와 키 처리(Space/Enter = 집기)를 소유한다 — 이 버튼의 누름 · 키가 거기로 새면 끌기가 시작되거나 집기로 읽힌다.
+          onPointerDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
           // 터치 폰은 누르는 자리 44×44(음수 margin으로 줄 높이는 그대로) — 호버 없는 기기는 늘 보이고, 마우스는 카드 호버 · 초점 때 보인다.
-          className={cn('-my-0.5 -mr-1 rounded text-ds-ink-3 hover:bg-ds-surface-sunk hover:text-ds-ink touch:-my-3 touch:min-h-11 touch:min-w-11', HOVER_REVEAL_HIT, HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING)}
+          className={cn('-my-0.5 -mr-1', metaInk, 'hover:bg-ds-surface-sunk hover:text-ds-ink touch:-my-3 touch:size-11', HOVER_REVEAL_HIT, HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING)}
         >
           <MoreHorizontal className="size-4" aria-hidden="true" />
-        </button>
+        </Button>
       </div>
 
       {/* 줄 2 — 제목(2줄까지) */}
@@ -517,7 +526,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       <div className="mt-1 flex min-h-5 items-center gap-1.5">
         {categoryTag ? <MaterialChip>{categoryTag}</MaterialChip> : null}
         {epicName && story.epic_id ? (
-          <span className="flex min-w-0 max-w-[40%] items-center gap-1 text-editorial-meta text-ds-ink-3">
+          <span className={cn('flex min-w-0 max-w-[40%] items-center gap-1 text-editorial-meta', metaInk)}>
             <span className={`size-1.5 shrink-0 rounded-sm ${getEpicDotClass(story.epic_id)}`} aria-hidden="true" />
             <span className="min-w-0 truncate">{epicName}</span>
           </span>
@@ -525,7 +534,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
         {labels.slice(0, 2).map((label) => (
           <LabelChip key={label.id} label={label} />
         ))}
-        {labels.length > 2 ? <span className="shrink-0 text-editorial-meta text-ds-ink-3">+{labels.length - 2}</span> : null}
+        {labels.length > 2 ? <span className={cn('shrink-0 text-editorial-meta', metaInk)}>+{labels.length - 2}</span> : null}
         {lineBadgePromoted ? null : lineBadge === 'pending_gate' ? (
           <Badge variant="outline" className="gap-1">
             <Pause className="size-3 shrink-0" />
@@ -551,12 +560,12 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
             {lastExecution.status === 'matched' ? (
               <Zap className="h-3 w-3 text-ds-needs-hand" />
             ) : (
-              <ZapOff className="h-3 w-3 text-ds-ink-3" />
+              <ZapOff className={cn('h-3 w-3', metaInk)} />
             )}
           </span>
         ) : null}
         {story.story_points != null ? (
-          <span className="shrink-0 text-editorial-meta tabular-nums text-ds-ink-3">{t('storyPointsBadge', { count: story.story_points })}</span>
+          <span className={cn('shrink-0 text-editorial-meta tabular-nums', metaInk)}>{t('storyPointsBadge', { count: story.story_points })}</span>
         ) : null}
         {/* E-VERIFY P0-04 — 증거 있는 done 카드에만(무증거 = 완전 무표시). human_verified → verified · self_reported만 → claimed. */}
         {story.status === 'done' && trustStage === 'verified' && verifiedBy ? (
@@ -595,6 +604,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
             {assigneeList.length > 3 && (
               <div className="flex h-5 w-5 items-center justify-center rounded-full border border-ds-line bg-ds-surface-sunk text-micro font-medium text-ds-ink-2 ring-1 ring-ds-surface-high">
                 +{assigneeList.length - 3}
+                {assigneeList.slice(3).some((m) => m.type === 'agent') ? <span className="sr-only">{t('filterAgents')}</span> : null}
               </div>
             )}
           </div>

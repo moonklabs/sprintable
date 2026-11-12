@@ -68,6 +68,11 @@ describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
     }
   });
 
+  it.each(themes)('⭐%s: 보드 카드 안 글자 — 평소 카드는 ink-3(흐린 글)까지, 열린 카드는 ink-2까지 4.5:1 이상(다크에서 ink-3은 열린 카드 면 위 4.29:1이라 모자란다 — codex 4908)', (_name, t) => {
+    expect(contrast(t['ink-3']!, t[LAYER_TOKEN.rowOthers]!), 'ink-3 on rowOthers').toBeGreaterThanOrEqual(4.5);
+    for (const ink of ['ink', 'ink-2']) expect(contrast(t[ink]!, t[LAYER_TOKEN.rowSelected]!), `${ink} on rowSelected`).toBeGreaterThanOrEqual(4.5);
+  });
+
   it('층마다 토큰이 서로 다르다(같은 토큰을 두 층에 쓰지 않는다) · 클래스 이름이 토큰 이름을 가리킨다', () => {
     const tokens = Object.values(LAYER_TOKEN);
     expect(new Set(tokens).size).toBe(tokens.length);

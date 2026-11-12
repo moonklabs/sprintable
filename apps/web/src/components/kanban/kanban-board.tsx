@@ -1860,6 +1860,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
               storyLineMap={storyLineMap}
               projectId={projectId}
               getStatusLabel={domainLabels.statusLabel}
+              selectedStoryId={selectedStory?.id ?? null}
               onCreateStory={(title) => createStoryReporting('backlog', title)}
             />
           </div>
