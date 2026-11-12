@@ -2042,9 +2042,14 @@ describe('ApprovalsQueue — 4909 AC3 the list + detail screen', () => {
     await rightClick('h2');
     expect(menuLabels()).toEqual([koMessages.cage.gateApprove, koMessages.cage.gateReject]);
     await clickMenuItem(koMessages.cage.gateReject);
-    const patch = calls.find((c) => c.method === 'PATCH');
-    expect(patch?.url).toBe('/api/v1/hitl-requests/h2');
-    expect(JSON.parse(patch?.body ?? '{}')).toEqual({ status: 'rejected' });
+    const patches = () => calls.filter((c) => c.method === 'PATCH');
+    expect(patches().map((c) => c.url)).toEqual(['/api/v1/hitl-requests/h2']);
+    expect(JSON.parse(patches()[0]!.body ?? '{}')).toEqual({ status: 'rejected' });
+    // …and «approve» on the OTHER row sends status approved for THAT one (a missing or miswired approve entry fails here)
+    await rightClick('h1');
+    await clickMenuItem(koMessages.cage.gateApprove);
+    expect(patches().map((c) => c.url)).toEqual(['/api/v1/hitl-requests/h2', '/api/v1/hitl-requests/h1']);
+    expect(JSON.parse(patches()[1]!.body ?? '{}')).toEqual({ status: 'approved' });
   });
 
   it('an agent account has no right-click menu on a HITL row (the browser\'s own menu stays)', async () => {
@@ -2084,7 +2089,9 @@ describe('ApprovalsQueue — 4909 AC3 the list + detail screen', () => {
     await act(async () => { approve.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await rightClick('g1');
     const labels = menuLabels();
+    expect(labels).toEqual([koMessages.cage.gateApprove, koMessages.cage.sigReject, koMessages.cage.gateDiscussSubmit, koMessages.cage.queueMenuOpen]); // the menu IS there (an empty menu would make the loop below vacuous)
     for (const label of labels.slice(0, 3)) expect(disabledOf(label as string)).toBe(true);
+    expect(disabledOf(labels[3] as string)).toBe(false);
   });
 
   it('⭐a double-click on a row opens that request\'s own page (/gates/{id}); a single click only picks it; a HITL row has no page', async () => {
