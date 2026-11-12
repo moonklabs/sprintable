@@ -89,7 +89,21 @@ function hitl(overrides: Partial<HitlInboxItem>): HitlInboxItem {
   };
 }
 
+// story 4909 (UI-R1 AC3) — the queue is a «list + detail» screen: wide (≥ 1024px) the picked row's card sits beside the list. These tests read the card of the FIRST row (picked on open), so they run wide.
+/** the buttons of the request the detail column shows (the list rows also carry buttons — their titles — which are not the card's actions) */
+const scope = (): ParentNode => container.querySelector('[data-testid="gate-queue-detail"]') ?? container;
+/** pick a row of the list by (part of) its title — the detail column then shows that request */
+const pickRow = async (titlePartOrKey: string) => {
+  const row = [...container.querySelectorAll('[data-testid="gate-queue-row"]')].find((r) => r.getAttribute('data-row-key') === titlePartOrKey || r.textContent?.includes(titlePartOrKey));
+  expect(row).toBeTruthy();
+  await act(async () => { (row as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+};
+function stubWidth(wide: boolean) {
+  vi.stubGlobal('matchMedia', (q: string) => ({ matches: wide, media: q, addEventListener: () => {}, removeEventListener: () => {} }));
+}
+
 beforeEach(() => {
+  stubWidth(true);
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -203,7 +217,7 @@ describe('ApprovalsQueue', () => {
     await mount();
     expect(container.querySelector('[data-testid="gate-inbox-load-error"]')).not.toBeNull();
     heldShouldFail = false;
-    const retryBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '다시 시도') as HTMLButtonElement;
+    const retryBtn = [...scope().querySelectorAll('button')].find((b) => b.textContent === '다시 시도') as HTMLButtonElement;
     await act(async () => { retryBtn.click(); });
     expect(container.querySelector('[data-testid="gate-inbox-load-error"]')).toBeNull();
     expect(container.textContent).toContain('복구된 항목');
@@ -243,7 +257,7 @@ describe('ApprovalsQueue', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
       expect(container.querySelector('[data-testid="gate-inbox-load-error"]')).not.toBeNull();
       expect(container.textContent).toContain(koMessages.cage.gateInboxLoadError);
-      expect([...container.querySelectorAll('button')].some((b) => b.textContent === koMessages.cage.gateInboxRetry)).toBe(true);
+      expect([...scope().querySelectorAll('button')].some((b) => b.textContent === koMessages.cage.gateInboxRetry)).toBe(true);
     } finally {
       vi.useRealTimers();
     }
@@ -262,7 +276,10 @@ describe('ApprovalsQueue', () => {
     const text = container.textContent ?? '';
     expect(text).toContain('머지 게이트 항목');
     expect(text).toContain('문서 결재 항목');
-    expect(container.querySelectorAll('button').length).toBeGreaterThanOrEqual(4);
+    // four requests = four rows in the list (the detail column shows the picked one's card); three need a hand, one is on hold
+    expect(container.querySelectorAll('[data-testid="gate-queue-row"]').length).toBe(4);
+    expect(container.querySelectorAll('[data-testid="gate-queue-section-hand"] [data-testid="gate-queue-row"]').length).toBe(3);
+    expect(container.querySelectorAll('[data-testid="gate-queue-section-held"] [data-testid="gate-queue-row"]').length).toBe(1);
   });
 
   // story #2926(잔여 fast-follow, 카디르 F2 QA LOW①) — stateLabel 문구가 통일 키
@@ -378,8 +395,8 @@ describe('ApprovalsQueue', () => {
     );
     await mount();
     expect(container.textContent).toContain(koMessages.cage.gateReapprovalResubmitWaiting);
-    const approveButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
-    const rejectButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.sigReject));
+    const approveButton = [...scope().querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    const rejectButton = [...scope().querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.sigReject));
     expect(approveButton?.hasAttribute('disabled')).toBe(true);
     expect(rejectButton?.hasAttribute('disabled')).toBe(true);
   });
@@ -394,7 +411,7 @@ describe('ApprovalsQueue', () => {
     );
     await mount();
     expect(container.textContent).not.toContain(koMessages.cage.gateReapprovalResubmitWaiting);
-    const approveButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    const approveButton = [...scope().querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
     expect(approveButton?.hasAttribute('disabled')).toBe(false);
   });
 
@@ -504,7 +521,7 @@ describe('ApprovalsQueue', () => {
   it('항목 탭 시 canonical 상세(/gates/{id})로 push한다(중복 빌드 봉쇄)', async () => {
     mockFetches([gate({ id: 'g-tap' })], []);
     await mount();
-    const button = container.querySelector('button');
+    const button = scope().querySelector('button');
     await act(async () => { button?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(pushMock).toHaveBeenCalledWith('/gates/g-tap');
   });
@@ -520,7 +537,7 @@ describe('ApprovalsQueue', () => {
     });
     mockFetches([{ ...gate({ id: 'g-own' }), project_id: projectId }], []);
     await mount();
-    await act(async () => { container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { scope().querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(pushMock).toHaveBeenLastCalledWith(expected);
   });
 
@@ -531,13 +548,13 @@ describe('ApprovalsQueue', () => {
     });
     mockFetches([gate({ id: 'g-tap' })], []);
     await mount();
-    await act(async () => { container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { scope().querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(pushMock).toHaveBeenLastCalledWith('/gates/g-tap?p=proj-A');
 
     const { setPendingProjectTarget } = await import('@/lib/pending-project-switch');
     try {
       await act(async () => { setPendingProjectTarget('proj-B'); });
-      await act(async () => { container.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      await act(async () => { scope().querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       expect(pushMock).toHaveBeenLastCalledWith('/gates/g-tap?p=proj-B');
     } finally {
       setPendingProjectTarget(null);
@@ -576,7 +593,7 @@ describe('ApprovalsQueue', () => {
     // #2257 갭 재현: held 쿼리가 항상 []을 반환하는 상황에서도 큐 기본 동작(pending 렌더)은 서야 한다.
     mockFetches([gate({ id: 'g-pending-only' })], []);
     await mount();
-    expect(container.querySelectorAll('button').length).toBe(1);
+    expect(scope().querySelectorAll('button').length).toBe(1);
     expect(container.textContent).not.toContain(koMessages.cage.gateInboxEmpty);
   });
 
@@ -595,7 +612,7 @@ describe('ApprovalsQueue', () => {
   it('hitl 항목 승인 클릭 시 PATCH /api/v1/hitl-requests/{id}를 status=approved로 호출하고 목록에서 사라진다', async () => {
     const calls = mockFetches([hitl({ id: 'h-approve' })], []);
     await mount();
-    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    const approveButton = Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
     await act(async () => { approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const patchCall = calls.find((c) => c.method === 'PATCH');
     expect(patchCall?.url).toBe('/api/v1/hitl-requests/h-approve');
@@ -606,7 +623,7 @@ describe('ApprovalsQueue', () => {
   it('hitl 항목 반려 클릭 시 PATCH를 status=rejected로 호출한다', async () => {
     const calls = mockFetches([hitl({ id: 'h-reject' })], []);
     await mount();
-    const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateReject));
+    const rejectButton = Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateReject));
     await act(async () => { rejectButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const patchCall = calls.find((c) => c.method === 'PATCH');
     expect(JSON.parse(patchCall?.body ?? '{}')).toEqual({ status: 'rejected' });
@@ -621,7 +638,7 @@ describe('ApprovalsQueue', () => {
       [],
     );
     await mount();
-    const gateButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('머지 게이트'));
+    const gateButton = Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes('머지 게이트'));
     await act(async () => { gateButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(pushMock).toHaveBeenCalledWith('/gates/g-mixed');
     expect(pushMock).not.toHaveBeenCalledWith(expect.stringContaining('h-mixed'));
@@ -639,7 +656,7 @@ describe('ApprovalsQueue', () => {
     });
     mockFetches([hitl({ id: 'h-agent', title: 'agent가 보는 승인요청' })], []);
     await mount();
-    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    const buttons = [...scope().querySelectorAll('button')].map((b) => b.textContent);
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateReject))).toBe(false);
     expect(container.textContent).toContain(koMessages.cage.gateReadonlyNotAuthorized);
@@ -652,14 +669,14 @@ describe('ApprovalsQueue', () => {
     });
     mockFetches([hitl({ id: 'h-unknown' })], []);
     await mount();
-    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    const buttons = [...scope().querySelectorAll('button')].map((b) => b.textContent);
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
   });
 
   it('human 계정이면 hitl 승인/반려 버튼이 뜬다(회귀 확認)', async () => {
     mockFetches([hitl({ id: 'h-human' })], []);
     await mount();
-    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    const buttons = [...scope().querySelectorAll('button')].map((b) => b.textContent);
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateReject))).toBe(true);
   });
@@ -678,7 +695,7 @@ describe('ApprovalsQueue', () => {
   it('AC — 저위험(risk_grade=low)·승인권한 있는 gate는 인라인 승인/변경요청 버튼이 뜬다', async () => {
     mockFetches([lowRiskActionable()], []);
     await mount();
-    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    const buttons = [...scope().querySelectorAll('button')].map((b) => b.textContent);
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
     expect(buttons.some((t) => t?.includes(koMessages.cage.sigReject))).toBe(true);
   });
@@ -690,7 +707,7 @@ describe('ApprovalsQueue', () => {
   it('AC(신규, 22affaf2) — risk_grade=high도 인라인 카드를 받는다·primary 라벨은 "승인하고 서명"(원탭 아님)', async () => {
     mockFetches([lowRiskActionable({ id: 'g-high', risk_grade: 'high' })], []);
     await mount();
-    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    const buttons = [...scope().querySelectorAll('button')].map((b) => b.textContent);
     // "승인하고 서명"은 "승인"을 부분문자열로 포함하므로 정확히 일치하는 버튼이 없는지로 판정한다
     // (원탭 전용 "승인" 단독 버튼이 안 남아있어야 함 — 서명 게이팅 우회 경로가 없다는 뜻).
     expect(buttons.some((t) => t === koMessages.cage.sigApproveAndSign)).toBe(true);
@@ -702,7 +719,7 @@ describe('ApprovalsQueue', () => {
   it('AC(신규, 22affaf2) — risk_grade=high에서 primary("승인하고 서명") 클릭은 즉시 transition을 안 부르고 서명 모달을 연다', async () => {
     const calls = mockFetches([lowRiskActionable({ id: 'g-high2', risk_grade: 'high' })], []);
     await mount();
-    const signBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigApproveAndSign));
+    const signBtn = Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigApproveAndSign));
     await act(async () => { signBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
     expect(document.body.querySelector('[data-slot="dialog-content"]')).toBeTruthy();
@@ -711,21 +728,21 @@ describe('ApprovalsQueue', () => {
   it('unknown(risk_grade 미배선)도 이제 인라인 카드를 받되 고위험과 동형(서명 모달, 원탭 아님) — 보수적 취급 유지', async () => {
     mockFetches([lowRiskActionable({ id: 'g-unknown', risk_grade: null })], []);
     await mount();
-    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    const buttons = [...scope().querySelectorAll('button')].map((b) => b.textContent);
     expect(buttons.some((t) => t?.includes(koMessages.cage.sigApproveAndSign))).toBe(true);
   });
 
   it('can_approve=false면 저위험이어도 인라인 버튼이 안 뜬다(per-caller 권한 게이팅)', async () => {
     mockFetches([lowRiskActionable({ id: 'g-noperm', can_approve: false })], []);
     await mount();
-    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    const buttons = [...scope().querySelectorAll('button')].map((b) => b.textContent);
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
   });
 
   it('AC "승인 후 완료 상태+서명 기록 링크 즉시" — 승인 클릭 시 POST /api/gates/{id}/transition을 호출하고, 재조회 없이 완료 배지+기록 링크로 즉시 바뀐다', async () => {
     const calls = mockFetches([lowRiskActionable()], []);
     await mount();
-    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    const approveButton = Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
     await act(async () => { approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     const postCall = calls.find((c) => c.method === 'POST');
@@ -735,7 +752,7 @@ describe('ApprovalsQueue', () => {
     expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
     expect(container.textContent).toContain(koMessages.cage.queueViewRecord);
     // 승인/반려 버튼 자체가 사라진다(재클릭 물리적으로 불가 — 중복 실행 방지의 두 번째 층).
-    const buttonsAfter = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    const buttonsAfter = [...scope().querySelectorAll('button')].map((b) => b.textContent);
     expect(buttonsAfter.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
     // 재조회(fetchGates) 없이 이 렌더만으로 반영됐다 — GET 호출 수가 mount 시점(pending+held
     // 각 1회=2)에서 늘지 않았다.
@@ -769,7 +786,7 @@ describe('ApprovalsQueue', () => {
       return { ok: true, json: async () => [] };
     }));
     await mount();
-    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    const approveButton = Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
     await act(async () => { approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     // 「완료」 카드로 즉시 전환됐다 — 그 자체가 AC3의 명시 안내다(별도 에러 배너를 겹쳐
@@ -779,7 +796,7 @@ describe('ApprovalsQueue', () => {
     // 재조회(GET) 없이 body의 current_status만으로 전환됐다 — mount 시점(pending+held=2)에서
     // POST 1건 추가된 것 외 GET 호출 수가 안 늘어야 한다.
     expect(calls.filter((c) => c.method === undefined || c.method === 'GET')).toHaveLength(2);
-    const buttonsAfter = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    const buttonsAfter = [...scope().querySelectorAll('button')].map((b) => b.textContent);
     expect(buttonsAfter.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
   });
 
@@ -798,7 +815,7 @@ describe('ApprovalsQueue', () => {
     }));
     await mount();
 
-    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    const approveButton = Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
     await act(async () => { approveButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(approveButton.disabled).toBe(true);
     // 응답 오기 전 재클릭 — disabled라 브라우저가 클릭을 무시하지만, 방어적으로 핸들러를
@@ -828,7 +845,7 @@ describe('ApprovalsQueue', () => {
     }));
     await mount();
 
-    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    const approveButton = Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
     await act(async () => { approveButton.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(approveButton.textContent).not.toContain('...');
     expect(approveButton.textContent).toContain(koMessages.cage.gateApproving);
@@ -843,7 +860,7 @@ describe('ApprovalsQueue', () => {
   it('변경 요청 클릭 시(저위험) 사유 다이얼로그를 열고, 사유 입력 後에만 status=rejected로 호출한다', async () => {
     const calls = mockFetches([lowRiskActionable({ id: 'g-rej' })], []);
     await mount();
-    const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigReject));
+    const rejectButton = Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigReject));
     await act(async () => { rejectButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     // 다이얼로그가 열렸다 — 즉시 POST는 아직 안 나갔다.
@@ -876,18 +893,18 @@ describe('ApprovalsQueue', () => {
       return { ok: true, json: async () => [] };
     }));
     await mount();
-    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    const approveButton = Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
     await act(async () => { approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(container.textContent).toContain('이미 처리된 게이트입니다');
     expect(container.textContent).not.toContain(koMessages.cage.queueResolvedApproved);
-    const buttonsAfter = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    const buttonsAfter = [...scope().querySelectorAll('button')].map((b) => b.textContent);
     expect(buttonsAfter.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
   });
 
   it('held gate는 저위험이어도 인라인 버튼이 안 뜬다(보류 상태는 원탭 대상 아님)', async () => {
     mockFetches([], [lowRiskActionable({ id: 'g-held-low', status: 'held' })]);
     await mount();
-    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    const buttons = [...scope().querySelectorAll('button')].map((b) => b.textContent);
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
   });
 
@@ -898,7 +915,7 @@ describe('ApprovalsQueue', () => {
     mockFetches([lowRiskActionable({ id: 'g-pending-held-until', held_until: new Date().toISOString() })], []);
     await mount();
     expect(container.textContent).toContain(koMessages.cage.gateStatusHeld);
-    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    const buttons = [...scope().querySelectorAll('button')].map((b) => b.textContent);
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
   });
 
@@ -928,8 +945,13 @@ describe('ApprovalsQueue', () => {
     // React가 두 카드의 위치/구조를 그대로 유지하는 한(g-b는 이 테스트 내내 in-flight 2버튼
     // 레이아웃을 벗어나지 않는다) DOM 참조는 재조회 없이도 재렌더를 관통해 유효하다 — B가
     // "..."로 라벨만 바뀌는 것과 무관하게 같은 버튼 엘리먼트를 계속 가리킨다.
-    const [approveA, approveB] = Array.from(container.querySelectorAll('button')).filter((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement[];
+    // the detail column shows ONE request at a time: press A's approve (picked on open), pick B's row, press B's approve
+    const approveIn = () => Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    const approveA = approveIn();
     await act(async () => { approveA.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await pickRow('g-b');
+    const approveB = approveIn();
+    expect(approveB).not.toBe(approveA);
     await act(async () => { approveB.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2);
 
@@ -951,7 +973,7 @@ describe('ApprovalsQueue', () => {
   it('보류(논의 필요) 클릭 시 다이얼로그가 열리고, 사유 없인 제출 버튼이 비활성이다', async () => {
     mockFetches([lowRiskActionable({ id: 'g-discuss' })], []);
     await mount();
-    const discussButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateDiscussSubmit));
+    const discussButton = Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateDiscussSubmit));
     await act(async () => { discussButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(document.body.querySelector('[data-slot="dialog-title"]')?.textContent).toBe(koMessages.cage.gateDiscussTitle);
     const submitButton = Array.from(document.body.querySelectorAll('[data-slot="dialog-content"] button')).find((b) => b.textContent === koMessages.cage.gateDiscussSubmit) as HTMLButtonElement;
@@ -961,7 +983,7 @@ describe('ApprovalsQueue', () => {
   it('보류(논의 필요) 사유 입력 후 제출하면 POST /api/gates/{id}/discuss를 {reason}으로 호출한다', async () => {
     const calls = mockFetches([lowRiskActionable({ id: 'g-discuss2' })], []);
     await mount();
-    const discussButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateDiscussSubmit));
+    const discussButton = Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateDiscussSubmit));
     await act(async () => { discussButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const textarea = document.body.querySelector('[data-slot="dialog-content"] textarea') as HTMLTextAreaElement;
     await act(async () => {
@@ -988,18 +1010,18 @@ describe('ApprovalsQueue', () => {
       return { ok: true, json: async () => [] };
     }));
     await mount();
-    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    const approveButton = Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
     await act(async () => { approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
 
-    const undoButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateUndo));
+    const undoButton = Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateUndo));
     expect(undoButton).toBeTruthy();
     await act(async () => { undoButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     const undoCall = calls.find((c) => c.method === 'POST' && c.url.includes('/undo'));
     expect(undoCall?.url).toBe('/api/gates/g-undo/undo');
     expect(container.textContent).not.toContain(koMessages.cage.queueResolvedApproved);
-    const buttonsAfter = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    const buttonsAfter = [...scope().querySelectorAll('button')].map((b) => b.textContent);
     expect(buttonsAfter.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(true);
   });
 
@@ -1008,11 +1030,11 @@ describe('ApprovalsQueue', () => {
   it('AC 음성대조 — 반려 클릭은 다이얼로그만 열고(취소 버튼 안 뜸), 사유 입력 後 제출해야 취소 버튼이 뜬다', async () => {
     mockFetches([lowRiskActionable({ id: 'g-reject-undo' })], []);
     await mount();
-    const rejectButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigReject));
-    expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.cage.gateUndo))).toBe(false);
+    const rejectButton = Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigReject));
+    expect([...scope().querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.cage.gateUndo))).toBe(false);
     await act(async () => { rejectButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     // 다이얼로그만 열렸다 — 아직 반려되지 않았으므로 취소 버튼은 여전히 없다.
-    expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.cage.gateUndo))).toBe(false);
+    expect([...scope().querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.cage.gateUndo))).toBe(false);
 
     const textarea = document.body.querySelector('#gate-sig-reason') as HTMLTextAreaElement;
     await act(async () => {
@@ -1022,7 +1044,7 @@ describe('ApprovalsQueue', () => {
     });
     const dialogRejectBtn = [...document.body.querySelectorAll('[data-slot="dialog-content"] button')].find((b) => b.textContent?.includes(koMessages.cage.sigReject)) as HTMLButtonElement;
     await act(async () => { dialogRejectBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.cage.gateUndo))).toBe(true);
+    expect([...scope().querySelectorAll('button')].some((b) => b.textContent?.includes(koMessages.cage.gateUndo))).toBe(true);
   });
 
   // story 22affaf2(유나 design③) — 고위험 인라인 서명 모달. canonical 상세와 동일 컴포넌트
@@ -1039,7 +1061,7 @@ describe('ApprovalsQueue', () => {
     }
 
     async function openSignatureDialog() {
-      const signBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === koMessages.cage.sigApproveAndSign);
+      const signBtn = Array.from(scope().querySelectorAll('button')).find((b) => b.textContent === koMessages.cage.sigApproveAndSign);
       await act(async () => { signBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       const dialog = document.body.querySelector('[data-slot="dialog-content"]');
       expect(dialog).toBeTruthy();
@@ -1116,7 +1138,7 @@ describe('ApprovalsQueue', () => {
     it('큐 카드의 행2 [변경 요청] 버튼을 직접 눌러도(모달을 열지 않고) 고위험은 여전히 모달을 연다(서명 우회 경로 없음)', async () => {
       const calls = mockFetches([highRiskActionable({ id: 'g-sig-reject-entry' })], []);
       await mount();
-      const rejectEntry = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigReject));
+      const rejectEntry = Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigReject));
       await act(async () => { rejectEntry?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
       expect(document.body.querySelector('[data-slot="dialog-content"]')).toBeTruthy();
@@ -1127,7 +1149,7 @@ describe('ApprovalsQueue', () => {
   it('AC(신규, 22affaf2) — 인라인 승인 직후 "N분 내 취소 가능" 힌트가 취소 버튼과 함께 뜬다', async () => {
     mockFetches([lowRiskActionable({ id: 'g-hint' })], []);
     await mount();
-    const approveButton = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
+    const approveButton = Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove));
     await act(async () => { approveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(container.textContent).toContain(koMessages.cage.gateUndoRemaining.replace('{minutes}', '5'));
   });
@@ -1154,8 +1176,9 @@ describe('ApprovalsQueue', () => {
     await mount();
     // exact textContent 일치로 검색(gateApprove="승인"이 sigApproveAndSign="승인하고 서명"의
     // 부분문자열이라 includes()면 잘못된 버튼이 잡힐 수 있다).
-    for (const label of [koMessages.cage.gateApprove, koMessages.cage.sigApproveAndSign]) {
-      const primary = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === label);
+    for (const [label, rowKey] of [[koMessages.cage.gateApprove, 'g-order-low'], [koMessages.cage.sigApproveAndSign, 'g-order-high']] as const) {
+      await pickRow(rowKey); // the detail column shows the picked request's card
+      const primary = Array.from(scope().querySelectorAll('button')).find((b) => b.textContent === label);
       expect(primary).toBeTruthy();
       const actionRow = primary!.parentElement!;
       const rejectBtn = Array.from(actionRow.querySelectorAll('button')).find((b) => b.textContent === koMessages.cage.sigReject);
@@ -1194,7 +1217,7 @@ describe('ApprovalsQueue — 실시간 해소/위임 반영(story #2985 AC2)', (
 
     expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
     // 남이 해소한 건 — 이 세션에서 내가 한 게 아니므로 undo(정정) 버튼은 안 뜬다.
-    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    const buttons = [...scope().querySelectorAll('button')].map((b) => b.textContent);
     expect(buttons.some((t) => t?.includes(koMessages.cage.gateUndo))).toBe(false);
   });
 
@@ -1349,7 +1372,7 @@ describe('ApprovalsQueue — story #3113 결정 게이트(agent_decision_request
     expect(container.textContent).not.toContain('PO 권고=A');
     expect(container.textContent).not.toContain('A) Organization');
 
-    const expandBtn = Array.from(container.querySelectorAll('button')).find(
+    const expandBtn = Array.from(scope().querySelectorAll('button')).find(
       (b) => b.textContent === koMessages.cage.decisionExpand,
     );
     expect(expandBtn).toBeTruthy();
@@ -1364,12 +1387,12 @@ describe('ApprovalsQueue — story #3113 결정 게이트(agent_decision_request
   it('AC3 — options가 있으면 안을 고르기 전엔 승인 버튼이 비활성이다', async () => {
     mockFetches([decisionGate()], []);
     await mount();
-    const expandBtn = Array.from(container.querySelectorAll('button')).find(
+    const expandBtn = Array.from(scope().querySelectorAll('button')).find(
       (b) => b.textContent === koMessages.cage.decisionExpand,
     );
     await act(async () => { expandBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
-    const approveBtn = Array.from(container.querySelectorAll('button')).find(
+    const approveBtn = Array.from(scope().querySelectorAll('button')).find(
       (b) => b.textContent?.includes(koMessages.cage.gateApprove),
     ) as HTMLButtonElement;
     expect(approveBtn.disabled).toBe(true);
@@ -1379,7 +1402,7 @@ describe('ApprovalsQueue — story #3113 결정 게이트(agent_decision_request
   it('AC3 — 안을 고르면 승인 버튼이 활성화되고, 승인 시 선택안이 note로 전송·영구 기록된다', async () => {
     const calls = mockFetches([decisionGate()], []);
     await mount();
-    const expandBtn = Array.from(container.querySelectorAll('button')).find(
+    const expandBtn = Array.from(scope().querySelectorAll('button')).find(
       (b) => b.textContent === koMessages.cage.decisionExpand,
     );
     await act(async () => { expandBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
@@ -1388,7 +1411,7 @@ describe('ApprovalsQueue — story #3113 결정 게이트(agent_decision_request
     expect(radios).toHaveLength(3);
     await act(async () => { radios[1]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
-    const approveBtn = Array.from(container.querySelectorAll('button')).find(
+    const approveBtn = Array.from(scope().querySelectorAll('button')).find(
       (b) => b.textContent?.includes(koMessages.cage.gateApprove),
     ) as HTMLButtonElement;
     expect(approveBtn.disabled).toBe(false);
@@ -1404,7 +1427,7 @@ describe('ApprovalsQueue — story #3113 결정 게이트(agent_decision_request
   it('options가 없는 결정 게이트(question만)는 승인 버튼이 곧바로 활성이다(선택 강요 없음)', async () => {
     mockFetches([decisionGate({ id: 'g-no-opts', neutral_facts: { question: '그냥 확인만 부탁' } })], []);
     await mount();
-    const approveBtn = Array.from(container.querySelectorAll('button')).find(
+    const approveBtn = Array.from(scope().querySelectorAll('button')).find(
       (b) => b.textContent?.includes(koMessages.cage.gateApprove),
     ) as HTMLButtonElement;
     expect(approveBtn.disabled).toBe(false);
@@ -1416,7 +1439,7 @@ describe('ApprovalsQueue — story #3113 결정 게이트(agent_decision_request
   it('거절 버튼은 안 선택 없이도 눌리지만(반려는 안을 고르는 행위가 아님), 사유 다이얼로그를 거쳐야 제출된다', async () => {
     const calls = mockFetches([decisionGate()], []);
     await mount();
-    const rejectBtn = Array.from(container.querySelectorAll('button')).find(
+    const rejectBtn = Array.from(scope().querySelectorAll('button')).find(
       (b) => b.textContent?.includes(koMessages.cage.sigReject),
     ) as HTMLButtonElement;
     expect(rejectBtn.disabled).toBe(false); // 옵션 미선택 상태에서도 클릭 자체는 가능.
@@ -1457,7 +1480,7 @@ describe('ApprovalsQueue — 레시피 발행 게이트 본 초안 버전 (story
   it('⭐원탭 라벨이 «초안 보고 승인»이고 누르면 전이 없이 초안 카드가 있는 서명 모달이 열린다', async () => {
     const calls = mockFetches([recipeGate(1)], []);
     await mount();
-    const buttons = [...container.querySelectorAll('button')];
+    const buttons = [...scope().querySelectorAll('button')];
     expect(buttons.some((b) => b.textContent === koMessages.cage.gateApprove)).toBe(false);
     const reviewBtn = buttons.find((b) => b.textContent?.includes(koMessages.cage.gateReviewDraftToApprove));
     expect(reviewBtn).toBeTruthy();
@@ -1481,7 +1504,7 @@ describe('ApprovalsQueue — 레시피 발행 게이트 본 초안 버전 (story
       return { ok: true, json: async () => [] };
     }));
     await mount();
-    const reviewBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateReviewDraftToApprove));
+    const reviewBtn = [...scope().querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateReviewDraftToApprove));
     await act(async () => { reviewBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     let dialog = document.body.querySelector('[data-slot="dialog-content"]')!;
     await act(async () => { (dialog.querySelector('[role="checkbox"]') as HTMLElement).click(); });
@@ -1510,7 +1533,7 @@ describe('ApprovalsQueue — 서명 창 «취소»는 사유 초안을 지운다
     mockFetches([gate({ id: 'g-high-cancel', gate_type: 'merge_gate', status: 'pending', requires_human: true, can_approve: true, risk_grade: 'high', work_item_summary: { title: '고위험 항목', slug: null } })], []);
     await mount();
     const openSig = async () => {
-      const signBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigApproveAndSign));
+      const signBtn = Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.sigApproveAndSign));
       await act(async () => { signBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     };
     const cancelLabel = (koMessages.cage as unknown as Record<string, string>).cancel;
@@ -1536,7 +1559,7 @@ describe('ApprovalsQueue — 서명 창 «취소»는 사유 초안을 지운다
 describe('ApprovalsQueue — 4909 (다) a failed approve / reject is told, not swallowed', () => {
   const failedText = () => `${koMessages.cage.gateTransitionError.replace('{reason}', koMessages.cage.gateTransitionErrorGeneric)}`;
   const press = async (label: string) => {
-    const b = [...container.querySelectorAll('button')].find((x) => x.textContent?.includes(label));
+    const b = [...scope().querySelectorAll('button')].find((x) => x.textContent?.includes(label));
     await act(async () => { b?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
   };
@@ -1562,7 +1585,7 @@ describe('ApprovalsQueue — 4909 (다) a failed approve / reject is told, not s
     await press(koMessages.cage.gateApprove);
     expect(container.querySelector('[data-testid="hitl-resolve-error"]')?.textContent).toBe(failedText()); // reverted → no line at all
     expect(container.textContent).toContain('실패할 승인 요청'); // not removed
-    const approve = [...container.querySelectorAll('button')].find((x) => x.textContent?.includes(koMessages.cage.gateApprove));
+    const approve = [...scope().querySelectorAll('button')].find((x) => x.textContent?.includes(koMessages.cage.gateApprove));
     expect(approve?.hasAttribute('disabled')).toBe(false);
   });
 
@@ -1625,11 +1648,11 @@ describe('ApprovalsQueue — 4909 (라) the signature dialog approval carries th
     });
   };
   async function chooseOptionAndOpenDialog(index: number) {
-    const expandBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.decisionExpand);
+    const expandBtn = [...scope().querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.decisionExpand);
     await act(async () => { expandBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const radios = [...container.querySelectorAll('[role="radio"]')];
     await act(async () => { radios[index]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const sign = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.sigApproveAndSign);
+    const sign = [...scope().querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.sigApproveAndSign);
     await act(async () => { sign!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const dialog = document.body.querySelector('[data-slot="dialog-content"]');
     expect(dialog).toBeTruthy();
@@ -1664,7 +1687,7 @@ describe('ApprovalsQueue — 4909 (라) the signature dialog approval carries th
   it('a high-risk gate WITHOUT options (not a decision with a choice) still sends the reason alone — nothing is invented', async () => {
     const calls = mockFetches([highRiskDecisionGate({ id: 'g-sig-nochoice', work_item_id: 'g-sig-nochoice', neutral_facts: { question: '그냥 확인만 부탁' } })], []);
     await mount();
-    const sign = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.sigApproveAndSign);
+    const sign = [...scope().querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.sigApproveAndSign);
     await act(async () => { sign!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const dialog = document.body.querySelector('[data-slot="dialog-content"]')!;
     await act(async () => { (dialog.querySelector('[role="checkbox"]') as HTMLElement).click(); });
@@ -1680,15 +1703,21 @@ describe('ApprovalsQueue — 4909 (라) the signature dialog approval carries th
       highRiskDecisionGate({ id: 'g-second', work_item_id: 'g-second' }),
     ], []);
     await mount();
-    for (const expandBtn of [...container.querySelectorAll('button')].filter((b) => b.textContent === koMessages.cage.decisionExpand)) {
-      await act(async () => { expandBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    }
-    const radios = [...container.querySelectorAll('[role="radio"]')];
-    expect(radios).toHaveLength(6);
-    await act(async () => { radios[1]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); }); // first gate: B
-    await act(async () => { radios[5]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); }); // second gate: C
-    const signButtons = [...container.querySelectorAll('button')].filter((b) => b.textContent === koMessages.cage.sigApproveAndSign);
-    await act(async () => { signButtons[1]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // the detail column shows one request: choose B on the first (picked on open), pick the second row and choose C there — each gate keeps its own choice
+    const chooseOption = async (index: number) => {
+      const expandBtn = [...scope().querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.decisionExpand);
+      await act(async () => { expandBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      const radios = [...scope().querySelectorAll('[role="radio"]')];
+      expect(radios).toHaveLength(3);
+      await act(async () => { radios[index]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    };
+    await chooseOption(1); // first gate: B
+    await pickRow('g-second');
+    await chooseOption(2); // second gate: C
+    await pickRow('g-first');
+    await pickRow('g-second'); // back and forth: the choices stayed with their gates
+    const signButton2 = [...scope().querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.sigApproveAndSign);
+    await act(async () => { signButton2!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const dialog = document.body.querySelector('[data-slot="dialog-content"]')!;
     await act(async () => { (dialog.querySelector('[role="checkbox"]') as HTMLElement).click(); });
     await setText(dialog.querySelector('textarea') as HTMLTextAreaElement, '둘째 게이트 사유');
@@ -1709,5 +1738,124 @@ describe('ApprovalsQueue — 4909 (라) the signature dialog approval carries th
     const body = postBody(calls);
     expect(body.status).toBe('rejected');
     expect(body.note).toBe('이 요청 자체를 반려');
+  });
+});
+
+// story 4909 (UI-R1 AC3, 결재함) — the queue is a «list + detail» screen. The list: one compact row per request, in two sections (what needs a hand · on hold). The detail column: the card of the picked request.
+// The first row is picked on open (never an option — an option is never chosen in advance); picking another row changes the detail; deciding a request moves the detail to the next undecided one of its section.
+describe('ApprovalsQueue — 4909 AC3 the list + detail screen', () => {
+  const lowGate = (id: string, title: string, over: Partial<GateItem> = {}) => gate({
+    id, work_item_id: `w-${id}`, gate_type: 'merge_gate', status: 'pending', requires_human: true, can_approve: true, risk_grade: 'low',
+    work_item_summary: { title, slug: null }, ...over,
+  });
+  const decision = (id: string, question: string) => gate({
+    id, work_item_id: id, gate_type: 'agent_decision_request', status: 'pending', requires_human: true, can_approve: true, risk_grade: 'low', work_item_summary: null,
+    neutral_facts: { question, assumption: '가격 문의가 많아요', options: ['가격 먼저', '지금처럼'] },
+  });
+  const rowsIn = (section?: 'hand' | 'held') => [...container.querySelectorAll(`${section ? `[data-testid="gate-queue-section-${section}"] ` : ''}[data-testid="gate-queue-row"]`)];
+  const detailText = () => (scope() as HTMLElement).textContent ?? '';
+
+  it('⭐wide: the list has a row per request in two sections, the FIRST row is picked and its card is the detail — the others\' cards are not drawn', async () => {
+    mockFetches([lowGate('g1', '첫째 결재 항목'), lowGate('g2', '둘째 결재 항목')], [lowGate('g3', '보류된 항목', { status: 'held', held_until: null })]);
+    await mount();
+    expect(rowsIn()).toHaveLength(3);
+    expect(rowsIn('hand')).toHaveLength(2);
+    expect(rowsIn('held')).toHaveLength(1);
+    expect(container.querySelector('[data-testid="gate-queue-section-hand"]')?.getAttribute('aria-label')).toBe(koMessages.cage.queueSectionHand);
+    expect(container.querySelector('[data-testid="gate-queue-section-held"]')?.getAttribute('aria-label')).toBe(koMessages.cage.queueSectionHeld);
+    expect(rowsIn()[0]!.querySelector('[aria-current]')).toBeTruthy(); // reverted (the old stacked cards) → no rows at all
+    expect(rowsIn()[1]!.querySelector('[aria-current]')).toBeNull();
+    expect(detailText()).toContain('첫째 결재 항목');
+    expect(detailText()).not.toContain('둘째 결재 항목');
+    expect(container.querySelector('[data-testid="gates-screen-detail-column"]')?.getAttribute('aria-label')).toBe(koMessages.cage.queueDetailLabel);
+  });
+
+  it('⭐picking another row shows THAT request\'s card in the detail (and moves the picked mark)', async () => {
+    mockFetches([lowGate('g1', '첫째 결재 항목'), lowGate('g2', '둘째 결재 항목')], []);
+    await mount();
+    await pickRow('g2');
+    expect(detailText()).toContain('둘째 결재 항목');
+    expect(detailText()).not.toContain('첫째 결재 항목');
+    expect(rowsIn()[1]!.querySelector('[aria-current]')).toBeTruthy();
+    expect(rowsIn()[0]!.querySelector('[aria-current]')).toBeNull();
+  });
+
+  it('⭐an option is NEVER chosen in advance: the first decision request opens «not chosen yet», every option unchecked and approve off with its hint', async () => {
+    mockFetches([decision('d1', '랜딩 문구를 가격 먼저로 바꿔도 될까요?')], []);
+    await mount();
+    const expandBtn = [...scope().querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.decisionExpand);
+    await act(async () => { expandBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const radios = [...scope().querySelectorAll('[role="radio"]')];
+    expect(radios).toHaveLength(2);
+    expect(radios.every((r) => r.getAttribute('aria-checked') === 'false')).toBe(true);
+    const approve = [...scope().querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    expect(detailText()).toContain(koMessages.cage.decisionSelectHint);
+  });
+
+  it('⭐deciding the picked request moves the detail to the NEXT undecided one of its section; the decided row stays in the list marked «승인 완료»', async () => {
+    mockFetches([lowGate('g1', '첫째 결재 항목'), lowGate('g2', '둘째 결재 항목')], []);
+    await mount();
+    const approve = [...scope().querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    await act(async () => { approve.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(detailText()).toContain('둘째 결재 항목'); // moved on
+    expect(rowsIn()[0]!.textContent).toContain(koMessages.cage.queueResolvedApproved);
+    expect(rowsIn()).toHaveLength(2); // still in the list
+    await pickRow('g1'); // pick the decided one again: its card says it is decided
+    expect(detailText()).toContain(koMessages.cage.queueResolvedApproved);
+  });
+
+  it('narrow: the list alone (no detail column, no sheet) until a row is tapped — then the detail is a NAMED sheet', async () => {
+    stubWidth(false);
+    mockFetches([lowGate('g1', '첫째 결재 항목')], []);
+    await mount();
+    expect(rowsIn()).toHaveLength(1);
+    expect(container.querySelector('[data-testid="gates-screen-detail-column"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="gates-screen-detail-sheet"]')).toBeNull();
+    await pickRow('g1');
+    const sheet = document.body.querySelector('[data-testid="gates-screen-detail-sheet"]');
+    expect(sheet).toBeTruthy();
+    expect(sheet!.getAttribute('aria-label')).toBe(koMessages.cage.queueSheetLabel.replace('{title}', '첫째 결재 항목'));
+    expect(sheet!.textContent).toContain('첫째 결재 항목');
+  });
+
+  it('j / k walk the rows (the home\'s keys — no new command key): j on the first row picks the second', async () => {
+    mockFetches([lowGate('g1', '첫째 결재 항목'), lowGate('g2', '둘째 결재 항목')], []);
+    await mount();
+    const firstTitleButton = rowsIn()[0]!.querySelector('button') as HTMLButtonElement;
+    firstTitleButton.focus();
+    await act(async () => { firstTitleButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true })); });
+    expect(detailText()).toContain('둘째 결재 항목');
+    await act(async () => { (rowsIn()[1]!.querySelector('button') as HTMLButtonElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true })); });
+    expect(detailText()).toContain('첫째 결재 항목');
+  });
+
+  it('⭐a request that finishes AFTER the person picked another row does not drag the detail away from what they are reading', async () => {
+    let releaseFirst: (() => void) | null = null;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { method?: string }) => {
+      if (init?.method === 'POST' && url.includes('g1')) return new Promise((resolve) => { releaseFirst = () => resolve({ ok: true, json: async () => ({}) }); });
+      if (url.includes('status=pending')) return { ok: true, json: async () => [lowGate('g1', '첫째 결재 항목'), lowGate('g2', '둘째 결재 항목'), lowGate('g3', '셋째 결재 항목')] };
+      return { ok: true, json: async () => [] };
+    }));
+    await mount();
+    const approve = [...scope().querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    await act(async () => { approve.dispatchEvent(new MouseEvent('click', { bubbles: true })); }); // g1 in flight
+    await pickRow('g3'); // the person moves on to the third
+    await act(async () => { releaseFirst?.(); await Promise.resolve(); await Promise.resolve(); }); // g1 is decided now
+    expect(detailText()).toContain('셋째 결재 항목'); // reverted → pulled to the second (the one after g1)
+    expect(detailText()).not.toContain('둘째 결재 항목');
+    expect(rowsIn()[0]!.textContent).toContain(koMessages.cage.queueResolvedApproved);
+  });
+
+  it('a request that leaves the list (decided elsewhere · a HITL card answered) while picked: the detail moves to the next row of its section — never an empty detail while rows remain', async () => {
+    mockFetches([hitl({ id: 'h1', title: '첫째 승인 요청' }), hitl({ id: 'h2', title: '둘째 승인 요청' })], []);
+    await mount();
+    expect(detailText()).toContain('첫째 승인 요청');
+    const approve = [...scope().querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    await act(async () => { approve.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(rowsIn()).toHaveLength(1);
+    expect(detailText()).toContain('둘째 승인 요청');
   });
 });
