@@ -8,6 +8,7 @@ import { Chip } from '../chip';
 import { ConfirmDialog, Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../dialog';
 import { DateNav } from '../date-nav';
 import { DatePicker } from '../date-picker';
+import { ListDetailShell } from '../list-detail-shell';
 import { Metric } from '../metric';
 import { PageSplit } from '../page-split';
 import { Panel, PanelBody, PanelContent, PanelHeader, PanelTitle, PanelTrigger } from '../panel';
@@ -85,6 +86,18 @@ export function ShowcasePartsB({ today }: { today: string }) {
           <TreeRow depth={0} title="접힌 폴더" icon="folder" expanded={false} controlProps={{ onClick: noop }} />
           <TreeRow depth={2} title="안으로 놓을 자리" icon="folder" expanded dropZone="into" controlProps={{ onClick: noop }} />
         </div>
+      </Block>
+      <Block title="ListDetailShell — 목록 + 상세 열(넓으면 나란히 · 좁으면 아래 시트)">
+        <ListDetailShell
+          wide
+          list={<div className="rounded-ds-control border border-ds-line bg-ds-surface p-3 text-ds-body text-ds-ink">목록</div>}
+          detail={<div className="rounded-ds-control border border-ds-line bg-ds-surface p-3 text-ds-body text-ds-ink">상세</div>}
+          detailLabel="상세 열"
+          sheetLabel="상세 시트"
+          sheetOpen={false}
+          onSheetOpenChange={noop}
+          testId="showcase-list-detail"
+        />
       </Block>
       <Block title="PageSplit · SummaryCard — 본문 + 옆 칸(폰은 칩 줄)">
         <PageSplit
