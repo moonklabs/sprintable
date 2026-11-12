@@ -31,7 +31,7 @@ describe('design-system.css — 새 뜻 이름 토큰(--ds-*)', () => {
 
   it('밝음 · 어둠이 같은 이름 집합을 정의한다(한쪽만 있으면 한 테마가 비어 렌더된다)', () => {
     expect(Object.keys(light).sort()).toEqual(Object.keys(dark).sort());
-    expect(Object.keys(light).length).toBe(27);
+    expect(Object.keys(light).length).toBe(28);
   });
 
   it('⭐고정폭 글자 하한: 가장 작은 mono-sm도 11px 이상(폰 11pt 하한 · 12px 미만 글자 처방)', () => {

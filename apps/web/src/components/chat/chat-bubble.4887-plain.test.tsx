@@ -38,11 +38,13 @@ async function render(o: { agent: boolean; mine: boolean; grouped?: boolean }) {
 }
 const box = () => container.querySelector('[data-testid="chat-bubble-text"]') as HTMLElement;
 
-describe('ChatBubble — an agent has no bubble, a person keeps theirs (story 4887 · UI-4 P4-b)', () => {
-  it('⭐ an AGENT\'s message (not mine) is plain: no fill, no rounded box, no padding box — the text sits on the page', async () => {
+describe('ChatBubble — an agent\'s text sits on the same layer as a person\'s, with squarer corners (story 4906 replaces the plain agent of 4887 P4-b)', () => {
+  it('⭐ an AGENT\'s message (not mine) is on the others\' layer (ds-surface-high) with the agent\'s squarer corners — no longer bare text on the page', async () => {
     await render({ agent: true, mine: false });
-    expect(box().getAttribute('data-bubble')).toBe('plain'); // reverted (every message filled) → 'filled'
-    for (const c of ['bg-proof-panel', 'bg-proof-blue-soft', 'rounded-xl', 'px-3.5']) expect(box().className, c).not.toContain(c);
+    expect(box().getAttribute('data-bubble')).toBe('filled'); // reverted (plain agent) → 'plain'
+    for (const c of ['bg-ds-surface-high', 'rounded-lg', 'px-3.5']) expect(box().className, c).toContain(c);
+    expect(box().className).not.toContain('rounded-xl'); // a person\'s bubble is rounder: the agent keeps the squarer shape that matches its square avatar
+    expect(box().className).not.toContain('bg-ds-mine');
     expect(box().textContent).toContain('안녕하세요'); // the text is still there
   });
 
@@ -57,7 +59,7 @@ describe('ChatBubble — an agent has no bubble, a person keeps theirs (story 48
   it('⭐ another PERSON\'s message keeps its bubble (panel fill · rounded · padded) — the bubble is what marks a person', async () => {
     await render({ agent: false, mine: false });
     expect(box().getAttribute('data-bubble')).toBe('filled');
-    expect(box().className).toContain('bg-proof-panel'); // reverted (plain for all but mine) → missing
+    expect(box().className).toContain('bg-ds-surface-high'); // reverted (plain for all but mine) → missing
     expect(box().className).toContain('rounded-xl');
     expect(box().className).toContain('px-3.5');
   });
@@ -65,19 +67,20 @@ describe('ChatBubble — an agent has no bubble, a person keeps theirs (story 48
   it('⭐ MY message keeps its bubble (the blue-soft fill, rounded on the left and bottom, padded)', async () => {
     await render({ agent: false, mine: true });
     expect(box().getAttribute('data-bubble')).toBe('filled');
-    expect(box().className).toContain('bg-proof-blue-soft');
+    expect(box().className).toContain('bg-ds-mine');
     expect(box().className).toContain('rounded-xl');
   });
 
   it('a message of an agent that is MINE (the viewer is that agent) stays filled — «plain» is for the others\' agents only', async () => {
     await render({ agent: true, mine: true });
     expect(box().getAttribute('data-bubble')).toBe('filled');
-    expect(box().className).toContain('bg-proof-blue-soft');
+    expect(box().className).toContain('bg-ds-mine');
   });
 
-  it('a CONTINUATION of an agent\'s run is plain too (no head, still no bubble)', async () => {
+  it('a CONTINUATION of an agent\'s run keeps the layer too (no head, still the others\' layer)', async () => {
     await render({ agent: true, mine: false, grouped: true });
-    expect(box().getAttribute('data-bubble')).toBe('plain');
+    expect(box().getAttribute('data-bubble')).toBe('filled');
+    expect(box().className).toContain('bg-ds-surface-high');
     expect(container.querySelector('[data-testid="bubble-head-time"]')).toBeNull();
   });
 });

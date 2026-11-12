@@ -2012,14 +2012,14 @@ describe('ChatBubble — story #2921 S4(유나 확定, 버블·아바타 Proofli
     content: '안녕한 일반 텍스트 메시지인 — 참조 없음',
   };
 
-  it('버블=무채 panel(내 메시지=blue-soft) — isMine이면 bg-proof-blue-soft, 아니면 bg-proof-panel', async () => {
+  it('버블=층 규칙의 글 줄(4906) — isMine이면 bg-ds-mine, 아니면 bg-ds-surface-high', async () => {
     // ⛔bg-proof-blue-soft는 에이전트 아바타(ProofAvatar isAgent)에도 붙어 셀렉터가 겹친다 —
     // 버블 고유 모서리 클래스(rounded-tr-sm/rounded-tl-sm)와 함께 잡아 버블 자신만 특정한다.
     await act(async () => {
       root.render(wrap(<ChatBubble message={{ ...plainMessage, references: [], sender_type: 'human' }} isMine />));
     });
-    expect(container.querySelector('.rounded-tr-sm.bg-proof-blue-soft')).toBeTruthy();
-    expect(container.querySelector('.rounded-tr-sm.bg-proof-panel')).toBeNull();
+    expect(container.querySelector('.rounded-tr-sm.bg-ds-mine')).toBeTruthy();
+    expect(container.querySelector('.rounded-tr-sm.bg-ds-surface-high')).toBeNull();
     // 옛 solid 배경+흰 글자 조합이 안 남아있다(눈에 안 보이는 흰 글자 회귀 방지).
     expect(container.querySelector('.bg-primary.text-primary-foreground')).toBeNull();
 
@@ -2028,8 +2028,8 @@ describe('ChatBubble — story #2921 S4(유나 확定, 버블·아바타 Proofli
     await act(async () => {
       root.render(wrap(<ChatBubble message={{ ...plainMessage, references: [], sender_type: 'human' }} isMine={false} />));
     });
-    expect(container.querySelector('.rounded-tl-sm.bg-proof-panel')).toBeTruthy();
-    expect(container.querySelector('.rounded-tl-sm.bg-proof-blue-soft')).toBeNull();
+    expect(container.querySelector('.rounded-tl-sm.bg-ds-surface-high')).toBeTruthy();
+    expect(container.querySelector('.rounded-tl-sm.bg-ds-mine')).toBeNull();
   });
 
   // story #2921 S4 후속(2026-08-22, 유나 합성 5규칙 확定·avatar-unification-design-memo-2921) —

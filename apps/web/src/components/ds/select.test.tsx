@@ -36,7 +36,8 @@ describe('ds NativeSelect', () => {
     expect(cls).toContain('h-ds-control');
     expect(cls).toContain('bg-ds-surface-sunk');
     expect(cls).toMatch(/(^|\s)border-ds-line-control(\s|$)/);
-    expect(cls).toContain('focus-visible:ring-ds-action');
+    expect(cls).toContain('focus-visible:border-ds-ink-2');
+    expect(cls).not.toMatch(/focus(-visible|-within)?:(ring|border)-ds-action/);
     expect(cls).toMatch(/(^|\s)text-base(\s|$)/);
     expect(cls).toContain('lg:text-ds-body');
   });

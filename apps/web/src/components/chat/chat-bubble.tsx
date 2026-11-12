@@ -46,6 +46,7 @@ import { toEmbedCardOpenPanel } from './embed-card-open-panel-adapter';
 import { ReportMessageSummary } from './report-message-summary';
 import { ServerCommandResultCard } from './server-command-result-card';
 import { useFlatHref } from '@/hooks/use-flat-href';
+import { LAYER } from '@/components/ds/layers';
 
 interface ChatBubbleProps {
   message: ChatMessage;
@@ -783,7 +784,7 @@ export function ChatBubble({
             // story #2319 — tombstone placeholder. 색/경고 없이 무채색(story #2299 AC⑤와 같은
             // 규율 — 「끊어짐」은 사실 표시일 뿐 에러가 아니다).
             <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm italic text-muted-foreground ${
-              isMine ? 'rounded-tr-sm bg-muted/50' : 'rounded-tl-sm bg-muted/50'
+              isMine ? `rounded-tr-sm ${LAYER.rowOthers}` : `rounded-tl-sm ${LAYER.rowOthers}`
             }`}>
               {t('deletedMessagePlaceholder')}
             </div>
@@ -791,7 +792,7 @@ export function ChatBubble({
             // story #2349 — tombstone과 다르다: 서버는 내용을 그대로 내려준다. 여기서 클라가
             // 가리고, "보기"로 펼칠 수 있어야 한다(PO 규격 — 되돌릴 수 없는 tombstone과 구분).
             <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm italic text-muted-foreground ${
-              isMine ? 'rounded-tr-sm bg-muted/50' : 'rounded-tl-sm bg-muted/50'
+              isMine ? `rounded-tr-sm ${LAYER.rowOthers}` : `rounded-tl-sm ${LAYER.rowOthers}`
             }`}>
               {t('blockedSenderMessagePlaceholder')}{' '}
               <button
@@ -857,7 +858,7 @@ export function ChatBubble({
               // story #4197·#4200(유나 확정) — 보여 줄 글자도 첨부도 없는 메시지. 빈 말풍선 대신 «삭제된 메시지»와
               // 같은 틀(italic muted·bg-muted/50·경고색·펼치기 없음).
               <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 text-sm italic text-muted-foreground ${
-                isMine ? 'rounded-tr-sm bg-muted/50' : 'rounded-tl-sm bg-muted/50'
+                isMine ? `rounded-tr-sm ${LAYER.rowOthers}` : `rounded-tl-sm ${LAYER.rowOthers}`
               }`} data-testid="chat-bubble-empty-placeholder">
                 {t('emptyMessagePlaceholder')}
               </div>
@@ -872,11 +873,11 @@ export function ChatBubble({
               plainRow
                 ? 'py-0.5'
                 : isMine
-                  ? 'rounded-xl rounded-tr-sm bg-proof-blue-soft px-3.5 py-2'
+                  ? `rounded-xl rounded-tr-sm ${LAYER.rowMine} px-3.5 py-2`
                   : isAgent
-                    ? 'py-0.5'
-                    : 'rounded-xl rounded-tl-sm bg-proof-panel px-3.5 py-2'
-            }`} data-bubble={plainRow || (isAgent && !isMine) ? 'plain' : 'filled'}>
+                    ? `rounded-lg rounded-tl-sm ${LAYER.rowOthers} px-3.5 py-2`
+                    : `rounded-xl rounded-tl-sm ${LAYER.rowOthers} px-3.5 py-2`
+            }`} data-bubble={plainRow ? 'plain' : 'filled'}>
               {/* story #ec57c80c(v2 3호) — report성 밀도 재설계는 에이전트 메시지에만
                   적용한다(진단·처방 전부 "에이전트 report성 메시지" 범위, human 메시지는
                   무변경). ReportMessageSummary 내부가 발동 조건(computeReportDensity) 미충족

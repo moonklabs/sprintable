@@ -1,5 +1,6 @@
 import type { ComponentProps } from 'react';
 import { cn } from '@/lib/utils';
+import { FIELD_FOCUS } from './field-focus';
 import { Icon } from './icon';
 
 export type NativeSelectProps = ComponentProps<'select'>;
@@ -16,9 +17,9 @@ export function NativeSelect({ className, children, ...props }: NativeSelectProp
       <select
         className={cn(
           'h-ds-control touch:h-ds-touch w-full min-w-0 appearance-none rounded-ds-control border border-ds-line-control bg-ds-surface-sunk py-0 pr-8 pl-3 text-base text-ds-ink outline-none transition-colors duration-(--ds-duration-fast) motion-reduce:transition-none lg:text-ds-body',
-          'focus-visible:border-ds-action focus-visible:ring-2 focus-visible:ring-ds-action',
+          FIELD_FOCUS,
           'disabled:pointer-events-none disabled:cursor-not-allowed disabled:border-dashed disabled:bg-transparent disabled:text-ds-ink-3',
-          'aria-invalid:border-ds-failed aria-invalid:focus-visible:ring-ds-failed',
+          'aria-invalid:border-ds-failed',
         )}
         {...props}
       >

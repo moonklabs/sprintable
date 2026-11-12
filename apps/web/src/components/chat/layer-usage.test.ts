@@ -1,0 +1,27 @@
+// 4906 — «화면 층 규칙»을 대화 방이 실제로 쓰는지 소스로 고정한다: 대화 방 바닥은 내용 칸 층, 글 줄은 층 토큰(옛 proof-*/muted 면으로 돌아가지 않는다).
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+const read = (f: string) => readFileSync(join(__dirname, f), 'utf8');
+
+describe('대화 방은 화면 층 규칙의 토큰을 쓴다 (4906)', () => {
+  it('⭐대화 방 바닥(ChatView 루트)은 내용 칸 층 LAYER.panel — 바탕과 같은 색으로 돌아가지 않는다', () => {
+    const src = read('chat-view.tsx');
+    expect(src).toContain("import { LAYER } from '@/components/ds/layers'");
+    expect(src).toContain('overflow-hidden ${LAYER.panel}`');
+  });
+
+  it('⭐말풍선: 남의 글 · 에이전트 글 = LAYER.rowOthers, 내 글 = LAYER.rowMine, 가림·삭제 말풍선도 글 줄 층 — 옛 proof 면 · bg-muted/50 0', () => {
+    const src = read('chat-bubble.tsx');
+    expect(src).toContain('${LAYER.rowMine}');
+    expect(src).toContain('${LAYER.rowOthers}');
+    for (const legacy of ['bg-proof-panel', 'bg-proof-blue-soft', 'rounded-tr-sm bg-muted/50', 'rounded-tl-sm bg-muted/50']) expect(src, legacy).not.toContain(legacy);
+  });
+
+  it('⭐에이전트 글은 맨글(py-0.5만)로 바탕에 서지 않는다 — 말풍선 분기에 층 클래스가 있다(plainRow만 맨글)', () => {
+    const src = read('chat-bubble.tsx');
+    expect(src).toMatch(/isAgent\s*\?\s*`rounded-lg rounded-tl-sm \$\{LAYER\.rowOthers\}/);
+    expect(src).toContain("data-bubble={plainRow ? 'plain' : 'filled'}");
+  });
+});

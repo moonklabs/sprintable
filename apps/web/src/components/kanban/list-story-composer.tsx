@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ds/button';
+import { FIELD_FOCUS_WITHIN } from '@/components/ds/field-focus';
 import { Icon } from '@/components/ds/icon';
 import { Input } from '@/components/ds/input';
 
@@ -56,7 +57,7 @@ export function ListStoryComposer({ onCreate }: { onCreate: (title: string) => P
     );
   }
   return (
-    <div className="mx-1 mb-2 rounded-ds-control border border-ds-action p-2" data-testid="list-story-composer">
+    <div className={`mx-1 mb-2 rounded-ds-control border border-ds-line-control p-2 ${FIELD_FOCUS_WITHIN}`} data-testid="list-story-composer">
       <Input
         autoFocus
         value={draft}

@@ -27,6 +27,7 @@
   --ds-on-action: #ffffff;
   --ds-action-text: #4a3bc8;
   --ds-action-soft: #efedfc;
+  --ds-mine: #d9d4fa;
   --ds-needs-hand: #9a4b00;
   --ds-needs-hand-bar: #d6791c;
   --ds-on-needs-hand: #1a0f00;
@@ -57,6 +58,7 @@
   --ds-on-action: #24008c;
   --ds-action-text: #c7bfff;
   --ds-action-soft: #2b2c46;
+  --ds-mine: #34365c;
   --ds-needs-hand: #ffb77d;
   --ds-needs-hand-bar: #d6791c;
   --ds-on-needs-hand: #1a0f00;
@@ -159,6 +161,7 @@
   --color-ds-on-action: var(--ds-on-action);
   --color-ds-action-text: var(--ds-action-text);
   --color-ds-action-soft: var(--ds-action-soft);
+  --color-ds-mine: var(--ds-mine);
   --color-ds-needs-hand: var(--ds-needs-hand);
   --color-ds-needs-hand-bar: var(--ds-needs-hand-bar);
   --color-ds-on-needs-hand: var(--ds-on-needs-hand);

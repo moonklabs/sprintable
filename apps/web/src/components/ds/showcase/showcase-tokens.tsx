@@ -20,6 +20,7 @@ const COLORS: Array<{ name: string; swatch: string }> = [
   { name: 'on-action', swatch: 'bg-ds-on-action' },
   { name: 'action-text', swatch: 'bg-ds-action-text' },
   { name: 'action-soft', swatch: 'bg-ds-action-soft' },
+  { name: 'mine', swatch: 'bg-ds-mine' },
   { name: 'needs-hand', swatch: 'bg-ds-needs-hand' },
   { name: 'needs-hand-bar', swatch: 'bg-ds-needs-hand-bar' },
   { name: 'on-needs-hand', swatch: 'bg-ds-on-needs-hand' },
@@ -63,7 +64,7 @@ const DENSITY: Array<{ name: string; cls: string; px: string; use: string }> = [
 export function ShowcaseTokens() {
   return (
     <>
-      <Block title="색 — 뜻 이름 27종 (--ds-*)">
+      <Block title="색 — 뜻 이름 28종 (--ds-*)">
         <div className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-2">
           {COLORS.map((c) => (
             <div key={c.name} className="flex items-center gap-2 rounded-ds-control border border-ds-line bg-ds-surface p-1.5">
