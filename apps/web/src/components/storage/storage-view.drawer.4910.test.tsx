@@ -86,6 +86,31 @@ describe('서랍 방식에서 행 더블클릭 = 열린 채로(5668의 결함 �
     expect(drawer()).toBeNull();
   });
 
+  it('⭐서랍 안쪽을 누른 뒤에는(표식이 지워짐) 막에 닿는 detail 2 클릭도 닫는다 — 행 클릭으로 막 연 직후만 무시(코덱스 1차)', async () => {
+    setInline(false);
+    await render();
+    const row = container.querySelector<HTMLElement>('[data-storage-row]')!;
+    await clickWithDetail(row, 1);
+    expect(drawer()).not.toBeNull();
+    // 서랍 안쪽(패널 칸)을 눌러 표식을 지운다
+    const panelCell = drawer()!.querySelector<HTMLElement>('div.absolute.inset-y-0')!;
+    await act(async () => { panelCell.dispatchEvent(new Event('pointerdown', { bubbles: true })); });
+    await clickWithDetail(backdrop()!, 2);
+    expect(drawer(), '안쪽을 누른 뒤의 막 클릭은 detail과 무관하게 닫음').toBeNull();
+  });
+
+  it('⭐서랍을 닫았다가 다시 행 클릭으로 열어도 더블클릭 = 열린 채(표식이 다시 선다)', async () => {
+    setInline(false);
+    await render();
+    const row = container.querySelector<HTMLElement>('[data-storage-row]')!;
+    await clickWithDetail(row, 1);
+    await clickWithDetail(backdrop()!, 1); // 닫음(표식 지움)
+    expect(drawer()).toBeNull();
+    await clickWithDetail(row, 1); // 다시 연다
+    await clickWithDetail(backdrop()!, 2); // 더블클릭의 둘째
+    expect(drawer(), '다시 열어도 더블클릭 = 열린 채').not.toBeNull();
+  });
+
   it('1536 이상(인라인 칸)은 서랍이 없다 — 행을 눌러도 대화 상자가 안 뜬다(변화 0)', async () => {
     setInline(true);
     await render();
