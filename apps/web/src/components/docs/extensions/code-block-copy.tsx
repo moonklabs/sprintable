@@ -309,6 +309,12 @@ export const CodeBlockWithCopy = CodeBlock.extend({
     return ['pre', mergeAttributes(HTMLAttributes), ['code', codeAttrs, 0]];
   },
 
+  // 4914 — 확장이 거저 주는 «VS Code 붙여넣기 → 코드 블록» 플러그인은 싣지 않는다: 이 편집기에 전에 없던 붙여넣기 길이고(요구 밖), 붙여넣기 글에 든
+  // `vscode-editor-data`를 검사 없이 `JSON.parse`해 틀린 값이 오면 붙여넣기 자체가 던진다(codex 1차). 명령 · ``` 규칙 · 단축키만 받는다.
+  addProseMirrorPlugins() {
+    return [];
+  },
+
   addNodeView() {
     return ReactNodeViewRenderer(CodeBlockView);
   },

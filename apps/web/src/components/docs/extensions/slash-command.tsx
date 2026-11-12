@@ -716,6 +716,9 @@ export function createSlashCommandExtension(strings: SlashMenuStrings) {
         suggestion: {
           char: '/',
           pluginKey: SLASH_SUGGESTION_KEY,
+          // 4914 — 코드 블록 안에서는 «/» 가 코드 글자다(`a/b` · `//` 주석 · URL) — 메뉴를 열지 않는다(story-mention의 `spec.code` 거절과 같은 규칙).
+          allow: ({ state, range }: { state: { doc: { resolve: (pos: number) => { parent: { type: { spec: { code?: boolean } } } } } }; range: { from: number } }) =>
+            !state.doc.resolve(range.from).parent.type.spec.code,
           items: ({ query }: { query: string }) => items.filter((item) => matchesSlashQuery(item, query)),
           render: () => createSuggestionRenderer(categories, strings.listLabel),
         } satisfies Partial<SuggestionOptions<SlashMenuItem>>,

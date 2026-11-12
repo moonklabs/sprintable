@@ -11,6 +11,7 @@ import type { Editor } from '@tiptap/core';
 import { makeDocEditor } from './doc-editor-roundtrip.fixture';
 import { buildSlashMenuCategories } from './extensions/slash-command';
 import { CodeBlockWithCopy } from './extensions/code-block-copy';
+import { createWikiLinkSuggestion } from './extensions/wiki-link';
 
 let editor: Editor | null = null;
 afterEach(() => { editor?.destroy(); editor = null; });
@@ -100,5 +101,45 @@ describe('코드 블록 확장 — 이어받음(extend)으로 명령 · 규칙 �
     expect(root.querySelector('pre')!.getAttribute('data-language')).toBe('python');
     expect(root.querySelector('code')!.className).toBe('language-python');
     expect(root.querySelector('code')!.textContent).toBe('print(1)\nprint(2)');
+  });
+});
+
+describe('코드 블록 안에서는 «/» · «[[» 제안이 열리지 않는다 · 붙여넣기 플러그인은 싣지 않는다(코덱스 1차)', () => {
+  // 슬래시 제안 플러그인의 지금 상태(prosemirror는 같은 이름의 키를 새로 만들면 `이름$1`로 가르므로, 편집기에 실린 플러그인을 이름으로 찾아 읽는다)
+  const slashActive = (e: Editor): boolean | undefined => {
+    const plugin = e.state.plugins.find((pl) => String((pl as unknown as { key: string }).key).startsWith('slashCommandSuggestion'));
+    return (plugin?.getState(e.state) as { active?: boolean } | undefined)?.active;
+  };
+
+  it('⭐코드 블록 안에서 «/co»를 쳐도 슬래시 메뉴가 안 열린다 — 문단에서는 열린다(대조)', () => {
+    editor = makeDocEditor('<p></p>');
+    editor.commands.focus('end');
+    editor.commands.insertContent('/co');
+    expect(slashActive(editor), '문단(대조)').toBe(true);
+    editor.commands.setContent('<pre><code></code></pre>');
+    editor.commands.setTextSelection(1); // 코드 블록 안(맨 앞)
+    expect(editor.isActive('codeBlock')).toBe(true);
+    editor.commands.insertContent('/co');
+    expect(editor.state.selection.$from.parent.type.name).toBe('codeBlock');
+    expect(slashActive(editor), '코드 블록').toBeFalsy();
+  });
+
+  it('⭐코드 블록 안의 «[[»는 위키 링크 제안의 allow가 거절한다 — 문단에서는 허용(대조)', () => {
+    const allow = createWikiLinkSuggestion('p1', 'not found').allow!;
+    editor = makeDocEditor('<p>a</p>');
+    editor.commands.focus('end');
+    const para = { state: editor.state, range: { from: editor.state.selection.from, to: editor.state.selection.from }, editor, isActive: false };
+    expect(allow(para)).toBe(true);
+    editor.commands.setContent('<pre><code>a</code></pre>');
+    editor.commands.setTextSelection(2); // 코드 블록 안(글자 «a» 뒤)
+    expect(editor.state.selection.$from.parent.type.name).toBe('codeBlock');
+    const code = { state: editor.state, range: { from: 1, to: 2 }, editor, isActive: false };
+    expect(allow(code)).toBe(false);
+  });
+
+  it('⭐확장이 거저 주는 «VS Code 붙여넣기» 플러그인은 싣지 않는다(검사 없는 JSON.parse가 붙여넣기를 던지게 하지 않음)', () => {
+    editor = makeDocEditor('<p>x</p>');
+    const keys = editor.state.plugins.map((pl) => String((pl as unknown as { key: string }).key));
+    expect(keys.some((k) => k.startsWith('codeBlockVSCodeHandler'))).toBe(false);
   });
 });
