@@ -57,7 +57,7 @@ describe('[SID:4669 · 4891] RegisterPage — Google first, the e-mail form on t
     await mount();
     const google = byTestId('register-google') as HTMLAnchorElement;
     expect(google?.textContent?.trim()).toBe(koMessages.register.continueWithGoogle);
-    expect(google.className).toContain('bg-brand'); // the one brand-colored control on the screen
+    expect(google.className).toContain('bg-ds-action'); // the one primary-colored control on the screen (the ds primary — story 4891)
     // reverted (the e-mail form folded behind a button again) → only the checkbox is here and the fold button exists
     expect(inputs().map((i) => i.type)).toEqual(['checkbox', 'text', 'email', 'password']);
     expect(byTestId('register-email-open')).toBeNull();
@@ -68,7 +68,7 @@ describe('[SID:4669 · 4891] RegisterPage — Google first, the e-mail form on t
     expect(google.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const submit = byTestId('register-submit') as HTMLButtonElement;
     expect(submit.textContent?.trim()).toBe(koMessages.register.submit);
-    expect(submit.className).not.toContain('bg-brand'); // with Google on the e-mail way is the second way
+    expect(submit.className).not.toContain('bg-ds-action'); // with Google on the e-mail way is the second way
   });
 
   it('T2 OAuth on, the terms gate BOTH ways (AUTH-07): unticked by default · [Google로 계속] goes nowhere and [회원가입] is off · ticking opens both · the e-mail request carries tos_accepted:true', async () => {
@@ -129,7 +129,7 @@ describe('[SID:4669 · 4891] RegisterPage — Google first, the e-mail form on t
     expect(byTestId('register-email-open')).toBeNull();
     expect(byTestId('register-email-form')).not.toBeNull();
     expect(inputs().map((i) => i.type)).toEqual(['checkbox', 'text', 'email', 'password']);
-    expect((byTestId('register-submit') as HTMLButtonElement).className).toContain('bg-brand');
+    expect((byTestId('register-submit') as HTMLButtonElement).className).toContain('bg-ds-action');
     expect(container.textContent).not.toContain(koMessages.register.or);
   });
 

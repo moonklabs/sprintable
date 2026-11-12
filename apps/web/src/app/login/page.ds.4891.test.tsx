@@ -103,7 +103,7 @@ describe('[SID:4891] LoginPage on ds parts', () => {
     expect(google.getAttribute('href')).toBe('/auth/login?provider=google&tos_accepted=true&next=%2Finvite%2Fabc');
     expect(google.textContent?.trim()).toBe(L.google);
     expect(google.querySelector('svg')).not.toBeNull();
-    expect(google.className).toContain('border-ds-line-control'); // the ds secondary look
+    expect(google.className.split(/\s+/)).toContain('border-ds-line-control'); // the ds secondary look: the EXACT class token (a substring would also match every variant's «disabled:border-ds-line-control»)
     expect(google.nextElementSibling?.getAttribute('data-testid')).toBe('login-terms-line');
   });
 
