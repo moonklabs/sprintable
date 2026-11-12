@@ -87,6 +87,25 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
   // 닫혀 있을 때도 쓸 수 있는데, 그 메시지 본문은 이 화면 어디에도 안 떠 있다.
   // 실패했을 때만 본문을 선택 가능하게 노출한다.
   const [copyFailedOnboardingMessage, setCopyFailedOnboardingMessage] = useState<string | null>(null);
+  const openKeyDialog = () => { keyDialogOpenRef.current = true; setNewKeyDialog(true); };
+  // every way of closing the dialog (the [완료] button, Esc, a click outside, the X) goes through here: bump the generation (jobs started before it can no longer write) and clear everything that carries the key.
+  const closeNewKeyDialog = () => {
+    keyGenRef.current += 1;
+    keyDialogOpenRef.current = false;
+    setNewKeyDialog(false);
+    setGeneratedKey(null);
+    setGeneratedMcpConfig(null);
+    setCopyFailedOnboardingMessage(null);
+  };
+  /** The only writer of key-carrying state. `held` = the generation the job took when it started. `reopen` is the create-key answer's exception (a fresh generation + the dialog opens). */
+  const writeKeyState = (held: number, apply: () => void, reopen = false) => {
+    if (held === keyGenRef.current && keyDialogOpenRef.current) { apply(); return; }
+    if (!reopen) return;
+    keyGenRef.current += 1;
+    keyDialogOpenRef.current = true;
+    setNewKeyDialog(true);
+    apply();
+  };
   const [revokeConfirmDialog, setRevokeConfirmDialog] = useState(false);
   // story #2416 — 개별 키 revoke의 native confirm() 대체. null=닫힘, 아니면 대상 키 id.
   const [revokeKeyId, setRevokeKeyId] = useState<string | null>(null);
@@ -94,6 +113,12 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
   // story 4889 (codex): this card belongs to ONE agent — once it is gone (the person went to another agent), what it still has in flight must not reach the page: no new-key callback (the plaintext key would land on the OTHER agent's screen), no toast
   const aliveRef = useRef(true);
   useEffect(() => { aliveRef.current = true; return () => { aliveRef.current = false; }; }, []);
+  // story 4912 D4 — ONE device for «nothing that carries the plaintext key is written once the key-shown dialog is gone».
+  // The key-carrying state (full key · MCP config · the failed-copy message) is written only through `writeKeyState`. An async job takes `keyGenRef.current` when it STARTS and writes
+  // only if that generation is still the current one AND the dialog is open; closing bumps the generation and clears everything. The one exception is the create-key answer: the old key
+  // is already revoked, so a late answer is not dropped but opens the dialog again under a fresh generation (`reopen`) to be shown once.
+  const keyGenRef = useRef(0);
+  const keyDialogOpenRef = useRef(false);
   const notify = useCallback((toast: Parameters<typeof addToast>[0]) => { if (aliveRef.current) addToast(toast); }, [addToast]);
 
   // 문서 app 단일화(2026-08-10 선생님 지시): app 자기 도메인 canonical 직지정(랜딩 301 제거로 app.sprintable.ai 가 자기 /llms.txt 를 직접 서빙).
@@ -145,6 +170,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
 
   const generateApiKey = async () => {
     if (!agentId) return;
+    const heldGen = keyGenRef.current;
     setLoading(true);
     try {
       const response = await fetchWithAuth(`/api/agents/${agentId}/api-key`, {
@@ -158,8 +184,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
       const rawKey = (result.data?.api_key ?? '') as string;
       const rawMcp = result.data?.mcp_config;
       const mcpConfigStr = rawMcp == null ? null : typeof rawMcp === 'string' ? rawMcp : JSON.stringify(rawMcp, null, 2);
-      setGeneratedKey(rawKey);
-      setGeneratedMcpConfig(mcpConfigStr);
+      writeKeyState(heldGen, () => { setGeneratedKey(rawKey); setGeneratedMcpConfig(mcpConfigStr); }, true);
       onNewKey?.(rawKey, mcpConfigStr);
       await loadApiKeys();
     } catch (error) {
@@ -190,7 +215,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
     } finally {
       setLoading(false);
     }
-    setNewKeyDialog(true);
+    openKeyDialog();
     void generateApiKey();
   };
 
@@ -236,12 +261,16 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
     window.setTimeout(() => setCopiedKey(false), 1500);
   };
 
-  const copyOnboardingMessage = async (apiKey: string, mcpConfig?: string | null) => {
+  // `carriesKey` = the message holds the fresh full key (not just a listed key's prefix): only then is the failed-copy textarea key-carrying state and goes through the writer's generation check
+  // (a copy that fails AFTER the dialog was closed must not bring the message back).
+  const copyOnboardingMessage = async (apiKey: string, mcpConfig?: string | null, carriesKey = false) => {
     const message = buildOnboardingMessage(apiKey, mcpConfig);
+    const heldGen = keyGenRef.current;
     const result = await copyTextSafely(message);
     if (!result.ok) {
       addToast({ type: 'error', title: t('agentApiKeyCopyFailTitle'), body: tc('copyFailedSelectManually') });
-      setCopyFailedOnboardingMessage(message);
+      if (carriesKey) writeKeyState(heldGen, () => setCopyFailedOnboardingMessage(message));
+      else setCopyFailedOnboardingMessage(message);
       return;
     }
     setCopyFailedOnboardingMessage(null);
@@ -249,6 +278,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
     addToast({ type: 'success', title: t('agentApiKeyOnboardingCopiedTitle') });
     window.setTimeout(() => setCopiedOnboarding(false), 1500);
   };
+
 
   const activeKeys = apiKeys.filter((k) => !k.revoked_at);
   const hasActiveKey = activeKeys.length > 0 || generatedKey !== null;
@@ -271,7 +301,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
             <Button
               variant="outline"
               disabled={!hasActiveKey || copiedOnboarding}
-              onClick={() => void copyOnboardingMessage(generatedKey ?? (activeKeys[0] ? `${activeKeys[0].key_prefix}...` : ''), generatedMcpConfig)}
+              onClick={() => void copyOnboardingMessage(generatedKey ?? (activeKeys[0] ? `${activeKeys[0].key_prefix}...` : ''), generatedMcpConfig, generatedKey !== null)}
               className="gap-1.5"
             >
               {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
@@ -282,7 +312,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
                 if (activeKeys.length > 0) {
                   setRevokeConfirmDialog(true);
                 } else {
-                  setNewKeyDialog(true);
+                  openKeyDialog();
                   void generateApiKey();
                 }
               }}
@@ -433,7 +463,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
         }}
       />
 
-      <Dialog open={newKeyDialog} onOpenChange={setNewKeyDialog}>
+      <Dialog open={newKeyDialog} onOpenChange={(open) => { if (open) openKeyDialog(); else closeNewKeyDialog(); }}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{t('agentApiKeyGeneratedTitle')}</DialogTitle>
@@ -477,7 +507,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
                   variant="outline"
                   size="sm"
                   className="mt-2 gap-1.5"
-                  onClick={() => void copyOnboardingMessage(generatedKey, generatedMcpConfig)}
+                  onClick={() => void copyOnboardingMessage(generatedKey, generatedMcpConfig, true)}
                 >
                   {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
                   {t('agentApiKeyCopyOnboardingCta')}
@@ -487,10 +517,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
           )}
           <DialogFooter>
             <Button
-              onClick={() => {
-                setNewKeyDialog(false);
-                setGeneratedKey(null);
-              }}
+              onClick={closeNewKeyDialog}
             >
               {t('agentApiKeyDone')}
             </Button>
