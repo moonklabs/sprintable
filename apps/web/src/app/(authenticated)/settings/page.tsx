@@ -448,6 +448,9 @@ export default function SettingsPage() {
 
   // 4906 — the organization's details (name · plan · role) load from the ONE organization id, not from the project: an account with no project has them too.
   useEffect(() => {
+    // codex 1라운드 — orgInfo.id로 조직 삭제 · 이름 저장이 간다: 조직이 바뀌면 옛 조직의 상세를 먼저 비우고(새 응답이 올 때까지 빈 칸 > 옛 조직),
+    // 늦게 도착한 옛 응답(본문 읽기가 늦은 경우 포함)이 새 조직의 상세를 덮지 못하게 «읽은 뒤»에도 취소를 본다.
+    setOrgInfo((current) => (current && current.id !== orgId ? null : current));
     if (!orgId) return;
     let cancelled = false;
     void (async () => {
@@ -455,6 +458,7 @@ export default function SettingsPage() {
       const orgListRes = await fetchWithAuth('/api/organizations').catch(() => null);
       if (cancelled || !orgListRes?.ok) return;
       const orgListJson = await orgListRes.json() as { data?: Array<{ id: string; name: string; slug: string; plan?: string; role?: string }> };
+      if (cancelled) return;
       const found = (orgListJson.data ?? []).find((o) => o.id === orgId);
       if (found) {
         setOrgInfo(found);

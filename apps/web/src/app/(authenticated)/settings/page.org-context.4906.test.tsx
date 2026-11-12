@@ -46,7 +46,7 @@ const flush = async () => { for (let i = 0; i < 10; i++) await act(async () => {
 const json = (data: unknown, status = 200) => ({ ok: status < 400, status, json: async () => ({ data }) });
 
 /** `hasProject: false` = a fresh account: /api/current-project has nothing to say. `ctxOrgId: null` = the dashboard context has no organization (the old source is the only one). */
-async function mountPage(query: string, opts: { hasProject: boolean; ctxOrgId: string | null }) {
+async function mountPage(query: string, opts: { hasProject: boolean; ctxOrgId: string | null; orgListImpl?: () => unknown }) {
   useDashboardContextMock.mockReturnValue({
     orgId: opts.ctxOrgId, orgMemberships: opts.ctxOrgId ? [{ orgId: opts.ctxOrgId, role: 'owner' }] : [], currentMemberType: 'human', currentTeamMemberId: 'tm-1', projectId: opts.hasProject ? 'p1' : null,
   });
@@ -58,7 +58,7 @@ async function mountPage(query: string, opts: { hasProject: boolean; ctxOrgId: s
     const url = String(input);
     if (url === '/api/me') return json({ role: 'owner', user_id: 'u1' });
     if (url === '/api/current-project') return opts.hasProject ? json({ project_id: 'p1', org_id: 'org-1' }) : json(null, 404);
-    if (url === '/api/organizations') { orgListCalls += 1; return json([{ id: 'org-1', name: '우리 조직', slug: 'our', role: 'owner' }]); }
+    if (url === '/api/organizations') { orgListCalls += 1; return (opts.orgListImpl?.() ?? json([{ id: 'org-1', name: '우리 조직', slug: 'our', role: 'owner' }])) as ReturnType<typeof json>; }
     return json(null, 404);
   });
   vi.doMock('@/lib/db/client', () => ({ fetchWithAuth: fetchWithAuthMock }));
@@ -121,5 +121,48 @@ describe('[SID:4906] settings › one organization id: a fresh account (organiza
     await createProjectNamed('감마');
     expect(projectPosts).toHaveLength(0);
     expect(text()).toContain(T.projectCreateOrgMissing);
+  });
+
+  async function switchOrgTo(orgId: string) {
+    useDashboardContextMock.mockReturnValue({ orgId, orgMemberships: [{ orgId, role: 'owner' }], currentMemberType: 'human', currentTeamMemberId: 'tm-1', projectId: null });
+    const { default: SettingsPage } = await import('./page');
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><SettingsPage /></NextIntlClientProvider>); });
+    await flush();
+  }
+  const inputValues = () => [...document.querySelectorAll('input')].map((i) => i.value);
+
+  it('⭐codex: a LATE answer for the old organization (its body still being read) never overwrites the details of the organization the screen switched to', async () => {
+    // (the org delete / rename go by orgInfo.id — a stale org-1 there would aim them at the wrong organization)
+    let releaseBody: (v: unknown) => void = () => {};
+    let call = 0;
+    await mountPage('tab=organization', {
+      hasProject: false, ctxOrgId: 'org-1',
+      orgListImpl: () => {
+        call += 1;
+        if (call === 1) return { ok: true, status: 200, json: () => new Promise((resolve) => { releaseBody = resolve; }) };
+        return json([{ id: 'org-2', name: '둘째 조직', slug: 'two', role: 'owner' }]);
+      },
+    });
+    await switchOrgTo('org-2');
+    expect(inputValues()).toContain('둘째 조직');
+    await act(async () => { releaseBody({ data: [{ id: 'org-1', name: '첫째 조직', slug: 'one', role: 'owner' }] }); });
+    await flush();
+    expect(inputValues()).toContain('둘째 조직');
+    expect(inputValues()).not.toContain('첫째 조직');
+  });
+
+  it('⭐codex: when the organization changes and the new details do not load, the OLD organization\'s details are gone (not left to be edited or deleted)', async () => {
+    let call = 0;
+    await mountPage('tab=organization', {
+      hasProject: false, ctxOrgId: 'org-1',
+      orgListImpl: () => {
+        call += 1;
+        return call === 1 ? json([{ id: 'org-1', name: '첫째 조직', slug: 'one', role: 'owner' }]) : json(null, 500);
+      },
+    });
+    expect(inputValues()).toContain('첫째 조직');
+    await switchOrgTo('org-2');
+    expect(inputValues()).not.toContain('첫째 조직'); // the name box (edit · delete go by it) is gone until the new details load
+    expect(document.body.textContent).not.toContain('첫째 조직');
   });
 });
