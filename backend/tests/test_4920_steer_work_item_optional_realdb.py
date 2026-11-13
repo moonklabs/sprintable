@@ -1,7 +1,7 @@
 """story 4920 (the owner's report 11-13: «스토리 선택 안하면 메시지 전송조차 안되는지?») — `preset.steer.instruct`: the work item is optional.
 
 Real Postgres. Three things are pinned:
-1. the migration 0474 rewrites the platform definition row 0274 seeded in place (required loses work_item_type / work_item_id; the card's «대상» line is optional) — and a downgrade puts 0274's values back;
+1. the migration 0474 rewrites the platform definition row 0274 seeded in place (required loses work_item_type / work_item_id; the card's «대상» line is optional) — and a downgrade puts 0274's values back; it touches no other row (another platform key · an org's own definition);
 2. an instruction WITHOUT a work item publishes and reaches the target alone;
 3. an instruction WITH a work item reaches exactly who it did before (the target + the work item's stakeholders) — no regression.
 """
@@ -154,11 +154,22 @@ async def test_upgrade_touches_only_the_platform_row_of_the_key():
                 id=own_id, key="org.acme.steer_instruct", org_id=org_id,
                 payload_schema=m._PAYLOAD_SCHEMA, routing=m._ROUTING, block_template=m._BLOCK_TEMPLATE,
             ))
+            # a SECOND platform definition (another key, org_id NULL): the UPDATE is limited to the steer key, not to «every platform row»
+            other_id = uuid.uuid4()
+            other_schema = {"type": "object", "additionalProperties": False, "required": ["work_item_type", "work_item_id", "note"],
+                            "properties": {"work_item_type": {"type": "string"}, "work_item_id": {"type": "string"}, "note": {"type": "string"}}}
+            other_template = {"blocks": [{"type": "header", "text": "다른 정의"}]}
+            s.add(EventDefinition(
+                id=other_id, key="preset.other.sample", org_id=None,
+                payload_schema=other_schema, routing=m._ROUTING, block_template=other_template,
+            ))
             await s.commit()
             await _run_migration(s, "upgrade")
             s.expire_all()
             own = (await s.execute(select(EventDefinition).where(EventDefinition.id == own_id))).scalar_one()
             assert own.payload_schema == m._PAYLOAD_SCHEMA and own.block_template == m._BLOCK_TEMPLATE, "the org's own definition is not rewritten"
+            other = (await s.execute(select(EventDefinition).where(EventDefinition.id == other_id))).scalar_one()
+            assert other.payload_schema == other_schema and other.block_template == other_template, "another platform definition is not rewritten"
     finally:
         await engine.dispose()
 
@@ -219,7 +230,7 @@ async def test_instruction_with_a_work_item_reaches_the_same_people_as_before():
                 "target_member_id": str(target_id), "instruction": "이 스토리 우선순위를 올려주세요",
             })
             assert resp["escalation_member_ids"] == [str(target_id)]
-            assert str(stakeholder_id) in resp["broadcast_member_ids"]
+            assert resp["broadcast_member_ids"] == [str(stakeholder_id)], "exactly the work item's stakeholders — nobody added, nobody dropped"
     finally:
         await engine.dispose()
 
