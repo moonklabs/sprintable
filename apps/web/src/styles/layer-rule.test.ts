@@ -187,3 +187,25 @@ describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
     expect(globals).not.toMatch(/--skeleton-highlight:[^;]*var\(--background\)/);
   });
 });
+
+// 4916 — 대화 방은 내용 칸 판을 따로 깔지 않고 «쪽 바탕(page)» 위에 말풍선 · 입력칸만 선다(선생님 11-13 «채팅창 안에만 흰색 — 역겨움»). 그래서 말풍선 · 입력칸 값이 «바탕 기준»으로도 선을 지켜야 한다.
+// 라이트의 바탕(#f3f5f9, L .970)은 내용 칸(흰색)보다 어두워, 옛 남의 글 면(.948)은 바탕과 .022밖에 안 갈렸다 → 토큰 값에서 고친다(채팅만 덧칠 X — 같은 «바탕 위 면이 흐림»이 다른 화면에도 있다).
+describe('화면 층 규칙 — 바탕(page) 위 말풍선 · 입력칸 (4916)', () => {
+  it.each(themes)('⭐%s: 바탕 → 남의 글 ≥ 0.05 · 내 글 ≥ 0.09 · 입력칸 ≥ 0.03(경계가 함께 가른다) — 방 안에 따로 까는 판이 없어도 말풍선이 보인다', (_name, t) => {
+    expect(step(t, 'page', 'rowOthers')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPage);
+    expect(step(t, 'page', 'rowMine')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowMineOnPage);
+    expect(step(t, 'page', 'field')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.fieldOnPage);
+  });
+
+  it.each(themes)('⭐%s: 값을 옮긴 뒤에도 옛 선은 그대로 — 내용 칸 → 입력칸 ≥ 0.05 · 카드 면 → 우물 ≥ 0.03 · 열린 카드 ↔ 글 줄 채도차 ≥ 0.01', (_name, t) => {
+    expect(step(t, 'panel', 'field')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.fieldOnPanel);
+    expect(step(t, 'rowOthers', 'well')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.wellOnRow);
+    expect(chroma(t[LAYER_TOKEN.rowSelected]!) - chroma(t[LAYER_TOKEN.rowOthers]!)).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowSelectedVsOthersChroma);
+  });
+
+  it('⭐옛 값(라이트 남의 글 #eaeef4)은 바탕 위에서 문턱 아래였다 — 이 시험이 그 값에선 빨개진다(재현 가드)', () => {
+    const t = { ...themes[0]![1], [LAYER_TOKEN.rowOthers]: '#eaeef4' };
+    expect(step(t, 'page', 'rowOthers')).toBeLessThan(LAYER_MIN_STEP.rowOthersOnPage);
+  });
+});
+
