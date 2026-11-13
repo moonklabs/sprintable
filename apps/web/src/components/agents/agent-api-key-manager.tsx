@@ -233,6 +233,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
       if (error instanceof CreateBodyTimeoutError) {
         // story 4912 (B2, codex): NOT «발급 실패» — the new key may exist (and the old ones are already revoked) while its plaintext never reached this screen. Say so, and read the list so what exists is on screen.
         notify({ type: 'error', title: tc('error'), body: t('agentApiKeyCreateUnconfirmed') });
+        reportIssuing(false); // the create is over — the list read below (whose own body is unbounded) must not hold the panel (codex round 2)
         await loadApiKeys();
       } else {
         notify({

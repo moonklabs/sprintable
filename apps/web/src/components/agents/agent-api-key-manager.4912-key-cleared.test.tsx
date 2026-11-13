@@ -343,5 +343,29 @@ describe('AgentApiKeyManager — 4912 D4: the other things that could hold the k
       vi.useRealTimers();
     }
   });
+
+  it('⭐본문 시간 초과 뒤 키 목록 읽기가 멈춰도 패널은 잡히지 않는다 — «발급 중»은 만들기가 끝난 순간 풀리고 목록 읽기를 기다리지 않는다(codex 2차)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const calls: boolean[] = [];
+      let listGets = 0;
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+        const u = String(url);
+        if (u.includes('/api-key') && init?.method === 'POST') return { ok: true, status: 201, json: () => new Promise(() => {}) } as unknown as Response;
+        if (u.includes('/api-key')) { listGets += 1; return listGets === 1 ? new Response(JSON.stringify({ data: [] }), { status: 200 }) : new Promise<Response>(() => {}); } // the re-read after the timeout hangs
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }));
+      await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="a" onIssuingChange={(b) => calls.push(b)} /></NextIntlClientProvider>); });
+      await settle();
+      await act(async () => { btn(S.agentApiKeyGenerate)?.click(); });
+      await settle();
+      await act(async () => { vi.advanceTimersByTime(20_001); });
+      await settle();
+      expect(listGets).toBeGreaterThan(1); // the re-read is out and never answers
+      expect(calls.at(-1), 'the panel is free although the list read is stuck').toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
