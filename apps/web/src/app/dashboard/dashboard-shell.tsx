@@ -37,6 +37,7 @@ import { useChatUnreadTotal } from '@/hooks/use-chat-unread-total';
 import { ReleaseNotesProvider } from '@/components/release-notes/release-notes-gate';
 import { RefreshProvider } from '@/contexts/refresh-context';
 import { TeamPresenceToggleProvider } from '@/components/presence/team-presence-toggle';
+import { useShellBandsHeight } from '@/components/nav/shell-bands-height';
 import { ActivationChecklistBanner } from '@/components/dashboard/activation-checklist-banner';
 import { HomeModelProvider } from '@/components/home/home-model-provider';
 import { NavRailWithHomeBadge } from '@/components/home/home-nav-rail';
@@ -267,6 +268,8 @@ function ScrollShell({
   children: React.ReactNode;
 }) {
   const { setScrollContainer, scrollContainer } = useTopBar();
+  const bandsRef = useRef<HTMLDivElement>(null);
+  useShellBandsHeight(bandsRef);
   const setRef = useCallback((el: HTMLDivElement | null) => {
     setScrollContainer(el);
   }, [setScrollContainer]);
@@ -290,7 +293,7 @@ function ScrollShell({
     <ReleaseNotesProvider userId={currentTeamMemberId}>
     <TeamPresenceToggleProvider value={{ toggle: panel.togglePanel, workingCount, open: panelVisible }}>
     <SidebarInset className={cn('relative flex flex-col overflow-hidden', LAYER.page)}>
-      <div ref={setRef} className="flex flex-1 min-h-0 flex-col overflow-y-auto">
+      <div ref={setRef} className="flex flex-1 min-h-0 flex-col overflow-y-auto pb-[var(--shell-launcher-clear,0px)]">
         {showTopBar && (
           <TopBar
             orgId={orgId}
@@ -300,6 +303,8 @@ function ScrollShell({
             userName={userName}
           />
         )}
+        {/* 4913 셸 — 띠 셋을 한 칸에 담아 높이를 잰다(useShellBandsHeight → --shell-bands-h → --shell-chrome-h). 칸 자체는 모양이 없다: 띠마다 `empty:hidden`이라 다 비면 높이 0. */}
+        <div ref={bandsRef} data-shell-bands>
         <div className="px-3 pt-3 empty:hidden">
           <ActivationChecklistBanner />
         </div>
@@ -310,6 +315,7 @@ function ScrollShell({
         {/* story 4725 decision 2 — once: what was cut when this account's mailbox was proved (the server holds the mark; it is gone after [닫기]) */}
         <div className="px-3 pt-3 empty:hidden">
           <ReclaimNoticeAlert />
+        </div>
         </div>
         {/* story #4130(PO 라이브 실측, 2026-09-21 23:23~23:31Z) — 이 아래 `min-h-0`를 뺐다.
             바깥 스크롤러(위 :199 `overflow-y-auto`) 「안」에서 다시 `min-h-0`+`flex-1`을 쓰면

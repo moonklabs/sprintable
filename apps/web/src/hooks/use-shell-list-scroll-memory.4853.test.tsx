@@ -348,6 +348,6 @@ describe('the shell uses the hook (source shape · comments stripped)', () => {
     expect(CODE).toMatch(/import \{ useShellListScrollMemory \} from '@\/hooks\/use-shell-list-scroll-memory';/);
     expect(CODE).toMatch(/const \{ setScrollContainer, scrollContainer \} = useTopBar\(\);/);
     expect(CODE).toMatch(/useShellListScrollMemory\(scrollContainer, usePathname\(\)\);/);
-    expect(CODE).toMatch(/<div ref=\{setRef\} className="flex flex-1 min-h-0 flex-col overflow-y-auto">/);
+    expect(CODE).toMatch(/<div ref=\{setRef\} className="flex flex-1 min-h-0 flex-col overflow-y-auto(?: pb-\[var\(--shell-launcher-clear,0px\)\])?">/); // 4913 셸: 도움말 단추 여백이 스크롤러 아래에 붙을 수 있다 — 스크롤 칸 자체(같은 요소)라는 핀은 그대로
   });
 });
