@@ -103,6 +103,8 @@ RESERVED_WORKSPACE_SLUGS: frozenset[str] = frozenset({
     "phone-landing", "phone-start",
     # story 4886 — the web design-system showcase page (new top-level route, internal reference)
     "design-system",
+    # story 4915 — the public «다시 시도» page the proxy rewrites an unconfirmed page load to (new top-level web route)
+    "session-unconfirmed",
 })
 
 
