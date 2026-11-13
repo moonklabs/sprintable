@@ -1,10 +1,14 @@
 'use client';
 
+import { useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardBody } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Card } from '@/components/ds/card';
+import { Chip } from '@/components/ds/chip';
+import { EmptyState } from '@/components/ds/empty-state';
+import { RowList, RowListItem } from '@/components/ds/row-list';
+import { Skeleton } from '@/components/ds/skeleton';
 import type { EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
 import { orderedRecipeRoles, recipeConnectionTargets, roleActorKind, stagesWithGate } from '@/lib/recipe-role-slots';
 import { stageRoleLabel } from '@/lib/stage-role';
@@ -53,137 +57,99 @@ function gateCount(def: EventDefinitionResponse): number {
   return stagesWithGate(def.stage_metadata).length;
 }
 
-function RecipeCard({
-  recipe, onApply, onViewDetail,
+/**
+ * 4913(UI-R5) C2 — 레시피 목록: 옛 3열 카드 격자(768 틀 안 세 칸 = 비좁음)를 «한 패널 안 행 목록»(RowList)으로. 보이는 것은 그대로 — 이름 · 설명 · 단계/게이트 수 · 역할 · 연결 · «프로젝트에 적용» · «상세 보기»:
+ *  - 줄: 이름 + 설명 한 줄(잘림) + 단계 · 게이트 칩 + 오른쪽 «프로젝트에 적용»
+ *  - 줄을 펼치면(Enter · 더블클릭 · 오른쪽 쉐브론) 역할 · 연결 행(옛 카드의 dl)
+ *  - «상세 보기» = «⋯» 메뉴 · 우클릭 같은 항목 (눌러서 큰 상세 창)
+ */
+function RecipeRow({
+  recipe, index, expanded, onExpandedChange, onApply, onViewDetail,
 }: {
   recipe: EventDefinitionResponse;
+  index: number;
+  expanded: boolean;
+  onExpandedChange: (open: boolean) => void;
   onApply?: (recipe: EventDefinitionResponse) => void;
   onViewDetail?: (recipe: EventDefinitionResponse) => void;
 }) {
   const t = useTranslations('organization');
-  const roles = roleNames(recipe, t);
   const tPreset = useTranslations('recipePreset');
+  const roles = roleNames(recipe, t);
   const connections = connectionNames(recipe, t);
   const description = presetDescription(recipe, tPreset);
+  const name = presetName(recipe, tPreset);
   return (
-    <Card className="h-full" data-testid={`recipe-card-${recipe.id}`}>
-      <CardBody className="flex h-full flex-col gap-2">
-        <h4 className="text-sm font-semibold text-foreground">{presetName(recipe, tPreset)}</h4>
-        {description ? <p className="min-h-8 break-keep text-xs text-muted-foreground">{description}</p> : null}
-        <div className="flex flex-wrap gap-1.5">
-          <Badge variant="outline">{t('recipeGalleryStageCountBadge', { count: stageCount(recipe) })}</Badge>
-          <Badge variant="outline">{t('recipeGalleryGateCountBadge', { count: gateCount(recipe) })}</Badge>
-        </div>
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-t border-border pt-2 text-xs">
-          <dt className="text-muted-foreground">{t('recipeCardRolesLabel')}</dt>
-          <dd className={roles.length > 0 ? 'break-keep text-foreground' : 'break-keep text-muted-foreground'} data-testid="recipe-card-roles">
+    <RowListItem
+      data-testid={`recipe-card-${recipe.id}`}
+      title={name}
+      subtitle={description || undefined}
+      statusMark={(
+        <>
+          <Chip>{t('recipeGalleryStageCountBadge', { count: stageCount(recipe) })}</Chip>
+          <Chip>{t('recipeGalleryGateCountBadge', { count: gateCount(recipe) })}</Chip>
+        </>
+      )}
+      trailing={onApply ? <Button variant="secondary" onClick={() => onApply(recipe)}>{t('recipeGalleryApplyCta')}</Button> : undefined}
+      actions={onViewDetail ? [{ key: 'detail', label: t('recipeGalleryDetailCta'), onSelect: () => onViewDetail(recipe) }] : []}
+      actionsLabel={t('eventRowActionAriaLabel', { n: index + 1, label: name })}
+      expanded={expanded}
+      onExpandedChange={onExpandedChange}
+      expandLabel={t('recipeGalleryDetailCta')}
+      onOpen={() => onExpandedChange(true)}
+      detail={(
+        <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-ds-small">
+          <dt className="text-ds-ink-3">{t('recipeCardRolesLabel')}</dt>
+          <dd className={roles.length > 0 ? 'm-0 break-keep text-ds-ink' : 'm-0 break-keep text-ds-ink-3'} data-testid="recipe-card-roles">
             {roles.length > 0 ? roles.join(' · ') : t('recipeCardConnectionNone')}
           </dd>
-          <dt className="text-muted-foreground">{t('recipeCardConnectionsLabel')}</dt>
-          <dd className={connections.length > 0 ? 'break-keep text-foreground' : 'break-keep text-muted-foreground'} data-testid="recipe-card-connections">
+          <dt className="text-ds-ink-3">{t('recipeCardConnectionsLabel')}</dt>
+          <dd className={connections.length > 0 ? 'm-0 break-keep text-ds-ink' : 'm-0 break-keep text-ds-ink-3'} data-testid="recipe-card-connections">
             {connections.length > 0 ? connections.join(' · ') : t('recipeCardConnectionNone')}
           </dd>
         </dl>
-        <div className="mt-auto flex gap-2 pt-1">
-          <Button size="sm" onClick={() => onApply?.(recipe)}>{t('recipeGalleryApplyCta')}</Button>
-          <Button size="sm" variant="ghost" onClick={() => onViewDetail?.(recipe)}>{t('recipeGalleryDetailCta')}</Button>
-        </div>
-      </CardBody>
-    </Card>
+      )}
+    />
   );
 }
 
-export interface RecipeCardGridProps {
+export interface RecipeListProps {
   recipes: EventDefinitionResponse[];
   loading: boolean;
   error: string | null;
   emptyMessage: string;
+  /** RowList의 접근성 이름(한 화면에 목록이 여럿이다). */
+  ariaLabel: string;
   onApply?: (recipe: EventDefinitionResponse) => void;
   onViewDetail?: (recipe: EventDefinitionResponse) => void;
 }
 
-// story #4049(E-RECIPE-1 ①) — events/page.tsx가 «마케팅» 탭 자리를 자기 바깥 탭 체계
-// (기존 CRUD 화면의 「개발 워크플로」 탭과 형제)로 이미 갖고 있어, RecipeGallery 자신의
-// 내부 탭 chrome을 다시 씌우면 탭 안에 탭이 뜨는 중복이 난다 — 그 페이지가 바로 쓸 수
-// 있게 카드 그리드만 떼어 export한다. RecipeGallery 자신은 이걸 안 쓰고 그대로 유지
-// (develop 기존 검증된 동작 무변경 — #4424 qa:pass된 loading/error 3분기 그대로).
-export function RecipeCardGrid({ recipes, loading, error, emptyMessage, onApply, onViewDetail }: RecipeCardGridProps) {
+export function RecipeList({ recipes, loading, error, emptyMessage, ariaLabel, onApply, onViewDetail }: RecipeListProps) {
   const t = useTranslations('organization');
-  if (loading) return <p className="text-sm text-muted-foreground">{t('recipeGalleryLoading')}</p>;
-  if (error) return <p role="alert" className="text-sm text-destructive">{t('recipeGalleryLoadError')}</p>;
-  if (recipes.length === 0) return <p className="text-sm text-muted-foreground">{emptyMessage}</p>;
-  return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {recipes.map((recipe) => (
-        <RecipeCard key={recipe.id} recipe={recipe} onApply={onApply} onViewDetail={onViewDetail} />
-      ))}
-    </div>
-  );
-}
-
-export interface RecipeGalleryProps {
-  marketingRecipes: EventDefinitionResponse[];
-  workflowRecipes: EventDefinitionResponse[];
-  loading: boolean;
-  error: string | null;
-  onApply?: (recipe: EventDefinitionResponse) => void;
-  onViewDetail?: (recipe: EventDefinitionResponse) => void;
-}
-
-export function RecipeGallery({
-  marketingRecipes, workflowRecipes, loading, error, onApply, onViewDetail,
-}: RecipeGalleryProps) {
-  const t = useTranslations('organization');
-
-  return (
-    <div className="space-y-4">
-      <div>
-        <h3 className="text-lg font-semibold text-foreground">{t('recipeGalleryTitle')}</h3>
-        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{t('recipeGalleryDescription')}</p>
+  const [openId, setOpenId] = useState<string | null>(null);
+  if (loading) {
+    return (
+      <div role="status" aria-busy="true" className="space-y-3">
+        <span className="sr-only">{t('recipeGalleryLoading')}</span>
+        {[1, 2, 3].map((i) => <Skeleton key={i} className="h-14 w-full" />)}
       </div>
-
-      <Tabs defaultValue="marketing">
-        <TabsList>
-          <TabsTrigger value="marketing">
-            {t('recipeGalleryTabMarketing')} <span className="text-muted-foreground">{marketingRecipes.length}</span>
-          </TabsTrigger>
-          <TabsTrigger value="workflow">
-            {t('recipeGalleryTabWorkflow')} <span className="text-muted-foreground">{workflowRecipes.length}</span>
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="marketing">
-          {loading ? (
-            <p className="text-sm text-muted-foreground">{t('recipeGalleryLoading')}</p>
-          ) : error ? (
-            <p role="alert" className="text-sm text-destructive">{t('recipeGalleryLoadError')}</p>
-          ) : marketingRecipes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t('recipeGalleryEmpty')}</p>
-          ) : (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {marketingRecipes.map((recipe) => (
-                <RecipeCard key={recipe.id} recipe={recipe} onApply={onApply} onViewDetail={onViewDetail} />
-              ))}
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="workflow">
-          {loading ? (
-            <p className="text-sm text-muted-foreground">{t('recipeGalleryLoading')}</p>
-          ) : error ? (
-            <p role="alert" className="text-sm text-destructive">{t('recipeGalleryLoadError')}</p>
-          ) : workflowRecipes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t('recipeGalleryWorkflowEmpty')}</p>
-          ) : (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {workflowRecipes.map((recipe) => (
-                <RecipeCard key={recipe.id} recipe={recipe} onApply={onApply} onViewDetail={onViewDetail} />
-              ))}
-            </div>
-          )}
-        </TabsContent>
-      </Tabs>
-    </div>
+    );
+  }
+  if (error) return <Banner tone="failed">{t('recipeGalleryLoadError')}</Banner>;
+  if (recipes.length === 0) return <Card><EmptyState size="inline" title={emptyMessage} /></Card>;
+  return (
+    <RowList aria-label={ariaLabel} data-testid="recipe-list">
+      {recipes.map((recipe, index) => (
+        <RecipeRow
+          key={recipe.id}
+          recipe={recipe}
+          index={index}
+          expanded={openId === recipe.id}
+          onExpandedChange={(open) => setOpenId(open ? recipe.id : null)}
+          onApply={onApply}
+          onViewDetail={onViewDetail}
+        />
+      ))}
+    </RowList>
   );
 }

@@ -97,7 +97,9 @@ function mockFetches() {
 
 async function mount() {
   const { default: OrganizationEventsPage } = await import('./page');
-  await act(async () => { root.render(wrap(<OrganizationEventsPage />)); });
+  // 4913 C2 — 화면 제목은 앱 틀 위 막대(TopBarSlot)로 간다: 막대 컨텍스트는 화면과 같은 번(모듈 비움 뒤)에 불러온다 — 정적으로 불러오면 컨텍스트가 둘이 된다.
+  const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+  await act(async () => { root.render(wrap(<TopBarProvider><OrganizationEventsPage /></TopBarProvider>)); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
@@ -211,8 +213,11 @@ describe('/organization/events — 마케팅 탭(AC1·AC2)', () => {
     await mount();
     await switchToMarketingTab();
 
-    const detailBtn = [...document.body.querySelectorAll('button')].find((b) => b.textContent === '상세 보기');
-    await act(async () => { detailBtn!.click(); });
+    // 4913 C2 — «상세 보기»는 레시피 행의 «⋯» 메뉴(우클릭도 같은 항목)에 있다.
+    const more = document.body.querySelector('[data-testid^="recipe-card-"] [data-slot="ds-row-actions-trigger"]') as HTMLElement;
+    await act(async () => { more.click(); });
+    const detailItem = [...document.body.querySelectorAll('[role="menuitem"]')].find((i) => i.textContent === '상세 보기') as HTMLElement;
+    await act(async () => { detailItem.click(); });
     await flush();
 
     const stepper = document.body.querySelector('[data-testid="recipe-stepper"]')!;

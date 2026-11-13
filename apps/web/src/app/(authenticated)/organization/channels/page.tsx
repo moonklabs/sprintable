@@ -28,7 +28,7 @@ import { PastedSecretConnectCard } from '@/components/channel-connect/pasted-sec
 import { ReplaceCredentialCard } from '@/components/channel-connect/replace-credential-card';
 import { OAuthResultBanner } from '@/components/channel-connect/oauth-result-banner';
 import { FacebookPageSelectCard, type SelectCandidate } from '@/components/channel-connect/facebook-page-select-card';
-import { AppCredentialsStatusResponse, ChannelConnectionResponse, TestConnectionResponse } from '@/components/channel-connect/types';
+import type { AppCredentialsStatusResponse, ChannelConnectionResponse, TestConnectionResponse } from '@/components/channel-connect/types';
 import { AgentSetupSection } from '@/components/channel-connect/agent-setup-section';
 import { ExternalPublishPauseCard } from '@/components/channel-connect/external-publish-pause-card';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';

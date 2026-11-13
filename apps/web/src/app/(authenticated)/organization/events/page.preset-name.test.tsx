@@ -49,10 +49,12 @@ async function renderPage(locale: 'ko' | 'en') {
     return { ok: true, json: async () => ({}) };
   }));
   const { default: OrganizationEventsPage } = await import('./page');
+  // 4913 C2 — 화면 제목은 앱 틀 위 막대(TopBarSlot)로 간다: 막대 컨텍스트는 화면과 같은 번(모듈 비움 뒤)에 불러온다 — 정적으로 불러오면 컨텍스트가 둘이 된다.
+  const { TopBarProvider } = await import('@/components/nav/top-bar-context');
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
-        <OrganizationEventsPage />
+        <TopBarProvider><OrganizationEventsPage /></TopBarProvider>
       </NextIntlClientProvider>,
     );
   });

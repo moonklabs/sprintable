@@ -34,6 +34,31 @@ const ORG_ID = 'org-1';
 
 const CURRENT_MEMBER_ID = 'member-me-1';
 
+// 4913 C2 — 정의 행(RowList): 수정 · 발행 테스트 · 비활성화는 행 «⋯» 메뉴(우클릭도 같은 항목)에 있고 «프로젝트에 적용»은 행 오른쪽 단추다. 펼침 = 행 오른쪽 쉐브론(aria-expanded) · Enter · 더블클릭.
+const rowOf = (key?: string) => (key
+  ? container.querySelector(`[data-testid="event-def-row-${key}"]`)
+  : container.querySelector('[data-slot="ds-row-list-item"][data-testid^="event-def-row-"]')) as HTMLElement | null;
+async function openRowMenu(key?: string) {
+  const trigger = rowOf(key)?.querySelector('[data-slot="ds-row-actions-trigger"]') as HTMLElement | null;
+  if (!trigger) return [] as HTMLElement[];
+  await act(async () => { trigger.click(); });
+  return [...document.body.querySelectorAll('[role="menuitem"]')] as HTMLElement[];
+}
+/** 행 메뉴의 항목 글(없으면 빈 목록) — 메뉴는 읽고 닫는다. */
+async function rowMenuLabels(key?: string) {
+  const labels = (await openRowMenu(key)).map((i) => i.textContent ?? '');
+  await act(async () => { document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+  return labels;
+}
+async function rowAction(label: string, key?: string) {
+  const item = (await openRowMenu(key)).find((i) => i.textContent === label)!;
+  await act(async () => { item.click(); });
+}
+async function toggleRow(key?: string) {
+  const chevron = rowOf(key)!.querySelector('[aria-expanded]') as HTMLElement;
+  await act(async () => { chevron.click(); });
+}
+
 function asAdmin() {
   useDashboardContextMock.mockReturnValue({
     orgId: ORG_ID,
@@ -134,7 +159,9 @@ function mockFetches(defs: unknown[], opts?: { onPost?: (body: unknown) => { ok:
 
 async function mount() {
   const { default: OrganizationEventsPage } = await import('./page');
-  await act(async () => { root.render(wrap(<OrganizationEventsPage />)); });
+  // 4913 C2 — 화면 제목은 앱 틀 위 막대(TopBarSlot)로 간다: 막대 컨텍스트는 화면과 같은 번(모듈 비움 뒤)에 불러온다 — 정적으로 불러오면 컨텍스트가 둘이 된다.
+  const { TopBarProvider } = await import('@/components/nav/top-bar-context');
+  await act(async () => { root.render(wrap(<TopBarProvider><OrganizationEventsPage /></TopBarProvider>)); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
   // story #4049 후속(페드루 PO, 2026-09-19, [시안이탈첫노출]) — 기본 탭이 marketing으로
   // 바뀌어(레시피-first 의도) 이 스위트(개발 워크플로우 CRUD)는 워크플로우 탭으로 명시
@@ -190,8 +217,8 @@ describe('OrganizationEventsPage', () => {
     expect(customHeading?.textContent).not.toMatch(/\(\d+\)/);
     expect(presetHeading?.textContent).not.toMatch(/\(\d+\)/);
     // 페드루 PO 적기만(#4082) — Badge→CountBadge(plain span, data-slot 없음).
-    expect(customHeading?.querySelector('span')?.textContent).toBe('2');
-    expect(presetHeading?.querySelector('span')?.textContent).toBe('1');
+    expect([...customHeading!.querySelectorAll('span')].at(-1)?.textContent).toBe('2');
+    expect([...presetHeading!.querySelectorAll('span')].at(-1)?.textContent).toBe('1');
   });
 
   // story #3745(name===key 잔존, 페드루 PO 決·유나 定 2026-09-09) — `name || 폴백`(#4082
@@ -210,8 +237,8 @@ describe('OrganizationEventsPage', () => {
     // name===key 행도 이제 「이름 없는 이벤트」(제목 자리에 코드 키가 서지 않는다) — 부제로
     // key가 정직하게 뜬다(raw 값이 한 줄에 두 번 서는 것과는 다른 문제 — 여긴 애초에 라벨이
     // 없어 부제 하나로만 진실을 말한다).
-    const samekeyToggle = container.querySelector('[data-testid="event-def-toggle-org.moonklabs.same_as_key"]');
-    expect(samekeyToggle?.textContent).toBe(koMessages.organization.eventUnnamedDefinition);
+    const samekeyTitle = rowOf('org.moonklabs.same_as_key')?.querySelector('[data-slot="ds-list-row"] .font-semibold');
+    expect(samekeyTitle?.textContent).toBe(koMessages.organization.eventUnnamedDefinition);
     expect(container.querySelector('[data-testid="event-def-key-subtitle-org.moonklabs.same_as_key"]')?.textContent).toBe('org.moonklabs.same_as_key');
     // name이 없으면 제목이 「이름 없는 이벤트」(key가 아니다) — 부제로 key가 정직하게 뜬다.
     expect(container.querySelector('[data-testid="event-def-key-subtitle-org.moonklabs.no_name"]')?.textContent).toBe('org.moonklabs.no_name');
@@ -230,8 +257,9 @@ describe('OrganizationEventsPage', () => {
   it('프리셋 항목은 관리자여도 수정/비활성 버튼이 절대 안 뜬다(읽기전용)', async () => {
     mockFetches([preset()]);
     await mount();
-    expect([...container.querySelectorAll('button')].some((b) => b.textContent === koMessages.organization.eventEditCta)).toBe(false);
-    expect([...container.querySelectorAll('button')].some((b) => b.textContent === koMessages.organization.eventDeactivateCta)).toBe(false);
+    const labels = await rowMenuLabels();
+    expect(labels).not.toContain(koMessages.organization.eventEditCta);
+    expect(labels).not.toContain(koMessages.organization.eventDeactivateCta);
   });
 
   // story #2663 회귀가드(핵심) — GET 목록에 id가 없는 동안(develop에 아직 안 올라온 상태)
@@ -240,31 +268,33 @@ describe('OrganizationEventsPage', () => {
     mockFetches([customNoId()]);
     await mount();
     expect(container.textContent).toContain('org.moonklabs.work.decision');
-    expect([...container.querySelectorAll('button')].some((b) => b.textContent === koMessages.organization.eventEditCta)).toBe(false);
-    expect([...container.querySelectorAll('button')].some((b) => b.textContent === koMessages.organization.eventDeactivateCta)).toBe(false);
+    const labels = await rowMenuLabels();
+    expect(labels).not.toContain(koMessages.organization.eventEditCta);
+    expect(labels).not.toContain(koMessages.organization.eventDeactivateCta);
   });
 
   it('id 있는 커스텀 정의(#2663 머지 후)는 관리자에게 수정/비활성 버튼이 뜬다', async () => {
     mockFetches([customWithId()]);
     await mount();
-    expect([...container.querySelectorAll('button')].some((b) => b.textContent === koMessages.organization.eventEditCta)).toBe(true);
-    expect([...container.querySelectorAll('button')].some((b) => b.textContent === koMessages.organization.eventDeactivateCta)).toBe(true);
+    const labels = await rowMenuLabels();
+    expect(labels).toContain(koMessages.organization.eventEditCta);
+    expect(labels).toContain(koMessages.organization.eventDeactivateCta);
   });
 
   it('비활성 정의는 비활성화 버튼이 안 뜬다(이미 비활성인데 또 끌 이유 없음)', async () => {
     mockFetches([customWithId({ enabled: false })]);
     await mount();
-    expect([...container.querySelectorAll('button')].some((b) => b.textContent === koMessages.organization.eventEditCta)).toBe(true);
-    expect([...container.querySelectorAll('button')].some((b) => b.textContent === koMessages.organization.eventDeactivateCta)).toBe(false);
+    const labels = await rowMenuLabels();
+    expect(labels).toContain(koMessages.organization.eventEditCta);
+    expect(labels).not.toContain(koMessages.organization.eventDeactivateCta);
   });
 
   it('키 항목 클릭 시 payload_schema/routing JSON이 펼쳐진다', async () => {
     mockFetches([preset()]);
     await mount();
     // story #3745 — 행 제목이 name(게이트 판정)이라 key로는 못 찾는다.
-    const keyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '게이트 판정')!;
     expect(container.textContent).not.toContain('"work_item_stakeholders"');
-    await act(async () => { keyBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await toggleRow();
     expect(container.textContent).toContain('"work_item_stakeholders"');
   });
 
@@ -321,8 +351,7 @@ describe('OrganizationEventsPage', () => {
   it('수정 폼은 key가 읽기전용이고 기존 JSON이 채워진 채로 열리며, 저장 시 PATCH(id 타겟)를 호출한다', async () => {
     const calls = mockFetches([customWithId({ id: 'def-42', key: 'org.moonklabs.my_event' })]);
     await mount();
-    const editBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventEditCta)!;
-    await act(async () => { editBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await rowAction(koMessages.organization.eventEditCta);
 
     const keyInput = document.body.querySelector('#event-key') as HTMLInputElement;
     expect(keyInput.value).toBe('org.moonklabs.my_event');
@@ -338,8 +367,7 @@ describe('OrganizationEventsPage', () => {
   it('비활성화 확인 다이얼로그에서 확정하면 PATCH {enabled:false}를 호출한다', async () => {
     const calls = mockFetches([customWithId({ id: 'def-9' })]);
     await mount();
-    const deactivateBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventDeactivateCta)!;
-    await act(async () => { deactivateBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await rowAction(koMessages.organization.eventDeactivateCta);
 
     const confirmBtn = [...document.body.querySelectorAll('[data-slot="dialog-content"] button')].find((b) => b.textContent === koMessages.organization.eventDeactivateConfirmCta) as HTMLButtonElement;
     await act(async () => { confirmBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
@@ -352,8 +380,7 @@ describe('OrganizationEventsPage', () => {
   it('발행 테스트는 POST /api/events/publish를 definition_key+payload로 호출한다', async () => {
     const calls = mockFetches([customWithId({ id: 'def-7', key: 'org.moonklabs.my_event' })]);
     await mount();
-    const testBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventTestPublishCta)!;
-    await act(async () => { testBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await rowAction(koMessages.organization.eventTestPublishCta);
 
     const submitBtn = [...document.body.querySelectorAll('[data-slot="dialog-content"] button')].find((b) => b.textContent === koMessages.organization.eventTestPublishSubmit) as HTMLButtonElement;
     await act(async () => { submitBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
@@ -366,8 +393,8 @@ describe('OrganizationEventsPage', () => {
   it('비활성 정의는 발행 테스트 버튼이 비활성화된다', async () => {
     mockFetches([customWithId({ id: 'def-1', enabled: false })]);
     await mount();
-    const testBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventTestPublishCta) as HTMLButtonElement;
-    expect(testBtn.disabled).toBe(true);
+    const item = (await openRowMenu()).find((i) => i.textContent === koMessages.organization.eventTestPublishCta)!;
+    expect(item.getAttribute('aria-disabled') === 'true' || item.hasAttribute('data-disabled')).toBe(true);
   });
 
   it('BE 거부(400 invalid_definition)를 사람이 읽을 문구로 그대로 보여준다', async () => {
@@ -560,8 +587,7 @@ describe('OrganizationEventsPage — 이벤트 정의기(story #2670 A층)', () 
       block_template: { blocks: [{ type: 'header', text: '릴리즈 흐름' }] },
     })]);
     await mount();
-    const editBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventEditCta)!;
-    await act(async () => { editBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await rowAction(koMessages.organization.eventEditCta);
 
     // 기본 탭이 활성(고급 전용 배지 없음) — #event-key(JSON탭 전용)는 안 보이고 폼 필드가 보인다.
     expect(dialogContent().textContent).not.toContain(koMessages.organization.definerAdvancedOnlyBadge);
@@ -584,8 +610,7 @@ describe('OrganizationEventsPage — 이벤트 정의기(story #2670 A층)', () 
       routing: { escalation: { kind: 'server_derived', target: 'none' }, broadcast: { kind: 'server_derived', target: 'goal_owner' } },
     })]);
     await mount();
-    const editBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventEditCta)!;
-    await act(async () => { editBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await rowAction(koMessages.organization.eventEditCta);
 
     expect(dialogContent().textContent).toContain(koMessages.organization.definerAdvancedOnlyBadge);
     // 고급 탭이 강제로 열려 JSON textarea가 보인다(기존 #3070 편집기 기능 유지 — 손실 0).
@@ -619,8 +644,7 @@ describe('OrganizationEventsPage — 발행 이력(story #2665)', () => {
     }));
     await mount();
     // story #3745 — 행 제목이 name이라 key로는 못 찾는다.
-    const keyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '내 이벤트')!;
-    await act(async () => { keyBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await toggleRow();
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 
     const historyCall = calls.find((c) => c.url.startsWith('/api/events/definitions/publish-history'));
@@ -637,8 +661,7 @@ describe('OrganizationEventsPage — 발행 이력(story #2665)', () => {
     mockFetches([customWithId({ id: 'def-2', key: 'org.moonklabs.empty_event' })]);
     await mount();
     // story #3745 — 행 제목이 name(customWithId 기본값 「작업 판단」)이라 key로는 못 찾는다.
-    const keyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '작업 판단')!;
-    await act(async () => { keyBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await toggleRow();
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     expect(container.textContent).toContain(koMessages.organization.eventPublishHistoryEmpty);
   });
@@ -650,8 +673,7 @@ describe('OrganizationEventsPage — 발행 이력(story #2665)', () => {
       return { ok: true, json: async () => ({}) };
     }));
     await mount();
-    const keyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '작업 판단')!;
-    await act(async () => { keyBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await toggleRow();
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     expect(container.textContent).toContain(koMessages.organization.eventPublishHistoryError);
     // 나머지 상세(payload_schema 등)는 여전히 렌더된다 — 이력 실패가 카드 전체를 안 죽인다.
@@ -662,8 +684,7 @@ describe('OrganizationEventsPage — 발행 이력(story #2665)', () => {
     asMember();
     const calls = mockFetches([customWithId({ id: 'def-4', key: 'org.moonklabs.member_view' })]);
     await mount();
-    const keyBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '작업 판단')!;
-    await act(async () => { keyBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await toggleRow();
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     expect(calls.some((c) => c.url.startsWith('/api/events/definitions/publish-history'))).toBe(false);
   });
@@ -731,8 +752,7 @@ describe('OrganizationEventsPage — 고급 탭 key 문자셋 클라 선검증(s
   it('수정 모드(key 읽기전용)에서는 클라 선검증이 안 뜬다(회귀 0 — 기존 값은 항상 유효)', async () => {
     mockFetches([customWithId({ id: 'def-9', key: 'org.moonklabs.existing-ish' })]);
     await mount();
-    const editBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.organization.eventEditCta)!;
-    await act(async () => { editBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await rowAction(koMessages.organization.eventEditCta);
     await act(async () => { switchToAdvancedTab(); });
     expect(document.body.textContent).not.toContain(koMessages.organization.definerKeyErrorCharset);
     expect(document.body.textContent).not.toContain(koMessages.organization.definerKeyHint);
@@ -765,8 +785,7 @@ describe('OrganizationEventsPage — 정의 상세보기 사람 언어 기본(st
   function expandRow(key: string) {
     // story #3737(D2) — 토글 버튼 라벨이 이제 name(있으면) 우선이라 key와 다를 수
     // 있다(현재 텍스트가 아니라 data-testid로 안정적으로 찾는다).
-    const btn = container.querySelector(`[data-testid="event-def-toggle-${key}"]`) as HTMLButtonElement;
-    return act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    return toggleRow(key);
   }
 
   it('서식이 분류되는 정의는 서식/받는 사람/필드 표/실물 카드가 JSON 없이 먼저 보인다', async () => {
@@ -876,8 +895,7 @@ describe('OrganizationEventsPage — 카탈로그 적용 진입점 + stage_metad
   function expandRow(key: string) {
     // story #3737(D2) — 토글 버튼 라벨이 이제 name(있으면) 우선이라 key와 다를 수
     // 있다(현재 텍스트가 아니라 data-testid로 안정적으로 찾는다).
-    const btn = container.querySelector(`[data-testid="event-def-toggle-${key}"]`) as HTMLButtonElement;
-    return act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    return toggleRow(key);
   }
 
   it('사이클형 정의는 펼치면 stage별 role/action과 gate/capability가 사람 언어로 뜬다', async () => {
@@ -1000,7 +1018,8 @@ describe('OrganizationEventsPage — 폼 초안(story #4370)', () => {
     });
   };
   const open = async (label: string) => {
-    await act(async () => { btn(container, label).click(); });
+    if (label === koMessages.organization.eventTestPublishCta) await rowAction(label); // 4913 C2 — «발행 테스트»는 행 «⋯» 메뉴에 있다
+    else await act(async () => { btn(container, label).click(); });
     await pendingFrames();
   };
   async function closeByEsc(field: HTMLElement) {

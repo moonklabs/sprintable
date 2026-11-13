@@ -508,13 +508,7 @@ export const EXEMPT_PAIRS = new Set<string>([
   // 전환"/"채널에서 보기")이 들어가 렌더 결과는 갈린다, 템플릿 문자열 자체의
   // 우연한 형태 일치일 뿐.
   'content.commentsResubmitAriaLabel <-> content.commentsRetryAriaLabel',
-  // story #4049(E-RECIPE-1 ①) — events/page.tsx가 마케팅 적용 성공 토스트에
-  // eventApplySuccessToast("배정 {count}건 저장 완료")를 새로 쓰면서 같은 파일 안
-  // eventEditSubmit("저장", 기존 EventFormDialog 저장 버튼)과 부분문자열로 겹친다.
-  // 토스트(적용 다이얼로그 제출 뒤 비동기로 잠깐 뜸)와 정의 수정 다이얼로그의 저장
-  // 버튼(별개 다이얼로그, 별개 트리거)은 화면에 동시에 설 자리가 없다 — docs.title
-  // <-> docs.indexDocCount류와 동형(짧은 낱말이 다른 문장 속에 자연스럽게 재등장).
-  'organization.eventApplySuccessToast <-> organization.eventEditSubmit',
+  // 4913 C2 — `organization.eventApplySuccessToast <-> organization.eventEditSubmit`(story #4049) 항목을 지웠다: 이 가드는 «같은 파일 안»의 겹침만 잡는데, 정의 만들기·고치기 창이 events/page.tsx에서 components/organization/event-definition-dialogs.tsx로 옮겨 가며(저장 단추 eventEditSubmit) 토스트와 한 파일에 서지 않는다 — 죽은 예외(scanRepository 실측 확認).
   // story #4043 Tier1(2026-09-19) — eventsTitle/eventRowActionAriaLabel이 "이벤트"→
   // "레시피"/"워크플로우"로 낱말 정정되며 원래의 부분문자열 충돌이 사라졌다(죽은 예외,
   // scanRepository 실측 확認 — organization.eventRowActionAriaLabel <->

@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 //
-// story #4212(유나 규격 · 390) — 조직 이벤트 «개발 워크플로» 목록 행(EventDefRow)의 1024 미만 레이아웃 클래스 핀.
-// 예전엔 한 줄 flex에서 왼쪽 flex-1(기준 폭 0)이 0까지 줄어 제목 «Un…»·배지가 버튼과 겹쳤고, shrink-0 버튼 묶음이
-// 행 밖으로 넘쳤다. 1024 미만은 세로로 쌓고(제목 줄바꿈·버튼 wrap), lg: 이상은 이전 배치 그대로(1440 무변).
-// jsdom은 레이아웃을 재지 못하므로 규격 클래스를 핀한다(실측은 유나 design 390·1440).
+// story #4212(유나 규격 · 390) → 4913 C2 — 조직 이벤트 «개발 워크플로» 목록 행(EventDefRow)의 좁은 폭 규격.
+// 옛 판: 손으로 만든 한 줄 flex가 390에서 제목 «Un…»·배지가 버튼과 겹치고 단추 묶음이 행 밖으로 넘쳤다(4212·4215) → 1024 미만 세로 쌓기 클래스를 핀했다.
+// 새 판: 행은 틀의 `RowListItem`(ds ListRow) — 제목 한 줄 잘림 · 오른쪽 묶음(칩 · 적용 · «⋯»)이 모자라면 둘째 줄 오른쪽으로(공용 ListRow 줄바꿈) · 부제(코드 키)는 한 줄 말줄임. 실제 폭은 레이아웃 e2e가 잰다 — jsdom은 폭을 못 재 규격 클래스를 핀한다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -48,10 +47,12 @@ async function renderWorkflowTab(def: typeof PRESET = PRESET) {
     return { ok: true, json: async () => ({}) };
   }));
   const { default: OrganizationEventsPage } = await import('./page');
+  // 4913 C2 — 화면 제목은 앱 틀 위 막대(TopBarSlot)로 간다: 막대 컨텍스트는 화면과 같은 번(모듈 비움 뒤)에 불러온다 — 정적으로 불러오면 컨텍스트가 둘이 된다.
+  const { TopBarProvider } = await import('@/components/nav/top-bar-context');
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-        <OrganizationEventsPage />
+        <TopBarProvider><OrganizationEventsPage /></TopBarProvider>
       </NextIntlClientProvider>,
     );
   });
@@ -63,50 +64,48 @@ async function renderWorkflowTab(def: typeof PRESET = PRESET) {
 }
 
 const classesOf = (el: Element | null) => new Set((el?.getAttribute('class') ?? '').split(/\s+/).filter(Boolean));
+const rowEl = () => document.querySelector(`[data-testid="event-def-row-${PRESET.key}"]`)!;
+const listRow = () => rowEl().querySelector('[data-slot="ds-list-row"]')!;
 
-describe('EventDefRow — 390 행 레이아웃(story #4212 유나 규격)', () => {
-  it('행: 1024 미만 세로 쌓기 · lg: 이상 이전 한 줄 배치', async () => {
+describe('EventDefRow — 행 레이아웃(RowList · 4212 규격을 틀의 행이 이어받음)', () => {
+  it('행은 RowList(role=list · 이름) 안의 listitem이고 한 줄(ListRow)이 줄바꿈을 허용한다', async () => {
     await renderWorkflowTab();
-    const row = classesOf(document.querySelector(`[data-testid="event-def-row-${PRESET.key}"]`));
-    for (const c of ['flex', 'flex-col', 'gap-2', 'lg:flex-row', 'lg:flex-wrap', 'lg:items-center', 'lg:justify-between']) {
-      expect(row.has(c), c).toBe(true);
-    }
-    expect(row.has('justify-between'), '1024 미만에 justify-between 없음').toBe(false);
+    expect(rowEl().getAttribute('role')).toBe('listitem');
+    expect(rowEl().closest('[role="list"]')?.getAttribute('aria-label')).toBe(koMessages.organization.eventsPresetGroupTitle);
+    expect(classesOf(listRow()).has('flex-wrap'), '오른쪽 묶음이 모자라면 둘째 줄로').toBe(true);
   });
 
-  it('제목: 1024 미만 줄바꿈(말줄임 없음) · lg: 이상 말줄임', async () => {
+  it('제목: 한 줄 말줄임(잘린 글도 DOM에 전부) — 칩 · 단추와 겹치지 않는다', async () => {
     await renderWorkflowTab();
-    const title = classesOf(document.querySelector(`[data-testid="event-def-toggle-${PRESET.key}"]`));
-    expect(title.has('break-words')).toBe(true);
-    expect(title.has('lg:truncate')).toBe(true);
-    expect(title.has('truncate'), '1024 미만 말줄임 0').toBe(false);
+    const title = listRow().querySelector('.font-semibold')!;
+    expect(classesOf(title).has('truncate')).toBe(true);
+    expect(title.textContent).toBeTruthy();
   });
 
-  it('⭐제목 버튼은 줄어들 수 있다(min-w-0) — 공백 없는 60자 제목도 390 행 안에서 낱말 안 줄바꿈(story #4215 까디르 QA)', async () => {
-    // flex 항목은 기본 최소 폭 = 가장 긴 낱말이라, min-w-0이 없으면 break-words가 있어도 공백 없는 제목은 행 밖으로 넘쳤다
-    // (Chromium 390 실측 복제: min-w-0 없음 24px 넘침 → 있음 0 · 1440은 두 경우 같음). jsdom은 폭을 못 재 클래스로 핀한다.
+  it('⭐공백 없는 60자 제목도 행 안에서 한 줄로 잘리고(truncate · min-w-0 칸) 전문은 DOM에 남는다(story #4215 까디르 QA)', async () => {
     const longTitle = 'Supercalifragilisticexpialidocious_workflow_identifier_60chx';
     expect(longTitle).toHaveLength(60);
     expect(longTitle).not.toMatch(/\s/);
-    // 로케일 문안 표(platform-preset-copy)에 없는 키 — 표시명이 name 그대로 나오는 자리(표에 있는 키는 표 문안으로 바뀐다).
+    // 로케일 문안 표(platform-preset-copy)에 없는 키 — 표시명이 name 그대로 나오는 자리.
     const def = { ...PRESET, key: 'preset.workflow.long_title_fixture', name: longTitle };
     await renderWorkflowTab(def);
-    const toggle = document.querySelector(`[data-testid="event-def-toggle-${def.key}"]`);
-    expect(toggle?.textContent).toContain(longTitle);
-    const title = classesOf(toggle);
-    for (const c of ['min-w-0', 'break-words', 'lg:truncate']) expect(title.has(c), c).toBe(true);
+    const row = document.querySelector(`[data-testid="event-def-row-${def.key}"] [data-slot="ds-list-row"]`)!;
+    const title = row.querySelector('.font-semibold')!;
+    expect(title.textContent).toContain(longTitle);
+    expect(classesOf(title).has('truncate')).toBe(true);
+    expect(classesOf(title.parentElement).has('min-w-0'), '제목 칸이 줄어들 수 있다').toBe(true);
   });
 
-  it('키 부제: 덩어리 폭 안에서만 말줄임', async () => {
+  it('키 부제: 한 줄 말줄임(코드 글꼴)', async () => {
     await renderWorkflowTab();
-    const sub = classesOf(document.querySelector(`[data-testid="event-def-key-subtitle-${PRESET.key}"]`));
-    for (const c of ['min-w-0', 'max-w-full', 'truncate']) expect(sub.has(c), c).toBe(true);
+    const sub = document.querySelector(`[data-testid="event-def-key-subtitle-${PRESET.key}"]`)!;
+    const cell = sub.parentElement!;
+    for (const c of ['truncate', 'font-mono']) expect(classesOf(cell).has(c), c).toBe(true);
   });
 
-  it('버튼 묶음: 1024 미만 wrap(행 밖 넘침 0) · lg: 이상 한 줄·수축 안 함', async () => {
+  it('오른쪽 묶음(활성 · 버전 칩 · «프로젝트에 적용»): 오른쪽 끝에 붙은 채 줄바꿈 · 행 밖으로 안 넘친다(max-w-full)', async () => {
     await renderWorkflowTab();
-    const actions = classesOf(document.querySelector(`[data-testid="event-def-actions-${PRESET.key}"]`));
-    for (const c of ['flex', 'flex-wrap', 'lg:shrink-0', 'lg:flex-nowrap']) expect(actions.has(c), c).toBe(true);
-    expect(actions.has('shrink-0'), '1024 미만 shrink-0 없음').toBe(false);
+    const group = listRow().querySelector('[data-slot="ds-chip"]')!.parentElement!;
+    for (const c of ['flex', 'flex-wrap', 'ml-auto', 'justify-end', 'max-w-full']) expect(classesOf(group).has(c), c).toBe(true);
   });
 });

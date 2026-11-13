@@ -30,10 +30,11 @@ async function build() {
         import Rules from './src/app/(authenticated)/organization/content-rules/page';
         import Rewards from './src/app/(authenticated)/rewards/page';
         import Channels from './src/app/(authenticated)/organization/channels/page';
+        import Events from './src/app/(authenticated)/organization/events/page';
         import { ToastProvider } from './src/components/ui/toast';
         function Bar() { const { title } = useTopBar(); return React.createElement('header', { 'data-testid': 'app-bar', style: { height: '48px', display: 'flex', alignItems: 'center', padding: '0 16px', borderBottom: '1px solid #8884' } }, title); }
         window.__mount = (which) => {
-          const Screen = { roles: Roles, trust: Trust, gc: Gc, rules: Rules, rewards: Rewards, channels: Channels }[which];
+          const Screen = { roles: Roles, trust: Trust, gc: Gc, rules: Rules, rewards: Rewards, channels: Channels, events: Events }[which];
           createRoot(document.getElementById('root')).render(React.createElement(NextIntlClientProvider, { locale: 'ko', messages: ko, timeZone: 'Asia/Seoul' },
             React.createElement(TopBarProvider, null, React.createElement(ToastProvider, null, React.createElement(Bar), React.createElement('main', { 'data-testid': 'main' }, React.createElement(Screen))))));
         };`,
@@ -48,7 +49,7 @@ async function build() {
       setup(b: import('esbuild').PluginBuild) {
         b.onResolve({ filter: /^next\/navigation$/ }, () => ({ path: 'next-navigation-stub', namespace: 'nav-stub' }));
         b.onLoad({ filter: /.*/, namespace: 'nav-stub' }, () => ({
-          contents: "export const useSearchParams = () => new URLSearchParams(); export const usePathname = () => '/organization/channels'; export const useRouter = () => ({ replace() {}, push() {}, back() {}, refresh() {} });",
+          contents: "export const useSearchParams = () => new URLSearchParams(); export const useParams = () => ({}); export const usePathname = () => '/organization/channels'; export const useRouter = () => ({ replace() {}, push() {}, back() {}, refresh() {} });",
           loader: 'js',
         }));
       },
@@ -73,7 +74,7 @@ const SUMMARY = [
   { member_id: 'm3', role_key: 'dev', role_label: '개발', hit_rate: 0.5, resolved: 4, computed_at: '2026-11-10T00:00:00Z', pending: 1, name: 'A very long member display name that must be cut inside its row', member_type: 'agent', member_deleted: false },
 ];
 
-type Which = 'roles' | 'trust' | 'gc' | 'rules' | 'rewards' | 'channels';
+type Which = 'roles' | 'trust' | 'gc' | 'rules' | 'rewards' | 'channels' | 'events';
 const AVAILABLE = [
   { channel: 'threads', display_name: 'Threads', credential_kind: 'oauth', kind: 'social' },
   { channel: 'wordpress', display_name: 'WordPress', credential_kind: 'pasted_secret', kind: 'blog' },
@@ -94,6 +95,13 @@ const GC = [
   { id: 'g2', provider_key: 'vertex_gemini', label: '지난 캠페인', model_config_json: {}, location: 'asia-northeast3', status: 'revoked', created_by: 'm1', created_at: '2026-10-01T00:00:00Z', revoked_at: '2026-10-20T00:00:00Z' },
 ];
 const RULES = { banned_terms: ['무료체험', '100% 보장'], require_utm: true, tone: '친근하게', taxonomy: ['공지', '이벤트'], channel_priority: ['threads', 'wordpress'], brand_kit: { logo_url: 'https://x.example/logo.png', colors: ['#111', '#5b4be0'], fonts: ['Pretendard'] }, generation_budget: { limit_minor: 5000000, currency: 'KRW', period: 'month' }, utm_rules: { enabled: true, default_source: 'sprintable', default_medium: 'social', campaign_from: 'campaign_slug', content_from: 'draft_id' } };
+
+// the events screen — a marketing recipe with a long name, a custom definition with a long name (cyclic: shows «프로젝트에 적용»), a preset
+const EVENT_DEFS = [
+  { id: 'mk1', key: 'preset.marketing.video_production', org_id: null, name: '영상 제작 (릴스·쇼츠) with a very long recipe name that has to wrap inside its row and never push the apply press out of the panel', description: 'A long description that has to be cut to one line inside the row and never widen the panel on a phone.', payload_schema: { properties: { stage: { enum: ['draft', 'concept_confirmed', 'published'] } } }, stage_metadata: { draft: { role: '크리에이터' }, concept_confirmed: { role: '디렉터', gate: { type: 'concept_approval', approver: 'org_owner' } }, published: { role: '발행자' } }, enabled: true, version: 1 },
+  { id: 'ev1', key: 'org.org.work.a_very_long_custom_definition_key_that_must_be_cut_inside_its_row_and_never_push_the_press_out', name: 'A very long custom definition name that must wrap inside its row and never push the status chips out of the panel', org_id: 'org-1', payload_schema: { type: 'object', properties: { stage: { enum: ['draft', 'published'] } }, additionalProperties: false }, stage_metadata: { draft: { role: 'A' }, published: { role: 'B' } }, routing: { escalation: { kind: 'server_derived', target: 'none' }, broadcast: { kind: 'server_derived', target: 'none' } }, block_template: null, enabled: true, version: 3 },
+  { id: null, key: 'preset.gate.verdict', name: '게이트 판정', org_id: null, payload_schema: { type: 'object', properties: {}, additionalProperties: false }, routing: { escalation: { kind: 'server_derived', target: 'none' }, broadcast: { kind: 'server_derived', target: 'none' } }, block_template: null, enabled: true, version: 2 },
+];
 
 async function open(page: Page, which: Which, scheme: 'light' | 'dark', width: number, height: number) {
   const { js, css } = await build();
@@ -117,6 +125,8 @@ async function open(page: Page, which: Which, scheme: 'light' | 'dark', width: n
     if (url.pathname === '/api/rewards') return json({ data: [{ id: 'r1', member_id: 'm1', amount: 50, reason: 'A very long reason that has to wrap inside its row and never push the amount out of the panel on a phone', created_at: '2026-11-11T00:00:00Z' }] });
     if (url.pathname === '/api/team-members') return json({ data: [{ id: 'm1', name: '오너 하나', type: 'human' }, { id: 'm2', name: '관리자 둘', type: 'human' }] });
     if (url.pathname === '/api/org-members') return json({ data: MEMBERS });
+    if (url.pathname === '/api/events/definitions') return json(EVENT_DEFS);
+    if (url.pathname.startsWith('/api/events/definitions/publish-history')) return json([]); // the opened row's history reads an array
     if (url.pathname === '/api/me') return json({ data: { user_id: 'u-me' } });
     if (url.pathname === '/api/trust-scores/org-summary') return json({ members: SUMMARY });
     if (url.pathname.startsWith('/api/trust-scores/history')) return json({ snapshots: [{ computed_at: '2026-11-09T00:00:00Z', hit_rate: 0.8, resolved: 9 }, { computed_at: '2026-11-08T00:00:00Z', hit_rate: 0.7, resolved: 8 }] });
@@ -148,7 +158,7 @@ const lightnessOf = (css: string) => {
 for (const scheme of ['light', 'dark'] as const) {
   for (const [width, height] of [[1440, 900], [390, 844]] as const) {
     test.describe(`${scheme} ${width}`, () => {
-      for (const which of ['roles', 'trust', 'gc', 'rules', 'rewards', 'channels'] as const) {
+      for (const which of ['roles', 'trust', 'gc', 'rules', 'rewards', 'channels', 'events'] as const) {
         test(`${which} — one heading in the app bar · reading frame · no sideways scroll · layers`, async ({ page }) => {
           await open(page, which, scheme, width, height);
           // one heading, in the bar, none in the body
@@ -260,5 +270,54 @@ test('channels — a row whose right-hand group is wider than the row wraps it o
     const pb = (await press.boundingBox())!;
     expect(pb.x + pb.width).toBeLessThanOrEqual(panel.x + panel.width + 1);
     expect(pb.x).toBeGreaterThanOrEqual(panel.x - 1);
+  }
+});
+
+test('events — the development tab: both lists inside the frame, an opened definition row is one step off the panel, nothing is cut (light + dark, phone 390 + 320)', async ({ page }) => {
+  for (const scheme of ['light', 'dark'] as const) {
+    for (const [width, height] of [[390, 844], [320, 640]] as const) {
+      await open(page, 'events', scheme, width, height);
+      await page.getByRole('tab', { name: /./ }).nth(1).click(); // the development tab
+      await page.locator('[data-testid="events-custom-list"]').waitFor();
+      expect(await page.locator('[data-testid="events-custom-list"] [data-slot="ds-list-row"]').count()).toBe(1);
+      expect(await page.locator('[data-testid="events-preset-list"] [data-slot="ds-list-row"]').count()).toBe(1);
+      const row = page.locator('[data-testid^="event-def-row-org."]').first();
+      await row.locator('[data-row-main]').dblclick({ position: { x: 24, y: 8 } }); // double-click on the row's own left edge (not a press) = open the row
+      const detail = row.locator('[data-slot="ds-row-detail"]');
+      await detail.waitFor();
+      const panel = page.locator('[data-testid="events-custom-list"]');
+      const lPanel = lightnessOf(await panel.evaluate((el) => getComputedStyle(el).backgroundColor));
+      const lDetail = lightnessOf(await detail.evaluate((el) => getComputedStyle(el).backgroundColor));
+      expect(Math.abs(lDetail - lPanel), `${scheme} ${width}: panel ${await panel.evaluate((el) => getComputedStyle(el).backgroundColor)} detail ${await detail.evaluate((el) => getComputedStyle(el).backgroundColor)}`).toBeGreaterThanOrEqual(0.05);
+      expect(await detail.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+      // nothing pressable in any row is cut off by the panel edge (read all rects in one go — no waiting on a node that re-renders)
+      const pb0 = (await panel.boundingBox())!;
+      const rects = await page.locator('[data-slot="ds-list-row"]').evaluateAll((rows) => rows.flatMap((r) => [...r.querySelectorAll('button, a, [data-slot="ds-chip"]')].map((e) => { const b = e.getBoundingClientRect(); return { x: b.x, w: b.width, h: b.height, t: (e.textContent || '').trim() }; })).filter((r) => r.w > 0 && r.h > 0)); // (the inactive tab's rows are hidden — no box)
+      expect(rects.length).toBeGreaterThan(0);
+      for (const r of rects) {
+        expect(r.x + r.w, r.t).toBeLessThanOrEqual(pb0.x + pb0.width + 1);
+        expect(r.x, r.t).toBeGreaterThanOrEqual(pb0.x - 1);
+      }
+    }
+  }
+});
+
+test('events — the marketing tab: a recipe row keeps «프로젝트에 적용» inside the panel and shows its roles/connections only when opened (light + dark, phone 390 + 320)', async ({ page }) => {
+  for (const scheme of ['light', 'dark'] as const) {
+    for (const [width, height] of [[390, 844], [320, 640]] as const) {
+      await open(page, 'events', scheme, width, height);
+      const list = page.locator('[data-testid="recipe-list"]');
+      await list.waitFor();
+      expect(await list.locator('[data-testid="recipe-card-roles"]').count()).toBe(0);
+      const panel = (await list.boundingBox())!;
+      const apply = list.getByRole('button', { name: '프로젝트에 적용' });
+      const ab = (await apply.boundingBox())!;
+      expect(ab.x + ab.width).toBeLessThanOrEqual(panel.x + panel.width + 1);
+      expect(ab.x).toBeGreaterThanOrEqual(panel.x - 1);
+      await list.locator('[data-row-main]').dblclick({ position: { x: 24, y: 8 } });
+      await list.locator('[data-testid="recipe-card-roles"]').waitFor();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+    }
   }
 });
