@@ -1125,9 +1125,8 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
     const text = container.querySelector('[data-testid="chat-bubble-text"]')!.textContent;
     // the four presets the app already knows say their one-line sentence even with no definition read — and the fields stay as a readable list (the content is not dropped)
     expect(text).toContain('작업 상태 변경 · 스토리 진행 중 → 리뷰 중');
-    expect(Array.from(container.querySelectorAll('li')).map((li) => li.textContent)).toEqual(expect.arrayContaining([
-      expect.stringContaining('in-progress'), expect.stringContaining('in-review'), expect.stringContaining('대상: S-42'),
-    ]));
+    // the head already said the type and both statuses: the list does not say them again — only what the head did not (the target)
+    expect(Array.from(container.querySelectorAll('li')).map((li) => li.textContent)).toEqual(['대상: S-42']);
     expect(container.textContent).not.toMatch(/\[이벤트\]|preset\.work|work_item_type|from_status|to_status/); // no machine header line · no raw key names
   });
 
@@ -1138,7 +1137,7 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
     expect(container.querySelector('[data-testid="chat-bubble-text"]')).not.toBeNull();
     // the «- » list the PO decided on stays a real <li> list (not hyphen literals) — without the raw key names
     const items = Array.from(container.querySelectorAll('li')).map((li) => li.textContent);
-    expect(items).toEqual(expect.arrayContaining([expect.stringContaining('story'), expect.stringContaining('in-progress'), expect.stringContaining('in-review')]));
+    expect(items).toEqual(['대상: S-42']); // a real <li> list; the fields the head sentence used (type · from · to) are not repeated in it
     expect(items.some((t) => /work_item_type|from_status|to_status/.test(t ?? ''))).toBe(false);
   });
 

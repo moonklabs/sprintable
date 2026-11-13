@@ -81,6 +81,21 @@ describe('ChatBubble — an event message drawn as text (story 4921 · PO 11-13:
   it('⭐a steer drawn as text: the steer sentence WITH the target name as the head (the same sentence as the room list)', async () => {
     await render(msg(MACHINE('preset.steer.instruct'), { event_key: 'preset.steer.instruct', payload: { instruction: '먼저 봐 주세요', target_member_id: UUID }, refs: { target: { found: true, name: '미르코' } } } as never));
     expect(head()).toBe('방향 전환 · 먼저 봐 주세요 → 미르코');
-    expect(items()).toEqual(['지시 대상자: 미르코']);
+    expect(items()).toEqual([]); // the instruction and the target are in the head: not said twice
+    expect(container.querySelectorAll('[data-testid="event-text-fallback"] p')).toHaveLength(1);
+  });
+  it('⭐the four presets: whatever the head sentence used is NOT in the list; what it did not say still is', async () => {
+    const cases: Array<{ key: string; payload: Record<string, unknown>; refs: Record<string, unknown>; headHas: string; listed: string[]; gone: RegExp }> = [
+      { key: 'preset.gate.verdict', payload: { gate_type: 'merge', verdict: 'approved', work_item_id: 'S-1', reason: '확인함' }, refs: {}, headHas: '게이트 판정', listed: ['대상: S-1'], gone: /gate type|verdict|gate_type/ },
+      { key: 'preset.work.status_changed', payload: { work_item_type: 'story', from_status: 'in-progress', to_status: 'in-review', work_item_id: 'S-42' }, refs: {}, headHas: '작업 상태 변경', listed: ['대상: S-42'], gone: /work item type|from status|to status|in-progress|in-review/ },
+      { key: 'preset.work.assigned', payload: { work_item_type: 'story', assignee_member_id: UUID, assigned_by_member_id: UUID, work_item_id: 'S-9' }, refs: { assignee: { found: true, name: '미르코' }, assigned_by: { found: true, name: '페드루' } }, headHas: '작업 배정 · 스토리 → 미르코', listed: ['배정자: 페드루', '대상: S-9'], gone: /담당자|work item type/ },
+      { key: 'preset.goal.measured', payload: { metric_value: 12, metric_unit: 'velocity', goal_id: 'G-1' }, refs: {}, headHas: '목표 측정 · 12', listed: ['목표: G-1'], gone: /metric value|metric unit|측정치|단위/ },
+    ];
+    for (const c of cases) {
+      await render(msg(MACHINE(c.key), { event_key: c.key, payload: c.payload, refs: c.refs } as never));
+      expect(head(), c.key).toContain(c.headHas);
+      expect(items(), c.key).toEqual(expect.arrayContaining(c.listed));
+      expect(items().join('|'), c.key).not.toMatch(c.gone);
+    }
   });
 });
