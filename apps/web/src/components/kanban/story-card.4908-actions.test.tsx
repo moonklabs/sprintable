@@ -221,7 +221,6 @@ describe('4908 제목 바로 바꾸기 — 메뉴 · F2', () => {
 
 describe('4908 이름 바꾸기 초점 — codex 1라운드 반영', () => {
   const input = () => container.querySelector<HTMLInputElement>('input');
-  const press = (el: Element) => act(() => { el.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); });
 
   it('⭐다른 곳을 눌러 빠져나가며(blur) 저장해도 그 사람이 옮긴 초점을 카드로 가로채지 않는다', () => {
     const onRename = vi.fn();

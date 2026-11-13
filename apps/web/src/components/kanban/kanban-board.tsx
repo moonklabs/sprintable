@@ -6,7 +6,8 @@ import { createPortal } from 'react-dom';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { Check, ChevronDown, LayoutGrid, LayoutList, Search, Workflow, Plus } from 'lucide-react';
-import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, DragOverlay, closestCenter } from '@dnd-kit/core';
+import { DndContext, DragEndEvent, KeyboardSensor, PointerSensor, useSensor, useSensors, DragOverlay, closestCenter } from '@dnd-kit/core';
+import { KEYBOARD_SENSOR_OPTIONS, buildDndAccessibility } from './board-dnd';
 import { Button } from '@/components/ui/button';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -321,6 +322,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
   // 모바일 status 변경은 long-press 메뉴/드롭다운 경로 — touch-drag-reorder 상실은 product intent.
   const sensors = useSensors(
     useSensor(MousePointerSensor, { activationConstraint: { distance: 8 } }),
+    // 4908 키보드 끌기: Space로 집고 ↑↓←→로 옮기고 Space/Enter로 놓고 Esc로 취소(Enter 단독은 «열기»라 집지 않는다). 잠긴(파생) 열은 놓을 자리가 아니라 건너뛴다(droppable disabled).
+    useSensor(KeyboardSensor, KEYBOARD_SENSOR_OPTIONS),
   );
 
   const epicMap: Record<string, string> = {};
@@ -1468,6 +1471,19 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
   const activeStory = activeId ? stories.find((s) => s.id === activeId) : null;
   const dragStatus = activeStory?.status ?? null;
 
+  // 4908 키보드 끌기 낭독(스크린리더) — dnd-kit 기본 안내는 영어라 한국어로: 집었을 때 · 옮기는 중 · 놓았을 때 · 취소했을 때.
+  const dndTitleOf = (id: string | number) => stories.find((st) => st.id === String(id))?.title ?? '';
+  const dndPlaceOf = (id: string | number) => {
+    const sid = String(id);
+    const onCard = stories.find((st) => st.id === sid);
+    if (onCard) return onCard.title;
+    const trustCol = TRUST_COLUMNS.find((c) => c.id === sid);
+    if (trustCol) return t(trustCol.i18nKey);
+    const classicCol = COLUMNS.find((c) => c.id === sid);
+    return classicCol ? (domainLabels.statusLabel(classicCol.id) ?? t(classicCol.i18nKey)) : '';
+  };
+  const dndAccessibility = buildDndAccessibility(t, dndTitleOf, dndPlaceOf);
+
   // story #4307(유나 확정) — 전면 스켈레톤은 첫 불러오기만. 다시 불러오는 동안은 툴바 · 필터 버튼이 남고 컬럼(목록) 자리만 같은 스켈레톤 부품 +
   // aria-busy(툴바엔 안 검). 도중에 또 바꾸면 마지막 조건 응답만 반영된다(fetchData의 runId · stale 판정).
   // story #4888 — 첫 불러오는 동안에도 렌즈 칩(headLead)은 머리 줄 자리에 선다: 칩이 잠깐 사라졌다 나타나지 않고(링크 · 렌즈 이동이 끊기지 않고), 줄 틀이 같아 아래가 밀리지 않는다.
@@ -1984,6 +2000,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
           // 드래그 시작 자체를 막는다(이중 방어 — dnd-kit listeners 부재+drop 타깃 무효 둘 다).
           <DndContext
             sensors={sensors}
+            accessibility={dndAccessibility}
             collisionDetection={closestCenter}
             onDragStart={handleDragStart}
             onDragEnd={handleTrustDragEnd}
@@ -2049,6 +2066,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
         ) : (
           <DndContext
             sensors={sensors}
+            accessibility={dndAccessibility}
             // closestCenter: 기본 rectIntersection은 모바일 narrow 가로스크롤 레이아웃에서 dragged rect가
             // 다중 컬럼에 걸쳐 over를 source로 오해소 → cross-column 이동 실패(story 1f81bc74 repro 확정).
             // center 기반은 멀티컨테이너 over 정확 해소·데스크탑 무회귀. 앱 내 DnD 충돌해소 primitive를

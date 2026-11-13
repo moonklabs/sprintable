@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { LAYER } from '@/components/ds/layers';
 import { COLUMNS, type KanbanStory, type KanbanMember, type LineStatusSummary } from './types';
 import { StoryCard } from './story-card';
 import type { LabelData } from '@/components/ui/label-chip';
@@ -68,7 +69,9 @@ function StatusGroup({
   const [expanded, setExpanded] = useState(columnId !== 'done');
 
   return (
-    <div>
+    // 4908 — 폰 목록 보기의 한 상태 묶음 = 내용 칸 층(LAYER.panel) + 얇은 테두리: 열 보드의 «열 면»과 같은 자리다. 이 면이 없으면 카드(글 줄 층)가 바탕 위에 맨몸으로 떠
+    // 라이트 390에서 카드 ↔ 바탕이 0.025로 층 규칙(≥ 0.05)에 모자랐다(카디르군 «후» 실측 11-13).
+    <div data-testid={`list-group-${columnId}`} className={cn('rounded-xl border border-ds-line p-1', LAYER.panel)}>
       <button
         type="button"
         className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-sm font-semibold text-foreground hover:bg-muted/50"

@@ -25,6 +25,7 @@ import { memberDisplayLabel, memberRowLabels } from '@/lib/member-display';
 import { Input } from '@/components/ui/input';
 import { isImeComposing } from '@/lib/ime-composition';
 import { LAYER } from '@/components/ds/layers';
+import { moveCardFocus } from './card-nav';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 // #1942 재작업(까심 REQUEST_CHANGES): 카드-상대 flip(left-0/right-0)은 보드가 가로스크롤이라
@@ -461,6 +462,12 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       setContextMenuOpen(true);
       return;
     }
+    // 끌고 있는 동안(키보드 끌기: Space로 집은 뒤)의 Enter · 방향키 · Space · Esc는 끌기 센서가 문서에서 받는다 — 카드는 «열기»나 초점 이동으로 가로채지 않는다.
+    if (isDragging) return;
+    // 방향키 = 이웃 카드로 초점 이동(↑↓ 같은 열 · ←→ 이웃 열). 카드 자신에게 초점이 있고 수정키가 없을 때만.
+    if (e.target === e.currentTarget && !editing && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.startsWith('Arrow')) {
+      if (moveCardFocus(e.currentTarget, e.key)) { e.preventDefault(); return; }
+    }
     // Enter = 열기(4908 Q4 — 끌기는 Space). 잠긴(파생) 열 카드는 끌기가 없으니 Space도 열기(단추 역할의 기본 약속). 카드 자신에게 초점이 있을 때만.
     if (e.target === e.currentTarget && !editing && (e.key === 'Enter' || (locked && e.key === ' '))) {
       e.preventDefault();
@@ -473,7 +480,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       return;
     }
     dndOnKeyDown?.(e);
-  }, [dndOnKeyDown, menuItemCount, onRename, startRename, editing, locked, onClick]);
+  }, [dndOnKeyDown, menuItemCount, onRename, startRename, editing, locked, onClick, isDragging]);
 
   // 4908 — 카드 «⋯» 버튼: 카드 안 어디서나 같은 메뉴를 연다(우클릭과 같은 메뉴 · 앵커만 버튼 아래).
   const openMenuFromButton = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
@@ -583,6 +590,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       // "button"으로 준다 — 새로 안 얹는다).
       aria-haspopup="menu"
       aria-expanded={contextMenuOpen}
+      data-story-card=""
       aria-current={selected ? 'true' : undefined}
       data-selected={selected ? 'true' : undefined}
       title={story.story_number ? `#${story.story_number}` : story.title}

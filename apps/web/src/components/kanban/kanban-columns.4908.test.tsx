@@ -124,4 +124,17 @@ describe('4908 열 — codex 검수 반영', () => {
     });
     expect([...container.querySelectorAll('[data-selected]')]).toHaveLength(1);
   });
+
+  it('⭐폰 목록 보기: 상태 묶음마다 내용 칸 층(LAYER.panel) 위에 선다 — 열 면이 없어 카드가 바탕 위에 맨몸으로 뜨면 라이트 390에서 층이 0.025로 모자란다(카디르군 «후»)', async () => {
+    await act(async () => {
+      root.render(wrap(<KanbanListView stories={[story({ id: 'a' }), story({ id: 'b', status: 'in-progress' })]} epicMap={{}} memberMap={{}} onStoryClick={() => {}} onChangeStatus={async () => {}} />));
+    });
+    const groups = [...container.querySelectorAll<HTMLElement>('[data-testid^="list-group-"]')];
+    expect(groups.length).toBeGreaterThanOrEqual(2);
+    for (const g of groups) {
+      const cls = g.className.split(/\s+/);
+      expect(cls, g.dataset.testid).toContain(LAYER.panel);
+      expect(cls).toContain('border-ds-line');
+    }
+  });
 });

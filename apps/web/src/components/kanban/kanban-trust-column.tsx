@@ -173,6 +173,7 @@ export function KanbanTrustColumn({
   return (
     <div
       ref={setNodeRef}
+      data-board-column={id}
       // 4908 — 열은 «내용 칸 층»(LAYER.panel): 바탕과 카드 사이를 면으로 가른다(바탕 → 열 ≥ 0.03 · 열 → 카드 ≥ 0.05, layer-rule.test). 잠긴 열은 같은 면에 안내 글만 다르다.
       className={`flex h-full w-[280px] min-w-[240px] flex-col rounded-xl border p-3 transition ${LAYER.panel} ${
         closedDuringDrag ? 'border-ds-line opacity-45' : isOver ? 'border-ds-action ring-1 ring-ds-action' : 'border-ds-line'

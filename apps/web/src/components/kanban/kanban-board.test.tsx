@@ -48,15 +48,17 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
 // useSseNotifications를 모킹해 콜백을 캡처하는 기존 관례(story-detail-panel.test.tsx)와
 // 동형으로, DndContext만 부분 모킹해 onDragEnd를 캡처한다(다른 export는 실물 그대로 재사용 —
 // useDroppable/useSortable 등은 실제 dnd-kit 훅이라야 카드 wiring 테스트가 의미 있음).
-const { capturedDragEndHandlers } = vi.hoisted(() => ({
+const { capturedDndProps, capturedDragEndHandlers } = vi.hoisted(() => ({
   capturedDragEndHandlers: [] as Array<(event: unknown) => void>,
+  capturedDndProps: [] as Array<{ sensors?: unknown; accessibility?: unknown }>,
 }));
 vi.mock('@dnd-kit/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@dnd-kit/core')>();
   return {
     ...actual,
-    DndContext: ({ onDragEnd, children }: { onDragEnd?: (event: unknown) => void; children?: React.ReactNode }) => {
+    DndContext: ({ onDragEnd, children, sensors, accessibility }: { onDragEnd?: (event: unknown) => void; children?: React.ReactNode; sensors?: unknown; accessibility?: unknown }) => {
       if (onDragEnd) capturedDragEndHandlers.push(onDragEnd);
+      capturedDndProps.push({ sensors, accessibility });
       return children;
     },
   };
@@ -163,6 +165,7 @@ beforeEach(() => {
     bottomDockBannerSlot: bannerSlot,
   });
   capturedDragEndHandlers.length = 0;
+  capturedDndProps.length = 0;
   isMobileMock = false;
   searchRef.current = '';
 });
@@ -2561,6 +2564,22 @@ describe('KanbanBoard — 카드 메뉴 담당자 · 이름 바꾸기 · 삭제(
     expect(container.querySelector('[role="dialog"]'), '둘째 클릭은 서랍을 닫지 않음').not.toBeNull();
     await act(async () => { backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); });
     expect(container.querySelector('[role="dialog"]'), '막을 처음 누르면 닫힘').toBeNull();
+  });
+
+  it('⭐보드의 두 끌기 틀(신뢰축 · 클래식) 모두 키보드 센서와 한국어 낭독을 연결한다(키보드 끌기 동작 자체는 board-dnd.4908.test.tsx — 이 파일은 DndContext를 모킹한다)', async () => {
+    const { KeyboardSensor } = await import('@dnd-kit/core');
+    const { KEYBOARD_SENSOR_OPTIONS } = await import('./board-dnd');
+    stubFetch(stories, members);
+    await mount();
+    const trust = capturedDndProps.at(-1)!;
+    const sensorOf = (props: { sensors?: unknown }) => (props.sensors as Array<{ sensor: unknown; options: unknown }>).find((x) => x.sensor === KeyboardSensor);
+    expect(sensorOf(trust)?.options).toEqual(KEYBOARD_SENSOR_OPTIONS);
+    expect((trust.accessibility as { screenReaderInstructions: { draggable: string } }).screenReaderInstructions.draggable).toBe(koMessages.board.dndInstructions);
+    const classicBtn = [...container.querySelectorAll('button')].find((bn) => bn.textContent === '5단계 클래식');
+    await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const classic = capturedDndProps.at(-1)!;
+    expect(sensorOf(classic)?.options).toEqual(KEYBOARD_SENSOR_OPTIONS);
+    expect((classic.accessibility as { screenReaderInstructions: { draggable: string } }).screenReaderInstructions.draggable).toBe(koMessages.board.dndInstructions);
   });
 
   it('⭐삭제는 사람 전용 — human이면 메뉴에 «삭제», agent면 메뉴 항목이 없다(패널과 같은 규칙)', async () => {
