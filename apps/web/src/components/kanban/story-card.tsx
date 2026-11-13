@@ -461,8 +461,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
   // 사이 이동, wrap). Enter/Space는 네이티브 <button> 활성화로 이미 동작해 별도 처리 0.
   const handleMenuKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-      // 상태 칩 줄: 칩 사이를 ←/→로 오간다(끝에서 반대쪽 끝으로). 칩이 아닌 항목에서는 아무 일도 하지 않는다.
-      if ((document.activeElement as HTMLElement | null)?.getAttribute('role') !== 'menuitemradio') return;
+      // 상태 칩 줄: 칩 사이를 ←/→로 오간다(끝에서 반대쪽 끝으로). 초점이 칩이 아닌 항목에 있으면(indexOf = -1) 아무 일도 하지 않는다.
       const chips = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'));
       const at = chips.indexOf(document.activeElement as HTMLButtonElement);
       if (at === -1) return;

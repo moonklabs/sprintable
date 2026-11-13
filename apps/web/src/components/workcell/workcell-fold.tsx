@@ -40,9 +40,10 @@ export function WorkcellFold({ evidenceCount, conversationCount, ...workcell }: 
         aria-expanded={open}
         aria-controls={open ? bodyId : undefined}
         data-testid="workcell-fold-toggle"
+        // 높이 44(min-h-11)는 디자인 Button 기본이 이미 준다 — 여기서 다시 쓰지 않는다(h-auto만 덮어 글이 줄바꿈될 때 늘어난다).
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          'h-auto min-h-11 w-full min-w-0 justify-start gap-2 whitespace-normal rounded-xl border border-ds-line px-3 py-2 text-left font-normal',
+          'h-auto w-full min-w-0 justify-start gap-2 whitespace-normal rounded-xl border border-ds-line px-3 py-2 text-left font-normal',
           LAYER.rowOthers,
         )}
       >

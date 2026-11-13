@@ -181,6 +181,12 @@ describe('StoryCard 컨텍스트 메뉴 — 4908 상태 칩 한 줄(예전 «상
     expect(document.body.querySelector('[aria-haspopup="menu"][role="menuitem"]')).toBeNull();
   });
 
+  it('⭐칩은 폰(touch)에서 44px 높이를 갖는다 — touch:min-h-11', () => {
+    renderCard();
+    openViaContextMenu();
+    for (const c of chips()) expect(c.className.split(/\s+/), c.textContent ?? '').toContain('touch:min-h-11');
+  });
+
   it('⭐지금 상태 칩만 aria-checked=true + ✓ 표시 — 색만으로 알리지 않는다', () => {
     renderCard();
     openViaContextMenu();

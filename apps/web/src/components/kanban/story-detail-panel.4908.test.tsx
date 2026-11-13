@@ -272,3 +272,64 @@ describe('4908 서랍 배경 막 — 둘째 이후 클릭은 «카드로 막 연
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+// 접힌 작업 칸 줄이 읽어 주는 수 — 진짜 서랍 + 진짜 접힘 줄로 잰다(수가 어디서 오는지: 근거 = 근거 칸에 실제로 놓인 신호, 대화 = 연결된 대화 + 댓글).
+describe('4908 카드 상세 — 접힌 작업 칸 줄의 수 · 설명 없는 장', () => {
+  const summaryText = () => container.querySelector('[data-testid="workcell-fold-summary"]')?.textContent;
+  async function mountStory(s: KanbanStory, extra: Record<string, unknown> = {}, refs: unknown = { data: [] }) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes('/references?direction=outgoing')) return { ok: true, json: async () => refs };
+      return { ok: true, json: async () => (/rejected-relations|\/api\/labels|\/api\/item-labels/.test(u) ? [] : { data: [] }) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ToastProvider><StoryDetailPanel story={s} tasks={[]} onClose={() => {}} projectId="p1" {...extra} /></ToastProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+  }
+
+  it('⭐연결된 대화 1건이면 «대화 1» · 없으면 «대화 0» · 단계는 trust_stage 순서', async () => {
+    await mountStory({ ...story, trust_stage: 'needs_input' } as KanbanStory, {}, {
+      data: [{
+        id: 'ref-1', created_at: '2026-08-20T00:00:00Z', form: 'proof', target_type: 'chat_message', still_exists: true,
+        proof_payload: { conversation_id: 'conv-1', start_message_id: 'msg-1', snapshot: [{ message_id: 'msg-1', author_id: 'a1', content: 'hi', created_at: '2026-08-20T00:00:00Z' }] },
+      }],
+    });
+    expect(summaryText()).toBe('단계 3/6 · 근거 0 · 대화 1');
+  });
+
+  it('대화 수를 아직 못 받았으면(불러오는 중) «대화 –»', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ToastProvider><StoryDetailPanel story={{ ...story, trust_stage: 'running' } as KanbanStory} tasks={[]} onClose={() => {}} projectId="p1" /></ToastProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    expect(summaryText()).toBe('단계 2/6 · 근거 0 · 대화 –');
+  });
+
+  it('⭐근거 칸에 신호(에이전트 주장 봉인)가 있으면 «근거 1»', async () => {
+    const memberMap = { a1: { id: 'a1', name: '빌드 에이전트', type: 'agent' } } as never;
+    await mountStory({ ...story, trust_stage: 'claimed_done', status: 'in-review', assignee_id: 'a1', assignee_ids: ['a1'], self_reported: true } as KanbanStory, { memberMap });
+    expect(summaryText()).toBe('단계 4/6 · 근거 1 · 대화 0');
+  });
+
+  it('⭐설명이 없는 장: 작업 칸을 펼쳐도 제목을 목표 자리에 다시 쓰지 않는다 — «설명 미기재»', async () => {
+    await mountStory({ ...story, description: null, trust_stage: 'running' } as KanbanStory);
+    await act(async () => { container.querySelector<HTMLElement>('[data-testid="workcell-fold-toggle"]')!.click(); });
+    expect(container.textContent).toContain(koMessages.workcell.briefGoalMissing);
+    expect((container.textContent ?? '').split(story.title).length - 1).toBe(1);
+  });
+
+  it('⭐펼친 작업 칸에는 상태 글자(진행 중)가 다시 나오지 않는다 — 머리의 상태 칩이 한 번만 말한다', async () => {
+    await mountStory({ ...story, trust_stage: 'running' } as KanbanStory);
+    await act(async () => { container.querySelector<HTMLElement>('[data-testid="workcell-fold-toggle"]')!.click(); });
+    expect((container.textContent ?? '').split(koMessages.board.inProgress).length - 1).toBe(1);
+  });
+});

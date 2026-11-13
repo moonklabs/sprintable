@@ -146,6 +146,13 @@ describe('RecipeStartSection', () => {
     expect(link).not.toBeNull();
   });
 
+  it('⭐4908: «대화 보기» 링크는 ds-action-text(층 위 글자 4.5:1 이상)이고 옛 text-primary가 아니다 — 속성 칸 면 위 다크 4.48이던 것', async () => {
+    await render([candidateStub({ started: true, conversation_id: 'conv-9', message_id: 'msg-9', current_stage: 'draft', current_role: 'Creator', current_stage_position: 1, total_stages: 9 })]);
+    const link = container.querySelector('a[href^="/chats/conv-9"]')!;
+    expect(link.className.split(/\s+/)).toContain('text-ds-action-text');
+    expect(link.className.split(/\s+/)).not.toContain('text-primary');
+  });
+
   it('마지막 단계까지 발행됐으면 다음 단계 대신 «마지막 단계» 문구를 보인다(story #4082)', async () => {
     await render([candidateStub({
       started: true, conversation_id: 'conv-9', message_id: 'msg-9',
