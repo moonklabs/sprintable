@@ -53,11 +53,23 @@ interface AgentRow extends AgentMember {
 /** one read of the three the page makes: «failed» (an error answer, a rejected request or an unreadable body) is NOT the same as «answered with nothing» */
 type Read<T> = { ok: true; data: T | null } | { ok: false };
 
-async function readData<T>(request: Promise<Response>): Promise<Read<T>> {
+/**
+ * The three reads answer LISTS. An array is the list; «nothing» is an empty list — `null` / a missing `data` and the proxy's `{ ok: true }` marker (the leaderboard route turns a 204 into `{ data: { ok: true } }`);
+ * anything else (a string, a number, another object) cannot be read as a list → «failed» (codex round 1: such a shape used to throw inside the shaping and land in the catch as a members failure).
+ */
+function asList<T>(data: unknown): T[] | null {
+  if (Array.isArray(data)) return data as T[];
+  if (data === null || data === undefined) return [];
+  if (typeof data === 'object' && (data as { ok?: unknown }).ok === true) return [];
+  return null;
+}
+
+async function readList<T>(request: Promise<Response>): Promise<Read<T[]>> {
   try {
     const res = await request;
     if (!res.ok) return { ok: false };
-    return { ok: true, data: ((await res.json()) as { data: T | null }).data };
+    const list = asList<T>(((await res.json()) as { data?: unknown }).data);
+    return list === null ? { ok: false } : { ok: true, data: list };
   } catch {
     return { ok: false };
   }
@@ -126,9 +138,9 @@ export function AgentPerformancePanel() {
     setLoading(true);
     try {
       const [members, velocityRead, leaderboardRead] = await Promise.all([
-        readData<AgentMember[]>(fetchWithAuth(`/api/team-members?project_id=${projectId}&type=agent`)),
-        readData<SprintVelocityItem[]>(fetchWithAuth(`/api/analytics/velocity-history?project_id=${projectId}`)),
-        readData<LeaderboardEntry[]>(fetchWithAuth(`/api/rewards/leaderboard?project_id=${projectId}&period=all`)),
+        readList<AgentMember>(fetchWithAuth(`/api/team-members?project_id=${projectId}&type=agent`)),
+        readList<SprintVelocityItem>(fetchWithAuth(`/api/analytics/velocity-history?project_id=${projectId}`)),
+        readList<LeaderboardEntry>(fetchWithAuth(`/api/rewards/leaderboard?project_id=${projectId}&period=all`)),
       ]);
 
       const agentMembers = (members.ok ? members.data ?? [] : []).filter((m) => m.type === 'agent');
@@ -167,7 +179,7 @@ export function AgentPerformancePanel() {
       );
       setVelocity(velocityRead.ok ? velocityRead.data ?? [] : []);
     } catch {
-      // the three reads cannot reject (readData answers «failed»); only an unexpected throw in the shaping lands here — it is a failure too, never an empty screen
+      // the three reads cannot reject (readList answers «failed»); only an unexpected throw in the shaping lands here — it is a failure too, never an empty screen
       setMembersFailed(true);
     } finally {
       setLoading(false);

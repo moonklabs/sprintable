@@ -1,7 +1,6 @@
 'use client';
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useTranslations } from 'next-intl';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { AgentPerformancePanel } from '@/components/agents/agent-performance-panel';
 import { AgentManagementTab } from '@/components/agents/agent-management-tab';
@@ -34,7 +33,6 @@ export function resolveTab(tab: string | null): AgentsTab {
  * story #2952 AC1(발견성) — 기본 탭은 'manage'(삭제 · 비활성화 · 재활성 액션이 있는 곳 — 통계는 차트뿐이라 첫 방문자가 «삭제 경로가 없다»고 오판한 PO+선생님 실사례).
  */
 export function AgentsPageTabs() {
-  const t = useTranslations('agents');
   const searchParams = useSearchParams();
   const router = useRouter();
   const dashboardCtx = useDashboardContext();

@@ -23,7 +23,7 @@ afterEach(async () => { await act(async () => { root.unmount(); }); container.re
 const AGENTS = [{ id: 'ag-1', name: '알파', type: 'agent' }, { id: 'ag-2', name: '베타', type: 'agent' }];
 const ok = (data: unknown) => ({ ok: true, json: async () => ({ data }) });
 const SPRINTS = [{ id: 's1', title: '스프린트 1', velocity: 8, status: 'closed', start_date: null, end_date: null }, { id: 's2', title: '스프린트 2', velocity: 4, status: 'closed', start_date: null, end_date: null }];
-type Fail = 'none' | 'members500' | 'membersReject' | 'membersUnreadable' | 'velocity500' | 'leaderboard500';
+type Fail = 'none' | 'members500' | 'membersReject' | 'membersUnreadable' | 'velocity500' | 'leaderboard500' | 'leaderboard204' | 'velocityString' | 'leaderboardWithoutAg1' | 'velocityZeros';
 function mockReads(fail: Fail = 'none') {
   fetchWithAuthMock.mockImplementation(async (url: string) => {
     if (url.startsWith('/api/team-members')) {
@@ -32,8 +32,18 @@ function mockReads(fail: Fail = 'none') {
       if (fail === 'membersUnreadable') return { ok: true, json: async () => { throw new SyntaxError('unreadable'); } };
       return ok(AGENTS);
     }
-    if (url.startsWith('/api/analytics/velocity-history')) return fail === 'velocity500' ? { ok: false, status: 500, json: async () => ({}) } : ok(SPRINTS);
-    if (url.startsWith('/api/rewards/leaderboard')) return fail === 'leaderboard500' ? { ok: false, status: 500, json: async () => ({}) } : ok([{ member_id: 'ag-1', balance: 50 }, { member_id: 'ag-2', balance: 120 }]);
+    if (url.startsWith('/api/analytics/velocity-history')) {
+      if (fail === 'velocity500') return { ok: false, status: 500, json: async () => ({}) };
+      if (fail === 'velocityString') return ok('not a list');
+      if (fail === 'velocityZeros') return ok(SPRINTS.map((x) => ({ ...x, velocity: 0 })));
+      return ok(SPRINTS);
+    }
+    if (url.startsWith('/api/rewards/leaderboard')) {
+      if (fail === 'leaderboard500') return { ok: false, status: 500, json: async () => ({}) };
+      if (fail === 'leaderboard204') return ok({ ok: true }); // the proxy route turns a 204 into { data: { ok: true } }
+      if (fail === 'leaderboardWithoutAg1') return ok([{ member_id: 'ag-2', balance: 120 }]);
+      return ok([{ member_id: 'ag-1', balance: 50 }, { member_id: 'ag-2', balance: 120 }]);
+    }
     if (url.startsWith('/api/analytics/agent-stats/batch')) return ok({ 'ag-1': { completed: 7, total_stories: 9, done_story_points: 0, avg_lead_time_ms: 7_200_000 }, 'ag-2': { completed: 3, total_stories: 3, done_story_points: 0, avg_lead_time_ms: 0 } });
     return { ok: false, json: async () => ({}) };
   });
@@ -109,6 +119,35 @@ describe('AgentPerformancePanel — 4912 D: a failed read is not «none»', () =
     expect(text()).not.toContain('TJSB');
     expect(container.querySelector('[data-testid="agent-stats-row-ag-1"] [data-slot="ds-chip"]')).toBeNull();
     expect(banner()).not.toBeNull();
+  });
+
+  it('⭐리더보드가 204(= { ok: true } 표지)로 «없음»이면 실패가 아니다 — 에이전트 줄은 서고 «0 TJSB»(알려진 없음) · 띠 없음 · 에이전트 읽기 실패로 둔갑하지 않는다(codex)', async () => {
+    mockReads('leaderboard204');
+    await render();
+    expect(banner()).toBeNull();
+    expect(container.querySelector('[data-testid="agent-stats-row-ag-1"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="agent-stats-row-ag-1"]')!.textContent).toContain('0 TJSB');
+    expect(container.querySelector('[data-testid="agent-leaderboard-load-failed"]')).toBeNull();
+  });
+
+  it('⭐리스트로 읽을 수 없는 모양(문자열)이 오면 «없음»이 아니라 실패 — 벨로시티 카드가 «읽지 못했어요» · 띠(codex: 예전엔 .slice에서 던졌다)', async () => {
+    mockReads('velocityString');
+    await render();
+    expect(container.querySelector('[data-testid="agent-velocity-load-failed"]')?.textContent).toBe(P.velocityLoadFailed);
+    expect(banner()).not.toBeNull();
+    expect(container.querySelector('[data-testid="agent-stats-row-ag-1"]')).not.toBeNull();
+  });
+
+  it('리더보드에 없는 에이전트는 순위 칩 없이 «0 TJSB»만(읽기는 성공 — 순위만 모른다) · 벨로시티 값이 전부 0이어도 막대가 선다(codex 시험 공백)', async () => {
+    mockReads('leaderboardWithoutAg1');
+    await render();
+    expect([...container.querySelectorAll('[data-testid="agent-stats-row-ag-1"] [data-slot="ds-chip"]')].map((c) => c.textContent)).toEqual(['0 TJSB']);
+    expect([...container.querySelectorAll('[data-testid="agent-stats-row-ag-2"] [data-slot="ds-chip"]')].map((c) => c.textContent)).toEqual(['#1', '120 TJSB']);
+    mockReads('velocityZeros');
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><div key="again"><AgentPerformancePanel /></div></NextIntlClientProvider>); });
+    await act(async () => { for (let i = 0; i < 8; i += 1) await Promise.resolve(); });
+    const bars = [...container.querySelectorAll('[data-testid="agent-velocity-card"] [role="progressbar"]')];
+    expect(bars).toHaveLength(2);
   });
 
   it('⭐[다시 시도]는 셋 다 다시 읽는다 — 고쳐진 뒤엔 띠가 사라지고 에이전트 줄이 선다', async () => {
