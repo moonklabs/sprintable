@@ -331,20 +331,20 @@
   --foreground: var(--proof-ink);
   --card: var(--proof-panel);
   --card-foreground: var(--proof-ink);
-  --popover: var(--proof-panel);
+  --popover: var(--ds-surface-raised);
   --popover-foreground: var(--proof-ink);
-  --primary: var(--proof-blue);
-  --primary-foreground: oklch(0.985 0 0);
+  --primary: var(--ds-action);
+  --primary-foreground: var(--ds-on-action);
   --secondary: var(--proof-sunk);
   --secondary-foreground: var(--proof-ink-2);
   --muted: var(--proof-sunk);
   --muted-foreground: var(--proof-ink-3);
   --accent: var(--proof-sunk);
   --accent-foreground: var(--proof-ink-2);
-  --destructive: var(--proof-red);
+  --destructive: var(--ds-failed);
   --border: var(--proof-line);
-  --input: var(--proof-line);
-  --ring: var(--proof-blue);
+  --input: var(--ds-line-control);
+  --ring: var(--ds-action);
   --chart-1: oklch(0.871 0.006 286.286);
   --chart-2: oklch(0.552 0.016 285.938);
   --chart-3: oklch(0.442 0.017 285.786);
@@ -360,20 +360,18 @@
      따라간다(기존 #2318 불변식 — "안 맞추면 사이드바만 옛 파랑" 그대로 유지, 소스만 proof-*로). */
   --sidebar: var(--proof-panel);
   --sidebar-foreground: var(--proof-ink);
-  --sidebar-primary: var(--proof-blue);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-primary: var(--ds-action);
+  --sidebar-primary-foreground: var(--ds-on-action);
   --sidebar-accent: var(--proof-sunk);
   --sidebar-accent-foreground: var(--proof-ink-2);
   --sidebar-border: var(--proof-line);
-  --sidebar-ring: var(--proof-blue);
+  --sidebar-ring: var(--ds-action);
 
-  /* story #2969 §2 sidebar 행(유나 확定, PR-3 carbon fill 이연분) — 활성 nav 항목 배경은
-     현재 사이트 테마(라이트/다크)와 무관하게 항상 다크 "Carbon" 톤(신규 브랜드색 아님 —
-     다크 테마의 --proof-panel/--proof-ink 값을 그대로 고정 리터럴로 재사용, 시그니처
-     디자인 결정이라 :root에 1회만 선언·.dark에서 재정의하지 않는다 — 테마 전환에도 항상
-     동일). 시트론 좌측 엣지(PR-3, sidebar.tsx)와 조합해 "활성=carbon+시트론 엣지" 완성. */
-  --sidebar-active-fill: #17191C;
-  --sidebar-active-fill-foreground: #F2F4ED;
+  /* story #2969 §2 sidebar 행(유나 확定, PR-3 carbon fill 이연분)은 «활성 nav 항목 = 어두운 Carbon 알약 + 시트론 좌측 엣지»였다.
+     story 4919(UI-R6, PO 판정 2026-11-13) — 옛 Carbon 알약(#17191C · 옛 다크 패널색)을 걷고, 다시 지은 nav 칸의 활성과 같은
+     ds 꼴(action-soft 면 + action-text 글)로 잇는다. 시트론 엣지는 그대로(소비처 sidebar.tsx · nav-v3-item-list.tsx). */
+  --sidebar-active-fill: var(--ds-action-soft);
+  --sidebar-active-fill-foreground: var(--ds-action-text);
 
   /* Sprintable brand (blue) — 254/0.17 hue/chroma는 스펙 그대로, L만 0.58→0.56(AA 4.5:1 확保) */
   --brand: oklch(0.56 0.17 254);
@@ -512,11 +510,11 @@
      AA 미달 4색(ink-3·amber·green·slate)은 시안 실값을 그대로 안 쓰고 doc이 AA 통과로
      조정한 값 — 조정 근거·대비 수치는 doc §⑥ 참고(여기서 재복사하지 않는다, SSOT는 doc).
      다크(.dark 블록, 아래)는 v3 시안이 라이트 전용이라 미정 — 이 PR에서 무변경(doc §④). */
-  --proof-bg: #F7F6F3;
-  --proof-panel: #FFFFFF;
-  --proof-sunk: #F1EFEA;
-  --proof-line: #E7E4DE;
-  --proof-line-soft: #EEEBE5;
+  --proof-bg: var(--ds-background);
+  --proof-panel: var(--ds-surface);
+  --proof-sunk: var(--ds-surface-sunk);
+  --proof-line: var(--ds-line);
+  --proof-line-soft: var(--ds-line);
   /* story #2969 §1.2(PR-4, doc proofline-system-layer-2969) — 오버레이 전용 강조 hairline.
      "오버레이는 항상 --elev-overlay + 1px hairline(--proof-line-strong) 동반 — 그림자만으론
      엣지가 흐리다"(§1.2). PR-T에서 이연했던 토큰 — 값은 기존 --proof-line을 --proof-ink
@@ -525,15 +523,15 @@
      story #3826은 이 공식을 안 건드림 — --proof-line/--proof-ink 값만 바뀌어 파생값이
      자동으로 따라간다). */
   --proof-line-strong: color-mix(in oklch, var(--proof-line) 50%, var(--proof-ink) 50%);
-  --proof-ink: #1D1C1A;
-  --proof-ink-2: #5F5C57;
+  --proof-ink: var(--ds-ink);
+  --proof-ink-2: var(--ds-ink-2);
   /* story #2917(2026-08-22)이 원값 #6D6F67을 sunk 위 AA 미달로 #63655D 조정 — story
      #3826(2026-09-13, doc 3dc24888)이 v3 룩앤필로 다시 조정: #6E6C67(sunk #F1EFEA 위
      4.56:1, doc §⑥). 다크는 무변(#8D9088, 라이트만 교체 — doc §④). */
-  --proof-ink-3: #6E6C67;
-  --proof-faint: #9C9E93;
-  --proof-blue: #3B5BA5;
-  --proof-blue-soft: #E7EDF7;
+  --proof-ink-3: var(--ds-ink-3);
+  --proof-faint: var(--ds-line-strong);
+  --proof-blue: var(--ds-info);
+  --proof-blue-soft: var(--ds-info-soft);
   /* story #2983 — 라이트 전용 재조정값(다크 #C7F85A와 hue/sat 동일, L만 하향, 유나 확定
      2026-08-24). vs proof-panel(white) 4.22:1 · vs proof-sunk(#ECEAE2) 3.50:1 — 비텍스트
      3:1 최소 위 여유 margin. 텍스트(작은 배지 라벨 등)로는 4.5:1 미달이라 그 축은 값을
@@ -543,16 +541,16 @@
   --proof-citron: #5F8706;
   /* story #3826(2026-09-13, doc 3dc24888) — v3 조정값. 시안 실값 #3E7D5A는 green-soft
      위 4.26:1로 AA 미달이라 #3B7856으로 조정(4.56:1, doc §⑥). */
-  --proof-green: #3B7856;
-  --proof-green-soft: #E9F1EC;
+  --proof-green: var(--ds-done);
+  --proof-green-soft: var(--ds-done-soft);
   /* story #3826(2026-09-13, doc 3dc24888) — v3 조정값. 시안 실값 #B07A1E는 amber-soft
      위 3.37:1로 AA 미달이라 #946719로 조정(4.51:1, doc §⑥). */
-  --proof-amber: #946719;
-  --proof-amber-soft: #FBF3E2;
+  --proof-amber: var(--ds-needs-hand);
+  --proof-amber-soft: var(--ds-needs-hand-soft);
   /* story #3826(v3) — v3는 「사람 손 필요」에 amber 1색만 쓰고 red는 시안 미사용이라
      현행 유지(doc 3dc24888 표① "빠짐 0" 원칙 — 추정값 0). */
-  --proof-red: #C33B3B;
-  --proof-red-soft: #FBEAEA;
+  --proof-red: var(--ds-failed);
+  --proof-red-soft: var(--ds-failed-soft);
   /* story #3826(신규, 2026-09-13, doc 3dc24888 §①-1) — v3 「에이전트 진행」(calm) 전용
      축. 기존 --proof-blue(주 버튼)와 뜻이 섞이면 "누른 버튼"과 "진행 중" 표시가 같은
      색으로 헷갈려 신규 토큰으로 연다(doc의 FE 결정 1 — blue 흡수 대신 신설 채택).
@@ -604,7 +602,7 @@
   /* §⑤ — 프로스티드 글래스, 오버레이/모달 전용(이 PR의 A/B/C급 소비처엔 아직 없음 — 토큰만
      선신설, 실 소비는 모달/오버레이 표면 착수 시). */
   --glass-overlay-filter: blur(14px) saturate(1.3);
-  --glass-overlay-bg: rgba(252, 251, 247, .62);
+  --glass-overlay-bg: color-mix(in srgb, var(--ds-surface-raised) 62%, transparent);
 }
 
 /* story #4128 — 유나 canon 정식 결정(2026-09-21): 폼 컨트롤(checkbox/radio) accent-color를
@@ -685,20 +683,20 @@
   --foreground: var(--proof-ink);
   --card: var(--proof-panel);
   --card-foreground: var(--proof-ink);
-  --popover: var(--proof-panel);
+  --popover: var(--ds-surface-raised);
   --popover-foreground: var(--proof-ink);
-  --primary: var(--proof-blue);
-  --primary-foreground: oklch(0.16 0.038 262);
+  --primary: var(--ds-action);
+  --primary-foreground: var(--ds-on-action);
   --secondary: var(--proof-sunk);
   --secondary-foreground: var(--proof-ink-2);
   --muted: var(--proof-sunk);
   --muted-foreground: var(--proof-ink-3);
   --accent: var(--proof-sunk);
   --accent-foreground: var(--proof-ink-2);
-  --destructive: var(--proof-red);
+  --destructive: var(--ds-failed);
   --border: var(--proof-line);
-  --input: var(--proof-line);
-  --ring: var(--proof-blue);
+  --input: var(--ds-line-control);
+  --ring: var(--ds-action);
   --chart-1: oklch(0.871 0.006 286.286);
   --chart-2: oklch(0.75 0.016 285.938);
   --chart-3: oklch(0.62 0.017 285.786);
@@ -707,12 +705,12 @@
   /* story #2917: 라이트와 동일 별칭 원칙(sidebar가 card/primary/muted/border를 거울처럼 따름). */
   --sidebar: var(--proof-panel);
   --sidebar-foreground: var(--proof-ink);
-  --sidebar-primary: var(--proof-blue);
-  --sidebar-primary-foreground: oklch(0.16 0.038 262);
+  --sidebar-primary: var(--ds-action);
+  --sidebar-primary-foreground: var(--ds-on-action);
   --sidebar-accent: var(--proof-sunk);
   --sidebar-accent-foreground: var(--proof-ink-2);
   --sidebar-border: var(--proof-line);
-  --sidebar-ring: var(--proof-blue);
+  --sidebar-ring: var(--ds-action);
 
   /* Sprintable brand (blue, lighter for dark) — hue/chroma 스펙 그대로, L은 라이트와 동일 규칙 */
   --brand: oklch(0.64 0.17 254);
@@ -811,28 +809,28 @@
 
   /* E-UI-DAEGBYEON P0: Proof Capsule (Dark · Carbon/Fog) — proof-capsule-mockup-render 정확값.
      단순 반전 아님(§ 의미대비) — blue/green/amber/red 전부 dark 전용 값. */
-  --proof-bg: #0B0C0D;
-  --proof-panel: #17191C;
-  --proof-sunk: #111315;
-  --proof-line: #2B2E2D;
-  --proof-line-soft: #232628;
+  --proof-bg: var(--ds-background);
+  --proof-panel: var(--ds-surface);
+  --proof-sunk: var(--ds-surface-sunk);
+  --proof-line: var(--ds-line);
+  --proof-line-soft: var(--ds-line);
   /* story #2969 §1.2(PR-4) — 다크 오버레이 강조 hairline. 라이트와 동일 공식(color-mix 50%
      proof-ink) — 다크 proof-ink는 밝은 텍스트색이라 자동으로 "더 밝은/눈에 띄는" 방향으로
      간다(테마별 반전 로직 불요). 유나 확定(2026-08-23) — 이 공식 그대로. */
   --proof-line-strong: color-mix(in oklch, var(--proof-line) 50%, var(--proof-ink) 50%);
-  --proof-ink: #F2F4ED;
-  --proof-ink-2: #C4C7BE;
-  --proof-ink-3: #8D9088;
-  --proof-faint: #5F625B;
-  --proof-blue: #6B87FF;
-  --proof-blue-soft: #1C2438;
+  --proof-ink: var(--ds-ink);
+  --proof-ink-2: var(--ds-ink-2);
+  --proof-ink-3: var(--ds-ink-3);
+  --proof-faint: var(--ds-line-strong);
+  --proof-blue: var(--ds-info);
+  --proof-blue-soft: var(--ds-info-soft);
   --proof-citron: #C7F85A;
-  --proof-green: #4FB97E;
-  --proof-green-soft: #14251C;
-  --proof-amber: #D9A441;
-  --proof-amber-soft: #2A2214;
-  --proof-red: #E06767;
-  --proof-red-soft: #2A1717;
+  --proof-green: var(--ds-done);
+  --proof-green-soft: var(--ds-done-soft);
+  --proof-amber: var(--ds-needs-hand);
+  --proof-amber-soft: var(--ds-needs-hand-soft);
+  --proof-red: var(--ds-failed);
+  --proof-red-soft: var(--ds-failed-soft);
 
   /* story #2969 §1.2(PR-T) — 다크 오버레이 그림자(라이트 대응값의 doc §1.2 지정 다크값). */
   --elev-overlay: 0 1px 2px rgba(0, 0, 0, .5), 0 12px 34px -8px rgba(0, 0, 0, .62);

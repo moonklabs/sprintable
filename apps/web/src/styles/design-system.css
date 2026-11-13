@@ -1,9 +1,10 @@
 /*
  * UI-3 design system tokens (story a9d56577 · doc ui3-token-names-and-component-list-v0, 11-10 PO 결정).
  *
- * 새 뜻 이름 토큰을 «따로» 세운다 — 옛 변수(--background · --foreground · --proof-* …)와 이름이 겹치지 않게 `--ds-` 접두를 두고,
- * 옛 이름을 이 값의 별칭으로 잇지 않는다(잇는 순간 아직 안 다시 지은 화면의 색이 흔들린다). 새 부품(`components/ds/`) · 새 화면만 쓰고
- * 옛 변수는 그대로 둔다(자연도태).
+ * 새 뜻 이름 토큰을 «따로» 세운다 — 옛 변수(--background · --foreground · --proof-* …)와 이름이 겹치지 않게 `--ds-` 접두를 두고, 새 부품(`components/ds/`) · 새 화면은 이 값을 바로 쓴다.
+ * story 4919(UI-R6, PO 판정 2026-11-13): 처음엔 «옛 이름을 이 값의 별칭으로 잇지 않는다(잇는 순간 아직 안 다시 지은 화면의 색이 흔들린다)»였지만, 지금은 다시 지은 화면이 대부분이고
+ * 남은 «흔들림»이 곧 걷어야 할 옛 미색이다. 그래서 `app/globals.css`의 옛 값 SSOT(`--proof-*`)와 몇 별칭(`--primary` · `--ring` · `--input` · `--popover`)이 이 파일의 토큰을 가리킨다 —
+ * **색 값을 정하는 곳은 이 파일 하나**이고, 옛 이름은 그 값을 부르는 별칭일 뿐이다(대응표 = 4919 AC2 문서, 시험 = `styles/old-palette-alias.4919.test.ts`).
  *
  * 값은 어둠 / 밝음. 앱의 테마 스위치는 `.dark` 클래스(globals.css `@custom-variant dark`)라 밝음이 :root · 어둠이 .dark.
  * 대비는 design-system.test.ts가 이 파일의 값을 읽어 계산한다(글자 조합 4.5:1 · 누를 수 있는 경계 3:1 아래로 내려가면 빨개진다).

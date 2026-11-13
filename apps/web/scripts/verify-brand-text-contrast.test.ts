@@ -1,15 +1,15 @@
-import { readFileSync } from 'node:fs';
+import { readGlobalsCss } from './lib/read-globals-css';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { computeBrandTextContrasts, findBrandOnTextUses, findBrandSoftTextUses, scanRepo, scanRepoBrandOnText } from './verify-brand-text-contrast';
 
-const CSS = readFileSync(path.resolve(__dirname, '../src/app/globals.css'), 'utf8');
+const CSS = readGlobalsCss(path.resolve(__dirname, '../src/app/globals.css'));
 
 describe('story #4315 — 브랜드 글자 토큰 대비', () => {
   it('⭐양 테마 --brand-text가 배경 · 카드 · 칩 틴트에서 4.5:1 이상(기대값 pin)', () => {
     const [light, dark] = computeBrandTextContrasts(CSS);
     expect(light!.onBackground).toBeCloseTo(7.05, 1);
-    expect(dark!.onBackground).toBeCloseTo(10.48, 1);
+    expect(dark!.onBackground).toBeCloseTo(9.93, 1); // story 4919 — 다크 바탕이 ds-background #0f141a로 이어졌다(옛 10.48 = #0B0C0D 위)
     for (const c of [light!, dark!]) {
       expect(c.onBackground).toBeGreaterThanOrEqual(4.5);
       expect(c.onCard).toBeGreaterThanOrEqual(4.5);

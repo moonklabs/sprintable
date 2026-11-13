@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const dsCss = readFileSync(join(__dirname, '..', '..', 'styles', 'design-system.css'), 'utf8');
-const globalsCss = readFileSync(join(__dirname, '..', 'globals.css'), 'utf8');
 const connectStep = readFileSync(join(__dirname, 'connect-step.tsx'), 'utf8');
 
 const hex = (h: string): [number, number, number] => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) as [number, number, number];
@@ -19,10 +18,10 @@ function dsBlock(selector: ':root' | '.dark'): Record<string, string> {
   if (!m) throw new Error(`block ${selector} not found`);
   return Object.fromEntries([...m[1]!.matchAll(/--ds-([\w-]+)\s*:\s*(#[0-9a-fA-F]{6})\s*;/g)].map((x) => [x[1]!, x[2]!.toLowerCase()]));
 }
-// the legacy proof tokens: the first set in globals.css is light, the second dark
+// the legacy proof tokens: since story 4919 they ARE the ds tokens (proof-sunk = ds surface-sunk, proof-panel = ds surface), so the two faces now share one value per theme
 const proof = (name: 'sunk' | 'panel'): [string, string] => {
-  const all = [...globalsCss.matchAll(new RegExp(`--proof-${name}:\\s*(#[0-9a-fA-F]{6})`, 'g'))].map((m) => m[1]!);
-  return [all[0]!, all[1]!];
+  const key = name === 'sunk' ? 'surface-sunk' : 'surface';
+  return [dsBlock(':root')[key]!, dsBlock('.dark')[key]!];
 };
 
 // the class → token the component uses (read from the component, not copied here)

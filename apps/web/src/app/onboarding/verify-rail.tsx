@@ -106,14 +106,14 @@ export function parseFirstCallAt(json: unknown): string | null {
 function StepIcon({ status }: { status: RailStatus }) {
   if (status === 'done') {
     return (
-      <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-success text-on-scrim">
+      <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-success text-background">
         <Check className="h-3.5 w-3.5" aria-hidden />
       </span>
     );
   }
   if (status === 'failed') {
     return (
-      <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-destructive text-on-scrim">
+      <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-destructive text-background">
         <X className="h-3.5 w-3.5" aria-hidden />
       </span>
     );

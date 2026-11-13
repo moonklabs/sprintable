@@ -59,6 +59,7 @@
  * 여는 태그이므로, 그 태그가 시작하는 줄에 같은 관례로 붙인다).
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readGlobalsCss } from './lib/read-globals-css';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -414,7 +415,7 @@ export function loadBaseline(filePath: string): Set<string> {
 }
 
 function main(): number {
-  const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
+  const css = readGlobalsCss(GLOBALS_CSS_PATH);
   const { vars } = extractCssVarBlock(css, ':root');
   const statusColorNames = deriveCrossCheckTextVars(vars);
 
@@ -453,7 +454,7 @@ function main(): number {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   if (process.argv.includes('--write-baseline')) {
-    const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
+    const css = readGlobalsCss(GLOBALS_CSS_PATH);
     const { vars } = extractCssVarBlock(css, ':root');
     const statusColorNames = deriveCrossCheckTextVars(vars);
     const candidates = scanRepo(SRC_ROOT, statusColorNames);

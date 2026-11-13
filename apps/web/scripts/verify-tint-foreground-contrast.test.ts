@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readGlobalsCss } from './lib/read-globals-css';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extractCssVarBlock, discoverTintFamilies, discoverBgFamilies, discoverBorderFamilies, computeFamilyContrasts, computeCrossFamilyBgReference, computeCrossCheckContrasts, computeNonTextCrossCheckContrasts, deriveCrossCheckTextVars, GRANDFATHER_BASELINE } from './verify-tint-foreground-contrast';
@@ -213,21 +213,21 @@ describe('computeCrossFamilyBgReference — story #2575 AC4 양성대조(교차-
   // 원 사고 자체는 위 첫 테스트가 합성 CSS로 이미 영구 고정해 재현 가능하다).
   // story #3826(2026-09-13, doc 3dc24888) — v3 AA 조정(amber #946719)으로 값이 다시
   // 이동: 4.67 → 4.74(실측).
-  it('실 globals.css로 계산하면 light/destructive-on-warning-bg가 proof 팔레트 실측값(4.74)과 근사 일치한다', () => {
-    const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
+  it('실 globals.css로 계산하면 light/destructive-on-warning-bg가 ds 팔레트 실측값(4.94 — story 4919, 옛 proof 4.74)과 근사 일치한다', () => {
+    const css = readGlobalsCss(GLOBALS_CSS_PATH);
     const results = computeCrossFamilyBgReference(css);
     const hit = results.find((r) => r.theme === 'light' && r.textFamily === 'destructive' && r.bgFamily === 'warning')!;
-    expect(hit.ratio).toBeCloseTo(4.74, 1);
+    expect(hit.ratio).toBeCloseTo(4.94, 1);
   });
 
   // story #3826(2026-09-13, doc 3dc24888) — v3 AA 조정(amber #946719, warning-bg 위
   // 4.51:1로 조정)으로 값이 이동: 3.25 → 4.51(실측). doc §⑥가 이 정확한 숫자를 "AA
   // 통과 조정 근거"로 명시(amber 대비표).
-  it('같은-계열 쌍(textFamily === bgFamily)도 참고표에 포함된다 — warning-on-warning-bg가 proof 팔레트 실측값(4.51)과 근사 일치', () => {
-    const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
+  it('같은-계열 쌍(textFamily === bgFamily)도 참고표에 포함된다 — warning-on-warning-bg가 ds 팔레트 실측값(5.52 — story 4919, 옛 proof 4.51)과 근사 일치', () => {
+    const css = readGlobalsCss(GLOBALS_CSS_PATH);
     const results = computeCrossFamilyBgReference(css);
     const hit = results.find((r) => r.theme === 'light' && r.textFamily === 'warning' && r.bgFamily === 'warning')!;
-    expect(hit.ratio).toBeCloseTo(4.51, 1);
+    expect(hit.ratio).toBeCloseTo(5.52, 1);
   });
 });
 
@@ -459,7 +459,7 @@ describe('computeNonTextCrossCheckContrasts — story #4094 AC2 못 틀리는 �
 });
 
 describe('real repo globals.css — 실제 정의가 전 조합 AA(4.5)를 통과한다(story #2420 AC1/AC5 · #2575 AC1)', () => {
-  const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
+  const css = readGlobalsCss(GLOBALS_CSS_PATH);
   const results = computeFamilyContrasts(css);
 
   it('finds at least the four families the spec names(destructive·warning·info·success)', () => {
@@ -489,7 +489,7 @@ describe('real repo globals.css — 실제 정의가 전 조합 AA(4.5)를 통�
       .filter((v) => !Number.isNaN(v));
     const min = Math.min(...familyColorRatios);
     expect(min).toBeGreaterThanOrEqual(4.5);
-    expect(min).toBeLessThan(4.6); // 문턱에서 크게 안 멀어졌는지 — 멀어지면 팔레트가 또 바뀐 것.
+    expect(min).toBeLessThan(4.7); // 문턱에서 크게 안 멀어졌는지 — 멀어지면 팔레트가 또 바뀐 것. story 4919: ds 팔레트로 최솟값이 4.50 → 4.62(여전히 AA 위, «반례 복원» 없음).
   });
 
   // story #2575 AC1 — -bg가 이 스토리 이전엔 아예 안 잡혔다는 것 자체가 #2960의 근본원인.
@@ -507,9 +507,9 @@ describe('real repo globals.css — 실제 정의가 전 조합 AA(4.5)를 통�
   // story #2917: proof-amber 팔레트로 값이 이동(3.25) — 위 computeCrossFamilyBgReference
   // 테스트 주석과 동일 이유. story #3826(2026-09-13, doc 3dc24888): v3 AA 조정으로
   // 다시 이동(3.25 → 4.51, amber #946719).
-  it('AC4 양성대조 — light/warning의 familyColorOnBackgroundRatio(-bg)가 proof 팔레트 실측값(4.51)과 근사 일치한다', () => {
+  it('AC4 양성대조 — light/warning의 familyColorOnBackgroundRatio(-bg)가 ds 팔레트 실측값(5.52 — story 4919, 옛 proof 4.51)과 근사 일치한다', () => {
     const r = results.find((x) => x.theme === 'light' && x.family === 'warning' && x.kind === 'bg')!;
-    expect(r.familyColorOnBackgroundRatio).toBeCloseTo(4.51, 1);
+    expect(r.familyColorOnBackgroundRatio).toBeCloseTo(5.52, 1);
   });
 
   // story #4102(#4100 유나 定 A안) — 이 이론적 미달(brand 교차 10건)은 더 이상 CI 게이트가
@@ -518,10 +518,10 @@ describe('real repo globals.css — 실제 정의가 전 조합 AA(4.5)를 통�
   // verify-no-new-tint-color-text.ts)으로 옮겼다. 이 테스트는 «토큰 정의 수준에서는
   // 여전히 수학적으로 미달»이라는 순수 참고 수치가 계속 이 값(≤10)으로 안정적임을 pin —
   // computeCrossCheckContrasts 자체는 안 지웠으니(참고 자료로 유용) 값이 흔들리면 안 된다.
-  it('brand 교차 미달(참고 전용, 게이트 아님) — 실 globals.css가 지금 딱 10건이고(발견 당시 그대로), 더 늘지 않았다', () => {
+  it('brand 교차 미달(참고 전용, 게이트 아님) — 실 globals.css가 지금 18건이고(story 4919: ds 옅은 면으로 이어지며 이론상 조합이 10 → 18), 더 늘지 않았다', () => {
     const crossCheck = computeCrossCheckContrasts(css);
     const failing = crossCheck.filter((r) => r.ratio < 4.5 && r.textVar === 'brand');
-    expect(failing.length).toBeLessThanOrEqual(10);
+    expect(failing.length).toBeLessThanOrEqual(18); // 참고 전용 — 진짜 방어는 usage 층 가드(verify-cross-element-tint-text · verify-no-new-tint-color-text, 모두 초록)
   });
 
   // story #4102 — 위와 같은 이유로 참고 전용(게이트 아님). 값(≤11) 자체는 무변.

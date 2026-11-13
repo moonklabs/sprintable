@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readGlobalsCss } from './lib/read-globals-css';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { computeAccentColorContrasts } from './verify-accent-color-contrast';
@@ -11,16 +11,16 @@ function fixture(primary: string, background: string, card: string): string {
 }
 
 describe('computeAccentColorContrasts (story #4128 — accent-color 회귀 대비 가드)', () => {
-  it('실 globals.css의 토큰으로 유나 정본 실측값을 그대로 재현한다(라이트 6.02/다크 6.09 배경, 라이트 6.51/다크 3.21 흰 체크)', () => {
-    const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
+  it('실 globals.css의 토큰으로 실측값을 재현한다(story 4919 — --primary=ds-action: 라이트 5.45/다크 5.84 배경, 라이트 5.95/다크 3.17 흰 체크 · 옛 유나 정본 6.02/6.09 · 6.51/3.21)', () => {
+    const css = readGlobalsCss(GLOBALS_CSS_PATH);
     const results = computeAccentColorContrasts(css);
     const light = results.find((r) => r.theme === 'light')!;
     const dark = results.find((r) => r.theme === 'dark')!;
 
-    expect(light.fillOnBackgroundRatio).toBeCloseTo(6.02, 1);
-    expect(light.whiteCheckOnFillRatio).toBeCloseTo(6.51, 1);
-    expect(dark.fillOnBackgroundRatio).toBeCloseTo(6.09, 1);
-    expect(dark.whiteCheckOnFillRatio).toBeCloseTo(3.21, 1);
+    expect(light.fillOnBackgroundRatio).toBeCloseTo(5.45, 1);
+    expect(light.whiteCheckOnFillRatio).toBeCloseTo(5.95, 1);
+    expect(dark.fillOnBackgroundRatio).toBeCloseTo(5.84, 1);
+    expect(dark.whiteCheckOnFillRatio).toBeCloseTo(3.17, 1);
 
     for (const r of results) {
       expect(r.fillOnBackgroundRatio, `${r.theme} 채움 vs 배경`).toBeGreaterThanOrEqual(3);

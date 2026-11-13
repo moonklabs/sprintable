@@ -571,7 +571,6 @@ describe('NotificationBell — 배지 「99+」 대비(story 3466)', () => {
   });
 
   it('⭐색 계산 양성대조 — globals.css 실값으로 라이트·다크 둘 다 대비비 ≥4.5(WCAG AA)', async () => {
-    const { readFileSync } = await import('node:fs');
     const path = await import('node:path');
     const { fileURLToPath } = await import('node:url');
     const { contrastRatio } = await import('@/lib/color-contrast');
@@ -581,7 +580,9 @@ describe('NotificationBell — 배지 「99+」 대비(story 3466)', () => {
     // ENOENT). 테스트 파일 자신의 위치 기준으로 고정 — cwd 무관(verify-tint-
     // foreground-contrast.ts와 같은 관례).
     const cssPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../app/globals.css');
-    const css = readFileSync(cssPath, 'utf-8');
+    // story 4919 — --proof-*가 ds 참조(var(--ds-*))가 됐으니 테마별 ds 값으로 푼 글을 읽는다(scripts/lib/read-globals-css).
+    const { readGlobalsCss } = await import('../../../scripts/lib/read-globals-css');
+    const css = readGlobalsCss(cssPath);
 
     function hexToRgb(hex: string): [number, number, number] {
       const n = hex.replace('#', '');

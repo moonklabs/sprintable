@@ -30,7 +30,7 @@
  * 4.5에 가까운 값으로 통과/실패 경계에 서거나, 검증된 L·채도 구역 밖의 값으로 정의되면,
  * 이 근사 대신 실 브라우저 canvas 캡처로 재검증할 자리라는 것을 여기 남겨 둔다.
  */
-import { readFileSync } from 'node:fs';
+import { readGlobalsCss } from './lib/read-globals-css';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseOklchToRgba, compositeOver } from '../src/lib/oklch-contrast';
@@ -408,7 +408,7 @@ export function computeCrossFamilyBgReference(css: string): CrossFamilyBgReferen
 }
 
 function main(): number {
-  const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
+  const css = readGlobalsCss(GLOBALS_CSS_PATH);
   const results = computeFamilyContrasts(css);
   const tintResults = results.filter((r) => r.kind === 'tint');
   const bgResults = results.filter((r) => r.kind === 'bg');

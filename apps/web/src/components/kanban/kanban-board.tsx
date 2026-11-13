@@ -1524,7 +1524,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
         // story #3007(로드맵 P2·PR-E, L1) — 토스트성 배너는 floating이라 --elev-overlay.
         // story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는 이 테마에
         // 매핑이 없는 no-op(라이트 3.55·다크 3.00, AA 미달). trust-seal.tsx 선례.
-        <div key={transitionErrorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="pointer-events-auto rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-on-scrim dark:text-proof-bg shadow-[var(--elev-overlay)]">
+        <div key={transitionErrorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="pointer-events-auto rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-background shadow-[var(--elev-overlay)]">
           ⚠️ {transitionError}
         </div>,
         bottomDockBannerSlot,
