@@ -6884,7 +6884,7 @@
     "galleryGroupOption": "{label} · {count}",
     "viewerVersionSelectLabel": "Version",
     "detailThreadsHeading": "Comments",
-    "viewerCanvasHint": "Drag to move, scroll to zoom",
+    "viewerCanvasHint": "Drag to move, scroll to zoom. Double-click to switch between fit and actual size; with the picture focused, the 0 and 1 keys do the same.",
     "viewerCanvasHintTouch": "Move with one finger, zoom with two. Double-tap to fit.",
     "viewerFitAction": "Fit to view",
     "viewerActualSizeAction": "Actual size",

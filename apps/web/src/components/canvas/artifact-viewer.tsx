@@ -26,6 +26,7 @@ import { Icon } from '@/components/ds/icon';
 import { NativeSelect } from '@/components/ds/select';
 import { PageHead } from '@/components/ds/page-head';
 import { LAYER } from '@/components/ds/layers';
+import { ContextMenu, ContextMenuTrigger, MenuContent, MenuItem } from '@/components/ds/menu';
 
 interface ArtifactViewerProps {
   artifact: VisualArtifact;
@@ -303,6 +304,11 @@ export function ArtifactViewer({
   if (layout === 'page') {
     const sortedVersions = [...versions].sort((a, b) => b.version - a.version);
     const canPropose = !isViewingAnchor && !!onProposeCanonical;
+    const proposePending = pendingCanonicalizeVersion === selectedVersion;
+    // 4910 — 머리 단추와 그림 위 우클릭 메뉴가 «같은 동작 객체»를 쓴다(두 길이 어긋나지 않게 — AC4). 새 동작 0.
+    const exportAction = { id: 'export', label: t('exportDialogTitle'), icon: 'download' as const, run: () => setExportOpen(true) };
+    const proposeAction = canPropose && !proposePending ? { id: 'propose', label: t('proposeCanonicalAction'), icon: 'auto_awesome' as const, run: () => onProposeCanonical?.(selectedVersion) } : null;
+    const pictureActions = [...(proposeAction ? [proposeAction] : []), exportAction];
     return (
       <div className={cn('flex flex-col gap-4', className)}>
         {/* 4910 — 제목은 위 막대 한 곳(화면 `artifact-detail-view`의 TopBarSlot). 머리 칸에는 칩(형식 · 임포트됨 · 정본) + 동작만 선다. */}
@@ -330,17 +336,12 @@ export function ArtifactViewer({
               {artifact.format === 'html' ? (
                 <DsButton variant="quiet" iconStart={<Icon name="open_in_full" size={14} />} onClick={() => setExpandOpen(true)}>{t('viewerExpandAction')}</DsButton>
               ) : null}
-              {canPropose ? (
-                pendingCanonicalizeVersion === selectedVersion ? (
-                  <Chip tone="needs-hand" icon="schedule">{t('canonicalizePendingBadge')}</Chip>
-                ) : (
-                  <DsButton iconStart={<Icon name="auto_awesome" size={14} />} onClick={() => onProposeCanonical?.(selectedVersion)}>{t('proposeCanonicalAction')}</DsButton>
-                )
-              ) : null}
+              {canPropose && proposePending ? <Chip tone="needs-hand" icon="schedule">{t('canonicalizePendingBadge')}</Chip> : null}
+              {proposeAction ? <DsButton iconStart={<Icon name={proposeAction.icon} size={14} />} onClick={proposeAction.run}>{proposeAction.label}</DsButton> : null}
               {artifact.format === 'tree' && onEnterEdit ? (
                 <DsButton iconStart={<Icon name="edit" size={14} />} onClick={onEnterEdit}>{isViewingAnchor ? t('editAsNewVersionAction') : t('editAction')}</DsButton>
               ) : null}
-              <DsButton iconStart={<Icon name="download" size={14} />} onClick={() => setExportOpen(true)}>{t('exportDialogTitle')}</DsButton>
+              <DsButton iconStart={<Icon name={exportAction.icon} size={14} />} onClick={exportAction.run}>{exportAction.label}</DsButton>
               {onCreateThread ? (
                 <DsButton
                   variant={pinAddMode ? 'primary' : 'quiet'}
@@ -358,7 +359,17 @@ export function ArtifactViewer({
           {/* 칸 폭(컨테이너)이 넓으면 보기 영역 | 오른쪽 열 하나, 좁으면 열이 아래로 — 문서 읽기와 같은 컨테이너 쿼리. */}
           <div className="grid grid-cols-1 @min-[860px]:grid-cols-[minmax(0,1fr)_340px]">
             <div ref={stageRegionRef} tabIndex={-1} data-stage-region="" className={cn('relative min-w-0 p-4 outline-none', LAYER.well)}>
-              {stageBody}
+              {/* 4910 — 데스크톱 손길: 그림 위 우클릭 = 머리 단추와 같은 동작(정본으로 제안 · 내보내기). 우클릭에만 있는 동작 0 — 폰(터치)에는 머리 단추가 그대로. */}
+              <ContextMenu>
+                <ContextMenuTrigger data-testid="artifact-picture-menu-trigger" className="block">
+                  {stageBody}
+                </ContextMenuTrigger>
+                <MenuContent>
+                  {pictureActions.map((action) => (
+                    <MenuItem key={action.id} icon={action.icon} onClick={action.run}>{action.label}</MenuItem>
+                  ))}
+                </MenuContent>
+              </ContextMenu>
             </div>
             <aside data-testid="artifact-detail-column" className="flex min-w-0 flex-col divide-y divide-ds-line border-t border-ds-line @min-[860px]:border-t-0 @min-[860px]:border-l">
               <ArtifactVersionRail

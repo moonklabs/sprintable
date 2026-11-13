@@ -192,6 +192,8 @@ function CanvasViewport({
   const touchPointersRef = useRef(new Map<number, { x: number; y: number }>());
   const pinchBaselineRef = useRef<{ distance: number; midX: number; midY: number; scale: number; tx: number; ty: number } | null>(null);
   const lastTapRef = useRef<{ time: number; x: number; y: number } | null>(null);
+  // 4910 — 마지막 포인터가 터치였으면 더블클릭 이벤트(브라우저가 더블탭에서 덧붙이기도 함)는 무시한다: 터치는 위 더블탭 경로가 이미 같은 일을 해서, 둘 다 타면 한 번 더 뒤집힌다.
+  const lastPointerTypeRef = useRef<string>('mouse');
 
   // image=실측 우선(로드 후 자연 크기가 선언보다 정확) → 그 다음 선언된 canvas_bounds(§4,
   // BE #2135) → 마지막 포맷별 기본 아트보드(가짜 추정 아님·명시된 폴백 규약).
@@ -287,6 +289,7 @@ function CanvasViewport({
   }, [viewportSize.w, viewportSize.h]);
 
   function handlePointerDown(e: React.PointerEvent) {
+    lastPointerTypeRef.current = e.pointerType;
     // story 74d6047e — 1-finger는 이미 pointer 이벤트 제네릭 pan 경로가 그대로 작동한다(터치
     // 전용 신규 로직 불필요, 아래 공유 코드로 진행). 2-finger째만 핀치로 분기.
     if (e.pointerType === 'touch') {
@@ -314,6 +317,22 @@ function CanvasViewport({
     // 구형 브라우저·이 프로젝트 vitest jsdom 둘 다 미지원 가능 — pan 자체는 capture 없이도
     // 동작(빠른 드래그가 요소 밖으로 나가면 move를 놓칠 수 있는 정도의 성능 저하일 뿐).
     if (typeof el.setPointerCapture === 'function') el.setPointerCapture(e.pointerId);
+  }
+
+  // 4910 — 마우스 손길(AC2 §3): 그림 더블클릭 = 전체 보기 ↔ 실제 크기(터치 더블탭과 같은 `toggleZoomAtPoint`), 그림에 초점이 있을 때 키 0 = 전체 보기 · 1 = 실제 크기(아래 도구줄의 두 단추와 같은 `fitToView` · `actualSize`).
+  // 새 동작 0 — 이미 있는 두 동작을 부르는 길만. 편집 모드 · 핀 추가 모드(클릭 = 픽) · 핀 위에서는 쓰지 않는다.
+  function handleDoubleClick(e: React.MouseEvent) {
+    if (mode === 'edit' || pinAddMode) return;
+    if (lastPointerTypeRef.current === 'touch') return;
+    if ((e.target as HTMLElement).closest('[data-artifact-canvas-overlay] button, [data-artifact-canvas-overlay] a, [data-artifact-canvas-overlay] [role="button"]')) return;
+    toggleZoomAtPoint(e.clientX, e.clientY);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (mode === 'edit' || e.target !== e.currentTarget) return; // 그림 칸 자신에 초점이 있을 때만(안쪽 단추 · 입력의 글자는 건드리지 않는다)
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    if (e.key === '0') { e.preventDefault(); fitToView(); }
+    else if (e.key === '1') { e.preventDefault(); actualSize(); }
   }
 
   function handlePointerMove(e: React.PointerEvent) {
@@ -467,8 +486,11 @@ function CanvasViewport({
       <div
         ref={viewportRef}
         data-artifact-canvas-viewport
-        className="relative min-h-0 w-full flex-1 touch-none overflow-hidden rounded-lg border border-border bg-muted/20"
+        // 4910 — 키(0 · 1)로 닿게 초점을 받는다(편집 모드는 안 받음). 이름 = 산출물 제목, 단축키는 aria-keyshortcuts로 알림.
+        {...(mode === 'edit' ? {} : { role: 'group', tabIndex: 0, 'aria-label': title, 'aria-keyshortcuts': '0 1', onKeyDown: handleKeyDown })}
+        className="relative min-h-0 w-full flex-1 touch-none select-none overflow-hidden rounded-lg border border-border bg-muted/20 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         style={{ cursor: pinAddMode ? 'crosshair' : (isDragging ? 'grabbing' : 'grab') }}
+        onDoubleClick={handleDoubleClick}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
