@@ -54,7 +54,6 @@
     "app/register/page.tsx": 1,
     "app/reset-password/page.tsx": 2,
     "app/verify-email/page.tsx": 1,
-    "components/agents/access-matrix-tab.tsx": 2,
     "components/agents/agent-connection-settings-section.tsx": 2,
     "components/agents/member-notification-preferences-summary.tsx": 1,
     "components/agents/messaging-policy-section.tsx": 2,

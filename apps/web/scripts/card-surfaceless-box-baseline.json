@@ -21,7 +21,6 @@
     "app/onboarding/connect-step.tsx": 1,
     "app/onboarding/onboarding-form.tsx": 1,
     "app/register/page.tsx": 2,
-    "components/agents/access-matrix-tab.tsx": 1,
     "components/agents/agent-connection-settings-section.tsx": 2,
     "components/agents/agent-run-tool-calls-section.tsx": 1,
     "components/agents/member-notification-preferences-summary.tsx": 1,
