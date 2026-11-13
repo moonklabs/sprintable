@@ -21,6 +21,7 @@ import { IconButton } from '@/components/ds/icon-button';
 import { Icon } from '@/components/ds/icon';
 import { Textarea } from '@/components/ds/input';
 import { useDocsLayout } from '../docs-context';
+import { useToast } from '@/components/ui/toast';
 import { useDocDelete } from '@/components/docs/use-doc-delete';
 import { DocAssigneeControl } from '@/components/docs/doc-assignee-control';
 import { DocBreadcrumb } from '@/components/docs/doc-breadcrumb';
@@ -74,6 +75,7 @@ export default function DocSlugPage() {
   const isNew = isNewRef.current;
 
   const { wsSlug, projSlug, projectId, tree, setTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer } = useDocsLayout();
+  const { addToast } = useToast();
 
   const [selectedDoc, setSelectedDoc] = useState<DocDetail | null>(null);
   const [docLoading, setDocLoading] = useState(true);
@@ -81,6 +83,12 @@ export default function DocSlugPage() {
   // 4910 — «새 문서»로 막 만든 초안(?new=1): 서버엔 기본 제목(«제목 없음»)이 들어 있지만 그 글은 «진짜 글자»가 아니라 자리 표시여야 한다(쓰면 뒤에 붙던 결함).
   // 제목이 아직 기본 글이고 사용자가 손대기 전이면 칸은 비워 두고 기본 글은 placeholder로 보인다. 한 번이라도 고치면 평소대로(값 = 제목).
   const [titleUntouched, setTitleUntouched] = useState(true);
+  // 4910 ② «첫 저장 때 만들기» — 「새 문서」는 서버에 아무것도 안 만들고 임시 주소(`untitled-…?new=1`)의 초안 화면으로만 온다(docs-client-layout.createDoc). 그 주소에 문서가 없으면(404) 이 화면은 «초안 모드»:
+  // 서버 문서(selectedDoc) 없이 편집기만 뜨고, 첫 «쓴 것»(제목 한 글자 · 내용 비공백)에서 문서를 한 번 만든다. 그 뒤는 예전과 같은 PATCH 자동저장 길.
+  const [draft, setDraft] = useState<{ slug: string; parentId: string | null } | null>(null);
+  const [draftCreating, setDraftCreating] = useState(false);
+  const [adoptSnapshot, setAdoptSnapshot] = useState<string | null>(null);
+  const creatingRef = useRef(false);
   const [content, setContent] = useState('');
   const [contentFormat, setContentFormat] = useState<'markdown' | 'html'>('markdown');
   const [autosave, setAutosave] = useState(true);
@@ -140,6 +148,7 @@ export default function DocSlugPage() {
     editing: selectedDoc !== null,
     autosave,
     onSaved: handleDocSaved,
+    adoptBaselineSnapshot: adoptSnapshot, // 4910 ② — 막 만든 문서의 기준선 = 만들 때 보낸 값(생성 중 친 글자가 «저장됨»으로 사라지지 않게)
   });
 
   const handleNormalize = useCallback((value: string) => {
@@ -155,6 +164,11 @@ export default function DocSlugPage() {
       // re-seeds the editor with an outdated baseline and can re-trigger an overwrite.
       const res = await fetchWithAuth(`/api/docs?project_id=${projectId}&slug=${slug}`, { cache: 'no-store' });
       if (!res.ok) {
+        // 4910 ② — 임시 주소(`untitled-…`)에 `?new=1`로 왔는데 문서가 없으면(404) 서버에 아직 안 만든 «새 문서 초안»이다(오류가 아님). 그 밖의 404는 아래 옛 회복 그대로(목록으로).
+        if (res.status === 404 && isNew && isUntitledSlug(slug)) {
+          setDraft({ slug, parentId: new URLSearchParams(window.location.search).get('parent') || null });
+          return;
+        }
         // prod P0(2026-07-14) — 이전엔 setSelectedDoc(null)만 하고 끝나 이 슬러그가 현재
         // project_id에 없는(삭제됐든, project 전환 레이스로 어긋났든) 모든 경우가 회복 경로
         // 없는 "문서를 찾을 수 없습니다" 정적 화면에 영구 고립됐다 — 새로고침도 같은
@@ -186,13 +200,64 @@ export default function DocSlugPage() {
     } finally {
       setDocLoading(false);
     }
-  }, [projectId, slug, router, wsSlug, projSlug]);
+  }, [projectId, slug, router, wsSlug, projSlug, isNew]);
 
   useEffect(() => { void fetchDoc(); }, [fetchDoc]);
 
   // 4910 — 막 만든 초안의 제목칸(위 titleUntouched): 서버에 들어 있는 기본 글은 값이 아니라 placeholder로만 보인다.
   const defaultTitle = t('newDocDefaultTitle');
   const brandNewTitle = isNew && titleUntouched && title === defaultTitle;
+
+  // 4910 ② — 초안 모드에서 «쓴 것»이 생기면 문서를 한 번 만든다(single-flight). 제목 = 쓴 글, 비었으면 기본 글. 슬러그 = 임시 슬러그(제목에서 파생은 만든 뒤 예전 PATCH 길이 한다).
+  const isDraft = selectedDoc === null && draft !== null;
+  const draftHasText = isDraft && (title.trim() !== '' || content.trim() !== '');
+  const createDraftDoc = useCallback(async (): Promise<boolean> => {
+    if (!draft || selectedDoc || creatingRef.current || !projectId) return false;
+    if (title.trim() === '' && content.trim() === '') return false;
+    creatingRef.current = true;
+    setDraftCreating(true);
+    const postedTitle = title.trim() === '' ? defaultTitle : title;
+    const posted = { title: postedTitle, content, content_format: contentFormat };
+    try {
+      const res = await fetchWithAuth('/api/docs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: projectId, ...posted, slug: draft.slug, parent_id: draft.parentId }),
+      });
+      if (!res.ok) throw new Error('Failed to create doc');
+      const { data } = await res.json();
+      // 기준선 = 보낸 값. 응답 오기 전에 더 친 글자는 보낸 값과 달라 dirty가 되어 다음 자동저장이 보낸다.
+      setAdoptSnapshot(JSON.stringify(posted));
+      setSelectedDoc(data as DocDetail);
+      setTitle((cur) => (cur === '' ? postedTitle : cur));
+      setDraft(null);
+      setTree((prev) => [{ id: data.id, parent_id: data.parent_id || null, title: data.title, slug: data.slug, icon: data.icon || null, sort_order: data.sort_order || 0, is_folder: data.is_folder || false, updated_at: data.updated_at } as (typeof prev)[number], ...prev]);
+      return true;
+    } catch {
+      addToast({ title: t('createFailed'), type: 'error' });
+      return false;
+    } finally {
+      creatingRef.current = false;
+      setDraftCreating(false);
+    }
+  }, [draft, selectedDoc, projectId, title, content, contentFormat, defaultTitle, setTree, addToast, t]);
+  // 자동저장과 같은 박자(디바운스 1.5초). 만들기가 실패하면 값이 그대로라 다시 안 돈다 — 다음 입력 또는 «저장»이 다시 시도한다.
+  useEffect(() => {
+    if (!isDraft || !autosave || !draftHasText) return;
+    const timer = window.setTimeout(() => { void createDraftDoc(); }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [isDraft, autosave, draftHasText, createDraftDoc]);
+  // 나갈 때(화면 이동): 쓴 것이 있는데 아직 안 만들었으면 지금 만든다 — 만들기는 지우는 길이 아니라 최악에도 «쓴 글이 문서로 남는» 쪽이다. 탭 닫기 · 새로고침은 아래 beforeunload 경고.
+  const flushDraftRef = useRef<() => void>(() => {});
+  useEffect(() => { flushDraftRef.current = () => { if (draftHasText) void createDraftDoc(); }; });
+  useEffect(() => () => flushDraftRef.current(), []);
+  // 저장 안 된 글이 있을 때(아직 안 만든 초안 + 쓴 것 · 만드는 중) 탭을 닫거나 새로고침하면 브라우저가 한 번 묻는다. (이 편집기에는 이 경고가 원래 없었다 — 만든 뒤의 문서는 이 PR 밖.)
+  useEffect(() => {
+    if (!(draftHasText || draftCreating)) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [draftHasText, draftCreating]);
 
   // FIX-4 off-ramp (fc4d4264): resolve a conflict / remote-changed dead-end.
   // Pull re-fetches the live doc (fetchDoc is no-store, AC-F4-7) → the serverUpdatedAt
@@ -319,7 +384,7 @@ export default function DocSlugPage() {
     );
   }
 
-  if (!selectedDoc) {
+  if (!selectedDoc && !draft) {
     return (
       <div className="flex h-full items-center justify-center">
         <p className="break-keep text-ds-small text-ds-ink-3">{t('notFound')}</p>
@@ -327,7 +392,9 @@ export default function DocSlugPage() {
     );
   }
 
-  const docActions = (
+  const docActions = !selectedDoc ? (
+    <InlineSaveIndicator status={draftCreating ? 'saving' : draftHasText ? 'unsaved' : 'idle'} onAction={() => { void createDraftDoc(); }} t={t} tc={tc} />
+  ) : (
     <>
       <InlineSaveIndicator status={saveStatus} onAction={save} t={t} tc={tc} />
       <div className="relative">
@@ -415,7 +482,7 @@ export default function DocSlugPage() {
       {/* 박스1: Dispatch(담당자) 밴드 제거 → 슬림 헤더 담당자 아바타+popover로 이동(content-dominant·기능 보존). */}
 
       {/* S28: doc decision gate(검토 상태·반려 사유·재상신 CTA·revision 이력). 비-gated/이력없음은 self-hide. */}
-      {selectedDoc.doc_type !== 'sprint_report' ? (
+      {selectedDoc && selectedDoc.doc_type !== 'sprint_report' ? (
         <div className="flex-shrink-0 px-4 pt-2 lg:px-6">
           <DocGateSection docId={selectedDoc.id} status={selectedDoc.status} onTransitioned={fetchDoc} />
         </div>
@@ -426,8 +493,8 @@ export default function DocSlugPage() {
         <DocEditor
           value={content}
           contentFormat={contentFormat}
-          editable={selectedDoc.doc_type !== 'sprint_report'}
-          currentDocId={selectedDoc.id}
+          editable={selectedDoc?.doc_type !== 'sprint_report'}
+          currentDocId={selectedDoc?.id}
           // story #3866(발견 즉시 수정) — projectId가 DocEditor 최상위 prop으로 한 번도 안
           // 넘어오고 있었다(dispatchSlot 안 DocAssigneeControl에만 있었음). 기존 wikiLink
           // `[[` 검색(WikiLinkNode.configure({projectId})) 도 이 페이지에서 이미 항상
@@ -439,16 +506,16 @@ export default function DocSlugPage() {
           // story #4339(AC7) — 편집 없이 편집기가 다듬은 값 = 깨끗한 기준(쓰기 없음) · 입력했다 지우면 이 값으로 돌아와 dirty가 풀린다.
           onNormalize={handleNormalize}
           onContentFormatChange={setContentFormat}
-          isDirty={isDirty}
-          onSave={save}
+          isDirty={selectedDoc ? isDirty : draftHasText || draftCreating}
+          onSave={selectedDoc ? save : createDraftDoc}
           autosave={autosave}
           onAutosaveToggle={setAutosave}
           title={brandNewTitle ? '' : title}
           onTitleChange={handleTitleChange}
-          titlePlaceholder={brandNewTitle ? defaultTitle : t('titlePlaceholder')}
+          titlePlaceholder={brandNewTitle || (isDraft && titleUntouched) ? defaultTitle : t('titlePlaceholder')}
           titleAutoFocus={isNew || !title}
           onOpenTree={openTreeDrawer}
-          dispatchSlot={projectId ? (
+          dispatchSlot={projectId && selectedDoc ? (
             <DocAssigneeControl
               docId={selectedDoc.id}
               projectId={projectId}
@@ -462,19 +529,19 @@ export default function DocSlugPage() {
               {revisionCount != null && revisionCount > 0 ? (
                 <>
                   <span className="tabular-nums">{t('docMetaRevisions', { count: revisionCount })}</span>
-                  {selectedDoc.updated_at ? <span aria-hidden> · </span> : null}
+                  {selectedDoc?.updated_at ? <span aria-hidden> · </span> : null}
                 </>
               ) : null}
-              {selectedDoc.updated_at ? (
+              {selectedDoc?.updated_at ? (
                 <span className="tabular-nums">{formatViewerRelativeTime(selectedDoc.updated_at, locale, displayTimezone)}</span>
               ) : null}
             </>
           }
           urlSlot={
             <DocUrlChip
-              slug={selectedDoc.slug}
-              onEdit={selectedDoc.doc_type !== 'sprint_report' ? () => setUrlDialogOpen(true) : undefined}
-              onDeriveFromTitle={selectedDoc.doc_type !== 'sprint_report' && slugifyDocTitle(title) ? handleDeriveFromTitle : undefined}
+              slug={selectedDoc?.slug ?? draft?.slug ?? slug}
+              onEdit={selectedDoc && selectedDoc.doc_type !== 'sprint_report' ? () => setUrlDialogOpen(true) : undefined}
+              onDeriveFromTitle={selectedDoc && selectedDoc.doc_type !== 'sprint_report' && slugifyDocTitle(title) ? handleDeriveFromTitle : undefined}
               labels={{ editUrl: t('editUrl'), slugNudge: t('slugNudge') }}
             />
           }
@@ -530,6 +597,7 @@ export default function DocSlugPage() {
         />
       </div>
 
+      {selectedDoc ? (
       <DocUrlDialog
         open={urlDialogOpen}
         onClose={() => setUrlDialogOpen(false)}
@@ -547,7 +615,9 @@ export default function DocSlugPage() {
           cancel: tc('cancel'),
         }}
       />
+      ) : null}
 
+      {selectedDoc ? (
       <DocShareDialog
         open={shareDialogOpen}
         onClose={() => setShareDialogOpen(false)}
@@ -563,6 +633,7 @@ export default function DocSlugPage() {
           shareSingleDocNote: ts('shareSingleDocNote'),
         }}
       />
+      ) : null}
     </div>
   );
 }

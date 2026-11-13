@@ -4,7 +4,7 @@
 // 기본(예전) 동작은 «그 틱의 현재 값» — 만드는 요청을 보낸 뒤 응답 오기 전에 친 글자가 «이미 저장됨»으로 보여 조용히 사라진다.
 // `adoptBaselineSnapshot`(요청에 실어 보낸 값의 스냅샷)을 넘기면 그 뒤 달라진 만큼이 dirty가 되고 자동저장이 보낸다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { useDocSync } from './use-doc-sync';
 
@@ -13,7 +13,11 @@ import { useDocSync } from './use-doc-sync';
 type Payload = { title: string; content: string; content_format: string };
 type Opts = Parameters<typeof useDocSync<{ updated_at: string }>>[0];
 const out: { current: ReturnType<typeof useDocSync<{ updated_at: string }>> | null } = { current: null };
-function Probe({ opts }: { opts: Opts }) { out.current = useDocSync<{ updated_at: string }>(opts); return null; }
+function Probe({ opts }: { opts: Opts }) {
+  const sync = useDocSync<{ updated_at: string }>(opts);
+  useEffect(() => { out.current = sync; }); // 렌더 중이 아니라 효과에서 기록(act가 효과까지 비운다)
+  return null;
+}
 
 let container: HTMLDivElement;
 let root: Root;

@@ -13,6 +13,7 @@ import koMessages from '../../../../../../messages/ko.json';
 import { DocsClientLayout } from './docs-client-layout';
 import { DocsIndex } from './docs-index';
 import layoutSource from './docs-client-layout.tsx?raw';
+import docsIndexSource from './docs-index.tsx?raw';
 
 const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
 vi.mock('next/navigation', () => ({
@@ -289,7 +290,7 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     expect(container.textContent).toContain('문서B');
   });
 
-  it('⑥문서 생성 — "새 문서" 클릭이 POST /api/docs를 쏘고 신규 문서 라우트로 이동한다', async () => {
+  it('⑥문서 생성 — "새 문서" 클릭은 서버에 아무것도 만들지 않고(POST 0) 임시 주소의 초안 화면으로 이동한다(4910 · 첫 저장 때 만들기)', async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     stubFetch({ onCall: (url, init) => calls.push({ url, init }) });
     await mount();
@@ -297,9 +298,9 @@ describe('DocsClientLayout — 레일 v2 재조립 후 6 능력 회귀가드(§1
     expect(newDocBtn).toBeTruthy();
     await act(async () => { newDocBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await act(async () => { await Promise.resolve(); });
-    const postCall = calls.find((c) => c.init?.method === 'POST' && c.url.includes('/api/docs'));
-    expect(postCall).toBeTruthy();
-    expect(pushMock).toHaveBeenCalled();
+    expect(calls.find((c) => c.init?.method === 'POST')).toBeUndefined(); // 누르는 순간 고아 초안이 생길 수 없다
+    expect(pushMock).toHaveBeenCalledTimes(1);
+    expect(String(pushMock.mock.calls[0]![0])).toMatch(/\/docs\/untitled-\d+\?new=1$/);
   });
 
   it('⑥폴더 생성 — "새 폴더" 클릭이 인라인 폼을 열고 제출이 POST /api/docs(is_folder=true)를 쏜다', async () => {
@@ -586,15 +587,43 @@ describe('DocsClientLayout — 목록 열 머리 · 토글 · 틀 (4892)', () =>
     expect(inHeader('새 문서')?.getAttribute('data-slot')).toBe('ds-button');
   });
 
-  it('⭐머리의 «새 문서»는 실제로 문서를 만든다(POST /api/docs, 폴더 아님)', async () => {
+  it('⭐머리의 «새 문서»는 서버에 만들지 않고 초안 화면으로만 간다(POST 0 · 임시 슬러그 `untitled-<시각><여섯 자리>`) — 폴더 만들기는 예전 그대로 이름을 받은 뒤 POST', async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     stubFetch({ onCall: (url, init) => calls.push({ url, init }) });
     await mount();
     await act(async () => { inHeader('새 문서')!.click(); });
     await act(async () => { await Promise.resolve(); });
-    const post = calls.find((c) => c.init?.method === 'POST');
-    expect(post).toBeTruthy();
-    expect(JSON.parse((post!.init!.body as string) ?? '{}').is_folder).toBeFalsy();
+    expect(calls.filter((c) => c.init?.method === 'POST')).toHaveLength(0);
+    expect(pushMock).toHaveBeenCalledTimes(1);
+    expect(String(pushMock.mock.calls[0]![0])).toMatch(/^\/[^/]+\/[^/]+\/docs\/untitled-\d{19,}\?new=1$/); // 시각 13자리 + 무작위 6자리
+  });
+
+  it('⭐같은 순간 «새 문서»를 두 번 눌러도 주소가 다르다(무작위 꼬리) — 두 사람이 같은 순간 눌러도 남의 문서를 열지 않게', async () => {
+    stubFetch();
+    await mount();
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    await act(async () => { inHeader('새 문서')!.click(); });
+    await act(async () => { inHeader('새 문서')!.click(); });
+    const urls = pushMock.mock.calls.map((c) => String(c[0]));
+    expect(urls).toHaveLength(2);
+    expect(urls[0]).not.toBe(urls[1]);
+    for (const u of urls) expect(u).toContain('untitled-1700000000000');
+    vi.restoreAllMocks();
+  });
+
+  it('⭐(다) «새 문서»를 부르는 모든 길이 createDoc 하나를 지난다 — 레이아웃에 문서 POST가 남은 곳은 «폴더 만들기» 하나뿐(이름을 받은 뒤)', () => {
+    const posts = layoutSource.match(/fetch\('\/api\/docs',\s*\{\s*method: 'POST'/g) ?? [];
+    expect(posts).toHaveLength(1); // 폴더 제출(submitCreateFolder)
+    expect(layoutSource).toMatch(/const submitCreateFolder[\s\S]*?is_folder: true/);
+    // 새 문서 길 셋(머리 단추 · 둘째 단추 · 빈 상태 단추 → 컨텍스트 handleNewDoc, 트리 «하위 문서» → handleAddChild)은 같은 createDoc을 부른다
+    expect(layoutSource).toMatch(/const handleNewDoc = useCallback\(\(\) => \{ void createDoc\(null\); \}/);
+    expect(layoutSource).toMatch(/const handleAddChild = useCallback\(async \(parentId: string\) => \{ createDoc\(parentId\); \}/);
+    expect(layoutSource).toContain('onAddChild={handleAddChild}');
+    expect(layoutSource).toContain('router.push(newDocUrl(wsSlug, projSlug, newUntitledSlug(), parentId))'); // 하위 문서의 parent가 주소까지 간다
+    expect(layoutSource.match(/onClick=\{handleNewDoc\}/g)).toHaveLength(2); // 상단 바 단추 · 사이드 머리 단추
+    expect(docsIndexSource.match(/onClick=\{handleNewDoc\}/g)).toHaveLength(2); // 빈 상태 단추 둘 — 컨텍스트의 같은 handleNewDoc
+    expect(docsIndexSource).toContain('useDocsLayout()');
+    expect(docsIndexSource).not.toMatch(/fetch\(/); // 문서 화면 목록 쪽에는 문서를 만드는 자기 길이 없다
   });
 
   it('⭐머리의 «새 폴더»는 이름 칸 폼을 연다', async () => {

@@ -6,6 +6,10 @@ import { newDocUrl, docUrl, docsListUrl } from './doc-project-url';
 describe('newDocUrl — 신규 문서 생성 직후 이동 URL', () => {
   it('builds a ws/proj-scoped path with new=1 (구조상 project 컨텍스트 소실 불가)', () => {
     expect(newDocUrl('moonklabs', 'proj-a', 'untitled-123')).toBe('/moonklabs/proj-a/docs/untitled-123?new=1');
+    // 4910 ② — 하위 문서면 어느 문서 밑인지를 parent로 싣는다(아직 서버에 없는 초안이라 URL이 유일한 출처).
+    expect(newDocUrl('moonklabs', 'proj-a', 'untitled-123', 'folder-9')).toBe('/moonklabs/proj-a/docs/untitled-123?new=1&parent=folder-9');
+    expect(newDocUrl('moonklabs', 'proj-a', 'untitled-123', null)).toBe('/moonklabs/proj-a/docs/untitled-123?new=1');
+    expect(newDocUrl('moonklabs', 'proj-a', 'untitled-123', 'a b&c')).toBe('/moonklabs/proj-a/docs/untitled-123?new=1&parent=a%20b%26c');
   });
 });
 
