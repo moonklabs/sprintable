@@ -8,8 +8,9 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../../messages/ko.json';
+import enMessages from '../../../../../../messages/en.json';
 import { LAYER } from '@/components/ds/layers';
-import { LOOP_FILTER_STICKY, LOOP_ROW_FACE } from './loops-layer';
+import { LOOP_FILTER_STICKY, LOOP_ROW_FACE, LOOP_STATE_COLUMN } from './loops-layer';
 
 const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
 
@@ -116,6 +117,58 @@ describe('[SID:4911] 실행 목록 — 구획 · 행', () => {
     }
     // 구획 패널은 ds Card(내용 칸)다
     expect(section('progress')!.getAttribute('data-slot')).toBe('ds-row-list');
+  });
+});
+
+describe('[SID:4911] 실행 목록 — 상태 칸 줄맞춤', () => {
+  it('⭐단계 막대 + 상태 칩은 줄 «앞» 고정 폭 칸에 있다(sm: 같은 폭 · 폰: 한 줄 전체) — 오른쪽 묶음이 아니다', async () => {
+    await mount();
+    for (const id of ['a', 'b', 'c', 'd', 'e']) {
+      const rowEl = q(`[data-testid="loop-row-${id}"] [data-slot="ds-list-row"]`)!;
+      const lead = rowEl.querySelector('[data-slot="ds-list-row-leading"]')!;
+      for (const c of LOOP_STATE_COLUMN.split(' ')) expect(lead.classList.contains(c), `${id} ${c}`).toBe(true);
+      expect(lead.querySelector('[data-slot="loop-state-column"]')).not.toBeNull();
+      expect(lead.querySelector('[data-loop-status]'), id).not.toBeNull();
+      // 오른쪽 묶음(trailing)에는 상태 칩 · 단계 막대가 없다
+      const trailing = rowEl.lastElementChild!;
+      expect(trailing.querySelector('[data-loop-status], [data-slot="loop-stage-bar"]'), id).toBeNull();
+    }
+  });
+
+  it('⭐상태 칸 규칙 자체: sm 이상 = 고정 폭 11rem(w-44) · 폰 = 줄 전체 폭(max-sm:w-full) — 둘 다 있어야 한다(상수를 따라 읽는 위 시험과 별개로 값을 못 박는다)', () => {
+    expect(LOOP_STATE_COLUMN.split(' ').sort()).toEqual(['max-sm:w-full', 'sm:w-52']);
+  });
+
+  it('⭐칸 폭 13rem(208px)에 두 언어의 가장 긴 상태 칩이 들어간다(폭 모형: 막대 96 + 간격 8 + 칩 = 점 6 + 간격 6 + 안쪽 12 + 테두리 2 + 글; 글 폭 = 한글 11px · 공백 3.3px · 라틴 6.6px 고정폭) — 더 긴 영문 상태 낱말이 오면 이 시험이 먼저 빨개진다', () => {
+    const states = ['Draft', 'Briefing', 'Generating', 'Deciding', 'Executing', 'Measuring', 'Closed', 'Abandoned'];
+    const textPx = (s: string) => Array.from(s).reduce((w, ch) => w + (ch === ' ' ? 3.3 : /[\u3131-\uD79D]/.test(ch) ? 11 : 6.6), 0);
+    const chipPx = (label: string) => 6 + 6 + 12 + 2 + textPx(label);
+    const budget = 208 - 96 - 8;
+    const labels = (m: Record<string, string>) => states.map((st) => m[`status${st}`]!);
+    for (const [name, msgs] of [['ko', koMessages.loops], ['en', enMessages.loops]] as const) {
+      const widest = Math.max(...labels(msgs as Record<string, string>).map(chipPx));
+      expect(widest, `${name} widest chip ${widest}px must fit ${budget}px`).toBeLessThanOrEqual(budget);
+    }
+    // 모형이 옛 폭(11rem = 176px)에서는 영문이 넘친다는 것을 보여 준다(재현 가드)
+    expect(Math.max(...labels(enMessages.loops as Record<string, string>).map(chipPx))).toBeGreaterThan(176 - 96 - 8);
+  });
+
+  it('칸 폭은 모든 줄이 같은 문자열이다(줄마다 달리하지 않는다) · 막대가 없는 중단 줄도 같은 칸', async () => {
+    await mount();
+    const cols = qa('[data-slot="ds-list-row-leading"]');
+    expect(cols).toHaveLength(5);
+    expect(new Set(cols.map((c) => c.className)).size).toBe(1);
+    const abandoned = q('[data-testid="loop-row-e"] [data-slot="ds-list-row-leading"]')!;
+    expect(abandoned.querySelector('[data-slot="loop-stage-bar"]')).toBeNull();
+    expect(abandoned.querySelector('[data-loop-status="abandoned"]')).not.toBeNull();
+  });
+
+  it('오른쪽 묶음에는 성과 칩 · 태그만 남는다', async () => {
+    await mount();
+    const trailing = q('[data-testid="loop-row-b"] [data-slot="ds-list-row"]')!.lastElementChild!;
+    expect(Array.from(trailing.querySelectorAll('[data-slot="ds-chip"]')).map((c) => c.textContent)).toEqual(['retention', 'growth']);
+    const closed = q('[data-testid="loop-row-c"] [data-slot="ds-list-row"]')!.lastElementChild!;
+    expect(closed.querySelector('[data-outcome="hit"]')).not.toBeNull();
   });
 });
 
