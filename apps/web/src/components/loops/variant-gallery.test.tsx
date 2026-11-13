@@ -58,8 +58,9 @@ async function mountAndSubmit(errorCode: string) {
   await act(async () => { root.render(wrap(<VariantGallery loopId="loop-1" groups={GROUPS} canDecide onDecided={() => {}} />)); });
   await flush();
 
-  const radios = container.querySelectorAll('input[type="radio"]');
-  await act(async () => { (radios[0] as HTMLInputElement).click(); });
+  // 4911 — ds Radio(Base UI): 누르는 것은 role=radio 뿌리다.
+  const radios = container.querySelectorAll('[role="radio"]');
+  await act(async () => { (radios[0] as HTMLElement).click(); });
   const textareas = container.querySelectorAll('textarea');
   for (const ta of Array.from(textareas) as HTMLTextAreaElement[]) {
     const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;

@@ -3,9 +3,13 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { Brain, Lightbulb, Sparkles } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Card } from '@/components/ds/card';
+import { Chip } from '@/components/ds/chip';
+import { Icon } from '@/components/ds/icon';
+import { LAYER } from '@/components/ds/layers';
+import { SectionHeader } from '@/components/ds/section-header';
+import { Skeleton } from '@/components/ds/skeleton';
+import { cn } from '@/lib/utils';
 import { OutcomeBadge } from '@/components/loops/outcome-badge';
 import { AiAttributionRow, AiTransparencyLine, type AiConfidence } from '@/components/loops/ai-attribution';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -69,47 +73,48 @@ function ContextPackCard({ item }: { item: ContextPackItem }) {
   const viewLabel = item.entity_type === 'hypothesis' ? t('contextPackViewHypothesis') : t('contextPackViewLoop');
 
   return (
-    <div className="space-y-2.5 rounded-xl border border-border bg-card p-3">
+    // 면: 글 줄 층(rowOthers) — 안쪽 결정 칸은 내용 칸(panel)으로 한 단 올려 가른다.
+    <div className={cn('space-y-2.5 rounded-ds-control border border-ds-line p-3', LAYER.rowOthers)}>
       <div className="flex items-start justify-between gap-2">
-        <div className="space-y-1">
-          <div className="flex items-center gap-1.5">
-            <Badge variant="chip" className="text-[9px] uppercase">{entityLabel}</Badge>
-            {item.outcome ? <OutcomeBadge hypothesisStatus={item.outcome.hypothesis_status} className="text-[9px]" /> : null}
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Chip className="uppercase">{entityLabel}</Chip>
+            {item.outcome ? <OutcomeBadge hypothesisStatus={item.outcome.hypothesis_status} /> : null}
           </div>
-          <p className="text-sm font-semibold text-foreground">{item.goal}</p>
+          <p className="m-0 text-ds-body font-semibold text-ds-ink">{item.goal}</p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
-          <span className="whitespace-nowrap text-[11px] font-medium text-muted-foreground">
+          <span className="whitespace-nowrap font-mono text-ds-mono-md text-ds-ink-2">
             {t('contextPackSimilarity', { value: item.similarity.toFixed(2) })}
           </span>
-          <div className="h-1 w-16 overflow-hidden rounded-full bg-info-tint" aria-hidden>
-            <div className="h-full rounded-full bg-info" style={{ width: `${Math.round(item.similarity * 100)}%` }} />
+          <div className="h-1 w-16 overflow-hidden rounded-full bg-ds-info-soft" aria-hidden>
+            <div className="h-full rounded-full bg-ds-info" style={{ width: `${Math.round(item.similarity * 100)}%` }} />
           </div>
         </div>
       </div>
 
       {item.decision ? (
-        <div className="space-y-1 rounded-lg border border-border bg-muted/30 p-2.5 text-[11.5px]">
+        <div className={cn('space-y-1 rounded-ds-control border border-ds-line p-2.5 text-ds-small', LAYER.panel)}>
           {item.decision.chosen ? (
             <div>
-              <Badge variant="success" className="mr-1.5 text-[9px]">{t('contextPackChosenLabel')}</Badge>
-              <span className="font-medium text-foreground">{item.decision.chosen.label}</span>
-              <span className="text-muted-foreground"> — {item.decision.chosen.reason}</span>
+              <Chip tone="done" icon="check" className="mr-1.5">{t('contextPackChosenLabel')}</Chip>
+              <span className="font-medium text-ds-ink">{item.decision.chosen.label}</span>
+              <span className="text-ds-ink-2"> — {item.decision.chosen.reason}</span>
             </div>
           ) : (
-            <p className="italic text-muted-foreground">{t('contextPackDecisionPending')}</p>
+            <p className="m-0 italic text-ds-ink-2">{t('contextPackDecisionPending')}</p>
           )}
           {item.decision.rejected.map((r, i) => (
             <div key={i}>
-              <Badge variant="chip" className="mr-1.5 text-[9px]">{t('contextPackRejectedLabel')}</Badge>
-              <span className="font-medium text-foreground">{r.label}</span>
-              <span className="text-muted-foreground"> — {r.reason}</span>
+              <Chip className="mr-1.5">{t('contextPackRejectedLabel')}</Chip>
+              <span className="font-medium text-ds-ink">{r.label}</span>
+              <span className="text-ds-ink-2"> — {r.reason}</span>
             </div>
           ))}
         </div>
       ) : null}
 
-      <div className="flex items-center justify-between gap-2 border-t border-border pt-2 text-[11px] text-muted-foreground">
+      <div className="flex items-center justify-between gap-2 border-t border-ds-line pt-2 text-ds-small text-ds-ink-2">
         {item.outcome ? (
           <span>
             {t('contextPackOutcomeLine', {
@@ -121,7 +126,7 @@ function ContextPackCard({ item }: { item: ContextPackItem }) {
           </span>
         ) : <span />}
         {item.href ? (
-          <Link href={item.href} className="shrink-0 font-semibold text-primary hover:underline">
+          <Link href={item.href} className="shrink-0 font-semibold text-ds-action-text hover:underline">
             {viewLabel} →
           </Link>
         ) : null}
@@ -143,6 +148,7 @@ export function ContextPackPanel({ loopId }: { loopId: string }) {
   const [loading, setLoading] = useState(true);
   const [unavailable, setUnavailable] = useState(false);
   const [slow, setSlow] = useState(false);
+  const [userCollapsed, setUserCollapsed] = useState<boolean | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -177,69 +183,76 @@ export function ContextPackPanel({ loopId }: { loopId: string }) {
     return () => { cancelled = true; controller.abort(); clearTimeout(slowTimer); };
   }, [loopId, orgId]);
 
-  return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card">
-      <div className="border-b border-border bg-info-tint/40 px-4 py-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5">
-            <Brain className="size-4 text-info" aria-hidden />
-            <span className="text-sm font-bold text-foreground">{t('contextPackTitle')}</span>
-          </div>
-          {!loading && !unavailable && data && data.items.length > 0 ? (
-            <Badge variant="outline">{t('contextPackCount', { count: data.items.length })}</Badge>
-          ) : null}
-        </div>
-        <p className="mt-0.5 break-keep text-xs text-muted-foreground">{t('contextPackSubtitle')}</p>
-      </div>
+  const hasItems = !loading && !unavailable && !!data && data.embed_available && data.items.length > 0;
+  // 비었거나 못 가져온 «과거 학습»은 큰 빈 칸이 아니라 한 줄로 접혀 있다(4911) — 사람이 펼치면 그 안내가 열린다. 있으면 펼쳐 있다.
+  const collapsed = loading ? false : (userCollapsed ?? !hasItems); // 불러오는 동안은 사용자가 접어 둔 것도 열린다(스켈레톤 · 느림 안내가 다시 불러올 때 숨지 않게)
+  const summary = loading ? null
+    : unavailable || (data && !data.embed_available) ? t('contextPackEmbedUnavailable')
+      : !data || data.items.length === 0 ? t('contextPackEmpty')
+        : t('contextPackCount', { count: data.items.length });
 
-      <div className="space-y-2.5 p-3">
-        {loading ? (
-          <>
-            <Skeleton className="h-20 rounded-xl" />
-            <Skeleton className="h-20 rounded-xl" />
-            {slow ? <p className="break-keep text-center text-xs text-muted-foreground">{tCommon('backgroundJobSlow')}</p> : null}
-          </>
-        ) : unavailable || (data && !data.embed_available) ? (
-          <p className="py-4 text-center text-sm text-muted-foreground">{t('contextPackEmbedUnavailable')}</p>
-        ) : !data || data.items.length === 0 ? (
-          <p className="py-4 text-center text-sm text-muted-foreground">{t('contextPackEmpty')}</p>
-        ) : (
-          <>
-            {/* L2 요약(위) → L3 제안(중간) → L1 근거 items(아래) — 유나 LOCK: 위계는 항상 결정 UI보다 낮게. */}
-            {data.synthesis ? (
-              <div className="rounded-lg border border-info-border bg-info-tint p-2.5 text-xs text-foreground">
-                <div className="flex items-start gap-2">
-                  <Sparkles className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <div className="flex flex-wrap items-center justify-between gap-1.5">
-                      <p className="font-semibold">{t('contextPackSynthesisTitle')}</p>
-                      <AiAttributionRow confidence={data.synthesis_confidence} evidenceCount={data.evidence_count} />
+  return (
+    <Card className="overflow-hidden" data-slot="context-pack" data-collapsed={collapsed}>
+      <SectionHeader
+        title={t('contextPackTitle')}
+        level={3}
+        collapsed={collapsed}
+        onToggle={() => { if (!loading) setUserCollapsed(!collapsed); }}
+      />
+      {summary ? <p data-testid="context-pack-summary" className="m-0 border-b border-ds-line px-4 py-1.5 break-keep text-ds-small text-ds-ink-2">{summary}</p> : null}
+      {collapsed ? null : (
+        <div className="border-t-0">
+          <p className="m-0 border-b border-ds-line px-4 py-2 break-keep text-ds-small text-ds-ink-3">{t('contextPackSubtitle')}</p>
+          <div className="space-y-2.5 p-3">
+            {loading ? (
+              <>
+                <Skeleton className="h-20" />
+                <Skeleton className="h-20" />
+                {slow ? <p className="m-0 break-keep text-center text-ds-small text-ds-ink-3">{tCommon('backgroundJobSlow')}</p> : null}
+              </>
+            ) : unavailable || (data && !data.embed_available) ? (
+              <p className="m-0 py-4 text-center text-ds-body text-ds-ink-3">{t('contextPackEmbedUnavailable')}</p>
+            ) : !data || data.items.length === 0 ? (
+              <p className="m-0 py-4 text-center text-ds-body text-ds-ink-3">{t('contextPackEmpty')}</p>
+            ) : (
+              <>
+                {/* L2 요약(위) → L3 제안(중간) → L1 근거 items(아래) — 유나 LOCK: 위계는 항상 결정 UI보다 낮게. */}
+                {data.synthesis ? (
+                  <div className="rounded-ds-control border border-ds-info/40 bg-ds-info-soft p-2.5 text-ds-small text-ds-ink">
+                    <div className="flex items-start gap-2">
+                      <Icon name="auto_awesome" className="mt-0.5 text-ds-info" />
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex flex-wrap items-center justify-between gap-1.5">
+                          <p className="m-0 font-semibold">{t('contextPackSynthesisTitle')}</p>
+                          <AiAttributionRow confidence={data.synthesis_confidence} evidenceCount={data.evidence_count} />
+                        </div>
+                        <p className="m-0 whitespace-pre-line text-ds-ink">{data.synthesis}</p>
+                      </div>
                     </div>
-                    <p className="whitespace-pre-line text-foreground">{data.synthesis}</p>
+                    <AiTransparencyLine className="border-ds-info/40" />
                   </div>
-                </div>
-                <AiTransparencyLine className="border-info-border/60" />
-              </div>
-            ) : null}
-            {data.recommendation ? (
-              <div className="rounded-lg border border-dashed border-border bg-muted/20 p-2.5 text-xs text-muted-foreground">
-                <div className="flex items-start gap-2">
-                  <Lightbulb className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <div className="flex flex-wrap items-center justify-between gap-1.5">
-                      <p className="font-medium text-foreground/80">{t('contextPackRecommendationTitle')}</p>
-                      <AiAttributionRow confidence={data.recommendation_confidence} evidenceCount={data.evidence_count} />
+                ) : null}
+                {data.recommendation ? (
+                  <div className={cn('rounded-ds-control border border-dashed border-ds-line-control p-2.5 text-ds-small text-ds-ink-2', LAYER.rowOthers)}>
+                    <div className="flex items-start gap-2">
+                      <Icon name="lightbulb" className="mt-0.5" />
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex flex-wrap items-center justify-between gap-1.5">
+                          <p className="m-0 font-medium text-ds-ink">{t('contextPackRecommendationTitle')}</p>
+                          <AiAttributionRow confidence={data.recommendation_confidence} evidenceCount={data.evidence_count} />
+                        </div>
+                        <p className="m-0 whitespace-pre-line">{data.recommendation}</p>
+                      </div>
                     </div>
-                    <p className="whitespace-pre-line">{data.recommendation}</p>
+                    <AiTransparencyLine />
                   </div>
-                </div>
-                <AiTransparencyLine />
-              </div>
-            ) : null}
-            {data.items.map((item) => <ContextPackCard key={`${item.entity_type}-${item.entity_id}`} item={item} />)}
-          </>
-        )}
-      </div>
-    </div>
+                ) : null}
+                {data.items.map((item) => <ContextPackCard key={`${item.entity_type}-${item.entity_id}`} item={item} />)}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }

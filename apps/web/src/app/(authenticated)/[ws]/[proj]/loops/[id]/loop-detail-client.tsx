@@ -4,10 +4,20 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { ArrowLeft, FileText, GitBranch, ShieldAlert } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Card } from '@/components/ds/card';
+import { Chip } from '@/components/ds/chip';
+import { CountBadge } from '@/components/ds/count-badge';
+import { EmptyState } from '@/components/ds/empty-state';
+import { Icon } from '@/components/ds/icon';
+import { PageFrame } from '@/components/ds/page-frame';
+import { PageSplit } from '@/components/ds/page-split';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
+import { SummaryCard, type SummaryItem } from '@/components/ds/summary-card';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { LoopStatusBadge, type LoopStatus } from '@/components/loops/loop-status-badge';
+import { LoopStageBar } from '@/components/loops/loop-stage-bar';
 import { OutcomeBadge } from '@/components/loops/outcome-badge';
 import { VariantGallery, type VariantGroup } from '@/components/loops/variant-gallery';
 import { ContextPackPanel } from '@/components/loops/context-pack-panel';
@@ -119,13 +129,19 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug, projectId }: { loop
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
 
+  const backToList = () => router.replace(`/${wsSlug}/${projSlug}/loops`);
+
   if (loading) {
     return (
       <>
         <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
-        <div className="flex h-64 items-center justify-center">
-          <p className="text-sm text-muted-foreground">{t('loading')}</p>
-        </div>
+        <PageFrame width="wide">
+          <SkeletonGroup label={t('loading')} className="space-y-3">
+            <Skeleton variant="text" size="title" className="max-w-sm" />
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-28 w-full" />
+          </SkeletonGroup>
+        </PageFrame>
       </>
     );
   }
@@ -134,13 +150,10 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug, projectId }: { loop
     return (
       <>
         <TopBarSlot title={<h1 className="text-sm font-medium">{t('title')}</h1>} />
-        <div className="flex h-64 flex-col items-center justify-center gap-3">
-          <p className="text-sm text-muted-foreground">{t('notFound')}</p>
+        <PageFrame width="wide">
           {/* story #1990: replace — 뒤로가기 재진입 트랩 방지(§3.2). */}
-          <button type="button" onClick={() => router.replace(`/${wsSlug}/${projSlug}/loops`)} className="text-xs text-primary hover:underline">
-            {t('backToList')}
-          </button>
-        </div>
+          <EmptyState title={t('notFound')} action={<Button variant="secondary" onClick={backToList}>{t('backToList')}</Button>} />
+        </PageFrame>
       </>
     );
   }
@@ -148,124 +161,112 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug, projectId }: { loop
   const canDecide = isHuman && loop.status === 'deciding';
   const totalSlots = groups.length;
   const decidedSlots = groups.filter((g) => g.artifacts.every((a) => a.decision !== 'pending')).length;
+  const outcome = loop.status === 'closed' ? loop.outcome_snapshot : null;
+
+  // 속성 칸 — «이 실행이 무엇인가»를 읽기만 하는 맥락(눌리는 것은 본문에). 값이 없는 항목은 그리지 않는다(옛 머리 줄도 그랬다).
+  const railItems: SummaryItem[] = [
+    { id: 'stage', label: t('filterLabel'), value: (
+      <span className="flex flex-wrap items-center gap-2">
+        <LoopStageBar status={loop.status} />
+        <LoopStatusBadge status={loop.status} />
+      </span>
+    ) },
+  ];
+  if (totalSlots > 0) railItems.push({ id: 'decision', label: t('decisionProgressLabel'), value: t('decisionProgress', { done: decidedSlots, total: totalSlots }) });
+  if (loop.recipe_slug) railItems.push({ id: 'recipe', label: t('recipeLabel'), value: <span className="font-mono text-ds-mono-lg">{loop.recipe_slug}</span> });
+  if (loop.parent_loop_id) railItems.push({ id: 'lineage', label: t('lineageLabel'), value: t('lineageFrom', { id: loop.parent_loop_id.slice(0, 8) }) });
+  if (brief) {
+    railItems.push({ id: 'brief', label: t('briefLink'), value: (
+      <Link href={flatHref(`/docs/${brief.slug}`)} className="inline-flex items-center gap-1 text-ds-action-text hover:underline">
+        <Icon name="description" />
+        {brief.title}
+      </Link>
+    ) });
+  }
+  // Outcome — E-LOOP-LEDGER S9: closed loop 성과(S7 outcome_snapshot 소비)
+  if (outcome) {
+    railItems.push({ id: 'outcome', label: t('outcomeSectionLabel'), value: (
+      <span className="flex flex-col items-start gap-1">
+        <OutcomeBadge hypothesisStatus={outcome.hypothesis_status} />
+        {outcome.outcome_result ? (
+          <span>
+            {t('outcomeMetricLine', {
+              metric: outcome.outcome_result.metric,
+              actual: outcome.outcome_result.actual,
+              dir: outcome.outcome_result.direction === 'up' ? th('dirUp') : th('dirDown'),
+              target: outcome.outcome_result.target,
+            })}
+          </span>
+        ) : (
+          <span className="italic text-ds-ink-2">{t('outcomeNoResult')}</span>
+        )}
+      </span>
+    ) });
+  }
+  if (loop.goal_tags.length > 0) {
+    railItems.push({ id: 'tags', label: t('tagsLabel'), value: (
+      <span className="flex flex-wrap gap-1">{loop.goal_tags.map((tag) => <Chip key={tag} title={tag} className="max-w-full min-w-0"><span className="truncate">{tag}</span></Chip>)}</span>
+    ) });
+  }
 
   return (
     <>
       <TopBarSlot
         title={
-          <button
-            type="button"
-            // story #1990: replace(), not push() — 콜드-진입 합성 스택에 세번째 엔트리를
-            // 쌓지 않아 브라우저 BACK 재진입 트랩을 없앤다(§3.2). back()류 직접호출 금지
-            // ([[feedback-history-back-nextjs]]) 준수.
-            onClick={() => router.replace(`/${wsSlug}/${projSlug}/loops`)}
-            className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="size-3.5" />
-            {t('backToList')}
-          </button>
+          // story #1990: replace(), not push() — 콜드-진입 합성 스택에 세번째 엔트리를
+          // 쌓지 않아 브라우저 BACK 재진입 트랩을 없앤다(§3.2). back()류 직접호출 금지
+          // ([[feedback-history-back-nextjs]]) 준수.
+          <Button variant="quiet" onClick={backToList} iconStart={<Icon name="arrow_back" />}>{t('backToList')}</Button>
         }
       />
-      <div className="mx-auto max-w-3xl space-y-5 overflow-y-auto p-5">
-        {/* Header */}
-        <div className="space-y-2.5">
-          <div className="flex items-start justify-between gap-2">
-            <h1 className="text-lg font-bold text-foreground">{loop.title}</h1>
-            <LoopStatusBadge status={loop.status} />
-          </div>
+      <PageFrame width="wide">
+        <h1 className="m-0 text-ds-title font-semibold text-ds-ink">{loop.title}</h1>
 
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            {loop.parent_loop_id ? (
-              <span className="inline-flex items-center gap-1">
-                <GitBranch className="size-3" aria-hidden />
-                {t('lineageFrom', { id: loop.parent_loop_id.slice(0, 8) })}
-              </span>
+        <PageSplit narrow="above" asideLabel={t('railTitle')} aside={<SummaryCard title={t('railTitle')} items={railItems} emptyLabel={t('railEmpty')} />}>
+          <div className="space-y-4" data-testid="loop-detail-main">
+            {/* Moat framing — decision UX = 이 화면의 심장(handoff §2) */}
+            {totalSlots > 0 && loop.status === 'deciding' ? (
+              <Banner tone="info"><span className="font-semibold">{t('moatFraming')}</span> — {t('moatFramingDesc')}</Banner>
             ) : null}
-            {loop.recipe_slug ? (
-              <span>{t('recipeLabel')}: <span className="font-mono">{loop.recipe_slug}</span></span>
+
+            {/* View-only / human-only notices */}
+            {totalSlots > 0 && loop.status !== 'deciding' ? (
+              <p className="m-0 text-ds-small text-ds-ink-3">{t('notDecidingNotice')}</p>
             ) : null}
-            {totalSlots > 0 ? <span>{t('decisionProgress', { done: decidedSlots, total: totalSlots })}</span> : null}
-          </div>
-
-          {loop.goal_tags.length > 0 ? (
-            <div className="flex flex-wrap gap-1">
-              {loop.goal_tags.map((tag) => (
-                <Badge key={tag} variant="chip" className="text-[10px]">{tag}</Badge>
-              ))}
-            </div>
-          ) : null}
-
-          {/* Outcome — E-LOOP-LEDGER S9: closed loop 성과(S7 outcome_snapshot 소비) */}
-          {loop.status === 'closed' && loop.outcome_snapshot ? (
-            <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 p-3">
-              <span className="text-xs font-medium text-muted-foreground">{t('outcomeSectionLabel')}</span>
-              <OutcomeBadge hypothesisStatus={loop.outcome_snapshot.hypothesis_status} />
-              {loop.outcome_snapshot.outcome_result ? (
-                <span className="text-sm text-foreground">
-                  {t('outcomeMetricLine', {
-                    metric: loop.outcome_snapshot.outcome_result.metric,
-                    actual: loop.outcome_snapshot.outcome_result.actual,
-                    dir: loop.outcome_snapshot.outcome_result.direction === 'up' ? th('dirUp') : th('dirDown'),
-                    target: loop.outcome_snapshot.outcome_result.target,
-                  })}
-                </span>
-              ) : (
-                <span className="text-sm italic text-muted-foreground">{t('outcomeNoResult')}</span>
-              )}
-            </div>
-          ) : null}
-
-          {/* Goal / hypothesis */}
-          <div className="rounded-lg border border-border bg-muted/40 p-3">
-            <p className="mb-1 text-xs font-medium text-muted-foreground">{t('goalLabel')}</p>
-            <p className="text-sm text-foreground">
-              {hypothesis?.statement ?? <span className="italic text-muted-foreground">{t('goalEmpty')}</span>}
-            </p>
-            {brief ? (
-              <Link
-                href={flatHref(`/docs/${brief.slug}`)}
-                className="mt-2 inline-flex items-center gap-1 text-xs text-primary hover:underline"
-              >
-                <FileText className="size-3" aria-hidden />
-                {t('briefLink')}: {brief.title}
-              </Link>
+            {totalSlots > 0 && loop.status === 'deciding' && !isHuman ? (
+              <Banner tone="note">{t('humanOnlyNotice')}</Banner>
             ) : null}
+
+            {/* Goal / hypothesis */}
+            <Card className="p-3" data-testid="loop-goal">
+              <p className="m-0 mb-1 text-ds-small text-ds-ink-3">{t('goalLabel')}</p>
+              <p className="m-0 text-ds-body text-ds-ink">
+                {hypothesis?.statement ?? <span className="italic text-ds-ink-2">{t('goalEmpty')}</span>}
+              </p>
+            </Card>
+
+            {/* Variant gallery — 후보가 없으면 한 줄 */}
+            <section aria-label={t('candidatesTitle')} className="space-y-2">
+              {totalSlots > 0 ? (
+                <h2 className="m-0 flex items-center gap-2 text-ds-card-title font-semibold text-ds-ink">
+                  {t('candidatesTitle')}
+                  <CountBadge count={totalSlots} />
+                </h2>
+              ) : null}
+              <VariantGallery
+                loopId={loop.id}
+                groups={groups}
+                canDecide={canDecide}
+                onDecided={() => void fetchAll()}
+                outcome={outcome}
+              />
+            </section>
+
+            {/* Context pack — E-LOOP-LEDGER S13: "과거 loop에서 학습" (S12 계약, 브리핑 맥락 부속 섹션) — 비면 한 줄로 접혀 있다 */}
+            <ContextPackPanel loopId={loop.id} />
           </div>
-
-          {/* Moat framing — decision UX = 이 화면의 심장(handoff §2) */}
-          {totalSlots > 0 && loop.status === 'deciding' ? (
-            // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
-            <div className="rounded-lg border border-info-border bg-info-tint p-2.5 text-xs text-foreground">
-              🧠 <span className="font-semibold">{t('moatFraming')}</span> — {t('moatFramingDesc')}
-            </div>
-          ) : null}
-
-          {/* View-only / human-only notices */}
-          {totalSlots > 0 && loop.status !== 'deciding' ? (
-            <p className="text-xs text-muted-foreground">{t('notDecidingNotice')}</p>
-          ) : null}
-          {totalSlots > 0 && loop.status === 'deciding' && !isHuman ? (
-            // story #2590(TIER1) — tint 배경 위 계열색 글자는 text-foreground(#2420 규칙). 계열
-            // 정체성은 border-warning-border로 전달.
-            <div className="flex items-center gap-1.5 rounded-lg border border-warning-border bg-warning-tint px-2.5 py-2 text-xs text-foreground">
-              <ShieldAlert className="size-3.5 shrink-0" aria-hidden />
-              {t('humanOnlyNotice')}
-            </div>
-          ) : null}
-        </div>
-
-        {/* Variant gallery */}
-        <VariantGallery
-          loopId={loop.id}
-          groups={groups}
-          canDecide={canDecide}
-          onDecided={() => void fetchAll()}
-          outcome={loop.status === 'closed' ? loop.outcome_snapshot : null}
-        />
-
-        {/* Context pack — E-LOOP-LEDGER S13: "과거 loop에서 학습" (S12 계약, 브리핑 맥락 부속 섹션) */}
-        <ContextPackPanel loopId={loop.id} />
-      </div>
+        </PageSplit>
+      </PageFrame>
     </>
   );
 }
