@@ -4,7 +4,7 @@
 // phone-control screens say so instead of drawing a pairing that cannot work. Draws nothing it has to fetch: no read, no request, so nothing can fail on this screen.
 // Hosted mode never draws it (the pages decide with `isEmbeddedServer()` on the server).
 import { useTranslations } from 'next-intl';
-import { Card } from '@/components/ui/card';
+import { Card } from '@/components/ds/card';
 
 export function PhoneRelayLocalNotice() {
   const t = useTranslations('desktop.phoneRelayLocal');

@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Card } from '@/components/ds/card';
 import { Textarea } from '@/components/ui/textarea';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
