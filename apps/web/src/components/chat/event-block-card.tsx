@@ -16,7 +16,7 @@ import { withProjectParam } from '@/lib/with-project-param';
 import { GATE_STATUS_LABEL_KEYS, gateStatusLabel } from '@/lib/gate-status-label';
 import { gateTypeLabel } from '@/lib/gate-type-label';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
-import { entityTypeLabel } from '@/components/chat/chat-input-entity-tokens';
+import { entityTypeLabel, hasEntityTypeLabel } from '@/components/chat/chat-input-entity-tokens';
 import { formatLocaleDateTime } from '@/lib/i18n';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { isLocalizedPlatformPreset, localizeLegacyUnnamedHeader, localizePresetBlockTemplate, localizeSeedStageTextBlocks, presetName } from '@/lib/platform-preset-copy';
@@ -47,10 +47,8 @@ const SOURCE_LABEL_KEYS: Record<string, 'sourceInternal' | 'sourceGa4'> = {
 export function readableSlug(slug: string): string {
   return slug.replace(/[_-]+/g, ' ').trim();
 }
-const entityTypeWords = (type: string, t: (key: string) => string): string => {
-  const label = entityTypeLabel(type, t);
-  return label === type ? readableSlug(type) : label; // an unmapped type comes back as itself
-};
+const entityTypeWords = (type: string, t: (key: string) => string): string =>
+  hasEntityTypeLabel(type) ? entityTypeLabel(type, t) : readableSlug(type);
 const gateVerdictWords = (verdict: string, tCage: (key: string) => string): string =>
   GATE_STATUS_LABEL_KEYS[verdict] ? gateStatusLabel(verdict, tCage) : readableSlug(verdict);
 

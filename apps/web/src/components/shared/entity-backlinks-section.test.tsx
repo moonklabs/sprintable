@@ -248,6 +248,21 @@ describe('EntityBacklinksSection', () => {
     expect(container.textContent).not.toContain('waiting-on-legal');
   });
 
+  it('⭐story 4925 — a structured event with NO stage (null / empty) is just the name — no crash, no dangling « · »', async () => {
+    for (const stage of [null, '', '  ']) {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+        data: [{
+          id: 'r1', source_type: 'chat_message', source_id: 'm1', created_by: null, created_at: '2026-07-28T00:00:00Z', still_exists: true, doc: null,
+          message: { id: 'm1', conversation_id: 'c1', sender: null, content_snippet: '[이벤트] org.acme.flow', event: { definition_key: 'org.acme.flow', name: '인수 흐름', stage, role: null, gate_type: null, approver: null } },
+        }],
+        meta: { next_cursor: null, has_more: false, collection_scope: { source_types: ['chat_message'], forms: 'all', excludes: [] } },
+      }))));
+      await render('story', 's1');
+      expect(container.textContent).toContain('인수 흐름');
+      expect(container.textContent).not.toMatch(/인수 흐름 ·/);
+    }
+  });
+
   it('⭐story 4925 — an OLD event message row (no structured `event`, the snippet is the machine text) is the one word «이벤트» — no slug, no «- key: value»', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       data: [{

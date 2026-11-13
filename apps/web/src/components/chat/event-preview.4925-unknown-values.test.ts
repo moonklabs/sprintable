@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { composeEventBodyFallback, composeEventPreviewLine, readableSlug, type EventPreviewHelpers } from './event-block-card';
+import { hasEntityTypeLabel } from './chat-input-entity-tokens';
+import { hasRecipeStageLabel } from '@/lib/recipe-stage-label';
 
 // story 4925 — the four older presets' sentences (and the card labels / the bubble list that read them): a value no label knows reads as WORDS (4921's rule: underscore / hyphen → space), never as its slug.
 const WORDS: Record<string, string> = {
@@ -43,5 +45,13 @@ describe('the four older presets with a value no label knows (story 4925)', () =
   it('the bubble list: an unmapped key uses the same rule (one function)', () => {
     const m = composeEventBodyFallback('[이벤트] org.x.y\n- a: b', 'org.x.y', { stage_name: 'x', waiting_on_legal: 'yes' }, {}, null, helpers)!;
     expect(m.items.map((i) => i.label)).toEqual(['stage name', 'waiting on legal']);
+    expect(m.items.map((i) => i.value)).toEqual(['x', 'yes']); // the VALUES stay as they are (PO 11-13: «값은 그대로») — only the key is made readable
+  });
+  it('mapped vs unmapped is decided by the table, not by comparing the label with the slug', () => {
+    expect(hasEntityTypeLabel('story')).toBe(true);
+    expect(hasEntityTypeLabel('visual_artifact')).toBe(false);
+    expect(hasEntityTypeLabel('constructor')).toBe(false); // an inherited object property is not a label
+    expect(hasRecipeStageLabel('draft')).toBe(true);
+    expect(hasRecipeStageLabel('waiting-on-legal')).toBe(false);
   });
 });

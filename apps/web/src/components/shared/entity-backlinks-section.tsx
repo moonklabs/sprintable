@@ -5,7 +5,7 @@ import { FileText, MessageSquare, Calendar, BookOpen, ClipboardCheck, Frame } fr
 import { useLocale, useTranslations } from 'next-intl';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { fetchWithAuth } from '@/lib/db/client';
-import { recipeStageLabel } from '@/lib/recipe-stage-label';
+import { hasRecipeStageLabel, recipeStageLabel } from '@/lib/recipe-stage-label';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { gateApproverLabel } from '@/lib/gate-approver-label';
 import { toPlainPreview } from '@/components/chat/entity-ref';
@@ -77,12 +77,12 @@ const SOURCE_TYPE_ICON = {
 function eventBacklinkLabel(event: NonNullable<BacklinkItem['message']>['event'], tOrg: (key: string) => string, tEventCard: (key: string) => string): string {
   // story 4925 — no definition name (deleted …): the one word «이벤트» (4921's rule), never the definition KEY; a stage no label knows reads as words, not as its slug
   const name = event!.name?.trim() || tEventCard('genericEventHeader');
-  const rawStage = event!.stage;
-  const stageLabel = recipeStageLabel(rawStage, tOrg);
-  const stage = stageLabel === rawStage ? readableSlug(rawStage) : stageLabel;
+  const rawStage = typeof event!.stage === 'string' ? event!.stage.trim() : '';
+  // no stage at all → the line is just the name (never a dangling « · »)
+  const stage = rawStage ? (hasRecipeStageLabel(rawStage) ? recipeStageLabel(rawStage, tOrg) : readableSlug(rawStage)) : null;
   const role = event!.role ? ` (${stageRoleLabel(event!.role, tOrg)})` : '';
   const approver = event!.gate_type ? ` · ${gateApproverLabel(tOrg, event!.approver)}` : '';
-  return `${name} · ${stage}${role}${approver}`;
+  return `${name}${stage ? ` · ${stage}` : ''}${role}${approver}`;
 }
 
 /**
