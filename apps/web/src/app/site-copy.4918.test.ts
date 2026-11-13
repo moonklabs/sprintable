@@ -41,20 +41,21 @@ describe('로그인 부제 · 사이트 설명 리브랜딩 (4918)', () => {
     expect(manifest().description).toBe(DESCRIPTION_EN);
   });
 
-  it('⭐링크 미리보기(layout.tsx)의 설명: ko · en 한 줄이 정한 글자이고 로케일로 고른다(제목 · OG · 트위터 세 곳 모두 같은 값)', () => {
-    const src = read('src/app/layout.tsx');
-    expect(src).toContain(`const SITE_DESCRIPTION_KO = "${DESCRIPTION_KO}";`);
-    expect(src).toContain(`const SITE_DESCRIPTION_EN = "${DESCRIPTION_EN}";`);
-    expect(src).toContain("const siteDescription = locale === 'en' ? SITE_DESCRIPTION_EN : SITE_DESCRIPTION_KO;");
-    // 설명 · OG 설명 · 트위터 설명이 모두 그 값(옛 상수로 돌아가면 빨강)
-    expect(src.match(/description: siteDescription,/g)?.length).toBe(3);
-    expect(src).not.toMatch(/description:\s*SITE_DESCRIPTION[,\s]/);
+  it('⭐링크 미리보기 설명(messages siteMeta.description): ko · en 한 줄이 정한 글자', () => {
+    expect((ko as { siteMeta: { description: string } }).siteMeta.description).toBe(DESCRIPTION_KO);
+    expect((en as { siteMeta: { description: string } }).siteMeta.description).toBe(DESCRIPTION_EN);
   });
 
-  it('⭐매니페스트 설명은 layout.tsx의 영어 한 줄과 같은 글자(두 곳이 어긋나지 않는다)', () => {
-    const layout = read('src/app/layout.tsx');
-    const m = layout.match(/const SITE_DESCRIPTION_EN = "([^"]+)";/);
-    expect(m?.[1]).toBe(manifest().description);
+  it('⭐링크 미리보기(layout.tsx)는 그 키를 로케일로 읽고 설명 · OG 설명 · 트위터 설명 세 곳이 모두 같은 값 — 옛 상수 · 한글 상수로 돌아가면 빨강', () => {
+    const src = read('src/app/layout.tsx');
+    expect(src).toContain("const tMeta = await getTranslations('siteMeta');");
+    expect(src).toContain("const siteDescription = tMeta('description');");
+    expect(src.match(/description: siteDescription,/g)?.length).toBe(3);
+    expect(src).not.toMatch(/SITE_DESCRIPTION/);
+  });
+
+  it('⭐매니페스트 설명은 messages(en) siteMeta.description과 같은 글자(두 곳이 어긋나지 않는다)', () => {
+    expect(manifest().description).toBe((en as { siteMeta: { description: string } }).siteMeta.description);
   });
 
   it('⭐옛 문구 0: 웹 앱 사용자에게 닿는 글(messages · 시험 아닌 src 소스)에 «열린 루프를 닫는 조직 OS» · «organization OS that closes open loops»가 없다', () => {

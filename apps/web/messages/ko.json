@@ -1527,6 +1527,9 @@
     "expiredBody": "보안을 위해 세션이 만료됐어요. 다시 로그인하면 보던 화면으로 돌아가요.",
     "reloginCta": "다시 로그인"
   },
+  "siteMeta": {
+    "description": "에이전트가 맥에서 일하는 동안, 대화와 승인은 폰에서. 혼자 또는 작은 팀으로 일하는 사람을 위한 작업 공간."
+  },
   "login": {
     "title": "Sprintable",
     "subtitle": "책상을 떠나도, 일은 이어진다",

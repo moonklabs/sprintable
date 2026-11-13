@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist_Mono, Source_Serif_4 } from "next/font/google";
 import { NextIntlClientProvider } from 'next-intl';
-import { getLocale, getMessages } from 'next-intl/server';
+import { getLocale, getMessages, getTranslations } from 'next-intl/server';
 import { getViewerTimeZone } from '@/i18n/request';
 import { ViewerTimeZoneProvider } from '@/components/viewer-time-zone';
 import { ThemeProvider } from '@/components/providers/theme-provider';
@@ -15,11 +15,9 @@ import "./globals.css";
 
 // story #2745(선생님 지적 2026-08-18, PR#3202 리뷰 유나 확認) — "PM tool"/"AI-powered sprint
 // management"는 옛 포지셔닝(우리는 PM 툴이 아니다). title은 sprintable-landing 정본 <title>과 동일(이미 선생님 승인).
-// story 4918 — 설명 한 줄은 선생님이 정한 문구(맥에서 일하는 에이전트 · 폰에서 대화와 승인 · 혼자 또는 작은 팀)로, 로케일별로 고른다.
+// story 4918 — 설명 한 줄은 선생님이 정한 문구(맥에서 일하는 에이전트 · 폰에서 대화와 승인 · 혼자 또는 작은 팀)로, messages `siteMeta.description`(로케일별)에서 읽는다.
 // 로그인 부제(messages login.subtitle)와 매니페스트 설명(app/manifest.ts)이 같은 결정을 따른다 — 바꿀 땐 셋을 같이(site-copy.4918.test.ts가 지킨다).
 const SITE_TITLE = "Sprintable — Ship with AI agents";
-const SITE_DESCRIPTION_KO = "에이전트가 맥에서 일하는 동안, 대화와 승인은 폰에서. 혼자 또는 작은 팀으로 일하는 사람을 위한 작업 공간.";
-const SITE_DESCRIPTION_EN = "While your agents work on your Mac, chat and approve from your phone. A workspace for people who work solo or in small teams.";
 
 const geistMono = Geist_Mono({
   variable: "--font-mono",
@@ -38,7 +36,8 @@ const sourceSerif = Source_Serif_4({
 // 별도 이미지 미지정 시 OG 폴백 — nextjs metadata 컨벤션).
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await getLocale();
-  const siteDescription = locale === 'en' ? SITE_DESCRIPTION_EN : SITE_DESCRIPTION_KO;
+  const tMeta = await getTranslations('siteMeta');
+  const siteDescription = tMeta('description');
   const ogImage = locale === 'en'
     ? { url: '/og/opengraph-en.png', alt: 'Sprintable' }
     : { url: '/og/opengraph-ko.png', alt: 'Sprintable' };
