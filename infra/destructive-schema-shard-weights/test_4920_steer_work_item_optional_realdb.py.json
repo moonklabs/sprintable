@@ -1,0 +1,1 @@
+{"file": "tests/test_4920_steer_work_item_optional_realdb.py", "sec": 15.0, "source": "story 4920 (2026-11-13) — local wall time of the file (6 tests, real Postgres): 13.7s; rounded up. Replace with the CI-measured value once shard-durations artifacts exist for this file."}
