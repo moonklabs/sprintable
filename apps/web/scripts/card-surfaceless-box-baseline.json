@@ -13,7 +13,6 @@
     "app/(authenticated)/campaigns/[campaignId]/page.tsx": 1,
     "app/(authenticated)/content/[draftId]/page.tsx": 6,
     "app/(authenticated)/content/channel-posts/[draftId]/page.tsx": 6,
-    "app/(authenticated)/organization/channels/page.tsx": 1,
     "app/(authenticated)/organization/events/page.tsx": 2,
     "app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx": 3,
     "app/forgot-password/page.tsx": 1,

@@ -115,6 +115,11 @@ describe('story #3785 회귀 pin — 이번 PR이 고친 자리는 baseline에�
     expect(countSurfacelessBoxClasses(content, 'app/(authenticated)/rewards/page.tsx')).toBe(0);
   });
 
+  it('4913(UI-R5 C판) 채널 연결 — 키 패널의 면 없는 상자도 ds 선(border-ds-line)으로 옮겨 baseline에서 걷혔고 이제 0이다', () => {
+    const content = readFileSync(path.resolve(__dirname, '../src/app/(authenticated)/organization/channels/page.tsx'), 'utf8');
+    expect(countSurfacelessBoxClasses(content, 'app/(authenticated)/organization/channels/page.tsx')).toBe(0);
+  });
+
   it('standup 구역 카드 1자리(현재 스프린트)는 baseline에 없다(bg-card로 전환됨)', () => {
     const content = readFileSync(
       path.resolve(__dirname, '../src/app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx'),

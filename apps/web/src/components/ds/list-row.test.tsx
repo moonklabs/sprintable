@@ -99,4 +99,16 @@ describe('ds ListRow', () => {
     expect(a.className).toContain('min-h-ds-control');
     expect(a.getAttribute('aria-current')).toBe('true');
   });
+
+  // 4913 C판(codex) — 오른쪽 행동 묶음(상태 칩 + 단추 + «⋯»)이 폰 좁은 폭에서 패널 가장자리에 «잘리지» 않고 둘째 줄로 내려온다.
+  it('⭐행은 줄바꿈을 허용하고, 오른쪽 묶음은 오른쪽 끝에 붙은 채 줄바꿈 · 제목 칸은 최소 폭 기준(basis)을 가진다', async () => {
+    await act(async () => { root.render(<ListRow title="줄" trailing={<><span>칩</span><button type="button">연결 관리</button></>} />); });
+    expect(row().className).toContain('flex-wrap');
+    const trailing = row().querySelector('button')!.parentElement as HTMLElement;
+    expect(trailing.className).toContain('flex-wrap');
+    expect(trailing.className).toContain('ml-auto');
+    expect(trailing.className).toContain('justify-end');
+    expect(trailing.className).toContain('max-w-full');
+    expect((row().querySelector('.truncate') as HTMLElement).parentElement!.className).toContain('basis-24');
+  });
 });

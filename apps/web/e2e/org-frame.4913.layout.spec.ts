@@ -29,10 +29,11 @@ async function build() {
         import Gc from './src/app/(authenticated)/organization/generation-connectors/page';
         import Rules from './src/app/(authenticated)/organization/content-rules/page';
         import Rewards from './src/app/(authenticated)/rewards/page';
+        import Channels from './src/app/(authenticated)/organization/channels/page';
         import { ToastProvider } from './src/components/ui/toast';
         function Bar() { const { title } = useTopBar(); return React.createElement('header', { 'data-testid': 'app-bar', style: { height: '48px', display: 'flex', alignItems: 'center', padding: '0 16px', borderBottom: '1px solid #8884' } }, title); }
         window.__mount = (which) => {
-          const Screen = { roles: Roles, trust: Trust, gc: Gc, rules: Rules, rewards: Rewards }[which];
+          const Screen = { roles: Roles, trust: Trust, gc: Gc, rules: Rules, rewards: Rewards, channels: Channels }[which];
           createRoot(document.getElementById('root')).render(React.createElement(NextIntlClientProvider, { locale: 'ko', messages: ko, timeZone: 'Asia/Seoul' },
             React.createElement(TopBarProvider, null, React.createElement(ToastProvider, null, React.createElement(Bar), React.createElement('main', { 'data-testid': 'main' }, React.createElement(Screen))))));
         };`,
@@ -41,7 +42,17 @@ async function build() {
     bundle: true, format: 'iife', platform: 'browser', write: false, logLevel: 'silent', jsx: 'automatic',
     tsconfig: path.join(WEB, 'tsconfig.json'),
     define: { 'process.env.NODE_ENV': '"production"', 'process.env.NEXT_PUBLIC_APP_URL': '"https://dev-app.sprintable.ai"' },
-    plugins: [layoutStubPlugin()],
+    // the channels screen reads the URL (OAuth return) — a working `next/navigation` for this spec only (the shared stub list returns null for hooks); first in the list so it wins
+    plugins: [{
+      name: 'nav-stub',
+      setup(b: import('esbuild').PluginBuild) {
+        b.onResolve({ filter: /^next\/navigation$/ }, () => ({ path: 'next-navigation-stub', namespace: 'nav-stub' }));
+        b.onLoad({ filter: /.*/, namespace: 'nav-stub' }, () => ({
+          contents: "export const useSearchParams = () => new URLSearchParams(); export const usePathname = () => '/organization/channels'; export const useRouter = () => ({ replace() {}, push() {}, back() {}, refresh() {} });",
+          loader: 'js',
+        }));
+      },
+    }, layoutStubPlugin()],
   });
   const js = out.outputFiles[0]!.text;
   const candidates = [...new Set([...js.matchAll(/"([^"\n]+)"/g)].flatMap((m) => m[1]!.split(/\s+/)).filter(Boolean))];
@@ -62,7 +73,22 @@ const SUMMARY = [
   { member_id: 'm3', role_key: 'dev', role_label: '개발', hit_rate: 0.5, resolved: 4, computed_at: '2026-11-10T00:00:00Z', pending: 1, name: 'A very long member display name that must be cut inside its row', member_type: 'agent', member_deleted: false },
 ];
 
-type Which = 'roles' | 'trust' | 'gc' | 'rules' | 'rewards';
+type Which = 'roles' | 'trust' | 'gc' | 'rules' | 'rewards' | 'channels';
+const AVAILABLE = [
+  { channel: 'threads', display_name: 'Threads', credential_kind: 'oauth', kind: 'social' },
+  { channel: 'wordpress', display_name: 'WordPress', credential_kind: 'pasted_secret', kind: 'blog' },
+  { channel: 'sandbox', display_name: 'Sandbox', credential_kind: 'none', kind: 'social' },
+];
+const CONNS = [
+  { id: 'c1', channel: 'threads', account_id: 'acc-1', account_label: '@a_very_long_account_handle_that_must_be_cut_inside_its_row_and_never_push_the_status_chip_out', credential_kind: 'oauth', status: 'active', token_expires_at: null, last_refreshed_at: null, last_error: null, can_auto_refresh: true, connected_by: 'm1', created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z' },
+];
+// a second, expired connection on the same channel: the row then shows the worst status chip («다시 연결 필요»), the primary «연결 관리» and the «⋯» press together — the widest trailing group a channel row has
+const CONNS2 = [...CONNS, { ...CONNS[0], id: 'c2', account_id: 'acc-2', account_label: '@second', status: 'expired', token_expires_at: '2020-01-01T00:00:00Z', can_auto_refresh: false }];
+const MEASURE = [
+  { key: 'beacon', status: 'not_started', last_seen_at: null, count_7d: null, settings_path: null },
+  { key: 'utm', status: 'auto', last_seen_at: null, count_7d: null, settings_path: '/settings' },
+  { key: 'ga4', status: 'disconnected', last_seen_at: null, count_7d: null, settings_path: null },
+];
 const GC = [
   { id: 'g1', provider_key: 'vertex_gemini', label: 'A very long connector name that must wrap inside its row and never push the revoke press out', model_config_json: { image: 'imagen-3', video: 'veo-2' }, location: 'global', status: 'active', created_by: 'm1', created_at: '2026-11-01T00:00:00Z', revoked_at: null },
   { id: 'g2', provider_key: 'vertex_gemini', label: '지난 캠페인', model_config_json: {}, location: 'asia-northeast3', status: 'revoked', created_by: 'm1', created_at: '2026-10-01T00:00:00Z', revoked_at: '2026-10-20T00:00:00Z' },
@@ -80,6 +106,10 @@ async function open(page: Page, which: Which, scheme: 'light' | 'dark', width: n
     if (url.pathname === '/') {
       return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="ko" class="${scheme === 'dark' ? 'dark' : ''}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body class="bg-ds-background text-ds-ink" style="margin:0"><div id="root"></div></body></html>` });
     }
+    if (url.pathname === '/api/organizations/org-1/channel-connections/available-channels') return json({ data: AVAILABLE });
+    if (url.pathname === '/api/organizations/org-1/channel-connections') return json({ data: CONNS2 });
+    if (url.pathname.endsWith('/app-credentials')) return json({ data: { configured: true, app_id_suffix: 'abcd', effective_source: 'org' } });
+    if (url.pathname === '/api/organizations/org-1/measurement-connections') return json({ data: MEASURE });
     if (url.pathname === '/api/organizations/org-1/generation-connectors') return json({ data: { connectors: GC } });
     if (url.pathname === '/api/organizations/org-1/content-rules') return json({ data: { org_id: 'org-1', rules: RULES, version: 3, updated_at: '2026-11-10T00:00:00Z', updated_by: { member_id: 'm1', name: '송윤재' } } });
     if (url.pathname === '/api/organizations/org-1/generation-budget') return json({ data: { limit_minor: 5000000, spent_minor: 1200000, remaining_minor: 3800000, currency: 'KRW', period: 'month' } });
@@ -118,7 +148,7 @@ const lightnessOf = (css: string) => {
 for (const scheme of ['light', 'dark'] as const) {
   for (const [width, height] of [[1440, 900], [390, 844]] as const) {
     test.describe(`${scheme} ${width}`, () => {
-      for (const which of ['roles', 'trust', 'gc', 'rules', 'rewards'] as const) {
+      for (const which of ['roles', 'trust', 'gc', 'rules', 'rewards', 'channels'] as const) {
         test(`${which} — one heading in the app bar · reading frame · no sideways scroll · layers`, async ({ page }) => {
           await open(page, which, scheme, width, height);
           // one heading, in the bar, none in the body
@@ -150,6 +180,13 @@ for (const scheme of ['light', 'dark'] as const) {
             const b = (await row.boundingBox())!;
             expect(b.height).toBeGreaterThanOrEqual(55.5);
             expect(b.x + b.width).toBeLessThanOrEqual(panel.x + panel.width + 1);
+            // nothing pressable inside a row is cut off by the panel edge (the panel clips what runs past it)
+            for (const press of await row.locator('button, a, [data-slot="ds-chip"]').all()) {
+              const pb = await press.boundingBox();
+              if (!pb) continue;
+              expect(pb.x + pb.width, await press.innerText()).toBeLessThanOrEqual(panel.x + panel.width + 1);
+              expect(pb.x).toBeGreaterThanOrEqual(panel.x - 1);
+            }
           }
         });
       }
@@ -168,5 +205,60 @@ test('trust — an opened row is one step off the panel and keeps its text insid
     expect(Math.abs(lDetail - lPanel)).toBeGreaterThanOrEqual(0.05);
     expect(await detail.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  }
+});
+
+test('channels — an opened channel row is one step off the panel, keeps its long account name inside, and the footnote/menu stay in the frame (light + dark, phone)', async ({ page }) => {
+  for (const scheme of ['light', 'dark'] as const) {
+    await open(page, 'channels', scheme, 390, 844);
+    await page.locator('#channel-row-threads').dblclick(); // double-click = open the row
+    const detail = page.locator('[data-testid="channel-section"] [data-slot="ds-row-detail"]').first();
+    await detail.waitFor();
+    const lPanel = lightnessOf(await page.locator('[data-slot="ds-row-list"]').first().evaluate((el) => getComputedStyle(el).backgroundColor));
+    const lDetail = lightnessOf(await detail.evaluate((el) => getComputedStyle(el).backgroundColor));
+    expect(Math.abs(lDetail - lPanel)).toBeGreaterThanOrEqual(0.05);
+    expect(await detail.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+    // every footnote line stays inside the panel
+    const panel = (await page.locator('[data-slot="ds-row-list"]').first().boundingBox())!;
+    for (const note of await page.locator('[data-slot="ds-row-footnote"]').all()) {
+      const b = (await note.boundingBox())!;
+      expect(b.x + b.width).toBeLessThanOrEqual(panel.x + panel.width + 1);
+    }
+  }
+});
+
+test('channels — on the narrowest phone (320) nothing pressable in a row is cut off by the panel edge, even with the status chip + «연결 관리» + «⋯» together', async ({ page }) => {
+  for (const scheme of ['light', 'dark'] as const) {
+    await open(page, 'channels', scheme, 320, 640);
+    const panel = (await page.locator('[data-slot="ds-row-list"]').first().boundingBox())!;
+    for (const press of await page.locator('[data-testid="channel-section"] [data-slot="ds-list-row"]').first().locator('button, a, [data-slot="ds-chip"]').all()) {
+      const pb = (await press.boundingBox())!;
+      expect(pb.x + pb.width, await press.innerText()).toBeLessThanOrEqual(panel.x + panel.width + 1);
+      expect(pb.x).toBeGreaterThanOrEqual(panel.x - 1);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  }
+});
+
+test('channels — a row whose right-hand group is wider than the row wraps it onto a second line instead of clipping it (320, a stand-in for longer labels · English)', async ({ page }) => {
+  await open(page, 'channels', 'light', 320, 640);
+  const row = page.locator('[data-testid="channel-section"] [data-slot="ds-list-row"]').first();
+  const before = (await row.boundingBox())!;
+  // widen the group by 140 px — what a longer button label or a longer chip would do
+  await row.evaluate((el) => {
+    const group = el.querySelector('button')!.parentElement as HTMLElement;
+    const pad = document.createElement('span');
+    pad.style.cssText = 'display:inline-block;width:140px;height:20px';
+    pad.setAttribute('data-testid', 'pad');
+    group.appendChild(pad);
+  });
+  const after = (await row.boundingBox())!;
+  expect(after.height).toBeGreaterThan(before.height); // it grew: the group went to a second line
+  const panel = (await page.locator('[data-slot="ds-row-list"]').first().boundingBox())!;
+  for (const press of await row.locator('button, a, [data-slot="ds-chip"], [data-testid="pad"]').all()) {
+    const pb = (await press.boundingBox())!;
+    expect(pb.x + pb.width).toBeLessThanOrEqual(panel.x + panel.width + 1);
+    expect(pb.x).toBeGreaterThanOrEqual(panel.x - 1);
   }
 });
