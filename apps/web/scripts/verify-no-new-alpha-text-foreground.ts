@@ -75,7 +75,6 @@ function walk(dir: string, out: string[]): void {
 export const GRANDFATHER_BASELINE = new Map<string, number>([
   ['app/(authenticated)/[ws]/[proj]/goals/[id]/page.tsx::text-foreground/80', 1],
   ['app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx::text-foreground/90', 1],
-  ['app/(authenticated)/organization/workforce/[id]/page.tsx::text-foreground/80', 1],
   ['app/(authenticated)/organization/workforce/recruiter/recruiter-client.tsx::text-foreground/80', 2],
   ['app/invite/accept/invite-accept-client.tsx::text-foreground/70', 1],
   ['app/invite/accept/invite-accept-client.tsx::text-foreground/85', 3],
