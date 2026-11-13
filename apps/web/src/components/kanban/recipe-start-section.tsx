@@ -271,7 +271,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
       {c.conversation_id && (
         <Link
           href={flatHref(`/chats/${c.conversation_id}${c.message_id ? `?messageId=${encodeURIComponent(c.message_id)}` : ''}`)}
-          className="text-xs font-medium text-primary hover:underline"
+          className="text-xs font-medium text-ds-action-text hover:underline"
         >
           {t('recipeStartViewConversation')}
         </Link>

@@ -94,8 +94,9 @@ describe('StoryCard 컨텍스트 메뉴 — story #3664 AC1(role/aria)', () => {
     const menu = document.body.querySelector('[role="menu"]');
     expect(menu).not.toBeNull();
     const items = document.body.querySelectorAll('[role="menu"] [role="menuitem"]');
-    // editStory·changeStatus·assignMember·deleteStory — 4개 핸들러를 다 넘겼으니 4개.
-    expect(items.length).toBe(4);
+    // editStory·assignMember·deleteStory — 3개(상태는 4908부터 메뉴 안 칩 5개: role=menuitemradio).
+    expect(items.length).toBe(3);
+    expect(document.body.querySelectorAll('[role="menu"] [role="menuitemradio"]').length).toBe(5);
     expect(getCard().getAttribute('aria-expanded')).toBe('true');
   });
 });
@@ -120,9 +121,11 @@ describe('StoryCard 컨텍스트 메뉴 — story #3664 AC2(키보드)', () => {
   it('ArrowDown/ArrowUp이 role=menuitem 사이를 순회한다(wrap 포함)', () => {
     renderCard();
     openViaContextMenu();
-    const items = Array.from(document.body.querySelectorAll<HTMLElement>('[role="menu"] [role="menuitem"]'));
+    // 위/아래는 칩도 한 칸씩 지난다(DOM 순서: 수정 → 칩 5 → 담당자 → 삭제).
+    const items = Array.from(document.body.querySelectorAll<HTMLElement>('[role="menu"] [role="menuitem"], [role="menu"] [role="menuitemradio"]'));
     const menu = document.body.querySelector('[role="menu"]') as HTMLElement;
 
+    expect(items).toHaveLength(8);
     expect(document.activeElement).toBe(items[0]);
     act(() => {
       menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
@@ -163,55 +166,145 @@ describe('StoryCard 컨텍스트 메뉴 — story #3664 AC2(키보드)', () => {
   });
 });
 
-function getStatusTrigger(): HTMLButtonElement {
-  const trigger = document.body.querySelector('[role="menu"] [role="menuitem"][aria-haspopup="menu"]');
-  if (!trigger) throw new Error('상태 변경 트리거 not found');
-  return trigger as HTMLButtonElement;
+function chips(): HTMLButtonElement[] {
+  return Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menu"] [role="menuitemradio"]'));
 }
 
-function getSubmenu(): HTMLElement {
-  // 최상위 메뉴가 아닌 두 번째 [role="menu"](서브메뉴, 별도 portal) — 요소 자체를 특정하려면
-  // 상태 변경 항목(statuses.length===5, editStory/assignMember/deleteStory엔 없는 항목 수)로 식별.
-  const menus = Array.from(document.body.querySelectorAll<HTMLElement>('[role="menu"]'));
-  const submenu = menus.find((m) => m.querySelectorAll('[role="menuitem"]').length === 5);
-  if (!submenu) throw new Error('서브메뉴 not found');
-  return submenu;
-}
-
-describe('StoryCard 컨텍스트 메뉴 — story #3664 CHANGES(유나 QA, 상태 변경 서브메뉴 키보드)', () => {
-  it('서브메뉴가 열리면 첫 항목(role=menuitem)으로 포커스, 방향키는 서브메뉴 안에서만 순회', () => {
+describe('StoryCard 컨텍스트 메뉴 — 4908 상태 칩 한 줄(예전 «상태 변경 ▸» 하위 메뉴 대체)', () => {
+  it('⭐칩 5개가 이름 있는 그룹(상태 변경) 안에 서고 하위 메뉴는 없다 — 우클릭 뒤 [role=menu]는 하나뿐', () => {
     renderCard();
     openViaContextMenu();
-    const trigger = getStatusTrigger();
-    act(() => { trigger.click(); });
-
-    const submenu = getSubmenu();
-    const items = Array.from(submenu.querySelectorAll<HTMLElement>('[role="menuitem"]'));
-    expect(document.activeElement).toBe(items[0]);
-
-    act(() => {
-      submenu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
-    });
-    // 서브메뉴 안에서만 순회 — 상위 메뉴(editStory 등)로 포커스가 안 새 나간다.
-    expect(document.activeElement).toBe(items[1]);
-    expect(items).toContain(document.activeElement as HTMLElement);
+    const group = document.body.querySelector('[role="menu"] [role="group"]') as HTMLElement;
+    expect(group.getAttribute('aria-label')).toBe(koMessages.board.changeStatus);
+    expect(chips().map((c) => c.getAttribute('data-status-chip'))).toEqual(['backlog', 'ready-for-dev', 'in-progress', 'in-review', 'done']);
+    expect(document.body.querySelectorAll('[role="menu"]').length).toBe(1);
+    expect(document.body.querySelector('[aria-haspopup="menu"][role="menuitem"]')).toBeNull();
   });
 
-  it('서브메뉴에서 Esc는 서브메뉴만 닫고 트리거로 포커스를 되돌린다(상위 메뉴는 열려 있음)', () => {
+  it('⭐메뉴 폭 240 — 칩 다섯이 두 줄(3+2)에 고르게 들어가는 폭(192는 2+2+1로 들쭉날쭉했다)', () => {
     renderCard();
     openViaContextMenu();
-    const trigger = getStatusTrigger();
-    act(() => { trigger.click(); });
-    expect(document.body.querySelectorAll('[role="menu"]').length).toBe(2);
+    expect((document.body.querySelector('[role="menu"]') as HTMLElement).style.width).toBe('240px');
+  });
 
+  it('⭐긴 조직 라벨 칩은 넘치지 않고 칩 안에서 줄바꿈된다(nowrap 아님 · max-w-full · 긴 낱말 꺾임)', () => {
+    renderCard({ getStatusLabel: (s: string) => (s === 'done' ? '아주아주아주아주아주아주아주긴조직상태이름완료' : s) } as Partial<Parameters<typeof StoryCard>[0]>);
+    openViaContextMenu();
+    const long = chips().find((c) => c.getAttribute('data-status-chip') === 'done')!;
+    expect(long.className.split(/\s+/)).toEqual(expect.arrayContaining(['max-w-full', 'whitespace-normal', '[overflow-wrap:anywhere]']));
+    expect(long.className.split(/\s+/)).not.toContain('whitespace-nowrap');
+  });
+
+  it('⭐칩은 폰(touch)에서 44px 높이를 갖는다 — touch:min-h-11', () => {
+    renderCard();
+    openViaContextMenu();
+    for (const c of chips()) expect(c.className.split(/\s+/), c.textContent ?? '').toContain('touch:min-h-11');
+  });
+
+  it('⭐상태만 있는 메뉴(수정 · 담당 · 삭제 콜백 없음)를 열면 첫 칩으로 초점이 간다 — 키보드 사용자가 바로 칩을 오간다', () => {
+    renderCard({ onEdit: undefined, onAssign: undefined, onDelete: undefined });
+    openViaContextMenu();
+    expect(document.body.querySelectorAll('[role="menu"] [role="menuitem"]').length).toBe(0);
+    expect(document.activeElement).toBe(chips()[0]);
+  });
+
+  it('⭐메뉴 높이 계산에 칩 줄이 들어간다 — 화면 아래쪽 우클릭이어도 마지막 칩이 뷰포트 밖으로 안 나간다', () => {
+    renderCard();
+    const card = getCard();
     act(() => {
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 100, clientY: window.innerHeight - 5 }));
     });
+    const menu = document.body.querySelector('[role="menu"]') as HTMLElement;
+    // 항목 4(수정 · 상태 줄 · 담당자 · 삭제) × 36 + 칩 줄이 더 차지하는 140 + 안쪽 8 + 여백 8
+    expect(parseFloat(menu.style.top)).toBe(window.innerHeight - (4 * 36 + 140 + 8) - 8);
+  });
 
-    // 서브메뉴만 사라지고 상위 메뉴(카드 트리거의 aria-haspopup 메뉴)는 그대로 열려 있다.
-    expect(document.body.querySelectorAll('[role="menu"]').length).toBe(1);
-    expect(getCard().getAttribute('aria-expanded')).toBe('true');
-    expect(document.activeElement).toBe(getStatusTrigger());
+  it('⭐지금 상태 칩만 aria-checked=true + ✓ 표시 — 색만으로 알리지 않는다', () => {
+    renderCard();
+    openViaContextMenu();
+    const states = chips().map((c) => [c.getAttribute('data-status-chip'), c.getAttribute('aria-checked')]);
+    expect(states).toEqual([['backlog', 'false'], ['ready-for-dev', 'false'], ['in-progress', 'true'], ['in-review', 'false'], ['done', 'false']]);
+    const current = chips().find((c) => c.getAttribute('aria-checked') === 'true')!;
+    expect(current.querySelector('svg')).not.toBeNull();
+    expect(chips().filter((c) => c.querySelector('svg')).length).toBe(1);
+  });
+
+  it('⭐우클릭 → 칩 한 번(두 번 눌러) 상태가 바뀐다: onChangeStatus(스토리, 상태) · 메뉴는 닫히고 초점은 카드로', () => {
+    const { onChangeStatus } = renderCard();
+    const card = getCard();
+    openViaContextMenu();
+    act(() => { chips().find((c) => c.getAttribute('data-status-chip') === 'in-review')!.click(); });
+    expect(onChangeStatus).toHaveBeenCalledTimes(1);
+    expect(onChangeStatus).toHaveBeenCalledWith('s1', 'in-review');
+    expect(document.body.querySelector('[role="menu"]')).toBeNull();
+    expect(document.activeElement).toBe(card);
+  });
+
+  it('지금 상태 칩을 누르면 바꾸지 않고(요청 0) 메뉴만 닫는다', () => {
+    const { onChangeStatus } = renderCard();
+    openViaContextMenu();
+    act(() => { chips().find((c) => c.getAttribute('aria-checked') === 'true')!.click(); });
+    expect(onChangeStatus).not.toHaveBeenCalled();
+    expect(document.body.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it('⭐←/→는 칩 사이를 오가고 양 끝에서 반대 끝으로 돈다', () => {
+    renderCard();
+    openViaContextMenu();
+    const cs = chips();
+    const menu = document.body.querySelector('[role="menu"]') as HTMLElement;
+    const press = (key: string) => act(() => { (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); });
+    void menu;
+    act(() => { cs[0]!.focus(); });
+    press('ArrowRight');
+    expect(document.activeElement).toBe(cs[1]);
+    press('ArrowLeft');
+    press('ArrowLeft');
+    expect(document.activeElement).toBe(cs[4]);
+    press('ArrowRight');
+    expect(document.activeElement).toBe(cs[0]);
+  });
+
+  it('칩이 아닌 항목에서 ←/→는 아무 일도 없다(초점 그대로)', () => {
+    renderCard();
+    openViaContextMenu();
+    const first = document.body.querySelector('[role="menu"] [role="menuitem"]') as HTMLElement;
+    expect(document.activeElement).toBe(first);
+    act(() => { first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })); });
+    expect(document.activeElement).toBe(first);
+  });
+
+  it('↑/↓로 칩 줄에서 이웃 항목(담당자 · 수정)으로 나갈 수 있다', () => {
+    renderCard();
+    openViaContextMenu();
+    const cs = chips();
+    act(() => { cs[4]!.focus(); });
+    act(() => { (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })); });
+    expect((document.activeElement as HTMLElement).getAttribute('role')).toBe('menuitem');
+    expect(document.activeElement?.textContent).toContain(koMessages.board.assignMember);
+  });
+
+  it('Esc는 메뉴 전체를 닫고 초점을 카드로 되돌린다(하위 메뉴가 없으니 «한 층»뿐)', () => {
+    renderCard();
+    const card = getCard();
+    openViaContextMenu();
+    act(() => { chips()[0]!.focus(); });
+    act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
+    expect(document.body.querySelector('[role="menu"]')).toBeNull();
+    expect(document.activeElement).toBe(card);
+  });
+
+  it('⭐잠긴(파생) 열 카드는 칩 줄이 없다 — 막힘 그대로', () => {
+    renderCard({ locked: true } as Partial<Parameters<typeof StoryCard>[0]>);
+    openViaContextMenu();
+    expect(chips()).toHaveLength(0);
+    expect(document.body.querySelector('[role="group"]')).toBeNull();
+  });
+
+  it('onChangeStatus가 없으면 칩 줄이 없다', () => {
+    renderCard({ onChangeStatus: undefined });
+    openViaContextMenu();
+    expect(chips()).toHaveLength(0);
   });
 });
 
@@ -227,23 +320,23 @@ describe('StoryCard 컨텍스트 메뉴 — story #3664 회귀(기존 우클릭�
     expect(menu.style.left).toBe('123px');
   });
 
-  it('항목 4종(수정·상태 변경·담당자 지정·삭제)이 클릭으로 각자의 콜백을 부른다', () => {
+  it('항목 3종(수정·담당자 지정·삭제)이 클릭으로 각자의 콜백을 부른다(상태는 칩 — 위 describe)', () => {
     const { onEdit, onAssign, onDelete } = renderCard();
     openViaContextMenu();
     const items = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menu"] [role="menuitem"]'));
-    expect(items).toHaveLength(4);
+    expect(items).toHaveLength(3);
 
     act(() => { items[0]!.click(); });
     expect(onEdit).toHaveBeenCalledWith('s1');
 
     openViaContextMenu();
     const itemsAfterReopen = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menu"] [role="menuitem"]'));
-    act(() => { itemsAfterReopen[2]!.click(); }); // assignMember(3번째)
+    act(() => { itemsAfterReopen[1]!.click(); }); // assignMember(2번째)
     expect(onAssign).toHaveBeenCalledWith('s1');
 
     openViaContextMenu();
     const itemsAfterReopen2 = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menu"] [role="menuitem"]'));
-    act(() => { itemsAfterReopen2[3]!.click(); }); // deleteStory(4번째) — ConfirmDialog를 연다(실 삭제 아님).
+    act(() => { itemsAfterReopen2[2]!.click(); }); // deleteStory(3번째) — ConfirmDialog를 연다(실 삭제 아님).
     expect(onDelete).not.toHaveBeenCalled();
   });
 });

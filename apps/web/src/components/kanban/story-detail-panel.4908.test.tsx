@@ -46,15 +46,46 @@ async function mount() {
 }
 
 describe('4908 카드 상세 — 본문 / 속성 칸', () => {
-  it('⭐속성 칸과 본문 칸이 따로 선다 · 속성 칸은 좁은 폭에서 본문 앞(order-first), lg 이상에서 오른쪽(lg:order-last)', async () => {
+  it('⭐속성 칸과 본문 칸이 따로 선다 · 속성 칸은 DOM에서 본문 앞(좁은 폭: 위 · 초점 순서도 앞), lg 이상에서 오른쪽 열 맨 위에 붙는다(lg:sticky · col-start-2)', async () => {
     const { rail, main } = await mount();
     expect(rail).not.toBeNull();
     expect(main).not.toBeNull();
     expect(rail!.tagName).toBe('ASIDE');
     expect(rail!.getAttribute('aria-label')).toBe(koMessages.board.detailProperties);
     const c = rail!.className.split(/\s+/);
-    expect(c).toEqual(expect.arrayContaining(['order-first', 'lg:order-last']));
+    expect(c).toEqual(expect.arrayContaining(['lg:sticky', 'lg:top-0', 'lg:col-start-2', 'lg:row-start-1', 'lg:row-span-2', 'lg:self-start']));
+    expect(c).not.toContain('order-first');
+    expect(c).not.toContain('lg:order-last');
     expect(rail!.contains(main!)).toBe(false);
+    expect(rail!.compareDocumentPosition(main!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(main!.className.split(/\s+/)).toEqual(expect.arrayContaining(['lg:col-start-1', 'lg:row-start-2']));
+  });
+
+  it('⭐순서: 작업 칸 한 줄(접힘) → 속성 칸 → 본문 — 좁은 폭에서 담당 · 상태가 첫 화면에 들도록 작업 칸은 접혀 있다', async () => {
+    const { rail, main } = await mount();
+    const fold = container.querySelector<HTMLElement>('[data-testid="workcell-fold"]')!;
+    const toggle = container.querySelector<HTMLElement>('[data-testid="workcell-fold-toggle"]')!;
+    expect(fold).not.toBeNull();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('[role="progressbar"]')).toBeNull();
+    expect(fold.compareDocumentPosition(rail!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(rail!.compareDocumentPosition(main!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(fold.className.split(/\s+/)).not.toContain('lg:col-start-2');
+    expect(fold.parentElement!.className.split(/\s+/)).toEqual(expect.arrayContaining(['lg:col-start-1', 'lg:row-start-1']));
+  });
+
+  it('⭐같은 말은 한 자리: 제목 · 상태 글자가 접힌 채로도 펼친 뒤로도 한 번씩만 있다(제목 3번 · 상태 5번이던 것)', async () => {
+    await mount();
+    const count = (needle: string) => (container.textContent ?? '').split(needle).length - 1;
+    const statusWord = koMessages.board.inProgress;
+    expect(count(story.title)).toBe(1);
+    expect(count(statusWord)).toBe(1);
+    const toggle = container.querySelector<HTMLElement>('[data-testid="workcell-fold-toggle"]')!;
+    await act(async () => { toggle.click(); });
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(container.textContent).toContain(koMessages.workcell.briefTitle);
+    expect(count(story.title)).toBe(1);
+    expect(count(statusWord)).toBe(1);
   });
 
   const B = koMessages.board;
@@ -239,5 +270,66 @@ describe('4908 서랍 배경 막 — 둘째 이후 클릭은 «카드로 막 연
     onClose.mockReset();
     clickWith(backdrop, 2);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+// 접힌 작업 칸 줄이 읽어 주는 수 — 진짜 서랍 + 진짜 접힘 줄로 잰다(수가 어디서 오는지: 근거 = 근거 칸에 실제로 놓인 신호, 대화 = 연결된 대화 + 댓글).
+describe('4908 카드 상세 — 접힌 작업 칸 줄의 수 · 설명 없는 장', () => {
+  const summaryText = () => container.querySelector('[data-testid="workcell-fold-summary"]')?.textContent;
+  async function mountStory(s: KanbanStory, extra: Record<string, unknown> = {}, refs: unknown = { data: [] }) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes('/references?direction=outgoing')) return { ok: true, json: async () => refs };
+      return { ok: true, json: async () => (/rejected-relations|\/api\/labels|\/api\/item-labels/.test(u) ? [] : { data: [] }) };
+    }));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ToastProvider><StoryDetailPanel story={s} tasks={[]} onClose={() => {}} projectId="p1" {...extra} /></ToastProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+  }
+
+  it('⭐연결된 대화 1건이면 «대화 1» · 없으면 «대화 0» · 단계는 trust_stage 순서', async () => {
+    await mountStory({ ...story, trust_stage: 'needs_input' } as KanbanStory, {}, {
+      data: [{
+        id: 'ref-1', created_at: '2026-08-20T00:00:00Z', form: 'proof', target_type: 'chat_message', still_exists: true,
+        proof_payload: { conversation_id: 'conv-1', start_message_id: 'msg-1', snapshot: [{ message_id: 'msg-1', author_id: 'a1', content: 'hi', created_at: '2026-08-20T00:00:00Z' }] },
+      }],
+    });
+    expect(summaryText()).toBe('단계 3/6 · 근거 0 · 대화 1');
+  });
+
+  it('대화 수를 아직 못 받았으면(불러오는 중) «대화 –»', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ToastProvider><StoryDetailPanel story={{ ...story, trust_stage: 'running' } as KanbanStory} tasks={[]} onClose={() => {}} projectId="p1" /></ToastProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    expect(summaryText()).toBe('단계 2/6 · 근거 0 · 대화 –');
+  });
+
+  it('⭐근거 칸에 신호(에이전트 주장 봉인)가 있으면 «근거 1»', async () => {
+    const memberMap = { a1: { id: 'a1', name: '빌드 에이전트', type: 'agent' } } as never;
+    await mountStory({ ...story, trust_stage: 'claimed_done', status: 'in-review', assignee_id: 'a1', assignee_ids: ['a1'], self_reported: true } as KanbanStory, { memberMap });
+    expect(summaryText()).toBe('단계 4/6 · 근거 1 · 대화 0');
+  });
+
+  it('⭐설명이 없는 장: 작업 칸을 펼쳐도 제목을 목표 자리에 다시 쓰지 않는다 — «설명 미기재»', async () => {
+    await mountStory({ ...story, description: null, trust_stage: 'running' } as KanbanStory);
+    await act(async () => { container.querySelector<HTMLElement>('[data-testid="workcell-fold-toggle"]')!.click(); });
+    expect(container.textContent).toContain(koMessages.workcell.briefGoalMissing);
+    expect((container.textContent ?? '').split(story.title).length - 1).toBe(1);
+  });
+
+  it('⭐펼친 작업 칸에는 상태 글자(진행 중)가 다시 나오지 않는다 — 머리의 상태 칩이 한 번만 말한다', async () => {
+    await mountStory({ ...story, trust_stage: 'running' } as KanbanStory);
+    await act(async () => { container.querySelector<HTMLElement>('[data-testid="workcell-fold-toggle"]')!.click(); });
+    expect((container.textContent ?? '').split(koMessages.board.inProgress).length - 1).toBe(1);
   });
 });

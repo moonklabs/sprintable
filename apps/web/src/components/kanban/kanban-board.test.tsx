@@ -2381,6 +2381,25 @@ describe('KanbanBoard — 카드 메뉴 담당자 · 이름 바꾸기 · 삭제(
     expect((container.querySelector('[role="dialog"]') as HTMLElement).textContent).toContain('빌드 에이전트');
   });
 
+  it('⭐메뉴 칩으로 상태를 바꾸면 카드가 다른 열로 옮겨 가 다시 서도 초점이 그 카드에 남는다(body로 빠지지 않는다)', async () => {
+    stubFetch(stories, members);
+    await mount();
+    const classicBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '5단계 클래식');
+    await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const base = vi.mocked(fetch);
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => (
+      typeof url === 'string' && url === '/api/stories/bulk' && init?.method === 'PATCH' ? { ok: true, json: async () => ({ data: [] }) } : base(url, init)
+    )));
+    const before = container.querySelector('[data-story-id="s1"]');
+    const menu = await menuFor('카드하나');
+    await press(menu.querySelector('[data-status-chip="in-progress"]')!);
+    await flush();
+    const after = container.querySelector('[data-story-id="s1"]') as HTMLElement;
+    expect(after).not.toBeNull();
+    expect(after, '다른 열로 옮겨 다시 선 카드').not.toBe(before);
+    expect(document.activeElement).toBe(after);
+  });
+
   /** PATCH를 손에 쥔다: 요청마다 resolve 대기열에 서고, 테스트가 순서를 정해 응답한다. */
   function stubDeferredPatch() {
     const base = vi.mocked(fetch);

@@ -6961,7 +6961,13 @@
     "pipelineClaimedDone": "완료 주장",
     "pipelineVerified": "검증됨",
     "pipelineMergeReady": "머지 준비",
-    "confidenceCaption": "단계 {done}/{total}"
+    "confidenceCaption": "단계 {done}/{total}",
+    "briefGoalMissing": "설명 미기재",
+    "foldTitle": "작업 칸",
+    "foldSummary": "단계 {done}/{total} · 근거 {evidence} · 대화 {conversation}",
+    "foldSummaryOutside": "파이프라인 범위 밖 · 근거 {evidence} · 대화 {conversation}",
+    "foldExpand": "펼치기",
+    "foldCollapse": "접기"
   },
   "loopQueue": {
     "title": "닫히지 않은 실행 큐",

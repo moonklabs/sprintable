@@ -107,7 +107,8 @@ describe('카드 안쪽 키는 끌기로 넘기지 않는다(codex 4조각)', ()
   it('⭐메뉴(포털) 항목을 Space로 눌러도 끌기가 시작되지 않는다 — 항목의 Space가 React 포털을 타고 카드까지 올라와도', async () => {
     const btn = card('카드하나').querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
     await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const item = document.body.querySelector<HTMLElement>('[role="menuitem"]')!;
+    // 메뉴 항목: 이 보드의 카드는 상태 칩(role=menuitemradio)만 가진다(수정 · 담당 콜백이 없다).
+    const item = document.body.querySelector<HTMLElement>('[role="menuitem"], [role="menuitemradio"]')!;
     expect(item).not.toBeNull();
     await key(item, 'Space', ' ');
     await tick();

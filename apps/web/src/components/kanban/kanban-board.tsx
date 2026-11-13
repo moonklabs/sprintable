@@ -1190,6 +1190,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
   const handleChangeStatus = useCallback(async (storyId: string, newStatus: string) => {
     const story = stories.find((s) => s.id === storyId);
     if (!story || story.status === newStatus) return;
+    // 메뉴로 상태를 바꾸면 카드가 다른 열로 옮겨 다시 서 초점이 body로 빠진다 — 키보드로 놓았을 때와 같은 길로 옮겨 간 카드에 초점을 돌려준다.
+    markKeyboardDrop(storyId);
 
     // Optimistic update
     setStories((prev) =>
@@ -1238,7 +1240,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
       adjustColumnTotal(newStatus, -1);
       adjustColumnTotal(story.status, +1);
     }
-  }, [stories, t, adjustColumnTotal, addToast, bumpTransitionErrorNonce]);
+  }, [stories, t, adjustColumnTotal, addToast, bumpTransitionErrorNonce, markKeyboardDrop]);
 
   const handleAssignStory = useCallback(async (storyId: string) => {
     // TODO: Implement proper member selection UI

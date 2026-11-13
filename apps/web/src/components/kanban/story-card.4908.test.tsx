@@ -95,7 +95,8 @@ describe('4908 카드 — «⋯» 버튼과 메뉴', () => {
     expect(menu).not.toBeNull();
     const items = [...menu!.querySelectorAll('[role="menuitem"]')].map((i) => i.textContent);
     expect(items).toContain(koMessages.board.kickoff);
-    expect(items).toContain(koMessages.board.changeStatus);
+    // 상태는 하위 메뉴가 아니라 메뉴 안 칩 줄(그룹 이름 = «상태 변경»)이다.
+    expect(menu!.querySelector('[role="group"]')?.getAttribute('aria-label')).toBe(koMessages.board.changeStatus);
   });
 
   it('«⋯» 클릭이 카드 열기(onClick)로 새지 않는다', () => {
