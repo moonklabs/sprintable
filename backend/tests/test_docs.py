@@ -114,6 +114,7 @@ async def test_create_doc_201():
         # (실 DB select/insert) mock-session 테스트에선 patch(실 DB 쿼리 우회). 파서 자체의 동작은
         # test_1993_mention_parser.py(순수 함수)·test_1993_mentions_realdb.py(실 PG)가 커버.
         with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
+             patch("app.services.doc_slug.is_slug_taken", new_callable=AsyncMock, return_value=False), \
              patch("app.routers.docs._resolve_doc_member_id",
                    new_callable=AsyncMock) as mock_resolve, \
              patch("app.routers.docs.canonicalize_member_id",
@@ -148,6 +149,7 @@ async def test_create_doc_is_folder_true_sets_doc_type_folder():
     doc = _mock_doc()
     doc.doc_type = "folder"
     with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
+         patch("app.services.doc_slug.is_slug_taken", new_callable=AsyncMock, return_value=False), \
          patch("app.routers.docs._resolve_doc_member_id", new_callable=AsyncMock) as mock_resolve, \
          patch("app.routers.docs.canonicalize_member_id", new_callable=AsyncMock) as mock_canon, \
          patch("app.services.mention_parser.reconcile_doc_mentions", new_callable=AsyncMock) as mock_reconcile:
@@ -181,6 +183,7 @@ async def test_create_doc_is_folder_omitted_defaults_to_page():
     """음성대조 — is_folder 미지정(기본 False)이면 기존 동작(doc_type="page") 그대로."""
     doc = _mock_doc()
     with patch("app.repositories.base.BaseRepository.create", new_callable=AsyncMock) as mock_create, \
+         patch("app.services.doc_slug.is_slug_taken", new_callable=AsyncMock, return_value=False), \
          patch("app.routers.docs._resolve_doc_member_id", new_callable=AsyncMock) as mock_resolve, \
          patch("app.routers.docs.canonicalize_member_id", new_callable=AsyncMock) as mock_canon, \
          patch("app.services.mention_parser.reconcile_doc_mentions", new_callable=AsyncMock) as mock_reconcile:
