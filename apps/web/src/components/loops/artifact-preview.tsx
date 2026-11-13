@@ -1,9 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { ImageOff, Loader2, Lock } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ds/button';
+import { Chip } from '@/components/ds/chip';
+import { Icon } from '@/components/ds/icon';
+import { LAYER } from '@/components/ds/layers';
+import { Skeleton } from '@/components/ds/skeleton';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -47,16 +50,16 @@ function ImagePreview({ assetId, fallbackLabel }: { assetId: string; fallbackLab
       <div className="absolute inset-0">
         <Skeleton className="absolute inset-0 rounded-none" />
         <div className="absolute inset-0 grid place-items-center">
-          <Loader2 className="size-5 animate-spin text-info" aria-label={t('previewLoading')} />
+          <Icon name="progress_activity" size={20} spin label={t('previewLoading')} className="text-ds-info" />
         </div>
       </div>
     );
   }
   if (state === 'no-access') {
     return (
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-muted px-3 text-center text-muted-foreground">
-        <Lock className="size-5" aria-hidden />
-        <span className="text-[10px] font-medium">{t('previewNoAccessTitle')}</span>
+      <div className={cn('absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-3 text-center text-ds-ink-3', LAYER.well)}>
+        <Icon name="lock" size={20} />
+        <span className="text-ds-small font-medium">{t('previewNoAccessTitle')}</span>
       </div>
     );
   }
@@ -72,9 +75,9 @@ function ImagePreview({ assetId, fallbackLabel }: { assetId: string; fallbackLab
     );
   }
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-muted px-3 text-center text-muted-foreground">
-      <ImageOff className="size-5" aria-hidden />
-      <span className="line-clamp-2 text-[10px] leading-[13px] font-medium">{fallbackLabel}</span>
+    <div className={cn('absolute inset-0 flex flex-col items-center justify-center gap-1 px-3 text-center text-ds-ink-3', LAYER.well)}>
+      <Icon name="hide_image" size={20} />
+      <span className="line-clamp-2 text-ds-small font-medium">{fallbackLabel}</span>
     </div>
   );
 }
@@ -126,31 +129,26 @@ function TextPreview({
   };
 
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 overflow-y-auto bg-muted/30 px-3 py-2 text-center">
+    <div className={cn('absolute inset-0 flex flex-col items-center justify-center gap-1 overflow-y-auto px-3 py-2 text-center', LAYER.well)}>
       <p
         className={cn(
-          'text-[13px] font-semibold leading-snug text-foreground',
-          isLong && !expanded && 'line-clamp-3 text-[11.5px] font-normal',
+          'm-0 text-ds-body font-semibold leading-snug text-ds-ink',
+          isLong && !expanded && 'line-clamp-3 text-ds-small font-normal',
         )}
       >
         {displayText}
       </p>
       {isLong ? (
-        <button
-          type="button"
-          onClick={handleToggle} aria-expanded={expanded}
-          disabled={loadingFull}
-          className="text-[10px] font-semibold text-primary hover:underline disabled:opacity-50"
-        >
+        <Button type="button" variant="quiet" onClick={handleToggle} aria-expanded={expanded} disabled={loadingFull}>
           {loadingFull ? t('previewLoading') : expanded ? t('previewCollapse') : t('previewExpand')}
-        </button>
+        </Button>
       ) : null}
       {fullTextError ? (
-        <button type="button" onClick={handleToggle} className="text-[9px] font-medium text-destructive hover:underline">
+        <Button type="button" variant="danger" onClick={handleToggle}>
           {t('errorDesc')} · {t('retry')}
-        </button>
+        </Button>
       ) : textTruncated && fullText === null ? (
-        <span className="text-[9px] text-muted-foreground">{t('previewTruncatedNote')}</span>
+        <span className="text-ds-small text-ds-ink-3">{t('previewTruncatedNote')}</span>
       ) : null}
     </div>
   );
@@ -159,11 +157,9 @@ function TextPreview({
 function TypeChipFallback({ contentType, fallbackLabel }: { contentType: string; fallbackLabel: string }) {
   const subtype = contentType.split('/')[1] ?? contentType;
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-muted px-3 text-center text-muted-foreground">
-      <span className="line-clamp-2 text-[10px] leading-[13px] font-medium">{fallbackLabel}</span>
-      <span className="rounded-full border border-border bg-background px-1.5 py-0.5 text-[9px] font-semibold uppercase text-muted-foreground">
-        {subtype}
-      </span>
+    <div className={cn('absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-3 text-center text-ds-ink-3', LAYER.well)}>
+      <span className="line-clamp-2 text-ds-small font-medium">{fallbackLabel}</span>
+      <Chip className="uppercase">{subtype}</Chip>
     </div>
   );
 }

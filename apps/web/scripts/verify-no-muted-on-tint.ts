@@ -997,7 +997,6 @@ export const GRANDFATHER_BASELINE = new Map<string, number>([
   ['components/chat/reference-drop-notice.tsx::muted-on-warning-tint', 2],
   ['components/epics/hypothesis-declaration-card.tsx::muted-on-info-tint', 1],
   ['components/epics/hypothesis-declaration-section.tsx::muted-on-info-tint', 1],
-  ['components/loops/context-pack-panel.tsx::muted-on-info-tint', 1],
   ['components/retro/sprint-close-cockpit.tsx::muted-on-info-tint', 3],
   // agent-project-access-section.tsx — 삼항/바인딩 두 분기가 각각 tint·muted를 가져 런타임
   // 공존 0(실 파일 대조). 제거만·색 변경 0(스코프 밖, 코드 무접촉).

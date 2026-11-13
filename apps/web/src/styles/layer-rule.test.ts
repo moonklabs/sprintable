@@ -11,6 +11,7 @@ import { ARTIFACT_CARD_FACE, ARTIFACT_CARD_WELL, ARTIFACT_PANEL } from '../compo
 import { HYPOTHESES_FACE, HYPOTHESIS_BAND_FACE } from '../components/hypotheses/hypotheses-face';
 import { GOALS_FRAME_FACE } from '../app/(authenticated)/[ws]/[proj]/goals/goals-layer';
 import { AGENT_RUNS_PANEL_FACE, AGENT_RUNS_ROW_FACE } from '../components/agents/agent-runs-list';
+import { VARIANT_REASON_FACE, VARIANT_TILE_FACE, VARIANT_TILE_WELL } from '../components/loops/variant-gallery';
 import { LOOP_PANEL_FACE, LOOP_ROW_FACE, LOOP_ROW_HOVER } from '../app/(authenticated)/[ws]/[proj]/loops/loops-layer';
 
 const css = readFileSync(join(__dirname, 'design-system.css'), 'utf8');
@@ -276,5 +277,25 @@ describe('실행 목록(4911) — 바탕 → 패널 → 행', () => {
 
   it('⭐호버 = 한 단 위(rowOthers → well)로 갈린다: 행 얼굴과 호버 면의 밝기차가 우물 선(≥ 0.03)을 지킨다', () => {
     for (const [, t] of themes) expect(step(t, 'rowOthers', 'well')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.wellOnRow);
+  });
+});
+
+// 4911 AC3 — 루프 상세: 틀 = 바탕 · 카드(목표 · 슬롯 · 과거 학습 · 속성 칸) = 내용 칸 · 후보 타일 = 글 줄 층 · 썸네일 = 우물 · 이유 칸 = 내용 칸.
+describe('루프 상세(4911) — 바탕 → 카드 → 후보 타일 → 우물', () => {
+  it('후보 갤러리가 층 표 이름을 그대로 쓴다: 타일 면 = rowOthers · 썸네일 = well · 이유 칸 = panel', () => {
+    expect(VARIANT_TILE_FACE).toBe(LAYER.rowOthers);
+    expect(VARIANT_TILE_WELL).toBe(LAYER.well);
+    expect(VARIANT_REASON_FACE).toBe(LAYER.panel);
+  });
+
+  it.each(themes)('⭐%s: 바탕 → 카드 ≥ 0.03 · 카드 → 타일 ≥ 0.05 · 타일 → 썸네일 우물 ≥ 0.03 · 타일 → 이유 칸(panel)이 갈린다(≥ 0.05)', (_name, t) => {
+    expect(step(t, 'page', 'panel')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.panelOverPage);
+    expect(step(t, 'panel', 'rowOthers')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPanel);
+    expect(step(t, 'rowOthers', 'well')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.wellOnRow);
+    expect(step(t, 'rowOthers', 'panel')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPanel);
+  });
+
+  it('⭐옛 문제 재현 가드: 타일 면(rowOthers) 위에 입력칸 면(sunk)을 얹으면 라이트에서 면이 안 갈린다 — 그래서 이유 칸은 panel이다', () => {
+    expect(step(themes[0]![1], 'rowOthers', 'field')).toBeLessThan(LAYER_MIN_STEP.fieldOnPanel);
   });
 });

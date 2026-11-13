@@ -2,13 +2,25 @@
 
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { EmptyState } from '@/components/ui/empty-state';
-import { OperatorTextarea } from '@/components/ui/operator-control';
+import { Button } from '@/components/ds/button';
+import { Card } from '@/components/ds/card';
+import { Chip } from '@/components/ds/chip';
+import { LAYER } from '@/components/ds/layers';
+import { Radio, RadioGroup } from '@/components/ds/radio';
+import { SectionHeader } from '@/components/ds/section-header';
+import { Textarea } from '@/components/ds/input';
 import { ArtifactPreview } from '@/components/loops/artifact-preview';
 import { OutcomeBadge } from '@/components/loops/outcome-badge';
-import { Layers } from 'lucide-react';
+import { cn } from '@/lib/utils';
+
+/**
+ * 4911 — 후보 갤러리의 층: 슬롯 카드 = 내용 칸(panel) · 후보 타일 면 = 남의 글 줄(rowOthers) · 썸네일 칸 = 우물(well) · 타일 안 이유 칸(입력 · 읽기) = 내용 칸(panel).
+ * 이유 칸이 sunk가 아니라 panel인 까닭: 글 줄 면 위에 입력칸 면(sunk)을 얹으면 라이트에서 면이 안 갈린다(4908 속성 칸과 같은 이유) — 경계(line-control)가 함께 가른다.
+ * 화면 코드는 층 표 이름을 그대로 쓰고 `styles/layer-rule.test.ts`가 이 이름과 그 사이 밝기차를 지킨다.
+ */
+export const VARIANT_TILE_FACE = LAYER.rowOthers;
+export const VARIANT_TILE_WELL = LAYER.well;
+export const VARIANT_REASON_FACE = LAYER.panel;
 
 /** loop_outcome_attribution.py 산출 shape — closed loop에만 존재. */
 export interface OutcomeInfo {
@@ -137,110 +149,118 @@ function VariantSlot({
     }
   }
 
-  return (
-    <div className="overflow-hidden rounded-xl border border-border bg-card">
-      <div className="flex items-center justify-between border-b border-border bg-muted/40 px-4 py-2.5">
-        <span className="text-sm font-semibold text-foreground">{group.variant_group}</span>
-        {decided ? (
-          <Badge variant="success">{t('slotDecided')}</Badge>
+  const header = (
+    <SectionHeader
+      title={group.variant_group}
+      level={3}
+      trailing={
+        decided ? (
+          <Chip tone="done" dot>{t('slotDecided')}</Chip>
         ) : canDecide ? (
-          <span className="text-xs font-medium text-primary">{t('slotDeciding')}</span>
+          <Chip tone="needs-hand" dot>{t('slotDeciding')}</Chip>
         ) : (
-          <Badge variant="outline">{t('slotCandidates', { count: sorted.length })}</Badge>
+          <Chip>{t('slotCandidates', { count: sorted.length })}</Chip>
+        )
+      }
+    />
+  );
+
+  const tiles = sorted.map((artifact) => {
+    const isChosen = artifact.decision === 'chosen';
+    const isRejected = artifact.decision === 'rejected';
+    const isPendingSelectable = artifact.decision === 'pending' && canDecide && !decided;
+    const selectedForSubmit = chosenId === artifact.id;
+
+    return (
+      <div
+        key={artifact.id}
+        data-slot="variant-tile"
+        data-decision={artifact.decision}
+        className={cn(
+          'overflow-hidden rounded-ds-control border',
+          VARIANT_TILE_FACE,
+          // 결정 상태는 색만이 아니다: 선택 = done 테두리 + «선택» 칩 · 반려 = 점선 + «반려» 칩 · 고르는 중 = action 테두리 + 채워진 라디오.
+          isChosen ? 'border-ds-done ring-1 ring-ds-done' : isRejected ? 'border-dashed border-ds-line-control' : selectedForSubmit ? 'border-ds-action ring-1 ring-ds-action' : 'border-ds-line',
         )}
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 p-3 sm:grid-cols-2 lg:grid-cols-3">
-        {sorted.map((artifact) => {
-          const isChosen = artifact.decision === 'chosen';
-          const isRejected = artifact.decision === 'rejected';
-          const isPendingSelectable = artifact.decision === 'pending' && canDecide && !decided;
-          const selectedForSubmit = chosenId === artifact.id;
-
-          return (
-            <div
-              key={artifact.id}
-              className={`overflow-hidden rounded-lg border transition ${
-                isChosen
-                  ? 'border-success ring-1 ring-success/40'
-                  : isRejected
-                    ? 'border-border opacity-55'
-                    : selectedForSubmit
-                      ? 'border-primary ring-1 ring-primary/40'
-                      : 'border-border'
-              }`}
-            >
-              <div className="relative h-28 bg-muted">
-                <ArtifactPreview
-                  assetId={artifact.asset_id}
-                  fallbackLabel={artifact.variant_label}
-                  contentType={artifact.content_type}
-                  textContent={artifact.text_content ?? null}
-                  textTruncated={artifact.text_truncated ?? false}
-                />
-              </div>
-              <div className="space-y-1.5 p-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-xs font-medium text-foreground">{artifact.variant_label}</span>
-                  <div className="flex shrink-0 items-center gap-1">
-                    {isChosen ? <Badge variant="success" className="text-[9px]">{t('chosenBadge')}</Badge> : null}
-                    {isChosen && outcome ? (
-                      <OutcomeBadge hypothesisStatus={outcome.hypothesis_status} className="text-[9px]" />
-                    ) : null}
-                  </div>
-                </div>
-
-                {isChosen && artifact.choose_reason ? (
-                  <p className="rounded-md border border-border bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
-                    {artifact.choose_reason}
-                  </p>
-                ) : null}
-                {isRejected && artifact.rejection_reason ? (
-                  <p className="rounded-md border border-border bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
-                    {artifact.rejection_reason}
-                  </p>
-                ) : null}
-
-                {isPendingSelectable ? (
-                  <div className="space-y-1.5">
-                    <label className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
-                      <input
-                        type="radio"
-                        name={`slot-${group.variant_group}`}
-                        checked={selectedForSubmit}
-                        onChange={() => setChosenId(artifact.id)}
-                      />
-                      {t('chosenBadge')}
-                    </label>
-                    <OperatorTextarea
-                      value={reasons[artifact.id] ?? ''}
-                      onChange={(e) => setReasons((prev) => ({ ...prev, [artifact.id]: e.target.value }))}
-                      placeholder={selectedForSubmit ? t('chooseReasonPlaceholder') : t('rejectionReasonPlaceholder')}
-                      className="min-h-[52px] text-base lg:text-xs"
-                    />
-                    <p className="text-[10px] text-muted-foreground">
-                      {selectedForSubmit ? t('chooseReasonLabel') : t('rejectionReasonLabel')}
-                    </p>
-                  </div>
-                ) : null}
-              </div>
+      >
+        <div className={cn('relative h-28', VARIANT_TILE_WELL)}>
+          <ArtifactPreview
+            assetId={artifact.asset_id}
+            fallbackLabel={artifact.variant_label}
+            contentType={artifact.content_type}
+            textContent={artifact.text_content ?? null}
+            textTruncated={artifact.text_truncated ?? false}
+          />
+        </div>
+        <div className="space-y-1.5 p-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="min-w-0 truncate text-ds-small font-semibold text-ds-ink">{artifact.variant_label}</span>
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+              {isChosen ? <Chip tone="done" icon="check">{t('chosenBadge')}</Chip> : null}
+              {isChosen && outcome ? <OutcomeBadge hypothesisStatus={outcome.hypothesis_status} /> : null}
+              {isRejected ? <Chip>{t('contextPackRejectedLabel')}</Chip> : null}
             </div>
-          );
-        })}
+          </div>
+
+          {isChosen && artifact.choose_reason ? (
+            <p className={cn('m-0 rounded-ds-control border border-ds-line px-2 py-1 text-ds-small text-ds-ink-2', VARIANT_REASON_FACE)}>
+              {artifact.choose_reason}
+            </p>
+          ) : null}
+          {isRejected && artifact.rejection_reason ? (
+            <p className={cn('m-0 rounded-ds-control border border-ds-line px-2 py-1 text-ds-small text-ds-ink-2', VARIANT_REASON_FACE)}>
+              {artifact.rejection_reason}
+            </p>
+          ) : null}
+
+          {isPendingSelectable ? (
+            <div className="space-y-1.5">
+              <Radio value={artifact.id} label={t('chosenBadge')} />
+              {/* 입력칸 면 = 내용 칸(panel): 글 줄 면(rowOthers) 위에 sunk를 얹으면 라이트에서 면이 안 갈린다(4908 속성 칸과 같은 이유) — 경계(line-control)가 함께 가른다. */}
+              <Textarea
+                value={reasons[artifact.id] ?? ''}
+                onChange={(e) => setReasons((prev) => ({ ...prev, [artifact.id]: e.target.value }))}
+                aria-label={selectedForSubmit ? t('chooseReasonLabel') : t('rejectionReasonLabel')}
+                placeholder={selectedForSubmit ? t('chooseReasonPlaceholder') : t('rejectionReasonPlaceholder')}
+                className={cn('min-h-[52px]', VARIANT_REASON_FACE)}
+              />
+              <p className="m-0 text-ds-small text-ds-ink-3">
+                {selectedForSubmit ? t('chooseReasonLabel') : t('rejectionReasonLabel')}
+              </p>
+            </div>
+          ) : null}
+        </div>
       </div>
+    );
+  });
+
+  const grid = 'grid grid-cols-1 gap-3 p-3 sm:grid-cols-2 lg:grid-cols-3';
+  const canPick = canDecide && !decided;
+
+  return (
+    <Card className="overflow-hidden" data-slot="variant-slot" data-testid={`variant-slot-${group.variant_group}`}>
+      {header}
+      {canPick ? (
+        // 라디오 묶음 = 슬롯 하나(한 번에 하나 고르기 · 방향키). 이름 = 슬롯 이름.
+        <RadioGroup aria-label={group.variant_group} value={chosenId ?? ''} onValueChange={(v) => setChosenId(String(v))} className={grid}>
+          {tiles}
+        </RadioGroup>
+      ) : (
+        <div className={grid}>{tiles}</div>
+      )}
 
       {!decided && canDecide ? (
-        <div className="space-y-2 border-t border-border px-4 py-3">
-          {error ? <p className="text-xs text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
+        <div className="space-y-2 border-t border-ds-line px-4 py-3">
+          {error ? <p className="m-0 text-ds-small text-ds-failed" role="alert" aria-live="assertive" aria-atomic="true">{error}</p> : null}
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-[11px] text-muted-foreground">{t('confirmSlotHint')}</p>
-            <Button size="sm" disabled={!canSubmit} onClick={() => void handleSubmit()}>
+            <p className="m-0 text-ds-small text-ds-ink-3">{t('confirmSlotHint')}</p>
+            <Button variant="primary" disabled={!canSubmit} loading={submitting} onClick={() => void handleSubmit()}>
               {submitting ? t('confirmSlotSubmitting') : t('confirmSlot')}
             </Button>
           </div>
         </div>
       ) : null}
-    </div>
+    </Card>
   );
 }
 
@@ -260,7 +280,8 @@ export function VariantGallery({
   const t = useTranslations('loops');
 
   if (groups.length === 0) {
-    return <EmptyState icon={<Layers />} title={t('noArtifacts')} />;
+    // 후보가 없으면 큰 빈 칸 대신 한 줄(4911) — 있을 때만 슬롯 카드가 선다.
+    return <p data-slot="variant-empty" className="m-0 text-ds-small text-ds-ink-3">{t('noArtifacts')}</p>;
   }
 
   return (
