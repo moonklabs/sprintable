@@ -14,6 +14,13 @@ import { listSpecPins, type SpecPin } from '@/services/canvas-spec-pins';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 import { useMemberNameFallback } from '@/hooks/use-member-name-fallback';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { PageFrame } from '@/components/ds/page-frame';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
+import { EmptyState } from '@/components/ds/empty-state';
+import { LAYER } from '@/components/ds/layers';
+import { cn } from '@/lib/utils';
 
 interface DetailItem {
   artifact: VisualArtifact;
@@ -45,6 +52,8 @@ const NO_MEMBERS: Record<string, MemberRef> = {};
  */
 export function ArtifactDetailView({ artifactId, projectId }: { artifactId: string; projectId?: string }) {
   const t = useTranslations('canvas');
+  const tc = useTranslations('common');
+  const flatHref = useFlatHref();
   useSyntheticParentTabHistory('/more');
   const [state, setState] = useState<DetailState>(null);
   // story #4343(유나 · PO 11:22Z) — 이 화면만 memberMap을 안 넘겨 레일 · 코멘트 작성자가 전부 «알 수 없는 구성원»이었다(develop의 한 줄이
@@ -118,32 +127,49 @@ export function ArtifactDetailView({ artifactId, projectId }: { artifactId: stri
     setState((cur) => (cur && cur !== 'not_found' ? { ...cur, pendingCanonicalizeVersion } : cur));
   }
 
+  // 4910 — 제목은 위 막대 한 곳. 받는 중 · 못 찾음에서도 위 막대 제목(h1)이 0개가 되지 않게 «산출물» 이름을 세운다(받으면 «산출물 / 제목»으로 바뀐다).
   if (state === null) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-muted-foreground">{t('detailLoading')}</p>
-      </div>
+      <PageFrame width="wide">
+        <TopBarSlot title={<h1 className="text-sm font-medium">{t('galleryTitle')}</h1>} />
+        <SkeletonGroup label={tc('loading')} className={cn('space-y-3 rounded-ds-panel border border-ds-line p-4', LAYER.panel)}>
+          <Skeleton className="h-[320px] w-full" />
+          <Skeleton variant="text" className="w-1/3" />
+        </SkeletonGroup>
+      </PageFrame>
     );
   }
 
   if (state === 'not_found') {
     return (
-      <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-muted-foreground">{t('detailNotFound')}</p>
-      </div>
+      <PageFrame width="wide">
+        <TopBarSlot title={<h1 className="text-sm font-medium">{t('galleryTitle')}</h1>} />
+        <div className={cn('rounded-ds-panel border border-ds-line', LAYER.panel)}>
+          {/* 못 찾음에는 예전에도 돌아가는 길이 없었다(존재 비공개 — 새 길을 만들지 않는다). */}
+          <EmptyState icon="image" title={t('detailNotFound')} />
+        </div>
+      </PageFrame>
     );
   }
 
   const { artifact, versions, threads, nodes, pendingCanonicalizeVersion, specPins } = state;
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-6 lg:px-8 lg:py-8">
-      <Link href=".." className="mb-4 inline-block text-xs font-medium text-muted-foreground hover:text-foreground">
-        {t('galleryBackAction')}
-      </Link>
+    <PageFrame width="wide" data-testid="artifact-detail">
+      {/* 4910 — 위 막대: «산출물 / 제목»(앞 이름은 갤러리로 가는 링크 — 예전 본문 «돌아가기» 링크 자리). 제목이 유일한 h1. 폰은 앞 이름 글자를 줄이지 않고 제목만 말줄임. */}
+      <TopBarSlot
+        title={
+          <div className="flex min-w-0 grow items-center">
+            <Link href={flatHref('/artifacts')} className="mr-2.5 shrink-0 rounded-ds-control text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ds-action">{t('galleryTitle')}</Link>
+            <span aria-hidden="true" className="mr-2.5 shrink-0 text-xs text-muted-foreground">/</span>
+            <h1 className="min-w-0 truncate text-base font-[650] tracking-[-0.01em] text-foreground">{artifact.title}</h1>
+          </div>
+        }
+      />
       {/* story #4343(까디르) — 받은 버전 캐시가 버전 번호로만 키라, 산출물이 바뀌면 새로 마운트해 비운다(패널은 이미 key로 다시 마운트). */}
       <ArtifactViewer
         key={artifact.id}
+        layout="page"
         artifact={artifact}
         versions={versions}
         memberMap={names.memberMap as Record<string, MemberRef>}
@@ -157,6 +183,6 @@ export function ArtifactDetailView({ artifactId, projectId }: { artifactId: stri
         pendingCanonicalizeVersion={pendingCanonicalizeVersion}
         onProposeCanonical={(versionNumber) => void handleProposeCanonical(versionNumber)}
       />
-    </div>
+    </PageFrame>
   );
 }

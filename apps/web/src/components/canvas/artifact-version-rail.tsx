@@ -7,6 +7,8 @@ import { actorRowLabels, memberLookup } from '@/lib/member-display';
 import { cn } from '@/lib/utils';
 import type { ArtifactVersion, MemberRef, VisualArtifact } from '@/services/canvas';
 import { RowName } from '@/components/shared/row-name';
+import { Chip } from '@/components/ds/chip';
+import { LAYER } from '@/components/ds/layers';
 
 interface ArtifactVersionRailProps {
   artifact: VisualArtifact;
@@ -17,17 +19,20 @@ interface ArtifactVersionRailProps {
   /** C2 착지 후 슬롯 — 넘기면 "coming soon" 대신 이 노드(보통 `<DescriptionPane/>`)를 렌더.
    * ArtifactVersionRail 자체는 C2 타입을 몰라도 되게 순수 슬롯으로 받는다. */
   descriptionSlot?: React.ReactNode;
+  /** 4910 — `rail`(기본) = 스토리 패널의 옆 레일(예전 그대로) · `column` = 산출물 상세 화면의 오른쪽 열 한 구역(ds 층 · 칩, 안쪽 스크롤은 목록만). */
+  layout?: 'rail' | 'column';
 }
 
 /**
  * E-CANVAS C1 Lv1 — 버전 lineage 레일. 각 엔트리 = 변경자·변경 이유(의미 단위)만.
  * raw 편집 나열 금지(핸드오프 §6 감시 게이트) — 여기 보이는 게 실제 저장된 커밋 단위 전부다.
  */
-export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSelectVersion, memberMap = {}, descriptionSlot }: ArtifactVersionRailProps) {
+export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSelectVersion, memberMap = {}, descriptionSlot, layout = 'rail' }: ArtifactVersionRailProps) {
   const t = useTranslations('canvas');
   // story #4284 — 이름 없는 구성원 표시(common.memberUnnamed).
   const tc = useTranslations('common');
   const [descOpen, setDescOpen] = useState(false);
+  const column = layout === 'column';
   const sorted = [...versions].sort((a, b) => b.version - a.version);
   // [SID:4311 PR 3] 판 줄 작성자 — 같은 이름 서로 다른 작성자 둘이면 «· ID 앞 8자»(작성자 id마다 한 번).
   const authorLabels = actorRowLabels(sorted.map((v) => ({ id: v.created_by, label: memberLookup(memberMap, v.created_by, tc)!.label })));
@@ -37,9 +42,9 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
   // (머리글 · 설명 패널은 목록 밖에 고정 · 전역 스크롤바 숨김이라 `.scrollbar-visible`로 굴러감을 보인다 · 스크롤 상자가 줄 버튼 초점 링을 자르지 않게 `focus-inset`).
   // 390(쌓임)은 상한 없음.
   return (
-    <div className="flex flex-col border-l border-border p-3 sm:h-0 sm:min-h-full">
-      <p className="mb-3 shrink-0 text-micro font-bold uppercase tracking-wide text-muted-foreground">{t('versionLineage')}</p>
-      <ul data-version-list="" className="focus-inset scrollbar-visible space-y-3 sm:min-h-0 sm:flex-1 sm:overflow-y-auto">
+    <div className={column ? 'flex flex-col p-4' : 'flex flex-col border-l border-border p-3 sm:h-0 sm:min-h-full'}>
+      <p className={column ? 'mb-2 shrink-0 text-ds-small font-semibold text-ds-ink-2' : 'mb-3 shrink-0 text-micro font-bold uppercase tracking-wide text-muted-foreground'}>{t('versionLineage')}</p>
+      <ul data-version-list="" className={column ? 'focus-inset scrollbar-visible max-h-[min(40vh,360px)] space-y-1 overflow-y-auto' : 'focus-inset scrollbar-visible space-y-3 sm:min-h-0 sm:flex-1 sm:overflow-y-auto'}>
         {sorted.map((v) => {
           const isCurrent = v.version === artifact.current_version;
           const isAnchor = v.version === artifact.anchor_version;
@@ -54,7 +59,10 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
                 // story #4354(유나 실측) — 선택이 배경색으로만 보여 화면 읽기에 «선택됨»이 안 들렸다. 판 목록(ul/li + 버튼)의 «지금 보는 판»이라
                 // aria-current(listbox 아님) — 고른 줄에만, 선택이 바뀌면 이전 줄에서 빠진다. 상세 · 스토리 패널 둘 다 이 컴포넌트.
                 aria-current={isSelected ? 'true' : undefined}
-                className={cn(
+                className={column ? cn(
+                  'flex w-full items-start gap-2 rounded-ds-control p-2 text-left transition-colors hover:bg-ds-surface-high touch:min-h-ds-touch',
+                  isSelected && LAYER.rowSelected,
+                ) : cn(
                   'flex w-full items-start gap-2 rounded-md p-1 text-left transition-colors hover:bg-muted/40',
                   isSelected && 'bg-muted/60',
                 )}
@@ -71,10 +79,12 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
                     v{v.version}
                     {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
                     {isCurrent ? (
-                      <span className="rounded bg-info/10 px-1 py-0.5 text-micro font-bold text-foreground">{t('versionCurrentTag')}</span>
+                      column ? <Chip tone="info">{t('versionCurrentTag')}</Chip>
+                        : <span className="rounded bg-info/10 px-1 py-0.5 text-micro font-bold text-foreground">{t('versionCurrentTag')}</span>
                     ) : null}
                     {isAnchor ? (
-                      <span className="rounded bg-success/10 px-1 py-0.5 text-micro font-bold text-foreground">{t('versionAnchorTag')}</span>
+                      column ? <Chip tone="done">{t('versionAnchorTag')}</Chip>
+                        : <span className="rounded bg-success/10 px-1 py-0.5 text-micro font-bold text-foreground">{t('versionAnchorTag')}</span>
                     ) : null}
                   </p>
                   {/* [SID:4311 PR 3 · 유나 1440 실측] «이름 · 꼬리 · 요약» 한 줄 — 요약 → 이름 순으로 잘리고 꼬리는 늘 보인다(예전 한 덩어리 truncate는
@@ -93,7 +103,9 @@ export function ArtifactVersionRail({ artifact, versions, selectedVersion, onSel
       <button
         type="button"
         onClick={() => setDescOpen((v) => !v)} aria-expanded={descOpen}
-        className="mt-3 flex w-full shrink-0 items-center gap-1 border-t border-border pt-3 text-left text-editorial-meta text-muted-foreground hover:text-foreground"
+        className={column
+          ? 'mt-3 flex min-h-ds-touch w-full shrink-0 items-center gap-1 border-t border-ds-line pt-3 text-left text-ds-small text-ds-ink-2 hover:text-ds-ink'
+          : 'mt-3 flex w-full shrink-0 items-center gap-1 border-t border-border pt-3 text-left text-editorial-meta text-muted-foreground hover:text-foreground'}
       >
         {t('descriptionPaneToggle')}
         {descOpen ? <ChevronUp className="h-3 w-3" aria-hidden /> : <ChevronDown className="h-3 w-3" aria-hidden />}

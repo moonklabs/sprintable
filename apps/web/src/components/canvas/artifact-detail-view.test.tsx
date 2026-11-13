@@ -10,7 +10,13 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import { ArtifactDetailView } from './artifact-detail-view';
+import { LAYER } from '@/components/ds/layers';
 import koMessagesRaw from '../../../messages/ko.json';
+
+// 4910 — 위 막대 칸(TopBarSlot)은 위 막대 문맥이 있어야 서니, 그 자리에 제목을 그대로 그리는 대역으로 바꿔 «제목은 위 막대에만»을 잰다. 나머지(ds · 뷰어 · 레일 · 스테이지)는 실물.
+vi.mock('@/components/nav/top-bar-slot', () => ({
+  TopBarSlot: ({ title }: { title?: React.ReactNode }) => <div data-testid="top-bar-slot-stub">{title}</div>,
+}));
 
 type LooseMessages = { [key: string]: string | LooseMessages };
 const koMessages = koMessagesRaw as unknown as LooseMessages;
@@ -80,7 +86,13 @@ describe('ArtifactDetailView — standalone 상세(story #2713)', () => {
     stubFetch(true);
     await mount('artifact-1');
     expect(container.textContent).toContain('흐름판 재설계 시안');
-    expect(container.textContent).toContain('갤러리로 돌아가기');
+    // 4910 — 옛 본문 «갤러리로 돌아가기» 링크는 위 막대 «산출물 / 제목»의 앞 이름 링크가 됐다(같은 길, 본문엔 없음).
+    const bar = container.querySelector('[data-testid="top-bar-slot-stub"]')!;
+    expect(bar.querySelector('a')?.getAttribute('href')).toBe('/artifacts');
+    expect(bar.querySelector('a')?.textContent).toBe('산출물');
+    expect(bar.querySelector('h1')?.textContent).toBe('흐름판 재설계 시안');
+    expect(container.querySelectorAll('h1').length).toBe(1);
+    expect(container.querySelector('[data-testid="artifact-detail-panel"]')!.textContent).not.toContain('갤러리로 돌아가기');
   });
 
   it('404(미존재/접근 불가)면 not-found 상태로 빠진다 — existence-non-disclosure 그대로 상속', async () => {
@@ -228,7 +240,8 @@ describe('ArtifactDetailView — 버전 계보 레일 = 버전 목록 전부(sto
     await flush();
     expect(versionDetailCalls).toEqual([1]);
     expect(stageHtml()).toContain('v1 본문');
-    expect(rowOf(1).className).toContain('bg-muted/60');
+    expect(rowOf(1).getAttribute('aria-current')).toBe('true');
+    for (const cls of LAYER.rowSelected.split(' ')) expect(rowOf(1).classList.contains(cls)).toBe(true);
     await act(async () => { rowOf(3).click(); });
     expect(stageHtml()).toContain('v3 본문');
     await act(async () => { rowOf(1).click(); });

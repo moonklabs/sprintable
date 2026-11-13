@@ -6884,6 +6884,8 @@
     "galleryGroupBy": "Group by",
     "galleryGroupSelectLabel": "Group",
     "galleryGroupOption": "{label} · {count}",
+    "viewerVersionSelectLabel": "Version",
+    "detailThreadsHeading": "Comments",
     "viewerCanvasHint": "Drag to move, scroll to zoom",
     "viewerCanvasHintTouch": "Move with one finger, zoom with two. Double-tap to fit.",
     "viewerFitAction": "Fit to view",
