@@ -66,15 +66,21 @@ describe('폰 폴더 고르기 단추 · 서랍 닫기 단추 (4910 스토리지
     expect(cls).toContain('min-h-[44px]');
   });
 
-  it('⭐서랍을 열면 닫기 단추는 ds IconButton(data-slot ds-icon-button · 이름 «닫기») — 눌러 닫힌다', async () => {
+  it('⭐동작: 서랍은 처음에 닫힘(aria-hidden · inert) → «전체 자산» 단추가 열고 → 닫기 단추(ds IconButton · 이름 «닫기»)가 닫는다 · 두 단추 모두 type=button', async () => {
     await render();
-    const trigger = container.querySelector<HTMLElement>('[data-testid="storage-folder-drawer-trigger"]')!;
+    const trigger = container.querySelector<HTMLButtonElement>('[data-testid="storage-folder-drawer-trigger"]')!;
+    const drawer = () => container.ownerDocument.querySelector<HTMLElement>('[data-testid="storage-folder-drawer"]')!;
+    const isClosed = () => drawer().getAttribute('aria-hidden') === 'true' && drawer().hasAttribute('inert');
+    expect(isClosed()).toBe(true); // 서랍은 늘 붙어 있다 — 열림 여부는 aria-hidden · inert
+    expect(trigger.type).toBe('button');
     await act(async () => { trigger.click(); });
-    const drawer = container.ownerDocument.querySelector<HTMLElement>('[data-testid="storage-folder-drawer"]')!;
-    expect(drawer).not.toBeNull();
-    const close = drawer.querySelector<HTMLElement>('[data-slot="ds-icon-button"]')!;
+    expect(isClosed()).toBe(false); // 단추가 연다(onClick을 떼면 RED)
+    const close = drawer().querySelector<HTMLButtonElement>('[data-slot="ds-icon-button"]')!;
     expect(close).not.toBeNull();
     expect(close.getAttribute('aria-label')).toBe('닫기');
-    expect(drawer.querySelector('[data-slot="button"]')).toBeNull(); // 옛 ui 부품 단추가 서랍 머리에 안 남는다
+    expect(close.type).toBe('button');
+    expect(drawer().querySelector('[data-slot="button"]')).toBeNull(); // 옛 ui 부품 단추가 서랍 머리에 안 남는다
+    await act(async () => { close.click(); });
+    expect(isClosed()).toBe(true); // 닫기 단추가 닫는다(onClick을 떼면 RED)
   });
 });
