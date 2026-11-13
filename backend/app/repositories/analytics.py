@@ -699,16 +699,19 @@ class AnalyticsRepository:
     ) -> list[dict]:
         limit = min(limit, 100)
 
-        # S20 전수스캔(산티아고 SME fast-follow, sibling — reward.py:leaderboard와 동형):
-        # reward_balances 뷰는 org_id 컬럼이 없어 SQL 필터 불가·caller가 project_id를 caller
-        # org 소속인지 사전 검증해야 한다(현재 미라우팅 dead code지만 향후 재배선 landmine 방지).
+        # story 4912 (PO 11-13): same as reward.py's leaderboard — the all-time board is the ledger's sum (the `reward_balances` view was never created by alembic: 500 on every alembic-built database).
+        # (No caller routes to this method today; it is kept correct so a later re-wiring does not inherit the missing view — and its cursor clause, which used to be appended after ORDER BY, is a HAVING now.)
         if period == "all":
-            q = "SELECT member_id, balance FROM reward_balances WHERE project_id = :pid ORDER BY balance DESC"
-            params: dict = {"pid": str(project_id), "lim": limit}
+            q = (
+                "SELECT member_id, CAST(SUM(amount) AS float) AS balance FROM reward_ledger"
+                " WHERE project_id = :pid AND org_id = :org_id"
+                " GROUP BY member_id"
+            )
+            params: dict = {"pid": str(project_id), "org_id": str(self.org_id), "lim": limit}
             if cursor:
-                q += " AND balance < :cursor"
+                q += " HAVING SUM(amount) < :cursor"
                 params["cursor"] = float(cursor)
-            q += " LIMIT :lim"
+            q += " ORDER BY balance DESC, member_id LIMIT :lim"
             result = await self.session.execute(text(q), params)
             return [{"member_id": r[0], "balance": float(r[1])} for r in result.all()]
 
