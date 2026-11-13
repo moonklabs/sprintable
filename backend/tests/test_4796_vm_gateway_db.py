@@ -448,7 +448,7 @@ def test_the_compose_service_is_a_second_postgres_of_its_own_published_on_the_pr
     doc = yaml.safe_load((_VM / "compose.yml").read_text())
     compose = doc["services"]
     gw = compose["gateway-db"]
-    assert gw["image"] == compose["db"]["image"] == "pgvector/pgvector:pg15", "the image already on the VM, same major as the application's"
+    assert gw["image"] == compose["db"]["image"] == "pgvector/pgvector:pg15@sha256:47af0b65960b14f1c6945aa4ccae37836c632e9a6fe0eea9160936e616e5b2e9", "the image already on the VM (pinned by digest, story 4917), same major as the application's"
     assert gw["profiles"] == ["gateway-db"] and gw["restart"] == "no"
     assert gw["ports"] == ["${GATEWAY_DB_BIND:-127.0.0.1}:5432:5432"], "the private address the deployer reads, or the loopback address — never all interfaces"
     assert gw["volumes"][0] == "${DATA_DIR:?}/gateway-postgres:/var/lib/postgresql/data" and compose["db"]["volumes"] == ["${DATA_DIR:?}/postgres:/var/lib/postgresql/data"], "its own data folder"
