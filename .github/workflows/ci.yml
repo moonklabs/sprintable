@@ -285,7 +285,10 @@ jobs:
       postgres:
         # pgvector image: the baseline schema declares `CREATE EXTENSION vector` (embeddings),
         # which the stock postgres:16 image lacks. Cloud SQL (dev/prod) has pgvector available.
-        image: pgvector/pgvector:pg16
+        # Pinned by DIGEST (PG 16.15, the last image the whole suite was green on): the floating `pg16` tag moved to 16.16 on 2026-11-12 23:08Z and the schema-dump comparisons
+        # (test_3804 · test_4010) turned red with per-column `pg_attver=N` values — a tag that changes under us changes the test run. EVERY service image in this file uses this same
+        # digest (guard: backend/tests/test_ci_pgvector_image_pinned.py); to move to a newer image, change the digest in one PR and watch the dump comparisons.
+        image: pgvector/pgvector:pg16@sha256:0dd3149a06e4579a0d70d8fef9945636cd514005e7237deb27f9b67886f8dc4f
         env:
           POSTGRES_USER: sprintable
           POSTGRES_PASSWORD: sprintable
@@ -427,7 +430,7 @@ jobs:
 
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg16@sha256:0dd3149a06e4579a0d70d8fef9945636cd514005e7237deb27f9b67886f8dc4f
         env:
           POSTGRES_USER: sprintable
           POSTGRES_PASSWORD: sprintable
@@ -1064,7 +1067,7 @@ jobs:
 
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg16@sha256:0dd3149a06e4579a0d70d8fef9945636cd514005e7237deb27f9b67886f8dc4f
         env:
           POSTGRES_USER: sprintable
           POSTGRES_PASSWORD: sprintable
@@ -1256,7 +1259,7 @@ jobs:
 
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg16@sha256:0dd3149a06e4579a0d70d8fef9945636cd514005e7237deb27f9b67886f8dc4f
         env:
           POSTGRES_USER: sprintable
           POSTGRES_PASSWORD: sprintable
@@ -1616,7 +1619,7 @@ jobs:
       shards: ${{ steps.plan.outputs.shards }}
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg16@sha256:0dd3149a06e4579a0d70d8fef9945636cd514005e7237deb27f9b67886f8dc4f
         env:
           POSTGRES_USER: sprintable
           POSTGRES_PASSWORD: sprintable
@@ -1683,7 +1686,7 @@ jobs:
       postgres:
         # pgvector image: the baseline schema declares `CREATE EXTENSION vector` (embeddings),
         # which the stock postgres:16 image lacks. Cloud SQL (dev/prod) has pgvector available.
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg16@sha256:0dd3149a06e4579a0d70d8fef9945636cd514005e7237deb27f9b67886f8dc4f
         env:
           POSTGRES_USER: sprintable
           POSTGRES_PASSWORD: sprintable
@@ -1969,7 +1972,7 @@ jobs:
     # 재사용 — 비용은 미미(gateway 마이그레이션 3~4개뿐, 수 초).
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg16@sha256:0dd3149a06e4579a0d70d8fef9945636cd514005e7237deb27f9b67886f8dc4f
         env:
           POSTGRES_USER: sprintable
           POSTGRES_PASSWORD: sprintable
@@ -2743,7 +2746,7 @@ jobs:
     # 세우고, 그 위에 FastAPI(uvicorn)와 Next(dev)를 띄운 뒤 chromium을 돌린다. docs/contrast-guard.md 참조.
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg16@sha256:0dd3149a06e4579a0d70d8fef9945636cd514005e7237deb27f9b67886f8dc4f
         env:
           POSTGRES_USER: sprintable
           POSTGRES_PASSWORD: sprintable
