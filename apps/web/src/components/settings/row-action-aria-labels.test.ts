@@ -46,7 +46,6 @@ const CASES: { namespace: string; key: string; ko: string[]; en: string[] }[] = 
   // 만들지 않고 키 자체를 하나(rowActionAriaLabel)로 합쳐 겹칠 쌍을 구조적으로 없앤다
   // (접근 이름을 가르는 건 {label} 표본 자체).
   { namespace: 'insightsBoard', key: 'rowActionAriaLabel', ko: ['후속 조치', '원본과 대조'], en: ['Follow-up', 'Reconcile with source'] },
-  { namespace: 'agentRuns', key: 'openDetailAriaLabel', ko: ['상세 보기'], en: ['Open detail'] },
   // story #3606(잔여, 페드루 PO 確定 2026-09-07) — gateApprove(HITL 승인)·primaryLabel
   // (일반/서명 승인 둘 다)도 같은 map·같은 gateRowActionAriaLabel 재사용으로 마감.
   { namespace: 'cage', key: 'gateRowActionAriaLabel', ko: ['반려', '변경 요청', '보류(논의 필요)', '승인', '승인하고 서명'], en: ['Reject', 'Approve', 'Approve & sign'] },
