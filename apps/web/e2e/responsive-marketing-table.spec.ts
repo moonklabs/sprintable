@@ -36,7 +36,7 @@ interface RouteSpec {
 //     muted 문구로 뜨는 상태(예: hosted_site라 채널 미제공, 또는 아직 집계 전) — 이게
 //     원 결함(char-split)의 진앙이라 반드시 필요하다(스토리 근거 §insights-board 390·768).
 const ROUTES: RouteSpec[] = [
-  { path: '/content', label: '블로그 포스트 목록', rowTestId: 'content-list-row' },
+  // 4913 D물결: 블로그 포스트 목록은 «한 쪽 틀»의 행 목록(RowList)이 됐다 — 표/카드 두 DOM 계약이 없다. 그 화면의 넘침 · 잘림은 org-frame.4913.layout.spec.ts가 잰다.
   { path: '/content/channel-posts', label: '채널 포스트 목록', rowTestId: 'channel-posts-list-row' },
   {
     path: '/organization/insights-board', label: '성과 보드', rowTestId: 'insights-board-row',

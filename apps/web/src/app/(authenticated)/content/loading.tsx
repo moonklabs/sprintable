@@ -1,8 +1,14 @@
-// story #4274(E-MOBILE-SPEED · 민 기기 배포 27) — loading.tsx가 없는 탭 · 메뉴 목적지는 누른 뒤 서버 응답(RSC 450~670ms)을 다 받을 때까지
-// 화면이 안 바뀌었다(«탭→주소» 536~1000ms · 있는 결재 · 대화는 44~193ms). 결재(inbox/loading.tsx)와 같은 문법의 스켈레톤으로 즉시 반응.
-// 블로그 포스트 · 채널 포스트(이 아래 전부).
-import { PageSkeleton } from '@/components/ui/page-skeleton';
+// 4913(UI-R5 D물결) — 블로그 포스트 «한 쪽 틀» 로딩: 도착 화면과 같은 틀(OrgScreenLoading = PageFrame wide) + 불러오는 동안 위 막대 제목을 폴백으로 쥔다(story #4326).
+// 이 폴더의 loading.tsx는 아래 `channel-posts` · `[draftId]`도 덮는다 — 제목 폴백은 도착 주소의 마지막 조각이 `content`일 때(= 목록 자체)만 선다(RouteTopBarFallback).
+// 채널 포스트는 자기 loading.tsx(옛 스켈레톤)를 따로 둔다 — 그 화면을 틀로 옮길 때 같이 바뀐다.
+import { RouteTopBarFallback } from '@/components/nav/flat-tab-top-bar';
+import { OrgScreenLoading } from '@/components/organization/org-screen-loading';
 
 export default function Loading() {
-  return <PageSkeleton className="mx-auto w-full max-w-5xl space-y-6 p-6" />;
+  return (
+    <>
+      <RouteTopBarFallback route="content" />
+      <OrgScreenLoading width="wide" />
+    </>
+  );
 }

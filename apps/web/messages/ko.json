@@ -3090,8 +3090,6 @@
     "statusTabAll": "전체",
     "statusTabEmpty": "이 탭에 해당하는 글이 없어요",
     "approvalRequestViewCta": "승인 요청 보기",
-    "columnTitle": "제목",
-    "columnStatus": "상태",
     "columnVersion": "버전",
     "columnOriginAuthor": "작성자",
     "columnAuthor": "최종 수정자",
