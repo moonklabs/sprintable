@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
-import { CONNECTION_LABEL_KEY, RecipeCardGrid, RecipeGallery } from './recipe-gallery';
+import { CONNECTION_LABEL_KEY, RecipeList } from './recipe-gallery';
 import { RECIPE_CONNECTION_TARGETS } from '@/lib/recipe-role-slots';
 import { VIDEO_PRODUCTION_RECIPE } from '@/lib/video-production-seed.test.fixture';
 import type { EventDefinitionResponse } from '@/components/loops/loop-create-dialog';
@@ -50,95 +50,141 @@ const MARKETING_RECIPE: EventDefinitionResponse = {
   enabled: true,
 };
 
-const WORKFLOW_RECIPE: EventDefinitionResponse = {
-  id: 'wf-1', key: 'preset.workflow.dev_flow', org_id: null,
-  name: '3단계 스크럼', description: null,
-  payload_schema: {}, stage_metadata: {}, enabled: true,
-};
 
-describe('RecipeGallery — 마케팅/워크플로 탭 분리(AC1)', () => {
-  it('마케팅 탭이 기본 활성이고 카드에 단계/게이트 수 배지가 뜬다', async () => {
-    await act(async () => {
-      root.render(wrap(
-        <RecipeGallery marketingRecipes={[MARKETING_RECIPE]} workflowRecipes={[WORKFLOW_RECIPE]} loading={false} error={null} />,
-      ));
-    });
+async function renderList(node: React.ReactNode) {
+  await act(async () => { root.render(wrap(node)); });
+}
+function rowOf(id: string): HTMLElement {
+  return container.querySelector(`[data-testid="recipe-card-${id}"]`) as HTMLElement;
+}
+async function openRowMenu(id: string) {
+  const more = rowOf(id).querySelector('[data-slot="ds-row-actions-trigger"]') as HTMLElement;
+  await act(async () => { more.click(); });
+}
+function menuItems(): HTMLElement[] {
+  return [...document.body.querySelectorAll('[role="menuitem"]')] as HTMLElement[];
+}
+
+// 4913 C2 — 3열 카드 격자 → 한 패널 안 행 목록(RowList). 보이는 것은 그대로, 상세(역할·연결)는 펼침 안으로.
+describe('RecipeList — 행 목록(story #4048 AC1 계약 + 4913 C2)', () => {
+  it('한 패널 안 RowList — 행마다 이름 · 설명 · 단계/게이트 수 칩이 줄에 뜬다', async () => {
+    await renderList(<RecipeList recipes={[MARKETING_RECIPE]} loading={false} error={null} emptyMessage="-" ariaLabel="마케팅 워크플로우" />);
+    const list = container.querySelector('[data-testid="recipe-list"]')!;
+    expect(list.getAttribute('data-slot')).toBe('ds-row-list');
+    expect(list.querySelector('[role="list"]')?.getAttribute('aria-label')).toBe('마케팅 워크플로우');
+    expect(list.querySelectorAll('[role="listitem"]')).toHaveLength(1);
     // story #4202 — 플랫폼 프리셋은 원문 name이 아니라 messages(recipePreset) 문안으로 그린다.
-    expect(container.textContent).toContain(koMessages.recipePreset.videoProductionName);
-    expect(container.textContent).toContain('마케팅 워크플로우');
-    expect(container.textContent).toContain('개발 워크플로');
-    expect(container.textContent).toMatch(/단계\s*3/);
-    expect(container.textContent).toMatch(/게이트\s*1/);
+    const row = rowOf('mkt-1');
+    expect(row.textContent).toContain(koMessages.recipePreset.videoProductionName);
+    expect(row.textContent).toMatch(/단계\s*3/);
+    expect(row.textContent).toMatch(/게이트\s*1/);
     // story #4173 — 역할 수 배지는 뺐다(역할 이름 행과 중복, 유나 앵커 §1).
-    expect(container.textContent).not.toMatch(/역할\s*3/);
+    expect(row.textContent).not.toMatch(/역할\s*3/);
+    // 옛 격자는 없다.
+    expect(container.querySelector('[class*="grid-cols-3"], [class*="lg:grid-cols"]')).toBeNull();
   });
 
-  it('apply/detail 버튼이 그 레시피 객체로 콜백을 부른다', async () => {
+  it('«프로젝트에 적용» = 행 오른쪽 단추 → 그 레시피 객체로 onApply', async () => {
     const onApply = vi.fn();
-    const onViewDetail = vi.fn();
-    await act(async () => {
-      root.render(wrap(
-        <RecipeGallery
-          marketingRecipes={[MARKETING_RECIPE]} workflowRecipes={[]} loading={false} error={null}
-          onApply={onApply} onViewDetail={onViewDetail}
-        />,
-      ));
-    });
-    const buttons = [...container.querySelectorAll('button')];
-    const applyBtn = buttons.find((b) => b.textContent === '프로젝트에 적용');
-    const detailBtn = buttons.find((b) => b.textContent === '상세 보기');
-    await act(async () => { applyBtn!.click(); });
-    await act(async () => { detailBtn!.click(); });
+    await renderList(<RecipeList recipes={[MARKETING_RECIPE]} loading={false} error={null} emptyMessage="-" ariaLabel="x" onApply={onApply} />);
+    const applyBtn = [...rowOf('mkt-1').querySelectorAll('button')].find((b) => b.textContent === '프로젝트에 적용')!;
+    await act(async () => { applyBtn.click(); });
     expect(onApply).toHaveBeenCalledWith(MARKETING_RECIPE);
+  });
+
+  it('«상세 보기» = «⋯» 메뉴 항목 → 그 레시피 객체로 onViewDetail (행 줄에는 «상세 보기» 글자 단추가 없다)', async () => {
+    const onViewDetail = vi.fn();
+    await renderList(<RecipeList recipes={[MARKETING_RECIPE]} loading={false} error={null} emptyMessage="-" ariaLabel="x" onViewDetail={onViewDetail} />);
+    expect([...rowOf('mkt-1').querySelectorAll('button')].some((b) => b.textContent === '상세 보기')).toBe(false);
+    await openRowMenu('mkt-1');
+    const items = menuItems();
+    expect(items.map((i) => i.textContent)).toEqual(['상세 보기']);
+    await act(async () => { items[0]!.click(); });
     expect(onViewDetail).toHaveBeenCalledWith(MARKETING_RECIPE);
   });
 
-  it('로딩·에러·빈 상태 문구가 각각 뜬다(회귀 0 — 셋 다 다른 조건)', async () => {
-    await act(async () => { root.render(wrap(<RecipeGallery marketingRecipes={[]} workflowRecipes={[]} loading error={null} />)); });
-    expect(container.textContent).toContain('불러오는 중');
-
-    await act(async () => { root.render(wrap(<RecipeGallery marketingRecipes={[]} workflowRecipes={[]} loading={false} error="boom" />)); });
-    expect(container.textContent).toContain('워크플로우를 불러오지 못했어요');
-
-    await act(async () => { root.render(wrap(<RecipeGallery marketingRecipes={[]} workflowRecipes={[]} loading={false} error={null} />)); });
-    expect(container.textContent).toContain('표시할 워크플로우가 없어요');
+  it('우클릭 메뉴도 «⋯»와 같은 항목(상세 보기)', async () => {
+    const onViewDetail = vi.fn();
+    await renderList(<RecipeList recipes={[MARKETING_RECIPE]} loading={false} error={null} emptyMessage="-" ariaLabel="x" onViewDetail={onViewDetail} />);
+    const trigger = rowOf('mkt-1').querySelector('[data-slot="ds-row-context-trigger"]') as HTMLElement;
+    await act(async () => { trigger.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 })); });
+    expect(menuItems().map((i) => i.textContent)).toEqual(['상세 보기']);
   });
 
-  it('개발 워크플로 탭도 로딩·에러 상태를 처리한다(페드루 QA #4424 qa:changes 재현 — 수정 前엔 바로 빈목록 문구)', async () => {
-    async function switchToWorkflowTab() {
-      const trigger = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent?.includes('개발 워크플로'))!;
-      await act(async () => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    }
+  it('핸들러를 안 주면 단추도 메뉴도 안 그린다(읽기 전용 호출부)', async () => {
+    await renderList(<RecipeList recipes={[MARKETING_RECIPE]} loading={false} error={null} emptyMessage="-" ariaLabel="x" />);
+    expect([...rowOf('mkt-1').querySelectorAll('button')].some((b) => b.textContent === '프로젝트에 적용')).toBe(false);
+    expect(rowOf('mkt-1').querySelector('[data-slot="ds-row-actions-trigger"]')).toBeNull();
+  });
 
-    await act(async () => { root.render(wrap(<RecipeGallery marketingRecipes={[]} workflowRecipes={[]} loading error={null} />)); });
-    await switchToWorkflowTab();
+  it('행을 펼치면 역할 · 연결이 뜨고, 한 번에 하나만 열린다', async () => {
+    const other = { ...MARKETING_RECIPE, id: 'mkt-2', key: 'preset.marketing.other', name: '다른 레시피' };
+    await renderList(<RecipeList recipes={[MARKETING_RECIPE, other]} loading={false} error={null} emptyMessage="-" ariaLabel="x" />);
+    expect(container.querySelector('[data-testid="recipe-card-roles"]')).toBeNull();
+    const chevron = (id: string) => rowOf(id).querySelector('button[aria-expanded]') as HTMLElement;
+    expect(chevron('mkt-1').getAttribute('aria-expanded')).toBe('false');
+    await act(async () => { chevron('mkt-1').click(); });
+    expect(chevron('mkt-1').getAttribute('aria-expanded')).toBe('true');
+    expect(rowOf('mkt-1').querySelector('[data-testid="recipe-card-roles"]')).not.toBeNull();
+    await act(async () => { chevron('mkt-2').click(); });
+    expect(chevron('mkt-1').getAttribute('aria-expanded')).toBe('false');
+    expect(rowOf('mkt-1').querySelector('[data-testid="recipe-card-roles"]')).toBeNull();
+    expect(rowOf('mkt-2').querySelector('[data-testid="recipe-card-roles"]')).not.toBeNull();
+  });
+
+  it('더블클릭 · Enter = 행 펼침(Enter 한 번 더 = 접힘 · Esc = 접힘) — 행 안 단추를 더블클릭한 것은 펼침이 아니다', async () => {
+    await renderList(<RecipeList recipes={[MARKETING_RECIPE]} loading={false} error={null} emptyMessage="-" ariaLabel="x" onApply={() => {}} />);
+    const main = rowOf('mkt-1').querySelector('[data-row-main]') as HTMLElement;
+    const roles = () => rowOf('mkt-1').querySelector('[data-testid="recipe-card-roles"]');
+    const apply = [...rowOf('mkt-1').querySelectorAll('button')].find((b) => b.textContent === '프로젝트에 적용')!;
+    await act(async () => { apply.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true })); });
+    expect(roles()).toBeNull();
+    await act(async () => { main.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true })); });
+    expect(roles()).not.toBeNull();
+    const key = (k: string) => act(async () => { main.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); });
+    await key('Escape');
+    expect(roles()).toBeNull();
+    await key('Enter');
+    expect(roles()).not.toBeNull();
+    await key('Enter');
+    expect(roles()).toBeNull();
+  });
+
+  it('로딩 · 에러 · 빈 상태 문구가 각각 뜬다(회귀 0 — 셋 다 다른 조건)', async () => {
+    await renderList(<RecipeList recipes={[]} loading error={null} emptyMessage="표시할 워크플로우가 없어요" ariaLabel="x" />);
     expect(container.textContent).toContain('불러오는 중');
-    expect(container.textContent).not.toContain('표시할 개발 워크플로우가 없어요');
+    expect(container.querySelector('[role="status"][aria-busy="true"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="recipe-list"]')).toBeNull();
 
-    await act(async () => { root.render(wrap(<RecipeGallery marketingRecipes={[]} workflowRecipes={[]} loading={false} error="boom" />)); });
-    await switchToWorkflowTab();
+    await renderList(<RecipeList recipes={[]} loading={false} error="boom" emptyMessage="표시할 워크플로우가 없어요" ariaLabel="x" />);
     expect(container.textContent).toContain('워크플로우를 불러오지 못했어요');
-    expect(container.textContent).not.toContain('표시할 개발 워크플로우가 없어요');
+    expect(container.textContent).not.toContain('표시할 워크플로우가 없어요');
 
-    await act(async () => { root.render(wrap(<RecipeGallery marketingRecipes={[]} workflowRecipes={[]} loading={false} error={null} />)); });
-    await switchToWorkflowTab();
-    expect(container.textContent).toContain('표시할 개발 워크플로우가 없어요');
+    await renderList(<RecipeList recipes={[]} loading={false} error={null} emptyMessage="표시할 워크플로우가 없어요" ariaLabel="x" />);
+    expect(container.textContent).toContain('표시할 워크플로우가 없어요');
+    expect(container.querySelector('[data-testid="recipe-list"]')).toBeNull();
   });
 });
 
 // story #4173(유나 디자인 앵커 2026-09-23) — 카드가 필요한 역할 이름·필요한 연결을 보여준다.
 // 역할 순서는 적용 다이얼로그 자리와 같은 함수(사람 먼저 → 흐름 순서).
-describe('RecipeCardGrid — 역할·연결 행(story #4173)', () => {
+describe('RecipeList — 역할·연결 행(story #4173, 펼침 안)', () => {
   async function renderCards(recipes: EventDefinitionResponse[]) {
     await act(async () => {
-      root.render(wrap(<RecipeCardGrid recipes={recipes} loading={false} error={null} emptyMessage="-" />));
+      root.render(wrap(<RecipeList recipes={recipes} loading={false} error={null} emptyMessage="-" ariaLabel="x" />));
     });
-    return (id: string) => ({
-      roles: container.querySelector(`[data-testid="recipe-card-${id}"] [data-testid="recipe-card-roles"]`)?.textContent,
-      connections: container.querySelector(`[data-testid="recipe-card-${id}"] [data-testid="recipe-card-connections"]`)?.textContent,
-    });
+    // 역할 · 연결은 행 펼침 안 — 모든 행을 차례로 펼쳐 읽는다(한 번에 하나만 열려서 id마다 따로).
+    const read = new Map<string, { roles?: string | null; connections?: string | null }>();
+    for (const r of recipes) {
+      const chevron = rowOf(r.id).querySelector('button[aria-expanded]') as HTMLElement;
+      await act(async () => { chevron.click(); });
+      read.set(r.id, {
+        roles: rowOf(r.id).querySelector('[data-testid="recipe-card-roles"]')?.textContent,
+        connections: rowOf(r.id).querySelector('[data-testid="recipe-card-connections"]')?.textContent,
+      });
+    }
+    return (id: string) => read.get(id)!;
   }
-
   const BLOG: EventDefinitionResponse = {
     id: 'blog', key: 'preset.marketing.blog_post', org_id: null, name: '블로그 글', description: null,
     payload_schema: { properties: { stage: { enum: ['draft', 'review', 'published'] } } },
@@ -205,12 +251,12 @@ describe('연결 라벨 표 완전성(story #4173)', () => {
 });
 
 // story #4202 — 플랫폼 프리셋 이름·설명은 로케일 문안(messages recipePreset), 조직 커스텀 정의는 원문.
-describe('RecipeCardGrid — 플랫폼 프리셋 이름·설명 로케일(story #4202)', () => {
+describe('RecipeList — 플랫폼 프리셋 이름·설명 로케일(story #4202)', () => {
   async function renderGrid(recipe: EventDefinitionResponse, locale: 'ko' | 'en') {
     await act(async () => {
       root.render(
         <NextIntlClientProvider locale={locale} messages={locale === 'ko' ? koMessages : enMessages} timeZone="Asia/Seoul">
-          <RecipeCardGrid recipes={[recipe]} loading={false} error={null} emptyMessage="" />
+          <RecipeList recipes={[recipe]} loading={false} error={null} emptyMessage="" ariaLabel="x" />
         </NextIntlClientProvider>,
       );
     });

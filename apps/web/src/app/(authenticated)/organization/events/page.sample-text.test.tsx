@@ -63,10 +63,11 @@ describe.each([
       return { ok: true, json: async () => ({}) };
     }));
     const { default: OrganizationEventsPage } = await import('./page');
+    const { TopBarProvider } = await import('@/components/nav/top-bar-context'); // 4913 C2 — 화면 제목이 위 막대로 간다(화면과 같은 모듈 번)
     await act(async () => {
       root.render(
         <NextIntlClientProvider locale={locale} messages={messages} timeZone="Asia/Seoul">
-          <OrganizationEventsPage />
+          <TopBarProvider><OrganizationEventsPage /></TopBarProvider>
         </NextIntlClientProvider>,
       );
     });

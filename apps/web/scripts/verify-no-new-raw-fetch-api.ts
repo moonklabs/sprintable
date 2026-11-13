@@ -127,7 +127,7 @@ export const GRANDFATHER_BASELINE = new Set<string>([
   'app/(authenticated)/inbox/page.tsx::/api/notifications',
   'app/(authenticated)/inbox/page.tsx::/api/team-members/',
   'app/(authenticated)/organization/events/page.tsx::/api/events/definitions/',
-  'app/(authenticated)/organization/events/page.tsx::/api/events/publish',
+  'components/organization/event-definition-dialogs.tsx::/api/events/publish',
   'app/(authenticated)/organization/roles/page.tsx::/api/org-members/',
   'app/(authenticated)/organization/trust/trust-utils.tsx::/api/trust-scores/history?member_id=',
   'app/(authenticated)/organization/workforce/[id]/page.tsx::/api/webhooks/config',
