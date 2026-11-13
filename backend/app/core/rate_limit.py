@@ -24,16 +24,23 @@ def _rate_key_client_ip_only(request: Request) -> str:
 
     The address is `client_ip` (the front end's word with the shared secret, or the front door's overwritten X-Forwarded-For) folded by `fold_ip` (IPv6 → its /64). One line is logged per request:
     a short hash of the key and the way the address was decided (edge · xff · cf · socket) — never the address. A `socket` that is common means the deployment's settings are wrong."""
-    cached = getattr(request.state, "_rate_ip_key", None)
+    # tolerant of a request that is only the minimum a direct-call test builds (`client` + `headers`): no `state` (no cache then), no `scope`, no `method`
+    state = getattr(request, "state", None)
+    cached = getattr(state, "_rate_ip_key", None) if state is not None else None
     if cached is not None:
         return cached
     from app.core.client_ip import client_ip_with_source, fold_ip
 
     ip, via = client_ip_with_source(request)
     key = fold_ip(ip)
-    request.state._rate_ip_key = key
-    route = request.scope.get("route")
-    logger.info("rate_limit.key id=%s via=%s method=%s route=%s", _key_id(key), via, request.method, getattr(route, "path", None) or "?")  # the route template (/legal/{doc_type}), never the raw path a client typed
+    if state is not None:
+        try:
+            state._rate_ip_key = key
+        except Exception:  # noqa: BLE001 — a state object that refuses attributes just means no cache
+            pass
+    scope = getattr(request, "scope", None)
+    route = scope.get("route") if isinstance(scope, dict) else None
+    logger.info("rate_limit.key id=%s via=%s method=%s route=%s", _key_id(key), via, getattr(request, "method", "?"), getattr(route, "path", None) or "?")  # the route template (/legal/{doc_type}), never the raw path a client typed
     return key
 
 
@@ -123,7 +130,10 @@ REFRESH_PERSON_LIMIT = "60/minute"
 
 
 def hit_refresh_person_limit(user_id: str) -> int | None:
-    """None = allowed; otherwise the seconds until a retry can pass."""
+    """None = allowed; otherwise the seconds until a retry can pass. Follows the shared limiter's switch (`limiter.enabled` — off under pytest, on everywhere else), like every other limit on the route: a test that
+    switches the address limiter off (a dozen real-DB files do, and some rotate one person's token 64–70 times in a row on purpose) switches this off with it."""
+    if not limiter.enabled:
+        return None
     return hit_person_limits("auth.refresh", user_id, REFRESH_PERSON_LIMIT)
 
 

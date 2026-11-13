@@ -77,7 +77,8 @@ def client_ip_with_source(request: Request) -> tuple[str, str]:
     if _behind_trusted_front():
         # several header LINES (not only several comma-separated entries) are possible: the front door appends its own line last, so the last line's last entry is the connecting address
         # (`headers.get()` would return the FIRST line — the one a client can send)
-        lines = request.headers.getlist("x-forwarded-for")
+        getlist = getattr(request.headers, "getlist", None)
+        lines = getlist("x-forwarded-for") if getlist else ([request.headers["x-forwarded-for"]] if "x-forwarded-for" in request.headers else [])
         xff = lines[-1] if lines else ""
         connecting = _valid_ip(xff.rsplit(",", 1)[-1]) if xff else None
         if connecting:

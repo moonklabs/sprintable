@@ -250,12 +250,16 @@ async def _post_refresh(token: str, session, ip: str = "203.0.113.50"):
 
 
 @pytest.fixture(autouse=True)
-def _fresh_counts():
+def _fresh_counts(monkeypatch):
+    from app.core import rate_limit
     from app.core.rate_limit import reset_failed_logins, reset_person_limits
 
+    monkeypatch.setattr(rate_limit.limiter, "enabled", True)   # these tests ARE about the limits: pytest switches the shared limiter off by default
+    rate_limit.limiter.reset()
     reset_person_limits(); reset_failed_logins()
     yield
     reset_person_limits(); reset_failed_logins()
+    rate_limit.limiter.reset()
 
 
 @pytest.mark.anyio
@@ -380,11 +384,39 @@ def test_failures_older_than_the_window_are_forgotten(on_vm_behind_caddy):
     assert note_failed_login(req, "late@example.test", now=1000.0 + 601) == 1
 
 
-def test_the_oauth_handoff_counts_the_same_address_unit(on_vm_behind_caddy):
-    from app.routers.auth_firebase_internal import _client_ip
+def test_the_oauth_handoff_counts_a_folded_address_but_its_audit_keeps_the_real_one(on_vm_behind_caddy):
+    from app.routers.auth_firebase_internal import _client_ip, _handoff_rate_key
 
-    assert _client_ip(_request({"X-Forwarded-For": "203.0.113.9"})) == "203.0.113.9"
-    assert _client_ip(_request({"X-Forwarded-For": "2001:db8:1:2::7"})) == "2001:db8:1:2::/64"
+    v4 = _request({"X-Forwarded-For": "203.0.113.9"})
+    v6 = _request({"X-Forwarded-For": "2001:db8:1:2::7"})
+    assert _client_ip(v4) == "203.0.113.9" and _client_ip(v6) == "2001:db8:1:2::7"     # the audit line: the exact address
+    assert _handoff_rate_key(v4, "issue") == "oauth_handoff_custom_scheme_issue:203.0.113.9"
+    assert _handoff_rate_key(v6, "issue") == "oauth_handoff_custom_scheme_issue:2001:db8:1:2::/64"   # the count: the person-sized unit
+
+
+def test_the_key_function_runs_for_a_request_that_is_only_a_client_and_headers():
+    """the direct-call tests (test_1931 · test_cbd578d4) build a request with nothing but `client` and a plain-dict `headers`: no state · scope · method · getlist"""
+    from app.core.rate_limit import _rate_key_client_ip_only
+
+    class _Client:
+        host = "198.51.100.4"
+
+    class _Bare:
+        client = _Client()
+        headers: dict[str, str] = {}
+
+    assert _rate_key_client_ip_only(_Bare()) == "198.51.100.4"
+    assert _rate_key_client_ip_only(_Bare()) == "198.51.100.4"   # no state to cache on: computed again, same answer
+
+
+def test_a_plain_dict_headers_request_behind_a_trusted_front_reads_the_forwarded_address(on_vm_behind_caddy):
+    from app.core.rate_limit import _rate_key_client_ip_only
+
+    class _Bare:
+        client = type("_C", (), {"host": "172.18.0.5"})()
+        headers = {"x-forwarded-for": "1.2.3.4, 203.0.113.9"}
+
+    assert _rate_key_client_ip_only(_Bare()) == "203.0.113.9"
 
 
 def test_the_warning_is_written_once_per_window_not_on_every_failure_after_the_tenth(on_vm_behind_caddy, caplog):
@@ -457,3 +489,15 @@ def test_an_enormous_email_is_cut_before_it_is_hashed_and_counts_like_its_prefix
     base = "a" * _FAILED_LOGIN_EMAIL_MAX_CHARS
     assert note_failed_login(req, base, now=1000.0) == 1
     assert note_failed_login(req, base + "b" * 100_000, now=1001.0) == 1   # the same first 320 characters: the same account hash
+
+
+def test_the_person_count_follows_the_limiters_switch(monkeypatch):
+    """a test (or a deployment) that switches the shared limiter off switches the person count off with it; on, it counts"""
+    from app.core import rate_limit
+
+    person = str(uuid.uuid4())
+    monkeypatch.setattr(rate_limit.limiter, "enabled", False)
+    assert all(rate_limit.hit_refresh_person_limit(person) is None for _ in range(200))
+    monkeypatch.setattr(rate_limit.limiter, "enabled", True)
+    assert [rate_limit.hit_refresh_person_limit(person) for _ in range(60)] == [None] * 60
+    assert rate_limit.hit_refresh_person_limit(person) is not None

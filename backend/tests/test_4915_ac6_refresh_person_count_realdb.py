@@ -40,9 +40,11 @@ async def _dispose_global_engine_after_test():
 
 
 @pytest.fixture(autouse=True)
-def _fresh_person_counts():
+def _fresh_person_counts(monkeypatch):
+    from app.core import rate_limit
     from app.core.rate_limit import reset_person_limits
 
+    monkeypatch.setattr(rate_limit.limiter, "enabled", True)   # pytest switches the shared limiter (and with it the person count) off by default; this file is about the count
     reset_person_limits()
     yield
     reset_person_limits()
