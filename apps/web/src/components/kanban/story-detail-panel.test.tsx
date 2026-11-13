@@ -1037,7 +1037,7 @@ describe('StoryDetailPanel — 제목/설명/완료기준 저장 실패 시 문�
 
     const titleBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('원래 제목'));
     await act(async () => { titleBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const input = container.querySelector('input[data-slot="input"][data-testid="story-title-input"]') as HTMLInputElement;
+    const input = container.querySelector('input[data-slot="ds-input"][data-testid="story-title-input"]') as HTMLInputElement;
     await act(async () => { setNativeValue(input, '새 제목'); });
     const saveBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '저장');
     await act(async () => { saveBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
@@ -1595,7 +1595,7 @@ describe('StoryDetailPanel — 댓글 · 활동 작성자 동명이인([SID:4311
     const authors = [...container.querySelectorAll('li div.mt-2 > span:first-child')].map((el) => el.textContent);
     expect(authors).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '안나', '안나']);
     // 워크셀 대화(같은 댓글 목록)도 같은 표.
-    const workcell = [...container.querySelectorAll('span.whitespace-nowrap.font-semibold.text-proof-ink')].map((el) => el.textContent);
+    const workcell = [...container.querySelectorAll('span.whitespace-nowrap.font-semibold.text-ds-ink')].map((el) => el.textContent);
     expect(workcell).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '안나', '안나']);
   });
 

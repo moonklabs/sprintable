@@ -22,7 +22,7 @@ import { AttachmentFile } from '@/components/chat/attachment-file';
 import { EntityChip, getEntityHref } from '@/components/chat/embed-card';
 import { parseEntityRef } from '@/components/chat/entity-ref';
 import { ReferenceDropNotice, parseDroppedReferences, type DroppedReference } from '@/components/chat/reference-drop-notice';
-import { LabelChip, LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/label-chip';
+import { LABEL_PRESET_COLORS, type LabelData } from '@/components/ui/label-chip';
 import { DependencyGraph } from './dependency-graph';
 import { OutcomeResultCard, type OutcomeResult } from '@/components/outcome/outcome-result-card';
 import { StoryHypothesesSection } from '@/components/hypotheses/story-hypotheses-section';
@@ -51,19 +51,15 @@ import { EntityAwareTextarea } from '@/components/shared/entity-aware-textarea';
 import { EntityDispatchPanel } from '@/components/dispatch/entity-dispatch-panel';
 import { RecipeStartSection } from '@/components/kanban/recipe-start-section';
 import { PrLinkSection } from '@/components/integrations/pr-link-section';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ds/button';
 import { LAYER } from '@/components/ds/layers';
-import { Input } from '@/components/ui/input';
+import { Input, Textarea } from '@/components/ds/input';
 import { isImeComposing } from '@/lib/ime-composition';
-import { Textarea } from '@/components/ui/textarea';
 import { Chip } from '@/components/ds/chip';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ds/menu';
 import { COLUMNS } from './types';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  Dialog, DialogContent, DialogDescription,
-  DialogFooter, DialogHeader, DialogTitle,
-} from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ds/tabs';
+import { ConfirmDialog } from '@/components/ds/dialog';
 import { useToast } from '@/components/ui/toast';
 import { useSyntheticParentTabHistory } from '@/hooks/use-synthetic-parent-tab-history';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
@@ -145,9 +141,9 @@ interface StoryDetailPanelProps {
 }
 
 function taskTone(status: string) {
-  if (status === 'done') return 'bg-success';
-  if (status === 'in-progress') return 'bg-info'; // story #2023 ⓑ: 진행중=시스템 상태(L5), 브랜드 아님
-  return 'bg-background/20';
+  if (status === 'done') return 'bg-ds-done';
+  if (status === 'in-progress') return 'bg-ds-info'; // story #2023 ⓑ: 진행중=시스템 상태(L5), 브랜드 아님
+  return 'bg-ds-line-control';
 }
 
 // BE _MAX_STORY_ATTACHMENTS 정합 (schemas/story.py)
@@ -226,9 +222,9 @@ const descriptionViewerComponents = {
   ol: ({ children }: { children?: React.ReactNode }) => <ol className="mb-2 ml-4 list-decimal space-y-0.5 text-muted-foreground">{children}</ol>,
   li: ({ children }: { children?: React.ReactNode }) => <li className="text-sm leading-6">{children}</li>,
   // story #2165: 코드블럭은 전역 스크롤바 숨김 예외.
-  pre: ({ children }: { children?: React.ReactNode }) => <pre className="mb-2 overflow-x-auto scrollbar-visible rounded-lg bg-muted p-3 text-editorial-ui text-foreground">{children}</pre>,
-  code: ({ children }: { children?: React.ReactNode }) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-editorial-ui text-foreground">{children}</code>,
-  blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className="mb-2 border-l-2 border-border pl-3 text-muted-foreground">{children}</blockquote>,
+  pre: ({ children }: { children?: React.ReactNode }) => <pre className="mb-2 overflow-x-auto scrollbar-visible rounded-lg bg-ds-surface-sunk p-3 text-editorial-ui text-foreground">{children}</pre>,
+  code: ({ children }: { children?: React.ReactNode }) => <code className="rounded bg-ds-surface-sunk px-1 py-0.5 font-mono text-editorial-ui text-foreground">{children}</code>,
+  blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className="mb-2 border-l-2 border-ds-line pl-3 text-muted-foreground">{children}</blockquote>,
   // 긴급 정정(2026-07-28, PO 검수): description/AC 뷰어는 부모 div에 클릭=편집모드 진입
   // onClick이 걸려 있다(1093·1140줄) — 링크가 stopPropagation 없이 렌더돼 클릭이 그대로
   // 버블링, 링크가 새 탭으로 열리는 동시에 편집모드까지 열렸다. 링크 클릭은 여기서 끊는다.
@@ -245,7 +241,7 @@ const descriptionViewerComponents = {
   ),
   strong: ({ children }: { children?: React.ReactNode }) => <strong className="font-semibold text-foreground">{children}</strong>,
   em: ({ children }: { children?: React.ReactNode }) => <em className="italic text-muted-foreground">{children}</em>,
-  hr: () => <hr className="my-2 border-border" />,
+  hr: () => <hr className="my-2 border-ds-line" />,
 };
 
 // story #2269(C-11) AC0 — chat-bubble.tsx의 isGhostReference와 동형(레지스트리 분리 이유는
@@ -1576,11 +1572,11 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     <span className="inline-flex flex-wrap items-center gap-1 align-middle">
       {oldLabel != null ? (
         <>
-          <span className="min-h-5 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground line-through">{expand ? oldLabel : truncate(oldLabel)}</span>
+          <span className="min-h-5 rounded bg-ds-surface-sunk px-1.5 py-0.5 text-xs text-muted-foreground line-through">{expand ? oldLabel : truncate(oldLabel)}</span>
           <span className="text-muted-foreground">→</span>
         </>
       ) : null}
-      <span className="min-h-5 rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground">{expand ? newLabel : truncate(newLabel)}</span>
+      <span className="min-h-5 rounded bg-ds-surface-sunk px-1.5 py-0.5 text-xs font-medium text-foreground">{expand ? newLabel : truncate(newLabel)}</span>
     </span>
   );
   // [SID:4286 · 까디르 P1] id가 있는데 «—»이던 자리(아는 사람 · 모르는 사람 뭉갬) — id 없음만 «—».
@@ -1650,12 +1646,12 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
         // story #3007(로드맵 P2·PR-E, L1) — 모바일 시트/데스크톱 사이드시트 둘 다 floating이라
         // --elev-overlay.
         className={overlayPosition
-          ? `fixed inset-x-4 z-50 mx-auto max-w-xl overflow-hidden rounded-lg border border-border ${LAYER.panel} shadow-[var(--elev-overlay)] outline-none backdrop-blur-xl sm:inset-x-auto sm:right-4 sm:w-full`
+          ? `fixed inset-x-4 z-50 mx-auto max-w-xl overflow-hidden rounded-lg border border-ds-line ${LAYER.panel} shadow-[var(--elev-overlay)] outline-none backdrop-blur-xl sm:inset-x-auto sm:right-4 sm:w-full`
           : `fixed inset-0 z-50 ${LAYER.panel} shadow-[var(--elev-overlay)] outline-none backdrop-blur-xl lg:inset-y-0 lg:left-auto lg:right-0 lg:w-full lg:max-w-4xl lg:border-l lg:border-border`}
         style={overlayPosition ? { top: overlayPosition.top, height: overlayPosition.heightPx } : undefined}
       >
       <div className="flex h-full flex-col">
-        <div className="flex items-start justify-between border-b border-border p-5">
+        <div className="flex items-start justify-between border-b border-ds-line p-5">
           <div className="flex-1 space-y-2 pr-3">
             {story.story_number ? (
               <span className="block text-xs font-medium text-muted-foreground">#{story.story_number}</span>
@@ -1673,13 +1669,13 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     if (isImeComposing(e)) return;
                     if (e.key === 'Enter') void handleSaveTitle();
                   }}
-                  className="h-auto bg-muted px-2 py-1 text-lg font-semibold lg:text-lg dark:bg-muted"
+                  className="h-auto px-2 py-1 text-lg font-semibold lg:text-lg"
                 />
                 <div className="flex gap-2">
-                  <Button size="sm" onClick={handleSaveTitle} disabled={savingTitle || !titleDraft.trim()}>
+                  <Button variant="primary" onClick={handleSaveTitle} disabled={savingTitle || !titleDraft.trim()}>
                     {savingTitle ? t('loading') : t('save')}
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => { setEditingTitle(false); setTitleDraft(story.title); }}>
+                  <Button variant="quiet" onClick={() => { setEditingTitle(false); setTitleDraft(story.title); }}>
                     {t('cancel')}
                   </Button>
                 </div>
@@ -1687,7 +1683,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
             ) : (
               <Button
                 type="button"
-                variant="ghost"
+                variant="quiet"
                 // [SID:4362] 디자인 Button 기본이 whitespace-nowrap이라 제목이 한 줄로 패널 밖까지 늘었다(390에서 525px · 초점 링도 패널 밖) →
                 // 줄바꿈 허용 · 긴 낱말(경로 · URL)도 꺾음.
                 className="group h-auto min-h-0 w-full min-w-0 items-start justify-start gap-1 whitespace-normal p-0 text-left font-normal"
@@ -1698,10 +1694,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               </Button>
             )}
             <div className="flex items-center gap-2">
-              <DropdownMenu>
-                <DropdownMenuTrigger
+              <Menu>
+                <MenuTrigger
                   render={
-                    <Button type="button" variant="ghost" className="h-auto min-h-0 min-w-0 p-0" disabled={savingStatus} aria-label={t('status')}>
+                    <Button type="button" variant="quiet" className="h-auto min-h-0 min-w-0 p-0" disabled={savingStatus} aria-label={t('status')}>
                       {/* 4908 — 머리에서 가장 눈에 띄는 요소라 공용 Badge(눌린 거친 결)가 아니라 ds Chip(점 + 글 + 경계 ds-line · 결 없음)으로. 이 자리만 — 공용 Badge는 그대로. 메뉴의 ✓ 표시와 같은 낱말(statusLabel). */}
                       <Chip tone={STATUS_CHIP_TONE[localStatus] ?? 'neutral'} dot className="h-6 cursor-pointer px-2.5 transition hover:brightness-95" data-testid="story-detail-status-chip">
                         {statusLabel}
@@ -1710,24 +1706,24 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     </Button>
                   }
                 />
-                <DropdownMenuContent align="start">
+                <MenuContent align="start">
                   {COLUMNS.map((col) => {
                     const isCurrent = col.id === localStatus;
                     // 정공법 A(c1cd484b): 전이-순서 disable 제거 — 어느 상태로든 선택 가능(하드블록 X).
                     // 비정상 점프는 /status 응답 violation → 비차단 토스트로 가시화.
                     return (
-                      <DropdownMenuItem
+                      <MenuItem
                         key={col.id}
                         disabled={savingStatus || isCurrent}
                         onClick={() => { if (!isCurrent) void handleChangeStatus(col.id); }}
                       >
                         <Check className={`size-4 ${isCurrent ? '' : 'opacity-0'}`} />
                         {getStatusLabel?.(col.id) ?? t(statusKeyMap[col.id] ?? col.i18nKey)}
-                      </DropdownMenuItem>
+                      </MenuItem>
                     );
                   })}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                </MenuContent>
+              </Menu>
               {/* P0-04(trust-pipeline-minimal-decision) — in-flight 전용 신뢰 칩(입력 필요/병합
                   대기). done엔 렌더 0(TrustSeal 중복 방지)·무신호(gate 없음)면 칩 자체 미렌더. 5-status
                   배지는 무변경(순수 additive 오버레이). 칸반 카드엔 안 얹음(Proofline이 이미 담당).
@@ -1735,24 +1731,23 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   색 신호 그대로 KEEP(merge_ready=green·기타=amber) — 계열색 텍스트만 헤어라인 위에서
                   라이트 AA 미달이라 text-foreground로 이전(대비표 정본). */}
               {trustChip && trustChipLabel ? (
-                <span data-testid="story-detail-trust-chip" className="inline-flex items-center gap-1.5 rounded-xl border border-proof-line px-2 py-0.5 text-editorial-meta font-semibold text-foreground">
-                  <span className={`size-1.5 rounded-full ${trustChip === 'merge_ready' ? 'bg-proof-green' : 'bg-proof-amber'}`} aria-hidden="true" />
+                // 4908 — 옛 proof 헤어라인 칩 → ds Chip(점 + 낱말): 입력 필요 = 손 필요(needs-hand) · 병합 대기 = 끝남 쪽(done).
+                <Chip data-testid="story-detail-trust-chip" tone={trustChip === 'merge_ready' ? 'done' : 'needs-hand'} dot className="h-6 px-2.5">
                   {trustChipLabel}
-                </span>
+                </Chip>
               ) : null}
               {/* story #2258 AC2 — 검증요청: pending "qa" gate가 없을 때만 요청 버튼, 있으면 대기 배지. */}
               {chipGates.some((g) => g.gate_type === 'qa' && g.status === 'pending') ? (
-                <span className="inline-flex items-center gap-1.5 rounded-xl border border-proof-line px-2 py-0.5 text-editorial-meta font-semibold text-foreground">
-                  <span className="size-1.5 rounded-full bg-proof-amber" aria-hidden="true" />
+                <Chip tone="needs-hand" dot className="h-6 px-2.5">
                   {t('verificationPending')}
-                </span>
+                </Chip>
               ) : (
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="quiet"
                   onClick={() => void handleRequestVerification()}
                   disabled={requestingVerification}
-                  className="h-auto min-h-0 min-w-0 inline-flex items-center gap-1 rounded-xl border border-border bg-transparent px-2 py-0.5 text-editorial-meta font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
+                  className="h-auto min-h-0 min-w-0 inline-flex items-center gap-1 rounded-xl border border-ds-line bg-transparent px-2 py-0.5 text-editorial-meta font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
                 >
                   {requestingVerification ? t('loading') : t('requestVerification')}
                 </Button>
@@ -1782,7 +1777,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
             <HumanOnlyAction>
               <Button
                 type="button"
-                variant="ghost"
+                variant="quiet"
                 onClick={() => setShowDeleteConfirm(true)}
                 className="h-auto min-h-0 min-w-0 flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs text-foreground hover:bg-destructive-tint"
                 aria-label={t('deleteStory')}
@@ -1790,7 +1785,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
             </HumanOnlyAction>
-            <Button type="button" variant="ghost" onClick={onClose} className="h-auto min-h-0 min-w-0 rounded-md border border-border px-3 py-2 text-muted-foreground hover:text-foreground hover:bg-muted/50">✕</Button>
+            <Button type="button" variant="quiet" onClick={onClose} className="h-auto min-h-0 min-w-0 rounded-md border border-ds-line px-3 py-2 text-muted-foreground hover:text-foreground">✕</Button>
           </div>
         </div>
         {/* story #2528 — 전역 스크롤바 숨김(#2165) 하에선 스크롤은 되나 바가 안 보여 하단
@@ -1852,7 +1847,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 {!editingAssignee && (
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="quiet"
                     onClick={() => setEditingAssignee(true)}
                     className="h-auto min-h-0 min-w-0 p-0 text-xs font-normal text-muted-foreground hover:text-foreground"
                   >
@@ -1861,12 +1856,12 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 )}
               </div>
               {editingAssignee ? (
-                <div className="mt-1 flex flex-col gap-1 rounded-md border border-border bg-muted/30 p-1">
+                <div className="mt-1 flex flex-col gap-1 rounded-md border border-ds-line bg-ds-surface p-1">
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="quiet"
                     onClick={() => void handleClearAssignees()}
-                    className="h-auto min-h-0 w-full min-w-0 justify-start rounded px-2 py-1.5 text-left text-sm font-normal text-muted-foreground hover:bg-muted"
+                    className="h-auto min-h-0 w-full min-w-0 justify-start rounded px-2 py-1.5 text-left text-sm font-normal text-muted-foreground"
                   >
                     — {t('clearAssignees')}
                   </Button>
@@ -1885,12 +1880,12 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                       <Button
                         key={m.id}
                         type="button"
-                        variant="ghost"
+                        variant="quiet"
                         onClick={() => void handleToggleAssignee(m.id)}
                         aria-pressed={selected}
-                        className={`h-auto min-h-0 w-full min-w-0 items-center justify-start gap-2 whitespace-normal rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${selected ? 'font-medium text-foreground' : 'font-normal text-muted-foreground'}`}
+                        className={`h-auto min-h-0 w-full min-w-0 items-center justify-start gap-2 whitespace-normal rounded px-2 py-1.5 text-left text-sm ${selected ? 'font-medium text-foreground' : 'font-normal text-muted-foreground'}`}
                       >
-                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-micro font-medium text-foreground">
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ds-surface-sunk text-micro font-medium text-foreground">
                           {/* story #4284 — 이름 없는 구성원은 타입대로 아이콘(에이전트 Bot · 사람 User · UnnamedMemberIcon 정본 · 유나 판정). */}
                           {m.name ? firstGraphemes(m.name, 2).toUpperCase() : <UnnamedMemberIcon type={m.type} />}
                         </span>
@@ -1902,9 +1897,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   })}
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="quiet"
                     onClick={() => setEditingAssignee(false)}
-                    className="h-auto min-h-0 mt-1 w-full min-w-0 rounded px-2 py-1 text-center text-xs font-normal text-muted-foreground hover:bg-muted"
+                    className="h-auto min-h-0 mt-1 w-full min-w-0 rounded px-2 py-1 text-center text-xs font-normal text-muted-foreground"
                   >
                     {t('cancel')}
                   </Button>
@@ -1925,7 +1920,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
 
             {/* E-BOARD S1: Dispatch — assignee 인접(킥오프=assignee 선택 후 액션). EntityDispatchPanel 마운트만(신규 디자인 0). */}
             {projectId && (
-              <div className="rounded-lg border border-border bg-muted/20 p-3">
+              <div className="rounded-lg border border-ds-line bg-ds-surface p-3">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('dispatch')}</p>
                 <EntityDispatchPanel
                   entityType="story"
@@ -1960,9 +1955,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 </div>
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="quiet"
                   onClick={() => setShowLabelPicker((v) => !v)}
-                  className="h-auto min-h-0 min-w-0 rounded px-1.5 py-0.5 text-micro font-normal text-muted-foreground hover:bg-muted"
+                  className="h-auto min-h-0 min-w-0 rounded px-1.5 py-0.5 text-micro font-normal text-muted-foreground"
                 >
                   {showLabelPicker ? tc('close') : t('addGeneric')}
                 </Button>
@@ -1976,19 +1971,19 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     <div className="mb-2 flex flex-wrap gap-4 pt-3.5">
                       {storyLabels.map((label) => (
                         <span key={label.itemLabelId} className="group relative inline-flex max-w-full">
-                          <LabelChip label={label} className="max-w-full" />
+                          <Chip className="h-auto min-h-5 max-w-full py-0.5 font-sans text-xs text-ds-ink"><span aria-hidden="true" className="size-2 shrink-0 rounded-full" style={{ backgroundColor: label.color ?? LABEL_PRESET_COLORS[LABEL_PRESET_COLORS.length - 1] }} /><span className="min-w-0 truncate">{label.name}</span></Chip>
                           {/* story #4345 — 누르는 자리 24×24: 투명 버튼 안쪽 모서리에 예전 14px 원을 그대로 둔다(원 자리 · 크기 무변 · 칩 쪽으로 안 넓힘 —
                               모서리 자리 그대로 바깥쪽으로). 칩 줄 간격(gap · 위 여백)이 그 바깥 몫을 받아 옆 칩과 겹침 0. */}
                           <Button
                             type="button"
-                            variant="ghost"
+                            variant="quiet"
                             onClick={() => void handleDetachLabel(label.itemLabelId)}
                             className={cn('h-auto absolute -right-3.5 -top-3.5 rounded-full p-0 hover:bg-transparent', HOVER_REVEAL, HOVER_REVEAL_HIT, 'items-end justify-start')}
                             aria-label={t('removeItemAction', { item: label.name })}
                           >
                             {/* story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는 이 테마에 매핑이 없는 no-op.
                                 trust-seal.tsx 선례로 hover 상태도 테마별 반전(dark:). 이제 원이 안쪽 span이라 버튼 hover를 group으로 받는다. */}
-                            <span aria-hidden="true" className="flex size-3.5 items-center justify-center rounded-full bg-muted-foreground/20 text-foreground group-hover/button:bg-destructive/80 group-hover/button:text-on-scrim dark:group-hover/button:text-proof-bg">
+                            <span aria-hidden="true" className="flex size-3.5 items-center justify-center rounded-full bg-ds-ink-3/20 text-ds-ink group-hover/button:bg-ds-failed group-hover/button:text-ds-on-action">
                               <X className="size-2" />
                             </span>
                           </Button>
@@ -2000,7 +1995,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   )}
 
                   {showLabelPicker && (
-                    <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-2">
+                    <div className="space-y-2 rounded-lg border border-ds-line bg-ds-surface p-2">
                       {/* Existing org labels */}
                       {orgLabels.filter((l) => !storyLabels.some((sl) => sl.id === l.id)).length > 0 && (
                         <div className="flex flex-wrap gap-1">
@@ -2010,7 +2005,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                               <Button
                                 key={label.id}
                                 type="button"
-                                variant="ghost"
+                                variant="quiet"
                                 onClick={() => void handleAttachLabel(label.id)}
                                 className="h-auto min-h-0 min-w-0 max-w-full items-center gap-1.5 whitespace-normal rounded-full border border-ds-line-strong bg-ds-surface px-2 py-0.5 text-left text-xs font-normal text-foreground [overflow-wrap:anywhere] hover:bg-ds-surface-highest"
                               >
@@ -2027,7 +2022,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                             <Button
                               key={hex}
                               type="button"
-                              variant="ghost"
+                              variant="quiet"
                               aria-pressed={newLabelColor === hex}
                               onClick={() => setNewLabelColor(hex)}
                               className={`h-4 min-h-0 w-4 min-w-0 rounded-full border-2 p-0 ${newLabelColor === hex ? 'border-foreground' : 'border-transparent'}`}
@@ -2047,10 +2042,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         />
                         <Button
                           type="button"
-                          variant="ghost"
+                          variant="quiet"
                           onClick={() => void handleCreateLabel()}
                           disabled={!newLabelName.trim() || creatingLabel}
-                          className="h-auto min-h-0 min-w-0 rounded bg-primary px-2 py-1 text-xs font-normal text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                          className="h-auto min-h-0 min-w-0 rounded px-2 py-1 text-xs font-normal disabled:opacity-50"
                         >
                           {creatingLabel ? '...' : t('createLabel')}
                         </Button>
@@ -2073,7 +2068,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 {!editingDescription && (
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="quiet"
                     onClick={() => setEditingDescription(true)}
                     className="h-auto min-h-0 min-w-0 p-0 text-xs font-normal text-muted-foreground hover:text-foreground"
                   >
@@ -2099,10 +2094,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     entityCandidatesLabel={t('entityCandidatesLabel')}
                   />
                   <div className="flex gap-2">
-                    <Button size="sm" onClick={handleSaveDescription} disabled={savingDescription}>
+                    <Button variant="primary" onClick={handleSaveDescription} disabled={savingDescription}>
                       {savingDescription ? t('loading') : t('save')}
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => { setEditingDescription(false); clearDescriptionDraft(); }}>
+                    <Button variant="quiet" onClick={() => { setEditingDescription(false); clearDescriptionDraft(); }}>
                       {t('cancel')}
                     </Button>
                   </div>
@@ -2121,9 +2116,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               ) : (
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="quiet"
                   onClick={() => setEditingDescription(true)}
-                  className="h-auto min-h-0 mt-2 w-full min-w-0 rounded-md border border-dashed border-border py-3 text-sm font-normal text-muted-foreground hover:border-primary hover:text-primary"
+                  className="h-auto min-h-0 mt-2 w-full min-w-0 rounded-md border border-dashed border-ds-line py-3 text-sm font-normal text-muted-foreground hover:border-primary hover:text-primary"
                 >
                   + {t('addDescription')}
                 </Button>
@@ -2137,7 +2132,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 {!editingAC && (
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="quiet"
                     onClick={() => setEditingAC(true)}
                     className="h-auto min-h-0 min-w-0 p-0 text-xs font-normal text-muted-foreground hover:text-foreground"
                   >
@@ -2159,10 +2154,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     entityCandidatesLabel={t('entityCandidatesLabel')}
                   />
                   <div className="flex gap-2">
-                    <Button size="sm" onClick={handleSaveAC} disabled={savingAC}>
+                    <Button variant="primary" onClick={handleSaveAC} disabled={savingAC}>
                       {savingAC ? t('loading') : t('save')}
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => { setEditingAC(false); clearAcDraft(); }}>
+                    <Button variant="quiet" onClick={() => { setEditingAC(false); clearAcDraft(); }}>
                       {t('cancel')}
                     </Button>
                   </div>
@@ -2177,9 +2172,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               ) : (
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="quiet"
                   onClick={() => setEditingAC(true)}
-                  className="h-auto min-h-0 mt-2 w-full min-w-0 rounded-md border border-dashed border-border py-3 text-sm font-normal text-muted-foreground hover:border-primary hover:text-primary"
+                  className="h-auto min-h-0 mt-2 w-full min-w-0 rounded-md border border-dashed border-ds-line py-3 text-sm font-normal text-muted-foreground hover:border-primary hover:text-primary"
                 >
                   + {t('addAcceptanceCriteria')}
                 </Button>
@@ -2198,7 +2193,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 <span className="text-micro font-mono uppercase tracking-wider text-muted-foreground">{t('attachments')}</span>
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="quiet"
                   onClick={() => attachInputRef.current?.click()}
                   disabled={uploadingAttachment || (story.attachments?.length ?? 0) >= STORY_ATTACHMENT_LIMIT}
                   className="h-auto min-h-0 min-w-0 flex items-center gap-1 p-0 text-xs font-normal text-muted-foreground hover:text-foreground disabled:opacity-40"
@@ -2232,7 +2227,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         ) : null}
                         <Button
                           type="button"
-                          variant="ghost"
+                          variant="quiet"
                           onClick={() => handleRemoveAttachment(att.url)}
                           // story #4345 — 누르는 자리 24×24(아이콘 그대로 · padding) · 첨부 위 모서리 자리 그대로 바깥쪽으로(안쪽 가장자리 고정).
                           className={cn('h-auto absolute -right-1 -top-1 rounded bg-destructive-tint p-1.5 text-destructive hover:brightness-95', HOVER_REVEAL, HOVER_REVEAL_HIT)}
@@ -2247,9 +2242,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               ) : !uploadingAttachment ? (
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="quiet"
                   onClick={() => attachInputRef.current?.click()}
-                  className="h-auto min-h-0 mt-2 w-full min-w-0 rounded-md border border-dashed border-border py-3 text-sm font-normal text-muted-foreground hover:border-primary hover:text-primary"
+                  className="h-auto min-h-0 mt-2 w-full min-w-0 rounded-md border border-dashed border-ds-line py-3 text-sm font-normal text-muted-foreground hover:border-primary hover:text-primary"
                 >
                   + {t('addAttachment')}
                 </Button>
@@ -2275,9 +2270,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 </div>
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="quiet"
                   onClick={() => setShowAddDep((v) => !v)} aria-expanded={showAddDep}
-                  className="h-auto min-h-0 min-w-0 flex items-center gap-0.5 rounded px-1.5 py-0.5 text-micro font-normal text-muted-foreground hover:bg-muted"
+                  className="h-auto min-h-0 min-w-0 flex items-center gap-0.5 rounded px-1.5 py-0.5 text-micro font-normal text-muted-foreground"
                 >
                   <Plus className="size-3" />{t('dep.add')}
                 </Button>
@@ -2307,7 +2302,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 <div className="space-y-1.5">
                   {/* 컴팩트 그래프 */}
                   {deps.length > 0 && (
-                    <div className="mb-2 rounded-lg border border-border bg-muted/10 p-2">
+                    <div className="mb-2 rounded-lg border border-ds-line bg-ds-surface-high p-2">
                       <DependencyGraph
                         storyId={story.id}
                         deps={deps}
@@ -2322,16 +2317,16 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     const blocker = storyMap[d.from_id];
                     return (
                       <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-warning-border bg-warning-tint px-2.5 py-1.5 text-xs text-foreground">
-                        <Button type="button" variant="ghost" onClick={() => onNavigate?.(d.from_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
+                        <Button type="button" variant="quiet" onClick={() => onNavigate?.(d.from_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
                           <AlertTriangle className="size-3 shrink-0" />
                           <span className="font-medium shrink-0">{t('dep.blockedByLabel')}</span>
                           <span className="min-w-0 truncate">{blocker?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
                           {blocker?.status ? <span className="ml-auto shrink-0 font-mono text-micro opacity-60">{resolveStatusLabel(blocker.status)}</span> : null}
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-warning/20', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        <Button type="button" variant="quiet" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-warning/20', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-warning/20', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
+                        <Button type="button" variant="quiet" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-warning/20', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -2342,17 +2337,17 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   {deps.filter((d) => d.dep_type === 'blocks' && d.from_id === story.id).map((d) => {
                     const blocked = storyMap[d.to_id];
                     return (
-                      <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-border bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
-                        <Button type="button" variant="ghost" onClick={() => onNavigate?.(d.to_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
+                      <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-ds-line bg-ds-surface-high px-2.5 py-1.5 text-xs text-muted-foreground">
+                        <Button type="button" variant="quiet" onClick={() => onNavigate?.(d.to_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
                           <GitFork className="size-3 shrink-0" />
                           <span className="font-medium shrink-0">{t('dep.blockingLabel')}</span>
                           <span className="min-w-0 truncate">{blocked?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
                           {blocked?.status ? <span className="ml-auto shrink-0 font-mono text-micro opacity-60">{resolveStatusLabel(blocked.status)}</span> : null}
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        <Button type="button" variant="quiet" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
+                        <Button type="button" variant="quiet" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -2363,17 +2358,17 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   {deps.filter((d) => d.dep_type === 'depends_on' && d.from_id === story.id).map((d) => {
                     const target = storyMap[d.to_id];
                     return (
-                      <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-border bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
-                        <Button type="button" variant="ghost" onClick={() => onNavigate?.(d.to_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
+                      <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-ds-line bg-ds-surface-high px-2.5 py-1.5 text-xs text-muted-foreground">
+                        <Button type="button" variant="quiet" onClick={() => onNavigate?.(d.to_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
                           <GitFork className="size-3 shrink-0 rotate-90" />
                           <span className="font-medium shrink-0">{t('dep.dependsOnLabel')}</span>
                           <span className="min-w-0 truncate">{target?.title ?? `#${d.to_id.slice(0, 6)}`}</span>
                           {target?.status ? <span className="ml-auto shrink-0 font-mono text-micro opacity-60">{resolveStatusLabel(target.status)}</span> : null}
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        <Button type="button" variant="quiet" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
+                        <Button type="button" variant="quiet" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -2384,17 +2379,17 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   {deps.filter((d) => d.dep_type === 'depends_on' && d.to_id === story.id).map((d) => {
                     const source = storyMap[d.from_id];
                     return (
-                      <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-border bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
-                        <Button type="button" variant="ghost" onClick={() => onNavigate?.(d.from_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
+                      <div key={d.id} className="group flex w-full items-center gap-2 rounded-md border border-ds-line bg-ds-surface-high px-2.5 py-1.5 text-xs text-muted-foreground">
+                        <Button type="button" variant="quiet" onClick={() => onNavigate?.(d.from_id)} className="h-auto min-h-0 min-w-0 flex flex-1 items-center justify-start gap-2 p-0 text-left font-normal" disabled={!onNavigate}>
                           <GitFork className="size-3 shrink-0 -rotate-90" />
                           <span className="font-medium shrink-0">{t('dep.dependedByLabel')}</span>
                           <span className="min-w-0 truncate">{source?.title ?? `#${d.from_id.slice(0, 6)}`}</span>
                           {source?.status ? <span className="ml-auto shrink-0 font-mono text-micro opacity-60">{resolveStatusLabel(source.status)}</span> : null}
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
+                        <Button type="button" variant="quiet" onClick={() => void handleToggleDepType(d)} disabled={updatingDepId === d.id} className={cn('h-auto -my-1 shrink-0 rounded p-1.5', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.toggleType')} title={t('dep.toggleType')}>
                           <ArrowLeftRight className="size-3" />
                         </Button>
-                        <Button type="button" variant="ghost" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5 hover:bg-muted', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
+                        <Button type="button" variant="quiet" onClick={() => void handleRemoveDep(d.id)} className={cn('h-auto -my-1 shrink-0 rounded p-1.5', HOVER_REVEAL, HOVER_REVEAL_HIT)} aria-label={t('dep.remove')}>
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -2405,16 +2400,16 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
 
               {/* + 의존성 추가 폼 */}
               {showAddDep && (
-                <div className="mt-2 space-y-2 rounded-lg border border-border bg-muted/20 p-2">
+                <div className="mt-2 space-y-2 rounded-lg border border-ds-line bg-ds-surface-high p-2">
                   <div className="flex gap-1">
                     {(['blocks', 'depends_on'] as const).map((type) => (
                       <Button
                         key={type}
                         type="button"
-                        variant="ghost"
+                        variant="quiet"
                         aria-pressed={depType === type}
                         onClick={() => setDepType(type)}
-                        className={`h-auto min-h-0 min-w-0 rounded px-2 py-0.5 text-micro font-medium ${depType === type ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
+                        className={`h-auto min-h-0 min-w-0 rounded px-2 py-0.5 text-micro font-medium ${depType === type ? 'bg-ds-action text-ds-on-action' : 'bg-ds-surface-sunk text-ds-ink-2 hover:text-ds-ink'}`}
                       >
                         {type === 'blocks' ? t('dep.typeBlocks') : t('dep.typeDepends')}
                       </Button>
@@ -2425,7 +2420,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     value={depQuery}
                     onChange={(e) => setDepQuery(e.target.value)}
                     placeholder={t('dep.searchPlaceholder')}
-                    className="h-auto bg-background px-2 py-1 lg:text-xs dark:bg-background"
+                    className="h-auto bg-ds-surface px-2 py-1 lg:text-xs "
                   />
                   {/* story #2328(C-11 ㉡층): 2글자 미만이면 후보(depCandidates), 2글자
                       이상이면 검색 결과(depQueryResults) — 절대 안 섞는다(갈아치움). */}
@@ -2433,7 +2428,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     const { items, showingCandidates } = selectDepPickerItems(depQuery, depCandidates, depQueryResults);
                     if (items.length === 0) return null;
                     return (
-                      <ul className="focus-inset max-h-32 overflow-y-auto rounded border border-border bg-background">
+                      <ul className="focus-inset max-h-32 overflow-y-auto rounded border border-ds-line bg-ds-surface">
                         {showingCandidates && (
                           // story #2328 — 유나 규격 원문의 「── ... ──」는 "구분선이 있다"를
                           // 아스키로 흉내낸 표기였지 문자로 넣으라는 뜻이 아니었다(2026-07-30
@@ -2448,10 +2443,10 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                           <li key={s.id}>
                             <Button
                               type="button"
-                              variant="ghost"
+                              variant="quiet"
                               onClick={() => void handleAddDep(s.id)}
                               disabled={addingDep}
-                              className="h-auto min-h-0 w-full min-w-0 flex-col items-start justify-start px-2 py-1.5 text-left text-xs font-normal hover:bg-muted disabled:opacity-50"
+                              className="h-auto min-h-0 w-full min-w-0 flex-col items-start justify-start px-2 py-1.5 text-left text-xs font-normal disabled:opacity-50"
                             >
                               <span className="block truncate">{s.title}</span>
                               {showingCandidates ? (
@@ -2559,7 +2554,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     {tasks.length > 0 ? (
                       <ul className="space-y-2">
                         {tasks.map((task) => (
-                          <li key={task.id} className="flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+                          <li key={task.id} className="flex items-center gap-3 rounded-md border border-ds-line bg-ds-surface-high px-3 py-2 text-sm">
                             <span className={`h-2.5 w-2.5 rounded-full ${taskTone(task.status)}`} />
                             <span className={task.status === 'done' ? 'text-muted-foreground line-through' : 'text-foreground'}>{task.title}</span>
                           </li>
@@ -2579,7 +2574,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     ) : null}
                     {nextTasksCursor ? (
                       <div className="mt-3 text-center">
-                        <Button variant="outline" size="sm" onClick={onLoadMoreTasks} disabled={loadingMoreTasks || !onLoadMoreTasks}>
+                        <Button variant="secondary" onClick={onLoadMoreTasks} disabled={loadingMoreTasks || !onLoadMoreTasks}>
                           {loadingMoreTasks ? t('loading') : t('loadMore')}
                         </Button>
                       </div>
@@ -2603,8 +2598,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     }}
                   />
                   <div className="flex justify-end">
-                    <Button
-                      size="sm"
+                    <Button variant="primary"
                       onClick={handleSubmitComment}
                       disabled={!commentInput.trim() || submittingComment}
                     >
@@ -2622,7 +2616,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                   <>
                     <ul className="space-y-3">
                       {comments.map((comment) => (
-                        <li key={comment.id} className="rounded-md border border-border bg-muted/30 p-3">
+                        <li key={comment.id} className="rounded-md border border-ds-line bg-ds-surface-high p-3">
                           <p className="whitespace-pre-wrap text-sm text-foreground">{comment.content}</p>
                           <div className="mt-2 flex items-center gap-2 text-micro font-mono text-muted-foreground">
                             <span>{commentAuthorLabels.get(comment.created_by) ?? authorLabel(comment.created_by)}</span>
@@ -2634,7 +2628,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     </ul>
                     {nextCommentsCursor ? (
                       <div className="text-center">
-                        <Button variant="outline" size="sm" onClick={handleLoadMoreComments} disabled={loadingMoreComments}>
+                        <Button variant="secondary" onClick={handleLoadMoreComments} disabled={loadingMoreComments}>
                           {loadingMoreComments ? t('loading') : t('loadMore')}
                         </Button>
                       </div>
@@ -2656,7 +2650,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                         const isLong = (activity.old_value?.length ?? 0) > 40 || (activity.new_value?.length ?? 0) > 40;
                         const expanded = expandedActivityId === activity.id;
                         return (
-                          <li key={activity.id} className="rounded-md border border-border bg-muted/30 p-3">
+                          <li key={activity.id} className="rounded-md border border-ds-line bg-ds-surface-high p-3">
                             <div className="text-sm">{formatActivityMessage(activity, expanded)}</div>
                             <div className="mt-1 flex items-center gap-2 text-micro font-mono text-muted-foreground">
                               <span>{actorName}</span>
@@ -2665,9 +2659,9 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                               {isLong ? (
                                 <Button
                                   type="button"
-                                  variant="ghost"
+                                  variant="quiet"
                                   onClick={() => setExpandedActivityId(expanded ? null : activity.id)}
-                                  className="h-auto min-h-0 min-w-0 ml-auto rounded px-1.5 py-0.5 font-normal text-muted-foreground hover:bg-muted hover:text-foreground"
+                                  className="h-auto min-h-0 min-w-0 ml-auto rounded px-1.5 py-0.5 font-normal text-muted-foreground hover:text-foreground"
                                 >
                                   {expanded ? t('collapseSection') : t('expandSection')}
                                 </Button>
@@ -2679,7 +2673,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                     </ul>
                     {nextActivitiesCursor ? (
                       <div className="text-center">
-                        <Button variant="outline" size="sm" onClick={handleLoadMoreActivities} disabled={loadingMoreActivities}>
+                        <Button variant="secondary" onClick={handleLoadMoreActivities} disabled={loadingMoreActivities}>
                           {loadingMoreActivities ? t('loading') : t('loadMore')}
                         </Button>
                       </div>
@@ -2695,29 +2689,17 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
     </div>
 
       {/* Delete confirm dialog */}
-      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('deleteStoryDialogTitle')}</DialogTitle>
-            <DialogDescription>
-              {t('storyDeleteIrreversible')}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={() => setShowDeleteConfirm(false)} disabled={deleting}>
-              {tc('cancel')}
-            </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => void handleDelete()}
-              disabled={deleting}
-            >
-              {deleting ? tc('deleting') : t('permanentDelete')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={setShowDeleteConfirm}
+        title={t('deleteStoryDialogTitle')}
+        description={t('storyDeleteIrreversible')}
+        confirmLabel={deleting ? tc('deleting') : t('permanentDelete')}
+        cancelLabel={tc('cancel')}
+        tone="danger"
+        loading={deleting}
+        onConfirm={() => void handleDelete()}
+      />
 
     </>
   );

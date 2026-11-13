@@ -4,7 +4,7 @@ import { useId, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ds/button';
 import { LAYER } from '@/components/ds/layers';
 import { Workcell, type WorkcellProps } from './workcell';
 
@@ -36,14 +36,14 @@ export function WorkcellFold({ evidenceCount, conversationCount, ...workcell }: 
     <section data-testid="workcell-fold" aria-label={t('foldTitle')} className="min-w-0">
       <Button
         type="button"
-        variant="ghost"
+        variant="quiet"
         aria-expanded={open}
         aria-controls={open ? bodyId : undefined}
         data-testid="workcell-fold-toggle"
         // 높이 44(min-h-11)는 디자인 Button 기본이 이미 준다 — 여기서 다시 쓰지 않는다(h-auto만 덮어 글이 줄바꿈될 때 늘어난다).
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          'h-auto w-full min-w-0 justify-start gap-2 whitespace-normal rounded-xl border border-ds-line px-3 py-2 text-left font-normal',
+          'h-auto w-full min-w-0 justify-start gap-2 whitespace-normal rounded-xl border border-ds-line px-3 py-2 text-left font-normal hover:bg-ds-surface-highest',
           LAYER.rowOthers,
         )}
       >

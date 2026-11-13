@@ -132,35 +132,35 @@ describe('Workcell — story #2922 W4 책임자/실행자 헤더 승격(중복 �
 // story #2922 W6(선행 조각) — Proofline 좌측 레일. queued는 4색(blue/amber/green/red) 중
 // 어느 것도 아니라(신호 없음) 회색 폴백이어야 한다(no-fiction — 색을 지어내지 않음).
 describe('Workcell — story #2922 W6 Proofline 레일(단계→색 파생)', () => {
-  it('merge_ready → bg-proof-green 레일', () => {
+  it('merge_ready → bg-ds-done 레일', () => {
     // 카디르군 QA(#3345 HIGH) — 이전 정규식(전역 class+aria-hidden 매치)이 레일이 아니라
-    // merge_ready일 때 PipelineStepper의 «선행완료 점»(동일하게 bg-proof-green+
+    // merge_ready일 때 PipelineStepper의 «선행완료 점»(동일하게 bg-ds-done+
     // aria-hidden="true")에 우연매치해 로드베어링이 아니었다(뮤테이션해도 안 깨짐, 실증
     // — codex+카디르 완전독립 이중재현). 최상위 첫 자식(레일 그 자체)에만 앵커링한다.
     const markup = renderKo(<Workcell {...BASE} pipelineStage="merge_ready" />);
     const railMatch = markup.match(/^<div\b[^>]*><div class="([^"]*)" aria-hidden="true"><\/div>/);
     expect(railMatch).toBeTruthy();
-    expect(railMatch![1].split(/\s+/)).toContain('bg-proof-green');
+    expect(railMatch![1].split(/\s+/)).toContain('bg-ds-done');
   });
 
-  it('needs_input → bg-proof-amber 레일', () => {
+  it('needs_input → bg-ds-needs-hand-bar 레일', () => {
     const markup = renderKo(<Workcell {...BASE} pipelineStage="needs_input" />);
-    expect(markup).toMatch(/class="[^"]*bg-proof-amber[^"]*"[^>]*aria-hidden="true"/);
+    expect(markup).toMatch(/class="[^"]*bg-ds-needs-hand-bar[^"]*"[^>]*aria-hidden="true"/);
   });
 
-  it('queued(신호 없음) → 4색 어느 것도 안 쓰고 중립 회색(bg-proof-line)만', () => {
+  it('queued(신호 없음) → 4색 어느 것도 안 쓰고 중립 회색(bg-ds-line)만', () => {
     const markup = renderKo(<Workcell {...BASE} pipelineStage="queued" />);
     const railMatch = markup.match(/<div class="w-1 shrink-0 self-stretch[^"]*" aria-hidden="true"><\/div>/);
     expect(railMatch).toBeTruthy();
-    expect(railMatch![0]).toContain('bg-proof-line');
+    expect(railMatch![0]).toContain('bg-ds-line');
     expect(railMatch![0]).not.toMatch(/bg-proof-(blue|amber|green|red)/);
   });
 
-  it('verified → bg-proof-green 레일(유나양 확定 델타 — 이전엔 blue였다)', () => {
+  it('verified → bg-ds-done 레일(유나양 확定 델타 — 이전엔 blue였다)', () => {
     const markup = renderKo(<Workcell {...BASE} pipelineStage="verified" />);
     const railMatch = markup.match(/^<div\b[^>]*><div class="([^"]*)" aria-hidden="true"><\/div>/);
     expect(railMatch).toBeTruthy();
-    expect(railMatch![1].split(/\s+/)).toContain('bg-proof-green');
+    expect(railMatch![1].split(/\s+/)).toContain('bg-ds-done');
   });
 });
 
@@ -184,7 +184,7 @@ describe('Workcell — story #2922 W6 스테퍼 트러스트-시맨틱 컬러(�
   }
 
   // story #3099(DS·AA 후속, #3090과 동형) — 라벨 텍스트는 amber/green/blue 전부 AA 미달이라
-  // text-proof-ink로 중립화됐다. 트러스트-시맨틱 색은 이제 dot(라벨 span 안의 두 번째
+  // text-ds-ink로 중립화됐다. 트러스트-시맨틱 색은 이제 dot(라벨 span 안의 두 번째
   // class="..." — size-1.5 rounded-full span)만 싣는다.
   function stageDotClass(markup: string, label: string): string {
     const block = markup.split('role="listitem"').slice(1).find((b) => b.includes(`>${label}</span>`));
@@ -194,12 +194,12 @@ describe('Workcell — story #2922 W6 스테퍼 트러스트-시맨틱 컬러(�
     return matches[1]![1];
   }
 
-  it('라벨 텍스트는 상태와 무관하게 항상 중립(text-proof-ink) — 색 신호는 텍스트가 아니라 dot이 싣는다(AA 미달 방지)', () => {
+  it('라벨 텍스트는 상태와 무관하게 항상 중립(text-ds-ink) — 색 신호는 텍스트가 아니라 dot이 싣는다(AA 미달 방지)', () => {
     const markup = renderKo(<Workcell {...BASE} pipelineStage="merge_ready" bentoLayout={false} />);
     // story #3880 — pipeline 스테이지 라벨 ko 값 정본화.
     for (const label of ['진행 중', '입력 필요', '완료 주장', '검증됨', '머지 준비']) {
       const cls = stageWrapperClass(markup, label).split(/\s+/);
-      expect(cls).toContain('text-proof-ink');
+      expect(cls).toContain('text-ds-ink');
       expect(cls).not.toEqual(expect.arrayContaining(['text-proof-blue', 'text-proof-amber', 'text-proof-green']));
     }
   });
@@ -207,14 +207,14 @@ describe('Workcell — story #2922 W6 스테퍼 트러스트-시맨틱 컬러(�
   it('merge_ready가 current일 때, 이미 지나온 Running 단계는 강제로 green이 되지 않고 자기 고유색(blue) 유지 — dot 기준', () => {
     const markup = renderKo(<Workcell {...BASE} pipelineStage="merge_ready" bentoLayout={false} />);
     const runningDotClass = stageDotClass(markup, '진행 중');
-    expect(runningDotClass.split(/\s+/)).toContain('border-proof-blue');
-    expect(runningDotClass.split(/\s+/)).not.toContain('bg-proof-green');
+    expect(runningDotClass.split(/\s+/)).toContain('border-ds-action');
+    expect(runningDotClass.split(/\s+/)).not.toContain('bg-ds-done');
   });
 
   it('verified가 current일 때 그 자신은 green(자기 색이 진짜 green이므로) — dot 기준', () => {
     const markup = renderKo(<Workcell {...BASE} pipelineStage="verified" bentoLayout={false} />);
     const verifiedDotClass = stageDotClass(markup, '검증됨');
-    expect(verifiedDotClass.split(/\s+/)).toContain('bg-proof-green');
+    expect(verifiedDotClass.split(/\s+/)).toContain('bg-ds-done');
     const verifiedWrapperClass = stageWrapperClass(markup, '검증됨');
     expect(verifiedWrapperClass.split(/\s+/)).toContain('font-bold');
   });
@@ -222,7 +222,7 @@ describe('Workcell — story #2922 W6 스테퍼 트러스트-시맨틱 컬러(�
   it('claimed_done이 current일 때 그 자신은 blue(주장·미검증 — 아직 green 아님) — dot 기준', () => {
     const markup = renderKo(<Workcell {...BASE} pipelineStage="claimed_done" bentoLayout={false} />);
     const claimedDotClass = stageDotClass(markup, '완료 주장');
-    expect(claimedDotClass.split(/\s+/)).toContain('bg-proof-blue');
+    expect(claimedDotClass.split(/\s+/)).toContain('bg-ds-action');
   });
 });
 
@@ -262,7 +262,7 @@ describe('Workcell — story #2984 §1~§4 bento 기본 레이아웃(bentoLayout
   it('§2 — Brief/Run과 Evidence를 잇는 계보 연결선(가운데 트랙)이 렌더된다', () => {
     const markup = renderKo(<Workcell {...BASE} />);
     expect(markup).toContain('lg:col-start-2 lg:row-start-1 lg:row-span-2');
-    expect(markup).toContain('bg-proof-line-strong');
+    expect(markup).toContain('bg-ds-line-strong');
   });
 
   // story bc9ee586(critical, 선생님 실사고 2026-08-24) — 3열 그리드가 모바일(390px)에서
@@ -555,18 +555,18 @@ describe('Workcell — story #5b3aea5e Brief 콘텐츠 층(마크다운 스트�
     expect(markup).not.toContain('- `tsc');
   });
 
-  // story #3054(2984-S6) — runNextNeed 콜아웃이 헤어라인을 쓰고 bg-proof-blue-soft 채움은
+  // story #3054(2984-S6) — runNextNeed 콜아웃이 헤어라인을 쓰고 bg-ds-action-soft 채움은
   // 안 쓴다. ⚠️elev(--elev-card)는 안 쓴다 — bentoLayout=false "완전 복귀" 계약(§6, 아래
   // 테스트)과 충돌하는 걸 실측으로 잡았던 자리(pre-fix 상태에서 이 회귀가 실제로 났었다).
-  it('runNextNeed 콜아웃이 헤어라인을 쓰고 bg-proof-blue-soft/elev-card 둘 다 안 쓴다', () => {
+  it('runNextNeed 콜아웃이 헤어라인을 쓰고 bg-ds-action-soft/elev-card 둘 다 안 쓴다', () => {
     const markup = renderKo(<Workcell {...BASE} />);
     const nextNeed = BASE.run.nextNeed!;
     expect(markup).toContain(nextNeed);
     const idx = markup.indexOf(nextNeed);
     const tagStart = markup.lastIndexOf('<div', idx);
     const tag = markup.slice(tagStart, idx);
-    expect(tag).toContain('border-proof-line');
-    expect(tag).not.toContain('bg-proof-blue-soft');
+    expect(tag).toContain('border-ds-line');
+    expect(tag).not.toContain('bg-ds-action-soft');
     expect(tag).not.toContain('shadow-[var(--elev-card)]');
   });
 });

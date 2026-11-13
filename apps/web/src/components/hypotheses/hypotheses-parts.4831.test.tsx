@@ -144,7 +144,7 @@ describe('스토리 가설 연결 — 검색 칸이 후보를 거르고 고른 �
     vi.stubGlobal('fetch', fetchMock);
     await mount(<StoryHypothesesSection storyId="s-1" epicId={null} projectId="p-1" />);
     await act(async () => { buttonWith(container, th.linkHypothesis).click(); await Promise.resolve(); await Promise.resolve(); });
-    const search = q<HTMLInputElement>(container, `input[data-slot="input"][placeholder="${th.pickerSearch}"]`);
+    const search = q<HTMLInputElement>(container, `input[data-slot="ds-input"][placeholder="${th.pickerSearch}"]`);
     expect(search).toBeTruthy();
     expect(container.textContent).toContain('결제 전환율을 올린다');
     expect(container.textContent).toContain('온보딩 이탈을 줄인다');
@@ -164,7 +164,7 @@ describe('스토리 가설 연결 — 검색 칸이 후보를 거르고 고른 �
     fetchWithAuthMock.mockImplementation(async () => ({ ok: true, json: async () => ({ data: [] }) }));
     await mount(<StoryHypothesesSection storyId="s-1" epicId={null} projectId="p-1" />);
     await act(async () => { buttonWith(container, th.linkHypothesis).click(); await Promise.resolve(); });
-    const search = q<HTMLInputElement>(container, `input[data-slot="input"][placeholder="${th.pickerSearch}"]`);
+    const search = q<HTMLInputElement>(container, `input[data-slot="ds-input"][placeholder="${th.pickerSearch}"]`);
     expect(search.className).toContain('pl-7');
     expect(search.parentElement!.className).toBe('relative');
     expect(search.parentElement!.className).not.toContain('border');

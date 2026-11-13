@@ -75,7 +75,7 @@ describe('스토리 제목 칸 — 한글 조합 중 엔터', () => {
   async function openTitle() {
     await mountPanel();
     await act(async () => { (container.querySelector('h2')!.closest('button') as HTMLButtonElement).click(); });
-    const input = container.querySelector<HTMLInputElement>('input[data-slot="input"][data-testid="story-title-input"]')!;
+    const input = container.querySelector<HTMLInputElement>('input[data-slot="ds-input"][data-testid="story-title-input"]')!;
     await act(async () => { setInput(input, '새 제ㅁ'); });
     return input;
   }
@@ -105,7 +105,7 @@ describe('새 라벨 이름 칸 — 한글 조합 중 엔터', () => {
     await mountPanel();
     const toggle = [...container.querySelectorAll('button')].find((b) => b.parentElement?.textContent?.includes(board.labelsSectionTitle!) && b.parentElement.querySelector('span')?.textContent === board.labelsSectionTitle) as HTMLButtonElement;
     await act(async () => { toggle.click(); });
-    const input = container.querySelector<HTMLInputElement>(`input[data-slot="input"][placeholder="${board.newLabelNamePlaceholder}"]`)!;
+    const input = container.querySelector<HTMLInputElement>(`input[data-slot="ds-input"][placeholder="${board.newLabelNamePlaceholder}"]`)!;
     await act(async () => { setInput(input, '긴급ㅂ'); });
     return input;
   }

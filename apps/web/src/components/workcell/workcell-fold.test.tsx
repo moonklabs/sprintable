@@ -76,11 +76,11 @@ describe('4908 작업 칸 접힘 — 기본은 접힌 한 줄', () => {
     expect(mount({}, 'en').summary()).toBe('Step 2/6 · Evidence 0 · Conversation 0');
   });
 
-  it('⭐접힌 줄은 눌러 펼치는 단추다 — 최소 높이 44(min-h-11) · 층 토큰 면(rowOthers) + 경계', () => {
+  it('⭐접힌 줄은 눌러 펼치는 단추다 — 폰 누름 영역 44(touch:min-h-ds-touch · ds Button 기본) · 층 토큰 면(rowOthers) + 경계', () => {
     const { toggle } = mount();
     expect(toggle.tagName).toBe('BUTTON');
     expect(toggle.getAttribute('type')).toBe('button');
-    expect(toggle.className.split(/\s+/)).toEqual(expect.arrayContaining(['min-h-11', 'border', 'border-ds-line', LAYER.rowOthers]));
+    expect(toggle.className.split(/\s+/)).toEqual(expect.arrayContaining(['touch:min-h-ds-touch', 'border', 'border-ds-line', LAYER.rowOthers]));
   });
 });
 
