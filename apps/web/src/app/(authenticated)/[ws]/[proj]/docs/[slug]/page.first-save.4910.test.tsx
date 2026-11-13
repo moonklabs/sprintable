@@ -211,6 +211,19 @@ describe('router.push로 들어온 첫 렌더의 주소 (4910 ② dev 실측 결
     expect(postBody(1).title).toBe('나');
   });
 
+  it('초안 판정은 «지금 주소의 ?new=1»이다 — 앞서 새 문서를 만들어 래치가 켜져 있어도, ?new=1 없이 온 없는 임시 슬러그(오래된 링크)는 초안이 아니라 목록으로', async () => {
+    paramsMock.slug = 'untitled-111';
+    searchOverride.current = 'new=1';
+    await renderPage();
+    await type('title', '가');
+    await wait(1600);
+    expect(editorProps.current!.currentDocId).toBe('new-doc'); // 래치 켜진 채
+    paramsMock.slug = 'untitled-333'; searchOverride.current = ''; // ?new=1 없는 없는 문서 주소
+    await renderPage();
+    await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+    expect(routerMock.replace).toHaveBeenCalled(); // 목록으로
+  });
+
   it('?new=1은 한 번 켜지면 유지(래치) — 내용만 써서 기본 제목으로 만들어진 뒤 주소에서 ?new=1이 빠져도 제목칸은 값이 아니라 placeholder 그대로(쓰면 뒤에 붙던 결함이 안 돌아온다)', async () => {
     paramsMock.slug = 'untitled-123456789';
     searchOverride.current = 'new=1';
