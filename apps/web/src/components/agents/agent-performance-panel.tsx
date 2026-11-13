@@ -57,18 +57,19 @@ type Read<T> = { ok: true; data: T | null } | { ok: false };
  * The three reads answer LISTS. An array is the list; «nothing» is an empty list — `null` / a missing `data` and the proxy's `{ ok: true }` marker (the leaderboard route turns a 204 into `{ data: { ok: true } }`);
  * anything else (a string, a number, another object) cannot be read as a list → «failed» (codex round 1: such a shape used to throw inside the shaping and land in the catch as a members failure).
  */
-function asList<T>(data: unknown): T[] | null {
+function asList<T>(data: unknown, markerIsEmpty: boolean): T[] | null {
   if (Array.isArray(data)) return data as T[];
   if (data === null || data === undefined) return [];
-  if (typeof data === 'object' && (data as { ok?: unknown }).ok === true) return [];
+  // the `{ ok: true }` marker is the LEADERBOARD route's 204 only (codex round 2) — a members / velocity read never has it, so there it is a malformed answer
+  if (markerIsEmpty && typeof data === 'object' && (data as { ok?: unknown }).ok === true) return [];
   return null;
 }
 
-async function readList<T>(request: Promise<Response>): Promise<Read<T[]>> {
+async function readList<T>(request: Promise<Response>, markerIsEmpty = false): Promise<Read<T[]>> {
   try {
     const res = await request;
     if (!res.ok) return { ok: false };
-    const list = asList<T>(((await res.json()) as { data?: unknown }).data);
+    const list = asList<T>(((await res.json()) as { data?: unknown }).data, markerIsEmpty);
     return list === null ? { ok: false } : { ok: true, data: list };
   } catch {
     return { ok: false };
@@ -140,7 +141,7 @@ export function AgentPerformancePanel() {
       const [members, velocityRead, leaderboardRead] = await Promise.all([
         readList<AgentMember>(fetchWithAuth(`/api/team-members?project_id=${projectId}&type=agent`)),
         readList<SprintVelocityItem>(fetchWithAuth(`/api/analytics/velocity-history?project_id=${projectId}`)),
-        readList<LeaderboardEntry>(fetchWithAuth(`/api/rewards/leaderboard?project_id=${projectId}&period=all`)),
+        readList<LeaderboardEntry>(fetchWithAuth(`/api/rewards/leaderboard?project_id=${projectId}&period=all`), true),
       ]);
 
       const agentMembers = (members.ok ? members.data ?? [] : []).filter((m) => m.type === 'agent');

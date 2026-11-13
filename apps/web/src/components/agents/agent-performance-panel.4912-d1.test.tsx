@@ -23,13 +23,14 @@ afterEach(async () => { await act(async () => { root.unmount(); }); container.re
 const AGENTS = [{ id: 'ag-1', name: '알파', type: 'agent' }, { id: 'ag-2', name: '베타', type: 'agent' }];
 const ok = (data: unknown) => ({ ok: true, json: async () => ({ data }) });
 const SPRINTS = [{ id: 's1', title: '스프린트 1', velocity: 8, status: 'closed', start_date: null, end_date: null }, { id: 's2', title: '스프린트 2', velocity: 4, status: 'closed', start_date: null, end_date: null }];
-type Fail = 'none' | 'members500' | 'membersReject' | 'membersUnreadable' | 'velocity500' | 'leaderboard500' | 'leaderboard204' | 'velocityString' | 'leaderboardWithoutAg1' | 'velocityZeros';
+type Fail = 'none' | 'members500' | 'membersReject' | 'membersUnreadable' | 'velocity500' | 'leaderboard500' | 'leaderboard204' | 'velocityString' | 'leaderboardWithoutAg1' | 'velocityZeros' | 'membersMarker';
 function mockReads(fail: Fail = 'none') {
   fetchWithAuthMock.mockImplementation(async (url: string) => {
     if (url.startsWith('/api/team-members')) {
       if (fail === 'members500') return { ok: false, status: 500, json: async () => ({}) };
       if (fail === 'membersReject') throw new TypeError('network down');
       if (fail === 'membersUnreadable') return { ok: true, json: async () => { throw new SyntaxError('unreadable'); } };
+      if (fail === 'membersMarker') return ok({ ok: true }); // the 204 marker belongs to the leaderboard route only
       return ok(AGENTS);
     }
     if (url.startsWith('/api/analytics/velocity-history')) {
@@ -147,7 +148,14 @@ describe('AgentPerformancePanel — 4912 D: a failed read is not «none»', () =
     await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><div key="again"><AgentPerformancePanel /></div></NextIntlClientProvider>); });
     await act(async () => { for (let i = 0; i < 8; i += 1) await Promise.resolve(); });
     const bars = [...container.querySelectorAll('[data-testid="agent-velocity-card"] [role="progressbar"]')];
-    expect(bars).toHaveLength(2);
+    expect(bars.map((x) => [x.getAttribute('aria-valuenow'), x.getAttribute('aria-valuemax')])).toEqual([['0', '1'], ['0', '1']]); // the reload ran (the first load had 8 / 4 of 8)
+  });
+
+  it('⭐에이전트 읽기에 { ok: true } 표지가 오면 «에이전트 없음»이 아니라 실패(표지는 리더보드 204 몫) — 코드의 markerIsEmpty를 켜면 RED (codex 2차)', async () => {
+    mockReads('membersMarker');
+    await render();
+    expect(banner()?.getAttribute('data-tone')).toBe('failed');
+    expect(text()).not.toContain(P.noAgents);
   });
 
   it('⭐[다시 시도]는 셋 다 다시 읽는다 — 고쳐진 뒤엔 띠가 사라지고 에이전트 줄이 선다', async () => {
