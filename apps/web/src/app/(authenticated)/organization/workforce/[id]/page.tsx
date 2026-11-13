@@ -214,6 +214,8 @@ export default function AgentDetailPage() {
   const [hasActiveKey, setHasActiveKey] = useState(false);
   // story 4912 (A2): the side summary says «활성 키 있음/없음» only once a key-list read really worked (a failed read is not «없음»)
   const [keysReadOk, setKeysReadOk] = useState(false);
+  const keyReadSeqRef = useRef(0); // story 4912 (B2, codex): the newest key read wins — two retries / a retry and the initial read must not land out of order
+  const [keysReading, setKeysReading] = useState(false);
   const [keysReadFailed, setKeysReadFailed] = useState(false); // story 4912 (B2): a failed key read is said as a failure (with [다시 시도]) — never as «no key»
   const [fakechatEnvKeyCopied, setFakechatEnvKeyCopied] = useState(false);
 
@@ -286,18 +288,23 @@ export default function AgentDetailPage() {
 
   const fetchActiveApiKey = useCallback(async () => {
     const forId = id;
+    const seq = ++keyReadSeqRef.current;
+    const current = () => idRef.current === forId && keyReadSeqRef.current === seq;
+    setKeysReading(true);
     try {
       const res = await fetchWithAuth(`/api/agents/${id}/api-key`);
-      if (idRef.current !== forId) return;
+      if (!current()) return;
       if (!res.ok) { setKeysReadFailed(true); return; }
       const json = await res.json() as { data: ApiKey[] };
-      if (idRef.current !== forId) return;
+      if (!current()) return;
       const active = (json.data ?? []).find((k) => !k.revoked_at);
       setHasActiveKey(!!active);
       setKeysReadOk(true);
       setKeysReadFailed(false);
     } catch {
-      if (idRef.current === forId) setKeysReadFailed(true);
+      if (current()) setKeysReadFailed(true);
+    } finally {
+      if (keyReadSeqRef.current === seq) setKeysReading(false);
     }
   }, [id]);
 
@@ -848,7 +855,7 @@ export default function AgentDetailPage() {
               ) : keysReadFailed && !keysReadOk ? (
                 <div className="flex flex-wrap items-center gap-2" data-testid="agent-key-read-failed">
                   <p role="status" className="text-xs text-warning-strong">{ta('detailKeyReadFailed')}</p>
-                  <Button type="button" variant="outline" size="sm" onClick={() => { void fetchActiveApiKey(); }}>{tc('retry')}</Button>
+                  <Button type="button" variant="outline" size="sm" disabled={keysReading} onClick={() => { void fetchActiveApiKey(); }}>{tc('retry')}</Button>
                 </div>
               ) : !hasActiveKey ? (
                 <p className="text-xs text-warning-strong">{t('agentFakechatEnvKeyRequired')}</p>

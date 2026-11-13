@@ -67,12 +67,15 @@ async function readJsonWithin(response: Response, ms: number): Promise<unknown> 
   try {
     return await Promise.race([
       response.json(),
-      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('response body timed out')), ms); }),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new CreateBodyTimeoutError('response body timed out')), ms); }),
     ]);
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
 }
+
+/** the create answer's headers came but its body did not finish: the key may EXIST on the server (the old keys are already revoked) while nobody can read it */
+class CreateBodyTimeoutError extends Error {}
 
 function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKeysRead, compact = false, onIssuingChange }: AgentApiKeyManagerProps) {
   const t = useTranslations('settings');
@@ -156,6 +159,15 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
   const onKeysReadRef = useRef(onKeysRead);
   const onIssuingChangeRef = useRef(onIssuingChange);
   useEffect(() => { onKeysReadRef.current = onKeysRead; onIssuingChangeRef.current = onIssuingChange; });
+  // story 4912 (B2, codex): ONLY this card's own hold is ever released by this card, and once — an edge-triggered report. «발급 중» now ends at the state write, so the same card's later `finally` (and a card that has already been unmounted) must not clear a hold a NEWER panel has taken since.
+  const issuingRef = useRef(false);
+  const reportIssuing = (issuing: boolean) => {
+    if (issuingRef.current === issuing) return;
+    issuingRef.current = issuing;
+    onIssuingChangeRef.current?.(issuing);
+  };
+  // a card that goes away while it still holds the panel (the agent list changed under it) lets go of it
+  useEffect(() => () => { if (issuingRef.current) { issuingRef.current = false; onIssuingChangeRef.current?.(false); } }, []);
   const loadApiKeys = useCallback(async () => {
     if (!agentId) return;
     const seq = ++readSeq.current;
@@ -198,7 +210,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
     if (!agentId) return;
     const heldGen = keyGenRef.current;
     setLoading(true);
-    onIssuingChangeRef.current?.(true);
+    reportIssuing(true);
     try {
       const response = await fetchWithAuth(`/api/agents/${agentId}/api-key`, {
         method: 'POST',
@@ -213,20 +225,26 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
       const rawMcp = result.data?.mcp_config;
       const mcpConfigStr = rawMcp == null ? null : typeof rawMcp === 'string' ? rawMcp : JSON.stringify(rawMcp, null, 2);
       writeKeyState(heldGen, () => { setGeneratedKey(rawKey); setGeneratedMcpConfig(mcpConfigStr); }, true);
-      onIssuingChangeRef.current?.(false); // story 4912 (B2): «발급 중» ends the moment the key is in the dialog's state (the follow-up list read below is not worth holding a panel for)
+      reportIssuing(false); // story 4912 (B2): «발급 중» ends the moment the key is in the dialog's state (the follow-up list read below is not worth holding a panel for)
       onNewKey?.(rawKey, mcpConfigStr);
       await loadApiKeys();
     } catch (error) {
       console.error('[agent-api-key] generate failed', error);
-      notify({
-        type: 'error',
-        title: tc('error'),
-        // story #4359(까디르) — 화면엔 늘 ko 키 · 원인(영어 Error 메시지)은 로그로만.
-        body: t('agentApiKeyGenerateFailed'),
-      });
+      if (error instanceof CreateBodyTimeoutError) {
+        // story 4912 (B2, codex): NOT «발급 실패» — the new key may exist (and the old ones are already revoked) while its plaintext never reached this screen. Say so, and read the list so what exists is on screen.
+        notify({ type: 'error', title: tc('error'), body: t('agentApiKeyCreateUnconfirmed') });
+        await loadApiKeys();
+      } else {
+        notify({
+          type: 'error',
+          title: tc('error'),
+          // story #4359(까디르) — 화면엔 늘 ko 키 · 원인(영어 Error 메시지)은 로그로만.
+          body: t('agentApiKeyGenerateFailed'),
+        });
+      }
     } finally {
       setLoading(false);
-      onIssuingChangeRef.current?.(false);
+      reportIssuing(false);
     }
   };
 
@@ -234,7 +252,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
     if (!agentId) return;
     setRevokeConfirmDialog(false);
     setLoading(true);
-    onIssuingChangeRef.current?.(true); // the old keys are being revoked: from here until the new key's answer the panel stays
+    reportIssuing(true); // the old keys are being revoked: from here until the new key's answer the panel stays
     try {
       await Promise.all(
         activeKeys.map((key) =>

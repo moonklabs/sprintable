@@ -2468,6 +2468,7 @@
     "agentFakechatEnvKeySecurityNote": "For security, existing keys can't be shown again. Generate a new one in the API Keys section above to see it here.",
     "agentApiKeyOnboardingCopiedTitle": "Onboarding message copied",
     "agentApiKeyCopyFailTitle": "Copy failed",
+    "agentApiKeyCreateUnconfirmed": "The answer to creating the new key did not finish. The new key may already exist — check the key list below, and if you cannot see its value, create it again with «Replace with a new key».",
     "agentApiKeyReplaceCta": "Replace with a new key",
     "agentApiKeyManageCta": "Manage keys",
     "agentApiKeyManageTitle": "{name} — keys",

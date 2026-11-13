@@ -2468,6 +2468,7 @@
     "agentFakechatEnvKeySecurityNote": "보안상 기존 키는 재표시되지 않아요. 위 API Keys 섹션에서 새 키를 발급하면 여기 자동으로 나타나요.",
     "agentApiKeyOnboardingCopiedTitle": "온보딩 메시지 복사됨",
     "agentApiKeyCopyFailTitle": "복사 실패",
+    "agentApiKeyCreateUnconfirmed": "새 키를 만드는 응답이 끝나지 않았어요. 새 키가 이미 만들어졌을 수 있어요 — 아래 키 목록을 확인하고, 키 값을 볼 수 없으면 «새 키로 바꾸기»로 다시 만들어 주세요.",
     "agentApiKeyReplaceCta": "새 키로 바꾸기",
     "agentApiKeyManageCta": "키 관리",
     "agentApiKeyManageTitle": "{name} — 키 관리",

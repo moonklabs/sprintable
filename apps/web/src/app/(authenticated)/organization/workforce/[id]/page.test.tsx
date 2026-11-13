@@ -752,5 +752,31 @@ describe('AgentDetailPage — 상세 머리(story 4912 · A2)', () => {
     expect(failed()).toBeNull();
     expect(container.textContent).toContain(koMessages.settings.agentFakechatEnvKeyRequired); // a real empty list keeps the old words
   });
+
+  it('⭐SSE 카드 «다시 시도»는 읽는 동안 눌리지 않는다 — 같은 읽기를 겹쳐 띄워 옛 답이 새 답을 덮는 길을 막는다(codex)', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let keyGets = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url !== 'string') return { ok: false, json: async () => null };
+      if (url === '/api/team-members/agent-1') return { ok: true, json: async () => ({ data: AGENT }) };
+      if (url.startsWith('/api/agents/') && url.endsWith('/api-key')) { keyGets += 1; if (keyGets === 1) return { ok: false, json: async () => null }; await gate; return { ok: true, json: async () => ({ data: [] }) }; }
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { user_id: 'u1', role: 'admin' } }) };
+      if (url.startsWith('/api/webhooks/config')) return { ok: true, json: async () => ({ data: [] }) };
+      return { ok: false, json: async () => null };
+    }));
+    await mount();
+    const retry = () => ([...container.querySelectorAll('[data-testid="agent-key-read-failed"] button')][0] as HTMLButtonElement);
+    expect(retry().disabled).toBe(false);
+    await act(async () => { retry().click(); });
+    await settle();
+    expect(keyGets).toBe(2);
+    expect(retry().disabled, 'the retry read is out: the button waits').toBe(true);
+    await act(async () => { retry().click(); });
+    expect(keyGets, 'a press while reading sends nothing').toBe(2);
+    await act(async () => { release(); });
+    await settle();
+  });
 });
 
