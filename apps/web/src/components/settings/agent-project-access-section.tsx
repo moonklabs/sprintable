@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Shield, ShieldOff, Loader2 } from 'lucide-react';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { ListRow } from '@/components/ds/list-row';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
+import { DetailCard } from '@/components/agents/detail-card';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -128,90 +130,66 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
   const grantedCount = Object.keys(grantMap).length;
 
   return (
-    <SectionCard>
-      <SectionCardHeader>
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1">
-            <h2 className="text-base font-semibold text-foreground">{t('agentProjectAccessTitle')}</h2>
-            <p className="text-sm text-muted-foreground">
-              {t('agentProjectAccessDesc')}
-            </p>
-          </div>
-          {!loading && projects.length > 0 ? (
-            <div className="shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-              <div className="font-medium text-foreground">{grantedCount} / {projects.length}</div>
-              <div>{t('projectAccessGrantedLabel')}</div>
-            </div>
-          ) : null}
+    <DetailCard
+      data-testid="agent-detail-card-project-access"
+      title={t('agentProjectAccessTitle')}
+      description={t('agentProjectAccessDesc')}
+      action={!loading && projects.length > 0 ? (
+        <div className="shrink-0 text-right text-ds-small tabular-nums text-ds-ink-3">
+          <div className="font-medium text-ds-ink">{grantedCount} / {projects.length}</div>
+          <div>{t('projectAccessGrantedLabel')}</div>
         </div>
-      </SectionCardHeader>
-      <SectionCardBody className="space-y-3">
+      ) : undefined}
+    >
         {message && (
           // story #2105 2차 — handleToggle이 재시도 전 setMessage(null)을 먼저 호출해(위 정의) 매
           // 시도마다 언마운트→리마운트된다. 에러=alert/assertive, 성공=status/polite.
-          <Alert
-            variant={message.type === 'success' ? 'success' : 'destructive'}
-            role={message.type === 'success' ? 'status' : 'alert'}
-            aria-live={message.type === 'success' ? 'polite' : 'assertive'}
-            aria-atomic="true"
-          >
-            <AlertDescription>{message.text}</AlertDescription>
-          </Alert>
+          // story 4912 (C2c): the ds Banner carries the role (failed = alert · info = status) — role=alert already means assertive + atomic, role=status polite + atomic. A second aria-live on an inner element made the same text a nested live region (read twice); there is ONE live region now (PO + codex).
+          <Banner tone={message.type === 'success' ? 'info' : 'failed'} className="rounded-ds-control">
+            {message.text}
+          </Banner>
         )}
 
         {loading ? (
-          <div className="space-y-1 divide-y divide-border">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="flex items-center gap-3 px-3 py-3">
-                <div className="h-4 w-32 flex-1 animate-pulse rounded bg-muted" />
-                <div className="h-7 w-20 animate-pulse rounded bg-muted" />
-              </div>
-            ))}
-          </div>
+          <SkeletonGroup label={t('agentProjectAccessTitle')} className="space-y-2">
+            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-10" />)}
+          </SkeletonGroup>
         ) : projects.length === 0 ? (
-          <p className="rounded-md border border-dashed border-border px-3 py-6 text-sm text-muted-foreground">
+          <p className="rounded-ds-control border border-dashed border-ds-line px-3 py-6 text-ds-body text-ds-ink-3">
             {t('noAccessibleProjects')}
           </p>
         ) : (
-          <div className="focus-inset max-h-72 divide-y divide-border overflow-y-auto overflow-x-hidden rounded-md border border-border">
+          <div className="focus-inset max-h-72 overflow-y-auto overflow-x-hidden rounded-ds-control border border-ds-line [&>*:last-child]:border-b-0">
             {projects.map((project) => {
               const errored = errorIds.has(project.id);
               const readDenied = readDeniedIds.has(project.id);
               const granted = project.id in grantMap;
               const toggling = togglingId === project.id;
               return (
-                <div key={project.id} className="flex items-center justify-between gap-3 px-3 py-3 text-sm">
-                  <span className="min-w-0 truncate font-medium text-foreground">{project.name}</span>
-                  {errored ? (
-                    <button
-                      type="button"
-                      onClick={() => void loadGrants()}
-                      className="inline-flex shrink-0 items-center gap-1 text-xs text-destructive hover:underline"
-                      role="alert"
-                      aria-live="assertive"
-                      aria-atomic="true"
-                    >
-                      {t('loadFailedRetry')}
-                    </button>
+                <ListRow
+                  key={project.id}
+                  density="compact"
+                  title={project.name}
+                  trailing={errored ? (
+                    // story 4912 (C2c, codex round 2): a role=alert on the button element itself displaced its button role; the alert is the wrapper (announced at once, atomic) and the button keeps being a button
+                    <span role="alert" aria-atomic="true" className="inline-flex">
+                      <Button variant="quiet" onClick={() => void loadGrants()} className="text-ds-failed">
+                        {t('loadFailedRetry')}
+                      </Button>
+                    </span>
                   ) : readDenied ? (
-                    <span
-                      className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
-                      title={t('readAccessDeniedTooltip')}
-                    >
+                    <span className="inline-flex shrink-0 items-center gap-1 text-ds-small text-ds-ink-3" title={t('readAccessDeniedTooltip')}>
                       {t('readAccessDenied')}
                     </span>
                   ) : canEdit ? (
                     <Button
-                      variant="glass"
-                      size="sm"
+                      variant="secondary"
                       disabled={toggling}
                       onClick={() => void handleToggle(project.id)}
                       className={cn(
-                        'min-w-[72px] shrink-0 gap-1 transition-colors',
-                        // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
-                        granted
-                          ? 'border-success/40 bg-success-tint text-foreground hover:bg-success/15'
-                          : 'border-border text-muted-foreground hover:bg-muted/40',
+                        'min-w-[72px] shrink-0 gap-1',
+                        // story 4912 (C2c): allowed = the «done» tint with ink text (never a coloured text on a tint); blocked = neutral
+                        granted ? 'border-ds-done bg-ds-done-soft text-ds-ink hover:bg-ds-done-soft' : 'text-ds-ink-3',
                       )}
                     >
                       {toggling ? (
@@ -224,19 +202,18 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
                     </Button>
                   ) : (
                     <span className={cn(
-                      'inline-flex shrink-0 items-center gap-1 text-xs',
-                      granted ? 'text-success' : 'text-muted-foreground',
+                      'inline-flex shrink-0 items-center gap-1 text-ds-small',
+                      granted ? 'text-ds-done' : 'text-ds-ink-3',
                     )}>
                       {granted ? <Shield className="h-3 w-3" /> : <ShieldOff className="h-3 w-3" />}
                       {granted ? t('projectAccessAllowed') : t('projectAccessBlocked')}
                     </span>
                   )}
-                </div>
+                />
               );
             })}
           </div>
         )}
-      </SectionCardBody>
-    </SectionCard>
+    </DetailCard>
   );
 }
