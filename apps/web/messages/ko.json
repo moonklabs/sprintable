@@ -5999,7 +5999,11 @@
     "sourceLabel": "출처",
     "metricValueLabel": "측정치",
     "measuredAtLabel": "측정 시각",
-    "recipePublishFailedHeader": "발행이 멈췄어요"
+    "recipePublishFailedHeader": "발행이 멈췄어요",
+    "steerHeader": "방향 전환",
+    "steerTargetLabel": "지시 대상자",
+    "memberMissing": "(알 수 없는 구성원)",
+    "genericEventHeader": "이벤트"
   },
   "activityLog": {
     "title": "활동 로그",

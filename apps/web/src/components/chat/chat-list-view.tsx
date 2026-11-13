@@ -28,9 +28,10 @@ import { isNoProjectAtAll, projectsUnknownBecauseFailed } from '@/app/(authentic
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { participantDisplayLabel } from '@/lib/member-display';
-import { composeEventPreviewLine } from './event-block-card';
+import { composeEventPreviewLine, composeEventPreviewFallback } from './event-block-card';
 import { toListPreview } from './list-preview';
 import { useOrgDomainLabels, type OrgDomainLabels } from '@/hooks/use-org-domain-labels';
+import { useEventDefinitionNames } from '@/hooks/use-event-definition-names';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { DeviceChip } from '@/components/desktop/device-chip';
@@ -167,6 +168,7 @@ function ConversationRow({
   currentMemberId,
   isAgentConv,
   domainLabels,
+  eventDefinitionName,
   projectLabel,
   onClick,
 }: {
@@ -178,6 +180,8 @@ function ConversationRow({
   // story #3888 CHANGES①(PO PR 코멘트, 2026-09-14 18:53Z) — 부모(ChatListView)가 1회만
   // 호출한 useOrgDomainLabels 결과를 prop으로 받는다(행마다 재호출 금지 — 요청 중복 방지).
   domainLabels: OrgDomainLabels;
+  /** story 4921 — the event definition's human name by key (read once by the parent, like the domain labels) — for the fallback line of an event with no sentence of its own */
+  eventDefinitionName: (eventKey: string) => string | undefined;
   onClick: () => void;
 }) {
   const t = useTranslations('chats');
@@ -201,11 +205,19 @@ function ConversationRow({
   // 시점에 구운 slug) 대신 「{헤더} · {요약}」로 렌더 시점 조립(composeEventPreviewLine,
   // event-block-card.tsx — 같은 재료 재사용). 조립 실패(미지원 event_key·payload 결손)는
   // null이라 기존 content 폴백으로 조용히 떨어진다.
+  const previewHelpers = { tBoard, tCage, tDashboard, tEventCard, tEntity: t, tOutcomeLoop, domainLabels, eventDefinitionName };
+  // story 4921 — an event with no sentence of its own (workflow stages · marketing recipes · recipe publish stopped · an org's custom events …) used to fall to its `content`: the MACHINE text an agent reads
+  // («[이벤트] preset.x», «- key: value» lines). A person sees the definition's name + their own words, or the one word «이벤트» — never a slug or an id. A content somebody WROTE is still shown as it is.
   const eventPreview = composeEventPreviewLine(
     conv.latest_message?.event?.event_key,
     conv.latest_message?.event?.payload,
-    { tBoard, tCage, tDashboard, tEventCard, tEntity: t, tOutcomeLoop, domainLabels },
+    previewHelpers,
     conv.latest_message?.event?.refs,
+  ) ?? composeEventPreviewFallback(
+    conv.latest_message?.content,
+    conv.latest_message?.event?.event_key,
+    conv.latest_message?.event?.payload,
+    previewHelpers,
   );
   // story #3949 — 이벤트 조립이 없으면(위 null 폴백) 남는 건 «보통» 메시지 원문 —
   // 마크다운 링크/entity 참조 토큰이 그대로 샐 수 있어 평문화(toPlainPreview → 4887: list-preview.ts의 toListPreview)한다.
@@ -447,6 +459,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // 개든 요청은 항상 1건.
   const locale = useLocale();
   const domainLabels = useOrgDomainLabels(orgId, locale);
+  const eventDefinitionName = useEventDefinitionNames(); // story 4921 — one read for every row (like the domain labels)
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [allConversations, setAllConversations] = useState<ConversationItem[]>([]);
   // agent 탭(allConversations·include_agent_conversations) 첫 활성화 1회만 fetch 하기 위한 가드.
@@ -982,7 +995,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     <div className="space-y-1">
       {/* story 4887 (UI-4 screen PR · the approved layout) — ONE list: the «DM» / «그룹» sub-heads are gone (the room's own glyph says which it is), in the order the server gave them */}
       {conversations.map((conv) => (
-        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} projectLabel={projectLabelOf(conv)} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
+        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} eventDefinitionName={eventDefinitionName} projectLabel={projectLabelOf(conv)} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
       ))}
       {conversations.length < myTotal && (
         <Button
@@ -1058,7 +1071,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         {t('agentSection')}
       </p>
       {agentOnlyConvs.map((conv) => (
-        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} isAgentConv domainLabels={domainLabels} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
+        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} isAgentConv domainLabels={domainLabels} eventDefinitionName={eventDefinitionName} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
       ))}
       {allConversations.length < agentTotal && (
         <Button

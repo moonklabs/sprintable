@@ -24,6 +24,7 @@ import { groupByIdenticalContent, referenceTypeLabel } from '@/lib/inbox-generic
 import type { EventPreviewHelpers } from '@/components/chat/event-block-card';
 import { composeNotificationDisplay, type Notification } from './inbox-notification-display';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
+import { useEventDefinitionNames } from '@/hooks/use-event-definition-names';
 import { formatAtLeast } from '@/lib/format-at-least';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { InboxTopBarTitle, useInboxTabLabels } from '@/components/nav/flat-tab-top-bar';
@@ -221,8 +222,9 @@ export default function InboxPage() {
   // story #3903 AC2 — composeEventPreviewLine의 domainLabels 재료(org 커스텀 status
   // 라벨 오버라이드). chat-list-view.tsx의 기존 재사용 패턴과 동형.
   const domainLabels = useOrgDomainLabels(orgId, locale);
+  const eventDefinitionName = useEventDefinitionNames(); // story 4921 — the fallback line of an event with no sentence of its own names the event by its definition
   const eventPreviewHelpers: EventPreviewHelpers = {
-    tBoard, tCage, tDashboard, tEventCard, tEntity, tOutcomeLoop, domainLabels,
+    tBoard, tCage, tDashboard, tEventCard, tEntity, tOutcomeLoop, domainLabels, eventDefinitionName,
   };
   const activeTab = searchParams.get('tab') ?? 'notifications';
   // story #2164(2026-07-25, 까심): 예전엔 이 세 탭 중 notifications 탭 라벨과 페이지 헤더가

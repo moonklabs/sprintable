@@ -5999,7 +5999,11 @@
     "sourceLabel": "Source",
     "metricValueLabel": "Measured value",
     "measuredAtLabel": "Measured at",
-    "recipePublishFailedHeader": "Publishing stopped"
+    "recipePublishFailedHeader": "Publishing stopped",
+    "steerHeader": "Direction change",
+    "steerTargetLabel": "Instructed member",
+    "memberMissing": "(unknown member)",
+    "genericEventHeader": "Event"
   },
   "activityLog": {
     "title": "Activity Log",
