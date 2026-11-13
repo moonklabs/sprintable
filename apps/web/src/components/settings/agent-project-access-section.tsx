@@ -122,6 +122,9 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
           setMessage({ type: 'error', text: t('agentProjectAccessPutOnFailed', { project: projectName }) });
         }
       }
+    } catch {
+      // story 4912 (PO 11-13): a REJECTED request (the network went away) said nothing at all — the button just came back. It is the same failure as an HTTP error answer, so it says the same sentence.
+      setMessage({ type: 'error', text: t(recordId ? 'agentProjectAccessTakeOffFailed' : 'agentProjectAccessPutOnFailed', { project: projectName }) });
     } finally {
       setTogglingId(null);
     }

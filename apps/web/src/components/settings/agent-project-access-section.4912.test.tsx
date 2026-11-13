@@ -19,6 +19,7 @@ let container: HTMLDivElement;
 let root: Root;
 let answers: Record<string, () => Response | Promise<Response>>;
 let postAnswer: () => Response | Promise<Response>;
+let deleteAnswer: () => Response | Promise<Response>;
 beforeEach(() => {
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   answers = {
@@ -28,10 +29,11 @@ beforeEach(() => {
     'p-4': () => new Response('{}', { status: 500 }), // transient error → retry
   };
   postAnswer = () => new Response(JSON.stringify({ data: { id: 'r-9' } }), { status: 201 });
+  deleteAnswer = () => new Response('{}', { status: 500 });
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const m = String(input).match(/^\/api\/projects\/(p-\d)\/access(?:\/(.+))?$/);
     if (m && !init?.method) return answers[m[1]!]!();
-    if (m && init?.method === 'DELETE') return new Response('{}', { status: 500 });
+    if (m && init?.method === 'DELETE') return deleteAnswer();
     if (m && init?.method === 'POST') return postAnswer();
     return new Response('{}', { status: 404 });
   }));
@@ -96,6 +98,27 @@ describe('AgentProjectAccessSection — ds 한 층(story 4912 · C2c)', () => {
     expect(banner.textContent).toContain('베타');
     expect(banner.querySelector('[aria-live], [role]')).toBeNull();
     expect(rowOf('베타').querySelector('button')?.textContent).toContain(S.projectAccessAllowed);
+  });
+
+  it('⭐요청 자체가 거절돼도(네트워크 끊김) 실패 띠가 뜬다 — 차단(DELETE)도 허용(POST)도 · 단추는 도로 눌린다 — catch를 걷으면 RED (PO 11-13: 말없이 삼키던 결함)', async () => {
+    deleteAnswer = () => { throw new TypeError('network down'); };
+    postAnswer = () => { throw new TypeError('network down'); };
+    await mount();
+    await act(async () => { (rowOf('알파').querySelector('button') as HTMLElement).click(); }); // allowed → block (DELETE rejects)
+    await settle();
+    let banner = card().querySelector('[data-slot="ds-banner"]') as HTMLElement;
+    expect(banner, 'a failure line, not silence').not.toBeNull();
+    expect(banner.getAttribute('role')).toBe('alert');
+    expect(banner.textContent).toContain('알파');
+    expect((rowOf('알파').querySelector('button') as HTMLButtonElement).disabled).toBe(false); // free again
+    expect(rowOf('알파').querySelector('button')?.textContent).toContain(S.projectAccessAllowed); // nothing changed
+    await act(async () => { (rowOf('베타').querySelector('button') as HTMLElement).click(); }); // blocked → allow (POST rejects)
+    await settle();
+    banner = card().querySelector('[data-slot="ds-banner"]') as HTMLElement;
+    expect(banner.getAttribute('role')).toBe('alert');
+    expect(banner.textContent).toContain('베타');
+    expect((rowOf('베타').querySelector('button') as HTMLButtonElement).disabled).toBe(false);
+    expect(rowOf('베타').querySelector('button')?.textContent).toContain(S.projectAccessBlocked);
   });
 
   it('⭐누른 줄의 토글은 요청이 나가 있는 동안 disabled(다른 줄은 그대로 — 한 번에 하나) · 허용 줄은 done 틴트 클래스, 차단 줄은 중립', async () => {

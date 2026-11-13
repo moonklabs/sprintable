@@ -55,6 +55,7 @@ describe('AgentApiKeyManager — 4912 C4: the windows on the ds Dialog', () => {
     const buttons = Array.from(dlg.querySelectorAll('[data-slot="ds-dialog-footer"] button')) as HTMLButtonElement[];
     expect(buttons.map((b) => b.textContent)).toEqual([koMessages.common.cancel, S.agentApiKeyRevokeConfirmCta]); // cancel first (Base UI's first focus), then the confirm
     expect(buttons[1]!.className).toContain('border-ds-failed');
+    expect(document.activeElement, 'the first focus is «취소» (Enter once must not revoke — codex)').toBe(buttons[0]);
     await act(async () => { buttons[1]!.click(); });
     await settle();
     expect(calls.some((c) => c.method === 'POST')).toBe(true);
@@ -72,6 +73,7 @@ describe('AgentApiKeyManager — 4912 C4: the windows on the ds Dialog', () => {
     await act(async () => { confirm.click(); });
     await settle();
     expect(calls.filter((c) => c.method === 'DELETE').map((c) => c.url)).toEqual(['/api/agents/agent-1/api-key/key-1']);
+    expect(popup(), 'the confirm closed itself (the caller closes: revokeKeyId is cleared before the request)').toBeNull();
   });
 
   it('⭐한 번만 보이는 «새 키» 창 = ds Dialog — 이름(aria-labelledby)이 제목 · 키 칸 ds Input(읽기 전용) · 머리말 · 범위 · 온보딩 글이 sunk 면 · [완료] primary', async () => {

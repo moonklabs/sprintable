@@ -339,27 +339,33 @@ export default function AgentDetailPage() {
   const handleSaveEdit = async () => {
     if (!editName.trim()) return;
     setSavingEdit(true);
-    const res = await fetchWithAuth(`/api/team-members/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: editName.trim(), role: editRole.trim() || 'member' }),
-    });
-    if (res.ok) {
-      const json = await res.json() as { data: AgentMember };
-      setAgent(json.data);
-      setEditingName(false);
-      addToast({ type: 'success', title: tc('saved') });
-    } else {
-      const status = res.status;
-      // story #2485 — backend update_team_member()는 generic HTTP상태 코드만 낸다
-      // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
-      if (status === 403) {
-        addToast({ type: 'error', title: t('ownershipDenied') });
+    // story 4912 (PO 11-13): a rejected request used to leave `savingEdit` true for good (the save button stayed disabled, no word) — catch + finally
+    try {
+      const res = await fetchWithAuth(`/api/team-members/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: editName.trim(), role: editRole.trim() || 'member' }),
+      });
+      if (res.ok) {
+        const json = await res.json() as { data: AgentMember };
+        setAgent(json.data);
+        setEditingName(false);
+        addToast({ type: 'success', title: tc('saved') });
       } else {
-        addToast({ type: 'error', title: tc('error') });
+        const status = res.status;
+        // story #2485 — backend update_team_member()는 generic HTTP상태 코드만 낸다
+        // (진짜 비즈니스 code 없음, 그라운딩 확認) — raw 서버 message 노출 대신 고정 문구.
+        if (status === 403) {
+          addToast({ type: 'error', title: t('ownershipDenied') });
+        } else {
+          addToast({ type: 'error', title: tc('error') });
+        }
       }
+    } catch {
+      addToast({ type: 'error', title: tc('error') });
+    } finally {
+      setSavingEdit(false);
     }
-    setSavingEdit(false);
   };
 
   const handleSaveWebhook = async () => {
@@ -391,6 +397,9 @@ export default function AgentDetailPage() {
       }
       addToast({ type: 'success', title: t('webhookUrlSavedToast') });
       await fetchWebhookConfigs(agent.project_id);
+    } catch {
+      // story 4912 (PO 11-13): a rejected request said nothing — same failure as an HTTP error answer
+      addToast({ type: 'error', title: tc('error') });
     } finally {
       setSavingWebhook(false);
     }
@@ -517,6 +526,9 @@ export default function AgentDetailPage() {
           addToast({ type: 'error', title: tc('error') });
         }
       }
+    } catch {
+      // story 4912 (PO 11-13): a rejected request / an unreadable answer said nothing — same failure as an HTTP error answer
+      addToast({ type: 'error', title: tc('error') });
     } finally {
       setSavingRuntime(false);
     }
@@ -536,6 +548,10 @@ export default function AgentDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_active: next }),
       });
+    } catch {
+      // story 4912 (PO 11-13): a rejected request said nothing (the finally below frees the guard) — same failure as an HTTP error answer; not this page's word if it moved on to another agent
+      if (stillMine()) addToast({ type: 'error', title: tc('error') });
+      return;
     } finally {
       if (stillMine()) { togglingRef.current = false; setTogglingActive(false); }
     }
