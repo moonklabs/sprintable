@@ -270,7 +270,7 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
                     )}
                   >
                     {/* story 4921 — an event message drawn as text shows the person's line (the definition's name is not read in this screen: the word «이벤트» + the person's own words), never the machine text an agent reads */}
-                    {composeEventPreviewFallback(m.content, m.event?.event_key, m.event?.payload, { tEventCard }) ?? m.content}
+                    {composeEventPreviewFallback(m.content, m.event?.event_key, m.event?.payload, { tEventCard }, m.event?.refs as Record<string, unknown> | undefined) ?? m.content}
                   </Card>
                   {/* story #4430 — right under the sender's own bubble, above the reference and approval cards */}
                   <WithheldDeliveryLine withheld={m.delivery_withheld} isMine={isMine} />

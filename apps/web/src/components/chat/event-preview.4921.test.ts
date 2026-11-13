@@ -96,7 +96,7 @@ describe('humanizeMachineEventSummary — a stored «{sender}: [이벤트] …»
     const line = humanizeMachineEventSummary(summary, { event_key: 'preset.workflow.kanban', payload: { stage: 'ready' } }, t);
     expect(line).toBe('시스템 발행: 이벤트');
     expect(line).not.toMatch(LEAK);
-    expect(humanizeMachineEventSummary('페드루: [이벤트] preset.steer.instruct - instruction: 지시', { event_key: 'preset.steer.instruct', payload: { instruction: '먼저 봐 주세요' } }, t)).toBe('페드루: 이벤트 · 먼저 봐 주세요');
+    expect(humanizeMachineEventSummary('페드루: [이벤트] preset.steer.instruct - instruction: 지시', { event_key: 'preset.steer.instruct', payload: { instruction: '먼저 봐 주세요' } }, t)).toBe('페드루: 방향 전환 · 먼저 봐 주세요');
     expect(humanizeMachineEventSummary('Someone: [Event] org.x.y\n- a: b', undefined, t)).toBe('Someone: 이벤트');
   });
   it('기계 문장이 아닌 요약 · 빈 값은 그대로', () => {
@@ -105,5 +105,18 @@ describe('humanizeMachineEventSummary — a stored «{sender}: [이벤트] …»
     expect(humanizeMachineEventSummary(undefined, undefined, t)).toBeUndefined();
     expect(humanizeMachineEventSummary(null, undefined, t)).toBeNull();
     expect(humanizeMachineEventSummary('[이벤트]', undefined, t)).toBe('[이벤트]');
+  });
+});
+
+describe('the text fallback carries the steer sentence and the legacy summary keeps the target (story 4921)', () => {
+  const t = (k: string) => COPY[k] ?? k;
+  it('⭐composeEventPreviewFallback of a steer with refs.target = the same sentence as composeEventPreviewLine', () => {
+    const refs = { target: { found: true, name: '미르코' } };
+    expect(composeEventPreviewFallback('[이벤트] preset.steer.instruct\n- instruction: x', 'preset.steer.instruct', { instruction: '먼저 봐 주세요' }, { tEventCard: t }, refs)).toBe('방향 전환 · 먼저 봐 주세요 → 미르코');
+    expect(composeEventPreviewFallback('[이벤트] preset.steer.instruct\n- instruction: x', 'preset.steer.instruct', { instruction: '먼저 봐 주세요' }, { tEventCard: t })).toBe('방향 전환 · 먼저 봐 주세요');
+  });
+  it('⭐a stored machine summary of a steer: «{보낸 이}: 방향 전환 · … → 이름»', () => {
+    const line = humanizeMachineEventSummary('페드루: [이벤트] preset.steer.instruct - instruction: x', { event_key: 'preset.steer.instruct', payload: { instruction: '먼저 봐 주세요' }, refs: { target: { found: true, name: '미르코' } } }, t);
+    expect(line).toBe('페드루: 방향 전환 · 먼저 봐 주세요 → 미르코');
   });
 });

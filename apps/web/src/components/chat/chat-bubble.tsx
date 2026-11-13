@@ -523,11 +523,12 @@ export function ChatBubble({
   const isLiteral = !isCmd && message.content.startsWith('//');
   // story 4921 — an event message that is drawn as TEXT (its definition has no card template, or the definitions could not be read) must not show the machine text an agent reads («[이벤트] preset.x»,
   // «- key: value» lines): it shows the definition's name + the person's own words, or the one word «이벤트». Cards (approval · event · server command) and every ordinary message are untouched.
-  const eventTextLine = eventTarget && !eventBlockTemplate && !approvalTarget && !serverCommand
-    ? composeEventPreviewFallback(message.content, eventTarget.event_key, eventTarget.payload, {
+  // A message published before the structured `event` rode along (no `event` at all) is recognised by its machine header and gets the one word «이벤트».
+  const eventTextLine = !eventBlockTemplate && !approvalTarget && !serverCommand && !isDeleted
+    ? composeEventPreviewFallback(message.content, eventTarget?.event_key, eventTarget?.payload, {
       tEventCard,
       eventDefinitionName: (key) => eventDefinitionsByKey?.[key]?.name ?? undefined,
-    })
+    }, eventTarget?.refs as Record<string, unknown> | undefined)
     : null;
   const displayContent = eventTextLine ?? (isLiteral ? dequoteLiteral(message.content) : message.content);
   // story #4197·#4200(유나 결정) — 보여 줄 글자 0(빈 문자열·공백뿐·주석뿐, 단일 술어 hasNoVisibleText)이면 기본 텍스트

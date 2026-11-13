@@ -46,10 +46,18 @@ def first_human_line(value: Any, max_chars: int = _PREVIEW_TEXT_MAX) -> str | No
     return line if len(line) <= max_chars else line[:max_chars] + "…"  # `str` slices by code point
 
 
-def human_event_text(content: str | None, event: dict | None, locale: str = "ko") -> str | None:
-    """the person-readable line for an event message, or None when `content` is not machine text (the caller keeps it)"""
+def _locale_of_content(content: str) -> str:
+    """the language the message was WRITTEN in is the language of its header («[Event]» → en, «[이벤트]» → ko): the server holds no reader's locale on these paths, and the old summary was the content in that language"""
+    en_prefix = t("events.event_line_header", "en", event_key=_SENTINEL).split(_SENTINEL)[0]
+    return "en" if content.startswith(en_prefix) else "ko"
+
+
+def human_event_text(content: str | None, event: dict | None, locale: str | None = None) -> str | None:
+    """the person-readable line for an event message, or None when `content` is not machine text (the caller keeps it).
+    `locale` None → the language of the message's own header."""
     if not is_machine_event_content(content):
         return None
+    locale = locale or _locale_of_content(content or "")
     card = event if isinstance(event, dict) else {}
     payload = card.get("payload") if isinstance(card.get("payload"), dict) else {}
     refs = card.get("refs") if isinstance(card.get("refs"), dict) else {}

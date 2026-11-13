@@ -98,3 +98,11 @@ def test_preview_content_of_a_message_uses_the_event_card_and_leaves_other_messa
     assert _preview_content(msg("그냥 글", None)) == "그냥 글"
     assert _preview_content(msg("발행이 멈췄어요.", {"event_key": "preset.recipe.publish_failed", "payload": {}})) == "발행이 멈췄어요."
     assert _preview_content(msg("", None)) == ""
+
+
+def test_the_language_of_the_line_follows_the_header_of_the_message_without_a_reader_locale():
+    ev = {"event_key": "preset.steer.instruct", "payload": {"instruction": "Look first"}, "refs": {"target": {"found": True, "name": "Mirco"}}}
+    assert human_event_text(machine("preset.steer.instruct", "en"), ev) == "Direction change · Look first → Mirco"
+    assert human_event_text(machine("preset.steer.instruct", "ko"), ev) == "방향 전환 · Look first → Mirco"
+    assert human_event_text(machine("org.x.y", "en"), {"event_key": "org.x.y", "payload": {}}) == "Event"
+    assert human_event_text(machine("org.x.y", "en"), {"event_key": "org.x.y", "payload": {}}, "ko") == "이벤트"  # an explicit locale wins

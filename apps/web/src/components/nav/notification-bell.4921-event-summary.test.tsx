@@ -49,11 +49,11 @@ describe('NotificationBell — event messages in words (story 4921)', () => {
   it('⭐옛 기계 문장 요약은 «{보낸 이}: 이벤트[ · 글]», 새 사람 문장 · 보통 글은 그대로 — 슬러그 · id · key: value 0', async () => {
     await openBell();
     const lines = headlines();
-    expect(lines).toEqual(['시스템 발행: 이벤트', '페드루: 이벤트 · 먼저 봐 주세요', '시스템 발행: 이벤트', '페드루: 방향 전환 · 먼저 봐 주세요 → 미르코', '미르코: 안녕하세요']);
+    expect(lines).toEqual(['시스템 발행: 이벤트', '페드루: 방향 전환 · 먼저 봐 주세요', '시스템 발행: 이벤트', '페드루: 방향 전환 · 먼저 봐 주세요 → 미르코', '미르코: 안녕하세요']);
     for (const l of lines) expect(l).not.toMatch(/\[이벤트\]|\[Event\]|preset\.|org\.x|target_member_id|97470487|- \w+:/);
   });
   it('영어 화면: «이벤트» 자리는 «Event»', async () => {
     await openBell('en');
-    expect(headlines().slice(0, 3)).toEqual(['시스템 발행: Event', '페드루: Event · 먼저 봐 주세요', '시스템 발행: Event']);
+    expect(headlines().slice(0, 3)).toEqual(['시스템 발행: Event', '페드루: Direction change · 먼저 봐 주세요', '시스템 발행: Event']);
   });
 });

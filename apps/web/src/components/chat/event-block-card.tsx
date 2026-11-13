@@ -733,22 +733,29 @@ export function composeEventPreviewLine(
 
   // story 4921 — «방향 전환 · {지시 글 앞부분}[ → {대상 이름}]». The target's name comes from `refs.target` (found); a message published before this story has no ref → no « → name» (the sentence stays whole);
   // a member who is gone now → «알 수 없는 구성원». The instruction is the person's own text (first line).
-  if (eventKey === 'preset.steer.instruct') {
-    const instruction = firstHumanLine(payload['instruction'], PREVIEW_TEXT_MAX);
-    if (!instruction) return null;
-    const targetRef = refs?.['target'];
-    const targetName =
-      targetRef && typeof targetRef === 'object'
-        ? (targetRef.found && typeof targetRef.name === 'string' ? targetRef.name : (!targetRef.found ? tEventCard('memberMissing') : null))
-        : null;
-    return `${tEventCard('steerHeader')} · ${instruction}${targetName ? ` → ${targetName}` : ''}`;
-  }
+  if (eventKey === 'preset.steer.instruct') return steerPreviewSentence(payload, refs, tEventCard);
 
   return null;
 }
 
 /** how much of a person's own text the one-line preview keeps */
 const PREVIEW_TEXT_MAX = 60;
+
+/** «방향 전환 · {지시 글}[ → {대상 이름}]» — one sentence for every surface (room list · inbox · bell · bubble · v3), so a surface that has only the text fallback says the same thing */
+function steerPreviewSentence(
+  payload: Record<string, unknown> | undefined,
+  refs: Record<string, unknown> | undefined,
+  tEventCard: (key: string) => string,
+): string | null {
+  const instruction = firstHumanLine(payload?.['instruction'], PREVIEW_TEXT_MAX);
+  if (!instruction) return null;
+  const targetRef = refs?.['target'] as { found?: boolean; name?: unknown } | null | undefined;
+  const targetName =
+    targetRef && typeof targetRef === 'object'
+      ? (targetRef.found && typeof targetRef.name === 'string' ? targetRef.name : (!targetRef.found ? tEventCard('memberMissing') : null))
+      : null;
+  return `${tEventCard('steerHeader')} · ${instruction}${targetName ? ` → ${targetName}` : ''}`;
+}
 /** the payload fields that hold a PERSON'S words (an instruction, a message, a summary, a note) — NOT `title` / `body` / `content` / `reason` (workflow and recipe payloads carry slugs, ids and paths there) — the first usable one, first line, is what a fallback line may show */
 const HUMAN_TEXT_FIELDS = ['instruction', 'message', 'summary', 'note'] as const;
 /** a line that is an id, a path or a link is not a person's words even in a text field */
@@ -782,9 +789,10 @@ export function humanizeMachineEventSummary(
   if (typeof summary !== 'string') return summary;
   const m = /^([^\n]*?): (\[(?:이벤트|Event)\] [\s\S]*)$/.exec(summary);
   if (!m) return summary;
-  const card = (event && typeof event === 'object' ? event : {}) as { event_key?: unknown; payload?: unknown };
+  const card = (event && typeof event === 'object' ? event : {}) as { event_key?: unknown; payload?: unknown; refs?: unknown };
   const payload = card.payload && typeof card.payload === 'object' ? (card.payload as Record<string, unknown>) : undefined;
-  const line = composeEventPreviewFallback(m[2], typeof card.event_key === 'string' ? card.event_key : undefined, payload, { tEventCard });
+  const refs = card.refs && typeof card.refs === 'object' ? (card.refs as Record<string, unknown>) : undefined;
+  const line = composeEventPreviewFallback(m[2], typeof card.event_key === 'string' ? card.event_key : undefined, payload, { tEventCard }, refs);
   return line ? `${m[1]}: ${line}` : summary;
 }
 
@@ -798,9 +806,14 @@ export function composeEventPreviewFallback(
   eventKey: string | undefined,
   payload: Record<string, unknown> | undefined,
   helpers: Pick<EventPreviewHelpers, 'tEventCard' | 'eventDefinitionName'>,
+  refs?: Record<string, unknown>,
 ): string | null {
   if (!isMachineEventContent(content)) return null;
   const { tEventCard, eventDefinitionName } = helpers;
+  if (eventKey === 'preset.steer.instruct') {
+    const steer = steerPreviewSentence(payload, refs, tEventCard);
+    if (steer) return steer;
+  }
   const name = (eventKey ? eventDefinitionName?.(eventKey)?.trim() : '') || tEventCard('genericEventHeader');
   let text: string | null = null;
   for (const field of HUMAN_TEXT_FIELDS) {

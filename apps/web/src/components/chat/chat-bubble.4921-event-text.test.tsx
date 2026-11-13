@@ -54,4 +54,13 @@ describe('ChatBubble — an event message drawn as text (story 4921)', () => {
     await render(msg('발행이 멈췄어요. 작업 상세에서 다시 시도해 주세요.', { event_key: 'preset.recipe.publish_failed', payload: {}, refs: {} } as never));
     expect(text()).toContain('발행이 멈췄어요');
   });
+  it('⭐an OLD event message with no `event` at all (published before it rode along) still never shows the machine text', async () => {
+    await render(msg(MACHINE('preset.workflow.kanban')));
+    expect(text()).toBe('이벤트');
+    expect(text()).not.toMatch(LEAK);
+  });
+  it('⭐a steer drawn as text says the steer sentence WITH the target name (the same sentence as the room list), not «이벤트 · …»', async () => {
+    await render(msg(MACHINE('preset.steer.instruct'), { event_key: 'preset.steer.instruct', payload: { instruction: '먼저 봐 주세요', target_member_id: UUID }, refs: { target: { found: true, name: '미르코' } } } as never));
+    expect(text()).toBe('방향 전환 · 먼저 봐 주세요 → 미르코');
+  });
 });
