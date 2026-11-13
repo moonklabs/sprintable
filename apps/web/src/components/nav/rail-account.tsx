@@ -36,7 +36,7 @@ export function RailAccount({ orgId, orgMemberships, projectId, projectMembershi
         className={cn('block rounded-ds-control hover:bg-ds-surface-high focus-visible:ring-2 focus-visible:ring-ds-action', className)}
         data-rail-item="account"
       >
-        <span className="flex size-10 items-center justify-center rounded-ds-control text-ds-ink-3 transition-colors">
+        <span className="flex size-10 items-center justify-center rounded-ds-control text-ds-ink-3 transition-colors [@media(max-height:520px)]:size-8">
           <Icon name={RAIL_ICON_BY_ITEM_ID.account!} size={20} className="size-5" />
         </span>
       </PopoverTrigger>
