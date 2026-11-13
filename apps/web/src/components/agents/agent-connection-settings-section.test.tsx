@@ -9,6 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { AgentConnectionSettingsSection } from './agent-connection-settings-section';
+import { HighlightedJson } from '@/app/onboarding/connect-step';
 
 const { copied, clip } = vi.hoisted(() => ({ copied: [] as string[], clip: { ok: true } }));
 vi.mock('@/lib/clipboard', () => ({ copyTextSafely: async (text: string) => { copied.push(text); return { ok: clip.ok }; } }));
@@ -88,7 +89,18 @@ describe('AgentConnectionSettingsSection — ds 한 층(story 4912 · C2a)', () 
     expect(card().querySelector('[data-slot="ds-skeleton"]')).toBeNull();
   });
 
-  it('복사: 성공하면 «복사됨» · 실패하면 «직접 선택해 복사» 줄 + (새 키가 있으면) 실 config가 든 ds Textarea', async () => {
+  it('복사 성공: 단추가 «복사됨»으로 바뀌고 클립보드엔 지금 보이는 설정이 간다(실패 줄 없음)', async () => {
+    stub();
+    await mount();
+    await settle();
+    await act(async () => { btn(O.copyConfig)?.click(); });
+    await settle();
+    expect(copied.at(-1)).toBe(STDIO);
+    expect(btn(O.copied)).toBeTruthy();
+    expect(card().querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('복사 실패: «직접 선택해 복사» 줄 + (새 키가 있으면) 실 config가 든 ds Textarea', async () => {
     stub();
     await mount('sk_live_FULL');
     await settle();
@@ -113,3 +125,16 @@ describe('agent-connection-settings-section.tsx — 소스', () => {
     expect(src).toContain('<DetailCard');
   });
 });
+
+describe('HighlightedJson — 글자색은 ds 토큰(눌린 면 위 4.5:1 · story 4912 · C2a codex)', () => {
+  it('⭐키 · 문자열 · 부호가 ds 토큰이고 옛 text-success / text-muted-foreground / text-primary가 아니다', async () => {
+    const host = document.createElement('div'); document.body.appendChild(host);
+    const r = createRoot(host);
+    await act(async () => { r.render(<pre><HighlightedJson text={'{"a": "b"}'} /></pre>); });
+    const cls = [...host.querySelectorAll('span')].map((e) => e.className).filter(Boolean);
+    expect(cls).toEqual(expect.arrayContaining(['text-ds-action-text', 'text-ds-info', 'text-ds-ink-3']));
+    expect(cls.join(' ')).not.toMatch(/text-(success|muted-foreground|primary)\b/);
+    await act(async () => { r.unmount(); }); host.remove();
+  });
+});
+
