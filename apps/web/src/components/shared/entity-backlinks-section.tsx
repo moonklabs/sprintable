@@ -9,6 +9,7 @@ import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { stageRoleLabel } from '@/lib/stage-role';
 import { gateApproverLabel } from '@/lib/gate-approver-label';
 import { toPlainPreview } from '@/components/chat/entity-ref';
+import { composeEventPreviewFallback, readableSlug } from '@/components/chat/event-block-card';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { Chip } from '@/components/ds/chip';
 import { cn } from '@/lib/utils';
@@ -73,15 +74,33 @@ const SOURCE_TYPE_ICON = {
  * 않는다는 원칙 그대로). gate_type이 있을 때만(그 stage에 실제로 게이트가 걸릴 때만) 승인자
  * 세그먼트를 덧붙인다 — #4076이 처방한 _render_event_message_content의 "게이트 있을 때만
  * approver를 말한다" 관례와 동형. */
-function eventBacklinkLabel(event: NonNullable<BacklinkItem['message']>['event'], tOrg: (key: string) => string): string {
-  const name = event!.name ?? event!.definition_key;
-  const stage = recipeStageLabel(event!.stage, tOrg);
+function eventBacklinkLabel(event: NonNullable<BacklinkItem['message']>['event'], tOrg: (key: string) => string, tEventCard: (key: string) => string): string {
+  // story 4925 — no definition name (deleted …): the one word «이벤트» (4921's rule), never the definition KEY; a stage no label knows reads as words, not as its slug
+  const name = event!.name?.trim() || tEventCard('genericEventHeader');
+  const rawStage = event!.stage;
+  const stageLabel = recipeStageLabel(rawStage, tOrg);
+  const stage = stageLabel === rawStage ? readableSlug(rawStage) : stageLabel;
   const role = event!.role ? ` (${stageRoleLabel(event!.role, tOrg)})` : '';
   const approver = event!.gate_type ? ` · ${gateApproverLabel(tOrg, event!.approver)}` : '';
   return `${name} · ${stage}${role}${approver}`;
 }
 
-function backlinkLabel(item: BacklinkItem, tOrg: (key: string) => string): string | undefined {
+/**
+ * story 4925 — the line for a chat message that a backlink / the story origin points at. An event message (structured `event`) is rebuilt from it; a message whose snippet is the machine text an AGENT reads
+ * («[이벤트] preset.x - key: value …» — an old row with no `event`) is the one word «이벤트» (4921's fallback function); anything else is the snippet as plain text, as before.
+ */
+export function backlinkMessageLabel(
+  message: BacklinkItem['message'],
+  tOrg: (key: string) => string,
+  tEventCard: (key: string) => string,
+): string | undefined {
+  if (message?.event) return eventBacklinkLabel(message.event, tOrg, tEventCard);
+  const snippet = message?.content_snippet;
+  if (snippet == null) return undefined;
+  return composeEventPreviewFallback(snippet, undefined, undefined, { tEventCard }) ?? toPlainPreview(snippet);
+}
+
+function backlinkLabel(item: BacklinkItem, tOrg: (key: string) => string, tEventCard: (key: string) => string): string | undefined {
   switch (item.source_type) {
     case 'doc': return item.doc?.title;
     // story #3949 — content_snippet은 메시지 원문 조각이라 마크다운 링크/entity 참조
@@ -89,8 +108,7 @@ function backlinkLabel(item: BacklinkItem, tOrg: (key: string) => string): strin
     // #4091의 event 구조화 렌더 분기는 그대로 두고, 그 분기가 아닐 때(raw
     // content_snippet 폴백)만 평문화를 적용한다.
     case 'chat_message':
-      if (item.message?.event) return eventBacklinkLabel(item.message.event, tOrg);
-      return item.message?.content_snippet != null ? toPlainPreview(item.message.content_snippet) : undefined;
+      return backlinkMessageLabel(item.message, tOrg, tEventCard);
     case 'meeting': return item.meeting?.title;
     case 'story': return item.story?.title;
     case 'evidence': return item.evidence?.title;
@@ -165,6 +183,7 @@ export function EntityBacklinksSection({ entityType, entityId, className }: Enti
   // story #4091(§c) — recipe-stage-label.ts/stage-role.ts/gate-approver-label.ts SSOT가
   // 전부 organization 네임스페이스에 산다(recipe-detail-view.tsx 등 기존 소비처와 동일).
   const tOrg = useTranslations('organization');
+  const tEventCard = useTranslations('eventCard'); // story 4925
   const locale = useLocale();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   // story-detail-panel처럼 entityId만 바뀌고 이 컴포넌트가 리마운트 안 되는 호출부가 있을 수
@@ -202,7 +221,7 @@ export function EntityBacklinksSection({ entityType, entityId, className }: Enti
         <ul className="flex flex-col gap-1.5">
           {mentionItems.map((item) => {
             const Icon = SOURCE_TYPE_ICON[item.source_type];
-            const label = backlinkLabel(item, tOrg);
+            const label = backlinkLabel(item, tOrg, tEventCard);
             const creatorName = item.created_by?.name;
             return (
               <li

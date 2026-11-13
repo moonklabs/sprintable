@@ -218,7 +218,7 @@ describe('EntityBacklinksSection', () => {
     expect(container.textContent).not.toContain(koMessages.organization.recipeGateApproverUnknown);
   });
 
-  it('정의를 못 찾은(삭제 등) 이벤트 메시지는 definition_key 원문으로 물러나되 role/approver는 지어내지 않는다', async () => {
+  it('정의를 못 찾은(삭제 등) 이벤트 메시지는 정의 키가 아니라 «이벤트» 한 낱말로 물러나되 role/approver는 지어내지 않는다(story 4925)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       data: [{
         id: 'r1', source_type: 'chat_message', source_id: 'm1', created_by: null,
@@ -231,8 +231,34 @@ describe('EntityBacklinksSection', () => {
       meta: { next_cursor: null, has_more: false, collection_scope: { source_types: ['chat_message'], forms: 'all', excludes: [] } },
     }))));
     await render('story', 's1');
-    expect(container.textContent).toContain('preset.gone.recipe');
-    expect(container.textContent).toContain(koMessages.organization.recipeStageLabelDraft);
+    expect(container.textContent).toContain('이벤트 · ' + koMessages.organization.recipeStageLabelDraft);
+    expect(container.textContent).not.toMatch(/preset\.gone|\[이벤트\]/); // never the definition key or the machine header
+  });
+
+  it('⭐story 4925 — a stage no label knows reads as words, not as its slug', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{
+        id: 'r1', source_type: 'chat_message', source_id: 'm1', created_by: null, created_at: '2026-07-28T00:00:00Z', still_exists: true, doc: null,
+        message: { id: 'm1', conversation_id: 'c1', sender: null, content_snippet: '[이벤트] org.acme.flow', event: { definition_key: 'org.acme.flow', name: '인수 흐름', stage: 'waiting-on-legal', role: null, gate_type: null, approver: null } },
+      }],
+      meta: { next_cursor: null, has_more: false, collection_scope: { source_types: ['chat_message'], forms: 'all', excludes: [] } },
+    }))));
+    await render('story', 's1');
+    expect(container.textContent).toContain('인수 흐름 · waiting on legal');
+    expect(container.textContent).not.toContain('waiting-on-legal');
+  });
+
+  it('⭐story 4925 — an OLD event message row (no structured `event`, the snippet is the machine text) is the one word «이벤트» — no slug, no «- key: value»', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{
+        id: 'r1', source_type: 'chat_message', source_id: 'm1', created_by: null, created_at: '2026-07-28T00:00:00Z', still_exists: true, doc: null,
+        message: { id: 'm1', conversation_id: 'c1', sender: null, content_snippet: '[이벤트] preset.work.assigned - work_item_type: story - work_item_id: 626e421c-6264-40e9-b51a-0ec57bddebfb', event: null },
+      }],
+      meta: { next_cursor: null, has_more: false, collection_scope: { source_types: ['chat_message'], forms: 'all', excludes: [] } },
+    }))));
+    await render('story', 's1');
+    expect(container.textContent).toContain('이벤트');
+    expect(container.textContent).not.toMatch(/\[이벤트\]|preset\.|work_item_type|626e421c/);
   });
 
   it('event가 없는 일반 멘션 메시지는 기존 content_snippet 그대로 렌더된다(회귀 0)', async () => {

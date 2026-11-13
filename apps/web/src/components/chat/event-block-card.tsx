@@ -13,7 +13,7 @@ import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { withProjectParam } from '@/lib/with-project-param';
-import { gateStatusLabel } from '@/lib/gate-status-label';
+import { GATE_STATUS_LABEL_KEYS, gateStatusLabel } from '@/lib/gate-status-label';
 import { gateTypeLabel } from '@/lib/gate-type-label';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
 import { entityTypeLabel } from '@/components/chat/chat-input-entity-tokens';
@@ -43,6 +43,17 @@ const SOURCE_LABEL_KEYS: Record<string, 'sourceInternal' | 'sourceGa4'> = {
 // {{label.to_status}} 해소용. story-detail-panel.tsx:846의 statusKeyMap과 동형(그 파일은
 // export 안 해 재사용 불가 — 이 저장소 기존 관례가 이미 소비처마다 로컬 복제, kanban-
 // list-view.tsx/story-card.tsx 등도 각자 갖고 있다. 새 공유 모듈 신설은 이 스토리 범위 밖).
+/** story 4925 — a value no label knows, as a person reads it («waiting-on-legal» → «waiting on legal», «visual_artifact» → «visual artifact»): the one rule for an unmapped slug on a human line (the same underscore → space the bubble's field list uses) */
+export function readableSlug(slug: string): string {
+  return slug.replace(/[_-]+/g, ' ').trim();
+}
+const entityTypeWords = (type: string, t: (key: string) => string): string => {
+  const label = entityTypeLabel(type, t);
+  return label === type ? readableSlug(type) : label; // an unmapped type comes back as itself
+};
+const gateVerdictWords = (verdict: string, tCage: (key: string) => string): string =>
+  GATE_STATUS_LABEL_KEYS[verdict] ? gateStatusLabel(verdict, tCage) : readableSlug(verdict);
+
 const STORY_STATUS_KEY_MAP: Record<string, string> = {
   backlog: 'backlog',
   'ready-for-dev': 'readyForDev',
@@ -229,11 +240,11 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
     const slug = payload[key];
     if (typeof slug !== 'string') continue;
     const statusKey = STORY_STATUS_KEY_MAP[slug];
-    labels[key] = domainLabels.statusLabel(slug) ?? (statusKey ? tBoard(statusKey) : slug);
+    labels[key] = domainLabels.statusLabel(slug) ?? (statusKey ? tBoard(statusKey) : readableSlug(slug));
   }
   const verdict = payload['verdict'];
   if (typeof verdict === 'string') {
-    labels['verdict'] = gateStatusLabel(verdict, tCage);
+    labels['verdict'] = gateVerdictWords(verdict, tCage);
   }
   // 페드루 CHANGES(2026-09-14 15:26Z) — 캡처 리뷰로 실측 적출: work_item_type("story")·
   // gate_type("external_publish" 등)도 같은 클래스의 원시 slug였다(AC2 "slug 0"과 동일
@@ -241,7 +252,7 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
   // §②-1 낱말 표와 정합)·gateTypeLabel()(lib/gate-type-label.ts, dashboard 네임스페이스).
   const workItemType = payload['work_item_type'];
   if (typeof workItemType === 'string') {
-    labels['work_item_type'] = entityTypeLabel(workItemType, t);
+    labels['work_item_type'] = entityTypeWords(workItemType, t);
   }
   const gateType = payload['gate_type'];
   if (typeof gateType === 'string') {
@@ -277,7 +288,7 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
       // 아니라 "(deleted story)"). ko는 대소문자 구분이 없어 toLowerCase()가 no-op이라
       // 로케일 분기 없이 안전하게 항상 적용한다.
       labels['work_item_target'] = tEventCard('targetMissing', {
-        type: entityTypeLabel(workItemRef.type, t).toLowerCase(),
+        type: entityTypeWords(workItemRef.type, t).toLowerCase(),
       });
     }
   }
@@ -319,7 +330,7 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
       labels['goal_target'] = goalRef.token;
     } else if (!goalRef.found && typeof goalRef.type === 'string') {
       labels['goal_target'] = tEventCard('targetMissing', {
-        type: entityTypeLabel(goalRef.type, t).toLowerCase(),
+        type: entityTypeWords(goalRef.type, t).toLowerCase(),
       });
     }
   }
@@ -676,7 +687,7 @@ export function composeEventPreviewSentence(
     const verdict = payload['verdict'];
     if (typeof gateType !== 'string' || typeof verdict !== 'string') return null;
     const gateTypeLbl = gateTypeLabel(tDashboard, gateType);
-    const verdictLbl = gateStatusLabel(verdict, tCage);
+    const verdictLbl = gateVerdictWords(verdict, tCage);
     return { line: `${tEventCard('gateVerdictHeader')} · ${gateTypeLbl} — ${verdictLbl}`, used: ['gate_type', 'verdict'] };
   }
 
@@ -686,12 +697,12 @@ export function composeEventPreviewSentence(
     if (typeof fromStatus !== 'string' || typeof toStatus !== 'string') return null;
     const resolveStatusLabel = (slug: string) => {
       const statusKey = STORY_STATUS_KEY_MAP[slug];
-      return domainLabels.statusLabel(slug) ?? (statusKey ? tBoard(statusKey) : slug);
+      return domainLabels.statusLabel(slug) ?? (statusKey ? tBoard(statusKey) : readableSlug(slug));
     };
     const fromLabel = resolveStatusLabel(fromStatus);
     const toLabel = resolveStatusLabel(toStatus);
     const workItemType = payload['work_item_type'];
-    const typeLabel = typeof workItemType === 'string' ? entityTypeLabel(workItemType, tEntity) : null;
+    const typeLabel = typeof workItemType === 'string' ? entityTypeWords(workItemType, tEntity) : null;
     const summary = typeLabel ? `${typeLabel} ${fromLabel} → ${toLabel}` : `${fromLabel} → ${toLabel}`;
     return { line: `${tEventCard('statusChangedHeader')} · ${summary}`, used: ['from_status', 'to_status', ...(typeLabel ? ['work_item_type'] : [])] };
   }
@@ -702,7 +713,7 @@ export function composeEventPreviewSentence(
   // 담당자 없이는 문장이 성립하지 않는다, work_item_type/verdict 부재 시 null과 동형).
   if (eventKey === 'preset.work.assigned') {
     const workItemType = payload['work_item_type'];
-    const typeLabel = typeof workItemType === 'string' ? entityTypeLabel(workItemType, tEntity) : null;
+    const typeLabel = typeof workItemType === 'string' ? entityTypeWords(workItemType, tEntity) : null;
     const assigneeRef = refs?.['assignee'];
     const assigneeName =
       assigneeRef && typeof assigneeRef === 'object' && assigneeRef.found && typeof assigneeRef.name === 'string'
@@ -849,7 +860,7 @@ export function composeEventBodyFallback(
     }
     const title = schemaProps?.[key]?.title;
     const cardKey = CARD_FIELD_LABEL_KEYS[key];
-    const label = (typeof title === 'string' && title.trim()) || (cardKey ? tEventCard(cardKey) : '') || key.replace(/[_-]+/g, ' ');
+    const label = (typeof title === 'string' && title.trim()) || (cardKey ? tEventCard(cardKey) : '') || readableSlug(key);
     items.push({ label, value: value.length > 200 ? `${Array.from(value).slice(0, 200).join('')}…` : value });
   }
   return { head, words, items };

@@ -5,9 +5,8 @@ import { FileText, MessageSquare, Calendar, BookOpen } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { getEntityHref } from '@/components/chat/embed-card';
-import { toPlainPreview } from '@/components/chat/entity-ref';
 import { parseCursorMeta } from '@/lib/pagination';
-import type { BacklinkItem } from './entity-backlinks-section';
+import { backlinkMessageLabel, type BacklinkItem } from './entity-backlinks-section';
 import { deriveStoryOrigin } from './derive-story-origin';
 
 import { fetchWithAuth } from '@/lib/db/client';
@@ -35,12 +34,13 @@ function sourceIcon(sourceType: BacklinkItem['source_type']) {
   }
 }
 
-function sourceLabel(item: BacklinkItem): string | undefined {
+function sourceLabel(item: BacklinkItem, tOrg: (key: string) => string, tEventCard: (key: string) => string): string | undefined {
   switch (item.source_type) {
     case 'doc': return item.doc?.title;
     // story #3949 CHANGES2(유나 design, 2026-09-16) — entity-backlinks-section.tsx의
     // backlinkLabel()과 byte-동일 누출(같은 content_snippet 필드, 다른 소비처).
-    case 'chat_message': return item.message?.content_snippet != null ? toPlainPreview(item.message.content_snippet) : undefined;
+    // story 4925 — the same line as the backlinks list gives (an event message in words, never the machine text)
+    case 'chat_message': return backlinkMessageLabel(item.message, tOrg, tEventCard);
     case 'meeting': return item.meeting?.title;
     case 'story': return item.story?.title;
     case 'evidence': case 'artifact': return undefined;
@@ -128,6 +128,8 @@ async function findOriginAcrossPages(storyId: string, signal: { cancelled: boole
 export function StoryOriginSection({ storyId }: StoryOriginSectionProps) {
   const flatHref = useFlatHref(); // story #4231 3차 — flat 목적지는 현재 프로젝트(`?p=`)를 싣는다
   const t = useTranslations('board');
+  const tOrg = useTranslations('organization');
+  const tEventCard = useTranslations('eventCard'); // story 4925
   const locale = useLocale();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [result, setResult] = useState<LoadedResult | 'failed' | null>(null);
@@ -155,7 +157,7 @@ export function StoryOriginSection({ storyId }: StoryOriginSectionProps) {
       {origin ? (
         (() => {
           const Icon = sourceIcon(origin.source_type);
-          const label = sourceLabel(origin);
+          const label = sourceLabel(origin, tOrg, tEventCard);
           const href = sourceHref(origin, flatHref);
           const creatorName = origin.created_by?.name;
           const content = (
