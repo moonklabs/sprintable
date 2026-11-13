@@ -1336,6 +1336,35 @@ jobs:
           DATABASE_URL=postgresql+asyncpg://sprintable:sprintable@localhost:5432/sprintable_test_tpl \
           uv run python scripts/build_destructive_schema_template.py
 
+      # DIAGNOSTIC (draft PR for story 4917 AC2, never merged) — where does `SET (pg_attver=N)` on every column come from when the floating pg16 tag is 16.16? Prints facts only, changes nothing.
+      - name: "DIAG pg_attver source (draft PR)"
+        if: needs.detect-changed-scope.outputs.backend_relevant != 'false' && matrix.shard == 10
+        continue-on-error: true
+        working-directory: backend
+        run: |
+          export PGPASSWORD=sprintable
+          P="psql -h localhost -U sprintable -At"
+          q="select count(*) from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and a.attoptions is not null"
+          s="select c.relname||'.'||a.attname||' '||a.attoptions::text from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and a.attoptions is not null order by 1 limit 3"
+          echo "DIAG server: $($P -d postgres -c 'select version()')"
+          echo "DIAG client pg_dump: $(pg_dump --version)"
+          echo "DIAG container image: $(docker ps --format '{{.Image}} {{.ID}}' | head -3 | tr '\n' ';')"
+          echo "DIAG extensions (tpl): $($P -d sprintable_test_tpl -c "select string_agg(extname||' '||extversion, ', ') from pg_extension")"
+          echo "DIAG settings: $($P -d postgres -c "select string_agg(name||'='||setting, ', ') from pg_settings where name in ('shared_preload_libraries','server_version','default_table_access_method')")"
+          echo "DIAG tpl (create_all): columns with attoptions = $($P -d sprintable_test_tpl -c "$q")"
+          echo "DIAG tpl sample: $($P -d sprintable_test_tpl -c "$s")"
+          for x in a b; do
+            createdb -h localhost -U sprintable diag_fresh_$x
+            ALEMBIC_DATABASE_URL=postgresql+psycopg2://sprintable:sprintable@localhost:5432/diag_fresh_$x uv run alembic upgrade head >/dev/null 2>&1 || echo "DIAG alembic upgrade $x FAILED"
+            echo "DIAG fresh $x (alembic): columns with attoptions = $($P -d diag_fresh_$x -c "$q")"
+            echo "DIAG fresh $x sample: $($P -d diag_fresh_$x -c "$s")"
+            pg_dump --schema-only --no-owner --no-privileges -h localhost -U sprintable -d diag_fresh_$x > /tmp/diag_$x.sql
+            echo "DIAG fresh $x pg_dump lines with pg_attver: $(grep -c pg_attver /tmp/diag_$x.sql)"
+          done
+          echo "DIAG fresh a vs b differing lines (ignoring restrict tokens): $(diff <(grep -v 'restrict' /tmp/diag_a.sql) <(grep -v 'restrict' /tmp/diag_b.sql) | grep -c '^[<>]')"
+          echo "DIAG first pg_attver line fresh a: $(grep -m1 pg_attver /tmp/diag_a.sql)"
+          echo "DIAG first pg_attver line fresh b: $(grep -m1 pg_attver /tmp/diag_b.sql)"
+
       # story 8236bbc3: destructive_schema 마커 파일(Base.metadata.create_all/drop_all로 자체
       # 스키마 직접 관리)은 alembic-migrated 공유 DB에서 절대 실행하지 않는다 — 실측대로
       # drop_all()이 DB를 오염시켜 같은 세션 후속 테스트 전부를 연쇄 실패시킬 수 있다.
