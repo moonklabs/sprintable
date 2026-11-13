@@ -33,6 +33,8 @@ import { useFlatHref } from '@/hooks/use-flat-href';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { ListDetailShell } from '@/components/ds/list-detail-shell';
 import { useListSelection, selectNextAfterLeft } from '@/hooks/use-list-selection';
+import { PermissionCard, useAgentPermissionRequests } from '@/components/inbox/agent-permission-requests';
+import { agentOnDevice, permissionLine, requestAge, shownToolName, type PermissionRequest } from '@/lib/agent-permissions';
 import { useListDetailWide } from '@/hooks/use-list-detail-wide';
 import { GateQueueList, type GateQueueMenuItem, type GateQueueRow, type GateQueueSection } from './gate-queue-list';
 import { useTeamTimeZone } from '@/components/team-time-zone';
@@ -242,11 +244,20 @@ export function ApprovalsQueue() {
   // an option is never chosen in advance (the detail opens «not chosen yet» and approve stays off until the person chooses).
   const wide = useListDetailWide();
   const [sheetOpen, setSheetOpen] = useState(false);
-  const handItems = items.filter((it) => isHitl(it) || !isHeld(it));
-  const heldItems = items.filter((it) => !isHitl(it) && isHeld(it));
+  // an approvals list that could not be read in full is never drawn partly (one leg may have answered): the old screen hid it behind the error, and so does this one — the requests below do not depend on it
+  const approvals = loadFailed ? [] : items;
+  const handItems = approvals.filter((it) => isHitl(it) || !isHeld(it));
+  const heldItems = approvals.filter((it) => !isHitl(it) && isHeld(it));
+  // 2d-2 — the «에이전트 권한 요청» section: the SAME hook the standalone group used (one reader on this screen = one SSE subscription + one 15 s clock; the old block on the inbox tab is gone).
+  // The web only looks at these (the phone app answers), so a row here has no menu and deciding one never moves the detail (`advanceAfterDecided` below only walks the approvals).
+  const perm = useAgentPermissionRequests();
+  const tPerm = useTranslations('agentPermissions');
+  const permKeyOf = (r: PermissionRequest) => `perm:${r.id}`;
+  // the requests take part in the pick only once the approvals have loaded: whichever read answered first must not decide the first pick (the first approval comes first whenever there is one)
+  const pickable = loading ? [] : perm.shown;
   const { selectedKey, select } = useListSelection(
-    [handItems.map((it) => ({ key: it.id })), heldItems.map((it) => ({ key: it.id }))],
-    handItems[0]?.id ?? heldItems[0]?.id ?? null,
+    [handItems.map((it) => ({ key: it.id })), pickable.map((r) => ({ key: permKeyOf(r) })), heldItems.map((it) => ({ key: it.id }))],
+    handItems[0]?.id ?? heldItems[0]?.id ?? (pickable[0] ? permKeyOf(pickable[0]) : null) ?? null, // an approval (needing a hand, else on hold) always comes before a request
   );
   // what the person is looking at right now — read when a request finishes (it may finish after they picked another row)
   const selectedKeyRef = useRef<string | null>(selectedKey);
@@ -487,29 +498,33 @@ export function ApprovalsQueue() {
     }
   };
 
-  if (loading) return <p className="text-xs text-muted-foreground">{t('gateInboxLoading')}</p>;
+  if (loading) return <>{perm.offLine}<p className="text-xs text-muted-foreground">{t('gateInboxLoading')}</p></>;
 
   // story #3521(유나 §22-2, PO 確定 2026-09-05) — "없음"보다 먼저 검사한다. leg가 실패했으면
   // items가 비어 있어도 그건 진짜 0건이 아니라 못 불러온 것 — 다른 문구+다시 시도.
-  if (loadFailed) {
-    return (
-      <div
-        className="rounded-xl border border-dashed border-destructive/30 bg-destructive-tint px-4 py-5 text-center"
-        data-testid="gate-inbox-load-error"
-      >
-        <p className="text-sm text-foreground">{t('gateInboxLoadError')}</p>
-        <Button variant="outline" size="sm" className="mt-2" onClick={loadGates}>
-          {t('gateInboxRetry')}
-        </Button>
-      </div>
-    );
-  }
+  // 2d-2: permission requests are rows of this list too — they are still drawn when the approvals could not be read (the error block above them) or there are none (no «nothing» block over a list that has rows).
+  const hasPerm = perm.shown.length > 0;
+  const loadErrorBlock = (
+    <div
+      className="rounded-xl border border-dashed border-destructive/30 bg-destructive-tint px-4 py-5 text-center"
+      data-testid="gate-inbox-load-error"
+    >
+      <p className="text-sm text-foreground">{t('gateInboxLoadError')}</p>
+      <Button variant="outline" size="sm" className="mt-2" onClick={loadGates}>
+        {t('gateInboxRetry')}
+      </Button>
+    </div>
+  );
+  if (loadFailed && !hasPerm) return <>{perm.offLine}{loadErrorBlock}</>;
 
-  if (items.length === 0) {
+  if (items.length === 0 && !loadFailed && !hasPerm) {
     return (
-      <div className="rounded-xl border border-dashed border-border bg-muted/20 px-4 py-5 text-center">
-        <p className="text-sm text-muted-foreground">{t('gateInboxEmpty')}</p>
-      </div>
+      <>
+        {perm.offLine}
+        <div className="rounded-xl border border-dashed border-border bg-muted/20 px-4 py-5 text-center">
+          <p className="text-sm text-muted-foreground">{t('gateInboxEmpty')}</p>
+        </div>
+      </>
     );
   }
 
@@ -971,32 +986,51 @@ export function ApprovalsQueue() {
       menu: menuFor(item),
     };
   };
+  // a permission request as a row: «에이전트 · 컴퓨터» · the tool (or the line that says it was not read) · when it was asked. No menu — the web only looks.
+  const permRowOf = (r: PermissionRequest): GateQueueRow => ({
+    key: permKeyOf(r),
+    chip: permissionLine(r) === 'unknown' ? tPerm('chipUnknown') : tPerm('chip'),
+    title: agentOnDevice(r.agent_name, r.device_name),
+    subtitle: [shownToolName(r, locale) ?? tPerm('toolUnread'), tPerm('asked', requestAge(r, perm.now))].join(' · '),
+  });
   const sections: GateQueueSection[] = [
     { id: 'hand', title: t('queueSectionHand'), rows: handItems.map(rowOf) },
+    { id: 'perm', title: tPerm('groupTitle'), rows: perm.shown.map(permRowOf) },
     { id: 'held', title: t('queueSectionHeld'), rows: heldItems.map(rowOf) },
   ];
-  const selectedItem = items.find((it) => it.id === selectedKey) ?? null;
+  const selectedItem = approvals.find((it) => it.id === selectedKey) ?? null;
+  const selectedPerm = selectedItem ? null : perm.shown.find((r) => permKeyOf(r) === selectedKey) ?? null;
   // a double-click on a row opens the request's own page (`/gates/{id}`, the project it belongs to) — the same place the card's click-through button goes; a HITL request has no page
   const openRow = (key: string) => {
-    const target = items.find((it) => it.id === key);
+    const target = approvals.find((it) => it.id === key);
     if (target && !isHitl(target)) router.push(gateHref(target));
   };
   // the detail block: wide → THIS column is the scroller (the pinned action bar sticks to its bottom); narrow → the sheet's own body scrolls, so it stays a plain block and the bar sticks to the sheet's bottom
-  const detailTitle = selectedItem ? rowOf(selectedItem).title : '';
+  const detailTitle = selectedItem ? rowOf(selectedItem).title : selectedPerm ? permRowOf(selectedPerm).title : '';
   const sheetLabel = t('queueSheetLabel', { title: detailTitle });
 
   return (
     <>
+      {perm.offLine}
+      {loadFailed ? <div className="mb-3">{loadErrorBlock}</div> : null}
       <ListDetailShell
         testId="gates-screen"
         wide={wide}
         list={<GateQueueList sections={sections} selectedKey={selectedKey} onSelect={onSelectRow} onOpen={openRow} />}
         detail={selectedItem
-          ? <div className="focus-inset space-y-2 lg:max-h-[calc(100svh-6rem)] lg:overflow-y-auto" data-testid="gate-queue-detail">{renderItemCard(selectedItem, items.indexOf(selectedItem))}</div>
-          : <p className="m-0 rounded-ds-control border border-dashed border-ds-line px-4 py-6 text-center text-ds-small text-ds-ink-3">{t('queueDetailEmpty')}</p>}
+          ? <div className="focus-inset space-y-2 lg:max-h-[calc(100svh-6rem)] lg:overflow-y-auto" data-testid="gate-queue-detail">{renderItemCard(selectedItem, approvals.indexOf(selectedItem))}</div>
+          : selectedPerm
+            ? (
+              // the same card the standalone group drew (phone-app-only buttons, the one read-only line elsewhere) — the stage is in its key so the network question's second card starts fresh
+              <div className="focus-inset space-y-2 lg:max-h-[calc(100svh-6rem)] lg:overflow-y-auto" data-testid="gate-queue-detail">
+                <PermissionCard key={`${selectedPerm.id}:${selectedPerm.stage ?? 'ask'}`} request={selectedPerm} now={perm.now} phone={perm.phone} auth={perm.auth}
+                  answer={perm.answerFor(selectedPerm)} onAnswer={(decision) => perm.onAnswer(selectedPerm, decision)} />
+              </div>
+            )
+            : <p className="m-0 rounded-ds-control border border-dashed border-ds-line px-4 py-6 text-center text-ds-small text-ds-ink-3">{t('queueDetailEmpty')}</p>}
         detailLabel={t('queueDetailLabel')}
         sheetLabel={sheetLabel}
-        sheetOpen={sheetOpen && selectedItem !== null}
+        sheetOpen={sheetOpen && (selectedItem !== null || selectedPerm !== null)}
         onSheetOpenChange={setSheetOpen}
       />
       <GateDiscussDialog

@@ -9,7 +9,6 @@ import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
 import { AgentIdentity } from '@/components/ui/agent-identity';
 import { ApprovalsQueue } from '@/components/inbox/approvals-queue';
-import { AgentPermissionRequests } from '@/components/inbox/agent-permission-requests';
 import { AttentionQueueView } from '@/components/attention-queue/attention-queue-view';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { useToast } from '@/components/ui/toast';
@@ -572,8 +571,7 @@ export default function InboxPage() {
           </div>
         ) : activeTab === 'gates' ? (
           <div className="flex-1 overflow-y-auto p-4">
-            {/* story #4533 — «에이전트 권한 요청» above the approvals, a group of its own (the web only looks) */}
-            <AgentPermissionRequests />
+            {/* story #4533 — «에이전트 권한 요청» (the web only looks): since 4909 2d-2 it is a section of the approvals list below, read by the list's own reader — not a second block here */}
             <ApprovalsQueue />
           </div>
         ) : (

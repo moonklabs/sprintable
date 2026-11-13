@@ -39,7 +39,7 @@ export interface GateQueueRow {
 }
 
 export interface GateQueueSection {
-  id: 'hand' | 'held';
+  id: 'hand' | 'perm' | 'held';
   title: string;
   rows: GateQueueRow[];
 }
