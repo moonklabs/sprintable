@@ -7,7 +7,6 @@ import { AgentPerformancePanel } from '@/components/agents/agent-performance-pan
 import { AgentManagementTab } from '@/components/agents/agent-management-tab';
 import { AccessMatrixTab } from '@/components/agents/access-matrix-tab';
 import { RecruiterClient } from '@/app/(authenticated)/organization/workforce/recruiter/recruiter-client';
-import { Badge } from '@/components/ui/badge';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { AgentsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 import { RecruitNoProject, recruitNoProjectState } from '@/components/agents/recruit-no-project';
@@ -55,12 +54,7 @@ export function AgentsPageTabs() {
         !projectId ? (
           <RecruitNoProject state={recruitNoProjectState(dashboardCtx)} createHref={flatHref('/settings?tab=projects')} onRetry={() => window.location.reload()} />
         ) : (
-          <>
-            <div className="flex items-center gap-2 border-b border-border px-6 py-2">
-              <Badge variant="info">{t('scopeThisProject')}</Badge>
-            </div>
-            <AgentPerformancePanel />
-          </>
+          <AgentPerformancePanel /> /* story 4912 (D): the scope chip «이 프로젝트» is the panel's own PageHead line now */
         )
       ) : null}
       {tab === 'manage' ? <AgentManagementTab onAddAgent={() => goTab('recruit')} /> : null}

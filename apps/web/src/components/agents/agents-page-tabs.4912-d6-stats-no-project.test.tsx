@@ -60,11 +60,11 @@ describe('Statistics tab without a project (story 4912 D6)', () => {
     expect(container.querySelector('[data-testid="stats-panel"]')).toBeNull();
   });
 
-  it('with a project the panel and the «이 프로젝트» badge are there, no notice (the normal path is unchanged)', async () => {
+  it('with a project the panel is there, no notice (the normal path is unchanged — the «이 프로젝트» chip is the panel\'s own PageHead line since 4912 D, pinned in its test)', async () => {
     useDashboardContextMock.mockReturnValue(ctx('p1'));
     await mount();
     expect(container.querySelector('[data-testid="stats-panel"]')).toBeTruthy();
-    expect(container.textContent).toContain(koMessages.agents.scopeThisProject);
+    expect(container.querySelector('.border-b.border-border'), 'the old scope-badge bar is gone from the tabs shell').toBeNull();
     expect(notice()).toBeNull();
   });
 });
