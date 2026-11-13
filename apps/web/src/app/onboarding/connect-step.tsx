@@ -100,9 +100,10 @@ export function HighlightedJson({ text }: { text: string }) {
   let m: RegExpExecArray | null;
   while ((m = regex.exec(text)) !== null) {
     if (m.index > last) segments.push({ t: text.slice(last, m.index) });
-    if (m[1]) segments.push({ t: m[1], c: 'text-primary' });
-    else if (m[2]) segments.push({ t: m[2], c: 'text-success' });
-    else if (m[3]) segments.push({ t: m[3], c: 'text-muted-foreground' });
+    // story 4912 (C2a, codex): ds text tokens that hold 4.5:1 on BOTH the sunk face (light #e6eaf1: 6.3 / 5.1 / 5.1) and the panel faces — the legacy text-success / text-muted-foreground were ~4.3 on the sunk face
+    if (m[1]) segments.push({ t: m[1], c: 'text-ds-action-text' });
+    else if (m[2]) segments.push({ t: m[2], c: 'text-ds-info' });
+    else if (m[3]) segments.push({ t: m[3], c: 'text-ds-ink-3' });
     last = regex.lastIndex;
   }
   if (last < text.length) segments.push({ t: text.slice(last) });

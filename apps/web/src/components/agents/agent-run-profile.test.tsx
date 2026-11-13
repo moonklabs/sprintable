@@ -430,3 +430,51 @@ describe('AgentRunProfileBulkDialog', () => {
     expect(document.body.textContent).toContain('지금 바꾸려면 데스크톱 앱에서 차례로 다시 시작해 주세요');
   });
 });
+
+// story 4912 (C2a) — the card's face: the ds Card via DetailCard, ds buttons, no old text tokens; behaviour is what the tests above pin.
+describe('AgentRunProfileSection — card face (story 4912 · C2a)', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  beforeEach(() => { container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
+  afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); });
+  const tick = async () => { await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); }); };
+  const base = { agent_id: 'a1', runtime: 'codex', model: 'gpt-6-sol', effort: 'high', version: 3, updated_at: null, can_change: true, allowed_hosts: [{ host: 'example.test' }] };
+  async function mount(optionsOk = true) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/options')) return optionsOk ? new Response(JSON.stringify({ data: OPTIONS })) : new Response('{}', { status: 500 });
+      if (url.endsWith('/remote-control')) return new Response(JSON.stringify({ data: { enabled: true, enabled_at: null, can_change: false, owner_names: [] } }));
+      return new Response(JSON.stringify({ data: base }));
+    }));
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><AgentRunProfileSection agentId="a1" runtimeType="codex" /></NextIntlClientProvider>); });
+    await tick();
+  }
+  const card = () => container.querySelector('[data-testid="agent-detail-card-run-profile"]') as HTMLElement | null;
+
+  it('⭐카드는 DetailCard(ds Card · bg-ds-surface) · [저장]은 ds primary · 허용 주소 [빼기]는 ds quiet — 옛 hero/ghost 단추가 아니다', async () => {
+    await mount();
+    expect(card()?.getAttribute('data-slot')).toBe('ds-card');
+    expect(card()!.className).toContain('bg-ds-surface');
+    const save = [...card()!.querySelectorAll('button')].find((b) => b.textContent === '저장')!;
+    expect(save.className).toContain('bg-ds-action'); // ds primary
+    const remove = [...card()!.querySelectorAll('button')].find((b) => b.getAttribute('aria-label')?.includes('example.test'))!;
+    expect(remove.className).not.toContain('bg-ds-action');
+    expect(remove.getAttribute('data-slot') ?? '').not.toBe('');
+  });
+
+  it('읽기 실패는 같은 카드 안의 실패 줄 + ds 다시 시도 단추', async () => {
+    await mount(false);
+    expect(card()?.textContent).toContain(koMessages.agents.runProfileLoadFailed);
+    expect([...card()!.querySelectorAll('button')].some((b) => b.textContent === koMessages.agents.runProfileRetry)).toBe(true);
+  });
+
+  it('⭐소스: ui/section-card · ui/button이 없고(스위치만 이름 붙은 예외) 옛 글자 토큰 · 옛 단추 변형이 없다 — 되돌리면 RED', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const src = readFileSync(join(__dirname, 'agent-run-profile-section.tsx'), 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+    expect([...src.matchAll(/from '@\/components\/ui\/([\w-]+)'/g)].map((m) => m[1])).toEqual(['switch']);
+    expect(src).not.toMatch(/text-(muted-foreground|foreground|destructive|xs|sm|base)\b/);
+    expect(src).not.toMatch(/variant="(hero|ghost|outline)"/);
+    expect(src).toContain('<DetailCard');
+  });
+});
+

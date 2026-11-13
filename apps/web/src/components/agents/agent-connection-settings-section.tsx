@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Check, Copy, Cloud, Terminal, FileText } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
-import { cn } from '@/lib/utils';
+import { Button } from '@/components/ds/button';
+import { Textarea } from '@/components/ds/input';
+import { Skeleton } from '@/components/ds/skeleton';
+import { DetailCard } from '@/components/agents/detail-card';
 import { fetchWithAuth } from '@/lib/db/client';
 import { HighlightedJson, inferTransport, renderArtifact, type Transport } from '@/app/onboarding/connect-step';
 import { copyTextSafely } from '@/lib/clipboard';
@@ -110,59 +110,49 @@ export function AgentConnectionSettingsSection({ agentId, freshApiKey }: AgentCo
   };
 
   return (
-    <SectionCard>
-      <SectionCardHeader>
-        <div className="space-y-1">
-          <h2 className="text-base font-semibold text-foreground">{t('agentMcpTitle')}</h2>
-          <p className="text-sm text-muted-foreground">{t('agentMcpDescription')}</p>
-        </div>
-      </SectionCardHeader>
-      <SectionCardBody className="space-y-3">
+    <DetailCard data-testid="agent-detail-card-connection" title={t('agentMcpTitle')} description={t('agentMcpDescription')}>
         {transport && (
-          <div className="flex gap-0 rounded-md border border-border bg-muted p-1 max-w-xs">
-            <button
-              type="button"
+          // story 4912 (C2a): the hosted / local choice is two ds buttons that say which one is on (aria-pressed) — no bare tags, no bg-muted pill
+          <div role="group" aria-label={t('agentMcpTitle')} className="flex max-w-xs gap-1 rounded-ds-control border border-ds-line bg-ds-surface-sunk p-1">
+            <Button
+              variant={transport === 'http' ? 'secondary' : 'quiet'}
+              aria-pressed={transport === 'http'}
               onClick={() => handleSwitchTransport('http')}
-              className={cn(
-                'flex flex-1 items-center justify-center gap-1.5 rounded px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors',
-                transport === 'http' && 'bg-background text-foreground shadow-sm',
-              )}
+              className="flex-1"
+              iconStart={<Cloud className="h-3.5 w-3.5" aria-hidden />}
             >
-              <Cloud className="h-3.5 w-3.5" aria-hidden />
               {to('transportHosted')}
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant={transport === 'stdio' ? 'secondary' : 'quiet'}
+              aria-pressed={transport === 'stdio'}
               onClick={() => handleSwitchTransport('stdio')}
-              className={cn(
-                'flex flex-1 items-center justify-center gap-1.5 rounded px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors',
-                transport === 'stdio' && 'bg-background text-foreground shadow-sm',
-              )}
+              className="flex-1"
+              iconStart={<Terminal className="h-3.5 w-3.5" aria-hidden />}
             >
-              <Terminal className="h-3.5 w-3.5" aria-hidden />
               {to('transportLocal')}
-            </button>
+            </Button>
           </div>
         )}
 
         {loading ? (
-          <div className="h-24 animate-pulse rounded-md bg-muted" />
+          <Skeleton className="h-24" />
         ) : error ? (
-          <p className="text-xs text-destructive">{t('agentMcpLoadError')}</p>
+          <p className="text-ds-small text-ds-failed">{t('agentMcpLoadError')}</p>
         ) : isHostedUnavailableAndNoFile(hostedUnavailable, mcpFile) ? (
-          <p className="text-xs text-muted-foreground">{t('agentMcpHostedUnavailable')}</p>
+          <p className="text-ds-small text-ds-ink-3">{t('agentMcpHostedUnavailable')}</p>
         ) : mcpFile ? (
-          <div className="overflow-hidden rounded-md border border-border">
-            <div className="flex items-center justify-between gap-2 border-b border-border bg-muted px-3 py-2">
+          <div className="overflow-hidden rounded-ds-control border border-ds-line">
+            <div className="flex items-center justify-between gap-2 border-b border-ds-line bg-ds-surface-sunk px-3 py-2">
               <div className="flex min-w-0 items-center gap-2">
-                <FileText className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                <span className="font-mono text-xs text-foreground">.mcp.json</span>
+                <FileText className="h-4 w-4 shrink-0 text-ds-ink-3" aria-hidden />
+                <span className="font-mono text-ds-mono-md text-ds-ink">.mcp.json</span>
               </div>
-              <Button variant="outline" size="sm" onClick={() => void handleCopy()} className="shrink-0">
+              <Button variant="secondary" onClick={() => void handleCopy()} className="shrink-0">
                 {copied ? <><Check className="h-3.5 w-3.5" />{to('copied')}</> : <><Copy className="h-3.5 w-3.5" />{to('copyConfig')}</>}
               </Button>
             </div>
-            <pre className="overflow-x-auto bg-muted/40 p-3 text-xs leading-relaxed">
+            <pre className="overflow-x-auto bg-ds-surface-sunk p-3 text-ds-mono-md leading-relaxed">
               <code className="font-mono">{displayConfig ? <HighlightedJson text={displayConfig} /> : null}</code>
             </pre>
             {/* story #3986 — 실패 시 freshApiKey가 있으면 화면엔 마스킹판만
@@ -170,14 +160,14 @@ export function AgentConnectionSettingsSection({ agentId, freshApiKey }: AgentCo
                 노출한다(유나 지시 — 별도 안내 줄은 안 만든다, 실패 문구가
                 이미 지시). */}
             {copyFailed ? (
-              <div className="space-y-1.5 border-t border-border p-3">
-                <p role="alert" className="text-xs text-destructive">{tc('copyFailedSelectManually')}</p>
+              <div className="space-y-1.5 border-t border-ds-line p-3">
+                <p role="alert" className="text-ds-small text-ds-failed">{tc('copyFailedSelectManually')}</p>
                 {freshApiKey ? (
                   <Textarea
                     readOnly
                     value={renderArtifact(mcpFile?.content ?? null, freshApiKey, false) ?? ''}
                     onFocus={(e) => e.currentTarget.select()}
-                    className="resize-none p-2 font-mono lg:text-xs"
+                    className="resize-none p-2 font-mono"
                     rows={4}
                     data-testid="agent-connection-settings-copy-failed-raw-config"
                   />
@@ -188,21 +178,20 @@ export function AgentConnectionSettingsSection({ agentId, freshApiKey }: AgentCo
         ) : null}
 
         {!loading && !error && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-ds-small text-ds-ink-3">
             {freshApiKey ? t('agentMcpFreshKeyNote') : t('agentMcpPlaceholderNote')}
           </p>
         )}
 
         {otherFiles.map((f) => (
-          <div key={f.filename} className="overflow-hidden rounded-md border border-border">
-            <div className="border-b border-border bg-muted px-3 py-2">
-              <span className="font-mono text-xs text-foreground">{f.filename}</span>
+          <div key={f.filename} className="overflow-hidden rounded-ds-control border border-ds-line">
+            <div className="border-b border-ds-line bg-ds-surface-sunk px-3 py-2">
+              <span className="font-mono text-ds-mono-md text-ds-ink">{f.filename}</span>
             </div>
-            <pre className="overflow-x-auto bg-muted/40 p-3 text-xs leading-relaxed whitespace-pre-wrap">{f.content}</pre>
+            <pre className="overflow-x-auto whitespace-pre-wrap bg-ds-surface-sunk p-3 text-ds-mono-md leading-relaxed">{f.content}</pre>
           </div>
         ))}
-      </SectionCardBody>
-    </SectionCard>
+    </DetailCard>
   );
 }
 
