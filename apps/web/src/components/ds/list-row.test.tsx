@@ -18,6 +18,18 @@ afterEach(async () => {
 const row = () => container.querySelector('[data-slot="ds-list-row"]') as HTMLElement;
 
 describe('ds ListRow', () => {
+  it('⭐앞 자리 칸은 기본 shrink-0이고 leadingClassName을 받는다 — 화면이 고정 폭을 주면 줄마다 제목이 같은 x에서 시작(4911)', async () => {
+    await act(async () => {
+      root.render(<ListRow leading={<i data-testid="lead" />} leadingClassName="sm:w-[7.5rem]" title="제목" />);
+    });
+    const cell = row().querySelector('[data-slot="ds-list-row-leading"]') as HTMLElement;
+    expect(cell.className).toContain('shrink-0');
+    expect(cell.className).toContain('sm:w-[7.5rem]');
+    expect(cell.querySelector('[data-testid="lead"]')).not.toBeNull();
+    await act(async () => { root.render(<ListRow leading={<i data-testid="lead" />} title="제목" />); });
+    expect((row().querySelector('[data-slot="ds-list-row-leading"]') as HTMLElement).className).toBe('shrink-0');   // no prop → exactly as before
+  });
+
   it('앞 자리 · 제목 · 고정폭 둘째 줄 · 오른쪽 행동', async () => {
     await act(async () => {
       root.render(<ListRow leading={<i data-testid="lead" />} title="결제 수단 두 개 추가 승인" subtitle="개발 에이전트 · 12분 전" trailing={<button type="button">허용</button>} />);

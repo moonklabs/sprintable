@@ -7,6 +7,8 @@ import { cn } from '@/lib/utils';
 type ListRowBase = Omit<HTMLAttributes<HTMLElement>, 'title'> & {
   /** 앞 자리(Avatar 등). */
   leading?: ReactNode;
+  /** 앞 자리 칸의 클래스(예: 줄마다 제목이 같은 x에서 시작하게 하는 고정 폭 `sm:w-[7.5rem]`) — 폭 값은 화면마다 다르니 화면이 상수로 주고, 메커니즘만 여기 한 곳(4911). 기본 `shrink-0`은 그대로. */
+  leadingClassName?: string;
   /** 둘째 줄(고정폭) — 시각 · 번호 · 한 마디. */
   subtitle?: ReactNode;
   /** 오른쪽 행동 · 상태(Button · Chip …). */
@@ -27,7 +29,7 @@ export type ListRowProps = ListRowBase & ListRowNeeds & ListRowShape;
  * UI-3(a9d56577) ListRow — doc §4 #8. 최소 높이 56 · 앞 자리 + 제목 둘째 줄 + 오른쪽 행동. 호버 · 선택 · 손 필요.
  * 줄 전체가 누를 수 있으면 `asChild`로 링크 · 단추 요소를 줄로 쓰고, 오른쪽 행동은 따로 눌린다.
  */
-export function ListRow({ leading, title, subtitle, trailing, needsHand = false, needsHandLabel, selected = false, density = 'default', asChild = false, className, children, ...props }: ListRowProps) {
+export function ListRow({ leading, leadingClassName, title, subtitle, trailing, needsHand = false, needsHandLabel, selected = false, density = 'default', asChild = false, className, children, ...props }: ListRowProps) {
   // Fragment는 props를 받지 못해 모양 · 의미가 새므로 거부한다(타입도 요소만 받는다).
   if (asChild && (!isValidElement(children) || children.type === Fragment)) return null;
   const Comp = asChild ? Slot : 'div';
@@ -39,7 +41,7 @@ export function ListRow({ leading, title, subtitle, trailing, needsHand = false,
   const body = (
     <>
       {needsHandCue}
-      {leading ? <div className="shrink-0">{leading}</div> : null}
+      {leading ? <div data-slot="ds-list-row-leading" className={cn('shrink-0', leadingClassName)}>{leading}</div> : null}
       <div className="min-w-0 flex-1 basis-24">
         <div className="truncate text-ds-body font-semibold text-ds-ink">{title}</div>
         {subtitle ? <div className="truncate font-mono text-ds-mono-md text-ds-ink-3">{subtitle}</div> : null}

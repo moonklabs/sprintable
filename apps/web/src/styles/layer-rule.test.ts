@@ -14,6 +14,7 @@ import { AGENT_RUNS_PANEL_FACE, AGENT_RUNS_ROW_FACE } from '../components/agents
 import { VARIANT_REASON_FACE, VARIANT_TILE_FACE, VARIANT_TILE_WELL } from '../components/loops/variant-gallery';
 import { LOOP_PANEL_FACE, LOOP_ROW_FACE, LOOP_ROW_HOVER } from '../app/(authenticated)/[ws]/[proj]/loops/loops-layer';
 import { AGENT_RUN_DETAIL_PANEL_FACE, AGENT_RUN_DETAIL_STRIP_FACE } from '../components/agents/agent-run-detail';
+import { TOOL_CALLS_PANEL_FACE, TOOL_CALL_ROW_FACE, TOOL_CALL_DETAIL_WELL } from '../components/agents/agent-run-tool-calls-section';
 
 const css = readFileSync(join(__dirname, 'design-system.css'), 'utf8');
 
@@ -315,5 +316,19 @@ describe('실행 상세(4911) — 바탕 → 내용 칸 → 숫자 묶음', () =
   it.each(themes)('⭐%s: 바탕 → 내용 칸 ≥ 문턱 · 내용 칸 → 숫자 묶음 ≥ 문턱', (_name, t) => {
     expect(step(t, 'page', 'panel')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.panelOverPage);
     expect(step(t, 'panel', 'rowOthers')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPanel);
+  });
+});
+
+// 4911 (UI-R3) — «실행 상세»의 도구 호출 구역: 구역은 내용 칸 카드, 한 호출은 그 칸 위의 글 줄 면, 펼친 호출의 안쪽은 한 단 더 들어간 우물. 옛 구역은 `SectionCard` + 테두리 상자 + 반투명 `overlay-fill`이라 새 내용 칸 아래에서 면이 어긋났다.
+describe('도구 호출 구역(4911) — 바탕 → 구역 카드 → 호출 줄 → 펼침 우물', () => {
+  it('구역 = 내용 칸 · 호출 줄 = 글 줄 · 펼침 안쪽 = 우물(토큰 이름)', () => {
+    expect(TOOL_CALLS_PANEL_FACE).toBe(LAYER.panel);
+    expect(TOOL_CALL_ROW_FACE).toBe(LAYER.rowOthers);
+    expect(TOOL_CALL_DETAIL_WELL).toBe(LAYER.well);
+  });
+  it.each(themes)('⭐%s: 바탕 → 구역 카드 ≥ 문턱 · 카드 → 호출 줄 ≥ 문턱 · 호출 줄 → 우물 ≥ 문턱', (_name, t) => {
+    expect(step(t, 'page', 'panel')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.panelOverPage);
+    expect(step(t, 'panel', 'rowOthers')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPanel);
+    expect(step(t, 'rowOthers', 'well')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.wellOnRow);
   });
 });
