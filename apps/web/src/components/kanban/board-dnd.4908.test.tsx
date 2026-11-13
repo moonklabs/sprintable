@@ -140,6 +140,13 @@ describe('useKeyboardDropRefocus — 키보드로 놓은 카드의 초점 되돌
     expect(document.activeElement?.id).toBe('a');
   });
 
+  it('⭐그 사이 포인터로 어딘가를(빈 곳 포함) 누르면 잊는다 — 빈 곳을 누른 뒤 목록이 바뀌어도 초점을 되돌리지 않는다', () => {
+    mark('b');
+    act(() => { document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); });
+    rerender(['b', 'a']);
+    expect(document.activeElement).toBe(document.body);
+  });
+
   it('⭐5초가 지나면 잊는다', () => {
     vi.useFakeTimers();
     try {

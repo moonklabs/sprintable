@@ -50,15 +50,15 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
 // useDroppable/useSortable 등은 실제 dnd-kit 훅이라야 카드 wiring 테스트가 의미 있음).
 const { capturedDndProps, capturedDragEndHandlers } = vi.hoisted(() => ({
   capturedDragEndHandlers: [] as Array<(event: unknown) => void>,
-  capturedDndProps: [] as Array<{ sensors?: unknown; accessibility?: unknown }>,
+  capturedDndProps: [] as Array<{ sensors?: unknown; accessibility?: unknown; onDragStart?: (e: unknown) => void; onDragCancel?: () => void }>,
 }));
 vi.mock('@dnd-kit/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@dnd-kit/core')>();
   return {
     ...actual,
-    DndContext: ({ onDragEnd, children, sensors, accessibility }: { onDragEnd?: (event: unknown) => void; children?: React.ReactNode; sensors?: unknown; accessibility?: unknown }) => {
+    DndContext: ({ onDragEnd, children, sensors, accessibility, onDragStart, onDragCancel }: { onDragEnd?: (event: unknown) => void; children?: React.ReactNode; sensors?: unknown; accessibility?: unknown; onDragStart?: (e: unknown) => void; onDragCancel?: () => void }) => {
       if (onDragEnd) capturedDragEndHandlers.push(onDragEnd);
-      capturedDndProps.push({ sensors, accessibility });
+      capturedDndProps.push({ sensors, accessibility, onDragStart, onDragCancel });
       return children;
     },
   };
@@ -2625,6 +2625,23 @@ describe('KanbanBoard — 카드 메뉴 담당자 · 이름 바꾸기 · 삭제(
 
   it('⭐같은 규칙 — 클래식 5단계(축마다 따로 시험: 한 축의 표시가 다른 축을 가리지 않게)', async () => {
     expect(await keyboardDropThenListChange('classic')).toBe('s1');
+  });
+
+  it('⭐Esc로 끌기를 취소하면(onDragCancel) 끌기 표시가 거둬진다 — 놓을 수 있는 열 안내가 남지 않는다(두 축)', async () => {
+    stubFetch(stories, members);
+    await mount();
+    for (const axis of ['trust', 'classic'] as const) {
+      if (axis === 'classic') {
+        const classicBtn = [...container.querySelectorAll('button')].find((bn) => bn.textContent === '5단계 클래식');
+        await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      }
+      const props = capturedDndProps.at(-1)!;
+      expect(props.onDragCancel, `${axis}: onDragCancel 연결`).toBeTypeOf('function');
+      await act(async () => { props.onDragStart!({ active: { id: 's1' } }); });
+      if (axis === 'classic') expect(container.textContent).toContain(koMessages.board.validDrop);
+      await act(async () => { capturedDndProps.at(-1)!.onDragCancel!(); });
+      expect(container.textContent).not.toContain(koMessages.board.validDrop);
+    }
   });
 
   it('⭐삭제는 사람 전용 — human이면 메뉴에 «삭제», agent면 메뉴 항목이 없다(패널과 같은 규칙)', async () => {

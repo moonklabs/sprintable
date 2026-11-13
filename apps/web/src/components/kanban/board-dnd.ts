@@ -37,6 +37,12 @@ export function buildDndAccessibility(t: Translate, titleOf: (id: string | numbe
  */
 export function useKeyboardDropRefocus(deps: unknown): (storyId: string) => void {
   const pending = useRef<{ id: string; until: number } | null>(null);
+  // 사람이 포인터로 어딘가를 누르면(빈 곳 포함) 초점을 두고 싶은 곳이 따로 있다는 뜻이다 — 그 뒤로는 되돌리지 않는다.
+  useEffect(() => {
+    const forget = () => { pending.current = null; };
+    document.addEventListener('pointerdown', forget, true);
+    return () => document.removeEventListener('pointerdown', forget, true);
+  }, []);
   useEffect(() => {
     const p = pending.current;
     if (!p) return;

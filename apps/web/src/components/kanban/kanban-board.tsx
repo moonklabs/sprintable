@@ -879,6 +879,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
   // 키보드로 놓은 카드는 다른 열로 옮겨 가며 다시 만들어진다(신뢰축은 응답 뒤 trust_stage로) — 그때 잃은 초점을 되돌린다.
   const markKeyboardDrop = useKeyboardDropRefocus(stories);
 
+  // Esc로 끌기를 취소하면 놓기(onDragEnd)가 아니라 취소(onDragCancel)가 온다 — 끌기 표시(activeId · 놓을 수 있는 열 안내)를 거둔다.
+  const handleDragCancel = () => setActiveId(null);
+
   const handleDragStart = (event: { active: { id: string | number } }) => {
     setActiveId(String(event.active.id));
   };
@@ -2011,6 +2014,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
             collisionDetection={closestCenter}
             onDragStart={handleDragStart}
             onDragEnd={handleTrustDragEnd}
+            onDragCancel={handleDragCancel}
           >
             <div className="flex h-full gap-3 overflow-x-auto px-3 py-3">
               {TRUST_COLUMNS.map((col) => {
@@ -2081,6 +2085,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
             collisionDetection={closestCenter}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
+            onDragCancel={handleDragCancel}
           >
             <div className="flex h-full gap-3 overflow-x-auto px-3 py-3">
               {COLUMNS.map((col) => {
