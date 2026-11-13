@@ -258,7 +258,7 @@ export function ArtifactViewer({
      * (htmlInteractive 기본 false). html_blob이 실제로 상호작용(버튼 클릭 등)을
      * 요구하는 산출물일 수 있어, 그 경로가 「크게 보기」임을 명시한다. */}
     {artifact.format === 'html' ? (
-      <p className="mt-1.5 text-editorial-meta text-muted-foreground">
+      <p onContextMenu={(e) => e.stopPropagation()} className="mt-1.5 text-editorial-meta text-muted-foreground">
         {t('artifactStageInteractiveHint')}
       </p>
     ) : null}
@@ -393,7 +393,8 @@ export function ArtifactViewer({
                   {threadCards}
                 </section>
               ) : null}
-              <EntityBacklinksSection entityType="artifact" entityId={artifact.id} />
+              {/* 열 구분선(divide-y)이 이미 위 선을 그으니 자기 윗선은 끈다 — 겹선 둘 → 하나. */}
+              <EntityBacklinksSection entityType="artifact" entityId={artifact.id} className="border-t-0" />
             </aside>
           </div>
         </section>
