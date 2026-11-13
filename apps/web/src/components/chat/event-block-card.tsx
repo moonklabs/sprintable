@@ -779,7 +779,8 @@ export function composeEventPreviewFallback(
   helpers: Pick<EventPreviewHelpers, 'tEventCard' | 'eventDefinitionName'>,
 ): string | null {
   if (!isMachineEventContent(content)) return null;
-  const name = (eventKey ? helpers.eventDefinitionName?.(eventKey)?.trim() : '') || helpers.tEventCard('genericEventHeader');
+  const { tEventCard, eventDefinitionName } = helpers;
+  const name = (eventKey ? eventDefinitionName?.(eventKey)?.trim() : '') || tEventCard('genericEventHeader');
   let text: string | null = null;
   for (const field of HUMAN_TEXT_FIELDS) {
     text = firstHumanLine(payload?.[field], PREVIEW_TEXT_MAX);
