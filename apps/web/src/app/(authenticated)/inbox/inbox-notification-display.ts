@@ -1,4 +1,4 @@
-import { composeEventPreviewLine, type EventPreviewHelpers } from '@/components/chat/event-block-card';
+import { composeEventPreviewLine, composeEventPreviewFallback, type EventPreviewHelpers } from '@/components/chat/event-block-card';
 import { unescapeReferenceLabel, toPlainPreview } from '@/components/chat/entity-ref';
 import { gateTypeLabel } from '@/lib/gate-type-label';
 
@@ -182,7 +182,9 @@ export function composeNotificationDisplay(
   }
 
   if (event?.event_key && event.payload) {
-    const composed = composeEventPreviewLine(event.event_key, event.payload, eventPreviewHelpers, event.refs);
+    // story 4921 — an event with no sentence of its own whose body is the machine text («[이벤트] preset.x» …) reads as its definition's name + the person's own words (or «이벤트») — never a slug or an id
+    const composed = composeEventPreviewLine(event.event_key, event.payload, eventPreviewHelpers, event.refs)
+      ?? composeEventPreviewFallback(body, event.event_key, event.payload, eventPreviewHelpers);
     if (composed) body = composed;
   } else if (event == null) {
     // 카디르 QA 적발(PR#4344, codex 뮤테이션 6건 中 5건 발산) — 원래 `else`였던 이 분기가
@@ -190,7 +192,9 @@ export function composeNotificationDisplay(
     // gatePendingApprovalBody로 정상 조합)까지 잡아 legacy 파싱으로 되돌려썼다. "event 있으면
     // legacy 폴백 절대 안 돈다"는 계약(no-op)을 event==null로 명시해 강제한다 — event가
     // 있는데 이 preset만 못 다루는 경우는 legacy 취급이 아니라 위에서 이미 처리된 것.
-    const legacyComposed = composeLegacyEventBodyFallback(notification.body, eventPreviewHelpers.tEventCard);
+    const legacyComposed = composeLegacyEventBodyFallback(notification.body, eventPreviewHelpers.tEventCard)
+      // story 4921 — an older row (or an English one) with the machine text as its body and no event to build a sentence from: the one word «이벤트», never the slug and the «- key: value» lines
+      ?? composeEventPreviewFallback(notification.body, undefined, undefined, eventPreviewHelpers);
     if (legacyComposed) body = legacyComposed;
   }
 

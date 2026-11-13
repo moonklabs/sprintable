@@ -152,3 +152,35 @@ describe('composeNotificationDisplay — story #3949 평문화(event 無·legacy
     expect(body).not.toContain('entity:');
   });
 });
+
+// story 4921 — the inbox shows the same fallback: an event with no sentence of its own whose body is the machine text reads as its definition's name + the person's own words (or «이벤트»)
+describe('composeNotificationDisplay — story 4921 (문장이 없는 이벤트 · 방향 지시)', () => {
+  const h2: EventPreviewHelpers = {
+    ...helpers,
+    tEventCard: (key) => ({ gateVerdictHeader: '게이트 판정', steerHeader: '방향 전환', genericEventHeader: '이벤트', memberMissing: '(알 수 없는 구성원)' } as Record<string, string>)[key] ?? key,
+    eventDefinitionName: (key) => (key === 'preset.marketing.video_production' ? '영상 제작' : undefined),
+  };
+  const t = (key: string) => key;
+  const note = (type: string, body: string, event: Notification['event']): Notification => ({ id: 'n1', type, title: 't', body, event, created_at: '2026-11-13T00:00:00Z', read_at: null } as unknown as Notification);
+  const MACHINE_BODY = '[이벤트] preset.marketing.video_production\n- stage: draft\n- work_item_id: 946300bd-434c-45d6-901d-c0d1af8603e7';
+  it('⭐방향 지시 알림: «방향 전환 · {지시 글} → {이름}»', () => {
+    const d = composeNotificationDisplay(note('conversation.message', '[이벤트] preset.steer.instruct\n- instruction: 지시', { event_key: 'preset.steer.instruct', payload: { instruction: '먼저 봐 주세요' }, refs: { target: { found: true, name: '미르코' } } } as never), t, h2);
+    expect(d.body).toBe('방향 전환 · 먼저 봐 주세요 → 미르코');
+  });
+  it('⭐문장이 없는 이벤트(마케팅 레시피 stage): 정의 이름 한 낱말 — 슬러그 · id 없음', () => {
+    const d = composeNotificationDisplay(note('conversation.message', MACHINE_BODY, { event_key: 'preset.marketing.video_production', payload: { stage: 'draft', work_item_id: '946300bd-434c-45d6-901d-c0d1af8603e7' } } as never), t, h2);
+    expect(d.body).toBe('영상 제작');
+    expect(d.body).not.toMatch(/preset\.|946300bd|stage:/);
+  });
+  it('정의 이름을 모르면 «이벤트» 한 낱말 · 사람이 쓴 body는 그대로', () => {
+    expect(composeNotificationDisplay(note('conversation.message', MACHINE_BODY, { event_key: 'org.zeta.x', payload: {} } as never), t, h2).body).toBe('이벤트');
+    expect(composeNotificationDisplay(note('conversation.message', '발행이 멈췄어요.', { event_key: 'org.zeta.x', payload: {} } as never), t, h2).body).toBe('발행이 멈췄어요.');
+  });
+  it('⭐event 메타데이터가 없는 옛 알림(영문 머리줄 포함)의 기계 문장 body: «이벤트» 한 낱말 — 슬러그 · «- key: value» 없음', () => {
+    for (const body of ['[이벤트] preset.steer.instruct\n- instruction: x', '[Event] preset.workflow.kanban\n- stage: ready']) {
+      const d = composeNotificationDisplay(note('conversation.message', body, null as never), t, h2);
+      expect(d.body).toBe('이벤트');
+    }
+    expect(composeNotificationDisplay(note('conversation.message', '그냥 알림 글', null as never), t, h2).body).toBe('그냥 알림 글');
+  });
+});

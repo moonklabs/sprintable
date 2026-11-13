@@ -302,6 +302,13 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
       }
     }
   }
+  // story 4921 — the direction instruction's target (`refs.target`, the same two shapes): a name; a member who is gone now = «알 수 없는 구성원» (never the uuid); NO ref at all
+  // (a message published before this story) = no label → the card's optional «지시 대상자» line is left out — the member is simply not named there, and the card does not claim «unknown».
+  const targetRef = refs?.['target'];
+  if (targetRef && typeof targetRef === 'object') {
+    if (targetRef.found && typeof targetRef.name === 'string') labels['target_name'] = targetRef.name;
+    else if (!targetRef.found) labels['target_name'] = tEventCard('memberMissing');
+  }
 
   // story #3893 CHANGES②(PO PR#4298 리뷰 2026-09-15) — refs.goal(preset.goal.measured의
   // goal_id, 실은 epic.id — events.py `_render_event_notification_work_item_ref`의
@@ -382,6 +389,9 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
     measuredAtLabel: tEventCard('measuredAtLabel'),
     // story #4258 — preset.recipe.publish_failed(레시피 비동기 발행 멈춤) 카드 머리.
     recipePublishFailedHeader: tEventCard('recipePublishFailedHeader'),
+    // story 4921 — preset.steer.instruct: its header and the «지시 대상자» label were Korean text baked into the row (an English reader saw them in Korean)
+    steerHeader: tEventCard('steerHeader'),
+    steerTargetLabel: tEventCard('steerTargetLabel'),
   };
 
   // story #3884 — 현재 실 프리셋(status_changed·gate.verdict)은 더 이상 `{{ref.X}}`를
@@ -624,6 +634,8 @@ export interface EventPreviewHelpers {
     /** story #4281 — 알림 본문의 종류 낱말도 조직 커스텀 라벨이 먼저(`useOrgDomainLabels` 그대로 넘기면 채워짐). */
     entityTypeLabel?: (slug: string) => string | undefined;
   };
+  /** story 4921 — the event definition's own (human) name for a key, when the screen has the definitions (the room list and the inbox read them once). Used only by the fallback line. */
+  eventDefinitionName?: (eventKey: string) => string | undefined;
 }
 
 /**
@@ -719,5 +731,63 @@ export function composeEventPreviewLine(
     return `${tEventCard('goalMeasuredHeader')} · ${summary}`;
   }
 
+  // story 4921 — «방향 전환 · {지시 글 앞부분}[ → {대상 이름}]». The target's name comes from `refs.target` (found); a message published before this story has no ref → no « → name» (the sentence stays whole);
+  // a member who is gone now → «알 수 없는 구성원». The instruction is the person's own text (first line).
+  if (eventKey === 'preset.steer.instruct') {
+    const instruction = firstHumanLine(payload['instruction'], PREVIEW_TEXT_MAX);
+    if (!instruction) return null;
+    const targetRef = refs?.['target'];
+    const targetName =
+      targetRef && typeof targetRef === 'object'
+        ? (targetRef.found && typeof targetRef.name === 'string' ? targetRef.name : (!targetRef.found ? tEventCard('memberMissing') : null))
+        : null;
+    return `${tEventCard('steerHeader')} · ${instruction}${targetName ? ` → ${targetName}` : ''}`;
+  }
+
   return null;
+}
+
+/** how much of a person's own text the one-line preview keeps */
+const PREVIEW_TEXT_MAX = 60;
+/** the payload fields that hold a PERSON'S words (an instruction, a message, a summary, a note) — NOT `title` / `body` / `content` / `reason` (workflow and recipe payloads carry slugs, ids and paths there) — the first usable one, first line, is what a fallback line may show */
+const HUMAN_TEXT_FIELDS = ['instruction', 'message', 'summary', 'note'] as const;
+/** a line that is an id, a path or a link is not a person's words even in a text field */
+const NOT_WORDS_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|^\/|^[a-z][a-z0-9+.-]*:\/\/|entity:[a-z_]+:/i;
+
+function firstHumanLine(value: unknown, max: number): string | null {
+  if (typeof value !== 'string') return null;
+  const line = value.split('\n').map((l) => l.trim()).find((l) => l.length > 0);
+  if (!line || NOT_WORDS_RE.test(line)) return null;
+  const chars = Array.from(line); // by code point: a cut never splits an emoji (a surrogate pair)
+  return chars.length > max ? `${chars.slice(0, max).join('')}…` : line;
+}
+
+/**
+ * story 4921 — the machine text an event message carries as its `content` (what an AGENT reads: «[이벤트] preset.x» / «[Event] preset.x», then «- key: value» lines — the server writes it, events.py
+ * `_generic_event_message_lines` / the stage renderers; it is the whole channel for agents and stays). A person never reads it: it is a slug, ids and field names.
+ */
+export function isMachineEventContent(content: string | null | undefined): boolean {
+  return typeof content === 'string' && /^\[(?:이벤트|Event)\]\s+\S/.test(content);
+}
+
+/**
+ * story 4921 — the line a person sees where `composeEventPreviewLine` has no sentence of its own (every event but the five it knows: workflow stages · marketing recipes · recipe publish stopped · an org's custom events …):
+ * the definition's own human NAME (when the screen has the definitions; else the one word «이벤트») · the person's own words from the payload (`instruction` · `message` · `summary` …, first line) when there are some.
+ * Never a slug, an id or a «- key: value» line. Returns null when the content is NOT machine text (a sentence somebody wrote — kept as it is by the caller).
+ */
+export function composeEventPreviewFallback(
+  content: string | null | undefined,
+  eventKey: string | undefined,
+  payload: Record<string, unknown> | undefined,
+  helpers: Pick<EventPreviewHelpers, 'tEventCard' | 'eventDefinitionName'>,
+): string | null {
+  if (!isMachineEventContent(content)) return null;
+  const { tEventCard, eventDefinitionName } = helpers;
+  const name = (eventKey ? eventDefinitionName?.(eventKey)?.trim() : '') || tEventCard('genericEventHeader');
+  let text: string | null = null;
+  for (const field of HUMAN_TEXT_FIELDS) {
+    text = firstHumanLine(payload?.[field], PREVIEW_TEXT_MAX);
+    if (text) break;
+  }
+  return text ? `${name} · ${text}` : name;
 }

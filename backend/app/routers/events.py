@@ -3316,9 +3316,13 @@ async def _publish_registry_event_core(
     # 여부만으로 트리거, definition_key 무관 — 신규 발행 갈래 0, #2633 AC2 단일 파이프
     # 유지)으로 발행 시점에 이름 해석한다. 두 필드 다 같은 리졸버(member_ref) 재사용 —
     # payload 키 이름만 다르다(담당자 vs 배정자, 유나 확定 2026-09-14 20:16Z).
+    # story 4921 — the direction instruction (`preset.steer.instruct`) names its target (`target_member_id`) and, when a person gave it,
+    # its issuer (`issued_by_member_id`) the same way: the card said the raw uuid (its template read `{{payload.target_member_id}}`)
     for _refs_member_payload_key, _refs_member_refs_key in (
         ("assignee_member_id", "assignee"),
         ("assigned_by_member_id", "assigned_by"),
+        ("target_member_id", "target"),
+        ("issued_by_member_id", "issued_by"),
     ):
         _refs_member_id_raw = payload.get(_refs_member_payload_key)
         if not _refs_member_id_raw:

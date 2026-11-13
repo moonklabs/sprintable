@@ -10,6 +10,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { ChatListView, CHAT_PROJECT_FILTER_KEY } from './chat-list-view';
+import { resetEventDefinitionNames } from '@/hooks/use-event-definition-names';
 
 // story 4847 — the agents tab belongs to the organization's owner/admin: the ORGANIZATION role (orgMemberships), not the shell's «role» (/me: the larger of the project and organization roles)
 const ORG_ADMIN = { orgId: 'org-4847-admin', orgMemberships: [{ orgId: 'org-4847-admin', orgName: 'O', orgSlug: 'o', role: 'admin' }] }; // an org id no other test in this file uses (the domain-labels hook caches per organization)
@@ -364,6 +365,52 @@ describe('ChatListView — story #3888 이벤트 메시지 미리보기(raw slug
     expect(container.textContent).not.toContain('preset.work.status_changed');
   });
 
+  // story 4921 — the SAME room list, events with no sentence of their own: the machine text an agent reads («[이벤트] preset.x», «- key: value» lines) never reaches a person
+  it('⭐4921 방향 지시: «방향 전환 · {지시 글} → {대상 이름}» (원문 «[이벤트] preset.steer.instruct …»가 아니다)', async () => {
+    stubFetchWithConversations([{
+      id: 'conv-steer-1', type: 'dm', title: '지시 방',
+      latest_message: {
+        content: '[이벤트] preset.steer.instruct\n- target_member_id: 97470487-345a-4e85-9c45-cdf901737adb\n- instruction: 먼저 봐 주세요',
+        created_at: '2026-11-13T14:20:00Z',
+        event: { event_key: 'preset.steer.instruct', payload: { target_member_id: '97470487-345a-4e85-9c45-cdf901737adb', instruction: '먼저 봐 주세요' }, refs: { target: { found: true, name: '미르코' } } },
+      },
+      updated_at: '2026-11-13T14:20:00Z', unread_count: 0,
+    }]);
+    await mount();
+    expect(container.textContent).toContain('방향 전환 · 먼저 봐 주세요 → 미르코');
+    expect(container.textContent).not.toMatch(/\[이벤트\]|preset\.steer|target_member_id|97470487/);
+  });
+
+  it('⭐4921 문장이 없는 이벤트(워크플로우 stage): 정의의 사람 이름 한 낱말 — 슬러그 · id · «- key: value» 줄 없음', async () => {
+    resetEventDefinitionNames();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/events/definitions')) return { ok: true, json: async () => ([{ key: 'preset.workflow.kanban', name: '칸반 워크플로우', org_id: null, payload_schema: {}, routing: {}, block_template: null, enabled: true, version: 1 }]) };
+      if (url.includes('/api/conversations/recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/api/conversations?')) return { ok: true, json: async () => ({ data: [{
+        id: 'conv-stage-1', type: 'dm', title: '워크플로우 방',
+        latest_message: { content: '[이벤트] preset.workflow.kanban\n- stage: ready\n- work_item_id: 946300bd-434c-45d6-901d-c0d1af8603e7', created_at: '2026-11-13T14:20:00Z', event: { event_key: 'preset.workflow.kanban', payload: { stage: 'ready', work_item_id: '946300bd-434c-45d6-901d-c0d1af8603e7' } } },
+        updated_at: '2026-11-13T14:20:00Z', unread_count: 0,
+      }], total: 1 }) };
+      return { ok: false, status: 404, json: async () => null };
+    }));
+    await mount();
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.textContent).toContain('칸반 워크플로우');
+    expect(container.textContent).not.toMatch(/\[이벤트\]|preset\.workflow|- stage|work_item_id|946300bd/);
+  });
+
+  it('⭐4921 정의 이름을 못 읽어도(실패) 한 낱말 «이벤트» — 슬러그가 아니다 · 사람이 쓴 content는 그대로', async () => {
+    resetEventDefinitionNames();
+    stubFetchWithConversations([
+      { id: 'conv-x1', type: 'dm', title: '이름 모름 방', latest_message: { content: '[이벤트] org.zeta.note\n- summary: 정리 끝', created_at: '2026-11-13T14:20:00Z', event: { event_key: 'org.zeta.note', payload: { summary: '정리 끝' } } }, updated_at: '2026-11-13T14:20:00Z', unread_count: 0 },
+      { id: 'conv-x2', type: 'dm', title: '설명 문장 방', latest_message: { content: '발행이 멈췄어요. 작업 상세에서 다시 시도해 주세요.', created_at: '2026-11-13T14:19:00Z', event: { event_key: 'preset.recipe.publish_failed', payload: { reason_code: 'x' } } }, updated_at: '2026-11-13T14:19:00Z', unread_count: 0 },
+    ]);
+    await mount();
+    expect(container.textContent).toContain('이벤트 · 정리 끝');
+    expect(container.textContent).not.toMatch(/\[이벤트\]|org\.zeta/);
+    expect(container.textContent).toContain('발행이 멈췄어요. 작업 상세에서 다시 시도해 주세요.');
+  });
+
   it('4887 ⭐ an ordinary message shows its text without markdown markers', async () => {
     stubFetchWithConversations([{
       id: 'conv-md-1', type: 'group', title: '오늘 할 일',
@@ -549,7 +596,9 @@ describe('ChatListView — story #3888 이벤트 메시지 미리보기(raw slug
 
   // 음성대조 — refs.assignee가 없으면(구버전 캐시 등) 반쪽 요약 금지 원칙에 따라 raw
   // content로 폴백한다(과잉 일반화 금지 계약 확認, work.status_changed와 동일 패턴).
-  it('음성대조 — work.assigned인데 refs.assignee가 없으면 raw content 폴백', async () => {
+  // story 4921 (PO 11-13: «슬러그 · id · 키 이름 노출 0») — 이 둘은 예전엔 «raw content로 떨어진다»를 못박았다(과잉 일반화 금지). 그 raw content는 에이전트가 읽는 기계 문장이라
+  // 사람 화면에는 정의 이름 / «이벤트» 한 낱말로 바뀐다(문장을 못 짓는 건 그대로 — 지어내지 않는다).
+  it('음성대조 — work.assigned인데 refs.assignee가 없으면 문장을 짓지 않고 «이벤트» 한 낱말(기계 문장이 아니다)', async () => {
     stubFetchWithConversations([{
       id: 'conv-event-5', type: 'dm', title: '배정봇(구버전)',
       latest_message: {
@@ -563,14 +612,16 @@ describe('ChatListView — story #3888 이벤트 메시지 미리보기(raw slug
       updated_at: '2026-09-14T18:00:00Z', unread_count: 0,
     }]);
     await mount();
-    expect(container.textContent).toContain('[이벤트] preset.work.assigned');
+    expect(container.textContent).toContain('이벤트');
+    expect(container.textContent).not.toContain('[이벤트] preset.work.assigned');
+    expect(container.textContent).not.toContain('preset.work.assigned');
   });
 
   // 양성대조 — event_key가 이 카드가 처리하는 4개 preset(story #3893으로 2개 추가) 밖
   // (예: 미래 확장 preset)이면
   // composeEventPreviewLine이 null을 돌려주고 기존 content 폴백으로 조용히 떨어진다
   // (과잉 일반화 금지 계약 확認).
-  it('양성대조 — 미지원 event_key는 raw content 폴백으로 떨어진다(과잉 일반화 금지)', async () => {
+  it('양성대조 — 문장이 없는 event_key는 기계 문장 대신 «이벤트» 한 낱말로 떨어진다(문장을 지어내지 않는다 · 슬러그도 안 보인다 · story 4921)', async () => {
     stubFetchWithConversations([{
       id: 'conv-event-unsupported', type: 'dm', title: '기타 이벤트',
       latest_message: {
@@ -581,7 +632,9 @@ describe('ChatListView — story #3888 이벤트 메시지 미리보기(raw slug
       updated_at: '2026-09-14T18:00:00Z', unread_count: 0,
     }]);
     await mount();
-    expect(container.textContent).toContain('[이벤트] preset.some.other');
+    expect(container.textContent).toContain('이벤트');
+    expect(container.textContent).not.toContain('preset.some.other');
+    expect(container.textContent).not.toContain('[이벤트]');
   });
 });
 

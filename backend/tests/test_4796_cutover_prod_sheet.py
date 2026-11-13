@@ -941,7 +941,10 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     # one line, restricted to the platform row (`org_id IS NULL`) by key — no DDL, no table swap, nothing an old release could not live with (the old release's composer still sends a work item, which the schema still allows).
     steer = [h for h in hits if h.startswith("0474_")]
     assert len(steer) == 1 and "UPDATE event_definitions SET payload_schema" in steer[0] and "org_id IS NULL" in steer[0] and not any(k in steer[0] for k in ("DROP", "ALTER", "VALIDATE")), steer
-    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_"))]
+    # story 4921: 0475 is the same kind of line — a data-only `UPDATE` of the platform «preset.steer.instruct» row (its card template only), written in upgrade() itself so the reading lists it; the key and `org_id IS NULL` bound the rows.
+    card = [h for h in hits if h.startswith("0475_")]
+    assert len(card) == 1 and "UPDATE event_definitions SET block_template" in card[0] and "org_id IS NULL" in card[0] and not any(k in card[0] for k in ("DROP", "ALTER", "VALIDATE")), card
+    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)
