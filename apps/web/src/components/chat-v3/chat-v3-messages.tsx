@@ -16,6 +16,8 @@ import { WithheldDeliveryLine } from '@/components/chat/withheld-delivery-line';
 import { AgentWakeNotice } from '@/components/chat/agent-wake-notice';
 import { agentsStillToWake, recalledAgentWake } from '@/lib/chat/agent-wake';
 import { ChatV3EventCard } from './chat-v3-event-card';
+import { isMachineEventContent } from '@/components/chat/event-block-card';
+import { EventTextFallback } from '@/components/chat/event-text-fallback';
 import { seedFromCompose } from './chat-v3-compose';
 import { newClientNonce, normalizeToMessage, sentMessageFromAnswer, type ChatMessage } from '@/hooks/use-chat-sse';
 import type { TodayNeedsMeItem } from '@/components/org-briefing/derive-today';
@@ -267,7 +269,10 @@ export const ChatV3Messages = forwardRef<ChatV3MessagesHandle, ChatV3MessagesPro
                       isMine ? 'rounded-tr-sm bg-primary/10 text-left' : 'rounded-tl-sm',
                     )}
                   >
-                    {m.content}
+                    {/* story 4921 — an event message drawn as text shows the person's line (the definition's name is not read in this screen: the word «이벤트» + the person's own words), never the machine text an agent reads */}
+                    {isMachineEventContent(m.content)
+                      ? <EventTextFallback content={m.content} eventKey={m.event?.event_key} payload={m.event?.payload} refs={m.event?.refs as Record<string, unknown> | undefined} />
+                      : m.content}
                   </Card>
                   {/* story #4430 — right under the sender's own bubble, above the reference and approval cards */}
                   <WithheldDeliveryLine withheld={m.delivery_withheld} isMine={isMine} />

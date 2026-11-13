@@ -159,6 +159,17 @@ async def test_an_instruction_with_a_work_item_carries_the_targets_name_and_the_
             assert refs.get("target") == {"found": True, "name": "미르코"}
             assert refs.get("work_item", {}).get("found") is True and f"entity:story:{story_id}" in refs["work_item"]["token"]
             assert "issued_by" not in refs, "no issuer in the payload → no ref (nothing is invented)"
+            # the summary the bell / live frames carry for this message (story 4921, second PR) is the human line — never the machine text an agent reads
+            from app.models.conversation import ConversationMessage
+            from app.models.team import TeamMember
+            from app.routers.conversations import _msg_payload
+
+            msg = (await s.execute(select(ConversationMessage).where(ConversationMessage.id == uuid.UUID(_resp["message_id"])))).scalar_one()
+            assert msg.content.startswith("[이벤트] "), "the stored content stays the agents' text"
+            sender = (await s.execute(select(TeamMember).where(TeamMember.id == msg.sender_id))).scalar_one()
+            summary = _msg_payload(msg, sender)["summary"]
+            assert "방향 전환 · 먼저 봐 주세요 → 미르코" in summary
+            assert "[이벤트]" not in summary and "preset.steer" not in summary and str(target_id) not in summary and "work_item" not in summary
     finally:
         await engine.dispose()
 

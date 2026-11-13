@@ -17,6 +17,7 @@ import {
 import { useLocale, useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { toPlainPreview } from '@/components/chat/entity-ref';
+import { humanizeMachineEventSummary } from '@/components/chat/event-block-card';
 import { CountBadge } from '@/components/ds/count-badge';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -283,6 +284,7 @@ function NotificationPanel({
   syncDegraded,
 }: NotificationPanelProps) {
   const t = useTranslations('inbox');
+  const tEventCard = useTranslations('eventCard');
   const tCommon = useTranslations('common');
   const locale = useLocale();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
@@ -333,7 +335,7 @@ function NotificationPanel({
             </span>
           )}
           <span className="min-w-0 flex-1">
-            <span data-testid="notification-line-headline" className={cn('block truncate text-ds-body text-ds-ink', !n.read_at && 'font-semibold')}>{headline(t, n)}</span>
+            <span data-testid="notification-line-headline" className={cn('block truncate text-ds-body text-ds-ink', !n.read_at && 'font-semibold')}>{headline(t, n, tEventCard)}</span>
             <span className="block truncate text-ds-small text-ds-ink-3">
               {room ? <span data-testid="notification-line-room">{room}</span> : null}
               {room && sender ? ' · ' : null}
@@ -423,8 +425,10 @@ function NotificationPanel({
 // story #4182 — summary는 서버가 만든 미리보기지만 이미 저장된 옛 행엔 내부 HTML 주석이 남아 있다.
 // 렌더에서도 평문화하고, 비면(주석뿐이던 경우) 이벤트 타입 문구로 폴백한다.
 // 벨 줄 머리글: summary → (dispatched면) 실어 온 꼴의 문구 → 이벤트 종류 폴백(story #4520).
-function headline(t: (key: string) => string, n: Pick<EventNotification, 'event_type' | 'payload'>): string {
-  return plainSummary(n.payload?.summary, getDispatchedHeadline(t, n.event_type, n.payload) ?? getEventTypeCopy(t, n.event_type));
+function headline(t: (key: string) => string, n: Pick<EventNotification, 'event_type' | 'payload'>, tEventCard: (key: string) => string): string {
+  // story 4921 — a row stored BEFORE the server wrote a human summary for event messages still carries «{sender}: [이벤트] preset.x …» (the machine text an agent reads): shown as «{sender}: 이벤트[ · the person's words]»
+  const summary = humanizeMachineEventSummary(n.payload?.summary, n.payload?.['event'], tEventCard);
+  return plainSummary(summary, getDispatchedHeadline(t, n.event_type, n.payload) ?? getEventTypeCopy(t, n.event_type));
 }
 
 function plainSummary(summary: string | null | undefined, fallback: string): string {
@@ -433,6 +437,7 @@ function plainSummary(summary: string | null | undefined, fallback: string): str
 export function NotificationBell() {
   const router = useRouter();
   const t = useTranslations('inbox');
+  const tEventCard = useTranslations('eventCard');
   const { projectId } = useDashboardContext();
   const { addToast } = useToast();
   const [open, setOpen] = useState(false);
@@ -486,7 +491,7 @@ export function NotificationBell() {
     // story #3074 — 데스크톱 셸(bridge-init.js가 top-frame+정확 origin에서만 window.__sprintableBridge를
     // 노출)이 있으면 그 경로«만» 쓴다 — 중복/포커스 억제는 네이티브 단독 판정이라 document.hidden
     // 조건 없이 항상 부른다. 브리지가 없을 때(일반 브라우저)만 기존 웹 Notification 경로(회귀 0).
-    const summary = headline(t, incoming);
+    const summary = headline(t, incoming, tEventCard);
     if (hasDesktopNotifyBridge()) {
       const body = incoming.payload?.sender_name ? `${incoming.payload.sender_name} · ${summary}` : summary;
       void notifyViaDesktopBridge({
@@ -504,7 +509,7 @@ export function NotificationBell() {
         icon: '/favicon.ico',
       });
     }
-  }, [t]);
+  }, [t, tEventCard]);
 
   // story #2201 — sync_status는 SseEventNotification 계약과 무관한 별도 이벤트라
   // extraEventNames/onExtraEvent로 구독한다(핸들러 파이프라인을 안 건드림). story #2686(축D) —

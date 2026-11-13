@@ -655,7 +655,7 @@ export interface EventPreviewHelpers {
  * 필드 부재(work.assigned는 refs.assignee 미해소 포함)는 null을 돌려줘 호출부가 기존
  * content 폴백으로 떨어진다(과잉 일반화 금지, 발명 0).
  */
-export function composeEventPreviewLine(
+export function composeEventPreviewSentence(
   eventKey: string | undefined,
   payload: Record<string, unknown> | undefined,
   helpers: EventPreviewHelpers,
@@ -667,7 +667,7 @@ export function composeEventPreviewLine(
   // 그라운딩 확認: _publish_registry_event_core가 event_context 전체를 msg_metadata에
   // 저장하고 그 dict가 이미 refs를 포함).
   refs?: Record<string, string | null | { found: boolean; token?: string; type?: string; name?: string }>,
-): string | null {
+): { line: string; used: string[] } | null {
   if (!eventKey || !payload) return null;
   const { tBoard, tCage, tDashboard, tEventCard, tEntity, tOutcomeLoop, domainLabels } = helpers;
 
@@ -677,7 +677,7 @@ export function composeEventPreviewLine(
     if (typeof gateType !== 'string' || typeof verdict !== 'string') return null;
     const gateTypeLbl = gateTypeLabel(tDashboard, gateType);
     const verdictLbl = gateStatusLabel(verdict, tCage);
-    return `${tEventCard('gateVerdictHeader')} · ${gateTypeLbl} — ${verdictLbl}`;
+    return { line: `${tEventCard('gateVerdictHeader')} · ${gateTypeLbl} — ${verdictLbl}`, used: ['gate_type', 'verdict'] };
   }
 
   if (eventKey === 'preset.work.status_changed') {
@@ -693,7 +693,7 @@ export function composeEventPreviewLine(
     const workItemType = payload['work_item_type'];
     const typeLabel = typeof workItemType === 'string' ? entityTypeLabel(workItemType, tEntity) : null;
     const summary = typeLabel ? `${typeLabel} ${fromLabel} → ${toLabel}` : `${fromLabel} → ${toLabel}`;
-    return `${tEventCard('statusChangedHeader')} · ${summary}`;
+    return { line: `${tEventCard('statusChangedHeader')} · ${summary}`, used: ['from_status', 'to_status', ...(typeLabel ? ['work_item_type'] : [])] };
   }
 
   // story #3893(유나 §⑤ 확定 2026-09-14 19:47Z) — "작업 배정 · {work_item_type 라벨} →
@@ -709,7 +709,7 @@ export function composeEventPreviewLine(
         ? assigneeRef.name
         : null;
     if (!typeLabel || !assigneeName) return null;
-    return `${tEventCard('workAssignedHeader')} · ${typeLabel} → ${assigneeName}`;
+    return { line: `${tEventCard('workAssignedHeader')} · ${typeLabel} → ${assigneeName}`, used: ['work_item_type', 'assignee_member_id'] };
   }
 
   // story #3893(유나 §⑤ 확定 「목표 측정 · {metric_value}{metric_unit}」) — CHANGES①(PO
@@ -728,27 +728,44 @@ export function composeEventPreviewLine(
         ? tOutcomeLoop(`metric_${metricUnit}` as 'metric_velocity')
         : null;
     const summary = unitLabel ? `${metricValue} ${unitLabel}` : `${metricValue}`;
-    return `${tEventCard('goalMeasuredHeader')} · ${summary}`;
+    return { line: `${tEventCard('goalMeasuredHeader')} · ${summary}`, used: ['metric_value', ...(unitLabel ? ['metric_unit'] : [])] };
   }
 
   // story 4921 — «방향 전환 · {지시 글 앞부분}[ → {대상 이름}]». The target's name comes from `refs.target` (found); a message published before this story has no ref → no « → name» (the sentence stays whole);
   // a member who is gone now → «알 수 없는 구성원». The instruction is the person's own text (first line).
-  if (eventKey === 'preset.steer.instruct') {
-    const instruction = firstHumanLine(payload['instruction'], PREVIEW_TEXT_MAX);
-    if (!instruction) return null;
-    const targetRef = refs?.['target'];
-    const targetName =
-      targetRef && typeof targetRef === 'object'
-        ? (targetRef.found && typeof targetRef.name === 'string' ? targetRef.name : (!targetRef.found ? tEventCard('memberMissing') : null))
-        : null;
-    return `${tEventCard('steerHeader')} · ${instruction}${targetName ? ` → ${targetName}` : ''}`;
-  }
+  if (eventKey === 'preset.steer.instruct') return steerPreviewSentence(payload, refs, tEventCard);
 
   return null;
 }
 
+/** the one-line sentence of the presets that have one (null for any other) — every surface but the bubble reads only the line */
+export function composeEventPreviewLine(
+  eventKey: string | undefined,
+  payload: Record<string, unknown> | undefined,
+  helpers: EventPreviewHelpers,
+  refs?: Record<string, string | null | { found: boolean; token?: string; type?: string; name?: string }>,
+): string | null {
+  return composeEventPreviewSentence(eventKey, payload, helpers, refs)?.line ?? null;
+}
+
 /** how much of a person's own text the one-line preview keeps */
 const PREVIEW_TEXT_MAX = 60;
+
+/** «방향 전환 · {지시 글}[ → {대상 이름}]» — one sentence for every surface (room list · inbox · bell · bubble · v3), so a surface that has only the text fallback says the same thing */
+function steerPreviewSentence(
+  payload: Record<string, unknown> | undefined,
+  refs: Record<string, unknown> | undefined,
+  tEventCard: (key: string) => string,
+): { line: string; used: string[] } | null {
+  const instruction = firstHumanLine(payload?.['instruction'], PREVIEW_TEXT_MAX);
+  if (!instruction) return null;
+  const targetRef = refs?.['target'] as { found?: boolean; name?: unknown } | null | undefined;
+  const targetName =
+    targetRef && typeof targetRef === 'object'
+      ? (targetRef.found && typeof targetRef.name === 'string' ? targetRef.name : (!targetRef.found ? tEventCard('memberMissing') : null))
+      : null;
+  return { line: `${tEventCard('steerHeader')} · ${instruction}${targetName ? ` → ${targetName}` : ''}`, used: ['instruction', ...(targetName ? ['target_member_id'] : [])] };
+}
 /** the payload fields that hold a PERSON'S words (an instruction, a message, a summary, a note) — NOT `title` / `body` / `content` / `reason` (workflow and recipe payloads carry slugs, ids and paths there) — the first usable one, first line, is what a fallback line may show */
 const HUMAN_TEXT_FIELDS = ['instruction', 'message', 'summary', 'note'] as const;
 /** a line that is an id, a path or a link is not a person's words even in a text field */
@@ -770,6 +787,93 @@ export function isMachineEventContent(content: string | null | undefined): boole
   return typeof content === 'string' && /^\[(?:이벤트|Event)\]\s+\S/.test(content);
 }
 
+/** the words the event card already has for a payload field (eventCard) — the second place a label is looked up for the bubble's text fallback */
+const CARD_FIELD_LABEL_KEYS: Record<string, string> = {
+  note: 'noteLabel', reason: 'reasonLabel', assignee_member_id: 'assigneeLabel', assigned_by_member_id: 'assignedByLabel', goal_id: 'goalLabel',
+  metric_unit: 'unitLabel', source: 'sourceLabel', metric_value: 'metricValueLabel', measured_at: 'measuredAtLabel',
+  target_member_id: 'steerTargetLabel', work_item_id: 'targetLabel',
+};
+/** the member / work-item ref that names an id field: `target_member_id` → refs.target · `work_item_id` → refs.work_item */
+const refKeyOfIdField = (key: string) => key.replace(/_member_id$/, '').replace(/_id$/, '');
+
+export interface EventBodyFallback {
+  /** the head line: the one-line sentence of a preset that has one, else the definition's human name, else «이벤트» — never the «[이벤트] preset.x» header line or a slug */
+  head: string;
+  /** the person's own words (instruction · message · summary · note), whole */
+  words: string | null;
+  /** every other payload field as a readable «label: value» line (label: the definition's schema title → the card's own words → the key made readable; an id that refs names shows the name) */
+  items: Array<{ label: string; value: string }>;
+}
+
+/**
+ * story 4921 — what a chat BUBBLE shows for an event message that has no card template (the definition has none · could not be read · an old message): the head, the person's words and the other fields as
+ * a readable list — the content is not dropped (a bubble body keeps what happened); only the machine header line and raw key names go. «이벤트» alone is what remains when there is no field at all.
+ */
+export function composeEventBodyFallback(
+  content: string | null | undefined,
+  eventKey: string | undefined,
+  payload: Record<string, unknown> | undefined,
+  refs: Record<string, unknown> | undefined,
+  definition: { name?: string | null; payload_schema?: Record<string, unknown> } | null | undefined,
+  helpers: EventPreviewHelpers,
+): EventBodyFallback | null {
+  if (!isMachineEventContent(content)) return null;
+  const { tEventCard } = helpers;
+  const made = composeEventPreviewSentence(eventKey, payload, helpers, refs as never);
+  const sentence = made?.line ?? null;
+  // the fields the head sentence already said are not said again in the list (one place, from the sentence's own builder)
+  const said = new Set(made?.used ?? []);
+  const definitionName = (eventKey ? helpers.eventDefinitionName?.(eventKey) ?? definition?.name : definition?.name)?.trim();
+  const head = sentence || definitionName || tEventCard('genericEventHeader');
+  let words: string | null = null;
+  let wordsField: string | null = null;
+  for (const field of HUMAN_TEXT_FIELDS) {
+    const v = payload?.[field];
+    if (typeof v === 'string' && v.trim()) { words = v.trim(); wordsField = field; break; }
+  }
+  // a short one-line instruction the head sentence already says is not said twice
+  if (words && sentence && !words.includes('\n') && Array.from(words).length <= PREVIEW_TEXT_MAX && sentence.includes(words)) words = null;
+  const schemaProps = (definition?.payload_schema as { properties?: Record<string, { title?: unknown }> } | undefined)?.properties;
+  const items: Array<{ label: string; value: string }> = [];
+  for (const [key, raw] of Object.entries(payload ?? {})) {
+    if (key === wordsField || said.has(key) || raw === null || raw === undefined) continue;
+    let value: string;
+    if (typeof raw === 'string') value = raw.trim();
+    else if (typeof raw === 'number' || typeof raw === 'boolean') value = String(raw);
+    else { try { value = JSON.stringify(raw); } catch { continue; } }
+    if (!value) continue;
+    if (/_id$/.test(key)) {
+      const ref = refs?.[refKeyOfIdField(key)] as { found?: boolean; name?: unknown } | null | undefined;
+      if (ref && typeof ref === 'object' && ref.found && typeof ref.name === 'string' && ref.name) value = ref.name;
+      else if (ref && typeof ref === 'object' && ref.found === false) value = tEventCard('memberMissing');
+    }
+    const title = schemaProps?.[key]?.title;
+    const cardKey = CARD_FIELD_LABEL_KEYS[key];
+    const label = (typeof title === 'string' && title.trim()) || (cardKey ? tEventCard(cardKey) : '') || key.replace(/[_-]+/g, ' ');
+    items.push({ label, value: value.length > 200 ? `${Array.from(value).slice(0, 200).join('')}…` : value });
+  }
+  return { head, words, items };
+}
+
+/**
+ * story 4921 — a notification SUMMARY stored in the machine shape «{sender}: [이벤트] preset.x\n- key: value …» (what the server wrote for event messages before it wrote the human line) is shown as
+ * «{sender}: {the fallback line}». Anything else — a summary that is not that shape, a missing one — is returned as it is.
+ */
+export function humanizeMachineEventSummary(
+  summary: string | null | undefined,
+  event: unknown,
+  tEventCard: (key: string) => string,
+): string | null | undefined {
+  if (typeof summary !== 'string') return summary;
+  const m = /^([^\n]*?): (\[(?:이벤트|Event)\] [\s\S]*)$/.exec(summary);
+  if (!m) return summary;
+  const card = (event && typeof event === 'object' ? event : {}) as { event_key?: unknown; payload?: unknown; refs?: unknown };
+  const payload = card.payload && typeof card.payload === 'object' ? (card.payload as Record<string, unknown>) : undefined;
+  const refs = card.refs && typeof card.refs === 'object' ? (card.refs as Record<string, unknown>) : undefined;
+  const line = composeEventPreviewFallback(m[2], typeof card.event_key === 'string' ? card.event_key : undefined, payload, { tEventCard }, refs);
+  return line ? `${m[1]}: ${line}` : summary;
+}
+
 /**
  * story 4921 — the line a person sees where `composeEventPreviewLine` has no sentence of its own (every event but the five it knows: workflow stages · marketing recipes · recipe publish stopped · an org's custom events …):
  * the definition's own human NAME (when the screen has the definitions; else the one word «이벤트») · the person's own words from the payload (`instruction` · `message` · `summary` …, first line) when there are some.
@@ -780,9 +884,14 @@ export function composeEventPreviewFallback(
   eventKey: string | undefined,
   payload: Record<string, unknown> | undefined,
   helpers: Pick<EventPreviewHelpers, 'tEventCard' | 'eventDefinitionName'>,
+  refs?: Record<string, unknown>,
 ): string | null {
   if (!isMachineEventContent(content)) return null;
   const { tEventCard, eventDefinitionName } = helpers;
+  if (eventKey === 'preset.steer.instruct') {
+    const steer = steerPreviewSentence(payload, refs, tEventCard);
+    if (steer) return steer.line;
+  }
   const name = (eventKey ? eventDefinitionName?.(eventKey)?.trim() : '') || tEventCard('genericEventHeader');
   let text: string | null = null;
   for (const field of HUMAN_TEXT_FIELDS) {

@@ -3,6 +3,7 @@
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { toPlainPreview } from '@/components/chat/entity-ref';
+import { composeEventPreviewFallback } from '@/components/chat/event-block-card';
 
 export interface ChatV3ThreadParticipant {
   member_id: string;
@@ -13,7 +14,8 @@ export interface ChatV3ThreadParticipant {
 export interface ChatV3Thread {
   id: string;
   participants: ChatV3ThreadParticipant[];
-  latest_message: { content: string | null; created_at: string | null; has_attachments?: boolean } | null;
+  // story 4921 — `event` (key · payload · refs) of an event message: the preview line is built from it, never from the machine text an agent reads
+  latest_message: { content: string | null; created_at: string | null; has_attachments?: boolean; event?: { event_key?: string; payload?: Record<string, unknown>; refs?: Record<string, unknown> } | null } | null;
   unread_count: number;
   // story #4314 — 대화의 프로젝트(목록 · 단건 응답 둘 다 싣는다 · ConversationResponse.project_id). 문맥 패널 작업 항목 링크의 대상 프로젝트.
   project_id?: string | null;
@@ -38,6 +40,7 @@ export function ChatV3ThreadRail({ threads, meId, selectedId, onSelect }: {
 }) {
   const t = useTranslations('chatV3');
   const tChats = useTranslations('chats'); // story #4442 — «첨부 파일», one key for both lists
+  const tEventCard = useTranslations('eventCard'); // story 4921
 
   return (
     <section className="flex w-full shrink-0 flex-col border-r border-border bg-card lg:w-[320px]" data-testid="chat-v3-thread-rail">
@@ -83,7 +86,7 @@ export function ChatV3ThreadRail({ threads, meId, selectedId, onSelect }: {
                           aria-describedby로 다시 잇는다. */}
                       {isAgent ? <span id={roleId ?? undefined} className="shrink-0 text-micro text-muted-foreground" data-testid="chat-v3-role-tag-agent">{t('roleTagAgent')}</span> : null}
                     </div>
-                    <p id={previewId} className="mt-0.5 truncate text-xs text-muted-foreground">{thread.latest_message?.content ? toPlainPreview(thread.latest_message.content) : (thread.latest_message?.has_attachments ? tChats('latestAttachmentOnly') : '')}</p>
+                    <p id={previewId} className="mt-0.5 truncate text-xs text-muted-foreground">{thread.latest_message?.content ? (composeEventPreviewFallback(thread.latest_message.content, thread.latest_message.event?.event_key, thread.latest_message.event?.payload, { tEventCard }, thread.latest_message.event?.refs) ?? toPlainPreview(thread.latest_message.content)) : (thread.latest_message?.has_attachments ? tChats('latestAttachmentOnly') : '')}</p>
                   </div>
                   {thread.unread_count > 0 ? (
                     <span className="mt-1 size-2 shrink-0 rounded-full bg-primary" data-testid="chat-v3-unread-dot" />

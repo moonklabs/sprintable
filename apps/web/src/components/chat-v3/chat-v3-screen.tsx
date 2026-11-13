@@ -53,7 +53,9 @@ export function threadsAfterMessage(
   const hasAttachments = Array.isArray(payload.attachments) && payload.attachments.length > 0;
   // story #4442 — an attachment-only message (no text) updates the thread too: «첨부 파일» and its time
   if (createdAt && (content || hasAttachments)) {
-    item.latest_message = { content: content ?? '', created_at: createdAt, ...(hasAttachments ? { has_attachments: true } : {}) };
+    // story 4921 — an event message keeps its `event` on a live update too (the preview line is built from it)
+    const liveEvent = payload.event && typeof payload.event === 'object' ? { event: payload.event as NonNullable<ChatV3Thread['latest_message']>['event'] } : {};
+    item.latest_message = { content: content ?? '', created_at: createdAt, ...(hasAttachments ? { has_attachments: true } : {}), ...liveEvent };
     if (conversationId !== selectedId && !isOwnMessage(payload, meId)) item.unread_count = (item.unread_count ?? 0) + 1;
   }
   updated.splice(idx, 1);

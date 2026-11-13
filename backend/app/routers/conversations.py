@@ -649,7 +649,7 @@ def _msg_payload(
             ),
         } if sender else None,
         # e2608901: 알림 카피 — raw event_type 대신 사람-친화 summary를 payload에 동봉.
-        "summary": _build_message_summary(msg.content, sender.name if sender else None, bool(attachments)),
+        "summary": _build_message_summary(_preview_content(msg), sender.name if sender else None, bool(attachments)),  # story 4921 — an event message's summary is the human line, not the machine text
         "created_at": msg.created_at.isoformat(),
     }
     # story #2263 AC6(오르테가 판정 2026-07-29, 스레드 7256d5cc): 읽기 경로(list_messages·
@@ -790,6 +790,15 @@ def _operator_reply_target_gate_id(root_msg: "ConversationMessage | None") -> uu
     except ValueError:
         logger.warning("operator reply skip — malformed gate_id in approval_target=%r", gate_id_raw)
         return None
+
+
+def _preview_content(msg: "ConversationMessage") -> str:
+    """story 4921 — the text a person sees for this message in a preview (the bell's summary · a notification body · the activity log): for an event message whose `content` is the machine text an
+    agent reads («[이벤트] preset.x», «- key: value» lines) it is the human line built from the event card; every other content is returned as it is."""
+    from app.services.event_message_text import human_event_text
+
+    content = msg.content or ""
+    return human_event_text(content, _event_payload(msg).get("event")) or content
 
 
 def _event_payload(msg: "ConversationMessage") -> dict:
@@ -3590,7 +3599,7 @@ async def send_message_core(
                             # story #3903 PO PASS 후속 — 「회원님을」→「나를」(inbox.mentionTitle과
                             # 동일 문구·PO 2인칭 통일 지시 그대로 적용, f0083e15dc).
                             title=f"{sender.name or UNNAMED_MEMBER_LABEL}님이 나를 멘션했어요",
-                            body=plain_text_preview(msg.content, NOTIFICATION_BODY_PREVIEW_MAX),
+                            body=plain_text_preview(_preview_content(msg), NOTIFICATION_BODY_PREVIEW_MAX),
                             reference_type="conversation", reference_id=conversation_id,
                             source_project_id=conv.project_id,
                             # story #3903(migration 0378) — sender_name(제목 렌더시 조합용)
@@ -3643,7 +3652,7 @@ async def send_message_core(
                         # 「새 메시지」는 명사구라 합니다체/해요체 어미 자체가 없음(AC1 대상
                         # 아님, 3903 실측 확認) — 그대로.
                         title=f"{sender.name or UNNAMED_MEMBER_LABEL}님의 새 메시지",
-                        body=plain_text_preview(msg.content, NOTIFICATION_BODY_PREVIEW_MAX),
+                        body=plain_text_preview(_preview_content(msg), NOTIFICATION_BODY_PREVIEW_MAX),
                         reference_type="conversation", reference_id=conversation_id,
                         source_project_id=conv.project_id,
                         # story #3903(migration 0378) — 위 mention 블록과 동형.
@@ -3839,7 +3848,7 @@ async def send_message_core(
             entity_id=conversation_id,
             context={
                 "message_id": str(msg.id),
-                "content_preview": plain_text_preview(msg.content, _SUMMARY_PREVIEW_MAX),
+                "content_preview": plain_text_preview(_preview_content(msg), _SUMMARY_PREVIEW_MAX),
             },
         )
 

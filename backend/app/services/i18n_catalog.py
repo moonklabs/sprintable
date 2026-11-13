@@ -670,6 +670,28 @@ _CATALOG: dict[str, dict[str, str]] = {
         "ko": "[이벤트] {event_key}",
         "en": "[Event] {event_key}",
     },
+    # story 4921 — the line a PERSON sees for an event message (the summary the bell carries, a notification body, the activity log's preview): the machine text of the message (what an agent reads)
+    # is never shown to a person. Same words as the web's `eventCard.steerHeader / genericEventHeader / memberMissing`.
+    "events.preview_generic": {
+        "ko": "이벤트",
+        "en": "Event",
+    },
+    "events.preview_steer": {
+        "ko": "방향 전환 · {instruction}",
+        "en": "Direction change · {instruction}",
+    },
+    "events.preview_steer_target": {
+        "ko": "{line} → {name}",
+        "en": "{line} → {name}",
+    },
+    "events.preview_member_missing": {
+        "ko": "(알 수 없는 구성원)",
+        "en": "(unknown member)",
+    },
+    "events.preview_with_words": {
+        "ko": "{head} · {words}",
+        "en": "{head} · {words}",
+    },
     "events.stage_action_label": {
         "ko": "할 일: {action}",
         "en": "To do: {action}",
