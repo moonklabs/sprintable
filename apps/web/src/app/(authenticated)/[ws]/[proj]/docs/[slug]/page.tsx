@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { DocEditor } from '@/components/docs/doc-editor';
 import { DocGateSection } from '@/components/docs/doc-gate-section';
@@ -70,8 +70,14 @@ export default function DocSlugPage() {
   const locale = useLocale();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const ts = useTranslations('share');
-  // 신규 문서 자동 포커스: URL ?new=1 파라미터를 ref로 처리 (useSearchParams Suspense 이슈 방지)
-  const isNewRef = useRef(typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('new') === '1');
+  // 신규 문서: URL ?new=1 · ?parent=. 출처는 useSearchParams — App Router는 router.push 때 «새 화면을 먼저 렌더하고 주소(history)는 커밋 뒤에» 바꾸므로 렌더 중 window.location은 옛 주소라 틀린 출처다
+  // (두 번째부터의 «새 문서»가 초안 대신 목록으로 튕기던 dev 실측 결함 · 11-13). `new`는 한 번 켜지면 이 화면이 사는 동안 유지(래치) — 첫 저장 뒤 주소가 정본 슬러그로 옮겨져 ?new=1이 빠져도
+  // 제목칸 placeholder(brandNewTitle)가 값으로 바뀌지 않게.
+  const searchParams = useSearchParams();
+  const newParam = searchParams?.get('new') === '1';
+  const parentParam = searchParams?.get('parent') || null;
+  const isNewRef = useRef(newParam);
+  if (newParam) isNewRef.current = true;
   const isNew = isNewRef.current;
 
   const { wsSlug, projSlug, projectId, tree, setTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer } = useDocsLayout();
@@ -170,7 +176,7 @@ export default function DocSlugPage() {
       if (!res.ok) {
         // 4910 ② — 임시 주소(`untitled-…`)에 `?new=1`로 왔는데 문서가 없으면(404) 서버에 아직 안 만든 «새 문서 초안»이다(오류가 아님). 그 밖의 404는 아래 옛 회복 그대로(목록으로).
         if (res.status === 404 && isNew && isUntitledSlug(slug)) {
-          setDraft({ slug, parentId: new URLSearchParams(window.location.search).get('parent') || null });
+          setDraft({ slug, parentId: parentParam });
           return;
         }
         // prod P0(2026-07-14) — 이전엔 setSelectedDoc(null)만 하고 끝나 이 슬러그가 현재
@@ -204,7 +210,7 @@ export default function DocSlugPage() {
     } finally {
       setDocLoading(false);
     }
-  }, [projectId, slug, router, wsSlug, projSlug, isNew]);
+  }, [projectId, slug, router, wsSlug, projSlug, isNew, parentParam]);
 
   useEffect(() => { void fetchDoc(); }, [fetchDoc]);
 

@@ -14,7 +14,7 @@ const { routerMock, paramsMock, editorProps } = vi.hoisted(() => ({
   paramsMock: { slug: 'untitled-123' },
   editorProps: { current: null as null | { title?: string; titlePlaceholder?: string; onTitleChange?: (v: string) => void; onChange?: (v: string) => void } },
 }));
-vi.mock('next/navigation', () => ({ useParams: () => paramsMock, useRouter: () => routerMock }));
+vi.mock('next/navigation', () => ({ useParams: () => paramsMock, useRouter: () => routerMock, useSearchParams: () => new URLSearchParams(window.location.search), }));
 vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
 vi.mock('@/components/ui/human-only-action', () => ({ HumanOnlyAction: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
 vi.mock('@/hooks/use-synthetic-parent-tab-history', () => ({ useSyntheticParentTabHistory: () => {} }));

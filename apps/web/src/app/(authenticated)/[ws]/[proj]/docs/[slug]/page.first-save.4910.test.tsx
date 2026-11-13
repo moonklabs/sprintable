@@ -13,14 +13,15 @@ type EditorProps = {
   onTitleChange?: (v: string) => void; onChange?: (v: string) => void; onSave?: () => Promise<boolean>;
 };
 type SyncOpts = { docId: string | null; savePayload: { title: string; content: string; content_format: string }; adoptBaselineSnapshot?: string | null };
-const { routerMock, paramsMock, editorProps, addToastMock, syncOptions } = vi.hoisted(() => ({
+const { routerMock, paramsMock, editorProps, addToastMock, syncOptions, searchOverride } = vi.hoisted(() => ({
   routerMock: { replace: vi.fn(), push: vi.fn() },
   paramsMock: { slug: 'untitled-123456789' },
   editorProps: { current: null as null | EditorProps },
   addToastMock: vi.fn(),
   syncOptions: { current: null as null | SyncOpts },
+  searchOverride: { current: null as null | string }, // useSearchParams가 돌려줄 쿼리 — null이면 window.location.search. «렌더 때 useSearchParams는 ?new=1을 아는데 window.location은 아직 옛 주소»인 순서를 만든다.
 }));
-vi.mock('next/navigation', () => ({ useParams: () => paramsMock, useRouter: () => routerMock }));
+vi.mock('next/navigation', () => ({ useParams: () => paramsMock, useRouter: () => routerMock, useSearchParams: () => new URLSearchParams(searchOverride.current ?? window.location.search) }));
 vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast: addToastMock }) }));
 vi.mock('@/components/ui/human-only-action', () => ({ HumanOnlyAction: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
 vi.mock('@/hooks/use-synthetic-parent-tab-history', () => ({ useSyntheticParentTabHistory: () => {} }));
@@ -66,7 +67,7 @@ const created = (body: Record<string, unknown>) => ({ data: { id: 'new-doc', tit
 
 beforeEach(() => {
   vi.useFakeTimers();
-  postMode = 'ok'; resolveHungPost = null; unmounted = false;
+  postMode = 'ok'; resolveHungPost = null; unmounted = false; searchOverride.current = null;
   editorProps.current = null; syncOptions.current = null;
   fetchMock.mockClear(); setTree.mockClear(); addToastMock.mockClear(); routerMock.replace.mockClear();
   global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
@@ -131,6 +132,60 @@ describe('초안 모드 진입 (4910 ②)', () => {
     await open('?new=1', 'quarterly-review');
     expect(routerMock.replace).toHaveBeenCalledTimes(1);
     expect(editorProps.current).toBeNull();
+  });
+});
+
+describe('router.push로 들어온 첫 렌더의 주소 (4910 ② dev 실측 결함)', () => {
+  const renderPage = async () => {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <DocsLayoutContext.Provider value={CTX}><DocSlugPage /></DocsLayoutContext.Provider>
+        </NextIntlClientProvider>,
+      );
+      await vi.advanceTimersByTimeAsync(10);
+    });
+  };
+
+  it('⭐App Router는 새 화면을 먼저 렌더하고 주소는 커밋 뒤에 바꾼다: useSearchParams는 ?new=1을 아는데 window.location은 아직 /docs여도 → 초안 모드(목록으로 안 튕김) · 쓰면 1회 POST', async () => {
+    paramsMock.slug = 'untitled-123456789';
+    window.history.replaceState(null, '', '/moonklabs/sprintable/docs'); // 렌더 순간의 window.location = 옛 주소
+    searchOverride.current = 'new=1'; // 렌더 시점에 Next가 주는 새 주소의 쿼리
+    await renderPage();
+    expect(routerMock.replace).not.toHaveBeenCalled(); // 옛 코드(window.location을 첫 렌더에 읽음): 목록으로 돌려보냄
+    expect(editorProps.current).not.toBeNull();
+    expect(editorProps.current!.currentDocId).toBeFalsy();
+    await type('title', '가');
+    await wait(1600);
+    expect(posts()).toHaveLength(1);
+  });
+
+  it('하위 문서(?parent=)도 같은 출처에서 읽는다 — 렌더 때 window.location이 옛 주소여도 parent_id가 실린다', async () => {
+    paramsMock.slug = 'untitled-123456789';
+    window.history.replaceState(null, '', '/moonklabs/sprintable/docs');
+    searchOverride.current = 'new=1&parent=folder-9';
+    await renderPage();
+    await type('title', '가');
+    await wait(1600);
+    expect(postBody().parent_id).toBe('folder-9');
+  });
+
+  it('?new=1이 없으면(오래된 링크) 같은 404는 여전히 목록으로', async () => {
+    paramsMock.slug = 'untitled-123456789';
+    window.history.replaceState(null, '', '/moonklabs/sprintable/docs/untitled-123456789');
+    searchOverride.current = '';
+    await renderPage();
+    expect(routerMock.replace).toHaveBeenCalled();
+  });
+
+  it('?new=1은 한 번 켜지면 유지(래치) — 첫 저장 뒤 주소에서 ?new=1이 빠져도 초안 화면이 그대로다', async () => {
+    paramsMock.slug = 'untitled-123456789';
+    searchOverride.current = 'new=1';
+    await renderPage();
+    searchOverride.current = ''; // 주소가 정본 슬러그로 옮겨지며 ?new=1이 빠진 뒤의 렌더
+    await type('title', '가');
+    expect(editorProps.current).not.toBeNull();
+    expect(editorProps.current!.titlePlaceholder).toBe(KO.newDocDefaultTitle);
   });
 });
 

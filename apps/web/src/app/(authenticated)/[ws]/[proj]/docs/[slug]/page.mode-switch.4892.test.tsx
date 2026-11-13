@@ -12,7 +12,7 @@ const { routerMock, paramsMock } = vi.hoisted(() => ({
   routerMock: { replace: vi.fn(), push: vi.fn() },
   paramsMock: { slug: 'my-doc' },
 }));
-vi.mock('next/navigation', () => ({ useParams: () => paramsMock, useRouter: () => routerMock }));
+vi.mock('next/navigation', () => ({ useParams: () => paramsMock, useRouter: () => routerMock, useSearchParams: () => new URLSearchParams(window.location.search), }));
 vi.mock('@/components/ui/human-only-action', () => ({ HumanOnlyAction: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
 vi.mock('@/hooks/use-synthetic-parent-tab-history', () => ({ useSyntheticParentTabHistory: () => {} }));
 vi.mock('@/components/docs/use-doc-sync', () => ({

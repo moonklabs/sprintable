@@ -18,6 +18,7 @@ const { routerMock, paramsMock, addToastMock } = vi.hoisted(() => ({
 vi.mock('next/navigation', () => ({
   useParams: () => paramsMock,
   useRouter: () => routerMock,
+  useSearchParams: () => new URLSearchParams(window.location.search),
 }));
 vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast: addToastMock }) }));
 vi.mock('@/components/ui/human-only-action', () => ({ HumanOnlyAction: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
