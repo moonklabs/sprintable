@@ -23,7 +23,7 @@ _LOCALES = frozenset({"ko", "en"})
 
 
 @router.get("/{doc_type}", response_model=LegalDocumentCurrentResponse)
-@limiter.limit("60/minute")
+@limiter.limit("120/minute")  # story 4915 AC6: counted per address now (was one count for every user together); room for a NAT'd office
 async def get_current_legal_document(
     request: Request,
     doc_type: str,

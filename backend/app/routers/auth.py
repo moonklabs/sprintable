@@ -54,7 +54,7 @@ from app.core.security import (
     REFRESH_TOKEN_EXPIRE_DAYS,
     create_refresh_token,
 )
-from app.core.rate_limit import limiter, resend_verification_limiter
+from app.core.rate_limit import hit_refresh_person_limit, limiter, note_failed_login, resend_verification_limiter
 from app.dependencies.auth import AuthContext, _reject_if_before_cutover, get_current_user, resolve_request_org_id
 from app.services.project_auth import (
     accessible_project_ids_in_org, first_accessible_project_id, has_project_access,
@@ -1351,7 +1351,7 @@ async def register(
 # ─── POST /api/v2/auth/token ──────────────────────────────────────────────────
 
 @router.post("/token")
-@limiter.limit("10/minute")
+@limiter.limit("20/minute")  # story 4915 AC6: counted per address now (was one count for every user together); room for a NAT'd office's morning
 async def login(
     request: Request,
     body: LoginRequest,
@@ -1390,6 +1390,7 @@ async def login(
             )).one()
             if _counted.login_fail_count > 5 and _counted.login_locked_until is not None:
                 _already_locked_remaining = max(0, int((_counted.login_locked_until - datetime.now(timezone.utc)).total_seconds()))
+        note_failed_login(request, body.email)  # story 4915 AC6: a warning line when one address fails as many different accounts (a spray under every per-account lock-out)
         _ip = request.client.host if request.client else None
         _ua = request.headers.get("user-agent")
         await _write_audit(
@@ -1511,8 +1512,34 @@ async def login(
 
 # ─── POST /api/v2/auth/refresh ────────────────────────────────────────────────
 
+async def _refresh_person_limit_answer(session: AsyncSession, person: uuid.UUID | None, token_hash: str) -> JSONResponse | None:
+    """story 4915 AC6 — counts this refresh against the PERSON the (signature-checked) token names; None = go on, otherwise the 429 to answer.
+
+    A page load with an expired access token makes several requests at once and each asks for a refresh (the winner rotates, the rest are forked — see `refresh_token`), so the count that stops a loop is one person's,
+    not a shared address's. Only a token that is STILL ALIVE is counted — unexpired, and either not ended or ended by a rotation inside the same window the rotation itself resolves a straggler in: a signed token that is
+    long dead (an old copy somebody kept) is not counted, so holding one cannot burn the person's count; it is answered 401 by the rotation as before. (A token inside the straggler window can still be counted — the
+    holder of such a token is the person's own live session.) The answer is a 429 `RATE_LIMITED` with `Retry-After`; the front end reads it as «could not confirm» and keeps the cookies."""
+    if person is None:
+        return None
+    now = datetime.now(timezone.utc)
+    alive = (await session.execute(
+        select(RefreshToken.id).where(
+            RefreshToken.token_hash == token_hash,
+            RefreshToken.expires_at > now,
+            or_(RefreshToken.revoked_at.is_(None), RefreshToken.revoked_at > now - timedelta(seconds=settings.auth_refresh_chain_resolve_window_seconds)),
+        ).limit(1)
+    )).first()
+    if alive is None:
+        return None
+    retry_after = hit_refresh_person_limit(str(person))
+    if retry_after is None:
+        return None
+    logger.warning("auth.refresh 실패 reason=person_rate_limited user_id=%s retry_after_s=%s", person, retry_after)
+    return _err("RATE_LIMITED", "Too many refresh requests", 429, headers={"Retry-After": str(retry_after)})
+
+
 @router.post("/refresh")
-@limiter.limit("20/minute")
+@limiter.limit("120/minute")  # story 4915 AC6: the ADDRESS floor (was 20/min for every user together); the per-person count is below, after the token's signature is checked
 async def refresh_token(
     request: Request,
     body: RefreshRequest,
@@ -1530,9 +1557,13 @@ async def refresh_token(
 
     token_hash = hash_token(body.refresh_token)
     correlation_key = token_hash[:12]  # story e5225c0a: 산티아고 관측성 요구 — 로그 상관키(PII 아님)
+    _lock_user = _refresh_payload_user_id(payload)
+    # story 4915 AC6 — the per-PERSON count: signature and type are checked above; one indexed read says whether this token is still alive; nothing is written before the count.
+    _limited = await _refresh_person_limit_answer(session, _lock_user, token_hash)
+    if _limited is not None:
+        return _limited
     # story 4782 (second PR): an all-device revoke and this rotation queue on the person's session lock (`_lock_person_sessions`) — the revoke first → the rotation below finds its token ended;
     # this rotation first → its successor is committed before the revoke's statements run, and they end it
-    _lock_user = _refresh_payload_user_id(payload)
     if _lock_user is not None:
         await _lock_person_sessions(session, _lock_user, exclusive=False)
 

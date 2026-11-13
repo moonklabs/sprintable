@@ -531,7 +531,10 @@ _OAUTH_HANDOFF_CUSTOM_SCHEME_CONSUME_LIMIT = 10
 
 
 def _client_ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    # story 4915 AC6: the same «person-sized address» every other limit counts (was the socket address — on the VM, the front end's own container: every user in one count)
+    from app.core.rate_limit import _rate_key_client_ip_only
+
+    return _rate_key_client_ip_only(request)
 
 
 async def _enforce_custom_scheme_rate_limit(request: Request, callback_mode: str, *, scope: str, limit: int) -> None:
