@@ -181,6 +181,20 @@ describe('StoryCard 컨텍스트 메뉴 — 4908 상태 칩 한 줄(예전 «상
     expect(document.body.querySelector('[aria-haspopup="menu"][role="menuitem"]')).toBeNull();
   });
 
+  it('⭐메뉴 폭 240 — 칩 다섯이 두 줄(3+2)에 고르게 들어가는 폭(192는 2+2+1로 들쭉날쭉했다)', () => {
+    renderCard();
+    openViaContextMenu();
+    expect((document.body.querySelector('[role="menu"]') as HTMLElement).style.width).toBe('240px');
+  });
+
+  it('⭐긴 조직 라벨 칩은 넘치지 않고 칩 안에서 줄바꿈된다(nowrap 아님 · max-w-full · 긴 낱말 꺾임)', () => {
+    renderCard({ getStatusLabel: (s: string) => (s === 'done' ? '아주아주아주아주아주아주아주긴조직상태이름완료' : s) } as Partial<Parameters<typeof StoryCard>[0]>);
+    openViaContextMenu();
+    const long = chips().find((c) => c.getAttribute('data-status-chip') === 'done')!;
+    expect(long.className.split(/\s+/)).toEqual(expect.arrayContaining(['max-w-full', 'whitespace-normal', '[overflow-wrap:anywhere]']));
+    expect(long.className.split(/\s+/)).not.toContain('whitespace-nowrap');
+  });
+
   it('⭐칩은 폰(touch)에서 44px 높이를 갖는다 — touch:min-h-11', () => {
     renderCard();
     openViaContextMenu();

@@ -32,7 +32,7 @@ import { useViewerTimeZone } from '@/components/viewer-time-zone';
 // 카드 자체가 뷰포트 밖으로 밀려나면(신고 재현: 컬럼 280px, 카드 x=215~471, 뷰포트 390px) 어느
 // 쪽으로 flip해도 못 푼다 — 카드 우측 모서리(471)조차 이미 뷰포트 밖이라 "카드 기준 반대쪽"도
 // 여전히 뷰포트 밖. 뷰포트 좌표로 직접 clamp해야 카드 위치와 무관하게 항상 화면 안에 들어온다.
-const MENU_WIDTH = 192; // Tailwind w-48
+const MENU_WIDTH = 240; // 4908 — 192(w-48)에서 올렸다: 상태 칩 다섯(백로그 · 개발 대기 · 진행 중 · 리뷰 중 · 완료)이 «3+2» 두 줄로 고르게 들어가는 폭(192는 2+2+1로 들쭉날쭉). 담당자 서브메뉴도 같은 폭.
 const VIEWPORT_MARGIN = 8;
 
 function clampToViewport(x: number): number {
@@ -43,7 +43,7 @@ function clampToViewport(x: number): number {
 const MENU_ITEM_HEIGHT = 36;
 // 4908 — 새로 더한 메뉴 항목(이름 바꾸기 · 담당자)은 날것 단추 태그가 아니라 디자인 Button(ghost)을 메뉴 항목 모양으로 쓴다(가드 verify:no-new-raw-button).
 const MENU_ITEM_BUTTON = 'h-auto min-h-0 min-w-0 w-full justify-start rounded-sm px-3 py-2 text-left text-sm font-normal whitespace-normal hover:bg-muted';
-// 4908 — 상태 칩 줄은 칩이 줄바꿈되고(폭 192 안에서 2~3줄) 폰에서는 칩이 44px 높이라 항목 하나(36px)로 셀 수 없다: 이름 줄 20 + 최대 3줄 × (44 + 간격 4) + 안쪽 여백 12 = 176px를 한 덩어리로 잡는다(넉넉한 쪽). 항목 수에는 1로 세고(⋯ 단추 유무도 이 수), 모자란 140px를 더한다.
+// 4908 — 상태 칩 줄은 칩이 줄바꿈되고(폭 240 안에서 보통 두 줄 · 긴 조직 라벨이면 더) 폰에서는 칩이 44px 높이라 항목 하나(36px)로 셀 수 없다: 이름 줄 20 + 두 줄 × (44 + 간격 4) + 안쪽 여백 12 = 128px, 긴 라벨 한 줄 여유 48을 더해 176px를 한 덩어리로 잡는다(넉넉한 쪽). 항목 수에는 1로 세고(⋯ 단추 유무도 이 수), 모자란 140px를 더한다.
 const STATUS_ROW_EXTRA_HEIGHT = 176 - MENU_ITEM_HEIGHT;
 function clampTopToViewport(y: number, itemCount: number, extraPx = 0): number {
   return Math.max(VIEWPORT_MARGIN, Math.min(y, window.innerHeight - (itemCount * MENU_ITEM_HEIGHT + extraPx + 8) - VIEWPORT_MARGIN));
@@ -783,7 +783,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
                       data-status-chip={status.id}
                       onClick={() => { if (current) closeContextMenu(true); else handleChangeStatusClick(status.id); }}
                       className={cn(
-                        'h-auto min-h-0 min-w-0 gap-1 rounded-full border px-2 py-1 text-xs font-normal whitespace-nowrap touch:min-h-11',
+                        'h-auto min-h-0 min-w-0 max-w-full gap-1 rounded-full border px-2 py-1 text-left text-xs font-normal whitespace-normal [overflow-wrap:anywhere] touch:min-h-11',
                         current ? 'border-ds-action-text bg-ds-action-soft font-semibold text-ds-ink' : 'border-ds-line hover:bg-muted',
                       )}
                     >
