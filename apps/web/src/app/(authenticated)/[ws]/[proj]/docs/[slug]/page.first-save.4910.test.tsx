@@ -51,7 +51,7 @@ const KO = (koMessages as unknown as { docs: { newDocDefaultTitle: string; title
 let container: HTMLDivElement;
 let root: Root;
 let unmounted = false;
-let postMode: 'ok' | 'fail' | 'hang' = 'ok';
+let postMode: 'ok' | 'fail' | 'hang' | 'conflict-once' = 'ok';
 let resolveHungPost: (() => void) | null = null;
 const fetchMock = vi.fn();
 const setTree = vi.fn();
@@ -74,6 +74,7 @@ beforeEach(() => {
     if (init?.method === 'POST' && url === '/api/docs') {
       const body = JSON.parse(init.body as string);
       if (postMode === 'fail') return new Response('{}', { status: 500 });
+      if (postMode === 'conflict-once') { postMode = 'ok'; return new Response('{}', { status: 409 }); }
       if (postMode === 'hang') await new Promise<void>((resolve) => { resolveHungPost = resolve; });
       return new Response(JSON.stringify(created(body)), { status: 201 });
     }
@@ -212,6 +213,45 @@ describe('가장 위험한 자리 · 실패 · 단일 비행 (4910 ②)', () => 
     expect(syncOptions.current!.adoptBaselineSnapshot).toBe(JSON.stringify({ title: '가', content: '', content_format: 'markdown' })); // 보낸 값
     expect(syncOptions.current!.savePayload.title).toBe('가나다'); // 지금 값은 더 쳤다 → 둘이 달라 자동저장이 보낸다
     expect(syncOptions.current!.savePayload.content).toBe('더 쓴 내용');
+  });
+
+  it('⭐만드는 중에 제목을 쓰고 비운 칸은 응답이 와도 되살아나지 않는다(손댄 칸)', async () => {
+    postMode = 'hang';
+    await open();
+    await type('content', '내용만');
+    await wait(1600);
+    expect(posts()).toHaveLength(1);
+    expect(postBody().title).toBe(KO.newDocDefaultTitle);
+    await type('title', '가'); await type('title', ''); // 쓰고 지움 = 손댄 것
+    await act(async () => { resolveHungPost!(); await vi.advanceTimersByTimeAsync(5); });
+    expect(editorProps.current!.title).toBe('');
+  });
+
+  it('대조: 제목을 손대지 않았으면 응답 뒤 기본 글이 제목 값으로 들어간다', async () => {
+    postMode = 'hang';
+    await open();
+    await type('content', '내용만');
+    await wait(1600);
+    await act(async () => { resolveHungPost!(); await vi.advanceTimersByTimeAsync(5); });
+    expect(syncOptions.current!.savePayload.title).toBe(KO.newDocDefaultTitle);
+  });
+
+  it('⭐POST가 409(슬러그 충돌)면 같은 요청을 되풀이하지 않고 새 임시 슬러그로 주소를 옮겨 다음 박자에 다시 만든다 — 토스트 없음 · 글 그대로', async () => {
+    postMode = 'conflict-once';
+    await open();
+    await type('title', '가');
+    await wait(1600);
+    expect(posts()).toHaveLength(1);
+    expect(addToastMock).not.toHaveBeenCalled();
+    expect(routerMock.replace).toHaveBeenCalledTimes(1);
+    const url = routerMock.replace.mock.calls[0]![0] as string;
+    const fresh = /\/docs\/(untitled-\d+)\?new=1/.exec(url)![1]!;
+    expect(fresh).not.toBe('untitled-123456789');
+    expect(editorProps.current!.title).toBe('가');
+    await wait(1600);
+    expect(posts()).toHaveLength(2);
+    expect(postBody(1).slug).toBe(fresh); // 새 슬러그로 다시
+    expect(editorProps.current!.currentDocId).toBe('new-doc');
   });
 
   it('단일 비행: 만드는 중에 «저장»(onSave)을 또 눌러도 POST는 한 번', async () => {

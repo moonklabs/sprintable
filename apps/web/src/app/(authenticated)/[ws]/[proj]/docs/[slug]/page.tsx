@@ -7,8 +7,8 @@ import { DocEditor } from '@/components/docs/doc-editor';
 import { DocGateSection } from '@/components/docs/doc-gate-section';
 import { DocUrlChip } from '@/components/docs/doc-url-chip';
 import { DocUrlDialog, type SlugSubmitResult } from '@/components/docs/doc-url-dialog';
-import { slugifyDocTitle, isUntitledSlug } from '@/components/docs/lib/doc-slug';
-import { docsListUrl, docUrl } from '@/components/docs/lib/doc-project-url';
+import { slugifyDocTitle, isUntitledSlug, newUntitledSlug } from '@/components/docs/lib/doc-slug';
+import { docsListUrl, docUrl, newDocUrl } from '@/components/docs/lib/doc-project-url';
 import { useDocSync, unwrapDocResponse } from '@/components/docs/use-doc-sync';
 import { htmlToMarkdown } from '@/components/docs/lib/content-converter';
 import { InlineSaveIndicator } from './inline-save-indicator';
@@ -83,6 +83,8 @@ export default function DocSlugPage() {
   // 4910 — «새 문서»로 막 만든 초안(?new=1): 서버엔 기본 제목(«제목 없음»)이 들어 있지만 그 글은 «진짜 글자»가 아니라 자리 표시여야 한다(쓰면 뒤에 붙던 결함).
   // 제목이 아직 기본 글이고 사용자가 손대기 전이면 칸은 비워 두고 기본 글은 placeholder로 보인다. 한 번이라도 고치면 평소대로(값 = 제목).
   const [titleUntouched, setTitleUntouched] = useState(true);
+  const titleTouchedRef = useRef(false); // 4910 ② — 위 값의 동기 거울: 만드는 중에 제목을 손댔는지(비운 것도 손댄 것) — 응답이 와도 사용자가 비운 칸을 되살리지 않는다.
+  const slugRetriesRef = useRef(0);
   // 4910 ② «첫 저장 때 만들기» — 「새 문서」는 서버에 아무것도 안 만들고 임시 주소(`untitled-…?new=1`)의 초안 화면으로만 온다(docs-client-layout.createDoc). 그 주소에 문서가 없으면(404) 이 화면은 «초안 모드»:
   // 서버 문서(selectedDoc) 없이 편집기만 뜨고, 첫 «쓴 것»(제목 한 글자 · 내용 비공백)에서 문서를 한 번 만든다. 그 뒤는 예전과 같은 PATCH 자동저장 길.
   const [draft, setDraft] = useState<{ slug: string; parentId: string | null } | null>(null);
@@ -126,6 +128,7 @@ export default function DocSlugPage() {
 
   const handleTitleChange = useCallback((value: string) => {
     setTitleUntouched(false);
+    titleTouchedRef.current = true;
     setTitle(value);
     setSelectedDoc((prev) => (prev ? { ...prev, title: value } : null));
     setTree((prev) => prev.map((d) => (d.id === selectedDoc?.id ? { ...d, title: value } : d)));
@@ -224,12 +227,21 @@ export default function DocSlugPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project_id: projectId, ...posted, slug: draft.slug, parent_id: draft.parentId }),
       });
+      if (res.status === 409 && slugRetriesRef.current < 3) {
+        // 임시 슬러그가 이미 쓰인 경우(무작위 꼬리로 사실상 없지만): 같은 요청을 되풀이하지 않고 새 임시 슬러그로 주소를 옮겨 다음 박자에 다시 만든다. 글은 화면 상태에 그대로 있다.
+        slugRetriesRef.current += 1;
+        const fresh = newUntitledSlug();
+        setDraft({ slug: fresh, parentId: draft.parentId });
+        router.replace(newDocUrl(wsSlug, projSlug, fresh, draft.parentId));
+        return false;
+      }
       if (!res.ok) throw new Error('Failed to create doc');
       const { data } = await res.json();
       // 기준선 = 보낸 값. 응답 오기 전에 더 친 글자는 보낸 값과 달라 dirty가 되어 다음 자동저장이 보낸다.
       setAdoptSnapshot(JSON.stringify(posted));
       setSelectedDoc(data as DocDetail);
-      setTitle((cur) => (cur === '' ? postedTitle : cur));
+      // 제목을 한 번도 안 건드렸을 때만 기본 글을 되돌려 놓는다(만드는 중에 비운 칸은 비운 채로).
+      if (!titleTouchedRef.current) setTitle((cur) => (cur === '' ? postedTitle : cur));
       setDraft(null);
       setTree((prev) => [{ id: data.id, parent_id: data.parent_id || null, title: data.title, slug: data.slug, icon: data.icon || null, sort_order: data.sort_order || 0, is_folder: data.is_folder || false, updated_at: data.updated_at } as (typeof prev)[number], ...prev]);
       return true;
@@ -240,7 +252,7 @@ export default function DocSlugPage() {
       creatingRef.current = false;
       setDraftCreating(false);
     }
-  }, [draft, selectedDoc, projectId, title, content, contentFormat, defaultTitle, setTree, addToast, t]);
+  }, [draft, selectedDoc, projectId, title, content, contentFormat, defaultTitle, setTree, addToast, t, router, wsSlug, projSlug]);
   // 자동저장과 같은 박자(디바운스 1.5초). 만들기가 실패하면 값이 그대로라 다시 안 돈다 — 다음 입력 또는 «저장»이 다시 시도한다.
   useEffect(() => {
     if (!isDraft || !autosave || !draftHasText) return;

@@ -1,4 +1,5 @@
 import type { IDocRepository, Doc, DocSummary, CreateDocInput, UpdateDocInput, DocListFilters, DocPageResult, RepositoryScopeContext } from '@sprintable/core-storage';
+import { NotFoundError } from '@sprintable/core-storage';
 import { fastapiCall } from './utils';
 
 interface RawDocPageResponse {
@@ -40,7 +41,8 @@ export class ApiDocRepository implements IDocRepository {
       query: { project_id: projectId, slug },
     });
     const first = res.data[0];
-    if (!first) throw new Error(`Doc not found: ${slug}`);
+    // 4910: a missing slug is a 404, not a plain Error (the BFF turned a plain Error into 400, so the new-doc screen could not tell «no such doc» from a real failure).
+    if (!first) throw Object.assign(new NotFoundError(`Doc not found: ${slug}`), { code: 'NOT_FOUND', status: 404 });
     const doc = await fastapiCall<Doc>('GET', `/api/v2/docs/${first.id}`, this.accessToken);
     // story #4313 — 위키 링크 대응(적힌 slug → 지금 slug)은 slug 단건 경로 응답에만 있다(상세 GET엔 없음) — 이미 받은 값을 실어 보낸다(요청 추가 0).
     return { ...doc, wiki_link_targets: first.wiki_link_targets ?? null };
