@@ -48,15 +48,17 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
 // useSseNotifications를 모킹해 콜백을 캡처하는 기존 관례(story-detail-panel.test.tsx)와
 // 동형으로, DndContext만 부분 모킹해 onDragEnd를 캡처한다(다른 export는 실물 그대로 재사용 —
 // useDroppable/useSortable 등은 실제 dnd-kit 훅이라야 카드 wiring 테스트가 의미 있음).
-const { capturedDragEndHandlers } = vi.hoisted(() => ({
+const { capturedDndProps, capturedDragEndHandlers } = vi.hoisted(() => ({
   capturedDragEndHandlers: [] as Array<(event: unknown) => void>,
+  capturedDndProps: [] as Array<{ sensors?: unknown; accessibility?: unknown; onDragStart?: (e: unknown) => void; onDragCancel?: () => void }>,
 }));
 vi.mock('@dnd-kit/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@dnd-kit/core')>();
   return {
     ...actual,
-    DndContext: ({ onDragEnd, children }: { onDragEnd?: (event: unknown) => void; children?: React.ReactNode }) => {
+    DndContext: ({ onDragEnd, children, sensors, accessibility, onDragStart, onDragCancel }: { onDragEnd?: (event: unknown) => void; children?: React.ReactNode; sensors?: unknown; accessibility?: unknown; onDragStart?: (e: unknown) => void; onDragCancel?: () => void }) => {
       if (onDragEnd) capturedDragEndHandlers.push(onDragEnd);
+      capturedDndProps.push({ sensors, accessibility, onDragStart, onDragCancel });
       return children;
     },
   };
@@ -163,6 +165,7 @@ beforeEach(() => {
     bottomDockBannerSlot: bannerSlot,
   });
   capturedDragEndHandlers.length = 0;
+  capturedDndProps.length = 0;
   isMobileMock = false;
   searchRef.current = '';
 });
@@ -2561,6 +2564,84 @@ describe('KanbanBoard — 카드 메뉴 담당자 · 이름 바꾸기 · 삭제(
     expect(container.querySelector('[role="dialog"]'), '둘째 클릭은 서랍을 닫지 않음').not.toBeNull();
     await act(async () => { backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); });
     expect(container.querySelector('[role="dialog"]'), '막을 처음 누르면 닫힘').toBeNull();
+  });
+
+  it('⭐보드의 두 끌기 틀(신뢰축 · 클래식) 모두 키보드 센서와 한국어 낭독을 연결한다(키보드 끌기 동작 자체는 board-dnd.4908.test.tsx — 이 파일은 DndContext를 모킹한다)', async () => {
+    const { KeyboardSensor } = await import('@dnd-kit/core');
+    const { KEYBOARD_SENSOR_OPTIONS } = await import('./board-dnd');
+    stubFetch(stories, members);
+    await mount();
+    const trust = capturedDndProps.at(-1)!;
+    const sensorOf = (props: { sensors?: unknown }) => (props.sensors as Array<{ sensor: unknown; options: unknown }>).find((x) => x.sensor === KeyboardSensor);
+    expect(sensorOf(trust)?.options).toEqual(KEYBOARD_SENSOR_OPTIONS);
+    expect((trust.accessibility as { screenReaderInstructions: { draggable: string } }).screenReaderInstructions.draggable).toBe(koMessages.board.dndInstructions);
+    const classicBtn = [...container.querySelectorAll('button')].find((bn) => bn.textContent === '5단계 클래식');
+    await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const classic = capturedDndProps.at(-1)!;
+    expect(sensorOf(classic)?.options).toEqual(KEYBOARD_SENSOR_OPTIONS);
+    expect((classic.accessibility as { screenReaderInstructions: { draggable: string } }).screenReaderInstructions.draggable).toBe(koMessages.board.dndInstructions);
+  });
+
+  it('⭐키보드로 집었다 제자리에 놓으면(over = active) 아무 일도 없다 — 카드가 맨 아래로 가거나 PATCH가 나가지 않는다(신뢰축 · 클래식)', async () => {
+    stubFetch([...stories, { id: 's2', title: '카드둘', status: 'backlog', priority: 'medium', trust_stage: 'queued' }], members);
+    await mount();
+    const patches = () => vi.mocked(fetch).mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'PATCH').length;
+    const before = patches();
+    const trustEnd = capturedDragEndHandlers.at(-1)!;
+    await act(async () => { await trustEnd({ active: { id: 's1' }, over: { id: 's1' }, activatorEvent: new KeyboardEvent('keydown') }); });
+    expect(patches()).toBe(before);
+    const order = () => [...container.querySelectorAll('[data-story-card]')].map((c) => c.getAttribute('title'));
+    expect(order()).toEqual(['카드하나', '카드둘']);
+    const classicBtn = [...container.querySelectorAll('button')].find((bn) => bn.textContent === '5단계 클래식');
+    await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const classicEnd = capturedDragEndHandlers.at(-1)!;
+    await act(async () => { await classicEnd({ active: { id: 's1' }, over: { id: 's1' }, activatorEvent: new KeyboardEvent('keydown') }); });
+    expect(patches()).toBe(before);
+    expect(order()).toEqual(['카드하나', '카드둘']);
+  });
+
+  async function keyboardDropThenListChange(axis: 'trust' | 'classic') {
+    stubFetch(stories, members);
+    await mount();
+    if (axis === 'classic') {
+      const classicBtn = [...container.querySelectorAll('button')].find((bn) => bn.textContent === '5단계 클래식');
+      await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    }
+    const handler = capturedDragEndHandlers.at(-1)!;
+    await act(async () => { await handler({ active: { id: 's1' }, over: { id: 's1' }, activatorEvent: new KeyboardEvent('keydown') }); });
+    await act(async () => { (document.activeElement as HTMLElement | null)?.blur?.(); });
+    expect(document.activeElement).toBe(document.body);
+    // 목록이 바뀐다(실시간 담당 변경) — 신뢰축은 응답 뒤 trust_stage가 바뀌며 카드가 다시 만들어지는 때와 같은 신호
+    await act(async () => {
+      dispatchSse('story.assignee_changed', { story_id: 's1', project_id: 'proj-1', actor_id: 'other-1', actor_name: '까심', assignee_id: 'm2', old_assignee_id: 'm1', assignees: ['m2'] });
+      await Promise.resolve();
+    });
+    return (document.activeElement as HTMLElement | null)?.getAttribute('data-story-id');
+  }
+
+  it('⭐키보드로 놓은 카드는 그 뒤 목록이 바뀌어도(다시 만들어져 초점을 잃어도) 초점이 그 카드로 돌아온다 — 신뢰축', async () => {
+    expect(await keyboardDropThenListChange('trust')).toBe('s1');
+  });
+
+  it('⭐같은 규칙 — 클래식 5단계(축마다 따로 시험: 한 축의 표시가 다른 축을 가리지 않게)', async () => {
+    expect(await keyboardDropThenListChange('classic')).toBe('s1');
+  });
+
+  it('⭐Esc로 끌기를 취소하면(onDragCancel) 끌기 표시가 거둬진다 — 놓을 수 있는 열 안내가 남지 않는다(두 축)', async () => {
+    stubFetch(stories, members);
+    await mount();
+    for (const axis of ['trust', 'classic'] as const) {
+      if (axis === 'classic') {
+        const classicBtn = [...container.querySelectorAll('button')].find((bn) => bn.textContent === '5단계 클래식');
+        await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      }
+      const props = capturedDndProps.at(-1)!;
+      expect(props.onDragCancel, `${axis}: onDragCancel 연결`).toBeTypeOf('function');
+      await act(async () => { props.onDragStart!({ active: { id: 's1' } }); });
+      if (axis === 'classic') expect(container.textContent).toContain(koMessages.board.validDrop);
+      await act(async () => { capturedDndProps.at(-1)!.onDragCancel!(); });
+      expect(container.textContent).not.toContain(koMessages.board.validDrop);
+    }
   });
 
   it('⭐삭제는 사람 전용 — human이면 메뉴에 «삭제», agent면 메뉴 항목이 없다(패널과 같은 규칙)', async () => {

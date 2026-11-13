@@ -144,6 +144,7 @@ export function KanbanColumn({
   return (
     <div
       ref={setNodeRef}
+      data-board-column={id}
       className={`flex h-full flex-col rounded-xl border p-3 transition ${collapsed ? 'w-[52px] min-w-[52px]' : 'w-[280px] min-w-[240px]'} ${colClass}`}
     >
       {isDragging && isValidTarget && (
