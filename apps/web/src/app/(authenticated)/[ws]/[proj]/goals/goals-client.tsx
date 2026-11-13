@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { GOALS_FRAME_FACE } from './goals-layer';
 import { Plus, Send, X, Flag } from 'lucide-react';
 import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
@@ -595,7 +596,7 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
   // one head for both views — the head itself decides that the state filter belongs to the list view only
   const head = <GoalsHead view={view} onViewChange={setView} counts={counts} filter={statusFilter} onFilterChange={setStatusFilter} />;
   // the frame's height: the window minus the shell and the work-tabs band (so the screen does not scroll the page by the band's height)
-  const frame = 'h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))] min-h-0 flex-col overflow-hidden bg-ds-background';
+  const frame = `h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))] min-h-0 flex-col overflow-hidden ${GOALS_FRAME_FACE}`;
 
   const listColumn = (
     <div data-testid="goals-list-column" className={`flex min-h-0 w-full min-w-0 flex-col ${showDetail ? 'lg:w-[420px] lg:shrink-0 lg:border-r lg:border-ds-line' : ''}`}>

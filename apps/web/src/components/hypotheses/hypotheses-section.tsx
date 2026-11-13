@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Plus, Sparkles } from 'lucide-react';
+import { Button } from '@/components/ds/button';
+import { cn } from '@/lib/utils';
+import { HYPOTHESES_FACE } from './hypotheses-face';
 import type { Hypothesis, HypothesisDraft } from '@sprintable/core-storage';
 import { HypothesisRow, type HypothesisRowActions } from './hypothesis-row';
 import { HypothesisVerdictCard } from './hypothesis-verdict-card';
@@ -51,42 +54,33 @@ function HypothesisDraftPreview({
   const dir = md.direction === 'up' ? t('dirUp') : t('dirDown');
 
   return (
-    <div className="space-y-3 rounded-xl border border-primary/30 bg-primary/5 p-3">
-      <div className="flex items-center gap-1.5 text-xs font-medium text-primary">
+    // 4909 AC3 (가설 칸 1단계) — the preview is the AI-marked face of the ds (info tone) inside the card; the two buttons are ds Buttons (the same texts, the same handlers).
+    <div className="space-y-3 rounded-ds-control border border-ds-line bg-ds-info-soft p-3">
+      <div className="flex items-center gap-1.5 text-ds-small font-semibold text-ds-info">
         <Sparkles className="size-3.5" aria-hidden />
         {t('draftReviewTitle')}
       </div>
 
       <div className="space-y-2">
         <div className="space-y-0.5">
-          <p className="text-editorial-meta font-medium text-muted-foreground">{t('statementField')}</p>
-          <p className="text-sm text-foreground">{draft.statement}</p>
+          <p className="text-ds-small font-medium text-ds-ink-3">{t('statementField')}</p>
+          <p className="text-ds-body text-ds-ink">{draft.statement}</p>
         </div>
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-ds-small text-ds-ink-2">
           <span><span className="font-medium">{t('metricField')}:</span> {md.metric} {dir} {md.target}</span>
           <span><span className="font-medium">{t('measureAfterField')}:</span> {draft.measure_after.slice(0, 10)}</span>
         </div>
       </div>
 
-      <p className="text-editorial-meta text-muted-foreground">{t('draftNote')}</p>
+      <p className="text-ds-small text-ds-ink-3">{t('draftNote')}</p>
 
       <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={confirming}
-          className="rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground disabled:opacity-50"
-        >
+        <Button type="button" variant="quiet" onClick={onCancel} disabled={confirming}>
           {t('cancel')}
-        </button>
-        <button
-          type="button"
-          onClick={onAccept}
-          disabled={confirming}
-          className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
-        >
+        </Button>
+        <Button type="button" variant="primary" onClick={onAccept} disabled={confirming}>
           {confirming ? tc('saving') : t('draftAccept')}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -334,30 +328,23 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
   const sorted = items ? [...items] : [];
 
   return (
-    <section aria-label={t('sectionTitle')} className="rounded-xl border border-border bg-muted/20 p-3">
+    // 4909 AC3 (가설 칸 1단계) — the card's face is the content layer (HYPOTHESES_FACE = LAYER.panel: one step above the page, +.030 light / +.036 dark — the old `bg-muted/20` card measured −.018 / −.004 and did not separate at all).
+    <section aria-label={t('sectionTitle')} data-testid="hypotheses-section" className={cn('rounded-ds-control border border-ds-line p-3', HYPOTHESES_FACE)}>
       {/* story 4906 (customer lap ⑨) — the title + two buttons did not fit the 360px goal-detail card in English («Hypotheses» · «Review draft» · «Add hypothesis»): the buttons group was shrink-0 on a
           no-wrap row and ran past the card's right edge (button right 1091 · card 1059 at a 1100 window). The row and the group now WRAP — beside the title when they fit, under it when they do not. */}
       <div className="flex flex-wrap items-center justify-between gap-2" data-testid="hypotheses-head">
-        <h2 className="text-sm font-semibold text-foreground">{t('sectionTitle')}</h2>
+        <h2 className="flex items-center gap-2 text-ds-card-title font-semibold text-ds-ink">
+          {t('sectionTitle')}
+          {items !== null && items.length > 0 ? <span className="font-mono text-ds-mono-md font-normal text-ds-ink-3" data-testid="hypotheses-count">{items.length}</span> : null}
+        </h2>
         {!formOpen && !draft ? (
           <div className="flex min-w-0 flex-wrap items-center gap-1.5" data-testid="hypotheses-head-actions">
-            <button
-              type="button"
-              onClick={() => void handleDraft()}
-              disabled={drafting}
-              className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground transition hover:border-primary hover:text-primary disabled:opacity-50"
-            >
-              <Sparkles className="size-3.5" />
+            <Button type="button" variant="secondary" onClick={() => void handleDraft()} disabled={drafting} iconStart={<Sparkles className="size-3.5" aria-hidden />}>
               {drafting ? t('drafting') : t('draftCta')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setFormOpen(true)}
-              className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground transition hover:border-primary hover:text-primary"
-            >
-              <Plus className="size-3.5" />
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setFormOpen(true)} iconStart={<Plus className="size-3.5" aria-hidden />}>
               {t('add')}
-            </button>
+            </Button>
           </div>
         ) : null}
       </div>
@@ -380,16 +367,16 @@ export function HypothesesSection({ epicId, projectId }: { epicId: string; proje
       ) : null}
 
       {linkFailed ? (
-        <p role="alert" data-testid="hypothesis-link-failed" className="mt-3 rounded-lg border border-destructive/30 bg-destructive-tint px-2.5 py-1.5 text-editorial-meta text-foreground">
+        <p role="alert" data-testid="hypothesis-link-failed" className="mt-3 rounded-ds-control border border-ds-failed bg-ds-failed-soft px-3 py-2 text-ds-small text-ds-ink">
           {t('linkStoryFailed')}
         </p>
       ) : null}
 
       <div className="mt-3 space-y-2">
         {items === null ? (
-          <p className="text-xs text-muted-foreground">…</p>
+          <p className="text-ds-small text-ds-ink-3">…</p>
         ) : sorted.length === 0 ? (
-          !formOpen ? <p className="py-4 text-center text-sm text-muted-foreground">{t('empty')}</p> : null
+          !formOpen ? <p className="py-4 text-center text-ds-small text-ds-ink-3">{t('empty')}</p> : null
         ) : (
           sorted.map((h) => (
             <div key={h.id} className="space-y-2">

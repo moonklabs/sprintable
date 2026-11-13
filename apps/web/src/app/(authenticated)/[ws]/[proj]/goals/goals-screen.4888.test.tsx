@@ -9,6 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../../messages/ko.json';
 import enMessages from '../../../../../../messages/en.json';
+import { LAYER } from '@/components/ds/layers';
 
 const { pushMock, hypothesesMock } = vi.hoisted(() => ({ pushMock: vi.fn(), hypothesesMock: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: pushMock }) }));
@@ -354,6 +355,18 @@ describe('목표 화면 — 넓은 화면: 상세 열', () => {
     expect(progress.textContent).toContain('4/4');
     expect(progress.querySelector('[data-slot="ds-progress-fill"]')!.className).toContain('bg-ds-action');
     expect(progress.querySelector('[data-slot="ds-progress-fill"]')!.className).not.toContain('bg-ds-done');
+  });
+
+  it('⭐layer (4909): the frame and the detail column stay on the PAGE layer (one reading area, no panel laid over it), and the cards inside are the content layer above it', async () => {
+    stubMedia(true); stubFetch(); await mount();
+    const toks = (el: Element) => el.className.split(/\s+/);
+    for (const el of [q('[data-testid="goals-screen"]')!, q('[data-testid="goal-detail"]')!]) {
+      expect(toks(el)).toContain(LAYER.page);
+      expect(toks(el)).not.toContain(LAYER.panel);
+    }
+    const cards = qa('[data-testid="goal-detail"] [data-slot="ds-card"]');
+    expect(cards.length).toBeGreaterThanOrEqual(4); // schedule · progress · description · stories
+    expect(cards.every((c) => toks(c).includes(LAYER.panel))).toBe(true);
   });
 
   it('«전체 보기»는 그 목표 자신의 페이지 링크', async () => {

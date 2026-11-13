@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ds/button';
 import { Card } from '@/components/ds/card';
+import { GOALS_FRAME_FACE } from './goals-layer';
 import { Chip } from '@/components/ds/chip';
 import { ListRow } from '@/components/ds/list-row';
 import { Metric } from '@/components/ds/metric';
@@ -85,7 +86,7 @@ export function GoalDetailColumn({ goal, projectId, onUpdate }: { goal: Goal; pr
   const storyLabel = (slug: string): string => { const key = STORY_STATUS_KEY[slug]; return key ? tBoard(key) : slug; };
 
   return (
-    <section data-testid="goal-detail" data-goal-id={goal.id} aria-labelledby={headingId} className="flex h-full min-h-0 w-full flex-col bg-ds-background">
+    <section data-testid="goal-detail" data-goal-id={goal.id} aria-labelledby={headingId} className={`flex h-full min-h-0 w-full flex-col ${GOALS_FRAME_FACE}`}>
       <header className="flex shrink-0 items-start justify-between gap-3 border-b border-ds-line px-5 py-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
