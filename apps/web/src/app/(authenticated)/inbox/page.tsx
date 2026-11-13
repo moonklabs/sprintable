@@ -717,13 +717,8 @@ export default function InboxPage() {
                                           {refLabel}
                                         </span>
                                       ) : null}
-                                      {n.reference_id ? (
-                                        <span className="min-w-0 flex-1 truncate font-mono text-micro text-muted-foreground">
-                                          {n.reference_id.slice(0, 8)}
-                                        </span>
-                                      ) : (
-                                        <span className="min-w-0 flex-1 truncate text-foreground">{composeNotificationDisplay(n, t, eventPreviewHelpers).title}</span>
-                                      )}
+                                      {/* story 4921 — the line says WHAT it is in words (the notification's own title), never the first 8 characters of the id it points at */}
+                                      <span className="min-w-0 flex-1 truncate text-foreground">{(() => { const d = composeNotificationDisplay(n, t, eventPreviewHelpers); return d.body ? `${d.title} · ${d.body}` : d.title; })()}</span>
                                       <span className="shrink-0 text-micro text-muted-foreground">{formatTime(n.created_at)}</span>
                                       {n.href ? (
                                         <a

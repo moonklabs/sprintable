@@ -38,7 +38,7 @@ import { parseHitlRequest } from '@/lib/hitl-classifier';
 import { WithheldDeliveryLine } from './withheld-delivery-line';
 import { HitlApprovalCard, type HitlAnswer } from './hitl-approval-card';
 import { ApprovalRequestCard, type CardState } from './approval-request-card';
-import { EventBlockCard } from './event-block-card';
+import { EventBlockCard, composeEventPreviewFallback } from './event-block-card';
 import { parseBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
 import { segmentMessageContent } from './message-segments';
 import { classifyChatHref, HAS_MENTION_RE, MENTION_RE, splitPlainUrls } from './chat-link-rules';
@@ -492,6 +492,7 @@ export function ChatBubble({
   hitlAnswer = null, onRespondHitl, eventDefinitionsByKey, onOpenReadingPanel, onFillComposer, gateByKey,
 }: ChatBubbleProps) {
   const t = useTranslations('chats');
+  const tEventCard = useTranslations('eventCard'); // story 4921
   const tc = useTranslations('common');
   const isAgent = message.sender_type === 'agent';
   // story #2319 — tombstone. content는 서버가 이미 ""로 스크럽했다(오발송 대응 목적).
@@ -520,7 +521,15 @@ export function ChatBubble({
   // S8: 슬래시 커맨드는 전용 버블(brand·mono·⌘). 리터럴(`//`)은 dequote된 일반 텍스트.
   const isCmd = isCommand(message.content);
   const isLiteral = !isCmd && message.content.startsWith('//');
-  const displayContent = isLiteral ? dequoteLiteral(message.content) : message.content;
+  // story 4921 — an event message that is drawn as TEXT (its definition has no card template, or the definitions could not be read) must not show the machine text an agent reads («[이벤트] preset.x»,
+  // «- key: value» lines): it shows the definition's name + the person's own words, or the one word «이벤트». Cards (approval · event · server command) and every ordinary message are untouched.
+  const eventTextLine = eventTarget && !eventBlockTemplate && !approvalTarget && !serverCommand
+    ? composeEventPreviewFallback(message.content, eventTarget.event_key, eventTarget.payload, {
+      tEventCard,
+      eventDefinitionName: (key) => eventDefinitionsByKey?.[key]?.name ?? undefined,
+    })
+    : null;
+  const displayContent = eventTextLine ?? (isLiteral ? dequoteLiteral(message.content) : message.content);
   // story #4197·#4200(유나 결정) — 보여 줄 글자 0(빈 문자열·공백뿐·주석뿐, 단일 술어 hasNoVisibleText)이면 기본 텍스트
   // 말풍선 자리에서: 첨부가 있으면 말풍선을 생략하고 첨부만, 첨부가 없으면 «표시할 내용이 없는 메시지예요».
   // references 메타는 조건에 없다 — 참조 카드는 본문 안 entity 토큰이 있어야 그려지고, 토큰이 있으면 글자가 0이 아니다.

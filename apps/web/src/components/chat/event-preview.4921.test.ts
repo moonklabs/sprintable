@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { composeEventPreviewFallback, composeEventPreviewLine, isMachineEventContent, type EventPreviewHelpers } from './event-block-card';
+import { composeEventPreviewFallback, composeEventPreviewLine, humanizeMachineEventSummary, isMachineEventContent, type EventPreviewHelpers } from './event-block-card';
 
 // story 4921 — the one line a person sees for an event message: a sentence for the direction instruction, and for every event WITHOUT a sentence of its own the definition's name + the person's own words
 // (or the one word «이벤트») — never the machine text an agent reads (a slug · ids · «- key: value» lines · «[이벤트]»).
@@ -86,5 +86,24 @@ describe('isMachineEventContent / composeEventPreviewFallback — 문장이 없�
   });
   it('⭐방향 지시 문장도 같은 규칙 — 지시 글이 id · 경로면 문장을 짓지 않는다(null → 폴백)', () => {
     expect(composeEventPreviewLine('preset.steer.instruct', { instruction: '/api/v2/x' }, helpers)).toBeNull();
+  });
+});
+
+describe('humanizeMachineEventSummary — a stored «{sender}: [이벤트] …» summary (story 4921)', () => {
+  const t = (k: string) => COPY[k] ?? k;
+  it('⭐기계 문장 요약은 «{보낸 이}: 이벤트[ · 사람 글]»로 — 슬러그 · id · key: value 없음', () => {
+    const summary = `시스템 발행: [이벤트] preset.workflow.kanban\n- stage: ready\n- work_item_id: ${UUID}`;
+    const line = humanizeMachineEventSummary(summary, { event_key: 'preset.workflow.kanban', payload: { stage: 'ready' } }, t);
+    expect(line).toBe('시스템 발행: 이벤트');
+    expect(line).not.toMatch(LEAK);
+    expect(humanizeMachineEventSummary('페드루: [이벤트] preset.steer.instruct - instruction: 지시', { event_key: 'preset.steer.instruct', payload: { instruction: '먼저 봐 주세요' } }, t)).toBe('페드루: 이벤트 · 먼저 봐 주세요');
+    expect(humanizeMachineEventSummary('Someone: [Event] org.x.y\n- a: b', undefined, t)).toBe('Someone: 이벤트');
+  });
+  it('기계 문장이 아닌 요약 · 빈 값은 그대로', () => {
+    expect(humanizeMachineEventSummary('미르코: 안녕하세요', { event_key: 'x', payload: {} }, t)).toBe('미르코: 안녕하세요');
+    expect(humanizeMachineEventSummary('방향 전환 · 먼저 봐 주세요 → 미르코', undefined, t)).toBe('방향 전환 · 먼저 봐 주세요 → 미르코');
+    expect(humanizeMachineEventSummary(undefined, undefined, t)).toBeUndefined();
+    expect(humanizeMachineEventSummary(null, undefined, t)).toBeNull();
+    expect(humanizeMachineEventSummary('[이벤트]', undefined, t)).toBe('[이벤트]');
   });
 });

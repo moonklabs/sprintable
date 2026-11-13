@@ -80,7 +80,8 @@ def _src(rel: str) -> str:
 
 
 def test_activity_content_preview_uses_plain_text_preview():
-    assert '"content_preview": plain_text_preview(msg.content, _SUMMARY_PREVIEW_MAX)' in _src("routers/conversations.py")
+    # story 4921 — the text a preview reads is `_preview_content(msg)` (the human line for an event message, the content as it is for any other)
+    assert '"content_preview": plain_text_preview(_preview_content(msg), _SUMMARY_PREVIEW_MAX)' in _src("routers/conversations.py")
 
 
 def test_story_comment_notification_body_uses_plain_text_preview():
@@ -98,7 +99,7 @@ def test_recipe_gate_draft_doc_summary_strips_comments():
 
 def test_chat_mention_and_message_notification_bodies_use_plain_text_preview():
     # PR #4541 까디르 QA ①(P1) — 이 두 body는 모바일 푸시·macOS 알림·Discord 웹훅으로 그대로 나간다.
-    assert _src("routers/conversations.py").count("body=plain_text_preview(msg.content, NOTIFICATION_BODY_PREVIEW_MAX)") == 2
+    assert _src("routers/conversations.py").count("body=plain_text_preview(_preview_content(msg), NOTIFICATION_BODY_PREVIEW_MAX)") == 2  # story 4921
 
 
 def test_agent_dispatch_description_fallback_uses_plain_text_preview():

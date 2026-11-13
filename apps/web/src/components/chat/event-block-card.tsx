@@ -771,6 +771,24 @@ export function isMachineEventContent(content: string | null | undefined): boole
 }
 
 /**
+ * story 4921 — a notification SUMMARY stored in the machine shape «{sender}: [이벤트] preset.x\n- key: value …» (what the server wrote for event messages before it wrote the human line) is shown as
+ * «{sender}: {the fallback line}». Anything else — a summary that is not that shape, a missing one — is returned as it is.
+ */
+export function humanizeMachineEventSummary(
+  summary: string | null | undefined,
+  event: unknown,
+  tEventCard: (key: string) => string,
+): string | null | undefined {
+  if (typeof summary !== 'string') return summary;
+  const m = /^([^\n]*?): (\[(?:이벤트|Event)\] [\s\S]*)$/.exec(summary);
+  if (!m) return summary;
+  const card = (event && typeof event === 'object' ? event : {}) as { event_key?: unknown; payload?: unknown };
+  const payload = card.payload && typeof card.payload === 'object' ? (card.payload as Record<string, unknown>) : undefined;
+  const line = composeEventPreviewFallback(m[2], typeof card.event_key === 'string' ? card.event_key : undefined, payload, { tEventCard });
+  return line ? `${m[1]}: ${line}` : summary;
+}
+
+/**
  * story 4921 — the line a person sees where `composeEventPreviewLine` has no sentence of its own (every event but the five it knows: workflow stages · marketing recipes · recipe publish stopped · an org's custom events …):
  * the definition's own human NAME (when the screen has the definitions; else the one word «이벤트») · the person's own words from the payload (`instruction` · `message` · `summary` …, first line) when there are some.
  * Never a slug, an id or a «- key: value» line. Returns null when the content is NOT machine text (a sentence somebody wrote — kept as it is by the caller).
