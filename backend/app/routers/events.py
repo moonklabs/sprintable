@@ -771,34 +771,43 @@ async def agent_event_stream(
                         "sse.backfill_degraded reason=%s org_id=%s member_id=%s",
                         _backfill_reason, org_id, resolved_member_id,
                     )
-                # story #2201: heartbeat 다음, backfill 이벤트 스트리밍 시작 前에 전용 이벤트
-                # 타입으로 보낸다 — 응답 헤더/heartbeat 메타에는 못 싣는다(heartbeat은 위에서
-                # 이 판정 前에 이미 나가 헤더를 flush했다, hang 방지 설계라 이 스토리에서 손대지
-                # 않는다). 미등록 named event는 이 정확히 같은 엔드포인트에서 heartbeat이 매일
-                # 무해함을 실증 중이라 계약 안전은 이미 확認됨(FE·MCP 브리지 둘 다 조용히 무시).
-                yield (
-                    "event: sync_status\n"
-                    f"data: {json.dumps({'complete': _backfill_reason is None, 'reason': _backfill_reason, 'returned': len(pending_events)})}\n\n"
-                )
+            # story 4922 — the database is read in SHORT sessions that end before anything is sent: the session above closes here (its connection is back in the pool), the frames
+            # of a batch are built from memory, and the first-delivery stamp opens a session of its own after the batch went out. The old shape held ONE session — its connection and its
+            # open transaction — across every `yield` below. Starlette's StreamingResponse does not close the stream's generator when the client goes away (it only stops iterating
+            # it: `stream_response` is `async for chunk in body_iterator`), so a generator parked at a `yield` inside `async with … as db` keeps its connection until the garbage collector
+            # finds it («The garbage collector is trying to clean up non-checked-in connection … checked out at events.py:714 generate (task finished)» — CI runs 43344831907 · 43358060648).
+            # Playwright's `page.reload()` leaves the stream exactly there, and the request pool is 3 + 1: one lost place leaves 3, a few leave none (QueuePool 30 s timeout, an
+            # `activation/checklist` that does not answer in 5 s, an asyncpg `InterfaceError` when the collector terminates a connection another request is about to use).
+            # story #2201: heartbeat 다음, backfill 이벤트 스트리밍 시작 前에 전용 이벤트
+            # 타입으로 보낸다 — 응답 헤더/heartbeat 메타에는 못 싣는다(heartbeat은 위에서
+            # 이 판정 前에 이미 나가 헤더를 flush했다, hang 방지 설계라 이 스토리에서 손대지
+            # 않는다). 미등록 named event는 이 정확히 같은 엔드포인트에서 heartbeat이 매일
+            # 무해함을 실증 중이라 계약 안전은 이미 확認됨(FE·MCP 브리지 둘 다 조용히 무시).
+            yield (
+                "event: sync_status\n"
+                f"data: {json.dumps({'complete': _backfill_reason is None, 'reason': _backfill_reason, 'returned': len(pending_events)})}\n\n"
+            )
 
-                for i in range(0, len(pending_events), _SSE_BATCH_SIZE):
-                    if _access is not None and (_why := await _access.due(RECHECK_BEFORE_SEND_SEC)):
-                        yield _access_revoked_frame(_why)
-                        return
-                    batch = pending_events[i : i + _SSE_BATCH_SIZE]
+            for i in range(0, len(pending_events), _SSE_BATCH_SIZE):
+                if _access is not None and (_why := await _access.due(RECHECK_BEFORE_SEND_SEC)):
+                    yield _access_revoked_frame(_why)
+                    return
+                batch = pending_events[i : i + _SSE_BATCH_SIZE]
+                async with async_session_factory() as db:
                     sender_orgs = await _sender_orgs_for(db, batch)  # story 4649: one lookup for the batch's senders
-                    # story #4870: a stored copy of a room's words is read back only by who may read the room NOW (one question for the batch); the words are taken out of the frame otherwise
+                    # story #4870: a stored copy of a room's words is read back only by who may read the room NOW (one question for the batch); the words are taken out of
                     _withheld = await withheld_payloads(db, org_id, auth, [stored_event(e) for e in batch])
-                    batch_data = [_backfill_frame_data(evt, org_id, sender_orgs, _withheld.get(str(evt.id))) for evt in batch]  # story #4505: the live frame's shape
-                    # 1c22da3e fix: yield 먼저 → 성공 후 delivered 마킹.
-                    # 선마킹 시 yield(클라 disconnect 등) 실패하면 이벤트가 delivered로
-                    # 남아 영구 누락. 후마킹 + 클라 seen_ids dedup 으로 손실 0(재전송 허용).
-                    for data, evt in zip(batch_data, batch):
-                        yield f"event: {sse_event_name(evt.event_type)}\nid: {evt.id}\ndata: {json.dumps({**data, 'is_backfill': True})}\n\n"
-                        # story #3026 — 이 연결이 백필로 이미 내보낸 id. 아래 라이브 루프의
-                        # 큐에 같은 event_id가 겹쳐 들어와도(레이스 윈도우) 이 연결에서 또
-                        # 안 보낸다(연결-로컬 dedup, DB 공유상태 아님).
-                        _sent_event_ids.add(str(evt.id))
+                batch_data = [_backfill_frame_data(evt, org_id, sender_orgs, _withheld.get(str(evt.id))) for evt in batch]  # story #4505: the live frame's shape
+                # 1c22da3e fix: yield 먼저 → 성공 후 delivered 마킹.
+                # 선마킹 시 yield(클라 disconnect 등) 실패하면 이벤트가 delivered로
+                # 남아 영구 누락. 후마킹 + 클라 seen_ids dedup 으로 손실 0(재전송 허용).
+                for data, evt in zip(batch_data, batch):
+                    yield f"event: {sse_event_name(evt.event_type)}\nid: {evt.id}\ndata: {json.dumps({**data, 'is_backfill': True})}\n\n"
+                    # story #3026 — 이 연결이 백필로 이미 내보낸 id. 아래 라이브 루프의
+                    # 큐에 같은 event_id가 겹쳐 들어와도(레이스 윈도우) 이 연결에서 또
+                    # 안 보낸다(연결-로컬 dedup, DB 공유상태 아님).
+                    _sent_event_ids.add(str(evt.id))
+                async with async_session_factory() as db:
                     await _stamp_first_delivery(db, batch, now)
                     await db.commit()
 
