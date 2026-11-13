@@ -123,16 +123,17 @@ describe('LoopsClient — 페이지 h1 1개(story #3946)', () => {
   });
 });
 
-describe('[SID:4388] LoopsClient — the chosen status filter is announced as pressed', () => {
-  it('the first filter («all») starts pressed; clicking the second moves aria-pressed to it', async () => {
+describe('[SID:4388] LoopsClient — the chosen status filter is announced (4911: a native «단계» select replaces the chip row)', () => {
+  it('the select starts on «all» (전체); choosing another stage moves the selected value and its announced name is «단계»', async () => {
     await mount();
-    const row = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '전체')!.parentElement!;
-    const pressed = () => Array.from(row.querySelectorAll(':scope > button')).map((b) => b.getAttribute('aria-pressed'));
-    const count = pressed().length;
-    expect(count).toBeGreaterThan(2);
-    expect(pressed()).toEqual(['true', ...Array(count - 1).fill('false')]);
+    const select = container.querySelector<HTMLSelectElement>('select')!;
+    expect(select.closest('label')!.textContent).toContain('단계');
+    expect(select.value).toBe('all');
+    expect(select.options[select.selectedIndex]!.textContent).toBe('전체');
+    expect(select.options.length).toBeGreaterThan(2);
 
-    await act(async () => { (row.querySelectorAll(':scope > button')[1] as HTMLButtonElement).click(); });
-    expect(pressed()).toEqual(['false', 'true', ...Array(count - 2).fill('false')]);
+    await act(async () => { select.value = select.options[1]!.value; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(select.value).toBe(select.options[1]!.value);
+    expect(select.value).not.toBe('all');
   });
 });
