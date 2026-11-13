@@ -79,6 +79,8 @@ export const RESERVED_FIRST_SEGMENTS = new Set([
   // story 4714 — the phone app's landing and start screen (new top-level routes outside the session layouts); unlisted, `/phone-start` could be read as a
   // workspace slug (the same fault class as `desktop` · `today` above)
   'phone-landing', 'phone-start',
+  // story 4915 (PR 2) — the public «다시 시도» page the proxy rewrites an unconfirmed page load to (app/session-unconfirmed/page.tsx); unlisted, `/session-unconfirmed` could be read as a workspace slug.
+  'session-unconfirmed',
   'privacy', 'refund-policy', 'register', 'reset-password',
   'rewards', 'set-password', 'settings', 'share', 'terms',
   // story #3962(2026-09-17) — 새 최상위 app/today(v3 첫 화면, (authenticated) 밖

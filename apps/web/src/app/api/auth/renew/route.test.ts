@@ -67,22 +67,31 @@ describe('GET /api/auth/renew (story 4904)', () => {
     expect(res.headers.get('x-session-changed')).toBe('1');
   });
 
-  it.each([
-    ['superseded by a switch', { ok: false, status: 401, headers: { get: () => null }, json: async () => ({ error: { code: 'TOKEN_SUPERSEDED' } }) }],
-    ['a backend that is ill (503)', { ok: false, status: 503, headers: { get: () => null }, json: async () => ({}) }],
-    ['a 200 without tokens', { ok: true, json: async () => ({ data: {} }) }],
-  ])('%s → the sign-in, the cookies stay (not known to be dead)', async (_n, answer) => {
-    mockFetch.mockResolvedValue(answer);
+  it('superseded by a switch (401 TOKEN_SUPERSEDED) → the sign-in, the cookies stay (the session moved on; not known to be dead)', async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 401, headers: { get: () => null }, json: async () => ({ error: { code: 'TOKEN_SUPERSEDED' } }) });
     const res = await get('/chats');
     expect(res.headers.get('location')).toBe('https://app.test/login?next=%2Fchats&reason=session_expired');
     expect(setCookie(res)).toBe('');
   });
 
-  it('the backend cannot be reached → the sign-in, the cookies stay', async () => {
-    mockFetch.mockRejectedValue(new Error('network'));
-    const res = await get('/chats');
-    expect(res.headers.get('location')).toBe('https://app.test/login?next=%2Fchats&reason=session_expired');
-    expect(setCookie(res)).toBe('');
+  // story 4915 (PR 2) — «could not confirm» (the call was rejected · timed out · 5xx · an answer we cannot read) is NOT a sign-out: nothing cleared, back to the page with a 10-second marker; the layout answers it
+  // with the «다시 시도» screen (and does not call this road again while the marker lives — no loop).
+  it.each([
+    ['a backend that is ill (503)', () => mockFetch.mockResolvedValue({ ok: false, status: 503, headers: { get: () => null }, json: async () => ({}) })],
+    ['a 502 behind a deploy', () => mockFetch.mockResolvedValue({ ok: false, status: 502, headers: { get: () => null }, json: async () => ({}) })],
+    ['a 200 without tokens', () => mockFetch.mockResolvedValue({ ok: true, json: async () => ({ data: {} }) })],
+    ['the backend cannot be reached (rejected)', () => mockFetch.mockRejectedValue(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } }))],
+  ])('%s → back to the page (query kept) with the short unconfirmed marker, NOT the sign-in, no session cookie touched', async (_n, arrange) => {
+    arrange();
+    const res = await get('/chats?story=abc');
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toBe('https://app.test/chats?story=abc');
+    const c = setCookie(res);
+    expect(c).toContain('sp_renew_unconfirmed=1');
+    expect(c).toMatch(/Max-Age=10\b/i);
+    expect(c).not.toMatch(/sp_(at|rt)=/);
+    expect(c).not.toContain('sp_renew_tried');
+    expect(res.headers.get('x-session-changed')).toBeNull();
   });
 
   it('the query of the page is kept exactly (one decode only): ?story=a%26b stays a%26b, on the way back and in the sign-in', async () => {

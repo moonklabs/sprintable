@@ -7,7 +7,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { decodeJwt } from 'jose';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
-import { cookieBase, markSessionChanged, SP_AT_MAX_AGE_SECONDS, SP_RENEW_TRIED_COOKIE, SP_RENEW_TRIED_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
+import { cookieBase, markSessionChanged, SP_AT_MAX_AGE_SECONDS, SP_RENEW_TRIED_COOKIE, SP_RENEW_TRIED_MAX_AGE_SECONDS, SP_RENEW_UNCONFIRMED_COOKIE, SP_RENEW_UNCONFIRMED_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { buildLoginRedirect, safeNextPath } from '@/lib/auth/session-redirect';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { ACTIVE_ACCOUNT_COOKIE } from '@/lib/auth/account-vault';
@@ -38,6 +38,12 @@ export async function GET(request: Request) {
   const base = resolveAppUrl(null);
   const next = internalPage(new URL(request.url).searchParams.get('next'));
   const toLogin = () => NextResponse.redirect(`${base}${buildLoginRedirect(next)}`, 303);
+  // story 4915 — the refresh call could not be confirmed (rejected · timed out · 5xx · unreadable): nothing is cleared, the person is not signed out; back to the page, with the short marker
+  const backUnconfirmed = () => {
+    const res = NextResponse.redirect(`${base}${next}`, 303);
+    res.cookies.set(SP_RENEW_UNCONFIRMED_COOKIE, '1', { ...cookieBase(), maxAge: SP_RENEW_UNCONFIRMED_MAX_AGE_SECONDS });
+    return res;
+  };
 
   const cookieStore = await cookies();
   // the marker means «one renewal was just done for this browser»: the road itself honours it, so a link that points at the road (or a cross-site page that fires it again and again)
@@ -55,13 +61,17 @@ export async function GET(request: Request) {
       body: JSON.stringify({ refresh_token: refreshToken }),
     });
   } catch {
-    return toLogin(); // not confirmed: the cookies stay (same rule as the refresh road · story 4778)
+    // not confirmed: the cookies stay (same rule as the refresh road · story 4778) — and the person is NOT sent to the sign-in (story 4915): back to the page with a short «could not confirm» cookie,
+    // which the layout answers with the «다시 시도» screen (no second round through this road while it lives)
+    return backUnconfirmed();
   }
 
   const json = await safeJsonParse(fastapiRes) as { data?: { access_token?: unknown; refresh_token?: unknown }; error?: { code?: string } } | null;
   const accessToken = typeof json?.data?.access_token === 'string' ? json.data.access_token : '';
   const newRefreshToken = typeof json?.data?.refresh_token === 'string' ? json.data.refresh_token : '';
   if (!fastapiRes.ok || !accessToken || !newRefreshToken) {
+    // a 5xx · 429 · an answer we cannot read is «not confirmed» as well (only a 401 says the token is dead)
+    if (fastapiRes.status !== 401) return backUnconfirmed();
     const res = toLogin();
     // only an answer that says the token is DEAD (a 401 that is not «superseded») clears the cookies — the same line as the refresh road
     if (fastapiRes.status === 401 && json?.error?.code !== TOKEN_SUPERSEDED) {

@@ -8,6 +8,7 @@ import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { MIGRATED_RESOURCES, RENAMED_RESOURCES, RETIRED_RESOURCES } from '@/lib/legacy-resource-tables';
 import { PHONE_LANDING_NEXT_PARAM, PHONE_LANDING_PATH, SHELL_COOKIE, SHELL_COOKIE_MAX_AGE_SECONDS, SHELL_NAV_HEADER } from '@/lib/phone-landing-address';
+import { SESSION_UNCONFIRMED_PATH } from '@/lib/auth/session-unconfirmed';
 import {
   fetchResolve,
   looksLikeWorkspaceSegment,
@@ -36,6 +37,8 @@ const PUBLIC_EXACT = [
   // story #4763 (PO 10-26) — the Mac app download for a person with no account (the first screen's «Mac 앱 받기»): a redirect to the file and nothing else, only where
   // DESKTOP_DOWNLOAD_ENABLED is on (route.ts §desktop/get/macos). EXACT, not a prefix — the card's /desktop/downloads/macos.json stays behind a session.
   '/desktop/get/macos',
+  // story 4915 (PR 2) — the «다시 시도» page the proxy rewrites an unconfirmed page load to (static, no data; a direct visit is harmless)
+  '/session-unconfirmed',
   '/llms-baos.txt',
   // 45a5a006: 공개 정적 문서(app 자체 온보딩 가이드, 랜딩과 내용 상이해 리다이렉트 대상 아님) —
   // 누락 시 인증 미들웨어가 보호 라우트로 오인해 /login 307(공개 문서가 로그인 뒤에 묶이는 버그).
@@ -740,7 +743,23 @@ function loginRedirect(request: NextRequest, sessionExpired: boolean): NextRespo
 // 이 세 실패 사유를 여기서 한 번만 구분해 양쪽 호출부의 분기를 통일한다.
 // sessionExpired(story #2745): 호출부가 hadAnySessionSignal() 등으로 판정해 넘긴다 — 세션 신호가
 // 애초에 없었던 익명 첫 진입은 false로 넘어와 loginRedirect가 reason을 안 붙인다.
-function handleUnauthenticated(request: NextRequest, isApiPath: boolean, clearCookies: boolean, sessionExpired: boolean): NextResponse {
+function handleUnauthenticated(request: NextRequest, isApiPath: boolean, clearCookies: boolean, sessionExpired: boolean, unconfirmed = false): NextResponse {
+  // story 4915 (PR 2): «the refresh call could not be confirmed» (rejected · timed out · 5xx — RefreshOutcome 'transient') is NOT «signed out». A page load used to be sent to /login anyway (cookies kept, but the
+  // person saw the sign-in while the session was alive — the same defect as the authenticated layout's `!meRes`). Now a document read or a client navigation (a Next RSC fetch, not a prefetch) is REWRITTEN to the
+  // public «다시 시도» page (the address stays; cookies are never touched). It is a rewrite, NOT «let the request continue»: handlers behind the proxy that do no session check of their own (the card's
+  // /desktop/downloads/macos.json) must not be reached without a session. Prefetches and non-page requests (a fetch · an image · JSON) keep the old answer.
+  // «a client navigation» is told apart by what the real Next passes the proxy: its `RSC` request header is NOT visible here (measured on a real Next dev server: `rsc` absent, `Accept: text/x-component` and the `_rsc`
+  // query present) — so the header, the `_rsc` parameter and the RSC content type all count (the unit tests' hand-made requests carry the header, the real server does not).
+  const clientNavigation = request.headers.has('rsc') || request.nextUrl.searchParams.has('_rsc') || (request.headers.get('accept') ?? '').includes('text/x-component');
+  const prefetch = request.headers.has('next-router-prefetch') || request.headers.has('next-router-segment-prefetch');
+  if (unconfirmed && !isApiPath && (isDocumentRead(request) || (clientNavigation && !prefetch))) {
+    const url = request.nextUrl.clone();
+    url.pathname = SESSION_UNCONFIRMED_PATH;
+    url.search = '';
+    const rewritten = NextResponse.rewrite(url, { request: { headers: request.headers } }); // the headers WITHOUT what a client sent as x-resolved-* (stripped at the entrance)
+    rewritten.headers.set('Cache-Control', 'no-store');
+    return rewritten;
+  }
   const response = isApiPath ? NextResponse.next({ request }) : loginRedirect(request, sessionExpired);
   if (clearCookies) clearAuthCookies(response);
   return response;
@@ -961,7 +980,7 @@ async function proxyImpl(incoming: NextRequest) {
     // 섞여 있다 — sp_rt/활성계정 금고 신호로 실제 판정(둘 다 없으면 애초에 세션이 없었던 것).
     const sessionExpired = hadAnySessionSignal(request);
     const outcome = await tryRefreshViaFastapi(request);
-    if (outcome.kind !== 'ok') return handleUnauthenticated(request, isApiPath, outcome.kind === 'invalid', sessionExpired);
+    if (outcome.kind !== 'ok') return handleUnauthenticated(request, isApiPath, outcome.kind === 'invalid', sessionExpired, outcome.kind === 'transient');
     // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지(쿠키는 유지).
     if (!(await refreshMatchesActive(request, outcome.accessToken))) {
       return handleUnauthenticated(request, isApiPath, false, sessionExpired);
@@ -975,7 +994,7 @@ async function proxyImpl(incoming: NextRequest) {
     // access token invalid/expired — try refresh. accessToken 쿠키가 실재했으므로(이 분기 진입
     // 조건) 이건 항상 진짜 "만료"다 — sessionExpired=true 고정.
     const outcome = await tryRefreshViaFastapi(request);
-    if (outcome.kind !== 'ok') return handleUnauthenticated(request, isApiPath, outcome.kind === 'invalid', true);
+    if (outcome.kind !== 'ok') return handleUnauthenticated(request, isApiPath, outcome.kind === 'invalid', true, outcome.kind === 'transient');
     // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지(쿠키는 유지).
     if (!(await refreshMatchesActive(request, outcome.accessToken))) {
       return handleUnauthenticated(request, isApiPath, false, true);

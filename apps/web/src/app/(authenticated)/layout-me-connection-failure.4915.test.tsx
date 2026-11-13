@@ -18,7 +18,7 @@ vi.mock('@/ee/components/billing/au-usage-banner', () => ({ AuUsageBanner: () =>
 vi.mock('@/components/auth/tab-owner-gate', () => ({ TabOwnerGate: ({ children }: { children: React.ReactNode }) => children }));
 // an exact sentinel (identity, not a name): the layout's tree must contain THIS component to count as «the retry screen»
 const FailureScreen = vi.hoisted(() => function AccountContextFailureStandIn() { return null; });
-vi.mock('./account-context-failure', () => ({ AccountContextFailure: FailureScreen }));
+vi.mock('@/components/auth/account-context-failure', () => ({ AccountContextFailure: FailureScreen }));
 
 type MeMode = 'ok' | '401' | '502' | 'reject-reset' | 'reject-refused' | 'reject-timeout';
 let meMode: MeMode = 'ok';

@@ -17,6 +17,14 @@ export const SP_AT_MAX_AGE_SECONDS = 60 * 60;
 export const SP_RENEW_TRIED_COOKIE = 'sp_renew_tried';
 export const SP_RENEW_TRIED_MAX_AGE_SECONDS = 60;
 
+/**
+ * story 4915 — the renew road could not CONFIRM anything (the refresh call was rejected · timed out · answered 5xx): the session is not known to be dead, so nothing is cleared and the person is not sent
+ * to the sign-in. The road writes this very short cookie and sends them back to the page; while it is present the layout shows the «다시 시도» screen instead of calling the road again (no loop), and once it is
+ * gone a retry goes through the road afresh.
+ */
+export const SP_RENEW_UNCONFIRMED_COOKIE = 'sp_renew_unconfirmed';
+export const SP_RENEW_UNCONFIRMED_MAX_AGE_SECONDS = 10;
+
 /** APP_BASE_URL 또는 NEXT_PUBLIC_APP_URL 기준으로 Secure 쿠키 여부 결정.
  *  HTTP(localhost, Tailscale, ngrok 등)에서는 false, HTTPS에서는 true.
  */
