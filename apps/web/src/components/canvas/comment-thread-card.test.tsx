@@ -5,6 +5,7 @@ import koMessages from '../../../messages/ko.json';
 import { CommentThreadCard } from './comment-thread-card';
 import { MOCK_MEMBERS } from '@/services/canvas';
 import { MOCK_THREADS } from '@/services/canvas-comments';
+import { LAYER } from '@/components/ds/layers';
 
 function wrap(node: React.ReactNode) {
   return (
@@ -56,12 +57,13 @@ describe('CommentThreadCard', () => {
     }
   });
 
-  // story #3009(로드맵 P2·PR-F, L1) — 인라인 카드는 --elev-card.
-  it('카드 셸이 shadow-[var(--elev-card)]를 쓰고 shadow-sm은 안 쓴다', () => {
+  // story #3009(L1)는 인라인 카드에 --elev-card 그림자를 줬다. 4910에서 ds 층 규칙으로 바뀜: 카드는 그림자 없이 «선 + 글 줄 층(LAYER.rowOthers)»으로 칸과 갈린다(styles/layer-rule.test.ts가 간격을 지킨다).
+  it('카드 셸은 ds 선 + 글 줄 층(LAYER.rowOthers)이고 옛 그림자 · 옛 bg-card 는 안 쓴다', () => {
     const open = MOCK_THREADS.find((t) => t.rollup === 'open')!;
     const markup = renderToStaticMarkup(wrap(<CommentThreadCard thread={open} memberMap={MOCK_MEMBERS} />));
-    expect(markup).toContain('shadow-[var(--elev-card)]');
-    expect(markup).not.toMatch(/shadow-sm["\s]/);
+    const shellClasses = /^<div class="([^"]*)"/.exec(markup)![1]!.split(' ');
+    for (const cls of ['rounded-ds-panel', 'border', 'border-ds-line', ...LAYER.rowOthers.split(' ')]) expect(shellClasses).toContain(cls);
+    expect(shellClasses.join(' ')).not.toMatch(/shadow-|bg-card|border-border/);
   });
 });
 
