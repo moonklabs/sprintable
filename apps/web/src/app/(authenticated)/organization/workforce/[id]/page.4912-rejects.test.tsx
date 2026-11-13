@@ -25,16 +25,27 @@ vi.mock('@/components/settings/agent-project-access-section', () => ({ AgentProj
 
 let container: HTMLDivElement;
 let root: Root;
-beforeEach(() => { addToast.mockClear(); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
+beforeEach(() => { mode = 'reject'; addToast.mockClear(); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); vi.resetModules(); });
 
 const AGENT = { id: 'agent-1', name: '에이전트1', type: 'agent', role: 'member', project_id: 'proj-1', is_active: true, webhook_url: null, created_by: 'human-1', fakechat_port: null, runtime_type: 'claude-code' };
 const WEBHOOK = { id: 'w-1', member_id: 'agent-1', url: 'https://old.example.com/hook', is_active: true };
 
+// 'reject' = every write is a rejected request · 'webhook-saved' = the webhook PUT succeeds but the re-read of the configs rejects · 'unreadable' = the PATCH answers 200 with a body that cannot be read
+let mode: 'reject' | 'webhook-saved' | 'unreadable' = 'reject';
+let webhookWritten = false;
 function stubFetch() {
+  webhookWritten = false;
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
-    if (method !== 'GET') throw new TypeError('network down'); // every write is a REJECTED request
+    if (mode === 'webhook-saved' && url.startsWith('/api/webhooks/config')) {
+      if (method === 'PUT') { webhookWritten = true; return { ok: true, json: async () => ({ data: WEBHOOK }) }; }
+      if (webhookWritten) throw new TypeError('network down'); // the RE-READ after the save
+    }
+    if (mode === 'unreadable' && method === 'PATCH') return { ok: true, status: 200, json: async () => { throw new SyntaxError('unreadable'); } };
+    if (method !== 'GET' && mode === 'reject') throw new TypeError('network down'); // every write is a REJECTED request
+    if (method !== 'GET' && mode === 'webhook-saved') return { ok: true, json: async () => ({ data: {} }) };
+    if (method !== 'GET') throw new TypeError('network down');
     if (url === '/api/team-members/agent-1') return { ok: true, json: async () => ({ data: AGENT }) };
     if (url.startsWith('/api/agents/') && url.endsWith('/api-key')) return { ok: true, json: async () => ({ data: [] }) };
     if (url === '/api/projects') return { ok: true, json: async () => ({ data: [] }) };
@@ -90,6 +101,35 @@ describe('AgentDetailPage — 4912: a rejected save request says so', () => {
     await settle();
     expect(addToast).toHaveBeenCalledWith(ERR);
     expect(save().textContent).toBe(koMessages.common.save);
+  });
+
+  it('⭐웹훅 저장은 성공했는데 설정 «다시 읽기»만 거절되면 성공 토스트만 — 오류 토스트가 덧붙지 않는다(codex 2차) — .catch를 걷으면 RED', async () => {
+    mode = 'webhook-saved';
+    await mount();
+    const card = container.querySelector('[data-testid="agent-detail-card-webhook"]') as HTMLElement;
+    const input = card.querySelector('input[type="url"]') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'https://new.example.com/hook');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const save = [...card.querySelectorAll('button')].find((b) => b.textContent === koMessages.common.save) as HTMLButtonElement;
+    await act(async () => { save.click(); });
+    await settle(); await settle();
+    expect(webhookWritten).toBe(true);
+    expect(addToast).toHaveBeenCalledWith({ type: 'success', title: koMessages.settings.webhookUrlSavedToast });
+    expect(addToast).not.toHaveBeenCalledWith(ERR);
+  });
+
+  it('⭐활성 토글의 답이 200인데 읽을 수 없으면 오류 토스트(처리 안 된 거절이 아니다) · 가드가 풀린다(codex 2차)', async () => {
+    mode = 'unreadable';
+    await mount();
+    await act(async () => { (container.querySelector('[data-testid="agent-detail-actions"]') as HTMLElement).click(); });
+    await act(async () => { (document.querySelector('[role="menuitem"]') as HTMLElement).click(); });
+    await settle();
+    const confirm = [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === koMessages.settings.deactivateAgentDialogConfirm)!;
+    await act(async () => { confirm.click(); });
+    await settle();
+    expect(addToast).toHaveBeenCalledWith(ERR);
   });
 
   it('⭐런타임 저장 · 이름 저장 · 활성 토글 · 웹훅 저장 — 요청을 기다리는 모든 저장 처리기가 catch를 가진다(소스 가드 — 런타임 저장은 고르는 칸이 무거워 여기서 줄 수만 본다)', () => {

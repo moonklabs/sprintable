@@ -396,7 +396,8 @@ export default function AgentDetailPage() {
         }
       }
       addToast({ type: 'success', title: t('webhookUrlSavedToast') });
-      await fetchWebhookConfigs(agent.project_id);
+      // the save succeeded: a failing RE-READ of the configs must not add an error toast on top of the success one (codex round 2) — the list just stays as it was
+      await fetchWebhookConfigs(agent.project_id).catch(() => undefined);
     } catch {
       // story 4912 (PO 11-13): a rejected request said nothing — same failure as an HTTP error answer
       addToast({ type: 'error', title: tc('error') });
@@ -557,7 +558,14 @@ export default function AgentDetailPage() {
     }
     if (!stillMine()) return; // the page moved on to another agent while this was out: its answer is not this page's
     if (res.ok) {
-      const json = await res.json() as { data: AgentMember };
+      let json: { data: AgentMember };
+      try {
+        json = await res.json() as { data: AgentMember };
+      } catch {
+        // an unreadable answer (codex round 2): the request went through but this page cannot tell — the same failure word, not an unhandled rejection
+        if (stillMine()) addToast({ type: 'error', title: tc('error') });
+        return;
+      }
       if (!stillMine()) return; // the body took long enough for the page to leave
       setAgent(json.data);
       addToast({ type: 'success', title: next ? t('agentActivated') : t('agentDeactivated') });
