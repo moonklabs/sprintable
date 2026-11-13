@@ -104,7 +104,7 @@
     "components/canvas/artifact-gallery-view.tsx::hidden h-fit rounded-xl border border-border bg-card lg:block",
     "components/canvas/artifact-gallery-view.tsx::rounded-xl border border-border bg-card lg:hidden",
     "components/canvas/artifact-section.tsx::flex flex-col items-center gap-3 rounded-lg border border-border bg-card px-6 py-9 text-center",
-    "components/canvas/artifact-stage.tsx::relative min-h-0 w-full flex-1 touch-none overflow-hidden rounded-lg border border-border bg-muted/20",
+    "components/canvas/artifact-stage.tsx::relative min-h-0 w-full flex-1 touch-none select-none overflow-hidden rounded-lg border border-border bg-muted/20 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
     "components/canvas/artifact-viewer.tsx::overflow-hidden rounded-2xl border border-border bg-card shadow-[var(--elev-card)]",
     "components/canvas/comment-compose-popover.tsx::w-56 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-card p-2 shadow-[var(--elev-overlay)] outline-none  ",
     "components/canvas/comment-thread-card.tsx::rounded-xl border border-border bg-card shadow-[var(--elev-card)]",
