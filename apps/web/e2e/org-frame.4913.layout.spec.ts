@@ -32,10 +32,11 @@ async function build() {
         import Channels from './src/app/(authenticated)/organization/channels/page';
         import Events from './src/app/(authenticated)/organization/events/page';
         import Content from './src/app/(authenticated)/content/page';
+        import Insights from './src/app/(authenticated)/organization/insights-board/page';
         import { ToastProvider } from './src/components/ui/toast';
         function Bar() { const { title } = useTopBar(); return React.createElement('header', { 'data-testid': 'app-bar', style: { height: '48px', display: 'flex', alignItems: 'center', padding: '0 16px', borderBottom: '1px solid #8884' } }, title); }
         window.__mount = (which) => {
-          const Screen = { roles: Roles, trust: Trust, gc: Gc, rules: Rules, rewards: Rewards, channels: Channels, events: Events, content: Content }[which];
+          const Screen = { roles: Roles, trust: Trust, gc: Gc, rules: Rules, rewards: Rewards, channels: Channels, events: Events, content: Content, insights: Insights }[which];
           createRoot(document.getElementById('root')).render(React.createElement(NextIntlClientProvider, { locale: 'ko', messages: ko, timeZone: 'Asia/Seoul' },
             React.createElement(TopBarProvider, null, React.createElement(ToastProvider, null, React.createElement(Bar), React.createElement('main', { 'data-testid': 'main' }, React.createElement(Screen))))));
         };`,
@@ -75,9 +76,9 @@ const SUMMARY = [
   { member_id: 'm3', role_key: 'dev', role_label: '개발', hit_rate: 0.5, resolved: 4, computed_at: '2026-11-10T00:00:00Z', pending: 1, name: 'A very long member display name that must be cut inside its row', member_type: 'agent', member_deleted: false },
 ];
 
-type Which = 'roles' | 'trust' | 'gc' | 'rules' | 'rewards' | 'channels' | 'events' | 'content';
-// the body frame width at ≥ 800: `reading` 768 for forms and lists, `wide` 1152 for the table-like marketing screens (blog posts · channel posts)
-const FRAME_AT_DESKTOP: Record<Which, number> = { roles: 768, trust: 768, gc: 768, rules: 768, rewards: 768, channels: 768, events: 768, content: 1152 };
+type Which = 'roles' | 'trust' | 'gc' | 'rules' | 'rewards' | 'channels' | 'events' | 'content' | 'insights';
+// the body frame width at ≥ 800: `reading` 768 for forms and lists, `wide` 1152 for the table-like marketing screens (blog posts · channel posts · insights board)
+const FRAME_AT_DESKTOP: Record<Which, number> = { roles: 768, trust: 768, gc: 768, rules: 768, rewards: 768, channels: 768, events: 768, content: 1152, insights: 1152 };
 const AVAILABLE = [
   { channel: 'threads', display_name: 'Threads', credential_kind: 'oauth', kind: 'social' },
   { channel: 'wordpress', display_name: 'WordPress', credential_kind: 'pasted_secret', kind: 'blog' },
@@ -114,6 +115,13 @@ const POST_DRAFTS = [
   { ...DRAFT_BASE, draft_id: 'p3', title: '초안 글', can_archive: false },
 ];
 
+// the insights board (성과 보드): a table on a wide screen, cards below 1024 — three rows, one with a very long title, one channel the filter column could not fit
+const INSIGHTS_ROWS = [
+  { publication_id: 'p1', kind: 'channel_publication', channel: 'threads', work_item_id: 'w1', title: 'A very long published post title that has to be cut inside its table cell and must wrap inside its card and never push the row out of the panel', published_at: '2026-11-01T09:00:00Z', external_url: 'https://example.com/a', connection_id: 'c1', d1: { status: 'captured', normalized: { impressions: 1200, reach: 800, views: 640, engagements: 31, clicks: 12, spend: null, conversions: null }, captured_at: '2026-11-02T09:00:00Z' }, d7: { status: 'captured', normalized: { impressions: 5200, reach: 3100, views: 2900, engagements: 140, clicks: 66, spend: null, conversions: null }, captured_at: '2026-11-08T09:00:00Z' } },
+  { publication_id: 'p2', kind: 'site_post', channel: 'hosted_site', work_item_id: 'w2', title: '글 B', published_at: '2026-10-30T09:00:00Z', external_url: null, connection_id: null, d1: { status: 'pending', normalized: null, captured_at: null }, d7: { status: 'failed', normalized: null, captured_at: null } },
+  { publication_id: 'p3', kind: 'channel_publication', channel: 'instagram', work_item_id: 'w3', title: '글 C', published_at: '2026-10-20T09:00:00Z', external_url: null, connection_id: 'c2', d1: null, d7: null },
+];
+
 async function open(page: Page, which: Which, scheme: 'light' | 'dark', width: number, height: number) {
   const { js, css } = await build();
   await page.emulateMedia({ colorScheme: scheme });
@@ -137,6 +145,8 @@ async function open(page: Page, which: Which, scheme: 'light' | 'dark', width: n
     if (url.pathname === '/api/team-members') return json({ data: [{ id: 'm1', name: '오너 하나', type: 'human' }, { id: 'm2', name: '관리자 둘', type: 'human' }] });
     if (url.pathname === '/api/org-members') return json({ data: MEMBERS });
     if (url.pathname === '/api/organizations/org-1/site-posts/drafts') return json({ data: POST_DRAFTS, error: null, meta: { totalCount: 5 } });
+    if (url.pathname === '/api/organizations/org-1/insights-board/cost-summary') return json({ data: { ads: { approved_boost_count: 0, sealed_ads_currency: null, sealed_budget_minor: 0, captured_spend_minor: 0, remaining_minor: 0, cap_reached_count: 0 }, generation_cost_spent_minor: null, generation_cost_period_start: null, generation_cost_period_end: null, generation_currency: null, x_cost_spent_minor: null } });
+    if (url.pathname === '/api/organizations/org-1/insights-board') return json({ data: { rows: INSIGHTS_ROWS, has_more: false, next_cursor: null, hidden_count: null, ga4_connection_status: 'not_connected' } });
     if (url.pathname === '/api/events/definitions') return json(EVENT_DEFS);
     if (url.pathname.startsWith('/api/events/definitions/publish-history')) return json([]); // the opened row's history reads an array
     if (url.pathname === '/api/me') return json({ data: { user_id: 'u-me' } });
@@ -152,7 +162,7 @@ async function open(page: Page, which: Which, scheme: 'light' | 'dark', width: n
   await page.goto('http://preview.test/');
   await page.addScriptTag({ content: js });
   await page.evaluate((w) => (window as unknown as { __mount: (x: string) => void }).__mount(w), which);
-  await page.locator('[data-slot="ds-row-list-item"]').first().waitFor();
+  await page.locator(which === 'insights' ? '[data-testid="insights-board-row"]' : '[data-slot="ds-row-list-item"]').first().waitFor({ state: 'attached' });
 }
 
 /** OKLab L of a css colour (rgb/rgba) — same formula as styles/layer-rule.test.ts */
@@ -355,6 +365,90 @@ test('content (blog posts) — nothing pressable in a row is cut off by the pane
       const frame = (await page.locator('[data-slot="ds-page-frame"]').first().boundingBox())!;
       const tabs = (await page.locator('[role="tablist"]').first().boundingBox())!;
       expect(tabs.x + tabs.width).toBeLessThanOrEqual(frame.x + frame.width + 1);
+    }
+  }
+});
+
+// ── 성과 보드(4913 D1): a table ≥1024 and cards below, inside the WIDE frame (1152) ──
+for (const scheme of ['light', 'dark'] as const) {
+  for (const [width, height] of [[1440, 900], [1100, 800], [390, 844], [320, 640]] as const) {
+    test(`insights ${scheme} ${width} — one heading in the app bar · wide frame · ${width >= 1024 ? 'the table' : 'the cards'} stay inside the panel · filters follow the width · no sideways scroll`, async ({ page }) => {
+      await open(page, 'insights', scheme, width, height);
+      expect(await page.locator('h1').count()).toBe(1);
+      expect(await page.locator('[data-testid="app-bar"] h1').count()).toBe(1);
+      expect(await page.locator('[data-testid="main"] h1').count()).toBe(0);
+      const frame = (await page.locator('[data-slot="ds-page-frame"]').first().boundingBox())!;
+      expect(await page.locator('[data-slot="ds-page-frame"]').first().getAttribute('data-width')).toBe('wide');
+      if (width >= 1200) expect(Math.round(frame.width)).toBe(1152);
+      else expect(frame.width).toBeLessThanOrEqual(width);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+      // the old head line (eyebrow) is gone: the screen name is written once (the bar), not again in the frame
+      expect(await page.locator('[data-slot="ds-page-frame"]').first().innerText()).not.toContain('성과 보드');
+      // table (≥1024) or cards (<1024): exactly one of them is on screen, inside the frame
+      const table = page.locator('table').first();
+      const cards = page.locator('[data-slot="responsive-data-table-card"]');
+      if (width >= 1024) {
+        expect(await table.isVisible()).toBe(true);
+        expect(await cards.first().isVisible()).toBe(false);
+        const tb = (await table.boundingBox())!;
+        expect(tb.x).toBeGreaterThanOrEqual(frame.x - 1);
+        expect(tb.x + tb.width).toBeLessThanOrEqual(frame.x + frame.width + 1);
+        // the table sits on the panel layer: one step brighter than the page (light and dark)
+        const lPage = lightnessOf(await page.evaluate(() => getComputedStyle(document.body).backgroundColor));
+        const lPanel = lightnessOf(await page.locator('table').first().evaluate((el) => getComputedStyle(el.closest('[data-slot="ds-card"]') ?? el).backgroundColor));
+        expect(Math.abs(lPanel - lPage)).toBeGreaterThanOrEqual(0.03);
+      } else {
+        expect(await table.isVisible()).toBe(false);
+        expect(await cards.count()).toBe(3);
+        for (const card of await cards.all()) {
+          const b = (await card.boundingBox())!;
+          expect(b.x).toBeGreaterThanOrEqual(frame.x - 1);
+          expect(b.x + b.width).toBeLessThanOrEqual(frame.x + frame.width + 1);
+          expect(await card.evaluate((el) => el.scrollWidth <= el.clientWidth + 1), 'a card keeps its text inside').toBe(true);
+        }
+      }
+      // the filter row: always open on a wide screen, folded behind the «필터» button below 640 (sm)
+      const filterBody = page.locator('[data-slot="ds-filter-bar-body"]');
+      if (width >= 640) {
+        expect(await filterBody.isVisible()).toBe(true);
+        const fb = (await filterBody.boundingBox())!;
+        expect(fb.x + fb.width).toBeLessThanOrEqual(frame.x + frame.width + 1);
+        // every filter press is inside the frame (wrapping onto a second line is fine, clipping is not)
+        for (const press of await filterBody.locator('button, input').all()) {
+          const pb = await press.boundingBox();
+          if (!pb) continue;
+          expect(pb.x + pb.width).toBeLessThanOrEqual(frame.x + frame.width + 1);
+          expect(pb.x).toBeGreaterThanOrEqual(frame.x - 1);
+        }
+      } else {
+        expect(await filterBody.isVisible()).toBe(false);
+        await page.locator('[data-slot="ds-filter-bar"] > button[aria-expanded]').click();
+        expect(await filterBody.isVisible()).toBe(true);
+        for (const press of await filterBody.locator('button, input').all()) {
+          const pb = await press.boundingBox();
+          if (!pb) continue;
+          expect(pb.x + pb.width).toBeLessThanOrEqual(frame.x + frame.width + 1);
+        }
+      }
+      // the period button is the one press in the head, inside the frame
+      const win = (await page.locator('[data-testid="insights-board-window-trigger"]').boundingBox())!;
+      expect(win.x + win.width).toBeLessThanOrEqual(frame.x + frame.width + 1);
+    });
+  }
+}
+
+test('insights — opening a row (expand) keeps the detail inside the table / card and the page does not scroll sideways (light + dark, 1440 + 390)', async ({ page }) => {
+  for (const scheme of ['light', 'dark'] as const) {
+    for (const [width, height] of [[1440, 900], [390, 844]] as const) {
+      await open(page, 'insights', scheme, width, height);
+      const toggle = page.locator(width >= 1024 ? 'table [data-testid="insights-board-row-expand-toggle"]' : '[data-slot="responsive-data-table-card"] [data-testid="insights-board-row-expand-toggle"]').first();
+      await toggle.click();
+      const detail = page.locator('[data-testid="insights-board-row-detail-row"]').filter({ visible: true }).first();
+      await detail.waitFor();
+      const frame = (await page.locator('[data-slot="ds-page-frame"]').first().boundingBox())!;
+      const db = (await detail.boundingBox())!;
+      expect(db.x + db.width).toBeLessThanOrEqual(frame.x + frame.width + 1);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
     }
   }
 });

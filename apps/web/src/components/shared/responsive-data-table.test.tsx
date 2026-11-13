@@ -199,7 +199,7 @@ describe('ResponsiveDataTable', () => {
     expect(footerTr!.tagName).toBe('TR');
 
     // 카드: footer가 그 행의 카드 wrapper(border rounded-md) 안쪽에 있다(형제 카드가 아님).
-    const cardWrapper = container.querySelector('[data-testid="responsive-data-table-cards"] .rounded-md.border');
+    const cardWrapper = container.querySelector('[data-testid="responsive-data-table-cards"] [data-slot="responsive-data-table-card"]');
     expect(cardWrapper).not.toBeNull();
     expect(cardWrapper!.querySelector('[data-testid="row-footer-card"]')).not.toBeNull();
 
@@ -228,7 +228,7 @@ describe('ResponsiveDataTable', () => {
 
     const tr = container.querySelector('table tbody tr');
     expect(tr!.className).toContain('bg-primary/10');
-    const cardWrapper = container.querySelector('[data-testid="responsive-data-table-cards"] .rounded-md.border');
+    const cardWrapper = container.querySelector('[data-testid="responsive-data-table-cards"] [data-slot="responsive-data-table-card"]');
     expect(cardWrapper!.className).toContain('bg-primary/10');
     // ref 콜백이 표·카드 두 실 DOM 노드 모두에서 호출됐다(항상 둘 다 DOM에 있다는
     // AC5/6 계약과 정합 — 하나만 마운트되면 refs.length===1이었을 것).
@@ -236,5 +236,36 @@ describe('ResponsiveDataTable', () => {
 
     await act(async () => { root.unmount(); });
     container.remove();
+  });
+
+  it('⭐clamp 열의 표 칸만 한 줄로 자른다(max-w-xs truncate) — 화면 파일이 폭 클래스를 직접 쓰지 않는다(4913 D1)', async () => {
+    const { container, root } = mountTable();
+    await act(async () => {
+      root.render(
+        <ResponsiveDataTable
+          columns={COLUMNS.map((c, i) => (i === 0 ? { ...c, clamp: true } : c))}
+          rows={[ROWS[0]]}
+          rowKey={(r) => r.id}
+        />,
+      );
+    });
+    const tds = [...container.querySelectorAll('table tbody tr td')];
+    expect(tds[0]!.className).toContain('truncate');
+    expect(tds[0]!.className).toContain('max-w-xs');
+    expect(tds[1]!.className).not.toContain('truncate');
+  });
+
+  it('⭐표 · 카드 바깥 모양은 ds 토큰만 쓴다 — 옛 shadcn 색(bg-muted · text-muted-foreground · border-border) 0(4913 D1)', async () => {
+    const { container, root } = mountTable();
+    await act(async () => {
+      root.render(<ResponsiveDataTable columns={COLUMNS} rows={ROWS} rowKey={(r) => r.id} />);
+    });
+    const shell = [
+      container.querySelector('table')!.outerHTML.replace(/>[^<]*</g, '><'),
+      container.querySelector('[data-testid="responsive-data-table-cards"]')!.outerHTML.replace(/>[^<]*</g, '><'),
+    ].join('');
+    expect(shell).not.toMatch(/bg-muted|text-muted-foreground|border-border|text-foreground/);
+    expect(container.querySelector('table thead')!.className).toContain('bg-ds-surface-high');
+    expect(container.querySelector('[data-slot="responsive-data-table-card"]')!.className).toContain('border-ds-line');
   });
 });
