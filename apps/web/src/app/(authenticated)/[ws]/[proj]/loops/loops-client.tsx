@@ -23,7 +23,7 @@ import { LoopCreateDialog } from '@/components/loops/loop-create-dialog';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { LoopsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
-import { LOOP_FILTER_STICKY, LOOP_ROW_FACE, LOOP_ROW_HOVER } from './loops-layer';
+import { LOOP_FILTER_STICKY, LOOP_ROW_FACE, LOOP_ROW_HOVER, LOOP_STATE_COLUMN } from './loops-layer';
 
 // story 1eb18bd8(doc resource-view-firsttouch-identity-pattern §2/§4 — 실험실 파일럿): 빈
 // first-touch 정체성 visual = "4노드(가설→실행→검증→학습+↻다음 Loop) 가로 플로우(과설명 금지·
@@ -116,10 +116,15 @@ function LoopRow({ loop, onOpen }: { loop: Loop; onOpen: () => void }) {
       className={`${LOOP_ROW_FACE} ${LOOP_ROW_HOVER} cursor-pointer`}
       title={loop.title}
       subtitle={subtitle || undefined}
-      statusMark={(
-        <>
+      leading={(
+        <span data-slot="loop-state-column" className="flex items-center gap-2">
           <LoopStageBar status={loop.status} />
           <LoopStatusBadge status={loop.status} />
+        </span>
+      )}
+      leadingClassName={LOOP_STATE_COLUMN}
+      statusMark={(
+        <>
           {loop.status === 'closed' && loop.outcome_snapshot ? <OutcomeBadge hypothesisStatus={loop.outcome_snapshot.hypothesis_status} /> : null}
           {loop.goal_tags.map((tag) => <Chip key={tag}>{tag}</Chip>)}
         </>

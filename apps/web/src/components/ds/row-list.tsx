@@ -120,6 +120,8 @@ export type RowListItemProps = RowActionsProps & Omit<HTMLAttributes<HTMLElement
   /** 시험 손잡이는 행 «전체»(`role=listitem` — 펼침 칸까지 담은 래퍼)에 붙는다. */
   'data-testid'?: string;
   leading?: ReactNode;
+  /** `ListRow.leadingClassName` — 앞 자리 칸의 고정 폭 등. */
+  leadingClassName?: string;
   title: ReactNode;
   subtitle?: ReactNode;
   /** 오른쪽 상태(Chip · 막대 …) — 이미 그려진 노드를 받는 슬롯. 이름이 `status`가 아닌 까닭: 원시 status 값 렌더를 잡는 `verify:no-raw-role-jsx-text`가 이름만 보고 걸린다(`TreeRow.statusMark`와 같은 이유). */
