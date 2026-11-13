@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { ArrowLeft, Bell, Bot, CheckCheck, ChevronDown, ChevronRight, Inbox as InboxIcon, Info, Zap, ZapOff, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Button as DsButton } from '@/components/ds/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
 import { AgentIdentity } from '@/components/ui/agent-identity';
@@ -529,10 +530,9 @@ export default function InboxPage() {
         actions={
           // story #4277 — 402폭에서 글자 버튼이 셸 TopBar의 shrink-0 액션 칸을 넓혀 상단바가 가로로 넘쳤다(409/402). 스프린트 상단바 관례:
           // 폰은 아이콘만 · 글자는 sm 이상 · 접근 이름은 aria-label로 유지.
-          <Button variant="glass" size="sm" onClick={markAllRead} disabled={unreadCount === 0} aria-label={t('markAllRead')}>
-            <CheckCheck className="size-4 sm:hidden" aria-hidden="true" />
+          <DsButton variant="secondary" onClick={markAllRead} disabled={unreadCount === 0} aria-label={t('markAllRead')} iconStart={<CheckCheck className="size-4 sm:hidden" aria-hidden="true" />}>
             <span className="hidden sm:inline">{t('markAllRead')}</span>
-          </Button>
+          </DsButton>
         }
         showContextChip
       />
