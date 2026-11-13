@@ -1,14 +1,14 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
-import { MoreHorizontal, Link2, Play, XCircle, CheckCircle2, CircleSlash } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Play } from 'lucide-react';
+import { Button } from '@/components/ds/button';
+import { Chip } from '@/components/ds/chip';
+import { IconButton } from '@/components/ds/icon-button';
+import type { IconName } from '@/components/ds/icon-paths';
+import { ListRow } from '@/components/ds/list-row';
+import { ContextMenu, ContextMenuTrigger, Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ds/menu';
 import { cn } from '@/lib/utils';
 import type { Hypothesis } from '@sprintable/core-storage';
 import { HypothesisStatusBadge } from './hypothesis-status-badge';
@@ -28,7 +28,15 @@ export interface HypothesisRowActions {
   onStartMeasuring: (h: Hypothesis) => void;
 }
 
-/** Compact in-flight / terminal row (§4.2). verified/falsified use the VerdictCard instead. */
+/** one entry of the row's menu — the ⋯ button's menu and the Mac right-click menu are the SAME list of the SAME functions (never a right-click-only action) */
+interface HypothesisMenuEntry { id: 'link' | 'verify' | 'falsify' | 'kill'; icon: IconName; label: string; danger?: boolean; onSelect: () => void }
+
+/**
+ * Compact in-flight / terminal row (§4.2). verified/falsified use the VerdictCard instead.
+ * 4909 AC3 (가설 칸 2단계): the row speaks the ds ListRow grammar — the status chip (+ the «초안» pin) · the statement on up to two lines · a mono second line «지표 · 날짜 · 🔗 연결 수 · @담당» · the ONE action of the moment on the right
+ * (초안 확인 / 활성화 / 측정 시작) and the ⋯ menu; the «measuring starts…» hint stays a line of the row. The same menu opens with a right-click (Mac / desktop) — the same entries, the same functions.
+ * There is no «open» for a hypothesis (it has no page of its own), so a double-click is not wired to anything: binding the row's transition button to it would make an accidental transition one slip away.
+ */
 export function HypothesisRow({
   hypothesis,
   actions,
@@ -55,136 +63,74 @@ export function HypothesisRow({
   const canStartMeasuringInline = hypothesis.status === 'active';
   const linkedCount = hypothesis.story_ids?.length ?? 0;
   const killed = hypothesis.status === 'killed';
+  const startHint = hypothesis.measure_after ? t('startMeasuringHintWithDate', { date: hypothesis.measure_after.slice(0, 10) }) : t('startMeasuringHint');
 
-  return (
-    <div className="rounded-xl border border-border bg-background px-3 py-2.5">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <HypothesisStatusBadge status={hypothesis.status} />
-          {needsConfirm ? (
-            <Badge variant="outline" className="border-dashed text-muted-foreground">
-              {t('draftPin')}
-            </Badge>
-          ) : null}
-        </div>
-        <HypothesisActions hypothesis={hypothesis} actions={actions} t={t} />
-      </div>
-
-      <p className={cn('mt-1.5 line-clamp-2 text-sm leading-6 text-foreground', killed && 'text-muted-foreground line-through')}>
-        {hypothesis.statement}
-      </p>
-
-      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-        {md?.metric ? (
-          <span className="tabular-nums">
-            📈 {md.metric} {md.direction === 'down' ? '≤' : '≥'} {fmt(md.target)}
-          </span>
-        ) : null}
-        {hypothesis.measure_after ? (
-          <>
-            <span className="text-border">·</span>
-            <span>{hypothesis.measure_after.slice(0, 10)}</span>
-          </>
-        ) : null}
-        {linkedCount > 0 ? (
-          <>
-            <span className="text-border">·</span>
-            <span>🔗 {linkedCount}</span>
-          </>
-        ) : null}
-        <span className="text-border">·</span>
-        <span>@{hypothesis.owner_member_id ? resolveName(hypothesis.owner_member_id) : t('owner')}</span>
-      </div>
-
-      {/* §12.2ⓑ: 초안이면 [초안 확인], 확인됨/휴먼 proposed면 같은 자리에 [활성화] 연속 노출. */}
-      {needsConfirm ? (
-        <div className="mt-2">
-          <button
-            type="button"
-            onClick={() => actions.onConfirmDraft(hypothesis)}
-            className="rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-foreground transition hover:border-primary hover:text-primary"
-          >
-            {t('confirmDraft')}
-          </button>
-        </div>
-      ) : canActivateInline ? (
-        <div className="mt-2">
-          <button
-            type="button"
-            onClick={() => actions.onActivate(hypothesis)}
-            className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-foreground transition hover:border-primary hover:text-primary"
-          >
-            <Play className="size-3" />
-            {t('activate')}
-          </button>
-        </div>
-      ) : canStartMeasuringInline ? (
-        <div className="mt-2">
-          <button
-            type="button"
-            onClick={() => actions.onStartMeasuring(hypothesis)}
-            title={hypothesis.measure_after ? t('startMeasuringHintWithDate', { date: hypothesis.measure_after.slice(0, 10) }) : t('startMeasuringHint')}
-            className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-foreground transition hover:border-primary hover:text-primary"
-          >
-            <Play className="size-3" />
-            {t('startMeasuring')}
-          </button>
-          {/* AC2: 동선의 의미를 문구로 — "측정 시작"이 언제부터 재는지 사람이 알 수 있게. */}
-          <p className="mt-1 text-editorial-meta text-muted-foreground">
-            {hypothesis.measure_after ? t('startMeasuringHintWithDate', { date: hypothesis.measure_after.slice(0, 10) }) : t('startMeasuringHint')}
-          </p>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function HypothesisActions({
-  hypothesis,
-  actions,
-  t,
-}: {
-  hypothesis: Hypothesis;
-  actions: HypothesisRowActions;
-  t: ReturnType<typeof useTranslations>;
-}) {
   // 활성화는 §12.2ⓑ대로 row 인라인에 노출(연속 흐름) — 메뉴엔 연결/kill/달성/반증만.
   const canKill = hypothesis.status === 'proposed' || hypothesis.status === 'active' || hypothesis.status === 'measuring';
   // story #2036 — 달성/반증은 measuring 상태에서만 열린다(BE 합법 전이가 measuring→verified|falsified뿐).
   const canResolve = hypothesis.status === 'measuring';
+  const entries: HypothesisMenuEntry[] = [
+    { id: 'link', icon: 'link', label: t('linkStory'), onSelect: () => actions.onLinkStory(hypothesis) },
+    ...(canResolve ? [
+      { id: 'verify' as const, icon: 'check_circle' as const, label: t('resolveVerify'), onSelect: () => actions.onResolve(hypothesis, 'verified') },
+      { id: 'falsify' as const, icon: 'do_not_disturb_on' as const, label: t('resolveFalsify'), onSelect: () => actions.onResolve(hypothesis, 'falsified') },
+    ] : []),
+    ...(canKill ? [{ id: 'kill' as const, icon: 'close' as const, label: t('kill'), danger: true, onSelect: () => actions.onKill(hypothesis) }] : []),
+  ];
+  const items = (): ReactNode => entries.map((e) => (
+    <MenuItem key={e.id} icon={e.icon} variant={e.danger ? 'danger' : 'default'} onClick={e.onSelect}>{e.label}</MenuItem>
+  ));
+
+  const inlineAction = needsConfirm ? (
+    <Button type="button" variant="secondary" onClick={() => actions.onConfirmDraft(hypothesis)}>{t('confirmDraft')}</Button>
+  ) : canActivateInline ? (
+    <Button type="button" variant="secondary" onClick={() => actions.onActivate(hypothesis)} iconStart={<Play className="size-3" aria-hidden />}>{t('activate')}</Button>
+  ) : canStartMeasuringInline ? (
+    <Button type="button" variant="secondary" onClick={() => actions.onStartMeasuring(hypothesis)} title={startHint} iconStart={<Play className="size-3" aria-hidden />}>{t('startMeasuring')}</Button>
+  ) : null;
+
+  // the second line's pieces: «지표 · 날짜 · 🔗 연결 수 · @담당» — each piece after the first carries its own dot and never splits from it (a wrapped line starts with a piece, not with a stray «·»)
+  const pieces: ReactNode[] = [
+    ...(md?.metric ? [<span key="m" className="tabular-nums">📈 {md.metric} {md.direction === 'down' ? '≤' : '≥'} {fmt(md.target)}</span>] : []),
+    ...(hypothesis.measure_after ? [<span key="d">{hypothesis.measure_after.slice(0, 10)}</span>] : []),
+    ...(linkedCount > 0 ? [<span key="l">🔗 {linkedCount}</span>] : []),
+    <span key="o">@{hypothesis.owner_member_id ? resolveName(hypothesis.owner_member_id) : t('owner')}</span>,
+  ];
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        aria-label={t('actions')}
-        className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-      >
-        <MoreHorizontal className="size-4" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-44">
-        <DropdownMenuItem onClick={() => actions.onLinkStory(hypothesis)}>
-          <Link2 className="mr-2 size-4" />
-          {t('linkStory')}
-        </DropdownMenuItem>
-        {canResolve ? (
-          <>
-            <DropdownMenuItem onClick={() => actions.onResolve(hypothesis, 'verified')} className="text-success focus:text-success">
-              <CheckCircle2 className="mr-2 size-4" />
-              {t('resolveVerify')}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => actions.onResolve(hypothesis, 'falsified')} className="text-info focus:text-info">
-              <CircleSlash className="mr-2 size-4" />
-              {t('resolveFalsify')}
-            </DropdownMenuItem>
-          </>
-        ) : null}
-        {canKill ? (
-          <DropdownMenuItem onClick={() => actions.onKill(hypothesis)} className="text-destructive focus:text-destructive">
-            <XCircle className="mr-2 size-4" />
-            {t('kill')}
-          </DropdownMenuItem>
-        ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <div data-testid="hypothesis-row" data-status={hypothesis.status} className="overflow-hidden rounded-ds-control border border-ds-line">
+      <ContextMenu>
+        {/* the whole row (text AND its action cluster) is the right-click target; the cluster sits to the right of the text when the card is wide and under it when it is narrow (container query — a goal card can be as narrow as a phone) */}
+        <ContextMenuTrigger render={<div className="@container" />}>
+          <div className="flex flex-col @lg:flex-row @lg:items-start">
+            <ListRow
+              className="min-w-0 flex-1 items-start border-b-0"
+              leading={(
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <HypothesisStatusBadge status={hypothesis.status} />
+                  {needsConfirm ? <Chip tone="neutral" className="border-dashed">{t('draftPin')}</Chip> : null}
+                </span>
+              )}
+              title={<span className={cn('line-clamp-2 whitespace-normal font-normal leading-6', killed && 'text-ds-ink-3 line-through')}>{hypothesis.statement}</span>}
+              subtitle={(
+                <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 whitespace-normal">
+                  {pieces.map((piece, i) => (i === 0 ? piece : <span key={`p${i}`} className="whitespace-nowrap"><span aria-hidden>· </span>{piece}</span>))}
+                </span>
+              )}
+            />
+            <div className="flex shrink-0 items-center gap-2 px-4 pb-2 @lg:py-2 @lg:pl-0 @lg:pr-3">
+              {inlineAction}
+              <Menu>
+                <MenuTrigger render={<IconButton icon="more_horiz" label={t('actions')} />} />
+                <MenuContent align="end">{items()}</MenuContent>
+              </Menu>
+            </div>
+          </div>
+          {/* AC2: 동선의 의미를 문구로 — "측정 시작"이 언제부터 재는지 사람이 알 수 있게(행 안의 한 줄 — 우클릭 대상 안, codex 1차). */}
+          {canStartMeasuringInline ? <p data-testid="hypothesis-start-hint" className="border-t border-ds-line px-4 py-1.5 text-ds-small text-ds-ink-3">{startHint}</p> : null}
+        </ContextMenuTrigger>
+        <MenuContent align="start">{items()}</MenuContent>
+      </ContextMenu>
+    </div>
   );
 }

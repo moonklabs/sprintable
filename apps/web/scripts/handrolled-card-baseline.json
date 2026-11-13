@@ -190,7 +190,6 @@
     "components/hypotheses/hypothesis-resolve-dialog.tsx::max-h-[40vh] min-h-0 overflow-y-auto rounded-lg border border-border/60 bg-muted/20 px-3 py-2",
     "components/hypotheses/hypothesis-resolve-dialog.tsx::w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm tabular-nums text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary",
     "components/hypotheses/hypothesis-resolve-dialog.tsx::w-full rounded-xl border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary",
-    "components/hypotheses/hypothesis-row.tsx::rounded-xl border border-border bg-background px-3 py-2.5",
     "components/hypotheses/story-hypotheses-section.tsx::flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5",
     "components/hypotheses/story-hypotheses-section.tsx::space-y-2 rounded-lg border border-border bg-background p-2",
     "components/hypotheses/story-hypotheses-section.tsx::space-y-2 rounded-xl border border-border bg-muted/20 p-3",

@@ -45,36 +45,37 @@ export function HypothesisVerdictCard({
     : result?.scored_at ? t('closedByAuto') : null;
 
   return (
+    // 4909 AC3 (가설 칸 2단계) — the verdict card on the ds tokens: the pair keeps its colours (verified = done green · falsified = info blue, never failed red) as a soft face over the card, the delta readout is unchanged.
     <div
       role="group"
+      data-testid="hypothesis-verdict"
+      data-verdict={hypothesis.status}
       className={cn(
-        'rounded-2xl border p-4 animate-in fade-in duration-500',
-        isVerified ? 'border-success-border bg-success-tint' : 'border-info-border bg-info-tint',
+        'rounded-ds-control border border-ds-line p-4 animate-in fade-in duration-500',
+        isVerified ? 'bg-ds-done-soft' : 'bg-ds-info-soft',
       )}
     >
       <div className="flex items-center justify-between gap-2">
-        {/* tint-guard-ok: same-family verdict tint, AA 양테마 success 4.56/6.54·info 5.54/4.81 — 색=검증 semantic(PO §12.1). success 라이트 4.56 = AA 마진 +0.06 — --proof-green 밝힐 때 이 자리 재측 필수 */}
-        <span className={cn('flex items-center gap-1.5 text-sm font-semibold', isVerified ? 'text-success' : 'text-info')}>
+        <span className={cn('flex items-center gap-1.5 text-ds-body font-semibold', isVerified ? 'text-ds-done' : 'text-ds-info')}>
           <span aria-hidden>{isVerified ? '✓' : '⊘'}</span>
           {isVerified ? t('statusVerified') : t('statusFalsified')}
         </span>
         {result?.scored_at ? (
-          <span className="text-editorial-meta text-muted-foreground">{t('scoredOn', { date: result.scored_at.slice(0, 10) })}</span>
+          <span className="text-ds-small text-ds-ink-3">{t('scoredOn', { date: result.scored_at.slice(0, 10) })}</span>
         ) : null}
       </div>
 
-      <p className="mt-3 text-sm leading-6 text-foreground">{hypothesis.statement}</p>
+      <p className="mt-3 text-ds-body leading-6 text-ds-ink">{hypothesis.statement}</p>
 
       {result && typeof result.target === 'number' && typeof result.actual === 'number' ? (
         <>
-          <div className="mt-4 flex items-baseline justify-between gap-3 text-sm">
-            <span className="tabular-nums text-muted-foreground">
+          <div className="mt-4 flex items-baseline justify-between gap-3 text-ds-body">
+            <span className="tabular-nums text-ds-ink-3">
               {t('target')} {result.direction === 'down' ? '≤' : '≥'} {fmt(result.target)}
             </span>
-            <span className="tabular-nums text-muted-foreground">
+            <span className="tabular-nums text-ds-ink-3">
               {t('actual')}{' '}
-              {/* tint-guard-ok: same-family success on success-tint, AA 양테마 4.56/6.54(위와 같은 근거·마진 주의) */}
-              <span className={cn('font-semibold', isVerified ? 'text-success' : 'text-foreground')}>{fmt(result.actual)}</span>
+              <span className={cn('font-semibold', isVerified ? 'text-ds-done' : 'text-ds-ink')}>{fmt(result.actual)}</span>
             </span>
           </div>
           <DeltaTrack target={result.target} actual={result.actual} isVerified={isVerified} />
@@ -82,10 +83,10 @@ export function HypothesisVerdictCard({
       ) : null}
 
       {result?.reason ? (
-        <p className="mt-3 text-xs leading-5 text-muted-foreground">&ldquo;{result.reason}&rdquo;</p>
+        <p className="mt-3 text-ds-small leading-5 text-ds-ink-2">&ldquo;{result.reason}&rdquo;</p>
       ) : null}
       {closedByLabel ? (
-        <p className="mt-1.5 text-editorial-meta text-muted-foreground">{closedByLabel}</p>
+        <p className="mt-1.5 text-ds-small text-ds-ink-3">{closedByLabel}</p>
       ) : null}
     </div>
   );
@@ -97,13 +98,13 @@ function DeltaTrack({ target, actual, isVerified }: { target: number; actual: nu
   const offset = Math.max(-42, Math.min(42, ((actual - target) / scale) * 42));
   return (
     <div className="mt-3" aria-hidden>
-      <div className="relative h-px w-full bg-border">
-        <span className="absolute top-1/2 h-2.5 w-px -translate-y-1/2 bg-muted-foreground/60" style={{ left: '50%' }} />
+      <div className="relative h-px w-full bg-ds-line">
+        <span className="absolute top-1/2 h-2.5 w-px -translate-y-1/2 bg-ds-ink-3" style={{ left: '50%' }} />
         <span
           className={cn(
-            'absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-background',
+            'absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-ds-surface',
             'animate-in fade-in slide-in-from-left-1 duration-700',
-            isVerified ? 'bg-success' : 'bg-info',
+            isVerified ? 'bg-ds-done' : 'bg-ds-info',
           )}
           style={{ left: `${50 + offset}%` }}
         />
