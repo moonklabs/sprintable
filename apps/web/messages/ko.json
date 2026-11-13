@@ -6890,7 +6890,7 @@
     "galleryGroupOption": "{label} · {count}개",
     "viewerVersionSelectLabel": "보는 판",
     "detailThreadsHeading": "코멘트",
-    "viewerCanvasHint": "드래그로 이동, 휠로 확대·축소해요",
+    "viewerCanvasHint": "드래그로 이동, 휠로 확대·축소해요. 더블클릭하면 전체 보기와 실제 크기가 바뀌고, 그림에 초점을 두고 0 · 1 키로도 바꿀 수 있어요.",
     "viewerCanvasHintTouch": "한 손가락으로 이동하고, 두 손가락으로 확대·축소해요. 더블탭하면 화면에 맞춰요.",
     "viewerFitAction": "전체 보기",
     "viewerActualSizeAction": "실제 크기",
