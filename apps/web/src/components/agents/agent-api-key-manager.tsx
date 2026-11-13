@@ -46,6 +46,8 @@ interface AgentApiKeyManagerProps {
   onKeysRead?: (activeCount: number) => void;
   /** story 4912 (B1): inside the «키 관리» panel the panel's own title names the agent — the card skips its title + description (the buttons and everything else stay). */
   compact?: boolean;
+  /** story 4912 (B1, codex): true from the moment a new key is being issued (the old keys may already be revoked) until the create answer is in. The «키 관리» panel does not close in that window — closing unmounts this card, and a create answer with nobody to show it to is a key that exists and can never be read. */
+  onIssuingChange?: (issuing: boolean) => void;
 }
 
 /**
@@ -57,7 +59,7 @@ export function AgentApiKeyManager(props: AgentApiKeyManagerProps) {
   return <AgentApiKeyManagerCard key={props.agentId} {...props} />;
 }
 
-function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKeysRead, compact = false }: AgentApiKeyManagerProps) {
+function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKeysRead, compact = false, onIssuingChange }: AgentApiKeyManagerProps) {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
   const locale = useLocale();
@@ -137,7 +139,8 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
   const refreshRef = useRef<HTMLButtonElement>(null); // this card's own [새로고침] (the API-key page holds several cards — never a global lookup)
   // the callback lives in a ref: a parent that passes a new function every render must not re-run the load (the load effect depends on loadApiKeys)
   const onKeysReadRef = useRef(onKeysRead);
-  useEffect(() => { onKeysReadRef.current = onKeysRead; });
+  const onIssuingChangeRef = useRef(onIssuingChange);
+  useEffect(() => { onKeysReadRef.current = onKeysRead; onIssuingChangeRef.current = onIssuingChange; });
   const loadApiKeys = useCallback(async () => {
     if (!agentId) return;
     const seq = ++readSeq.current;
@@ -180,6 +183,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
     if (!agentId) return;
     const heldGen = keyGenRef.current;
     setLoading(true);
+    onIssuingChangeRef.current?.(true);
     try {
       const response = await fetchWithAuth(`/api/agents/${agentId}/api-key`, {
         method: 'POST',
@@ -205,6 +209,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
       });
     } finally {
       setLoading(false);
+      onIssuingChangeRef.current?.(false);
     }
   };
 
@@ -212,6 +217,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
     if (!agentId) return;
     setRevokeConfirmDialog(false);
     setLoading(true);
+    onIssuingChangeRef.current?.(true); // the old keys are being revoked: from here until the new key's answer the panel stays
     try {
       await Promise.all(
         activeKeys.map((key) =>

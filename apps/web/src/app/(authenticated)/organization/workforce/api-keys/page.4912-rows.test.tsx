@@ -7,12 +7,13 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../../messages/ko.json';
-import ApiKeysPage, { summarizeKeys } from './page';
+import ApiKeysPage from './page';
+import { summarizeKeys } from '@/components/agents/api-key-summary';
 
 vi.mock('@/components/nav/top-bar-slot', () => ({ TopBarSlot: () => null }));
-const { managerProps } = vi.hoisted(() => ({ managerProps: { current: [] as Array<{ agentId: string; compact?: boolean }> } }));
+const { managerProps } = vi.hoisted(() => ({ managerProps: { current: [] as Array<{ agentId: string; compact?: boolean; onIssuingChange?: (b: boolean) => void }> } }));
 vi.mock('@/components/agents/agent-api-key-manager', () => ({
-  AgentApiKeyManager: (props: { agentId: string; compact?: boolean }) => { managerProps.current.push(props); return <div data-testid="stub-agent-api-key-manager" data-agent-id={props.agentId} />; },
+  AgentApiKeyManager: (props: { agentId: string; compact?: boolean; onIssuingChange?: (b: boolean) => void }) => { managerProps.current.push(props); return <div data-testid="stub-agent-api-key-manager" data-agent-id={props.agentId} />; },
 }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -78,7 +79,7 @@ describe('API 키 화면 줄(story 4912 · B1)', () => {
     expect(sub('a3')).not.toBe(S.agentApiKeyRowNone); // a failed read is not an empty list
   });
 
-  it('⭐줄 하나가 «키 관리»로 패널을 연다 — 단추 · Enter · 더블클릭 · 우클릭 메뉴 모두 같은 일 · 패널엔 키 관리자가 compact로 한 에이전트만', async () => {
+  it('⭐줄 하나가 «키 관리»로 패널을 연다 — 단추 · Enter · 더블클릭이 같은 일 · 패널엔 키 관리자가 compact로 한 에이전트만', async () => {
     stub({});
     await mount();
     expect(document.querySelector('[data-testid="api-key-panel"]')).toBeNull();
@@ -115,4 +116,22 @@ describe('API 키 화면 줄(story 4912 · B1)', () => {
     await settle();
     expect(keyReads.filter((x) => x === 'a1').length).toBe(2); // closed: the row read again
   });
+
+  it('⭐새 키를 만드는 동안(옛 키는 이미 무효) 패널은 닫히지 않는다 — 닫으면 키 관리자가 사라져 «만들어졌는데 아무도 못 보는 키»가 생긴다(codex) · 답이 오면 닫힌다', async () => {
+    stub({ a1: [] });
+    await mount();
+    await act(async () => { (row('a1').querySelector('button:not([data-slot="ds-row-actions-trigger"])') as HTMLElement).click(); });
+    await settle();
+    const props = managerProps.current.at(-1)!;
+    await act(async () => { props.onIssuingChange?.(true); });
+    await act(async () => { document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    await settle();
+    expect(document.querySelector('[data-testid="api-key-panel"]'), 'issuing: Esc does not close the panel').not.toBeNull();
+    expect(document.querySelector('[data-testid="stub-agent-api-key-manager"]')).not.toBeNull();
+    await act(async () => { props.onIssuingChange?.(false); });
+    await act(async () => { document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    await settle();
+    expect(document.querySelector('[data-testid="api-key-panel"]')).toBeNull();
+  });
 });
+

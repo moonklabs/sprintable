@@ -17,6 +17,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { memberOrAgentLabel, memberRowLabels } from '@/lib/member-display';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
+import { summarizeKeys, type KeyRecord, type KeySummary } from '@/components/agents/api-key-summary';
 
 interface Agent {
   id: string;
@@ -26,33 +27,6 @@ interface Agent {
   // story #3994 — 「시스템 발행」은 키를 발급받을 연결 대상이 아니다(제외, AC4와
   // 같은 결 — "고를 자리에 실익 없는 행을 안 둔다").
   runtime_type?: string | null;
-}
-
-interface KeyRecord {
-  id: string;
-  last_used_at: string | null;
-  revoked_at: string | null;
-  expires_at: string | null;
-}
-
-// story 4912 (B1) — what a row says about the agent's keys: loading · the read FAILED (not «no key» — a failed read is not an empty list) · or how many are active / when last used / expiring within 7 days
-type KeySummary =
-  | { state: 'loading' }
-  | { state: 'failed' }
-  | { state: 'ok'; active: number; lastUsedAt: string | null; expiresInDays: number | null };
-
-export function summarizeKeys(keys: KeyRecord[], now = Date.now()): Extract<KeySummary, { state: 'ok' }> {
-  const active = keys.filter((k) => !k.revoked_at);
-  let lastUsedAt: string | null = null;
-  for (const k of active) if (k.last_used_at && (!lastUsedAt || k.last_used_at > lastUsedAt)) lastUsedAt = k.last_used_at;
-  // the same rule the key line used to wear: «⚠ n일 뒤 만료» within 7 days (an already expired key is not «expiring»)
-  let expiresInDays: number | null = null;
-  for (const k of active) {
-    if (!k.expires_at) continue;
-    const days = Math.ceil((new Date(k.expires_at).getTime() - now) / (1000 * 60 * 60 * 24));
-    if (days > 0 && days <= 7 && (expiresInDays === null || days < expiresInDays)) expiresInDays = days;
-  }
-  return { state: 'ok', active: active.length, lastUsedAt, expiresInDays };
 }
 
 /** One agent = one row. The row reads that agent's key list itself (the card used to, one read per agent — the same number of reads), and re-reads when the panel closes (`reloadToken`). */
@@ -112,6 +86,8 @@ export default function ApiKeysPage() {
   // story 4912 (B1): the «키 관리» panel holds ONE agent at a time; closing it re-reads the rows' key summaries
   const [openAgentId, setOpenAgentId] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  // story 4912 (B1, codex): while a new key is being issued the panel does not close (closing would unmount the key manager and drop the one answer that carries the new key)
+  const [issuing, setIssuing] = useState(false);
   // [SID:4311 PR 3] 에이전트 칸 머리 — 같은 이름 둘이면 «· ID 앞 8자» · 이름 빔 = «이름 없는 에이전트»(목록 행 규칙 한 곳).
   const agentLabels = useMemo(() => memberRowLabels(agents, tc, () => '', (a) => memberOrAgentLabel(a, tc)), [agents, tc]);
 
@@ -159,11 +135,11 @@ export default function ApiKeysPage() {
         </RowList>
       )}
 
-      <Panel open={openAgent !== null} onOpenChange={(open) => { if (!open) { setOpenAgentId(null); setReloadToken((n) => n + 1); } }}>
+      <Panel open={openAgent !== null} onOpenChange={(open) => { if (!open && !issuing) { setOpenAgentId(null); setReloadToken((n) => n + 1); } }}>
         <PanelContent aria-label={t('agentApiKeyManageTitle', { name: openLabel })} data-testid="api-key-panel">
           <PanelHeader><DialogTitle>{t('agentApiKeyManageTitle', { name: openLabel })}</DialogTitle></PanelHeader>
           <PanelBody>
-            {openAgent ? <AgentApiKeyManager agentId={openAgent.id} agentName={openAgent.name ?? ''} agentLabel={openLabel} compact /> : null}
+            {openAgent ? <AgentApiKeyManager agentId={openAgent.id} agentName={openAgent.name ?? ''} agentLabel={openLabel} compact onIssuingChange={setIssuing} /> : null}
           </PanelBody>
         </PanelContent>
       </Panel>
