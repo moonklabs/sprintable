@@ -18,6 +18,7 @@ const PROJECTS = [{ id: 'p-1', name: '알파' }, { id: 'p-2', name: '베타' }, 
 let container: HTMLDivElement;
 let root: Root;
 let answers: Record<string, () => Response | Promise<Response>>;
+let postAnswer: () => Response | Promise<Response>;
 beforeEach(() => {
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   answers = {
@@ -26,10 +27,12 @@ beforeEach(() => {
     'p-3': () => new Response('{}', { status: 403 }), // read denied
     'p-4': () => new Response('{}', { status: 500 }), // transient error → retry
   };
+  postAnswer = () => new Response(JSON.stringify({ data: { id: 'r-9' } }), { status: 201 });
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const m = String(input).match(/^\/api\/projects\/(p-\d)\/access(?:\/(.+))?$/);
     if (m && !init?.method) return answers[m[1]!]!();
     if (m && init?.method === 'DELETE') return new Response('{}', { status: 500 });
+    if (m && init?.method === 'POST') return postAnswer();
     return new Response('{}', { status: 404 });
   }));
 });
@@ -78,6 +81,35 @@ describe('AgentProjectAccessSection — ds 한 층(story 4912 · C2c)', () => {
     expect(banner.getAttribute('role')).toBe('alert');
     expect(banner.getAttribute('data-tone')).toBe('failed');
     expect(banner.textContent).toContain('알파');
+    expect(banner.querySelector('[aria-live], [role]'), 'ONE live region: the Banner\'s own role, no nested aria-live / role inside').toBeNull();
+  });
+
+  it('⭐성공 메시지는 ds Banner info = role=status(옛 Alert success · polite) — 겹친 live 영역 없이 겉 role 하나 · 눌러 «허용»으로 바뀐다', async () => {
+    await mount();
+    await act(async () => { (rowOf('베타').querySelector('button') as HTMLElement).click(); }); // POST → 201 → allowed
+    await settle();
+    const banner = card().querySelector('[data-slot="ds-banner"]') as HTMLElement;
+    expect(banner.getAttribute('role')).toBe('status');
+    expect(banner.getAttribute('data-tone')).toBe('info');
+    expect(banner.textContent).toContain('베타');
+    expect(banner.querySelector('[aria-live], [role]')).toBeNull();
+    expect(rowOf('베타').querySelector('button')?.textContent).toContain(S.projectAccessAllowed);
+  });
+
+  it('⭐누른 줄의 토글은 요청이 나가 있는 동안 disabled(다른 줄은 그대로 — 한 번에 하나) · 허용 줄은 done 틴트 클래스, 차단 줄은 중립', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    postAnswer = async () => { await gate; return new Response(JSON.stringify({ data: { id: 'r-9' } }), { status: 201 }); };
+    await mount();
+    const allowed = rowOf('알파').querySelector('button') as HTMLButtonElement;
+    const blocked = rowOf('베타').querySelector('button') as HTMLButtonElement;
+    expect(allowed.className).toContain('bg-ds-done-soft');
+    expect(blocked.className).not.toContain('bg-ds-done-soft');
+    expect(blocked.className).toContain('min-w-[72px]');
+    await act(async () => { blocked.click(); });
+    expect((rowOf('베타').querySelector('button') as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { release(); }); await settle();
+    expect((rowOf('베타').querySelector('button') as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('⭐읽는 동안은 ds Skeleton 묶음(손으로 그린 animate-pulse 아님)이고, 프로젝트가 없으면 점선 빈 칸 글', async () => {

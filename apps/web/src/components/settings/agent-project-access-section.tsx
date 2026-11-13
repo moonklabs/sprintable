@@ -144,12 +144,9 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
         {message && (
           // story #2105 2차 — handleToggle이 재시도 전 setMessage(null)을 먼저 호출해(위 정의) 매
           // 시도마다 언마운트→리마운트된다. 에러=alert/assertive, 성공=status/polite.
-          // story 4912 (C2b): the ds Banner carries the same roles (failed = alert · info = status); the live-region attributes stay explicit.
-          <Banner
-            tone={message.type === 'success' ? 'info' : 'failed'}
-            className="rounded-ds-control"
-          >
-            <span aria-live={message.type === 'success' ? 'polite' : 'assertive'} aria-atomic="true">{message.text}</span>
+          // story 4912 (C2c): the ds Banner carries the role (failed = alert · info = status) — role=alert already means assertive + atomic, role=status polite + atomic. A second aria-live on an inner element made the same text a nested live region (read twice); there is ONE live region now (PO + codex).
+          <Banner tone={message.type === 'success' ? 'info' : 'failed'} className="rounded-ds-control">
+            {message.text}
           </Banner>
         )}
 
