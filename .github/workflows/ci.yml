@@ -284,7 +284,7 @@ jobs:
     services:
       postgres:
         # pgvector image: the baseline schema declares `CREATE EXTENSION vector` (embeddings),
-        # which the stock postgres:16 image lacks. Cloud SQL (dev/prod) has pgvector available.
+        # which the stock postgres image lacks. The dev/prod VM database is this same pgvector image.
         # Pinned by DIGEST and it is the SAME image dev and prod run (pgvector pg15, PostgreSQL 15.19 — deploy/vm/compose.yml): the floating `pg16` tag moved to 16.16 on 2026-11-12 23:08Z and the
         # schema-dump comparisons (test_3804 · test_4010) turned red with per-column `pg_attver=N` values — a tag that changes under us changes the test run; and a prod promotion rehearsal that runs
         # on a different major than prod proves less. EVERY service image in this file uses this same digest (guard: backend/tests/test_ci_pgvector_image_pinned.py); to move to a newer image,
@@ -1686,7 +1686,7 @@ jobs:
     services:
       postgres:
         # pgvector image: the baseline schema declares `CREATE EXTENSION vector` (embeddings),
-        # which the stock postgres:16 image lacks. Cloud SQL (dev/prod) has pgvector available.
+        # which the stock postgres image lacks. The dev/prod VM database is this same pgvector image.
         image: pgvector/pgvector:pg15@sha256:47af0b65960b14f1c6945aa4ccae37836c632e9a6fe0eea9160936e616e5b2e9
         env:
           POSTGRES_USER: sprintable
