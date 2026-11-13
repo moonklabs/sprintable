@@ -48,9 +48,9 @@ async function openKeyShownDialog() {
   stubFetch();
   await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" /></NextIntlClientProvider>); });
   await settle();
-  await act(async () => { btn(S.agentApiKeyGenerate)?.click(); });
+  await act(async () => { btn(S.agentApiKeyReplaceCta)?.click(); });
   await settle();
-  const confirmBtn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('새 키 발급') && b !== btn(S.agentApiKeyGenerate));
+  const confirmBtn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('새 키 발급') && b !== btn(S.agentApiKeyReplaceCta));
   expect(confirmBtn, 'the revoke-and-reissue confirm button is there').toBeTruthy();
   await act(async () => { confirmBtn?.click(); });
   await settle();
@@ -111,9 +111,9 @@ describe('AgentApiKeyManager — 4912 D4: the other things that could hold the k
     }));
     await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" /></NextIntlClientProvider>); });
     await settle();
-    await act(async () => { btn(S.agentApiKeyGenerate)?.click(); });
+    await act(async () => { btn(S.agentApiKeyReplaceCta)?.click(); });
     await settle();
-    const confirmBtn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('새 키 발급') && b !== btn(S.agentApiKeyGenerate));
+    const confirmBtn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('새 키 발급') && b !== btn(S.agentApiKeyReplaceCta));
     await act(async () => { confirmBtn?.click(); });
     await settle(); // the key dialog is open, the POST is still out
     await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
@@ -168,6 +168,71 @@ describe('AgentApiKeyManager — 4912 D4: the other things that could hold the k
     await act(async () => { btn(S.agentApiKeyRefresh)?.click(); });
     await settle();
     expect(calls).toEqual([1]); // the failed read said nothing
+  });
+
+  it('⭐단추는 하는 일 그대로의 이름이다 — 키가 있으면 «새 키로 바꾸기»(누르면 무효화 확인), 키가 없으면 «API 키 발급»', async () => {
+    stubFetch(); // one active key is listed
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" /></NextIntlClientProvider>); });
+    await settle();
+    expect(btn(S.agentApiKeyReplaceCta)).toBeTruthy();
+    expect(btn(S.agentApiKeyGenerate)).toBeUndefined();
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 })));
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" /></NextIntlClientProvider>); });
+    await settle();
+    expect(btn(S.agentApiKeyGenerate)).toBeTruthy();
+    expect(btn(S.agentApiKeyReplaceCta)).toBeUndefined();
+  });
+
+  it('⭐compact: 패널 안에서는 카드가 자기 제목 · 설명을 그리지 않는다(패널 제목이 에이전트 이름) — 단추는 그대로', async () => {
+    stubFetch();
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" compact /></NextIntlClientProvider>); });
+    await settle();
+    expect(container.querySelector('h3')).toBeNull();
+    expect(container.textContent).not.toContain(S.agentApiKeyListDescription);
+    expect(btn(S.agentApiKeyReplaceCta)).toBeTruthy();
+  });
+
+  it('⭐onIssuingChange: 새 키를 만드는 동안 true(바꾸기는 옛 키를 무효화하는 순간부터) · 답이 오면 false · 만들기가 실패해도 false(패널이 영영 안 닫히지 않게)', async () => {
+    const calls: boolean[] = [];
+    let answer!: (r: Response) => void;
+    const postGate = new Promise<Response>((res) => { answer = res; });
+    let finishRevoke!: () => void;
+    const deleteGate = new Promise<void>((res) => { finishRevoke = res; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes('/api-key') && init?.method === 'POST') return postGate;
+      if (u.includes('/api-key') && init?.method === 'DELETE') { await deleteGate; return new Response('{}', { status: 200 }); }
+      if (u.includes('/api-key')) return new Response(JSON.stringify({ data: [{ id: 'key-1', key_prefix: 'sk_live_abcd', created_at: '2026-08-01T00:00:00Z', last_used_at: null, revoked_at: null, expires_at: null, scope: ['stories'] }] }), { status: 200 });
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    }));
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" onIssuingChange={(b) => calls.push(b)} /></NextIntlClientProvider>); });
+    await settle();
+    expect(calls).toEqual([]);
+    await act(async () => { btn(S.agentApiKeyReplaceCta)?.click(); });
+    await settle();
+    expect(calls).toEqual([]); // the confirm is only asked — nothing is revoked yet
+    const confirmBtn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('새 키 발급') && b !== btn(S.agentApiKeyReplaceCta));
+    await act(async () => { confirmBtn?.click(); });
+    await settle();
+    expect(calls).toEqual([true]); // the old key is being revoked (the DELETE is still out): the panel must already stay
+    await act(async () => { finishRevoke(); });
+    await settle();
+    expect(calls.at(-1)).toBe(true); // the create answer is still out
+    await act(async () => { answer(new Response(JSON.stringify({ data: { api_key: NEW_KEY, mcp_config: MCP } }), { status: 201 })); });
+    await settle();
+    expect(calls.at(-1)).toBe(false);
+    // a FAILED create ends it too
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    calls.length = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => (String(url).includes('/api-key') && init?.method === 'POST' ? new Response('{}', { status: 500 }) : new Response(JSON.stringify({ data: [] }), { status: 200 }))));
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" onIssuingChange={(b) => calls.push(b)} /></NextIntlClientProvider>); });
+    await settle();
+    await act(async () => { btn(S.agentApiKeyGenerate)?.click(); });
+    await settle();
+    expect(calls).toEqual([true, false]);
   });
 });
 
