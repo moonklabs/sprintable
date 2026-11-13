@@ -172,6 +172,37 @@ describe('채널(채팅 흐름) — 한 쪽 틀(story 4913)', () => {
     expect(container.querySelector('[data-testid="channel-file-strip"]')?.textContent).toContain('report.pdf');
   });
 
+  it('⭐거절을 기다리는 사이 새 글을 쓰기 시작했으면 — 새 글은 그대로, 거절된 옛 글이 그 앞에 붙는다(덮어쓰지 않고 잃지도 않는다)', async () => {
+    let release!: () => void; const gate = new Promise<void>((r) => { release = r; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).includes('/api/channel/token')) return new Response(JSON.stringify({ token: 't', backend_origin: 'https://api.test' }), { status: 200 });
+      if (String(url).includes('/api/channel/deliver')) { await gate; return new Response('{}', { status: 500 }); }
+      return new Response('{}', { status: 200 });
+    }));
+    await mount();
+    await act(async () => { ws().drop(); });
+    await act(async () => { typeInto('먼저 보낸 글'); });
+    await act(async () => { (container.querySelector('[data-testid="channel-send"]') as HTMLButtonElement).click(); });
+    await act(async () => { typeInto('그 사이 쓰는 새 글'); }); // typed while the request is still out
+    await act(async () => { release(); });
+    await settle();
+    expect(box().value).toBe('먼저 보낸 글\n그 사이 쓰는 새 글');
+    expect(container.querySelector('[data-testid="channel-send-failed"]')).not.toBeNull();
+  });
+
+  it('⭐상태 낱말은 칩 하나 — 연결 중에는 목록이 따로 «연결 중»을 말하지 않고, 토큰을 못 읽으면 칩이 «연결 중»이 아니라 «연결 끊김»이다', async () => {
+    await mount();
+    expect(container.querySelector('[data-testid="channel-messages"]')?.textContent ?? '').not.toContain('연결 중');
+    expect(container.querySelector('[data-testid="channel-messages"]')?.textContent ?? '').not.toContain(C.empty);
+    expect(status()?.textContent).toBe(C.statusConnecting);
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    tokenOk = false;
+    await mount();
+    expect(status()?.textContent).toBe(C.statusDisconnected);
+    expect(container.querySelector('[data-testid="channel-token-failed"]')).not.toBeNull();
+  });
+
   it('⭐보내기가 받아지면 실패 띠 없이 칸이 비고, 빈 글이면 전송 단추가 꺼져 있다', async () => {
     await mount();
     await act(async () => { ws().drop(); });

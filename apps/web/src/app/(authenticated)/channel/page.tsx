@@ -155,8 +155,13 @@ export default function ChannelPage() {
     setPendingFile(null);
     setReplyTo(null);
 
-    // story 4913 — what the person wrote comes back into the field when the send is refused (it used to be cleared first and lost)
-    const restore = () => { setInput(text); setPendingFile(file); setReplyTo(reply); setSendFailed(true); };
+    // story 4913 — what the person wrote comes back into the field when the send is refused (it used to be cleared first and lost). The request took time: they may have started a new draft since — that one stays, the old words go in front of it (nothing is overwritten, nothing is lost)
+    const restore = () => {
+      setInput((cur) => (cur ? `${text}\n${cur}` : text));
+      setPendingFile((cur) => cur ?? file);
+      setReplyTo((cur) => cur ?? reply);
+      setSendFailed(true);
+    };
     try {
       if (file) {
         const fd = new FormData();
@@ -203,7 +208,8 @@ export default function ChannelPage() {
     );
   }
 
-  const status = STATUS_CHIP[wsStatus];
+  // the one status word: a token that could not be read is «not connected» (the chip must not say «연결 중» next to the failure banner)
+  const status = STATUS_CHIP[tokenFailed ? 'disconnected' : wsStatus];
   const replyPreview = replyTo ? toPlainPreview(messages.find((m) => m.id === replyTo)?.content ?? '').slice(0, 40) || t('attachment') : null;
 
   return (
@@ -225,10 +231,9 @@ export default function ChannelPage() {
         {/* story #4130 — 아래 입력 영역이 하단 고정 툴바 역할이라 로컬 min-h-0/flex-1/overflow-hidden 경계를 두지 않는다(셸의 단일 스크롤러가 메시지 목록을 스크롤) · 입력 영역은 sticky bottom-0.
             scrollIntoView() 기반 자동 스크롤은 실제 스크롤 컨테이너가 바뀌어도 DOM API가 스스로 찾아가므로 영향 없음. */}
         <section aria-label={t('title')} role="log" aria-live="polite" aria-relevant="additions" className="flex flex-1 flex-col gap-3" data-testid="channel-messages">
-          {messages.length === 0 && (
-            <p className="py-8 text-center text-ds-body text-ds-ink-3">
-              {wsStatus === 'connecting' ? t('connecting') : t('empty')}
-            </p>
+          {/* the connection state is the chip's alone (one status word on the page): while connecting the list says nothing */}
+          {messages.length === 0 && (wsStatus === 'connected' || wsStatus === 'disconnected') && (
+            <p className="py-8 text-center text-ds-body text-ds-ink-3">{t('empty')}</p>
           )}
           {messages.map((msg) => {
             const isOwn = msg.senderId === currentTeamMemberId;

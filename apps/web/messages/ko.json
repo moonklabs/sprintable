@@ -364,7 +364,6 @@
   "channel": {
     "title": "채널 채팅",
     "missingAgentId": "어떤 에이전트의 채널인지 지정되지 않았어요. 워크포스에서 에이전트를 골라 다시 열어 주세요.",
-    "connecting": "연결 중…",
     "empty": "메시지가 없어요.",
     "attachment": "첨부 파일",
     "reply": "답장",
@@ -379,7 +378,7 @@
     "statusDisconnected": "연결 끊김",
     "disconnectedNote": "연결이 끊겨 있어요. 보내는 글은 서버로 바로 전달돼요.",
     "connectFailed": "채널에 연결하지 못했어요.",
-    "sendFailed": "메시지를 보내지 못했어요. 글은 그대로 남겨 뒀어요. 다시 보내 주세요.",
+    "sendFailed": "메시지를 보내지 못했을 수 있어요. 글은 칸에 남겨 뒀어요 — 위 목록에서 확인한 뒤 다시 보내 주세요.",
     "inputLabel": "메시지"
   },
   "dashboard": {

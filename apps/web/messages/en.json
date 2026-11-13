@@ -364,7 +364,6 @@
   "channel": {
     "title": "Channel Chat",
     "missingAgentId": "No agent was specified for this channel. Pick an agent in Workforce and open it again.",
-    "connecting": "Connecting…",
     "empty": "No messages.",
     "attachment": "Attachment",
     "reply": "Reply",
@@ -379,7 +378,7 @@
     "statusDisconnected": "Disconnected",
     "disconnectedNote": "The connection is down. What you send goes to the server directly.",
     "connectFailed": "Couldn't connect to the channel.",
-    "sendFailed": "Couldn't send the message. Your text is still in the box — send it again.",
+    "sendFailed": "The message may not have been sent. Your text is still in the box — check the list above, then send it again.",
     "inputLabel": "Message"
   },
   "dashboard": {
