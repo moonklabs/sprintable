@@ -756,7 +756,10 @@ describe('ApprovalsQueue', () => {
     expect(buttonsAfter.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
     // 재조회(fetchGates) 없이 이 렌더만으로 반영됐다 — GET 호출 수가 mount 시점(pending+held
     // 각 1회=2)에서 늘지 않았다.
-    expect(calls.filter((c) => c.method === undefined || c.method === 'GET')).toHaveLength(2);
+    // counted per URL (PO 4909 2d-2): the approvals' two legs stay exactly 2, and the permission-request reader reads exactly ONCE — a second reader on the screen would show here as 2
+    const gets = calls.filter((c) => c.method === undefined || c.method === 'GET');
+    expect(gets.filter((c) => c.url.startsWith('/api/gates/inbox'))).toHaveLength(2);
+    expect(gets.filter((c) => c.url.startsWith('/api/agent-permission-requests'))).toHaveLength(1);
   });
 
   // story #2982(선생님 실사용 리포트, PO 확定 2026-08-24) — 이 큐의 stale items[] 스냅샷(주석
@@ -795,7 +798,10 @@ describe('ApprovalsQueue', () => {
     expect(container.textContent).toContain(koMessages.cage.queueResolvedApproved);
     // 재조회(GET) 없이 body의 current_status만으로 전환됐다 — mount 시점(pending+held=2)에서
     // POST 1건 추가된 것 외 GET 호출 수가 안 늘어야 한다.
-    expect(calls.filter((c) => c.method === undefined || c.method === 'GET')).toHaveLength(2);
+    // counted per URL (PO 4909 2d-2): the approvals' two legs stay exactly 2, and the permission-request reader reads exactly ONCE — a second reader on the screen would show here as 2
+    const gets = calls.filter((c) => c.method === undefined || c.method === 'GET');
+    expect(gets.filter((c) => c.url.startsWith('/api/gates/inbox'))).toHaveLength(2);
+    expect(gets.filter((c) => c.url.startsWith('/api/agent-permission-requests'))).toHaveLength(1);
     const buttonsAfter = [...scope().querySelectorAll('button')].map((b) => b.textContent);
     expect(buttonsAfter.some((t) => t?.includes(koMessages.cage.gateApprove))).toBe(false);
   });
