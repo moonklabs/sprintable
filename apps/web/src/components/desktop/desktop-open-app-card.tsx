@@ -7,7 +7,7 @@
 import { useSyncExternalStore } from 'react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Card } from '@/components/ds/card';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { appSetupLink } from '@/lib/auth/native-return-app';
 import { notAMac } from '@/components/desktop/desktop-download-card';
