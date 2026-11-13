@@ -130,7 +130,7 @@ describe('AgentApiKeyManager — 4912 D4: the other things that could hold the k
 
   it('the dialog\'s own X (the primitive close button) clears it the same way', async () => {
     await openKeyShownDialog();
-    const x = document.querySelector('[data-slot="dialog-close"]') as HTMLButtonElement | null;
+    const x = document.querySelector(`[data-slot="ds-dialog-content"] button[aria-label="${koMessages.common.close}"]`) as HTMLButtonElement | null; // the ds Dialog's own close (X)
     expect(x, 'the dialog has its own close button').toBeTruthy();
     await act(async () => { x?.click(); });
     await settle();
