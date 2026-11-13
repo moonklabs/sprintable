@@ -147,6 +147,35 @@ def test_backend_requests_fold_the_path_to_a_constant_and_drop_the_query():
     _no_secret("\n".join(out))
 
 
+def test_backend_handoff_all_counts_every_status_by_hour_2xx_included():
+    es = [
+        _be_request("2026-10-15T05:01:01Z", "/api/v2/internal/auth/oauth-handoff/issue", 200),
+        _be_request("2026-10-15T05:02:01Z", "/api/v2/internal/auth/oauth-handoff/issue", 200),
+        _be_request("2026-10-15T05:03:01Z", "/api/v2/internal/auth/oauth-handoff/consume", 200),
+        _be_request("2026-10-15T05:04:01Z", "/api/v2/internal/auth/oauth-handoff/consume", 401),
+        _be_request("2026-10-15T06:01:01Z", "/api/v2/internal/auth/oauth-handoff/consume", 200),
+        _be_request("2026-10-15T05:05:01Z", "/api/v2/auth/oauth/callback", 200),  # ③a 의 길 — 여기선 안 센다
+        _be_request("2026-10-15T05:06:01Z", "/api/v2/other", 200),  # 다른 경로
+        _be_request("2026-10-15T05:07:01Z", f"/api/v2/auth/oauth-handoff/{SECRETS[1]}", 200),  # 목록 밖 동작 이름 → (other)
+    ]
+    out = probe.agg_backend_handoff_all(es, HANDOFF)
+    assert out == [
+        "  2026-10-15T05:00Z  POST /oauth-handoff/(other)  → 200  1건",
+        "  2026-10-15T05:00Z  POST /oauth-handoff/consume  → 200  1건",
+        "  2026-10-15T05:00Z  POST /oauth-handoff/consume  → 401  1건",
+        "  2026-10-15T05:00Z  POST /oauth-handoff/issue  → 200  2건",
+        "  2026-10-15T06:00Z  POST /oauth-handoff/consume  → 200  1건",
+    ]
+    _no_secret("\n".join(out))
+
+
+def test_backend_handoff_all_folds_method_and_status_and_survives_malformed_entries():
+    odd = _be_request("2026-10-15T05:01:01Z", "/api/v2/internal/auth/oauth-handoff/issue", 200, "WEIRD")
+    odd["httpRequest"]["status"] = "teapot"
+    out = probe.agg_backend_handoff_all([odd, {}, {"httpRequest": "x"}, {"httpRequest": {"requestUrl": 7}}], HANDOFF)
+    assert out == ["  2026-10-15T05:00Z  ? /oauth-handoff/issue  → ?  1건"]
+
+
 def test_backend_paths_are_constant_labels_the_prefix_is_dropped():
     """까디르 렌즈 ②: `/oauth/callback` 앞 접두가 그대로 찍히던 구멍 — `/u/alice_kim_x/oauth/callback` 의 alice 가 새던 것."""
     es = [
@@ -262,8 +291,8 @@ def test_one_failing_branch_does_not_stop_the_others(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "웹 서비스: sprintable-frontend-prod · 백엔드 서비스: sprintable-backend-prod" in out  # dev 는 안 읽는다
     assert "PERMISSION_DENIED on state_check read" in out
-    assert out.count("(해당 항목 없음)") == 4  # 나머지 네 갈래(②·④·③a·③b)는 돌았고 비어 있다
-    assert len(calls) == 5
+    assert out.count("(해당 항목 없음)") == 5  # 나머지 다섯 갈래(②·④·③a·③c·③b)는 돌았고 비어 있다
+    assert len(calls) == 6
     assert all("sprintable-backend-dev" not in c for c in calls)
 
 
