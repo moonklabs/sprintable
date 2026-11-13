@@ -106,6 +106,10 @@ describe('[SID:4911] 실행 목록 — 구획 · 행', () => {
   it('행 얼굴 = 남의 글 줄 층(LAYER.rowOthers) — 내용 칸(패널) 위에서 갈린다', async () => {
     await mount();
     expect(LOOP_ROW_FACE).toBe(LAYER.rowOthers);
+    // 호버 = 한 단 위 면 + 둘째 줄이 ink-2로(ink-3은 그 면 위에서 4.5:1 아래 — layer-rule.test.ts)
+    const rowCls = q('[data-testid="loop-row-a"] [data-slot="ds-list-row"]')!.className;
+    expect(rowCls).toContain('hover:bg-ds-surface-highest');
+    expect(rowCls).toContain('hover:[&_div.font-mono]:text-ds-ink-2');
     for (const id of ['a', 'b', 'c']) {
       const row = q(`[data-testid="loop-row-${id}"] [data-slot="ds-list-row"]`)!;
       expect(row.className).toContain('bg-ds-surface-high');
@@ -155,18 +159,43 @@ describe('[SID:4911] 실행 목록 — 여는 길(클릭 · Enter · Space)', ()
   it('행 클릭 = 열기', async () => {
     await mount();
     await act(async () => { q('[data-testid="loop-row-b"] [data-slot="ds-list-row"]')!.click(); });
+    expect(pushMock).toHaveBeenCalledTimes(1);
     expect(pushMock).toHaveBeenCalledWith('/ws-1/proj-1/loops/b');
+  });
+
+  it('더블클릭은 또 열지 않는다(행 부품의 더블클릭 열기를 막음 — 첫 클릭이 이미 열었다)', async () => {
+    await mount();
+    await act(async () => { q('[data-testid="loop-row-b"] [data-slot="ds-list-row"]')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true })); });
+    expect(pushMock).not.toHaveBeenCalled();
   });
 
   it('행에 초점이 있을 때 Enter = 열기 · Space = 열기(role=button 그대로)', async () => {
     await mount();
     const row = q('[data-testid="loop-row-a"] [data-slot="ds-list-row"]')!;
     expect(row.getAttribute('role')).toBe('button');
-    await act(async () => { row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+    await act(async () => { row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+    expect(pushMock).toHaveBeenCalledTimes(1);
     expect(pushMock).toHaveBeenLastCalledWith('/ws-1/proj-1/loops/a');
     pushMock.mockClear();
-    await act(async () => { row.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true })); });
+    // Space: keydown is swallowed (the page does not scroll) and arms the row, keyup opens it
+    const down = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    await act(async () => { row.dispatchEvent(down); });
+    expect(down.defaultPrevented).toBe(true);
+    expect(pushMock).not.toHaveBeenCalled();
+    await act(async () => { row.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true, cancelable: true })); });
+    expect(pushMock).toHaveBeenCalledTimes(1);
     expect(pushMock).toHaveBeenLastCalledWith('/ws-1/proj-1/loops/a');
+  });
+
+  it('Space는 누른 그 줄에서 뗄 때만 열린다: 누르지 않은 keyup · 누른 채 초점이 옮겨 간 다른 줄 keyup은 열지 않는다', async () => {
+    await mount();
+    const a = q('[data-testid="loop-row-a"] [data-slot="ds-list-row"]')!;
+    const d = q('[data-testid="loop-row-d"] [data-slot="ds-list-row"]')!;
+    await act(async () => { a.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true, cancelable: true })); });
+    expect(pushMock).not.toHaveBeenCalled();
+    await act(async () => { a.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })); });
+    await act(async () => { d.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true, cancelable: true })); });
+    expect(pushMock).not.toHaveBeenCalled();
   });
 
   it('↑↓로 행을 옮긴다 — 탭 정지는 행 하나(목록 한 개당)', async () => {
@@ -196,6 +225,28 @@ describe('[SID:4911] 실행 목록 — 못 불러온 것 ≠ 실행 없음', () 
     expect(q('[role="alert"]')).toBeNull();
     expect(qa('[data-testid^="loop-row-"]')).toHaveLength(5);
     err.mockRestore();
+  });
+
+  it('단계를 바꾼 뒤 호출이 실패하면 앞 단계의 행을 남겨 두지 않는다(오류 띠만)', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await mount();
+    expect(qa('[data-testid^="loop-row-"]')).toHaveLength(5);
+    fetchMock.mockImplementation(async () => ({ ok: false, status: 500, json: async () => ({}) }));
+    const select = q('[data-testid="loops-status-filter"]') as HTMLSelectElement;
+    await act(async () => { select.value = 'closed'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(q('[role="alert"]')).not.toBeNull();
+    expect(qa('[data-testid^="loop-row-"]')).toHaveLength(0);
+    err.mockRestore();
+  });
+
+  it('이 화면이 모르는 새 상태도 «전체»에서 사라지지 않고 진행 중에 서며, 칩은 상태 값을 그대로 보여 준다', async () => {
+    fetchMock.mockImplementation(async () => ({ ok: true, json: async () => [mk('z', 'queued' as unknown as Status), mk('b', 'deciding')] }));
+    await mount();
+    const row = section('progress')!.querySelector('[data-testid="loop-row-z"]')!;
+    expect(row).not.toBeNull();
+    expect(row.querySelector('[data-slot="ds-chip"]')!.textContent).toBe('queued');
+    expect(row.querySelector('[data-slot="loop-stage-bar"]')).toBeNull();
   });
 
   it('진짜 0건(전체)이면 첫 만남 정체성 빈 상태가 그대로 나온다(가설 → 실행 → 검증 → 학습 · 첫 실행 시작하기)', async () => {

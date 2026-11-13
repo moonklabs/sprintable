@@ -260,7 +260,13 @@ describe('실행 목록(4911) — 바탕 → 패널 → 행', () => {
   it('화면이 층 표 이름을 그대로 쓴다: 패널 = panel · 행 얼굴 = rowOthers', () => {
     expect(LOOP_PANEL_FACE).toBe(LAYER.panel);
     expect(LOOP_ROW_FACE).toBe(LAYER.rowOthers);
-    expect(LOOP_ROW_HOVER).toBe(`hover:${LAYER.well}`);
+    expect(LOOP_ROW_HOVER).toContain(`hover:${LAYER.well}`);
+    expect(LOOP_ROW_HOVER).toContain('hover:[&_div.font-mono]:text-ds-ink-2');
+  });
+
+  it.each(themes)('⭐%s: 호버 면(well) 위 — 둘째 줄 ink-2는 4.5:1 이상이고, 옛 ink-3은 아래라서 호버 동안 ink-2로 올린다', (_name, t) => {
+    expect(contrast(t['ink-2']!, t[LAYER_TOKEN.well]!)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(t['ink-3']!, t[LAYER_TOKEN.well]!)).toBeLessThan(4.5);
   });
 
   it.each(themes)('⭐%s: 바탕 → 패널 ≥ 0.03 · 패널 → 행 얼굴 ≥ 0.05 (옛 «행 ↔ 내용 칸» 라이트 +0.027 · 다크 +0.059가 아니라)', (_name, t) => {

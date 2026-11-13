@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ds/button';
@@ -79,19 +79,36 @@ const STATUS_FILTERS: (LoopStatus | 'all')[] = [
  * 결정이 필요한 것(deciding) 먼저 · 진행 중(초안 · 브리핑 · 생성 중 · 실행 중 · 측정 중) · 끝난 것(종료 · 중단).
  */
 const SECTIONS = [
-  { id: 'decide', titleKey: 'sectionNeedsDecision', statuses: ['deciding'] },
-  { id: 'progress', titleKey: 'sectionInProgress', statuses: ['draft', 'briefing', 'generating', 'executing', 'measuring'] },
-  { id: 'finished', titleKey: 'sectionFinished', statuses: ['closed', 'abandoned'] },
-] as const satisfies ReadonlyArray<{ id: string; titleKey: 'sectionNeedsDecision' | 'sectionInProgress' | 'sectionFinished'; statuses: readonly LoopStatus[] }>;
+  { id: 'decide', titleKey: 'sectionNeedsDecision' },
+  { id: 'progress', titleKey: 'sectionInProgress' },
+  { id: 'finished', titleKey: 'sectionFinished' },
+] as const satisfies ReadonlyArray<{ id: string; titleKey: 'sectionNeedsDecision' | 'sectionInProgress' | 'sectionFinished' }>;
+
+/** 구획 소속은 «결정 중 / 끝남 / 그 밖 전부»다 — 이 화면이 아직 모르는 새 상태도 «전체»에서 사라지지 않고 진행 중에 선다. */
+export function loopSectionOf(status: string): (typeof SECTIONS)[number]['id'] {
+  if (status === 'deciding') return 'decide';
+  if (status === 'closed' || status === 'abandoned') return 'finished';
+  return 'progress';
+}
 
 function LoopRow({ loop, onOpen }: { loop: Loop; onOpen: () => void }) {
   const t = useTranslations('loops');
   const lineage = loop.parent_loop_id ? t('lineageFrom', { id: loop.parent_loop_id.slice(0, 8) }) : null;
   const subtitle = [lineage, loop.recipe_slug].filter(Boolean).join(' · ');
-  // 줄 전체가 «열기» 단추다(옛 role=button 그대로): 클릭 · Enter(행 부품) · Space(여기). 더블클릭은 첫 클릭이 이미 열었다.
-  const onKeyUp = (e: KeyboardEvent<HTMLElement>) => {
-    if (e.key === ' ' && e.target === e.currentTarget) { e.preventDefault(); onOpen(); }
+  // 줄 전체가 «열기» 단추다(옛 role=button 그대로): 클릭 · Enter(행 부품) · Space(여기).
+  // Space는 단추처럼 «눌렀다 뗄 때» 열린다: 누를 때(keydown)는 쪽이 밀리지 않게 막고 이 줄을 «장전»해 두며, 뗄 때(keyup) 장전된 그 줄에 초점이 그대로일 때만 연다(누른 채 초점이 옮겨 간 다른 줄이 열리지 않는다).
+  const armed = useRef<HTMLElement | null>(null);
+  const onKeyDownCapture = (e: KeyboardEvent<HTMLElement>) => {
+    if (e.key === ' ' && e.target === e.currentTarget) { e.preventDefault(); armed.current = e.currentTarget; }
   };
+  const onKeyUp = (e: KeyboardEvent<HTMLElement>) => {
+    if (e.key !== ' ' || e.target !== e.currentTarget || armed.current !== e.currentTarget) return;
+    armed.current = null;
+    e.preventDefault();
+    onOpen();
+  };
+  // 행 부품은 더블클릭도 «열기»로 받지만, 이 목록은 첫 클릭이 이미 열었다 — 두 번째가 또 열지 않게 막는다.
+  const onDoubleClick = (e: MouseEvent<HTMLElement>) => { e.preventDefault(); };
   return (
     <RowListItem
       role="button"
@@ -109,7 +126,9 @@ function LoopRow({ loop, onOpen }: { loop: Loop; onOpen: () => void }) {
         </>
       )}
       onClick={onOpen}
+      onKeyDownCapture={onKeyDownCapture}
       onKeyUp={onKeyUp}
+      onDoubleClick={onDoubleClick}
       onOpen={onOpen}
     />
   );
@@ -138,6 +157,7 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
       console.error('[loops] 목록을 불러오지 못했습니다', err);
       // 4911 — 못 불러온 것은 «실행이 없다»가 아니다: 빈 상태 문구 대신 오류 띠 + 다시 시도.
       setLoadFailed(true);
+      setLoops([]);
     } finally {
       setLoading(false);
     }
@@ -241,7 +261,7 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
         ) : null}
 
         {loops.length > 0 && grouped ? SECTIONS.map((section) => {
-          const rows = loops.filter((l) => (section.statuses as readonly LoopStatus[]).includes(l.status));
+          const rows = loops.filter((l) => loopSectionOf(l.status) === section.id);
           if (rows.length === 0) return null;
           return (
             <RowList key={section.id} aria-label={t(section.titleKey)} data-testid={`loops-section-${section.id}`} header={{ title: t(section.titleKey), count: <CountBadge count={rows.length} />, level: 2 }}>
