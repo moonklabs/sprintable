@@ -85,7 +85,6 @@ export default function ChannelPage() {
 
   // JWT 가져오기
   useEffect(() => {
-    setTokenFailed(false);
     fetchWithAuth('/api/channel/token')
       .then((r) => {
         if (!r.ok) throw new Error('channel token read failed');
@@ -98,7 +97,7 @@ export default function ChannelPage() {
   // WebSocket 연결
   useEffect(() => {
     if (!token || !agentId) return;
-    setWsStatus('connecting');
+    // the state before the socket answers is `idle` (shown as «연결 중»): no setState in the effect body — the socket's own callbacks set the rest
 
     const ws = new WebSocket(
       `${fastapiWsBase(backendOrigin)}/ws/chat/${agentId}?token=${encodeURIComponent(token)}`,
@@ -221,7 +220,7 @@ export default function ChannelPage() {
           actions={<Chip dot tone={status.tone} data-testid="channel-status">{t(status.key)}</Chip>}
         />
         {tokenFailed ? (
-          <Banner tone="failed" action={<Button onClick={() => setTokenRetry((n) => n + 1)}>{tc('retry')}</Button>}>
+          <Banner tone="failed" action={<Button onClick={() => { setTokenFailed(false); setTokenRetry((n) => n + 1); }}>{tc('retry')}</Button>}>
             <span data-testid="channel-token-failed">{t('connectFailed')}</span>
           </Banner>
         ) : wsStatus === 'disconnected' ? (
