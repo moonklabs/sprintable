@@ -1150,17 +1150,23 @@
 @layer components {
   .dashboard-shell-root {
     --shell-inset: 0.5rem;
-    --shell-chrome-h: calc(3rem + 2 * var(--shell-inset));
+    --shell-chrome-h: calc(3rem + 2 * var(--shell-inset) + var(--shell-bands-h, 0px) + var(--shell-launcher-clear, 0px));
   }
   .dashboard-shell-root[data-topbar-hidden] {
-    --shell-chrome-h: calc(2 * var(--shell-inset));
+    --shell-chrome-h: calc(2 * var(--shell-inset) + var(--shell-bands-h, 0px) + var(--shell-launcher-clear, 0px));
   }
   @media (max-width: 1023px) {
     .dashboard-shell-root {
-      --shell-chrome-h: calc(3rem + var(--mobile-tab-bar-h));
+      --shell-chrome-h: calc(3rem + var(--mobile-tab-bar-h) + var(--shell-bands-h, 0px) + var(--shell-launcher-clear, 0px));
     }
     .dashboard-shell-root[data-topbar-hidden] {
-      --shell-chrome-h: var(--mobile-tab-bar-h);
+      --shell-chrome-h: calc(var(--mobile-tab-bar-h) + var(--shell-bands-h, 0px) + var(--shell-launcher-clear, 0px));
     }
   }
+  /* 4913 셸 — 둥근 도움말(지원) 단추가 그려지는 동안(`<html data-support-launcher>`, 단추 컴포넌트가 «그려진다»와 같은 값으로 켜고 끈다) 화면 아래 4rem(= 단추 48px + 창 가장자리 16px)을 비워
+     단추가 화면의 눌리는 것(실제 크기 단추 · 보내기 …)을 덮지 않게 한다 — 노치 폰은 단추를 놓는 BottomDock이 `--bottom-dock-inset`에 안전 영역을 더하므로 여백도 같은 만큼(데스크톱은 0). 비운 만큼은 스크롤러 아래 여백(`pb-[var(--shell-launcher-clear)]`)이고 앵커 화면은 `--shell-chrome-h`로 같은 만큼 짧아진다. 단추가 안 그려지면(설정 · 모바일 채팅 상세 · 온보딩 완주) 0. */
+  :root[data-support-launcher] .dashboard-shell-root {
+    --shell-launcher-clear: calc(4rem + env(safe-area-inset-bottom, 0px));
+  }
+  /* --shell-bands-h: 셸 스크롤러 맨 위의 «있을 때만» 띠 셋이 먹은 높이 — 값은 셸이 잰다(components/nav/shell-bands-height.ts · ResizeObserver) — 서버가 그린 첫 값은 없음(0). */
 }
