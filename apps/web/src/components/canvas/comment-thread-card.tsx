@@ -8,7 +8,10 @@ import { pickIGaJosa } from '@/lib/korean-particle';
 import { AnchorPin } from './anchor-pin';
 import type { MemberRef } from '@/services/canvas';
 import type { CommentThread } from '@/services/canvas-comments';
-import { Input } from '@/components/ui/input';
+import { Input } from '@/components/ds/input';
+import { Button } from '@/components/ds/button';
+import { Chip } from '@/components/ds/chip';
+import { LAYER } from '@/components/ds/layers';
 import { isImeComposing } from '@/lib/ime-composition';
 
 const ROLLUP_LABEL_KEY: Record<CommentThread['rollup'], string> = {
@@ -47,8 +50,6 @@ export function CommentThreadCard({
   const nameOf = (id: string) => authorLabels.get(id) ?? baseNameOf(id);
   const [replyDraft, setReplyDraft] = useState('');
   const resolved = thread.rollup === 'resolved';
-  // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
-  const rollupTone = resolved ? 'text-foreground bg-success/10' : 'text-foreground bg-info/10';
 
   const handleReply = () => {
     const body = replyDraft.trim();
@@ -58,37 +59,35 @@ export function CommentThreadCard({
   };
 
   return (
-    // story #3009(로드맵 P2·PR-F, L1) — 인라인 카드는 --elev-card.
-    <div className={cn('rounded-xl border border-border bg-card shadow-[var(--elev-card)]', resolved && 'opacity-70', className)}>
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+    // 4910 — ds 토큰: 카드 얼굴 = 글 줄 층(LAYER.rowOthers, 칸 위) · 선 = ds-line. 가라앉음(resolved)은 그대로 opacity.
+    <div className={cn('rounded-ds-panel border border-ds-line', LAYER.rowOthers, resolved && 'opacity-70', className)}>
+      <div className="flex items-center gap-2 border-b border-ds-line px-3 py-2">
         <AnchorPin
           number={thread.pin_number}
           state={resolved ? 'resolved' : 'open'}
           active={active}
           onClick={onSelectPin ? () => onSelectPin(thread.id) : undefined}
         />
-        {thread.element_label ? <span className="text-xs font-semibold text-foreground">{thread.element_label}</span> : null}
-        <span className={cn('ml-auto rounded px-1.5 py-0.5 text-micro font-bold', rollupTone)}>
-          {t(ROLLUP_LABEL_KEY[thread.rollup])}
-        </span>
+        {thread.element_label ? <span className="text-ds-small font-semibold text-ds-ink">{thread.element_label}</span> : null}
+        <Chip tone={resolved ? 'done' : 'info'} className="ml-auto">{t(ROLLUP_LABEL_KEY[thread.rollup])}</Chip>
       </div>
 
       <div className="space-y-2 px-3 py-2.5">
         {thread.comments.map((c) => (
           <div key={c.id}>
-            <p className="text-editorial-meta text-muted-foreground">
-              <strong className="text-foreground">{nameOf(c.author_id)}</strong>
+            <p className="text-ds-small text-ds-ink-3">
+              <strong className="text-ds-ink">{nameOf(c.author_id)}</strong>
             </p>
-            <p className="mt-0.5 text-xs leading-relaxed text-foreground">{c.body}</p>
+            <p className="mt-0.5 text-ds-small leading-relaxed text-ds-ink">{c.body}</p>
           </div>
         ))}
 
         {thread.resultVersion != null ? (
-          <p className="text-micro font-semibold text-info">{t('resultLinkNote', { version: thread.resultVersion })}</p>
+          <p className="text-ds-small font-semibold text-ds-info">{t('resultLinkNote', { version: thread.resultVersion })}</p>
         ) : null}
 
         {resolved && thread.resolved_by ? (
-          <p className="text-micro text-muted-foreground">{t('resolvedByNote', { name: nameOf(thread.resolved_by), josa: pickIGaJosa(nameOf(thread.resolved_by)) })}</p>
+          <p className="text-ds-small text-ds-ink-3">{t('resolvedByNote', { name: nameOf(thread.resolved_by), josa: pickIGaJosa(nameOf(thread.resolved_by)) })}</p>
         ) : null}
 
         {!resolved ? (
@@ -100,15 +99,10 @@ export function CommentThreadCard({
               // 조합 중의 엔터는 글자 확정 키 — 보내기로 읽으면 반쯤 쓴 답글이 나가고 칸이 비워져 확정된 글자가 다음 답글로 또 나간다(4831 측정 중 발견).
               onKeyDown={(e) => { if (isImeComposing(e)) return; if (e.key === 'Enter') handleReply(); }}
               placeholder={t('replyPlaceholder')}
-              className="h-auto min-w-0 flex-1 px-2 py-1 lg:text-editorial-meta text-foreground bg-background dark:bg-background"
+              aria-label={t('replyPlaceholder')}
+              className="min-w-0 flex-1"
             />
-            <button
-              type="button"
-              onClick={() => onResolve?.(thread.id)}
-              className="shrink-0 rounded-md border border-border px-2 py-1 text-micro font-semibold text-muted-foreground hover:bg-muted"
-            >
-              {t('resolveAction')}
-            </button>
+            <Button onClick={() => onResolve?.(thread.id)} className="shrink-0">{t('resolveAction')}</Button>
           </div>
         ) : null}
       </div>

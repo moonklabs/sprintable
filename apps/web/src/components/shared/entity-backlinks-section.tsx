@@ -10,6 +10,8 @@ import { stageRoleLabel } from '@/lib/stage-role';
 import { gateApproverLabel } from '@/lib/gate-approver-label';
 import { toPlainPreview } from '@/components/chat/entity-ref';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { Chip } from '@/components/ds/chip';
+import { cn } from '@/lib/utils';
 
 interface BacklinkMember { id: string; name: string; type: string }
 
@@ -136,6 +138,8 @@ export type BacklinksEntityType = keyof typeof ENTITY_ROUTE_SEGMENT;
 interface EntityBacklinksSectionProps {
   entityType: BacklinksEntityType;
   entityId: string;
+  /** 4910 — 바깥 선이 이미 있는 틀(산출물 상세 오른쪽 열의 구분선)에서는 `border-t-0`로 겹선을 없앤다. */
+  className?: string;
 }
 
 /**
@@ -156,7 +160,7 @@ interface LoadedResult {
   items: BacklinkItem[];
 }
 
-export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinksSectionProps) {
+export function EntityBacklinksSection({ entityType, entityId, className }: EntityBacklinksSectionProps) {
   const t = useTranslations('board');
   // story #4091(§c) — recipe-stage-label.ts/stage-role.ts/gate-approver-label.ts SSOT가
   // 전부 organization 네임스페이스에 산다(recipe-detail-view.tsx 등 기존 소비처와 동일).
@@ -190,10 +194,10 @@ export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinks
   const mentionItems = items.filter((item) => item.relation !== 'created_from');
 
   return (
-    <div className="border-t border-border/60 px-4 py-3">
-      <p className="mb-2 text-xs font-medium text-muted-foreground">{t('backlinksTitle')}</p>
+    <div className={cn('border-t border-ds-line px-4 py-3', className)}>
+      <p className="mb-2 text-ds-small font-semibold text-ds-ink-2">{t('backlinksTitle')}</p>
       {mentionItems.length === 0 ? (
-        <p className="text-xs text-muted-foreground">{t('backlinksEmpty')}</p>
+        <p className="text-ds-small text-ds-ink-3">{t('backlinksEmpty')}</p>
       ) : (
         <ul className="flex flex-col gap-1.5">
           {mentionItems.map((item) => {
@@ -203,17 +207,15 @@ export function EntityBacklinksSection({ entityType, entityId }: EntityBacklinks
             return (
               <li
                 key={item.id}
-                className={`flex items-start gap-2 text-xs ${item.still_exists ? 'text-foreground' : 'text-muted-foreground'}`}
+                className={`flex items-start gap-2 text-ds-small ${item.still_exists ? 'text-ds-ink' : 'text-ds-ink-3'}`}
               >
                 <Icon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
                 <div className="min-w-0 flex-1">
                   <span className="[overflow-wrap:anywhere]">{label ?? item.source_id}</span>
                   {!item.still_exists && (
-                    <span className="ml-1.5 rounded bg-muted px-1 py-0.5 text-micro text-muted-foreground">
-                      {t('backlinksTargetGone')}
-                    </span>
+                    <Chip className="ml-1.5">{t('backlinksTargetGone')}</Chip>
                   )}
-                  <div className="text-micro text-muted-foreground">
+                  <div className="text-ds-small text-ds-ink-3">
                     {creatorName ? `${creatorName} · ` : ''}
                     {formatViewerRelativeTime(item.created_at, locale, displayTimezone)}
                   </div>
