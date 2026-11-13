@@ -4,11 +4,12 @@ import { Children, cloneElement, Fragment, isValidElement, type MouseEvent, type
 import { Button as ButtonPrimitive } from '@base-ui/react/button';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
+import { ARIA_DISABLED_FACE, DISABLED_FACE } from './disabled-face';
 import { Icon } from './icon';
 
 /**
  * UI-3(a9d56577) 새 Button — doc ui3-token-names-and-component-list-v0 §4 #1. 변형 넷(주 · 보조 · 조용 · 위험) × 크기 둘(28 · 36).
- * 상태: 호버 · 눌림 · 초점(2px action 링) · 비활성(점선 윤곽 + 글 ink-3) · 로딩(글 유지 + 도는 아이콘 · 눌러도 안 간다).
+ * 상태: 호버 · 눌림 · 초점(2px action 링) · 비활성(실선 흐린 면 + 글 ink-3 — disabled-face.ts) · 로딩(글 유지 + 도는 아이콘 · 눌러도 안 간다).
  * 위험은 «모양»만 — 확인 한 단계는 호출부가 Dialog로 붙인다. 폰은 누름 영역이 44 이상(보이는 크기와 무관).
  */
 export const buttonVariants = cva(
@@ -16,9 +17,9 @@ export const buttonVariants = cva(
     'inline-flex shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-ds-control border font-semibold',
     'transition-[filter,background-color] duration-(--ds-duration-fast) motion-reduce:transition-none outline-none',
     'focus-visible:ring-2 focus-visible:ring-ds-action focus-visible:ring-offset-1 focus-visible:ring-offset-ds-background',
-    'active:brightness-90 disabled:pointer-events-none disabled:border-dashed disabled:border-ds-line-control disabled:bg-transparent disabled:text-ds-ink-3 disabled:brightness-100',
+    `active:brightness-90 disabled:pointer-events-none disabled:brightness-100 ${DISABLED_FACE}`,
     // asChild(링크 등)는 native :disabled가 없다 — aria-disabled가 같은 «비활성» 모양을 입는다.
-    'aria-disabled:pointer-events-none aria-disabled:border-dashed aria-disabled:border-ds-line-control aria-disabled:bg-transparent aria-disabled:text-ds-ink-3 aria-disabled:brightness-100',
+    `aria-disabled:pointer-events-none aria-disabled:brightness-100 ${ARIA_DISABLED_FACE}`,
     'aria-busy:pointer-events-none touch:min-h-ds-touch touch:min-w-ds-touch',
   ],
   {

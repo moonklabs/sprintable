@@ -3,6 +3,7 @@
 import { Button as ButtonPrimitive } from '@base-ui/react/button';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
+import { ARIA_DISABLED_FACE, DISABLED_FACE } from './disabled-face';
 import { Icon, type IconName } from './icon';
 
 const iconButtonVariants = cva(
@@ -17,7 +18,7 @@ const iconButtonVariants = cva(
       /** `quiet` 글자 없는 보조 단추 · `primary` 화면의 주 행동 하나(떠 있는 새 대화 단추 등 — 한 화면에 하나). */
       variant: {
         quiet: '',
-        primary: 'border-ds-action bg-ds-action text-ds-on-action hover:bg-ds-action hover:text-ds-on-action hover:brightness-95 disabled:border-dashed disabled:border-ds-line-control disabled:bg-transparent disabled:brightness-100 aria-disabled:border-dashed aria-disabled:border-ds-line-control aria-disabled:bg-transparent aria-disabled:brightness-100',
+        primary: `border-ds-action bg-ds-action text-ds-on-action hover:bg-ds-action hover:text-ds-on-action hover:brightness-95 disabled:brightness-100 aria-disabled:brightness-100 ${DISABLED_FACE} ${ARIA_DISABLED_FACE}`,
       },
       size: { md: 'size-ds-control-sm', lg: 'size-ds-control', xl: 'size-ds-control-xl' },
     },

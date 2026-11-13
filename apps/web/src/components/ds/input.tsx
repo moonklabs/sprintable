@@ -3,6 +3,7 @@
 import type { ComponentProps } from 'react';
 import { Input as InputPrimitive } from '@base-ui/react/input';
 import { cn } from '@/lib/utils';
+import { DISABLED_FACE } from './disabled-face';
 import { FIELD_FOCUS } from './field-focus';
 
 // 글자 크기: 폰(기본)은 16px(text-base) — iOS Safari는 16px 미만 입력칸을 누르면 화면을 확대한다(story #4410, 현행 `ui/input`과 같은 규칙). lg 이상은 본문 13(ds-body).
@@ -10,7 +11,7 @@ import { FIELD_FOCUS } from './field-focus';
 const FIELD =
   '[color-scheme:light] dark:[color-scheme:dark] w-full min-w-0 rounded-ds-control border border-ds-line-control bg-ds-surface-sunk px-3 text-base text-ds-ink outline-none transition-colors duration-(--ds-duration-fast) motion-reduce:transition-none lg:text-ds-body ' +
   `placeholder:text-ds-ink-3 ${FIELD_FOCUS} ` +
-  'disabled:pointer-events-none disabled:cursor-not-allowed disabled:border-dashed disabled:bg-transparent disabled:text-ds-ink-3 ' +
+  `disabled:pointer-events-none disabled:cursor-not-allowed ${DISABLED_FACE} ` +
   'aria-invalid:border-ds-failed';
 
 // Base UI의 className은 «상태를 받는 함수»도 허용하지만 cn()은 함수를 조용히 버린다 — 이 부품은 문자열만 받는다(현행 ui/checkbox와 같은 약속).

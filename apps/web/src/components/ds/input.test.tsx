@@ -49,12 +49,13 @@ describe('ds Input', () => {
     expect(input().className).toContain('lg:text-ds-body');
   });
 
-  it('⭐오류(aria-invalid)는 failed 경계 · 비활성은 점선 + ink-3(색만이 아닌 모양)', async () => {
+  it('⭐오류(aria-invalid)는 failed 경계 · 비활성은 실선 흐린 면 + ink-3(색만이 아닌 면 · 선 · 글)', async () => {
     await render(<Input aria-label="이름" aria-invalid />);
     expect(input().className).toContain('aria-invalid:border-ds-failed');
     await render(<Input aria-label="이름" disabled />);
     expect(input().disabled).toBe(true);
-    expect(input().className).toContain('disabled:border-dashed');
+    expect(input().className).toContain('disabled:bg-ds-surface-high');
+    expect(input().className).not.toContain('border-dashed');
     expect(input().className).toContain('disabled:text-ds-ink-3');
   });
 

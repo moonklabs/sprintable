@@ -3,6 +3,7 @@
 import { useId, type ReactNode } from 'react';
 import { Checkbox as CheckboxPrimitive } from '@base-ui/react/checkbox';
 import { cn } from '@/lib/utils';
+import { DATA_DISABLED_FACE, DATA_DISABLED_INDETERMINATE_FACE } from './disabled-face';
 import { Icon } from './icon';
 
 export type CheckboxProps = Omit<CheckboxPrimitive.Root.Props, 'className' | 'children'> & {
@@ -28,7 +29,7 @@ export function Checkbox({ label, className, onKeyDown, ...props }: CheckboxProp
           onKeyDown?.(event);
           if (event.key === 'Enter') event.preventBaseUIHandler();
         }}
-        className="inline-flex size-4 shrink-0 items-center justify-center rounded-ds-tag border border-ds-line-control bg-ds-surface-sunk text-ds-on-action outline-none focus-visible:ring-2 focus-visible:ring-ds-action focus-visible:ring-offset-1 focus-visible:ring-offset-ds-background data-checked:border-ds-action data-checked:bg-ds-action data-indeterminate:border-ds-action data-indeterminate:bg-ds-action data-disabled:cursor-not-allowed data-disabled:border-dashed data-disabled:bg-transparent data-disabled:text-ds-ink-3 data-disabled:data-checked:border-ds-line-control data-disabled:data-checked:bg-transparent data-disabled:data-indeterminate:border-ds-line-control data-disabled:data-indeterminate:bg-transparent aria-invalid:border-ds-failed"
+        className={`inline-flex size-4 shrink-0 items-center justify-center rounded-ds-tag border border-ds-line-control bg-ds-surface-sunk text-ds-on-action outline-none focus-visible:ring-2 focus-visible:ring-ds-action focus-visible:ring-offset-1 focus-visible:ring-offset-ds-background data-checked:border-ds-action data-checked:bg-ds-action data-indeterminate:border-ds-action data-indeterminate:bg-ds-action data-disabled:cursor-not-allowed ${DATA_DISABLED_FACE} ${DATA_DISABLED_INDETERMINATE_FACE} aria-invalid:border-ds-failed data-disabled:aria-invalid:border-ds-failed data-disabled:data-checked:aria-invalid:border-ds-failed data-disabled:data-indeterminate:aria-invalid:border-ds-failed`}
         {...props}
       >
         <CheckboxPrimitive.Indicator data-slot="ds-checkbox-indicator" className="flex items-center justify-center" render={(p, state) => <span {...p}>{state.indeterminate ? <Icon name="remove" size={12} /> : <Icon name="check" size={12} />}</span>} />

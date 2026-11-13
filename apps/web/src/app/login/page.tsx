@@ -42,6 +42,8 @@ export default function LoginPage() {
     errorCode ? (oauthErrors[errorCode] ?? t('loginFailed')) : null
   );
   const [loading, setLoading] = useState(false);
+  // 4924 — bumped on every «a box is empty» press so the reason Banner is a NEW node each time (an unchanged role=alert node is not read again)
+  const [reasonSeq, setReasonSeq] = useState(0);
   const [firebaseLoading, setFirebaseLoading] = useState(false);
 
   // story #3118 AC0 — 기본값 false(SSR과 하이드레이션 첫 프레임 모두 비노출, fail-closed).
@@ -56,8 +58,24 @@ export default function LoginPage() {
   // story a0118204: 스캐폴드 — NEXT_PUBLIC_FIREBASE_AUTH_ENABLED가 꺼져있으면(기본) 버튼 자체가
   // 안 보이니 호출 불가. 켜져 있어도 서버 플래그(FIREBASE_AUTH_ISSUE_SESSION)가 꺼져있으면
   // BFF가 501을 반환 — 클라 플래그는 UX 노출 게이트일 뿐 실 발급 권위가 아니다.
+  // 4924 — an empty field no longer turns the button off without a word (the same root as the story-4920 «send» that was off for no stated reason): the button stays on and, pressed (or Enter),
+  // says WHICH field is empty in the error banner (role/aria-live — read aloud). Nothing is sent to the server.
+  const missingReason = (): string | null => {
+    const noEmail = !email.trim();
+    const noPassword = !password.trim();
+    if (noEmail && noPassword) return t('missingEmailAndPassword');
+    if (noEmail) return t('missingEmail');
+    if (noPassword) return t('missingPassword');
+    return null;
+  };
+
   const handleFirebaseLogin = async () => {
-    if (!email.trim() || !password.trim()) return;
+    const missing = missingReason();
+    if (missing) {
+      setError(missing);
+      setReasonSeq((n) => n + 1);
+      return;
+    }
     setFirebaseLoading(true);
     setError(null);
     try {
@@ -84,7 +102,12 @@ export default function LoginPage() {
   };
 
   const handleLogin = async () => {
-    if (!email.trim() || !password.trim()) return;
+    const missing = missingReason();
+    if (missing) {
+      setError(missing);
+      setReasonSeq((n) => n + 1);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -178,12 +201,12 @@ export default function LoginPage() {
               handleLogin/handleFirebaseLogin이 재시도 시 setError(null)을 먼저 호출해 이
               단락이 매 시도마다 언마운트→리마운트되므로(토스트의 "나타남"과 동형), 동일한
               실패 사유가 연속으로 떠도 매번 새 DOM 노드로 안착해 안정적으로 낭독된다. */}
-          {error && <Banner tone="failed">{error}</Banner>}
-          <Button type="button" variant="primary" size="lg" className="w-full" onClick={handleLogin} disabled={loading || !email.trim() || !password.trim()}>
+          {error && <Banner key={reasonSeq} tone="failed">{error}</Banner>}
+          <Button type="button" variant="primary" size="lg" className="w-full" onClick={handleLogin} disabled={loading}>
             {loading ? t('signingIn') : t('signIn')}
           </Button>
           {FIREBASE_AUTH_ENABLED && (
-            <Button type="button" variant="secondary" size="lg" className="w-full" onClick={handleFirebaseLogin} disabled={firebaseLoading || !email.trim() || !password.trim()}>
+            <Button type="button" variant="secondary" size="lg" className="w-full" onClick={handleFirebaseLogin} disabled={firebaseLoading}>
               {firebaseLoading ? t('signingIn') : t('firebaseSignIn')}
             </Button>
           )}

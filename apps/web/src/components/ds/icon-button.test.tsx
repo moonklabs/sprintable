@@ -33,12 +33,13 @@ describe('ds IconButton', () => {
     expect(container.querySelector('button')!.className).toContain('size-ds-control');
   });
 
-  it('⭐주 모양 primary: action 면 · 글 on-action · 비활성은 점선 윤곽 · 이름(label)은 그대로 필수', async () => {
+  it('⭐주 모양 primary: action 면 · 글 on-action · 비활성은 실선 흐린 면 · 이름(label)은 그대로 필수', async () => {
     await act(async () => { root.render(<IconButton label="새 대화" icon="add" variant="primary" size="xl" />); });
     const b = container.querySelector('button')!;
     expect(b.className).toMatch(/(^|\s)bg-ds-action(\s|$)/);
     expect(b.className).toMatch(/(^|\s)text-ds-on-action(\s|$)/);
-    expect(b.className).toContain('disabled:border-dashed');
+    expect(b.className).toContain('disabled:bg-ds-surface-high');
+    expect(b.className).not.toContain('border-dashed');
     expect(b.getAttribute('aria-label')).toBe('새 대화');
   });
 
@@ -55,8 +56,8 @@ describe('ds IconButton', () => {
     await act(async () => { root.render(<IconButton label="새 대화" icon="add" variant="primary" disabled />); });
     const cls = container.querySelector('button')!.className;
     for (const p of ['disabled', 'aria-disabled']) {
-      expect(cls, p).toContain(`${p}:bg-transparent`);
-      expect(cls, p).toContain(`${p}:border-dashed`);
+      expect(cls, p).toContain(`${p}:bg-ds-surface-high`);
+      expect(cls, p).toContain(`${p}:border-ds-line`);
       expect(cls, p).toContain(`${p}:brightness-100`);
       expect(cls, p).toContain(`${p}:pointer-events-none`);
     }

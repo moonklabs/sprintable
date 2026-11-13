@@ -49,12 +49,14 @@ describe('ds Button', () => {
     expect(btn().className).toContain('touch:min-h-ds-touch');
   });
 
-  it('비활성은 disabled + 점선 윤곽 + 글 ink-3(색만으로 비활성을 말하지 않는다)', async () => {
+  it('비활성은 disabled + 실선 흐린 면 · 흐린 선 + 글 ink-3(색만으로 비활성을 말하지 않는다)', async () => {
     const onClick = vi.fn();
     await act(async () => { root.render(<Button disabled onClick={onClick}>확인</Button>); });
     expect(btn().hasAttribute('disabled') || btn().getAttribute('data-disabled') !== null).toBe(true);
     // aria-disabled: 변형도 부분 문자열로 걸리므로 낱말 경계로 «native :disabled» 쪽을 따로 본다.
-    expect(btn().className).toMatch(/(^|\s)disabled:border-dashed/);
+    expect(btn().className).toMatch(/(^|\s)disabled:border-ds-line(\s|$)/);
+    expect(btn().className).toMatch(/(^|\s)disabled:bg-ds-surface-high(\s|$)/);
+    expect(btn().className).not.toContain('border-dashed');
     expect(btn().className).toMatch(/(^|\s)disabled:text-ds-ink-3/);
   });
 
@@ -135,12 +137,13 @@ describe('ds Button', () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
-  it('⭐asChild + disabled/loading 링크도 비활성 «모양»을 입는다(aria-disabled: 점선 · 글 ink-3 · 눌림 없음)', async () => {
+  it('⭐asChild + disabled/loading 링크도 비활성 «모양»을 입는다(aria-disabled: 실선 흐린 면 · 글 ink-3 · 눌림 없음)', async () => {
     await act(async () => { root.render(<Button asChild disabled variant="primary"><a href="https://example.com/x">삭제</a></Button>); });
     const cls = container.querySelector('a')!.className;
-    expect(cls).toContain('aria-disabled:border-dashed');
+    expect(cls).toContain('aria-disabled:border-ds-line');
     expect(cls).toContain('aria-disabled:text-ds-ink-3');
-    expect(cls).toContain('aria-disabled:bg-transparent');
+    expect(cls).toContain('aria-disabled:bg-ds-surface-high');
+    expect(cls).not.toContain('border-dashed');
     expect(cls).toContain('aria-disabled:pointer-events-none');
   });
 

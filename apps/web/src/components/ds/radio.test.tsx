@@ -73,14 +73,15 @@ describe('ds Radio', () => {
     expect(radios().map((r) => r.getAttribute('aria-checked'))).toEqual(['false', 'false', 'true']);
   });
 
-  it('비활성 항목은 점선 윤곽 클래스를 가진다', async () => {
+  it('비활성 항목은 실선 흐린 면 클래스를 가진다', async () => {
     await render(<RadioGroup aria-label="묶음"><Radio value="a" label="x" disabled /></RadioGroup>);
-    expect(radios()[0]!.className).toContain('data-disabled:border-dashed');
+    expect(radios()[0]!.className).toContain('data-disabled:bg-ds-surface-high');
+    expect(radios()[0]!.className).not.toContain('border-dashed');
   });
 
   it('⭐비활성 + 고른 항목은 action 윤곽을 잃는다(점은 ink-3)', async () => {
     await render(<RadioGroup aria-label="묶음" defaultValue="a"><Radio value="a" label="x" disabled /></RadioGroup>);
-    expect(radios()[0]!.className).toContain('data-disabled:data-checked:border-ds-line-control');
+    expect(radios()[0]!.className).toContain('data-disabled:data-checked:border-ds-line');
     expect(container.querySelector('[data-slot="ds-radio-indicator"]')!.className).toContain('data-disabled:bg-ds-ink-3');
   });
 
