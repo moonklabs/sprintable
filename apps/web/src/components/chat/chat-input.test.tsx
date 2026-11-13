@@ -384,7 +384,7 @@ describe('ChatInput — STEER 모드(story #2942)', () => {
     expect(select.textContent).toContain('동료1');
   });
 
-  it('대상·작업·지시 셋 다 없으면 전송 버튼이 비활성 — 셋 다 채워야 활성화된다', async () => {
+  it('대상 + 지시 글이면 전송 버튼이 켜진다 — 일감(작업)은 붙이는 맥락일 뿐 필수가 아니다(story 4920)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/api/entities/search')) {
         return new Response(JSON.stringify({ data: [{ entity_type: 'story', entity_id: 's1', title: '대상 스토리', status: 'in-progress' }] }));
@@ -400,24 +400,23 @@ describe('ChatInput — STEER 모드(story #2942)', () => {
     const sendBtn = container.querySelector('[data-testid="chat-send"]') as HTMLButtonElement;
     expect(sendBtn.disabled).toBe(true);
 
-    // 지시 텍스트만 채움 — 여전히 비활성(대상·작업 미선택).
+    // 지시 텍스트만 채움 — 여전히 비활성(대상 미선택).
     await act(async () => { setValue(textarea(), '이제 A로 가자'); });
     expect(sendBtn.disabled).toBe(true);
 
-    // 대상 선택.
+    // 대상 선택 → 켜진다(작업은 안 골라도).
     const select = container.querySelector('select') as HTMLSelectElement;
     await act(async () => { setValue(select, 'u1'); });
-    expect(sendBtn.disabled).toBe(true); // 작업 아직 미선택.
+    expect(sendBtn.disabled).toBe(false);
 
-    // 작업 검색 → 후보 클릭.
+    // 작업을 골라도 켜진 채(맥락을 붙이는 것).
     const workItemInput = container.querySelectorAll('input[type="text"]')[0] as HTMLInputElement;
     await act(async () => { setValue(workItemInput, '대상'); });
     await act(async () => { await new Promise((r) => setTimeout(r, 260)); });
     const candidate = [...container.querySelectorAll('[role="listbox"] button')].find((b) => b.textContent?.includes('대상 스토리')) as HTMLButtonElement;
     expect(candidate, '작업 후보를 못 찾음').toBeDefined();
     await act(async () => { candidate.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })); });
-
-    expect(sendBtn.disabled).toBe(false); // 셋 다 채워짐.
+    expect(sendBtn.disabled).toBe(false);
   });
 
   it('전송 성공 — POST /api/events/publish를 정확한 body로 호출하고, 성공 後 STEER 패널이 닫힌다', async () => {

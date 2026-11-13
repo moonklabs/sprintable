@@ -513,7 +513,9 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   // 그대로 보여준다(임의 문구 창작 금지 — extractBackendErrorMessage 기존 관례).
   const handleSendSteer = async () => {
     const instruction = text.trim();
-    if (!instruction || !steerTargetId || !steerWorkItem || steerSending || disabled) return;
+    if (!instruction || steerSending || disabled) return;
+    // story 4920 — the work item is OPTIONAL context (an instruction is «to whom · what»: the target and the text). A missing target is said out loud: Enter used to do nothing at all.
+    if (!steerTargetId) { setSteerError(t('steerNeedTarget')); return; }
     setSteerSending(true);
     setSteerError(null);
     try {
@@ -524,8 +526,8 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           definition_key: 'preset.steer.instruct',
           conversation_id: threadId,
           payload: {
-            work_item_type: steerWorkItem.entity_type,
-            work_item_id: steerWorkItem.entity_id,
+            // story 4920 — the work item rides along only when one was picked (the server routes the card to its stakeholders then; without one the instruction goes to the target alone)
+            ...(steerWorkItem ? { work_item_type: steerWorkItem.entity_type, work_item_id: steerWorkItem.entity_id } : {}),
             target_member_id: steerTargetId,
             instruction,
           },
@@ -649,7 +651,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
 
   const atMaxAttachments = pendingFiles.length >= MAX_ATTACHMENTS;
   const canSend = (text.trim().length > 0 || pendingFiles.length > 0) && !sending && !disabled;
-  const canSteerSend = text.trim().length > 0 && !!steerTargetId && !!steerWorkItem && !steerSending && !disabled;
+  const canSteerSend = text.trim().length > 0 && !!steerTargetId && !steerSending && !disabled; // story 4920 — the work item is not required
 
   return (
     <div
@@ -713,6 +715,10 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           조합(#2419 계보) — 새 토큰 발명 없이 위치만 옮겨 해소. */}
       {steerError && (
         <p role="alert" aria-live="assertive" aria-atomic="true" className="mb-1 text-xs text-destructive">{steerError}</p>
+      )}
+      {/* story 4920 — why the send button is off: the person typed an instruction but chose nobody (the one thing an instruction needs besides its text). Said as a status line, not by a silent disabled button. The alert above (Enter pressed) says the same thing, so it stands in then. */}
+      {steerMode && !steerError && !steerTargetId && text.trim().length > 0 && (
+        <p role="status" data-testid="steer-need-target" className="mb-1 text-xs text-muted-foreground">{t('steerNeedTarget')}</p>
       )}
       {droppedFiles > 0 ? (
         // story #4474 — the files over the cap are named by count and reason (a status, so a screen reader hears it too)
@@ -784,7 +790,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
           <Select
             aria-label={t('steerPanelTargetLabel')}
             value={steerTargetId}
-            onChange={(e) => setSteerTargetId(e.target.value)}
+            onChange={(e) => { setSteerTargetId(e.target.value); if (e.target.value) setSteerError(null); }}
             className="h-auto min-w-[7rem] flex-1 border-ds-line-control bg-ds-surface-sunk dark:bg-ds-surface-sunk px-2 py-1 lg:text-xs"
           >
             <option value="">{t('steerPanelTargetPlaceholder')}</option>
