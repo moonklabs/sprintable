@@ -225,3 +225,37 @@ describe('ds RowListItem — onOpen (4912 행 열기)', () => {
     expect(onOpen).not.toHaveBeenCalled();
   });
 });
+
+describe('ds RowListItem — actionsTrigger (4912 B2)', () => {
+  it("⭐'context-only' = «⋯»를 그리지 않고 우클릭 메뉴는 같은 항목으로 남는다 — 단추가 이미 있는 행이 같은 것을 두 자리에 세우지 않는다 · 기본은 둘 다", async () => {
+    const onSelect = vi.fn();
+    await render(
+      <RowList aria-label="목록" header={{ title: '연결', count: 2 }}>
+        <RowListItem data-testid="row-hidden" title="숨김" actions={[{ key: 'manage', label: '키 관리', onSelect }]} actionsLabel="행 메뉴" actionsTrigger="context-only" />
+        <RowListItem data-testid="row-visible" title="보임" actions={[{ key: 'manage', label: '키 관리', onSelect }]} actionsLabel="행 메뉴" />
+      </RowList>,
+    );
+    expect(container.querySelector('[data-testid="row-hidden"] [data-slot="ds-row-actions-trigger"]')).toBeNull();
+    expect(container.querySelector('[data-testid="row-visible"] [data-slot="ds-row-actions-trigger"]')).not.toBeNull();
+    const trigger = container.querySelector('[data-testid="row-hidden"] [data-slot="ds-row-context-trigger"]')!;
+    await act(async () => { trigger.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40, button: 2 })); });
+    expect(menuLabels()).toEqual(['키 관리']);
+  });
+
+  it("⭐안 주면 지금과 한 글자도 안 다르다 — actionsTrigger를 빼면 'visible'을 준 것과 DOM이 같다(공용 부품의 기본값 가드 · 생성 id만 뺀다)", async () => {
+    const norm = (html: string) => html.replace(/\s(id|aria-controls|aria-labelledby|aria-describedby|for)="[^"]*"/g, '');
+    const list = (trigger?: 'visible' | 'context-only') => (
+      <RowList aria-label="목록" header={{ title: '연결', count: 1 }}>
+        <RowListItem data-testid="row" title="행" subtitle="둘째 줄" actions={[{ key: 'a', label: '열기', onSelect: vi.fn() }, { key: 'b', label: '해제', variant: 'danger', separatorBefore: true, onSelect: vi.fn() }]} actionsLabel="행 메뉴" {...(trigger ? { actionsTrigger: trigger } : {})} />
+      </RowList>
+    );
+    await render(list());
+    const omitted = norm(container.innerHTML);
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await render(list('visible'));
+    expect(norm(container.innerHTML)).toBe(omitted);
+    expect(omitted).toContain('data-slot="ds-row-actions-trigger"'); // the «⋯» IS drawn by default
+  });
+});
+

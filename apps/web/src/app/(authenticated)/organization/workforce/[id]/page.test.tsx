@@ -669,5 +669,114 @@ describe('AgentDetailPage — 상세 머리(story 4912 · A2)', () => {
     await act(async () => { managerProps.current?.onKeysRead?.(1); });
     expect(side()).toContain(koMessages.agents.detailSummaryKeyHas);
   });
+
+  // ---- story 4912 (B2) ----
+  it('⭐D8: 상세 머리 칩이 목록과 같은 한 함수로 role을 글자로 바꾼다 — member는 «구성원»(원문 «member»가 새지 않는다) · 기본 직무 키는 i18n 이름 · 그 밖은 원문', async () => {
+    stubWithPatch({ role: 'member' });
+    await mount();
+    const head = () => container.querySelector('[data-testid="agent-detail-head"]')!.textContent ?? '';
+    expect(head()).toContain(koMessages.organization.roleGroupMember);
+    expect(head()).not.toMatch(/(^|[^\w])member([^\w]|$)/);
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    stubWithPatch({ role: 'qa' });
+    await mount();
+    expect(head()).toContain(koMessages.organization.trustRoleLabelQa);
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    stubWithPatch({ role: 'my-custom-role' });
+    await mount();
+    expect(head()).toContain('my-custom-role');
+  });
+
+  it('⭐토글 가드는 «세대»다 — 요청이 나가 있는 동안 A→B→A로 돌아와 새 요청을 띄워도, 옛 요청이 끝나며 새 요청의 가드를 풀지 않는다(세 번째 PATCH가 안 나간다)', async () => {
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((r) => { releaseFirst = r; });
+    let patchCount = 0;
+    patches.length = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (typeof url !== 'string') return { ok: false, json: async () => null };
+      if (/^\/api\/team-members\/agent-[12]$/.test(url) && init?.method === 'PATCH') {
+        patchCount += 1;
+        patches.push({ url, body: String(init.body) });
+        if (patchCount === 1) await firstGate; // the OLD request stays out; the second one never finishes either (so its guard is the one that must hold)
+        else await new Promise<void>(() => {});
+        return { ok: true, json: async () => ({ data: { ...AGENT, is_active: false } }) };
+      }
+      if (url === '/api/team-members/agent-1') return { ok: true, json: async () => ({ data: AGENT }) };
+      if (url === '/api/team-members/agent-2') return { ok: true, json: async () => ({ data: { ...AGENT, id: 'agent-2', name: '에이전트2' } }) };
+      if (url.startsWith('/api/agents/') && url.endsWith('/api-key')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { user_id: 'u1', role: 'admin' } }) };
+      if (url.startsWith('/api/webhooks/config')) return { ok: true, json: async () => ({ data: [] }) };
+      return { ok: false, json: async () => null };
+    }));
+    const rerender = async () => { await act(async () => { const { default: Page } = await import('./page'); root.render(wrap(<Page />)); }); await settle(); await settle(); };
+    const deactivate = async () => {
+      await openMenu(); await act(async () => { items()[0]!.click(); }); await settle();
+      const confirm = [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === koMessages.settings.deactivateAgentDialogConfirm)!;
+      await act(async () => { confirm.click(); }); await settle();
+    };
+    await mount();
+    await deactivate(); // request 1 (agent-1) is out
+    expect(patches).toHaveLength(1);
+    paramId.current = 'agent-2'; await rerender();
+    paramId.current = 'agent-1'; await rerender(); // back on agent-1 — the id is the same as request 1's
+    await deactivate(); // request 2 (a NEW request on agent-1) is out
+    expect(patches).toHaveLength(2);
+    await act(async () => { releaseFirst(); }); await settle(); // the OLD request ends: it must not clear request 2's guard
+    await openMenu();
+    expect(items()[0]!.hasAttribute('disabled') || items()[0]!.getAttribute('aria-disabled') === 'true', 'the menu item stays disabled while request 2 is out').toBe(true);
+    expect(patches).toHaveLength(2);
+  });
+
+  it('⭐SSE 카드: 키 목록 읽기가 실패하면 «먼저 키를 발급하세요»(= 키 없음)라 말하지 않고 «읽지 못했어요 + 다시 시도»를 말한다 · 다시 시도하면 읽어 온다 · 진짜 빈 목록은 옛 문구 그대로', async () => {
+    let keyOk = false;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url !== 'string') return { ok: false, json: async () => null };
+      if (url === '/api/team-members/agent-1') return { ok: true, json: async () => ({ data: AGENT }) };
+      if (url.startsWith('/api/agents/') && url.endsWith('/api-key')) return keyOk ? { ok: true, json: async () => ({ data: [] }) } : { ok: false, json: async () => null };
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { user_id: 'u1', role: 'admin' } }) };
+      if (url.startsWith('/api/webhooks/config')) return { ok: true, json: async () => ({ data: [] }) };
+      return { ok: false, json: async () => null };
+    }));
+    await mount();
+    const failed = () => container.querySelector('[data-testid="agent-key-read-failed"]');
+    expect(failed()).not.toBeNull();
+    expect(failed()!.textContent).toContain(koMessages.agents.detailKeyReadFailed);
+    expect(container.textContent).not.toContain(koMessages.settings.agentFakechatEnvKeyRequired); // a failed read is not «no key»
+    keyOk = true; // the retry works now and the list is really empty
+    await act(async () => { ([...failed()!.querySelectorAll('button')][0] as HTMLElement).click(); });
+    await settle();
+    expect(failed()).toBeNull();
+    expect(container.textContent).toContain(koMessages.settings.agentFakechatEnvKeyRequired); // a real empty list keeps the old words
+  });
+
+  it('⭐SSE 카드 «다시 시도»는 읽는 동안 눌리지 않는다 — 같은 읽기를 겹쳐 띄워 옛 답이 새 답을 덮는 길을 막는다(codex)', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let keyGets = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url !== 'string') return { ok: false, json: async () => null };
+      if (url === '/api/team-members/agent-1') return { ok: true, json: async () => ({ data: AGENT }) };
+      if (url.startsWith('/api/agents/') && url.endsWith('/api-key')) { keyGets += 1; if (keyGets === 1) return { ok: false, json: async () => null }; await gate; return { ok: true, json: async () => ({ data: [] }) }; }
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { user_id: 'u1', role: 'admin' } }) };
+      if (url.startsWith('/api/webhooks/config')) return { ok: true, json: async () => ({ data: [] }) };
+      return { ok: false, json: async () => null };
+    }));
+    await mount();
+    const retry = () => ([...container.querySelectorAll('[data-testid="agent-key-read-failed"] button')][0] as HTMLButtonElement);
+    expect(retry().disabled).toBe(false);
+    await act(async () => { retry().click(); });
+    await settle();
+    expect(keyGets).toBe(2);
+    expect(retry().disabled, 'the retry read is out: the button waits').toBe(true);
+    await act(async () => { retry().click(); });
+    expect(keyGets, 'a press while reading sends nothing').toBe(2);
+    await act(async () => { release(); });
+    await settle();
+  });
 });
 

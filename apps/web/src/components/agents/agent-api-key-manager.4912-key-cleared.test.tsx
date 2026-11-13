@@ -8,7 +8,7 @@ import { AgentApiKeyManager } from './agent-api-key-manager';
 
 // story 4912 D4 — the full key is shown once, in the «key shown» dialog. Closing that dialog by ANY way (the [완료] button, Esc) must drop the plaintext key (and the MCP config) from state:
 // before, only [완료] cleared the key (and never the MCP config) — Esc / a click outside left it, so the header's «온보딩 메시지 복사» kept copying the full key.
-const { copied, addToast, copyState } = vi.hoisted(() => ({ copied: [] as string[], addToast: () => {}, copyState: { ok: true, gate: null as Promise<void> | null } })); // addToast must keep ONE identity: the load effect depends on it
+const { copied, addToast, toasts, copyState } = vi.hoisted(() => { const toasts: Array<{ body?: string }> = []; return { copied: [] as string[], toasts, addToast: (t: { body?: string }) => { toasts.push(t); }, copyState: { ok: true, gate: null as Promise<void> | null } }; }); // addToast must keep ONE identity: the load effect depends on it
 vi.mock('@/lib/clipboard', () => ({ copyTextSafely: async (text: string) => { copied.push(text); if (copyState.gate) await copyState.gate; return { ok: copyState.ok }; } }));
 vi.mock('@/components/ui/toast', () => ({ useToast: () => ({ addToast }) }));
 
@@ -57,7 +57,7 @@ async function openKeyShownDialog() {
   expect(document.body.textContent).toContain(NEW_KEY); // the key IS shown while the dialog is open
 }
 
-beforeEach(() => { copied.length = 0; copyState.ok = true; copyState.gate = null; container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
+beforeEach(() => { toasts.length = 0; copied.length = 0; copyState.ok = true; copyState.gate = null; container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('AgentApiKeyManager — 4912 D4: the full key does not stay once the key-shown dialog is closed', () => {
@@ -233,6 +233,139 @@ describe('AgentApiKeyManager — 4912 D4: the other things that could hold the k
     await act(async () => { btn(S.agentApiKeyGenerate)?.click(); });
     await settle();
     expect(calls).toEqual([true, false]);
+  });
+
+  it('⭐«발급 중»은 키가 상태에 적힌 순간 끝난다 — 뒤따르는 키 목록 읽기가 끝나기를 기다리지 않는다(패널이 그 읽기에 묶이지 않게)', async () => {
+    const calls: boolean[] = [];
+    let listGets = 0;
+    let finishList!: (r: Response) => void;
+    const listGate = new Promise<Response>((res) => { finishList = res; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes('/api-key') && init?.method === 'POST') return new Response(JSON.stringify({ data: { api_key: NEW_KEY, mcp_config: MCP } }), { status: 201 });
+      if (u.includes('/api-key')) { listGets += 1; return listGets === 1 ? new Response(JSON.stringify({ data: [] }), { status: 200 }) : listGate; } // the follow-up read (2nd GET) hangs
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    }));
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" onIssuingChange={(b) => calls.push(b)} /></NextIntlClientProvider>); });
+    await settle();
+    await act(async () => { btn(S.agentApiKeyGenerate)?.click(); });
+    await settle();
+    expect(document.body.textContent).toContain(NEW_KEY); // the key is in the dialog
+    expect(calls.at(-1), 'ended at the state write, the follow-up read is still out').toBe(false);
+    await act(async () => { finishList(new Response(JSON.stringify({ data: [] }), { status: 200 })); });
+    await settle();
+  });
+
+  it('⭐만들기 답의 본문이 끝나지 않으면 20초 뒤 «발급 실패»로 끝난다 — «발급 중»이 영영 안 풀려 패널이 새로고침 전까지 안 닫히지 않는다', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const calls: boolean[] = [];
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+        const u = String(url);
+        if (u.includes('/api-key') && init?.method === 'POST') return { ok: true, status: 201, json: () => new Promise(() => {}) } as unknown as Response; // headers came, the body never ends
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }));
+      await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" onIssuingChange={(b) => calls.push(b)} /></NextIntlClientProvider>); });
+      await settle();
+      await act(async () => { btn(S.agentApiKeyGenerate)?.click(); });
+      await settle();
+      expect(calls.at(-1), 'still issuing while the body is awaited').toBe(true);
+      await act(async () => { vi.advanceTimersByTime(20_001); });
+      await settle();
+      expect(calls.at(-1), 'the bounded read ended it').toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('⭐옛 카드의 뒤늦은 «발급 중 끝»이 새 패널의 «발급 중»을 지우지 않는다(codex) — 카드 A가 키를 적고 닫힌 뒤 뒤따르는 읽기가 끝나도, 그 사이 새 카드 B가 잡은 hold는 그대로', async () => {
+    const calls: boolean[] = [];
+    let finishListA!: (r: Response) => void;
+    const listGateA = new Promise<Response>((res) => { finishListA = res; });
+    let aListGets = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      const isA = u.includes('/agent-1/');
+      if (u.includes('/api-key') && init?.method === 'POST') return isA ? new Response(JSON.stringify({ data: { api_key: NEW_KEY, mcp_config: MCP } }), { status: 201 }) : new Promise<Response>(() => {}); // B's create never answers (it stays «발급 중»)
+      if (u.includes('/api-key')) { if (isA) { aListGets += 1; if (aListGets > 1) return listGateA; } return new Response(JSON.stringify({ data: [] }), { status: 200 }); }
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    }));
+    const mountCard = async (agentId: string) => { await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId={agentId} agentName={agentId} onIssuingChange={(b) => calls.push(b)} /></NextIntlClientProvider>); }); await settle(); };
+    await mountCard('agent-1');
+    await act(async () => { btn(S.agentApiKeyGenerate)?.click(); });
+    await settle(); // A wrote the key (hold released) and its follow-up list read is out
+    expect(calls).toEqual([true, false]);
+    await act(async () => { root.unmount(); }); // the panel closes: card A is gone while its read is still out
+    root = createRoot(container);
+    await mountCard('agent-2');
+    await act(async () => { btn(S.agentApiKeyGenerate)?.click(); });
+    await settle(); // B took the hold
+    expect(calls.at(-1)).toBe(true);
+    await act(async () => { finishListA(new Response(JSON.stringify({ data: [] }), { status: 200 })); });
+    await settle(); // A's late read ends: it must NOT release B's hold
+    expect(calls.at(-1), 'B still holds the panel').toBe(true);
+  });
+
+  it('⭐hold를 쥔 채 카드가 사라지면(목록이 바뀌어 에이전트가 빠짐 등) 그 hold를 놓는다 — 패널이 영영 못 닫히지 않게', async () => {
+    const calls: boolean[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => (String(url).includes('/api-key') && init?.method === 'POST' ? new Promise<Response>(() => {}) : new Response(JSON.stringify({ data: [] }), { status: 200 }))));
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="a" onIssuingChange={(b) => calls.push(b)} /></NextIntlClientProvider>); });
+    await settle();
+    await act(async () => { btn(S.agentApiKeyGenerate)?.click(); });
+    await settle();
+    expect(calls).toEqual([true]);
+    await act(async () => { root.unmount(); });
+    expect(calls).toEqual([true, false]);
+    root = createRoot(container);
+  });
+
+  it('⭐만들기 답의 본문이 끝나지 않아 시간이 다 되면 «발급 실패»가 아니라 «새 키가 만들어졌을 수 있어요»라 말하고 키 목록을 다시 읽는다(옛 키는 이미 무효 — codex)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      let listGets = 0;
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+        const u = String(url);
+        if (u.includes('/api-key') && init?.method === 'POST') return { ok: true, status: 201, json: () => new Promise(() => {}) } as unknown as Response;
+        if (u.includes('/api-key')) { listGets += 1; return new Response(JSON.stringify({ data: [] }), { status: 200 }); }
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }));
+      await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="a" /></NextIntlClientProvider>); });
+      await settle();
+      const before = listGets;
+      await act(async () => { btn(S.agentApiKeyGenerate)?.click(); });
+      await settle();
+      await act(async () => { vi.advanceTimersByTime(20_001); });
+      await settle();
+      expect(toasts.map((t) => t.body)).toContain(S.agentApiKeyCreateUnconfirmed);
+      expect(toasts.map((t) => t.body)).not.toContain(S.agentApiKeyGenerateFailed);
+      expect(listGets, 'the list is read again so what exists is on screen').toBeGreaterThan(before);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('⭐본문 시간 초과 뒤 키 목록 읽기가 멈춰도 패널은 잡히지 않는다 — «발급 중»은 만들기가 끝난 순간 풀리고 목록 읽기를 기다리지 않는다(codex 2차)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const calls: boolean[] = [];
+      let listGets = 0;
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+        const u = String(url);
+        if (u.includes('/api-key') && init?.method === 'POST') return { ok: true, status: 201, json: () => new Promise(() => {}) } as unknown as Response;
+        if (u.includes('/api-key')) { listGets += 1; return listGets === 1 ? new Response(JSON.stringify({ data: [] }), { status: 200 }) : new Promise<Response>(() => {}); } // the re-read after the timeout hangs
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }));
+      await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="a" onIssuingChange={(b) => calls.push(b)} /></NextIntlClientProvider>); });
+      await settle();
+      await act(async () => { btn(S.agentApiKeyGenerate)?.click(); });
+      await settle();
+      await act(async () => { vi.advanceTimersByTime(20_001); });
+      await settle();
+      expect(listGets).toBeGreaterThan(1); // the re-read is out and never answers
+      expect(calls.at(-1), 'the panel is free although the list read is stuck').toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

@@ -31,7 +31,7 @@ import { isDesktopRuntime } from '@/lib/agent-run-profile';
 import { AgentRunProfileBulkDialog } from '@/components/agents/agent-run-profile-bulk-dialog';
 import { CountBadge } from '@/components/ui/count-badge';
 import { useFlatHref } from '@/hooks/use-flat-href';
-import { orgRoleLabel } from '@/lib/org-role-label';
+import { agentRoleLabel } from '@/lib/org-role-label';
 import { memberRowLabels } from '@/lib/member-display';
 import { RowName } from '@/components/shared/row-name';
 import { StatusLabel } from '@/components/ds/status-label';
@@ -147,7 +147,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
   const [agents, setAgents] = useState<OrgAgent[]>([]);
   // story #4311 — 같은 이름 구성원이 한 목록에서 갈리게 행 라벨은 memberRowLabels(member-display 한 곳의 꼬리 규칙)로.
   // story #4311(유나 비차단) — 행에 조직 역할 배지가 보이므로 그 글자를 roleLabel로 넘긴다(역할이 보이고 서로 다르면 꼬리 없음).
-  const rowLabels = useMemo(() => memberRowLabels(agents, tc, (a) => orgRoleLabel(a.role, to) ?? ''), [agents, tc, to]);
+  const rowLabels = useMemo(() => memberRowLabels(agents, tc, (a) => agentRoleLabel(a.role, to) ?? ''), [agents, tc, to]);
 
   // story 4889 (W1): the list reads the SAME live state as the DM strip and the Today list (one read: /api/agents/desktop-sessions) — a row of an agent on a computer wears its state
   const { rows: stateRows } = useAgentStates();
@@ -289,7 +289,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
 
   const subtitleOf = (agent: OrgAgent): string => {
     const parts: string[] = [];
-    const roleText = orgRoleLabel(agent.role, to); // [SID:4282 · 유나 결정] agent.role is the ORG role (owner/admin/member) · only an unknown value shows raw
+    const roleText = agentRoleLabel(agent.role, to); // story 4912 D8: the ONE role label function (org roles + default job keys; an unknown value shows raw) — the detail's chip uses the same one
     if (roleText) parts.push(roleText);
     parts.push(ta('manageProjectsGranted', { count: grantCounts[agent.id] ?? 0 }));
     if (agent.device_name && !embedded) parts.push(agent.device_name); // story 4675 (F2): the computer — two agents with one name are told apart here (hidden where there is one computer, story 4832)

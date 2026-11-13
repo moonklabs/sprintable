@@ -108,8 +108,13 @@ type RowActionsProps =
       /** 있으면 «⋯» 메뉴와 **우클릭 메뉴**가 같은 항목으로 생긴다. 없으면 우클릭은 브라우저 기본 그대로다. */
       actions: RowAction[];
       actionsLabel: string;
+      /**
+       * story 4912 (B2): `'context-only'` = the same items open by **right-click only** — no «⋯» drawn. For a row whose one action is already a visible button of its own (the API key screen's «키 관리»): the same thing is not put in two places.
+       * Default `'visible'` (the «⋯» menu AND the right-click menu).
+       */
+      actionsTrigger?: 'visible' | 'context-only';
     }
-  | { actions?: undefined; actionsLabel?: never };
+  | { actions?: undefined; actionsLabel?: never; actionsTrigger?: never };
 
 export type RowListItemProps = RowActionsProps & Omit<HTMLAttributes<HTMLElement>, 'title' | 'children'> & {
   /** 시험 손잡이는 행 «전체»(`role=listitem` — 펼침 칸까지 담은 래퍼)에 붙는다. */
@@ -139,7 +144,7 @@ export type RowListItemProps = RowActionsProps & Omit<HTMLAttributes<HTMLElement
  * 행 자체가 초점을 받는다(`data-row-main`): Enter = 펼침/접힘, Esc = 닫기(펼쳐 있을 때), 안쪽 단추 · 입력에서는 건드리지 않는다.
  */
 export function RowListItem({
-  leading, title, subtitle, statusMark, trailing, actions, actionsLabel, expanded = false, onExpandedChange, detail, expandLabel, onOpen, className, 'data-testid': testId, onDoubleClick, ...rest
+  leading, title, subtitle, statusMark, trailing, actions, actionsLabel, actionsTrigger = 'visible', expanded = false, onExpandedChange, detail, expandLabel, onOpen, className, 'data-testid': testId, onDoubleClick, ...rest
 }: RowListItemProps) {
   const detailId = useId();
   const hasDetail = detail !== undefined && detail !== null && detail !== false;
@@ -197,7 +202,7 @@ export function RowListItem({
                 onClick={() => onExpandedChange?.(!expanded)}
               />
             ) : null}
-            {hasActions ? (
+            {hasActions && actionsTrigger === 'visible' ? (
               <Menu>
                 <MenuTrigger render={<IconButton icon="more_horiz" label={actionsLabel} data-slot="ds-row-actions-trigger" />} />
                 <MenuContent align="end">
