@@ -2,7 +2,7 @@
 //
 // 4910 ④ — 그림 칸 다시 맞춤: 이미지는 처음엔 선언 크기(없으면 기본 1280×800)로 «전체 보기»를 맞춘 뒤 불러지며 실제 크기가 알려진다.
 // 실제 크기가 알려졌을 때 사용자가 아직 화면을 안 만졌으면 한 번 다시 맞추고, 만졌으면(끌기 · 휠 · 핀치 · 더블클릭 · 실제 크기) 건드리지 않는다. 크기마다 한 번, 내용이 바뀌면 처음부터.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
@@ -14,12 +14,15 @@ import koMessages from '../../../messages/ko.json';
 let container: HTMLDivElement;
 let root: Root;
 const sizeGetters: PropertyDescriptor[] = [];
+let viewW = 640;
+let viewH = 480;
 
 // 640×480 칸 고정(jsdom은 0). 기본 아트보드 1280×800 → fit 0.5. 실제 크기 320×200 → fit 2, 160×100 → fit 4(MAX).
 beforeEach(() => {
+  viewW = 640; viewH = 480;
   for (const prop of ['clientWidth', 'clientHeight'] as const) {
     sizeGetters.push(Object.getOwnPropertyDescriptor(HTMLElement.prototype, prop) ?? { value: 0, configurable: true });
-    Object.defineProperty(HTMLElement.prototype, prop, { configurable: true, get() { return prop === 'clientWidth' ? 640 : 480; } });
+    Object.defineProperty(HTMLElement.prototype, prop, { configurable: true, get() { return prop === 'clientWidth' ? viewW : viewH; } });
   }
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -27,6 +30,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.unstubAllGlobals();
   await act(async () => { root.unmount(); });
   container.remove();
   (['clientWidth', 'clientHeight'] as const).forEach((prop, i) => Object.defineProperty(HTMLElement.prototype, prop, sizeGetters[i]!));
@@ -116,6 +120,18 @@ describe('ArtifactStage — 이미지 실제 크기를 알았을 때 다시 맞�
     await mountImage('https://cdn.example.com/two.png');
     await loadImage(320, 200);
     expect(scaleNow()).toBeCloseTo(2, 3);
+  });
+
+  it('창 · 칸 크기가 바뀌어도(손대기 전이라도) 다시 맞추지 않는다 — 처음 맞춤은 «최초 1회», 다시 맞춤은 «이미지 크기가 새로 알려진 때»만', async () => {
+    let notify: () => void = () => undefined;
+    class FakeResizeObserver { constructor(cb: () => void) { notify = cb; } observe() {} disconnect() {} unobserve() {} }
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+    await mountImage();
+    await loadImage(320, 200);
+    expect(scaleNow()).toBeCloseTo(2, 3);
+    viewW = 320; viewH = 240; // 칸이 반으로 줄어듦
+    await act(async () => { notify(); });
+    expect(scaleNow()).toBeCloseTo(2, 3); // 그대로 — 사용자가 «전체 보기»를 누를 때까지
   });
 
   it('이미지가 아닌 형식(html)은 건드리지 않는다 — img도 없고 배율은 처음 맞춘 그대로', async () => {
