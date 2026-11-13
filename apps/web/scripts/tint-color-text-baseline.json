@@ -97,7 +97,6 @@
     "components/docs/doc-gate-section.tsx::success::bg-success-tint text-success",
     "components/docs/doc-gate-section.tsx::success::h-7 gap-1 text-success hover:bg-success-tint hover:text-foreground",
     "components/docs/extensions/file-node.tsx::destructive::flex h-[38px] w-[38px] flex-shrink-0 items-center justify-center rounded-md bg-destructive-tint text-destructive",
-    "components/hypotheses/hypothesis-gate-badge.tsx::success::h-7 gap-1 text-success hover:bg-success-tint hover:text-success",
     "components/inbox/approvals-queue.tsx::success::h-7 gap-1 text-success hover:bg-success-tint hover:text-foreground",
     "components/kanban/story-detail-panel.tsx::destructive::h-auto absolute -right-1 -top-1 rounded bg-destructive-tint p-1.5 text-destructive hover:brightness-95",
     "components/nav/profile-menu.tsx::destructive::flex items-center gap-2 text-destructive focus:bg-destructive-tint focus:text-destructive",

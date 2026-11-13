@@ -3,9 +3,11 @@
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Shield, ShieldCheck, ShieldX, Sparkles, User, CheckCircle, XCircle } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ds/button';
+import { Chip } from '@/components/ds/chip';
+import { Input } from '@/components/ds/input';
+import { cn } from '@/lib/utils';
+import { HYPOTHESIS_BAND_FACE } from './hypotheses-face';
 import { gateNeedsAction } from '@/components/cage/gate-evidence';
 import type { GateItem } from '@/components/kanban/types';
 import type { Hypothesis } from '@sprintable/core-storage';
@@ -18,10 +20,11 @@ import type { Hypothesis } from '@sprintable/core-storage';
  */
 type GateState = 'pending' | 'confirmed' | 'rejected';
 
-const META: Record<GateState, { variant: 'warning' | 'success' | 'destructive'; Icon: typeof Shield; labelKey: string }> = {
-  pending: { variant: 'warning', Icon: Shield, labelKey: 'gatePending' },
-  confirmed: { variant: 'success', Icon: ShieldCheck, labelKey: 'gateConfirmed' },
-  rejected: { variant: 'destructive', Icon: ShieldX, labelKey: 'gateRejected' },
+// 4909 AC3 (가설 칸 3단계) — the band's state chip on the ds Chip: waiting = amber (needs-hand) · confirmed = green (done) · rejected = red (failed); the word and the shield mark are always there.
+const META: Record<GateState, { tone: 'needs-hand' | 'done' | 'failed'; Icon: typeof Shield; labelKey: string }> = {
+  pending: { tone: 'needs-hand', Icon: Shield, labelKey: 'gatePending' },
+  confirmed: { tone: 'done', Icon: ShieldCheck, labelKey: 'gateConfirmed' },
+  rejected: { tone: 'failed', Icon: ShieldX, labelKey: 'gateRejected' },
 };
 
 // gate-approval 축은 outcome lifecycle(active→measuring→verified)와 독립 — confirmed_by가 박히면
@@ -88,21 +91,21 @@ export function HypothesisGateBadge({ hypothesis, gate, resolveName = () => '', 
   const actorId = state === 'rejected' ? (gate?.resolver_id ?? null) : hypothesis.confirmed_by_member_id;
 
   return (
-    <div className="space-y-1.5 rounded-xl border border-border bg-muted/20 px-3 py-2">
+    <div data-testid="hypothesis-gate-band" data-gate-state={state} className={cn('space-y-1.5 rounded-ds-control border border-ds-line px-3 py-2', HYPOTHESIS_BAND_FACE)}>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <Badge variant={meta.variant} className="shrink-0 gap-1">
-          <MetaIcon className="size-3 shrink-0" />
+        <Chip tone={meta.tone}>
+          <MetaIcon className="size-3 shrink-0" aria-hidden />
           {t(meta.labelKey)}
-        </Badge>
+        </Chip>
         {/* owner/drafted_by/confirmed_by 구분 미니 evidence */}
         {draftedBy ? (
-          <span className="inline-flex items-center gap-1 text-editorial-meta text-muted-foreground">
+          <span className="inline-flex items-center gap-1 text-ds-small text-ds-ink-3">
             <Sparkles className="size-3 shrink-0" />
             {t('gateDraftedBy', { name: resolveName(draftedBy) })}
           </span>
         ) : null}
         {actorId && (state === 'confirmed' || state === 'rejected') ? (
-          <span className="inline-flex items-center gap-1 text-editorial-meta text-muted-foreground">
+          <span className="inline-flex items-center gap-1 text-ds-small text-ds-ink-3">
             <User className="size-3 shrink-0" />
             {t(state === 'rejected' ? 'gateRejectedBy' : 'gateConfirmedBy', { name: resolveName(actorId) })}
           </span>
@@ -110,24 +113,10 @@ export function HypothesisGateBadge({ hypothesis, gate, resolveName = () => '', 
         {/* approve/reject = GateInbox action 재사용(requires_human·pending 시만) */}
         {canAct && rejectNote === null ? (
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 gap-1 text-success hover:bg-success-tint hover:text-success"
-              disabled={resolving}
-              onClick={() => void transition('approved')}
-            >
-              <CheckCircle className="size-3.5" />
+            <Button type="button" variant="secondary" disabled={resolving} onClick={() => void transition('approved')} iconStart={<CheckCircle className="size-3.5" aria-hidden />}>
               {t('gateApprove')}
             </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 gap-1 text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
-              disabled={resolving}
-              onClick={() => setRejectNote('')}
-            >
-              <XCircle className="size-3.5" />
+            <Button type="button" variant="danger" disabled={resolving} onClick={() => setRejectNote('')} iconStart={<XCircle className="size-3.5" aria-hidden />}>
               {t('gateReject')}
             </Button>
           </div>
@@ -141,12 +130,11 @@ export function HypothesisGateBadge({ hypothesis, gate, resolveName = () => '', 
             value={rejectNote}
             onChange={(e) => setRejectNote(e.target.value)}
             placeholder={t('gateRejectNotePlaceholder')}
-            className="h-7 min-w-0 flex-1 px-2 py-0 lg:text-xs bg-background dark:bg-background"
+            className="min-w-0 flex-1"
           />
           <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 text-destructive hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60"
+            type="button"
+            variant="danger"
             // story #3334 — 반려 사유(note) 서버측 필수 강제(gates.py 422)와 짝. 예전엔
             // resolving만 봐서 빈 입력으로도 즉시 제출됐다.
             disabled={resolving || !rejectNote.trim()}
@@ -154,7 +142,7 @@ export function HypothesisGateBadge({ hypothesis, gate, resolveName = () => '', 
           >
             {resolving ? '…' : t('gateRejectConfirm')}
           </Button>
-          <Button size="sm" variant="ghost" className="h-7" onClick={() => setRejectNote(null)}>
+          <Button type="button" variant="quiet" onClick={() => setRejectNote(null)}>
             {t('gateCancel')}
           </Button>
         </div>
