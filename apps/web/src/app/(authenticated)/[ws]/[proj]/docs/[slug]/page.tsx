@@ -78,6 +78,9 @@ export default function DocSlugPage() {
   const [selectedDoc, setSelectedDoc] = useState<DocDetail | null>(null);
   const [docLoading, setDocLoading] = useState(true);
   const [title, setTitle] = useState('');
+  // 4910 — «새 문서»로 막 만든 초안(?new=1): 서버엔 기본 제목(«제목 없음»)이 들어 있지만 그 글은 «진짜 글자»가 아니라 자리 표시여야 한다(쓰면 뒤에 붙던 결함).
+  // 제목이 아직 기본 글이고 사용자가 손대기 전이면 칸은 비워 두고 기본 글은 placeholder로 보인다. 한 번이라도 고치면 평소대로(값 = 제목).
+  const [titleUntouched, setTitleUntouched] = useState(true);
   const [content, setContent] = useState('');
   const [contentFormat, setContentFormat] = useState<'markdown' | 'html'>('markdown');
   const [autosave, setAutosave] = useState(true);
@@ -114,6 +117,7 @@ export default function DocSlugPage() {
   }, [setTree, slug, router, wsSlug, projSlug]);
 
   const handleTitleChange = useCallback((value: string) => {
+    setTitleUntouched(false);
     setTitle(value);
     setSelectedDoc((prev) => (prev ? { ...prev, title: value } : null));
     setTree((prev) => prev.map((d) => (d.id === selectedDoc?.id ? { ...d, title: value } : d)));
@@ -185,6 +189,10 @@ export default function DocSlugPage() {
   }, [projectId, slug, router, wsSlug, projSlug]);
 
   useEffect(() => { void fetchDoc(); }, [fetchDoc]);
+
+  // 4910 — 막 만든 초안의 제목칸(위 titleUntouched): 서버에 들어 있는 기본 글은 값이 아니라 placeholder로만 보인다.
+  const defaultTitle = t('newDocDefaultTitle');
+  const brandNewTitle = isNew && titleUntouched && title === defaultTitle;
 
   // FIX-4 off-ramp (fc4d4264): resolve a conflict / remote-changed dead-end.
   // Pull re-fetches the live doc (fetchDoc is no-store, AC-F4-7) → the serverUpdatedAt
@@ -435,9 +443,9 @@ export default function DocSlugPage() {
           onSave={save}
           autosave={autosave}
           onAutosaveToggle={setAutosave}
-          title={title}
+          title={brandNewTitle ? '' : title}
           onTitleChange={handleTitleChange}
-          titlePlaceholder={t('titlePlaceholder')}
+          titlePlaceholder={brandNewTitle ? defaultTitle : t('titlePlaceholder')}
           titleAutoFocus={isNew || !title}
           onOpenTree={openTreeDrawer}
           dispatchSlot={projectId ? (
