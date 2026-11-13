@@ -1525,6 +1525,7 @@ async def _refresh_person_limit_answer(session: AsyncSession, person: uuid.UUID 
     alive = (await session.execute(
         select(RefreshToken.id).where(
             RefreshToken.token_hash == token_hash,
+            RefreshToken.user_id == person,   # a token whose signed `sub` and whose row's owner disagree must not burn a third person's count
             RefreshToken.expires_at > now,
             or_(RefreshToken.revoked_at.is_(None), RefreshToken.revoked_at > now - timedelta(seconds=settings.auth_refresh_chain_resolve_window_seconds)),
         ).limit(1)

@@ -4,6 +4,7 @@ import collections
 import logging
 import secrets
 import sys
+import threading
 
 from fastapi import Request
 from slowapi import Limiter
@@ -31,7 +32,8 @@ def _rate_key_client_ip_only(request: Request) -> str:
     ip, via = client_ip_with_source(request)
     key = fold_ip(ip)
     request.state._rate_ip_key = key
-    logger.info("rate_limit.key id=%s via=%s method=%s path=%s", _key_id(key), via, request.method, request.url.path)
+    route = request.scope.get("route")
+    logger.info("rate_limit.key id=%s via=%s method=%s route=%s", _key_id(key), via, request.method, getattr(route, "path", None) or "?")  # the route template (/legal/{doc_type}), never the raw path a client typed
     return key
 
 
@@ -136,6 +138,10 @@ _FAILED_LOGIN_MAX_PER_KEY = 32
 _failed_logins: "collections.OrderedDict[str, dict]" = collections.OrderedDict()
 
 
+_failed_logins_lock = threading.Lock()   # the handlers run on one event loop (serial), but a thread path must not corrupt the two maps either
+_FAILED_LOGIN_EMAIL_MAX_CHARS = 320       # RFC 5321 address limit — the hash is never made of an unbounded string
+
+
 def note_failed_login(request: Request, email: str, *, now: float | None = None) -> int:
     """Counts a failed sign-in of `email` from this request's address; returns how many DIFFERENT accounts failed from it inside the window (at most `_FAILED_LOGIN_MAX_PER_KEY`). Warns once per window from the 10th on."""
     import hashlib
@@ -143,6 +149,12 @@ def note_failed_login(request: Request, email: str, *, now: float | None = None)
 
     t = time.time() if now is None else now
     key = _rate_key_client_ip_only(request)
+    digest = hashlib.sha256(email.strip().lower()[:_FAILED_LOGIN_EMAIL_MAX_CHARS].encode()).hexdigest()[:12]
+    with _failed_logins_lock:
+        return _note_failed_login_locked(key, digest, t)
+
+
+def _note_failed_login_locked(key: str, h: str, t: float) -> int:
     entry = _failed_logins.get(key)
     if entry is None:
         entry = _failed_logins[key] = {"seen": {}, "warned_at": None}
@@ -152,9 +164,8 @@ def note_failed_login(request: Request, email: str, *, now: float | None = None)
         _failed_logins.move_to_end(key)
     seen = entry["seen"]
     cutoff = t - _FAILED_LOGIN_WINDOW_SECONDS
-    for h in [h for h, ts in seen.items() if ts < cutoff]:
-        del seen[h]
-    h = hashlib.sha256(email.strip().lower().encode()).hexdigest()[:12]
+    for expired in [k for k, ts in seen.items() if ts < cutoff]:
+        del seen[expired]
     seen.pop(h, None)
     seen[h] = t  # most recent last
     while len(seen) > _FAILED_LOGIN_MAX_PER_KEY:

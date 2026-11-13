@@ -114,6 +114,34 @@ def test_the_way_the_address_was_decided_is_reported(with_secret, on_vm_behind_c
     assert client_ip_with_source(_request({}))[1] == "socket"
 
 
+def test_the_log_names_the_route_template_never_the_raw_path(on_vm_behind_caddy, caplog):
+    """a path with an open shape (/legal/{doc_type}) would otherwise print whatever a client types into the log"""
+    import logging
+
+    caplog.set_level(logging.INFO, logger="app.core.rate_limit")
+
+    class _Route:
+        path = "/api/v2/legal/{doc_type}"
+
+    req = Request({
+        "type": "http", "method": "GET", "path": "/api/v2/legal/EVIL%0Aforged-line", "query_string": b"", "route": _Route(),
+        "headers": [(b"x-forwarded-for", b"203.0.113.9")], "client": ("172.18.0.5", 5555),
+    })
+    _shared_key(req)
+    [line] = [r.getMessage() for r in caplog.records if r.getMessage().startswith("rate_limit.key")]
+    assert "route=/api/v2/legal/{doc_type}" in line and "EVIL" not in line
+
+
+def test_a_second_edge_key_header_line_never_makes_a_wrong_first_one_right(with_secret, monkeypatch):
+    monkeypatch.delenv("K_SERVICE", raising=False)
+    req = Request({
+        "type": "http", "method": "POST", "path": "/", "query_string": b"",
+        "headers": [(CLIENT_IP_HEADER.encode(), b"203.0.113.1"), (EDGE_KEY_HEADER.encode(), b"guess"), (EDGE_KEY_HEADER.encode(), _SECRET.encode())],
+        "client": ("172.18.0.5", 5555),
+    })
+    assert _shared_key(req) == "172.18.0.5"   # the first line is the one read; a right key behind a wrong one does not rescue it
+
+
 def test_the_key_is_logged_once_per_request_without_the_address(on_vm_behind_caddy, caplog):
     import logging
 
@@ -400,3 +428,32 @@ def test_the_log_id_salt_is_random_per_process_and_not_the_jwt_secret():
 
     assert "jwt_secret" not in inspect.getsource(rate_limit._key_id)
     assert len(rate_limit._KEY_ID_SALT) == 32
+
+
+def test_the_spray_tracker_survives_many_threads_and_keeps_its_ceilings(on_vm_behind_caddy):
+    import threading
+
+    from app.core.rate_limit import _FAILED_LOGIN_MAX_PER_KEY, _failed_logins, note_failed_login
+
+    req = _request({"X-Forwarded-For": "203.0.113.9"})
+    errors: list[BaseException] = []
+
+    def work(w: int) -> None:
+        try:
+            for n in range(200):
+                note_failed_login(req, f"user{w}-{n}@example.test", now=1000.0 + n * 0.01)
+        except BaseException as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [threading.Thread(target=work, args=(w,)) for w in range(8)]
+    [th.start() for th in threads]; [th.join() for th in threads]
+    assert not errors and len(_failed_logins["203.0.113.9"]["seen"]) <= _FAILED_LOGIN_MAX_PER_KEY
+
+
+def test_an_enormous_email_is_cut_before_it_is_hashed_and_counts_like_its_prefix(on_vm_behind_caddy):
+    from app.core.rate_limit import _FAILED_LOGIN_EMAIL_MAX_CHARS, note_failed_login
+
+    req = _request({"X-Forwarded-For": "203.0.113.9"})
+    base = "a" * _FAILED_LOGIN_EMAIL_MAX_CHARS
+    assert note_failed_login(req, base, now=1000.0) == 1
+    assert note_failed_login(req, base + "b" * 100_000, now=1001.0) == 1   # the same first 320 characters: the same account hash

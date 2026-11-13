@@ -154,6 +154,19 @@ async def test_only_a_token_that_is_still_alive_is_counted_against_the_person(ca
 
 
 @pytest.mark.anyio
+async def test_a_token_whose_row_belongs_to_another_person_is_not_counted_against_the_signed_sub():
+    """Qadir (a): the signed `sub` and the row's owner must agree, or a token could burn a third person's count"""
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            _owner, _raw, token_hash = await _seed(s, expires_in=timedelta(days=30), revoked_ago=None)
+        stranger = uuid.uuid4()
+        assert await _first_limited_call(Session, stranger, token_hash) is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
 async def test_a_token_with_no_row_is_not_counted():
     engine, Session = await _session_factory()
     try:
