@@ -14,6 +14,7 @@ import {
 } from '@/lib/project-context-client';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
+import { LAYER } from '@/components/ds/layers';
 import { clearReopenMarker, reopenCurrentUrlOnce, retryReopenCurrentUrl } from '@/lib/hard-reload';
 import { RouteErrorState } from '@/components/ui/route-error-state';
 import { RealtimeProvider } from '@/components/realtime-provider';
@@ -288,7 +289,7 @@ function ScrollShell({
   return (
     <ReleaseNotesProvider userId={currentTeamMemberId}>
     <TeamPresenceToggleProvider value={{ toggle: panel.togglePanel, workingCount, open: panelVisible }}>
-    <SidebarInset className="relative flex flex-col overflow-hidden">
+    <SidebarInset className={cn('relative flex flex-col overflow-hidden', LAYER.page)}>
       <div ref={setRef} className="flex flex-1 min-h-0 flex-col overflow-y-auto">
         {showTopBar && (
           <TopBar

@@ -535,7 +535,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
         // story #3845(§①⑤) — sprints-client.tsx가 자기 TopBarSlot(제목 "스프린트")을 이미
         // 소유하므로 여기서 또 TopBarSlot을 마운트하면 싱글톤 컨텍스트를 뺏어 제목이
         // 뒤바뀐다(top-bar-slot.tsx 싱글톤 주석 참고) — 절 헤딩+날짜 네비 한 줄로 대체.
-        <div className="sticky top-0 z-10 space-y-1 border-b border-border/80 bg-background px-6 py-3">
+        <div className="sticky top-0 z-10 space-y-1 border-b border-border/80 bg-ds-background px-6 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-foreground">{t('embeddedHeading')}</h2>
             <div className="flex flex-wrap items-center gap-1.5">{dateNavControls}</div>
@@ -555,7 +555,7 @@ export default function StandupPage({ projectId, embedded = false }: StandupClie
           />
 
           {/* S4: mobile date nav as its own full-width row (keeps the header title readable). */}
-          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b border-border/80 bg-background px-4 py-2 lg:hidden">
+          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b border-border/80 bg-ds-background px-4 py-2 lg:hidden">
             {dateNavControls}
           </div>
         </>

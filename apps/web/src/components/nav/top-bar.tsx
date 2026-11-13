@@ -2,6 +2,7 @@
 
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
+import { LAYER } from '@/components/ds/layers';
 import { NotificationBell } from './notification-bell';
 import { WhatsNewButton } from '@/components/release-notes/whats-new-button';
 import { PresenceToggleButton } from '@/components/presence/team-presence-toggle';
@@ -36,7 +37,8 @@ export function TopBar({ className, orgId, orgMemberships = [], projectId, proje
       className={cn(
         // story #4277(유나 판단 ②) — 컨테이너 쿼리 기준(칩의 태블릿 바닥 @[40rem]:min-w-[7.5rem]가 이 막대 폭을 본다).
         '@container flex h-12 shrink-0 items-center gap-2 border-b px-4',
-        'sticky top-0 z-30 bg-background transition-transform',
+        // 4913 — 쪽 바탕 층(LAYER.page = ds-background): 막대는 화면과 같은 바탕 위에 서야 한다(옛 bg-background는 따뜻한 옛 바탕이라 새 바탕과 색이 어긋남).
+        'sticky top-0 z-30 transition-transform', LAYER.page,
         '[transition-duration:var(--gnb-hide-duration)]',
         '[transition-timing-function:var(--gnb-hide-easing)]',
         // [SID:4288] 스크롤로 숨은 채 Tab 초점이 들어오면 다시 보인다(보이지 않는 초점 0 · 내용은 늘 닿아야 해서 inert가 아님).

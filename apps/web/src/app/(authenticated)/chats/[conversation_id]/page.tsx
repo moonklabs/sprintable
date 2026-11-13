@@ -425,7 +425,7 @@ export default function ConversationPage() {
           trailing={meta ? headTrailing : null}
           />
       )}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-ds-background">
         {blocked ? (
           // story #2168 PR-② — 능동 클릭 후 접근 불가(권한 회수 등, BE 403 — 인가는 이미
           // 쿼리 자체가 막는다·여기선 신규 인가 로직 0). ⛔중립 톤(destructive/빨강 금지) —

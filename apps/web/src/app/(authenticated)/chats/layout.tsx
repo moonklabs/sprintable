@@ -87,7 +87,7 @@ function ChatsLayoutBody({ children }: { children: React.ReactNode }) {
   // story #3007(로드맵 P2·PR-E, L1) — 모바일 드로어는 floating이라 shadow-xl 리터럴 대신
   // --elev-overlay.
   const railOverlayClass = railMode === 'overlay'
-    ? 'fixed inset-y-0 left-0 z-40 w-[270px] bg-background shadow-[var(--elev-overlay)] border-r border-border lg:!flex lg:!w-[270px] xl:static xl:z-auto xl:w-[270px] xl:shadow-none'
+    ? 'fixed inset-y-0 left-0 z-40 w-[270px] bg-ds-background shadow-[var(--elev-overlay)] border-r border-border lg:!flex lg:!w-[270px] xl:static xl:z-auto xl:w-[270px] xl:shadow-none'
     : '';
 
   return (

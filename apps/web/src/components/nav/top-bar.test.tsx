@@ -169,3 +169,13 @@ describe('TopBar — 폰 머리줄은 알림 하나(story 4890)', () => {
     expect(bell!.parentElement!.className).not.toContain('hidden');
   });
 });
+
+// 4913(셸 바탕 PR) — 막대는 쪽 바탕 층(ds-background) 위에 선다: 옛 따뜻한 bg-background를 칠하면 화면 바탕과 색이 어긋나 막대만 다른 색 띠로 보인다.
+describe('TopBar — 쪽 바탕 층(4913)', () => {
+  it('⭐막대 면은 LAYER.page(bg-ds-background)이고 옛 bg-background가 아니다', async () => {
+    await mount(1200);
+    const cls = (container.querySelector('[data-testid="top-bar"]') as HTMLElement).className.split(/\s+/);
+    expect(cls).toContain('bg-ds-background');
+    expect(cls).not.toContain('bg-background');
+  });
+});

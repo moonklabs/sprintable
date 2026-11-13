@@ -798,7 +798,7 @@ export function EntityPreviewModal({
 
   if (embedded) {
     return (
-      <div className="flex h-full flex-col overflow-hidden bg-background">
+      <div className="flex h-full flex-col overflow-hidden bg-ds-background">
         {header('span')}
         {body}
         {footer}

@@ -250,7 +250,7 @@
 
   /* DS-S11: Loading Skeleton */
   --skeleton-base: var(--muted);
-  --skeleton-highlight: color-mix(in oklch, var(--muted) 60%, var(--background) 40%);
+  --skeleton-highlight: color-mix(in oklch, var(--muted) 60%, var(--ds-background) 40%);
   --skeleton-duration: 1.5s;
   --animate-skeleton-shimmer: skeleton-shimmer 1.5s linear infinite;
 

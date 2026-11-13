@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { LAYER, LAYER_MIN_STEP, LAYER_TOKEN } from '../components/ds/layers';
+import { cn } from '../lib/utils';
 import { ASSET_ROW_FACE } from '../components/storage/storage-asset-row';
 import { ASSET_CARD_FACE, ASSET_CARD_WELL } from '../components/storage/storage-asset-grid';
 import { ARTIFACT_CARD_FACE, ARTIFACT_CARD_WELL, ARTIFACT_PANEL } from '../components/canvas/artifact-gallery-view';
@@ -134,5 +135,55 @@ describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
     expect(ARTIFACT_CARD_FACE).toBe(LAYER.rowOthers);
     expect(ARTIFACT_CARD_WELL).toBe(LAYER.well);
     expect(ARTIFACT_PANEL).toBe(LAYER.panel);
+  });
+
+  // 4913(셸 바탕 PR · PO 11-12) — «쪽 바탕은 한 토큰(ds-background = LAYER.page)»: 앱 틀(셸)이 한 번 칠한다. 셸 · 막대가 옛 bg-background를 칠하면 새 패널과의 층이 라이트 0.027로 선 아래가 되고, 틀(PageFrame)은 안 칠하니 색이 어긋난다.
+  it('⭐셸 바탕 → 패널: 셸 본문(SidebarInset)과 상단 막대가 쪽 바탕 층 토큰(LAYER.page)을 쓰고 옛 bg-background를 안 쓴다', () => {
+    const src = (rel: string) => readFileSync(join(__dirname, '..', rel), 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+    const shell = src('app/dashboard/dashboard-shell.tsx');
+    expect(shell).toMatch(/<SidebarInset className=\{cn\([^)]*LAYER\.page\)\}>/);
+    expect(shell).not.toMatch(/<SidebarInset[^>]*bg-background/);
+    const bar = src('components/nav/top-bar.tsx');
+    expect(bar).toContain('LAYER.page');
+    expect(bar).not.toMatch(/['" ]bg-background['" ]/);
+  });
+
+  it('⭐클래스 병합: SidebarInset의 옛 bg-background 위에 LAYER.page를 얹으면 새 바탕만 남는다(tailwind-merge가 같은 묶음으로 본다)', () => {
+    expect(cn('relative bg-background', LAYER.page)).toBe('relative bg-ds-background');
+  });
+
+  it.each(themes)('⭐%s: 셸 바탕(ds-background) → 패널(ds-surface) ≥ 0.03 · 셸이 칠하는 면 = 층 표의 page 토큰', (_name, t) => {
+    expect(LAYER_TOKEN.page).toBe('background');
+    expect(step(t, 'page', 'panel')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.panelOverPage);
+  });
+
+  // 4913(셸 바탕 PR · codex 검수) — 셸 안에서 «쪽 바탕 자리»를 옛 bg-background로 칠하던 곳(붙는 띠 · 전폭 면 · 채팅 · 문서 바탕 · 오류 화면)은 같은 토큰(LAYER.page = bg-ds-background)이다. 하나라도 옛 색으로 되돌아가면
+  // 셸(차가운 ds 바탕) 위에 따뜻한 옛 바탕 띠가 떠 보인다. 아래 문자열은 그 자리의 클래스 한 줄 그대로다(셸 밖 화면 — 로그인 · 온보딩 · 초대 · 폰 첫 화면 · v3 /today · /chat(`app/(v3)`, DashboardShell 밖) — 은 몸통 바탕(옛 토큰) 위라 대상이 아니다: 거기 서 있는 칸을 ds 색으로 바꾸면 오히려 따뜻한 바탕 위에 차가운 칸이 뜬다).
+  const PAGE_FILLS: Array<[string, string]> = [
+  ['app/(authenticated)/[ws]/[proj]/loops/loops-client.tsx', "sticky top-0 z-10 flex flex-wrap gap-1 bg-ds-background px-4 pt-3 pb-1"],
+  ['app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx', "sticky top-0 z-10 space-y-1 border-b border-border/80 bg-ds-background px-6 py-3"],
+  ['app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx', "sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b border-border/80 bg-ds-background px-4 py-2 lg:hidden"],
+  ['app/(authenticated)/channel/page.tsx', "flex flex-col bg-ds-background"],
+  ['app/(authenticated)/channel/page.tsx', "sticky bottom-0 border-t border-border bg-ds-background px-4 pb-safe-4 pb-4 pt-3"],
+  ['app/(authenticated)/chats/[conversation_id]/page.tsx', "flex min-h-0 flex-1 flex-col overflow-hidden bg-ds-background"],
+  ['app/(authenticated)/chats/layout.tsx', "fixed inset-y-0 left-0 z-40 w-[270px] bg-ds-background shadow-[var(--elev-overlay)] border-r border-border lg:!flex lg:!w-[270px] xl:static xl:z-auto xl:w-[270px] xl:shadow-none"],
+  ['components/chat/chat-input.tsx', "relative flex-shrink-0 border-t border-ds-line bg-ds-background px-2 py-3 sm:px-3"],
+  ['components/chat/embed-card.tsx', "flex h-full flex-col overflow-hidden bg-ds-background"],
+  ['components/chat/reading-panel.tsx', "flex h-full flex-col overflow-hidden border-l border-border bg-ds-background"],
+  ['components/org-briefing/org-briefing-shell.tsx', "sticky bottom-0 -mx-4 bg-ds-background px-4 pb-4 lg:-mx-6 lg:px-6"],
+  ['components/ui/route-error-state.tsx', "min-h-screen bg-ds-background"],
+  ['components/workspace/work-tabs-frame.tsx', "sticky top-0 z-10 bg-ds-background px-4 pt-3"],
+  ['components/docs/doc-editor.tsx', 'border-t border-border/60 bg-ds-background/95 pb-[env(safe-area-inset-bottom)]'],
+  ];
+  it.each(PAGE_FILLS)('⭐쪽 바탕 자리 = 층 토큰: %s 에 «%s»', (file, snippet) => {
+    expect(readFileSync(join(__dirname, '..', file), 'utf8')).toContain(snippet);
+    expect(snippet).toContain('bg-ds-background');
+    expect(snippet).not.toMatch(/(?<![\w-])bg-background(?![\w-])/);
+  });
+
+  it('⭐옛 스켈레톤 하이라이트는 새 쪽 바탕과 섞인다(옛 --background 아님)', () => {
+    const globals = readFileSync(join(__dirname, '..', 'app', 'globals.css'), 'utf8');
+    expect(globals).toMatch(/--skeleton-highlight:[^;]*var\(--ds-background\)/);
+    expect(globals).not.toMatch(/--skeleton-highlight:[^;]*var\(--background\)/);
   });
 });
