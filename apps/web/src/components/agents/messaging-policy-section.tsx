@@ -119,6 +119,9 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
       }
       setMode(stagedMode);
       addToast({ type: 'success', title: t('messagingPolicySaved') });
+    } catch {
+      // story 4912 (PO 11-13): a rejected request / unreadable answer is the same failure as an HTTP error answer — it says so (before: nothing)
+      addToast({ type: 'error', title: t('messagingPolicySaveError') });
     } finally {
       setSavingMode(false);
     }
@@ -141,6 +144,8 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
       const json = await res.json() as { data?: { allowlist?: string[] } };
       setAllowlist(json.data?.allowlist ?? [...allowlist, memberId]);
       setShowPicker(false);
+    } catch {
+      addToast({ type: 'error', title: tc('error') });
     } finally {
       setPendingId(null);
     }
@@ -158,6 +163,8 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
       }
       const json = await res.json() as { data?: { allowlist?: string[] } };
       setAllowlist(json.data?.allowlist ?? allowlist.filter((id) => id !== memberId));
+    } catch {
+      addToast({ type: 'error', title: tc('error') });
     } finally {
       setPendingId(null);
     }

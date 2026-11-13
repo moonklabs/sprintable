@@ -9,15 +9,15 @@ import { Textarea } from '@/components/ds/input';
 import { NativeSelect } from '@/components/ds/select';
 import { DetailCard } from '@/components/agents/detail-card';
 import {
+  ConfirmDialog,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { Input } from '@/components/ui/input';
+} from '@/components/ds/dialog';
+import { Input } from '@/components/ds/input';
 import { useToast } from '@/components/ui/toast';
 import { ToolPermissionPicker } from '@/components/agents/tool-permission-picker';
 import { copyTextSafely } from '@/lib/clipboard';
@@ -82,6 +82,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
   const t = useTranslations('settings');
   const tc = useTranslations('common');
   const locale = useLocale();
+  const keyDialogTitleId = useId(); // the ds Dialog needs its accessible name (the title)
   const expiryId = useId(); // one per card: two managers on a page (the keys screen's panel and a detail) must not share an id (a label would bind to the first select)
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
@@ -473,24 +474,16 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
         </div>
       )}
 
-      <Dialog open={revokeConfirmDialog} onOpenChange={setRevokeConfirmDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('agentApiKeyRevokeDialogTitle')}</DialogTitle>
-            <DialogDescription>
-              {t('agentApiKeyRevokeDialogBody', { count: activeKeys.length })}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => setRevokeConfirmDialog(false)}>
-              {tc('cancel')}
-            </Button>
-            <Button variant="danger" onClick={() => void revokeAllAndGenerate()}>
-              {t('agentApiKeyRevokeConfirmCta')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={revokeConfirmDialog}
+        onOpenChange={setRevokeConfirmDialog}
+        title={t('agentApiKeyRevokeDialogTitle')}
+        description={t('agentApiKeyRevokeDialogBody', { count: activeKeys.length })}
+        cancelLabel={tc('cancel')}
+        confirmLabel={t('agentApiKeyRevokeConfirmCta')}
+        tone="danger"
+        onConfirm={() => void revokeAllAndGenerate()}
+      />
 
       <ConfirmDialog
         open={revokeKeyId !== null}
@@ -499,6 +492,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
         description={t('agentApiKeySingleRevokeDialogBody')}
         cancelLabel={tc('cancel')}
         confirmLabel={t('agentApiKeySingleRevokeConfirmCta')}
+        tone="danger"
         onConfirm={() => {
           const id = revokeKeyId;
           setRevokeKeyId(null);
@@ -507,9 +501,9 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
       />
 
       <Dialog open={newKeyDialog} onOpenChange={(open) => { if (open) openKeyDialog(); else closeNewKeyDialog(); }}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg" aria-labelledby={keyDialogTitleId}>
           <DialogHeader>
-            <DialogTitle>{t('agentApiKeyGeneratedTitle')}</DialogTitle>
+            <DialogTitle id={keyDialogTitleId}>{t('agentApiKeyGeneratedTitle')}</DialogTitle>
             <DialogDescription>
               {t('agentApiKeyShownOnce')}
             </DialogDescription>
@@ -517,13 +511,13 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
           {generatedKey && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <label htmlFor="generated-api-key" className="text-sm font-medium leading-none text-foreground select-none">{t('agentApiKeyFieldLabel')}</label>
+                <label htmlFor="generated-api-key" className="text-ds-small font-medium leading-none text-ds-ink select-none">{t('agentApiKeyFieldLabel')}</label>
                 <div className="flex gap-2">
                   <Input
                     id="generated-api-key"
                     value={generatedKey}
                     readOnly
-                    className="font-mono text-base lg:text-sm"
+                    className="font-mono"
                   />
                   <Button variant="secondary" onClick={() => void copyToClipboard(generatedKey)} className="shrink-0">
                     {copiedKey ? <Check className="h-3.5 w-3.5 text-ds-done" /> : <Copy className="h-3.5 w-3.5" />}
@@ -531,21 +525,21 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
                   </Button>
                 </div>
               </div>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-ds-small text-ds-ink-3">
                 {t('agentApiKeyHeaderHint')}
-                <code className="block mt-1 p-2 bg-muted rounded text-xs break-all">
+                <code className="mt-1 block break-all rounded-ds-control bg-ds-surface-sunk p-2 font-mono text-ds-small text-ds-ink">
                   Authorization: Bearer {generatedKey}
                 </code>
               </p>
-              <div className="rounded-md bg-muted p-2">
-                <p className="text-xs font-medium text-foreground">{t('agentApiKeyScopeLabel')}</p>
-                <p className="mt-1 font-mono text-xs text-muted-foreground break-all">
+              <div className="rounded-ds-control bg-ds-surface-sunk p-2">
+                <p className="text-ds-small font-medium text-ds-ink">{t('agentApiKeyScopeLabel')}</p>
+                <p className="mt-1 break-all font-mono text-ds-small text-ds-ink-3">
                   {['core', ...selectedScopes].join(' · ')}
                 </p>
               </div>
-              <div className="pt-2 border-t border-border">
-                <p className="text-xs text-muted-foreground mb-2">{t('agentApiKeyOnboardingInstruction')}</p>
-                <pre className="text-xs bg-muted rounded p-2 whitespace-pre-wrap break-all">{buildOnboardingMessage(generatedKey, generatedMcpConfig)}</pre>
+              <div className="border-t border-ds-line pt-2">
+                <p className="mb-2 text-ds-small text-ds-ink-3">{t('agentApiKeyOnboardingInstruction')}</p>
+                <pre className="whitespace-pre-wrap break-all rounded-ds-control bg-ds-surface-sunk p-2 text-ds-small text-ds-ink">{buildOnboardingMessage(generatedKey, generatedMcpConfig)}</pre>
                 <Button
                   variant="secondary"
                   className="mt-2"
