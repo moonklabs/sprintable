@@ -275,13 +275,15 @@ describe('Workcell — story #2984 §1~§4 bento 기본 레이아웃(bentoLayout
     expect(markup).toContain('class="hidden lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:flex lg:justify-center"');
   });
 
-  it('§4 — Evidence 셀만 elevation(--elev-card, 인라인 카드 전용) 그림자를 갖고 나머지는 flat', () => {
-    // story #2990 §4 fast-follow(유나 확定) — elev-overlay(오버레이 전용)는 "팝오버처럼
-    // 분리"되는 의미 혼용이라 elev-card(인라인 카드 전용, 약한 강도)로 교체.
+  it('§4 (4908 개정) — 거친 결 판 · 뜬 그림자를 걷고 층 토큰 면으로: 바깥 판 rowOthers · 칸 panel · 그림자 0', () => {
+    // 4908 PO 판정: «거친 결 무늬 판 → 층 토큰 면». 예전 §4(Evidence 셀만 --elev-card)는 그림자로 칸을 갈랐지만, 이제 칸은 면(panel)과 경계로 갈린다.
     const markup = renderKo(<Workcell {...BASE} />);
-    expect(markup).toContain('shadow-[var(--elev-card)]');
+    expect(markup).not.toContain('proof-surface');
+    expect(markup).not.toContain('shadow-[var(--elev-card)]');
     expect(markup).not.toContain('shadow-[var(--elev-overlay)]');
-    expect(markup).toContain('shadow-[0_1px_0_var(--proof-line)]');
+    expect(markup).not.toContain('shadow-[0_1px_0_var(--proof-line)]');
+    expect(markup.match(/class="flex overflow-hidden rounded-xl border border-ds-line bg-ds-surface-high"/)).toBeTruthy();
+    expect((markup.match(/ bg-ds-surface"/g) ?? []).length).toBeGreaterThanOrEqual(4);
   });
 
   it('§3 — 헤더가 색 스테퍼가 아니라 물리량 게이지(role=progressbar)로 렌더된다', () => {
@@ -558,8 +560,9 @@ describe('Workcell — story #5b3aea5e Brief 콘텐츠 층(마크다운 스트�
   // 테스트)과 충돌하는 걸 실측으로 잡았던 자리(pre-fix 상태에서 이 회귀가 실제로 났었다).
   it('runNextNeed 콜아웃이 헤어라인을 쓰고 bg-proof-blue-soft/elev-card 둘 다 안 쓴다', () => {
     const markup = renderKo(<Workcell {...BASE} />);
-    expect(markup).toContain(BASE.run.nextNeed);
-    const idx = markup.indexOf(BASE.run.nextNeed);
+    const nextNeed = BASE.run.nextNeed!;
+    expect(markup).toContain(nextNeed);
+    const idx = markup.indexOf(nextNeed);
     const tagStart = markup.lastIndexOf('<div', idx);
     const tag = markup.slice(tagStart, idx);
     expect(tag).toContain('border-proof-line');
@@ -578,3 +581,41 @@ describe('Workcell — story 4906 ⑩ the current-step word under the gauge', ()
   });
 });
 
+
+// 4908 — 호스트(카드 상세 서랍)의 머리가 제목 · 상태를 이미 말할 때(headerOwns) 같은 말을 되풀이하지 않는다.
+describe('Workcell — 4908 headerOwns(같은 말 한 자리)', () => {
+  const OWN = { ...BASE, currentStageLabel: '진행중', run: { ...BASE.run, now: '진행중', stage: '진행중' } };
+  it('⭐기본(false)은 예전 그대로 — 제목 · 게이지 밑 글자 · «지금 / 단계» 줄이 다 있다', () => {
+    const markup = renderKo(<Workcell {...OWN} />);
+    expect(markup).toContain(OWN.title);
+    expect(markup).toContain('data-testid="workcell-current-stage"');
+    expect(markup).toContain('지금: 진행중');
+    expect(markup).toContain('단계 <b');
+  });
+  it('⭐true면 제목 · 상태 글자(게이지 밑) · «지금 / 단계» 줄이 빠지고 나머지(다음 요구 · 막힘 · 구획)는 그대로', () => {
+    const markup = renderKo(<Workcell {...OWN} headerOwns />);
+    expect(markup).not.toContain(OWN.title);
+    expect(markup).not.toContain('data-testid="workcell-current-stage"');
+    expect(markup).not.toContain('지금:');
+    expect(markup).not.toContain('단계 <b');
+    expect(markup).toContain('까심군 QA 리뷰 대기');
+    expect(markup).toContain('막힘');
+    expect(markup).toContain('role="progressbar"');
+    expect(markup).toContain('책임 윤재');
+  });
+  it('⭐true여도 상태 글자가 없는 파생 단계(currentStageLabel 없음)의 게이지 밑 글자는 남는다', () => {
+    const markup = renderKo(<Workcell {...BASE} pipelineStage="needs_input" headerOwns />);
+    expect(markup).toContain('data-testid="workcell-current-stage"');
+    expect(markup).toContain('입력 필요');
+  });
+  it('goal=null이면 «설명 미기재», 제목을 대신 넣지 않는다', () => {
+    const markup = renderKo(<Workcell {...BASE} headerOwns brief={{ ...BASE.brief, goal: null }} />);
+    expect(markup).toContain('설명 미기재');
+    expect(markup).not.toContain(BASE.title);
+  });
+  it('⭐nextNeed=null이면 «다음 요구» 칸을 그리지 않는다 — 상태 글자를 대신 넣어 같은 말을 한 번 더 찍지 않는다', () => {
+    const markup = renderKo(<Workcell {...BASE} run={{ ...BASE.run, nextNeed: null }} />);
+    expect(markup).not.toContain('다음 요구');
+    expect(renderKo(<Workcell {...BASE} />)).toContain('다음 요구');
+  });
+});

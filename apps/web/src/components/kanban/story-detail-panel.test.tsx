@@ -28,6 +28,17 @@ vi.mock('@/hooks/use-sse-notifications', () => ({
   useSseNotifications: vi.fn(),
 }));
 
+// 4908 — 작업 칸은 서랍에서 한 줄로 접혀 서고(WorkcellFold), 펼침·접힘 자체는 workcell-fold.test.tsx와 story-detail-panel.4908.test.tsx가 진짜 컴포넌트로 잰다.
+// 이 파일의 Workcell 배선 시험(단계 · 책임자 · 근거 · 대화 요약 · 작성자 이름)은 «펼친 작업 칸»의 내용을 보므로, 여기서만 접힘 줄을 펼친 채로 대신 세운다(같은 Workcell · 같은 props · headerOwns 포함).
+vi.mock('@/components/workcell/workcell-fold', async () => {
+  const { Workcell } = await vi.importActual<typeof import('@/components/workcell/workcell')>('@/components/workcell/workcell');
+  const { createElement } = await import('react');
+  return {
+    WorkcellFold: ({ evidenceCount: _e, conversationCount: _c, ...p }: Record<string, unknown>) =>
+      createElement(Workcell, { ...(p as unknown as import('@/components/workcell/workcell').WorkcellProps), headerOwns: true }),
+  };
+});
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -345,16 +356,20 @@ describe('StoryDetailPanel — Workcell pipelineStage = story.trust_stage 직결
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
   }
 
-  it('⭐story 4906 ⑩: status ready-for-dev (stage queued) → the caption under the gauge is the STATUS word «개발 대기», not the stage word «대기 중»', async () => {
+  // 4908 (PO 11-13): 4906 ⑩의 뜻(한 장이 «개발 대기»와 «대기 중»으로 두 이름을 갖지 않는다)을 «한 자리»로 닫는다 — 상태에서 바로 오는 단계는 게이지 밑에 글자를 다시 쓰지 않고 머리의 상태 칩이 맡는다.
+  const countOf = (needle: string) => (container.textContent ?? '').split(needle).length - 1;
+  it('⭐story 4906 ⑩ + 4908: status ready-for-dev (stage queued) → the STATUS word «개발 대기» is said once (the header chip), the stage word «대기 중» never, no caption under the gauge', async () => {
     await mountWithStatusAndStage('ready-for-dev', 'queued');
-    expect(currentStageLabel()).toBe(koMessages.board.readyForDev);
-    expect(currentStageLabel()).not.toBe(koMessages.workcell.pipelineQueued);
+    expect(currentStageLabel()).toBeNull();
+    expect(countOf(koMessages.board.readyForDev)).toBe(1);
+    expect(countOf(koMessages.workcell.pipelineQueued)).toBe(0);
   });
 
-  it('⭐story 4906 ⑩: status in-review (stage claimed_done) → «리뷰 중», not «완료 주장»', async () => {
+  it('⭐story 4906 ⑩ + 4908: status in-review (stage claimed_done) → «리뷰 중» once, «완료 주장» never', async () => {
     await mountWithStatusAndStage('in-review', 'claimed_done');
-    expect(currentStageLabel()).toBe(koMessages.board.inReview);
-    expect(currentStageLabel()).not.toBe(koMessages.workcell.pipelineClaimedDone);
+    expect(currentStageLabel()).toBeNull();
+    expect(countOf(koMessages.board.inReview)).toBe(1);
+    expect(countOf(koMessages.workcell.pipelineClaimedDone)).toBe(0);
   });
 
   it('⭐story 4906 ⑩ (codex): status and stage that DISAGREE (the live stage refresh ran ahead of the status) → the stage word, never a stale status word (ready-for-dev + running → «진행 중», not «개발 대기»)', async () => {
@@ -542,10 +557,14 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
   // 한 곳). aria-current를 먼저 시도해 bentoLayout={false} 폴백 경로도 계속 커버한다 —
   // 이 SSE 라이브 갱신 테스트들의 관심사는 "어느 단계가 뜨는가"이지 스테퍼 시각 표현이
   // 아니므로 어느 레이아웃이든 같은 헬퍼로 잡는다.
+  // 4908 — 상태에서 바로 오는 단계는 게이지 밑 글자를 다시 쓰지 않는다(머리의 상태 칩이 맡음). 그래서 «어느 단계가 뜨는가»는 게이지의 읽는 글(aria-valuetext «n/6 · 단계 글자»)로 잰다 — 이 글은 항상 있다.
   function currentStageLabel(): string | null {
     const legacy = container.querySelector('[aria-current="step"]')?.textContent?.trim();
     if (legacy) return legacy;
-    return container.querySelector('[data-testid="workcell-current-stage"]')?.textContent?.trim() ?? null;
+    const caption = container.querySelector('[data-testid="workcell-current-stage"]')?.textContent?.trim();
+    if (caption) return caption;
+    const valueText = container.querySelector('[role="progressbar"]')?.getAttribute('aria-valuetext');
+    return valueText ? valueText.split(' · ').slice(1).join(' · ') : null;
   }
 
   beforeEach(() => { vi.useFakeTimers(); });

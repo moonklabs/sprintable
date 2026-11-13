@@ -6954,7 +6954,13 @@
     "pipelineClaimedDone": "Claimed done",
     "pipelineVerified": "Verified",
     "pipelineMergeReady": "Merge-ready",
-    "confidenceCaption": "Step {done}/{total}"
+    "confidenceCaption": "Step {done}/{total}",
+    "briefGoalMissing": "No description",
+    "foldTitle": "Work cell",
+    "foldSummary": "Step {done}/{total} · Evidence {evidence} · Conversation {conversation}",
+    "foldSummaryOutside": "Outside the pipeline · Evidence {evidence} · Conversation {conversation}",
+    "foldExpand": "Expand",
+    "foldCollapse": "Collapse"
   },
   "loopQueue": {
     "title": "Unclosed run queue",

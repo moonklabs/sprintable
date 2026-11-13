@@ -46,15 +46,46 @@ async function mount() {
 }
 
 describe('4908 카드 상세 — 본문 / 속성 칸', () => {
-  it('⭐속성 칸과 본문 칸이 따로 선다 · 속성 칸은 좁은 폭에서 본문 앞(order-first), lg 이상에서 오른쪽(lg:order-last)', async () => {
+  it('⭐속성 칸과 본문 칸이 따로 선다 · 속성 칸은 DOM에서 본문 앞(좁은 폭: 위 · 초점 순서도 앞), lg 이상에서 오른쪽 열 맨 위에 붙는다(lg:sticky · col-start-2)', async () => {
     const { rail, main } = await mount();
     expect(rail).not.toBeNull();
     expect(main).not.toBeNull();
     expect(rail!.tagName).toBe('ASIDE');
     expect(rail!.getAttribute('aria-label')).toBe(koMessages.board.detailProperties);
     const c = rail!.className.split(/\s+/);
-    expect(c).toEqual(expect.arrayContaining(['order-first', 'lg:order-last']));
+    expect(c).toEqual(expect.arrayContaining(['lg:sticky', 'lg:top-0', 'lg:col-start-2', 'lg:row-start-1', 'lg:row-span-2', 'lg:self-start']));
+    expect(c).not.toContain('order-first');
+    expect(c).not.toContain('lg:order-last');
     expect(rail!.contains(main!)).toBe(false);
+    expect(rail!.compareDocumentPosition(main!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(main!.className.split(/\s+/)).toEqual(expect.arrayContaining(['lg:col-start-1', 'lg:row-start-2']));
+  });
+
+  it('⭐순서: 작업 칸 한 줄(접힘) → 속성 칸 → 본문 — 좁은 폭에서 담당 · 상태가 첫 화면에 들도록 작업 칸은 접혀 있다', async () => {
+    const { rail, main } = await mount();
+    const fold = container.querySelector<HTMLElement>('[data-testid="workcell-fold"]')!;
+    const toggle = container.querySelector<HTMLElement>('[data-testid="workcell-fold-toggle"]')!;
+    expect(fold).not.toBeNull();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('[role="progressbar"]')).toBeNull();
+    expect(fold.compareDocumentPosition(rail!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(rail!.compareDocumentPosition(main!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(fold.className.split(/\s+/)).not.toContain('lg:col-start-2');
+    expect(fold.parentElement!.className.split(/\s+/)).toEqual(expect.arrayContaining(['lg:col-start-1', 'lg:row-start-1']));
+  });
+
+  it('⭐같은 말은 한 자리: 제목 · 상태 글자가 접힌 채로도 펼친 뒤로도 한 번씩만 있다(제목 3번 · 상태 5번이던 것)', async () => {
+    await mount();
+    const count = (needle: string) => (container.textContent ?? '').split(needle).length - 1;
+    const statusWord = koMessages.board.inProgress;
+    expect(count(story.title)).toBe(1);
+    expect(count(statusWord)).toBe(1);
+    const toggle = container.querySelector<HTMLElement>('[data-testid="workcell-fold-toggle"]')!;
+    await act(async () => { toggle.click(); });
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(container.textContent).toContain(koMessages.workcell.briefTitle);
+    expect(count(story.title)).toBe(1);
+    expect(count(statusWord)).toBe(1);
   });
 
   const B = koMessages.board;

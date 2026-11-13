@@ -31,7 +31,8 @@ import { StoryMergeGate } from '@/components/cage/story-merge-gate';
 import { EvidenceSection } from '@/components/verify/evidence-section';
 import { ChatProofSection, parseStoryProofReferences } from '@/components/verify/chat-proof-section';
 import { pickRelevantMergeGate } from '@/services/verify';
-import { Workcell, type WorkcellMessage, type WorkcellPipelineStage } from '@/components/workcell/workcell';
+import type { WorkcellMessage, WorkcellPipelineStage } from '@/components/workcell/workcell';
+import { WorkcellFold } from '@/components/workcell/workcell-fold';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import type { ProofState, ProofCapsuleEvidence, ProofCapsuleGate, ProofCapsuleProps } from '@/components/proof-capsule/proof-capsule';
 import type { TrustSealClaimedProps, TrustSealVerifiedProps } from '@/components/verify/trust-seal';
@@ -1786,7 +1787,8 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
             (완료조건·댓글)을 인지할 신호가 없었다. .scrollbar-visible은 globals.css의 범용
             옵트인(신규 CSS 아님) — .tableWrapper(#2203)가 이미 라이브 양성으로 검증한 패턴. */}
         <div className="scrollbar-visible flex-1 overflow-y-auto p-5">
-          <div className="space-y-5">
+          {/* 4908 — 첫 화면 위는 제목 · 상태(머리) 바로 아래 속성 칸이다. lg 이상: 왼쪽 열 = 작업 칸 줄(접힘) · 본문, 오른쪽 열 = 속성 칸(스크롤해도 따라오는 sticky). 좁은 폭: 작업 칸 한 줄 → 속성 칸 → 본문(담당 · 상태가 첫 화면 안에 든다). DOM 순서 = 작업 칸 줄 → 속성 칸 → 본문(초점 순서도 같다). */}
+          <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_16rem] lg:grid-rows-[auto_1fr] lg:gap-x-6">
             {/* E-UI-DAEGBYEON P0 — Workcell 데뷔(최소 실화면 배선, story `e5310d1b`) + story #2922
                 W1 2×2 재설계. Evidence는 null(정직한 "아직 증거 없음" — EvidenceSection/
                 StoryMergeGate 실데이터 매핑은 후속 스코프, 대체 아님).
@@ -1795,14 +1797,17 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 보인다" 실사고로 이어졌다. 이제 무조건 렌더 — 각자 정직한 빈 상태로 대체
                 (owner=null→"책임자 미지정", pipelineStage=null→"파이프라인 범위 밖"). 지어낸
                 값은 여전히 0(no-fiction 원칙 유지). */}
-            <Workcell
+            <div className="min-w-0 space-y-5 lg:col-start-1 lg:row-start-1">
+            <WorkcellFold
+              evidenceCount={workcellEvidence ? [workcellEvidenceSignal, workcellTrustSeal, workcellGate].filter(Boolean).length : 0}
+              conversationCount={chatProofSummary === undefined ? undefined : (chatProofSummary.count ?? 0) + workcellMessages.length}
               title={story.title}
               pipelineStage={pipelineStage}
               // story 4906 ⑩ (PO 11-12 [A]): the three steps that come straight from the status say the STATUS word — the same word as the status chip above (not «Queued» beside «Ready for Dev»)
               // — only while status and stage AGREE (the live stage refresh updates the stage first; a status word for a stage the status does not map to would be stale): then the stage word stays
               currentStageLabel={STATUS_BACKED_STAGE[localStatus] === pipelineStage ? statusLabel : undefined}
               brief={{
-                goal: story.description?.trim() || story.title,
+                goal: story.description?.trim() || null,
                 // story #178c7c6d(3015②) — 예전엔 board 네임스페이스의 옛 DoD 미기재 문자열
                 // 키를 직접 호출해 넘겼으나, 이제 null로 정직하게 부재를 표현한다. 표시
                 // 문구·"본문 AC 보기" 링크는 BriefLayer가 소유(워크셀 자체 i18n으로 이관,
@@ -1819,18 +1824,18 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 tools: [],
                 scopes: [],
                 blocked: story.blocked_by?.length ? t('workcellBlockedReason') : null,
-                nextNeed: WORKCELL_NEXT_NEED_BY_STATUS[localStatus] ?? statusLabel,
+                nextNeed: WORKCELL_NEXT_NEED_BY_STATUS[localStatus] ?? null,
               }}
               evidence={workcellEvidence}
               conversation={{ view: 'run', messages: workcellMessages, chatProof: chatProofSummary }}
             />
             {/* E-DG S12: handoff stuck UX — DISPATCH 직후·handoff_stuck일 때만 조건부 렌더(자체 게이트) */}
             <StuckHandoffSection storyId={story.id} memberMap={memberMap} />
+            </div>
 
-            {/* 4908 — 본문 / 속성 칸 분리. 좁은 폭(<lg)에서는 속성 칸이 본문 앞에 서고(예전 순서와 같다: 담당 · 레시피 · 디스패치 · 포인트 · 라벨 · PR), lg 이상에서는 오른쪽 칸이 된다. */}
-            <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_16rem] lg:items-start lg:gap-6">
+            {/* 4908 — 본문 / 속성 칸 분리. 좁은 폭(<lg)에서는 속성 칸이 본문 앞에 서고(예전 순서와 같다: 담당 · 레시피 · 디스패치 · 포인트 · 라벨 · PR), lg 이상에서는 오른쪽 열 맨 위에 붙어 따라온다(sticky). */}
               {/* 4908 — 서랍 = 내용 칸 층(LAYER.panel) · 속성 칸 = 한 단 다른 면(LAYER.rowOthers) + 경계: 자리만 나뉘지 않고 눈으로 갈린다(서랍 → 속성 칸 ≥ 0.05, layer-rule.test). 이 면 위에서 옛 흐린 글(muted-foreground)이 다크 4.44:1로 모자라 속성 칸 안에서만 ds-ink-3(다크 4.56:1)로 바꾼다. */}
-              <aside data-testid="story-detail-properties" aria-label={t('detailProperties')} className={`order-first min-w-0 space-y-5 rounded-lg border border-ds-line ${LAYER.rowOthers} p-3 [--muted-foreground:var(--ds-ink-3)] lg:order-last`}>
+              <aside data-testid="story-detail-properties" aria-label={t('detailProperties')} className={`min-w-0 space-y-5 rounded-lg border border-ds-line ${LAYER.rowOthers} p-3 [--muted-foreground:var(--ds-ink-3)] lg:sticky lg:top-0 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-start`}>
             <div>
               <div className="flex items-center justify-between">
                 <span className="text-micro font-mono uppercase tracking-wider text-muted-foreground">{t('assignee')}</span>
@@ -2050,7 +2055,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
             <PrLinkSection storyId={story.id} />
 
               </aside>
-              <div data-testid="story-detail-main" className="min-w-0 space-y-5">
+              <div data-testid="story-detail-main" className="min-w-0 space-y-5 lg:col-start-1 lg:row-start-2">
             {/* Description */}
             <div ref={descriptionSectionRef}>
               <div className="flex items-center justify-between">
@@ -2674,7 +2679,6 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
               </TabsContent>
             </Tabs>
               </div>
-            </div>
           </div>
         </div>
       </div>

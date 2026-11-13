@@ -93,25 +93,13 @@ describe('4908 카드 메뉴 «담당자 ▸» — 켜고 끄기', () => {
     expect(onAssign).toHaveBeenCalledWith('s1');
   });
 
-  it('상태 서브메뉴와 담당자 서브메뉴는 동시에 열리지 않는다(하나를 열면 다른 하나가 닫힌다)', () => {
-    const card = render({ ...props, onChangeStatus: () => {} });
-    const menu = openMenu(card);
-    click(itemByText(menu, koMessages.board.changeStatus)!);
-    expect(document.body.querySelectorAll('[role="menu"]').length).toBe(2);
-    click(itemByText(menu, koMessages.board.assignMember)!);
-    expect(document.body.querySelectorAll('[role="menu"]').length).toBe(2);
-    expect(document.body.querySelector('[role="menuitemcheckbox"]')).not.toBeNull();
-    expect(itemByText(document.body, koMessages.board.inReview)).toBeUndefined();
-  });
-
-  it('⭐거꾸로도: 담당자 서브메뉴가 열려 있을 때 «상태 변경 ▸»를 열면 담당자 쪽이 닫힌다', () => {
+  it('⭐상태 칩 줄은 담당자 서브메뉴가 열려도 닫히지 않는다 — 서브메뉴는 담당자 하나뿐', () => {
     const card = render({ ...props, onChangeStatus: () => {} });
     const menu = openMenu(card);
     click(itemByText(menu, koMessages.board.assignMember)!);
+    expect(document.body.querySelectorAll('[role="menu"]').length).toBe(2);
     expect(document.body.querySelector('[role="menuitemcheckbox"]')).not.toBeNull();
-    click(itemByText(menu, koMessages.board.changeStatus)!);
-    expect(document.body.querySelector('[role="menuitemcheckbox"]')).toBeNull();
-    expect(itemByText(document.body, koMessages.board.inReview)).toBeTruthy();
+    expect(document.body.querySelectorAll('[role="menuitemradio"]').length).toBe(5);
   });
 
   it('Esc는 서브메뉴만 닫고 메뉴는 남는다', () => {
