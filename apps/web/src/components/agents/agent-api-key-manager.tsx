@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, useId, useRef, type ReactNode } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { Check, Copy } from 'lucide-react';
 import { Button } from '@/components/ds/button';
@@ -82,6 +82,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
   const t = useTranslations('settings');
   const tc = useTranslations('common');
   const locale = useLocale();
+  const expiryId = useId(); // one per card: two managers on a page (the keys screen's panel and a detail) must not share an id (a label would bind to the first select)
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(false);
@@ -391,9 +392,9 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
 
       {/* story #2838 — 만료 선택(항상 화면에 노출, 침묵 각인 금지). */}
       <div>
-        <label htmlFor="agent-api-key-expiry" className="mb-1 block text-ds-small font-medium text-ds-ink">{t('agentApiKeyExpiryLabel')}</label>
+        <label htmlFor={expiryId} className="mb-1 block text-ds-small font-medium text-ds-ink">{t('agentApiKeyExpiryLabel')}</label>
         <NativeSelect
-          id="agent-api-key-expiry"
+          id={expiryId}
           className="w-48"
           value={selectedExpiry}
           disabled={loading}

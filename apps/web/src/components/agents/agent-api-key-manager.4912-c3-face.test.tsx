@@ -74,6 +74,23 @@ describe('AgentApiKeyManager — 4912 C3: the ds face', () => {
     expect(label?.textContent).toBe(S.agentApiKeyExpiryLabel);
   });
 
+  it('⭐두 매니저가 한 화면에 있어도 만료 칸 id가 겹치지 않고 각 라벨이 제 칸에 묶인다 — 고정 id로 되돌리면 RED (codex)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 })));
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages}>
+          <AgentApiKeyManager agentId="agent-1" agentName="하나" />
+          <AgentApiKeyManager agentId="agent-2" agentName="둘" />
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); });
+    const selects = Array.from(document.querySelectorAll('[data-slot="ds-select"] select')) as HTMLSelectElement[];
+    expect(selects).toHaveLength(2);
+    expect(new Set(selects.map((x) => x.id)).size).toBe(2);
+    for (const sel of selects) expect(document.querySelector(`label[for="${sel.id}"]`)?.closest('[data-testid="agent-api-key-manager"]')).toBe(sel.closest('[data-testid="agent-api-key-manager"]'));
+  });
+
   it('⭐소스: ui/button · ui/section-card · ui/select · ui/textarea가 없고 목록 · 머리 줄에 옛 글자 크기 · 색 토큰이 없다(키 창 안은 옛 Dialog 그대로) — 되돌리면 RED', () => {
     const src = readFileSync(join(__dirname, 'agent-api-key-manager.tsx'), 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n').replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
     for (const bad of ["@/components/ui/button", "@/components/ui/section-card", "@/components/ui/select", "@/components/ui/textarea", 'SectionCard']) expect(src, bad).not.toContain(bad);
