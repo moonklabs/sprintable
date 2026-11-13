@@ -1,10 +1,13 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useId, useRef, type ReactNode } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { Check, Copy } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { SectionCard } from '@/components/ui/section-card';
+import { Button } from '@/components/ds/button';
+import { Chip } from '@/components/ds/chip';
+import { Textarea } from '@/components/ds/input';
+import { NativeSelect } from '@/components/ds/select';
+import { DetailCard } from '@/components/agents/detail-card';
 import {
   Dialog,
   DialogContent,
@@ -15,8 +18,6 @@ import {
 } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/toast';
 import { ToolPermissionPicker } from '@/components/agents/tool-permission-picker';
 import { copyTextSafely } from '@/lib/clipboard';
@@ -81,6 +82,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
   const t = useTranslations('settings');
   const tc = useTranslations('common');
   const locale = useLocale();
+  const expiryId = useId(); // one per card: two managers on a page (the keys screen's panel and a detail) must not share an id (a label would bind to the first select)
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(false);
@@ -333,33 +335,25 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
   const activeKeys = apiKeys.filter((k) => !k.revoked_at);
 
   return (
-    <SectionCard className="p-6" data-testid="agent-api-key-manager">
+    <KeyManagerFrame compact={compact} title={t('agentApiKeyListTitle', { name: agentLabel ?? agentName })} description={t('agentApiKeyListDescription')}>
       {/* story 4889 — 402폭 가로 넘침(실측: 스크롤러 scrollWidth 487 > 402): 머리가 «제목 | 버튼 셋(333px 한 줄)»이라 좁은 폭에서 버튼 줄이 카드 밖으로 밀렸다. 줄바꿈을 허용하고(flex-wrap) 제목 칸은 줄어들 수 있게(min-w-0) 한다. */}
-      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-        {compact ? null : (
-          <div className="min-w-0">
-            <h3 className="text-lg font-semibold">{t('agentApiKeyListTitle', { name: agentLabel ?? agentName })}</h3>
-            <p className="text-sm text-muted-foreground">
-              {t('agentApiKeyListDescription')}
-            </p>
-          </div>
-        )}
+      <div className="flex flex-wrap items-start justify-end gap-3">
         <div className="flex min-w-0 flex-col items-end gap-2">
           <div className="flex flex-wrap justify-end gap-2">
-            <Button ref={refreshRef} variant="outline" onClick={loadApiKeys} disabled={loading} data-testid="agent-api-key-refresh">
+            <Button ref={refreshRef} variant="secondary" onClick={loadApiKeys} disabled={loading} data-testid="agent-api-key-refresh">
               {t('agentApiKeyRefresh')}
             </Button>
             <Button
-              variant="outline"
+              variant="secondary"
               // story 4912 D5 — the onboarding message needs the FULL key. Without a fresh key this button copied «{prefix}...» (a message the agent cannot use), so it is only on while a fresh key is held.
               disabled={generatedKey === null || copiedOnboarding}
               onClick={() => { if (generatedKey !== null) void copyOnboardingMessage(generatedKey, generatedMcpConfig, true); }}
-              className="gap-1.5"
             >
-              {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+              {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-ds-done" /> : <Copy className="h-3.5 w-3.5" />}
               {t('agentApiKeyCopyOnboardingCta')}
             </Button>
             <Button
+              variant="primary"
               onClick={() => {
                 if (activeKeys.length > 0) {
                   setRevokeConfirmDialog(true);
@@ -379,7 +373,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
               readOnly
               value={copyFailedOnboardingMessage}
               onFocus={(e) => e.currentTarget.select()}
-              className="resize-none p-2 font-mono lg:text-xs"
+              className="resize-none p-2 font-mono text-ds-small"
               rows={4}
               data-testid="agent-api-key-copy-failed-raw-onboarding-message"
             />
@@ -388,7 +382,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
       </div>
 
       {/* 툴 권한 picker (2da32fbf) — 선택 그룹키가 신규 키의 scope로 바인딩된다. */}
-      <div className="mb-4">
+      <div>
         <ToolPermissionPicker
           value={selectedScopes}
           onChange={setSelectedScopes}
@@ -397,10 +391,11 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
       </div>
 
       {/* story #2838 — 만료 선택(항상 화면에 노출, 침묵 각인 금지). */}
-      <div className="mb-4">
-        <label className="text-sm font-medium mb-1 block">{t('agentApiKeyExpiryLabel')}</label>
-        <Select
-          className="h-auto w-auto px-2 py-1 lg:text-xs"
+      <div>
+        <label htmlFor={expiryId} className="mb-1 block text-ds-small font-medium text-ds-ink">{t('agentApiKeyExpiryLabel')}</label>
+        <NativeSelect
+          id={expiryId}
+          className="w-48"
           value={selectedExpiry}
           disabled={loading}
           onChange={(e) => setSelectedExpiry(e.target.value as ExpiryChoice)}
@@ -410,43 +405,39 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
           <option value="180d">{t('agentApiKeyExpiry180d')}</option>
           <option value="365d">{t('agentApiKeyExpiry365d')}</option>
           <option value="never">{t('agentApiKeyExpiryNever')}</option>
-        </Select>
+        </NativeSelect>
       </div>
 
       {loadFailed ? (
-        <div className="mb-3 flex flex-wrap items-center gap-3" data-testid="agent-api-key-load-failed">
-          <p role="status" className="text-sm text-foreground">{t('agentApiKeyLoadFailed')}</p>
+        <div className="flex flex-wrap items-center gap-3" data-testid="agent-api-key-load-failed">
+          <p role="status" className="text-ds-small text-ds-ink">{t('agentApiKeyLoadFailed')}</p>
           {/* the retry button goes away once the read works — the focus goes to [새로고침] then (never to the page) */}
-          <Button variant="outline" disabled={loading} onClick={() => { setRefocus(true); void loadApiKeys(); }}>{tc('retry')}</Button>
+          <Button variant="secondary" disabled={loading} onClick={() => { setRefocus(true); void loadApiKeys(); }}>{tc('retry')}</Button>
         </div>
       ) : null}
       {apiKeys.length === 0 ? (
-        loadFailed ? null : <p className="text-sm text-muted-foreground">{t('agentApiKeyEmpty')}</p>
+        loadFailed ? null : <p className="text-ds-small text-ds-ink-3">{t('agentApiKeyEmpty')}</p>
       ) : (
         <div className="space-y-2">
           {apiKeys.map((key) => (
             <div
               key={key.id}
-              className="flex flex-wrap items-center justify-between gap-2 p-3 border rounded-md"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-ds-control bg-ds-surface-sunk p-3"
             >
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className="font-mono text-sm shrink-0">{key.key_prefix}...</p>
+                  <p className="shrink-0 font-mono text-ds-small text-ds-ink">{key.key_prefix}...</p>
                   {(key.scope ?? ['read', 'write']).map((s) => (
-                    <span
-                      key={s}
-                      title={s}
-                      className={`max-w-full truncate rounded px-1.5 py-0.5 text-xs font-medium ${s === 'admin' ? 'bg-warning-tint text-warning-strong' : 'bg-muted text-muted-foreground'}`}
-                    >
+                    <Chip key={s} title={s} tone={s === 'admin' ? 'needs-hand' : 'neutral'} className="max-w-full truncate">
                       {s}
-                    </span>
+                    </Chip>
                   ))}
                 </div>
                 {/* story #3493 — created_at/last_used_at/revoked_at은 "기록"(정본
                     formatRelativeTime). expires_at은 미래 만료 "약속"이라 상대시각으로
                     decay시키면 안 됨(음수 diff가 clamp돼 "지금"으로 오표시) — §11-2
                     정본(formatScheduledAt)으로 절대 표기. */}
-                <p className="text-xs text-muted-foreground">
+                <p className="text-ds-small text-ds-ink-3">
                   {t('agentApiKeyCreatedAt', { time: formatViewerRelativeTime(key.created_at, locale, displayTimezone) })}
                   {key.last_used_at && <>{' · '}{t('agentApiKeyLastUsedAt', { time: formatViewerRelativeTime(key.last_used_at, locale, displayTimezone) })}</>}
                   {key.revoked_at && <>{' · '}{t('agentApiKeyRevokedAt', { time: formatViewerRelativeTime(key.revoked_at, locale, displayTimezone) })}</>}
@@ -458,7 +449,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
                   const isWarning = daysLeft > 0 && daysLeft <= 7;
                   const expiresDisplay = formatViewerScheduledAt(key.expires_at, displayTimezone).display;
                   return (
-                    <p className={`text-xs mt-0.5 ${isExpired ? 'text-destructive font-medium' : isWarning ? 'text-warning-strong font-medium' : 'text-muted-foreground'}`}>
+                    <p className={`mt-0.5 text-ds-small ${isExpired ? 'font-medium text-ds-failed' : isWarning ? 'font-medium text-ds-needs-hand' : 'text-ds-ink-3'}`}>
                       {isExpired
                         ? t('agentApiKeyExpiredAt', { date: expiresDisplay })
                         : isWarning
@@ -470,8 +461,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
               </div>
               {!key.revoked_at && (
                 <Button
-                  variant="destructive"
-                  size="sm"
+                  variant="danger"
                   onClick={() => setRevokeKeyId(key.id)}
                   disabled={loading}
                 >
@@ -492,10 +482,10 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRevokeConfirmDialog(false)}>
+            <Button variant="secondary" onClick={() => setRevokeConfirmDialog(false)}>
               {tc('cancel')}
             </Button>
-            <Button variant="destructive" onClick={() => void revokeAllAndGenerate()}>
+            <Button variant="danger" onClick={() => void revokeAllAndGenerate()}>
               {t('agentApiKeyRevokeConfirmCta')}
             </Button>
           </DialogFooter>
@@ -535,8 +525,8 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
                     readOnly
                     className="font-mono text-base lg:text-sm"
                   />
-                  <Button onClick={() => void copyToClipboard(generatedKey)} className="gap-1.5 shrink-0">
-                    {copiedKey ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+                  <Button variant="secondary" onClick={() => void copyToClipboard(generatedKey)} className="shrink-0">
+                    {copiedKey ? <Check className="h-3.5 w-3.5 text-ds-done" /> : <Copy className="h-3.5 w-3.5" />}
                     {copiedKey ? t('agentApiKeyKeyCopiedLabel') : t('agentApiKeyCopyKeyCta')}
                   </Button>
                 </div>
@@ -557,12 +547,11 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
                 <p className="text-xs text-muted-foreground mb-2">{t('agentApiKeyOnboardingInstruction')}</p>
                 <pre className="text-xs bg-muted rounded p-2 whitespace-pre-wrap break-all">{buildOnboardingMessage(generatedKey, generatedMcpConfig)}</pre>
                 <Button
-                  variant="outline"
-                  size="sm"
-                  className="mt-2 gap-1.5"
+                  variant="secondary"
+                  className="mt-2"
                   onClick={() => void copyOnboardingMessage(generatedKey, generatedMcpConfig, true)}
                 >
-                  {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copiedOnboarding ? <Check className="h-3.5 w-3.5 text-ds-done" /> : <Copy className="h-3.5 w-3.5" />}
                   {t('agentApiKeyCopyOnboardingCta')}
                 </Button>
               </div>
@@ -570,6 +559,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
           )}
           <DialogFooter>
             <Button
+              variant="primary"
               onClick={closeNewKeyDialog}
             >
               {t('agentApiKeyDone')}
@@ -577,6 +567,12 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </SectionCard>
+    </KeyManagerFrame>
   );
+}
+
+/** story 4912 (C3): on the detail's «키» tab the manager is a ds card (title + description in its header, like its sibling cards); inside the «키 관리» panel (`compact`) the panel is already the surface, so the content sits on it directly — no card in a panel. */
+function KeyManagerFrame({ compact, title, description, children }: { compact?: boolean; title: string; description: string; children: ReactNode }) {
+  if (compact) return <div className="space-y-4" data-testid="agent-api-key-manager">{children}</div>;
+  return <DetailCard data-testid="agent-api-key-manager" title={title} description={description}>{children}</DetailCard>;
 }
