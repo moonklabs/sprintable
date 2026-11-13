@@ -126,6 +126,10 @@ describe('ContentPostListPage — 한 쪽 틀(4913 D물결)', () => {
     await mount();
     const frame = container.querySelector('[data-slot="ds-page-frame"]')!;
     expect(frame.querySelectorAll('[role="tab"]')).toHaveLength(5);
+    // 탭 줄은 틀 안에서 스스로 가로 스크롤한다 — flex 줄의 자식이 내용 폭으로 뻗어 쪽 전체를 옆으로 밀지 않게 min-w-0 · max-w-full(좁은 폰 · 글꼴이 넓은 환경에서 실제로 넘쳤다)
+    const tabsRoot = frame.querySelector('[data-slot="ds-tabs"]')!;
+    expect(tabsRoot.className).toContain('min-w-0');
+    expect(tabsRoot.className).toContain('max-w-full');
     const toggle = frame.querySelector('[data-testid="content-show-archived-toggle"]') as HTMLButtonElement;
     expect(toggle.getAttribute('data-slot')).toBe('ds-button');
     expect(toggle.getAttribute('aria-pressed')).toBe('false');

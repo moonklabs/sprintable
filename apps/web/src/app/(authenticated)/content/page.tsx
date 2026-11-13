@@ -301,7 +301,8 @@ export default function ContentPostListPage() {
 
         {/* story #4277 — 402폭에서 상태 탭 다섯 + «보관됨 보기»가 한 줄에 안 들어가 셸 스크롤러가 가로로 넘쳤다(493/402). 좁으면 토글이 다음 줄로. */}
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-          <Tabs value={statusTab} onValueChange={(v) => setStatusTab(v as StatusTab)}>
+          {/* min-w-0 max-w-full: 탭 줄이 «가로 스크롤»을 틀 안에서 하게 — flex 줄의 자식은 기본이 내용 폭이라 좁은 폰에서 탭 다섯이 틀 밖으로 뻗어 쪽 전체가 옆으로 밀렸다(CI Linux 글꼴에서 잡힘) */}
+          <Tabs value={statusTab} onValueChange={(v) => setStatusTab(v as StatusTab)} className="min-w-0 max-w-full">
             <TabsList aria-label={t('title')}>
               <TabsTrigger value="all">{t('statusTabAll')}</TabsTrigger>
               <TabsTrigger value="draft">{t('contentStatusDraft')}</TabsTrigger>
