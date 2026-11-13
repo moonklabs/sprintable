@@ -1,13 +1,11 @@
 'use client';
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useTranslations } from 'next-intl';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { AgentPerformancePanel } from '@/components/agents/agent-performance-panel';
 import { AgentManagementTab } from '@/components/agents/agent-management-tab';
 import { AccessMatrixTab } from '@/components/agents/access-matrix-tab';
 import { RecruiterClient } from '@/app/(authenticated)/organization/workforce/recruiter/recruiter-client';
-import { Badge } from '@/components/ui/badge';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { AgentsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 import { RecruitNoProject, recruitNoProjectState } from '@/components/agents/recruit-no-project';
@@ -35,7 +33,6 @@ export function resolveTab(tab: string | null): AgentsTab {
  * story #2952 AC1(발견성) — 기본 탭은 'manage'(삭제 · 비활성화 · 재활성 액션이 있는 곳 — 통계는 차트뿐이라 첫 방문자가 «삭제 경로가 없다»고 오판한 PO+선생님 실사례).
  */
 export function AgentsPageTabs() {
-  const t = useTranslations('agents');
   const searchParams = useSearchParams();
   const router = useRouter();
   const dashboardCtx = useDashboardContext();
@@ -55,12 +52,7 @@ export function AgentsPageTabs() {
         !projectId ? (
           <RecruitNoProject state={recruitNoProjectState(dashboardCtx)} createHref={flatHref('/settings?tab=projects')} onRetry={() => window.location.reload()} />
         ) : (
-          <>
-            <div className="flex items-center gap-2 border-b border-border px-6 py-2">
-              <Badge variant="info">{t('scopeThisProject')}</Badge>
-            </div>
-            <AgentPerformancePanel />
-          </>
+          <AgentPerformancePanel /> /* story 4912 (D): the scope chip «이 프로젝트» is the panel's own PageHead line now */
         )
       ) : null}
       {tab === 'manage' ? <AgentManagementTab onAddAgent={() => goTab('recruit')} /> : null}

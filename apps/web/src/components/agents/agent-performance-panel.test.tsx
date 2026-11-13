@@ -83,9 +83,10 @@ it('묶음 500 → 숫자 칸은 «—»(«0» 없음)·안내 한 줄·다시 �
   await renderPanel();
   const notice = container.querySelector('[data-testid="agent-stats-load-error"]');
   expect(notice?.textContent).toContain(koMessages.agentPerformance.agentStatsLoadError);
-  const cells = [...container.querySelectorAll('span.tabular-nums')].map((e) => e.textContent);
+  // story 4912 (D): the number cells are ds Metric — a value not known is «—» + a readable reason (never «0»)
+  const cells = [...container.querySelectorAll('[data-slot="ds-metric"] dd')].map((e) => e.textContent ?? '');
   expect(cells.length).toBeGreaterThan(0);
-  expect(cells.every((c) => c === '—')).toBe(true);
+  expect(cells.every((c) => c.startsWith('—') && c.includes(koMessages.agentPerformance.agentStatsLoadError))).toBe(true);
 
   const batchCalls = () => fetchWithAuthMock.mock.calls.filter(([u]) => String(u).startsWith('/api/analytics/agent-stats/batch')).length;
   expect(batchCalls()).toBe(1);
