@@ -106,3 +106,10 @@ def fold_ip(ip: str) -> str:
             return str(addr.ipv4_mapped)
         return str(ipaddress.ip_network((addr, 64), strict=False))
     return str(addr)
+
+
+def audit_client_ip(request: Request) -> str | None:
+    """The address an AUDIT row records (`login_audit_logs.ip_address`): the same rule as `client_ip`, NOT folded (an investigation needs the exact address) and `None` — not the string "unknown" — when no rule found one.
+    story 4915: these rows were written from the socket address (`request.client.host`), which behind the front door (Cloud Run's front end · the VM's front container) is the same address for every person."""
+    ip = client_ip(request)
+    return None if ip == "unknown" else ip
