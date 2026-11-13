@@ -1420,6 +1420,8 @@
     "searchAssignees": "담당자 검색...",
     "noResults": "결과 없음",
     "detailProperties": "속성",
+    "renameStory": "이름 바꾸기",
+    "renameStoryInput": "{title} 이름 바꾸기",
     "cardMenuButton": "{title} 카드 메뉴 열기",
     "kickoff": "킥오프",
     "kickoffTriggered": "워크플로우가 실행됐어요",

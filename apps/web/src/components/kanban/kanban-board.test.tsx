@@ -2273,3 +2273,308 @@ describe('KanbanBoard — 열린 카드 표시(4908)', () => {
     expect(selected()).toHaveLength(1);
   });
 });
+
+// 4908 셋째 조각 — 카드 메뉴가 직접 하는 일: 담당자 켜고 끄기(패널과 같은 PATCH) · 제목 바로 바꾸기 · 삭제는 사람 전용.
+describe('KanbanBoard — 카드 메뉴 담당자 · 이름 바꾸기 · 삭제(4908)', () => {
+  const members = [{ id: 'm1', name: '안나', type: 'human' }, { id: 'm2', name: '빌드 에이전트', type: 'agent' }];
+  const stories = [{ id: 's1', title: '카드하나', status: 'backlog', priority: 'medium', trust_stage: 'queued', assignee_id: 'm1', assignee_ids: ['m1'] }];
+
+  /** 보드 fetch 위에 PATCH(/api/stories/s1)만 가로채 기록한다. ok=false면 실패를 돌려준다. */
+  function stubPatch(ok = true) {
+    const base = vi.mocked(fetch);
+    const calls: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url === '/api/stories/s1' && init?.method === 'PATCH') {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        calls.push(body);
+        return ok ? { ok: true, json: async () => ({ data: { id: 's1', ...body } }) } : { ok: false, json: async () => ({}) };
+      }
+      return base(url, init);
+    }));
+    return calls;
+  }
+  const menuFor = async (title: string) => {
+    const card = container.querySelector(`[title="${title}"]`) as HTMLElement;
+    await act(async () => { card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 20 })); });
+    return document.body.querySelector<HTMLElement>('[role="menu"]')!;
+  };
+  const item = (scope: ParentNode, text: string) => [...scope.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"]')].find((e) => e.textContent?.includes(text));
+  const press = (el: Element) => act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+
+  it('⭐«담당자 ▸»에서 한 사람을 켜면 패널과 같은 PATCH(assignee_ids 전체 배열)가 나가고 카드 담당이 바로 바뀐다', async () => {
+    stubFetch(stories, members);
+    await mount();
+    const calls = stubPatch();
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    const agent = [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes('빌드 에이전트'))!;
+    await press(agent);
+    expect(calls).toEqual([{ assignee_ids: ['m1', 'm2'] }]);
+    const checked = [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].map((b) => b.getAttribute('aria-checked'));
+    expect(checked).toEqual(['true', 'true']);
+  });
+
+  it('⭐켠 사람을 다시 누르면 빠진다(전체 배열 교체) · 마지막 한 명을 빼면 빈 배열', async () => {
+    stubFetch(stories, members);
+    await mount();
+    const calls = stubPatch();
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    await press([...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes('안나'))!);
+    expect(calls).toEqual([{ assignee_ids: [] }]);
+  });
+
+  it('⭐담당자 PATCH가 실패하면 직전 값으로 되돌리고 패널과 같은 실패 문구를 띄운다', async () => {
+    stubFetch(stories, members);
+    await mount();
+    stubPatch(false);
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    await press([...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes('빌드 에이전트'))!);
+    const checked = [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].map((b) => b.getAttribute('aria-checked'));
+    expect(checked).toEqual(['true', 'false']);
+    expect(document.body.textContent).toContain(koMessages.board.assigneeChangeFailed);
+  });
+
+  it('⭐제목 바로 바꾸기: 메뉴 «이름 바꾸기» → 새 제목 Enter → PATCH {title} · 카드 제목이 바로 바뀐다', async () => {
+    stubFetch(stories, members);
+    await mount();
+    const calls = stubPatch();
+    await press(item(await menuFor('카드하나'), koMessages.board.renameStory)!);
+    const input = container.querySelector<HTMLInputElement>('input[aria-label^="카드하나"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '새 제목');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    expect(calls).toEqual([{ title: '새 제목' }]);
+    expect(container.textContent).toContain('새 제목');
+  });
+
+  it('⭐제목 PATCH가 실패하면 옛 제목으로 되돌리고 패널과 같은 실패 문구를 띄운다', async () => {
+    stubFetch(stories, members);
+    await mount();
+    stubPatch(false);
+    await press(item(await menuFor('카드하나'), koMessages.board.renameStory)!);
+    const input = container.querySelector<HTMLInputElement>('input[aria-label^="카드하나"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '실패할 제목');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).not.toContain('실패할 제목');
+    expect(container.textContent).toContain('카드하나');
+    expect(document.body.textContent).toContain(koMessages.board.titleSaveFailed);
+  });
+
+  it('⭐그 카드의 상세 패널이 열려 있으면 메뉴에서 바꾼 담당자가 패널에도 바로 보인다(카드와 패널이 어긋나지 않는다)', async () => {
+    stubFetch(stories, members);
+    await mount();
+    stubPatch();
+    const card = container.querySelector('[title="카드하나"]') as HTMLElement;
+    await act(async () => { card.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    const dialog = container.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog.textContent).toContain('안나');
+    expect(dialog.textContent).not.toContain('빌드 에이전트');
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    await press([...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes('빌드 에이전트'))!);
+    expect((container.querySelector('[role="dialog"]') as HTMLElement).textContent).toContain('빌드 에이전트');
+  });
+
+  /** PATCH를 손에 쥔다: 요청마다 resolve 대기열에 서고, 테스트가 순서를 정해 응답한다. */
+  function stubDeferredPatch() {
+    const base = vi.mocked(fetch);
+    const bodies: Array<Record<string, unknown>> = [];
+    const answers: Array<(ok: boolean) => void> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url === '/api/stories/s1' && init?.method === 'PATCH') {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        bodies.push(body);
+        return new Promise((resolve) => answers.push((ok) => resolve(ok ? { ok: true, json: async () => ({ data: { id: 's1', ...body } }) } : { ok: false, json: async () => ({}) })));
+      }
+      return base(url, init);
+    }));
+    return { bodies, answers };
+  }
+  const flush = () => act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+
+  it('⭐연타: 두 번째 토글은 첫 요청이 안 끝나도 «화면에 이미 그려진 값»에서 계산된다 · 첫 요청이 실패해도 새 값을 덮지 않는다', async () => {
+    stubFetch(stories, [...members, { id: 'm3', name: '카를로스', type: 'human' }]);
+    await mount();
+    const { bodies, answers } = stubDeferredPatch();
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    const box = (name: string) => [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes(name))!;
+    await press(box('빌드 에이전트'));
+    await press(box('카를로스'));
+    expect(bodies).toEqual([{ assignee_ids: ['m1', 'm2'] }, { assignee_ids: ['m1', 'm2', 'm3'] }]);
+    answers[0]!(false); await flush(); // 먼저 보낸 요청이 늦게 실패
+    answers[1]!(true); await flush();
+    const checked = [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].map((b) => b.getAttribute('aria-checked'));
+    expect(checked).toEqual(['true', 'true', 'true']);
+    expect(document.body.textContent).not.toContain(koMessages.board.assigneeChangeFailed);
+  });
+
+  it('⭐순서가 뒤바뀐 성공: 나중에 보낸 요청의 응답이 먼저 오고, 먼저 보낸 요청의 응답이 늦게 와도 새 값을 옛 값으로 덮지 않는다', async () => {
+    stubFetch(stories, [...members, { id: 'm3', name: '카를로스', type: 'human' }]);
+    await mount();
+    const { bodies, answers } = stubDeferredPatch();
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    const box = (name: string) => [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes(name))!;
+    await press(box('빌드 에이전트'));
+    await press(box('카를로스'));
+    answers[1]!(true); await flush();
+    answers[0]!(true); await flush(); // 첫 요청의 서버 값은 [m1, m2] — 이게 화면을 덮으면 카를로스가 빠진다
+    const checked = [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].map((b) => b.getAttribute('aria-checked'));
+    expect(checked).toEqual(['true', 'true', 'true']);
+    // 안쪽 기준값도 새 값이어야 한다 — 다음 토글(안나 끄기)이 [m2, m3]로 나간다([m2]가 아니라)
+    await press(box('안나'));
+    expect(bodies.at(-1)).toEqual({ assignee_ids: ['m2', 'm3'] });
+  });
+
+  it('⭐확인값은 뒤로 가지 않는다: 둘째 요청이 먼저 성공하고 첫 요청이 늦게 성공해도(셋째가 아직 진행 중) 셋째가 실패하면 첫 요청이 아니라 둘째 요청의 값으로 되돌린다', async () => {
+    stubFetch(stories, [...members, { id: 'm3', name: '카를로스', type: 'human' }]);
+    await mount();
+    const { answers } = stubDeferredPatch();
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    const box = (name: string) => [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes(name))!;
+    await press(box('빌드 에이전트')); // 요청 0: [m1, m2]
+    await press(box('카를로스'));       // 요청 1: [m1, m2, m3]
+    await press(box('안나'));           // 요청 2: [m2, m3] — 아직 진행 중이라 «대기 상태 재시작»이 확인값을 지우지 못한다
+    answers[1]!(true); await flush();
+    answers[0]!(true); await flush();   // 먼저 보낸 요청이 늦게 성공 — 확인값을 [m1, m2]로 되돌리면 안 된다
+    answers[2]!(false); await flush();
+    const checked = [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].map((b) => b.getAttribute('aria-checked'));
+    expect(checked).toEqual(['true', 'true', 'true']); // 서버가 받은 마지막 값 = 요청 1의 [m1, m2, m3]
+  });
+
+  it('⭐제목도 확인값이 뒤로 가지 않는다: 둘째 이름 바꾸기가 먼저 성공하고 첫째가 늦게 성공해도(셋째 진행 중) 셋째가 실패하면 둘째 제목으로 되돌린다', async () => {
+    stubFetch(stories, members);
+    await mount();
+    const { answers } = stubDeferredPatch();
+    let current = '카드하나';
+    const rename = async (text: string) => {
+      await press(item(await menuFor(current), koMessages.board.renameStory)!);
+      const input = container.querySelector<HTMLInputElement>('input[aria-label$="이름 바꾸기"]')!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await Promise.resolve(); });
+      current = text;
+    };
+    await rename('첫째');
+    await rename('둘째');
+    await rename('셋째');
+    answers[1]!(true); await flush();
+    answers[0]!(true); await flush();
+    answers[2]!(false); await flush();
+    expect(container.textContent).toContain('둘째');
+    expect(container.textContent).not.toContain('첫째');
+  });
+
+  it('⭐본문을 읽는 사이 더 나중 토글이 시작돼도 옛 응답 본문이 새 선택을 덮지 않는다', async () => {
+    stubFetch(stories, [...members, { id: 'm3', name: '카를로스', type: 'human' }]);
+    await mount();
+    const base = vi.mocked(fetch);
+    const releases: Array<() => void> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url === '/api/stories/s1' && init?.method === 'PATCH') {
+        const body = JSON.parse(String(init.body)) as { assignee_ids: string[] };
+        if (releases.length === 0) {
+          // 첫 요청: 응답은 왔지만 본문(json)은 손으로 풀어 줄 때까지 대기
+          return { ok: true, json: () => new Promise((resolve) => { releases.push(() => resolve({ data: { id: 's1', assignee_ids: body.assignee_ids } })); }) };
+        }
+        return new Promise(() => {}); // 둘째 요청은 끝나지 않는다
+      }
+      return base(url, init);
+    }));
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    const box = (name: string) => [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes(name))!;
+    await press(box('빌드 에이전트')); // 요청 0 — 본문 대기 중
+    await press(box('카를로스'));       // 요청 1 시작 — 화면은 [m1, m2, m3]
+    releases[0]!(); await flush();       // 옛 본문 도착([m1, m2]) — 새 선택을 덮으면 안 된다
+    const checked = [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].map((b) => b.getAttribute('aria-checked'));
+    expect(checked).toEqual(['true', 'true', 'true']);
+  });
+
+  it('⭐제목 저장이 진행 중이어도 그 사이 들어온 실시간 담당 변경(SSE)에서 다음 토글이 계산된다(옛 담당을 되살리지 않는다)', async () => {
+    stubFetch(stories, [...members, { id: 'm3', name: '카를로스', type: 'human' }]);
+    await mount();
+    const { bodies } = stubDeferredPatch();
+    await press(item(await menuFor('카드하나'), koMessages.board.renameStory)!);
+    const input = container.querySelector<HTMLInputElement>('input[aria-label$="이름 바꾸기"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '저장 중인 제목');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await Promise.resolve(); }); // 제목 요청 — 끝나지 않는다
+    await act(async () => {
+      dispatchSse('story.assignee_changed', { story_id: 's1', project_id: 'proj-1', actor_id: 'other-1', actor_name: '까심', assignee_id: 'm3', old_assignee_id: 'm1', assignees: ['m3'] });
+      await Promise.resolve();
+    });
+    await press(item(await menuFor('저장 중인 제목'), koMessages.board.assignMember)!);
+    await press([...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes('빌드 에이전트'))!);
+    expect(bodies.at(-1)).toEqual({ assignee_ids: ['m3', 'm2'] }); // 옛 [m1]에서 계산하면 [m1, m2]
+  });
+
+  it('⭐연타에서 «마지막» 요청이 실패하면 마지막으로 서버가 받은 값으로 되돌린다', async () => {
+    stubFetch(stories, [...members, { id: 'm3', name: '카를로스', type: 'human' }]);
+    await mount();
+    const { answers } = stubDeferredPatch();
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    const box = (name: string) => [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes(name))!;
+    await press(box('빌드 에이전트'));
+    await press(box('카를로스'));
+    answers[0]!(true); await flush();
+    answers[1]!(false); await flush();
+    const checked = [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].map((b) => b.getAttribute('aria-checked'));
+    expect(checked).toEqual(['true', 'true', 'false']); // 서버가 받은 [m1, m2]
+    expect(document.body.textContent).toContain(koMessages.board.assigneeChangeFailed);
+  });
+
+  it('⭐제목도 같다: 먼저 보낸 이름 바꾸기가 늦게 실패해도 더 나중 이름을 옛 제목으로 덮지 않는다', async () => {
+    stubFetch(stories, members);
+    await mount();
+    const { answers } = stubDeferredPatch();
+    const rename = async (text: string) => {
+      await press(item(await menuFor(text === '첫 제목' ? '카드하나' : '첫 제목'), koMessages.board.renameStory)!);
+      const input = container.querySelector<HTMLInputElement>('input[aria-label$="이름 바꾸기"]')!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await Promise.resolve(); });
+    };
+    await rename('첫 제목');
+    await rename('둘째 제목');
+    answers[0]!(false); await flush();
+    answers[1]!(true); await flush();
+    expect(container.textContent).toContain('둘째 제목');
+    expect(document.body.textContent).not.toContain(koMessages.board.titleSaveFailed);
+  });
+
+  it('⭐더블클릭 = 열기: 카드 첫 클릭이 바로 서랍을 열고, 같은 연속 누름의 둘째 클릭이 서랍 막에 닿아도 서랍은 열린 채 — 막을 처음 누르면 닫힌다(시간 0)', async () => {
+    stubFetch(stories, members);
+    await mount();
+    const card = container.querySelector('[title="카드하나"]') as HTMLElement;
+    await act(async () => { card.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[role="dialog"]'), '첫 클릭으로 바로 열림').not.toBeNull();
+    const backdrop = container.querySelector('div[aria-hidden="true"].fixed.inset-0') as HTMLElement;
+    await act(async () => { backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })); });
+    expect(container.querySelector('[role="dialog"]'), '둘째 클릭은 서랍을 닫지 않음').not.toBeNull();
+    await act(async () => { backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); });
+    expect(container.querySelector('[role="dialog"]'), '막을 처음 누르면 닫힘').toBeNull();
+  });
+
+  it('⭐삭제는 사람 전용 — human이면 메뉴에 «삭제», agent면 메뉴 항목이 없다(패널과 같은 규칙)', async () => {
+    stubFetch(stories, members);
+    await mount();
+    expect(item(await menuFor('카드하나'), koMessages.board.deleteStory)).toBeTruthy();
+    await act(async () => { root.unmount(); });
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'agent', bottomDockBannerSlot: bannerSlot });
+    stubFetch(stories, members);
+    await mount();
+    expect(item(await menuFor('카드하나'), koMessages.board.deleteStory)).toBeUndefined();
+  });
+});
