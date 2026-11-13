@@ -275,6 +275,26 @@ describe('ApprovalsQueue — 4909 2d-2 the «remote control is off» line stays 
   });
 });
 
+describe('ApprovalsQueue — 4909 defect PR: the FRAME gives the detail column its height (no «100svh − 6rem» guess)', () => {
+  it('⭐the inbox 결재함 tab body is a column of definite height, the screen takes what is left of it, and the detail block fills its column — no viewport-height calc anywhere on the path', async () => {
+    pending = [lowGate('g1', '첫째 결재 항목')];
+    await mountInboxGates();
+    const screen = container.querySelector('[data-testid="gates-screen"]') as HTMLElement;
+    const body = screen.parentElement as HTMLElement; // the tab body the page draws
+    expect(body.className).toContain('flex min-h-0 flex-1 flex-col');
+    expect(body.className).toContain('lg:overflow-hidden'); // wide: nothing scrolls but the two columns; narrow keeps the one scrolling page (overflow-y-auto)
+    expect(body.className).toContain('overflow-y-auto');
+    expect(screen.className).toContain('lg:flex-1');
+    expect(screen.className).toContain('lg:grid-rows-[minmax(0,1fr)]');
+    const column = container.querySelector('[data-testid="gates-screen-detail-column"]') as HTMLElement;
+    expect(column.className).toContain('lg:h-full');
+    expect(detail()!.className).toContain('lg:h-full');
+    expect(detail()!.className).toContain('lg:overflow-y-auto');
+    expect(container.querySelector('[data-testid="gate-queue-list"]')!.className).toContain('lg:max-h-full');
+    for (const el of [body, screen, column, detail()!, container.querySelector('[data-testid="gate-queue-list"]')!]) expect(el.className).not.toMatch(/svh|calc\(|sticky/);
+  });
+});
+
 describe('ApprovalsQueue — 4909 2d-2 ONE reader on the screen', () => {
   it('⭐the list alone: the approvals\' two legs, ONE read of the permission list, ONE subscription to the named frame, ONE 15 s clock (1 → 2 reads after 15 s)', async () => {
     pending = [lowGate('g1', '첫째 결재 항목')]; permissionList = [perm('r1')];

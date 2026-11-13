@@ -84,7 +84,7 @@ function GateQueueRowView({ row, section, selected, onSelect, onOpen }: { row: G
 
 export function GateQueueList({ sections, selectedKey, onSelect, onOpen, footer }: { sections: GateQueueSection[]; selectedKey: string | null; onSelect: (key: string) => void; /** a double-click on a row opens the request's own page (the screen decides where) */ onOpen?: (key: string) => void; footer?: ReactNode }) {
   return (
-    <div className="overflow-hidden rounded-ds-control border border-ds-line bg-ds-surface" data-testid="gate-queue-list" onKeyDown={(e) => handleListKeys(e, onSelect)}>
+    <div className="overflow-hidden rounded-ds-control border border-ds-line bg-ds-surface focus-inset lg:max-h-full lg:overflow-y-auto" data-testid="gate-queue-list" onKeyDown={(e) => handleListKeys(e, onSelect)}>
       {sections.filter((s) => s.rows.length > 0).map((section) => (
         <section key={section.id} aria-label={section.title} data-testid={`gate-queue-section-${section.id}`}>
           <SectionHeader title={section.title} count={<CountBadge count={section.rows.length} />} tone={section.id === 'hand' ? 'needs-hand' : 'default'} level={2} />
