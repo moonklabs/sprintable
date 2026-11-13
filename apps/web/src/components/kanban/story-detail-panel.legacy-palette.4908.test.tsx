@@ -31,12 +31,16 @@ const PANEL_SOURCES = [
   'verify/evidence-section.tsx', 'verify/chat-proof-section.tsx',
 ];
 const TOKEN_IN_SOURCE = /(?<=^|[\s"'`{(])((?:[\w-]+:)*(?:bg-(?:background|muted|secondary|primary|card|popover|accent|input)|border-(?:border|input)|text-primary|(?:bg|border|text|ring|fill|stroke|from|to|via|divide|outline)-proof-[\w-]+|proof-surface[\w-]*)(?:\/\d+)?)(?=[\s"'`})\]]|$)/g;
+/** 이 부품들은 ds 짝으로 바뀌었다 — 옛 부품(ui/…)을 다시 불러오면(렌더 데이터가 없어 화면 시험이 못 보는 상태에서도) 여기서 잡힌다. */
+const OLD_PARTS = ['button', 'input', 'textarea', 'select', 'tabs', 'dropdown-menu', 'dialog', 'card', 'badge', 'radio-group', 'confirm-dialog'];
+const OLD_IMPORT = new RegExp(`from '@/components/ui/(?:${OLD_PARTS.join('|')})'`);
 function sourceHits(): string[] {
   const hits: string[] = [];
   for (const rel of PANEL_SOURCES) {
     const lines = readFileSync(join(__dirname, '..', rel), 'utf8').split('\n');
     lines.forEach((line, i) => {
       const t = line.trim();
+      if (OLD_IMPORT.test(line)) hits.push(`${rel}:${i + 1} ${line.trim()}`);
       if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*') || t.startsWith('{/*') || t.startsWith('import ')) return;
       const code = line.replace(/\/\/ .*$/, '');
       for (const m of code.matchAll(TOKEN_IN_SOURCE)) hits.push(`${rel}:${i + 1} ${m[1]}`);
@@ -146,6 +150,13 @@ describe('4908 카드 상세 — 옛 proof 팔레트 부품 0 (머리 · 몸통 
 
   it('⭐소스 전수: 패널이 불러 쓰는 자기 부품 소스(렌더 데이터가 없는 상태까지) 어디에도 옛 팔레트 클래스가 없다', () => {
     expect(sourceHits()).toEqual([]);
+  });
+
+  it('⭐소스 전수의 import 검사가 옛 부품을 실제로 잡는다(양성 대조)', () => {
+    expect(OLD_IMPORT.test("import { Button } from '@/components/ui/button';")).toBe(true);
+    expect(OLD_IMPORT.test("import { Card } from '@/components/ui/card';")).toBe(true);
+    expect(OLD_IMPORT.test("import { Button } from '@/components/ds/button';")).toBe(false);
+    expect(OLD_IMPORT.test("import { useToast } from '@/components/ui/toast';")).toBe(false);
   });
 
   it('⭐소스 전수 정규식이 옛 클래스를 실제로 잡는다(양성 대조) — 한 줄에 심으면 걸리고 ds 클래스는 안 걸린다', () => {
