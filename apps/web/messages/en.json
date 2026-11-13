@@ -4853,6 +4853,7 @@
     "detailAvatarChangeAria": "Change photo",
     "detailActionsAria": "Agent actions",
     "detailSideLabel": "Summary",
+    "detailKeyReadFailed": "Could not read the key status — try again.",
     "detailSummaryTitle": "Right now",
     "detailSummaryComputer": "Runs on",
     "detailSummaryKey": "Active key",

@@ -7,6 +7,7 @@ import { Icon } from '@/components/ds/icon';
 import { Skeleton } from '@/components/ds/skeleton';
 import { formatViewerScheduledAt } from '@/lib/schedule-format';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { DEFAULT_ROLE_LABEL_KEY } from '@/lib/org-role-label';
 
 export interface OrgSummaryRow {
   member_id: string;
@@ -75,13 +76,6 @@ export function coldStartReason(pending: number | null): { key: string; values?:
 // 판정 가능·label 문자열로는 커스텀과 구분 불가)면 이 자리에서 i18n 정본으로 한 단계
 // 앞질러 대체하고, 그 5키가 아니면(=조직이 직접 만든 커스텀 역할) DB의 role_label을 그대로
 // 쓴다(커스텀이 이긴다 — 조직이 지은 이름을 FE가 덮어쓸 권한이 없다).
-const DEFAULT_ROLE_LABEL_KEY: Record<string, string> = {
-  implementation: 'trustRoleLabelImplementation',
-  po: 'trustRoleLabelPo',
-  qa: 'trustRoleLabelQa',
-  design: 'trustRoleLabelDesign',
-  devops: 'trustRoleLabelDevops',
-};
 
 export function resolveRoleLabel(roleKey: string, roleLabel: string | null, t: Translator): string {
   // story #3735 CHANGES(카디르 QA 지적) — 객체 리터럴 인덱싱은 role_key가

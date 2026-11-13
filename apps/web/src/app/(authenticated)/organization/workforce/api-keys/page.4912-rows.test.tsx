@@ -133,5 +133,20 @@ describe('API 키 화면 줄(story 4912 · B1)', () => {
     await settle();
     expect(document.querySelector('[data-testid="api-key-panel"]')).toBeNull();
   });
+
+  it('⭐«키 관리»는 한 자리: 줄에 «⋯»가 없고(단추가 있다) 우클릭 메뉴는 같은 «키 관리»를 열어 준다', async () => {
+    stub({ a1: [] });
+    await mount();
+    expect(row('a1').querySelector('[data-slot="ds-row-actions-trigger"]'), 'no second «⋯» for the one action').toBeNull();
+    expect([...row('a1').querySelectorAll('button')].some((b) => b.textContent?.trim() === koMessages.settings.agentApiKeyManageCta)).toBe(true);
+    const trigger = row('a1').querySelector('[data-slot="ds-row-context-trigger"]')!;
+    await act(async () => { trigger.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 30, button: 2 })); });
+    const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((e) => e.textContent?.trim() === koMessages.settings.agentApiKeyManageCta);
+    expect(item, 'the right-click menu carries «키 관리»').toBeTruthy();
+    await act(async () => { item!.click(); });
+    await settle();
+    expect(document.querySelector('[data-testid="api-key-panel"]')).not.toBeNull();
+    expect(managerProps.current.at(-1)).toMatchObject({ agentId: 'a1' });
+  });
 });
 

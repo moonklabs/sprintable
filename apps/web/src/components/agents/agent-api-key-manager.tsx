@@ -59,6 +59,21 @@ export function AgentApiKeyManager(props: AgentApiKeyManagerProps) {
   return <AgentApiKeyManagerCard key={props.agentId} {...props} />;
 }
 
+/** the create answer's body must arrive within this long once its headers did */
+const CREATE_BODY_TIMEOUT_MS = 20_000;
+
+async function readJsonWithin(response: Response, ms: number): Promise<unknown> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      response.json(),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('response body timed out')), ms); }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKeysRead, compact = false, onIssuingChange }: AgentApiKeyManagerProps) {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
@@ -191,12 +206,14 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
         body: JSON.stringify({ scope: selectedScopes, expires_at: computeExpiresAt(selectedExpiry) }),
       });
       if (!response.ok) throw new Error('Failed to generate API key');
-      const result = await response.json() as { data?: { api_key?: string; mcp_config?: unknown } };
+      // story 4912 (B2, codex): `fetchWithAuth` times out the response HEADERS only — a create answer whose body never ends would hold «발급 중» (and the panel) forever. A bounded read turns that into the ordinary «발급 실패» path.
+      const result = await readJsonWithin(response, CREATE_BODY_TIMEOUT_MS) as { data?: { api_key?: string; mcp_config?: unknown } };
       if (!aliveRef.current) return; // the card is gone (another agent now): the key made for THIS agent is not shown on that one's page
       const rawKey = (result.data?.api_key ?? '') as string;
       const rawMcp = result.data?.mcp_config;
       const mcpConfigStr = rawMcp == null ? null : typeof rawMcp === 'string' ? rawMcp : JSON.stringify(rawMcp, null, 2);
       writeKeyState(heldGen, () => { setGeneratedKey(rawKey); setGeneratedMcpConfig(mcpConfigStr); }, true);
+      onIssuingChangeRef.current?.(false); // story 4912 (B2): «발급 중» ends the moment the key is in the dialog's state (the follow-up list read below is not worth holding a panel for)
       onNewKey?.(rawKey, mcpConfigStr);
       await loadApiKeys();
     } catch (error) {

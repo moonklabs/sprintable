@@ -52,7 +52,7 @@ import {
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
-import { resolveRoleLabel } from '@/app/(authenticated)/organization/trust/trust-utils';
+import { agentRoleLabel } from '@/lib/org-role-label';
 import { copyTextSafely } from '@/lib/clipboard';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
@@ -190,6 +190,8 @@ export default function AgentDetailPage() {
   const [deactivateOpen, setDeactivateOpen] = useState(false);
   const [togglingActive, setTogglingActive] = useState(false); // one activate / deactivate request at a time (a double press must not send two)
   const togglingRef = useRef(false); // the same guard, read synchronously: two presses in one tick are both before the next render
+  // story 4912 (B2, codex 5697 r2): a GENERATION, not the id — A→B→A inside one request must not let the old request clear the new request's guard or write its answer
+  const toggleGenRef = useRef(0);
   const [editingName, setEditingName] = useState(false);
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState('');
@@ -204,7 +206,7 @@ export default function AgentDetailPage() {
   const idRef = useRef(id);
   useEffect(() => { idRef.current = id; }, [id]); // (assigned in an effect, not during render — an abandoned concurrent render must not move it; this effect is declared before the loads below, so it runs first)
   // story 4912 (A2): the two dialogs belong to the agent they were opened for — a route change to another agent closes them (a deactivate confirm opened for A must never confirm against B)
-  useEffect(() => { setAvatarOpen(false); setDeactivateOpen(false); setTogglingActive(false); togglingRef.current = false; }, [id]);
+  useEffect(() => { setAvatarOpen(false); setDeactivateOpen(false); setTogglingActive(false); togglingRef.current = false; toggleGenRef.current += 1; }, [id]);
   const [webhookActive, setWebhookActive] = useState(false);
   const [savingWebhook, setSavingWebhook] = useState(false);
 
@@ -212,6 +214,7 @@ export default function AgentDetailPage() {
   const [hasActiveKey, setHasActiveKey] = useState(false);
   // story 4912 (A2): the side summary says «활성 키 있음/없음» only once a key-list read really worked (a failed read is not «없음»)
   const [keysReadOk, setKeysReadOk] = useState(false);
+  const [keysReadFailed, setKeysReadFailed] = useState(false); // story 4912 (B2): a failed key read is said as a failure (with [다시 시도]) — never as «no key»
   const [fakechatEnvKeyCopied, setFakechatEnvKeyCopied] = useState(false);
 
   const [projects, setProjects] = useState<ProjectOption[]>([]);
@@ -283,19 +286,25 @@ export default function AgentDetailPage() {
 
   const fetchActiveApiKey = useCallback(async () => {
     const forId = id;
-    const res = await fetchWithAuth(`/api/agents/${id}/api-key`);
-    if (!res.ok || idRef.current !== forId) return;
-    const json = await res.json() as { data: ApiKey[] };
-    if (idRef.current !== forId) return;
-    const active = (json.data ?? []).find((k) => !k.revoked_at);
-    setHasActiveKey(!!active);
-    setKeysReadOk(true);
+    try {
+      const res = await fetchWithAuth(`/api/agents/${id}/api-key`);
+      if (idRef.current !== forId) return;
+      if (!res.ok) { setKeysReadFailed(true); return; }
+      const json = await res.json() as { data: ApiKey[] };
+      if (idRef.current !== forId) return;
+      const active = (json.data ?? []).find((k) => !k.revoked_at);
+      setHasActiveKey(!!active);
+      setKeysReadOk(true);
+      setKeysReadFailed(false);
+    } catch {
+      if (idRef.current === forId) setKeysReadFailed(true);
+    }
   }, [id]);
 
   useEffect(() => {
     let current = true; // story 4889: an older id's late answer does not end the newer id's loading
     // story 4889: the previous agent's side state (key presence · webhook · a freshly shown key) does not stay while this id is read
-    setHasActiveKey(false); setKeysReadOk(false); setWebhookConfigs([]); setWebhookUrl(''); setFreshApiKey(null);
+    setHasActiveKey(false); setKeysReadOk(false); setKeysReadFailed(false); setWebhookConfigs([]); setWebhookUrl(''); setFreshApiKey(null);
     setLoading(true);
     Promise.all([fetchAgent(), fetchActiveApiKey(), fetchOrgContext()])
       .finally(() => { if (current) setLoading(false); });
@@ -507,7 +516,8 @@ export default function AgentDetailPage() {
     if (togglingRef.current) return;
     togglingRef.current = true;
     const next = !agent.is_active;
-    const requestedFor = id;
+    const gen = toggleGenRef.current;
+    const stillMine = () => toggleGenRef.current === gen; // false once the page left this agent (any id change bumps it — also A→B→A)
     setTogglingActive(true);
     let res: Response;
     try {
@@ -517,11 +527,12 @@ export default function AgentDetailPage() {
         body: JSON.stringify({ is_active: next }),
       });
     } finally {
-      if (idRef.current === requestedFor) { togglingRef.current = false; setTogglingActive(false); }
+      if (stillMine()) { togglingRef.current = false; setTogglingActive(false); }
     }
-    if (idRef.current !== requestedFor) return; // the page moved on to another agent while this was out: its answer is not this page's
+    if (!stillMine()) return; // the page moved on to another agent while this was out: its answer is not this page's
     if (res.ok) {
       const json = await res.json() as { data: AgentMember };
+      if (!stillMine()) return; // the body took long enough for the page to leave
       setAgent(json.data);
       addToast({ type: 'success', title: next ? t('agentActivated') : t('agentDeactivated') });
     } else {
@@ -623,7 +634,7 @@ export default function AgentDetailPage() {
                 <div className="mt-1 flex flex-wrap items-center gap-1.5">
                   {!agent.is_active ? <Chip>{ta('statusInactive')}</Chip> : null}
                   <Chip>{t('agentMember')}</Chip>
-                  <Chip>{resolveRoleLabel(agent.role, null, to)}</Chip>
+                  <Chip>{agentRoleLabel(agent.role, to)}</Chip>
                   {/* story #3092(2단계, 표면3) — 커넥터 필드. runtime_type null이면 생략
                       (전역 폴백 규칙 — 추측·「미지정」류 문구 금지). 공식 로고는 법무
                       사인오프 전이라 이번엔 텍스트만(로고 트랙은 후속 스코프). */}
@@ -834,6 +845,11 @@ export default function AgentDetailPage() {
                     export SPRINTABLE_API_KEY={freshApiKey}
                   </code>
                 </>
+              ) : keysReadFailed && !keysReadOk ? (
+                <div className="flex flex-wrap items-center gap-2" data-testid="agent-key-read-failed">
+                  <p role="status" className="text-xs text-warning-strong">{ta('detailKeyReadFailed')}</p>
+                  <Button type="button" variant="outline" size="sm" onClick={() => { void fetchActiveApiKey(); }}>{tc('retry')}</Button>
+                </div>
               ) : !hasActiveKey ? (
                 <p className="text-xs text-warning-strong">{t('agentFakechatEnvKeyRequired')}</p>
               ) : (

@@ -234,5 +234,48 @@ describe('AgentApiKeyManager — 4912 D4: the other things that could hold the k
     await settle();
     expect(calls).toEqual([true, false]);
   });
+
+  it('⭐«발급 중»은 키가 상태에 적힌 순간 끝난다 — 뒤따르는 키 목록 읽기가 끝나기를 기다리지 않는다(패널이 그 읽기에 묶이지 않게)', async () => {
+    const calls: boolean[] = [];
+    let listGets = 0;
+    let finishList!: (r: Response) => void;
+    const listGate = new Promise<Response>((res) => { finishList = res; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes('/api-key') && init?.method === 'POST') return new Response(JSON.stringify({ data: { api_key: NEW_KEY, mcp_config: MCP } }), { status: 201 });
+      if (u.includes('/api-key')) { listGets += 1; return listGets === 1 ? new Response(JSON.stringify({ data: [] }), { status: 200 }) : listGate; } // the follow-up read (2nd GET) hangs
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    }));
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" onIssuingChange={(b) => calls.push(b)} /></NextIntlClientProvider>); });
+    await settle();
+    await act(async () => { btn(S.agentApiKeyGenerate)?.click(); });
+    await settle();
+    expect(document.body.textContent).toContain(NEW_KEY); // the key is in the dialog
+    expect(calls.at(-1), 'ended at the state write, the follow-up read is still out').toBe(false);
+    await act(async () => { finishList(new Response(JSON.stringify({ data: [] }), { status: 200 })); });
+    await settle();
+  });
+
+  it('⭐만들기 답의 본문이 끝나지 않으면 20초 뒤 «발급 실패»로 끝난다 — «발급 중»이 영영 안 풀려 패널이 새로고침 전까지 안 닫히지 않는다', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const calls: boolean[] = [];
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+        const u = String(url);
+        if (u.includes('/api-key') && init?.method === 'POST') return { ok: true, status: 201, json: () => new Promise(() => {}) } as unknown as Response; // headers came, the body never ends
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }));
+      await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" onIssuingChange={(b) => calls.push(b)} /></NextIntlClientProvider>); });
+      await settle();
+      await act(async () => { btn(S.agentApiKeyGenerate)?.click(); });
+      await settle();
+      expect(calls.at(-1), 'still issuing while the body is awaited').toBe(true);
+      await act(async () => { vi.advanceTimersByTime(20_001); });
+      await settle();
+      expect(calls.at(-1), 'the bounded read ended it').toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 

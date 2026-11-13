@@ -4853,6 +4853,7 @@
     "detailAvatarChangeAria": "사진 바꾸기",
     "detailActionsAria": "에이전트 행동",
     "detailSideLabel": "요약",
+    "detailKeyReadFailed": "키 상태를 읽지 못했어요 — 다시 시도해 주세요.",
     "detailSummaryTitle": "지금 상태",
     "detailSummaryComputer": "실행 위치",
     "detailSummaryKey": "활성 키",

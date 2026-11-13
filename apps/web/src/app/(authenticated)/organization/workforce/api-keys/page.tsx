@@ -71,6 +71,7 @@ function AgentKeyRow({ agent, label, reloadToken, onOpen }: { agent: Agent; labe
       trailing={<Button onClick={onOpen} aria-label={t('agentApiKeyManageTitle', { name })}>{t('agentApiKeyManageCta')}</Button>}
       actions={[{ key: 'manage', label: t('agentApiKeyManageCta'), icon: 'key', onSelect: onOpen }]}
       actionsLabel={t('agentApiKeyManageTitle', { name })}
+      actionsTrigger="context-only" // story 4912 (B2): «키 관리» is the visible button; the right-click menu keeps the same item (no second «⋯» for one thing)
       onOpen={onOpen}
     />
   );

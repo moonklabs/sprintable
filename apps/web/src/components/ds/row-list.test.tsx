@@ -225,3 +225,21 @@ describe('ds RowListItem — onOpen (4912 행 열기)', () => {
     expect(onOpen).not.toHaveBeenCalled();
   });
 });
+
+describe('ds RowListItem — actionsTrigger (4912 B2)', () => {
+  it("⭐'context-only' = «⋯»를 그리지 않고 우클릭 메뉴는 같은 항목으로 남는다 — 단추가 이미 있는 행이 같은 것을 두 자리에 세우지 않는다 · 기본은 둘 다", async () => {
+    const onSelect = vi.fn();
+    await render(
+      <RowList aria-label="목록" header={{ title: '연결', count: 2 }}>
+        <RowListItem data-testid="row-hidden" title="숨김" actions={[{ key: 'manage', label: '키 관리', onSelect }]} actionsLabel="행 메뉴" actionsTrigger="context-only" />
+        <RowListItem data-testid="row-visible" title="보임" actions={[{ key: 'manage', label: '키 관리', onSelect }]} actionsLabel="행 메뉴" />
+      </RowList>,
+    );
+    expect(container.querySelector('[data-testid="row-hidden"] [data-slot="ds-row-actions-trigger"]')).toBeNull();
+    expect(container.querySelector('[data-testid="row-visible"] [data-slot="ds-row-actions-trigger"]')).not.toBeNull();
+    const trigger = container.querySelector('[data-testid="row-hidden"] [data-slot="ds-row-context-trigger"]')!;
+    await act(async () => { trigger.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40, button: 2 })); });
+    expect(menuLabels()).toEqual(['키 관리']);
+  });
+});
+
