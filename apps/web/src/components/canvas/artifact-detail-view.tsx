@@ -160,7 +160,7 @@ export function ArtifactDetailView({ artifactId, projectId }: { artifactId: stri
       <TopBarSlot
         title={
           <div className="flex min-w-0 grow items-center">
-            <Link href={flatHref('/artifacts')} className="mr-2.5 shrink-0 rounded-ds-control text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ds-action">{t('galleryTitle')}</Link>
+            <Link href={flatHref('/artifacts')} className="mr-2.5 inline-flex min-h-ds-touch shrink-0 items-center rounded-ds-control text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ds-action">{t('galleryTitle')}</Link>
             <span aria-hidden="true" className="mr-2.5 shrink-0 text-xs text-muted-foreground">/</span>
             <h1 className="min-w-0 truncate text-base font-[650] tracking-[-0.01em] text-foreground">{artifact.title}</h1>
           </div>

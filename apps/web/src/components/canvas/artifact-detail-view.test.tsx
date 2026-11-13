@@ -90,6 +90,8 @@ describe('ArtifactDetailView — standalone 상세(story #2713)', () => {
     const bar = container.querySelector('[data-testid="top-bar-slot-stub"]')!;
     expect(bar.querySelector('a')?.getAttribute('href')).toBe('/artifacts');
     expect(bar.querySelector('a')?.textContent).toBe('산출물');
+    // 폰에서 갤러리로 돌아가는 길 — 눌림 44 이상(코덱스 1차 LOW).
+    expect(bar.querySelector('a')?.classList.contains('min-h-ds-touch')).toBe(true);
     expect(bar.querySelector('h1')?.textContent).toBe('흐름판 재설계 시안');
     expect(container.querySelectorAll('h1').length).toBe(1);
     expect(container.querySelector('[data-testid="artifact-detail-panel"]')!.textContent).not.toContain('갤러리로 돌아가기');
