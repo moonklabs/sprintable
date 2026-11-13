@@ -15,12 +15,12 @@ const MOVED = [
   'organization/content-rules/page.tsx', 'organization/generation-connectors/page.tsx', 'rewards/page.tsx',
   'organization/channels/page.tsx', 'organization/events/page.tsx', 'content/page.tsx', 'organization/insights-board/page.tsx',
   'channel/page.tsx', // 4913 · 채널(채팅 흐름) — PageFrame stream
+  'content/channel-posts/page.tsx',
 ];
 /** 옮긴 화면의 라우트 로딩 폴더(= FLAT_ROUTE_TOP_BAR 키) — rewards는 표에 이미 있던 키. */
-const MOVED_LOADING = ['organization/roles', 'organization/trust', 'organization/content-rules', 'organization/generation-connectors', 'rewards', 'organization/channels', 'organization/events', 'content', 'organization/insights-board', 'channel'];
+const MOVED_LOADING = ['organization/roles', 'organization/trust', 'organization/content-rules', 'organization/generation-connectors', 'rewards', 'organization/channels', 'organization/events', 'content', 'organization/insights-board', 'channel', 'content/channel-posts'];
 /** 옮길 화면 — 지금 옛 부품 import 수(`from '@/components/ui/…'`)의 상한. 줄이는 방향으로만 바꾼다. */
 const RATCHET: Record<string, number> = {
-  'content/channel-posts/page.tsx': 7,
 };
 const read = (rel: string) => readFileSync(join(APP, rel), 'utf8');
 /** 주석을 뺀 코드(주석 속 «PageHeader» 같은 설명이 가드에 걸리지 않게). */
@@ -81,7 +81,7 @@ describe('조직 화면 한 쪽 틀 가드(4913)', () => {
       }
     });
     it('⭐옮긴 화면의 폴더 로딩이 덮는 «안 옮긴» 하위 화면은 자기 옛 로딩을 따로 쥔다(틀 스켈레톤이 상세 · 채널 포스트에 번쩍이지 않게 · codex 4913D)', () => {
-      for (const dir of ['content/[draftId]', 'content/channel-posts']) {
+      for (const dir of ['content/[draftId]', 'content/channel-posts/[draftId]', 'content/channel-posts/calendar', 'content/channel-posts/engagement']) {
         expect(code(`${dir}/loading.tsx`), dir).toMatch(/<PageSkeleton\b/);
         expect(code(`${dir}/loading.tsx`), dir).not.toMatch(/OrgScreenLoading/);
       }
@@ -118,5 +118,9 @@ describe('조직 화면 한 쪽 틀 가드(4913)', () => {
         expect((code(rel).match(OLD_UI) ?? []).length).toBeLessThanOrEqual(max);
       });
     }
+    // 4913 D물결이 끝나 조직 구역 열한 화면이 전부 MOVED로 올라와 ratchet이 비었다(시험이 하나도 없는 describe는 vitest가 «No test found»로 실패시킨다). 안 옮긴 화면을 다시 올릴 일이 생기면 이 시험을 그 화면 줄로 바꾼다.
+    it('⭐ratchet이 비었다 — 열한 화면이 전부 «옮김»이다(새 «안 옮긴» 화면을 RATCHET에 올리려면 이 시험을 바꿔야 한다)', () => {
+      expect(Object.keys(RATCHET)).toEqual([]);
+    });
   });
 });

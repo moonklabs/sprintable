@@ -4,28 +4,27 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { MoreHorizontal } from 'lucide-react';
 import { useChatsHref, useConnectRulesHref, useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
-import { EmptyState } from '@/components/ui/empty-state';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { PageHeader } from '@/components/ui/page-header';
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { useToast } from '@/components/ui/toast';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Chip, Tag } from '@/components/ds/chip';
+import { EmptyState } from '@/components/ds/empty-state';
+import { PageFrame } from '@/components/ds/page-frame';
+import { PageHead } from '@/components/ds/page-head';
+import { RowList, RowListItem, type RowAction } from '@/components/ds/row-list';
+import { Skeleton } from '@/components/ds/skeleton';
+import { TabNav, TabNavLink } from '@/components/ds/tab-nav';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ds/tabs';
+import { useToast } from '@/components/ds/toast';
+import { OrgScreenTitle } from '@/components/organization/org-screen-title';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useChannelLabel } from '@/lib/channel-label';
 import { formatViewerScheduledAt, formatScheduledAt } from '@/lib/schedule-format';
 import { deriveChannelPostView, type ChannelPublicationStatus } from '@/components/content/channel-post-status';
 import { deriveFailureAction, type CommandStatus } from '@/components/content/failure-action';
 import { FailureActionBadge } from '@/components/content/failure-action-badge';
-import { type ContentPostStatusInput } from '@/components/content/post-status';
-import { StatusChip } from '@/components/content/status-chip';
-import { AuthorKindBadge } from '@/components/content/author-kind-badge';
+import { type ContentPostStatus, type ContentPostStatusInput, contentPostStatusLabelKey } from '@/components/content/post-status';
 import { isSandboxChannelDraft, SandboxTestBadge } from '@/components/content/sandbox-test-badge';
-import { ResponsiveDataTable, type ResponsiveDataTableColumn } from '@/components/shared/responsive-data-table';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { useTeamTimeZone } from '@/components/team-time-zone';
@@ -48,6 +47,9 @@ import { useTeamTimeZone } from '@/components/team-time-zone';
  * 빈 상태 갈래는 유나 코드 실측 정정(PO 채택) — 블로그는 connection_id=None이 hosted_site
  * 기본 목적지라 이 갈래가 없고, 채널 포스트만 create_channel_post_draft_version이
  * connection_id 필수라 실제로 「나갈 곳 없음」이 생긴다.
+ *
+ * 4913(UI-R5 D물결) — 블로그 포스트(content/page.tsx)와 같은 «한 쪽 틀»로: 제목은 위 막대 · 본문은 PageFrame wide · 머리 = 설명 + «대화 열기» · 목록/캘린더/반응 전환 = TabNav(진짜 링크) ·
+ * 상태 탭 + «보관됨 보기» · 표 → RowList(한 줄 = 본문 미리보기 + 상태 칩 + 부제(채널 · 나가는 시각) + 다음 발 단추 · 행 아래 작은 글 = 막힘 사유 · 부분 성공 · 같은 스토리의 글).
  */
 
 interface ChannelPostDraftListItem {
@@ -134,6 +136,7 @@ export default function ChannelPostListPage() {
   // 그대로 화면에 찍힌다 — 죽은 verify:i18n-key-existence(#3739가 그날 처분한 스크립트)가
   // 있었다면 이 클래스를 CI에서 잡았을 자리(#3739 PR 본문의 「값 실증」).
   const tNav = useTranslations('nav');
+  const tCommon = useTranslations('common');
   const router = useRouter();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
 
@@ -279,259 +282,208 @@ export default function ChannelPostListPage() {
   const hasNoChannels = activeConnectionCount === 0;
 
   const connectChannelAction = (
-    <Button asChild variant="hero">
+    <Button asChild variant="primary">
       <Link href={connectRulesHref}>{tNav('orgChannels')}</Link>
     </Button>
   );
 
-  // story #3744(페드루 CHANGES Ⓑ, 시안 v6) — 채널 프레임도 블로그와 같은 「대화 열기」
-  // primary(openChatCta, content/page.tsx의 chatAction과 동형) — 「View calendar」
-  // outline은 header 주 액션 자리가 아니라 탭 줄 위 목록/캘린더 세그먼트로 내려간다
-  // (시안 "차이는 열 셋과 뷰 전환뿐").
+  // story #3744(페드루 CHANGES Ⓑ, 시안 v6) — 채널 프레임도 블로그와 같은 「대화 열기」 primary(openChatCta, content/page.tsx의 chatAction과 동형).
   const chatAction = (
-    <Button asChild variant="hero">
+    <Button asChild variant="primary">
       <Link href={chatsHref}>{t('openChatCta')}</Link>
     </Button>
   );
 
-  // story #4014 — ResponsiveDataTable 열 정의(content/page.tsx와 동형 취지 — 셀 내용이
-  // 조건부 로직을 품어 renderCell 함수로 표·카드 둘 다 그린다).
-  type ChannelPostListRow = (typeof draftsWithStatus)[number];
-  const columns: ResponsiveDataTableColumn<ChannelPostListRow>[] = [
-    {
-      key: 'preview', header: t('channelPostsColumnPreview'), cardSlot: 'title',
-      cellClassName: 'max-w-xs px-3 py-2.5 font-medium text-foreground',
-      renderCell: ({ draft, view }) => {
-        const hasTextPreview = 'text_preview' in draft && draft.text_preview != null;
-        return (
-          <>
-            {/* story #4277(민 기기 #15) — `truncate`가 인라인 <a>에 걸려 말줄임(ellipsis)이 안 붙고 카드 제목 칸(ResponsiveDataTable의
-                line-clamp-2)도 한 줄로 막혀, 402폭 카드에서 제목이 «… 재발행 경로 :»처럼 말줄임 없이 잘렸다. 표(lg 이상)에서만 한 줄
-                말줄임(block+truncate) · 카드(lg 미만)는 칸의 두 줄 말줄임에 맡긴다(content/page.tsx 목록 제목과 같은 모양). */}
-            <Link href={flatHref(`/content/channel-posts/${draft.draft_id}`)} className="hover:underline lg:block lg:truncate">
-              {hasTextPreview ? draft.text_preview : `${channelLabel(draft.channel)} · v${draft.current_version}`}
+  const renderRow = ({ draft, view, failureAction, tab }: (typeof draftsWithStatus)[number], index: number) => {
+    const detailHref = flatHref(`/content/channel-posts/${draft.draft_id}`);
+    const hasTextPreview = 'text_preview' in draft && draft.text_preview != null;
+    const scheduled = realStr(draft.scheduled_at);
+    const actions: RowAction[] = draft.can_archive
+      ? [{ key: 'archive', label: draft.is_deleted ? t('unarchiveAction') : t('archiveAction'), disabled: archivingId === draft.draft_id, onSelect: () => void handleArchiveToggle(draft) }]
+      : [];
+    // 나가는 시각(story #3744 ① 우선순위 4단): 막힘(FailureActionBadge) > 발행 시각 > 예약 시각 > «—». 막힘은 한 줄에 안 들어가는 문장이라 행 아래 작은 글로, 나머지는 부제에.
+    const outgoingText = draft.published_at
+      ? formatViewerScheduledAt(draft.published_at, displayTimezone).display
+      : scheduled
+        ? formatScheduledAt(scheduled, teamTz, displayTimezone).display
+        : '—';
+    const originDiffers = draft.origin_author_kind && draft.origin_author_kind !== draft.latest_author_kind;
+    const hasSource = !!(draft.source_content_item_id && draft.source_title);
+    const footnote = failureAction || view.partialSuccess || hasSource ? (
+      <>
+        {failureAction ? (
+          <div data-testid="channel-post-outgoing-at">
+            <FailureActionBadge
+              action={failureAction} displayTimezone={displayTimezone} compact
+              approvalContext={(('gate_status' in draft && 'scheduled_at' in draft)
+                ? { gateStatus: draft.gate_status ?? null, sealedScheduledAt: draft.scheduled_at ?? null } : undefined)}
+            />
+          </div>
+        ) : null}
+        {view.partialSuccess ? (
+          <div><Chip tone="needs-hand" data-testid="channel-post-partial-success">{t('channelPostsPartialSuccess')}</Chip></div>
+        ) : null}
+        {hasSource && draft.source_title ? (
+          // flex: 링크 상자가 줄 안에 머물고(`min-w-0 truncate`) 긴 원본 제목은 말줄임 — 인라인 <a>를 truncate 문단에 두면 글은 잘려도 링크 상자가 패널 밖까지 뻗는다(레이아웃 e2e가 잡음, 510 > 375).
+          <p className="m-0 flex min-w-0 gap-1" data-testid="channel-post-source-link">
+            <span className="shrink-0">{t('channelPostsSourceLabel')}</span>{' '}
+            <Link href={flatHref(`/content/${draft.source_content_item_id}`)} className="min-w-0 truncate underline">
+              {t('channelPostsSourceLinkText', { title: draft.source_title })}
             </Link>
-            {draft.origin_author_kind && draft.origin_author_kind !== draft.latest_author_kind ? (
-              <div className="mt-0.5" data-testid="channel-post-origin-author">
-                <AuthorKindBadge kind={draft.origin_author_kind} />
-              </div>
-            ) : null}
-            {view.partialSuccess ? (
-              <span
-                className="mt-1 inline-flex rounded-full bg-warning-tint px-1.5 py-0.5 text-xs text-foreground"
-                data-testid="channel-post-partial-success"
+          </p>
+        ) : null}
+      </>
+    ) : undefined;
+    return (
+      <RowListItem
+        key={draft.draft_id}
+        data-testid="channel-posts-list-row"
+        title={(
+          <Link href={detailHref} className="block truncate hover:underline">
+            {hasTextPreview ? draft.text_preview : `${channelLabel(draft.channel)} · v${draft.current_version}`}
+          </Link>
+        )}
+        subtitle={(
+          <>
+            <span>{channelLabel(draft.channel)}</span>
+            {isSandboxChannelDraft(draft.channel) ? <>{' '}<SandboxTestBadge /></> : null}
+            {failureAction ? null : <>{' · '}<span data-testid="channel-post-outgoing-at">{outgoingText}</span></>}
+            {originDiffers ? <>{' '}<span data-testid="channel-post-origin-author"><AuthorTag kind={draft.origin_author_kind} /></span></> : null}
+          </>
+        )}
+        statusMark={draft.is_deleted ? <Chip data-testid="channel-post-archived-badge">{t('contentStatusArchived')}</Chip> : <StatusMark status={view.status} />}
+        trailing={(
+          <>
+            {tab === 'pending' ? (
+              <Button
+                variant="secondary" onClick={() => router.push(flatHref('/inbox?tab=gates'))}
+                aria-label={t('archiveRowAriaLabel', { n: index + 1, label: t('approvalRequestViewCta') })}
               >
-                {t('channelPostsPartialSuccess')}
-              </span>
+                {t('approvalRequestViewCta')}
+              </Button>
             ) : null}
-            {draft.source_content_item_id && draft.source_title ? (
-              <p className="mt-0.5 truncate text-xs text-muted-foreground" data-testid="channel-post-source-link">
-                {t('channelPostsSourceLabel')}{' '}
-                <Link href={flatHref(`/content/${draft.source_content_item_id}`)} className="underline">
-                  {t('channelPostsSourceLinkText', { title: draft.source_title })}
-                </Link>
-              </p>
+            {tab === 'published' && draft.permalink ? (
+              <Button
+                variant="secondary" onClick={() => window.open(draft.permalink!, '_blank', 'noopener,noreferrer')}
+                aria-label={t('archiveRowAriaLabel', { n: index + 1, label: t('commentsReplyExternalLinkCta') })}
+              >
+                {t('commentsReplyExternalLinkCta')}
+              </Button>
             ) : null}
           </>
-        );
-      },
-    },
-    {
-      key: 'channel', header: t('channelPostsColumnChannel'), cardSlot: 'meta',
-      renderCell: ({ draft }) => (
-        <>
-          {channelLabel(draft.channel)}
-          {isSandboxChannelDraft(draft.channel) ? <SandboxTestBadge /> : null}
-        </>
-      ),
-    },
-    {
-      key: 'outgoingAt', header: t('channelPostsColumnOutgoingAt'), cardSlot: 'meta',
-      cellClassName: 'px-3 py-2.5 text-muted-foreground',
-      renderCell: ({ draft, failureAction }) => {
-        const scheduled = realStr(draft.scheduled_at);
-        return failureAction ? (
-          <FailureActionBadge
-            action={failureAction} displayTimezone={displayTimezone} compact
-            approvalContext={(('gate_status' in draft && 'scheduled_at' in draft)
-              ? { gateStatus: draft.gate_status ?? null, sealedScheduledAt: draft.scheduled_at ?? null } : undefined)}
-          />
-        ) : draft.published_at ? (
-          formatViewerScheduledAt(draft.published_at, displayTimezone).display
-        ) : scheduled ? (
-          formatScheduledAt(scheduled, teamTz, displayTimezone).display
-        ) : (
-          '—'
-        );
-      },
-    },
-    {
-      key: 'status', header: t('channelPostsColumnStatus'), cardSlot: 'meta',
-      renderCell: ({ draft, view }) => (
-        draft.is_deleted ? (
-          <span
-            className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground"
-            data-testid="channel-post-archived-badge"
-          >
-            {t('contentStatusArchived')}
-          </span>
-        ) : (
-          <StatusChip status={view.status} />
-        )
-      ),
-    },
-    {
-      key: 'actions',
-      header: <span className="sr-only">{t('columnActionsSrLabel')}</span>,
-      cardSlot: 'action',
-      renderCell: ({ draft, tab }, index) => (
-        <div className="flex items-center justify-end gap-1.5">
-          {tab === 'pending' ? (
-            <Button
-              variant="outline" size="sm" onClick={() => router.push(flatHref('/inbox?tab=gates'))}
-              aria-label={t('archiveRowAriaLabel', { n: index + 1, label: t('approvalRequestViewCta') })}
-            >
-              {t('approvalRequestViewCta')}
-            </Button>
-          ) : null}
-          {tab === 'published' && draft.permalink ? (
-            <Button
-              variant="outline" size="sm"
-              onClick={() => window.open(draft.permalink!, '_blank', 'noopener,noreferrer')}
-              aria-label={t('archiveRowAriaLabel', { n: index + 1, label: t('commentsReplyExternalLinkCta') })}
-            >
-              {t('commentsReplyExternalLinkCta')}
-            </Button>
-          ) : null}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-              data-testid="channel-post-row-actions-trigger"
-              aria-label={t('rowActionsAriaLabel', { n: index + 1 })}
-            >
-              <MoreHorizontal className="size-4" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {draft.can_archive ? (
-                <DropdownMenuItem
-                  onClick={() => void handleArchiveToggle(draft)}
-                  disabled={archivingId === draft.draft_id}
-                  data-testid="channel-post-archive-action"
-                  aria-label={t('archiveRowAriaLabel', {
-                    n: index + 1,
-                    label: draft.is_deleted ? t('unarchiveAction') : t('archiveAction'),
-                  })}
-                >
-                  {draft.is_deleted ? t('unarchiveAction') : t('archiveAction')}
-                </DropdownMenuItem>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      ),
-    },
-  ];
+        )}
+        actions={actions}
+        actionsLabel={t('rowActionsAriaLabel', { n: index + 1 })}
+        footnote={footnote}
+        onOpen={() => router.push(detailHref)}
+      />
+    );
+  };
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-6 p-6">
-      <PageHeader
-        title={t('channelPostsTitle')}
-        description={t('channelPostsDescription')}
-        actions={chatAction}
-      />
+    <>
+      <OrgScreenTitle>{t('channelPostsTitle')}</OrgScreenTitle>
+      <PageFrame width="wide">
+        <PageHead description={t('channelPostsDescription')} actions={chatAction} />
 
-      {/* story #3744(페드루 CHANGES Ⓑ) — 목록/캘린더 뷰 전환. stock Tabs 재사용(새 세그먼트
-          컴포넌트 발명 0) — 「목록」은 이 화면 자신(no-op)이고 「캘린더」·「반응」 선택은
-          그 route로 이동한다(둘 다 별도 페이지라 탭 패널 전환이 아니라 네비게이션).
-          story #3805(PR 2[FE], 유나 §절1) — 「반응」 세 번째 탭 추가, 새 사이드바 항목 0. */}
-      <Tabs value="list" onValueChange={(v) => {
-        if (v === 'calendar') router.push(flatHref('/content/channel-posts/calendar'));
-        if (v === 'engagement') router.push(flatHref('/content/channel-posts/engagement'));
-      }}
-      >
-        <TabsList data-testid="channel-posts-view-switch">
-          <TabsTrigger value="list">{t('channelPostsViewList')}</TabsTrigger>
-          <TabsTrigger value="calendar" data-testid="channel-posts-calendar-link">{t('channelPostsViewCalendar')}</TabsTrigger>
-          <TabsTrigger value="engagement" data-testid="channel-posts-engagement-link">{t('channelPostsViewEngagement')}</TabsTrigger>
-        </TabsList>
-      </Tabs>
+        {/* story #3744(페드루 CHANGES Ⓑ) — 목록/캘린더/반응 전환. 「목록」은 이 화면 자신이고 「캘린더」·「반응」은 별도 페이지라 탭 패널이 아니라 «진짜 링크»(TabNav — 새 창으로도 열린다).
+            story #3805(PR 2[FE], 유나 §절1) — 「반응」 세 번째. 새 사이드바 항목 0. */}
+        <TabNav aria-label={t('channelPostsTitle')} data-testid="channel-posts-view-switch">
+          <TabNavLink active aria-current="page" href={flatHref('/content/channel-posts')}>{t('channelPostsViewList')}</TabNavLink>
+          <TabNavLink asChild>
+            <Link href={flatHref('/content/channel-posts/calendar')} data-testid="channel-posts-calendar-link">{t('channelPostsViewCalendar')}</Link>
+          </TabNavLink>
+          <TabNavLink asChild>
+            <Link href={flatHref('/content/channel-posts/engagement')} data-testid="channel-posts-engagement-link">{t('channelPostsViewEngagement')}</Link>
+          </TabNavLink>
+        </TabNav>
 
+        {/* story #4277 — 콘텐츠 목록과 같은 줄(상태 탭 + «보관됨 보기») — 좁은 폭 · 긴 로케일에서 토글이 다음 줄로. 탭 뿌리는 min-w-0 max-w-full — 탭 줄이 틀 안에서 스스로 가로 스크롤(블로그 포스트가 CI에서 겪은 넘침과 같은 자리). */}
+        {connections !== null && !hasNoChannels ? (
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            <Tabs value={statusTab} onValueChange={(v) => setStatusTab(v as StatusTab)} className="min-w-0 max-w-full">
+              <TabsList data-testid="channel-posts-status-tabs" aria-label={t('channelPostsTitle')}>
+                <TabsTrigger value="all">{t('statusTabAll')}</TabsTrigger>
+                <TabsTrigger value="draft">{t('contentStatusDraft')}</TabsTrigger>
+                <TabsTrigger value="pending">{t('contentStatusPending')}</TabsTrigger>
+                <TabsTrigger value="approved">{t('contentStatusApproved')}</TabsTrigger>
+                <TabsTrigger value="published">{t('contentStatusPublished')}</TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <Button
+              type="button"
+              variant="quiet"
+              onClick={() => setShowArchived((v) => !v)}
+              aria-pressed={showArchived}
+              data-testid="channel-posts-show-archived-toggle"
+            >
+              {showArchived ? t('hideArchivedToggle') : t('showArchivedToggle')}
+            </Button>
+          </div>
+        ) : null}
 
-      {/* story #4277 — 콘텐츠 목록과 같은 줄(상태 탭 + «보관됨 보기») — 좁은 폭 · 긴 로케일에서 토글이 다음 줄로(같은 클래스 예방). */}
-      {connections !== null && !hasNoChannels ? (
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-          <Tabs value={statusTab} onValueChange={(v) => setStatusTab(v as StatusTab)}>
-            <TabsList data-testid="channel-posts-status-tabs">
-              <TabsTrigger value="all">{t('statusTabAll')}</TabsTrigger>
-              <TabsTrigger value="draft">{t('contentStatusDraft')}</TabsTrigger>
-              <TabsTrigger value="pending">{t('contentStatusPending')}</TabsTrigger>
-              <TabsTrigger value="approved">{t('contentStatusApproved')}</TabsTrigger>
-              <TabsTrigger value="published">{t('contentStatusPublished')}</TabsTrigger>
-            </TabsList>
-          </Tabs>
-          <Button
-            type="button"
-            variant="link"
-            onClick={() => setShowArchived((v) => !v)}
-            className="h-auto min-h-0 min-w-0 shrink-0 px-0 text-sm font-normal text-foreground underline"
-            data-testid="channel-posts-show-archived-toggle"
-          >
-            {showArchived ? t('hideArchivedToggle') : t('showArchivedToggle')}
-          </Button>
-        </div>
-      ) : null}
+        {loadError ? <Banner tone="failed" announce="assertive">{t('channelPostsLoadFailed')}</Banner> : null}
 
-      {loadError ? (
-        <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
-          <AlertDescription>{t('channelPostsLoadFailed')}</AlertDescription>
-        </Alert>
-      ) : null}
+        {connections === null ? (
+          // story #3744(PO 明示) — 연결 조회가 아직 안 끝났으면 「연결 0」과 「목록」 어느 쪽도 그리지 않는다(모른다≠0건).
+          <div role="status" aria-busy="true" className="space-y-3" data-testid="channel-posts-connections-loading">
+            <span className="sr-only">{tCommon('loading')}</span>
+            {[1, 2].map((i) => <Skeleton key={i} className="h-14 w-full" />)}
+          </div>
+        ) : hasNoChannels ? (
+          <EmptyState
+            title={t('channelPostsNoChannelsTitle')}
+            description={t('channelPostsNoChannelsListDescription')}
+            action={connectChannelAction}
+          />
+        ) : loading ? (
+          <div role="status" aria-busy="true" className="space-y-3" data-testid="channel-posts-list-loading">
+            <span className="sr-only">{tCommon('loading')}</span>
+            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-14 w-full" />)}
+          </div>
+        ) : visibleRows.length === 0 ? (
+          !loadError ? (
+            // story #3744(유나 CHANGES·PO 채택) — content/page.tsx와 동형 — 탭이 「전체」가 아닌데 0건이면 statusTabEmpty로.
+            statusTab !== 'all' ? (
+              <EmptyState title={t('statusTabEmpty')} />
+            ) : (
+              <EmptyState
+                title={showArchived ? t('archivedEmpty') : t('channelPostsEmptyTitle')}
+                description={showArchived ? undefined : t('channelPostsEmptyDescription')}
+              />
+            )
+          ) : null
+        ) : (
+          <RowList aria-label={t('channelPostsTitle')} data-testid="channel-posts-list">
+            {visibleRows.map((row, index) => renderRow(row, index))}
+          </RowList>
+        )}
 
-      {connections === null ? (
-        // story #3744(PO 明示) — 연결 조회가 아직 안 끝났으면 「연결 0」과 「목록」
-        // 어느 쪽도 그리지 않는다(모른다≠0건).
-        <div className="space-y-3" data-testid="channel-posts-connections-loading">
-          {[1, 2].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />)}
-        </div>
-      ) : hasNoChannels ? (
-        <EmptyState
-          title={t('channelPostsNoChannelsTitle')}
-          description={t('channelPostsNoChannelsListDescription')}
-          action={connectChannelAction}
-        />
-      ) : loading ? (
-        <div className="space-y-3" data-testid="channel-posts-list-loading">
-          {[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />)}
-        </div>
-      ) : visibleRows.length === 0 ? (
-        !loadError ? (
-          // story #3744(유나 CHANGES·PO 채택) — content/page.tsx와 동형(그 파일 주석
-          // 참조) — 탭이 「전체」가 아닌데 0건이면 statusTabEmpty로.
-          statusTab !== 'all' ? (
-            <EmptyState title={t('statusTabEmpty')} />
-          ) : (
-            <EmptyState
-              title={showArchived ? t('archivedEmpty') : t('channelPostsEmptyTitle')}
-              description={showArchived ? undefined : t('channelPostsEmptyDescription')}
-            />
-          )
-        ) : null
-      ) : (
-        <ResponsiveDataTable
-          columns={columns}
-          rows={visibleRows}
-          rowKey={(row) => row.draft.draft_id}
-          rowTestId="channel-posts-list-row"
-        />
-      )}
-
-      {/* story #3744(유나 CHANGES·PO 채택) — content/page.tsx와 동형(그 파일 주석 참조 —
-          statusTab이 'all'이 아니면 shownCount≠visibleRows 표시 개수라 이 줄을 안 그린다). */}
-      {!loading && !hasNoChannels && statusTab === 'all' && totalCount !== null && shownCount > 0 ? (
-        <p className="text-xs text-muted-foreground" data-testid="channel-posts-partial-state">
-          {tBoard('tasksPartialCount', { loaded: shownCount, total: totalCount })}
-        </p>
-      ) : null}
-    </div>
+        {/* story #3744(유나 CHANGES·PO 채택) — content/page.tsx와 동형(statusTab이 'all'이 아니면 shownCount≠visibleRows 표시 개수라 이 줄을 안 그린다). */}
+        {!loading && !hasNoChannels && statusTab === 'all' && totalCount !== null && shownCount > 0 ? (
+          <p className="m-0 text-ds-small text-ds-ink-3" data-testid="channel-posts-partial-state">
+            {tBoard('tasksPartialCount', { loaded: shownCount, total: totalCount })}
+          </p>
+        ) : null}
+      </PageFrame>
+    </>
   );
+}
+
+// 4913 — 상태 칩: 블로그 포스트(content/page.tsx)와 같은 «뜻 → 색» 짝(옛 StatusChip의 `data-status-chip`을 e2e 측정 헬퍼가 읽는다). 판별 불가(undefined)는 색 칩 아닌 평문 «—».
+const STATUS_TONE: Record<ContentPostStatus, 'neutral' | 'needs-hand' | 'info' | 'done' | 'failed'> = {
+  draft: 'neutral', pending: 'needs-hand', approved: 'info', published: 'done', reapproval_needed: 'failed',
+};
+
+function StatusMark({ status }: { status: ContentPostStatus | undefined }) {
+  const t = useTranslations('content');
+  if (status === undefined) return <span className="text-ds-small text-ds-ink-3">{t('originAuthorUnknown')}</span>;
+  return <Chip tone={STATUS_TONE[status]} dot data-status-chip={status}>{t(contentPostStatusLabelKey(status))}</Chip>;
+}
+
+// 4913 — 작성 주체 꼬리표(원작성이 최종 수정과 다를 때): 블로그 포스트와 같은 낱말 · «모르면 —».
+function AuthorTag({ kind }: { kind: 'agent' | 'human' | null | undefined }) {
+  const t = useTranslations('content');
+  if (kind !== 'agent' && kind !== 'human') return <span>{t('originAuthorUnknown')}</span>;
+  return <Tag>{kind === 'agent' ? t('authorAgent') : t('authorHuman')}</Tag>;
 }
