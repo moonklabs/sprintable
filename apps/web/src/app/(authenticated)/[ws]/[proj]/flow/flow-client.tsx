@@ -232,7 +232,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           var(--font-sans)라 시각 변화 0 — 세리프 켜지면 board TopBar 타이틀도 함께 전환). */}
       <TopBarSlot title={<h1 className="text-sm font-display font-extrabold">{t('title')}</h1>} showContextChip />
 
-      <div className="space-y-4 p-4">
+      <div className={view === 'list' ? 'px-4 pb-4' : 'space-y-4 p-4'}>
         {/* story #2930(P0-G) I3 — nav에서 flow+sprints가 「보드」 단일 항목으로 접히며 사라진
             sprints 진입점을 메우는 얕은 프레임(WorkspaceFrameTabs). 아래 ScaleLadder와 다른
             층 — 그건 안 건드린다(E-FLOW-V4 기 확定). */}
@@ -270,7 +270,8 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           // 먹고, 위 탭 줄 · 아래 «승인 흐름에서 멈춘 것» 상자가 뿌리 밖으로 넘쳤다(402 실측: 뿌리 804 · 보드 772 = 804−p-4×2). 이 화면에서 보드에
           // 명시 높이(보이는 영역 = 100svh − 셸 크롬 · 문서 · 스프린트 화면과 같은 앵커)를 주면 보드는 제 높이만 쓰고 뿌리가 내용만큼 자란다(넘침 0 ·
           // 뿌리 p-4 아래 여백이 그대로 틈). 보드 칸 안 세로 스크롤(칸마다 overflow-y-auto)은 무변.
-          <div className="h-[calc(100svh-var(--shell-chrome-h))]" data-testid="flow-board-frame">
+          // 4913 셸 후속 — 높이에서 «일감 탭 띠»(--work-tabs-h · 스크롤러 맨 위 sticky, 스프린트·목표 화면과 같은 값)도 뺀다. 목록 보기에서는 뿌리의 위 여백과 보드↔아래 상자 사이 간격(p-4 · space-y-4)을 틀 안 위·아래 16px(py-4)로 옮긴다 — 틀이 «남은 높이»를 정확히 쓰고(뿌리 여백이 틀 밖에 남으면 틀 하단이 main 아래로 띠 + 16px — dev 실측 60px — 나갔다) 뿌리는 옆 여백 + 맨 아래 16px(아래 상자 밑)만 쥔다. 가드 verify-no-hardcoded-shell-chrome-anchor는 calc 안 하드코딩 값을 막는다.
+          <div className="h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))] py-4" data-testid="flow-board-frame">
             <KanbanBoard
               projectId={projectId}
               wsSlug={wsSlug}

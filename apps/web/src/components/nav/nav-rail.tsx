@@ -87,9 +87,10 @@ export function NavRail({ orgSlug, projectSlug, account, listColumn, navV3Flags 
   const orgHasActive = Boolean(orgGroup?.items.some((i) => link(i).isActive));
 
 
-  // 아이콘 한 칸(40px). 켜짐 = action-soft 바탕 + action-text 글(선택 표시는 action 계열), 꺼짐 = ink-3. 호버 바탕은 링크 쪽(RAIL_LINK)이 입힌다.
+  // 아이콘 한 칸(40px · 낮은 창 높이 520px 이하에선 32px). 낮은 창에서 칸을 줄이는 까닭: 막대는 창 높이(h-svh)에 못 박혀 있고 아이콘 열한 개(40px + 간격 4px)는 약 494px라 420px 창(맥 앱 작은 창)에서 막대 아래가 74px 넘쳐 문서 전체가 스크롤됐다(4913 셸 후속).
+  // 안쪽 스크롤(overflow-y-auto)로 막지 않는다 — 구역 · 조직 펼침 메뉴가 막대 오른쪽으로 열려(absolute left-full) 안쪽 스크롤 칸이 그 메뉴를 잘라 버린다. 켜짐 = action-soft 바탕 + action-text 글(선택 표시는 action 계열), 꺼짐 = ink-3. 호버 바탕은 링크 쪽(RAIL_LINK)이 입힌다.
   const railIcon = (id: string, active: boolean) => (
-    <span className={cn('flex size-10 items-center justify-center rounded-ds-control transition-colors', active ? 'bg-ds-action-soft text-ds-action-text' : 'text-ds-ink-3')}>
+    <span className={cn('flex size-10 items-center justify-center rounded-ds-control transition-colors [@media(max-height:520px)]:size-8', active ? 'bg-ds-action-soft text-ds-action-text' : 'text-ds-ink-3')}>
       <Icon name={RAIL_ICON_BY_ITEM_ID[id]!} size={20} className="size-5" />
     </span>
   );
@@ -97,7 +98,8 @@ export function NavRail({ orgSlug, projectSlug, account, listColumn, navV3Flags 
   // 링크의 aria-label이 이름을 덮으므로 건수 > 0이면 링크 이름에 «이름 · 건수 뜻 N»을 싣는다(ariaName) — 배지 안 sr-only 글만으로는 스크린리더가 못 읽는다.
   // 배지 자리: 오른쪽 위에 얹되 **배지 아래가 아이콘 위(아이콘 상자 y 18)를 넘지 않게** — 배지 높이 16이라 `-top-1.5`(−6px → 배지가 y 2~18)가 아이콘 상자와 세로로 겹치지 않는 가장 낮은 자리다.
   // «99+»(11px 글자 · 폭 약 28px)가 와도 가로 폭과 상관없이 아이콘을 안 가린다(전엔 `-top-0.5` = y 6~22라 아이콘 위 4px 띠를 한 자리 수는 6×4 · «99+»는 15.8×4px 덮었다 — dev 실측 11-10).
-  const BADGE_PLACE = 'absolute -right-0.5 -top-1.5';
+  // 낮은 창(아이콘 칸 32px)에서는 건수 배지를 더 위로 — 40px 칸에서 «배지 아래 끝 = 아이콘 위 끝»이던 자리가 32px 칸에선 아이콘을 4px 덮는다.
+  const BADGE_PLACE = 'absolute -right-0.5 -top-1.5 [@media(max-height:520px)]:-top-2.5';
   const badge = (n: number, tone: 'unread' | 'needs-hand') => (n > 0 ? (
     tone === 'needs-hand'
       ? <CountBadge kind="needs-hand" label={t('railNeedsHand')} count={n} atLeast={todayCountAtLeast} className={BADGE_PLACE} data-testid="rail-badge" />
@@ -113,7 +115,7 @@ export function NavRail({ orgSlug, projectSlug, account, listColumn, navV3Flags 
   const dailyGroups = DAILY_GROUP_IDS.map(byId).filter((g): g is NavGroupConfig => Boolean(g));
 
   return (
-    <nav aria-label={t('workspace')} className="sticky top-0 z-20 hidden h-svh w-14 shrink-0 flex-col items-center gap-1 border-r border-ds-line bg-ds-surface py-2 lg:flex" data-testid="nav-rail">
+    <nav aria-label={t('workspace')} className="sticky top-0 z-20 hidden h-svh w-14 shrink-0 flex-col items-center gap-1 border-r border-ds-line bg-ds-surface py-2 [@media(max-height:520px)]:gap-0.5 [@media(max-height:520px)]:pt-3 lg:flex" data-testid="nav-rail">
       {dailyGroups.slice(0, 1).map(dailyEntry)}
       <Link href={chatLink.href} aria-label={ariaName(t(CHAT_CENTER_ITEM.labelKey), chatUnreadTotal, 'unread')} title={t(CHAT_CENTER_ITEM.labelKey)} aria-current={chatLink.isActive ? 'page' : undefined} className={RAIL_LINK} data-rail-item={CHAT_CENTER_ITEM.id}>
         {railIcon(CHAT_CENTER_ITEM.id, chatLink.isActive)}
@@ -121,7 +123,7 @@ export function NavRail({ orgSlug, projectSlug, account, listColumn, navV3Flags 
       </Link>
       {dailyGroups.slice(1).map(dailyEntry)}
 
-      <div className="mt-auto flex flex-col items-center gap-1">
+      <div className="mt-auto flex flex-col items-center gap-1 [@media(max-height:520px)]:gap-0.5">
         {orgGroup ? (
           <div ref={orgRef} className="relative" data-rail-group="org">
             <Button type="button" variant="ghost" aria-label={t('zoneOrganization')} title={t('zoneOrganization')} aria-expanded={orgOpen} aria-haspopup="true" onClick={() => setOrgOpen((v) => !v)} className={RAIL_BUTTON} data-rail-item="org">
