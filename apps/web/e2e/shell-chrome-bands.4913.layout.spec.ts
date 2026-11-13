@@ -151,7 +151,7 @@ for (const anchor of ANCHORS) {
           expect(m.docOver, 'the document does not scroll').toBeLessThanOrEqual(0);
           expect(m.anchorBottom, 'the frame ends inside the main').toBeLessThanOrEqual(m.insetBottom + 0.5);
           if (anchor.rootPx) { // flow's list view: the 16 px above and below the board live INSIDE the frame (py-4), so the frame can use exactly the room that is left
-            const innerGap = height <= 520 ? 8 : 16; // 4923: on a low window (height ≤ 520) the frame's own vertical room is 8 px (py-2), otherwise 16 px (py-4)
+            const innerGap = width >= 1024 && height <= 520 ? 8 : 16; // 4923: on a low desktop window (width ≥ 1024, height ≤ 520) the frame's own vertical room is 8 px (py-2), otherwise 16 px (py-4)
             expect(Math.round(m.innerGapTop), `the board keeps ${innerGap} px above`).toBe(innerGap);
             expect(Math.round(m.innerGapBottom), `the board keeps ${innerGap} px below`).toBe(innerGap);
           }

@@ -271,7 +271,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           // 명시 높이(보이는 영역 = 100svh − 셸 크롬 · 문서 · 스프린트 화면과 같은 앵커)를 주면 보드는 제 높이만 쓰고 뿌리가 내용만큼 자란다(넘침 0 ·
           // 뿌리 p-4 아래 여백이 그대로 틈). 보드 칸 안 세로 스크롤(칸마다 overflow-y-auto)은 무변.
           // 4913 셸 후속 — 높이에서 «일감 탭 띠»(--work-tabs-h · 스크롤러 맨 위 sticky, 스프린트·목표 화면과 같은 값)도 뺀다. 목록 보기에서는 뿌리의 위 여백과 보드↔아래 상자 사이 간격(p-4 · space-y-4)을 틀 안 위·아래 16px(py-4)로 옮긴다 — 틀이 «남은 높이»를 정확히 쓰고(뿌리 여백이 틀 밖에 남으면 틀 하단이 main 아래로 띠 + 16px — dev 실측 60px — 나갔다) 뿌리는 옆 여백 + 맨 아래 16px(아래 상자 밑)만 쥔다. 가드 verify-no-hardcoded-shell-chrome-anchor는 calc 안 하드코딩 값을 막는다.
-          <div className="h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))] py-4 [@media(max-height:520px)]:py-2" data-testid="flow-board-frame">
+          <div className="h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))] py-4 lg:[@media(max-height:520px)]:py-2" data-testid="flow-board-frame">
             <KanbanBoard
               projectId={projectId}
               wsSlug={wsSlug}

@@ -31,6 +31,7 @@ let observers: Array<() => void> = [];
 let width = 748;
 let desktop = true;
 const WIDTHS: Record<string, number> = { a: 241, b: 1, c: 460, d: 259 };
+afterEach(() => { WIDTHS.c = 460; });
 
 beforeEach(() => {
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
@@ -64,6 +65,17 @@ describe('[SID:4923] useHeadFold — 폭으로 접는다', () => {
     expect(folded()).toBe('false');                 // 딱 맞으면 편다
     width = 1088; await fire();
     expect(folded()).toBe('false');                 // 1440의 머리 폭
+  });
+
+  it('⭐내용이 바뀌면(contentKey) 접혀 있던 머리도 펼쳤을 때의 폭을 다시 재서 그에 맞게 편다 — 접힌 동안 잰 옛 값에 머물지 않는다', async () => {
+    await act(async () => { root.render(<Probe keyStr="a" />); });
+    expect(folded()).toBe('true');                  // 필요 985 > 748
+    WIDTHS.c = 100;                                  // 거르기 묶음이 훨씬 좁아진 내용(예: 칩이 줄었다)
+    await act(async () => { root.render(<Probe keyStr="b" />); });
+    expect(folded()).toBe('false');                 // 필요 241+1+100+259+24 = 625 ≤ 748 → 펴진다(옛 값 985에 머물면 접힌 채)
+    WIDTHS.c = 460;
+    await act(async () => { root.render(<Probe keyStr="c" />); });
+    expect(folded()).toBe('true');                  // 다시 넓어진 내용 → 접힌다
   });
 
   it('넉넉한 폭에서 시작하면 처음부터 펼친 채다', async () => {

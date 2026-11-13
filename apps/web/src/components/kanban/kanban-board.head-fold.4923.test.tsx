@@ -159,9 +159,9 @@ describe('[SID:4923] 보드 머리 — 한 줄에 안 들어가면 거르기가 
 
   it('⭐낮은 창(높이 ≤ 520)에서 머리 줄은 더 낮고(min-h-9 · py-0.5) 보드 틀 위아래 여백은 8(py-2)이다 — 높이 쪽 규칙이 클래스에 있다', async () => {
     await mount();
-    for (const c of ['[@media(max-height:520px)]:min-h-9', '[@media(max-height:520px)]:py-0.5']) expect(head().classList.contains(c), c).toBe(true);
+    for (const c of ['lg:[@media(max-height:520px)]:min-h-9', 'lg:[@media(max-height:520px)]:py-0.5']) expect(head().classList.contains(c), c).toBe(true);
     const flow = readFileSync(join(__dirname, '..', '..', 'app', '(authenticated)', '[ws]', '[proj]', 'flow', 'flow-client.tsx'), 'utf8');
-    expect(flow).toContain('py-4 [@media(max-height:520px)]:py-2" data-testid="flow-board-frame"');
+    expect(flow).toContain('py-4 lg:[@media(max-height:520px)]:py-2" data-testid="flow-board-frame"');
   });
 
   it('⭐숨긴 N(제외된 카드 수)은 접혀도 줄에 보인다(조용히 사라지는 카드가 없게 — story #2187)', async () => {

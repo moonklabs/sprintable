@@ -38,6 +38,7 @@ async function build() {
       contents: `
         import React, { useRef } from 'react'; import { createRoot } from 'react-dom/client';
         import { HeadFilterFold, useHeadFold } from './src/components/kanban/board-head-fold';
+        import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from './src/components/ui/dropdown-menu';
         const box = (w, h) => ({ width: w, height: h, flexShrink: 0 });
         function Head({ width }) {
           const ref = useRef(null);
@@ -49,7 +50,16 @@ async function build() {
               React.createElement('div', { className: 'h-5 w-px shrink-0 bg-border/80', 'aria-hidden': 'true' }),
               React.createElement(HeadFilterFold, { folded, count: 2, label: '거르기', labelActive: '거르기 · 2', popoverLabel: '거르기 조건' },
                 React.createElement('div', { style: { display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'nowrap', width: 460 } }, // the real filter group is 460px wide on dev (tabs · dividers · chips)
-                  ['전체', '멤버', '에이전트', '전체 스프린트', '전체 목표', '전체 담당자'].map((l, i) => React.createElement('button', { key: l, type: 'button', 'data-testid': 'ctl-' + i, style: { height: 28, width: [47, 47, 67, 99, 78, 89][i], flexShrink: 0 } }, l)))),
+                  ['전체', '멤버', '에이전트', '전체 스프린트', '전체 목표', '전체 담당자'].map((l, i) => {
+                    const style = { height: 28, width: [47, 47, 67, 99, 78, 89][i], flexShrink: 0 };
+                    // the three chips are REAL DropdownMenus (the board's own part), as on the board; the tabs are plain buttons
+                    if (i < 3) return React.createElement('button', { key: l, type: 'button', 'data-testid': 'ctl-' + i, style }, l);
+                    return React.createElement(DropdownMenu, { key: l },
+                      React.createElement(DropdownMenuTrigger, { render: React.createElement('button', { type: 'button', 'data-testid': 'ctl-' + i, style }) }, l),
+                      React.createElement(DropdownMenuContent, { align: 'start' },
+                        React.createElement(DropdownMenuItem, { 'data-testid': 'item-' + i + '-a' }, l + ' A'),
+                        React.createElement(DropdownMenuItem, { 'data-testid': 'item-' + i + '-b' }, l + ' B')));
+                  }))),
               React.createElement('div', { className: 'ml-auto flex shrink-0 items-center gap-1', style: box(259, 30) }, 'view')));
         }
         window.__mountHead = (width) => createRoot(document.getElementById('root')).render(React.createElement(Head, { width }));`,
@@ -142,8 +152,44 @@ test('[SID:4923] the popover holds every filter control, stays inside a 1100×42
   await expect(trigger).toBeFocused();
 });
 
+test('[SID:4923] a filter MENU opens from inside the popover without closing it (mouse): the menu is on top, the popover stays, picking an item closes only the menu', async ({ page }) => {
+  await open(page, { viewport: [1100, 420], headWidth: 748 });
+  await page.locator('[data-testid="board-filter-fold"]').click();
+  const pop = page.locator('[data-slot="board-filter-popover"]');
+  await expect(pop).toBeVisible();
+  await pop.locator('[data-testid="ctl-3"]').click();
+  const menu = page.locator('[data-slot="dropdown-menu-content"]');
+  await expect(menu, 'the sprint menu opened').toBeVisible();
+  await expect(pop, 'the popover is still open while its menu is open').toBeVisible();
+  await menu.locator('[data-testid="item-3-b"]').click();
+  await expect(menu, 'picking an item closes the menu').toBeHidden();
+  await expect(pop, 'the popover stays open after a pick (more filters can follow)').toBeVisible();
+});
+
+test('[SID:4923] a filter MENU opens from the popover by keyboard: Esc closes the menu first (focus back on its chip), the next Esc closes the popover (focus back on the fold button)', async ({ page }) => {
+  await open(page, { viewport: [1100, 420], headWidth: 748 });
+  const trigger = page.locator('[data-testid="board-filter-fold"]');
+  await trigger.focus();
+  await page.keyboard.press('Enter');
+  const pop = page.locator('[data-slot="board-filter-popover"]');
+  await expect(pop).toBeVisible();
+  const chip = pop.locator('[data-testid="ctl-3"]');
+  await chip.focus();
+  await page.keyboard.press('Enter');
+  const menu = page.locator('[data-slot="dropdown-menu-content"]');
+  await expect(menu, 'the menu opens by keyboard from inside the popover').toBeVisible();
+  await expect(pop, 'the popover stays open while the menu is open').toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await expect(pop, 'the first Esc closed only the menu').toBeVisible();
+  await expect(chip, 'focus is back on the chip that opened the menu').toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(pop).toBeHidden();
+  await expect(trigger).toBeFocused();
+});
+
 test('[SID:4923] the board frame keeps 8px above and below on a low window (16px on a tall one) — the frame class that carries the rule', () => {
   const cls = frameClass();
   expect(cls).toContain('py-4');
-  expect(cls).toContain('[@media(max-height:520px)]:py-2');
+  expect(cls).toContain('lg:[@media(max-height:520px)]:py-2');
 });

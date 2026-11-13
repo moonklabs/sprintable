@@ -86,8 +86,8 @@ interface KanbanBoardProps {
 }
 
 // story #4888 — 보드 머리 줄의 틀(불러오는 동안의 자리 표시와 실제 머리가 같은 틀이라 칩이 안 흔들린다)
-// story #4923 — 낮은 창(높이 ≤ 520 · 맥 앱 작은 창 1100×420)에서 머리 높이 44 → 약 38(줄 하나 34 + 위아래 여백 4). 줄이 넘칠 때 거르기를 «거르기 · n» 단추 하나로 접는 것은 높이가 아니라 머리 폭 몫이다(board-head-fold.tsx).
-const BOARD_HEAD_CLASS = 'focus-inset flex min-h-11 flex-shrink-0 flex-nowrap items-center gap-2 overflow-x-auto border-b border-border/80 px-4 py-1.5 [@media(max-height:520px)]:min-h-9 [@media(max-height:520px)]:py-0.5 lg:flex-wrap lg:overflow-visible';
+// story #4923 — 낮은 창(높이 ≤ 520 · 맥 앱 작은 창 1100×420 · 데스크톱 폭 lg 이상만 — 폰 가로 보기는 그대로)에서 머리 높이 44 → 약 38(줄 하나 34 + 위아래 여백 4). 줄이 넘칠 때 거르기를 «거르기 · n» 단추 하나로 접는 것은 높이가 아니라 머리 폭 몫이다(board-head-fold.tsx).
+const BOARD_HEAD_CLASS = 'focus-inset flex min-h-11 flex-shrink-0 flex-nowrap items-center gap-2 overflow-x-auto border-b border-border/80 px-4 py-1.5 lg:[@media(max-height:520px)]:min-h-9 lg:[@media(max-height:520px)]:py-0.5 lg:flex-wrap lg:overflow-visible';
 
 // WIP limit localStorage 키
 function wipLimitKey(projectId: string | undefined, status: string): string {
@@ -1502,6 +1502,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
   const headRef = useRef<HTMLDivElement>(null);
   const activeFilterCount = (assigneeTypeFilter ? 1 : 0) + (selectedSprintId ? 1 : 0) + (selectedEpicId ? 1 : 0) + (selectedAssigneeId ? 1 : 0) + (selectedLabelIds.length > 0 ? 1 : 0);
   const headFolded = useHeadFold(headRef, `${loading && !hasLoadedOnce}|${orgLabels.length}|${excludedCount}|${showSearch}|${viewMode}`);
+  // contentKey = 접힌 «줄»의 폭을 바꾸는 것만(첫 불러오기 · 숨긴 N · 검색 칸 열림 · 보기 전환 · 라벨 칩 유무). 거르기를 «고르는» 것(칩 글)은 접힌 줄을 안 바꾸고, 바뀌면 접힌 팝오버가 다시 서며 닫히므로 키에 넣지 않는다.
 
   // story #4307(유나 확정) — 전면 스켈레톤은 첫 불러오기만. 다시 불러오는 동안은 툴바 · 필터 버튼이 남고 컬럼(목록) 자리만 같은 스켈레톤 부품 +
   // aria-busy(툴바엔 안 검). 도중에 또 바꾸면 마지막 조건 응답만 반영된다(fetchData의 runId · stale 판정).

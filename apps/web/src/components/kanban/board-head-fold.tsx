@@ -33,12 +33,14 @@ export function useHeadFold(headRef: RefObject<HTMLElement | null>, contentKey: 
   const [folded, setFolded] = useState(false);
   const foldedRef = useRef(false);
   const needRef = useRef(0);
-  const measure = useCallback(() => {
+  /** `remeasure`: 내용이 바뀐 뒤 — 접혀 있으면 한 번 펴서(아래 [folded] 효과가 펼친 DOM을 잰다) 옛 폭에 머물지 않게 한다. */
+  const measure = useCallback((remeasure = false) => {
     const el = headRef.current;
     if (!el) return;
     const set = (v: boolean) => { if (foldedRef.current !== v) { foldedRef.current = v; setFolded(v); } };
     // 창 환경이 matchMedia를 모르면(시험 · 아주 옛 브라우저) 접지 않는다 — 펼친 머리가 예전 모양 그대로다.
     if (typeof window.matchMedia !== 'function' || !window.matchMedia(DESKTOP).matches) { set(false); return; }
+    if (remeasure && foldedRef.current) { set(false); return; }
     const cs = getComputedStyle(el);
     const pad = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
     const available = el.clientWidth;
@@ -50,16 +52,21 @@ export function useHeadFold(headRef: RefObject<HTMLElement | null>, contentKey: 
       set(false);
     }
   }, [headRef]);
+  // 내용이 바뀌면(칩 글 · 라벨 로드 · 검색 칸 열림 · 보기 전환) 접혀 있던 머리도 «이번 내용이 펼치면 얼마나 필요한가»를 다시 재야 한다 — 접힌 동안 잰 값은 옛 내용 기준이다.
+  // 접혀 있으면 한 번 펴고(페인트 前이라 깜빡임 없음) 아래 [folded] 효과가 펼친 DOM을 재서 그래도 안 맞으면 다시 접는다.
   useLayoutEffect(() => {
-    measure();
+    measure(true);
     const el = headRef.current;
     if (!el) return undefined;
-    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
+    const onChange = () => measure();
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(onChange) : null;
     ro?.observe(el);
     const mq = typeof window.matchMedia === 'function' ? window.matchMedia(DESKTOP) : null;
-    mq?.addEventListener('change', measure);
-    return () => { ro?.disconnect(); mq?.removeEventListener('change', measure); };
+    mq?.addEventListener('change', onChange);
+    return () => { ro?.disconnect(); mq?.removeEventListener('change', onChange); };
   }, [measure, headRef, contentKey]);
+  // 접힘이 바뀐 직후(DOM이 바뀐 뒤) 다시 잰다: 펼친 DOM에서 필요한 폭을 갱신하고, 안 맞으면 접는다(안 접히는 쪽 폭은 그대로 유지).
+  useLayoutEffect(() => { measure(); }, [folded, measure]);
   return folded;
 }
 
