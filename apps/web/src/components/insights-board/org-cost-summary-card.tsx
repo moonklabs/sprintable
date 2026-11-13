@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { Card } from '@/components/ui/card';
+import { Card } from '@/components/ds/card';
+import { Skeleton } from '@/components/ds/skeleton';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatMinorCurrency, type GenerationBudgetCurrency } from '@/components/content/generation-budget-indicator';
 
@@ -105,14 +106,14 @@ export function OrgCostSummaryCard({ orgId, preloadedState }: OrgCostSummaryCard
   if (state.status === 'loading') {
     return (
       <Card className="p-3" data-testid="org-cost-summary-card-loading">
-        <div className="h-12 animate-pulse rounded-md bg-muted" />
+        <Skeleton className="h-12 w-full" />
       </Card>
     );
   }
 
   if (state.status === 'failed') {
     return (
-      <Card className="p-3 text-xs text-muted-foreground" data-testid="org-cost-summary-card-failed">
+      <Card className="p-3 text-ds-small text-ds-ink-3" data-testid="org-cost-summary-card-failed">
         {t('orgCostLoadFailed')}
       </Card>
     );
@@ -125,15 +126,15 @@ export function OrgCostSummaryCard({ orgId, preloadedState }: OrgCostSummaryCard
   const adsCurrencyMixed = ads.approved_boost_count > 0 && adsCurrency === null;
 
   return (
-    <Card className="p-3 text-xs" data-testid="org-cost-summary-card">
-      <p className="mb-2 font-medium text-foreground" data-testid="org-cost-summary-title">
+    <Card className="p-3 text-ds-small" data-testid="org-cost-summary-card">
+      <p className="mb-2 font-medium text-ds-ink" data-testid="org-cost-summary-title">
         {t('orgCostSummaryTitle')}
       </p>
 
       <div className="space-y-1.5">
         <div data-testid="org-cost-ads-section">
           {ads.approved_boost_count === 0 ? (
-            <span className="text-muted-foreground" data-testid="org-cost-ads-none">
+            <span className="text-ds-ink-3" data-testid="org-cost-ads-none">
               {t('orgCostAdsNoApprovedBoosts')}
             </span>
           ) : (
@@ -142,11 +143,11 @@ export function OrgCostSummaryCard({ orgId, preloadedState }: OrgCostSummaryCard
                 {t('orgCostAdsApprovedCount', { count: ads.approved_boost_count })}
               </span>
               {adsCurrencyMixed ? (
-                <p className="text-muted-foreground" data-testid="org-cost-ads-currency-mixed">
+                <p className="text-ds-ink-3" data-testid="org-cost-ads-currency-mixed">
                   {t('orgCostAdsCurrencyMixed')}
                 </p>
               ) : adsCurrency && ads.sealed_budget_minor !== null && ads.captured_spend_minor !== null && ads.remaining_minor !== null ? (
-                <p className="text-foreground" data-testid="org-cost-ads-amounts">
+                <p className="text-ds-ink" data-testid="org-cost-ads-amounts">
                   {t('orgCostAdsBudgetSpentRemaining', {
                     budget: formatMinorCurrency(ads.sealed_budget_minor, adsCurrency, locale, tContent),
                     spent: formatMinorCurrency(ads.captured_spend_minor, adsCurrency, locale, tContent),
@@ -155,7 +156,7 @@ export function OrgCostSummaryCard({ orgId, preloadedState }: OrgCostSummaryCard
                 </p>
               ) : null}
               {ads.cap_reached_count > 0 ? (
-                <p className="text-muted-foreground" data-testid="org-cost-ads-cap-reached">
+                <p className="text-ds-ink-3" data-testid="org-cost-ads-cap-reached">
                   {t('orgCostAdsCapReachedNonzero', { count: ads.cap_reached_count })}
                 </p>
               ) : null}
@@ -175,7 +176,7 @@ export function OrgCostSummaryCard({ orgId, preloadedState }: OrgCostSummaryCard
             특별취급해 새 문장을 짓는 게 오히려 과잉, 유나 지적). */}
         <div data-testid="org-cost-generation-section">
           {generation_cost_spent_minor === null ? (
-            <span className="text-muted-foreground" data-testid="org-cost-generation-unmeasured">
+            <span className="text-ds-ink-3" data-testid="org-cost-generation-unmeasured">
               {t('orgCostGenerationUnmeasured')}
             </span>
           ) : generation_currency === null ? (
@@ -183,7 +184,7 @@ export function OrgCostSummaryCard({ orgId, preloadedState }: OrgCostSummaryCard
             // 없으면(서버 응답 불완전) 통화를 추정해 채우지 않는다. 실제 BE
             // 계약상 이 조합은 발생하지 않지만(정책 있으면 currency 항상
             // 채워짐) 방어적으로 유지.
-            <span className="text-muted-foreground" data-testid="org-cost-generation-failed">
+            <span className="text-ds-ink-3" data-testid="org-cost-generation-failed">
               {t('orgCostGenerationCheckFailed')}
             </span>
           ) : (
@@ -201,11 +202,11 @@ export function OrgCostSummaryCard({ orgId, preloadedState }: OrgCostSummaryCard
             섹션과 동형 3분기(미측정/통화 실패/실값)가 필요해졌다 — 그 전엔 non-null
             분기 자체가 없어 실 지출이 있어도 화면에 아무것도 안 그려졌다(침묵 결함). */}
         {x_cost_spent_minor === null ? (
-          <span className="text-muted-foreground" data-testid="org-cost-x-cost-unmeasured">
+          <span className="text-ds-ink-3" data-testid="org-cost-x-cost-unmeasured">
             {t('orgCostXCostUnmeasured')}
           </span>
         ) : x_currency === null ? (
-          <span className="text-muted-foreground" data-testid="org-cost-x-cost-failed">
+          <span className="text-ds-ink-3" data-testid="org-cost-x-cost-failed">
             {t('orgCostXCostCheckFailed')}
           </span>
         ) : (

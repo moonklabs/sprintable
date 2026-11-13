@@ -46,7 +46,7 @@ export function ReconcileResultLine({ verdicts }: { verdicts: Record<string, str
             {/* story #3620 CHANGES(페드루 PO 지시) — 불일치 판정만 두드러지게(destructive
                 아닌 강조 — 색으로 "경고"라 지어내지 않는다). 카드 4번째의 「N건」과 같은
                 강조 규칙을 결과 줄에도 그대로 맞춘다. */}
-            <span className={isMismatch ? 'font-medium text-foreground' : undefined}>
+            <span className={isMismatch ? 'font-medium text-ds-ink' : undefined}>
               {t(verdictLabelKey)}
             </span>
           </span>

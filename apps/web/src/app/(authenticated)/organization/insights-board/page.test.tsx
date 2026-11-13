@@ -232,8 +232,8 @@ describe('InsightsBoardPage — d1/d7 셀 3겹 null 축(story #3503)', () => {
     expect(rowBStatusCells).toHaveLength(2);
     expect(rowBStatusCells[0]?.textContent).toBe(koMessages.content.insightStatusWaiting);
     expect(rowBStatusCells[1]?.textContent).toBe(koMessages.content.insightStatusFailed);
-    expect(rowBStatusCells[1]?.className).toContain('text-destructive');
-    expect(rowBStatusCells[0]?.className).not.toContain('text-destructive');
+    expect(rowBStatusCells[1]?.className).toContain('text-ds-failed');
+    expect(rowBStatusCells[0]?.className).not.toContain('text-ds-failed');
 
     // Row C: d1=captured인데 impressions만 null(대시+사유) · d7=null(미스케줄).
     expect(rows[2]!.querySelector('[data-testid="insights-board-cell-value-dash"]')).not.toBeNull();
@@ -1085,5 +1085,35 @@ describe('InsightsBoardPage — 한 쪽 틀 변이 보강(4913 D1)', () => {
     await act(async () => { btn.click(); });
     await flush();
     expect(routerReplaceMock.mock.calls.at(-1)?.[0] as string).not.toContain('sort_dir');
+  });
+
+  it('⭐후속 조치 실패 문구는 ds 띠(실패 · role=alert), 성공 문구는 ds 띠(안내 · role=status) 안에 선다', async () => {
+    stubFetch({ followUp: () => ({ status: 403, body: { detail: { code: 'FOLLOW_UP_CREATE_HUMAN_ONLY', message: 'human only' } } }) });
+    await mount();
+    await expandFirstRow();
+    await act(async () => { (container.querySelector('[data-testid="insights-board-follow-up-button"]') as HTMLButtonElement).click(); });
+    await flush();
+    const submit = () => [...document.querySelectorAll('button')].find((b) => b.textContent === koMessages.insightsBoard.followUpSubmit) as HTMLButtonElement;
+    // 제출은 이 창의 주 행동 — 주 행동 색(ds primary)이고, 취소(quiet)와 모양이 갈린다
+    expect(submit().className).toContain('bg-ds-action');
+    await act(async () => { submit().click(); });
+    await flush();
+    const failBanner = document.querySelector('[data-testid="follow-up-error"]')?.closest('[data-slot="ds-banner"]');
+    expect(failBanner?.getAttribute('data-tone')).toBe('failed');
+    expect(failBanner?.getAttribute('role')).toBe('alert');
+  });
+
+  it('⭐후속 조치 성공 문구는 ds 안내 띠(role=status) 안에 서고 새 일감 링크가 그 안에 있다', async () => {
+    stubFetch({ followUp: () => ({ status: 201, body: { story_id: 'story-77' } }) });
+    await mount();
+    await expandFirstRow();
+    await act(async () => { (container.querySelector('[data-testid="insights-board-follow-up-button"]') as HTMLButtonElement).click(); });
+    await flush();
+    const submit = [...document.querySelectorAll('button')].find((b) => b.textContent === koMessages.insightsBoard.followUpSubmit) as HTMLButtonElement;
+    await act(async () => { submit.click(); });
+    await flush();
+    const banner = document.querySelector('[data-testid="follow-up-success-link"]')?.closest('[data-slot="ds-banner"]');
+    expect(banner?.getAttribute('data-tone')).toBe('info');
+    expect(banner?.getAttribute('role')).toBe('status');
   });
 });
