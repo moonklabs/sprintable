@@ -156,7 +156,8 @@ export function EntityDispatchPanel({
         <Select
           value={assigneeId}
           onChange={(e) => setAssigneeId(e.target.value)}
-          className="h-auto min-w-0 flex-1 px-2.5 py-1.5 bg-background dark:bg-background"
+          // 4908 — 폭 16rem 속성 칸에서 고르기 칸이 «담당자 선…»으로 잘리던 것: 11rem(min-w-44) 밑으로는 줄이지 않는다 — 모자라면 «이벤트 전달» 단추가 아래 줄로 내려가고 고르기 칸이 줄 전체를 쓴다(넓은 곳에서는 예전처럼 한 줄).
+          className="h-auto min-w-44 flex-1 px-2.5 py-1.5 bg-background dark:bg-background"
         >
           <option value="">{t('assigneeSelectPlaceholder')}</option>
           {members.map((m) => (

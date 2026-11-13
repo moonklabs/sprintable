@@ -274,6 +274,47 @@ describe('4908 서랍 배경 막 — 둘째 이후 클릭은 «카드로 막 연
 });
 
 // 접힌 작업 칸 줄이 읽어 주는 수 — 진짜 서랍 + 진짜 접힘 줄로 잰다(수가 어디서 오는지: 근거 = 근거 칸에 실제로 놓인 신호, 대화 = 연결된 대화 + 댓글).
+describe('4908 카드 상세 — 머리 상태 칩은 ds Chip(거친 결 Badge가 아니다)', () => {
+  async function mountStatus(status: string) {
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <ToastProvider><StoryDetailPanel story={{ ...story, status } as KanbanStory} tasks={[]} onClose={() => {}} projectId="p1" /></ToastProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    return container.querySelector<HTMLElement>('[data-testid="story-detail-status-chip"]')!;
+  }
+  const trigger = (chip: HTMLElement) => chip.closest('button')!;
+
+  it('⭐머리 상태 자리가 ds Chip(점 + 낱말 + ▾)이고 공용 Badge의 눌린 결(proof-surface)이 아니다 · 단추 이름은 «상태»', async () => {
+    const chip = await mountStatus('backlog');
+    expect(chip.getAttribute('data-slot')).toBe('ds-chip');
+    expect(chip.querySelector('[data-chip-dot]')).not.toBeNull();
+    expect(chip.textContent).toContain(koMessages.board.backlog);
+    expect(chip.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    expect(chip.className).not.toContain('proof-surface');
+    expect(trigger(chip).getAttribute('aria-label')).toBe(koMessages.board.status);
+    expect(trigger(chip).querySelector('[data-slot="badge"]')).toBeNull();
+  });
+
+  it.each([['backlog', 'neutral'], ['ready-for-dev', 'neutral'], ['in-progress', 'action'], ['in-review', 'neutral'], ['done', 'done']] as const)('상태 %s → 색 뜻 %s(낱말은 언제나 같이)', async (status, tone) => {
+    const chip = await mountStatus(status);
+    expect(chip.getAttribute('data-tone')).toBe(tone);
+    expect((chip.textContent ?? '').trim().length).toBeGreaterThan(0);
+  });
+
+  it('⭐누르면 상태 메뉴가 열리고 지금 상태에 ✓ — 메뉴 항목 낱말이 칩 낱말과 같다', async () => {
+    const chip = await mountStatus('in-progress');
+    await act(async () => { trigger(chip).click(); });
+    const items = [...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    expect(items.length).toBe(5);
+    const current = items.find((i) => i.textContent?.trim() === (chip.textContent ?? '').trim());
+    expect(current, '칩 낱말과 같은 메뉴 항목').toBeTruthy();
+    expect(current!.querySelector('svg')?.getAttribute('class') ?? '').not.toContain('opacity-0');
+  });
+});
+
 describe('4908 카드 상세 — 접힌 작업 칸 줄의 수 · 설명 없는 장', () => {
   const summaryText = () => container.querySelector('[data-testid="workcell-fold-summary"]')?.textContent;
   async function mountStory(s: KanbanStory, extra: Record<string, unknown> = {}, refs: unknown = { data: [] }) {

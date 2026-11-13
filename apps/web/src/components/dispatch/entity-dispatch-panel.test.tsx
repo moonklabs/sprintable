@@ -50,6 +50,21 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+describe('EntityDispatchPanel — 4908 좁은 칸(속성 칸 16rem)에서 고르기 칸이 안 잘린다', () => {
+  it('⭐고르기 칸은 11rem(min-w-44) 밑으로 줄지 않고 flex-wrap 줄이라 모자라면 단추가 아래 줄로 내려간다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: MEMBERS }) })));
+    await act(async () => {
+      root.render(wrap(<EntityDispatchPanel entityType="story" entityId="s1" projectId="p1" currentAssigneeId="m1" />));
+    });
+    await act(async () => { await Promise.resolve(); });
+    const select = container.querySelector('select')!;
+    const c = select.className.split(/\s+/);
+    expect(c).toEqual(expect.arrayContaining(['min-w-44', 'flex-1']));
+    expect(c).not.toContain('min-w-0');
+    expect(select.parentElement!.className.split(/\s+/)).toEqual(expect.arrayContaining(['flex', 'flex-wrap']));
+  });
+});
+
 describe('EntityDispatchPanel — 까심군 QA 회귀 (envelope unwrap)', () => {
   it('/api/dispatch가 {data:{dispatched:true}}로 응답하면 성공 토스트가 뜬다(담당자 미지정 오탐 아님)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {

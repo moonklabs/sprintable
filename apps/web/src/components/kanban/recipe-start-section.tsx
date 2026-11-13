@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { RadioGroup, Radio } from '@/components/ds/radio';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
@@ -288,13 +288,10 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
         </div>
       )}
       {notStarted.length > 1 && (
-        <RadioGroup name={`recipe-start-${storyId}`} className="mb-2 gap-1" value={selectedKey} onValueChange={(v) => setSelectedKey(v)}>
+        // 4908 — 고르는 동그라미가 속성 칸 면 위에서 바탕과 거의 같은 색이던 것(옛 부품의 border-input: 라이트 · 다크 모두 비글자 3:1 미달) → ds Radio(경계 line-control ≥ 3:1 · 고름 = action 테두리 + 안쪽 점). 묶음 이름은 칸 제목(레시피 시작).
+        <RadioGroup name={`recipe-start-${storyId}`} aria-label={t('recipeStart')} className="mb-2 gap-1" value={selectedKey} onValueChange={(v) => setSelectedKey(v)}>
           {notStarted.map((c) => (
-            <label key={c.key} className="flex items-center gap-2 text-sm text-foreground">
-              {/* story #4075 · 4831 — 켜진 색은 부품의 primary 면(전에는 브라우저 기본 accent를 토큰으로 덮던 자리) */}
-              <RadioGroupItem value={c.key} />
-              {presetName(c, tPreset)}
-            </label>
+            <Radio key={c.key} value={c.key} label={presetName(c, tPreset)} className="text-sm" />
           ))}
         </RadioGroup>
       )}
