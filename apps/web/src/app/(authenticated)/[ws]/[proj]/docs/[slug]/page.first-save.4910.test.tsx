@@ -78,6 +78,7 @@ beforeEach(() => {
       if (postMode === 'hang') await new Promise<void>((resolve) => { resolveHungPost = resolve; });
       return new Response(JSON.stringify(created(body)), { status: 201 });
     }
+    if (url.includes('slug=existing-doc')) return new Response(JSON.stringify({ data: { id: 'doc-existing', title: '남의 문서', slug: 'existing-doc', content: '원래 내용', content_format: 'markdown', updated_at: '2026-11-13T00:00:01Z' } }), { status: 200 });
     if (url.includes('/api/docs?')) return new Response('not found', { status: 404 }); // 서버에 아직 없는 초안
     return new Response('{}', { status: 200 });
   }) as unknown as typeof fetch;
@@ -251,6 +252,27 @@ describe('가장 위험한 자리 · 실패 · 단일 비행 (4910 ②)', () => 
     expect(fresh).toMatch(/^untitled-\d+$/);
     expect(fresh).not.toBe(postBody(0).slug); // 새 슬러그로 다시
     expect(editorProps.current!.currentDocId).toBe('new-doc');
+  });
+
+  it('⭐만든 뒤 같은 화면에서 다른 기존 문서로 가면(트리 이동 — [slug]만 바뀜) 낡은 «보낸 값» 기준선이 그 문서 기준선이 되지 않는다(쓸데없는 PATCH 0)', async () => {
+    await open();
+    await type('title', '가');
+    await wait(1600);
+    expect(syncOptions.current!.docId).toBe('new-doc');
+    expect(syncOptions.current!.adoptBaselineSnapshot).toBe(JSON.stringify({ title: '가', content: '', content_format: 'markdown' }));
+    paramsMock.slug = 'existing-doc';
+    window.history.replaceState(null, '', '/moonklabs/sprintable/docs/existing-doc');
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <DocsLayoutContext.Provider value={CTX}><DocSlugPage /></DocsLayoutContext.Provider>
+        </NextIntlClientProvider>,
+      );
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+    expect(syncOptions.current!.docId).toBe('doc-existing');
+    expect(syncOptions.current!.adoptBaselineSnapshot).toBeNull(); // 만든 문서 'new-doc'의 기준선이 'doc-existing'에 새지 않는다
   });
 
   it('단일 비행: 만드는 중에 «저장»(onSave)을 또 눌러도 POST는 한 번', async () => {

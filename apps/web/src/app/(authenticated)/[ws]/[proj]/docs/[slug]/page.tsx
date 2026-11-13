@@ -89,7 +89,8 @@ export default function DocSlugPage() {
   // 서버 문서(selectedDoc) 없이 편집기만 뜨고, 첫 «쓴 것»(제목 한 글자 · 내용 비공백)에서 문서를 한 번 만든다. 그 뒤는 예전과 같은 PATCH 자동저장 길.
   const [draft, setDraft] = useState<{ slug: string; parentId: string | null } | null>(null);
   const [draftCreating, setDraftCreating] = useState(false);
-  const [adoptSnapshot, setAdoptSnapshot] = useState<string | null>(null);
+  // 막 만든 문서의 «보낸 값» 기준선 — 만든 그 문서 id와 짝지어 둔다. 같은 컴포넌트가 [slug]만 바뀐 다른 문서에 다시 쓰이면(트리 이동) 낡은 스냅샷이 그 문서의 기준선이 되어 쓸데없는 PATCH가 나가기 때문.
+  const [adopt, setAdopt] = useState<{ docId: string; snapshot: string } | null>(null);
   const creatingRef = useRef(false);
   const [content, setContent] = useState('');
   const [contentFormat, setContentFormat] = useState<'markdown' | 'html'>('markdown');
@@ -151,7 +152,7 @@ export default function DocSlugPage() {
     editing: selectedDoc !== null,
     autosave,
     onSaved: handleDocSaved,
-    adoptBaselineSnapshot: adoptSnapshot, // 4910 ② — 막 만든 문서의 기준선 = 만들 때 보낸 값(생성 중 친 글자가 «저장됨»으로 사라지지 않게)
+    adoptBaselineSnapshot: adopt && adopt.docId === selectedDoc?.id ? adopt.snapshot : null, // 4910 ② — 막 만든 문서의 기준선 = 만들 때 보낸 값(생성 중 친 글자가 «저장됨»으로 사라지지 않게)
   });
 
   const handleNormalize = useCallback((value: string) => {
@@ -237,7 +238,7 @@ export default function DocSlugPage() {
       if (!res.ok) throw new Error('Failed to create doc');
       const { data } = await res.json();
       // 기준선 = 보낸 값. 응답 오기 전에 더 친 글자는 보낸 값과 달라 dirty가 되어 다음 자동저장이 보낸다.
-      setAdoptSnapshot(JSON.stringify(posted));
+      setAdopt({ docId: (data as DocDetail).id, snapshot: JSON.stringify(posted) });
       setSelectedDoc(data as DocDetail);
       // 제목을 한 번도 안 건드렸을 때만 기본 글을 되돌려 놓는다(만드는 중에 비운 칸은 비운 채로).
       if (!titleTouchedRef.current) setTitle((cur) => (cur === '' ? postedTitle : cur));
