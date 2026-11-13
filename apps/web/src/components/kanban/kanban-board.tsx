@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { Check, ChevronDown, LayoutGrid, LayoutList, Search, Workflow, Plus } from 'lucide-react';
 import { DndContext, DragEndEvent, KeyboardSensor, PointerSensor, useSensor, useSensors, DragOverlay, closestCenter } from '@dnd-kit/core';
-import { KEYBOARD_SENSOR_OPTIONS, buildDndAccessibility } from './board-dnd';
+import { KEYBOARD_SENSOR_OPTIONS, buildDndAccessibility, useKeyboardDropRefocus } from './board-dnd';
 import { Button } from '@/components/ui/button';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -876,6 +876,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
     });
   };
 
+  // 키보드로 놓은 카드는 다른 열로 옮겨 가며 다시 만들어진다(신뢰축은 응답 뒤 trust_stage로) — 그때 잃은 초점을 되돌린다.
+  const markKeyboardDrop = useKeyboardDropRefocus(stories);
+
   const handleDragStart = (event: { active: { id: string | number } }) => {
     setActiveId(String(event.active.id));
   };
@@ -956,7 +959,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
   const handleTrustDragEnd = async (event: DragEndEvent) => {
     setActiveId(null);
     const { active, over } = event;
+    if (event.activatorEvent instanceof KeyboardEvent) markKeyboardDrop(String(active.id));
     if (!over) return;
+    if (over.id === active.id) return; // 제자리에 놓기 — 아무 일도 없다(자기 자신을 뺀 목록에서 자리를 찾으면 맨 아래로 보내지 않게)
 
     const storyId = String(active.id);
     const overId = String(over.id);
@@ -1084,7 +1089,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
   const handleDragEnd = async (event: DragEndEvent) => {
     setActiveId(null);
     const { active, over } = event;
+    if (event.activatorEvent instanceof KeyboardEvent) markKeyboardDrop(String(active.id));
     if (!over) return;
+    if (over.id === active.id) return; // 제자리에 놓기 — 아무 일도 없다
 
     const storyId = String(active.id);
     const overId = String(over.id);

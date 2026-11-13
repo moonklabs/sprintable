@@ -2582,6 +2582,51 @@ describe('KanbanBoard — 카드 메뉴 담당자 · 이름 바꾸기 · 삭제(
     expect((classic.accessibility as { screenReaderInstructions: { draggable: string } }).screenReaderInstructions.draggable).toBe(koMessages.board.dndInstructions);
   });
 
+  it('⭐키보드로 집었다 제자리에 놓으면(over = active) 아무 일도 없다 — 카드가 맨 아래로 가거나 PATCH가 나가지 않는다(신뢰축 · 클래식)', async () => {
+    stubFetch([...stories, { id: 's2', title: '카드둘', status: 'backlog', priority: 'medium', trust_stage: 'queued' }], members);
+    await mount();
+    const patches = () => vi.mocked(fetch).mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'PATCH').length;
+    const before = patches();
+    const trustEnd = capturedDragEndHandlers.at(-1)!;
+    await act(async () => { await trustEnd({ active: { id: 's1' }, over: { id: 's1' }, activatorEvent: new KeyboardEvent('keydown') }); });
+    expect(patches()).toBe(before);
+    const order = () => [...container.querySelectorAll('[data-story-card]')].map((c) => c.getAttribute('title'));
+    expect(order()).toEqual(['카드하나', '카드둘']);
+    const classicBtn = [...container.querySelectorAll('button')].find((bn) => bn.textContent === '5단계 클래식');
+    await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const classicEnd = capturedDragEndHandlers.at(-1)!;
+    await act(async () => { await classicEnd({ active: { id: 's1' }, over: { id: 's1' }, activatorEvent: new KeyboardEvent('keydown') }); });
+    expect(patches()).toBe(before);
+    expect(order()).toEqual(['카드하나', '카드둘']);
+  });
+
+  async function keyboardDropThenListChange(axis: 'trust' | 'classic') {
+    stubFetch(stories, members);
+    await mount();
+    if (axis === 'classic') {
+      const classicBtn = [...container.querySelectorAll('button')].find((bn) => bn.textContent === '5단계 클래식');
+      await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    }
+    const handler = capturedDragEndHandlers.at(-1)!;
+    await act(async () => { await handler({ active: { id: 's1' }, over: { id: 's1' }, activatorEvent: new KeyboardEvent('keydown') }); });
+    await act(async () => { (document.activeElement as HTMLElement | null)?.blur?.(); });
+    expect(document.activeElement).toBe(document.body);
+    // 목록이 바뀐다(실시간 담당 변경) — 신뢰축은 응답 뒤 trust_stage가 바뀌며 카드가 다시 만들어지는 때와 같은 신호
+    await act(async () => {
+      dispatchSse('story.assignee_changed', { story_id: 's1', project_id: 'proj-1', actor_id: 'other-1', actor_name: '까심', assignee_id: 'm2', old_assignee_id: 'm1', assignees: ['m2'] });
+      await Promise.resolve();
+    });
+    return (document.activeElement as HTMLElement | null)?.getAttribute('data-story-id');
+  }
+
+  it('⭐키보드로 놓은 카드는 그 뒤 목록이 바뀌어도(다시 만들어져 초점을 잃어도) 초점이 그 카드로 돌아온다 — 신뢰축', async () => {
+    expect(await keyboardDropThenListChange('trust')).toBe('s1');
+  });
+
+  it('⭐같은 규칙 — 클래식 5단계(축마다 따로 시험: 한 축의 표시가 다른 축을 가리지 않게)', async () => {
+    expect(await keyboardDropThenListChange('classic')).toBe('s1');
+  });
+
   it('⭐삭제는 사람 전용 — human이면 메뉴에 «삭제», agent면 메뉴 항목이 없다(패널과 같은 규칙)', async () => {
     stubFetch(stories, members);
     await mount();

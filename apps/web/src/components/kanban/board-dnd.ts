@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useRef } from 'react';
 import type { Announcements, KeyboardSensorOptions } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 
@@ -28,4 +29,21 @@ export function buildDndAccessibility(t: Translate, titleOf: (id: string | numbe
       onDragCancel: ({ active }) => t('dndCancelled', { title: titleOf(active.id) }),
     },
   };
+}
+
+/**
+ * 키보드로 카드를 놓으면(다른 열로 옮기면) 카드가 새 열에서 다시 만들어져 초점이 body로 떨어진다 — dnd-kit이 놓는 순간 한 번 되돌리는 초점은 그 전에 쓰였다(신뢰축은 서버 응답으로 trust_stage가 바뀐 뒤에야 옮겨 간다).
+ * 놓은 카드를 표시해 두면(markDropped) 이후 목록(deps)이 바뀔 때마다 «초점이 아무 데도 없는 동안»에 한해 그 카드로 되돌린다. 5초 뒤에는 잊는다(그 사이 사람이 다른 곳을 눌렀다면 초점이 있으니 건드리지 않는다).
+ */
+export function useKeyboardDropRefocus(deps: unknown): (storyId: string) => void {
+  const pending = useRef<{ id: string; until: number } | null>(null);
+  useEffect(() => {
+    const p = pending.current;
+    if (!p) return;
+    if (Date.now() > p.until) { pending.current = null; return; }
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    document.querySelector<HTMLElement>(`[data-story-id="${p.id}"]`)?.focus();
+  }, [deps]);
+  return useCallback((storyId: string) => { pending.current = { id: storyId, until: Date.now() + 5000 }; }, []);
 }

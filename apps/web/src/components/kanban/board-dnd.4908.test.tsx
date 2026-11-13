@@ -3,13 +3,13 @@
 // 4908 넷째 조각 — 키보드 끌기를 «실제 DndContext»로: 보드 시험 파일은 DndContext를 모킹하므로(끌기 콜백을 손에 쥐려고) 센서 · 낭독 동작은 여기서 같은 설정(board-dnd.ts)으로 잰다.
 // Space로 집고 · Esc로 취소 · Space/Enter로 놓는다. Enter 단독은 «열기»(집지 않는다). 끄는 중의 Enter는 끌기를 끝낼 뿐 열기가 아니다.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider, useTranslations } from 'next-intl';
 import { DndContext, KeyboardSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import koMessages from '../../../messages/ko.json';
-import { KEYBOARD_SENSOR_OPTIONS, buildDndAccessibility } from './board-dnd';
+import { KEYBOARD_SENSOR_OPTIONS, buildDndAccessibility, useKeyboardDropRefocus } from './board-dnd';
 import { StoryCard } from './story-card';
 import type { KanbanStory } from './types';
 
@@ -100,5 +100,54 @@ describe('키보드 끌기(실제 DndContext)', () => {
     await key(card('카드하나'), 'Enter', 'Enter');
     await tick();
     expect(card('카드하나').getAttribute('aria-pressed')).toBeNull();
+  });
+});
+
+describe('카드 안쪽 키는 끌기로 넘기지 않는다(codex 4조각)', () => {
+  it('⭐메뉴(포털) 항목을 Space로 눌러도 끌기가 시작되지 않는다 — 항목의 Space가 React 포털을 타고 카드까지 올라와도', async () => {
+    const btn = card('카드하나').querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
+    await act(async () => { btn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const item = document.body.querySelector<HTMLElement>('[role="menuitem"]')!;
+    expect(item).not.toBeNull();
+    await key(item, 'Space', ' ');
+    await tick();
+    expect(card('카드하나').getAttribute('aria-pressed')).toBeNull();
+    expect(live()).not.toContain('집었어요');
+  });
+});
+
+describe('useKeyboardDropRefocus — 키보드로 놓은 카드의 초점 되돌리기', () => {
+  let mark: (id: string) => void = () => {};
+  function Probe({ list }: { list: string[] }) {
+    const m = useKeyboardDropRefocus(list);
+    useEffect(() => { mark = m; }, [m]);
+    return <div>{list.map((id) => <button key={id} data-story-id={id} id={id}>{id}</button>)}</div>;
+  }
+  const rerender = (list: string[]) => act(() => { root.render(<Probe list={list} />); });
+  beforeEach(() => { act(() => { root.render(<Probe list={['a', 'b']} />); }); (document.activeElement as HTMLElement | null)?.blur?.(); });
+
+  it('⭐놓은 카드가 목록이 바뀐 뒤(새 열에서 다시 만들어진 뒤)에도 초점이 아무 데도 없으면 그 카드로 초점이 간다', () => {
+    mark('b');
+    expect(document.activeElement).toBe(document.body);
+    rerender(['b', 'a']); // 목록이 바뀜
+    expect(document.activeElement?.id).toBe('b');
+  });
+
+  it('⭐그 사이 사람이 다른 곳에 초점을 두었으면 가로채지 않는다', () => {
+    mark('b');
+    (document.getElementById('a') as HTMLElement).focus();
+    rerender(['b', 'a']);
+    expect(document.activeElement?.id).toBe('a');
+  });
+
+  it('⭐5초가 지나면 잊는다', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-11-13T00:00:00Z'));
+      mark('b');
+      vi.setSystemTime(new Date('2026-11-13T00:00:06Z'));
+      rerender(['b', 'a']);
+      expect(document.activeElement).toBe(document.body);
+    } finally { vi.useRealTimers(); }
   });
 });

@@ -479,6 +479,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       startRename();
       return;
     }
+    // 카드 «안쪽»에서 올라온 키(포털 메뉴 항목의 Space · 안쪽 단추)는 끌기로 넘기지 않는다 — 메뉴 항목을 Space로 누르다 끌기가 시작되면 안 된다.
+    if (e.target !== e.currentTarget) return;
     dndOnKeyDown?.(e);
   }, [dndOnKeyDown, menuItemCount, onRename, startRename, editing, locked, onClick, isDragging]);
 
@@ -591,6 +593,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       aria-haspopup="menu"
       aria-expanded={contextMenuOpen}
       data-story-card=""
+      data-story-id={story.id}
       aria-current={selected ? 'true' : undefined}
       data-selected={selected ? 'true' : undefined}
       title={story.story_number ? `#${story.story_number}` : story.title}
