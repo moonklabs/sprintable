@@ -8,6 +8,8 @@ import { cn } from '../lib/utils';
 import { ASSET_ROW_FACE } from '../components/storage/storage-asset-row';
 import { ASSET_CARD_FACE, ASSET_CARD_WELL } from '../components/storage/storage-asset-grid';
 import { ARTIFACT_CARD_FACE, ARTIFACT_CARD_WELL, ARTIFACT_PANEL } from '../components/canvas/artifact-gallery-view';
+import { HYPOTHESES_FACE } from '../components/hypotheses/hypotheses-face';
+import { GOALS_FRAME_FACE } from '../app/(authenticated)/[ws]/[proj]/goals/goals-layer';
 
 const css = readFileSync(join(__dirname, 'design-system.css'), 'utf8');
 
@@ -47,6 +49,19 @@ function contrast(a: string, b: string): number {
 
 const themes: Array<[string, Record<string, string>]> = [['라이트', block(':root')], ['다크', block('.dark')]];
 const step = (t: Record<string, string>, from: keyof typeof LAYER_TOKEN, to: keyof typeof LAYER_TOKEN) => Math.abs(lightness(t[LAYER_TOKEN[to]]!) - lightness(t[LAYER_TOKEN[from]]!));
+
+// 4909 AC3 (가설 칸 1단계) — the goal screen is ONE reading area on the PAGE layer; its cards (the hypotheses card included) are the content layer one step above. The old hypotheses card (`bg-muted/20`) measured −.018 / −.004
+// against the page on dev (it did not separate); this pins the two faces to the layer map and the step between them to the line (≥ .03, both themes).
+describe('목표 화면(4909) — 틀 = 바탕, 카드 = 내용 칸', () => {
+  it('틀 · 상세 열은 바탕 층이고 가설 카드 면은 내용 칸 층이다(토큰 이름)', () => {
+    expect(GOALS_FRAME_FACE).toBe(LAYER.page);
+    expect(HYPOTHESES_FACE).toBe(LAYER.panel);
+    expect(GOALS_FRAME_FACE).not.toBe(HYPOTHESES_FACE);
+  });
+  it.each(themes)('⭐%s: 바탕 → 가설 카드 면 ≥ 0.03 (라이트 +.030 · 다크 +.036 — 옛 카드는 −.018 / −.004라 갈리지 않았다)', (_name, t) => {
+    expect(step(t, 'page', 'panel')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.panelOverPage);
+  });
+});
 
 describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
   it.each(themes)('⭐%s: 바탕 → 내용 칸 ≥ 0.03 · 내용 칸 → 남의 글 ≥ 0.05 · 내 글 ≥ 0.09 · 입력칸 ≥ 0.05', (_name, t) => {
