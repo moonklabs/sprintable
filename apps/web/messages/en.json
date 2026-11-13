@@ -7245,7 +7245,6 @@
     "sectionExpand": "Expand",
     "sectionCollapse": "Collapse",
     "filtersToggleLabel": "Filters",
-    "filtersToggleLabelWithCount": "Filters · {count} applied",
     "publishingTrustSectionTitle": "Publishing trust",
     "rowExpandAction": "View details",
     "rowDetailOrganicViewsLabel": "Organic views",

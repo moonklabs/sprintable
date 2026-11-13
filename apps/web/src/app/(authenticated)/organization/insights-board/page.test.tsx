@@ -13,6 +13,8 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../messages/ko.json';
+// 4913 D1 — 화면 제목은 앱 틀 위 막대(TopBarSlot)로 간다: 막대 컨텍스트로 감싼다.
+import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
 
 const { useDashboardContextMock, useSearchParamsMock, routerReplaceMock } = vi.hoisted(() => ({
   useDashboardContextMock: vi.fn(),
@@ -35,10 +37,14 @@ import InsightsBoardPage from './page';
 let container: HTMLDivElement;
 let root: Root;
 
+function TopBarTitleProbe() {
+  const { title } = useTopBar();
+  return <div data-testid="topbar-probe">{title}</div>;
+}
 function wrap(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      {node}
+      <TopBarProvider><TopBarTitleProbe />{node}</TopBarProvider>
     </NextIntlClientProvider>
   );
 }
@@ -132,6 +138,10 @@ function stubFetch(opts: {
   // 한꺼번에 숨긴 경우). include_deleted=true 뷰에선 null이 정직한 값이라
   // 그 URL일 땐 hiddenCount와 무관하게 항상 null을 낸다.
   hiddenCount?: number | null;
+  /** 4913 D1 — 보드 목록 응답이 영영 안 온다(로딩 칸 시험). */
+  hang?: boolean;
+  /** 4913 D1 변이 보강 — 보관됨 보기 응답이 «숨은 건수»를 실어 보내도(서버가 실수로) 화면은 그 줄을 안 그린다. */
+  hiddenCountWhenArchived?: number;
 }) {
   const page1 = opts.page1 ?? [ROW_A, ROW_B, ROW_C];
   const page1HasMore = opts.page1HasMore ?? false;
@@ -141,6 +151,7 @@ function stubFetch(opts: {
   const calls: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     calls.push(url);
+    if (opts.hang && url.includes('/insights-board?')) return new Promise(() => {});
     if (url.includes('/follow-ups') && init?.method === 'POST') {
       const result = opts.followUp?.(init) ?? { status: 201, body: { story_id: 'story-1' } };
       const ok = result.status < 400;
@@ -190,7 +201,7 @@ function stubFetch(opts: {
         json: async () => ({
           data: {
             rows, has_more: usingCursor ? false : page1HasMore, next_cursor: usingCursor ? null : page1NextCursor,
-            hidden_count: includeDeleted ? null : hiddenCount,
+            hidden_count: includeDeleted ? (opts.hiddenCountWhenArchived ?? null) : hiddenCount,
           },
           error: null, meta: null,
         }),
@@ -970,15 +981,109 @@ describe('InsightsBoardPage — 소재/훅 묶음 토글(story #3656, 목 데이
   });
 });
 
-// story #4278(유나 결정 ③) — 셸 메뉴 «결과»(구역 이름)를 눌러 온 화면이라 머리가 «결과 › 성과 보드»로 이어진다(메뉴 이름 · 제목 키는
-// 그대로). 뮤테이션: PageHeader의 eyebrow를 빼면 RED.
-describe('InsightsBoardPage — 머리의 구역 표시(story #4278)', () => {
-  it('⭐h1 «성과 보드» 바로 위에 구역 «결과»', async () => {
+// ── 4913 D1 — 성과 보드가 «한 쪽 틀»(넓은 틀) 안에 선다. 옛 story #4278의 «결과 › 성과 보드» 머리 줄(eyebrow = nav.navResults, 지금 값 «성과 보드» = 제목과 같은 글)은 걷었다:
+// 사이드바 메뉴의 켜진 항목 + 위 막대 제목이 같은 이름을 이미 말한다. 뮤테이션: OrgScreenTitle을 빼면 · PageFrame 폭을 바꾸면 · eyebrow를 되살리면 RED. ──
+describe('InsightsBoardPage — 한 쪽 틀(4913 D1)', () => {
+  it('⭐제목은 위 막대의 h1 하나뿐이고(본문 h1 0) 본문은 wide 틀(PageFrame) 안에 선다', async () => {
     stubFetch({ page1: [] });
     await mount();
-    const h1 = [...container.querySelectorAll('h1')].find((el) => el.textContent === koMessages.insightsBoard.pageTitle);
-    expect(h1).toBeTruthy();
-    expect(h1!.parentElement!.textContent).toContain(koMessages.nav.navResults);
-    expect(h1!.previousElementSibling?.textContent).toBe(koMessages.nav.navResults);
+    const h1s = [...container.querySelectorAll('h1')];
+    expect(h1s).toHaveLength(1);
+    expect(h1s[0]!.textContent).toBe(koMessages.insightsBoard.pageTitle);
+    expect(container.querySelector('[data-testid="topbar-probe"] h1')).not.toBeNull(); // 막대 자리에 오른다
+    const frame = container.querySelector('[data-slot="ds-page-frame"]')!;
+    expect(frame.getAttribute('data-width')).toBe('wide');
+    expect(frame.querySelector('h1')).toBeNull(); // 틀 안에는 제목이 없다
+  });
+
+  it('⭐머리 줄(eyebrow) 걷음 — 틀 안에 «성과 보드»가 한 번도 안 선다(제목과 같은 글이 두 번 서지 않는다 · 막대에만)', async () => {
+    stubFetch({ page1: [] });
+    await mount();
+    const frame = container.querySelector('[data-slot="ds-page-frame"]')!;
+    expect(koMessages.nav.navResults).toBe(koMessages.insightsBoard.pageTitle); // 옛 eyebrow 글 = 제목 글(같은 이름)
+    expect(frame.textContent).not.toContain(koMessages.insightsBoard.pageTitle);
+    expect(container.querySelector('[data-testid="topbar-probe"]')!.textContent).toBe(koMessages.insightsBoard.pageTitle);
+  });
+
+  it('⭐머리(PageHead)는 설명 한 줄 + 오른쪽 기간 단추 하나다 — 제목 자리는 없다', async () => {
+    stubFetch({ page1: [] });
+    await mount();
+    const head = container.querySelector('[data-slot="ds-page-head"]')!;
+    expect(head.textContent).toContain(koMessages.insightsBoard.pageDescription);
+    const actions = head.querySelector('[data-slot="ds-page-head-actions"]')!;
+    expect([...actions.querySelectorAll('button')]).toHaveLength(1);
+    expect(actions.querySelector('[data-testid="insights-board-window-trigger"]')).not.toBeNull();
+  });
+
+  it('⭐불러오는 동안은 틀 안 로딩 칸(role=status · aria-busy) — 표는 아직 없다', async () => {
+    stubFetch({ page1: [], hang: true });
+    await mount();
+    const status = container.querySelector('[data-slot="ds-page-frame"] [data-testid="insights-board-loading"][role="status"][aria-busy="true"]');
+    expect(status).not.toBeNull();
+    expect(container.querySelector('[data-testid="responsive-data-table-cards"]')).toBeNull();
+  });
+});
+
+describe('InsightsBoardPage — 한 쪽 틀 변이 보강(4913 D1)', () => {
+  it('⭐제목 칸은 한 줄로 잘린다(clamp) — 표 제목 td에 truncate가 선다', async () => {
+    stubFetch({});
+    await mount();
+    const td = [...container.querySelectorAll('table td')].find((el) => el.textContent?.includes('글 A')) as HTMLElement | undefined;
+    expect(td, '제목 td를 찾지 못함').not.toBeUndefined();
+    expect(td!.className).toContain('truncate');
+  });
+
+  it('⭐보관됨 토글은 눌림 상태(aria-pressed)를 말한다 — 꺼짐 false → 켬 true', async () => {
+    stubFetch({});
+    await mount();
+    const toggle = container.querySelector('[data-testid="insights-board-show-archived-toggle"]') as HTMLElement;
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    await act(async () => { toggle.click(); });
+    await flush();
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('⭐보관됨 보기 응답이 숨은 건수를 실어 와도 그 뷰에선 «N건 숨김»을 안 그린다', async () => {
+    stubFetch({ hiddenCount: 3, hiddenCountWhenArchived: 7 });
+    await mount();
+    expect(container.querySelector('[data-testid="insights-board-hidden-count"]')).not.toBeNull();
+    const toggle = container.querySelector('[data-testid="insights-board-show-archived-toggle"]') as HTMLElement;
+    await act(async () => { toggle.click(); });
+    await flush();
+    expect(container.querySelector('[data-testid="insights-board-hidden-count"]')).toBeNull();
+  });
+
+  it('⭐기간 메뉴에서 기본값(7일)을 고르면 주소에서 window가 빠진다', async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('window=30d'));
+    stubFetch({});
+    await mount();
+    await openMenuAndClick('insights-board-window-trigger', koMessages.insightsBoard.window7d);
+    expect(routerReplaceMock.mock.calls.at(-1)?.[0] as string).not.toContain('window=');
+  });
+
+  it('⭐기간 메뉴에서 기본값이 아닌 값(30일)을 고르면 window=30d가 주소에 실린다', async () => {
+    stubFetch({});
+    await mount();
+    await openMenuAndClick('insights-board-window-trigger', koMessages.insightsBoard.window30d);
+    expect(routerReplaceMock.mock.calls.at(-1)?.[0] as string).toContain('window=30d');
+  });
+
+  it('⭐정렬 방향 단추를 누르면 내림 → 오름(sort_dir=asc)이 주소에 실린다', async () => {
+    stubFetch({});
+    await mount();
+    const btn = container.querySelector('[data-testid="insights-board-sort-dir-toggle"]') as HTMLElement;
+    await act(async () => { btn.click(); });
+    await flush();
+    expect(routerReplaceMock.mock.calls.at(-1)?.[0] as string).toContain('sort_dir=asc');
+  });
+
+  it('⭐오름차순에서 방향 단추를 누르면 기본(내림)으로 돌아가 sort_dir이 주소에서 빠진다', async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams('sort_dir=asc'));
+    stubFetch({});
+    await mount();
+    const btn = container.querySelector('[data-testid="insights-board-sort-dir-toggle"]') as HTMLElement;
+    await act(async () => { btn.click(); });
+    await flush();
+    expect(routerReplaceMock.mock.calls.at(-1)?.[0] as string).not.toContain('sort_dir');
   });
 });

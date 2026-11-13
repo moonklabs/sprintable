@@ -129,6 +129,12 @@ export function OrgChannelsTopBarTitle() {
   return <OrgTitle>{tOrgChannels('pageTitle')}</OrgTitle>;
 }
 
+/** «성과 보드»(`organization/insights-board`) 상단바 제목 — 화면(OrgScreenTitle)과 폴백이 같은 모양을 쓴다(4913 D1). */
+export function OrgInsightsBoardTopBarTitle() {
+  const tInsights = useTranslations('insightsBoard');
+  return <OrgTitle>{tInsights('pageTitle')}</OrgTitle>;
+}
+
 /** «레시피»(`organization/events`) 상단바 제목 — 화면(OrgScreenTitle)과 폴백이 같은 모양을 쓴다(4913 C2). */
 export function OrgEventsTopBarTitle() {
   const tOrgEvents = useTranslations('organization');
@@ -223,6 +229,7 @@ export const FLAT_ROUTE_TOP_BAR = {
   'organization/channels': { Title: OrgChannelsTopBarTitle, showContextChip: false },
   'organization/events': { Title: OrgEventsTopBarTitle, showContextChip: false },
   content: { Title: ContentPostsTopBarTitle, showContextChip: false },
+  'organization/insights-board': { Title: OrgInsightsBoardTopBarTitle, showContextChip: false },
   // 까디르 4688 — 부모 workforce/loading이 덮던 하위 목록(마지막 조각 runs ≠ workforce라 «상세»로 봐서 빈 채였다) · 자기 loading.tsx로 쥔다.
   'organization/workforce/runs': { Title: AgentRunsTopBarTitle, showContextChip: true },
   'organization/workforce/api-keys': { Title: AgentApiKeysTopBarTitle, showContextChip: true },

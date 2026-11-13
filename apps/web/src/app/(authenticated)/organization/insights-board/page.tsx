@@ -1,20 +1,20 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
-import { EmptyState } from '@/components/ui/empty-state';
-import { PageHeader } from '@/components/ui/page-header';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Banner } from '@/components/ds/banner';
+import { Card } from '@/components/ds/card';
+import { Button } from '@/components/ds/button';
+import { EmptyState } from '@/components/ds/empty-state';
+import { FilterBar } from '@/components/ds/filter-bar';
+import { Input } from '@/components/ds/input';
+import { Menu, MenuContent, MenuGroup, MenuItem, MenuTrigger } from '@/components/ds/menu';
+import { PageFrame } from '@/components/ds/page-frame';
+import { PageHead } from '@/components/ds/page-head';
+import { Skeleton } from '@/components/ds/skeleton';
+import { OrgScreenTitle } from '@/components/organization/org-screen-title';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useChannelLabel } from '@/lib/channel-label';
 import { formatViewerScheduledAt } from '@/lib/schedule-format';
@@ -126,6 +126,18 @@ type ReconcileRowState =
   | { status: 'error'; message: string }
   | { status: 'done'; verdicts: Record<string, string> };
 
+/** 4913 D1 — 거르기 줄 · 머리의 «고르기» 단추: ds Menu(열고 닫기 · 화살표 · Esc · 초점 복원은 Base UI) + ds Button 꼴 트리거. 옛 `ui/dropdown-menu` 트리거와 같은 data-testid. */
+function PickMenu({ testId, label, children }: { testId: string; label: ReactNode; children: ReactNode }) {
+  return (
+    <Menu>
+      <MenuTrigger render={<Button variant="secondary" data-testid={testId} />}>{label}</MenuTrigger>
+      <MenuContent align="start">
+        <MenuGroup>{children}</MenuGroup>
+      </MenuContent>
+    </Menu>
+  );
+}
+
 export default function InsightsBoardPage() {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const { orgId, currentMemberType } = useDashboardContext();
@@ -134,14 +146,13 @@ export default function InsightsBoardPage() {
   const t = useTranslations('insightsBoard');
   const locale = useLocale();
   const tContent = useTranslations('content');
+  const tCommon = useTranslations('common');
   // story #3583(정정, 2026-09-10) — GA4 유입 지표 null 사유의 needs_reauth 갈래가
   // 채널 연결 화면 기존 낱말을 재사용한다(새 낱말 0, PO 確定).
   const tChannelConnect = useTranslations('channelConnect');
   // story #3656 — 훅 미태깅 묶음 라벨은 새 낱말을 안 만들고 docs 네임스페이스 기존
   // 키(indexCategoryUncategorized, 「미분류」)를 재사용한다(유나 確定).
   const tDocs = useTranslations('docs');
-  // story #4278(유나 결정 ③) — 셸 메뉴 «결과»(구역 이름)를 눌러 온 화면이라 머리에 구역을 싣는다(«결과 › 성과 보드»).
-  const tNav = useTranslations('nav');
   const channelLabel = useChannelLabel();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
 
@@ -205,17 +216,8 @@ export default function InsightsBoardPage() {
     }
   }, [orgId]);
   useEffect(() => { void loadCostSummary(); }, [loadCostSummary]);
-  // story #3979(자리 옮김 ④) — 표 머리 필터 7종을 접힌 토글 하나로. 기본 접힘(첫
-  // 화면은 요약 우선), 안의 마크업은 기존 그대로(무삭제).
-  // story #3979 CHANGES(페드루 PO 2026-09-17 01:14Z, 실결함) — URL에 이미 필터가
-  // 걸려 있는데(공유 링크 등) 접힌 채로 열리면 «표는 걸렀는데 화면엔 흔적 0»이
-  // 된다 — 초기값을 URL 파라미터 기준으로 계산한다(showArchived는 URL에 안
-  // 실리는 순수 로컬 state라 이 계산엔 안 낀다, 항상 false로 시작).
-  const [showFilters, setShowFilters] = useState(() =>
-    channelParam !== '' || statusParam !== '' || metricParam !== DEFAULT_METRIC ||
-    sortRoleParam !== DEFAULT_SORT_ROLE || sortDirParam !== DEFAULT_SORT_DIR || groupByParam !== DEFAULT_GROUP_BY,
-  );
-  // story #3979 CHANGES — 토글 라벨에 보일 개수(기본값과 다른 것만 센다).
+  // 4913 D1 — 거르기 줄의 접힘은 ds FilterBar가 쥔다(폰만 접힘 · 단추에 적용 개수). 옛 `showFilters` 상태 · «URL에 필터가 걸려 있으면 펼쳐서 시작»은 필요 없어졌다 — 넓은 화면은 늘 펼쳐 있고, 폰은 단추의 «· n»이 흔적이다.
+  // story #3979 CHANGES — 단추에 보일 개수(기본값과 다른 것만 센다).
   const appliedFilterCount = [
     channelParam !== '',
     statusParam !== '',
@@ -417,26 +419,13 @@ export default function InsightsBoardPage() {
   // v4). 그래도 기간 컨트롤은 이 화면 자체를 규정하는 값이라(§5 — 띠도 이 값을
   // 따른다) 제목 줄 우측에 둔다 — «주 액션 자리»를 그 컨트롤이 채운다.
   const windowControl = (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        className="inline-flex items-center gap-1.5 rounded-[0.5rem] border border-border bg-card px-[10px] py-[7px] text-[12px] text-muted-foreground"
-        data-testid="insights-board-window-trigger"
-      >
-        {t('windowLabel')} {t(`window${windowParam}`)}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start">
-        <DropdownMenuGroup>
-          {WINDOW_OPTIONS.map((option) => (
-            <DropdownMenuItem
-              key={option}
-              onClick={() => updateQuery({ window: option === DEFAULT_WINDOW ? null : option })}
-            >
-              {t(`window${option}`)}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <PickMenu testId="insights-board-window-trigger" label={<>{t('windowLabel')} {t(`window${windowParam}`)}</>}>
+      {WINDOW_OPTIONS.map((option) => (
+        <MenuItem key={option} onClick={() => updateQuery({ window: option === DEFAULT_WINDOW ? null : option })}>
+          {t(`window${option}`)}
+        </MenuItem>
+      ))}
+    </PickMenu>
   );
 
   // story #4014 — ResponsiveDataTable 배선. groupInsightsBoardRows()는 이미 그룹 순서로
@@ -451,8 +440,8 @@ export default function InsightsBoardPage() {
 
   const insightsColumns: ResponsiveDataTableColumn<InsightsBoardRow>[] = [
     {
-      key: 'title', header: t('columnTitle'), cardSlot: 'title',
-      cellClassName: 'max-w-xs truncate px-3 py-2.5 font-medium text-foreground',
+      key: 'title', header: t('columnTitle'), cardSlot: 'title', clamp: true,
+      cellClassName: 'px-3 py-2.5 font-medium text-ds-ink',
       renderCell: (row) => (
         row.external_url ? (
           <a href={row.external_url} target="_blank" rel="noopener noreferrer" className="hover:underline">
@@ -465,7 +454,7 @@ export default function InsightsBoardPage() {
     },
     {
       key: 'channel', header: t('columnChannel'), cardSlot: 'meta',
-      cellClassName: 'px-3 py-2.5 text-muted-foreground',
+      cellClassName: 'px-3 py-2.5 text-ds-ink-3',
       renderCell: (row) => channelLabel(row.channel),
     },
     {
@@ -475,7 +464,7 @@ export default function InsightsBoardPage() {
       // 보조기술이 읽는다(headerProps로 <th>에 직접, 안쪽 span에 달지 않는다).
       headerProps: { 'aria-sort': sortRoleParam === 'published_at' ? (sortDirParam === 'asc' ? 'ascending' : 'descending') : 'none' },
       cardSlot: 'meta',
-      cellClassName: 'px-3 py-2.5 text-muted-foreground',
+      cellClassName: 'px-3 py-2.5 text-ds-ink-3',
       renderCell: (row) => (
         <span data-testid="insights-board-published-at">
           {formatViewerScheduledAt(row.published_at, displayTimezone).display}
@@ -485,7 +474,7 @@ export default function InsightsBoardPage() {
     {
       key: 'd1', header: `${t('columnD1')} ${metricLabel}`, cardSlot: 'metric',
       headerProps: { 'aria-sort': sortRoleParam === 'd1' ? (sortDirParam === 'asc' ? 'ascending' : 'descending') : 'none' },
-      cellClassName: 'px-3 py-2.5 text-muted-foreground',
+      cellClassName: 'px-3 py-2.5 text-ds-ink-3',
       renderCell: (row) => (
         <InsightsBoardMetricCell
           bucket={row.d1} metric={metricParam} tContent={tContent} tBoard={t}
@@ -496,7 +485,7 @@ export default function InsightsBoardPage() {
     {
       key: 'd7', header: `${t('columnD7')} ${metricLabel}`, cardSlot: 'metric',
       headerProps: { 'aria-sort': sortRoleParam === 'd7' ? (sortDirParam === 'asc' ? 'ascending' : 'descending') : 'none' },
-      cellClassName: 'px-3 py-2.5 text-muted-foreground',
+      cellClassName: 'px-3 py-2.5 text-ds-ink-3',
       renderCell: (row) => (
         <InsightsBoardMetricCell
           bucket={row.d7} metric={metricParam} tContent={tContent} tBoard={t}
@@ -541,8 +530,7 @@ export default function InsightsBoardPage() {
               </div>
             ) : null}
             <Button
-              size="sm"
-              variant="ghost"
+              variant="quiet"
               onClick={() => toggleRowExpanded(row.publication_id)}
               aria-expanded={expandedRowIds.has(row.publication_id)}
               data-testid="insights-board-row-expand-toggle"
@@ -567,18 +555,18 @@ export default function InsightsBoardPage() {
     const label = groupRepresentativeLabel(groupByParam, group.rawKey);
     return {
       table: (
-        <tr className="bg-muted/30 text-xs" data-testid="insights-board-group-header">
-          <td colSpan={3} className="px-3 py-2 font-medium text-foreground">
+        <tr className="bg-ds-surface-high text-ds-small" data-testid="insights-board-group-header">
+          <td colSpan={3} className="px-3 py-2 font-medium text-ds-ink">
             <span data-testid="insights-board-group-label">{label}</span>
-            <span className="ml-2 text-muted-foreground">{t('groupMemberCount', { n: group.rows.length })}</span>
+            <span className="ml-2 text-ds-ink-3">{t('groupMemberCount', { n: group.rows.length })}</span>
           </td>
-          <td className="px-3 py-2 text-muted-foreground">
+          <td className="px-3 py-2 text-ds-ink-3">
             <InsightsBoardMetricCell
               bucket={aggregateGroupBucket(group.rows, 'd1')} metric={metricParam}
               tContent={tContent} tBoard={t} tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
             />
           </td>
-          <td className="px-3 py-2 text-muted-foreground">
+          <td className="px-3 py-2 text-ds-ink-3">
             <InsightsBoardMetricCell
               bucket={aggregateGroupBucket(group.rows, 'd7')} metric={metricParam}
               tContent={tContent} tBoard={t} tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
@@ -588,21 +576,21 @@ export default function InsightsBoardPage() {
         </tr>
       ),
       card: (
-        <div className="border-t border-border bg-muted/30 px-1 py-1.5 text-xs" data-testid="insights-board-group-header">
-          <p className="font-medium text-foreground">
+        <div className="border-t border-ds-line bg-ds-surface-high px-1 py-1.5 text-ds-small" data-testid="insights-board-group-header">
+          <p className="font-medium text-ds-ink">
             <span data-testid="insights-board-group-label">{label}</span>
-            <span className="ml-2 font-normal text-muted-foreground">{t('groupMemberCount', { n: group.rows.length })}</span>
+            <span className="ml-2 font-normal text-ds-ink-3">{t('groupMemberCount', { n: group.rows.length })}</span>
           </p>
           <div className="mt-1 grid grid-cols-2 gap-x-3">
             <div>
-              <p className="text-[11px] text-muted-foreground">{d1ColumnHeader}</p>
+              <p className="text-ds-small text-ds-ink-3">{d1ColumnHeader}</p>
               <InsightsBoardMetricCell
                 bucket={aggregateGroupBucket(group.rows, 'd1')} metric={metricParam}
                 tContent={tContent} tBoard={t} tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
               />
             </div>
             <div>
-              <p className="text-[11px] text-muted-foreground">{d7ColumnHeader}</p>
+              <p className="text-ds-small text-ds-ink-3">{d7ColumnHeader}</p>
               <InsightsBoardMetricCell
                 bucket={aggregateGroupBucket(group.rows, 'd7')} metric={metricParam}
                 tContent={tContent} tBoard={t} tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
@@ -636,7 +624,7 @@ export default function InsightsBoardPage() {
     ) : null;
     const reconcileContent = reconcile && reconcile.status !== 'loading' ? (
       reconcile.status === 'error' ? (
-        <span className="text-destructive" data-testid="insights-board-reconcile-error">{reconcile.message}</span>
+        <span className="text-ds-failed" data-testid="insights-board-reconcile-error">{reconcile.message}</span>
       ) : (
         <ReconcileResultLine verdicts={reconcile.verdicts} />
       )
@@ -647,12 +635,12 @@ export default function InsightsBoardPage() {
         <>
           {detail ? (
             <tr data-testid="insights-board-row-detail-row">
-              <td colSpan={7} className="bg-muted/20 px-3 py-2.5">{detail}</td>
+              <td colSpan={7} className="bg-ds-surface-high px-3 py-2.5">{detail}</td>
             </tr>
           ) : null}
           {reconcileContent ? (
             <tr data-testid="insights-board-reconcile-result-row">
-              <td colSpan={7} className="px-3 py-1.5 text-xs">{reconcileContent}</td>
+              <td colSpan={7} className="px-3 py-1.5 text-ds-small">{reconcileContent}</td>
             </tr>
           ) : null}
         </>
@@ -660,10 +648,10 @@ export default function InsightsBoardPage() {
       card: (
         <>
           {detail ? (
-            <div className="border-t border-border mt-2 pt-2" data-testid="insights-board-row-detail-row">{detail}</div>
+            <div className="mt-2 border-t border-ds-line bg-ds-surface-high pt-2" data-testid="insights-board-row-detail-row">{detail}</div>
           ) : null}
           {reconcileContent ? (
-            <div className="border-t border-border mt-2 pt-2 text-xs" data-testid="insights-board-reconcile-result-row">{reconcileContent}</div>
+            <div className="mt-2 border-t border-ds-line pt-2 text-ds-small" data-testid="insights-board-reconcile-result-row">{reconcileContent}</div>
           ) : null}
         </>
       ),
@@ -671,262 +659,186 @@ export default function InsightsBoardPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-6 p-6">
-      <PageHeader eyebrow={tNav('navResults')} title={t('pageTitle')} description={t('pageDescription')} actions={windowControl} />
+    <>
+      {/* 4913 D1 — 제목은 위 막대(h1 하나). 옛 머리의 «성과 보드» 머리 줄(eyebrow — navResults, 제목과 같은 글)은 걷었다: 사이드바 메뉴의 켜진 항목 + 위 막대 제목이 같은 이름을 이미 말한다. */}
+      <OrgScreenTitle>{t('pageTitle')}</OrgScreenTitle>
+      <PageFrame width="wide">
+        <PageHead description={t('pageDescription')} actions={windowControl} />
 
-      {/* story #3979(AC1, 시안 ④) — 첫 화면 요약 4칸(나간 글·자연 조회·쓴 광고비·
-          남은 한도), 채널별 표보다 위. */}
-      {orgId ? (
-        <ResultsSummaryCards
-          publishedInWindow={publishedInWindow}
-          viewsInWindow={viewsInWindow}
-          ga4ConnectionStatus={ga4ConnectionStatus}
-          boardLoading={loading}
-          boardLoadFailed={loadErrorMessage !== null}
-          costSummaryState={costSummaryState}
-          onRetryCostSummary={() => void loadCostSummary()}
-        />
-      ) : null}
-
-      {/* story #3979(자리 옮김 ②) — 일별 paid 지출 시계열 + 조직 비용 원장 카드
-          (OrgCostSummaryCard, CHANGES로 여기 안에 합류·자체 fetch 안 함)는 이제
-          「광고 상한」 카드 펼침 안(기본 접힘, 삭제 0). */}
-      {orgId ? <AdsCapCard orgId={orgId} costSummaryState={costSummaryState} /> : null}
-
-      {/* story #3979(자리 옮김 ④) — 필터 7종은 기본 접힘. 토글 안 마크업은 기존
-          그대로(무삭제) — «자리 옮김»이 필터 자체를 지우지 않는다.
-          story #3979 CHANGES(페드루 PO 2026-09-17 01:14Z, 실결함) — 적용된 개수를
-          라벨에 보여 «걸러졌는데 흔적 0»을 막는다(showFilters 초기값 계산과 같은
-          축, showArchived만 별도로 더한다 — 그건 URL에 안 실리지만 실제로 표를
-          거른다). */}
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={() => setShowFilters((v) => !v)}
-        aria-expanded={showFilters}
-        data-testid="insights-board-filters-toggle"
-      >
-        {appliedFilterCount > 0
-          ? t('filtersToggleLabelWithCount', { count: appliedFilterCount })
-          : t('filtersToggleLabel')} {showFilters ? t('sectionCollapse') : t('sectionExpand')}
-      </Button>
-
-      {/* CSS로만 접는다(React 트리에서 안 뺀다) — 기존 필터 테스트가 패널을 열지
-          않고도 querySelector/fireEvent로 바로 상호작용하는 전제를 그대로 지킨다. */}
-      <div className={showFilters ? 'flex flex-wrap items-center gap-2' : 'hidden'} data-testid="insights-board-filters-panel">
-        <input
-          value={channelParam}
-          onChange={(e) => updateQuery({ channel: e.target.value || null })}
-          placeholder={t('channelFilterPlaceholder')}
-          className="w-40 rounded-[0.5rem] border border-border bg-card px-[10px] py-[7px] text-base lg:text-[12px] text-foreground placeholder:text-muted-foreground"
-          data-testid="insights-board-channel-filter"
-        />
-
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            className="inline-flex items-center gap-1.5 rounded-[0.5rem] border border-border bg-card px-[10px] py-[7px] text-[12px] text-muted-foreground"
-            data-testid="insights-board-status-trigger"
-          >
-            {statusParam ? statusFilterLabel(statusParam as (typeof STATUS_FILTER_OPTIONS)[number]) : t('statusFilterAll')}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuGroup>
-              <DropdownMenuItem onClick={() => updateQuery({ status: null })}>{t('statusFilterAll')}</DropdownMenuItem>
-              {STATUS_FILTER_OPTIONS.map((option) => (
-                <DropdownMenuItem key={option} onClick={() => updateQuery({ status: option })}>
-                  {statusFilterLabel(option)}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            className="inline-flex items-center gap-1.5 rounded-[0.5rem] border border-border bg-card px-[10px] py-[7px] text-[12px] text-muted-foreground"
-            data-testid="insights-board-metric-trigger"
-          >
-            {t('metricLabel')} {metricLabel}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuGroup>
-              {SELECTABLE_METRIC_KEYS.map((option) => (
-                <DropdownMenuItem
-                  key={option}
-                  onClick={() => updateQuery({ metric: option === DEFAULT_METRIC ? null : option })}
-                >
-                  {tContent(METRIC_LABEL_KEYS[option])}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            className="inline-flex items-center gap-1.5 rounded-[0.5rem] border border-border bg-card px-[10px] py-[7px] text-[12px] text-muted-foreground"
-            data-testid="insights-board-sort-trigger"
-          >
-            {t('sortLabel')} {sortRoleLabel[sortRoleParam]}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuGroup>
-              {SORT_ROLE_OPTIONS.map((option) => (
-                <DropdownMenuItem
-                  key={option}
-                  onClick={() => updateQuery({ sort: option === DEFAULT_SORT_ROLE ? null : option })}
-                >
-                  {sortRoleLabel[option]}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <button
-          type="button"
-          onClick={() => updateQuery({ sort_dir: sortDirParam === 'desc' ? 'asc' : null })}
-          className="inline-flex items-center gap-1 rounded-[0.5rem] border border-border bg-card px-[10px] py-[7px] text-[12px] text-muted-foreground"
-          data-testid="insights-board-sort-dir-toggle"
-        >
-          {sortDirParam === 'desc' ? t('sortDirDesc') : t('sortDirAsc')}
-        </button>
-
-        {/* story #3656 — 소재/훅 묶음 토글. 서버 쿼리에 안 실림(client-side groupBy). */}
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            className="inline-flex items-center gap-1.5 rounded-[0.5rem] border border-border bg-card px-[10px] py-[7px] text-[12px] text-muted-foreground"
-            data-testid="insights-board-group-by-trigger"
-          >
-            {t('groupByLabel')} {groupByLabel[groupByParam]}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuGroup>
-              {GROUP_BY_OPTIONS.map((option) => (
-                <DropdownMenuItem
-                  key={option}
-                  onClick={() => updateQuery({ group_by: option === DEFAULT_GROUP_BY ? null : option })}
-                >
-                  {groupByLabel[option]}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-
-      {/* story #3746(3734 AC3 잔존 A) — 목록 두 화면과 같은 낱말·같은 뜻(`content.
-          showArchivedToggle`/`hideArchivedToggle` 재사용, 값 두 벌 안 만든다). 숨은
-          건수는 셀 수 있을 때만(hiddenCount null이면 안 그린다 — 모른다≠0).
-          story #3979 — 「보관됨」도 필터 7종 중 하나(유나 diff doc) — 같은 접힘. */}
-      <div className={showFilters ? 'flex flex-wrap items-center gap-3' : 'hidden'} data-testid="insights-board-archived-toggle-panel">
-        <Button
-          type="button" variant="link"
-          onClick={() => setShowArchived((v) => !v)}
-          className="h-auto min-h-0 min-w-0 px-0 text-sm font-normal text-foreground underline"
-          data-testid="insights-board-show-archived-toggle"
-        >
-          {showArchived ? tContent('hideArchivedToggle') : tContent('showArchivedToggle')}
-        </Button>
-        {!showArchived && hiddenCount !== null && hiddenCount > 0 ? (
-          <span className="text-xs text-muted-foreground" data-testid="insights-board-hidden-count">
-            {t('archivedHiddenCount', { count: hiddenCount })}
-          </span>
-        ) : null}
-      </div>
-
-      {loadErrorMessage ? (
-        <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
-          <AlertDescription>{loadErrorMessage}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      {loading ? (
-        <div className="space-y-3" data-testid="insights-board-loading">
-          {[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />)}
-        </div>
-      ) : rows.length === 0 ? (
-        !loadErrorMessage ? (
-          // story #3746(3734 AC3 잔존 A, 유나 定) — 「선택한 조건에 해당하는 발행 글이
-          // 아직 없습니다」는 사용자가 조건을 고른 적 없을 때(보관됨 보기를 안 켰는데
-          // 빈 화면) 틀린 말이다. 보관 때문에 비어 있는 갈래를 따로 가른다 — showArchived
-          // =false인데 hiddenCount>0이면 "지금 안 보이는 건 있는데 필터가 그걸 뺐다"는
-          // 뜻이라 그 자체가 답(보관된 것만 있다는 확定은 아니지만, 적어도 "조건" 탓으로
-          // 잘못 말하지 않는다).
-          !showArchived && hiddenCount !== null && hiddenCount > 0 ? (
-            <EmptyState title={t('emptyTitle')} description={t('archivedEmptyReason')} />
-          ) : (
-            <EmptyState title={t('emptyTitle')} description={t('emptyDescription')} />
-          )
-        ) : null
-      ) : (
-        <>
-          <ResponsiveDataTable
-            columns={insightsColumns}
-            rows={flatInsightsRows}
-            rowKey={(row) => row.publication_id}
-            rowTestId="insights-board-row"
-            groupKey={(row) => (groupByParam === 'none' ? null : rowToGroup.get(row.publication_id)?.groupKey ?? null)}
-            renderGroupHeader={renderInsightsGroupHeader}
-            renderRowFooter={renderInsightsRowFooter}
-            getRowProps={(row, _index, mode) => ({
-              ref: (el: HTMLElement | null) => {
-                const map = mode === 'table' ? tableRowRefs.current : cardRowRefs.current;
-                if (el) map.set(row.publication_id, el);
-                else map.delete(row.publication_id);
-              },
-              'data-highlighted': highlightedRowId === row.publication_id ? 'true' : undefined,
-              className: highlightedRowId === row.publication_id ? 'bg-primary/10 motion-safe:transition-colors' : undefined,
-            })}
+        {/* story #3979(AC1, 시안 ④) — 첫 화면 요약 4칸(나간 글·자연 조회·쓴 광고비·
+            남은 한도), 채널별 표보다 위. */}
+        {orgId ? (
+          <ResultsSummaryCards
+            publishedInWindow={publishedInWindow}
+            viewsInWindow={viewsInWindow}
+            ga4ConnectionStatus={ga4ConnectionStatus}
+            boardLoading={loading}
+            boardLoadFailed={loadErrorMessage !== null}
+            costSummaryState={costSummaryState}
+            onRetryCostSummary={() => void loadCostSummary()}
           />
+        ) : null}
 
-          {hasMore ? (
-            <div className="flex justify-center">
-              <Button variant="outline" onClick={() => void handleLoadMore()} disabled={loadingMore}>
-                {loadingMore ? t('loadingMore') : t('loadMore')}
-              </Button>
-            </div>
-          ) : null}
-        </>
-      )}
+        {/* story #3979(자리 옮김 ②) — 일별 paid 지출 시계열 + 조직 비용 원장 카드
+            (OrgCostSummaryCard, CHANGES로 여기 안에 합류·자체 fetch 안 함)는 「광고 상한」
+            카드 펼침 안(기본 접힘, 삭제 0). */}
+        {orgId ? <AdsCapCard orgId={orgId} costSummaryState={costSummaryState} /> : null}
 
-      {/* story #3746(#3484 이주) — 채널 목록(content/channel-posts/page.tsx)에서
-          걷고 표 아래로. 발행 품질 셋만(정시율·중복·승인 없는 호출) — 연결 건강
-          (만료·7일 내 만료)은 ③(3743) 행 칩+cron 알림이 맡아 은퇴. 띠 자체 기간
-          컨트롤은 없다 — 이 화면의 windowParam을 그대로 따른다(7d/30d/90d 그대로,
-          띠가 자기 상태를 따로 안 갖는다).
-          story #3979(자리 옮김 ⑤) — 「발행 신뢰도」 접힌 절 안으로(기본 접힘). 이
-          밴드는 page.test.tsx가 직접 테스트하지 않아(자체 테스트 파일 보유) 접혔을
-          때 마운트 자체를 뺀다(불필요한 자체 fetch 방지). */}
-      {orgId ? (
-        <div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setShowPublishingTrust((v) => !v)}
-            aria-expanded={showPublishingTrust}
-            data-testid="insights-board-publishing-trust-toggle"
-          >
-            {t('publishingTrustSectionTitle')} {showPublishingTrust ? t('sectionCollapse') : t('sectionExpand')}
-          </Button>
-          {showPublishingTrust ? (
-            <div className="mt-3" data-testid="insights-board-publishing-trust-body">
-              <PublishingMetricsBand orgId={orgId} window={windowParam} />
-            </div>
-          ) : null}
+        {/* 4913 D1 — 거르기 줄 한 가지 꼴(ds FilterBar): 넓은 화면은 늘 펼쳐 있고, 폰(sm 미만)에서는 «필터» 단추 하나로 접힌다(적용 개수는 단추에 «· n»).
+            옛 화면의 «모든 폭에서 기본 접힘 토글»은 폰만 접힘으로 바뀌었다(PR 본문 표). 필터 일곱(채널 · 상태 · 지표 · 정렬 · 방향 · 묶음 · 보관됨)은 하나도 안 지웠다. */}
+        <div data-testid="insights-board-filters-panel">
+          <FilterBar
+            aria-label={t('filtersToggleLabel')}
+            collapseLabel={t('filtersToggleLabel')}
+            activeCount={appliedFilterCount}
+            leading={(
+              <>
+                <Input
+                  value={channelParam}
+                  onChange={(e) => updateQuery({ channel: e.target.value || null })}
+                  placeholder={t('channelFilterPlaceholder')}
+                  aria-label={t('channelFilterPlaceholder')}
+                  className="w-40"
+                  data-testid="insights-board-channel-filter"
+                />
+                <PickMenu testId="insights-board-status-trigger" label={statusParam ? statusFilterLabel(statusParam as (typeof STATUS_FILTER_OPTIONS)[number]) : t('statusFilterAll')}>
+                  <MenuItem onClick={() => updateQuery({ status: null })}>{t('statusFilterAll')}</MenuItem>
+                  {STATUS_FILTER_OPTIONS.map((option) => (
+                    <MenuItem key={option} onClick={() => updateQuery({ status: option })}>
+                      {statusFilterLabel(option)}
+                    </MenuItem>
+                  ))}
+                </PickMenu>
+                <PickMenu testId="insights-board-metric-trigger" label={<>{t('metricLabel')} {metricLabel}</>}>
+                  {SELECTABLE_METRIC_KEYS.map((option) => (
+                    <MenuItem key={option} onClick={() => updateQuery({ metric: option === DEFAULT_METRIC ? null : option })}>
+                      {tContent(METRIC_LABEL_KEYS[option])}
+                    </MenuItem>
+                  ))}
+                </PickMenu>
+                <PickMenu testId="insights-board-sort-trigger" label={<>{t('sortLabel')} {sortRoleLabel[sortRoleParam]}</>}>
+                  {SORT_ROLE_OPTIONS.map((option) => (
+                    <MenuItem key={option} onClick={() => updateQuery({ sort: option === DEFAULT_SORT_ROLE ? null : option })}>
+                      {sortRoleLabel[option]}
+                    </MenuItem>
+                  ))}
+                </PickMenu>
+                <Button
+                  type="button"
+                  onClick={() => updateQuery({ sort_dir: sortDirParam === 'desc' ? 'asc' : null })}
+                  data-testid="insights-board-sort-dir-toggle"
+                >
+                  {sortDirParam === 'desc' ? t('sortDirDesc') : t('sortDirAsc')}
+                </Button>
+                {/* story #3656 — 소재/훅 묶음 토글. 서버 쿼리에 안 실림(client-side groupBy). */}
+                <PickMenu testId="insights-board-group-by-trigger" label={<>{t('groupByLabel')} {groupByLabel[groupByParam]}</>}>
+                  {GROUP_BY_OPTIONS.map((option) => (
+                    <MenuItem key={option} onClick={() => updateQuery({ group_by: option === DEFAULT_GROUP_BY ? null : option })}>
+                      {groupByLabel[option]}
+                    </MenuItem>
+                  ))}
+                </PickMenu>
+              </>
+            )}
+            trailing={(
+              <div className="flex flex-wrap items-center gap-3" data-testid="insights-board-archived-toggle-panel">
+                {/* story #3746 — 목록 두 화면과 같은 낱말·같은 뜻(`content.showArchivedToggle`/`hideArchivedToggle` 재사용). 숨은 건수는 셀 수 있을 때만(모른다≠0). */}
+                <Button
+                  type="button" variant="quiet"
+                  onClick={() => setShowArchived((v) => !v)}
+                  aria-pressed={showArchived}
+                  data-testid="insights-board-show-archived-toggle"
+                >
+                  {showArchived ? tContent('hideArchivedToggle') : tContent('showArchivedToggle')}
+                </Button>
+                {!showArchived && hiddenCount !== null && hiddenCount > 0 ? (
+                  <span className="text-ds-small text-ds-ink-3" data-testid="insights-board-hidden-count">
+                    {t('archivedHiddenCount', { count: hiddenCount })}
+                  </span>
+                ) : null}
+              </div>
+            )}
+          />
         </div>
-      ) : null}
 
-      {followUpRow && orgId ? (
-        <FollowUpDialog
-          orgId={orgId}
-          publicationId={followUpRow.publication_id}
-          originalTitle={followUpRow.title}
-          onClose={() => setFollowUpRow(null)}
-        />
-      ) : null}
-    </div>
+        {loadErrorMessage ? <Banner tone="failed">{loadErrorMessage}</Banner> : null}
+
+        {loading ? (
+          <div role="status" aria-busy="true" className="space-y-3" data-testid="insights-board-loading">
+            <span className="sr-only">{tCommon('loading')}</span>
+            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
+          </div>
+        ) : rows.length === 0 ? (
+          !loadErrorMessage ? (
+            // story #3746(3734 AC3 잔존 A, 유나 定) — 보관 때문에 비어 있는 갈래를 따로 가른다(조건 탓으로 잘못 말하지 않는다).
+            <Card>
+              {!showArchived && hiddenCount !== null && hiddenCount > 0 ? (
+                <EmptyState title={t('emptyTitle')} description={t('archivedEmptyReason')} />
+              ) : (
+                <EmptyState title={t('emptyTitle')} description={t('emptyDescription')} />
+              )}
+            </Card>
+          ) : null
+        ) : (
+          <>
+            <ResponsiveDataTable
+              columns={insightsColumns}
+              rows={flatInsightsRows}
+              rowKey={(row) => row.publication_id}
+              rowTestId="insights-board-row"
+              groupKey={(row) => (groupByParam === 'none' ? null : rowToGroup.get(row.publication_id)?.groupKey ?? null)}
+              renderGroupHeader={renderInsightsGroupHeader}
+              renderRowFooter={renderInsightsRowFooter}
+              getRowProps={(row, _index, mode) => ({
+                ref: (el: HTMLElement | null) => {
+                  const map = mode === 'table' ? tableRowRefs.current : cardRowRefs.current;
+                  if (el) map.set(row.publication_id, el);
+                  else map.delete(row.publication_id);
+                },
+                'data-highlighted': highlightedRowId === row.publication_id ? 'true' : undefined,
+                className: highlightedRowId === row.publication_id ? 'bg-ds-action-soft motion-safe:transition-colors' : undefined,
+              })}
+            />
+
+            {hasMore ? (
+              <div className="flex justify-center">
+                <Button onClick={() => void handleLoadMore()} disabled={loadingMore}>
+                  {loadingMore ? t('loadingMore') : t('loadMore')}
+                </Button>
+              </div>
+            ) : null}
+          </>
+        )}
+
+        {/* story #3746(#3484 이주) — 발행 품질 셋만(정시율·중복·승인 없는 호출). 띠 자체 기간 컨트롤은 없다 — 이 화면의 windowParam을 따른다.
+            story #3979(자리 옮김 ⑤) — 「발행 신뢰도」 접힌 절 안으로(기본 접힘 · 접혔을 때 마운트 자체를 뺀다 — 불필요한 자체 fetch 방지). */}
+        {orgId ? (
+          <div>
+            <Button
+              type="button"
+              onClick={() => setShowPublishingTrust((v) => !v)}
+              aria-expanded={showPublishingTrust}
+              data-testid="insights-board-publishing-trust-toggle"
+            >
+              {t('publishingTrustSectionTitle')} {showPublishingTrust ? t('sectionCollapse') : t('sectionExpand')}
+            </Button>
+            {showPublishingTrust ? (
+              <div className="mt-3" data-testid="insights-board-publishing-trust-body">
+                <PublishingMetricsBand orgId={orgId} window={windowParam} />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {followUpRow && orgId ? (
+          <FollowUpDialog
+            orgId={orgId}
+            publicationId={followUpRow.publication_id}
+            originalTitle={followUpRow.title}
+            onClose={() => setFollowUpRow(null)}
+          />
+        ) : null}
+      </PageFrame>
+    </>
   );
 }
