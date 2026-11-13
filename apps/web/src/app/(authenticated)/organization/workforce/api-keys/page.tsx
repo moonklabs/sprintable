@@ -1,12 +1,22 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocale, useTranslations } from 'next-intl';
 import { AgentApiKeyManager } from '@/components/agents/agent-api-key-manager';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ds/button';
+import { EmptyState } from '@/components/ds/empty-state';
+import { PageFrame } from '@/components/ds/page-frame';
+import { PageHead } from '@/components/ds/page-head';
+import { Panel, PanelBody, PanelContent, PanelHeader } from '@/components/ds/panel';
+import { DialogTitle } from '@/components/ds/dialog';
+import { RowList, RowListItem } from '@/components/ds/row-list';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { memberOrAgentLabel, memberRowLabels } from '@/lib/member-display';
+import { formatViewerRelativeTime } from '@/lib/storage/format';
 
 interface Agent {
   id: string;
@@ -18,6 +28,79 @@ interface Agent {
   runtime_type?: string | null;
 }
 
+interface KeyRecord {
+  id: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  expires_at: string | null;
+}
+
+// story 4912 (B1) — what a row says about the agent's keys: loading · the read FAILED (not «no key» — a failed read is not an empty list) · or how many are active / when last used / expiring within 7 days
+type KeySummary =
+  | { state: 'loading' }
+  | { state: 'failed' }
+  | { state: 'ok'; active: number; lastUsedAt: string | null; expiresInDays: number | null };
+
+export function summarizeKeys(keys: KeyRecord[], now = Date.now()): Extract<KeySummary, { state: 'ok' }> {
+  const active = keys.filter((k) => !k.revoked_at);
+  let lastUsedAt: string | null = null;
+  for (const k of active) if (k.last_used_at && (!lastUsedAt || k.last_used_at > lastUsedAt)) lastUsedAt = k.last_used_at;
+  // the same rule the key line used to wear: «⚠ n일 뒤 만료» within 7 days (an already expired key is not «expiring»)
+  let expiresInDays: number | null = null;
+  for (const k of active) {
+    if (!k.expires_at) continue;
+    const days = Math.ceil((new Date(k.expires_at).getTime() - now) / (1000 * 60 * 60 * 24));
+    if (days > 0 && days <= 7 && (expiresInDays === null || days < expiresInDays)) expiresInDays = days;
+  }
+  return { state: 'ok', active: active.length, lastUsedAt, expiresInDays };
+}
+
+/** One agent = one row. The row reads that agent's key list itself (the card used to, one read per agent — the same number of reads), and re-reads when the panel closes (`reloadToken`). */
+function AgentKeyRow({ agent, label, reloadToken, onOpen }: { agent: Agent; label: string | undefined; reloadToken: number; onOpen: () => void }) {
+  const t = useTranslations('settings');
+  const locale = useLocale();
+  const displayTimezone = useViewerTimeZone();
+  const [summary, setSummary] = useState<KeySummary>({ state: 'loading' });
+  const readSeq = useRef(0);
+
+  useEffect(() => {
+    const seq = ++readSeq.current;
+    void (async () => {
+      try {
+        const res = await fetchWithAuth(`/api/agents/${agent.id}/api-key`);
+        if (!res.ok) throw new Error('key list read failed');
+        const json = await res.json() as { data?: KeyRecord[] };
+        if (seq === readSeq.current) setSummary(summarizeKeys(json.data ?? []));
+      } catch {
+        if (seq === readSeq.current) setSummary({ state: 'failed' });
+      }
+    })();
+  }, [agent.id, reloadToken]);
+
+  const name = label ?? agent.name ?? '';
+  const subtitle = (() => {
+    if (summary.state === 'loading') return undefined;
+    if (summary.state === 'failed') return t('agentApiKeyRowReadFailed');
+    if (summary.active === 0) return t('agentApiKeyRowNone');
+    const parts = [t('agentApiKeyRowActive', { count: summary.active })];
+    if (summary.lastUsedAt) parts.push(t('agentApiKeyLastUsedAt', { time: formatViewerRelativeTime(summary.lastUsedAt, locale, displayTimezone) }));
+    if (summary.expiresInDays !== null) parts.push(`⚠ ${t('agentApiKeyRowExpiring', { days: summary.expiresInDays })}`);
+    return parts.join(' · ');
+  })();
+
+  return (
+    <RowListItem
+      data-testid={`api-key-row-${agent.id}`}
+      title={name}
+      subtitle={subtitle}
+      trailing={<Button onClick={onOpen} aria-label={t('agentApiKeyManageTitle', { name })}>{t('agentApiKeyManageCta')}</Button>}
+      actions={[{ key: 'manage', label: t('agentApiKeyManageCta'), icon: 'key', onSelect: onOpen }]}
+      actionsLabel={t('agentApiKeyManageTitle', { name })}
+      onOpen={onOpen}
+    />
+  );
+}
+
 export default function ApiKeysPage() {
   const tc = useTranslations('common');
   const t = useTranslations('settings'); // story #4359
@@ -26,6 +109,9 @@ export default function ApiKeysPage() {
   // story 4912 D2 — a failed read returned silently and the page said «활성 에이전트가 없어요» (an error read as «none»): now it says the read failed, with [다시 시도].
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
+  // story 4912 (B1): the «키 관리» panel holds ONE agent at a time; closing it re-reads the rows' key summaries
+  const [openAgentId, setOpenAgentId] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
   // [SID:4311 PR 3] 에이전트 칸 머리 — 같은 이름 둘이면 «· ID 앞 8자» · 이름 빔 = «이름 없는 에이전트»(목록 행 규칙 한 곳).
   const agentLabels = useMemo(() => memberRowLabels(agents, tc, () => '', (a) => memberOrAgentLabel(a, tc)), [agents, tc]);
 
@@ -47,39 +133,40 @@ export default function ApiKeysPage() {
     void loadAgents();
   }, [retryKey]);
 
+  const openAgent = agents.find((a) => a.id === openAgentId) ?? null;
+  const openLabel = openAgent ? (agentLabels.get(openAgent.id) ?? openAgent.name ?? '') : '';
+
   return (
-    <div className="container mx-auto px-4 py-8 space-y-8"> {/* story 4889: 큰 제목이 셸 칼럼 왼쪽 끝(x≈313)에 붙던 것 — 줄 띠와 같은 px-4 */}
-      <div>
-        <h1 className="text-display font-bold">{t('agentApiKeysPageTitle')}</h1>
-        <p className="text-muted-foreground mt-2">
-          {t('agentApiKeyListDescription')}
-        </p>
-      </div>
+    <PageFrame width="reading">
+      <TopBarSlot title={<h1 className="text-sm font-medium">{t('agentApiKeysPageTitle')}</h1>} />
+      <PageHead description={t('agentApiKeyListDescription')} />
 
       {loading ? (
-        <div className="space-y-4">
-          {[1, 2].map((i) => (
-            <div key={i} className="h-32 animate-pulse rounded-lg border border-border bg-muted/30" />
-          ))}
-        </div>
+        <SkeletonGroup label={tc('loading')} className="space-y-2" data-testid="api-keys-loading">
+          {[1, 2, 3].map((i) => <Skeleton key={i} className="h-14" />)}
+        </SkeletonGroup>
       ) : loadFailed ? (
-        <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border px-6 py-12 text-center" data-testid="api-keys-load-failed">
-          <p className="text-sm text-muted-foreground">{t('agentApiKeysLoadFailed')}</p>
-          <Button size="sm" variant="outline" onClick={() => setRetryKey((k) => k + 1)}>{tc('retry')}</Button>
+        <div data-testid="api-keys-load-failed">
+          <EmptyState title={t('agentApiKeysLoadFailed')} action={<Button onClick={() => setRetryKey((k) => k + 1)}>{tc('retry')}</Button>} />
         </div>
       ) : agents.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border px-6 py-12 text-center">
-          <p className="text-sm text-muted-foreground">{t('agentApiKeysNoAgents')}</p>
-        </div>
+        <EmptyState title={t('agentApiKeysNoAgents')} />
       ) : (
-        <div className="space-y-6">
+        <RowList aria-label={t('agentApiKeysPageTitle')} header={{ title: t('agentApiKeysPageTitle'), count: agents.length }} data-testid="api-key-list">
           {agents.map((agent) => (
-            <div key={agent.id} className="space-y-4">
-              <AgentApiKeyManager agentId={agent.id} agentName={agent.name ?? ''} agentLabel={agentLabels.get(agent.id)} />
-            </div>
+            <AgentKeyRow key={agent.id} agent={agent} label={agentLabels.get(agent.id)} reloadToken={reloadToken} onOpen={() => setOpenAgentId(agent.id)} />
           ))}
-        </div>
+        </RowList>
       )}
-    </div>
+
+      <Panel open={openAgent !== null} onOpenChange={(open) => { if (!open) { setOpenAgentId(null); setReloadToken((n) => n + 1); } }}>
+        <PanelContent aria-label={t('agentApiKeyManageTitle', { name: openLabel })} data-testid="api-key-panel">
+          <PanelHeader><DialogTitle>{t('agentApiKeyManageTitle', { name: openLabel })}</DialogTitle></PanelHeader>
+          <PanelBody>
+            {openAgent ? <AgentApiKeyManager agentId={openAgent.id} agentName={openAgent.name ?? ''} agentLabel={openLabel} compact /> : null}
+          </PanelBody>
+        </PanelContent>
+      </Panel>
+    </PageFrame>
   );
 }

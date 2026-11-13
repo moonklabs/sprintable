@@ -157,16 +157,22 @@ test('⭐402폭 — 전체 메뉴 · 탭바 모든 목적지에서 가로 넘침
   }
 });
 
-// story 4889 — API 키 화면의 에이전트 키 카드(머리의 «새로고침 · 온보딩 메시지 복사 · API 키 발급» 한 줄)는 목록이 그려져야 넘치는 자리다. 위 순회의 고정 대기(2.5초)로는 목록이 그려지기 전에 재서
-// 흔들렸다(CI에서 한 번 실패 · 재시도 통과). 여기서는 카드가 그려질 때까지 기다린 뒤에 잰다(결정적).
-test('402폭 — API 키 화면: 에이전트 키 카드가 그려진 뒤 가로 넘침 0', async ({ page }) => {
+// story 4889 — API 키 화면의 에이전트 키 카드는 목록이 그려져야 넘치는 자리다(고정 대기로는 목록이 그려지기 전에 재서 흔들렸다). story 4912 (B1): 이 화면은 «에이전트 한 줄씩 + 키 관리 패널»이다 —
+// 줄이 그려질 때까지 기다려 재고, 패널(폰에선 아래에서 오르는 시트)을 연 채 키 관리 카드가 그려진 뒤 다시 잰다(결정적).
+test('402폭 — API 키 화면: 에이전트 줄 · «키 관리» 패널이 그려진 뒤 가로 넘침 0', async ({ page }) => {
   test.setTimeout(3 * 60_000);
   await page.goto(withProject('/organization/workforce/api-keys'), { waitUntil: 'domcontentloaded' });
-  await page.locator('[data-testid="agent-api-key-manager"]').first().waitFor({ timeout: 60_000 });
-  // 카드 안에 버튼(머리의 버튼 묶음)이 그려졌는지 — 껍데기만 그려진 카드를 재서 거짓 PASS가 나지 않게(개수는 단위 시험이 고정한다: 머리 버튼 셋).
-  await expect(page.locator('[data-testid="agent-api-key-manager"]').first().locator('button')).not.toHaveCount(0);
-  const offenders = await findHorizontalOverflow(page);
-  expect(offenders, `/organization/workforce/api-keys @402 — 가로 넘침(스크롤러 scrollWidth > clientWidth): ${JSON.stringify(offenders)}`).toEqual([]);
+  const firstRow = page.locator('[data-testid^="api-key-row-"]').first();
+  await firstRow.waitFor({ timeout: 60_000 });
+  // 줄 안에 «키 관리» 단추가 그려졌는지 — 껍데기만 그려진 줄을 재서 거짓 PASS가 나지 않게.
+  await expect(firstRow.locator('button')).not.toHaveCount(0);
+  const rowOffenders = await findHorizontalOverflow(page);
+  expect(rowOffenders, `/organization/workforce/api-keys @402 (줄) — 가로 넘침(스크롤러 scrollWidth > clientWidth): ${JSON.stringify(rowOffenders)}`).toEqual([]);
+  await firstRow.locator('button:not([data-slot="ds-row-actions-trigger"])').first().click();
+  await page.locator('[data-testid="api-key-panel"] [data-testid="agent-api-key-manager"]').waitFor({ timeout: 60_000 });
+  await expect(page.locator('[data-testid="api-key-panel"] [data-testid="agent-api-key-manager"]').first().locator('button')).not.toHaveCount(0);
+  const panelOffenders = await findHorizontalOverflow(page);
+  expect(panelOffenders, `/organization/workforce/api-keys @402 (패널) — 가로 넘침(스크롤러 scrollWidth > clientWidth): ${JSON.stringify(panelOffenders)}`).toEqual([]);
 });
 
 // 가로 넘침 자로는 안 잡히는 402폭 자리(찌그러짐 · 여백) — 4277 2번 · 5번 · 6번 · 20번. 실 브라우저에서 모양을 잰다.

@@ -9,6 +9,8 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../../messages/ko.json';
 import ApiKeysPage from './page';
 
+vi.mock('@/components/nav/top-bar-slot', () => ({ TopBarSlot: () => null }));
+
 vi.mock('@/components/agents/agent-api-key-manager', () => ({
   AgentApiKeyManager: ({ agentName }: { agentName: string }) => <div data-testid="stub-agent-api-key-manager">{agentName}</div>,
 }));
@@ -52,7 +54,7 @@ describe('API 키 화면 에이전트 읽기(story 4912 D2)', () => {
     await mount();
     await act(async () => { retryBtn()?.click(); });
     await act(async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); });
-    expect(container.querySelector('[data-testid="stub-agent-api-key-manager"]')?.textContent).toBe('실 에이전트');
+    expect(container.querySelector('[data-testid="api-key-row-a1"]')?.textContent).toContain('실 에이전트'); // story 4912 (B1): a row per agent
     expect(container.querySelector('[data-testid="api-keys-load-failed"]')).toBeNull();
   });
 

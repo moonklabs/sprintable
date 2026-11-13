@@ -48,9 +48,9 @@ async function openKeyShownDialog() {
   stubFetch();
   await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" /></NextIntlClientProvider>); });
   await settle();
-  await act(async () => { btn(S.agentApiKeyGenerate)?.click(); });
+  await act(async () => { btn(S.agentApiKeyReplaceCta)?.click(); });
   await settle();
-  const confirmBtn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('새 키 발급') && b !== btn(S.agentApiKeyGenerate));
+  const confirmBtn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('새 키 발급') && b !== btn(S.agentApiKeyReplaceCta));
   expect(confirmBtn, 'the revoke-and-reissue confirm button is there').toBeTruthy();
   await act(async () => { confirmBtn?.click(); });
   await settle();
@@ -111,9 +111,9 @@ describe('AgentApiKeyManager — 4912 D4: the other things that could hold the k
     }));
     await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" /></NextIntlClientProvider>); });
     await settle();
-    await act(async () => { btn(S.agentApiKeyGenerate)?.click(); });
+    await act(async () => { btn(S.agentApiKeyReplaceCta)?.click(); });
     await settle();
-    const confirmBtn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('새 키 발급') && b !== btn(S.agentApiKeyGenerate));
+    const confirmBtn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('새 키 발급') && b !== btn(S.agentApiKeyReplaceCta));
     await act(async () => { confirmBtn?.click(); });
     await settle(); // the key dialog is open, the POST is still out
     await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
@@ -168,6 +168,30 @@ describe('AgentApiKeyManager — 4912 D4: the other things that could hold the k
     await act(async () => { btn(S.agentApiKeyRefresh)?.click(); });
     await settle();
     expect(calls).toEqual([1]); // the failed read said nothing
+  });
+
+  it('⭐단추는 하는 일 그대로의 이름이다 — 키가 있으면 «새 키로 바꾸기»(누르면 무효화 확인), 키가 없으면 «API 키 발급»', async () => {
+    stubFetch(); // one active key is listed
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" /></NextIntlClientProvider>); });
+    await settle();
+    expect(btn(S.agentApiKeyReplaceCta)).toBeTruthy();
+    expect(btn(S.agentApiKeyGenerate)).toBeUndefined();
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 })));
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" /></NextIntlClientProvider>); });
+    await settle();
+    expect(btn(S.agentApiKeyGenerate)).toBeTruthy();
+    expect(btn(S.agentApiKeyReplaceCta)).toBeUndefined();
+  });
+
+  it('⭐compact: 패널 안에서는 카드가 자기 제목 · 설명을 그리지 않는다(패널 제목이 에이전트 이름) — 단추는 그대로', async () => {
+    stubFetch();
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" compact /></NextIntlClientProvider>); });
+    await settle();
+    expect(container.querySelector('h3')).toBeNull();
+    expect(container.textContent).not.toContain(S.agentApiKeyListDescription);
+    expect(btn(S.agentApiKeyReplaceCta)).toBeTruthy();
   });
 });
 

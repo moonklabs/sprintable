@@ -9,6 +9,9 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../../messages/ko.json';
 import ApiKeysPage from './page';
 
+// story 4912 (B1) — the screen sets the top bar title; the top bar itself is not under test here
+vi.mock('@/components/nav/top-bar-slot', () => ({ TopBarSlot: () => null }));
+
 vi.mock('@/components/agents/agent-api-key-manager', () => ({
   AgentApiKeyManager: ({ agentId, agentName, agentLabel }: { agentId: string; agentName: string; agentLabel?: string }) => (
     <div data-testid="stub-agent-api-key-manager" data-agent-id={agentId} data-agent-label={agentLabel ?? ''}>{agentName}</div>
@@ -57,7 +60,7 @@ describe('ApiKeysPage — 시스템 발행 제외(story #3994)', () => {
     await mount();
     expect(container.textContent).not.toContain('시스템 발행');
     expect(container.textContent).toContain('실 에이전트');
-    expect(container.querySelectorAll('[data-testid="stub-agent-api-key-manager"]').length).toBe(1);
+    expect(container.querySelectorAll('[data-testid^="api-key-row-"]').length).toBe(1); // story 4912 (B1): one ROW per agent (the card opens in a panel)
   });
 });
 
@@ -75,21 +78,29 @@ describe('ApiKeysPage — 에이전트 동명이인([SID:4311 PR 3])', () => {
       return { ok: false, json: async () => null };
     }));
     await mount();
-    const cards = [...container.querySelectorAll('[data-testid="stub-agent-api-key-manager"]')];
-    expect(cards.map((c) => c.getAttribute('data-agent-label'))).toEqual(['봇 · aaaa1111', '봇 · bbbb2222', koMessages.common.agentUnnamed]);
-    expect(cards.map((c) => c.textContent)).toEqual(['봇', '봇', '']);
+    // story 4912 (B1): the rows carry the labels; the manager (in the panel) gets the label for its head and the ORIGINAL name for the message to the agent
+    const rows = [...container.querySelectorAll('[data-testid^="api-key-row-"]')];
+    expect(rows.map((r) => r.querySelector('[data-slot="ds-list-row"] .font-semibold')?.textContent)).toEqual(['봇 · aaaa1111', '봇 · bbbb2222', koMessages.common.agentUnnamed]);
+    const open = async (i: number) => { await act(async () => { (rows[i]!.querySelector('button:not([data-slot="ds-row-actions-trigger"])') as HTMLElement).click(); }); await act(async () => { await Promise.resolve(); }); };
+    await open(0);
+    let card = document.querySelector('[data-testid="stub-agent-api-key-manager"]')!;
+    expect(card.getAttribute('data-agent-label')).toBe('봇 · aaaa1111');
+    expect(card.textContent).toBe('봇');
+    await act(async () => { document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    await open(2);
+    card = document.querySelector('[data-testid="stub-agent-api-key-manager"]')!;
+    expect(card.getAttribute('data-agent-label')).toBe(koMessages.common.agentUnnamed);
+    expect(card.textContent).toBe('');
   });
 });
 
-// story 4889 — 큰 제목이 셸 칼럼 왼쪽 끝(x≈313)에 붙어 있었다(판정 캡처). 줄 띠(px-4)와 같은 안쪽 여백.
-describe('ApiKeysPage — 왼쪽 여백(story 4889)', () => {
-  it('⭐본문 래퍼가 px-4 안쪽 여백을 가진다 — 되돌리면 빨강', async () => {
+// story 4889 — the big title sat against the shell column's left edge; story 4912 (B1): the screen is now ONE of the three frame widths (the frame owns the margins — no hand-written container)
+describe('ApiKeysPage — 쪽 틀(story 4912)', () => {
+  it('⭐본문은 PageFrame reading 안에 선다(손으로 쓴 container · px-4 없음) — 큰 «에이전트 API 키» 제목은 위 막대로', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 })));
     await mount();
-    const h1 = container.querySelector('h1')!;
-    const wrapper = h1.closest('div.container');
-    expect(wrapper).toBeTruthy();
-    expect(wrapper!.className).toContain('px-4');
+    expect(container.querySelector('[data-slot="ds-page-frame"]')?.getAttribute('data-width')).toBe('reading');
+    expect(container.querySelector('div.container')).toBeNull();
+    expect(container.querySelector('h1')).toBeNull();
   });
 });
-

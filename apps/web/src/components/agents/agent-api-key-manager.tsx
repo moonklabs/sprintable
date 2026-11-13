@@ -44,6 +44,8 @@ interface AgentApiKeyManagerProps {
   onNewKey?: (apiKey: string, mcpConfig?: string | null) => void;
   /** story 4912 (A2): told after every SUCCESSFUL read of the key list how many keys are active — the detail's side summary says «활성 키 있음/없음» from it (so a revoke or a re-issue is reflected, and a failed read says nothing). */
   onKeysRead?: (activeCount: number) => void;
+  /** story 4912 (B1): inside the «키 관리» panel the panel's own title names the agent — the card skips its title + description (the buttons and everything else stay). */
+  compact?: boolean;
 }
 
 /**
@@ -55,7 +57,7 @@ export function AgentApiKeyManager(props: AgentApiKeyManagerProps) {
   return <AgentApiKeyManagerCard key={props.agentId} {...props} />;
 }
 
-function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKeysRead }: AgentApiKeyManagerProps) {
+function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKeysRead, compact = false }: AgentApiKeyManagerProps) {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
   const locale = useLocale();
@@ -292,12 +294,14 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
     <SectionCard className="p-6" data-testid="agent-api-key-manager">
       {/* story 4889 — 402폭 가로 넘침(실측: 스크롤러 scrollWidth 487 > 402): 머리가 «제목 | 버튼 셋(333px 한 줄)»이라 좁은 폭에서 버튼 줄이 카드 밖으로 밀렸다. 줄바꿈을 허용하고(flex-wrap) 제목 칸은 줄어들 수 있게(min-w-0) 한다. */}
       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-        <div className="min-w-0">
-          <h3 className="text-lg font-semibold">{t('agentApiKeyListTitle', { name: agentLabel ?? agentName })}</h3>
-          <p className="text-sm text-muted-foreground">
-            {t('agentApiKeyListDescription')}
-          </p>
-        </div>
+        {compact ? null : (
+          <div className="min-w-0">
+            <h3 className="text-lg font-semibold">{t('agentApiKeyListTitle', { name: agentLabel ?? agentName })}</h3>
+            <p className="text-sm text-muted-foreground">
+              {t('agentApiKeyListDescription')}
+            </p>
+          </div>
+        )}
         <div className="flex min-w-0 flex-col items-end gap-2">
           <div className="flex flex-wrap justify-end gap-2">
             <Button ref={refreshRef} variant="outline" onClick={loadApiKeys} disabled={loading} data-testid="agent-api-key-refresh">
@@ -324,7 +328,8 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
               }}
               disabled={loading}
             >
-              {t('agentApiKeyGenerate')}
+              {/* story 4912 (PO 11-12): the button names what it does — with a key already there, pressing it asks «무효화하고 새 키 발급», so it says «새 키로 바꾸기» (no key yet: «API 키 발급») */}
+              {activeKeys.length > 0 ? t('agentApiKeyReplaceCta') : t('agentApiKeyGenerate')}
             </Button>
           </div>
           {copyFailedOnboardingMessage ? (
