@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { DocEditor } from '@/components/docs/doc-editor';
 import { DocGateSection } from '@/components/docs/doc-gate-section';
@@ -70,14 +70,25 @@ export default function DocSlugPage() {
   const locale = useLocale();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const ts = useTranslations('share');
-  // 신규 문서 자동 포커스: URL ?new=1 파라미터를 ref로 처리 (useSearchParams Suspense 이슈 방지)
-  const isNewRef = useRef(typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('new') === '1');
-  const isNew = isNewRef.current;
+  // 신규 문서: URL ?new=1 · ?parent=. 출처는 useSearchParams — App Router는 router.push 때 «새 화면을 먼저 렌더하고 주소(history)는 커밋 뒤에» 바꾸므로 렌더 중 window.location은 옛 주소라 틀린 출처다
+  // (두 번째부터의 «새 문서»가 초안 대신 목록으로 튕기던 dev 실측 결함 · 11-13). `new`는 한 번 켜지면 이 화면이 사는 동안 유지(래치) — 첫 저장 뒤 주소가 정본 슬러그로 옮겨져 ?new=1이 빠져도
+  // 제목칸 placeholder(brandNewTitle)가 값으로 바뀌지 않게. 래치는 «화면에 있는 문서»와 짝이다(아래 isNew) — [slug]만 바뀐 채 이 컴포넌트가 다른 문서에 다시 쓰이면 옛 «새 문서» 표시가 따라가지 않는다.
+  const searchParams = useSearchParams();
+  const newParam = searchParams?.get('new') === '1';
+  const parentParam = searchParams?.get('parent') || null;
+  const newLatchRef = useRef<{ key: string; isNew: boolean } | null>(null);
+  const draftEnteredForSlugRef = useRef<string | null>(null); // 이 주소(slug)로 이미 초안에 들어와 있으면 같은 조회가 다시 돌아도 쓴 글(상태)을 비우지 않는다
 
   const { wsSlug, projSlug, projectId, tree, setTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer } = useDocsLayout();
   const { addToast } = useToast();
 
   const [selectedDoc, setSelectedDoc] = useState<DocDetail | null>(null);
+  // «새 문서» 래치: 키 = 화면에 있는 문서(없으면 주소의 slug). 키가 바뀌면 그 순간의 useSearchParams로 다시 정한다. 초안 → 만든 문서로 넘어갈 땐 주소가 그대로라 ?new=1이 아직 있어 true가 이어지고,
+  // 그 뒤 주소가 정본 슬러그로 옮겨져 ?new=1이 빠져도 같은 문서라 키가 안 바뀌어 유지된다.
+  const latchKey = selectedDoc ? `d:${selectedDoc.id}` : `s:${slug}`;
+  if (newLatchRef.current?.key !== latchKey) newLatchRef.current = { key: latchKey, isNew: newParam };
+  else if (newParam) newLatchRef.current.isNew = true;
+  const isNew = newLatchRef.current.isNew;
   const [docLoading, setDocLoading] = useState(true);
   const [title, setTitle] = useState('');
   // 4910 — «새 문서»로 막 만든 초안(?new=1): 서버엔 기본 제목(«제목 없음»)이 들어 있지만 그 글은 «진짜 글자»가 아니라 자리 표시여야 한다(쓰면 뒤에 붙던 결함).
@@ -169,8 +180,16 @@ export default function DocSlugPage() {
       const res = await fetchWithAuth(`/api/docs?project_id=${projectId}&slug=${slug}`, { cache: 'no-store' });
       if (!res.ok) {
         // 4910 ② — 임시 주소(`untitled-…`)에 `?new=1`로 왔는데 문서가 없으면(404) 서버에 아직 안 만든 «새 문서 초안»이다(오류가 아님). 그 밖의 404는 아래 옛 회복 그대로(목록으로).
-        if (res.status === 404 && isNew && isUntitledSlug(slug)) {
-          setDraft({ slug, parentId: new URLSearchParams(window.location.search).get('parent') || null });
+        // 들어올 때의 판정은 «지금 주소의 ?new=1»(newParam)로 한다 — 래치(isNew)는 화면에 있는 문서에 딸린 표시지 주소 판정이 아니다.
+        if (res.status === 404 && newParam && isUntitledSlug(slug)) {
+          if (draftEnteredForSlugRef.current === slug) return; // 같은 초안의 재조회 — 쓴 글 · 만든 문서 상태를 건드리지 않는다
+          draftEnteredForSlugRef.current = slug;
+          // 같은 컴포넌트가 앞서 다른 문서(또는 다른 초안)를 보였다면 그 상태를 비우고 새 초안으로 — 안 비우면 isDraft가 거짓인 채 옛 문서의 저장 길을 타고 옛 글이 새 초안처럼 보인다.
+          setSelectedDoc(null);
+          setTitle(''); setContent(''); setContentFormat('markdown'); setSlugLocked(false);
+          setTitleUntouched(true); titleTouchedRef.current = false; slugRetriesRef.current = 0;
+          setAdopt(null);
+          setDraft({ slug, parentId: parentParam });
           return;
         }
         // prod P0(2026-07-14) — 이전엔 setSelectedDoc(null)만 하고 끝나 이 슬러그가 현재
@@ -190,6 +209,8 @@ export default function DocSlugPage() {
         router.replace(docsListUrl(wsSlug, projSlug));
         return;
       }
+      draftEnteredForSlugRef.current = null;
+      setDraft(null);
       setSelectedDoc(data);
       setTitle(data.title ?? '');
       setContent(data.content ?? '');
@@ -204,7 +225,7 @@ export default function DocSlugPage() {
     } finally {
       setDocLoading(false);
     }
-  }, [projectId, slug, router, wsSlug, projSlug, isNew]);
+  }, [projectId, slug, router, wsSlug, projSlug, newParam, parentParam]);
 
   useEffect(() => { void fetchDoc(); }, [fetchDoc]);
 

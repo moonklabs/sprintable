@@ -17,6 +17,7 @@ const { routerMock, paramsMock } = vi.hoisted(() => ({
 vi.mock('next/navigation', () => ({
   useParams: () => paramsMock,
   useRouter: () => routerMock,
+  useSearchParams: () => new URLSearchParams(window.location.search),
 }));
 vi.mock('@/hooks/use-synthetic-parent-tab-history', () => ({
   useSyntheticParentTabHistory: () => {},
