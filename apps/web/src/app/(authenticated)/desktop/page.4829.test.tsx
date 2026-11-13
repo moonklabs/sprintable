@@ -20,8 +20,14 @@ async function cardsWith(embedded: string | undefined): Promise<unknown[]> {
   if (embedded === undefined) delete process.env.SPRINTABLE_EMBEDDED; else process.env.SPRINTABLE_EMBEDDED = embedded;
   vi.resetModules();
   const { default: DesktopPage } = await import('./page');
-  return componentTypes(DesktopPage());
+  return componentTypes(frameOf(DesktopPage()).props.children);
 }
+// 4913: the page is the top-bar title + the frame (PageFrame) — the cards live inside the frame
+function frameOf(page: unknown): { props: { children?: unknown; width?: string } } {
+  const [, frame] = (page as { props: { children: unknown[] } }).props.children;
+  return frame as { props: { children?: unknown; width?: string } };
+}
+
 // story 4889: the page is one composition (head · two columns · devices) — read its function components in document order, whatever DOM wrappers hold them
 function componentTypes(node: unknown): unknown[] {
   if (Array.isArray(node)) return node.flatMap(componentTypes);

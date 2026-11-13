@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useFormatter, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ds/card';
+import { DesktopEmptyState } from '@/components/desktop/desktop-empty-state';
 import { fetchWithAuth } from '@/lib/db/client';
 import { deviceDateOptions } from '@/lib/desktop-devices';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
@@ -138,12 +139,9 @@ export function DesktopRemoteDevices() {
         <p className="text-xs text-muted-foreground">{t('orgOff', { org: orgName })}</p>
       ) : null}
       {phones.length === 0 ? (
-        <>
-          <p className="text-sm text-muted-foreground">{t('empty')}</p>
-          {/* story 4645 AC7: the web cannot open the app's pairing window — say where it is. Only when the org's remote control is known on: off or not yet
-              known, the tail names no pairing (PO · Yuna 19:00Z · design CHANGES) */}
-          {remoteControlOn === true ? <p className="text-xs text-muted-foreground">{t('pairHint')}</p> : null}
-        </>
+        // story 4645 AC7: the web cannot open the app's pairing window — say where it is. Only when the org's remote control is known on: off or not yet known, the tail names no pairing (PO · Yuna 19:00Z · design CHANGES)
+        // 4913: the same dashed empty shape as «연결된 기기» (one empty shape on the screen)
+        <DesktopEmptyState title={t('empty')} testId="desktop-remote-devices-empty">{remoteControlOn === true ? t('pairHint') : null}</DesktopEmptyState>
       ) : (
         <Card className="p-0">
         <ul className="flex flex-col divide-y divide-border">

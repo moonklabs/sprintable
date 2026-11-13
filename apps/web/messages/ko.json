@@ -7250,7 +7250,7 @@
     "rowDetailAdsSpendLabel": "광고비"
   },
   "desktop": {
-    "pageTitle": "이 컴퓨터와 폰",
+    "pageTitle": "데스크톱 앱",
     "pageNote": "앱을 열고 받는 일, 폰으로 원격 제어하는 일, 연결된 기기를 보는 일을 한 화면에 모았어요.",
     "phoneRelayLocal": {
       "title": "폰으로 다루기는 호스팅 모드에서 쓸 수 있어요",

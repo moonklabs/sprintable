@@ -35,8 +35,8 @@ describe('/desktop 화면 카드는 내용 칸 층(LAYER.panel)이다 (4913)', (
   it('⭐page.tsx가 그리는 부품이 위 목록과 같다 — 새 카드 부품이 층 시험 밖에 서지 못한다', () => {
     const page = readFileSync(join(__dirname, '../../app/(authenticated)/desktop/page.tsx'), 'utf8');
     const used = [...page.matchAll(/from '@\/components\/desktop\/([a-z-]+)'/g)].map((m) => `${m[1]}.tsx`);
-    // DesktopPageHead는 카드가 아니라 머리다
-    const cards = used.filter((f) => f !== 'desktop-page-head.tsx').sort();
+    // DesktopPageHead는 카드가 아니라 머리 · DesktopScreenTitle은 위 막대 제목(4913)
+    const cards = used.filter((f) => f !== 'desktop-page-head.tsx' && f !== 'desktop-screen-title.tsx').sort();
     expect(cards).toEqual([...PAGE_CARDS].sort());
   });
 });

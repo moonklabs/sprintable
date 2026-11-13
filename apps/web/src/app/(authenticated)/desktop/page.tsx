@@ -1,7 +1,9 @@
 import { redirect } from 'next/navigation';
 import { DesktopDevices } from '@/components/desktop/desktop-devices';
 import { DesktopDownloadCard } from '@/components/desktop/desktop-download-card';
+import { PageFrame } from '@/components/ds/page-frame';
 import { DesktopPageHead } from '@/components/desktop/desktop-page-head';
+import { DesktopScreenTitle } from '@/components/desktop/desktop-screen-title';
 import { DesktopOpenAppCard } from '@/components/desktop/desktop-open-app-card';
 import { DesktopRemoteControlCard } from '@/components/desktop/desktop-remote-control-card';
 import { DesktopRemoteDevices } from '@/components/desktop/desktop-remote-devices';
@@ -44,27 +46,31 @@ export default function DesktopPage() {
   // story 4889 (W7~W10): the screen is one composition — a head, two columns (left: the app on this Mac · right: the phone), then the connected computers across the full width.
   // Each card keeps its own condition (a card that says nothing draws nothing), so the columns are plain stacks.
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-4 p-6">
-      <DesktopPageHead />
-      <div className="grid items-start gap-4 lg:grid-cols-2" data-testid="desktop-columns">
-        <div className="min-w-0 space-y-4 empty:hidden" data-testid="desktop-col-app">
-          {/* story #4763 AC5: «앱 열기» first on a Mac, the download right under it */}
-          <DesktopOpenAppCard />
-          <DesktopDownloadCard />
+    <>
+      {/* 4913: the title is on the app frame's top bar (the org-screen frame rule), the body starts with the note */}
+      <DesktopScreenTitle />
+      <PageFrame width="wide">
+        <DesktopPageHead />
+        <div className="grid items-start gap-4 lg:grid-cols-2" data-testid="desktop-columns">
+          <div className="min-w-0 space-y-4 empty:hidden" data-testid="desktop-col-app">
+            {/* story #4763 AC5: «앱 열기» first on a Mac, the download right under it */}
+            <DesktopOpenAppCard />
+            <DesktopDownloadCard />
+          </div>
+          <div className="min-w-0 space-y-4 empty:hidden" data-testid="desktop-col-phone">
+            {/* story 4829: local mode has no phone relay — the three phone cards are one line of guidance */}
+            {local ? <PhoneRelayLocalNotice /> : null}
+            {/* story #4535 — the org's «원격 제어» (an owner switches it; everyone else reads its state) */}
+            {local ? null : <DesktopRemoteControlCard />}
+            {/* story #4533 — «원격 기기»: my phones as pairs, [빼기] only (the web never pairs) */}
+            {local ? null : <DesktopRemoteDevices />}
+            {/* story #4733 — «세션 관리»: end and start the sessions of a paired computer from the phone app (nothing outside the phone app) */}
+            {local ? null : <PhoneSessionManagement />}
+          </div>
         </div>
-        <div className="min-w-0 space-y-4 empty:hidden" data-testid="desktop-col-phone">
-          {/* story 4829: local mode has no phone relay — the three phone cards are one line of guidance */}
-          {local ? <PhoneRelayLocalNotice /> : null}
-          {/* story #4535 — the org's «원격 제어» (an owner switches it; everyone else reads its state) */}
-          {local ? null : <DesktopRemoteControlCard />}
-          {/* story #4533 — «원격 기기»: my phones as pairs, [빼기] only (the web never pairs) */}
-          {local ? null : <DesktopRemoteDevices />}
-          {/* story #4733 — «세션 관리»: end and start the sessions of a paired computer from the phone app (nothing outside the phone app) */}
-          {local ? null : <PhoneSessionManagement />}
-        </div>
-      </div>
-      {/* story #4424 — «연결된 기기» (org owner/admin only; nothing for a member) · story 4832: a local install has one computer — nothing to list or disconnect */}
-      {local ? null : <DesktopDevices />}
-    </div>
+        {/* story #4424 — «연결된 기기» (org owner/admin only; nothing for a member) · story 4832: a local install has one computer — nothing to list or disconnect */}
+        {local ? null : <DesktopDevices />}
+      </PageFrame>
+    </>
   );
 }

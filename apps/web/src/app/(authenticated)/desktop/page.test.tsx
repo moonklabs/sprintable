@@ -26,6 +26,12 @@ function componentTypes(node: unknown): unknown[] {
   return componentTypes(el.props?.children);
 }
 
+// 4913: the page is the top-bar title + the frame (PageFrame) — the cards live inside the frame
+function frameOf(page: unknown): { props: { children?: unknown; width?: string } } {
+  const [, frame] = (page as { props: { children: unknown[] } }).props.children;
+  return frame as { props: { children?: unknown; width?: string } };
+}
+
 let originalEnvValue: string | undefined;
 
 beforeEach(() => {
@@ -54,7 +60,7 @@ describe('DesktopPage — story #4012 서버 게이트', () => {
     expect(redirectMock).not.toHaveBeenCalled();
     // story #4763 AC5 — «앱 열기» first, the download right under it
     // story #4535 — «원격 제어» between the two (Yuna 09:24Z) · story #4533 — «원격 기기» right under the switch · story #4733 — «세션 관리» (phone app only) before «연결된 기기»
-    expect(componentTypes(DesktopPage())).toEqual([DesktopPageHead, DesktopOpenAppCard, DesktopDownloadCard, DesktopRemoteControlCard, DesktopRemoteDevices, PhoneSessionManagement, DesktopDevices]);
+    expect(componentTypes(frameOf(DesktopPage()).props.children)).toEqual([DesktopPageHead, DesktopOpenAppCard, DesktopDownloadCard, DesktopRemoteControlCard, DesktopRemoteDevices, PhoneSessionManagement, DesktopDevices]);
   });
 
   it('DESKTOP_DOWNLOAD_ENABLED=false → /org-briefing으로 redirect(카드 렌더 없음)', async () => {

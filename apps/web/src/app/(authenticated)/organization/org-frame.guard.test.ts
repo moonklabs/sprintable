@@ -16,6 +16,7 @@ const MOVED = [
   'organization/channels/page.tsx', 'organization/events/page.tsx', 'content/page.tsx', 'organization/insights-board/page.tsx',
   'channel/page.tsx', // 4913 · 채널(채팅 흐름) — PageFrame stream
   'content/channel-posts/page.tsx',
+  'desktop/page.tsx', // 4913 — «데스크톱 앱» 화면(제목은 위 막대 · 본문 h1 금지)
 ];
 /** 옮긴 화면의 라우트 로딩 폴더(= FLAT_ROUTE_TOP_BAR 키) — rewards는 표에 이미 있던 키. */
 const MOVED_LOADING = ['organization/roles', 'organization/trust', 'organization/content-rules', 'organization/generation-connectors', 'rewards', 'organization/channels', 'organization/events', 'content', 'organization/insights-board', 'channel', 'content/channel-posts'];
@@ -57,11 +58,29 @@ describe('조직 화면 한 쪽 틀 가드(4913)', () => {
     it(`⭐G3 ${rel} — 모든 분기가 «제목 + 틀»을 쌍으로 그린다(권한 없음 · 로딩 분기에서 제목이 사라지던 길 막음)`, () => {
       const c = code(rel);
       const frames = c.match(/<(?:PageFrame|OrgScreenLoading)\b/g) ?? [];
-      const pairs = c.match(/<OrgScreenTitle\b[^>]*>[\s\S]*?<\/OrgScreenTitle>\s*<(?:PageFrame|OrgScreenLoading)\b/g) ?? [];
+      // 제목 = OrgScreenTitle 또는 그것을 감싼 화면 제목 컴포넌트(서버 page가 글을 못 쥘 때 — /desktop의 DesktopScreenTitle: 안에서 OrgScreenTitle을 그린다 · 아래 «감싼 제목» 시험이 그것을 못박는다)
+      const pairs = c.match(/<(?:OrgScreenTitle\b[^>]*>[\s\S]*?<\/OrgScreenTitle>|DesktopScreenTitle \/>)\s*<(?:PageFrame|OrgScreenLoading)\b/g) ?? [];
       expect(frames.length).toBeGreaterThanOrEqual(1);
       expect(pairs.length).toBe(frames.length);
     });
   }
+
+  describe('4913 /desktop — 제목이 위 막대로 갔다(본문에 제목 없음)', () => {
+    const COMP = join(APP, '..', '..', 'components/desktop');
+    it('⭐머리 컴포넌트에 <h1> 없음(설명 줄만) — 되돌려 h1을 다시 그리면 RED', () => {
+      const c = readFileSync(join(COMP, 'desktop-page-head.tsx'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+      expect(c).not.toMatch(/<h[1-6][\s>]/);
+      expect(c).toMatch(/pageNote/);
+    });
+    it('⭐감싼 제목은 OrgScreenTitle(= 위 막대 슬롯)로 «사이드바와 같은 이름(desktop.pageTitle)»을 그린다', () => {
+      const c = readFileSync(join(COMP, 'desktop-screen-title.tsx'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+      expect(c).toMatch(/<OrgScreenTitle>\{t\('pageTitle'\)\}<\/OrgScreenTitle>/);
+      expect(c).not.toMatch(/<h[1-6][\s>]/);
+    });
+    it('⭐화면은 제목 컴포넌트를 PageFrame 앞에 그린다', () => {
+      expect(code('desktop/page.tsx')).toMatch(/<DesktopScreenTitle \/>\s*<PageFrame width="wide">/);
+    });
+  });
 
   describe('G6 라우트 로딩(loading.tsx) — 옮긴 화면의 로딩도 같은 틀 + 위 막대 제목 폴백(codex 검수 4913A)', () => {
     for (const dir of MOVED_LOADING) {
