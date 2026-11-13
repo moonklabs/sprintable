@@ -70,6 +70,9 @@ interface Loop {
   updated_at: string;
 }
 
+/** 키 이름은 번역 대상이 아니다(키보드에 새겨진 글자). */
+const KEY_ENTER = 'Enter';
+
 const STATUS_FILTERS: (LoopStatus | 'all')[] = [
   'all', 'draft', 'briefing', 'generating', 'deciding', 'executing', 'measuring', 'closed', 'abandoned',
 ];
@@ -78,14 +81,10 @@ const STATUS_FILTERS: (LoopStatus | 'all')[] = [
  * 4911 — «전체»일 때만 상태 필드로 세 구획에 묶는다(새 호출 0 · 같은 한 번의 목록 응답). 특정 단계를 고르면 구획 없이 평평한 한 목록이다(걸러 보는 길이 «단계» 하나뿐).
  * 결정이 필요한 것(deciding) 먼저 · 진행 중(초안 · 브리핑 · 생성 중 · 실행 중 · 측정 중) · 끝난 것(종료 · 중단).
  */
-const SECTIONS = [
-  { id: 'decide', titleKey: 'sectionNeedsDecision' },
-  { id: 'progress', titleKey: 'sectionInProgress' },
-  { id: 'finished', titleKey: 'sectionFinished' },
-] as const satisfies ReadonlyArray<{ id: string; titleKey: 'sectionNeedsDecision' | 'sectionInProgress' | 'sectionFinished' }>;
+const SECTIONS = ['decide', 'progress', 'finished'] as const;
 
 /** 구획 소속은 «결정 중 / 끝남 / 그 밖 전부»다 — 이 화면이 아직 모르는 새 상태도 «전체»에서 사라지지 않고 진행 중에 선다. */
-export function loopSectionOf(status: string): (typeof SECTIONS)[number]['id'] {
+export function loopSectionOf(status: string): (typeof SECTIONS)[number] {
   if (status === 'deciding') return 'decide';
   if (status === 'closed' || status === 'abandoned') return 'finished';
   return 'progress';
@@ -207,6 +206,7 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
   }
 
   const grouped = statusFilter === 'all';
+  const sectionTitle = (id: (typeof SECTIONS)[number]) => (id === 'decide' ? t('sectionNeedsDecision') : id === 'progress' ? t('sectionInProgress') : t('sectionFinished'));
   const filterLabel = t('filterLabel');
 
   return (
@@ -238,7 +238,7 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
           trailing={loops.length > 0 ? (
             <span className="flex items-center gap-3 text-ds-small text-ds-ink-3" data-testid="loops-count-line">
               <span>{t('countLine', { count: loops.length })}</span>
-              <span className="flex items-center gap-1 max-lg:hidden"><Kbd>↑</Kbd><Kbd>↓</Kbd> {t('hintMove')} · <Kbd>Enter</Kbd> {t('hintOpen')}</span>
+              <span className="flex items-center gap-1 max-lg:hidden"><Kbd>↑</Kbd><Kbd>↓</Kbd> {t('hintMove')} · <Kbd>{KEY_ENTER}</Kbd> {t('hintOpen')}</span>
             </span>
           ) : undefined}
         />
@@ -273,10 +273,10 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
         ) : null}
 
         {loops.length > 0 && grouped ? SECTIONS.map((section) => {
-          const rows = loops.filter((l) => loopSectionOf(l.status) === section.id);
+          const rows = loops.filter((l) => loopSectionOf(l.status) === section);
           if (rows.length === 0) return null;
           return (
-            <RowList key={section.id} aria-label={t(section.titleKey)} data-testid={`loops-section-${section.id}`} header={{ title: t(section.titleKey), count: <CountBadge count={rows.length} />, level: 2 }}>
+            <RowList key={section} aria-label={sectionTitle(section)} data-testid={`loops-section-${section}`} header={{ title: sectionTitle(section), count: <CountBadge count={rows.length} />, level: 2 }}>
               {rows.map((loop) => <LoopRow key={loop.id} loop={loop} onOpen={() => openLoop(loop.id)} />)}
             </RowList>
           );
