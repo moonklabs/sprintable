@@ -187,6 +187,24 @@ describe('StoryCard 컨텍스트 메뉴 — 4908 상태 칩 한 줄(예전 «상
     for (const c of chips()) expect(c.className.split(/\s+/), c.textContent ?? '').toContain('touch:min-h-11');
   });
 
+  it('⭐상태만 있는 메뉴(수정 · 담당 · 삭제 콜백 없음)를 열면 첫 칩으로 초점이 간다 — 키보드 사용자가 바로 칩을 오간다', () => {
+    renderCard({ onEdit: undefined, onAssign: undefined, onDelete: undefined });
+    openViaContextMenu();
+    expect(document.body.querySelectorAll('[role="menu"] [role="menuitem"]').length).toBe(0);
+    expect(document.activeElement).toBe(chips()[0]);
+  });
+
+  it('⭐메뉴 높이 계산에 칩 줄이 들어간다 — 화면 아래쪽 우클릭이어도 마지막 칩이 뷰포트 밖으로 안 나간다', () => {
+    renderCard();
+    const card = getCard();
+    act(() => {
+      card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 100, clientY: window.innerHeight - 5 }));
+    });
+    const menu = document.body.querySelector('[role="menu"]') as HTMLElement;
+    // 항목 4(수정 · 상태 줄 · 담당자 · 삭제) × 36 + 칩 줄이 더 차지하는 140 + 안쪽 8 + 여백 8
+    expect(parseFloat(menu.style.top)).toBe(window.innerHeight - (4 * 36 + 140 + 8) - 8);
+  });
+
   it('⭐지금 상태 칩만 aria-checked=true + ✓ 표시 — 색만으로 알리지 않는다', () => {
     renderCard();
     openViaContextMenu();

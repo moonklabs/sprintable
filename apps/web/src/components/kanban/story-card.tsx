@@ -43,8 +43,10 @@ function clampToViewport(x: number): number {
 const MENU_ITEM_HEIGHT = 36;
 // 4908 — 새로 더한 메뉴 항목(이름 바꾸기 · 담당자)은 날것 단추 태그가 아니라 디자인 Button(ghost)을 메뉴 항목 모양으로 쓴다(가드 verify:no-new-raw-button).
 const MENU_ITEM_BUTTON = 'h-auto min-h-0 min-w-0 w-full justify-start rounded-sm px-3 py-2 text-left text-sm font-normal whitespace-normal hover:bg-muted';
-function clampTopToViewport(y: number, itemCount: number): number {
-  return Math.max(VIEWPORT_MARGIN, Math.min(y, window.innerHeight - (itemCount * MENU_ITEM_HEIGHT + 8) - VIEWPORT_MARGIN));
+// 4908 — 상태 칩 줄은 칩이 줄바꿈되고(폭 192 안에서 2~3줄) 폰에서는 칩이 44px 높이라 항목 하나(36px)로 셀 수 없다: 이름 줄 20 + 최대 3줄 × (44 + 간격 4) + 안쪽 여백 12 = 176px를 한 덩어리로 잡는다(넉넉한 쪽). 항목 수에는 1로 세고(⋯ 단추 유무도 이 수), 모자란 140px를 더한다.
+const STATUS_ROW_EXTRA_HEIGHT = 176 - MENU_ITEM_HEIGHT;
+function clampTopToViewport(y: number, itemCount: number, extraPx = 0): number {
+  return Math.max(VIEWPORT_MARGIN, Math.min(y, window.innerHeight - (itemCount * MENU_ITEM_HEIGHT + extraPx + 8) - VIEWPORT_MARGIN));
 }
 
 // E-MODERN A: 에픽 식별 dot — 기존 시맨틱 토큰만(신규 토큰/raw 팔레트 0). 신호색(warning=blocked·
@@ -192,7 +194,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     && (lineBadge === 'handoff_stuck' || lineBadge === 'waiting_human' || lineBadge === 'pending_gate');
   // 메뉴에 항목이 하나도 없는 카드(에픽 스윔레인 — 조작 콜백을 안 받는다)는 «⋯» 버튼도 없다(빈 메뉴가 열리는 것을 막는다).
   const assignViaSubmenu = !!onToggleAssignee && assignableMembers.length > 0;
-  const menuItemCount = (onEdit ? 1 : 0) + (onRename ? 1 : 0) + (onChangeStatus && !locked ? 2 : 0) + (assignViaSubmenu || onAssign ? 1 : 0) + (projectId ? 1 : 0) + (onDelete ? 1 : 0);
+  const menuItemCount = (onEdit ? 1 : 0) + (onRename ? 1 : 0) + (onChangeStatus && !locked ? 1 : 0) + (assignViaSubmenu || onAssign ? 1 : 0) + (projectId ? 1 : 0) + (onDelete ? 1 : 0);
+  const statusRowPx = onChangeStatus && !locked ? STATUS_ROW_EXTRA_HEIGHT : 0;
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   // story #2416 — native confirm() 대체.
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -329,7 +332,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
   // 진입). 포털이 이 effect보다 먼저 커밋되므로 querySelector 시점엔 이미 DOM에 있다.
   useEffect(() => {
     if (!contextMenuOpen) return;
-    const first = menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]');
+    const first = menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"], [role="menuitemradio"]');
     first?.focus();
   }, [contextMenuOpen]);
 
@@ -377,9 +380,9 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     e.stopPropagation();
     // 우클릭/롱프레스 지점(뷰포트 좌표)을 그대로 앵커로 쓰고 뷰포트 폭 안으로 clamp — 카드가
     // 어디 있든(가로스크롤로 화면 밖까지 걸쳐 있어도) 메뉴는 항상 화면 안에서 뜬다.
-    setMenuPos({ top: clampTopToViewport(e.clientY, menuItemCount), left: clampToViewport(e.clientX) });
+    setMenuPos({ top: clampTopToViewport(e.clientY, menuItemCount, statusRowPx), left: clampToViewport(e.clientX) });
     setContextMenuOpen(true);
-  }, [menuItemCount]);
+  }, [menuItemCount, statusRowPx]);
 
   // ── 4908 제목 바로 바꾸기(더블클릭 · F2 · 메뉴 «이름 바꾸기») ─────────────────────────────────────────────
   const startRename = useCallback(() => {
@@ -422,7 +425,7 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
       e.preventDefault();
       const rect = cardRef.current?.getBoundingClientRect();
       if (rect) {
-        setMenuPos({ top: clampTopToViewport(rect.bottom, menuItemCount), left: clampToViewport(rect.left) });
+        setMenuPos({ top: clampTopToViewport(rect.bottom, menuItemCount, statusRowPx), left: clampToViewport(rect.left) });
       }
       setContextMenuOpen(true);
       return;
@@ -447,15 +450,15 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
     // 카드 «안쪽»에서 올라온 키(포털 메뉴 항목의 Space · 안쪽 단추)는 끌기로 넘기지 않는다 — 메뉴 항목을 Space로 누르다 끌기가 시작되면 안 된다.
     if (e.target !== e.currentTarget) return;
     dndOnKeyDown?.(e);
-  }, [dndOnKeyDown, menuItemCount, onRename, startRename, editing, locked, onClick, isDragging]);
+  }, [dndOnKeyDown, menuItemCount, statusRowPx, onRename, startRename, editing, locked, onClick, isDragging]);
 
   // 4908 — 카드 «⋯» 버튼: 카드 안 어디서나 같은 메뉴를 연다(우클릭과 같은 메뉴 · 앵커만 버튼 아래).
   const openMenuFromButton = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     const rect = e.currentTarget.getBoundingClientRect();
-    setMenuPos({ top: clampTopToViewport(rect.bottom, menuItemCount), left: clampToViewport(rect.left) });
+    setMenuPos({ top: clampTopToViewport(rect.bottom, menuItemCount, statusRowPx), left: clampToViewport(rect.left) });
     setContextMenuOpen(true);
-  }, [menuItemCount]);
+  }, [menuItemCount, statusRowPx]);
 
   // story #3664 — 메뉴/서브메뉴 컨테이너 공용 키보드 순회(위/아래 화살표로 role="menuitem"
   // 사이 이동, wrap). Enter/Space는 네이티브 <button> 활성화로 이미 동작해 별도 처리 0.
