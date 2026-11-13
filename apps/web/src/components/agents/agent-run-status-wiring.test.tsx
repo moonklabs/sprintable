@@ -87,10 +87,10 @@ describe('agent-run-status 카탈로그 배선(story #3689) — list·detail 공
     await act(async () => { root.render(wrap(<AgentRunsList />)); });
     await flush();
 
-    const badge = [...container.querySelectorAll('span, div')].find((el) => el.textContent === koMessages.agentRuns.status_abandoned);
+    // story 4911: the list's status face is the ds Chip (data-tone); it reads the catalog's variant — the mocked abandoned = info → the chip's «info» tone (the real catalog says warning → «needs-hand»)
+    const badge = [...container.querySelectorAll('[data-slot="ds-chip"]')].find((el) => el.textContent === koMessages.agentRuns.status_abandoned);
     expect(badge).toBeDefined();
-    expect(badge?.className).toContain('bg-info-tint');
-    expect(badge?.className).not.toContain('bg-warning-tint');
+    expect(badge?.getAttribute('data-tone')).toBe('info');
   });
 
   it('AgentRunDetail이 카탈로그의 abandoned 변이를 그대로 배지 클래스에 반영한다', async () => {

@@ -10,6 +10,7 @@ import { ASSET_CARD_FACE, ASSET_CARD_WELL } from '../components/storage/storage-
 import { ARTIFACT_CARD_FACE, ARTIFACT_CARD_WELL, ARTIFACT_PANEL } from '../components/canvas/artifact-gallery-view';
 import { HYPOTHESES_FACE, HYPOTHESIS_BAND_FACE } from '../components/hypotheses/hypotheses-face';
 import { GOALS_FRAME_FACE } from '../app/(authenticated)/[ws]/[proj]/goals/goals-layer';
+import { AGENT_RUNS_PANEL_FACE, AGENT_RUNS_ROW_FACE } from '../components/agents/agent-runs-list';
 
 const css = readFileSync(join(__dirname, 'design-system.css'), 'utf8');
 
@@ -239,3 +240,16 @@ describe('화면 층 규칙 — 바탕(page) 위 말풍선 · 입력칸 (4916)',
   });
 });
 
+
+// 4911 (UI-R3) — «실행 기록» 목록: 그룹(먼저 볼 것 · 진행 중 · 끝난 것)은 바탕 위 내용 칸, 한 행은 그 칸 위의 글 줄 면. 옛 화면은 행마다 카드+테두리를 같은 면에 깔아 면이 갈리지 않았다.
+describe('실행 기록 목록(4911) — 바탕 → 그룹 칸 → 행', () => {
+  it('그룹 칸은 내용 칸 층 · 행은 글 줄 층이다(토큰 이름)', () => {
+    expect(AGENT_RUNS_PANEL_FACE).toBe(LAYER.panel);
+    expect(AGENT_RUNS_ROW_FACE).toBe(LAYER.rowOthers);
+    expect(AGENT_RUNS_PANEL_FACE).not.toBe(AGENT_RUNS_ROW_FACE);
+  });
+  it.each(themes)('⭐%s: 바탕 → 그룹 칸 ≥ 문턱 · 그룹 칸 → 행 ≥ 문턱', (_name, t) => {
+    expect(step(t, 'page', 'panel')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.panelOverPage);
+    expect(step(t, 'panel', 'rowOthers')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPanel);
+  });
+});
