@@ -8,6 +8,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { Check, ChevronDown, LayoutGrid, LayoutList, Search, Workflow, Plus } from 'lucide-react';
 import { DndContext, DragEndEvent, KeyboardSensor, PointerSensor, useSensor, useSensors, DragOverlay, closestCenter } from '@dnd-kit/core';
 import { KEYBOARD_SENSOR_OPTIONS, buildDndAccessibility, useKeyboardDropRefocus } from './board-dnd';
+import { HeadFilterFold, useHeadFold } from './board-head-fold';
 import { Button } from '@/components/ui/button';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -85,7 +86,8 @@ interface KanbanBoardProps {
 }
 
 // story #4888 — 보드 머리 줄의 틀(불러오는 동안의 자리 표시와 실제 머리가 같은 틀이라 칩이 안 흔들린다)
-const BOARD_HEAD_CLASS = 'focus-inset flex min-h-11 flex-shrink-0 flex-nowrap items-center gap-2 overflow-x-auto border-b border-border/80 px-4 py-1.5 lg:flex-wrap lg:overflow-visible';
+// story #4923 — 낮은 창(높이 ≤ 520 · 맥 앱 작은 창 1100×420)에서 머리 높이 44 → 약 38(줄 하나 34 + 위아래 여백 4). 줄이 넘칠 때 거르기를 «거르기 · n» 단추 하나로 접는 것은 높이가 아니라 머리 폭 몫이다(board-head-fold.tsx).
+const BOARD_HEAD_CLASS = 'focus-inset flex min-h-11 flex-shrink-0 flex-nowrap items-center gap-2 overflow-x-auto border-b border-border/80 px-4 py-1.5 [@media(max-height:520px)]:min-h-9 [@media(max-height:520px)]:py-0.5 lg:flex-wrap lg:overflow-visible';
 
 // WIP limit localStorage 키
 function wipLimitKey(projectId: string | undefined, status: string): string {
@@ -1496,6 +1498,11 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
   };
   const dndAccessibility = buildDndAccessibility(t, dndTitleOf, dndPlaceOf);
 
+  // story #4923 — 보드 머리가 한 줄에 안 들어가면 거르기 묶음이 «거르기 · n» 단추 + 팝오버로 접힌다(lg 이상 · 폭 기준). n = 적용 중인 거르기 수(종류 탭 · 스프린트 · 목표 · 담당자 · 라벨 — 하나씩).
+  const headRef = useRef<HTMLDivElement>(null);
+  const activeFilterCount = (assigneeTypeFilter ? 1 : 0) + (selectedSprintId ? 1 : 0) + (selectedEpicId ? 1 : 0) + (selectedAssigneeId ? 1 : 0) + (selectedLabelIds.length > 0 ? 1 : 0);
+  const headFolded = useHeadFold(headRef, `${loading && !hasLoadedOnce}|${orgLabels.length}|${excludedCount}|${showSearch}|${viewMode}`);
+
   // story #4307(유나 확정) — 전면 스켈레톤은 첫 불러오기만. 다시 불러오는 동안은 툴바 · 필터 버튼이 남고 컬럼(목록) 자리만 같은 스켈레톤 부품 +
   // aria-busy(툴바엔 안 검). 도중에 또 바꾸면 마지막 조건 응답만 반영된다(fetchData의 runId · stale 판정).
   // story #4888 — 첫 불러오는 동안에도 렌즈 칩(headLead)은 머리 줄 자리에 선다: 칩이 잠깐 사라졌다 나타나지 않고(링크 · 렌즈 이동이 끊기지 않고), 줄 틀이 같아 아래가 밀리지 않는다.
@@ -1509,6 +1516,17 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
     );
   }
   const refetching = loading && hasLoadedOnce;
+
+  // story #2187 — is_excluded 카드가 조용히 사라지면 "삭제 대상" 카드의 존재 자체를 아무도 모르게 된다(만든 쪽도 못 치우는데 아무도 안 보면 영영 안 놓인다) — 그래서 숨긴 수를 항상 보이는 어포던스로 남긴다.
+  // 4923 — 거르기 묶음이 접혀도 이 글은 접히지 않는다(HeadFilterFold의 excluded 자리).
+  const excludedBadge = excludedCount > 0 ? (
+    <span
+      title={t('excludedCountTitle')}
+      className="ml-1 rounded-md px-2 py-1 text-editorial-meta font-medium text-muted-foreground"
+    >
+      {t('excludedCountBadge', { count: excludedCount })}
+    </span>
+  ) : null;
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -1532,15 +1550,22 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
 
       {/* Board header — story #4888(보드 머리 통째): 렌즈 칩(headLead) + 필터 + 검색 · 보기 전환이 **한 줄**이다. 넓은 화면(lg)은 모자라면 줄바꿈, 폰은 줄바꿈 없이 가로로 미는 한 줄
           (예전엔 폰에서 3줄로 접혀 113px · 첫 카드가 화면의 74% 아래). 눌리는 것은 터치에서 44. */}
-      <div data-testid="board-head" className={BOARD_HEAD_CLASS}>
+      <div ref={headRef} data-testid="board-head" className={BOARD_HEAD_CLASS}>
         {headLead ? (
           <>
             {headLead}
             <div className="h-5 w-px shrink-0 bg-border/80" aria-hidden="true" />
           </>
         ) : null}
-        {/* Left: assignee type tabs + filter chips */}
-        <div className="flex shrink-0 items-center gap-1 lg:flex-wrap">
+        {/* Left: assignee type tabs + filter chips — 한 줄에 안 들어가면 «거르기 · n» 단추 + 팝오버로 접힌다(4923): 안의 조작은 펼친 줄과 팝오버가 같은 요소다 */}
+        <HeadFilterFold
+          folded={headFolded}
+          count={activeFilterCount}
+          label={t('filterFoldLabel')}
+          labelActive={t('filterFoldLabelActive', { count: activeFilterCount })}
+          popoverLabel={t('filterFoldPopoverLabel')}
+          excluded={excludedBadge}
+        >
           {([
             { id: '' as const, label: t('filterAll') },
             { id: 'human' as const, label: t('filterMembers') },
@@ -1826,18 +1851,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
             </DropdownMenu>
           )}
 
-          {/* story #2187 — is_excluded 카드가 조용히 사라지면 "삭제 대상" 카드의 존재 자체를
-              아무도 모르게 된다(만든 쪽도 못 치우는데 아무도 안 보면 영영 안 놓인다) — 그래서
-              숨긴 수를 항상 보이는 어포던스로 남긴다. */}
-          {excludedCount > 0 && (
-            <span
-              title={t('excludedCountTitle')}
-              className="ml-1 rounded-md px-2 py-1 text-editorial-meta font-medium text-muted-foreground"
-            >
-              {t('excludedCountBadge', { count: excludedCount })}
-            </span>
-          )}
-        </div>
+        </HeadFilterFold>
 
         {/* Right: search + view toggle */}
         <div className="ml-auto flex shrink-0 items-center gap-1">
