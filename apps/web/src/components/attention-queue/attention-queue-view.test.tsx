@@ -151,65 +151,129 @@ describe('AttentionQueueView — typeBadge 배선 (story #2923 AQ2)', () => {
   });
 });
 
-// story #3010(로드맵 P3, L5 대비) — kicker/empty body는 text-proof-faint(라이트 대비 미달)
-// 대신 text-proof-ink-3.
-describe('AttentionQueueView — 로드맵 P3 L5(faint 텍스트 대비 정정)', () => {
-  it('kicker가 text-proof-ink-3를 쓰고 text-proof-faint는 안 쓴다', async () => {
+// story #3010(로드맵 P3, L5 대비) — the faint-text contrast rule lives on in the ds parts (4909 AC3 3단계): the empty body uses the quiet ds ink (text-ds-ink-3), never a «faint» colour; the old proof kicker is gone with the proof panel.
+describe('AttentionQueueView — 로드맵 P3 L5(faint 텍스트 대비 정정) · ds 부품', () => {
+  it('머리는 ds SectionHeader(h2 = 지금 개입할 것)이고 옛 proof 면 · kicker · faint 글자는 하나도 안 남는다', async () => {
     await mount(mockGatePendingOnly());
-    const kicker = [...container.querySelectorAll('div')].find((d) => d.className.includes('uppercase') && d.className.includes('tracking-[0.12em]'));
-    expect(kicker?.className).toContain('text-proof-ink-3');
-    expect(container.querySelector('.text-proof-faint')).toBeNull();
+    const header = container.querySelector('[data-slot="ds-section-header"]');
+    expect(header).toBeTruthy();
+    expect(header!.querySelector('h2')?.textContent).toContain('지금 개입할 것');
+    expect(container.querySelector('[class*="proof-"]')).toBeNull(); // not one proof token class on the screen
+    expect(container.querySelector('.uppercase')).toBeNull();
+    expect(header!.querySelector('h2')?.textContent).toContain('홈'); // the kicker word is kept (muted), not dropped
   });
 
-  it('빈 상태 empty body가 text-proof-ink-3를 쓰고 text-proof-faint는 안 쓴다', async () => {
+  it('빈 상태 empty body가 조용한 ds 잉크(text-ds-ink-3)를 쓴다', async () => {
     await mount(async (url: string) => {
       if (url.includes('/api/glance/attention')) return { ok: true, json: async () => ({ data: { items: [] } }) };
       return { ok: true, json: async () => ({ data: [] }) };
     });
-    const emptyBody = [...container.querySelectorAll('p')].find((p) => p.className.includes('text-xs'));
-    expect(emptyBody?.className).toContain('text-proof-ink-3');
-    expect(container.querySelector('.text-proof-faint')).toBeNull();
+    const emptyBody = [...container.querySelectorAll('p')].find((p) => p.textContent?.includes('모든 작업이 흐르고 있어요'));
+    expect(emptyBody?.className).toContain('text-ds-ink-3');
+    expect(container.querySelector('[class*="proof-"]')).toBeNull();
   });
 });
 
-// story #3010(로드맵 P3, L6, 유나 판정 2026-08-24) — 섹션 주 제목 h2는 font-editorial-heading
-// (820 weight)로, 크기는 글자 눈금의 lg(18px) (story 4831: 눈금에 없는 19px에서).
-describe('AttentionQueueView — 로드맵 P3 L6(섹션 제목 editorial weight)', () => {
-  it('h2가 font-editorial-heading을 쓰고 글자 눈금의 lg(18px)를 쓴다', async () => {
+// story #3010(로드맵 P3, L6) — the section title is ONE heading (single mount), now the ds SectionHeader's title (text-ds-card-title · semibold), not a hand-rolled editorial h2.
+describe('AttentionQueueView — 로드맵 P3 L6(섹션 제목) · ds SectionHeader', () => {
+  it('섹션 제목은 h2 하나이고 ds 카드 제목 글자를 쓴다', async () => {
     await mount(mockGatePendingOnly());
-    const h2 = container.querySelector('h2');
-    expect(h2?.className).toContain('font-editorial-heading');
-    expect(h2?.className).toContain('text-lg'); // story 4831: 19px는 눈금에 없어 18px(lg)로
-    expect(h2?.className).not.toContain('font-extrabold');
+    expect(container.querySelectorAll('h2')).toHaveLength(1);
+    const title = container.querySelector('h2 [class*="text-ds-card-title"]');
+    expect(title?.className).toContain('text-ds-card-title');
+    expect(title?.className).toContain('font-semibold');
+  });
+  it('건수 글은 «{N}건 · 로그 안 열고 판단» 그대로 머리 오른쪽에 있다(수 규칙 그대로 — 7로 자른 수)', async () => {
+    await mount(async (url: string) => (url.includes('/api/glance/attention')
+      ? { ok: true, json: async () => ({ data: { items: manySignals(9) } }) } : { ok: true, json: async () => ({ data: [] }) }));
+    expect(container.querySelector('[data-slot="ds-section-header"]')?.textContent).toContain('7건 · 로그 안 열고 판단');
   });
 });
 
-// story #3052(2984-S4) — "최근 변경" highlighted 행은 fill(bg-proof-citron/15 wash) 대신
-// 헤어라인 좌측 액센트(border-l-proof-citron)를 쓴다. 색 신호(citron) 자체는 KEEP.
-describe('AttentionRow — story #3052 헤어라인 액센트(citron fill 폐지)', () => {
+// story #3052(2984-S4) — "최근 변경" highlighted rows use a left-edge accent (no fill wash); 4909 AC3 3단계: the same rule on the ds row — a left bar in the action colour, nothing painted over the row.
+describe('AttentionRow — story #3052 왼쪽 막대(배경 채움 폐지) · ds ListRow', () => {
   const item: AttentionQueueItem = {
     id: 'a1', kind: 'decision_needed', bucket: 'GATE', kindLabel: '게이트',
     proofState: 'amber', claim: '테스트 항목', actor: null,
     actionLabel: '검토', actionTone: 'primary', href: '/board?story=s1',
     enteredStateAtMs: null, sortKey: 0,
   };
+  const rowEl = () => container.querySelector('[data-testid="attention-row"]');
 
-  it('highlighted=true면 border-l-proof-citron을 쓰고 bg-proof-citron 채움은 안 쓴다', async () => {
-    await act(async () => {
-      root.render(wrap(<AttentionRow item={item} highlighted onNavigate={() => {}} />));
-    });
-    const row = container.querySelector('[role="button"]');
-    expect(row?.className).toContain('border-l-proof-citron');
-    expect(row?.className).not.toContain('bg-proof-citron');
+  it('highlighted=true면 border-l-ds-action을 쓰고 배경 채움은 안 쓴다', async () => {
+    await act(async () => { root.render(wrap(<AttentionRow item={item} highlighted onNavigate={() => {}} />)); });
+    expect(rowEl()?.className).toContain('border-l-ds-action');
+    expect(rowEl()?.className).not.toMatch(/(^|\s)bg-ds-action/);
   });
 
   it('highlighted=false면 border-l-transparent만 쓴다', async () => {
-    await act(async () => {
-      root.render(wrap(<AttentionRow item={item} highlighted={false} onNavigate={() => {}} />));
-    });
-    const row = container.querySelector('[role="button"]');
-    expect(row?.className).toContain('border-l-transparent');
-    expect(row?.className).not.toContain('border-l-proof-citron');
+    await act(async () => { root.render(wrap(<AttentionRow item={item} highlighted={false} onNavigate={() => {}} />)); });
+    expect(rowEl()?.className).toContain('border-l-transparent');
+    expect(rowEl()?.className).not.toContain('border-l-ds-action');
+  });
+});
+
+// 4909 AC3 3단계 — the row is ONE real link: the old separate gate button went to the same place as the row, so it is gone; the browser's own gestures (new tab · ⌘-click) come with a real <a href>.
+describe('AttentionRow — 4909 행 하나 = 진짜 링크', () => {
+  const item: AttentionQueueItem = {
+    id: 'a1', kind: 'decision_needed', bucket: 'GATE', kindLabel: '게이트',
+    proofState: 'amber', claim: '테스트 항목', actor: null,
+    actionLabel: '검토', actionTone: 'primary', href: '/board?story=s1',
+    enteredStateAtMs: null, sortKey: 0,
+  };
+  const draw = async (it: AttentionQueueItem = item, onNavigate: (h: string) => void = (h) => pushMock(h)) => {
+    await act(async () => { root.render(wrap(<AttentionRow item={it} highlighted={false} onNavigate={onNavigate} />)); });
+  };
+  const click = async (init: MouseEventInit) => {
+    const a = container.querySelector('a')!;
+    const ev = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ...init });
+    await act(async () => { a.dispatchEvent(ev); });
+    return ev;
+  };
+
+  it('⭐행 안의 링크는 정확히 하나(진짜 <a href>)이고 단추는 없다 — 같은 곳으로 가는 두 번째 자리가 없다', async () => {
+    await draw();
+    const anchors = container.querySelectorAll('a');
+    expect(anchors).toHaveLength(1);
+    expect(anchors[0]!.getAttribute('href')).toBe('/board?story=s1');
+    expect(container.querySelector('button')).toBeNull();
+    expect(container.querySelector('[role="button"]')).toBeNull(); // not a fake button either
+    // the verb survives as the row's own words (not a control)
+    expect(container.textContent).toContain('검토');
+    expect(anchors[0]!.textContent).toBe('테스트 항목');
+  });
+
+  it('⭐일반 클릭은 앱 라우터로(push · 기본 동작 막음)', async () => {
+    await draw();
+    const ev = await click({});
+    expect(pushMock).toHaveBeenCalledWith('/board?story=s1');
+    expect(ev.defaultPrevented).toBe(true);
+  });
+
+  it.each([['⌘', { metaKey: true }], ['Ctrl', { ctrlKey: true }], ['Shift', { shiftKey: true }], ['Alt', { altKey: true }], ['가운데 단추', { button: 1 }]] as const)('⭐%s 클릭은 브라우저 기본에 맡긴다(push 0 · 기본 동작 그대로)', async (_n, init) => {
+    await draw();
+    const ev = await click(init);
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(ev.defaultPrevented).toBe(false);
+  });
+
+  it('⭐href가 없으면 행은 정적이다 — 링크도 role도 없고 눌러도 아무 데도 안 간다(없는 라우트를 지어내지 않는다)', async () => {
+    await draw({ ...item, href: null });
+    expect(container.querySelector('a')).toBeNull();
+    expect(container.querySelector('[role="button"]')).toBeNull();
+    expect(container.textContent).toContain('테스트 항목');
+    await act(async () => { container.querySelector('[data-testid="attention-row"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it('행은 «종류 칩 · 주장 한 줄 · mono 부제(종류 · 시간)»로 그려진다 — 칩은 상태 말(kindLabel) 그대로, 색은 톤으로', async () => {
+    await draw({ ...item, enteredStateAtMs: Date.now() - 3 * 3600_000 });
+    const chip = container.querySelector('[data-slot="ds-chip"]');
+    expect(chip?.textContent).toContain('게이트');
+    expect(chip?.getAttribute('data-tone')).toBe('needs-hand'); // amber
+    const sub = container.querySelector('.truncate.font-mono'); // the row's second line (the chip is font-mono too, but never truncates)
+    expect(sub?.textContent).toMatch(/^GATE · /);
+    expect(container.querySelector('[data-slot="ds-list-row"]')).toBeTruthy();
   });
 });
 
@@ -224,10 +288,10 @@ describe('AttentionQueueView — story #3099 빈 상태(모두 처리됨) 텍스
     });
     const label = [...container.querySelectorAll('div')].find((d) => d.textContent?.trim() === '안전');
     expect(label).toBeTruthy();
-    expect(label?.className).toContain('text-proof-ink');
-    expect(label?.className).not.toContain('text-proof-green');
+    expect(label?.className).toContain('text-ds-ink');
+    expect(label?.className).not.toContain('text-ds-done');
     const icon = label?.querySelector('svg');
-    expect(icon?.getAttribute('class')).toContain('text-proof-green');
+    expect(icon?.getAttribute('class')).toContain('text-ds-done');
   });
 });
 
