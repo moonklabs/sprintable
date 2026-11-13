@@ -152,4 +152,22 @@ describe('AgentApiKeyManager — 4912 D4: the other things that could hold the k
     expect(Array.from(document.querySelectorAll('textarea')).some((t) => t.value.includes(NEW_KEY))).toBe(false);
     expect(document.body.textContent).not.toContain(NEW_KEY);
   });
+
+  it('⭐읽기에 성공할 때마다 «활성 키 몇 개»를 알린다(상세 옆 칸이 쓴다) — 폐기한 키는 세지 않고, 읽기가 실패하면 알리지 않는다', async () => {
+    const calls: number[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (String(url).includes('/api-key')
+      ? new Response(JSON.stringify({ data: [
+        { id: 'k1', key_prefix: 'sk_live_a', created_at: '2026-08-01T00:00:00Z', last_used_at: null, revoked_at: null, expires_at: null, scope: ['stories'] },
+        { id: 'k2', key_prefix: 'sk_live_b', created_at: '2026-08-01T00:00:00Z', last_used_at: null, revoked_at: '2026-08-02T00:00:00Z', expires_at: null, scope: ['stories'] },
+      ] }), { status: 200 })
+      : new Response('{}', { status: 404 }))));
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages}><AgentApiKeyManager agentId="agent-1" agentName="테스트 에이전트" onKeysRead={(n) => calls.push(n)} /></NextIntlClientProvider>); });
+    await settle();
+    expect(calls).toEqual([1]); // one active, one revoked
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })));
+    await act(async () => { btn(S.agentApiKeyRefresh)?.click(); });
+    await settle();
+    expect(calls).toEqual([1]); // the failed read said nothing
+  });
 });
+

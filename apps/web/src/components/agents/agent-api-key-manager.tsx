@@ -42,6 +42,8 @@ interface AgentApiKeyManagerProps {
   /** [SID:4311 PR 3] 머리 줄에만 쓰는 목록 라벨(같은 이름 둘이면 «· ID 앞 8자» · 이름 빔 = «이름 없는 에이전트»). 에이전트에게 보내는 온보딩 문구는 agentName 그대로. */
   agentLabel?: string;
   onNewKey?: (apiKey: string, mcpConfig?: string | null) => void;
+  /** story 4912 (A2): told after every SUCCESSFUL read of the key list how many keys are active — the detail's side summary says «활성 키 있음/없음» from it (so a revoke or a re-issue is reflected, and a failed read says nothing). */
+  onKeysRead?: (activeCount: number) => void;
 }
 
 /**
@@ -53,7 +55,7 @@ export function AgentApiKeyManager(props: AgentApiKeyManagerProps) {
   return <AgentApiKeyManagerCard key={props.agentId} {...props} />;
 }
 
-function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: AgentApiKeyManagerProps) {
+function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKeysRead }: AgentApiKeyManagerProps) {
   const t = useTranslations('settings');
   const tc = useTranslations('common');
   const locale = useLocale();
@@ -131,6 +133,9 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
   // story 4889 (codex): only the LATEST read writes — an older read (the read before a re-run of the load effect · an earlier press) answering late must not set the keys, the failure line or `loading` over a newer one
   const readSeq = useRef(0);
   const refreshRef = useRef<HTMLButtonElement>(null); // this card's own [새로고침] (the API-key page holds several cards — never a global lookup)
+  // the callback lives in a ref: a parent that passes a new function every render must not re-run the load (the load effect depends on loadApiKeys)
+  const onKeysReadRef = useRef(onKeysRead);
+  useEffect(() => { onKeysReadRef.current = onKeysRead; });
   const loadApiKeys = useCallback(async () => {
     if (!agentId) return;
     const seq = ++readSeq.current;
@@ -142,6 +147,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey }: Ag
       if (seq !== readSeq.current) return;
       setApiKeys(result.data ?? []);
       setLoadFailed(false);
+      if (aliveRef.current) onKeysReadRef.current?.((result.data ?? []).filter((k) => !k.revoked_at).length);
     } catch (error) {
       console.error('[agent-api-key] load failed', error);
       if (seq !== readSeq.current) return;

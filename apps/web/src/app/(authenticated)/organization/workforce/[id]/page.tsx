@@ -23,6 +23,16 @@ import { Button as DsButton } from '@/components/ds/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ds/tabs';
 import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { EmptyState } from '@/components/ds/empty-state';
+import { Card } from '@/components/ds/card';
+import { Chip } from '@/components/ds/chip';
+import { IconButton } from '@/components/ds/icon-button';
+import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ds/menu';
+import { PageFrame } from '@/components/ds/page-frame';
+import { PageSplit } from '@/components/ds/page-split';
+import { SummaryCard } from '@/components/ds/summary-card';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
+import { AgentsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
 import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
@@ -175,6 +185,11 @@ export default function AgentDetailPage() {
     return () => { off = true; };
   }, [id]);
 
+  // story 4912 (A2): the avatar's photo card opens from the avatar (a dialog) and the deactivate goes through a confirm like the list's
+  const [avatarOpen, setAvatarOpen] = useState(false);
+  const [deactivateOpen, setDeactivateOpen] = useState(false);
+  const [togglingActive, setTogglingActive] = useState(false); // one activate / deactivate request at a time (a double press must not send two)
+  const togglingRef = useRef(false); // the same guard, read synchronously: two presses in one tick are both before the next render
   const [editingName, setEditingName] = useState(false);
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState('');
@@ -188,11 +203,15 @@ export default function AgentDetailPage() {
   // story 4889: the id the page shows NOW — a late answer for an older id is dropped (and the per-agent side state is cleared when the id changes)
   const idRef = useRef(id);
   useEffect(() => { idRef.current = id; }, [id]); // (assigned in an effect, not during render — an abandoned concurrent render must not move it; this effect is declared before the loads below, so it runs first)
+  // story 4912 (A2): the two dialogs belong to the agent they were opened for — a route change to another agent closes them (a deactivate confirm opened for A must never confirm against B)
+  useEffect(() => { setAvatarOpen(false); setDeactivateOpen(false); setTogglingActive(false); togglingRef.current = false; }, [id]);
   const [webhookActive, setWebhookActive] = useState(false);
   const [savingWebhook, setSavingWebhook] = useState(false);
 
   const [freshApiKey, setFreshApiKey] = useState<string | null>(null);
   const [hasActiveKey, setHasActiveKey] = useState(false);
+  // story 4912 (A2): the side summary says «활성 키 있음/없음» only once a key-list read really worked (a failed read is not «없음»)
+  const [keysReadOk, setKeysReadOk] = useState(false);
   const [fakechatEnvKeyCopied, setFakechatEnvKeyCopied] = useState(false);
 
   const [projects, setProjects] = useState<ProjectOption[]>([]);
@@ -270,12 +289,13 @@ export default function AgentDetailPage() {
     if (idRef.current !== forId) return;
     const active = (json.data ?? []).find((k) => !k.revoked_at);
     setHasActiveKey(!!active);
+    setKeysReadOk(true);
   }, [id]);
 
   useEffect(() => {
     let current = true; // story 4889: an older id's late answer does not end the newer id's loading
     // story 4889: the previous agent's side state (key presence · webhook · a freshly shown key) does not stay while this id is read
-    setHasActiveKey(false); setWebhookConfigs([]); setWebhookUrl(''); setFreshApiKey(null);
+    setHasActiveKey(false); setKeysReadOk(false); setWebhookConfigs([]); setWebhookUrl(''); setFreshApiKey(null);
     setLoading(true);
     Promise.all([fetchAgent(), fetchActiveApiKey(), fetchOrgContext()])
       .finally(() => { if (current) setLoading(false); });
@@ -484,12 +504,22 @@ export default function AgentDetailPage() {
   };
 
   const handleToggleActive = async () => {
+    if (togglingRef.current) return;
+    togglingRef.current = true;
     const next = !agent.is_active;
-    const res = await fetchWithAuth(`/api/team-members/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ is_active: next }),
-    });
+    const requestedFor = id;
+    setTogglingActive(true);
+    let res: Response;
+    try {
+      res = await fetchWithAuth(`/api/team-members/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: next }),
+      });
+    } finally {
+      if (idRef.current === requestedFor) { togglingRef.current = false; setTogglingActive(false); }
+    }
+    if (idRef.current !== requestedFor) return; // the page moved on to another agent while this was out: its answer is not this page's
     if (res.ok) {
       const json = await res.json() as { data: AgentMember };
       setAgent(json.data);
@@ -506,124 +536,154 @@ export default function AgentDetailPage() {
     }
   };
 
-  return (
-    <div className="w-full max-w-3xl mx-auto p-6 space-y-6">
-      <div className="flex items-center gap-3">
-        {/* story #1990: replace, 기본 push 아님 — 뒤로가기 재진입 트랩 방지(§3.2). */}
-        <Link href={flatHref('/organization/workforce?tab=manage')} replace className="text-muted-foreground hover:text-foreground transition-colors">
-          <ArrowLeft className="h-4 w-4" />
-        </Link>
-        <h1 className="text-lg font-semibold text-foreground">{t('orgAgentsTitle')}</h1>
-      </div>
+  // story 4832: one computer in the app's own server — no «지금 도는 컴퓨터» line (and no link to a device list that is not drawn there)
+  const computerLine = embedded ? null : desk?.state && desk.device_name
+    ? ta('runningOn', { name: desk.device_name, state: sessionStateLabel(desk, tSession) })
+    : desk?.bound_device_name ? ta('boundNotRunYet', { name: desk.bound_device_name }) : null;
+  const computerSetupId = desk?.setup_id ?? desk?.bound_setup_id ?? null;
+  const canManageDevices = (orgRole === 'admin' || orgRole === 'owner') && desktopPageOn;
+  const summaryItems = [
+    ...(computerLine ? [{
+      id: 'computer',
+      label: ta('detailSummaryComputer'),
+      value: (
+        <span data-testid="agent-running-on" className="flex flex-col gap-0.5">
+          <span>{computerLine}</span>
+          {canManageDevices && computerSetupId ? (
+            <Link href={flatHref(`/desktop#device=${computerSetupId}`)} className="whitespace-nowrap text-ds-small font-medium text-ds-action-text hover:underline" data-testid="agent-see-devices">
+              {ta('seeConnectedDevices')}
+            </Link>
+          ) : null}
+        </span>
+      ),
+    }] : []),
+    // the key list is read for the people who may manage keys only (canEditBase); for others «no key» would be a guess
+    ...(showKeysTab && keysReadOk ? [{ id: 'key', label: ta('detailSummaryKey'), value: hasActiveKey ? ta('detailSummaryKeyHas') : ta('detailSummaryKeyNone') }] : []),
+  ];
+  const connectorText = runtimeLabel(agent.runtime_type);
 
-      {/* 기본 정보 */}
-      <SectionCard>
-        <SectionCardHeader>
-          <div className="flex items-center justify-between gap-3 w-full">
-            {editingName ? (
-              <div className="flex flex-1 items-center gap-2">
-                <OperatorInput
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  placeholder={t('agentNamePlaceholder')}
-                  className="max-w-xs"
-                />
-                <OperatorInput
-                  value={editRole}
-                  onChange={(e) => setEditRole(e.target.value)}
-                  placeholder={t('agentRolePlaceholder')}
-                  className="max-w-32"
-                />
-                <button type="button" onClick={() => void handleSaveEdit()} disabled={savingEdit} aria-label={tc('save')} className="text-success transition hover:opacity-80 disabled:opacity-50">
-                  <Check className="h-4 w-4" />
-                </button>
-                <button type="button" onClick={() => setEditingName(false)} aria-label={tc('cancel')} className="text-muted-foreground hover:text-foreground">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            ) : (
-              <div className="flex flex-1 items-center gap-3 min-w-0">
-                <Avatar name={agent.name} avatarUrl={agent.avatar_url} actorType="agent" size={40} runtimeType={agent.runtime_type} />
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-base font-semibold text-foreground">{agent.name}</span>
-                    {!agent.is_active ? <Badge variant="destructive">{ta('statusInactive')}</Badge> : null}
-                  </div>
-                  <div className="mt-1 flex items-center gap-2">
-                    <Badge variant="secondary">{t('agentMember')}</Badge>
-                    <Badge variant="outline">{resolveRoleLabel(agent.role, null, to)}</Badge>
-                    {/* story #3092(2단계, 표면3) — 커넥터 필드. runtime_type null이면 생략
-                        (전역 폴백 규칙 — 추측·「미지정」류 문구 금지). 공식 로고는 법무
-                        사인오프 전이라 이번엔 텍스트만(로고 트랙은 후속 스코프). */}
-                    {runtimeLabel(agent.runtime_type) ? (
-                      <Badge variant="chip">{t('connectorLabel')}: {runtimeLabel(agent.runtime_type)}</Badge>
-                    ) : null}
-                    {agent.needs_restart ? (
-                      <Badge variant="warning">{ta('agentNeedsRestartBadge')}</Badge>
-                    ) : null}
-                  </div>
-                  {(() => {
-                    const runtimeLine = formatAgentRuntimeLine(agent, locale, displayTimezone, ta);
-                    return runtimeLine ? (
-                      <p className="mt-1 truncate text-xs text-muted-foreground">{runtimeLine}</p>
-                    ) : null;
-                  })()}
-                  {/* story 4675 (F2 · Yuna §I ②③): «지금 도는 컴퓨터: {name} · {state}» (the DM strip's word) · bound but never run →
-                      «{name}에 연결됨 · 아직 안 돌았어요» · neither → no line. The device row link for an org owner/admin only (the
-                      list is theirs · 4424). */}
-                  {(() => {
-                    // story 4832: one computer in the app's own server — no «지금 도는 컴퓨터» line (and no link to a device list that is not drawn there)
-                    const line = embedded ? null : desk?.state && desk.device_name
-                      ? ta('runningOn', { name: desk.device_name, state: sessionStateLabel(desk, tSession) })
-                      : desk?.bound_device_name ? ta('boundNotRunYet', { name: desk.bound_device_name }) : null;
-                    if (!line) return null;
-                    const setupId = desk?.setup_id ?? desk?.bound_setup_id ?? null;
-                    const manage = (orgRole === 'admin' || orgRole === 'owner') && desktopPageOn;
-                    return (
-                      <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 break-keep text-xs text-muted-foreground" data-testid="agent-running-on">
-                        <span>{line}</span>
-                        {manage && setupId ? (
-                          <Link href={flatHref(`/desktop#device=${setupId}`)} className="whitespace-nowrap font-medium text-primary hover:underline" data-testid="agent-see-devices">
-                            {ta('seeConnectedDevices')}
-                          </Link>
-                        ) : null}
-                      </p>
-                    );
-                  })()}
-                </div>
-                {canEdit && (
-                <button
-                  type="button"
-                  onClick={() => { setEditName(agent.name); setEditRole(agent.role); setEditingName(true); }}
-                  aria-label={tc('edit')}
-                  className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                </button>
+  return (
+    <PageFrame width="wide">
+      <TopBarSlot title={<AgentsTopBarTitle />} showContextChip />
+      {/* story #1990: replace, 기본 push 아님 — 뒤로가기 재진입 트랩 방지(§3.2). story 4912 (A2): the back link keeps its place; the big «조직 에이전트» title is gone (the top bar says the screen's name). */}
+      <Link href={flatHref('/organization/workforce?tab=manage')} replace className="inline-flex w-fit items-center gap-1.5 text-ds-small text-ds-ink-3 hover:text-ds-ink" data-testid="agent-detail-back">
+        <ArrowLeft className="h-4 w-4" />
+        {ta('title')}
+      </Link>
+
+      <PageSplit asideLabel={ta('detailSideLabel')} aside={<SummaryCard title={ta('detailSummaryTitle')} items={summaryItems} emptyText={ta('detailSummaryEmpty')} emptyLabel={ta('detailSummaryEmptyLabel')} />}>
+        <div className="flex flex-col gap-6">
+      {/* 기본 정보 — story 4912 (A2): ONE head card (avatar · name · role/connector chips · runtime line · «⋯» menu); the photo card opens from the avatar, the activate/deactivate lives in the menu */}
+      <Card data-testid="agent-detail-head" className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          {editingName ? (
+            <div className="flex flex-1 items-center gap-2">
+              <OperatorInput
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder={t('agentNamePlaceholder')}
+                className="max-w-xs"
+              />
+              <OperatorInput
+                value={editRole}
+                onChange={(e) => setEditRole(e.target.value)}
+                placeholder={t('agentRolePlaceholder')}
+                className="max-w-32"
+              />
+              <button type="button" onClick={() => void handleSaveEdit()} disabled={savingEdit} aria-label={tc('save')} className="text-success transition hover:opacity-80 disabled:opacity-50">
+                <Check className="h-4 w-4" />
+              </button>
+              <button type="button" onClick={() => setEditingName(false)} aria-label={tc('cancel')} className="text-muted-foreground hover:text-foreground">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              {canEdit ? (
+                <Button type="button" variant="ghost" onClick={() => setAvatarOpen(true)} aria-label={ta('detailAvatarChangeAria')} data-testid="agent-avatar-open" className="h-auto w-auto shrink-0 rounded-full p-0">
+                  <Avatar name={agent.name} avatarUrl={agent.avatar_url} actorType="agent" size={44} runtimeType={agent.runtime_type} />
+                </Button>
+              ) : (
+                <Avatar name={agent.name} avatarUrl={agent.avatar_url} actorType="agent" size={44} runtimeType={agent.runtime_type} />
               )}
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-ds-card-title font-semibold text-ds-ink">{agent.name}</span>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => { setEditName(agent.name); setEditRole(agent.role); setEditingName(true); }}
+                      aria-label={tc('edit')}
+                      className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  {!agent.is_active ? <Chip>{ta('statusInactive')}</Chip> : null}
+                  <Chip>{t('agentMember')}</Chip>
+                  <Chip>{resolveRoleLabel(agent.role, null, to)}</Chip>
+                  {/* story #3092(2단계, 표면3) — 커넥터 필드. runtime_type null이면 생략
+                      (전역 폴백 규칙 — 추측·「미지정」류 문구 금지). 공식 로고는 법무
+                      사인오프 전이라 이번엔 텍스트만(로고 트랙은 후속 스코프). */}
+                  {connectorText ? <Chip>{t('connectorLabel')}: {connectorText}</Chip> : null}
+                  {agent.needs_restart ? <Chip tone="needs-hand">{ta('agentNeedsRestartBadge')}</Chip> : null}
+                </div>
+                {(() => {
+                  const runtimeLine = formatAgentRuntimeLine(agent, locale, displayTimezone, ta);
+                  return runtimeLine ? (
+                    <p className="mt-1 truncate text-ds-small text-ds-ink-3">{runtimeLine}</p>
+                  ) : null;
+                })()}
               </div>
-            )}
-          </div>
-        </SectionCardHeader>
-        {canEdit && (
-          <SectionCardBody className="space-y-4">
-            <AvatarEditCard
-              memberId={agent.id}
-              name={agent.name}
-              avatarUrl={agent.avatar_url ?? null}
-              actorType="agent"
-              onUpdated={(url) => setAgent((prev) => (prev ? { ...prev, avatar_url: url } : prev))}
-            />
-            <Button
-              variant="glass"
-              size="sm"
-              onClick={() => void handleToggleActive()}
-            >
-              {agent.is_active ? t('deactivateAgent') : t('activateAgent')}
-            </Button>
-          </SectionCardBody>
-        )}
-      </SectionCard>
+            </div>
+          )}
+          {canEdit && !editingName ? (
+            <Menu>
+              <MenuTrigger render={<IconButton icon="more_horiz" label={ta('detailActionsAria')} data-testid="agent-detail-actions" />} />
+              <MenuContent align="end">
+                {agent.is_active ? (
+                  <MenuItem variant="danger" icon="block" disabled={togglingActive} onClick={() => setDeactivateOpen(true)}>{t('deactivateAgent')}</MenuItem>
+                ) : (
+                  <MenuItem icon="check_circle" disabled={togglingActive} onClick={() => void handleToggleActive()}>{t('activateAgent')}</MenuItem>
+                )}
+              </MenuContent>
+            </Menu>
+          ) : null}
+        </div>
+      </Card>
+
+      {/* the photo card, opened from the avatar (it used to sit under the head card all the time) */}
+      <Dialog open={avatarOpen} onOpenChange={setAvatarOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{ta('detailAvatarChangeAria')}</DialogTitle>
+            <DialogDescription className="sr-only">{ta('detailAvatarChangeAria')}</DialogDescription>
+          </DialogHeader>
+          <AvatarEditCard
+            memberId={agent.id}
+            name={agent.name}
+            avatarUrl={agent.avatar_url ?? null}
+            actorType="agent"
+            onUpdated={(url) => setAgent((prev) => (prev ? { ...prev, avatar_url: url } : prev))}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* story #2406 AC1 (the list's rule, here too — PO 11-12 «같은 행동 · 같은 보호»): deactivating asks first (the 2026-08-01 incident: a wrong press switched a real account off); activating is immediate */}
+      <Dialog open={deactivateOpen} onOpenChange={setDeactivateOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('deactivateAgentDialogTitle', { name: agent.name })}</DialogTitle>
+            <DialogDescription>{t('deactivateAgentDialogBody')}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDeactivateOpen(false)}>{tc('cancel')}</Button>
+            <Button variant="destructive" disabled={togglingActive} onClick={() => { setDeactivateOpen(false); void handleToggleActive(); }}>{t('deactivateAgentDialogConfirm')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* story 4889 (UI-6 · W2, AC3 §2) — the one long scroll became four panels under a ds Tabs strip: 실행 환경 · 키 · 알림/메시징 · 접근. Every section stays (nothing removed · no new behaviour);
           panels stay MOUNTED (keepMounted) so a section's own state and loads are not lost when you switch. A tab whose sections are all hidden for this viewer/agent is not offered. */}
@@ -808,6 +868,7 @@ export default function AgentDetailPage() {
               agentId={id}
               agentName={agent.name}
               onNewKey={(key) => { setFreshApiKey(key); setHasActiveKey(true); }}
+              onKeysRead={(n) => { setHasActiveKey(n > 0); setKeysReadOk(true); }}
             />
           )
         )}
@@ -918,6 +979,8 @@ export default function AgentDetailPage() {
         />
         </TabsContent>
       </Tabs>
-    </div>
+        </div>
+      </PageSplit>
+    </PageFrame>
   );
 }

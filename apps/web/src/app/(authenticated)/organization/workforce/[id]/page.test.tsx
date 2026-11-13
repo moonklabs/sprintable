@@ -11,6 +11,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../../messages/ko.json';
 
+// story 4912 (A2) — the head now sets the top bar title; the top bar itself is not under test here
+vi.mock('@/components/nav/top-bar-slot', () => ({ TopBarSlot: () => null }));
+
 // story #3519 harness gotcha — useRouter가 매 렌더 새 객체를 반환하면 fetchAgent의
 // useCallback identity가 매번 바뀌어 로드 useEffect가 무한 재실행된다(story 4889 前 fetchAgent가
 // [id, router] 의존이었다 — 지금은 [id]뿐). router mock은 그래도 안정 참조로 고정해 둔다.
@@ -25,8 +28,10 @@ vi.mock('next/navigation', () => ({
   useRouter: () => routerMock,
 }));
 
+// story 4912 (A2): the stub keeps the props the page passes it, so a test can play the manager's «keys read» callback
+const { managerProps } = vi.hoisted(() => ({ managerProps: { current: null as null | { onKeysRead?: (n: number) => void } } }));
 vi.mock('@/components/agents/agent-api-key-manager', () => ({
-  AgentApiKeyManager: () => <div data-testid="stub-agent-api-key-manager" />,
+  AgentApiKeyManager: (props: { onKeysRead?: (n: number) => void }) => { managerProps.current = props; return <div data-testid="stub-agent-api-key-manager" />; },
 }));
 vi.mock('@/components/agents/agent-connection-settings-section', () => ({
   AgentConnectionSettingsSection: () => <div data-testid="stub-agent-connection-settings-section" />,
@@ -157,10 +162,12 @@ describe('AgentDetailPage — 시스템 발행 키 관리 숨김(story #3994 CHA
     await mount();
     expect(container.querySelector('[data-testid="stub-agent-api-key-manager"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="stub-agent-connection-settings-section"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="stub-avatar-edit-card"]')).not.toBeNull();
+    // story 4912 (A2): the photo card opens from the avatar (a dialog) — the avatar is the door, the card is behind it
+    expect(container.querySelector('[data-testid="agent-avatar-open"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="stub-messaging-policy-section"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="project-access-projects-count"]')?.getAttribute('data-can-edit')).toBe('true');
-    expect([...container.querySelectorAll('button')].some((b) => b.textContent === '비활성화' || b.textContent === '활성화')).toBe(true);
+    // story 4912 (A2): activate / deactivate is an item of the head's «⋯» menu now
+    expect(container.querySelector('[data-testid="agent-detail-actions"]')).not.toBeNull();
     // 「저장」 버튼 2개(런타임+webhook) — 시스템 발행이면 런타임 쪽은 읽기전용 분기라
     // 통째로 안 그려져 1개(webhook)만 남는다(아래 짝 테스트와 대칭 비교).
     expect([...container.querySelectorAll('button')].filter((b) => b.textContent === '저장').length).toBe(2);
@@ -457,7 +464,8 @@ describe('AgentDetailPage — 네 구역 탭(story 4889 · W2)', () => {
     expect(panelOf('stub-messaging-policy-section')).toBe('알림 · 메시징');
     expect(panelOf('project-access-projects-count')).toBe('접근');
     // the header card is above the panels (state · name · avatar stay on every panel)
-    expect(container.querySelector('[data-testid="stub-avatar-edit-card"]')?.closest('[role="tabpanel"]')).toBeNull();
+    expect(container.querySelector('[data-testid="agent-avatar-open"]')?.closest('[role="tabpanel"]')).toBeNull();
+    expect(container.querySelector('[data-testid="agent-detail-head"]')?.closest('[role="tabpanel"]')).toBeNull();
   });
 
   it('⭐구역 탭을 누르면 그 칸이 보이고(나머지는 숨김 · 마운트는 유지) 선택이 바뀐다', async () => {
@@ -496,3 +504,170 @@ describe('AgentDetailPage — 불러오는 중(story 4889)', () => {
     expect(container.querySelector('.animate-pulse.bg-muted')).toBeNull();
   });
 });
+
+// story 4912 (A2) — the detail HEAD: one head card (avatar door · name · chips · «⋯» menu), the photo card behind the avatar, deactivate asks first (the list's rule), a read-only side summary,
+// the back link kept, and no big «조직 에이전트» title (the top bar names the screen).
+describe('AgentDetailPage — 상세 머리(story 4912 · A2)', () => {
+  const patches: Array<{ url: string; body: string }> = [];
+  function stubWithPatch(agent: Record<string, unknown> = {}, extra?: (url: string) => unknown) {
+    patches.length = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (typeof url !== 'string') return { ok: false, json: async () => null };
+      if (url === '/api/team-members/agent-1' && init?.method === 'PATCH') {
+        patches.push({ url, body: String(init.body) });
+        return { ok: true, json: async () => ({ data: { ...AGENT, ...agent, ...JSON.parse(String(init.body)) } }) };
+      }
+      if (url === '/api/team-members/agent-1') return { ok: true, json: async () => ({ data: { ...AGENT, ...agent } }) };
+      if (url === '/api/team-members/agent-2') return { ok: true, json: async () => ({ data: { ...AGENT, ...agent, id: 'agent-2', name: '에이전트2' } }) };
+      if (url.startsWith('/api/agents/') && url.endsWith('/api-key')) return { ok: true, json: async () => ({ data: [{ id: 'k1', key_prefix: 'sk_live_ab', created_at: '2026-08-01T00:00:00Z', last_used_at: null, revoked_at: null }] }) };
+      if (url.startsWith('/api/agents/') && url.endsWith('/desktop-session')) {
+        const v = extra?.(url);
+        return { ok: true, json: async () => v ?? null };
+      }
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { user_id: 'u1', role: 'admin' } }) };
+      if (url.startsWith('/api/webhooks/config')) return { ok: true, json: async () => ({ data: [] }) };
+      return { ok: false, json: async () => null };
+    }));
+  }
+  const items = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+  const openMenu = async () => { await act(async () => { (container.querySelector('[data-testid="agent-detail-actions"]') as HTMLElement).click(); }); };
+  const settle = () => act(async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); });
+
+  it('⭐머리 한 상자: 이름 · 칩(역할 · 커넥터) · 뒤로 링크 · 위 막대가 이름을 말하므로 큰 «조직 에이전트» 제목은 없다', async () => {
+    stubWithPatch();
+    await mount();
+    const head = container.querySelector('[data-testid="agent-detail-head"]')!;
+    expect(head.textContent).toContain('에이전트1');
+    expect(head.querySelectorAll('[data-slot="ds-chip"]').length).toBeGreaterThanOrEqual(2);
+    expect(container.querySelector('[data-testid="agent-detail-back"]')?.getAttribute('href')).toContain('/organization/workforce?tab=manage');
+    expect(container.querySelector('h1')).toBeNull();
+    expect(container.textContent).not.toContain(koMessages.settings.orgAgentsTitle);
+  });
+
+  it('⭐아바타를 누르면 사진 카드가 창으로 열린다(전엔 머리 아래에 늘 있었다) — 누르기 前엔 안 그려진다', async () => {
+    stubWithPatch();
+    await mount();
+    expect(document.querySelector('[data-testid="stub-avatar-edit-card"]')).toBeNull();
+    await act(async () => { (container.querySelector('[data-testid="agent-avatar-open"]') as HTMLElement).click(); });
+    await settle();
+    expect(document.querySelector('[data-testid="stub-avatar-edit-card"]')).not.toBeNull();
+  });
+
+  it('⭐머리 «⋯» 메뉴의 «비활성화»는 확인창부터 연다 — 요청은 [비활성화]를 누를 때까지 안 나가고, 확인하면 PATCH {is_active:false}(목록과 같은 보호)', async () => {
+    stubWithPatch();
+    await mount();
+    await openMenu();
+    expect(items().map((i) => i.textContent)).toEqual([koMessages.settings.deactivateAgent]);
+    await act(async () => { items()[0]!.click(); });
+    await settle();
+    expect(document.body.textContent).toContain(koMessages.settings.deactivateAgentDialogBody);
+    expect(patches).toHaveLength(0);
+    const confirm = [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === koMessages.settings.deactivateAgentDialogConfirm)!;
+    await act(async () => { confirm.click(); });
+    await settle();
+    expect(patches).toHaveLength(1);
+    expect(JSON.parse(patches[0]!.body)).toEqual({ is_active: false });
+  });
+
+  it('⭐비활성 에이전트는 «활성화»가 바로 간다(확인창 없음 · 되돌릴 수 있는 방향)', async () => {
+    stubWithPatch({ is_active: false });
+    await mount();
+    await openMenu();
+    expect(items().map((i) => i.textContent)).toEqual([koMessages.settings.activateAgent]);
+    await act(async () => { items()[0]!.click(); });
+    await settle();
+    expect(patches).toHaveLength(1);
+    expect(JSON.parse(patches[0]!.body)).toEqual({ is_active: true });
+    expect(document.body.textContent).not.toContain(koMessages.settings.deactivateAgentDialogBody);
+  });
+
+  it('⭐옆 요약 칸(읽기만): 컴퓨터 줄은 «지금 도는 컴퓨터»가 옮겨 온 자리 · 활성 키 있음 — 머리 카드 안에는 그 줄이 없다', async () => {
+    stubWithPatch({}, () => ({ setup_id: 's1', device_name: '스튜디오 맥', state: 'running', activity: 'working' }));
+    await mount();
+    const side = container.querySelector('[data-slot="ds-page-split-aside"]')!;
+    expect(side.querySelector('[data-testid="agent-running-on"]')?.textContent).toContain('스튜디오 맥');
+    expect(container.querySelector('[data-testid="agent-detail-head"] [data-testid="agent-running-on"]')).toBeNull();
+    expect(side.textContent).toContain(koMessages.agents.detailSummaryKey);
+    expect(side.textContent).toContain(koMessages.agents.detailSummaryKeyHas);
+    expect(side.querySelector('button, a[href]:not([data-testid="agent-see-devices"])')).toBeNull(); // read-only: nothing to press in it
+  });
+
+  it('⭐「시스템 발행」: 아바타 문 · «⋯» 메뉴가 없다(읽기 전용)', async () => {
+    stubWithPatch({ runtime_type: 'system-publisher', name: '시스템 발행' });
+    await mount();
+    expect(container.querySelector('[data-testid="agent-avatar-open"]')).toBeNull();
+    expect(container.querySelector('[data-testid="agent-detail-actions"]')).toBeNull();
+  });
+
+  it('⭐창 상태는 그 에이전트 것이다 — 비활성화 확인창을 연 채 다른 에이전트로 이동하면 닫힌다(A에서 연 확인이 B를 비활성화하지 않는다)', async () => {
+    stubWithPatch();
+    await mount();
+    await openMenu();
+    await act(async () => { items()[0]!.click(); });
+    await settle();
+    expect(document.body.textContent).toContain(koMessages.settings.deactivateAgentDialogBody);
+    paramId.current = 'agent-2';
+    await act(async () => { const { default: Page } = await import('./page'); root.render(wrap(<Page />)); });
+    await settle();
+    await settle();
+    expect(container.querySelector('[data-testid="agent-detail-head"]')?.textContent).toContain('에이전트2'); // the OTHER agent is on screen now (read answered) — and the dialog is not
+    expect(document.body.textContent).not.toContain(koMessages.settings.deactivateAgentDialogBody);
+    expect(patches).toHaveLength(0);
+  });
+
+  it('⭐비활성화를 두 번 눌러도 PATCH는 한 번만 나간다(확인 단추 · «활성화» 항목 모두 진행 중엔 눌리지 않는다)', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    patches.length = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (typeof url !== 'string') return { ok: false, json: async () => null };
+      if (url === '/api/team-members/agent-1' && init?.method === 'PATCH') { patches.push({ url, body: String(init.body) }); await gate; return { ok: true, json: async () => ({ data: { ...AGENT, is_active: false } }) }; }
+      if (url === '/api/team-members/agent-1') return { ok: true, json: async () => ({ data: AGENT }) };
+      if (url.startsWith('/api/agents/') && url.endsWith('/api-key')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { user_id: 'u1', role: 'admin' } }) };
+      if (url.startsWith('/api/webhooks/config')) return { ok: true, json: async () => ({ data: [] }) };
+      return { ok: false, json: async () => null };
+    }));
+    await mount();
+    await openMenu();
+    await act(async () => { items()[0]!.click(); });
+    await settle();
+    const confirm = [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === koMessages.settings.deactivateAgentDialogConfirm)!;
+    await act(async () => { confirm.click(); confirm.click(); });
+    await settle();
+    expect(patches).toHaveLength(1); // the second press did not send another one
+    await act(async () => { release(); });
+    await settle();
+  });
+
+  it('⭐옆 칸 «활성 키»: 키 목록 읽기가 실패하면 «없음»이라 말하지 않는다(줄 자체가 없다) — 읽기가 되면 있음/없음', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (typeof url !== 'string') return { ok: false, json: async () => null };
+      if (url === '/api/team-members/agent-1') return { ok: true, json: async () => ({ data: AGENT }) };
+      if (url.startsWith('/api/agents/') && url.endsWith('/api-key')) return { ok: false, json: async () => null }; // the key read FAILS
+      if (url === '/api/projects') return { ok: true, json: async () => ({ data: [] }) };
+      if (url === '/api/me') return { ok: true, json: async () => ({ data: { user_id: 'u1', role: 'admin' } }) };
+      if (url.startsWith('/api/webhooks/config')) return { ok: true, json: async () => ({ data: [] }) };
+      return { ok: false, json: async () => null };
+    }));
+    await mount();
+    const side = container.querySelector('[data-slot="ds-page-split-aside"]')!;
+    expect(side.textContent).not.toContain(koMessages.agents.detailSummaryKey);
+    expect(side.textContent).not.toContain(koMessages.agents.detailSummaryKeyNone);
+  });
+
+  it('⭐마지막 키를 무효화하면(키 관리자가 «읽었더니 활성 0»을 알리면) 옆 칸이 «없음»으로 바뀐다 · 다시 발급해 1이 되면 «있음»', async () => {
+    stubWithPatch(); // the key list read answers one active key → «있음»
+    await mount();
+    const side = () => container.querySelector('[data-slot="ds-page-split-aside"]')!.textContent ?? '';
+    expect(side()).toContain(koMessages.agents.detailSummaryKeyHas);
+    await act(async () => { managerProps.current?.onKeysRead?.(0); });
+    expect(side()).toContain(koMessages.agents.detailSummaryKeyNone);
+    expect(side()).not.toContain(koMessages.agents.detailSummaryKeyHas);
+    await act(async () => { managerProps.current?.onKeysRead?.(1); });
+    expect(side()).toContain(koMessages.agents.detailSummaryKeyHas);
+  });
+});
+
