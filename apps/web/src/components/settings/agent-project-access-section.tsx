@@ -171,16 +171,12 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
                   density="compact"
                   title={project.name}
                   trailing={errored ? (
-                    <Button
-                      variant="quiet"
-                      onClick={() => void loadGrants()}
-                      className="text-ds-failed"
-                      role="alert"
-                      aria-live="assertive"
-                      aria-atomic="true"
-                    >
-                      {t('loadFailedRetry')}
-                    </Button>
+                    // story 4912 (C2c, codex round 2): role=alert on the <button> itself displaced its button role; the alert is the wrapper (announced at once, atomic) and the button keeps being a button
+                    <span role="alert" aria-atomic="true" className="inline-flex">
+                      <Button variant="quiet" onClick={() => void loadGrants()} className="text-ds-failed">
+                        {t('loadFailedRetry')}
+                      </Button>
+                    </span>
                   ) : readDenied ? (
                     <span className="inline-flex shrink-0 items-center gap-1 text-ds-small text-ds-ink-3" title={t('readAccessDeniedTooltip')}>
                       {t('readAccessDenied')}

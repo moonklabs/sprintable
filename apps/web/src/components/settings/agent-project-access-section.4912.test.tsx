@@ -63,7 +63,9 @@ describe('AgentProjectAccessSection — ds 한 층(story 4912 · C2c)', () => {
     expect(rowOf('감마').textContent).toContain(S.readAccessDenied);
     const retry = rowOf('델타').querySelector('button') as HTMLButtonElement;
     expect(retry.textContent).toBe(S.loadFailedRetry);
-    expect(retry.getAttribute('role')).toBe('alert');
+    // the alert is the WRAPPER; the button itself keeps its own button role (role=alert on a <button> displaced it — codex round 2)
+    expect(retry.hasAttribute('role')).toBe(false);
+    expect(retry.closest('[role="alert"]')).not.toBeNull();
   });
 
   it('⭐읽기만 하는 사람(canEdit 아님)은 단추가 아니라 글만 본다(허용 · 차단)', async () => {
