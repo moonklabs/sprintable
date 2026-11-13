@@ -1374,31 +1374,52 @@ describe('ApprovalsQueue — story #3113 결정 게이트(agent_decision_request
     expect(container.textContent).toContain('#g-decisi');
   });
 
-  it('AC2 — 펼치기 전엔 assumption·options가 안 보이고, 펼치면 전문이 뜬다', async () => {
+  // 4909 (PO 11-13 · 3113's meaning: «the full question · assumption · options are in front of the person BEFORE approving»): a request WITH options opens expanded in the detail column — no press to read it. The fold stays: «접기» hides it, «펼치기» brings it back.
+  const toggleBtn = (label: string) => Array.from(scope().querySelectorAll('button')).find((b) => b.textContent === label) as HTMLButtonElement | undefined;
+  it('⭐AC2 — a request with options opens EXPANDED (assumption · options readable at once, no press); «접기» hides them and «펼치기» brings them back', async () => {
     mockFetches([decisionGate()], []);
     await mount();
-    expect(container.textContent).not.toContain('PO 권고=A');
-    expect(container.textContent).not.toContain('A) Organization');
+    expect(scope().textContent).toContain('PO 권고=A');
+    expect(scope().textContent).toContain('A) Organization');
+    expect(scope().textContent).toContain('B) Individual');
+    expect(scope().textContent).toContain('C) 보류');
+    expect(toggleBtn(koMessages.cage.decisionExpand)).toBeUndefined(); // it offers the fold, not the expand
+    expect(toggleBtn(koMessages.cage.decisionCollapse)?.getAttribute('aria-expanded')).toBe('true');
 
-    const expandBtn = Array.from(scope().querySelectorAll('button')).find(
-      (b) => b.textContent === koMessages.cage.decisionExpand,
-    );
-    expect(expandBtn).toBeTruthy();
-    await act(async () => { expandBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await act(async () => { toggleBtn(koMessages.cage.decisionCollapse)!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(scope().textContent).not.toContain('PO 권고=A');
+    expect(scope().textContent).not.toContain('A) Organization');
+    expect(toggleBtn(koMessages.cage.decisionExpand)?.getAttribute('aria-expanded')).toBe('false');
 
-    expect(container.textContent).toContain('PO 권고=A');
-    expect(container.textContent).toContain('A) Organization');
-    expect(container.textContent).toContain('B) Individual');
-    expect(container.textContent).toContain('C) 보류');
+    await act(async () => { toggleBtn(koMessages.cage.decisionExpand)!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(scope().textContent).toContain('PO 권고=A');
+    expect(scope().textContent).toContain('C) 보류');
+  });
+
+  it('⭐opened expanded does NOT open the way to approve: with the options in front, approve stays OFF (with its hint) until one is chosen', async () => {
+    mockFetches([decisionGate()], []);
+    await mount();
+    expect(scope().textContent).toContain('A) Organization'); // expanded from the start
+    const approveBtn = Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    expect(approveBtn.disabled).toBe(true);
+    expect(scope().textContent).toContain(koMessages.cage.decisionSelectHint);
+    const radios = [...scope().querySelectorAll('[role="radio"]')];
+    expect(radios.every((r) => r.getAttribute('aria-checked') === 'false')).toBe(true); // never chosen in advance
+    await act(async () => { radios[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect((Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('a decision request WITHOUT options keeps the old start (folded) — the fold is toggled open as before', async () => {
+    mockFetches([decisionGate({ neutral_facts: { question: '옵션 없는 질문이에요?', assumption: '전제 문장이에요' } as GateItem['neutral_facts'] })], []);
+    await mount();
+    expect(scope().textContent).not.toContain('전제 문장이에요');
+    await act(async () => { toggleBtn(koMessages.cage.decisionExpand)!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(scope().textContent).toContain('전제 문장이에요');
   });
 
   it('AC3 — options가 있으면 안을 고르기 전엔 승인 버튼이 비활성이다', async () => {
     mockFetches([decisionGate()], []);
     await mount();
-    const expandBtn = Array.from(scope().querySelectorAll('button')).find(
-      (b) => b.textContent === koMessages.cage.decisionExpand,
-    );
-    await act(async () => { expandBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     const approveBtn = Array.from(scope().querySelectorAll('button')).find(
       (b) => b.textContent?.includes(koMessages.cage.gateApprove),
@@ -1410,10 +1431,6 @@ describe('ApprovalsQueue — story #3113 결정 게이트(agent_decision_request
   it('AC3 — 안을 고르면 승인 버튼이 활성화되고, 승인 시 선택안이 note로 전송·영구 기록된다', async () => {
     const calls = mockFetches([decisionGate()], []);
     await mount();
-    const expandBtn = Array.from(scope().querySelectorAll('button')).find(
-      (b) => b.textContent === koMessages.cage.decisionExpand,
-    );
-    await act(async () => { expandBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     const radios = Array.from(container.querySelectorAll('[role="radio"]'));
     expect(radios).toHaveLength(3);
@@ -1656,8 +1673,6 @@ describe('ApprovalsQueue — 4909 (라) the signature dialog approval carries th
     });
   };
   async function chooseOptionAndOpenDialog(index: number) {
-    const expandBtn = [...scope().querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.decisionExpand);
-    await act(async () => { expandBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const radios = [...container.querySelectorAll('[role="radio"]')];
     await act(async () => { radios[index]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const sign = [...scope().querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.sigApproveAndSign);
@@ -1722,8 +1737,6 @@ describe('ApprovalsQueue — 4909 (라) the signature dialog approval carries th
     await mount();
     // the detail column shows one request: choose B on the first (picked on open), pick the second row and choose C there — each gate keeps its own choice
     const chooseOption = async (index: number) => {
-      const expandBtn = [...scope().querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.decisionExpand);
-      await act(async () => { expandBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
       const radios = [...scope().querySelectorAll('[role="radio"]')];
       expect(radios).toHaveLength(3);
       await act(async () => { radios[index]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
@@ -1802,8 +1815,6 @@ describe('ApprovalsQueue — 4909 AC3 the list + detail screen', () => {
   it('⭐an option is NEVER chosen in advance: the first decision request opens «not chosen yet», every option unchecked and approve off with its hint', async () => {
     mockFetches([decision('d1', '랜딩 문구를 가격 먼저로 바꿔도 될까요?')], []);
     await mount();
-    const expandBtn = [...scope().querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.decisionExpand);
-    await act(async () => { expandBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     const radios = [...scope().querySelectorAll('[role="radio"]')];
     expect(radios).toHaveLength(2);
     expect(radios.every((r) => r.getAttribute('aria-checked') === 'false')).toBe(true);
@@ -1838,6 +1849,22 @@ describe('ApprovalsQueue — 4909 AC3 the list + detail screen', () => {
     expect(sheet).toBeTruthy();
     expect(sheet!.getAttribute('aria-label')).toBe(koMessages.cage.queueSheetLabel.replace('{title}', '첫째 결재 항목'));
     expect(sheet!.textContent).toContain('첫째 결재 항목');
+  });
+
+  it('⭐narrow (the phone sheet): a request with options opens the sheet EXPANDED too — same start as the wide detail; the fold still folds', async () => {
+    stubWidth(false);
+    mockFetches([decision('d1', '랜딩 문구를 가격 먼저로 바꿔도 될까요?')], []);
+    await mount();
+    await pickRow('d1');
+    const sheet = document.body.querySelector('[data-testid="gates-screen-detail-sheet"]')!;
+    expect(sheet).toBeTruthy();
+    expect(sheet.textContent).toContain('지금처럼');
+    expect(sheet.textContent).toContain('가격 문의가 많아요');
+    const approve = [...sheet.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true); // opened expanded, still not chosen: approve waits for an option
+    const fold = [...sheet.querySelectorAll('button')].find((b) => b.textContent === koMessages.cage.decisionCollapse) as HTMLButtonElement;
+    await act(async () => { fold.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(sheet.textContent).not.toContain('지금처럼');
   });
 
   it('j / k walk the rows (the home\'s keys — no new command key): j on the first row picks the second', async () => {
@@ -1933,7 +1960,8 @@ describe('ApprovalsQueue — 4909 AC3 the list + detail screen', () => {
     expect([...bar!.querySelectorAll('button')].map((b) => b.textContent?.trim())).toEqual([koMessages.cage.sigReject, koMessages.cage.gateDiscussSubmit, koMessages.cage.gateApprove]);
     // wide: the column is the scroller (lg: only — narrow, the sheet's own body scrolls, so a bare overflow-y-auto here would break the pinning)
     const detailTokens = tokens(container.querySelector('[data-testid="gate-queue-detail"]')!);
-    expect(detailTokens).toEqual(expect.arrayContaining(['lg:overflow-y-auto', 'lg:max-h-[calc(100svh-6rem)]']));
+    expect(detailTokens).toEqual(expect.arrayContaining(['lg:overflow-y-auto', 'lg:h-full'])); // the height comes from the frame (the shell's row) — never a viewport-height guess
+    expect(detailTokens.join(' ')).not.toMatch(/svh|calc\(/);
     expect(detailTokens).not.toContain('overflow-y-auto');
   });
 

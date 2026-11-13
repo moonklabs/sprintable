@@ -570,7 +570,8 @@ export default function InboxPage() {
             )}
           </div>
         ) : activeTab === 'gates' ? (
-          <div className="flex-1 overflow-y-auto p-4">
+          // 4909: a column of definite height (the tab body) — the approvals screen takes what is left of it and its list and detail scroll inside it (wide); narrow keeps the one scrolling page
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4 lg:overflow-hidden">
             {/* story #4533 — «에이전트 권한 요청» (the web only looks): since 4909 2d-2 it is a section of the approvals list below, read by the list's own reader — not a second block here */}
             <ApprovalsQueue />
           </div>

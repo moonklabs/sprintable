@@ -14,7 +14,7 @@ let root: Root;
 beforeEach(() => { container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); document.body.innerHTML = ''; vi.unstubAllGlobals(); });
 
-async function show(props: { wide: boolean; sheetOpen?: boolean; onSheetOpenChange?: (o: boolean) => void; testId?: string }) {
+async function show(props: { wide: boolean; sheetOpen?: boolean; onSheetOpenChange?: (o: boolean) => void; testId?: string; fill?: boolean }) {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
@@ -27,11 +27,40 @@ async function show(props: { wide: boolean; sheetOpen?: boolean; onSheetOpenChan
           sheetOpen={props.sheetOpen ?? false}
           onSheetOpenChange={props.onSheetOpenChange ?? (() => {})}
           testId={props.testId}
+          fill={props.fill}
         />
       </NextIntlClientProvider>,
     );
   });
 }
+
+describe('ListDetailShell — the «frame gives the height» mode (story 4909 defect PR)', () => {
+  const root_ = () => container.querySelector('[data-testid="list-detail"]') as HTMLElement;
+  const column = () => container.querySelector('[data-testid="list-detail-detail-column"]') as HTMLElement;
+  it('⭐OFF (the default): every screen that does not ask for it stands exactly as before — the page-scroll grid and the sticky, height-capped column', async () => {
+    await show({ wide: true });
+    expect(root_().className).toBe('lg:grid lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] lg:items-start lg:gap-4');
+    expect(column().className).toBe('sticky top-4 max-h-[calc(100svh-6rem)]');
+    await show({ wide: true, fill: false });
+    expect(root_().className).toBe('lg:grid lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] lg:items-start lg:gap-4');
+    expect(column().className).toBe('sticky top-4 max-h-[calc(100svh-6rem)]');
+  });
+  it('⭐ON: the row takes the frame\'s height (flex-1 · min-h-0 · one minmax(0,1fr) row), the column fills it — no sticky and no viewport-height guess', async () => {
+    await show({ wide: true, fill: true });
+    expect(root_().className).toContain('lg:flex-1');
+    expect(root_().className).toContain('lg:min-h-0');
+    expect(root_().className).toContain('lg:grid-rows-[minmax(0,1fr)]');
+    expect(root_().className).toContain('lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)]');
+    expect(column().className).toContain('lg:h-full');
+    expect(column().className).toContain('min-h-0');
+    expect(root_().className + column().className).not.toMatch(/sticky|svh|calc\(/);
+  });
+  it('ON does not change narrow: the same named sheet', async () => {
+    await show({ wide: false, sheetOpen: true, fill: true });
+    expect(document.body.querySelector('[data-testid="list-detail-detail-sheet"]')?.getAttribute('aria-label')).toBe('상세 시트');
+    expect(container.querySelector('[data-testid="list-detail-detail-column"]')).toBeNull();
+  });
+});
 
 describe('ListDetailShell', () => {
   it('⭐wide: the list AND a named detail column are on screen; no sheet', async () => {

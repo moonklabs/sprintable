@@ -11,7 +11,7 @@ import { DialogTitle } from './dialog';
  * The caller owns the width decision (`useListDetailWide()` — from 1024px the detail sits beside the list), what is picked and whether the sheet is open: this part only lays them out.
  */
 export function ListDetailShell({
-  list, detail, wide, detailLabel, sheetLabel, sheetOpen, onSheetOpenChange, testId = 'list-detail', columnTestId, sheetTestId,
+  list, detail, wide, detailLabel, sheetLabel, sheetOpen, onSheetOpenChange, testId = 'list-detail', columnTestId, sheetTestId, fill = false,
 }: {
   list: ReactNode;
   detail: ReactNode;
@@ -27,12 +27,18 @@ export function ListDetailShell({
   testId?: string;
   columnTestId?: string;
   sheetTestId?: string;
+  /**
+   * The FRAME gives the height (wide only): the caller's parent is a column of definite height (the inbox tab body), this shell takes what is left of it (`flex-1 min-h-0`) and each column scrolls inside its own row — no sticky, and no
+   * «100svh − N rem» guess of how much the app's chrome takes (that number was wrong on every frame but one: the pinned action bar fell below a short window). The caller's detail block then fills the column (`lg:h-full lg:overflow-y-auto`).
+   * Off (default): the old page-scroll layout, a sticky column — every screen that does not ask for it stands exactly as before.
+   */
+  fill?: boolean;
 }) {
   return (
-    <div className="lg:grid lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] lg:items-start lg:gap-4" data-testid={testId}>
+    <div className={fill ? 'lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)] lg:items-start lg:gap-4' : 'lg:grid lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] lg:items-start lg:gap-4'} data-testid={testId}>
       {list}
       {wide ? (
-        <aside className="sticky top-4 max-h-[calc(100svh-6rem)]" aria-label={detailLabel} data-testid={columnTestId ?? `${testId}-detail-column`}>
+        <aside className={fill ? 'min-h-0 lg:h-full' : 'sticky top-4 max-h-[calc(100svh-6rem)]'} aria-label={detailLabel} data-testid={columnTestId ?? `${testId}-detail-column`}>
           {detail}
         </aside>
       ) : (

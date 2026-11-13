@@ -231,7 +231,9 @@ export function ApprovalsQueue() {
   // 원탭 승인 전에 question/assumption/options 전문을 읽고 안을 골라야 한다. 접기/펼치기는
   // 카드마다 독립(id 키 Set, 다른 상태 추적과 동형). 선택안은 승인 시 note에 실려 영구
   // 기록(resolution_note)된다 — BE 신규 필드 없이 기존 자유텍스트 note로 충분(AC3).
-  const [expandedDecisionIds, setExpandedDecisionIds] = useState<Set<string>>(new Set());
+  // 4909 (선생님 «내용을 열 수가 없어 보지도 못하고 승인» · PO 11-13): a decision request WITH options opens EXPANDED in the detail column (the question · assumption · options are in front of the person before any approval — that is what the fold of 3113 was for), and
+  // the fold stays as it was: this set holds the requests whose state the person TOGGLED away from that start (expanded → folded; a request without options starts folded and toggles open). Approve still waits for a chosen option.
+  const [toggledDecisionIds, setToggledDecisionIds] = useState<Set<string>>(new Set());
   const [selectedOptionByGateId, setSelectedOptionByGateId] = useState<Record<string, string>>({});
   // 4909 (라) — 서명 창으로 승인해도 «어느 안이었는지»가 메모에 남는다. 한 번에 승인 길은 선택안을 note에 싣는데(위 primaryOnClick) 서명 창 길(고위험 결정 게이트)은
   // 사유만 실어 고른 안이 어디에도 기록되지 않았다. 안이 있는 결정 게이트면 «선택: …» 줄 + 사유 줄. (반려는 «요청 자체를 반려»라 안을 싣지 않는다 — 한 번에 길과 같은 규칙.)
@@ -275,7 +277,7 @@ export function ApprovalsQueue() {
     if (next !== null && next !== id) select(next);
   };
   const toggleDecisionExpanded = (id: string) => {
-    setExpandedDecisionIds((prev) => {
+    setToggledDecisionIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
@@ -598,7 +600,7 @@ export function ApprovalsQueue() {
         // 항상 null이라 title 자리가 해시로만 채워졌다. question이 있으면 그걸 1행 요지로
         // 쓰고(AC1), 해시는 아래 보조 캡션으로 강등(#3038 AC1과 동형 패턴).
         const decisionFacts = isDecisionGate(gate) ? deriveDecisionFacts(gate) : null;
-        const decisionExpanded = expandedDecisionIds.has(gate.id);
+        const decisionExpanded = ((decisionFacts?.options.length ?? 0) > 0) !== toggledDecisionIds.has(gate.id); // starts expanded when it has options (see toggledDecisionIds)
         const gateBody = (
           <>
             <div className="flex w-full flex-wrap items-center gap-1.5">
@@ -1016,13 +1018,14 @@ export function ApprovalsQueue() {
       <ListDetailShell
         testId="gates-screen"
         wide={wide}
+        fill
         list={<GateQueueList sections={sections} selectedKey={selectedKey} onSelect={onSelectRow} onOpen={openRow} />}
         detail={selectedItem
-          ? <div className="focus-inset space-y-2 lg:max-h-[calc(100svh-6rem)] lg:overflow-y-auto" data-testid="gate-queue-detail">{renderItemCard(selectedItem, approvals.indexOf(selectedItem))}</div>
+          ? <div className="focus-inset space-y-2 lg:h-full lg:overflow-y-auto" data-testid="gate-queue-detail">{renderItemCard(selectedItem, approvals.indexOf(selectedItem))}</div>
           : selectedPerm
             ? (
               // the same card the standalone group drew (phone-app-only buttons, the one read-only line elsewhere) — the stage is in its key so the network question's second card starts fresh
-              <div className="focus-inset space-y-2 lg:max-h-[calc(100svh-6rem)] lg:overflow-y-auto" data-testid="gate-queue-detail">
+              <div className="focus-inset space-y-2 lg:h-full lg:overflow-y-auto" data-testid="gate-queue-detail">
                 <PermissionCard key={`${selectedPerm.id}:${selectedPerm.stage ?? 'ask'}`} request={selectedPerm} now={perm.now} phone={perm.phone} auth={perm.auth}
                   answer={perm.answerFor(selectedPerm)} onAnswer={(decision) => perm.onAnswer(selectedPerm, decision)} />
               </div>
