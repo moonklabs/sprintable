@@ -51,6 +51,16 @@ export function slugifyDocTitle(title: string): string {
     .replace(/-+$/g, '');
 }
 
+/**
+ * 4910 — «새 문서»의 임시 슬러그(서버에 아직 문서가 없는 초안의 주소). 시각 + **여섯 자리 무작위 수**(숫자만 — `isUntitledSlug`가 `untitled-\d+`만 받는다):
+ * 같은 순간 두 사람이 «새 문서»를 눌러도 같은 주소가 되지 않게(남의 문서가 404가 아닌 채 열려 그걸 편집하게 되는 길을 막는다). 서버 BFF의 빈 슬러그 대체(`untitled-<시각><세 자리>`)와 같은 꼴.
+ */
+export function newUntitledSlug(now: number = Date.now()): string {
+  const buf = new Uint32Array(1);
+  globalThis.crypto.getRandomValues(buf);
+  return `untitled-${now}${String(buf[0]! % 1_000_000).padStart(6, '0')}`;
+}
+
 /** True for the auto-generated `untitled-<timestamp>` placeholder slug. */
 export function isUntitledSlug(slug: string): boolean {
   return UNTITLED_SLUG_RE.test(slug);
