@@ -72,7 +72,7 @@ export const OBJECT_PROP_ALLOWLIST: ReadonlyMap<string, string> = new Map([
     (brand) => [`lib/runtime-capabilities.ts::${brand}`, '에이전트 런타임 · 제품 이름 — 브랜드'] as const,
   ),
   ['services/memo.ts::latest reply', '메모 API timeline 라벨(데이터 값) — FE 렌더 0(grep · 4377 전수)'],
-  ['app/manifest.ts::The organization OS that closes open loops. Kanban, memos, standups, retros, MCP server — with AI agents as first-class team members.',
+  ['app/manifest.ts::While your agents work on your Mac, chat and approve from your phone. A workspace for people who work solo or in small teams.',
     'PWA 매니페스트 설명 — 단일 로케일 정적 설치 메타(로케일별 매니페스트는 별건)'],
 ]);
 /** 객체 속성 축 — 알고 남긴 자리(줄이기만 · 새로 생기면 FAIL · 고치면 빼야 초록). */
