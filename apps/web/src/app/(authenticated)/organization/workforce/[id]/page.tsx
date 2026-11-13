@@ -17,7 +17,6 @@ import { AgentConnectionSettingsSection } from '@/components/agents/agent-connec
 import { MessagingPolicySection } from '@/components/agents/messaging-policy-section';
 import { AgentRunProfileSection } from '@/components/agents/agent-run-profile-section';
 import { isDesktopRuntime } from '@/lib/agent-run-profile';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Button as DsButton } from '@/components/ds/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ds/tabs';
@@ -35,7 +34,7 @@ import { AgentsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { OperatorInput } from '@/components/ui/operator-control';
 import { OperatorDropdownSelect } from '@/components/ui/operator-dropdown-select';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { DetailCard } from '@/components/agents/detail-card';
 import { AgentProjectAccessSection } from '@/components/settings/agent-project-access-section';
 import { Avatar } from '@/components/shared/avatar';
 import { AvatarEditCard } from '@/components/shared/avatar-edit-card';
@@ -61,17 +60,21 @@ import { useViewerTimeZone } from '@/components/viewer-time-zone';
 const RUNTIME_STATUS_UI: Record<
   RuntimeStatus,
   {
-    variant: 'success' | 'warning' | 'destructive' | 'chip';
     labelKey: string;
     helpKey: string;
     Icon: typeof Check | null;
   }
 > = {
-  supported: { variant: 'success', labelKey: 'runtimeSupported', helpKey: 'runtimeSupportedHelp', Icon: Check },
-  partial: { variant: 'warning', labelKey: 'runtimePartial', helpKey: 'runtimePartialHelp', Icon: AlertTriangle },
-  unsupported: { variant: 'destructive', labelKey: 'runtimeUnsupported', helpKey: 'runtimeUnsupportedHelp', Icon: XCircle },
-  unset: { variant: 'chip', labelKey: 'runtimeUnset', helpKey: 'runtimeUnsetHelp', Icon: MinusCircle },
-  unknown: { variant: 'destructive', labelKey: 'runtimeUnknown', helpKey: 'runtimeUnknownHelp', Icon: XCircle },
+  supported: { labelKey: 'runtimeSupported', helpKey: 'runtimeSupportedHelp', Icon: Check },
+  partial: { labelKey: 'runtimePartial', helpKey: 'runtimePartialHelp', Icon: AlertTriangle },
+  unsupported: { labelKey: 'runtimeUnsupported', helpKey: 'runtimeUnsupportedHelp', Icon: XCircle },
+  unset: { labelKey: 'runtimeUnset', helpKey: 'runtimeUnsetHelp', Icon: MinusCircle },
+  unknown: { labelKey: 'runtimeUnknown', helpKey: 'runtimeUnknownHelp', Icon: XCircle },
+};
+
+/** story 4912 (C1): the status chip's tone — colour only where it MEANS something (supported = done · partial = needs a hand · unsupported/unknown = failed · unset = neutral). */
+const RUNTIME_CHIP_TONE: Record<RuntimeStatus, 'neutral' | 'done' | 'needs-hand' | 'failed'> = {
+  supported: 'done', partial: 'needs-hand', unsupported: 'failed', unset: 'neutral', unknown: 'failed',
 };
 
 interface AgentMember {
@@ -740,20 +743,17 @@ export default function AgentDetailPage() {
           const canSaveRuntime = stagedKnown && selectedRuntime !== savedRuntime;
           const StatusIcon = ui.Icon;
           return (
-            <SectionCard>
-              <SectionCardHeader>
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h2 className="text-base font-semibold text-foreground">{t('runtimeTypeTitle')}</h2>
-                    <Badge variant={ui.variant}>
-                      {StatusIcon ? <StatusIcon className="h-3 w-3" /> : null}
-                      {t(ui.labelKey)}
-                    </Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground">{t('runtimeTypeDescription')}</p>
-                </div>
-              </SectionCardHeader>
-              <SectionCardBody className="space-y-3">
+            <DetailCard
+              data-testid="agent-detail-card-runtime"
+              title={t('runtimeTypeTitle')}
+              status={(
+                <Chip tone={RUNTIME_CHIP_TONE[runtimeStatus]}>
+                  {StatusIcon ? <StatusIcon className="h-3 w-3" /> : null}
+                  {t(ui.labelKey)}
+                </Chip>
+              )}
+              description={t('runtimeTypeDescription')}
+            >
                 {canEdit ? (
                   <>
                     <div className="flex gap-2">
@@ -764,27 +764,25 @@ export default function AgentDetailPage() {
                         placeholder={t('runtimeTypePlaceholder')}
                         className="flex-1"
                       />
-                      <Button
-                        variant="hero"
-                        size="sm"
+                      <DsButton
+                        variant="primary"
                         onClick={() => void handleSaveRuntime()}
                         disabled={savingRuntime || !canSaveRuntime}
                       >
                         {savingRuntime ? '...' : tc('save')}
-                      </Button>
+                      </DsButton>
                     </div>
-                    <p className="text-xs text-muted-foreground">{t(ui.helpKey)}</p>
+                    <p className="text-ds-small text-ds-ink-3">{t(ui.helpKey)}</p>
                   </>
                 ) : (
                   <div className="space-y-1">
-                    <p className="text-sm text-foreground">
+                    <p className="text-ds-body text-ds-ink">
                       {stagedDef?.label ?? (selectedRuntime || t('runtimeUnset'))}
                     </p>
-                    <p className="text-xs text-muted-foreground">{t(ui.helpKey)}</p>
+                    <p className="text-ds-small text-ds-ink-3">{t(ui.helpKey)}</p>
                   </div>
                 )}
-              </SectionCardBody>
-            </SectionCard>
+            </DetailCard>
           );
         })()}
 
@@ -814,56 +812,48 @@ export default function AgentDetailPage() {
             연결하지 않아도 돼요"와 같은 화면에서 모순)가 떴다. 연결 설정 섹션(위)과 동일하게
             섹션 자체를 미렌더 — 새 대체 문구 추가 없음(위 중립 설명 1줄로 이미 충분). */}
         {!isSystemPublisherAgent ? (
-          <SectionCard>
-            <SectionCardHeader>
-              <div className="flex items-center justify-between w-full">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-base font-semibold text-foreground">{t('agentFakechatTitle')}</h2>
-                    <Badge variant="info">SSE</Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground break-keep">
-                    {t('agentFakechatDescription')}
-                  </p>
-                </div>
-                {freshApiKey ? (
-                  <Button variant="glass" size="sm" onClick={() => void handleCopyFakechatEnvKey()}>
-                    {fakechatEnvKeyCopied ? <Check className="h-3.5 w-3.5" /> : <><Copy className="h-3.5 w-3.5 mr-1" />{ta('fakechatEnvCopyExport')}</>}
-                  </Button>
-                ) : null}
-              </div>
-            </SectionCardHeader>
+          <DetailCard
+            data-testid="agent-detail-card-sse"
+            title={t('agentFakechatTitle')}
+            status={<Chip tone="info">SSE</Chip>}
+            description={t('agentFakechatDescription')}
+            action={freshApiKey ? (
+              <DsButton variant="secondary" onClick={() => void handleCopyFakechatEnvKey()}>
+                {fakechatEnvKeyCopied ? <Check className="h-3.5 w-3.5" /> : <><Copy className="mr-1 h-3.5 w-3.5" />{ta('fakechatEnvCopyExport')}</>}
+              </DsButton>
+            ) : undefined}
+          >
             {/* story #4240(유나 390 실측 «않아/요») — 한국어 안내 줄은 낱말 단위로만 줄바꿈(break-keep · CJK에만 작용 · 키·코드 줄 무영향). */}
-            <SectionCardBody className="space-y-3 break-keep">
-              <div className="space-y-1.5 text-xs text-muted-foreground">
+            <div className="space-y-3 break-keep">
+              <div className="space-y-1.5 text-ds-small text-ds-ink-3">
                 <p>{t('agentFakechatEnvKeyInstruction')}</p>
                 <p>{webhookActive ? t('agentFakechatWebhookActiveNote') : t('agentFakechatWebhookOffNote')}</p>
                 <p>
                   {t.rich('agentFakechatSuccessCheck', {
-                    code: (chunks) => <code className="rounded bg-muted px-1 py-0.5 font-mono text-editorial-meta text-foreground">{chunks}</code>,
+                    code: (chunks) => <code className="rounded-ds-tag bg-ds-surface-high px-1 py-0.5 font-mono text-ds-mono-md text-ds-ink">{chunks}</code>,
                   })}
                 </p>
               </div>
 
               {freshApiKey ? (
                 <>
-                  <p className="text-xs text-success">{t('agentFakechatEnvKeyFreshNote')}</p>
-                  <code className="block overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground/80">
+                  <p className="text-ds-small text-ds-done">{t('agentFakechatEnvKeyFreshNote')}</p>
+                  <code className="block overflow-x-auto rounded-ds-control border border-ds-line bg-ds-surface-sunk p-3 font-mono text-ds-mono-md text-ds-ink-2">
                     export SPRINTABLE_API_KEY={freshApiKey}
                   </code>
                 </>
               ) : keysReadFailed && !keysReadOk ? (
                 <div className="flex flex-wrap items-center gap-2" data-testid="agent-key-read-failed">
-                  <p role="status" className="text-xs text-warning-strong">{ta('detailKeyReadFailed')}</p>
-                  <Button type="button" variant="outline" size="sm" disabled={keysReading} onClick={() => { void fetchActiveApiKey(); }}>{tc('retry')}</Button>
+                  <p role="status" className="text-ds-small text-ds-needs-hand">{ta('detailKeyReadFailed')}</p>
+                  <DsButton variant="secondary" disabled={keysReading} onClick={() => { void fetchActiveApiKey(); }}>{tc('retry')}</DsButton>
                 </div>
               ) : !hasActiveKey ? (
-                <p className="text-xs text-warning-strong">{t('agentFakechatEnvKeyRequired')}</p>
+                <p className="text-ds-small text-ds-needs-hand">{t('agentFakechatEnvKeyRequired')}</p>
               ) : (
-                <p className="text-xs text-muted-foreground">{t('agentFakechatEnvKeySecurityNote')}</p>
+                <p className="text-ds-small text-ds-ink-3">{t('agentFakechatEnvKeySecurityNote')}</p>
               )}
-            </SectionCardBody>
-          </SectionCard>
+            </div>
+          </DetailCard>
         ) : null}
 
         </TabsContent>
@@ -879,13 +869,11 @@ export default function AgentDetailPage() {
             자체가 안 뜬다). */}
         {canEditBase && (
           isSystemPublisherAgent ? (
-            <SectionCard>
-              <SectionCardBody>
-                <p className="text-xs text-muted-foreground" data-testid="agent-detail-system-publisher-notice">
-                  {ta('systemPublisherNeutralDescription')}
-                </p>
-              </SectionCardBody>
-            </SectionCard>
+            <DetailCard data-testid="agent-detail-card-system-notice">
+              <p className="text-ds-small text-ds-ink-3" data-testid="agent-detail-system-publisher-notice">
+                {ta('systemPublisherNeutralDescription')}
+              </p>
+            </DetailCard>
           ) : (
             <AgentApiKeyManager
               agentId={id}
@@ -906,35 +894,36 @@ export default function AgentDetailPage() {
         {!isSystemPublisherAgent && (() => {
           const webhookState = getWebhookState(webhookConfigs);
           return (
-            <SectionCard>
-              <SectionCardHeader>
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h2 className="text-base font-semibold text-foreground">{t('notificationChannel')}</h2>
-                    {webhookState === 'empty' && <Badge variant="info">{t('webhookStatusEmpty')}</Badge>}
-                    {webhookState === 'active' && <Badge variant="success">{t('webhookStatusActive')}</Badge>}
-                    {webhookState === 'paused' && (
-                      <>
-                        <Badge variant="secondary">{t('webhookStatusInactive')}</Badge>
-                        <Badge variant="info">{t('webhookStatusFallback')}</Badge>
-                      </>
-                    )}
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    {webhookState === 'empty' && t('webhookHelperEmpty')}
-                    {webhookState === 'active' && t('webhookHelperActive')}
-                    {webhookState === 'paused' && t('webhookHelperPaused')}
-                  </p>
-                </div>
-              </SectionCardHeader>
-              <SectionCardBody className="space-y-3">
+            <DetailCard
+              data-testid="agent-detail-card-webhook"
+              title={t('notificationChannel')}
+              status={(
+                <>
+                  {webhookState === 'empty' && <Chip tone="info">{t('webhookStatusEmpty')}</Chip>}
+                  {webhookState === 'active' && <Chip tone="done">{t('webhookStatusActive')}</Chip>}
+                  {webhookState === 'paused' && (
+                    <>
+                      <Chip>{t('webhookStatusInactive')}</Chip>
+                      <Chip tone="info">{t('webhookStatusFallback')}</Chip>
+                    </>
+                  )}
+                </>
+              )}
+              description={(
+                <>
+                  {webhookState === 'empty' && t('webhookHelperEmpty')}
+                  {webhookState === 'active' && t('webhookHelperActive')}
+                  {webhookState === 'paused' && t('webhookHelperPaused')}
+                </>
+              )}
+            >
                 {!canEditWebhook ? (
-                  <p className="text-xs text-muted-foreground">{t('webhookAdminOnly')}</p>
+                  <p className="text-ds-small text-ds-ink-3">{t('webhookAdminOnly')}</p>
                 ) : null}
                 <div className="flex items-center justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium">{t('webhookEnabledToggle')}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{t('webhookEnabledHelp')}</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-ds-body font-medium text-ds-ink">{t('webhookEnabledToggle')}</p>
+                    <p className="mt-0.5 text-ds-small text-ds-ink-3">{t('webhookEnabledHelp')}</p>
                   </div>
                   <Switch
                     checked={webhookActive}
@@ -951,17 +940,15 @@ export default function AgentDetailPage() {
                     className="flex-1 font-mono"
                     disabled={!webhookActive || !canEditWebhook}
                   />
-                  <Button
-                    variant="hero"
-                    size="sm"
+                  <DsButton
+                    variant="primary"
                     onClick={() => void handleSaveWebhook()}
                     disabled={savingWebhook || !webhookActive || !webhookUrl.trim() || !canEditWebhook}
                   >
                     {savingWebhook ? '...' : tc('save')}
-                  </Button>
+                  </DsButton>
                 </div>
-              </SectionCardBody>
-            </SectionCard>
+            </DetailCard>
           );
         })()}
 
@@ -972,18 +959,13 @@ export default function AgentDetailPage() {
             story #3994 CHANGES-4(페드루 PO C4) — 위 알림 채널 카드와 동일 사유(거짓
             webhookAdminOnly 사유 회피)로 시스템 발행이면 미렌더. */}
         {!isSystemPublisherAgent && (
-          <SectionCard>
-            <SectionCardHeader>
-              <h2 className="text-base font-semibold text-foreground">{t('notificationPreferencesSummaryTitle')}</h2>
-            </SectionCardHeader>
-            <SectionCardBody>
-              {!canEditWebhook ? (
-                <p className="text-xs text-muted-foreground">{t('webhookAdminOnly')}</p>
-              ) : (
-                <MemberNotificationPreferencesSummary memberId={id} memberLabel={agent.name} />
-              )}
-            </SectionCardBody>
-          </SectionCard>
+          <DetailCard data-testid="agent-detail-card-notification-summary" title={t('notificationPreferencesSummaryTitle')}>
+            {!canEditWebhook ? (
+              <p className="text-ds-small text-ds-ink-3">{t('webhookAdminOnly')}</p>
+            ) : (
+              <MemberNotificationPreferencesSummary memberId={id} memberLabel={agent.name} />
+            )}
+          </DetailCard>
         )}
 
         {/* Messaging policy (E-MSG-POLICY S3) */}
