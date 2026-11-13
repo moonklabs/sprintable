@@ -33,36 +33,38 @@ afterEach(async () => {
   container.remove();
 });
 
-describe('AccessMatrixMessage 접근성 (story #2153)', () => {
-  it('type=success → role=status, aria-live=polite, text-success 클래스(빨강 아님)', async () => {
+// story 4912 (D): the message is the ds Banner (it names the close button through next-intl, so it renders inside the provider) — the Banner's OWN role is the one live region: failed = alert · info = status
+const wrapMsg = (node: React.ReactNode) => <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">{node}</NextIntlClientProvider>;
+describe('AccessMatrixMessage 접근성 (story #2153 · 4912 D)', () => {
+  it('type=success → ds Banner info = role=status(polite) — 빨강(failed)도 alert도 아니고 안쪽에 겹친 live 영역이 없다', async () => {
     await act(async () => {
-      root.render(<AccessMatrixMessage message={{ type: 'success', text: '완료' }} />);
+      root.render(wrapMsg(<AccessMatrixMessage message={{ type: 'success', text: '완료' }} />));
     });
-    const el = container.querySelector('[role="status"]');
+    const el = container.querySelector('[role="status"]') as HTMLElement | null;
     expect(el).not.toBeNull();
-    expect(el?.getAttribute('aria-live')).toBe('polite');
-    expect(el?.getAttribute('aria-atomic')).toBe('true');
-    expect(el?.className).toContain('text-success');
-    expect(el?.className).not.toContain('text-destructive');
+    expect(el?.getAttribute('data-slot')).toBe('ds-banner');
+    expect(el?.getAttribute('data-tone')).toBe('info');
+    expect(el?.textContent).toContain('완료');
+    expect(el?.querySelector('[aria-live], [role]'), 'ONE live region').toBeNull();
     expect(container.querySelector('[role="alert"]')).toBeNull();
   });
 
-  it('type=error → role=alert, aria-live=assertive, text-destructive 클래스(현행 유지)', async () => {
+  it('type=error → ds Banner failed = role=alert(assertive) — 안쪽에 겹친 live 영역이 없다', async () => {
     await act(async () => {
-      root.render(<AccessMatrixMessage message={{ type: 'error', text: '실패' }} />);
+      root.render(wrapMsg(<AccessMatrixMessage message={{ type: 'error', text: '실패' }} />));
     });
-    const el = container.querySelector('[role="alert"]');
+    const el = container.querySelector('[role="alert"]') as HTMLElement | null;
     expect(el).not.toBeNull();
-    expect(el?.getAttribute('aria-live')).toBe('assertive');
-    expect(el?.getAttribute('aria-atomic')).toBe('true');
-    expect(el?.className).toContain('text-destructive');
-    expect(el?.className).not.toContain('text-success');
+    expect(el?.getAttribute('data-slot')).toBe('ds-banner');
+    expect(el?.getAttribute('data-tone')).toBe('failed');
+    expect(el?.textContent).toContain('실패');
+    expect(el?.querySelector('[aria-live], [role]'), 'ONE live region').toBeNull();
     expect(container.querySelector('[role="status"]')).toBeNull();
   });
 
   it('message가 null이면 아무것도 렌더하지 않는다', async () => {
     await act(async () => {
-      root.render(<AccessMatrixMessage message={null} />);
+      root.render(wrapMsg(<AccessMatrixMessage message={null} />));
     });
     expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(container.querySelector('[role="status"]')).toBeNull();
