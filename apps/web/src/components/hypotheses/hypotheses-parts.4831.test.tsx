@@ -48,12 +48,12 @@ describe('가설 폼 — 문장 · 지표 · 출처 · 방향 · 목표 · 측�
     await submit(form);
     expect(onSubmit).not.toHaveBeenCalled(); // 문장 · 지표 · 측정 시점이 비면 막힘
 
-    await act(async () => { setInput(q(container, 'textarea[data-slot="textarea"]'), '체크아웃을 줄이면 전환이 오른다'); });
-    await act(async () => { setInput(q(container, `input[data-slot="input"][placeholder="${th.metricPlaceholder}"]`), '전환율'); });
-    await act(async () => { setSelect(q(container, 'select[data-slot="select"]'), 'manual'); });
-    expect(q<HTMLInputElement>(container, 'input[data-slot="input"][type=number]').className).toContain('sm:w-20'); // 자동 칸에서 목표 칸 폭을 부품의 w-full이 되돌리지 못한다
-    await act(async () => { setInput(q(container, 'input[data-slot="input"][type=number]'), '12.5'); });
-    await act(async () => { setInput(q(container, 'input[data-slot="input"][type=date]'), '2026-12-01'); });
+    await act(async () => { setInput(q(container, 'textarea[data-slot="ds-textarea"]'), '체크아웃을 줄이면 전환이 오른다'); });
+    await act(async () => { setInput(q(container, `input[data-slot="ds-input"][placeholder="${th.metricPlaceholder}"]`), '전환율'); });
+    await act(async () => { setSelect(q(container, '[data-slot="ds-select"] select'), 'manual'); });
+    expect(q<HTMLInputElement>(container, 'input[data-slot="ds-input"][type=number]').className).toContain('sm:w-20'); // 자동 칸에서 목표 칸 폭을 부품의 w-full이 되돌리지 못한다
+    await act(async () => { setInput(q(container, 'input[data-slot="ds-input"][type=number]'), '12.5'); });
+    await act(async () => { setInput(q(container, 'input[data-slot="ds-input"][type=date]'), '2026-12-01'); });
     await submit(form);
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit.mock.calls[0][0]).toEqual({
@@ -66,7 +66,7 @@ describe('가설 폼 — 문장 · 지표 · 출처 · 방향 · 목표 · 측�
   it('목표를 지우면 0으로 내려가고 화면 값은 비어 보인다(숫자 칸 규칙 그대로)', async () => {
     const onSubmit = vi.fn<(v: HypothesisFormValue) => void>();
     await mount(<HypothesisForm initial={{ statement: 's', metric_definition: { metric: 'm', source: 'internal_ops', target: 7, direction: 'down' }, measure_after: '2026-12-01' }} onSubmit={onSubmit} onCancel={() => {}} />);
-    const target = q<HTMLInputElement>(container, 'input[data-slot="input"][type=number]');
+    const target = q<HTMLInputElement>(container, 'input[data-slot="ds-input"][type=number]');
     expect(target.value).toBe('7');
     await act(async () => { setInput(target, ''); });
     await submit(q(container, 'form'));
@@ -114,7 +114,7 @@ describe('가설 게이트 띠 — 반려 사유 칸(story 4831)', () => {
     await mount(<HypothesisGateBadge hypothesis={HYP} gate={GATE} resolverId="me-1" onResolved={onResolved} />);
     expect(container.querySelector('input')).toBeNull();
     await act(async () => { buttonWith(container, th.gateReject).click(); });
-    const note = q<HTMLInputElement>(container, `input[data-slot="input"][placeholder="${th.gateRejectNotePlaceholder}"]`);
+    const note = q<HTMLInputElement>(container, `input[data-slot="ds-input"][placeholder="${th.gateRejectNotePlaceholder}"]`);
     expect(note.type).toBe('text');
     const confirm = buttonWith(container, th.gateRejectConfirm);
     expect(confirm.disabled).toBe(true);

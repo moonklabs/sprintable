@@ -8,7 +8,7 @@ import { cn } from '../lib/utils';
 import { ASSET_ROW_FACE } from '../components/storage/storage-asset-row';
 import { ASSET_CARD_FACE, ASSET_CARD_WELL } from '../components/storage/storage-asset-grid';
 import { ARTIFACT_CARD_FACE, ARTIFACT_CARD_WELL, ARTIFACT_PANEL } from '../components/canvas/artifact-gallery-view';
-import { HYPOTHESES_FACE } from '../components/hypotheses/hypotheses-face';
+import { HYPOTHESES_FACE, HYPOTHESIS_BAND_FACE } from '../components/hypotheses/hypotheses-face';
 import { GOALS_FRAME_FACE } from '../app/(authenticated)/[ws]/[proj]/goals/goals-layer';
 
 const css = readFileSync(join(__dirname, 'design-system.css'), 'utf8');
@@ -57,6 +57,11 @@ describe('목표 화면(4909) — 틀 = 바탕, 카드 = 내용 칸', () => {
     expect(GOALS_FRAME_FACE).toBe(LAYER.page);
     expect(HYPOTHESES_FACE).toBe(LAYER.panel);
     expect(GOALS_FRAME_FACE).not.toBe(HYPOTHESES_FACE);
+  });
+  it.each(themes)('⭐%s: 가설 카드 → 결재 띠 면(글 줄 층) ≥ 0.05 · 카드 → 양식 입력칸(입력칸 층) ≥ 0.05', (_name, t) => {
+    expect(HYPOTHESIS_BAND_FACE).toBe(LAYER.rowOthers);
+    expect(step(t, 'panel', 'rowOthers')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPanel);
+    expect(step(t, 'panel', 'field')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.fieldOnPanel);
   });
   it.each(themes)('⭐%s: 바탕 → 가설 카드 면 ≥ 0.03 (라이트 +.030 · 다크 +.036 — 옛 카드는 −.018 / −.004라 갈리지 않았다)', (_name, t) => {
     expect(step(t, 'page', 'panel')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.panelOverPage);
