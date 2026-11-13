@@ -215,12 +215,12 @@ function VariantSlot({
 
           {isPendingSelectable ? (
             <div className="space-y-1.5">
-              <Radio value={artifact.id} label={t('chosenBadge')} />
+              <Radio value={artifact.id} label={<>{t('chosenBadge')}<span className="sr-only"> · {artifact.variant_label}</span></>} />
               {/* 입력칸 면 = 내용 칸(panel): 글 줄 면(rowOthers) 위에 sunk를 얹으면 라이트에서 면이 안 갈린다(4908 속성 칸과 같은 이유) — 경계(line-control)가 함께 가른다. */}
               <Textarea
                 value={reasons[artifact.id] ?? ''}
                 onChange={(e) => setReasons((prev) => ({ ...prev, [artifact.id]: e.target.value }))}
-                aria-label={selectedForSubmit ? t('chooseReasonLabel') : t('rejectionReasonLabel')}
+                aria-label={`${selectedForSubmit ? t('chooseReasonLabel') : t('rejectionReasonLabel')} · ${artifact.variant_label}`}
                 placeholder={selectedForSubmit ? t('chooseReasonPlaceholder') : t('rejectionReasonPlaceholder')}
                 className={cn('min-h-[52px]', VARIANT_REASON_FACE)}
               />
@@ -242,7 +242,7 @@ function VariantSlot({
       {header}
       {canPick ? (
         // 라디오 묶음 = 슬롯 하나(한 번에 하나 고르기 · 방향키). 이름 = 슬롯 이름.
-        <RadioGroup aria-label={group.variant_group} value={chosenId ?? ''} onValueChange={(v) => setChosenId(String(v))} className={grid}>
+        <RadioGroup aria-label={group.variant_group} name={group.variant_group} value={chosenId ?? ''} onValueChange={(v) => setChosenId(String(v))} className={grid}>
           {tiles}
         </RadioGroup>
       ) : (

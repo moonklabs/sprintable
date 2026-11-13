@@ -57,7 +57,7 @@ function ImagePreview({ assetId, fallbackLabel }: { assetId: string; fallbackLab
   }
   if (state === 'no-access') {
     return (
-      <div className={cn('absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-3 text-center text-ds-ink-3', LAYER.well)}>
+      <div className={cn('absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-3 text-center text-ds-ink-2', LAYER.well)}>
         <Icon name="lock" size={20} />
         <span className="text-ds-small font-medium">{t('previewNoAccessTitle')}</span>
       </div>
@@ -75,7 +75,7 @@ function ImagePreview({ assetId, fallbackLabel }: { assetId: string; fallbackLab
     );
   }
   return (
-    <div className={cn('absolute inset-0 flex flex-col items-center justify-center gap-1 px-3 text-center text-ds-ink-3', LAYER.well)}>
+    <div className={cn('absolute inset-0 flex flex-col items-center justify-center gap-1 px-3 text-center text-ds-ink-2', LAYER.well)}>
       <Icon name="hide_image" size={20} />
       <span className="line-clamp-2 text-ds-small font-medium">{fallbackLabel}</span>
     </div>
@@ -148,7 +148,7 @@ function TextPreview({
           {t('errorDesc')} · {t('retry')}
         </Button>
       ) : textTruncated && fullText === null ? (
-        <span className="text-ds-small text-ds-ink-3">{t('previewTruncatedNote')}</span>
+        <span className="text-ds-small text-ds-ink-2">{t('previewTruncatedNote')}</span>
       ) : null}
     </div>
   );
@@ -157,7 +157,7 @@ function TextPreview({
 function TypeChipFallback({ contentType, fallbackLabel }: { contentType: string; fallbackLabel: string }) {
   const subtype = contentType.split('/')[1] ?? contentType;
   return (
-    <div className={cn('absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-3 text-center text-ds-ink-3', LAYER.well)}>
+    <div className={cn('absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-3 text-center text-ds-ink-2', LAYER.well)}>
       <span className="line-clamp-2 text-ds-small font-medium">{fallbackLabel}</span>
       <Chip className="uppercase">{subtype}</Chip>
     </div>

@@ -197,9 +197,9 @@ export function ContextPackPanel({ loopId }: { loopId: string }) {
         title={t('contextPackTitle')}
         level={3}
         collapsed={collapsed}
-        onToggle={() => setUserCollapsed(!collapsed)}
-        trailing={summary ? <span className="font-sans text-ds-small">{summary}</span> : null}
+        onToggle={() => { if (!loading) setUserCollapsed(!collapsed); }}
       />
+      {summary ? <p data-testid="context-pack-summary" className="m-0 border-b border-ds-line px-4 py-1.5 break-keep text-ds-small text-ds-ink-2">{summary}</p> : null}
       {collapsed ? null : (
         <div className="border-t-0">
           <p className="m-0 border-b border-ds-line px-4 py-2 break-keep text-ds-small text-ds-ink-3">{t('contextPackSubtitle')}</p>

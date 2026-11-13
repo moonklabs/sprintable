@@ -295,6 +295,11 @@ describe('루프 상세(4911) — 바탕 → 카드 → 후보 타일 → 우물
     expect(step(t, 'rowOthers', 'panel')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPanel);
   });
 
+  it.each(themes)('⭐%s: 썸네일 우물(well) 위 안내 글은 ink-2(≥ 4.5:1)다 — ink-3은 그 면 위에서 4.5 아래라 미리보기 자리에 쓰지 않는다', (_name, tk) => {
+    expect(contrast(tk['ink-2']!, tk[LAYER_TOKEN.well]!)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(tk['ink-3']!, tk[LAYER_TOKEN.well]!)).toBeLessThan(4.5);
+  });
+
   it('⭐옛 문제 재현 가드: 타일 면(rowOthers) 위에 입력칸 면(sunk)을 얹으면 라이트에서 면이 안 갈린다 — 그래서 이유 칸은 panel이다', () => {
     expect(step(themes[0]![1], 'rowOthers', 'field')).toBeLessThan(LAYER_MIN_STEP.fieldOnPanel);
   });

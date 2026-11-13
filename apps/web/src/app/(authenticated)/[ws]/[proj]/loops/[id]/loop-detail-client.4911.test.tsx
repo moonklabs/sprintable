@@ -45,11 +45,12 @@ const wrap = (node: React.ReactNode) => (
 );
 function TopBarTitleProbe() { const { title } = useTopBar(); return <div data-testid="topbar">{title}</div>; }
 
-type Scenario = { loop?: Record<string, unknown>; groups?: unknown[]; human?: boolean; pack?: unknown; hypothesis?: string | null; brief?: { id: string; title: string; slug: string } | null };
+type Scenario = { packPending?: boolean; loop?: Record<string, unknown>; groups?: unknown[]; human?: boolean; pack?: unknown; hypothesis?: string | null; brief?: { id: string; title: string; slug: string } | null };
 function serve(sc: Scenario = {}) {
   fetchWithAuthMock.mockImplementation(async (url: string) => {
     if (url === '/api/me') return { ok: true, json: async () => ({ data: { type: sc.human === false ? 'agent' : 'human' } }) };
     if (url.includes('/artifacts')) return { ok: true, json: async () => sc.groups ?? [] };
+    if (url.includes('/context-pack') && sc.packPending) return new Promise(() => {});
     if (url.includes('/context-pack')) return new Response(JSON.stringify(sc.pack ?? { items: [], embed_available: true }), { status: 200 });
     if (url.includes('/api/hypotheses/')) return { ok: true, json: async () => ({ data: { id: 'h1', statement: sc.hypothesis ?? '' } }) };
     if (url.includes('/api/docs/')) return { ok: true, json: async () => ({ data: sc.brief }) };
@@ -185,6 +186,24 @@ describe('[SID:4911] 루프 상세 — 본문(띠 · 목표 · 후보 · 과거 
     expect(pack.textContent).toContain(koMessages.loops.contextPackSubtitle);
   });
 
+  it('불러오는 동안에는 접을 수 없다(스켈레톤 · 느림 안내가 사라지지 않게) — 눌러도 열려 있다', async () => {
+    await mount({ packPending: true });
+    const pack = q('[data-slot="context-pack"]')!;
+    expect(pack.getAttribute('data-collapsed')).toBe('false');
+    expect(pack.querySelector('[data-slot="ds-skeleton"]')).not.toBeNull();
+    await act(async () => { (pack.querySelector('button[aria-expanded]') as HTMLButtonElement).click(); });
+    expect(pack.getAttribute('data-collapsed')).toBe('false');
+    expect(pack.querySelector('[data-slot="ds-skeleton"]')).not.toBeNull();
+  });
+
+  it('요약 글(건수 · 비었음 · 못 가져옴)은 줄어들지 않는 머리 오른쪽 칸이 아니라 머리 «아래» 한 줄에 선다(좁은 폭에서 제목을 밀지 않게)', async () => {
+    await mount();
+    const pack = q('[data-slot="context-pack"]')!;
+    const header = pack.querySelector('[data-slot="ds-section-header"]')!;
+    expect(header.textContent).not.toContain('관련된 과거 실행이 없어요');
+    expect(pack.querySelector('[data-testid="context-pack-summary"]')!.textContent).toBe('관련된 과거 실행이 없어요');
+  });
+
   it('과거 학습이 있으면 펼쳐 있고 건수 · 학습 요약 · 제안 · 근거 카드가 선다', async () => {
     await mount({ pack: PACK });
     const pack = q('[data-slot="context-pack"]')!;
@@ -206,6 +225,13 @@ describe('[SID:4911] 루프 상세 — 결정 슬롯(ds Radio · ds Textarea)', 
     const group = q('[role="radiogroup"]')!;
     expect(group.getAttribute('aria-label')).toBe('headline');
     expect(group.querySelectorAll('[data-slot="ds-radio"]')).toHaveLength(2);
+    // 폼 직렬화용 이름 = 슬롯 이름(옛 input name="slot-…"과 같은 구실) · 후보마다 이름이 달라 스크린리더가 A와 B를 가른다
+    expect(Array.from(group.querySelectorAll('input[type="radio"]')).every((i) => i.getAttribute('name') === 'headline')).toBe(true);
+    const radioNames = Array.from(group.querySelectorAll('[data-slot="ds-radio"]')).map((r) => document.getElementById(r.getAttribute('aria-labelledby')!)!.textContent);
+    expect(radioNames).toEqual(['선택 · 후보 a1', '선택 · 후보 a2']);
+    const areaNames = Array.from(group.querySelectorAll('textarea')).map((t) => t.getAttribute('aria-label'));
+    expect(new Set(areaNames).size).toBe(2);
+    expect(areaNames.every((n) => n!.includes('후보 a'))).toBe(true);
     expect(group.querySelectorAll('textarea[data-slot="ds-textarea"]')).toHaveLength(2);
     for (const ta of Array.from(group.querySelectorAll('textarea'))) {
       expect(ta.getAttribute('aria-label')).toBeTruthy();
@@ -270,6 +296,8 @@ describe('[SID:4911] 루프 상세 — 옛 팔레트 0', () => {
       const src = strip(readFileSync(f, 'utf8'));
       expect(src, f).not.toMatch(/from '@\/components\/ui\//);
       expect(src, f).not.toMatch(/from 'lucide-react'/);
+      if (f.endsWith('artifact-preview.tsx')) expect(src, f).not.toContain('text-ds-ink-3'); // well 면 위 ink-3은 4.5:1 아래(layer-rule.test.ts)
+      if (f.endsWith('ai-attribution.tsx')) expect(src, f).toContain('text-ds-ink-2'); // info-soft 위 투명성 줄
       expect(src, f).not.toMatch(/\b(?:bg-(?:background|muted|secondary|primary|card|popover|accent)|border-border|text-(?:muted-foreground|foreground|primary|destructive)|bg-info-tint|border-info-border)\b/);
     }
   });

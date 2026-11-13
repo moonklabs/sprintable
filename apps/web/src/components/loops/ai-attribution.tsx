@@ -49,7 +49,7 @@ export function AiAttributionRow({
 export function AiTransparencyLine({ className }: { className?: string }) {
   const t = useTranslations('loops');
   return (
-    <p className={cn('m-0 mt-1.5 border-t border-dashed border-ds-line pt-1.5 text-ds-small text-ds-ink-3', className)}>
+    <p className={cn('m-0 mt-1.5 border-t border-dashed border-ds-line pt-1.5 text-ds-small text-ds-ink-2', className)}>
       {t('aiTransparencyLine')}
     </p>
   );
