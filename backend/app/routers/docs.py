@@ -6,6 +6,7 @@ from datetime import datetime
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, field_validator
 from sqlalchemy import delete, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies.auth import AuthContext, enforce_body_context, get_current_user, get_project_scoped_org_id, get_verified_org_id
@@ -299,6 +300,31 @@ async def _assert_doc_parent_in_project(
         raise HTTPException(status_code=404, detail="Parent doc not found")
 
 
+# story 4910 — a doc made with a slug the project already uses is a caller mistake (409 SLUG_TAKEN, same body as the PATCH rename path), never a 500.
+# The unique index `docs_project_slug_active` (project_id, slug WHERE deleted_at IS NULL) is the final judge; the pre-check below is the cheap first answer.
+_DOC_SLUG_UNIQUE_INDEX = "docs_project_slug_active"
+
+
+def _is_doc_slug_unique_violation(exc: IntegrityError) -> bool:
+    # SQLSTATE 23505 (unique violation) AND the exact index name, both read from the driver's own exception (SQLAlchemy's asyncpg adapter
+    # keeps it as __cause__) — never a substring of the message: the failing-row detail carries the row's values, so a slug that merely
+    # spells the index name must not turn another constraint's error into SLUG_TAKEN.
+    cause = getattr(exc.orig, "__cause__", None) or exc.orig
+    name = getattr(cause, "constraint_name", None) or getattr(getattr(cause, "diag", None), "constraint_name", None)
+    state = getattr(cause, "sqlstate", None) or getattr(cause, "pgcode", None)
+    return state == "23505" and name == _DOC_SLUG_UNIQUE_INDEX
+
+
+async def _slug_taken_409(session: AsyncSession, org_id: uuid.UUID, project_id: uuid.UUID, slug: str) -> HTTPException:
+    from app.services.doc_slug import resolve_unique_slug
+
+    suggestion = await resolve_unique_slug(session, org_id, project_id, slug)
+    return HTTPException(
+        status_code=409,
+        detail={"code": "SLUG_TAKEN", "message": "이미 사용 중인 슬러그", "suggestion": suggestion},
+    )
+
+
 @router.post("", response_model=DocResponse, status_code=201)
 async def create_doc(
     body: DocCreate,
@@ -321,22 +347,35 @@ async def create_doc(
     created_by = await _resolve_doc_member_id(auth, org_id, session)
     created_by = await canonicalize_member_id(created_by, session)
     repo = DocRepository(session, org_id)
-    doc = await repo.create(
-        project_id=body.project_id,
-        title=body.title,
-        slug=body.slug,
-        content=body.content,
-        parent_id=body.parent_id,
-        created_by=created_by,
-        icon=body.icon,
-        sort_order=body.sort_order,
-        # story #2974 — is_folder는 doc_type=="folder"의 shorthand(Doc.is_folder derived
-        # property와 대칭). True면 doc_type을 강제 — explicit body.doc_type과 충돌해도
-        # is_folder가 우선(둘 다 명시된 경우는 없고, is_folder는 신설 편의 필드).
-        doc_type="folder" if body.is_folder else body.doc_type,
-        content_format=body.content_format,
-        tags=body.tags,
-    )
+    from app.services.doc_slug import is_slug_taken
+
+    # story 4910 — first answer: a live doc of this project already uses the slug → 409 (not a 500 from the unique index).
+    if await is_slug_taken(session, org_id, body.project_id, body.slug):
+        raise await _slug_taken_409(session, org_id, body.project_id, body.slug)
+    try:
+        doc = await repo.create(
+            project_id=body.project_id,
+            title=body.title,
+            slug=body.slug,
+            content=body.content,
+            parent_id=body.parent_id,
+            created_by=created_by,
+            icon=body.icon,
+            sort_order=body.sort_order,
+            # story #2974 — is_folder는 doc_type=="folder"의 shorthand(Doc.is_folder derived
+            # property와 대칭). True면 doc_type을 강제 — explicit body.doc_type과 충돌해도
+            # is_folder가 우선(둘 다 명시된 경우는 없고, is_folder는 신설 편의 필드).
+            doc_type="folder" if body.is_folder else body.doc_type,
+            content_format=body.content_format,
+            tags=body.tags,
+        )
+    except IntegrityError as exc:
+        # story 4910 — two requests can both pass the pre-check; the unique index lets one commit and the other's flush raises here → the same 409.
+        # Only that index is a slug conflict; any other integrity error keeps its old behaviour (re-raised).
+        if not _is_doc_slug_unique_violation(exc):
+            raise
+        await session.rollback()
+        raise await _slug_taken_409(session, org_id, body.project_id, body.slug) from None
     # story #1993(E-KNOWLEDGE-LINK S1): mentions write-path — 신규 doc 이라 existing=∅(순수 insert
     # 로 귀결하는 reconcile 재사용). **같은 트랜잭션**(try/except 로 삼키지 않음) — 실패 시 예외
     # propagate 로 doc 생성 전체가 롤백된다(AC4 원자성). created_by 는 위에서 이미 canonicalize
