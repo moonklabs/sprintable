@@ -746,7 +746,7 @@ export default function AgentDetailPage() {
             <DetailCard
               data-testid="agent-detail-card-runtime"
               title={t('runtimeTypeTitle')}
-              status={(
+              chips={(
                 <Chip tone={RUNTIME_CHIP_TONE[runtimeStatus]}>
                   {StatusIcon ? <StatusIcon className="h-3 w-3" /> : null}
                   {t(ui.labelKey)}
@@ -815,7 +815,7 @@ export default function AgentDetailPage() {
           <DetailCard
             data-testid="agent-detail-card-sse"
             title={t('agentFakechatTitle')}
-            status={<Chip tone="info">SSE</Chip>}
+            chips={<Chip tone="info">SSE</Chip>}
             description={t('agentFakechatDescription')}
             action={freshApiKey ? (
               <DsButton variant="secondary" onClick={() => void handleCopyFakechatEnvKey()}>
@@ -897,7 +897,7 @@ export default function AgentDetailPage() {
             <DetailCard
               data-testid="agent-detail-card-webhook"
               title={t('notificationChannel')}
-              status={(
+              chips={(
                 <>
                   {webhookState === 'empty' && <Chip tone="info">{t('webhookStatusEmpty')}</Chip>}
                   {webhookState === 'active' && <Chip tone="done">{t('webhookStatusActive')}</Chip>}

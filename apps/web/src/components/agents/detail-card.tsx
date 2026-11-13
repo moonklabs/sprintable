@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils';
  */
 export function DetailCard({
   title,
-  status,
+  chips,
   description,
   action,
   children,
@@ -20,8 +20,8 @@ export function DetailCard({
 }: {
   /** none = a body-only card (a one-line notice) */
   title?: ReactNode;
-  /** chips next to the title (the saved state of the thing) */
-  status?: ReactNode;
+  /** the chips next to the title (the saved state of the thing) */
+  chips?: ReactNode;
   description?: ReactNode;
   /** one control on the header's right end */
   action?: ReactNode;
@@ -36,7 +36,7 @@ export function DetailCard({
           <div className="min-w-0 space-y-1">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="m-0 text-ds-card-title font-semibold text-ds-ink">{title}</h2>
-              {status}
+              {chips}
             </div>
             {description ? <p className="m-0 break-keep text-ds-small text-ds-ink-3">{description}</p> : null}
           </div>

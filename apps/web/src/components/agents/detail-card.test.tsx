@@ -23,7 +23,7 @@ describe('DetailCard', () => {
   });
 
   it('머리 줄: 제목(h2) · 상태 칩 · 설명 · 오른쪽 한 컨트롤 — 본문은 따로 패딩 칸', async () => {
-    await render(<DetailCard title="알림 채널" status={<span data-testid="st">상태</span>} description="설명 글" action={<button type="button" data-testid="ac">저장</button>}><p data-testid="body">내용</p></DetailCard>);
+    await render(<DetailCard title="알림 채널" chips={<span data-testid="st">상태</span>} description="설명 글" action={<button type="button" data-testid="ac">저장</button>}><p data-testid="body">내용</p></DetailCard>);
     const head = container.querySelector('[data-slot="detail-card-header"]')!;
     expect(head.querySelector('h2')?.textContent).toBe('알림 채널');
     expect(head.querySelector('[data-testid="st"]')).not.toBeNull();

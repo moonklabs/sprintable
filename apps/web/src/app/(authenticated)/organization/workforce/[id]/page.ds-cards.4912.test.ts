@@ -3,9 +3,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+// JSX comments first (a multi-line one may name «<SectionCard»), then whole-line // and block comments
 const code = readFileSync(join(__dirname, 'page.tsx'), 'utf8')
-  .split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*|\{\/\*)/.test(l)).join('\n')
-  .replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
+  .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
 
 describe('에이전트 상세 하위 탭 카드 — ds 한 층(story 4912 · C1)', () => {
   it('⭐옛 ui/section-card · ui/badge를 import하지 않고 <SectionCard · <Badge를 그리지 않는다 — 되돌리면 RED', () => {
