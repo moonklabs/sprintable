@@ -7,8 +7,9 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Button } from '@/components/ui/button';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { Button } from '@/components/ds/button';
+import { DetailCard } from '@/components/agents/detail-card';
+// the switch stays the old ui part for now: the ds Toggle also draws its own label + «켬/끔» text (a layout change, not a face) — it moves with the run-profile fields in a later C piece
 import { Switch } from '@/components/ui/switch';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
@@ -71,13 +72,10 @@ export function AgentRunProfileSection({ agentId, runtimeType, runNow = null }: 
 
   if (failed) {
     return (
-      <SectionCard>
-        <SectionCardHeader><h2 className="text-base font-semibold text-foreground">{ta('runProfileTitle')}</h2></SectionCardHeader>
-        <SectionCardBody>
-          <p className="text-sm text-muted-foreground">{ta('runProfileLoadFailed')}</p>
-          <Button size="sm" variant="outline" className="mt-2" onClick={() => void load()}>{ta('runProfileRetry')}</Button>
-        </SectionCardBody>
-      </SectionCard>
+      <DetailCard data-testid="agent-detail-card-run-profile" title={ta('runProfileTitle')}>
+        <p className="text-ds-body text-ds-ink-3">{ta('runProfileLoadFailed')}</p>
+        <Button variant="secondary" onClick={() => void load()}>{ta('runProfileRetry')}</Button>
+      </DetailCard>
     );
   }
   if (!options || !profile || !draft) return null;
@@ -144,41 +142,34 @@ export function AgentRunProfileSection({ agentId, runtimeType, runNow = null }: 
   const hosts = profile.allowed_hosts ?? [];
 
   return (
-    <SectionCard>
-      <SectionCardHeader>
-        <div className="space-y-1">
-          <h2 className="text-base font-semibold text-foreground">{ta('runProfileTitle')}</h2>
-          <p className="text-sm text-muted-foreground">{ta('runProfileNextStart')}</p>
-        </div>
-      </SectionCardHeader>
-      <SectionCardBody className="space-y-3">
+    <DetailCard data-testid="agent-detail-card-run-profile" title={ta('runProfileTitle')} description={ta('runProfileNextStart')}>
         {/* story 4686 (AC2 · Yuna run-info-1014 (3)): «지금 도는 것: {model} · 생각 깊이 {effort}» and, for Claude, «계정: {account}» — what runs NOW,
             above the saved values below (they differ right after a change, until the next start: the line under the title says so). No live
             session → neither line. */}
         {runNow ? (
-          <div className="space-y-0.5 text-sm" data-testid="run-profile-run-now">
-            <p className="break-keep" data-testid="run-profile-run-now-value"><span className="text-muted-foreground">{ta('runNowLabel')}:</span> <span className="text-foreground">{runNowText(runNow, ta)}</span></p>
-            {runNow.account ? <p className="break-keep text-muted-foreground" data-testid="run-profile-run-now-account">{ta('runNowAccount', { account: runNow.account })}</p> : null}
+          <div className="space-y-0.5 text-ds-body" data-testid="run-profile-run-now">
+            <p className="break-keep" data-testid="run-profile-run-now-value"><span className="text-ds-ink-3">{ta('runNowLabel')}:</span> <span className="text-ds-ink">{runNowText(runNow, ta)}</span></p>
+            {runNow.account ? <p className="break-keep text-ds-ink-3" data-testid="run-profile-run-now-account">{ta('runNowAccount', { account: runNow.account })}</p> : null}
           </div>
         ) : null}
         {profile.can_change ? (
           <>
             <AgentRunProfileFields options={options} draft={draft} onChange={(d) => { setDraft(d); setLine(null); }} disabled={saving} />
             <div className="flex justify-end">
-              <Button variant="hero" size="sm" onClick={() => void save()} disabled={saving || unchanged || !draftReady(draft, options)}>
+              <Button variant="primary" onClick={() => void save()} disabled={saving || unchanged || !draftReady(draft, options)}>
                 {saving ? ta('runProfileSaving') : ta('runProfileSave')}
               </Button>
             </div>
           </>
         ) : (
-          <dl className="grid gap-1 text-sm sm:grid-cols-[8rem_1fr]">
-            <dt className="text-muted-foreground">{ta('runProfileRuntime')}</dt>
-            <dd className="text-foreground">{RUNTIME_LABELS[profile.runtime ?? ''] ?? profile.runtime}</dd>
-            <dt className="text-muted-foreground">{ta('runProfileModel')}</dt>
-            <dd className="text-foreground">{profile.model ?? ta('runProfileModelDefault')}</dd>
-            <dt className="text-muted-foreground">{ta('runProfileEffort')}</dt>
-            <dd className="text-foreground">
-              {profile.effort ? <>{ta(EFFORT_LABEL_KEYS[profile.effort] ?? 'runProfileEffortDefault')} <code className="text-xs text-muted-foreground">{profile.effort}</code></> : ta('runProfileEffortDefault')}
+          <dl className="grid gap-1 text-ds-body sm:grid-cols-[8rem_1fr]">
+            <dt className="text-ds-ink-3">{ta('runProfileRuntime')}</dt>
+            <dd className="text-ds-ink">{RUNTIME_LABELS[profile.runtime ?? ''] ?? profile.runtime}</dd>
+            <dt className="text-ds-ink-3">{ta('runProfileModel')}</dt>
+            <dd className="text-ds-ink">{profile.model ?? ta('runProfileModelDefault')}</dd>
+            <dt className="text-ds-ink-3">{ta('runProfileEffort')}</dt>
+            <dd className="text-ds-ink">
+              {profile.effort ? <>{ta(EFFORT_LABEL_KEYS[profile.effort] ?? 'runProfileEffortDefault')} <code className="text-ds-small text-ds-ink-3">{profile.effort}</code></> : ta('runProfileEffortDefault')}
             </dd>
           </dl>
         )}
@@ -189,7 +180,7 @@ export function AgentRunProfileSection({ agentId, runtimeType, runNow = null }: 
         <div className="grid gap-1.5 sm:grid-cols-[8rem_1fr] sm:items-start" data-testid="run-profile-unattended">
           {unattendedSwitchShown ? (
             <>
-              <span id="run-profile-unattended-label" className="text-sm text-muted-foreground sm:pt-0.5">{ta('runProfileUnattended')}</span>
+              <span id="run-profile-unattended-label" className="text-ds-body text-ds-ink-3 sm:pt-0.5">{ta('runProfileUnattended')}</span>
               <div className="space-y-1">
                 <Switch
                   checked={unattendedDraft}
@@ -197,11 +188,11 @@ export function AgentRunProfileSection({ agentId, runtimeType, runNow = null }: 
                   aria-labelledby="run-profile-unattended-label"
                   onCheckedChange={(on) => { setUnattendedDraft(on); setLine(null); }}
                 />
-                <p className="break-keep text-pretty text-xs text-muted-foreground">{ta('runProfileUnattendedHelp')}</p>
+                <p className="break-keep text-pretty text-ds-small text-ds-ink-3">{ta('runProfileUnattendedHelp')}</p>
               </div>
             </>
           ) : (
-            <p className="break-keep text-pretty text-sm text-muted-foreground sm:col-span-2" data-testid="run-profile-unattended-line">
+            <p className="break-keep text-pretty text-ds-body text-ds-ink-3 sm:col-span-2" data-testid="run-profile-unattended-line">
               {profile.runtime !== 'claude-code'
                 ? ta('runProfileUnattendedCodex')
                 : profile.unattended === true ? ta('runProfileUnattendedOwnerOnlyOn', ownerNames) : ta('runProfileUnattendedOwnerOnlyOff', ownerNames)}
@@ -209,18 +200,18 @@ export function AgentRunProfileSection({ agentId, runtimeType, runNow = null }: 
           )}
         </div>
         {/* story #4580 (배치 ③): «허용 주소» — one more row of the group; [빼기] only for whoever may change it */}
-        <dl className="grid gap-1 text-sm sm:grid-cols-[8rem_1fr]" data-testid="run-profile-allowed-hosts">
-          <dt className="text-muted-foreground">{ta('runProfileAllowedHosts')}</dt>
+        <dl className="grid gap-1 text-ds-body sm:grid-cols-[8rem_1fr]" data-testid="run-profile-allowed-hosts">
+          <dt className="text-ds-ink-3">{ta('runProfileAllowedHosts')}</dt>
           <dd className="space-y-1">
             {hosts.length === 0 ? (
-              <p className="text-muted-foreground">{ta('runProfileAllowedHostsEmpty')}</p>
+              <p className="text-ds-ink-3">{ta('runProfileAllowedHostsEmpty')}</p>
             ) : (
               <ul className="space-y-1">
                 {hosts.map((h) => (
                   <li key={h.host} className="flex items-center justify-between gap-2">
-                    <span className="break-keep text-sm font-medium text-foreground [overflow-wrap:anywhere]">{h.host}</span>
+                    <span className="break-keep text-ds-body font-medium text-ds-ink [overflow-wrap:anywhere]">{h.host}</span>
                     {profile.can_change ? (
-                      <Button variant="ghost" size="sm" onClick={() => void remove(h.host)} disabled={removing !== null}
+                      <Button variant="quiet" onClick={() => void remove(h.host)} disabled={removing !== null}
                         aria-label={`${ta('runProfileAllowedHostRemove')} · ${h.host}`}>
                         {ta('runProfileAllowedHostRemove')}
                       </Button>
@@ -229,17 +220,16 @@ export function AgentRunProfileSection({ agentId, runtimeType, runNow = null }: 
                 ))}
               </ul>
             )}
-            <p className="break-keep text-pretty text-xs text-muted-foreground">{ta('runProfileAllowedHostsHelp')}</p>
+            <p className="break-keep text-pretty text-ds-small text-ds-ink-3">{ta('runProfileAllowedHostsHelp')}</p>
             {/* Yuna 4972 ①: only where something can be removed (a list · a person who may change it) */}
-            {hosts.length > 0 && profile.can_change ? <p className="break-keep text-pretty text-xs text-muted-foreground">{ta('runProfileAllowedHostsNow')}</p> : null}
+            {hosts.length > 0 && profile.can_change ? <p className="break-keep text-pretty text-ds-small text-ds-ink-3">{ta('runProfileAllowedHostsNow')}</p> : null}
           </dd>
         </dl>
         {line ? (
-          <p role="status" className={line.kind === 'error' ? 'text-sm text-destructive' : 'text-sm text-muted-foreground'}>
+          <p role="status" className={line.kind === 'error' ? 'text-ds-body text-ds-failed' : 'text-ds-body text-ds-ink-3'}>
             {line.kind === 'saved' ? ta('runProfileSavedLine') : line.kind === 'removed' ? ta('runProfileAllowedHostRemoved', { host: line.host ?? '' }) : ta(line.key)}
           </p>
         ) : null}
-      </SectionCardBody>
-    </SectionCard>
+    </DetailCard>
   );
 }
