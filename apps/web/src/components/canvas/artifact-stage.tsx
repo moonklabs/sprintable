@@ -540,7 +540,8 @@ function CanvasViewport({
         </div>
       </div>
       {/* [SID:4362] 좁은 폭에서 안내 글과 도구 버튼이 한 줄에 다 안 들어가면 도구 줄을 넘긴다 — 예전엔 «전체 보기» · «실제 크기»가 낱말 중간에서 꺾였다. */}
-      <div className="mt-1.5 flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1">
+      {/* 4910 — 도구줄은 «그림»이 아니다: 위에서 그림 우클릭 메뉴(상세 화면)가 감싸고 있어도 여기서는 열리지 않는다(브라우저 기본 메뉴로 — 그림 위에서만 우리 메뉴). */}
+      <div onContextMenu={(e) => e.stopPropagation()} className="mt-1.5 flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1">
         <p className="min-w-0 text-editorial-meta text-muted-foreground">{t(isTouchDevice ? 'viewerCanvasHintTouch' : 'viewerCanvasHint')}</p>
         <div className="flex shrink-0 items-center gap-1 whitespace-nowrap text-editorial-meta font-medium text-muted-foreground">
           <span className="tabular-nums">{Math.round(transform.scale * 100)}%</span>

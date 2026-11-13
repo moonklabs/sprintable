@@ -91,6 +91,38 @@ describe('그림 위 우클릭 메뉴 (layout="page")', () => {
     }
   });
 
+  it('도구줄(전체 보기 · 실제 크기) 위 우클릭은 그림 메뉴를 열지 않는다 — 메뉴는 그림 위에서만', async () => {
+    await mount({ onProposeCanonical: () => undefined });
+    const toolbarButton = [...container.querySelectorAll('button')].find((b) => b.textContent?.trim() === '전체 보기')!;
+    expect(toolbarButton).toBeDefined();
+    expect(trigger().contains(toolbarButton)).toBe(true); // 트리거 «안»에 있는데도
+    await rightClick(toolbarButton);
+    expect(menuItems()).toHaveLength(0);
+    await rightClick(container.querySelector('[data-artifact-canvas-viewport]')!); // 그림 위는 연다
+    expect(menuItems().map((i) => i.textContent)).toEqual(['정본으로 제안', '내보내기']);
+  });
+
+  it('html 산출물의 «크게 보기 → 상호작용» 안내 글 위 우클릭도 메뉴를 열지 않는다', async () => {
+    await mount({ artifact: { ...MOCK_ARTIFACT, format: 'html' } });
+    const hint = [...container.querySelectorAll('p')].find((p) => p.textContent?.includes('클릭해서 흐름을 따라가려면'))!;
+    expect(hint).toBeDefined();
+    await rightClick(hint);
+    expect(menuItems()).toHaveLength(0);
+  });
+
+  it('오른쪽 열: 가리키는 것들의 윗선은 끈다(열 구분선 divide-y가 이미 있어 겹선 → 하나) · embedded는 예전 윗선 그대로', async () => {
+    await mount();
+    const column = container.querySelector('[data-testid="artifact-detail-column"]')!;
+    expect(column.className).toContain('divide-y');
+    const backlinks = column.lastElementChild!;
+    expect(backlinks.className).toContain('border-t-0');
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await mount({ layout: 'embedded' });
+    const embeddedBacklinks = [...container.querySelectorAll('div')].find((d) => d.className.includes('border-ds-line') && d.className.includes('px-4') && d.textContent?.includes('가리키는'))!;
+    expect(embeddedBacklinks.className).not.toContain('border-t-0');
+  });
+
   it('스토리 패널용 기본 배치(embedded)에는 이 메뉴가 없다 — 우클릭해도 메뉴 0', async () => {
     await mount({ layout: 'embedded', onProposeCanonical: () => undefined });
     expect(container.querySelector('[data-testid="artifact-picture-menu-trigger"]')).toBeNull();
