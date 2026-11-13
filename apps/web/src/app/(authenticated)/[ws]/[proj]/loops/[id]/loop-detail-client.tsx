@@ -205,7 +205,7 @@ export function LoopDetailClient({ loopId, wsSlug, projSlug, projectId }: { loop
   }
   if (loop.goal_tags.length > 0) {
     railItems.push({ id: 'tags', label: t('tagsLabel'), value: (
-      <span className="flex flex-wrap gap-1">{loop.goal_tags.map((tag) => <Chip key={tag}>{tag}</Chip>)}</span>
+      <span className="flex flex-wrap gap-1">{loop.goal_tags.map((tag) => <Chip key={tag} title={tag} className="max-w-full min-w-0"><span className="truncate">{tag}</span></Chip>)}</span>
     ) });
   }
 

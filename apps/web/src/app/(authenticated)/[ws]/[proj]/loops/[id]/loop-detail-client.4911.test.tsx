@@ -97,6 +97,11 @@ describe('[SID:4911] 루프 상세 — 틀 · 속성 칸', () => {
     expect(text).toContain('weekly-signup');
     expect(text).toContain('#12345678에서 파생');
     expect(text).toContain('retention');
+    // 긴 태그가 16rem 칸을 밀지 않는다: 칩이 칸 폭까지만 늘고 글은 줄임(title에 전문)
+    const tagChip = Array.from(q('[data-slot="ds-summary-card"]')!.querySelectorAll('[data-slot="ds-chip"]')).find((c) => c.textContent === 'retention')!;
+    expect(tagChip.classList.contains('max-w-full')).toBe(true);
+    expect(tagChip.querySelector('.truncate')!.textContent).toBe('retention');
+    expect(tagChip.getAttribute('title')).toBe('retention');
     expect(q('[data-slot="ds-summary-card"] a')!.getAttribute('href')).toBe('/docs/weekly');
     expect(q('[data-slot="ds-summary-card"] [data-outcome="hit"]')!.textContent).toContain('적중');
     expect(text).toContain('signup: 실제 12');

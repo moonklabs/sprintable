@@ -185,7 +185,7 @@ export function ContextPackPanel({ loopId }: { loopId: string }) {
 
   const hasItems = !loading && !unavailable && !!data && data.embed_available && data.items.length > 0;
   // 비었거나 못 가져온 «과거 학습»은 큰 빈 칸이 아니라 한 줄로 접혀 있다(4911) — 사람이 펼치면 그 안내가 열린다. 있으면 펼쳐 있다.
-  const collapsed = userCollapsed ?? (!loading && !hasItems);
+  const collapsed = loading ? false : (userCollapsed ?? !hasItems); // 불러오는 동안은 사용자가 접어 둔 것도 열린다(스켈레톤 · 느림 안내가 다시 불러올 때 숨지 않게)
   const summary = loading ? null
     : unavailable || (data && !data.embed_available) ? t('contextPackEmbedUnavailable')
       : !data || data.items.length === 0 ? t('contextPackEmpty')
