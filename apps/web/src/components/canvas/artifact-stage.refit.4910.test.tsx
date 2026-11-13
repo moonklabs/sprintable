@@ -85,6 +85,21 @@ describe('ArtifactStage — 이미지 실제 크기를 알았을 때 다시 맞�
     }
   });
 
+  it('두 손가락 핀치(터치)로 줌을 바꿨으면 이미지가 불러져도 다시 맞추지 않는다', async () => {
+    await mountImage();
+    expect(scaleNow()).toBeCloseTo(0.5, 3);
+    const touch = (type: string, pointerId: number, x: number) => pointer(type, { pointerId, pointerType: 'touch', clientX: x, clientY: 100 });
+    await touch('pointerdown', 1, 100);
+    await touch('pointerdown', 2, 200); // 두 번째 손가락 = 핀치 시작(거리 100)
+    await touch('pointermove', 1, 50);
+    await touch('pointermove', 2, 250); // 거리 200 = 두 배
+    await touch('pointerup', 1, 50);
+    await touch('pointerup', 2, 250);
+    expect(scaleNow()).toBeCloseTo(1, 2); // 0.5 × 2
+    await loadImage(320, 200);
+    expect(scaleNow()).toBeCloseTo(1, 2); // 다시 맞춤(2)으로 되돌아가지 않음
+  });
+
   it('«전체 보기»(키 0)는 만짐이 아니다 — 불러진 뒤에는 그래도 다시 맞춘다', async () => {
     await mountImage();
     await key('0');
