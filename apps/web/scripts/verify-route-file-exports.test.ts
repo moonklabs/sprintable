@@ -208,7 +208,7 @@ describe('scanRepo — story #3760 AC1/AC4(실 트리 실행)', () => {
   // story #4291 — `[ws]/[proj]/layout.tsx`(일감 탭 띠 WorkTabsFrame) 하나로 125→126(default export만).
   // story #4326(까디르 4688) — `organization/workforce/runs/loading.tsx`(실행 목록 상단바 폴백) 하나로 126→127(default export만).
   // story #4333 — 시한은 기본(행 가드 · 벽시계 예산 폐기). 일의 양은 결정적으로 — 한 스캔에서 같은 파일을 두 번 읽으면 RED(measureFsReads).
-  it('실 트리(apps/web/src/app) — 라우트 파일 138개·위반 0건', () => {
+  it('실 트리(apps/web/src/app) — 라우트 파일 141개·위반 0건', () => {
     const { result: __scan, maxPerFile, files: __filesRead } = measureFsReads(() => scanRepo(APP_ROOT));
     const { violations, fileCount } = __scan;
     expect(maxPerFile.count, `${maxPerFile.file} — 한 스캔에서 두 번 이상 읽음(일이 늘었다)`).toBeLessThanOrEqual(1);
