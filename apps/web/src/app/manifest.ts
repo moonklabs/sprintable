@@ -10,10 +10,10 @@ import type { MetadataRoute } from 'next';
 // theme_color(#42549B)는 브랜드 마크 색 축(별개 결정 축)이라 유지.
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    // story #2745 — layout.tsx SITE_TITLE/SITE_DESCRIPTION과 동일 정본(같은 이유로 동시 갱신).
+    // story #2745 — layout.tsx SITE_TITLE과 동일 정본(같은 이유로 동시 갱신). story 4918 — 설명은 layout.tsx SITE_DESCRIPTION_EN과 같은 글자(단일 로케일 정적 설치 메타라 영어 한 줄).
     name: 'Sprintable — Ship with AI agents',
     short_name: 'Sprintable',
-    description: 'The organization OS that closes open loops. Kanban, memos, standups, retros, MCP server — with AI agents as first-class team members.',
+    description: 'While your agents work on your Mac, chat and approve from your phone. A workspace for people who work solo or in small teams.',
     start_url: '/',
     display: 'standalone',
     background_color: '#F4F2EC',
