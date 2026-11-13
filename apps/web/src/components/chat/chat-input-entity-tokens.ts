@@ -89,6 +89,9 @@ const ENTITY_TYPE_LABELS: Record<string, string> = {
 const ENTITY_TYPE_LABEL_KEYS: Record<string, string> = {
   story: 'entityTypeStory', doc: 'entityTypeDoc', epic: 'entityTypeEpic', task: 'entityTypeTask',
 };
+/** story 4925 — whether a work item / entity type has a label (so a caller can tell «unmapped» from «mapped to a word that happens to equal the type») */
+export const hasEntityTypeLabel = (type: string): boolean => Object.hasOwn(ENTITY_TYPE_LABELS, type) || Object.hasOwn(ENTITY_TYPE_LABEL_KEYS, type);
+
 export function entityTypeLabel(type: string, t?: (key: string) => string): string {
   if (t) {
     const key = ENTITY_TYPE_LABEL_KEYS[type];

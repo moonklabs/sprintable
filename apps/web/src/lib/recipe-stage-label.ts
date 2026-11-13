@@ -57,6 +57,9 @@ const STAGE_LABEL_KEYS: Record<string, string> = {
   writing: 'recipeStageLabelWriting',
 };
 
+/** story 4925 — whether a stage slug has a label (so a caller can tell «unmapped» from «mapped to a word that happens to equal the slug») */
+export const hasRecipeStageLabel = (stage: string): boolean => Object.hasOwn(STAGE_LABEL_KEYS, stage);
+
 export function recipeStageLabel(stage: string, t: (key: string) => string): string {
   return Object.hasOwn(STAGE_LABEL_KEYS, stage) ? t(STAGE_LABEL_KEYS[stage]!) : stage;
 }
