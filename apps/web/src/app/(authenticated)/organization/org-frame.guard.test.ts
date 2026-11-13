@@ -14,14 +14,14 @@ const MOVED = [
   'organization/roles/page.tsx', 'organization/trust/page.tsx', 'organization/trust/trust-utils.tsx',
   'organization/content-rules/page.tsx', 'organization/generation-connectors/page.tsx', 'rewards/page.tsx',
   'organization/channels/page.tsx', 'organization/events/page.tsx', 'content/page.tsx',
+  'channel/page.tsx', // 4913 · 채널(채팅 흐름) — PageFrame stream
 ];
 /** 옮긴 화면의 라우트 로딩 폴더(= FLAT_ROUTE_TOP_BAR 키) — rewards는 표에 이미 있던 키. */
-const MOVED_LOADING = ['organization/roles', 'organization/trust', 'organization/content-rules', 'organization/generation-connectors', 'rewards', 'organization/channels', 'organization/events', 'content'];
+const MOVED_LOADING = ['organization/roles', 'organization/trust', 'organization/content-rules', 'organization/generation-connectors', 'rewards', 'organization/channels', 'organization/events', 'content', 'channel'];
 /** 옮길 화면 — 지금 옛 부품 import 수(`from '@/components/ui/…'`)의 상한. 줄이는 방향으로만 바꾼다. */
 const RATCHET: Record<string, number> = {
   'organization/insights-board/page.tsx': 5,
   'content/channel-posts/page.tsx': 7,
-  'channel/page.tsx': 1,
 };
 const read = (rel: string) => readFileSync(join(APP, rel), 'utf8');
 /** 주석을 뺀 코드(주석 속 «PageHeader» 같은 설명이 가드에 걸리지 않게). */

@@ -372,7 +372,15 @@
     "removeFile": "Remove file",
     "attachFile": "Attach file",
     "inputPlaceholder": "Type a message… (Enter to send, Shift+Enter for new line)",
-    "send": "Send"
+    "send": "Send",
+    "description": "Send and receive messages with the agent on this channel.",
+    "statusConnected": "Connected",
+    "statusConnecting": "Connecting",
+    "statusDisconnected": "Disconnected",
+    "disconnectedNote": "The connection is down. What you send goes to the server directly.",
+    "connectFailed": "Couldn't connect to the channel.",
+    "sendFailed": "Couldn't send the message. Your text is still in the box — send it again.",
+    "inputLabel": "Message"
   },
   "dashboard": {
     "ccGateGeneric": "gate",

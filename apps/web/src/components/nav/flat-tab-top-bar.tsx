@@ -67,15 +67,11 @@ export function TopBarFallbackHolder({ title, showContextChip }: { title: ReactN
   return null;
 }
 
-/** «채널»(/channel) 상단바 제목 — 연결 상태 점은 화면만 안다(폴백은 점 없이). 화면과 폴백이 같이 쓴다. */
-export function ChannelTopBarTitle({ statusDot }: { statusDot?: { className: string; label: string } }) {
+/** «채널»(/channel) 상단바 제목 — 화면(OrgScreenTitle)과 폴백이 같은 모양을 쓴다(4913 · 채널). */
+export function ChannelTopBarTitle() {
   const tChannel = useTranslations('channel');
-  return (
-    <div className="flex items-center gap-2">
-      <span className="text-sm font-medium text-foreground">{tChannel('title')}</span>
-      {statusDot ? <span className={`h-2 w-2 rounded-full ${statusDot.className}`} title={statusDot.label} /> : null}
-    </div>
-  );
+  // 연결 상태는 위 막대의 점이 아니라 화면 머리의 글 칩이 말한다(점은 «connected» 같은 영어 title만 가졌다).
+  return <OrgTitle>{tChannel('title')}</OrgTitle>;
 }
 
 /** «보상»(/rewards) 상단바 제목 — 화면과 폴백이 같이 쓴다. */
@@ -210,7 +206,7 @@ export const FLAT_ROUTE_TOP_BAR = {
   more: { Title: MoreTopBarTitle, showContextChip: true },
   inbox: { Title: InboxFallbackTitle, showContextChip: true },
   chats: { Title: ChatsTopBarTitle, showContextChip: true },
-  channel: { Title: () => <ChannelTopBarTitle />, showContextChip: true },
+  channel: { Title: ChannelTopBarTitle, showContextChip: true },
   rewards: { Title: RewardsTopBarTitle, showContextChip: true },
   '[ws]/[proj]/goals': { Title: GoalsTopBarTitle, showContextChip: true },
   '[ws]/[proj]/loops': { Title: LoopsTopBarTitle, showContextChip: true },
