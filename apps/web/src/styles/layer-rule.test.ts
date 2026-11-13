@@ -186,4 +186,9 @@ describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
     expect(globals).toMatch(/--skeleton-highlight:[^;]*var\(--ds-background\)/);
     expect(globals).not.toMatch(/--skeleton-highlight:[^;]*var\(--background\)/);
   });
+
+  // 4910 — 산출물 상세: 보기 영역(well)이 내용 칸(panel) 바로 위에 선다(목록 카드와 달리 사이에 행 면이 없다) — 그 간격도 눈으로 갈린다.
+  it.each(themes)('⭐%s: 산출물 상세 — 내용 칸 → 보기 영역(well) ≥ 0.03', (_name, t) => {
+    expect(step(t, 'panel', 'well')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.wellOnRow);
+  });
 });
