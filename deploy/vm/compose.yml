@@ -30,7 +30,9 @@ x-logging: &logging
 services:
   db:
     # pgvector is required: the migrations run CREATE EXTENSION vector. pg15 = what Cloud SQL runs today (cloudsql.txt), so the dump restores as it is.
-    image: pgvector/pgvector:pg15
+    # Pinned by DIGEST (story 4917): this is the image the dev and prod VMs ran on 2026-11-13 (PostgreSQL 15.19). The floating `pg15` tag had already moved on to 15.20 (2026-11-12 23:07Z),
+    # so a recreated container would have changed the database server under us. To move to a newer image: change this digest (and the gateway-db one below, always the same) in one PR.
+    image: pgvector/pgvector:pg15@sha256:47af0b65960b14f1c6945aa4ccae37836c632e9a6fe0eea9160936e616e5b2e9
     restart: unless-stopped
     logging: *logging
     mem_limit: 1312m
@@ -66,7 +68,7 @@ services:
   #  · the server never logs the values a statement ran with (customer text) — only the statement.
   # Started for a release whose declaration has the `support_gateway` block (the deployer adds `--profile gateway-db`).
   gateway-db:
-    image: pgvector/pgvector:pg15
+    image: pgvector/pgvector:pg15@sha256:47af0b65960b14f1c6945aa4ccae37836c632e9a6fe0eea9160936e616e5b2e9
     profiles: ["gateway-db"]
     # «no», on purpose: after a boot or a restart of docker nothing but sprintable-gateway-db-firewall.service starts this container, and only once the rule that keeps the metadata server out of its reach is in place
     restart: "no"

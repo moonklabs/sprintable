@@ -37,11 +37,19 @@ def test_compose_carries_no_secret_and_none_of_the_forbidden_switches() -> None:
 
 
 def test_images_other_than_ours_are_pinned() -> None:
-    assert COMPOSE["services"]["db"]["image"] == "pgvector/pgvector:pg15"
+    # story 4917: pinned by digest (the PG 15.19 image the dev and prod VMs ran on 2026-11-13) — a floating `pg15` tag had already moved to 15.20
+    assert COMPOSE["services"]["db"]["image"] == "pgvector/pgvector:pg15@sha256:47af0b65960b14f1c6945aa4ccae37836c632e9a6fe0eea9160936e616e5b2e9"
     assert re.fullmatch(r"caddy:\d+\.\d+\.\d+(-alpine)?", COMPOSE["services"]["caddy"]["image"])
     for name in ("backend", "migrate"):
         assert COMPOSE["services"][name]["image"] == "${BACKEND_IMAGE:?}"
     assert COMPOSE["services"]["frontend"]["image"] == "${FRONTEND_IMAGE:?}"
+
+
+def test_the_local_compose_db_runs_the_same_pinned_image_as_the_vm() -> None:
+    # story 4917: a developer's local database is the image the VMs run (PostgreSQL 15.19), not whatever the floating `pg15` tag is today
+    local = yaml.safe_load((_ROOT / "docker-compose.yml").read_text())
+    assert local["services"]["db"]["image"] == COMPOSE["services"]["db"]["image"]
+    assert "@sha256:" in local["services"]["db"]["image"]
 
 
 def test_migrate_runs_only_on_request_and_the_data_lives_on_the_data_disk() -> None:
