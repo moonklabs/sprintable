@@ -149,6 +149,7 @@ describe('MessagingPolicySection — card face (story 4912 · C2b)', () => {
     await act(async () => { radios()[2]!.click(); });
     const banner = card().querySelector('[data-slot="ds-banner"]') as HTMLElement;
     expect(banner).not.toBeNull();
+    expect(banner.getAttribute('role'), 'the warning interrupts (the old Alert warning was role=alert)').toBe('alert');
     expect(banner.textContent).toContain(S.messagingOrgWideWarningTitle);
     const save = [...card().querySelectorAll('button')].find((b) => b.textContent === koMessages.common.save)!;
     expect(save.className).toContain('bg-ds-action');
@@ -173,6 +174,24 @@ describe('MessagingPolicySection — card face (story 4912 · C2b)', () => {
     expect(src).not.toMatch(/text-(muted-foreground|foreground|destructive|xs|sm|base|brand)\b|border-brand|bg-brand|bg-muted|border-border/);
     expect(src).not.toMatch(/variant="(hero|outline)"/);
     expect(src).toContain('<DetailCard');
+  });
+
+  it('⭐빼는 중에는 그 행의 빼기가 눌리지 않는다(DELETE가 나가 있는 동안 disabled · codex) — 끝나면 행이 사라진다', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    stub('list', ['m-1']);
+    const base = (globalThis as { fetch: typeof fetch }).fetch as unknown as (u: string, i?: RequestInit) => Promise<unknown>;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/agents/agent-1/message-policy/allowlist/') && init?.method === 'DELETE') { await gate; return { ok: true, json: async () => ({ data: { allowlist: [] } }) }; }
+      return base(url, init);
+    }));
+    await mount();
+    const rm = () => card().querySelector(`button[aria-label="${koMessages.common.delete} · 멤버 하나"]`) as HTMLButtonElement | null;
+    await act(async () => { rm()!.click(); });
+    expect(rm()!.disabled).toBe(true);
+    await act(async () => { release(); });
+    await flush(); await flush();
+    expect(rm()).toBeNull();
   });
 });
 

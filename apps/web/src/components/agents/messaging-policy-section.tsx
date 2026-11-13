@@ -223,7 +223,7 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
 
         {/* org_wide 경고 */}
         {stagedMode === 'org_wide' && (
-          <Banner tone="note" className="rounded-ds-control">
+          <Banner tone="note" announce="assertive" className="rounded-ds-control">
             <span className="font-medium">{t('messagingOrgWideWarningTitle')}</span>{' '}
             <span className="text-ds-ink-2">{t('messagingOrgWideWarningDesc')}</span>
           </Banner>
