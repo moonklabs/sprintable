@@ -27,6 +27,11 @@ export interface BannerProps {
   action?: ReactNode;
   /** 주면 닫기 단추가 생긴다. */
   onDismiss?: () => void;
+  /**
+   * story 4912 (C2b, codex): `'assertive'` = `role=alert` (read at once) whatever the tone — for a WARNING that must interrupt (the old Alert warning was `role=alert`) without being painted as a failure.
+   * Default = the tone's own role (`failed` alert · the others status), exactly as before.
+   */
+  announce?: 'assertive';
   className?: string;
 }
 
@@ -34,12 +39,12 @@ export interface BannerProps {
  * UI-3(a9d56577) Banner — doc v0.3 #30. 전폭 · 최소 높이 36 · 왼쪽 아이콘 + 글 + (행동) + (닫기).
  * `failed`는 `role=alert`(즉시 읽힘), 나머지는 `role=status`(흐름을 끊지 않음).
  */
-export function Banner({ tone = 'info', children, action, onDismiss, className }: BannerProps) {
+export function Banner({ tone = 'info', children, action, onDismiss, className, announce }: BannerProps) {
   const t = useTranslations('common');
   const spec = TONES[tone];
   return (
     <div
-      role={spec.role}
+      role={announce === 'assertive' ? 'alert' : spec.role}
       data-slot="ds-banner"
       data-tone={tone}
       className={cn('flex min-h-ds-control w-full items-center gap-2 border px-3 py-1.5 text-ds-body text-ds-ink', spec.box, className)}

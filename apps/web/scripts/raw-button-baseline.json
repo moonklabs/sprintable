@@ -57,7 +57,7 @@
     "components/agents/access-matrix-tab.tsx": 2,
     "components/agents/agent-connection-settings-section.tsx": 2,
     "components/agents/member-notification-preferences-summary.tsx": 1,
-    "components/agents/messaging-policy-section.tsx": 3,
+    "components/agents/messaging-policy-section.tsx": 2,
     "components/agents/tool-permission-picker.tsx": 1,
     "components/attention-queue/attention-queue-view.tsx": 1,
     "components/cage/gate-evidence.tsx": 1,

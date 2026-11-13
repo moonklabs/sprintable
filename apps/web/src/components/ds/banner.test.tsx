@@ -52,6 +52,14 @@ describe('ds Banner', () => {
     expect(el().getAttribute('role')).toBe('alert');
   });
 
+  it("⭐announce='assertive'는 어느 변형이든 role=alert로 올린다(옛 Alert 경고가 즉시 읽히던 것 — 모양은 그대로) · 주지 않으면 지금과 같다", async () => {
+    await render(<Banner tone="note" announce="assertive">글</Banner>);
+    expect(el().getAttribute('role')).toBe('alert');
+    expect(el().getAttribute('data-tone')).toBe('note'); // still painted as a note, not a failure
+    await render(<Banner tone="note">글</Banner>);
+    expect(el().getAttribute('role')).toBe('status');
+  });
+
   it('그 밖의 경고(note)는 호박 색을 만들지 않는다 — 손 필요 색이 하나도 없다', async () => {
     await render(<Banner tone="note">글</Banner>);
     expect(el().className).not.toContain('needs-hand');

@@ -25,7 +25,6 @@
     "components/agents/agent-connection-settings-section.tsx": 2,
     "components/agents/agent-run-tool-calls-section.tsx": 1,
     "components/agents/member-notification-preferences-summary.tsx": 1,
-    "components/agents/messaging-policy-section.tsx": 2,
     "components/canvas/import-artifact-dialog.tsx": 2,
     "components/channel-connect/facebook-page-select-card.tsx": 1,
     "components/chat/delivery-contract-modal.tsx": 1,
