@@ -244,7 +244,8 @@ describe('옛 미색 실값 가드 — 선언 값에 옛 hex · rgb가 없다', 
   });
 });
 
-// ── 고체 --destructive 위 글은 «바탕을 뚫은 글»(text-background)이다 — 흰 글(text-white · text-on-scrim)은 다크 ds-failed(옅은 분홍) 위에서 1.7:1 ──────────
+// ── 고체 상태색 면(bg-destructive · success · warning · info · proof-*) 위 글은 «바탕을 뚫은 글»(text-background)이다 ─────────────────────────────────────
+// 다크 ds 상태색은 옅은 색(failed #ffb4ab · done #46deb2 · info #7db4ff …)이라 흰 글(text-white · text-on-scrim)은 1.7~2.1:1. 다크에서 글색을 뒤집는 줄(`dark:text-proof-bg` · `dark:text-background`)은 이미 맞는 꼴이다.
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((n) => {
     const p = join(dir, n);
@@ -253,32 +254,39 @@ function sourceFiles(dir: string): string[] {
     return /\.tsx$/.test(n) && !/\.test\./.test(n) ? [p] : [];
   });
 }
-/** `bg-destructive`(고체 — `-tint` · `-bg` · `/10` 같은 옅은 면 · border 제외)와 흰 글 클래스가 같은 줄에 있는 자리. */
-export function whiteTextOnSolidDestructive(source: string): string[] {
+const SOLID_STATE = /(^|[\s"'`])bg-(destructive|success|warning|info|proof-green|proof-amber|proof-red|proof-blue)(?![-\w/])/;
+const WHITE_TEXT = /(^|[\s"'`:])text-(white|on-scrim)(?![-\w])/;
+const DARK_FLIP = /dark:text-(proof-bg|background)(?![-\w])/;
+/** 고체 상태색 `bg-*`(`-tint` · `-bg` · `-soft` · `/10` 같은 옅은 면 · border 제외)와 흰 글 클래스가 같은 줄에 있고 다크 글색 뒤집기가 없는 자리. */
+export function whiteTextOnSolidState(source: string): string[] {
   const out: string[] = [];
   for (const line of source.split('\n')) {
     const code = line.replace(/\/\/.*$/, '').replace(/\/\*.*?\*\//g, '');
-    if (/(^|[\s"'`])bg-destructive(?![-\w/])/.test(code) && /(^|[\s"'`])(dark:)?text-(white|on-scrim)(?![-\w])/.test(code)) out.push(line.trim());
+    if (SOLID_STATE.test(code) && WHITE_TEXT.test(code) && !DARK_FLIP.test(code)) out.push(line.trim());
   }
   return out;
 }
-describe('고체 bg-destructive 위 글 — text-background(양 테마 4.5:1 이상)', () => {
-  it('src 전체에 고체 destructive + text-white/text-on-scrim 조합이 없다', () => {
-    const offenders = sourceFiles(SRC).flatMap((f) => whiteTextOnSolidDestructive(readFileSync(f, 'utf8')).map((l) => `${f.replace(SRC, 'src')}: ${l.slice(0, 120)}`));
+describe('고체 상태색 면 위 글 — text-background(양 테마 4.5:1 이상)', () => {
+  it('src 전체에 고체 상태색 + text-white/text-on-scrim 조합이 없다(다크 글색 뒤집기 줄은 예외)', () => {
+    const offenders = sourceFiles(SRC).flatMap((f) => whiteTextOnSolidState(readFileSync(f, 'utf8')).map((l) => `${f.replace(SRC, 'src')}: ${l.slice(0, 120)}`));
     expect(offenders).toEqual([]);
   });
-  it('글이 올라가는 넷이 모두 text-background를 쓴다(storage-delete-dialog · audio-recorder · verify-rail · kanban-board 알림)', () => {
+  it('글이 올라가는 자리가 text-background를 쓴다(destructive 넷 + 선택 체크 · 인증 원)', () => {
     const at = (rel: string) => readFileSync(join(SRC, rel), 'utf8');
     expect(at('components/storage/storage-delete-dialog.tsx')).toContain('bg-destructive text-background hover:brightness-95');
     expect(at('components/meetings/audio-recorder.tsx')).toContain('bg-destructive px-4 py-2 text-sm font-medium text-background hover:brightness-95');
     expect(at('app/onboarding/verify-rail.tsx')).toContain('rounded-full bg-destructive text-background');
+    expect(at('app/onboarding/verify-rail.tsx')).toContain('rounded-full bg-success text-background');
     expect(at('components/kanban/kanban-board.tsx')).toContain('border border-destructive bg-destructive px-4 py-3 text-sm text-background');
+    expect(at('app/(authenticated)/[ws]/[proj]/goals/steer-dispatch-modal.tsx')).toContain("'border-proof-blue bg-proof-blue text-background'");
   });
-  it('양성대조 — 가드가 옛 꼴을 잡는다(흰 글 · text-on-scrim · 다크 전용 글색)', () => {
-    expect(whiteTextOnSolidDestructive('<b className="bg-destructive text-white hover:bg-destructive/90" />')).toHaveLength(1);
-    expect(whiteTextOnSolidDestructive('<i className="rounded-full bg-destructive text-on-scrim" />')).toHaveLength(1);
-    expect(whiteTextOnSolidDestructive('<i className="bg-destructive text-sm dark:text-white" />')).toHaveLength(1);
-    expect(whiteTextOnSolidDestructive('<i className="bg-destructive-tint text-white" />')).toHaveLength(0); // 옅은 면은 대상 아님
-    expect(whiteTextOnSolidDestructive('<i className="bg-destructive text-background" />')).toHaveLength(0);
+  it('양성대조 — 가드가 옛 꼴을 잡는다(흰 글 · text-on-scrim · 다크 전용 흰 글), 옅은 면 · 글색 뒤집기는 대상 아님', () => {
+    expect(whiteTextOnSolidState('<b className="bg-destructive text-white hover:bg-destructive/90" />')).toHaveLength(1);
+    expect(whiteTextOnSolidState('<i className="rounded-full bg-success text-on-scrim" />')).toHaveLength(1);
+    expect(whiteTextOnSolidState("on ? 'border-proof-blue bg-proof-blue text-on-scrim' : 'x'")).toHaveLength(1);
+    expect(whiteTextOnSolidState('<i className="bg-destructive text-sm dark:text-white" />')).toHaveLength(1);
+    expect(whiteTextOnSolidState('<i className="bg-destructive-tint text-white" />')).toHaveLength(0); // 옅은 면은 대상 아님
+    expect(whiteTextOnSolidState('<i className="bg-proof-green text-on-scrim dark:text-proof-bg" />')).toHaveLength(0); // 다크 글색을 이미 뒤집는다
+    expect(whiteTextOnSolidState('<i className="bg-destructive text-background" />')).toHaveLength(0);
   });
 });
