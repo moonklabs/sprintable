@@ -13,6 +13,7 @@ import { GOALS_FRAME_FACE } from '../app/(authenticated)/[ws]/[proj]/goals/goals
 import { AGENT_RUNS_PANEL_FACE, AGENT_RUNS_ROW_FACE } from '../components/agents/agent-runs-list';
 import { VARIANT_REASON_FACE, VARIANT_TILE_FACE, VARIANT_TILE_WELL } from '../components/loops/variant-gallery';
 import { LOOP_PANEL_FACE, LOOP_ROW_FACE, LOOP_ROW_HOVER } from '../app/(authenticated)/[ws]/[proj]/loops/loops-layer';
+import { AGENT_RUN_DETAIL_PANEL_FACE, AGENT_RUN_DETAIL_STRIP_FACE } from '../components/agents/agent-run-detail';
 
 const css = readFileSync(join(__dirname, 'design-system.css'), 'utf8');
 
@@ -302,5 +303,17 @@ describe('루프 상세(4911) — 바탕 → 카드 → 후보 타일 → 우물
 
   it('⭐옛 문제 재현 가드: 타일 면(rowOthers) 위에 입력칸 면(sunk)을 얹으면 라이트에서 면이 안 갈린다 — 그래서 이유 칸은 panel이다', () => {
     expect(step(themes[0]![1], 'rowOthers', 'field')).toBeLessThan(LAYER_MIN_STEP.fieldOnPanel);
+  });
+});
+
+// 4911 (UI-R3) — «실행 상세»: 내용 칸 하나가 바탕 위에 서고, 그 안의 숫자 묶음은 글 줄 면. 옛 화면은 숫자 카드 넷 · 결제 카드 다섯 · 결과 상자를 반투명 `overlay-fill`로 겹쳐 면이 갈리지 않았다.
+describe('실행 상세(4911) — 바탕 → 내용 칸 → 숫자 묶음', () => {
+  it('내용 칸은 내용 칸 층 · 숫자 묶음은 글 줄 층이다(토큰 이름)', () => {
+    expect(AGENT_RUN_DETAIL_PANEL_FACE).toBe(LAYER.panel);
+    expect(AGENT_RUN_DETAIL_STRIP_FACE).toBe(LAYER.rowOthers);
+  });
+  it.each(themes)('⭐%s: 바탕 → 내용 칸 ≥ 문턱 · 내용 칸 → 숫자 묶음 ≥ 문턱', (_name, t) => {
+    expect(step(t, 'page', 'panel')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.panelOverPage);
+    expect(step(t, 'panel', 'rowOthers')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPanel);
   });
 });
