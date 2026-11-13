@@ -1,0 +1,57 @@
+name: Dev promote (desired.json)
+
+# story 4926 (PO 2026-11-13, after the 16:30Z–22:57Z stop: a person's gcloud login expired and the dev rollout could not move for 6.5 hours).
+# The last step of a dev rollout — «make the dev VM run this sha» = write desired.json of the dev deploy bucket — runs here, as the CI service account, instead of on a person's laptop.
+#
+# Called by cloud-build.yml (job promote-dev) after the dev build, from a run on develop. It is a reusable workflow, not a `workflow_run` listener: `workflow_run` only fires for workflow
+# files on the DEFAULT branch (main), and the dev build is dispatched with `--ref develop`.
+# All the logic is deploy/vm/bin/promote_dev.py (tested). The bucket is a constant there; this file passes no bucket, no path and no environment — there is nothing here to point at another bucket.
+#
+# Failure is visible: the job is red (the run page, the Actions tab) and its summary names the reason (CI red · no candidate · not newer · permission missing · not serving). «Re-run failed jobs» retries.
+# The laptop script (~/scratch/po/deploy-dev-now.sh → promote-dev-1107.sh) still works as a manual path; both may be used — writes are generation-checked, so one never overwrites the other's newer write.
+on:
+  workflow_call:
+    inputs:
+      sha:
+        description: "the full sha the dev build was made from"
+        required: true
+        type: string
+
+# one promotion at a time; a run waiting behind another is replaced by a newer waiting one (the newest build is the one that matters — the script refuses anything not newer than what is wanted)
+concurrency:
+  group: dev-promote
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read    # the «CI» run of the sha
+  id-token: write  # Workload Identity Federation
+
+jobs:
+  promote:
+    name: Promote this sha to the dev VM
+    # the only ref allowed to promote; promote_dev.py checks it again before any tool runs
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    # permission check (seconds) + candidate ≤ 40 min + CI ≤ 60 min (they overlap) + serving ≤ 12 min
+    timeout-minutes: 85
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Promote
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROMOTE_SHA: ${{ inputs.sha }}
+        run: python3 -I deploy/vm/bin/promote_dev.py --sha "$PROMOTE_SHA"

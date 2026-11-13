@@ -775,6 +775,23 @@ jobs:
             --substitutions=COMMIT_SHA="${{ github.sha }}",_DEPLOY_ENV="${VM_TARGET}",_VM_DEPLOY_BUCKET="sprintable-vm-${VM_TARGET}-deploy",_GA4_MEASUREMENT_ID="${VM_GA4_MEASUREMENT_ID}",_EE_ENABLED="${VM_EE_ENABLED}",_SUPPORT_WIDGET_ENABLED="${VM_SUPPORT_WIDGET_ENABLED}",_NEXT_PUBLIC_SUPPORT_GATEWAY_URL="${VM_SUPPORT_GATEWAY_URL}",_TOSS_CLIENT_KEY="${VM_TOSS_CLIENT_KEY}" \
             .
 
+  # story 4926 (PO 2026-11-13): the last step of a dev rollout — desired.json of the dev deploy bucket := this sha — is done here by the CI service account, not by a person's laptop login.
+  # Only a run on develop (the dev builds are dispatched with `--ref develop`); main (the prod path) never reaches it, and the called workflow and its script refuse any other ref again.
+  # The job waits for the sha's own develop CI and its candidate, so it can take up to an hour; it is its own job on purpose: serving-reality below does not wait for it, and a failed promotion
+  # shows as THIS job red without touching the build job.
+  promote-dev:
+    name: Promote to the dev VM
+    needs: cloud-build
+    if: github.ref == 'refs/heads/develop'
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    uses: ./.github/workflows/dev-promote.yml
+    with:
+      sha: ${{ github.sha }}
+    secrets: inherit
+
   # 2026-10-12 (story 4659): 배포 뒤에만 실서버 도달 확인. 예약 cron은 두지 않는다.
   serving-reality:
     needs: cloud-build
