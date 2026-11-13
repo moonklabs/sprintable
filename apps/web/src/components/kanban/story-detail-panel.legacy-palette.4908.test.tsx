@@ -3,6 +3,8 @@
 // 4908 (일곱째) — 카드 상세 패널 안에서 «옛 proof 팔레트로 풀리는 부품»이 0이어야 한다. 옛 shadcn 토큰(bg-background · bg-muted · bg-secondary · bg-primary · bg-card · bg-popover · bg-accent)과 proof-* 클래스는
 // 바탕을 옛 미색(라이트 247,246,243 / 241,239,234 · 다크 같은 짝)으로 풀어, 차가운 ds 면(서랍 → 속성 칸 → 안 칸) 위에 두 번째 바탕을 깔았다(PO 11-13 전체 화면 판정).
 // 이 시험은 «렌더된 패널 DOM 전체»(+ 포털로 뜬 메뉴)에서 그 클래스를 센다 — 부품을 옛것으로 되돌리면 빨개진다.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -18,7 +20,29 @@ vi.mock('@/hooks/use-sse-notifications', () => ({ useSseNotifications: vi.fn() }
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 /** 옛 팔레트 클래스: 수식자(hover: · dark: · focus: …)와 투명도(/30)가 붙어도 잡는다. */
-const LEGACY = /^(?:[\w-]+:)*(?:bg-(?:background|muted|secondary|primary|card|popover|accent|input)(?:\/\d+)?|(?:bg|border|text|ring|fill|stroke|from|to|via|divide|outline)-proof-[\w-]+(?:\/\d+)?|proof-surface[\w-]*)$/;
+const LEGACY = /^(?:[\w-]+:)*(?:bg-(?:background|muted|secondary|primary|card|popover|accent|input)(?:\/\d+)?|border-(?:border|input)(?:\/\d+)?|text-primary|(?:bg|border|text|ring|fill|stroke|from|to|via|divide|outline)-proof-[\w-]+(?:\/\d+)?|proof-surface[\w-]*)$/;
+
+/** 패널이 «불러 쓰는 자기 부품» 소스 전부(렌더 데이터가 없어도 잡히게 — 근거 · 출처 · 병합 관문 · 가설 · PR · 편집창 …). 공용 부품(증거 캡슐 · 신뢰 봉인 · 아바타 · 채팅 첨부 · 카드)은 여러 화면이 같이 쓰므로 이 장 밖. */
+const PANEL_SOURCES = [
+  'kanban/story-detail-panel.tsx', 'kanban/recipe-start-section.tsx', 'kanban/concept-card-section.tsx', 'dispatch/entity-dispatch-panel.tsx',
+  'integrations/pr-link-section.tsx', 'hypotheses/story-hypotheses-section.tsx', 'canvas/artifact-section.tsx', 'workcell/workcell.tsx', 'workcell/workcell-fold.tsx',
+  'outcome/outcome-result-card.tsx', 'shared/rejected-relations-section.tsx', 'shared/story-origin-section.tsx', 'shared/entity-aware-textarea.tsx',
+  'insights-board/story-insights-compare-section.tsx', 'cage/story-merge-gate.tsx', 'cage/stuck-handoff-section.tsx', 'verify/evidence-section.tsx', 'verify/chat-proof-section.tsx',
+];
+const TOKEN_IN_SOURCE = /(?<=^|[\s"'`{(])((?:[\w-]+:)*(?:bg-(?:background|muted|secondary|primary|card|popover|accent|input)|border-(?:border|input)|text-primary|(?:bg|border|text|ring|fill|stroke|from|to|via|divide|outline)-proof-[\w-]+|proof-surface[\w-]*)(?:\/\d+)?)(?=[\s"'`})\]]|$)/g;
+function sourceHits(): string[] {
+  const hits: string[] = [];
+  for (const rel of PANEL_SOURCES) {
+    const lines = readFileSync(join(__dirname, '..', rel), 'utf8').split('\n');
+    lines.forEach((line, i) => {
+      const t = line.trim();
+      if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*') || t.startsWith('{/*') || t.startsWith('import ')) return;
+      const code = line.replace(/\/\/ .*$/, '');
+      for (const m of code.matchAll(TOKEN_IN_SOURCE)) hits.push(`${rel}:${i + 1} ${m[1]}`);
+    });
+  }
+  return hits;
+}
 
 const story = {
   id: 's1', story_number: 4908, title: '보드 재건축', status: 'in-progress', priority: 'medium', trust_stage: 'running',
@@ -92,6 +116,8 @@ async function walkStates(): Promise<Record<string, string[]>> {
   for (const [name, re] of [['commentsTab', /댓글/], ['activityTab', /활동/]] as const) { await click(byText(re, main)); note(name); }
   await click(byText(/편집/, document.querySelector('[data-testid="story-detail-properties"]')!));
   note('assigneePicker');
+  const descEdit = byText(/편집/, main);
+  if (descEdit) { await click(descEdit); note('descriptionEdit'); }
   await click(document.querySelector(`button[aria-label="${koMessages.board.deleteStory}"]`));
   note('deleteConfirm');
   return report;
@@ -115,6 +141,17 @@ describe('4908 카드 상세 — 옛 proof 팔레트 부품 0 (머리 · 몸통 
       for (const c of cls) if (c && LEGACY.test(c)) outside.push(`${c} <${el.tagName.toLowerCase()}> ${el.closest('[data-testid]')?.getAttribute('data-testid') ?? ''}`);
     }
     expect(outside).toEqual([]);
+  });
+
+  it('⭐소스 전수: 패널이 불러 쓰는 자기 부품 소스(렌더 데이터가 없는 상태까지) 어디에도 옛 팔레트 클래스가 없다', () => {
+    expect(sourceHits()).toEqual([]);
+  });
+
+  it('⭐소스 전수 정규식이 옛 클래스를 실제로 잡는다(양성 대조) — 한 줄에 심으면 걸리고 ds 클래스는 안 걸린다', () => {
+    const probe = (code: string) => [...code.matchAll(TOKEN_IN_SOURCE)].map((m) => m[1]);
+    expect(probe('<div className="rounded-lg border border-border bg-muted/30 p-3 hover:bg-muted">')).toEqual(['border-border', 'bg-muted/30', 'hover:bg-muted']);
+    expect(probe('className={`x ${a ? "bg-primary text-primary" : "text-proof-ink"}`}')).toEqual(['bg-primary', 'text-primary', 'text-proof-ink']);
+    expect(probe('<div className="rounded-lg border border-ds-line bg-ds-surface-high text-ds-ink">')).toEqual([]);
   });
 
   it('⭐삭제 확인 창은 ds 확인 창(ds-dialog-content · 위험 단추)이다 — 옛 Dialog가 아니다', async () => {

@@ -160,7 +160,7 @@ export function ChatProofSection({ storyId }: ChatProofSectionProps) {
     return (
       <p className="text-editorial-meta text-muted-foreground">
         {t('chatProofLoadFailed')}{' '}
-        <button type="button" onClick={() => setRetryNonce((n) => n + 1)} className="text-primary hover:underline">
+        <button type="button" onClick={() => setRetryNonce((n) => n + 1)} className="text-ds-action-text hover:underline">
           {t('chatProofRetry')}
         </button>
       </p>

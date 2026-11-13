@@ -66,7 +66,7 @@ function PublicationCard({
   const sourceLabelKey = isBlogRow(row) ? 'storyCompareSourceSiteBeacon' : 'storyCompareSourceChannelApi';
 
   return (
-    <div className="rounded-lg border border-border bg-card p-3 space-y-2" data-testid="story-compare-publication-card">
+    <div className="rounded-lg border border-ds-line bg-ds-surface-high [--muted-foreground:var(--ds-ink-3)] p-3 space-y-2" data-testid="story-compare-publication-card">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           {row.external_url ? (
@@ -96,7 +96,7 @@ function PublicationCard({
           </thead>
           <tbody>
             {orderedMetrics.map((metric) => (
-              <tr key={metric} className="border-t border-border/60">
+              <tr key={metric} className="border-t border-ds-line">
                 <td className="py-1 pr-2 text-foreground">
                   {tContent(METRIC_LABEL_KEYS[metric])}
                   {metric === 'views' ? (

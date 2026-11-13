@@ -108,15 +108,15 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
   const btn = {
     // story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는 이 테마에 매핑이
     // 없는 no-op(라이트 3.55·다크 3.00, AA 미달). trust-seal.tsx 선례와 같은 처방.
-    idle: { cls: 'bg-destructive text-on-scrim dark:text-proof-bg hover:bg-destructive/90', Icon: AlertTriangle, label: t('fallbackNotifyOwner'), disabled: false },
+    idle: { cls: 'bg-ds-failed text-ds-on-action hover:brightness-95', Icon: AlertTriangle, label: t('fallbackNotifyOwner'), disabled: false },
     notifying: { cls: 'bg-destructive-tint text-destructive', Icon: Loader2, label: t('fallbackNotifying'), disabled: true },
-    notified: { cls: 'bg-muted text-muted-foreground', Icon: Check, label: t('fallbackNotified'), disabled: true },
+    notified: { cls: 'bg-ds-surface-sunk text-muted-foreground', Icon: Check, label: t('fallbackNotified'), disabled: true },
     failed: { cls: 'border border-destructive text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60', Icon: RotateCcw, label: t('fallbackRetry'), disabled: false },
   }[fallback];
   const BtnIcon = btn.Icon;
 
   return (
-    <div className="rounded-lg border border-border bg-muted/20 p-3">
+    <div className="rounded-lg border border-ds-line bg-ds-surface-high [--muted-foreground:var(--ds-ink-3)] p-3">
       <p className="mb-2 text-micro font-mono uppercase tracking-wide text-muted-foreground">{t('workflowLineContext')}</p>
       <div className="space-y-2.5">
         {/* ⓐ 경고 헤더 */}
@@ -142,7 +142,7 @@ export function StuckHandoffSection({ storyId, memberMap = {} }: StuckHandoffSec
         </Button>
         {/* story #2272 — ⓔ withdraw(형제 fallback-notify와 같은 흐름). 되돌릴 수 없어 confirm 단계 */}
         {withdraw === 'withdrawn' ? (
-          <div className="flex items-center gap-1.5 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
+          <div className="flex items-center gap-1.5 rounded-md bg-ds-surface-sunk px-2.5 py-1.5 text-xs text-muted-foreground">
             <Check className="size-3.5 shrink-0" />
             {t('withdrawn')}
           </div>

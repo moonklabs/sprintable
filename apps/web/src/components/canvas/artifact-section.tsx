@@ -252,7 +252,7 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
   if (items.length === 0 && !creating) {
     return (
       <div className={className}>
-        <div className="flex flex-col items-center gap-3 rounded-lg border border-ds-line bg-ds-surface-high px-6 py-9 text-center">
+        <div className="flex flex-col items-center gap-3 rounded-lg border border-ds-line bg-ds-surface-high [--muted-foreground:var(--ds-ink-3)] px-6 py-9 text-center">
           <div className="text-editorial-meta font-medium uppercase tracking-wide text-muted-foreground">
             {t('sectionLabel')}
           </div>

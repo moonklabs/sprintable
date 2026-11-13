@@ -9,6 +9,7 @@ import { HypothesisGateBadge } from './hypothesis-gate-badge';
 import type { GateItem } from '@/components/kanban/types';
 import { fetchWithAuth } from '@/lib/db/client';
 import { Input } from '@/components/ds/input';
+import { Button } from '@/components/ds/button';
 
 /**
  * Story-detail panel "linked hypotheses" surface (E1-S8c / S9 fold · blueprint §6.5).
@@ -126,18 +127,13 @@ export function StoryHypothesesSection({
   );
 
   return (
-    <section aria-label={t('linkedTitle')} className="space-y-2 rounded-xl border border-ds-line bg-ds-surface-high p-3">
+    <section aria-label={t('linkedTitle')} className="space-y-2 rounded-xl border border-ds-line bg-ds-surface-high [--muted-foreground:var(--ds-ink-3)] p-3">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground">{t('linkedTitle')}</h3>
         {!pickerOpen ? (
-          <button
-            type="button"
-            onClick={openPicker}
-            className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground transition hover:border-primary hover:text-primary"
-          >
-            <Plus className="size-3.5" />
+          <Button type="button" variant="secondary" onClick={openPicker} iconStart={<Plus className="size-3.5" />} className="h-auto px-2.5 py-1 text-xs font-medium">
             {t('linkHypothesis')}
-          </button>
+          </Button>
         ) : null}
       </div>
 

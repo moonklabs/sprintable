@@ -150,7 +150,7 @@ export function StoryOriginSection({ storyId }: StoryOriginSectionProps) {
   const origin = deriveStoryOrigin(result.items);
 
   return (
-    <div className="border-t border-border/60 px-4 py-3">
+    <div className="border-t border-ds-line px-4 py-3">
       <p className="mb-2 text-xs font-medium text-muted-foreground">{t('originTitle')}</p>
       {origin ? (
         (() => {
@@ -164,7 +164,7 @@ export function StoryOriginSection({ storyId }: StoryOriginSectionProps) {
               <span className="min-w-0 flex-1">
                 <span className="[overflow-wrap:anywhere]">{label ?? origin.source_id}</span>
                 {!origin.still_exists && (
-                  <span className="ml-1.5 rounded bg-muted px-1 py-0.5 text-micro text-muted-foreground">
+                  <span className="ml-1.5 rounded bg-ds-surface-sunk px-1 py-0.5 text-micro text-muted-foreground">
                     {t('backlinksTargetGone')}
                   </span>
                 )}

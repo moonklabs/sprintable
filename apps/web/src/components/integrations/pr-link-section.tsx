@@ -185,7 +185,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
               공유했다("aria-label 있는가"만 보면 놓치는 자리). 아이콘 전용이라 보이는
               글자 라벨은 없으므로 순번만으로 가른다. */}
           {canonical.map((l, index) => (
-            <li key={l.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-ds-line bg-ds-surface-high p-2 text-editorial-meta">
+            <li key={l.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-ds-line bg-ds-surface-high [--muted-foreground:var(--ds-ink-3)] p-2 text-editorial-meta">
               <a
                 href={prUrl(l.repo_full_name, l.pr_number)}
                 target="_blank"
@@ -205,15 +205,16 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
                 <Check className="size-3" />
                 {t('confidenceConfirmed')}
               </span>
-              <button
+              <Button
                 type="button"
+                variant="quiet"
                 onClick={() => void unlink(l)}
                 disabled={busyId === l.id}
                 aria-label={t('unlinkAria', { n: index + 1 })}
-                className="ml-auto inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60 disabled:opacity-50"
+                className="ml-auto size-5 min-h-0 min-w-0 p-0 text-ds-ink-3 hover:text-ds-failed"
               >
                 {busyId === l.id ? <Loader2 className="size-3 animate-spin" /> : <X className="size-3" />}
-              </button>
+              </Button>
             </li>
           ))}
         </ul>

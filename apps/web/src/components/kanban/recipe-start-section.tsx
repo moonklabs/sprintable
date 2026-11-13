@@ -92,7 +92,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
     return sectionShell(
       <>
         <p className="text-xs text-muted-foreground">{t('recipeStartRoleUnassigned')}</p>
-        <Link href={flatHref('/organization/events')} className="mt-1 inline-block text-xs text-primary hover:underline">
+        <Link href={flatHref('/organization/events')} className="mt-1 inline-block text-xs text-ds-action-text hover:underline">
           {t('recipeStartGoToAssign')}
         </Link>
       </>,
