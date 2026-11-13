@@ -52,6 +52,8 @@ def build_args(decl: dict, sha: str, given: dict[str, str]) -> list[tuple[str, s
     args = [("NEXT_PUBLIC_FASTAPI_URL", api), ("NEXT_PUBLIC_APP_URL", app), ("NEXT_PUBLIC_OAUTH_ENABLED", "true")]
     args += [(n, given[n]) for n in REQUIRED_SET]
     args += [("SPRINTABLE_DEPLOY_BUILD", "1"), ("APP_COMMIT_SHA", sha)]
+    # story 4917: Next's own type check does not finish on Cloud Build's default worker; the same sha's CI has checked the types (next.config.ts). Only this image build skips it.
+    args += [("SPRINTABLE_SKIP_BUILD_TYPECHECK", "1")]
     # the two hosts the image calls must be the VM's; the support gateway is its own Cloud Run service that stays where it is (design §3), so its URL may be a run.app address
     offenders = [n for n, v in args if n in DERIVED and "run.app" in v]
     if offenders:

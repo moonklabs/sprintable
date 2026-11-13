@@ -232,3 +232,35 @@ describe('the two pages that carry a one-time code in their address (story 4712 
     expect(all.headers.find((h) => h.key === 'Referrer-Policy')!.value).toBe('strict-origin-when-cross-origin'); // everywhere else unchanged
   });
 });
+
+// story 4917 — the VM image build (and only it) turns Next's own type check off: Cloud Build's default worker (2 vCPU · 8 GB) did not finish «Running TypeScript» (dev deploys 46 · 54 · 55);
+// the same sha's CI («web · Build», `tsc --noEmit`) has checked the types. Every other build keeps the check.
+describe('next.config.ts — SPRINTABLE_SKIP_BUILD_TYPECHECK (story 4917)', () => {
+  const KEY = 'SPRINTABLE_SKIP_BUILD_TYPECHECK';
+  const original = process.env[KEY];
+  afterEach(() => {
+    if (original === undefined) delete process.env[KEY];
+    else process.env[KEY] = original;
+    vi.resetModules();
+  });
+  async function typescriptOption(value: string | undefined) {
+    vi.resetModules();
+    if (value === undefined) delete process.env[KEY];
+    else process.env[KEY] = value;
+    const mod = (await import('./next.config')) as { default: { typescript?: { ignoreBuildErrors?: boolean } } };
+    return mod.default.typescript;
+  }
+
+  it('=1 (the VM image build): Next skips its own type check', async () => {
+    expect(await typescriptOption('1')).toEqual({ ignoreBuildErrors: true });
+  });
+
+  it('unset / empty (CI · the Cloud Run build · local): the check stays — no typescript option at all', async () => {
+    expect(await typescriptOption(undefined)).toBeUndefined();
+    expect(await typescriptOption('')).toBeUndefined();
+  });
+
+  it('only exactly "1" switches it off', async () => {
+    for (const v of ['0', 'true', 'yes', ' 1']) expect(await typescriptOption(v), v).toBeUndefined();
+  });
+});
