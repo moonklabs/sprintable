@@ -1,7 +1,7 @@
 'use client';
 
 import type { useTranslations } from 'next-intl';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ds/button';
 import { InsightsBoardMetricCell } from './insights-board-metric-cell';
 import { AdsSpendCell } from './ads-spend-cell';
 import { InsightsBoardCommentsCell } from './insights-board-comments-cell';
@@ -46,17 +46,17 @@ export function InsightsBoardRowDetail({
     <div className="space-y-3" data-testid="insights-board-row-detail">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
-          <p className="mb-1 text-muted-foreground">{tBoard('rowDetailOrganicViewsLabel')}</p>
+          <p className="mb-1 text-ds-ink-3">{tBoard('rowDetailOrganicViewsLabel')}</p>
           <div className="flex flex-wrap gap-3">
             <span data-testid="insights-board-row-detail-d1">
-              <span className="mr-1 text-muted-foreground">{tBoard('columnD1')}</span>
+              <span className="mr-1 text-ds-ink-3">{tBoard('columnD1')}</span>
               <InsightsBoardMetricCell
                 bucket={row.d1} metric="views" tContent={tContent} tBoard={tBoard}
                 tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
               />
             </span>
             <span data-testid="insights-board-row-detail-d7">
-              <span className="mr-1 text-muted-foreground">{tBoard('columnD7')}</span>
+              <span className="mr-1 text-ds-ink-3">{tBoard('columnD7')}</span>
               <InsightsBoardMetricCell
                 bucket={row.d7} metric="views" tContent={tContent} tBoard={tBoard}
                 tChannelConnect={tChannelConnect} ga4ConnectionStatus={ga4ConnectionStatus}
@@ -65,13 +65,13 @@ export function InsightsBoardRowDetail({
           </div>
         </div>
         <div>
-          <p className="mb-1 text-muted-foreground">{tBoard('rowDetailAdsSpendLabel')}</p>
+          <p className="mb-1 text-ds-ink-3">{tBoard('rowDetailAdsSpendLabel')}</p>
           <AdsSpendCell adsBoost={row.ads_boost} tBoard={tBoard} tContent={tContent} locale={locale} />
         </div>
       </div>
 
       <div>
-        <p className="mb-1 text-muted-foreground">{tBoard('columnComments')}</p>
+        <p className="mb-1 text-ds-ink-3">{tBoard('columnComments')}</p>
         <div data-testid="insights-board-comments-cell">
           <InsightsBoardCommentsCell row={row} t={tBoard} />
         </div>
@@ -81,8 +81,7 @@ export function InsightsBoardRowDetail({
         <div className="flex flex-wrap gap-1.5">
           {canCreateFollowUp ? (
             <Button
-              size="sm"
-              variant="outline"
+                variant="secondary"
               onClick={onFollowUp}
               data-testid="insights-board-follow-up-button"
               aria-label={tBoard('rowActionAriaLabel', { n: rowIndex + 1, label: tBoard('followUpAction') })}
@@ -92,8 +91,7 @@ export function InsightsBoardRowDetail({
           ) : null}
           {canReconcile ? (
             <Button
-              size="sm"
-              variant="outline"
+                variant="secondary"
               onClick={onReconcile}
               disabled={reconcileLoading}
               data-testid="insights-board-reconcile-button"

@@ -150,6 +150,7 @@ describe('ResultsSummaryCards(story #3979 AC1) — 쓴 광고비 / 남은 한도
     expect(container.querySelector('[data-testid="results-summary-ads-spend-value"]')).toBeNull();
     expect(container.querySelector('[data-testid="results-summary-ads-remaining-unmeasured"]')?.textContent).toBe('미측정');
     expect(container.querySelector('[data-testid="results-summary-ads-spend-cta"]')?.textContent).toBe('연결하러 가기');
+    expect(container.querySelector('[data-testid="results-summary-ads-spend-cta"]')?.className).toContain('text-ds-action-text');
   });
 
   // story #3987(2026-09-17, 페드루 PO 確定) — approved_boost_count===0만으로
@@ -168,6 +169,8 @@ describe('ResultsSummaryCards(story #3979 AC1) — 쓴 광고비 / 남은 한도
     await mount({ costSummaryState: NO_APPROVED_BOOSTS_NEEDS_REAUTH });
     expect(container.querySelector('[data-testid="results-summary-ads-spend-unmeasured"]')?.textContent).toBe('미측정');
     expect(container.querySelector('[data-testid="results-summary-ads-spend-cta"]')?.textContent).toBe('다시 연결');
+    // 4913 D2 — 다시 연결 링크는 «손 필요» 색(ds), 연결하러 가기는 행동 색(ds)
+    expect(container.querySelector('[data-testid="results-summary-ads-spend-cta"]')?.className).toContain('text-ds-needs-hand');
   });
 });
 
