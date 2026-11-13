@@ -127,8 +127,16 @@ if (process.env.SPRINTABLE_DEPLOY_BUILD === '1' && !process.env.NEXT_PUBLIC_APP_
 // - the proxy may buffer request bodies up to the attachment limit (100 MB, as the backend and the upload routes): Next's default 10 MB made a larger forwarded body fail with 500.
 const EMBEDDED_BUILD = process.env['SPRINTABLE_EMBEDDED_BUILD'] === '1';
 
+// story 4917 (the VM frontend build) — `next build` runs the type check («Running TypeScript») inside the image build. On Cloud Build's default worker (e2-standard-2: 2 vCPU · 8 GB) it did not
+// finish: compile 279 s, then 7+ minutes in that step (dev deploys 46 · 54 · 55 blocked on 11-13) — the same source and build values on e2-highcpu-32 finished in 7 minutes
+// (Compiled 119 s · TypeScript 91 s), on a 10-core Mac the type check is 32 s: the worker's resources, not the code. The same sha's CI («web · Build» = `next build` WITH the type check, and `tsc --noEmit`)
+// has already checked the types, and a deploy only follows a green CI of that sha — so the VM image build skips Next's own pass. Only the VM build path sets this (deploy/vm/bin/frontend_build_args.py);
+// CI, the Cloud Run build and the desktop build never do, and keep the check.
+const SKIP_BUILD_TYPECHECK = process.env['SPRINTABLE_SKIP_BUILD_TYPECHECK'] === '1';
+
 const nextConfig: NextConfig = {
   ...(EMBEDDED_BUILD ? { experimental: { proxyClientMaxBodySize: '100mb' } } : {}),
+  ...(SKIP_BUILD_TYPECHECK ? { typescript: { ignoreBuildErrors: true } } : {}),
   // Allow dev server access from non-localhost origins (e.g. Tailscale, LAN)
   // Set NEXT_DEV_ALLOWED_ORIGINS=host1,host2 in .env.local to enable
   allowedDevOrigins: process.env['NEXT_DEV_ALLOWED_ORIGINS']?.split(',').map((s) => s.trim()).filter(Boolean) ?? [],

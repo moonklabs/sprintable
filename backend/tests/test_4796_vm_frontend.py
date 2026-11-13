@@ -192,3 +192,27 @@ def test_the_script_does_not_build_when_a_value_is_missing(build, tmp_path: Path
     p = subprocess.run(["bash", str(_VM / "bin/build-frontend-vm.sh"), "dev", "abc1234", "r.example/f:1"], env=e, capture_output=True, text=True, cwd=tmp_path)
     assert p.returncode == 2 and "missing --set" in p.stderr, "refused up front (exit 2), not by accident later"
     assert "docker build" not in (tmp_path / "fake.log").read_text()
+
+
+# ───────────────────────── story 4917: the VM image build skips Next's own type check (only it) ─────────────────────────
+
+def test_the_vm_image_build_turns_next_type_check_off_and_only_the_vm_build_does() -> None:
+    """On Cloud Build's default worker (2 vCPU · 8 GB) `next build`'s «Running TypeScript» did not finish (dev deploys 46 · 54 · 55, 11-13); the same sha's CI has type-checked it.
+    The switch is a VM-build-only argument: the Dockerfile's default is empty, and no other build (Cloud Run cloudbuild.yaml · CI · the smoke build) passes it."""
+    decl = R.load_declaration(_VM / "env/dev.yaml")
+    assert ("SPRINTABLE_SKIP_BUILD_TYPECHECK", "1") in FB.build_args(decl, "abc1234", SETS)
+    dockerfile = (_ROOT / "apps/web/Dockerfile").read_text()
+    assert re.search(r'^ARG SPRINTABLE_SKIP_BUILD_TYPECHECK=""$', dockerfile, re.M), "the default must be empty: every other build keeps the check"
+    assert re.search(r"^ENV SPRINTABLE_SKIP_BUILD_TYPECHECK=\$\{SPRINTABLE_SKIP_BUILD_TYPECHECK\}$", dockerfile, re.M)
+    assert dockerfile.index("SPRINTABLE_SKIP_BUILD_TYPECHECK") < dockerfile.index("RUN pnpm build"), "the value must be set before `pnpm build` runs"
+    for other in ("cloudbuild.yaml", ".github/workflows/ci.yml", ".github/workflows/docker-smoke-test.yml"):
+        path = _ROOT / other
+        if path.exists():
+            assert "SPRINTABLE_SKIP_BUILD_TYPECHECK" not in path.read_text(), f"{other} must keep Next's type check"
+
+
+def test_the_script_passes_the_type_check_switch_to_the_image_build(build) -> None:
+    p, log = build()
+    assert p.returncode == 0, p.stderr
+    build_line = next(l for l in log.splitlines() if l.startswith("docker build"))
+    assert "--build-arg SPRINTABLE_SKIP_BUILD_TYPECHECK=1" in build_line

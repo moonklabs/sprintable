@@ -96,6 +96,10 @@ ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
 # 묻는다.
 ARG SPRINTABLE_DEPLOY_BUILD
 ENV SPRINTABLE_DEPLOY_BUILD=${SPRINTABLE_DEPLOY_BUILD}
+# story 4917 — the VM frontend build (deploy/vm/bin/build-frontend-vm.sh) passes 1 here: `next build` then skips its own type check (next.config.ts), which did not finish on Cloud Build's default
+# worker (2 vCPU · 8 GB). The same sha's CI has already type-checked it. Empty by default: the Cloud Run build (cloudbuild.yaml) and every other build keep the check.
+ARG SPRINTABLE_SKIP_BUILD_TYPECHECK=""
+ENV SPRINTABLE_SKIP_BUILD_TYPECHECK=${SPRINTABLE_SKIP_BUILD_TYPECHECK}
 RUN pnpm build
 
 # ─── 런타임 ──────────────────────────────────────────────────────────────────
