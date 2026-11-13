@@ -559,8 +559,9 @@ describe('KanbanBoard — 스토리 생성 실패 접근성(story #2105 2차)', 
     expect(alertEl?.getAttribute('aria-live')).toBe('assertive');
     // story 3466 후속(무효 유틸 4곳) — 이 배너가 no-op text-destructive-foreground
     // 대신 실 렌더 색을 갖는지.
-    expect(alertEl?.className).toContain('text-on-scrim'); // story 4831: text-white → 바탕 이름(항상 흰색)
-    expect(alertEl?.className).toContain('dark:text-proof-bg');
+    expect(alertEl?.className).toContain('text-background'); // story 4919: 고체 --destructive가 ds-failed(다크 #ffb4ab)가 돼 «바탕을 뚫은 글»(text-background)로 — 양 테마 대비 ≥ 4.5
+    expect(alertEl?.className).not.toContain('text-on-scrim');
+    expect(alertEl?.className).not.toContain('dark:text-proof-bg'); // 한 이름(text-background)이 양 테마를 맡는다
     expect(alertEl?.className).not.toContain('text-destructive-foreground');
   });
 

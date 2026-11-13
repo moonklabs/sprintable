@@ -23,7 +23,7 @@
  * — 같은 근거(실 Chromium 캡처 대조 완료, 우리 토큰 범위에서 안전)로 브라우저를 다시 띄우지
  * 않는다.
  */
-import { readFileSync } from 'node:fs';
+import { readGlobalsCss } from './lib/read-globals-css';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extractCssVarBlock, resolveCssVarValue } from './verify-tint-foreground-contrast';
@@ -69,7 +69,7 @@ export function computeAccentColorContrasts(css: string): AccentColorContrastRes
 }
 
 function main(): number {
-  const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
+  const css = readGlobalsCss(GLOBALS_CSS_PATH);
   const results = computeAccentColorContrasts(css);
   let failed = false;
 

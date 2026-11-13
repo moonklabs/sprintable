@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readGlobalsCss } from './lib/read-globals-css';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { scanContent, computeViolations, findExplicitBgVar, violationKey, type IconContrastCandidate } from './verify-nontext-icon-contrast';
@@ -12,7 +12,7 @@ const STATUS_COLORS = ['destructive', 'info', 'success', 'warning', 'brand', 'pr
 const scan = (jsx: string) => scanContent(`function C(){return (${jsx})}`, 'fixture.tsx', STATUS_COLORS);
 
 const GLOBALS_CSS_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/app/globals.css');
-const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
+const css = readGlobalsCss(GLOBALS_CSS_PATH);
 const { vars } = extractCssVarBlock(css, ':root');
 
 describe('verify-nontext-icon-contrast — story #4123 AC3 (유나 정본 artifact f08541fd 접지 5건)', () => {

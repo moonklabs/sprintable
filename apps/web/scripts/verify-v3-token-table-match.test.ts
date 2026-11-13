@@ -35,30 +35,31 @@ function extractProofTokens(block: string): Record<string, string> {
   return out;
 }
 
-// doc 3dc24888 표① "v3 값(정본)" 그대로(대문자 hex, doc 표기와 동일 케이스) — "현행
-// 유지"로 명시된 토큰(line-strong 공식·faint·citron·red·red-soft)은 교체 전 원래 값
-// 그대로(doc의 명시적 "추정값 0" 원칙 — 새로 지어내지 않는다).
+// story 4919(UI-R6, PO 판정 11-13): doc 3dc24888 표①의 «v3 값(정본)» 중 옛 미색 계열(bg · panel · sunk · line · ink · blue · green · amber · red …)은
+// ds 팔레트로 대체됐다 — 이 값 SSOT는 이제 `design-system.css`이고 `--proof-*`는 그 참조다(표 = 4919 AC2 doc b7aacdb4 표 1).
+// ds에 맞는 값이 없는 것(line-strong 공식 · citron · slate 둘 · radius)은 doc 정본 값 그대로 둔다. 이 시험은 «이름 1:1 · 빠짐 0 · 추가 0» + 위 대응을 못 박는다.
+const DS = (name: string) => `var(--ds-${name})`;
 const EXPECTED_PROOF_TOKENS: Record<string, string> = {
-  '--proof-bg': '#F7F6F3',
-  '--proof-panel': '#FFFFFF',
-  '--proof-sunk': '#F1EFEA',
-  '--proof-line': '#E7E4DE',
-  '--proof-line-soft': '#EEEBE5',
+  '--proof-bg': DS('background'),
+  '--proof-panel': DS('surface'),
+  '--proof-sunk': DS('surface-sunk'),
+  '--proof-line': DS('line'),
+  '--proof-line-soft': DS('line'), // N1(a) — ds는 선이 한 단계뿐
   '--proof-line-strong': 'color-mix(in oklch, var(--proof-line) 50%, var(--proof-ink) 50%)',
-  '--proof-ink': '#1D1C1A',
-  '--proof-ink-2': '#5F5C57',
-  '--proof-ink-3': '#6E6C67',
-  '--proof-faint': '#9C9E93',
-  '--proof-blue': '#3B5BA5',
-  '--proof-blue-soft': '#E7EDF7',
-  '--proof-citron': '#5F8706',
-  '--proof-green': '#3B7856',
-  '--proof-green-soft': '#E9F1EC',
-  '--proof-amber': '#946719',
-  '--proof-amber-soft': '#FBF3E2',
-  '--proof-red': '#C33B3B',
-  '--proof-red-soft': '#FBEAEA',
-  // doc §①-1 신규.
+  '--proof-ink': DS('ink'),
+  '--proof-ink-2': DS('ink-2'),
+  '--proof-ink-3': DS('ink-3'),
+  '--proof-faint': DS('line-strong'), // N2(b) — 장식
+  '--proof-blue': DS('info'), // N3 — 에이전트 신호 · 정보 뜻(주 행동은 별칭 --primary · --ring이 ds-action을 직접 가리킨다)
+  '--proof-blue-soft': DS('info-soft'),
+  '--proof-citron': '#5F8706', // N6 — 시그니처 연두, 유지
+  '--proof-green': DS('done'),
+  '--proof-green-soft': DS('done-soft'),
+  '--proof-amber': DS('needs-hand'),
+  '--proof-amber-soft': DS('needs-hand-soft'),
+  '--proof-red': DS('failed'),
+  '--proof-red-soft': DS('failed-soft'),
+  // doc §①-1 신규 — N7 유지.
   '--proof-slate': '#636F7D',
   '--proof-slate-soft': '#EEF1F4',
   // doc §② radius.
@@ -91,13 +92,14 @@ describe('story #3826 AC2 — v3 토큰 표 1:1 대조', () => {
     expect(extra, `doc에 없는 신규 --proof-* 토큰: ${extra.join(', ')}`).toEqual([]);
   });
 
-  it('.dark 블록은 이 스토리에서 무변경 — 라이트 값과 달라야 정상(doc §④, 다크는 미정)', () => {
+  it('.dark 블록 — ds로 이은 토큰은 라이트와 같은 참조(테마 전환은 ds 토큰이 한다) · citron은 다크 전용 값(4919)', () => {
     const darkBlock = extractBlock(css, /^\.dark\s*{/);
     const darkTokens = extractProofTokens(darkBlock);
-    // 다크가 라이트 v3 값으로 실수로 덮였다면 이 스토리에서 절대 안 되는 회귀 —
-    // 최소 bg/ink 둘만이라도 라이트 v3 값과 달라야 함을 pin(전수 대조는 스코프 밖,
-    // "다크 v3=미정"이라 비교할 정본 자체가 없다 — doc §④).
-    expect(darkTokens['--proof-bg']).not.toBe(EXPECTED_PROOF_TOKENS['--proof-bg']);
-    expect(darkTokens['--proof-ink']).not.toBe(EXPECTED_PROOF_TOKENS['--proof-ink']);
+    for (const [name, expected] of Object.entries(EXPECTED_PROOF_TOKENS)) {
+      if (!expected.startsWith('var(--ds-')) continue;
+      expect(darkTokens[name], `${name} (.dark)`).toBe(expected);
+    }
+    // citron은 ds에 없어 테마마다 값이 다르다 — 라이트 값과 달라야 한다.
+    expect(darkTokens['--proof-citron']).not.toBe(EXPECTED_PROOF_TOKENS['--proof-citron']);
   });
 });

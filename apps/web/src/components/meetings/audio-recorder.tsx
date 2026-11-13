@@ -327,7 +327,7 @@ export function AudioRecorder({
         {!isRecording ? (
           <button
             onClick={handleStart}
-            className="flex items-center gap-2 rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-background hover:bg-destructive/90"
+            className="flex items-center gap-2 rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-background hover:brightness-95"
           >
             🎙 {t('startRecording')}
           </button>
