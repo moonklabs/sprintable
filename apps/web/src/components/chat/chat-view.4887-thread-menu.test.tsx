@@ -65,6 +65,9 @@ describe('ChatView — the thread\'s original message can be deleted from its me
     window.addEventListener(CHAT_MESSAGE_DELETED_EVENT, listen);
     const del = [...document.querySelectorAll('[role="menuitem"]')].find((b) => b.textContent?.includes(koMessages.common.delete)) as HTMLElement;
     await act(async () => { del.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    // story 4912 follow-up: «삭제» asks once — the DELETE goes out when the confirm's [삭제] is pressed
+    const confirm = [...document.querySelectorAll('[data-slot="ds-dialog-footer"] button')].find((x) => x.textContent === koMessages.common.delete) as HTMLElement;
+    await act(async () => { confirm.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
     const sent = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE');
     window.removeEventListener(CHAT_MESSAGE_DELETED_EVENT, listen);
     expect(heard, 'the room announces the delete so its LIST blanks the preview').toEqual([{ conversationId: 'thread-1', createdAt: mine.created_at, messageId: 'm1', threadId: null, deletedAt: '2026-11-10T02:00:00.000Z' }]); // story 4903 (codex on 5664): with the message's id, so the list matches by it and remembers it // reverted (nothing announced) → []

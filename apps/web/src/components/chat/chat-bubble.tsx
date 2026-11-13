@@ -9,6 +9,7 @@ import { Check, Copy, MessageSquare, MessageSquareReply, MoreHorizontal } from '
 import { Card } from '@/components/ds/card';
 import { Chip } from '@/components/ds/chip';
 import { useTranslations } from 'next-intl';
+import { ConfirmDialog } from '@/components/ds/dialog';
 import { ViewerDate } from '@/components/viewer-time-zone';
 import { VIEWER_TIME_OPTIONS } from '@/lib/viewer-time-zone';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
@@ -670,7 +671,14 @@ export function ChatBubble({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMine, plainRow, message.id]);
 
+  // story 4912 follow-up (PO 11-13): «삭제» used to delete at once (no way back — the row turns into a tombstone for everybody). It asks ONCE, with the ds confirm (danger: the first focus lands on «취소»);
+  // the confirm lives in the bubble, so the room's rows, a thread's original and a thread's replies — all of them reach the delete through this menu — ask the same way.
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const handleDelete = useCallback(() => {
+    setConfirmDeleteOpen(true);
+  }, []);
+  const handleConfirmDelete = useCallback(() => {
+    setConfirmDeleteOpen(false);
     onDelete?.(message.id);
   }, [message.id, onDelete]);
 
@@ -1069,6 +1077,19 @@ export function ChatBubble({
           onBlock={onBlockUser}
         />
       )}
+
+      {onDelete ? (
+        <ConfirmDialog
+          open={confirmDeleteOpen && !isDeleted}
+          onOpenChange={setConfirmDeleteOpen}
+          title={t('deleteMessageConfirmTitle')}
+          description={t('deleteMessageConfirmBody')}
+          confirmLabel={tc('delete')}
+          cancelLabel={tc('cancel')}
+          tone="danger"
+          onConfirm={handleConfirmDelete}
+        />
+      ) : null}
 
       {/* story #2349 — "상대 프로필" 진입점 */}
       {profilePopover && (
