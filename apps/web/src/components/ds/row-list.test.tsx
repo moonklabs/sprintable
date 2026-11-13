@@ -241,5 +241,21 @@ describe('ds RowListItem — actionsTrigger (4912 B2)', () => {
     await act(async () => { trigger.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40, button: 2 })); });
     expect(menuLabels()).toEqual(['키 관리']);
   });
+
+  it("⭐안 주면 지금과 한 글자도 안 다르다 — actionsTrigger를 빼면 'visible'을 준 것과 DOM이 같다(공용 부품의 기본값 가드 · 생성 id만 뺀다)", async () => {
+    const norm = (html: string) => html.replace(/\s(id|aria-controls|aria-labelledby|aria-describedby|for)="[^"]*"/g, '');
+    const list = (trigger?: 'visible' | 'context-only') => (
+      <RowList aria-label="목록" header={{ title: '연결', count: 1 }}>
+        <RowListItem data-testid="row" title="행" subtitle="둘째 줄" actions={[{ key: 'a', label: '열기', onSelect: vi.fn() }, { key: 'b', label: '해제', variant: 'danger', separatorBefore: true, onSelect: vi.fn() }]} actionsLabel="행 메뉴" {...(trigger ? { actionsTrigger: trigger } : {})} />
+      </RowList>
+    );
+    await render(list());
+    const omitted = norm(container.innerHTML);
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await render(list('visible'));
+    expect(norm(container.innerHTML)).toBe(omitted);
+    expect(omitted).toContain('data-slot="ds-row-actions-trigger"'); // the «⋯» IS drawn by default
+  });
 });
 
