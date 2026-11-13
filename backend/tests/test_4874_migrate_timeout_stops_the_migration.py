@@ -251,6 +251,14 @@ class _Real:
         self.psycopg2 = psycopg2
         self.dsn = {k: v for k, v in dict(host=url.host, port=url.port or 5432, user=url.username, password=url.password, dbname=url.database).items() if v is not None}
         self.table = f"t4874_{uuid.uuid4().hex[:8]}"
+        # story 4922 — every name this test puts into `pg_stat_activity` is its OWN: `pg_stat_activity` is the whole cluster, and the backend's pooled connections of the tests that ran
+        # before this one are still there under the app's name (`local:dev`) — counting by that name gave 2 / 3 instead of 1 (CI runs 43449408634 / 43424348327). A migration name keeps the
+        # deployer's shape (prefix + 40 characters, ≤ 63) so the deployer's own SQL is what is exercised; the serving session carries the app-like name plus this test's token.
+        self.token = uuid.uuid4().hex
+        self.name_a = D.MIGRATE_NAME_PREFIX + self.token[:20] + "a" * 20
+        self.name_b = D.MIGRATE_NAME_PREFIX + self.token[:20] + "b" * 20
+        self.prefix = D.MIGRATE_NAME_PREFIX + self.token[:20]            # this test's slice of «every migration»: the deployer takes any LIKE pattern, the production one is the bare prefix
+        self.serving_name = f"local:dev:{self.token[:12]}"
         self.children: list[subprocess.Popen] = []
         self.adm = self.connect()
         with self.adm.cursor() as cur:
@@ -313,6 +321,9 @@ class _Real:
             c.kill()
             c.wait()
         with self.adm.cursor() as cur:
+            # story 4922 — killing the client ends an idle session at once but NOT a running `pg_sleep(120)`: the server goes on until the statement ends. A test that failed half way used to leave
+            # that session (and its lock) for two minutes under the shared name, and the next test counted it. The sessions THIS test made are ended here, by the names that are its own.
+            cur.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND (application_name LIKE %s OR application_name = %s)", (self.prefix + "%", self.serving_name))
             cur.execute(f"DROP TABLE IF EXISTS {self.table}")
         self.adm.close()
 
@@ -326,11 +337,11 @@ def test_a_running_migration_statement_is_cancelled_and_its_lock_freed_and_the_s
     real = _Real()
     t = None
     try:
-        migration = real.session(_NAME_B, "SELECT pg_sleep(120)")                          # the slow migration: ACCESS EXCLUSIVE lock, then a long statement
-        assert real.named(_NAME_B) == 1 and real.reader_waits(), "the lock holds the old release's reads"
+        migration = real.session(real.name_b, "SELECT pg_sleep(120)")                      # the slow migration: ACCESS EXCLUSIVE lock, then a long statement
+        assert real.named(real.name_b) == 1 and real.reader_waits(), "the lock holds the old release's reads"
         serving = real.connect()                                                          # a connection of the backend that serves: same role, other name, active at this moment
         with serving.cursor() as cur:
-            cur.execute("SET application_name = 'local:dev'")
+            cur.execute(f"SET application_name = '{real.serving_name}'")
         import threading
         errors: list[Exception] = []
 
@@ -343,13 +354,13 @@ def test_a_running_migration_statement_is_cancelled_and_its_lock_freed_and_the_s
         t = threading.Thread(target=serve)
         t.start()
         deadline = time.time() + 10
-        while not real.named("local:dev") and time.time() < deadline:   # the serving statement is running before the clean-up looks
+        while not real.named(real.serving_name) and time.time() < deadline:   # the serving statement is running before the clean-up looks
             time.sleep(0.05)
-        assert real.named("local:dev") == 1
-        lines = real.deployer_sql(_NAME_B)
+        assert real.named(real.serving_name) == 1
+        lines = real.deployer_sql(real.name_b)
         assert lines[0] == "1", lines                                                      # one session cancelled
         assert lines[-1] == "0", lines                                                     # …and the cancel was enough while its client was alive: nothing was left to terminate
-        assert real.wait_gone(_NAME_B), "…and, whatever the cancel left, the session is gone after the call"
+        assert real.wait_gone(real.name_b), "…and, whatever the cancel left, the session is gone after the call"
         assert not real.reader_waits(), "the lock is free"
         t.join()
         assert not errors, f"the serving session was hit: {errors}"
@@ -369,14 +380,14 @@ def test_a_migration_session_left_idle_in_its_transaction_is_terminated_because_
     monkeypatch.setattr(D, "CANCEL_GRACE_SECONDS", 1)
     real = _Real()
     try:
-        real.session(_NAME_B, "")                                                          # takes the lock and sits idle in its transaction
+        real.session(real.name_b, "")                                                      # takes the lock and sits idle in its transaction
         assert real.reader_waits()
         with real.adm.cursor() as cur:
-            cur.execute("SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE application_name = %s", (_NAME_B,))
-        assert real.named(_NAME_B) == 1 and real.reader_waits(), "a cancel alone leaves it, lock and all"
-        lines = real.deployer_sql(_NAME_B)
+            cur.execute("SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE application_name = %s", (real.name_b,))
+        assert real.named(real.name_b) == 1 and real.reader_waits(), "a cancel alone leaves it, lock and all"
+        lines = real.deployer_sql(real.name_b)
         assert lines[-1] == "1", lines                                                     # one session had to be terminated
-        assert real.wait_gone(_NAME_B) and not real.reader_waits()
+        assert real.wait_gone(real.name_b) and not real.reader_waits()
     finally:
         real.close()
 
@@ -387,11 +398,42 @@ def test_one_release_name_touches_only_that_release_while_the_prefix_clears_ever
     real = _Real()
     try:
         # two migrations of two releases cannot both hold ALTER on one table: the second takes a lock of its own table
-        real.session(_NAME_A, "", lock="LOCK TABLE {t} IN ACCESS SHARE MODE")
-        real.session(_NAME_B, "", lock="LOCK TABLE {t} IN ACCESS SHARE MODE")
-        real.deployer_sql(_NAME_B)
-        assert real.wait_gone(_NAME_B) and real.named(_NAME_A) == 1, "b's name touches b only"
-        real.deployer_sql(D.MIGRATE_NAME_PREFIX)
-        assert real.wait_gone(D.MIGRATE_NAME_PREFIX + "%"), "the prefix (before a new try) clears what an older release left"
+        real.session(real.name_a, "", lock="LOCK TABLE {t} IN ACCESS SHARE MODE")
+        real.session(real.name_b, "", lock="LOCK TABLE {t} IN ACCESS SHARE MODE")
+        real.deployer_sql(real.name_b)
+        assert real.wait_gone(real.name_b) and real.named(real.name_a) == 1, "b's name touches b only"
+        real.deployer_sql(real.prefix)
+        assert real.wait_gone(real.prefix + "%"), "the prefix (before a new try) clears what an older release left"
     finally:
+        real.close()
+
+
+@_needs_real
+def test_a_neighbour_named_like_the_app_does_not_move_this_tests_own_counts() -> None:
+    """story 4922 — the root of the CI flake (runs 43449408634 · 43424348327: `assert named("local:dev") == 1` saw 2 and 3). `pg_stat_activity` is the whole cluster: the backend's pooled connections
+    that earlier tests left behind carry the app's own name. A test that counts by that shared name is moved by its neighbours; one that counts by a name of its own is not."""
+    real = _Real()
+    neighbours = []
+    own = None
+    try:
+        before = real.named("local:dev")                             # whatever else already carries the app's name (earlier tests, other processes): not ours to count
+        for _ in range(2):                                           # what the tests before this one leave: the same role, the app's name, idle
+            c = real.connect()
+            with c.cursor() as cur:
+                cur.execute("SET application_name = 'local:dev'")
+            neighbours.append(c)
+        shared = real.connect()                                      # the OLD shape of the serving session in this file: the shared name
+        with shared.cursor() as cur:
+            cur.execute("SET application_name = 'local:dev'")
+        neighbours.append(shared)
+        assert real.named("local:dev") == before + 3, "counted by the shared name, the test's own session is not alone (the CI flake: 2 and 3 where 1 was expected)"
+        own = real.connect()                                         # the NEW shape: a name of its own
+        with own.cursor() as cur:
+            cur.execute(f"SET application_name = '{real.serving_name}'")
+        assert real.named(real.serving_name) == 1, "counted by its own name, the neighbours do not matter"
+        assert real.serving_name != "local:dev" and real.serving_name.startswith("local:dev:") and not real.serving_name.startswith(D.MIGRATE_NAME_PREFIX), "app-like, but never a migration name"
+        assert real.name_a.startswith(D.MIGRATE_NAME_PREFIX) and real.name_b.startswith(D.MIGRATE_NAME_PREFIX) and real.name_a != real.name_b and len(real.name_b) <= 63, "migration names keep the deployer's shape"
+    finally:
+        for c in neighbours + ([own] if own is not None else []):
+            c.close()
         real.close()

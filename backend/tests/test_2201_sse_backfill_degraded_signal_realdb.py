@@ -419,3 +419,96 @@ async def test_degraded_reason_logged(caplog):
         ), [r.message for r in caplog.records]
     finally:
         await engine.dispose()
+
+
+# ─── story 4922 — the stream holds no pool place while it waits for the client ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+# CI («Contrast guard» runs 43344831907 · 43358060648 · …): «The garbage collector is trying to clean up non-checked-in connection … | pool_holders: pool=request held_for=279s GET /api/v2/events/stream
+# checked out at: app/routers/events.py:714 generate (task finished)». The backfill read its events in `async with async_session_factory() as db:` and then `yield`ed the frames from INSIDE that block, so
+# the session — its connection and its open transaction — was held for as long as the client took to read. Starlette's StreamingResponse never closes the stream's generator when the client leaves (it
+# stops iterating: `stream_response` is `async for chunk in body_iterator`); a generator parked at such a `yield` keeps its connection until the garbage collector finds it. The request pool is 3 + 1,
+# so a few reloads of a page leave it empty: QueuePool's 30 s timeout, an `/api/activation/checklist` that does not answer in 5 s, an asyncpg `InterfaceError` when the collector terminates a connection.
+# These two tests stop at the moment the old code was parked (a frame sent, the client «gone»: nothing resumes or closes the generator) and look at the pool.
+
+
+async def _open_stream(seeded):
+    import asyncio
+
+    from app.dependencies.auth import AuthContext
+    from app.routers.events import agent_event_stream
+    from starlette.requests import Request
+
+    auth = AuthContext(
+        user_id=str(seeded["member_id"]), email="agent@test",
+        claims={"app_metadata": {"api_key_id": str(uuid.uuid4()), "org_id": str(seeded["org_id"])}},
+    )
+    async def _client_still_there():                               # the live loop asks `request.is_disconnected()`: a receive that never reports a disconnect
+        await asyncio.Event().wait()
+
+    request = Request(scope={"type": "http", "headers": [], "method": "GET", "path": "/api/v2/events/stream"}, receive=_client_still_there)
+    resp = await agent_event_stream(request=request, member_id=None, auth=auth, org_id=seeded["org_id"], since_timestamp=None, last_event_id=None)
+    assert resp.status_code == 200
+    return resp.body_iterator
+
+
+@pytest.mark.anyio
+async def test_a_stream_whose_client_is_gone_after_a_backfill_frame_holds_no_pool_place():
+    from app.core.database import engine as app_engine
+
+    engine, Session = await _session_factory()
+    stream = None
+    try:
+        seeded = await _seed(Session, with_fresh_event=True)       # one pending event: the backfill has a frame to send
+        stream = await _open_stream(seeded)
+        sent: list[str] = []
+        async for chunk in stream:                                 # heartbeat · sync_status · the backfill frame …
+            sent.append(chunk)
+            if '"is_backfill": true' in chunk:
+                break                                              # … and the client is gone: nothing resumes this generator, nothing closes it (StreamingResponse does neither)
+        assert any(c.startswith("event: sync_status") for c in sent) and sent[-1].count('"is_backfill": true') == 1, sent
+        held = app_engine.sync_engine.pool.checkedout()
+        assert held == 0, f"{held} pool place(s) held by a stream that only waits for its client — the backfill kept its session across a yield (story 4922)"
+    finally:
+        if stream is not None:
+            await stream.aclose()
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_the_first_delivery_is_still_stamped_after_the_frame_went_out_and_the_stamp_holds_nothing_either():
+    """the new shape reads in one short session, sends, and stamps in another — the order the old comment fixes («yield first, mark after»): the event stays pending until its frame was taken."""
+    import asyncio
+
+    from app.core.database import engine as app_engine
+    from app.models.event import Event
+    from sqlalchemy import select
+
+    engine, Session = await _session_factory()
+    stream = None
+    pending_next = None
+    try:
+        seeded = await _seed(Session, with_fresh_event=True)
+        stream = await _open_stream(seeded)
+        async for chunk in stream:
+            if '"is_backfill": true' in chunk:
+                break
+        async with Session() as s:
+            assert (await s.execute(select(Event.status).where(Event.id == seeded["event_id"]))).scalar_one() == "pending", "not stamped before the frame was taken"
+        async def _take_next():                                    # a real coroutine: the conftest's pool tag reads the running task's coroutine name
+            return await stream.__anext__()
+
+        pending_next = asyncio.ensure_future(_take_next())         # the client took the frame: the generator goes on — stamps, then waits for live events
+        deadline = asyncio.get_running_loop().time() + 10
+        status = "pending"
+        while status != "delivered" and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.1)
+            async with Session() as s:
+                status = (await s.execute(select(Event.status).where(Event.id == seeded["event_id"]))).scalar_one()
+        assert status == "delivered", "the first delivery is stamped once the frame went out"
+        assert app_engine.sync_engine.pool.checkedout() == 0, "…and while the stream waits for live events it holds no pool place"
+    finally:
+        if pending_next is not None:
+            pending_next.cancel()
+            await asyncio.gather(pending_next, return_exceptions=True)
+        if stream is not None:
+            await stream.aclose()
+        await engine.dispose()
