@@ -16,6 +16,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../messages/ko.json';
 import { ToastProvider, ToastContainer, useToast } from '@/components/ui/toast';
+import { TopBarProvider } from '@/components/nav/top-bar-context';
 
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 
@@ -31,6 +32,8 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
 const { routerPushMock } = vi.hoisted(() => ({ routerPushMock: vi.fn() }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: routerPushMock }),
+  usePathname: () => '/content/channel-posts',
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 import ChannelPostListPage from './page';
@@ -51,15 +54,20 @@ function TestToastRenderer() {
 function wrap(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      <ToastProvider>
-        {node}
-        <TestToastRenderer />
-      </ToastProvider>
+      <TopBarProvider>
+        <ToastProvider>
+          {node}
+          <TestToastRenderer />
+        </ToastProvider>
+      </TopBarProvider>
     </NextIntlClientProvider>
   );
 }
 
 const ORG_ID = 'org-1';
+
+/** 열린 ⋯ 메뉴의 «보관 / 보관 해제» 항목(4913: 옛 data-testid="channel-post-archive-action" 자리). */
+const archiveMenuItem = () => document.querySelector('[role="menuitem"]') as HTMLElement | null;
 const ONE_ACTIVE_CONNECTION = [{ id: 'conn-1', status: 'active' }];
 
 beforeEach(() => {
@@ -88,8 +96,9 @@ async function flush() {
 
 // story #3744 — 행 액션이 이제 ⋯ DropdownMenu 안에 있다(base-ui가 content를
 // document.body에 portal — container 스코프 밖). content/page.test.tsx와 동형.
+// 4913 — 트리거는 ds RowListItem의 «⋯»(data-slot="ds-row-actions-trigger") · 메뉴 항목은 role=menuitem(행 하나의 항목은 보관 / 보관 해제 하나뿐).
 async function openRowMenu(n = 0) {
-  const triggers = container.querySelectorAll('[data-testid="channel-post-row-actions-trigger"]');
+  const triggers = container.querySelectorAll('[data-slot="ds-row-actions-trigger"]');
   await act(async () => {
     (triggers[n] as HTMLElement).click();
   });
@@ -177,21 +186,20 @@ describe('ChannelPostListPage (story #3402)', () => {
     expect(container.textContent).not.toContain('새 글');
   });
 
-  // story #3422 ③-b(페드루 CHANGES Ⓑ, 시안 v6 — 목록/캘린더 뷰 전환은 탭 줄 위 stock
-  // Tabs로) — 캘린더 전환은 이제 Link가 아니라 Tabs onValueChange로 라우팅한다.
-  it('⭐목록/캘린더 전환에서 「캘린더」를 클릭하면 /content/channel-posts/calendar로 이동한다(0건이어도 항상 보인다)', async () => {
+  // story #3422 ③-b(페드루 CHANGES Ⓑ, 시안 v6) — 목록/캘린더 뷰 전환. 4913: 탭 패널이 아니라 «진짜 링크»(TabNav) — 캘린더 · 반응은 별도 페이지라 href로 간다(새 창으로도 열린다).
+  it('⭐목록/캘린더 전환의 「캘린더」는 /content/channel-posts/calendar로 가는 진짜 링크다(0건이어도 항상 보인다)', async () => {
     stubFetch([]);
     await act(async () => {
       root.render(wrap(<ChannelPostListPage />));
     });
     await flush();
 
-    const calendarTab = container.querySelector('[data-testid="channel-posts-calendar-link"]') as HTMLElement;
+    const calendarTab = container.querySelector('[data-testid="channel-posts-calendar-link"]') as HTMLAnchorElement;
     expect(calendarTab).not.toBeNull();
-    await act(async () => { calendarTab.click(); });
-    await flush();
-
-    expect(routerPushMock).toHaveBeenCalledWith('/content/channel-posts/calendar');
+    expect(calendarTab.tagName).toBe('A');
+    expect(calendarTab.getAttribute('href')).toBe('/content/channel-posts/calendar');
+    const engagementTab = container.querySelector('[data-testid="channel-posts-engagement-link"]') as HTMLAnchorElement;
+    expect(engagementTab.getAttribute('href')).toBe('/content/channel-posts/engagement');
   });
 
   // story #3744(유나 픽셀 CHANGES②·PO 채택, 2026-09-09 12:33Z) — 세그먼트 명사 짝은
@@ -203,7 +211,7 @@ describe('ChannelPostListPage (story #3402)', () => {
     await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
     await flush();
 
-    const listTab = [...container.querySelectorAll('[role="tab"]')].find((el) => el.textContent === koMessages.content.channelPostsViewList);
+    const listTab = [...container.querySelectorAll('[data-testid="channel-posts-view-switch"] a[aria-current="page"]')].find((el) => el.textContent === koMessages.content.channelPostsViewList);
     const calendarTab = container.querySelector('[data-testid="channel-posts-calendar-link"]');
     expect(listTab).toBeTruthy();
     expect(calendarTab?.textContent).toBe(koMessages.content.channelPostsViewCalendar);
@@ -403,7 +411,7 @@ describe('ChannelPostListPage (story #3402)', () => {
 
   // story #4277(민 기기 15번) — 402폭 카드에서 제목이 말줄임 없이 잘렸다: 인라인 <a>에 걸린 `truncate`는 말줄임표를 못 그리고 카드 제목 칸의
   // 두 줄 말줄임(line-clamp-2)도 한 줄로 막았다. 카드(lg 미만)엔 한 줄 강제 0 · 표(lg 이상)에서만 block+truncate.
-  it('⭐4277 15번 — 목록 제목 링크는 lg 이상에서만 한 줄 말줄임(카드에선 칸의 두 줄 말줄임에 맡김)', async () => {
+  it('⭐4277 15번 → 4913 — 목록 제목 링크는 block + truncate(링크 상자가 줄 안에 머물고 긴 제목은 말줄임 — 표 + 카드 이중 DOM이 사라져 폭 갈래가 없다)', async () => {
     stubFetch([{ ...DRAFT_A, text_preview: '리허설 ⑤-2 · 계보 앵커 확認 (재발행 경로 : 아주 긴 제목이 카드 폭을 넘는다)', text_length: 363 }]);
     await act(async () => {
       root.render(wrap(<ChannelPostListPage />));
@@ -414,9 +422,8 @@ describe('ChannelPostListPage (story #3402)', () => {
     expect(links.length).toBeGreaterThan(0);
     for (const a of links) {
       const tokens = a.className.split(/\s+/);
-      expect(tokens).not.toContain('truncate');
-      expect(tokens).toContain('lg:truncate');
-      expect(tokens).toContain('lg:block');
+      expect(tokens).toContain('truncate');
+      expect(tokens).toContain('block');
     }
   });
 
@@ -436,9 +443,9 @@ describe('ChannelPostListPage (story #3402)', () => {
   // (우선순위 — 막힘이 최우선, 그다음 발행, 그다음 예약, 마지막 「—」). 「—」는 이제
   // "아직 예약 없음" 한 뜻만(예전엔 막힘·발행 여부를 몰라서도 "—"였다).
   describe('나가는 시각(story #3744, ① 픽셀 CHANGES — 우선순위 4단)', () => {
-    // 3번째 <td>(0-index 2)가 「나가는 시각」 칸 — 글·채널·나가는 시각·상태·⋯.
+    // 4913: 「나가는 시각」 자리 = data-testid="channel-post-outgoing-at" 한 곳(막힘이면 행 아래 작은 글의 배지 · 아니면 부제의 시각 · 예약 · «—»).
     function outgoingCell() {
-      return container.querySelectorAll('[data-testid="channel-posts-list-row"] td')[2];
+      return container.querySelector('[data-testid="channel-post-outgoing-at"]');
     }
 
     it('⭐scheduled_at만 있음(막힘·발행 없음) — 예약 시각이 그 칸에 뜬다', async () => {
@@ -475,9 +482,10 @@ describe('ChannelPostListPage (story #3402)', () => {
 
       const badge = outgoingCell()?.querySelector('[data-testid="channel-post-failure-badge"]');
       expect(badge).not.toBeNull();
-      // 첫 번째(글) 칸엔 이제 배지가 없어야 한다 — 자리를 옮겼지 두 곳에 안 둔다.
-      const titleCell = container.querySelectorAll('[data-testid="channel-posts-list-row"] td')[0];
-      expect(titleCell?.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
+      // 제목(링크) 자리엔 배지가 없어야 한다 — 자리를 옮겼지 두 곳에 안 둔다.
+      const titleLink = container.querySelector('[data-testid="channel-posts-list-row"] [data-slot="ds-list-row"] a');
+      expect(titleLink?.querySelector('[data-testid="channel-post-failure-badge"]')).toBeNull();
+      expect(container.querySelectorAll('[data-testid="channel-post-failure-badge"]')).toHaveLength(1);
     });
 
     // 뮤테이션 표적 — 우선순위를 어기면(예: published_at을 막힘보다 앞에 두면) 이 값이
@@ -657,6 +665,43 @@ describe('ChannelPostListPage (story #3402)', () => {
       expect(button).toBeTruthy();
     });
 
+    // 4913 — 단추가 «그려진다»만으론 죽은 단추도 통과한다: 누르면 그 글의 채널 주소를 새 창으로 연다(뮤테이션 표적 — 동작을 비우면 실패).
+    it('⭐「채널에서 보기」를 누르면 permalink를 새 창(noopener)으로 연다', async () => {
+      const openMock = vi.fn();
+      vi.stubGlobal('open', openMock);
+      stubFetch([{
+        ...DRAFT_A, gate_status: 'approved', sealed_content_sha256: 'h1',
+        published_at: '2026-09-09T00:00:00Z', publication_status: 'published',
+        permalink: 'https://threads.net/@x/post/1',
+      }]);
+      await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
+      await flush();
+
+      const button = [...container.querySelectorAll('button')].find(
+        (el) => el.textContent === koMessages.content.commentsReplyExternalLinkCta,
+      ) as HTMLElement;
+      await act(async () => { button.click(); });
+      expect(openMock).toHaveBeenCalledWith('https://threads.net/@x/post/1', '_blank', 'noopener,noreferrer');
+    });
+
+    // 4913 — 원작성 주체가 최종 수정 주체와 «다를 때만» 두 번째 꼬리표가 선다(에이전트가 쓰고 사람이 고친 글이 구별되는 자리). 같거나 모르면 안 그린다.
+    it('⭐원작성 ≠ 최종 수정이면 원작성 꼬리표가 행에 서고, 같으면 안 선다', async () => {
+      stubFetch([
+        { ...DRAFT_A, draft_id: 'd1', origin_author_kind: 'agent', latest_author_kind: 'human' },
+        { ...DRAFT_A, draft_id: 'd2', origin_author_kind: 'human', latest_author_kind: 'human' },
+        { ...DRAFT_A, draft_id: 'd3', latest_author_kind: 'human' },
+      ]);
+      await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
+      await flush();
+
+      const rows = [...container.querySelectorAll('[data-testid="channel-posts-list-row"]')];
+      const origin = (i: number) => rows[i]!.querySelector('[data-testid="channel-post-origin-author"]');
+      expect(origin(0)?.textContent).toBe(koMessages.content.authorAgent);
+      expect(origin(0)?.querySelector('[data-slot="ds-tag"]')).not.toBeNull();
+      expect(origin(1)).toBeNull();
+      expect(origin(2)).toBeNull();
+    });
+
     // 뮤테이션 표적 — permalink 가드를 지우면 실패해야 한다.
     it('발행됨 행이라도 permalink가 없으면 「채널에서 보기」 버튼이 안 뜬다(뮤테이션 표적)', async () => {
       stubFetch([{
@@ -683,7 +728,7 @@ describe('ChannelPostListPage (story #3402)', () => {
         (el) => el.textContent === koMessages.content.approvalRequestViewCta,
       );
       expect(menuItem).toBeUndefined();
-      expect(document.querySelector('[data-testid="channel-post-archive-action"]')).not.toBeNull();
+      expect(archiveMenuItem()).not.toBeNull();
     });
 
     // §22-18 "유나의 자" — content/page.test.tsx와 동형(그 파일 주석 참조).
@@ -695,8 +740,8 @@ describe('ChannelPostListPage (story #3402)', () => {
       await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
       await flush();
 
-      // story #4014 — 표·카드 DOM이 항상 둘 다 있어(AC5/6) 표 쪽만 스코프.
-      const buttons = [...container.querySelectorAll('table button')].filter(
+      // 4913 — 표 + 카드 이중 DOM이 사라져 행당 단추 하나다.
+      const buttons = [...container.querySelectorAll('button')].filter(
         (el) => el.textContent === koMessages.content.approvalRequestViewCta,
       );
       expect(buttons).toHaveLength(2);
@@ -710,13 +755,16 @@ describe('ChannelPostListPage (story #3402)', () => {
 
   // story #3734 — content/page.test.tsx(site-posts)의 「보관」 describe와 동형.
   describe('보관(story #3734)', () => {
-    it('⭐can_archive=false — ⋯ 메뉴에 「보관」 항목이 안 보인다(fail-closed)', async () => {
+    it('⭐can_archive=false — 「보관」 항목이 없다: 비어 있는 ⋯ 단추도 안 그린다(fail-closed · 4913: 옛 화면은 빈 ⋯를 그렸다)', async () => {
       stubFetch([{ ...DRAFT_A, can_archive: false }]);
       await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
       await flush();
-      await openRowMenu();
 
-      expect(document.querySelector('[data-testid="channel-post-archive-action"]')).toBeNull();
+      expect(container.querySelector('[data-slot="ds-row-actions-trigger"]')).toBeNull();
+      const row = container.querySelector('[data-slot="ds-list-row"]') as HTMLElement;
+      await act(async () => { row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })); });
+      await flush();
+      expect(archiveMenuItem()).toBeNull();
     });
 
     it('⭐can_archive=true — ⋯ 메뉴의 「보관」 클릭 시 POST .../archive 호출, 기본 목록에서 즉시 사라진다', async () => {
@@ -725,7 +773,7 @@ describe('ChannelPostListPage (story #3402)', () => {
       await flush();
       await openRowMenu();
 
-      const button = document.querySelector('[data-testid="channel-post-archive-action"]') as HTMLElement;
+      const button = archiveMenuItem() as HTMLElement;
       expect(button.textContent).toBe(koMessages.content.archiveAction);
       await act(async () => { button.click(); });
       await flush();
@@ -752,7 +800,7 @@ describe('ChannelPostListPage (story #3402)', () => {
         koMessages.content.contentStatusArchived,
       );
       await openRowMenu();
-      expect(document.querySelector('[data-testid="channel-post-archive-action"]')?.textContent).toBe(
+      expect(archiveMenuItem()?.textContent).toBe(
         koMessages.content.unarchiveAction,
       );
     });
@@ -766,7 +814,7 @@ describe('ChannelPostListPage (story #3402)', () => {
       await flush();
       await openRowMenu();
 
-      const archiveButton = document.querySelector('[data-testid="channel-post-archive-action"]') as HTMLElement;
+      const archiveButton = archiveMenuItem() as HTMLElement;
       expect(archiveButton.textContent).toBe(koMessages.content.archiveAction);
       await act(async () => { archiveButton.click(); });
       await flush();
@@ -788,7 +836,7 @@ describe('ChannelPostListPage (story #3402)', () => {
       await flush();
       await openRowMenu();
 
-      const restoreButton = document.querySelector('[data-testid="channel-post-archive-action"]') as HTMLElement;
+      const restoreButton = archiveMenuItem() as HTMLElement;
       await act(async () => { restoreButton.click(); });
       await flush();
 
@@ -808,7 +856,7 @@ describe('ChannelPostListPage (story #3402)', () => {
       await flush();
 
       // story #4014 — 표·카드 DOM이 항상 둘 다 있어(AC5/6) 표 쪽만 스코프.
-      const triggers = container.querySelectorAll('table [data-testid="channel-post-row-actions-trigger"]');
+      const triggers = container.querySelectorAll('[data-slot="ds-row-actions-trigger"]');
       expect(triggers).toHaveLength(2);
       const labels = [...triggers].map((b) => b.getAttribute('aria-label'));
       expect(labels[0]).not.toBeNull();
@@ -823,7 +871,7 @@ describe('ChannelPostListPage (story #3402)', () => {
       await flush();
       await openRowMenu();
 
-      const button = document.querySelector('[data-testid="channel-post-archive-action"]') as HTMLElement;
+      const button = archiveMenuItem() as HTMLElement;
       await act(async () => { button.click(); });
       await flush();
 
@@ -851,7 +899,7 @@ describe('ChannelPostListPage (story #3402)', () => {
       await flush();
       await openRowMenu();
 
-      const restoreButton = document.querySelector('[data-testid="channel-post-archive-action"]') as HTMLElement;
+      const restoreButton = archiveMenuItem() as HTMLElement;
       await act(async () => { restoreButton.click(); });
       await flush();
 
@@ -868,7 +916,7 @@ describe('ChannelPostListPage (story #3402)', () => {
       await flush();
       await openRowMenu();
 
-      const archiveButton = document.querySelector('[data-testid="channel-post-archive-action"]') as HTMLElement;
+      const archiveButton = archiveMenuItem() as HTMLElement;
       await act(async () => { archiveButton.click(); });
       await flush();
 

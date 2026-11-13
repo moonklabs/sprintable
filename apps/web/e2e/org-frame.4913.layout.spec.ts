@@ -33,10 +33,11 @@ async function build() {
         import Events from './src/app/(authenticated)/organization/events/page';
         import Content from './src/app/(authenticated)/content/page';
         import Insights from './src/app/(authenticated)/organization/insights-board/page';
+        import ChannelPosts from './src/app/(authenticated)/content/channel-posts/page';
         import { ToastProvider } from './src/components/ui/toast';
         function Bar() { const { title } = useTopBar(); return React.createElement('header', { 'data-testid': 'app-bar', style: { height: '48px', display: 'flex', alignItems: 'center', padding: '0 16px', borderBottom: '1px solid #8884' } }, title); }
         window.__mount = (which) => {
-          const Screen = { roles: Roles, trust: Trust, gc: Gc, rules: Rules, rewards: Rewards, channels: Channels, events: Events, content: Content, insights: Insights }[which];
+          const Screen = { roles: Roles, trust: Trust, gc: Gc, rules: Rules, rewards: Rewards, channels: Channels, events: Events, content: Content, insights: Insights, channelPosts: ChannelPosts }[which];
           createRoot(document.getElementById('root')).render(React.createElement(NextIntlClientProvider, { locale: 'ko', messages: ko, timeZone: 'Asia/Seoul' },
             React.createElement(TopBarProvider, null, React.createElement(ToastProvider, null, React.createElement(Bar), React.createElement('main', { 'data-testid': 'main' }, React.createElement(Screen))))));
         };`,
@@ -76,9 +77,9 @@ const SUMMARY = [
   { member_id: 'm3', role_key: 'dev', role_label: '개발', hit_rate: 0.5, resolved: 4, computed_at: '2026-11-10T00:00:00Z', pending: 1, name: 'A very long member display name that must be cut inside its row', member_type: 'agent', member_deleted: false },
 ];
 
-type Which = 'roles' | 'trust' | 'gc' | 'rules' | 'rewards' | 'channels' | 'events' | 'content' | 'insights';
+type Which = 'roles' | 'trust' | 'gc' | 'rules' | 'rewards' | 'channels' | 'events' | 'content' | 'insights' | 'channelPosts';
 // the body frame width at ≥ 800: `reading` 768 for forms and lists, `wide` 1152 for the table-like marketing screens (blog posts · channel posts · insights board)
-const FRAME_AT_DESKTOP: Record<Which, number> = { roles: 768, trust: 768, gc: 768, rules: 768, rewards: 768, channels: 768, events: 768, content: 1152, insights: 1152 };
+const FRAME_AT_DESKTOP: Record<Which, number> = { roles: 768, trust: 768, gc: 768, rules: 768, rewards: 768, channels: 768, events: 768, content: 1152, insights: 1152, channelPosts: 1152 };
 const AVAILABLE = [
   { channel: 'threads', display_name: 'Threads', credential_kind: 'oauth', kind: 'social' },
   { channel: 'wordpress', display_name: 'WordPress', credential_kind: 'pasted_secret', kind: 'blog' },
@@ -122,6 +123,14 @@ const INSIGHTS_ROWS = [
   { publication_id: 'p3', kind: 'channel_publication', channel: 'instagram', work_item_id: 'w3', title: '글 C', published_at: '2026-10-20T09:00:00Z', external_url: null, connection_id: 'c2', d1: null, d7: null },
 ];
 
+// the channel posts screen — a pending post with a very long preview (shows «승인 요청 보기» + «⋯»), a published one with a permalink (shows «채널에서 보기» + «⋯»; sandbox channel; written by an agent, last edited by a human), a blocked one with a failure sentence, a partial success and a same-story link in the footnote
+const CHANNEL_DRAFT_BASE = { work_item_id: 'w', channel: 'threads', connection_id: 'c1', current_version: 3, updated_at: '2026-11-10T03:52:00+00:00', latest_author_kind: 'human', origin_author_kind: 'human', body_sha256: 'h', gate_status: null, reapproval_required: null, sealed_content_sha256: null, published_at: null, publication_status: null, can_archive: true };
+const CHANNEL_POST_DRAFTS = [
+  { ...CHANNEL_DRAFT_BASE, draft_id: 'c1', text_preview: 'A very long channel post preview that has to be cut inside its row and never push the approval press or the «⋯» out of the panel', gate_status: 'pending' },
+  { ...CHANNEL_DRAFT_BASE, draft_id: 'c2', channel: 'sandbox', text_preview: '발행된 글', gate_status: 'approved', sealed_content_sha256: 'h', published_at: '2026-11-09T00:00:00Z', publication_status: 'published', permalink: 'https://www.threads.net/@a/post/x', origin_author_kind: 'agent' },
+  { ...CHANNEL_DRAFT_BASE, draft_id: 'c3', text_preview: '막힌 글', gate_status: 'approved', sealed_content_sha256: 'h', command_status: 'dead_letter', publication_status: 'container_created', source_content_item_id: 'site-1', source_title: 'A very long source post title that must be cut inside the footnote line', can_archive: false },
+];
+
 async function open(page: Page, which: Which, scheme: 'light' | 'dark', width: number, height: number) {
   const { js, css } = await build();
   await page.emulateMedia({ colorScheme: scheme });
@@ -144,6 +153,7 @@ async function open(page: Page, which: Which, scheme: 'light' | 'dark', width: n
     if (url.pathname === '/api/rewards') return json({ data: [{ id: 'r1', member_id: 'm1', amount: 50, reason: 'A very long reason that has to wrap inside its row and never push the amount out of the panel on a phone', created_at: '2026-11-11T00:00:00Z' }] });
     if (url.pathname === '/api/team-members') return json({ data: [{ id: 'm1', name: '오너 하나', type: 'human' }, { id: 'm2', name: '관리자 둘', type: 'human' }] });
     if (url.pathname === '/api/org-members') return json({ data: MEMBERS });
+    if (url.pathname === '/api/organizations/org-1/channel-posts/drafts') return json({ data: CHANNEL_POST_DRAFTS, error: null, meta: { totalCount: 5 } });
     if (url.pathname === '/api/organizations/org-1/site-posts/drafts') return json({ data: POST_DRAFTS, error: null, meta: { totalCount: 5 } });
     if (url.pathname === '/api/organizations/org-1/insights-board/cost-summary') return json({ data: { ads: { approved_boost_count: 0, sealed_ads_currency: null, sealed_budget_minor: 0, captured_spend_minor: 0, remaining_minor: 0, cap_reached_count: 0 }, generation_cost_spent_minor: null, generation_cost_period_start: null, generation_cost_period_end: null, generation_currency: null, x_cost_spent_minor: null } });
     if (url.pathname === '/api/organizations/org-1/insights-board') return json({ data: { rows: INSIGHTS_ROWS, has_more: false, next_cursor: null, hidden_count: null, ga4_connection_status: 'not_connected' } });
@@ -180,7 +190,7 @@ const lightnessOf = (css: string) => {
 for (const scheme of ['light', 'dark'] as const) {
   for (const [width, height] of [[1440, 900], [390, 844]] as const) {
     test.describe(`${scheme} ${width}`, () => {
-      for (const which of ['roles', 'trust', 'gc', 'rules', 'rewards', 'channels', 'events', 'content'] as const) {
+      for (const which of ['roles', 'trust', 'gc', 'rules', 'rewards', 'channels', 'events', 'content', 'channelPosts'] as const) {
         test(`${which} — one heading in the app bar · the frame (reading 768 · wide 1152) · no sideways scroll · layers`, async ({ page }) => {
           await open(page, which, scheme, width, height);
           // one heading, in the bar, none in the body
@@ -449,6 +459,34 @@ test('insights — opening a row (expand) keeps the detail inside the table / ca
       const db = (await detail.boundingBox())!;
       expect(db.x + db.width).toBeLessThanOrEqual(frame.x + frame.width + 1);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+    }
+  }
+});
+
+test('channel posts — nothing pressable in a row or its footnote is cut off by the panel edge on 390 and 320 (preview link · status chip · next-step press · «⋯» · failure badge · source link), no sideways scroll, the view switch stays inside the frame (light + dark)', async ({ page }) => {
+  for (const scheme of ['light', 'dark'] as const) {
+    for (const [width, height] of [[390, 844], [320, 640]] as const) {
+      await open(page, 'channelPosts', scheme, width, height);
+      expect(await page.locator('[data-testid="channel-posts-list-row"]').count()).toBe(3);
+      // the controls that can run out of room must really be there (a missing press would make the clip check vacuous)
+      expect(await page.locator('[data-testid="channel-posts-list-row"] button', { hasText: '승인 요청 보기' }).count()).toBe(1);
+      expect(await page.locator('[data-testid="channel-posts-list-row"] button', { hasText: '채널에서 보기' }).count()).toBe(1);
+      expect(await page.locator('[data-testid="channel-posts-list-row"] [data-slot="ds-row-actions-trigger"]').count()).toBe(2);
+      expect(await page.locator('[data-testid="channel-post-failure-badge"]').count()).toBe(1);
+      expect(await page.locator('[data-testid="channel-post-source-link"]').count()).toBe(1);
+      const panel = (await page.locator('[data-testid="channel-posts-list"]').boundingBox())!;
+      const rects = await page.locator('[data-testid="channel-posts-list-row"]').evaluateAll((items) => items.flatMap((r) => [...r.querySelectorAll('button, a, [data-slot="ds-chip"], [data-testid="channel-post-failure-badge"]')].map((e) => { const b = e.getBoundingClientRect(); return { x: b.x, w: b.width, t: (e.textContent ?? '').trim().slice(0, 24) }; })));
+      expect(rects.length).toBeGreaterThan(8);
+      for (const r of rects) {
+        expect(r.x + r.w, `${scheme} ${width} ${r.t}`).toBeLessThanOrEqual(panel.x + panel.width + 1);
+        expect(r.x, `${scheme} ${width} ${r.t}`).toBeGreaterThanOrEqual(panel.x - 1);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+      const frame = (await page.locator('[data-slot="ds-page-frame"]').first().boundingBox())!;
+      for (const sel of ['[data-slot="ds-tab-nav"]', '[role="tablist"]']) {
+        const b = (await page.locator(sel).first().boundingBox())!;
+        expect(b.x + b.width, sel).toBeLessThanOrEqual(frame.x + frame.width + 1);
+      }
     }
   }
 });
