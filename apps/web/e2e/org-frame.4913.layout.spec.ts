@@ -31,10 +31,11 @@ async function build() {
         import Rewards from './src/app/(authenticated)/rewards/page';
         import Channels from './src/app/(authenticated)/organization/channels/page';
         import Events from './src/app/(authenticated)/organization/events/page';
+        import Content from './src/app/(authenticated)/content/page';
         import { ToastProvider } from './src/components/ui/toast';
         function Bar() { const { title } = useTopBar(); return React.createElement('header', { 'data-testid': 'app-bar', style: { height: '48px', display: 'flex', alignItems: 'center', padding: '0 16px', borderBottom: '1px solid #8884' } }, title); }
         window.__mount = (which) => {
-          const Screen = { roles: Roles, trust: Trust, gc: Gc, rules: Rules, rewards: Rewards, channels: Channels, events: Events }[which];
+          const Screen = { roles: Roles, trust: Trust, gc: Gc, rules: Rules, rewards: Rewards, channels: Channels, events: Events, content: Content }[which];
           createRoot(document.getElementById('root')).render(React.createElement(NextIntlClientProvider, { locale: 'ko', messages: ko, timeZone: 'Asia/Seoul' },
             React.createElement(TopBarProvider, null, React.createElement(ToastProvider, null, React.createElement(Bar), React.createElement('main', { 'data-testid': 'main' }, React.createElement(Screen))))));
         };`,
@@ -74,7 +75,9 @@ const SUMMARY = [
   { member_id: 'm3', role_key: 'dev', role_label: '개발', hit_rate: 0.5, resolved: 4, computed_at: '2026-11-10T00:00:00Z', pending: 1, name: 'A very long member display name that must be cut inside its row', member_type: 'agent', member_deleted: false },
 ];
 
-type Which = 'roles' | 'trust' | 'gc' | 'rules' | 'rewards' | 'channels' | 'events';
+type Which = 'roles' | 'trust' | 'gc' | 'rules' | 'rewards' | 'channels' | 'events' | 'content';
+// the body frame width at ≥ 800: `reading` 768 for forms and lists, `wide` 1152 for the table-like marketing screens (blog posts · channel posts)
+const FRAME_AT_DESKTOP: Record<Which, number> = { roles: 768, trust: 768, gc: 768, rules: 768, rewards: 768, channels: 768, events: 768, content: 1152 };
 const AVAILABLE = [
   { channel: 'threads', display_name: 'Threads', credential_kind: 'oauth', kind: 'social' },
   { channel: 'wordpress', display_name: 'WordPress', credential_kind: 'pasted_secret', kind: 'blog' },
@@ -103,6 +106,14 @@ const EVENT_DEFS = [
   { id: null, key: 'preset.gate.verdict', name: '게이트 판정', org_id: null, payload_schema: { type: 'object', properties: {}, additionalProperties: false }, routing: { escalation: { kind: 'server_derived', target: 'none' }, broadcast: { kind: 'server_derived', target: 'none' } }, block_template: null, enabled: true, version: 2 },
 ];
 
+// the blog posts screen — a pending post with a very long title (shows «승인 요청 보기» + «⋯»), a published one with a public link (shows «발행된 글 보기» + «⋯»; written by an agent, last edited by a human), a plain draft
+const DRAFT_BASE = { work_item_id: 'w', slug: 's', lang: 'ko', current_version: 3, updated_at: '2026-11-10T03:52:00+00:00', latest_author_kind: 'human', origin_author_kind: 'human', body_sha256: 'h', gate_status: null, reapproval_required: null, sealed_content_sha256: null, published_at: null, can_archive: true };
+const POST_DRAFTS = [
+  { ...DRAFT_BASE, draft_id: 'p1', title: 'A very long blog post title that has to be cut inside its row and never push the approval press or the «⋯» out of the panel', gate_status: 'pending' },
+  { ...DRAFT_BASE, draft_id: 'p2', title: '발행된 글', gate_status: 'approved', sealed_content_sha256: 'h', published_at: '2026-11-09T00:00:00Z', public_url: 'https://sprintable.ai/ko/blog/published', origin_author_kind: 'agent' },
+  { ...DRAFT_BASE, draft_id: 'p3', title: '초안 글', can_archive: false },
+];
+
 async function open(page: Page, which: Which, scheme: 'light' | 'dark', width: number, height: number) {
   const { js, css } = await build();
   await page.emulateMedia({ colorScheme: scheme });
@@ -125,6 +136,7 @@ async function open(page: Page, which: Which, scheme: 'light' | 'dark', width: n
     if (url.pathname === '/api/rewards') return json({ data: [{ id: 'r1', member_id: 'm1', amount: 50, reason: 'A very long reason that has to wrap inside its row and never push the amount out of the panel on a phone', created_at: '2026-11-11T00:00:00Z' }] });
     if (url.pathname === '/api/team-members') return json({ data: [{ id: 'm1', name: '오너 하나', type: 'human' }, { id: 'm2', name: '관리자 둘', type: 'human' }] });
     if (url.pathname === '/api/org-members') return json({ data: MEMBERS });
+    if (url.pathname === '/api/organizations/org-1/site-posts/drafts') return json({ data: POST_DRAFTS, error: null, meta: { totalCount: 5 } });
     if (url.pathname === '/api/events/definitions') return json(EVENT_DEFS);
     if (url.pathname.startsWith('/api/events/definitions/publish-history')) return json([]); // the opened row's history reads an array
     if (url.pathname === '/api/me') return json({ data: { user_id: 'u-me' } });
@@ -158,8 +170,8 @@ const lightnessOf = (css: string) => {
 for (const scheme of ['light', 'dark'] as const) {
   for (const [width, height] of [[1440, 900], [390, 844]] as const) {
     test.describe(`${scheme} ${width}`, () => {
-      for (const which of ['roles', 'trust', 'gc', 'rules', 'rewards', 'channels', 'events'] as const) {
-        test(`${which} — one heading in the app bar · reading frame · no sideways scroll · layers`, async ({ page }) => {
+      for (const which of ['roles', 'trust', 'gc', 'rules', 'rewards', 'channels', 'events', 'content'] as const) {
+        test(`${which} — one heading in the app bar · the frame (reading 768 · wide 1152) · no sideways scroll · layers`, async ({ page }) => {
           await open(page, which, scheme, width, height);
           // one heading, in the bar, none in the body
           expect(await page.locator('h1').count()).toBe(1);
@@ -168,8 +180,8 @@ for (const scheme of ['light', 'dark'] as const) {
           // the frame
           const frame = (await page.locator('[data-slot="ds-page-frame"]').first().boundingBox())!;
           if (width >= 800) {
-            expect(Math.round(frame.width)).toBe(768);
-            expect(Math.round(frame.x)).toBe(Math.round((width - 768) / 2));
+            expect(Math.round(frame.width)).toBe(FRAME_AT_DESKTOP[which]);
+            expect(Math.round(frame.x)).toBe(Math.round((width - FRAME_AT_DESKTOP[which]) / 2));
           } else {
             expect(frame.width).toBeLessThanOrEqual(width);
           }
@@ -318,6 +330,31 @@ test('events — the marketing tab: a recipe row keeps «프로젝트에 적용�
       await list.locator('[data-row-main]').dblclick({ position: { x: 24, y: 8 } });
       await list.locator('[data-testid="recipe-card-roles"]').waitFor();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+    }
+  }
+});
+
+test('content (blog posts) — nothing pressable in a row is cut off by the panel edge on 390 and 320, even with the status chip + «승인 요청 보기» / «발행된 글 보기» + «⋯» together (light + dark)', async ({ page }) => {
+  for (const scheme of ['light', 'dark'] as const) {
+    for (const [width, height] of [[390, 844], [320, 640]] as const) {
+      await open(page, 'content', scheme, width, height);
+      expect(await page.locator('[data-testid="content-list-row"]').count()).toBe(3);
+      const panel = (await page.locator('[data-testid="content-list"]').boundingBox())!;
+      const rects = await page.locator('[data-testid="content-list-row"] [data-slot="ds-list-row"]').evaluateAll((rows) => rows.flatMap((r) => [...r.querySelectorAll('button, a, [data-slot="ds-chip"]')].map((e) => { const b = e.getBoundingClientRect(); return { x: b.x, w: b.width, t: (e.textContent ?? '').trim().slice(0, 24) }; })));
+      expect(rects.length).toBeGreaterThan(6); // titles (links) + chips + the next-step presses + «⋯» of three rows
+      // the controls that can run out of room must really be there (a missing press would make the clip check vacuous)
+      expect(await page.locator('[data-testid="content-list-row"] button', { hasText: '승인 요청 보기' }).count()).toBe(1);
+      expect(await page.locator('[data-testid="content-list-row"] button', { hasText: '발행된 글 보기' }).count()).toBe(1);
+      expect(await page.locator('[data-testid="content-list-row"] [data-slot="ds-row-actions-trigger"]').count()).toBe(2);
+      for (const r of rects) {
+        expect(r.x + r.w, `${scheme} ${width} ${r.t}`).toBeLessThanOrEqual(panel.x + panel.width + 1);
+        expect(r.x, `${scheme} ${width} ${r.t}`).toBeGreaterThanOrEqual(panel.x - 1);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+      // the status tabs + «보관됨 보기» wrap inside the frame (no sideways scroll of the tab row)
+      const frame = (await page.locator('[data-slot="ds-page-frame"]').first().boundingBox())!;
+      const tabs = (await page.locator('[role="tablist"]').first().boundingBox())!;
+      expect(tabs.x + tabs.width).toBeLessThanOrEqual(frame.x + frame.width + 1);
     }
   }
 });

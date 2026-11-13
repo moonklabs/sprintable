@@ -4,23 +4,21 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
-import { MoreHorizontal } from 'lucide-react';
 import { useChatsHref, useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
-import { EmptyState } from '@/components/ui/empty-state';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { PageHeader } from '@/components/ui/page-header';
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { useToast } from '@/components/ui/toast';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Chip, Tag } from '@/components/ds/chip';
+import { EmptyState } from '@/components/ds/empty-state';
+import { PageFrame } from '@/components/ds/page-frame';
+import { PageHead } from '@/components/ds/page-head';
+import { RowList, RowListItem, type RowAction } from '@/components/ds/row-list';
+import { Skeleton } from '@/components/ds/skeleton';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ds/tabs';
+import { useToast } from '@/components/ds/toast';
+import { OrgScreenTitle } from '@/components/organization/org-screen-title';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
-import { deriveContentPostStatus, type ContentPostStatus, type ContentPostStatusInput } from '@/components/content/post-status';
-import { StatusChip } from '@/components/content/status-chip';
-import { AuthorKindBadge } from '@/components/content/author-kind-badge';
-import { ResponsiveDataTable, type ResponsiveDataTableColumn } from '@/components/shared/responsive-data-table';
+import { deriveContentPostStatus, contentPostStatusLabelKey, type ContentPostStatus, type ContentPostStatusInput } from '@/components/content/post-status';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
@@ -39,6 +37,9 @@ import { useViewerTimeZone } from '@/components/viewer-time-zone';
  * story #3744(UI 재설계 ①, 유나 시안 두 번째 판 — 미르코 2026-09-09) — 「관리자 덤프
  * 표」를 사람이 읽는 판으로. PageHeader(제목+설명+주 액션 「대화 열기」) · 상태 탭 ·
  * 열 4(제목·상태·마지막 수정·⋯) · 행 ⋯ 메뉴 · 부분 상태 줄 · Card 표 래퍼.
+ *
+ * 4913(UI-R5 D물결) — «한 쪽 틀»로: 제목은 위 막대(OrgScreenTitle) · 본문은 PageFrame(wide) · 머리 = 설명 + «대화 열기» · 목록은 RowList(한 줄 = 제목 + 상태 칩 + 부제(수정 · 버전 · 작성자) +
+ * 다음 발 단추, «⋯»와 우클릭이 같은 항목, 더블클릭 · Enter = 상세 열기). 표(ResponsiveDataTable)는 이 화면에서 걷었다 — 열 넷이 전부 한 줄 요약이라 표 머리가 하는 일이 없었다(정렬 · 거르기 없음).
  */
 
 interface SitePostDraftListItem {
@@ -111,6 +112,7 @@ export default function ContentPostListPage() {
   // 새 키를 안 만드는 이유 — 같은 문구를 두 namespace에 중복 등록하면 나중에 한쪽만
   // 고쳐 드리프트(verify-no-i18n-phrase-collision류 클래스와 사촌).
   const tBoard = useTranslations('board');
+  const tCommon = useTranslations('common');
   const locale = useLocale();
   const router = useRouter();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
@@ -230,198 +232,153 @@ export default function ContentPostListPage() {
   const shownCount = drafts.length;
 
   const chatAction = (
-    <Button asChild variant="hero">
+    <Button asChild variant="primary">
       <Link href={chatsHref}>{t('openChatCta')}</Link>
     </Button>
   );
 
-  // story #4014 — ResponsiveDataTable 열 정의. 셀 내용이 조건부 로직(보관 배지·행별 버튼
-  // 노출)을 품어 순수 선언형 config로는 부족하므로 renderCell 함수로 표·카드 둘 다 그린다
-  // (카드 전용 renderCard 없음 — 표 셀 내용이 그대로 카드에서도 통함, title만 line-clamp-2
-  // 로 감싸는 건 ResponsiveDataTable 자신이 함).
-  const columns: ResponsiveDataTableColumn<ContentListRow>[] = [
-    {
-      key: 'title', header: t('columnTitle'), cardSlot: 'title',
-      cellClassName: 'px-3 py-2.5 font-medium text-foreground',
-      renderCell: ({ draft }) => (
-        <Link href={flatHref(`/content/${draft.draft_id}`)} className="hover:underline">
-          {draft.title}
-        </Link>
-      ),
-    },
-    {
-      key: 'status', header: t('columnStatus'), cardSlot: 'meta',
-      renderCell: ({ draft, status }) => (
-        draft.is_deleted ? (
-          <span
-            className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground"
-            data-testid="content-archived-badge"
-          >
-            {t('contentStatusArchived')}
-          </span>
-        ) : (
-          <StatusChip status={status} />
-        )
-      ),
-    },
-    {
-      key: 'lastModified', header: t('columnLastModified'), cardSlot: 'meta',
-      renderCell: ({ draft }) => (
-        <>
-          <span data-testid="content-current-version">
-            {formatViewerRelativeTime(draft.updated_at, locale, displayTimezone)}
-            <span className="ml-1 font-mono">· v{draft.current_version}</span>
-          </span>
-          <span className="inline-flex items-center gap-1" data-testid="content-latest-author">
-            <AuthorKindBadge kind={draft.latest_author_kind} />
-          </span>
-          {draft.origin_author_kind !== draft.latest_author_kind ? (
-            <span data-testid="content-origin-author" title={t('columnOriginAuthor')}>
-              <AuthorKindBadge kind={draft.origin_author_kind} />
+  const renderRow = ({ draft, status, tab }: ContentListRow, index: number) => {
+    const detailHref = flatHref(`/content/${draft.draft_id}`);
+    const actions: RowAction[] = draft.can_archive
+      ? [{ key: 'archive', label: draft.is_deleted ? t('unarchiveAction') : t('archiveAction'), disabled: archivingId === draft.draft_id, onSelect: () => void handleArchiveToggle(draft) }]
+      : [];
+    return (
+      <RowListItem
+        key={draft.draft_id}
+        data-testid="content-list-row"
+        title={<Link href={detailHref} className="block truncate hover:underline">{draft.title}</Link>}
+        subtitle={(
+          <>
+            <span data-testid="content-current-version">
+              {formatViewerRelativeTime(draft.updated_at, locale, displayTimezone)}
+              <span> · v{draft.current_version}</span>
             </span>
-          ) : null}
-        </>
-      ),
-    },
-    {
-      key: 'actions',
-      header: <span className="sr-only">{t('columnActionsSrLabel')}</span>,
-      cardSlot: 'action',
-      renderCell: ({ draft, tab }, index) => (
-        <div className="flex items-center justify-end gap-1.5">
-          {/* story #3744(페드루 CHANGES Ⓐ, 시안 v6) — 「상태 딱지는 사람을 멈춰 세우고
-              다음 발은 움직인다·숨긴 액션은 터치에선 없는 것」. ⋯ 메뉴 뒤에 숨기지 않고
-              상시 보이는 outline 버튼으로(상태 뒤·⋯ 앞). 같은 동작을 두 자리에 두지
-              않는다 — ⋯ 메뉴엔 이제 보관/보관 해제만 남는다. */}
-          {tab === 'pending' ? (
-            <Button
-              variant="outline" size="sm" onClick={() => router.push(flatHref('/inbox?tab=gates'))}
-              aria-label={t('archiveRowAriaLabel', { n: index + 1, label: t('approvalRequestViewCta') })}
-            >
-              {t('approvalRequestViewCta')}
-            </Button>
-          ) : null}
-          {tab === 'published' && draft.public_url ? (
-            <Button
-              variant="outline" size="sm"
-              onClick={() => window.open(draft.public_url!, '_blank', 'noopener,noreferrer')}
-              aria-label={t('archiveRowAriaLabel', { n: index + 1, label: t('publishViewLink') })}
-            >
-              {t('publishViewLink')}
-            </Button>
-          ) : null}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-              data-testid="content-row-actions-trigger"
-              aria-label={t('rowActionsAriaLabel', { n: index + 1 })}
-            >
-              <MoreHorizontal className="size-4" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {draft.can_archive ? (
-                <DropdownMenuItem
-                  onClick={() => void handleArchiveToggle(draft)}
-                  disabled={archivingId === draft.draft_id}
-                  data-testid="content-archive-action"
-                >
-                  {draft.is_deleted ? t('unarchiveAction') : t('archiveAction')}
-                </DropdownMenuItem>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      ),
-    },
-  ];
+            {' '}
+            <span data-testid="content-latest-author"><AuthorTag kind={draft.latest_author_kind} /></span>
+            {draft.origin_author_kind !== draft.latest_author_kind ? (
+              <>
+                {' '}
+                <span data-testid="content-origin-author" title={t('columnOriginAuthor')}><AuthorTag kind={draft.origin_author_kind} /></span>
+              </>
+            ) : null}
+          </>
+        )}
+        statusMark={draft.is_deleted ? <Chip data-testid="content-archived-badge">{t('contentStatusArchived')}</Chip> : <StatusMark status={status} />}
+        trailing={(
+          <>
+            {tab === 'pending' ? (
+              <Button
+                variant="secondary"
+                onClick={() => router.push(flatHref('/inbox?tab=gates'))}
+                aria-label={t('archiveRowAriaLabel', { n: index + 1, label: t('approvalRequestViewCta') })}
+              >
+                {t('approvalRequestViewCta')}
+              </Button>
+            ) : null}
+            {tab === 'published' && draft.public_url ? (
+              <Button
+                variant="secondary"
+                onClick={() => window.open(draft.public_url!, '_blank', 'noopener,noreferrer')}
+                aria-label={t('archiveRowAriaLabel', { n: index + 1, label: t('publishViewLink') })}
+              >
+                {t('publishViewLink')}
+              </Button>
+            ) : null}
+          </>
+        )}
+        actions={actions}
+        actionsLabel={t('rowActionsAriaLabel', { n: index + 1 })}
+        onOpen={() => router.push(detailHref)}
+      />
+    );
+  };
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-6 p-6">
-      <PageHeader
-        title={t('title')}
-        description={t('description')}
-        actions={chatAction}
-      />
+    <>
+      <OrgScreenTitle>{t('title')}</OrgScreenTitle>
+      <PageFrame width="wide">
+        <PageHead description={t('description')} actions={chatAction} />
 
-      {/* story #4277 — 402폭에서 상태 탭 다섯 + «보관됨 보기»가 한 줄에 안 들어가 셸 스크롤러가 가로로 넘쳤다(493/402). 좁으면 토글이 다음 줄로. */}
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <Tabs value={statusTab} onValueChange={(v) => setStatusTab(v as StatusTab)}>
-          <TabsList>
-            <TabsTrigger value="all">{t('statusTabAll')}</TabsTrigger>
-            <TabsTrigger value="draft">{t('contentStatusDraft')}</TabsTrigger>
-            <TabsTrigger value="pending">{t('contentStatusPending')}</TabsTrigger>
-            <TabsTrigger value="approved">{t('contentStatusApproved')}</TabsTrigger>
-            <TabsTrigger value="published">{t('contentStatusPublished')}</TabsTrigger>
-          </TabsList>
-        </Tabs>
-        {/* story #3734 — 「보관됨 보기」 토글(유나 定: 두 상태 문구 다 정함).
-            story #3744(페드루 CHANGES 2026-09-09, PR#4084 낱말 정정 반영) — variant="ghost"+
-            hover:bg-transparent는 dark:hover:bg-muted/50이 별도 클래스라 안 지워져 다크
-            hover에 배경이 남는다(유나 실측). 정본 = variant="link"(hover 배경 자체가
-            없음)+색만 text-foreground로 덮기. 44px 터치 바닥은 이 h-auto 보정이 버리는
-            축이라 별건 적기만(페드루 지적, 3744 재편 스코프 — 이 파일은 임시 텍스트
-            링크 형이고 시안 실 배선 때 진짜 버튼/토글 컴포넌트로 교체된다). */}
-        <Button
-          type="button"
-          variant="link"
-          onClick={() => setShowArchived((v) => !v)}
-          className="h-auto min-h-0 min-w-0 shrink-0 px-0 text-sm font-normal text-foreground underline"
-          data-testid="content-show-archived-toggle"
-        >
-          {showArchived ? t('hideArchivedToggle') : t('showArchivedToggle')}
-        </Button>
-      </div>
-
-      {loadError ? (
-        <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
-          <AlertDescription>{t('loadFailed')}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      {loading ? (
-        <div className="space-y-3" data-testid="content-list-loading">
-          {[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />)}
+        {/* story #4277 — 402폭에서 상태 탭 다섯 + «보관됨 보기»가 한 줄에 안 들어가 셸 스크롤러가 가로로 넘쳤다(493/402). 좁으면 토글이 다음 줄로. */}
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          {/* min-w-0 max-w-full: 탭 줄이 «가로 스크롤»을 틀 안에서 하게 — flex 줄의 자식은 기본이 내용 폭이라 좁은 폰에서 탭 다섯이 틀 밖으로 뻗어 쪽 전체가 옆으로 밀렸다(CI Linux 글꼴에서 잡힘) */}
+          <Tabs value={statusTab} onValueChange={(v) => setStatusTab(v as StatusTab)} className="min-w-0 max-w-full">
+            <TabsList aria-label={t('title')}>
+              <TabsTrigger value="all">{t('statusTabAll')}</TabsTrigger>
+              <TabsTrigger value="draft">{t('contentStatusDraft')}</TabsTrigger>
+              <TabsTrigger value="pending">{t('contentStatusPending')}</TabsTrigger>
+              <TabsTrigger value="approved">{t('contentStatusApproved')}</TabsTrigger>
+              <TabsTrigger value="published">{t('contentStatusPublished')}</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          {/* story #3734 — 「보관됨 보기」 토글(유나 定: 두 상태 문구 다 정함). 4913: 글자 단추(quiet) — 옛 임시 링크 꼴을 걷고 누름 영역 44를 부품이 지킨다. */}
+          <Button
+            type="button"
+            variant="quiet"
+            onClick={() => setShowArchived((v) => !v)}
+            aria-pressed={showArchived}
+            data-testid="content-show-archived-toggle"
+          >
+            {showArchived ? t('hideArchivedToggle') : t('showArchivedToggle')}
+          </Button>
         </div>
-      ) : visibleRows.length === 0 ? (
-        !loadError ? (
-          // story #3744(유나 CHANGES·PO 채택) — 탭이 「전체」가 아닌데 그 탭에 걸리는 행이
-          // 0이면(전체는 안 비었을 수 있다) "아직 초안이 없습니다"는 거짓 진술이 된다 —
-          // statusTabEmpty(설명·주 액션 없음, 탭을 바꾸라는 뜻 하나만)로 분기. 탭이
-          // 「전체」일 때만 기존 archivedEmpty/emptyTitle 분기로 내려간다.
-          statusTab !== 'all' ? (
-            <EmptyState title={t('statusTabEmpty')} />
-          ) : (
-            <EmptyState
-              title={showArchived ? t('archivedEmpty') : t('emptyTitle')}
-              description={showArchived ? undefined : t('emptyDescription')}
-              action={showArchived ? undefined : chatAction}
-            />
-          )
-        ) : null
-      ) : (
-        <ResponsiveDataTable
-          columns={columns}
-          rows={visibleRows}
-          rowKey={(row) => row.draft.draft_id}
-          rowTestId="content-list-row"
-        />
-      )}
 
-      {/* story #3744 범위 ⑥ — 「N개 중 M개 표시 중」. totalCount가 null이면(헤더를
-          못 받음) 그 자리 전체를 안 그린다 — "이 페이지 수"를 "전체"로 위장하지 않는다
-          (한 페이지로 전체 단정 금지 클래스). 페이지네이션(「더 보기」 클릭 시 다음
-          페이지 로드)은 이 스토리 범위 밖(적기만 — limit 기본 50이 지금 규모 대비
-          충분히 넉넉해 실사용 hasMore가 거의 안 걸린다, 표시만 먼저 닫는다).
-          story #3744(유나 CHANGES·PO 채택) — shownCount(=drafts.length, 필터 前 서버
-          응답 개수)와 totalCount는 서버가 낸 같은 축의 두 수다. 하지만 표는 visibleRows
-          (탭으로 클라이언트 필터 後)를 그린다 — statusTab이 'all'이 아니면 shownCount≠표에
-          실제로 보이는 행 수라 「18개 중 18개」식 거짓 문장이 된다(서버가 탭별 count를
-          안 준다). totalCount===null 규율과 동형으로 statusTab==='all'일 때만 그린다. */}
-      {!loading && statusTab === 'all' && totalCount !== null && shownCount > 0 ? (
-        <p className="text-xs text-muted-foreground" data-testid="content-partial-state">
-          {tBoard('tasksPartialCount', { loaded: shownCount, total: totalCount })}
-        </p>
-      ) : null}
-    </div>
+        {loadError ? <Banner tone="failed" announce="assertive">{t('loadFailed')}</Banner> : null}
+
+        {loading ? (
+          <div role="status" aria-busy="true" className="space-y-3" data-testid="content-list-loading">
+            <span className="sr-only">{tCommon('loading')}</span>
+            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-14 w-full" />)}
+          </div>
+        ) : visibleRows.length === 0 ? (
+          !loadError ? (
+            // story #3744(유나 CHANGES·PO 채택) — 탭이 「전체」가 아닌데 그 탭에 걸리는 행이 0이면(전체는 안 비었을 수 있다) "아직 초안이 없습니다"는 거짓 진술이 된다 —
+            // statusTabEmpty(설명·주 액션 없음, 탭을 바꾸라는 뜻 하나만)로 분기. 탭이 「전체」일 때만 기존 archivedEmpty/emptyTitle 분기로 내려간다.
+            statusTab !== 'all' ? (
+              <EmptyState title={t('statusTabEmpty')} />
+            ) : (
+              <EmptyState
+                title={showArchived ? t('archivedEmpty') : t('emptyTitle')}
+                description={showArchived ? undefined : t('emptyDescription')}
+                action={showArchived ? undefined : chatAction}
+              />
+            )
+          ) : null
+        ) : (
+          <RowList aria-label={t('title')} data-testid="content-list">
+            {visibleRows.map((row, index) => renderRow(row, index))}
+          </RowList>
+        )}
+
+        {/* story #3744 범위 ⑥ — 「N개 중 M개 표시 중」. totalCount가 null이면(헤더를 못 받음) 그 자리 전체를 안 그린다 — "이 페이지 수"를 "전체"로 위장하지 않는다
+            (한 페이지로 전체 단정 금지 클래스). 페이지네이션(「더 보기」)은 이 스토리 범위 밖(적기만 — limit 기본 50이 지금 규모 대비 넉넉해 실사용 hasMore가 거의 안 걸린다).
+            story #3744(유나 CHANGES·PO 채택) — shownCount(=drafts.length, 필터 前 서버 응답 개수)와 totalCount는 서버가 낸 같은 축의 두 수다. 하지만 목록은 visibleRows
+            (탭으로 클라이언트 필터 後)를 그린다 — statusTab이 'all'이 아니면 shownCount≠실제로 보이는 행 수라 「18개 중 18개」식 거짓 문장이 된다(서버가 탭별 count를 안 준다).
+            totalCount===null 규율과 동형으로 statusTab==='all'일 때만 그린다. */}
+        {!loading && statusTab === 'all' && totalCount !== null && shownCount > 0 ? (
+          <p className="m-0 text-ds-small text-ds-ink-3" data-testid="content-partial-state">
+            {tBoard('tasksPartialCount', { loaded: shownCount, total: totalCount })}
+          </p>
+        ) : null}
+      </PageFrame>
+    </>
   );
+}
+
+// 4913 — 상태 칩: 옛 StatusChip(`data-status-chip`을 e2e 측정 헬퍼가 읽는다 — 상세 화면이 계속 쓴다)과 같은 «뜻 → 색» 짝을 ds Chip 톤으로. 판별 불가(undefined)는 색 칩이 아니라 평문 «—»(story #3386).
+const STATUS_TONE: Record<ContentPostStatus, 'neutral' | 'needs-hand' | 'info' | 'done' | 'failed'> = {
+  draft: 'neutral', pending: 'needs-hand', approved: 'info', published: 'done', reapproval_needed: 'failed',
+};
+
+function StatusMark({ status }: { status: ContentPostStatus | undefined }) {
+  const t = useTranslations('content');
+  if (status === undefined) return <span className="text-ds-small text-ds-ink-3">{t('originAuthorUnknown')}</span>;
+  return <Chip tone={STATUS_TONE[status]} dot data-status-chip={status}>{t(contentPostStatusLabelKey(status))}</Chip>;
+}
+
+// 4913 — 작성 주체 꼬리표(원작성 · 최종 수정) — 옛 AuthorKindBadge(ui/Badge)와 같은 낱말 · 같은 «모르면 —» 규율, ds Tag로.
+function AuthorTag({ kind }: { kind: 'agent' | 'human' | null | undefined }) {
+  const t = useTranslations('content');
+  if (kind !== 'agent' && kind !== 'human') return <span>{t('originAuthorUnknown')}</span>;
+  return <Tag>{kind === 'agent' ? t('authorAgent') : t('authorHuman')}</Tag>;
 }

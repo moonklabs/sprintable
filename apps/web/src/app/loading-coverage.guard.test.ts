@@ -177,7 +177,6 @@ const EXPECTED_ON = [
 const EXPECTED_CONTAINERS: Record<string, { source: string; container: string }> = {
   '/organization/members': { source: '(authenticated)/organization/members/page.tsx', container: 'mx-auto w-full max-w-3xl space-y-3 p-6' },
   '/organization/insights-board': { source: '(authenticated)/organization/insights-board/page.tsx', container: 'mx-auto w-full max-w-6xl space-y-6 p-6' },
-  '/content': { source: '(authenticated)/content/page.tsx', container: 'mx-auto w-full max-w-5xl space-y-6 p-6' },
   '/content/channel-posts': { source: '(authenticated)/content/channel-posts/page.tsx', container: 'mx-auto w-full max-w-5xl space-y-6 p-6' },
   '/settings': { source: '(authenticated)/settings/page.tsx', container: 'mx-auto w-full max-w-3xl p-4 lg:p-6' },
   '/org-briefing': { source: '../components/org-briefing/org-briefing-shell.tsx', container: 'mx-auto w-full max-w-4xl space-y-6 p-4 lg:p-6' },
@@ -193,6 +192,7 @@ const NO_CONTAINER: Record<string, string> = {
   '/organization/workforce': '에이전트 화면 전폭',
   '/organization/channels': '4913 한 쪽 틀 — 폭 · 여백은 PageFrame(ds) 한 곳이 정한다 · 로딩도 같은 틀(OrgScreenLoading = PageFrame)이라 갈릴 수 없다(org-frame.guard가 로딩 파일이 그 틀을 쓰는지 본다)',
   '/organization/events': '4913 한 쪽 틀 — 폭 · 여백은 PageFrame(ds) 한 곳이 정한다 · 로딩도 같은 틀(OrgScreenLoading = PageFrame)이라 갈릴 수 없다(org-frame.guard가 로딩 파일이 그 틀을 쓰는지 본다)',
+  '/content': '4913 한 쪽 틀 — 폭 · 여백은 PageFrame(ds) 한 곳이 정한다 · 로딩도 같은 틀(OrgScreenLoading = PageFrame)이라 갈릴 수 없다(org-frame.guard가 로딩 파일이 그 틀을 쓰는지 본다)',
   '/organization/content-rules': '4913 한 쪽 틀 — 폭 · 여백은 PageFrame(ds) 한 곳이 정한다 · 로딩도 같은 틀(OrgScreenLoading = PageFrame)이라 갈릴 수 없다(org-frame.guard가 로딩 파일이 그 틀을 쓰는지 본다)',
   '/organization/generation-connectors': '4913 한 쪽 틀 — 폭 · 여백은 PageFrame(ds) 한 곳이 정한다 · 로딩도 같은 틀(OrgScreenLoading = PageFrame)이라 갈릴 수 없다(org-frame.guard가 로딩 파일이 그 틀을 쓰는지 본다)',
   '/organization/roles': '4913 한 쪽 틀 — 폭 · 여백은 PageFrame(ds) 한 곳이 정한다 · 로딩도 같은 틀(OrgScreenLoading = PageFrame)이라 갈릴 수 없다(org-frame.guard가 로딩 파일이 그 틀을 쓰는지 본다)',
