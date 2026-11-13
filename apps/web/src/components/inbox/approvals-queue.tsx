@@ -7,7 +7,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Radio, RadioGroup } from '@/components/ds/radio';
 import { CheckCircle, ChevronDown, ChevronUp, XCircle } from 'lucide-react';
 import { deriveRiskLevel, usesSignatureFlow, deriveDiffFacts, isDecisionGate, deriveDecisionFacts, isRecipePublishGate, reviewedDraftOf } from '@/components/cage/gate-risk';
 import { gateNeedsAction } from '@/components/cage/gate-evidence';
@@ -692,36 +692,31 @@ export function ApprovalsQueue() {
             <button
               type="button"
               onClick={() => toggleDecisionExpanded(gate.id)} aria-expanded={decisionExpanded}
-              className="mt-1 flex items-center gap-1 text-editorial-meta font-medium text-primary hover:underline"
+              className="mt-1 flex items-center gap-1 text-ds-small font-medium text-ds-action hover:underline"
             >
               {decisionExpanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
               {t(decisionExpanded ? 'decisionCollapse' : 'decisionExpand')}
             </button>
             {decisionExpanded ? (
-              <div className="mt-1.5 space-y-2 rounded-lg border border-border bg-muted/20 p-2.5">
-                <p className="text-xs whitespace-pre-wrap text-foreground">{decisionFacts.question}</p>
+              <div className="mt-1.5 space-y-2 rounded-ds-control border border-ds-line p-2.5">
+                <p className="text-ds-small whitespace-pre-wrap text-ds-ink">{decisionFacts.question}</p>
                 {decisionFacts.assumption ? (
-                  <p className="text-editorial-meta whitespace-pre-wrap text-muted-foreground">
-                    <span className="font-medium text-foreground">{t('decisionAssumptionLabel')}</span> {decisionFacts.assumption}
+                  <p className="text-ds-small whitespace-pre-wrap text-ds-ink-2">
+                    <span className="font-medium text-ds-ink">{t('decisionAssumptionLabel')}</span> {decisionFacts.assumption}
                   </p>
                 ) : null}
                 {decisionFacts.options.length > 0 ? (
                   <div className="space-y-1">
-                    <p className="text-editorial-meta font-medium text-foreground">{t('decisionOptionsLabel')}</p>
+                    <p id={`decision-options-label-${gate.id}`} className="text-ds-small font-medium text-ds-ink">{t('decisionOptionsLabel')}</p>
                     <RadioGroup
+                      aria-labelledby={`decision-options-label-${gate.id}`}
                       name={`decision-option-${gate.id}`}
                       value={selectedOptionByGateId[gate.id] ?? null}
                       onValueChange={(value) => setSelectedOptionByGateId((prev) => ({ ...prev, [gate.id]: String(value) }))}
                       className="gap-1"
                     >
                       {decisionFacts.options.map((option) => (
-                        <label
-                          key={option}
-                          className="flex cursor-pointer items-start gap-1.5 rounded-md p-1 text-editorial-meta text-foreground hover:bg-muted/40"
-                        >
-                          <RadioGroupItem value={option} className="mt-0.5" />
-                          <span>{option}</span>
-                        </label>
+                        <Radio key={option} value={option} label={option} />
                       ))}
                     </RadioGroup>
                   </div>

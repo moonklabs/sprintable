@@ -1409,6 +1409,37 @@ describe('ApprovalsQueue — story #3113 결정 게이트(agent_decision_request
     expect((Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('⭐4909 — the options are ds Radios in a named ds group on the panel face (the old 1.2:1 ring + muted tint are gone)', async () => {
+    mockFetches([decisionGate()], []);
+    await mount();
+    const group = scope().querySelector('[data-slot="ds-radio-group"]') as HTMLElement | null;
+    expect(group).not.toBeNull();
+    expect(group!.getAttribute('role')).toBe('radiogroup');
+    const labelId = group!.getAttribute('aria-labelledby')!;
+    expect(document.getElementById(labelId)?.textContent).toBe(koMessages.cage.decisionOptionsLabel); // the group is named by the visible «선택지» line
+    const radios = [...group!.querySelectorAll('[role="radio"]')];
+    expect(radios).toHaveLength(3);
+    expect(radios.every((r) => r.getAttribute('data-slot') === 'ds-radio')).toBe(true);
+    expect(scope().querySelector('[data-slot="radio-group-item"]')).toBeNull(); // the old ui/radio-group item
+    // every option is named by its own visible text
+    expect(radios.map((r) => document.getElementById(r.getAttribute('aria-labelledby')!)?.textContent)).toEqual(['A) Organization', 'B) Individual', 'C) 보류']);
+    // the box around question · assumption · options sits on the panel face: no old muted tint, only the ds line
+    const box = group!.parentElement!.parentElement as HTMLElement;
+    expect(box.className).toContain('border-ds-line');
+    expect(box.className).not.toMatch(/bg-muted|border-border|rounded-lg/);
+  });
+
+  it('⭐4909 — choosing through the ds Radio (click and Space) still opens the way to approve', async () => {
+    mockFetches([decisionGate()], []);
+    await mount();
+    const approve = () => Array.from(scope().querySelectorAll('button')).find((b) => b.textContent?.includes(koMessages.cage.gateApprove)) as HTMLButtonElement;
+    expect(approve().disabled).toBe(true);
+    const radios = [...scope().querySelectorAll('[role="radio"]')] as HTMLElement[];
+    await act(async () => { radios[2]!.focus(); radios[2]!.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })); });
+    expect(radios[2]!.getAttribute('aria-checked')).toBe('true');
+    expect(approve().disabled).toBe(false);
+  });
+
   it('a decision request WITHOUT options keeps the old start (folded) — the fold is toggled open as before', async () => {
     mockFetches([decisionGate({ neutral_facts: { question: '옵션 없는 질문이에요?', assumption: '전제 문장이에요' } as GateItem['neutral_facts'] })], []);
     await mount();
