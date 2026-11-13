@@ -148,5 +148,13 @@ describe('API 키 화면 줄(story 4912 · B1)', () => {
     expect(document.querySelector('[data-testid="api-key-panel"]')).not.toBeNull();
     expect(managerProps.current.at(-1)).toMatchObject({ agentId: 'a1' });
   });
+
+  it('⭐줄 목록 패널은 ds 면(LAYER.panel = bg-ds-surface)이다 — 옛 bg-card 면이 아니다(다크에서 바탕과 .024로 문턱 .03 밑이던 것 · 카디르 셸 «후» 26화면)', async () => {
+    stub({ a1: [] });
+    await mount();
+    const panel = container.querySelector('[data-testid="api-key-list"]') as HTMLElement;
+    expect(panel.className).toContain('bg-ds-surface');
+    expect(panel.className).not.toMatch(/(?<![\w-])bg-card(?![\w-])/);
+  });
 });
 
