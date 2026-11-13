@@ -171,7 +171,7 @@ export function AgentProjectAccessSection({ agentMemberId, projects, canEdit }: 
                   density="compact"
                   title={project.name}
                   trailing={errored ? (
-                    // story 4912 (C2c, codex round 2): role=alert on the <button> itself displaced its button role; the alert is the wrapper (announced at once, atomic) and the button keeps being a button
+                    // story 4912 (C2c, codex round 2): a role=alert on the button element itself displaced its button role; the alert is the wrapper (announced at once, atomic) and the button keeps being a button
                     <span role="alert" aria-atomic="true" className="inline-flex">
                       <Button variant="quiet" onClick={() => void loadGrants()} className="text-ds-failed">
                         {t('loadFailedRetry')}
