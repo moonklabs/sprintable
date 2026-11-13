@@ -708,7 +708,7 @@ export function ChatBubble({
           e.preventDefault();
           e.stopPropagation();
         }}
-        className={`group/bubble flex scroll-mt-4 gap-2 outline-none focus-visible:ring-2 focus-visible:ring-ds-action transition-shadow ${isMine && !plainRow ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-0.5' : 'mt-2'} ${highlight ? 'rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-background' : ''} ${(isCiteAnchor || isCiteInRange) ? 'border-l-[3px] border-l-primary pl-1' : ''}`}
+        className={`group/bubble flex scroll-mt-4 gap-2 transition-shadow ${isMine && !plainRow ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-0.5' : 'mt-2'} ${highlight ? 'rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-background' : ''} ${(isCiteAnchor || isCiteInRange) ? 'border-l-[3px] border-l-primary pl-1' : ''} outline-none focus-visible:ring-2 focus-visible:ring-ds-action`}
         onContextMenu={handleContextMenu}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
