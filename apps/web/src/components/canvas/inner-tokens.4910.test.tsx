@@ -18,12 +18,8 @@ import { MOCK_THREADS } from '@/services/canvas-comments';
 // 옛 토큰 계열(색 · 글자 크기) — 이 세 부품 안에는 하나도 없어야 한다.
 const LEGACY = /(?<![\w-])(?:text-(?:muted-foreground|foreground|info|success)|bg-(?:muted|card|background|info\/\d+|success\/\d+)|border-border|text-micro|text-editorial-meta|text-xs|shadow-\[var\(--elev-card\)\])(?![\w-])/;
 
-// 번호 핀(AnchorPin)은 그림 위에도 그려지는 따로 부품이라 이 판 밖(PR 본문 «남는 칸») — 검사에서 그 한 요소만 뺀다.
-const legacyScan = (el: HTMLElement) => {
-  const copy = el.cloneNode(true) as HTMLElement;
-  copy.querySelectorAll('.rounded-bl-none').forEach((pin) => pin.remove());
-  return copy.innerHTML;
-};
+// 번호 핀(AnchorPin)도 이제 ds 토큰이라(4910 ③ · 대비는 styles/pin-contrast.4910.test.tsx) 카드 머리의 핀까지 포함해 통째로 검사한다.
+const legacyScan = (el: HTMLElement) => el.innerHTML;
 
 let container: HTMLDivElement;
 let root: Root;
