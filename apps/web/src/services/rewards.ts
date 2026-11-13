@@ -71,27 +71,14 @@ export class RewardsService {
       monthly: 30 * 86400_000,
     };
 
-    if (period === 'all') {
-      // all-time: reward_balances materialized view 사용
-      let q = this.db
-        .from('reward_balances')
-        .select('member_id, balance')
-        .eq('project_id', projectId)
-        .order('balance', { ascending: false })
-        .limit(limit);
-      if (cursor) q = q.lt('balance', Number(cursor));
-      const { data, error } = await q;
-      if (error) throw error;
-      return (data ?? []) as { member_id: string; balance: number }[];
-    }
-
-    const since = new Date(Date.now() - periodMs[period]).toISOString();
+    // story 4912: the all-time board is the ledger's own sum too (the `reward_balances` view was defined only in a Supabase migration, never in alembic — see backend/app/repositories/reward.py);
+    // a period board is the same sum over a time window. (Nothing imports this service today.)
     let q = this.db
       .from('reward_ledger')
       .select('member_id, amount')
-      .eq('project_id', projectId)
-      .gte('created_at', since);
-    if (cursor) q = q.lt('created_at', cursor);
+      .eq('project_id', projectId);
+    if (period !== 'all') q = q.gte('created_at', new Date(Date.now() - periodMs[period]).toISOString());
+    if (cursor && period !== 'all') q = q.lt('created_at', cursor);
     const { data, error } = await q;
     if (error) throw error;
 
@@ -101,6 +88,7 @@ export class RewardsService {
     }
     return Object.entries(totals)
       .map(([member_id, balance]) => ({ member_id, balance }))
+      .filter((e) => !(cursor && period === 'all') || e.balance < Number(cursor)) // the all-time cursor is a balance, a period cursor a time
       .sort((a, b) => b.balance - a.balance)
       .slice(0, limit);
   }
