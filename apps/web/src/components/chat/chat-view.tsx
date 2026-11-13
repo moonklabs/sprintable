@@ -981,7 +981,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
 
   return (
     <ReadingPanelProvider value={readingPanelContextValue}>
-    <div className={`flex h-full flex-col overflow-hidden ${LAYER.panel}`}>
+    <div className={`flex h-full flex-col overflow-hidden ${LAYER.page}`}>
       {/* Mobile thread back — only while a thread panel is open (closes it). The page
           TopBar owns the conversation header, so this no longer duplicates it (S2). */}
       {isMobileThreadView && (

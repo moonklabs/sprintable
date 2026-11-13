@@ -230,7 +230,7 @@ export function ThreadPanel({
   }, [conversationId, parentMessage.id, addToast, t]);
 
   return (
-    <div ref={panelRef} className={`flex h-full flex-col overflow-hidden border-l border-border ${LAYER.panel}`} data-testid="thread-panel">
+    <div ref={panelRef} className={`flex h-full flex-col overflow-hidden border-l border-border ${LAYER.page}`} data-testid="thread-panel">
       {/* Header — story #2911(S2e②③/R4) 「s2e-thread-depth-grammar」 확定: ReadingPanel과
           «같은 칩 브레드크럼» 문법(칩 버튼 + `›` text-border 구분자, 동일 토큰/스타일).
           「스레드」 평문 폐기. 스레드는 단일 레벨이라 세그먼트는 정확히 2개 — [대화](뒤로

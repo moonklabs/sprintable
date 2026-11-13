@@ -15,11 +15,11 @@
   --ds-background: #f3f5f9;
   --ds-surface: #ffffff;
   --ds-surface-raised: #f7f8fb;
-  --ds-surface-high: #eaeef4;
-  --ds-surface-highest: #dde3ec;
+  --ds-surface-high: #e0e4ea;
+  --ds-surface-highest: #cfd6e1;
   --ds-line: #d8dee8;
   --ds-line-strong: #b7bfcc;
-  --ds-line-control: #7c8596;
+  --ds-line-control: #757e8f;
   --ds-ink: #0f1420;
   --ds-ink-2: #3f4859;
   --ds-ink-3: #586274;
@@ -27,7 +27,7 @@
   --ds-on-action: #ffffff;
   --ds-action-text: #4a3bc8;
   --ds-action-soft: #efedfc;
-  --ds-mine: #d9d4fa;
+  --ds-mine: #cdc6f5;
   --ds-needs-hand: #9a4b00;
   --ds-needs-hand-bar: #d6791c;
   --ds-on-needs-hand: #1a0f00;
@@ -42,7 +42,7 @@
 }
 
 .dark {
-  --ds-surface-sunk: #0a0e15;
+  --ds-surface-sunk: #080c12;
   --ds-background: #0f141a;
   --ds-surface: #181c23;
   --ds-surface-raised: #1c2027;

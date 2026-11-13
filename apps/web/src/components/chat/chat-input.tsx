@@ -35,6 +35,7 @@ import {
   shouldAcceptEntityPickerSelection, shouldHighlightEntityCandidate, type EntityResult,
 } from './chat-input-entity-tokens';
 import { useEntityPicker } from '@/hooks/use-entity-picker';
+import { LAYER } from '@/components/ds/layers';
 import { fetchWithAuth } from '@/lib/db/client';
 import { participantDisplayLabel } from '@/lib/member-display';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
@@ -837,7 +838,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
       )}
 
       {/* story 4887 (UI-4 screen PR · the approved composer): the controls and the field are ONE bordered box — the clip (+ its ▾), the steer compass when there is someone to steer, the text and a «⏎ 보내기» at the right end. */}
-      <div className={`relative flex items-end gap-0.5 rounded-ds-control border border-ds-line-control bg-ds-surface-sunk px-0.5 py-1.5 ${FIELD_FOCUS_WITHIN}`} data-testid="chat-composer-box">
+      <div className={`relative flex items-end gap-0.5 rounded-ds-control border border-ds-line-control ${LAYER.field} px-0.5 py-1.5 ${FIELD_FOCUS_WITHIN}`} data-testid="chat-composer-box">
         {/* Command dropdown (선생님 B·mockup #3) — mention/entity 셸·키보드 nav 동일·command 활성=info 신호 토큰 */}
         {/* story #92f00dc4 — w-72→w-80: 서버 카탈로그 인자 힌트(예: `<스토리#> <멤버명>`)가
             추가되며 한 줄에 명령+힌트+설명이 안 맞아 줄바꿈되던 것 보정. */}

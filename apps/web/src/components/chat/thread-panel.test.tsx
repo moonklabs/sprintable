@@ -227,11 +227,12 @@ describe('ThreadPanel — the thread head (story 4887 · approved layout)', () =
     expect(rows.some((r) => r.className.includes('flex-row-reverse')), 'my reply is not pushed to the right').toBe(false);
   });
 
-  it('⭐ the thread panel floor is the content-panel layer (4906), not the page background', async () => {
+  it('⭐ the thread panel floor is the SAME page surface as the room and the shell (4916: no separate white island), not the old bg-background nor a content-panel plate', async () => {
     await mountWith(parentMessage, []);
     const panel = container.querySelector('[data-testid="thread-panel"]') as HTMLElement;
-    expect(panel.className).toContain('bg-ds-surface');
-    expect(panel.className).not.toContain('bg-background');
+    expect(panel.className).toContain('bg-ds-background');
+    expect(panel.className).not.toMatch(/(?<![\w-])bg-ds-surface(?![\w-])/); // reverted to LAYER.panel → red
+    expect(panel.className).not.toMatch(/(?<![\w-])bg-background(?![\w-])/);
   });
 
   it('⭐ the close button and the phone back arrow both call onClose', async () => {
