@@ -54,7 +54,6 @@
     "app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx::rounded-xl border border-dashed border-border bg-background p-6",
     "app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx::rounded-xl border border-dashed border-border bg-muted/40 p-4",
     "app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx::space-y-3 rounded-xl border border-border/70 bg-muted/10 p-3",
-    "app/(authenticated)/channel/page.tsx::min-h-[44px] flex-1 resize-none rounded-lg border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring",
     "app/(authenticated)/docs/design-tokens/page.tsx::dark rounded-xl border border-border/60 bg-background p-6",
     "app/(authenticated)/gates/[id]/page.tsx::space-y-2 rounded-lg border border-border bg-muted/20 p-3",
     "app/(authenticated)/inbox/page.tsx::rounded-xl border border-overlay-line-1 bg-muted/55 p-4 text-sm leading-6 text-foreground whitespace-pre-wrap",

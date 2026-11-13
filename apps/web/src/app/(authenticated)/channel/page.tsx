@@ -3,15 +3,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
-import { Paperclip, Send, X } from 'lucide-react';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
-import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { Button } from '@/components/ui/button';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Chip } from '@/components/ds/chip';
+import { EmptyState } from '@/components/ds/empty-state';
+import { FIELD_FOCUS_WITHIN } from '@/components/ds/field-focus';
+import { Icon } from '@/components/ds/icon';
+import { IconButton } from '@/components/ds/icon-button';
+import { LAYER } from '@/components/ds/layers';
+import { PageFrame } from '@/components/ds/page-frame';
+import { PageHead } from '@/components/ds/page-head';
+import { OrgScreenTitle } from '@/components/organization/org-screen-title';
 import { fetchWithAuth } from '@/lib/db/client';
 import { toPlainPreview } from '@/components/chat/entity-ref';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
-import { ChannelTopBarTitle } from '@/components/nav/flat-tab-top-bar';
-import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING, HOVER_REVEAL_HIT } from '@/lib/hover-reveal';
+import { isImeComposing } from '@/lib/ime-composition';
+import { HOVER_REVEAL, HOVER_REVEAL_FOCUS_RING } from '@/lib/hover-reveal';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface ChannelMsg {
@@ -41,8 +49,17 @@ function fmtTime(ts: string, locale: string, displayTimezone: string | null): st
   }
 }
 
+/** story 4913 (UI-R5 · 채널) — the connection state as a word, not a coloured dot with an English `title` (the dot said «connected» / «disconnected» to a screen reader in English). */
+const STATUS_CHIP: Record<WsStatus, { tone: 'done' | 'info' | 'neutral'; key: 'statusConnected' | 'statusConnecting' | 'statusDisconnected' }> = {
+  connected: { tone: 'done', key: 'statusConnected' },
+  connecting: { tone: 'info', key: 'statusConnecting' },
+  idle: { tone: 'info', key: 'statusConnecting' },
+  disconnected: { tone: 'neutral', key: 'statusDisconnected' },
+};
+
 export default function ChannelPage() {
   const t = useTranslations('channel');
+  const tc = useTranslations('common');
   const locale = useLocale();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const searchParams = useSearchParams();
@@ -56,25 +73,31 @@ export default function ChannelPage() {
   const [wsStatus, setWsStatus] = useState<WsStatus>('idle');
   const [token, setToken] = useState<string | null>(null);
   const [backendOrigin, setBackendOrigin] = useState<string | null>(null);
+  // story 4913 — a failed token read / a refused send are said (they were swallowed: the screen sat on «연결 중…» or the text just vanished)
+  const [tokenFailed, setTokenFailed] = useState(false);
+  const [tokenRetry, setTokenRetry] = useState(0);
+  const [sendFailed, setSendFailed] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const msgMapRef = useRef<Map<string, ChannelMsg>>(new Map());
   const seenIdsRef = useRef<Set<string>>(new Set());
 
   // JWT 가져오기
   useEffect(() => {
     fetchWithAuth('/api/channel/token')
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error('channel token read failed');
+        return r.json();
+      })
       .then((d: { token: string; backend_origin?: string }) => { setBackendOrigin(d.backend_origin ?? null); setToken(d.token); })
-      .catch(() => {});
-  }, []);
+      .catch(() => { setTokenFailed(true); });
+  }, [tokenRetry]);
 
   // WebSocket 연결
   useEffect(() => {
     if (!token || !agentId) return;
-    setWsStatus('connecting');
+    // the state before the socket answers is `idle` (shown as «연결 중»): no setState in the effect body — the socket's own callbacks set the rest
 
     const ws = new WebSocket(
       `${fastapiWsBase(backendOrigin)}/ws/chat/${agentId}?token=${encodeURIComponent(token)}`,
@@ -108,7 +131,6 @@ export default function ChannelPage() {
           ts: d.ts ?? new Date().toISOString(),
           fileUrl: d.file_url,
         };
-        msgMapRef.current.set(msg.id, msg);
         setMessages((prev) => [...prev, msg]);
       } catch { /* ignore */ }
     };
@@ -124,30 +146,48 @@ export default function ChannelPage() {
   const sendMessage = useCallback(async () => {
     const text = input.trim();
     if (!text && !pendingFile) return;
+    const file = pendingFile;
+    const reply = replyTo;
 
+    setSendFailed(false);
     setInput('');
     setPendingFile(null);
     setReplyTo(null);
 
-    if (pendingFile) {
-      const fd = new FormData();
-      fd.set('agent_id', agentId ?? '');
-      fd.set('content', text);
-      fd.set('file', pendingFile);
-      await fetch('/api/channel/upload', { method: 'POST', body: fd });
-    } else if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ content: text }));
-    } else {
-      await fetch('/api/channel/deliver', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agent_id: agentId, content: text }),
-      });
+    // story 4913 — what the person wrote comes back into the field when the send is refused (it used to be cleared first and lost). The request took time: they may have started a new draft since — that one stays, the old words go in front of it (nothing is overwritten, nothing is lost)
+    const restore = () => {
+      setInput((cur) => (cur ? `${text}\n${cur}` : text));
+      setPendingFile((cur) => cur ?? file);
+      setReplyTo((cur) => cur ?? reply);
+      setSendFailed(true);
+    };
+    try {
+      if (file) {
+        const fd = new FormData();
+        fd.set('agent_id', agentId ?? '');
+        fd.set('content', text);
+        fd.set('file', file);
+        const res = await fetch('/api/channel/upload', { method: 'POST', body: fd });
+        if (!res.ok) restore();
+      } else if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ content: text }));
+      } else {
+        const res = await fetch('/api/channel/deliver', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agent_id: agentId, content: text }),
+        });
+        if (!res.ok) restore();
+      }
+    } catch {
+      restore();
     }
-  }, [input, pendingFile, agentId]);
+  }, [input, pendingFile, replyTo, agentId]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // 한글 등 입력기 조합 중의 Enter는 글자 확정이다 — 보내기로 읽지 않는다(채팅 입력창과 같은 규칙).
+      if (isImeComposing(e)) return;
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         void sendMessage();
@@ -158,38 +198,41 @@ export default function ChannelPage() {
 
   if (!agentId) {
     return (
-      <div className="flex h-64 items-center justify-center">
-        <p className="text-sm text-muted-foreground">{t('missingAgentId')}</p>
-      </div>
+      <>
+        <OrgScreenTitle showContextChip>{t('title')}</OrgScreenTitle>
+        <PageFrame width="stream">
+          <EmptyState icon="forum" title={t('missingAgentId')} />
+        </PageFrame>
+      </>
     );
   }
 
-  const statusDot =
-    wsStatus === 'connected'
-      ? 'bg-success'
-      : wsStatus === 'connecting'
-        ? 'bg-warning animate-pulse'
-        : 'bg-muted-foreground';
+  // the one status word: a token that could not be read is «not connected» (the chip must not say «연결 중» next to the failure banner)
+  const status = STATUS_CHIP[tokenFailed ? 'disconnected' : wsStatus];
+  const replyPreview = replyTo ? toPlainPreview(messages.find((m) => m.id === replyTo)?.content ?? '').slice(0, 40) || t('attachment') : null;
 
   return (
     <>
-      <TopBarSlot
-        title={<ChannelTopBarTitle statusDot={{ className: statusDot, label: wsStatus }} />}
-        showContextChip
-      />
+      <OrgScreenTitle showContextChip>{t('title')}</OrgScreenTitle>
+      <PageFrame width="stream" className="flex-1 gap-3" data-testid="channel-page">
+        <PageHead
+          description={t('description')}
+          actions={<Chip dot tone={status.tone} data-testid="channel-status">{t(status.key)}</Chip>}
+        />
+        {tokenFailed ? (
+          <Banner tone="failed" action={<Button onClick={() => { setTokenFailed(false); setTokenRetry((n) => n + 1); }}>{tc('retry')}</Button>}>
+            <span data-testid="channel-token-failed">{t('connectFailed')}</span>
+          </Banner>
+        ) : wsStatus === 'disconnected' ? (
+          <Banner tone="note"><span data-testid="channel-disconnected">{t('disconnectedNote')}</span></Banner>
+        ) : null}
 
-      {/* story #4130 — 아래 입력 영역(:241)이 하단 고정 툴바 역할이라, 로컬 min-h-0/
-          flex-1/overflow-hidden 경계를 걷어내고(셸의 단일 스크롤러 :199가 메시지 목록을
-          스크롤) 입력 영역을 sticky bottom-0로 바꾼다(#4125가 이미 증명한 sticky 메커니즘
-          재사용 — 위쪽 대신 아래쪽 오프셋). scrollIntoView() 기반 자동 스크롤(:116)은 실제
-          스크롤 컨테이너가 바뀌어도 DOM API가 스스로 찾아가므로 영향 없음. */}
-      <div className="flex flex-col bg-ds-background">
-        {/* 메시지 목록 */}
-        <section className="px-4 py-4">
-          {messages.length === 0 && (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              {wsStatus === 'connecting' ? t('connecting') : t('empty')}
-            </p>
+        {/* story #4130 — 아래 입력 영역이 하단 고정 툴바 역할이라 로컬 min-h-0/flex-1/overflow-hidden 경계를 두지 않는다(셸의 단일 스크롤러가 메시지 목록을 스크롤) · 입력 영역은 sticky bottom-0.
+            scrollIntoView() 기반 자동 스크롤은 실제 스크롤 컨테이너가 바뀌어도 DOM API가 스스로 찾아가므로 영향 없음. */}
+        <section aria-label={t('title')} role="log" aria-live="polite" aria-relevant="additions" className="flex flex-1 flex-col gap-3" data-testid="channel-messages">
+          {/* the connection state is the chip's alone (one status word on the page): while connecting the list says nothing */}
+          {messages.length === 0 && (wsStatus === 'connected' || wsStatus === 'disconnected') && (
+            <p className="py-8 text-center text-ds-body text-ds-ink-3">{t('empty')}</p>
           )}
           {messages.map((msg) => {
             const isOwn = msg.senderId === currentTeamMemberId;
@@ -197,93 +240,70 @@ export default function ChannelPage() {
             return (
               <div
                 key={msg.id}
-                className={`group mb-3 flex ${isOwn ? 'justify-end' : 'justify-start'}`}
+                data-testid="channel-message"
+                data-own={isOwn ? 'true' : 'false'}
+                className={`group flex items-start gap-1 ${isOwn ? 'flex-row-reverse' : 'flex-row'}`}
               >
-                <div className="max-w-[70%]">
-                  {!isOwn && (
-                    <p className="mb-0.5 text-xs text-muted-foreground">{msg.senderName}</p>
-                  )}
-                  <div
-                    className={`relative rounded-2xl px-3 py-2 ${isOwn ? 'bg-brand text-brand-foreground' : 'bg-muted text-foreground'}`}
-                  >
+                <div className={`flex min-w-0 max-w-prose flex-col gap-0.5 ${isOwn ? 'items-end' : 'items-start'}`}>
+                  {!isOwn && <p className="m-0 text-ds-small text-ds-ink-2">{msg.senderName}</p>}
+                  <div className={`min-w-0 max-w-full rounded-xl px-3.5 py-2 ${isOwn ? `rounded-tr-sm ${LAYER.rowMine}` : `rounded-tl-sm ${LAYER.rowOthers}`}`}>
                     {msg.content && (
-                      <p className="whitespace-pre-wrap break-words text-sm">{msg.content}</p>
+                      <p className="m-0 whitespace-pre-wrap break-words text-ds-body text-ds-ink">{msg.content}</p>
                     )}
                     {msg.fileUrl && (
                       <a
-                        href={msg.fileUrl.replace(
-                          '/api/v2/channel/files/',
-                          '/api/channel/files/',
-                        )}
+                        href={msg.fileUrl.replace('/api/v2/channel/files/', '/api/channel/files/')}
                         download
-                        className="mt-1 block text-xs underline opacity-80"
+                        className="mt-1 block text-ds-small text-ds-action-text underline"
                       >
-                        [{t('attachment')}]
+                        {t('attachment')}
                       </a>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => setReplyTo(msg.id)}
-                      // story #4345 — `hidden`(탭 순서에서 빠짐) → 호버 없는 기기에선 늘 · 마우스는 호버 · 초점에서(HOVER_REVEAL).
-                      className={`absolute ${isOwn ? '-left-6' : '-right-6'} top-0 rounded-sm text-muted-foreground ${HOVER_REVEAL_HIT} ${HOVER_REVEAL} ${HOVER_REVEAL_FOCUS_RING}`}
-                      title={t('reply')}
-                    >
-                      ↩
-                    </button>
                   </div>
-                  <p
-                    className={`mt-0.5 text-xs text-muted-foreground ${isOwn ? 'text-right' : 'text-left'}`}
-                  >
-                    {fmtTime(msg.ts, locale, displayTimezone)}
-                  </p>
+                  <p className="m-0 text-ds-small text-ds-ink-3">{fmtTime(msg.ts, locale, displayTimezone)}</p>
                 </div>
+                {/* story #4345 — 호버 없는 기기에선 늘 · 마우스는 호버 · 초점에서(HOVER_REVEAL) */}
+                <IconButton
+                  icon="reply"
+                  label={t('reply')}
+                  onClick={() => setReplyTo(msg.id)}
+                  className={`${HOVER_REVEAL} ${HOVER_REVEAL_FOCUS_RING}`}
+                />
               </div>
             );
           })}
           <div ref={bottomRef} />
         </section>
 
-        {/* 입력 영역 */}
-        <div className="sticky bottom-0 border-t border-border bg-ds-background px-4 pb-safe-4 pb-4 pt-3">
-          {replyTo && (
-            <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-3 py-1.5 text-xs text-muted-foreground">
-              <span>
-                ↩{' '}
-                {/* eslint-disable-next-line react-hooks/refs */}
-                {toPlainPreview(msgMapRef.current.get(replyTo)?.content ?? '').slice(0, 40) || t('attachment')}
-              </span>
-              <button
-                type="button"
-                onClick={() => setReplyTo(null)}
-                className="ml-auto"
-                aria-label={t('cancelReply')}
-              >
-                <X className="h-3 w-3" />
-              </button>
+        {/* 입력 영역 — 틀의 안쪽 여백을 음수 여백으로 걷어 전폭 · 하단 고정 */}
+        <div className="sticky bottom-0 -mx-4 -mb-4 flex flex-col gap-2 border-t border-ds-line bg-ds-background px-4 pb-4 pt-3 sm:-mx-6 sm:-mb-6 sm:px-6 sm:pb-6">
+          {sendFailed && (
+            <Banner tone="failed"><span data-testid="channel-send-failed">{t('sendFailed')}</span></Banner>
+          )}
+          {replyPreview !== null && (
+            <div data-testid="channel-reply-strip" className={`flex items-center gap-2 rounded-ds-control px-3 py-1.5 text-ds-small text-ds-ink-2 ${LAYER.rowOthers}`}>
+              <Icon name="reply" size={14} className="shrink-0" />
+              <span className="min-w-0 flex-1 truncate">{replyPreview}</span>
+              <IconButton icon="close" label={t('cancelReply')} onClick={() => setReplyTo(null)} />
             </div>
           )}
           {pendingFile && (
-            <div className="mb-2 flex items-center gap-2 rounded-md bg-muted px-3 py-1.5 text-xs text-muted-foreground">
-              <Paperclip className="h-3 w-3 flex-shrink-0" />
-              <span className="truncate">{pendingFile.name}</span>
-              <button
-                type="button"
-                onClick={() => setPendingFile(null)}
-                className="ml-auto flex-shrink-0"
-                aria-label={t('removeFile')}
-              >
-                <X className="h-3 w-3" />
-              </button>
+            <div data-testid="channel-file-strip" className={`flex items-center gap-2 rounded-ds-control px-3 py-1.5 text-ds-small text-ds-ink-2 ${LAYER.rowOthers}`}>
+              <Icon name="attach_file" size={14} className="shrink-0" />
+              <span className="min-w-0 flex-1 truncate">{pendingFile.name}</span>
+              <IconButton icon="close" label={t('removeFile')} onClick={() => setPendingFile(null)} />
             </div>
           )}
-          <div className="flex items-end gap-2">
+          <div className={`flex items-end gap-1 rounded-ds-control border border-ds-line-control ${LAYER.field} px-1 py-1.5 ${FIELD_FOCUS_WITHIN}`} data-testid="channel-composer">
             <textarea
+              data-testid="channel-input"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               rows={2}
+              aria-label={t('inputLabel')}
               placeholder={t('inputPlaceholder')}
-              className="min-h-[44px] flex-1 resize-none rounded-lg border border-border bg-background px-3 py-2 text-base lg:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              className="min-h-11 flex-1 resize-none bg-transparent px-2 py-1.5 text-base text-ds-ink outline-none placeholder:text-ds-ink-3 lg:text-ds-body"
             />
             <input
               ref={fileInputRef}
@@ -291,27 +311,18 @@ export default function ChannelPage() {
               className="hidden"
               onChange={(e) => setPendingFile(e.target.files?.[0] ?? null)}
             />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={() => fileInputRef.current?.click()}
-              title={t('attachFile')}
-            >
-              <Paperclip className="h-4 w-4" />
-            </Button>
-            <Button
-              type="button"
-              size="icon"
+            <IconButton icon="attach_file" label={t('attachFile')} onClick={() => fileInputRef.current?.click()} />
+            <IconButton
+              icon="send"
+              label={t('send')}
+              variant="primary"
               onClick={() => void sendMessage()}
               disabled={!input.trim() && !pendingFile}
-              title={t('send')}
-            >
-              <Send className="h-4 w-4" />
-            </Button>
+              data-testid="channel-send"
+            />
           </div>
         </div>
-      </div>
+      </PageFrame>
     </>
   );
 }
