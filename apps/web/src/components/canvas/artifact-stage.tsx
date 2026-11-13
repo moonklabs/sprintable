@@ -187,6 +187,10 @@ function CanvasViewport({
   const [imageBounds, setImageBounds] = useState<{ w: number; h: number } | null>(null);
   const dragRef = useRef({ startX: 0, startY: 0, startTx: 0, startTy: 0, movedPast: false, pointerId: -1 });
   const firedFitRef = useRef(false);
+  // 4910 ④ — 이미지는 처음엔 선언 크기(없으면 기본 1280×800)로 «전체 보기»를 맞춘 뒤 불러지며 실제 크기가 알려진다. 실제 크기가 알려졌을 때 사용자가 아직 화면을 안 만졌으면(끌기 · 휠 · 핀치 · 더블클릭 · 실제 크기)
+  // 한 번 다시 맞춘다 — 안 그러면 큰 칸에 그림이 54%로 작게 구석에 놓인 채 남았다. 크기(`WxH`)마다 한 번만(같은 크기 load 이벤트가 또 와도 사용자가 맞춘 걸 되돌리지 않는다).
+  const userMovedRef = useRef(false);
+  const refitKeyRef = useRef<string | null>(null);
   // story 74d6047e — 2-finger 핀치 줌. 활성 터치 포인터 위치 추적 + 핀치 baseline(포인터 수가
   // 바뀔 때마다 재캡처 — crux: delta는 항상 "이 순간"의 baseline 대비라 점프가 없다).
   const touchPointersRef = useRef(new Map<number, { x: number; y: number }>());
@@ -202,7 +206,7 @@ function CanvasViewport({
   // iframe 렌더 전부 이 하나의 bounds를 참조하므로 재계산 로직 추가 없이 재렌더가 성립한다.
   const bounds = previewWidth != null ? { w: previewWidth, h: authoredBounds.h } : authoredBounds;
 
-  useEffect(() => { setImageBounds(null); firedFitRef.current = false; }, [content]);
+  useEffect(() => { setImageBounds(null); firedFitRef.current = false; userMovedRef.current = false; refitKeyRef.current = null; }, [content]);
 
   // ResizeObserver 미지원 환경(구형 브라우저·이 프로젝트 vitest jsdom) — 정적 폴백, 크래시 방지.
   useEffect(() => {
@@ -239,6 +243,7 @@ function CanvasViewport({
   }, [viewportSize, bounds.w, bounds.h]);
 
   const actualSize = useCallback(() => {
+    userMovedRef.current = true;
     const { w: vw, h: vh } = viewportSize;
     const tx = (vw - bounds.w) / 2;
     const ty = (vh - bounds.h) / 2;
@@ -248,6 +253,7 @@ function CanvasViewport({
   // story 74d6047e §4 — 더블탭=fit↔100% 토글(탭 지점 중심, 지도/사진 앱 관례). ⌘/Ctrl+휠 커서중심
   // 줌과 동일한 수학(고정 화면점 아래 콘텐츠점을 유지) — 목표 scale만 연속값 대신 두 값 중 토글.
   const toggleZoomAtPoint = useCallback((screenX: number, screenY: number) => {
+    userMovedRef.current = true;
     const rect = viewportRef.current?.getBoundingClientRect();
     if (!rect) return;
     const localX = screenX - rect.left;
@@ -287,6 +293,15 @@ function CanvasViewport({
     fitToView();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 최초 1회만(콘텐츠/뷰포트 변경 시 재-fit 강제 안 함, 사용자가 이미 조작했을 수 있음)
   }, [viewportSize.w, viewportSize.h]);
+
+  // 4910 ④ — 이미지 실제 크기가 알려지면(`imageBounds`) 사용자가 아직 안 만졌을 때 한 번 다시 «전체 보기». `fitToView`는 새 bounds를 이미 담은 상태로 이 효과에서 불린다.
+  useEffect(() => {
+    if (!imageBounds || viewportSize.w === 0 || viewportSize.h === 0) return;
+    const key = `${imageBounds.w}x${imageBounds.h}`;
+    if (refitKeyRef.current === key) return;
+    refitKeyRef.current = key;
+    if (!userMovedRef.current) fitToView();
+  }, [imageBounds, viewportSize.w, viewportSize.h, fitToView]);
 
   function handlePointerDown(e: React.PointerEvent) {
     lastPointerTypeRef.current = e.pointerType;
@@ -352,6 +367,7 @@ function CanvasViewport({
         const contentX = (baseline.midX - baseline.tx) / baseline.scale;
         const contentY = (baseline.midY - baseline.ty) / baseline.scale;
         const next = clampPan(newMidX - contentX * nextScale, newMidY - contentY * nextScale, nextScale, viewportSize.w, viewportSize.h);
+        userMovedRef.current = true;
         setIsDragging(true); // 핀치 중엔 오버레이(핀 등) pointer-events:none — 기존 드래그 규약 재사용
         setTransform({ ...next, scale: nextScale });
         return;
@@ -364,6 +380,7 @@ function CanvasViewport({
     const dy = e.clientY - d.startY;
     if (!d.movedPast && Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
       d.movedPast = true;
+      userMovedRef.current = true;
       setIsDragging(true);
     }
     if (d.movedPast) {
@@ -451,6 +468,7 @@ function CanvasViewport({
       if (scrollable && scrollable.scrollHeight > scrollable.clientHeight) return;
     }
     e.preventDefault();
+    userMovedRef.current = true;
     const rect = viewportRef.current?.getBoundingClientRect();
     if (!rect) return;
     if (e.ctrlKey || e.metaKey) {
