@@ -36,6 +36,8 @@ import { statusTone } from './agent-run-status-tone';
 /** 4911 — the run groups are the content layer over the page; a run row is the «others» row face on that layer (pinned by `styles/layer-rule.test.ts`) */
 export const AGENT_RUNS_PANEL_FACE = LAYER.panel;
 export const AGENT_RUNS_ROW_FACE = LAYER.rowOthers;
+/** the width of the status slot of a row on a wide screen (Tailwind needs the whole string) — pinned by agent-runs-list.4911.test.tsx */
+export const AGENT_RUN_STATUS_SLOT = 'sm:w-[7.5rem]';
 
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
@@ -150,7 +152,10 @@ function RunRow({ run, active, onOpen, onActive }: { run: AgentRun; active: bool
       selected={active}
       {...needs}
       className={`${AGENT_RUNS_ROW_FACE} rounded-ds-control border ${run.status === 'failed' ? 'before:absolute before:inset-y-0 before:left-0 before:w-1 before:rounded-l-ds-control before:bg-ds-failed' : ''} has-[button:focus-visible]:ring-2 has-[button:focus-visible]:ring-inset has-[button:focus-visible]:ring-ds-action`}
+      // the status slot has ONE width on a wide screen (the longest label «사람 확인 대기» / «HITL pending» fits), so every row's title starts at the same x — a chip as wide as its own word pushed the name
+      // of a «사람 확인 대기» row to the right of its neighbours (dev 1e1dbefc1: x = 412 · 463 · 411). On a phone the slot is as wide as its chip (a fixed width would eat the title).
       leading={<Chip tone={statusTone(run.status)} dot>{t(`status_${run.status}`)}</Chip>}
+      leadingClassName={AGENT_RUN_STATUS_SLOT}
       title={(
         // the title is a real button: Tab reaches it, Enter opens the run (a click anywhere on the row does the same)
         <Button

@@ -14,7 +14,7 @@ import { TopBarProvider } from '@/components/nav/top-bar-context';
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => useDashboardContextMock() }));
 
-import { AgentRunsList, groupRuns } from './agent-runs-list';
+import { AgentRunsList, AGENT_RUN_STATUS_SLOT, groupRuns } from './agent-runs-list';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -170,6 +170,21 @@ describe('AgentRunsList — 화면 구조(story 4911)', () => {
     const names = Array.from(container.querySelectorAll('[data-row-focus]')).map((el) => el.getAttribute('aria-label'));
     expect(names).toHaveLength(2);
     expect(new Set(names).size).toBe(2);
+  });
+
+  it('⭐모든 줄의 상태 칸은 같은 고정 폭(넓은 화면) — 칩 글자 길이가 달라도 제목이 같은 x에서 시작한다(dev 1e1dbefc1: «사람 확인 대기» 줄만 오른쪽으로 밀렸음)', async () => {
+    const all = (['completed', 'failed', 'hitl_pending', 'abandoned', 'running', 'queued', 'held'] as const).map((st) => run(st));
+    stubRuns((s) => ({ status: 200, items: s === 'failed' ? all.filter((r) => r.status === 'failed') : s === 'hitl_pending' ? all.filter((r) => r.status === 'hitl_pending') : all }));
+    await act(async () => { root.render(wrap(<AgentRunsList />)); });
+    await flush();
+    const slots = Array.from(container.querySelectorAll('[data-slot="ds-list-row-leading"]')) as HTMLElement[];
+    expect(slots).toHaveLength(7);
+    expect(AGENT_RUN_STATUS_SLOT).toBe('sm:w-[7.5rem]');
+    for (const slot of slots) {
+      expect(slot.className).toContain(AGENT_RUN_STATUS_SLOT);
+      expect(slot.querySelector('[data-slot="ds-chip"]')).not.toBeNull();   // the chip lives inside the slot
+    }
+    expect(new Set(slots.map((s) => s.className)).size).toBe(1);             // one width for every status
   });
 
   it('⭐«전체»에서 실패 전용 호출만 실패하면: 그 칸에 불러오기 실패 안내 + 다시 시도, 전체 목록에 있는 실패 건은 그대로 보인다(숨기지도 꾸미지도 않음)', async () => {

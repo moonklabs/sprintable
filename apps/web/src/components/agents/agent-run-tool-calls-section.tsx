@@ -3,10 +3,11 @@
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { CountBadge } from '@/components/ui/count-badge';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { Button } from '@/components/ds/button';
+import { Chip } from '@/components/ds/chip';
+import { CountBadge } from '@/components/ds/count-badge';
+import { LAYER } from '@/components/ds/layers';
+import { SectionHeader } from '@/components/ds/section-header';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatDuration, toLocaleStr } from './agent-run-detail';
 import type { AgentRunStatus } from '@/lib/agent-run-status';
@@ -33,6 +34,11 @@ const LIMIT = 50;
 function isSuccessStatus(statusCode: number): boolean {
   return statusCode < 400;
 }
+
+/** 4911 — the tool-call section is a content-layer card of its own under the detail's panel; a call is the «others» row face on it; the opened detail of a call is the well one step in (pinned by `styles/layer-rule.test.ts`) */
+export const TOOL_CALLS_PANEL_FACE = LAYER.panel;
+export const TOOL_CALL_ROW_FACE = LAYER.rowOthers;
+export const TOOL_CALL_DETAIL_WELL = LAYER.well;
 
 export function AgentRunToolCallsSection({
   runId,
@@ -107,27 +113,22 @@ export function AgentRunToolCallsSection({
   const hasMore = totalCount != null ? rows.length < totalCount : rows.length === LIMIT && rows.length > 0;
 
   return (
-    <SectionCard>
-      <SectionCardHeader>
-        <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
-          {t('toolCallsTitle')}
-          {totalCount != null && <CountBadge count={totalCount} />}
-        </h2>
-      </SectionCardHeader>
-      <SectionCardBody>
+    <section data-testid="agent-run-tool-calls" className={`${TOOL_CALLS_PANEL_FACE} overflow-hidden rounded-ds-panel border border-ds-line`}>
+      <SectionHeader level={2} title={t('toolCallsTitle')} count={totalCount != null ? <CountBadge count={totalCount} /> : undefined} />
+      <div className="p-3">
         {loading ? (
-          <div className="space-y-2">
-            {[1, 2, 3].map((i) => <div key={i} className="h-10 animate-pulse rounded-md bg-muted" />)}
+          <div className="space-y-1.5">
+            {[1, 2, 3].map((i) => <div key={i} className="h-10 animate-pulse rounded-ds-control bg-ds-surface-high" />)}
           </div>
         ) : loadError ? (
-          <p className="text-sm text-muted-foreground">{t('toolCallsLoadError')}</p>
+          <p className="text-ds-body text-ds-ink-3">{t('toolCallsLoadError')}</p>
         ) : rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
+          <p className="text-ds-body text-ds-ink-3">
             {isTerminal ? t('toolCallsEmptyNone') : t('toolCallsEmptyPending')}
           </p>
         ) : (
           <>
-            <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
+            <div className="space-y-1.5">
               {rows.map((row) => (
                 <ToolCallRowItem
                   key={row.id}
@@ -142,15 +143,15 @@ export function AgentRunToolCallsSection({
             </div>
             {hasMore && (
               <div className="mt-3 flex justify-center">
-                <Button variant="outline" size="sm" onClick={loadMore} disabled={loadingMore}>
+                <Button variant="secondary" onClick={loadMore} disabled={loadingMore}>
                   {loadingMore ? t('toolCallsLoadingMore') : t('loadMore')}
                 </Button>
               </div>
             )}
           </>
         )}
-      </SectionCardBody>
-    </SectionCard>
+      </div>
+    </section>
   );
 }
 
@@ -180,32 +181,31 @@ function ToolCallRowItem({
   const hasDetail = row.input_summary != null || !!row.error;
   const primaryLabel = row.tool ?? t('toolCallsUnnamedCall');
   return (
-    <div className="p-3" data-testid={`tool-call-row-${row.id}`}>
+    <div className={`${TOOL_CALL_ROW_FACE} rounded-ds-control p-3`} data-testid={`tool-call-row-${row.id}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             {hasDetail ? (
               <Button
                 type="button"
-                variant="ghost"
-                size="sm"
+                variant="quiet"
                 onClick={onToggleExpand} aria-expanded={expanded}
-                className="gap-1 truncate p-0 px-1 font-mono text-sm font-normal text-foreground"
+                className="h-auto min-h-0 max-w-full gap-1 truncate px-1 py-0.5 font-mono text-ds-body font-normal text-ds-ink"
                 data-testid={`tool-call-toggle-${row.id}`}
               >
-                {expanded ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />}
+                {expanded ? <ChevronDown className="size-3.5 shrink-0" aria-hidden="true" /> : <ChevronRight className="size-3.5 shrink-0" aria-hidden="true" />}
                 {primaryLabel}
               </Button>
             ) : (
-              <span className="truncate font-mono text-sm text-foreground" data-testid={`tool-call-primary-${row.id}`}>
+              <span className="truncate font-mono text-ds-body text-ds-ink" data-testid={`tool-call-primary-${row.id}`}>
                 {primaryLabel}
               </span>
             )}
-            <Badge variant={success ? 'success' : 'destructive'}>
+            <Chip tone={success ? 'done' : 'failed'} dot>
               {success ? t('toolCallsSuccessBadge') : t('toolCallsFailedBadge')}
-            </Badge>
+            </Chip>
           </div>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-ds-small text-ds-ink-2">
             <span>{toLocaleStr(row.started_at, locale, displayTimezone)}</span>
             <span>·</span>
             <span>{formatDuration(row.duration_ms)}</span>
@@ -214,11 +214,11 @@ function ToolCallRowItem({
         </div>
       </div>
       {expanded && hasDetail && (
-        <div className="mt-2 space-y-2 rounded-md border border-overlay-line-1 bg-overlay-fill-1 p-3">
+        <div className={`${TOOL_CALL_DETAIL_WELL} mt-2 space-y-2 rounded-ds-control p-3`}>
           {row.input_summary != null && (
             <div>
-              <p className="text-xs font-medium text-foreground">{t('toolCallsInputSummaryLabel')}</p>
-              <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-editorial-meta text-muted-foreground">
+              <p className="text-ds-small font-medium text-ds-ink">{t('toolCallsInputSummaryLabel')}</p>
+              <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-ds-mono-md text-ds-ink-2">
                 {JSON.stringify(row.input_summary, null, 2)}
               </pre>
             </div>
@@ -229,10 +229,10 @@ function ToolCallRowItem({
             // 한 줄(고정 문구)은 항상 보이고, 원문은 접기(ConnectionRow의
             // channelLastErrorToggle과 동형 <details>/<summary> 관례).
             <div>
-              <p className="text-xs font-medium text-destructive">{t('toolCallsErrorSummary')}</p>
-              <details className="mt-1 text-xs text-muted-foreground">
+              <p className="text-ds-small font-medium text-ds-failed">{t('toolCallsErrorSummary')}</p>
+              <details className="mt-1 text-ds-small text-ds-ink-2">
                 <summary className="cursor-pointer">{t('toolCallsErrorToggle')}</summary>
-                <p className="mt-1 whitespace-pre-wrap break-all font-mono text-editorial-meta">{row.error}</p>
+                <p className="mt-1 whitespace-pre-wrap break-all font-mono text-ds-mono-md">{row.error}</p>
               </details>
             </div>
           )}

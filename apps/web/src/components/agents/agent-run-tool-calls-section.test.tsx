@@ -91,7 +91,7 @@ describe('AgentRunToolCallsSection', () => {
     await flush();
     const heading = container.querySelector('h2');
     expect(heading?.textContent).not.toMatch(/\(\d+\)/);
-    expect(heading?.querySelector('span')?.textContent).toBe('7');
+    expect(heading?.querySelector('[data-slot="ds-count-badge"]')?.textContent).toBe('7');   // story 4911: the ds count badge inside the ds section header
   });
 
   // story #3722(카디르 QA changes, #4089 리뷰 2026-09-09) — 「attribution_reason 화면
@@ -225,7 +225,7 @@ describe('AgentRunToolCallsSection', () => {
     await mountSection();
     await flush();
     const heading = container.querySelector('h2');
-    expect(heading?.querySelector('span')).toBeNull();
+    expect(heading?.querySelector('[data-slot="ds-count-badge"]')).toBeNull();
   });
 
   it('로딩 실패는 에러 문구를 보이되 섹션 자체는 안 죽는다', async () => {
