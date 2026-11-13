@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { slugifyDocTitle, isUntitledSlug, DOC_SLUG_MAX_LENGTH } from './doc-slug';
 
 /**
@@ -70,10 +70,15 @@ describe('newUntitledSlug (4910)', () => {
     expect(isUntitledSlug(slug)).toBe(true);
   });
 
-  it('⭐같은 시각(같은 밀리초)에 만들어도 서로 다르다(무작위 꼬리) — 200개 중 겹침 0', async () => {
+  it('⭐같은 시각(같은 밀리초)에 만들어도 꼬리는 무작위 수에서 온다 — 무작위 수가 다르면 슬러그가 다르다(꼬리를 떼면 200개가 전부 같아진다 · 결정적)', async () => {
     const { newUntitledSlug } = await import('./doc-slug');
-    const set = new Set(Array.from({ length: 200 }, () => newUntitledSlug(1_700_000_000_000)));
-    expect(set.size).toBe(200);
+    let n = 0;
+    const spy = vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(((buf: Uint32Array) => { buf[0] = 1000 + n++; return buf; }) as typeof crypto.getRandomValues);
+    try {
+      const slugs = Array.from({ length: 200 }, () => newUntitledSlug(1_700_000_000_000));
+      expect(new Set(slugs).size).toBe(200);
+      expect(slugs[0]).toBe('untitled-1700000000000001000');
+    } finally { spy.mockRestore(); }
   });
 
   it('인자 없이 부르면 지금 시각을 쓴다', async () => {

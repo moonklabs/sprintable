@@ -8,7 +8,7 @@ import { DocGateSection } from '@/components/docs/doc-gate-section';
 import { DocUrlChip } from '@/components/docs/doc-url-chip';
 import { DocUrlDialog, type SlugSubmitResult } from '@/components/docs/doc-url-dialog';
 import { slugifyDocTitle, isUntitledSlug, newUntitledSlug } from '@/components/docs/lib/doc-slug';
-import { docsListUrl, docUrl, newDocUrl } from '@/components/docs/lib/doc-project-url';
+import { docsListUrl, docUrl } from '@/components/docs/lib/doc-project-url';
 import { useDocSync, unwrapDocResponse } from '@/components/docs/use-doc-sync';
 import { htmlToMarkdown } from '@/components/docs/lib/content-converter';
 import { InlineSaveIndicator } from './inline-save-indicator';
@@ -228,11 +228,10 @@ export default function DocSlugPage() {
         body: JSON.stringify({ project_id: projectId, ...posted, slug: draft.slug, parent_id: draft.parentId }),
       });
       if (res.status === 409 && slugRetriesRef.current < 3) {
-        // 임시 슬러그가 이미 쓰인 경우(무작위 꼬리로 사실상 없지만): 같은 요청을 되풀이하지 않고 새 임시 슬러그로 주소를 옮겨 다음 박자에 다시 만든다. 글은 화면 상태에 그대로 있다.
+        // 임시 슬러그가 이미 쓰인 경우(무작위 꼬리로 사실상 없지만): 같은 요청을 되풀이하지 않고 새 임시 슬러그로 다음 박자에 다시 만든다. 글은 화면 상태에 그대로 있다.
+        // 주소는 옮기지 않는다 — 동적 구간(slug)이 바뀌면 이 쪽이 새로 서서 쓴 글(상태)이 사라진다. 만든 뒤 주소 ≠ 문서 슬러그인 채로 남는 건 알려진 한계(PR 본문): 첫 PATCH가 슬러그를 파생하면 handleDocSaved가 주소를 맞춘다.
         slugRetriesRef.current += 1;
-        const fresh = newUntitledSlug();
-        setDraft({ slug: fresh, parentId: draft.parentId });
-        router.replace(newDocUrl(wsSlug, projSlug, fresh, draft.parentId));
+        setDraft({ slug: newUntitledSlug(), parentId: draft.parentId });
         return false;
       }
       if (!res.ok) throw new Error('Failed to create doc');
@@ -252,7 +251,7 @@ export default function DocSlugPage() {
       creatingRef.current = false;
       setDraftCreating(false);
     }
-  }, [draft, selectedDoc, projectId, title, content, contentFormat, defaultTitle, setTree, addToast, t, router, wsSlug, projSlug]);
+  }, [draft, selectedDoc, projectId, title, content, contentFormat, defaultTitle, setTree, addToast, t]);
   // 자동저장과 같은 박자(디바운스 1.5초). 만들기가 실패하면 값이 그대로라 다시 안 돈다 — 다음 입력 또는 «저장»이 다시 시도한다.
   useEffect(() => {
     if (!isDraft || !autosave || !draftHasText) return;

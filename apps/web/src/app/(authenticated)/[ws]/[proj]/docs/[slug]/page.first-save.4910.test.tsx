@@ -236,21 +236,20 @@ describe('가장 위험한 자리 · 실패 · 단일 비행 (4910 ②)', () => 
     expect(syncOptions.current!.savePayload.title).toBe(KO.newDocDefaultTitle);
   });
 
-  it('⭐POST가 409(슬러그 충돌)면 같은 요청을 되풀이하지 않고 새 임시 슬러그로 주소를 옮겨 다음 박자에 다시 만든다 — 토스트 없음 · 글 그대로', async () => {
+  it('⭐POST가 409(슬러그 충돌)면 같은 요청을 되풀이하지 않고 새 임시 슬러그로 다음 박자에 다시 만든다 — 토스트 없음 · 글 그대로 · 주소는 안 옮김(옮기면 이 쪽이 새로 서서 글이 사라진다)', async () => {
     postMode = 'conflict-once';
     await open();
     await type('title', '가');
     await wait(1600);
     expect(posts()).toHaveLength(1);
     expect(addToastMock).not.toHaveBeenCalled();
-    expect(routerMock.replace).toHaveBeenCalledTimes(1);
-    const url = routerMock.replace.mock.calls[0]![0] as string;
-    const fresh = /\/docs\/(untitled-\d+)\?new=1/.exec(url)![1]!;
-    expect(fresh).not.toBe('untitled-123456789');
+    expect(routerMock.replace).not.toHaveBeenCalled();
     expect(editorProps.current!.title).toBe('가');
     await wait(1600);
     expect(posts()).toHaveLength(2);
-    expect(postBody(1).slug).toBe(fresh); // 새 슬러그로 다시
+    const fresh = postBody(1).slug as string;
+    expect(fresh).toMatch(/^untitled-\d+$/);
+    expect(fresh).not.toBe(postBody(0).slug); // 새 슬러그로 다시
     expect(editorProps.current!.currentDocId).toBe('new-doc');
   });
 
