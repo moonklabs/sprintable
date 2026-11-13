@@ -3,6 +3,7 @@
 // 그대로 왕복시키는지, {data,meta}를 {items,hasMore,nextCursor}로 정확히 언랩하는지가
 // 이 스위트의 본체다 — 놓치면 사이드바 문서 트리 "더 보기"가 아무 것도 안 붙는다.
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { NotFoundError } from '@sprintable/core-storage';
 import { ApiDocRepository } from './ApiDocRepository';
 
 describe('ApiDocRepository.list — cursor 전달 + {data,meta} 응답 언랩 (#2191)', () => {
@@ -125,5 +126,16 @@ describe('ApiDocRepository.getBySlug — 단건 조회도 {data,meta} 봉투를 
 
     const repo = new ApiDocRepository('token');
     await expect(repo.getBySlug('proj-1', 'missing')).rejects.toThrow('Doc not found: missing');
+  });
+
+  it('4910: 없는 slug는 404를 실은 NotFoundError — BFF가 400이 아니라 404로 돌려줘야 «새 문서» 초안 모드로 들어간다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true, status: 200,
+      json: async () => ({ data: [], meta: { has_more: false, next_cursor: null } }),
+    })));
+    const err = await new ApiDocRepository('token').getBySlug('proj-1', 'missing').catch((e: unknown) => e) as Error & { code?: string; status?: number };
+    expect(err).toBeInstanceOf(NotFoundError);
+    expect(err.status).toBe(404);
+    expect(err.code).toBe('NOT_FOUND');
   });
 });

@@ -28,6 +28,7 @@ import { DocsLayoutContext, type Doc, type DocSortMode, type DocUpdate } from '.
 import { closedDrawerProps, useSwipeDrawer } from '@/lib/use-swipe-drawer';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { newDocUrl, docUrl } from '@/components/docs/lib/doc-project-url';
+import { newUntitledSlug } from '@/components/docs/lib/doc-slug';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isImeComposing } from '@/lib/ime-composition';
 import { DocsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
@@ -170,7 +171,6 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     });
   }, []);
 
-  const [isCreating, setIsCreating] = useState(false);
 
   // story #4385(까디르 codex HIGH · PO 10:07Z) — 트리 요청 세대. 새로 받기(필터 바뀜 · 다시 시도 · 다시 읽기)마다 올리고, 이어 받기는
   // 지금 세대를 싣는다. 응답이 올 때 세대가 바뀌었으면 버린다 — 옛 필터의 늦은 쪽이 새 목록에 붙지 않게.
@@ -333,30 +333,15 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     } catch { addToast({ title: t('deleteFailed'), type: 'error' }); await fetchTree(); }
   }, [fetchTree, addToast, t]);
 
-  const createDoc = useCallback(async (parentId: string | null = null) => {
-    if (!projectId || isCreating) return;
-    setIsCreating(true);
-    const slug = `untitled-${Date.now()}`;
-    try {
-      const res = await fetch('/api/docs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, title: t('newDocDefaultTitle'), slug, content: '', content_format: 'markdown', parent_id: parentId }),
-      });
-      if (!res.ok) throw new Error('Failed to create doc');
-      const { data } = await res.json();
-      setTree((prev) => [{ id: data.id, parent_id: data.parent_id || null, title: data.title, slug: data.slug, icon: data.icon || null, sort_order: data.sort_order || 0, is_folder: data.is_folder || false, updated_at: data.updated_at }, ...prev]);
-      // story a539c649 S2 — doc-project-url.ts 헤더 참고(#2154 구조적 소거).
-      router.push(newDocUrl(wsSlug, projSlug, data.slug));
-    } catch {
-      addToast({ title: t('createFailed'), type: 'error' });
-    } finally {
-      setIsCreating(false);
-    }
-  }, [projectId, isCreating, router, addToast, t, wsSlug, projSlug]);
+  // 4910 — «새 문서»는 누르는 순간 서버에 아무것도 만들지 않는다(옛 길은 빈 «제목 없음» 문서를 먼저 만들어, 안 쓰고 나가면 고아로 남았다). 서버에 없는 임시 주소(`untitled-…`)의 초안 화면으로만 가고,
+  // 문서는 편집 화면(`[slug]/page.tsx`)이 첫 «쓴 것»에서 한 번 만든다. «새 문서»를 부르는 모든 길(머리 단추 · 둘째 단추 · 빈 상태 단추 둘 · 트리 «하위 문서»)이 이 함수 하나를 지난다.
+  const createDoc = useCallback((parentId: string | null = null) => {
+    if (!projectId) return;
+    router.push(newDocUrl(wsSlug, projSlug, newUntitledSlug(), parentId));
+  }, [projectId, router, wsSlug, projSlug]);
 
   const handleNewDoc = useCallback(() => { void createDoc(null); }, [createDoc]);
-  const handleAddChild = useCallback((parentId: string) => createDoc(parentId), [createDoc]);
+  const handleAddChild = useCallback(async (parentId: string) => { createDoc(parentId); }, [createDoc]);
 
   // story #1950(prod-에스컬레이트 #43) — createDoc()은 항상 is_folder 없이 "제목 없음" 문서를
   // 만들고 바로 편집기로 보내(제목은 그 화면에서 정함) — 폴더는 컨테이너라 트리 안에 머무는
@@ -438,12 +423,12 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         <DsButton variant="quiet" onClick={handleNewFolder} disabled={folderSubmitting} aria-label={t('newFolder')} iconStart={<Icon name="create_new_folder" size={14} />}>
           <span className="hidden sm:inline">{t('newFolder')}</span>
         </DsButton>
-        <DsButton onClick={handleNewDoc} disabled={isCreating} aria-label={isCreating ? t('loading') : t('newDoc')} iconStart={<Icon name="add" size={14} />}>
-          <span className="hidden sm:inline">{isCreating ? t('loading') : t('newDoc')}</span>
+        <DsButton onClick={handleNewDoc} aria-label={t('newDoc')} iconStart={<Icon name="add" size={14} />}>
+          <span className="hidden sm:inline">{t('newDoc')}</span>
         </DsButton>
       </div>
     ),
-    [handleNewDoc, isCreating, handleNewFolder, folderSubmitting, t, sidebarCollapsed]
+    [handleNewDoc, handleNewFolder, folderSubmitting, t, sidebarCollapsed]
   );
 
   const listCount = docsHasMore && docsTotal !== null ? docsTotal : tree.length;
@@ -464,11 +449,10 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           variant="secondary"
           iconStart={<Icon name="add" size={14} />}
           onClick={handleNewDoc}
-          disabled={isCreating}
-          aria-label={isCreating ? t('loading') : t('newDoc')}
+          aria-label={t('newDoc')}
           className="hidden lg:inline-flex"
         >
-          {isCreating ? t('loading') : t('newDoc')}
+          {t('newDoc')}
         </DsButton>
       </div>
       <TreeSearchInput
