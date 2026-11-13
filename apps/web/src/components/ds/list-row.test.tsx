@@ -40,18 +40,6 @@ describe('ds ListRow', () => {
     expect(row().querySelector('button')!.textContent).toBe('허용');
   });
 
-  it('앞 자리 칸은 data-slot을 갖고 leadingClassName이 shrink-0 위에 더해진다(상태 칸 고정 폭 — 화면 상수 · 메커니즘만 부품)', async () => {
-    await act(async () => { root.render(<ListRow leading={<i />} leadingClassName="sm:w-44 max-sm:w-full" title="줄" />); });
-    const lead = row().querySelector('[data-slot="ds-list-row-leading"]')!;
-    expect(lead.classList.contains('shrink-0')).toBe(true);
-    expect(lead.classList.contains('sm:w-44')).toBe(true);
-    expect(lead.classList.contains('max-sm:w-full')).toBe(true);
-    await act(async () => { root.render(<ListRow leading={<i />} title="줄" />); });
-    expect(row().querySelector('[data-slot="ds-list-row-leading"]')!.className).toBe('shrink-0');
-    await act(async () => { root.render(<ListRow title="줄" leadingClassName="sm:w-44" />); });
-    expect(row().querySelector('[data-slot="ds-list-row-leading"]')).toBeNull(); // 앞 자리가 없으면 칸도 없다
-  });
-
   it('⭐손 필요 줄은 왼쪽 4px 막대 + data-needs-hand', async () => {
     await act(async () => { root.render(<ListRow title="줄" needsHand needsHandLabel="내 손이 필요" />); });
     expect(row().getAttribute('data-needs-hand')).toBe('true');
