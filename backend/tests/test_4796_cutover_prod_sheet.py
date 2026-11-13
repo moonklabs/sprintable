@@ -752,18 +752,41 @@ def test_the_rate_limits_the_sheet_lists_are_the_ones_in_the_code_and_the_accept
                 lim = next((d for d in node.decorator_list if isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute) and d.func.attr == "limit" and getattr(d.func.value, "id", "") == "limiter"), None)
                 route = next((d for d in node.decorator_list if isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute) and d.func.attr in ("get", "post")), None)
                 if lim and route:
-                    limits[prefix + route.args[0].value] = int(lim.args[0].value.split("/")[0])
+                    limits[prefix + route.args[0].value] = lim.args[0].value   # the whole «5/minute» — a unit must not be stripped (60/hour is not 60/minute)
     # the sheet is the HOSTED deployment's: a limit counts only if its route is registered on the app a hosted process builds. A router that is
     # registered conditionally (story 4825's embedded-only `local_auth`: no embedded switch in a hosted environment, so no route — pinned by
     # test_4825_local_bootstrap_realdb.py::test_08) is not on the sheet, and no file name has to be excepted here.
     from app.main import app as _hosted_app
     registered = {getattr(r, "path", None) for r in _hosted_app.routes}
     limits = {path: n for path, n in limits.items() if path in registered}
-    assert limits == {"/api/v2/legal/{doc_type}": 60, "/api/v2/auth/register": 5, "/api/v2/auth/token": 10, "/api/v2/auth/refresh": 20, "/api/v2/auth/switch-account": 20, "/api/v2/auth/native-bootstrap": 10,
-                      "/api/v2/auth/native-bootstrap/challenges": 10, "/api/v2/auth/device-installations/registration-challenges": 10, "/api/v2/auth/device-installations/register": 10}, limits
+    assert limits == {"/api/v2/legal/{doc_type}": "120/minute", "/api/v2/auth/register": "5/minute", "/api/v2/auth/token": "20/minute", "/api/v2/auth/refresh": "120/minute", "/api/v2/auth/switch-account": "20/minute",
+                      "/api/v2/auth/native-bootstrap": "10/minute", "/api/v2/auth/native-bootstrap/challenges": "10/minute", "/api/v2/auth/device-installations/registration-challenges": "10/minute",
+                      "/api/v2/auth/device-installations/register": "10/minute"}, limits
     g5 = SHEET.split("**The two acceptances of G5")[1].split("## G2, the read-only look")[0]
-    for token in ("`POST /api/v2/auth/register` 5 a minute", "`/auth/token`, `/auth/native-bootstrap`, `/auth/native-bootstrap/challenges`, `/auth/device-installations/registration-challenges` and `/auth/device-installations/register` 10 a minute each",
-                  "`/auth/refresh` and `/auth/switch-account` 20 a minute each", "`GET /api/v2/legal/{doc_type}` 60 a minute", "about 55 a minute", "**Accepted** only if the busiest minute of every route is below its limit", "**not accepted** if any is at or above it",
+    from app.core.rate_limit import REFRESH_PERSON_LIMIT, _rate_key_client_ip_only, limiter   # the per-person refresh number is read from the code (with its unit), so the sheet cannot drift from it
+    count, unit = REFRESH_PERSON_LIMIT.split("/")
+    assert unit == "minute" and f"{count} a minute per signed-in person" in g5, REFRESH_PERSON_LIMIT
+    from app.core.rate_limit import open_setup_limiter, resend_verification_limiter
+    assert limiter._key_func is open_setup_limiter._key_func is resend_verification_limiter._key_func is _rate_key_client_ip_only, "the sheet says every limit counts the user's address (client_ip), not the socket address"
+    from app.routers.auth_firebase_internal import _handoff_rate_key
+    import inspect
+    assert "fold_ip(_client_ip(request))" in inspect.getsource(_handoff_rate_key), "the OAuth hand-off counts the same address unit"
+    # the sheet's claim about the way in is checked against the declarations it talks about (parsed, not searched as text): prod forwards the front door's address and does NOT yet declare the edge secret
+    import yaml as _yaml
+
+    def _all_strings(o) -> set[str]:
+        if isinstance(o, dict):
+            return {str(k) for k in o} | {x for v in o.values() for x in _all_strings(v)}
+        if isinstance(o, list):
+            return {x for v in o for x in _all_strings(v)}
+        return {o} if isinstance(o, str) else set()
+
+    prod = _yaml.safe_load((_ROOT / "deploy/vm/env/prod.yaml").read_text())
+    assert prod["services"]["backend"]["added"]["TRUST_FORWARDED_FOR"] == "true", "the sheet says prod trusts the forwarded address"
+    assert not any("EDGE_CLIENT_IP_SECRET" in x for x in _all_strings(prod)), "the sheet says prod has no edge secret yet (neither service names one) — change both together"
+    for token in ("`POST /api/v2/auth/register` 5 a minute", "`/auth/token` 20 a minute", "`/auth/native-bootstrap`, `/auth/native-bootstrap/challenges`, `/auth/device-installations/registration-challenges` and `/auth/device-installations/register` 10 a minute each",
+                  "`/auth/refresh` 120 a minute (and, once its token's signature is checked, 60 a minute per signed-in person) and `/auth/switch-account` 20 a minute", "`GET /api/v2/legal/{doc_type}` 120 a minute", "prod's `env/prod.yaml` does not yet",
+                  "prod sets `TRUST_FORWARDED_FOR`", "conservative upper bound", "the stricter **60 a minute per signed-in person**", "this is an approximation, not an exact check", "about 55 a minute", "**Accepted** only if the busiest minute of every route is below its limit", "**not accepted** if any is at or above it",
                   "(1) **One account for the VM, in prod too:** prod takes the account model of [RUNBOOK §2](RUNBOOK.md) as it is"):
         assert token in g5, token
     block = _block_with("for route in register token")
@@ -862,16 +885,16 @@ def test_the_second_family_of_limits_is_the_one_in_the_code() -> None:
                 lim = next((d for d in node.decorator_list if isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute) and d.func.attr == "limit" and getattr(d.func.value, "id", "") == "open_setup_limiter"), None)
                 route = next((d for d in node.decorator_list if isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute) and d.func.attr == "post"), None)
                 if lim and route:
-                    found[prefix + route.args[0].value] = int(lim.args[0].value.split("/")[0])
-    assert found == {"/api/v2/desktop/setup-codes": 10, "/api/v2/desktop/setup-codes/exchange": 240, "/api/v2/desktop/device-token-codes": 10, "/api/v2/desktop/device-token-codes/exchange": 240, "/api/v2/onboarding/events": 120}, found
+                    found[prefix + route.args[0].value] = lim.args[0].value   # the whole «10/minute» — a unit must not be stripped
+    assert found == {"/api/v2/desktop/setup-codes": "10/minute", "/api/v2/desktop/setup-codes/exchange": "240/minute", "/api/v2/desktop/device-token-codes": "10/minute", "/api/v2/desktop/device-token-codes/exchange": "240/minute", "/api/v2/onboarding/events": "120/minute"}, found
     handoff = (_ROOT / "backend/app/routers/auth_firebase_internal.py").read_text()
     assert "_OAUTH_HANDOFF_CUSTOM_SCHEME_ISSUE_LIMIT = 5" in handoff and "_OAUTH_HANDOFF_CUSTOM_SCHEME_CONSUME_LIMIT = 10" in handoff
     auth = (_ROOT / "backend/app/routers/auth.py").read_text()
     assert auth.count('@resend_verification_limiter.limit("3/hour")') == 2 and '@router.post("/set-password/request")' in auth and '@router.post("/resend-verification")' in auth
     g5 = SHEET.split("**The two acceptances of G5")[1].split("## G1a")[0]
-    for token in ("**A second family counts by `client_ip`**", "`POST /api/v2/desktop/setup-codes` and `POST /api/v2/desktop/device-token-codes` 10 a minute each", "their two `…/exchange` routes 240 a minute each",
+    for token in ("**A second family has always counted by `client_ip`**", "`POST /api/v2/desktop/setup-codes` and `POST /api/v2/desktop/device-token-codes` 10 a minute each", "their two `…/exchange` routes 240 a minute each",
                   "`POST /api/v2/onboarding/events` 120 a minute", "the OAuth hand-off `issue` (5) and `consume` (10) a minute", "`POST /api/v2/auth/set-password/request` and `POST /api/v2/auth/resend-verification` 3 an hour each",
-                  "so for those callers these limits too are counted as one address"):
+                  "otherwise as the front end's one address"):
         assert token in g5, token
     block = _block_with("for route in desktop/setup-codes")
     for path in ("desktop/setup-codes", "desktop/setup-codes/exchange", "desktop/device-token-codes", "desktop/device-token-codes/exchange", "onboarding/events", "internal/auth/oauth-handoff/issue", "internal/auth/oauth-handoff/consume"):

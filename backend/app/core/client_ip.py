@@ -65,22 +65,44 @@ def _behind_trusted_front() -> bool:
     return _on_cloud_run() or settings.trust_forwarded_for
 
 
-def client_ip(request: Request) -> str:
-    """요청 상한이 셀 사용자 IP. 위 신뢰 경계 순서대로 — 하나도 못 정하면 소켓 주소(없으면 빈 문자열이 아니라 "unknown")."""
+def client_ip_with_source(request: Request) -> tuple[str, str]:
+    """(요청 상한이 셀 사용자 IP, 그 IP를 어느 길로 정했나). 길 = `edge`(프런트가 비밀과 함께 넘김) · `xff`(앞문이 덮어쓴 오른쪽 끝) · `cf`(그 끝이 Cloudflare 대역이라 CF-Connecting-IP) · `socket`(소켓 주소).
+    story 4915 AC6 — 길을 같이 돌려주는 이유: 설정이 틀리면(비밀 불일치 · TRUST_FORWARDED_FOR 꺼짐) 조용히 `socket`으로 떨어져 «모든 사용자가 한 통»이 되므로, 어느 길로 정했는지를 로그로 볼 수 있어야 한다."""
     secret = settings.edge_client_ip_secret
     if secret:
         given = request.headers.get(EDGE_KEY_HEADER, "")
         forwarded_ip = _valid_ip(request.headers.get(CLIENT_IP_HEADER))
         if given and forwarded_ip and hmac.compare_digest(given.encode(), secret.encode()):
-            return forwarded_ip
+            return forwarded_ip, "edge"
     if _behind_trusted_front():
         # several header LINES (not only several comma-separated entries) are possible: the front door appends its own line last, so the last line's last entry is the connecting address
         # (`headers.get()` would return the FIRST line — the one a client can send)
-        lines = request.headers.getlist("x-forwarded-for")
+        getlist = getattr(request.headers, "getlist", None)
+        lines = getlist("x-forwarded-for") if getlist else ([request.headers["x-forwarded-for"]] if "x-forwarded-for" in request.headers else [])
         xff = lines[-1] if lines else ""
         connecting = _valid_ip(xff.rsplit(",", 1)[-1]) if xff else None
         if connecting:
             if is_cloudflare_address(connecting):
-                return _valid_ip(request.headers.get("cf-connecting-ip")) or connecting
-            return connecting
-    return request.client.host if request.client else "unknown"
+                cf = _valid_ip(request.headers.get("cf-connecting-ip"))
+                return (cf, "cf") if cf else (connecting, "xff")
+            return connecting, "xff"
+    return (request.client.host if request.client else "unknown"), "socket"
+
+
+def client_ip(request: Request) -> str:
+    """요청 상한이 셀 사용자 IP. 위 신뢰 경계 순서대로 — 하나도 못 정하면 소켓 주소(없으면 빈 문자열이 아니라 "unknown")."""
+    return client_ip_with_source(request)[0]
+
+
+def fold_ip(ip: str) -> str:
+    """상한 통을 가르는 «사람 단위 주소». IPv6는 사용자가 자기 /64 안에서 주소를 마음대로 바꿀 수 있어(가정용 회선이 /64를 통째로 줌) 주소 전체를 키로 쓰면 요청마다 통을 갈아탈 수 있다 → /64 접두로 접는다.
+    IPv4-mapped IPv6(`::ffff:a.b.c.d`)는 같은 IPv4로 푼다. 주소가 아니면(`unknown` 등) 그대로."""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return ip
+    if addr.version == 6:
+        if addr.ipv4_mapped is not None:
+            return str(addr.ipv4_mapped)
+        return str(ipaddress.ip_network((addr, 64), strict=False))
+    return str(addr)
