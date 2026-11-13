@@ -13,7 +13,7 @@ from pathlib import Path
 import yaml
 
 _WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
-_PINNED = re.compile(r"^pgvector/pgvector:pg16@sha256:[0-9a-f]{64}$")
+_PINNED = re.compile(r"^pgvector/pgvector:pg15@sha256:47af0b65960b14f1c6945aa4ccae37836c632e9a6fe0eea9160936e616e5b2e9$")
 
 
 def _service_images() -> list[tuple[str, str, str]]:
@@ -42,3 +42,12 @@ def test_every_postgres_service_image_is_pinned_by_digest():
 def test_every_postgres_service_image_uses_the_same_digest():
     digests = {image.split("@", 1)[1] for _, _, image in _service_images() if "@" in image}
     assert len(digests) == 1, f"서비스 이미지 digest가 잡마다 다르다: {sorted(digests)}"
+
+
+def test_ci_image_is_the_one_prod_and_dev_run():
+    """story 4917 AC5: the CI service image is the VM compose image (dev · prod: pg15, PostgreSQL 15.19) — a rehearsal on another major proves less than the real thing"""
+    import yaml as _yaml
+
+    compose = _yaml.safe_load((Path(__file__).resolve().parents[2] / "deploy" / "vm" / "compose.yml").read_text(encoding="utf-8"))
+    vm_image = compose["services"]["db"]["image"]
+    assert {image for _, _, image in _service_images()} == {vm_image}
