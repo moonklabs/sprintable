@@ -27,7 +27,7 @@ const msg = (content: string, event?: ChatMessage['event']): ChatMessage => ({
   id: 'm1', memo_id: 'conv-1', created_by: 'agent-1', sender_name: '시스템', sender_type: 'agent', sender_avatar_url: null, sender_runtime_type: null,
   content, attachments: [], created_at: '2026-11-13T01:00:00.000Z', ...(event ? { event } : {}),
 });
-async function render(m: ChatMessage, defs?: Record<string, { name?: string; block_template?: unknown }>) {
+async function render(m: ChatMessage, defs?: Record<string, { name?: string; block_template?: unknown; payload_schema?: unknown }>) {
   await act(async () => {
     root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
       <ChatBubble message={m} isMine={false} isGrouped={false} eventDefinitionsByKey={defs as never} />
@@ -37,16 +37,35 @@ async function render(m: ChatMessage, defs?: Record<string, { name?: string; blo
 const text = () => (container.querySelector('[data-testid="chat-bubble-text"]') as HTMLElement | null)?.textContent ?? '';
 const LEAK = /\[이벤트\]|preset\.|work_item|\bstage:|97470487/;
 
-describe('ChatBubble — an event message drawn as text (story 4921)', () => {
-  it('⭐no definition (the read failed): «이벤트» + the person\'s words — no slug · id · key: value', async () => {
-    await render(msg(MACHINE('org.acme.signup'), { event_key: 'org.acme.signup', payload: { message: '새 가입이 들어왔어요', work_item_id: UUID }, refs: {} } as never));
-    expect(text()).toBe('이벤트 · 새 가입이 들어왔어요');
-    expect(text()).not.toMatch(LEAK);
+const items = () => Array.from(container.querySelectorAll('[data-testid="event-text-fallback"] li')).map((li) => li.textContent);
+const head = () => container.querySelector('[data-testid="event-text-fallback"] p')?.textContent;
+
+describe('ChatBubble — an event message drawn as text (story 4921 · PO 11-13: the body keeps what happened)', () => {
+  it('⭐no definition (the read failed): head «이벤트» + the person\'s words + the other fields as a readable list — no header line · no raw key names', async () => {
+    await render(msg(MACHINE('org.acme.signup'), { event_key: 'org.acme.signup', payload: { message: '새 가입이 들어왔어요', plan_name: 'team', work_item_id: UUID }, refs: { work_item: { found: true, name: '가입 흐름 정리' } } } as never));
+    expect(head()).toBe('이벤트');
+    expect(text()).toContain('새 가입이 들어왔어요');
+    expect(items()).toEqual(['plan name: team', '대상: 가입 흐름 정리']); // key made readable · the card's own word «대상» · the id shown as the NAME the refs carry
+    expect(text()).not.toMatch(/\[이벤트\]|org\.acme|plan_name|work_item_id|97470487/);
   });
-  it('⭐a definition without a card template: its human NAME', async () => {
-    await render(msg(MACHINE('preset.workflow.kanban'), { event_key: 'preset.workflow.kanban', payload: { stage: 'ready' }, refs: {} } as never), { 'preset.workflow.kanban': { name: '칸반 워크플로우', block_template: null } });
-    expect(text()).toBe('칸반 워크플로우');
-    expect(text()).not.toMatch(LEAK);
+  it('⭐label order: the definition schema title wins over the card word and the humanized key', async () => {
+    await render(msg(MACHINE('org.acme.signup'), { event_key: 'org.acme.signup', payload: { plan_name: 'team', note: '확인 필요' }, refs: {} } as never), {
+      'org.acme.signup': { name: '가입 알림', block_template: null, payload_schema: { properties: { plan_name: { title: '요금제' }, note: { title: '비고' } } } },
+    });
+    expect(head()).toBe('가입 알림');
+    expect(text()).toContain('확인 필요'); // `note` is a words field: shown whole, not in the list
+    expect(items()).toEqual(['요금제: team']);
+  });
+  it('⭐a definition without a card template: its human NAME as the head, the fields still listed', async () => {
+    await render(msg(MACHINE('preset.workflow.kanban'), { event_key: 'preset.workflow.kanban', payload: { stage: 'ready', work_item_id: UUID }, refs: {} } as never), { 'preset.workflow.kanban': { name: '칸반 워크플로우', block_template: null } });
+    expect(head()).toBe('칸반 워크플로우');
+    expect(items()).toEqual(['stage: ready', `대상: ${UUID}`]);
+    expect(text()).not.toMatch(/\[이벤트\]|preset\./);
+  });
+  it('⭐«이벤트» ALONE only when the event has no field at all', async () => {
+    await render(msg(MACHINE('org.acme.ping'), { event_key: 'org.acme.ping', payload: {}, refs: {} } as never));
+    expect(text()).toBe('이벤트');
+    expect(items()).toEqual([]);
   });
   it('an ordinary message and an event whose content a person wrote are left as written', async () => {
     await render(msg('그냥 글입니다'));
@@ -54,13 +73,14 @@ describe('ChatBubble — an event message drawn as text (story 4921)', () => {
     await render(msg('발행이 멈췄어요. 작업 상세에서 다시 시도해 주세요.', { event_key: 'preset.recipe.publish_failed', payload: {}, refs: {} } as never));
     expect(text()).toContain('발행이 멈췄어요');
   });
-  it('⭐an OLD event message with no `event` at all (published before it rode along) still never shows the machine text', async () => {
+  it('⭐an OLD event message with no `event` at all: head «이벤트», no machine text', async () => {
     await render(msg(MACHINE('preset.workflow.kanban')));
     expect(text()).toBe('이벤트');
     expect(text()).not.toMatch(LEAK);
   });
-  it('⭐a steer drawn as text says the steer sentence WITH the target name (the same sentence as the room list), not «이벤트 · …»', async () => {
+  it('⭐a steer drawn as text: the steer sentence WITH the target name as the head (the same sentence as the room list)', async () => {
     await render(msg(MACHINE('preset.steer.instruct'), { event_key: 'preset.steer.instruct', payload: { instruction: '먼저 봐 주세요', target_member_id: UUID }, refs: { target: { found: true, name: '미르코' } } } as never));
-    expect(text()).toBe('방향 전환 · 먼저 봐 주세요 → 미르코');
+    expect(head()).toBe('방향 전환 · 먼저 봐 주세요 → 미르코');
+    expect(items()).toEqual(['지시 대상자: 미르코']);
   });
 });

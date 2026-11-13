@@ -777,6 +777,71 @@ export function isMachineEventContent(content: string | null | undefined): boole
   return typeof content === 'string' && /^\[(?:이벤트|Event)\]\s+\S/.test(content);
 }
 
+/** the words the event card already has for a payload field (eventCard) — the second place a label is looked up for the bubble's text fallback */
+const CARD_FIELD_LABEL_KEYS: Record<string, string> = {
+  note: 'noteLabel', reason: 'reasonLabel', assignee_member_id: 'assigneeLabel', assigned_by_member_id: 'assignedByLabel', goal_id: 'goalLabel',
+  metric_unit: 'unitLabel', source: 'sourceLabel', metric_value: 'metricValueLabel', measured_at: 'measuredAtLabel',
+  target_member_id: 'steerTargetLabel', work_item_id: 'targetLabel',
+};
+/** the member / work-item ref that names an id field: `target_member_id` → refs.target · `work_item_id` → refs.work_item */
+const refKeyOfIdField = (key: string) => key.replace(/_member_id$/, '').replace(/_id$/, '');
+
+export interface EventBodyFallback {
+  /** the head line: the one-line sentence of a preset that has one, else the definition's human name, else «이벤트» — never the «[이벤트] preset.x» header line or a slug */
+  head: string;
+  /** the person's own words (instruction · message · summary · note), whole */
+  words: string | null;
+  /** every other payload field as a readable «label: value» line (label: the definition's schema title → the card's own words → the key made readable; an id that refs names shows the name) */
+  items: Array<{ label: string; value: string }>;
+}
+
+/**
+ * story 4921 — what a chat BUBBLE shows for an event message that has no card template (the definition has none · could not be read · an old message): the head, the person's words and the other fields as
+ * a readable list — the content is not dropped (a bubble body keeps what happened); only the machine header line and raw key names go. «이벤트» alone is what remains when there is no field at all.
+ */
+export function composeEventBodyFallback(
+  content: string | null | undefined,
+  eventKey: string | undefined,
+  payload: Record<string, unknown> | undefined,
+  refs: Record<string, unknown> | undefined,
+  definition: { name?: string | null; payload_schema?: Record<string, unknown> } | null | undefined,
+  helpers: EventPreviewHelpers,
+): EventBodyFallback | null {
+  if (!isMachineEventContent(content)) return null;
+  const { tEventCard } = helpers;
+  const sentence = composeEventPreviewLine(eventKey, payload, helpers, refs as never);
+  const definitionName = (eventKey ? helpers.eventDefinitionName?.(eventKey) ?? definition?.name : definition?.name)?.trim();
+  const head = sentence || definitionName || tEventCard('genericEventHeader');
+  let words: string | null = null;
+  let wordsField: string | null = null;
+  for (const field of HUMAN_TEXT_FIELDS) {
+    const v = payload?.[field];
+    if (typeof v === 'string' && v.trim()) { words = v.trim(); wordsField = field; break; }
+  }
+  // a short one-line instruction the head sentence already says is not said twice
+  if (words && sentence && !words.includes('\n') && Array.from(words).length <= PREVIEW_TEXT_MAX && sentence.includes(words)) words = null;
+  const schemaProps = (definition?.payload_schema as { properties?: Record<string, { title?: unknown }> } | undefined)?.properties;
+  const items: Array<{ label: string; value: string }> = [];
+  for (const [key, raw] of Object.entries(payload ?? {})) {
+    if (key === wordsField || raw === null || raw === undefined) continue;
+    let value: string;
+    if (typeof raw === 'string') value = raw.trim();
+    else if (typeof raw === 'number' || typeof raw === 'boolean') value = String(raw);
+    else { try { value = JSON.stringify(raw); } catch { continue; } }
+    if (!value) continue;
+    if (/_id$/.test(key)) {
+      const ref = refs?.[refKeyOfIdField(key)] as { found?: boolean; name?: unknown } | null | undefined;
+      if (ref && typeof ref === 'object' && ref.found && typeof ref.name === 'string' && ref.name) value = ref.name;
+      else if (ref && typeof ref === 'object' && ref.found === false) value = tEventCard('memberMissing');
+    }
+    const title = schemaProps?.[key]?.title;
+    const cardKey = CARD_FIELD_LABEL_KEYS[key];
+    const label = (typeof title === 'string' && title.trim()) || (cardKey ? tEventCard(cardKey) : '') || key.replace(/[_-]+/g, ' ');
+    items.push({ label, value: value.length > 200 ? `${Array.from(value).slice(0, 200).join('')}…` : value });
+  }
+  return { head, words, items };
+}
+
 /**
  * story 4921 — a notification SUMMARY stored in the machine shape «{sender}: [이벤트] preset.x\n- key: value …» (what the server wrote for event messages before it wrote the human line) is shown as
  * «{sender}: {the fallback line}». Anything else — a summary that is not that shape, a missing one — is returned as it is.

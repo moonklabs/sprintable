@@ -38,7 +38,8 @@ import { parseHitlRequest } from '@/lib/hitl-classifier';
 import { WithheldDeliveryLine } from './withheld-delivery-line';
 import { HitlApprovalCard, type HitlAnswer } from './hitl-approval-card';
 import { ApprovalRequestCard, type CardState } from './approval-request-card';
-import { EventBlockCard, composeEventPreviewFallback } from './event-block-card';
+import { EventBlockCard, isMachineEventContent } from './event-block-card';
+import { EventTextFallback } from './event-text-fallback';
 import { parseBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
 import { segmentMessageContent } from './message-segments';
 import { classifyChatHref, HAS_MENTION_RE, MENTION_RE, splitPlainUrls } from './chat-link-rules';
@@ -492,7 +493,6 @@ export function ChatBubble({
   hitlAnswer = null, onRespondHitl, eventDefinitionsByKey, onOpenReadingPanel, onFillComposer, gateByKey,
 }: ChatBubbleProps) {
   const t = useTranslations('chats');
-  const tEventCard = useTranslations('eventCard'); // story 4921
   const tc = useTranslations('common');
   const isAgent = message.sender_type === 'agent';
   // story #2319 — tombstone. content는 서버가 이미 ""로 스크럽했다(오발송 대응 목적).
@@ -521,16 +521,10 @@ export function ChatBubble({
   // S8: 슬래시 커맨드는 전용 버블(brand·mono·⌘). 리터럴(`//`)은 dequote된 일반 텍스트.
   const isCmd = isCommand(message.content);
   const isLiteral = !isCmd && message.content.startsWith('//');
-  // story 4921 — an event message that is drawn as TEXT (its definition has no card template, or the definitions could not be read) must not show the machine text an agent reads («[이벤트] preset.x»,
-  // «- key: value» lines): it shows the definition's name + the person's own words, or the one word «이벤트». Cards (approval · event · server command) and every ordinary message are untouched.
-  // A message published before the structured `event` rode along (no `event` at all) is recognised by its machine header and gets the one word «이벤트».
-  const eventTextLine = !eventBlockTemplate && !approvalTarget && !serverCommand && !isDeleted
-    ? composeEventPreviewFallback(message.content, eventTarget?.event_key, eventTarget?.payload, {
-      tEventCard,
-      eventDefinitionName: (key) => eventDefinitionsByKey?.[key]?.name ?? undefined,
-    }, eventTarget?.refs as Record<string, unknown> | undefined)
-    : null;
-  const displayContent = eventTextLine ?? (isLiteral ? dequoteLiteral(message.content) : message.content);
+  // story 4921 — an event message drawn as TEXT (its definition has no card template · the definitions could not be read · an old message with no `event` at all) shows the definition's name (or «이벤트»), the person's own
+  // words and the other fields as a readable list — never the machine header line («[이벤트] preset.x») or raw key names, and the content is not dropped (PO 11-13 18:3xZ). Cards and ordinary messages are untouched.
+  const eventTextFallback = !eventBlockTemplate && !approvalTarget && !serverCommand && !isDeleted && isMachineEventContent(message.content);
+  const displayContent = isLiteral ? dequoteLiteral(message.content) : message.content;
   // story #4197·#4200(유나 결정) — 보여 줄 글자 0(빈 문자열·공백뿐·주석뿐, 단일 술어 hasNoVisibleText)이면 기본 텍스트
   // 말풍선 자리에서: 첨부가 있으면 말풍선을 생략하고 첨부만, 첨부가 없으면 «표시할 내용이 없는 메시지예요».
   // references 메타는 조건에 없다 — 참조 카드는 본문 안 entity 토큰이 있어야 그려지고, 토큰이 있으면 글자가 0이 아니다.
@@ -911,7 +905,14 @@ export function ChatBubble({
                   적용한다(진단·처방 전부 "에이전트 report성 메시지" 범위, human 메시지는
                   무변경). ReportMessageSummary 내부가 발동 조건(computeReportDensity) 미충족
                   이면 곧바로 ChatMarkdown으로 폴백하므로 인간 메시지 경로는 항상 원본 그대로. */}
-              {isAgent ? (
+              {eventTextFallback ? (
+                <EventTextFallback
+                  content={message.content} eventKey={eventTarget?.event_key} payload={eventTarget?.payload}
+                  refs={eventTarget?.refs as Record<string, unknown> | undefined}
+                  definition={eventTarget?.event_key ? eventDefinitionsByKey?.[eventTarget.event_key] : null}
+                  eventDefinitionName={(key) => eventDefinitionsByKey?.[key]?.name ?? undefined}
+                />
+              ) : isAgent ? (
                 <ReportMessageSummary
                   content={displayContent} messageKind={message.message_kind} isMine={isMine}
                   references={message.references} entityStatusByKey={entityStatusByKey}

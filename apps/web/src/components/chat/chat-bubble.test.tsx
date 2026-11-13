@@ -1116,15 +1116,19 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
     expect(container.textContent).not.toContain('작업 상태 변경');
   });
 
-  // story 4921 — the four «generic fallback» cases below used to pin the machine text (an agent's text) being SHOWN as the bubble text; a person must not read it (the PO's decision): the bubble says «이벤트» (or the
-  // definition's name), never the slug, the field names or the «[이벤트]» header. The text an agent reads (message.content) is unchanged.
-  it('eventDefinitionsByKey 미제공(undefined) — 제네릭 폴백은 기계 문장이 아니라 «이벤트» 한 낱말(story 4921)', async () => {
+  // story 4921 — the «generic fallback» cases below used to pin the machine text (an agent's text) being SHOWN as the bubble text. The contract now (PO 11-13): a head (the definition's name · «이벤트» · a known preset's
+  // sentence) + the person's words + the other fields as a readable list — never the «[이벤트] preset.x» header line or raw key names; «이벤트» ALONE only when the event has no field at all. message.content is unchanged.
+  it('eventDefinitionsByKey 미제공(undefined) — 폴백은 머리 한 줄 + 읽을 수 있는 목록(story 4921 · PO 11-13)', async () => {
     await act(async () => {
       root.render(wrap(<ChatBubble message={EVENT_MESSAGE} isMine={false} />));
     });
     const text = container.querySelector('[data-testid="chat-bubble-text"]')!.textContent;
-    expect(text).toBe('이벤트');
-    expect(container.textContent).not.toMatch(/\[이벤트\]|preset\.work|work_item_type|from_status/);
+    // the four presets the app already knows say their one-line sentence even with no definition read — and the fields stay as a readable list (the content is not dropped)
+    expect(text).toContain('작업 상태 변경 · 스토리 진행 중 → 리뷰 중');
+    expect(Array.from(container.querySelectorAll('li')).map((li) => li.textContent)).toEqual(expect.arrayContaining([
+      expect.stringContaining('in-progress'), expect.stringContaining('in-review'), expect.stringContaining('대상: S-42'),
+    ]));
+    expect(container.textContent).not.toMatch(/\[이벤트\]|preset\.work|work_item_type|from_status|to_status/); // no machine header line · no raw key names
   });
 
   it('PO 리뷰(head 80319636c ①) — 폴백은 EventBlockCard 자체 렌더가 아니라 말풍선 글 칸을 탄다(카드 아님) · 4921: «- key: value» 목록은 더는 그려지지 않는다', async () => {
@@ -1132,15 +1136,18 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
       root.render(wrap(<ChatBubble message={EVENT_MESSAGE} isMine={false} />));
     });
     expect(container.querySelector('[data-testid="chat-bubble-text"]')).not.toBeNull();
-    expect(container.querySelectorAll('li')).toHaveLength(0);
+    // the «- » list the PO decided on stays a real <li> list (not hyphen literals) — without the raw key names
+    const items = Array.from(container.querySelectorAll('li')).map((li) => li.textContent);
+    expect(items).toEqual(expect.arrayContaining([expect.stringContaining('story'), expect.stringContaining('in-progress'), expect.stringContaining('in-review')]));
+    expect(items.some((t) => /work_item_type|from_status|to_status/.test(t ?? ''))).toBe(false);
   });
 
   it('event_key가 카탈로그에 없으면(구 정의 삭제 등) 제네릭 폴백', async () => {
     await act(async () => {
       root.render(wrap(<ChatBubble message={EVENT_MESSAGE} isMine={false} eventDefinitionsByKey={{}} />));
     });
-    expect(container.querySelector('[data-testid="chat-bubble-text"]')!.textContent).toBe('이벤트');
-    expect(container.textContent).not.toContain('preset.work.status_changed');
+    expect(container.textContent).toContain('작업 상태 변경');
+    expect(container.textContent).not.toMatch(/\[이벤트\]|preset\.work|from_status/);
   });
 
   it('정의는 있으나 block_template이 null이면 제네릭 폴백(사람 글, story 4921)', async () => {
