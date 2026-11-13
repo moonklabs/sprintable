@@ -127,6 +127,7 @@ function LoopRow({ loop, onOpen }: { loop: Loop; onOpen: () => void }) {
       )}
       onClick={onOpen}
       onKeyDownCapture={onKeyDownCapture}
+      onBlur={() => { armed.current = null; }}
       onKeyUp={onKeyUp}
       onDoubleClick={onDoubleClick}
       onOpen={onOpen}
@@ -144,28 +145,39 @@ export function LoopsClient({ projectId, wsSlug, projSlug }: { projectId: string
   const [statusFilter, setStatusFilter] = useState<LoopStatus | 'all'>('all');
   const [createOpen, setCreateOpen] = useState(false);
 
+  const requestSeq = useRef(0);
   const fetchLoops = useCallback(async () => {
+    const seq = ++requestSeq.current;
     try {
       const params = new URLSearchParams({ project_id: projectId, limit: '100' });
       if (statusFilter !== 'all') params.set('status', statusFilter);
       const res = await fetchWithAuth(`/api/loops?${params.toString()}`);
       if (!res.ok) throw new Error(`Failed to fetch loops: ${res.status}`);
       const data = (await res.json()) as Loop[];
+      if (seq !== requestSeq.current) return; // 그 사이 단계를 또 바꿨다 — 늦게 온 옛 답은 버린다
       setLoops(data);
       setLoadFailed(false);
     } catch (err) {
+      if (seq !== requestSeq.current) return;
       console.error('[loops] 목록을 불러오지 못했습니다', err);
       // 4911 — 못 불러온 것은 «실행이 없다»가 아니다: 빈 상태 문구 대신 오류 띠 + 다시 시도.
       setLoadFailed(true);
       setLoops([]);
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
   }, [projectId, statusFilter]);
 
   useEffect(() => { void fetchLoops(); }, [fetchLoops]);
 
-  const openLoop = (id: string) => router.push(`/${wsSlug}/${projSlug}/loops/${id}`);
+  // 진짜 더블클릭은 클릭이 두 번 먼저 온다 — 이동은 한 번만(바로 이어진 두 번째는 버린다).
+  const lastOpenAt = useRef(0);
+  const openLoop = (id: string) => {
+    const now = Date.now();
+    if (now - lastOpenAt.current < 800) return;
+    lastOpenAt.current = now;
+    router.push(`/${wsSlug}/${projSlug}/loops/${id}`);
+  };
 
   const topBar = (withActions: boolean) => (
     <TopBarSlot

@@ -62,6 +62,11 @@ describe('[SID:4911] 실행 상태 · 성과 칩 = ds Chip', () => {
     expect(chip.textContent).toBeTruthy();
   });
 
+  it('Object.prototype 이름(toString)이 «아는 상태»로 읽히지 않는다 — 그대로 값을 보여 준다', async () => {
+    await render(<LoopStatusBadge status={'toString' as unknown as LoopStatus} />);
+    expect(container.querySelector('[data-slot="ds-chip"]')!.textContent).toBe('toString');
+  });
+
   it('성과: 적중 = done(체크 아이콘) · 빗나감 = info — 반증에 빨강(failed)을 쓰지 않는다', async () => {
     await render(<><OutcomeBadge hypothesisStatus="verified" /><OutcomeBadge hypothesisStatus="falsified" /></>);
     const chips = Array.from(container.querySelectorAll('[data-slot="ds-chip"]'));

@@ -32,8 +32,8 @@ export function LoopStatusBadge({ status, className }: { status: LoopStatus; cla
   const t = useTranslations('loops');
   const labelKey = `status${status.charAt(0).toUpperCase()}${status.slice(1)}` as 'statusDraft';
   // 이 화면이 아직 모르는 상태(새 BE 상태 · 시험 픽스처)로 화면이 죽지 않게 «접음» 모양으로 낮춘다(옛 배지도 기본 갈래가 그랬다).
-  const known = status in TONE;
-  const { tone, dot } = TONE[status] ?? TONE.abandoned;
+  const known = Object.hasOwn(TONE, status);
+  const { tone, dot } = known ? TONE[status] : TONE.abandoned;
   return (
     <Chip tone={tone} dot={dot} data-loop-status={status} className={className}>
       {known ? t(labelKey) : status}
