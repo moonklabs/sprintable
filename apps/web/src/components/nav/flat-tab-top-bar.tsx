@@ -144,6 +144,12 @@ export function AgentRunsTopBarTitle() {
   return <h1 className="text-sm font-medium">{tAgentRuns('title')}</h1>;
 }
 
+/** «에이전트 API 키»(/organization/workforce/api-keys) 상단바 제목(story 4912 B1 — 화면이 같은 컴포넌트로 슬롯을 채운다). */
+export function AgentApiKeysTopBarTitle() {
+  const tSettings = useTranslations('settings');
+  return <h1 className="text-sm font-medium">{tSettings('agentApiKeysPageTitle')}</h1>;
+}
+
 /**
  * «스토리지»(`[ws]/[proj]/storage`) 상단바 제목 — 브레드크럼 · 이름뿐(4910 · 4913 규칙: 제목은 위 막대 한 곳).
  * 예전엔 «N개 자산 · 용량» 알약이 여기 붙었다(데이터라 화면만 넘김) — 그 개수는 본문 머리 줄로 내려갔고(`storage-asset-list` 머리), 그래서 폴백과 도착 화면이 글자까지 똑같다.
@@ -202,6 +208,7 @@ export const FLAT_ROUTE_TOP_BAR = {
   'organization/content-rules': { Title: OrgContentRulesTopBarTitle, showContextChip: false },
   // 까디르 4688 — 부모 workforce/loading이 덮던 하위 목록(마지막 조각 runs ≠ workforce라 «상세»로 봐서 빈 채였다) · 자기 loading.tsx로 쥔다.
   'organization/workforce/runs': { Title: AgentRunsTopBarTitle, showContextChip: true },
+  'organization/workforce/api-keys': { Title: AgentApiKeysTopBarTitle, showContextChip: true },
 } as const satisfies Record<string, { Title: () => ReactNode; showContextChip: boolean }>;
 
 export type FlatRoute = keyof typeof FLAT_ROUTE_TOP_BAR;
