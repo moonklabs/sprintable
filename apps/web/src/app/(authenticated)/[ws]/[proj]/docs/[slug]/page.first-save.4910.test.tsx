@@ -178,14 +178,17 @@ describe('router.push로 들어온 첫 렌더의 주소 (4910 ② dev 실측 결
     expect(routerMock.replace).toHaveBeenCalled();
   });
 
-  it('?new=1은 한 번 켜지면 유지(래치) — 첫 저장 뒤 주소에서 ?new=1이 빠져도 초안 화면이 그대로다', async () => {
+  it('?new=1은 한 번 켜지면 유지(래치) — 내용만 써서 기본 제목으로 만들어진 뒤 주소에서 ?new=1이 빠져도 제목칸은 값이 아니라 placeholder 그대로(쓰면 뒤에 붙던 결함이 안 돌아온다)', async () => {
     paramsMock.slug = 'untitled-123456789';
     searchOverride.current = 'new=1';
     await renderPage();
+    await type('content', '내용만');
+    await wait(1600);
+    expect(editorProps.current!.currentDocId).toBe('new-doc'); // 기본 제목(«제목 없음»)으로 만들어짐
+    expect(editorProps.current!.title).toBe(''); // brandNewTitle: 제목칸은 비어 있고 기본 글은 placeholder
     searchOverride.current = ''; // 주소가 정본 슬러그로 옮겨지며 ?new=1이 빠진 뒤의 렌더
-    await type('title', '가');
-    expect(editorProps.current).not.toBeNull();
-    expect(editorProps.current!.titlePlaceholder).toBe(KO.newDocDefaultTitle);
+    await type('content', '내용만 더');
+    expect(editorProps.current!.title).toBe(''); // 래치가 없으면 «제목 없음»이 값으로 되돌아온다
   });
 });
 
