@@ -67,12 +67,6 @@
       "why": "«모두 켜기» ↔ «모두 끄기»"
     },
     {
-      "file": "components/agents/access-matrix-tab.tsx",
-      "match": "handleToggle(agent.id, project)",
-      "count": 1,
-      "why": "이름이 지금 상태(«허용됨» ↔ «차단됨»)를 말함"
-    },
-    {
       "file": "components/channel-connect/external-publish-pause-card.tsx",
       "match": "handleToggle(",
       "count": 2,

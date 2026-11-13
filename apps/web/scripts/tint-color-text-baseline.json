@@ -86,8 +86,6 @@
     "app/(authenticated)/[ws]/[proj]/retro/[id]/page.tsx::success::border-success bg-success-tint text-success",
     "app/(authenticated)/[ws]/[proj]/sprints/sprints-client.tsx::destructive::flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive-tint text-destructive",
     "app/(authenticated)/settings/page.tsx::destructive::text-destructive hover:text-destructive data-active:text-destructive data-active:bg-destructive-tint",
-    "components/agents/access-matrix-tab.tsx::success::border-success/40 bg-success-tint text-success hover:bg-success/15",
-    "components/agents/access-matrix-tab.tsx::success::inline-flex size-4 items-center justify-center rounded border border-success/40 bg-success-tint text-success",
     "components/cage/stuck-handoff-section.tsx::destructive::bg-destructive-tint text-destructive",
     "components/chat/chat-input.tsx::info::bg-info/10 text-info",
     "components/chat/chat-list-view.tsx::info::bg-info/15 text-info",

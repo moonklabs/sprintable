@@ -2,8 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Check, Loader2 } from 'lucide-react';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Icon } from '@/components/ds/icon';
+import { PageFrame } from '@/components/ds/page-frame';
+import { PageHead } from '@/components/ds/page-head';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
+import { DetailCard } from '@/components/agents/detail-card';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isSystemPublisher } from '@/lib/runtime-capabilities';
@@ -31,20 +36,11 @@ interface AccessMatrixRow {
 
 export type AccessMatrixMessageState = { type: 'success' | 'error'; text: string } | null;
 
-// story #2153: 선언(type: 'success'|'error')과 렌더가 갈라져 있던 결함 — success가 들어와도
-// 항상 destructive/alert였다. 렌더 분기를 별도 컴포넌트로 빼 success 케이스를 직접 테스트한다.
+// story #2153: 선언(type: 'success'|'error')과 렌더가 갈라져 있던 결함 — success가 들어와도 항상 destructive/alert였다. 렌더 분기를 별도 컴포넌트로 빼 두 경우를 직접 테스트한다.
+// story 4912 (D): the ds Banner carries the role (failed = alert · info = status) — the ONE live region (no aria-live on top of it).
 export function AccessMatrixMessage({ message }: { message: AccessMatrixMessageState }) {
   if (!message) return null;
-  return (
-    <p
-      className={cn('mb-3 text-xs', message.type === 'success' ? 'text-success' : 'text-destructive')}
-      role={message.type === 'success' ? 'status' : 'alert'}
-      aria-live={message.type === 'success' ? 'polite' : 'assertive'}
-      aria-atomic="true"
-    >
-      {message.text}
-    </p>
-  );
+  return <Banner tone={message.type === 'success' ? 'info' : 'failed'}>{message.text}</Banner>;
 }
 
 /**
@@ -143,6 +139,9 @@ export function AccessMatrixTab() {
           setMessage({ type: 'error', text: t('agentActionFailed') });
         }
       }
+    } catch {
+      // story 4912 (PO 11-13): a REJECTED request (the network went away) said nothing — the cell just came back. It is the same failure as an HTTP error answer, so it says the same sentence.
+      setMessage({ type: 'error', text: t('agentActionFailed') });
     } finally {
       setTogglingKey(null);
     }
@@ -151,130 +150,111 @@ export function AccessMatrixTab() {
   const grantedCount = Object.keys(grantMap).length;
   const totalCells = agents.length * projects.length;
 
+  const head = <PageHead description={ta('matrixDescription')} meta={ta('matrixAdminOnlyHint')} />;
+
   if (loading) {
     return (
-      <div className="p-6">
-        <div className="space-y-2">
-          {[1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />)}
-        </div>
-      </div>
+      <PageFrame width="wide">
+        {head}
+        <SkeletonGroup label={tc('loading')} className="space-y-2" data-testid="access-matrix-loading">
+          {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12" />)}
+        </SkeletonGroup>
+      </PageFrame>
     );
   }
 
   if (loadError) {
     return (
-      <div className="p-6">
-        <SectionCard>
-          <SectionCardBody>
-            <p className="text-sm text-muted-foreground">{ta('matrixLoadError')}</p>
-            <button
-              type="button"
-              onClick={() => void load()}
-              className="mt-3 rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
-            >
-              {ta('matrixRetry')}
-            </button>
-          </SectionCardBody>
-        </SectionCard>
-      </div>
+      <PageFrame width="wide">
+        {head}
+        <div data-testid="access-matrix-load-error">
+          <Banner tone="failed" action={<Button variant="secondary" onClick={() => void load()}>{ta('matrixRetry')}</Button>}>
+            {ta('matrixLoadError')}
+          </Banner>
+        </div>
+      </PageFrame>
     );
   }
 
   return (
-    <div className="p-6">
-      <SectionCard>
-        <SectionCardHeader>
-          <div className="flex items-center justify-between gap-3">
-            <div className="space-y-1">
-              <h2 className="text-base font-semibold text-foreground">{ta('matrixTitle')}</h2>
-              <p className="text-sm text-muted-foreground">{ta('matrixDescription')}</p>
-            </div>
-            {totalCells > 0 ? (
-              <div className="shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-                <div className="font-medium text-foreground">{grantedCount} / {totalCells}</div>
-                <div>{ta('matrixGrantedCount')}</div>
-              </div>
-            ) : null}
+    <PageFrame width="wide">
+      {head}
+      <DetailCard
+        data-testid="access-matrix-card"
+        title={ta('matrixTitle')}
+        action={totalCells > 0 ? (
+          <div className="shrink-0 text-right text-ds-small tabular-nums text-ds-ink-3">
+            <div className="font-medium text-ds-ink">{grantedCount} / {totalCells}</div>
+            <div>{ta('matrixGrantedCount')}</div>
           </div>
-        </SectionCardHeader>
-        <SectionCardBody>
-          <AccessMatrixMessage message={message} />
+        ) : null}
+      >
+        <AccessMatrixMessage message={message} />
 
-          {agents.length === 0 || projects.length === 0 ? (
-            <div className="rounded-md border border-dashed border-border px-3 py-8 text-center">
-              <p className="text-sm text-muted-foreground">{ta('matrixEmpty')}</p>
-            </div>
-          ) : (
-            // story #2165: 표는 전역 스크롤바 숨김 예외 — 가로로 잘린 열이 있다는 것을 알려야 한다.
-            <div className="focus-inset overflow-x-auto scrollbar-visible rounded-md border border-border">
-              <table className="w-full border-collapse text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted/30">
-                    <th className="sticky left-0 z-10 bg-muted/30 px-3 py-2 text-left font-medium text-foreground">
-                      {ta('matrixAgentColumn')}
+        {agents.length === 0 || projects.length === 0 ? (
+          <p className="rounded-ds-control border border-dashed border-ds-line px-3 py-8 text-center text-ds-small text-ds-ink-3">{ta('matrixEmpty')}</p>
+        ) : (
+          // story #2165: 표는 전역 스크롤바 숨김 예외 — 가로로 잘린 열이 있다는 것을 알려야 한다.
+          <div className="focus-inset scrollbar-visible overflow-x-auto rounded-ds-control bg-ds-surface-sunk">
+            <table className="w-full border-collapse text-ds-body">
+              <thead>
+                <tr className="bg-ds-surface-high">
+                  <th className="sticky left-0 z-10 bg-ds-surface-high px-3 py-2 text-left font-medium text-ds-ink">
+                    {ta('matrixAgentColumn')}
+                  </th>
+                  {projects.map((project) => (
+                    <th key={project.id} className="whitespace-nowrap px-3 py-2 text-left font-medium text-ds-ink">
+                      {project.name}
                     </th>
-                    {projects.map((project) => (
-                      <th key={project.id} className="whitespace-nowrap px-3 py-2 text-left font-medium text-foreground">
-                        {project.name}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {agents.map((agent) => (
-                    <tr key={agent.id} className="border-b border-border last:border-b-0">
-                      <td className="sticky left-0 z-10 bg-background px-3 py-2 font-medium text-foreground">
-                        {rowLabels.get(agent.id)}
-                      </td>
-                      {projects.map((project) => {
-                        const k = key(agent.id, project.id);
-                        const granted = k in grantMap;
-                        const toggling = togglingKey === k;
-                        return (
-                          <td key={project.id} className="px-3 py-2 text-center">
-                            <button
-                              type="button"
-                              disabled={toggling}
-                              onClick={() => void handleToggle(agent.id, project)}
-                              className={cn(
-                                'inline-flex size-7 items-center justify-center rounded-md border transition-colors',
-                                granted
-                                  ? 'border-success/40 bg-success-tint text-success hover:bg-success/15'
-                                  : 'border-border text-muted-foreground hover:bg-muted/40',
-                              )}
-                              aria-label={granted ? ta('matrixCellGranted') : ta('matrixCellBlocked')}
-                            >
-                              {toggling ? (
-                                <Loader2 className="size-3.5 animate-spin" />
-                              ) : granted ? (
-                                <Check className="size-3.5" />
-                              ) : null}
-                            </button>
-                          </td>
-                        );
-                      })}
-                    </tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5">
-              <span className="inline-flex size-4 items-center justify-center rounded border border-success/40 bg-success-tint text-success">
-                <Check className="size-2.5" />
-              </span>
-              {ta('matrixLegendGranted')}
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="size-4 rounded border border-border" />
-              {ta('matrixLegendBlocked')}
-            </span>
-            <span className="ml-auto">{ta('matrixAdminOnlyHint')}</span>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ds-line">
+                {agents.map((agent) => (
+                  <tr key={agent.id}>
+                    <td className="sticky left-0 z-10 bg-ds-surface-sunk px-3 py-2 font-medium text-ds-ink">
+                      {rowLabels.get(agent.id)}
+                    </td>
+                    {projects.map((project) => {
+                      const k = key(agent.id, project.id);
+                      const granted = k in grantMap;
+                      const toggling = togglingKey === k;
+                      return (
+                        <td key={project.id} className="px-3 py-2 text-center">
+                          <Button
+                            variant="secondary"
+                            loading={toggling}
+                            onClick={() => void handleToggle(agent.id, project)}
+                            className={cn('w-8 px-0', granted && 'border-ds-done bg-ds-done-soft text-ds-done hover:bg-ds-done-soft')}
+                            aria-label={granted ? ta('matrixCellGranted') : ta('matrixCellBlocked')}
+                            aria-pressed={granted}
+                            data-granted={granted ? '' : undefined}
+                          >
+                            {granted && !toggling ? <Icon name="check" size={14} /> : null}
+                          </Button>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </SectionCardBody>
-      </SectionCard>
-    </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-4 text-ds-small text-ds-ink-3">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-flex size-4 items-center justify-center rounded-ds-tag border border-ds-done bg-ds-done-soft text-ds-done">
+              <Icon name="check" size={10} />
+            </span>
+            {ta('matrixLegendGranted')}
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="size-4 rounded-ds-tag border border-ds-line-control" />
+            {ta('matrixLegendBlocked')}
+          </span>
+        </div>
+      </DetailCard>
+    </PageFrame>
   );
 }

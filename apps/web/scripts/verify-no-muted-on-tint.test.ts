@@ -485,16 +485,20 @@ describe('scanContent — 같은 요소 tint/muted 공존 판정의 그룹 정�
     expect(scanContent(content, 'sample.tsx')).toEqual([]);
   });
 
-  // 조건③ 실 파일 양성대조 — access-matrix-tab.tsx(232행)의 `granted ? 'border-success/40
-  // bg-success-tint text-success…' : 'border-border text-muted-foreground…'`(같은 삼항의
-  // 두 분기)를 "한 분기 안에 tint+muted 공존"으로 되돌리면(granted 분기 자체에 muted를
-  // 끼워 넣으면) RED가 되어야 한다 — 그룹 정밀화가 진짜 공존은 여전히 잡는다는 확인.
-  describe('실 파일 뮤테이션 — access-matrix-tab.tsx(232행, 같은 삼항 안 공존 재현)', () => {
-    const REL_FILE = 'components/agents/access-matrix-tab.tsx';
-    const ABS_FILE = path.join(SRC_ROOT, REL_FILE);
-    const original = readFileSync(ABS_FILE, 'utf8');
+  // 조건③ 양성대조 — 옛 access-matrix-tab.tsx(232행)의 `granted ? 'border-success/40 bg-success-tint text-success…' : 'border-border text-muted-foreground…'`(같은 삼항의 두 분기)를
+  // "한 분기 안에 tint+muted 공존"으로 되돌리면(granted 분기 자체에 muted를 끼워 넣으면) RED가 되어야 한다 — 그룹 정밀화가 진짜 공존은 여전히 잡는다는 확인.
+  // story 4912 (D2): 그 파일이 ds 부품(`border-ds-done bg-ds-done-soft` — 옛 tint 계열이 아니다)으로 옮겨 가 «실 파일» 표본이 사라졌다 — 같은 모양을 한 줄 그대로 박아 둔 표본으로 이 대조를 이어 간다
+  // (규칙이 보는 것은 그 줄의 모양이지 파일 이름이 아니다).
+  describe('양성대조 — 옛 access-matrix-tab.tsx(232행)의 같은 삼항 안 공존 재현(표본 고정)', () => {
+    const REL_FILE = 'sample-access-matrix.tsx';
+    const original = `
+      <button className={cn('inline-flex size-7 items-center justify-center rounded-md border transition-colors',
+        granted
+          ? 'border-success/40 bg-success-tint text-success hover:bg-success/15'
+          : 'border-border text-muted-foreground hover:bg-muted/40')} />
+    `;
 
-    it('전제: 원본은 이 자리에서 위반 0(같은 삼항 두 분기가 상호배타)', () => {
+    it('전제: 원본 모양은 이 자리에서 위반 0(같은 삼항 두 분기가 상호배타)', () => {
       const violations = scanContent(original, REL_FILE);
       expect(violations.some((v) => v.className.includes('bg-success-tint'))).toBe(false);
     });
