@@ -1,18 +1,19 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertTriangle, ArrowLeft, Clock3, Cpu, Hash, Zap } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { PageHeader } from '@/components/ui/page-header';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { ArrowLeft } from 'lucide-react';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Chip } from '@/components/ds/chip';
+import { LAYER } from '@/components/ds/layers';
+import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { getRunErrorDisplay, getRunFailureDisposition } from '@/services/agent-run-history';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { formatViewerScheduledAt } from '@/lib/schedule-format';
-import { agentRunStatusBadgeVariant, type AgentRunStatus } from '@/lib/agent-run-status';
+import type { AgentRunStatus } from '@/lib/agent-run-status';
+import { statusTone } from './agent-run-status-tone';
 import { AgentRunToolCallsSection } from './agent-run-tool-calls-section';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
@@ -71,6 +72,10 @@ function formatBillingModeLabel(t: ReturnType<typeof useTranslations>, billingMo
   return t(`billingMode_${billingMode}`);
 }
 
+/** 4911 — the detail's faces: the content panel is the content layer over the page; the number strip is the «others» row face on that panel (pinned by `styles/layer-rule.test.ts`) */
+export const AGENT_RUN_DETAIL_PANEL_FACE = LAYER.panel;
+export const AGENT_RUN_DETAIL_STRIP_FACE = LAYER.rowOthers;
+
 export function AgentRunDetail({
   runId,
   locale,
@@ -96,6 +101,7 @@ export function AgentRunDetail({
     async function load() {
       setLoading(true);
       setLoadError(false);
+      setRun(null);   // a new run id (or a retry) must not show the PREVIOUS run's name · id in the title and the head while it loads
       try {
         const res = await fetchWithAuth(`/api/v1/agent-runs/${runId}`);
         const json = res.ok ? await res.json() : null;
@@ -112,11 +118,30 @@ export function AgentRunDetail({
     return () => { cancelled = true; };
   }, [runId, retryKey]);
 
+  // the top bar's title is this page's h1 (story #3945/#3946: a detail screen with no other h1) — in EVERY state, so the title and the «목록으로» head never vanish behind a skeleton or an error
+  // (one element per agent name: a new element every render would make the slot tear down and register again every render)
+  const loadedAgentName = run ? (run.agent_name ?? t('unknownAgent')) : null;
+  const titleEl = useMemo(
+    () => <h1 className="truncate text-sm font-medium">{loadedAgentName !== null ? `${t('detailEyebrow')} · ${loadedAgentName}` : t('detailEyebrow')}</h1>,
+    [loadedAgentName, t],
+  );
+  const slot = <TopBarSlot title={titleEl} />;
+  const head = (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button variant="quiet" onClick={onBack} data-testid="run-detail-back">
+        <ArrowLeft className="mr-1.5 size-4" aria-hidden="true" />
+        {t('backToList')}
+      </Button>
+      {run ? <span className="text-ds-small text-ds-ink-3">{t('runId')}: {run.id.slice(0, 8)}…</span> : null}
+    </div>
+  );
+
   if (loading) {
     return (
-      <div className="space-y-4">
-        <div className="h-24 animate-pulse rounded-xl bg-muted" />
-        <div className="h-64 animate-pulse rounded-xl bg-muted" />
+      <div className="space-y-3">
+        {slot}
+        {head}
+        <div className="h-48 animate-pulse rounded-ds-panel bg-ds-surface-high" />
       </div>
     );
   }
@@ -125,162 +150,125 @@ export function AgentRunDetail({
     return (
       // story #2105 2차 — load()가 재시도 전 setLoadError(false)를 먼저 호출해(위 정의) 매
       // retryKey 변경마다 언마운트→리마운트된다.
-      <div role="alert" aria-live="assertive" aria-atomic="true" className="flex flex-col items-center gap-3 py-20 text-center text-muted-foreground">
-        <p>{tc('error')}</p>
-        <p className="text-xs">{tc('errorDescription')}</p>
-        <Button size="sm" variant="outline" onClick={() => setRetryKey((k) => k + 1)}>
-          {tc('retry')}
-        </Button>
+      <div className="space-y-3">
+        {slot}
+        {head}
+        <div role="alert" aria-live="assertive" aria-atomic="true" className="flex flex-col items-center gap-3 py-12 text-center">
+          <p className="text-ds-body font-medium text-ds-ink">{tc('error')}</p>
+          <p className="text-ds-small text-ds-ink-3">{tc('errorDescription')}</p>
+          <Button variant="secondary" onClick={() => setRetryKey((k) => k + 1)}>
+            {tc('retry')}
+          </Button>
+        </div>
       </div>
     );
   }
 
   if (!run) {
     return (
-      <div className="py-20 text-center text-muted-foreground">
-        {tc('noData')}
+      <div className="space-y-3">
+        {slot}
+        {head}
+        <div className="py-12 text-center text-ds-body text-ds-ink-3">{tc('noData')}</div>
       </div>
     );
   }
 
   const errorDisplay = getRunErrorDisplay(run.error_message, run.last_error_code);
   const failureDisposition = getRunFailureDisposition(run);
+  const stats: Array<[string, string]> = [
+    [t('duration'), formatDuration(run.duration_ms)],
+    [t('llmCallsLabel'), String(run.llm_call_count)],
+    [t('tokens'), `${run.input_tokens ?? 0} / ${run.output_tokens ?? 0}`],
+    [t('cost'), run.cost_usd != null ? `$${run.cost_usd.toFixed(4)}` : '-'],
+  ];
+  const meta: Array<[string, string]> = [
+    [t('providerLabel'), run.llm_provider_key ?? '-'],
+    [t('billingModeLabel'), formatBillingModeLabel(t, run.llm_provider)],
+    [t('modelLabel'), run.model ?? '-'],
+    [t('computedCostLabel'), `${run.computed_cost_cents ?? 0}¢`],
+    [t('perRunCapLabel'), run.per_run_cap_cents != null ? `${run.per_run_cap_cents}¢` : '-'],
+  ];
 
   return (
-    <>
-      <div className="space-y-4">
-        <PageHeader
-          eyebrow={t('detailEyebrow')}
-          title={run.agent_name ?? t('unknownAgent')}
-          description={`${t('runId')}: ${run.id.slice(0, 8)}…`}
-          actions={
-            <div className="flex items-center gap-2">
-              <Button variant="glass" size="lg" onClick={onBack}>
-                <ArrowLeft className="mr-2 size-4" />
-                {t('backToList')}
-              </Button>
-            </div>
-          }
-        />
+    <div className="space-y-3">
+      {slot}
+      {head}
 
-        {/* Summary stats */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatCard icon={<Clock3 className="size-4" />} label={t('duration')} value={formatDuration(run.duration_ms)} />
-          <StatCard icon={<Cpu className="size-4" />} label={t('llmCallsLabel')} value={String(run.llm_call_count)} />
-          <StatCard icon={<Hash className="size-4" />} label={t('tokens')} value={`${run.input_tokens ?? 0} / ${run.output_tokens ?? 0}`} />
-          <StatCard icon={<Zap className="size-4" />} label={t('cost')} value={run.cost_usd != null ? `$${run.cost_usd.toFixed(4)}` : '-'} />
+      {/* ONE content panel: what happened (status · times · chips) → the numbers (one strip, not four cards) → who paid for it (one list, not five cards) → the error · the result */}
+      <section data-testid="agent-run-detail-panel" className={`${AGENT_RUN_DETAIL_PANEL_FACE} space-y-3 rounded-ds-panel border border-ds-line p-3`}>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <Chip tone={statusTone(run.status)} dot>{t(`status_${run.status}`)}</Chip>
+          {run.status === 'failed' && failureDisposition ? (
+            <Chip tone={failureDisposition === 'retry_scheduled' ? 'info' : 'neutral'}>{t(`failureDisposition_${failureDisposition}`)}</Chip>
+          ) : null}
+          <span className="text-ds-small text-ds-ink-2">{t('startedAt')}: {toLocaleStr(run.started_at, locale, displayTimezone)}</span>
+          {run.finished_at ? <span className="text-ds-small text-ds-ink-2">{t('finishedAt')}: {toLocaleStr(run.finished_at, locale, displayTimezone)}</span> : null}
+          {run.model ? <Chip>{run.model}</Chip> : null}
+          {run.trigger ? <Chip>{run.trigger}</Chip> : null}
         </div>
 
-        {/* Status + metadata */}
-        <SectionCard>
-          <SectionCardHeader>
-            <div className="flex flex-wrap items-center gap-3">
-              <Badge variant={agentRunStatusBadgeVariant(run.status)}>
-                {t(`status_${run.status}`)}
-              </Badge>
-              <span className="text-xs text-muted-foreground">
-                {t('startedAt')}: {toLocaleStr(run.started_at, locale, displayTimezone)}
-              </span>
-              {run.status === 'failed' && failureDisposition && (
-                <Badge variant={failureDisposition === 'retry_scheduled' ? 'info' : 'outline'}>
-                  {t(`failureDisposition_${failureDisposition}`)}
-                </Badge>
+        <dl data-testid="agent-run-detail-stats" className={`${AGENT_RUN_DETAIL_STRIP_FACE} grid grid-cols-2 gap-x-4 gap-y-2 rounded-ds-control px-3 py-2 sm:grid-cols-4`}>
+          {stats.map(([label, value]) => (
+            <div key={label} className="min-w-0">
+              <dt className="text-ds-small text-ds-ink-2">{label}</dt>
+              <dd className="truncate text-ds-body font-semibold text-ds-ink">{value}</dd>
+            </div>
+          ))}
+        </dl>
+
+        <dl data-testid="agent-run-detail-meta" className="grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2 xl:grid-cols-3">
+          {meta.map(([label, value]) => (
+            <div key={label} className="flex min-w-0 items-baseline gap-2">
+              <dt className="shrink-0 text-ds-small text-ds-ink-2">{label}</dt>
+              <dd className="min-w-0 break-all text-ds-body text-ds-ink">{value}</dd>
+            </div>
+          ))}
+        </dl>
+
+        {Array.isArray(run.billing_notes) && run.billing_notes.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-ds-small font-medium text-ds-ink-2">{t('billingNotesLabel')}</span>
+            {run.billing_notes.map((note) => (
+              <Chip key={note}>{note}</Chip>
+            ))}
+          </div>
+        )}
+
+        {/* Error message for failed runs — a failed Banner: the icon and the border say «failed» together with the words */}
+        {run.status === 'failed' && errorDisplay.message && (
+          <Banner tone="failed" className="rounded-ds-control">
+            <div className="min-w-0">
+              <p className="font-semibold">{t('errorLabel')}</p>
+              <p className="mt-0.5 break-words">{errorDisplay.message}</p>
+              {errorDisplay.code && (
+                <p className="mt-0.5 text-ds-small text-ds-ink-2">{t('errorCodeLabel')}: {errorDisplay.code}</p>
               )}
-              {run.finished_at && (
-                <span className="text-xs text-muted-foreground">
-                  {t('finishedAt')}: {toLocaleStr(run.finished_at, locale, displayTimezone)}
-                </span>
-              )}
-              {run.model && (
-                <Badge variant="chip">{run.model}</Badge>
-              )}
-              {run.trigger && (
-                <Badge variant="chip">{run.trigger}</Badge>
+              {/* story #3493 — next_retry_at은 미래 "약속"(재시도 예정 시각). record용
+                  formatRelativeTime을 쓰면 diffMs가 음수라 0으로 clamp돼 "지금"으로
+                  오표시되므로 §11-2 정본(formatScheduledAt)으로 절대 표기. */}
+              {failureDisposition === 'retry_scheduled' && run.next_retry_at && (
+                <p className="mt-0.5 text-ds-small text-ds-ink-2">{t('nextRetryAt')}: {formatViewerScheduledAt(run.next_retry_at, displayTimezone).display}</p>
               )}
             </div>
-          </SectionCardHeader>
-          <SectionCardBody>
-            <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              <MetaCard label={t('providerLabel')} value={run.llm_provider_key ?? '-'} />
-              <MetaCard label={t('billingModeLabel')} value={formatBillingModeLabel(t, run.llm_provider)} />
-              <MetaCard label={t('modelLabel')} value={run.model ?? '-'} />
-              <MetaCard label={t('computedCostLabel')} value={`${run.computed_cost_cents ?? 0}¢`} />
-              <MetaCard label={t('perRunCapLabel')} value={run.per_run_cap_cents != null ? `${run.per_run_cap_cents}¢` : '-'} />
-            </div>
+          </Banner>
+        )}
 
-            {Array.isArray(run.billing_notes) && run.billing_notes.length > 0 && (
-              <div className="mb-4 rounded-xl border border-overlay-line-1 bg-overlay-fill-1 px-4 py-3">
-                <p className="text-sm font-medium text-foreground">{t('billingNotesLabel')}</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {run.billing_notes.map((note) => (
-                    <Badge key={note} variant="chip">{note}</Badge>
-                  ))}
-                </div>
-              </div>
-            )}
+        {/* Result summary */}
+        {run.result_summary && (
+          <div className="space-y-0.5">
+            <p className="text-ds-small font-medium text-ds-ink-2">{t('resultSummary')}</p>
+            <p className="text-ds-body text-ds-ink">{run.result_summary}</p>
+          </div>
+        )}
+      </section>
 
-            {/* Error message for failed runs */}
-            {run.status === 'failed' && errorDisplay.message && (
-              <Alert variant="destructive" className="mb-4">
-                {/* story #2513 — Alert 글자가 text-foreground로 통일된 후, 색-미지정
-                    아이콘은 부모의 currentColor를 상속해 variant 색을 잃는다. 명시. */}
-                <AlertTriangle className="size-4 text-destructive" />
-                <AlertDescription>
-                  <p className="font-semibold">{t('errorLabel')}</p>
-                  <p className="mt-1">{errorDisplay.message}</p>
-                  {errorDisplay.code && (
-                    <p className="mt-1 text-xs opacity-75">{t('errorCodeLabel')}: {errorDisplay.code}</p>
-                  )}
-                  {/* story #3493 — next_retry_at은 미래 "약속"(재시도 예정 시각). record용
-                      formatRelativeTime을 쓰면 diffMs가 음수라 0으로 clamp돼 "지금"으로
-                      오표시되므로 §11-2 정본(formatScheduledAt)으로 절대 표기. */}
-                  {failureDisposition === 'retry_scheduled' && run.next_retry_at && (
-                    <p className="mt-1 text-xs opacity-75">{t('nextRetryAt')}: {formatViewerScheduledAt(run.next_retry_at, displayTimezone).display}</p>
-                  )}
-                </AlertDescription>
-              </Alert>
-            )}
-
-            {/* Result summary */}
-            {run.result_summary && (
-              <div className="mb-4 rounded-xl border border-overlay-line-1 bg-overlay-fill-1 px-4 py-3">
-                <p className="text-sm font-medium text-foreground">{t('resultSummary')}</p>
-                <p className="mt-1 text-sm text-muted-foreground">{run.result_summary}</p>
-              </div>
-            )}
-
-          </SectionCardBody>
-        </SectionCard>
-
-        <AgentRunToolCallsSection
-          runId={run.id}
-          runStatus={run.status}
-          locale={locale}
-          displayTimezone={displayTimezone}
-        />
-      </div>
-    </>
-  );
-}
-
-function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-overlay-line-1 bg-overlay-fill-1 px-4 py-3">
-      <div className="flex items-center gap-2 text-muted-foreground">
-        {icon}
-        <span className="text-xs">{label}</span>
-      </div>
-      <p className="mt-1 text-lg font-semibold text-foreground">{value}</p>
+      <AgentRunToolCallsSection
+        runId={run.id}
+        runStatus={run.status}
+        locale={locale}
+        displayTimezone={displayTimezone}
+      />
     </div>
   );
 }
-
-function MetaCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-overlay-line-1 bg-overlay-fill-1 px-4 py-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 break-all text-sm font-medium text-foreground">{value}</p>
-    </div>
-  );
-}
-
