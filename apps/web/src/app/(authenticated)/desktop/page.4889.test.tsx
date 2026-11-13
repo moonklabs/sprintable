@@ -34,8 +34,24 @@ async function pageWith(embedded: string | undefined): Promise<El> {
   if (embedded === undefined) delete process.env.SPRINTABLE_EMBEDDED; else process.env.SPRINTABLE_EMBEDDED = embedded;
   vi.resetModules();
   const { default: DesktopPage } = await import('./page');
-  return DesktopPage() as El;
+  // 4913: the page is <DesktopScreenTitle/> + <PageFrame width="wide"> — the composition below is the frame's
+  const [, frame] = (DesktopPage() as unknown as { props: { children: unknown[] } }).props.children;
+  return frame as El;
 }
+
+describe('[SID:4913] /desktop — the title is the top bar\'s (not the body\'s)', () => {
+  it('the page starts with the screen title, then the frame; no heading inside the frame', async () => {
+    delete process.env.SPRINTABLE_EMBEDDED; vi.resetModules();
+    const { default: DesktopPage } = await import('./page');
+    const { DesktopScreenTitle } = await import('@/components/desktop/desktop-screen-title');
+    const { PageFrame } = await import('@/components/ds/page-frame');
+    const [title, frame] = (DesktopPage() as unknown as { props: { children: El[] } }).props.children;
+    expect(title.type).toBe(DesktopScreenTitle);
+    expect(frame.type).toBe(PageFrame);
+    const { DesktopPageHead } = await import('@/components/desktop/desktop-page-head');
+    expect(comps(frame.props?.children)[0]).toBe(DesktopPageHead);
+  });
+});
 
 describe('[SID:4889] /desktop — the screen is one composition', () => {
   it('hosted: a head first, then two columns (app · phone), and the connected computers OUTSIDE the columns, across the full width', async () => {
@@ -47,7 +63,7 @@ describe('[SID:4889] /desktop — the screen is one composition', () => {
     const { DesktopRemoteDevices } = await import('@/components/desktop/desktop-remote-devices');
     const { PhoneSessionManagement } = await import('@/components/desktop/phone-session-management');
     const { DesktopDevices } = await import('@/components/desktop/desktop-devices');
-    expect(page.props?.className).toContain('max-w-5xl');
+    expect(page.props?.width).toBe('wide');
     expect(comps(page.props?.children)[0]).toBe(DesktopPageHead);
     const columns = byId(page, 'desktop-columns')!;
     expect(columns.props?.className).toContain('lg:grid-cols-2');
@@ -72,6 +88,7 @@ describe('[SID:4889] /desktop — the screen is one composition', () => {
     for (const l of ['ko', 'en']) {
       const d = JSON.parse(readFileSync(join(__dirname, `../../../../messages/${l}.json`), 'utf-8')).desktop;
       expect(typeof d.pageTitle).toBe('string');
+      expect(d.pageTitle).toBe(JSON.parse(readFileSync(join(__dirname, `../../../../messages/${l}.json`), 'utf-8')).nav.desktopApp); // 4913: one name — the sidebar's
       expect(typeof d.pageNote).toBe('string');
     }
   });

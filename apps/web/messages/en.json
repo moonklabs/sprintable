@@ -7253,7 +7253,7 @@
     "rowDetailAdsSpendLabel": "Ad spend"
   },
   "desktop": {
-    "pageTitle": "This computer and phone",
+    "pageTitle": "Desktop app",
     "pageNote": "Open or get the app, control it from your phone, and see connected devices — all on one screen.",
     "phoneRelayLocal": {
       "title": "Controlling from your phone works in hosted mode",

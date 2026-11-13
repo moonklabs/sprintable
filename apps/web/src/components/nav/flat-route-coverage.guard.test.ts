@@ -74,10 +74,15 @@ function realRoutes(dir = APP, out: string[] = []): string[] {
   return out.sort();
 }
 
-type Kind = 'table' | 'detail' | 'workTab' | 'noTopBarTitle';
+type Kind = 'table' | 'detail' | 'workTab' | 'noTopBarTitle' | 'redirectGated';
+
+/** 4913 — 서버 `redirect()`로 문을 지키는 화면은 loading.tsx 경계 아래에 못 선다(React 오류 310 · story #3915 — loading-coverage 가드). 그래서 FLAT_ROUTE_TOP_BAR(= loading 폴백) 줄이 없고,
+ * 제목은 화면이 자기 분기 안에서 그린다(동기 서버 화면이라 스트리밍 틈도 없다). 아래 «문 지킴 화면» 시험이 이 목록을 «실제로 redirect를 부르고 · loading이 안 덮는» 화면에 묶는다. */
+const REDIRECT_GATED = ['desktop'] as const;
 
 function classify(route: string): { kind: Kind } | { kind: 'unclassified'; slotIn: string } {
   if (route in FLAT_ROUTE_TOP_BAR) return { kind: 'table' };
+  if ((REDIRECT_GATED as readonly string[]).includes(route)) return { kind: 'redirectGated' };
   const segments = route.split('/');
   const rest = route.startsWith('[ws]/[proj]/') ? segments.slice(2) : segments;
   if (rest.some((s) => s.startsWith('['))) return { kind: 'detail' };
@@ -101,6 +106,15 @@ describe('상단바 폴백 표 — 실제 라우트 전수(story #4326 · 까디
       return c.kind === 'unclassified' ? [`${r} — ${c.slotIn}이 상단바를 채운다 → FLAT_ROUTE_TOP_BAR에 한 줄 + 자기 loading.tsx`] : [];
     });
     expect(unclassified).toEqual([]);
+  });
+
+  it('⭐문 지킴 화면(REDIRECT_GATED)은 정말 redirect()를 부르고, 어떤 loading.tsx도 안 덮는다 — 아니면 표 줄 + loading으로 올려야 한다', () => {
+    for (const r of REDIRECT_GATED) {
+      expect(readFileSync(path.join(APP, r, 'page.tsx'), 'utf8'), `${r} redirect`).toMatch(/import \{[^}]*\bredirect\b[^}]*\} from 'next\/navigation'[\s\S]*\bredirect\(/);
+      expect(existsSync(path.join(APP, r, 'loading.tsx')), `${r}/loading.tsx 없음`).toBe(false);
+      expect(existsSync(path.join(APP, 'loading.tsx')), '(authenticated)/loading.tsx 없음').toBe(false);
+      expect(r in FLAT_ROUTE_TOP_BAR, `${r}는 표에 없다`).toBe(false);
+    }
   });
 
   it('표의 경로는 실제 라우트다(없는 폴더 이름이 표에 남지 않게)', () => {

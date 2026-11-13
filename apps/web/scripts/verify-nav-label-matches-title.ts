@@ -36,6 +36,7 @@ export const NAV_TITLE_PAIRINGS: readonly NavTitlePairing[] = [
   { navItemId: 'org-trust', navKey: 'orgTrust', titleNamespace: 'organization', titleKey: 'trustSlotTitle' },
   { navItemId: 'docs', navKey: 'docs', titleNamespace: 'docs', titleKey: 'title' },
   { navItemId: 'org-workforce', navKey: 'workforce', titleNamespace: 'agents', titleKey: 'title' },
+  { navItemId: 'desktop-app', navKey: 'desktopApp', titleNamespace: 'desktop', titleKey: 'pageTitle' }, // 4913 — /desktop 위 막대 제목 = 사이드바 이름
 ];
 
 export interface NavTitleMismatch {
