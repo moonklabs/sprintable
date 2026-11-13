@@ -54,6 +54,7 @@ from app.core.security import (
     REFRESH_TOKEN_EXPIRE_DAYS,
     create_refresh_token,
 )
+from app.core.client_ip import audit_client_ip
 from app.core.rate_limit import hit_refresh_person_limit, limiter, note_failed_login, resend_verification_limiter
 from app.dependencies.auth import AuthContext, _reject_if_before_cutover, get_current_user, resolve_request_org_id
 from app.services.project_auth import (
@@ -1391,7 +1392,7 @@ async def login(
             if _counted.login_fail_count > 5 and _counted.login_locked_until is not None:
                 _already_locked_remaining = max(0, int((_counted.login_locked_until - datetime.now(timezone.utc)).total_seconds()))
         note_failed_login(request, body.email)  # story 4915 AC6: a warning line when one address fails as many different accounts (a spray under every per-account lock-out)
-        _ip = request.client.host if request.client else None
+        _ip = audit_client_ip(request)
         _ua = request.headers.get("user-agent")
         await _write_audit(
             session, "login_failure",
@@ -1422,7 +1423,7 @@ async def login(
         await _write_audit(
             session, "login_failure",
             user_id=user.id, email=body.email,
-            ip_address=request.client.host if request.client else None,
+            ip_address=audit_client_ip(request),
             user_agent=request.headers.get("user-agent"),
             detail="INVALID_CREDENTIALS",
         )
@@ -1496,7 +1497,7 @@ async def login(
     _, refresh_exp = create_refresh_token(str(user.id), expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
     await _store_refresh_token(session, user, tokens["refresh_token"], refresh_exp, app_metadata=_md)
 
-    _ip = request.client.host if request.client else None
+    _ip = audit_client_ip(request)
     _ua = request.headers.get("user-agent")
     await _write_audit(
         session, "login_success",
@@ -1924,7 +1925,7 @@ async def totp_verify(
     await session.execute(
         update(User).where(User.id == user.id).values(totp_enabled=True)
     )
-    _ip = request.client.host if request.client else None
+    _ip = audit_client_ip(request)
     _ua = request.headers.get("user-agent")
     await _write_audit(
         session, "2fa_enabled",
@@ -2279,7 +2280,7 @@ async def oauth_callback(
                 # (see `_reclaim_unproved_account`). None = another proof got there first → the plain tie below.
                 reclaimed_epoch = await _reclaim_unproved_account(
                     session, user, keep_provider=(provider, oauth_id), why=f"provider={provider}",
-                    ip_address=request.client.host if request.client else None,
+                    ip_address=audit_client_ip(request),
                 )
             if reclaimed_epoch is None:
                 # story 4838: the link writes the person's row — under the session lock, on an account still open (a deletion that got the lock first closed it)
@@ -2448,7 +2449,7 @@ async def oauth_link_callback(
         await _write_audit(
             session, "oauth_link_rejected_conflict", user_id=current_user_id,
             detail=f"provider={provider} already_linked_to={existing.id}",
-            ip_address=request.client.host if request.client else None,
+            ip_address=audit_client_ip(request),
         )
         await session.commit()
         return _err("PROVIDER_ALREADY_LINKED", f"This {provider} account is already linked to a different account", 409)
@@ -2461,7 +2462,7 @@ async def oauth_link_callback(
     )
     await _write_audit(
         session, "oauth_link", user_id=current_user_id, detail=f"provider={provider}",
-        ip_address=request.client.host if request.client else None,
+        ip_address=audit_client_ip(request),
     )
     await session.commit()
     return _ok({"provider": provider, "linked": True})
@@ -2496,7 +2497,7 @@ async def oauth_unlink(
     await session.execute(update(User).where(User.id == user.id).values(**{id_col_name: None}))
     await _write_audit(
         session, "oauth_unlink", user_id=user.id, detail=f"provider={provider}",
-        ip_address=request.client.host if request.client else None,
+        ip_address=audit_client_ip(request),
     )
     await session.commit()
     return _ok({"provider": provider, "linked": False})
