@@ -53,6 +53,11 @@ async function openMenu(text: string) {
   await act(async () => { rowOf(text).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 50 })); });
 }
 const menuItem = (label: string) => [...document.querySelectorAll('[role="menuitem"]')].find((b) => b.textContent?.includes(label)) as HTMLElement | undefined;
+// story 4912 follow-up: «삭제» asks once — the request goes out when the confirm's [삭제] is pressed
+const confirmDelete = async () => {
+  const b = [...document.querySelectorAll('[data-slot="ds-dialog-footer"] button')].find((x) => x.textContent === koMessages.common.delete) as HTMLElement;
+  await act(async () => { b.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+};
 const click = async (el: Element) => { await act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); }); };
 
 beforeEach(() => { Element.prototype.scrollIntoView = vi.fn(); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); addToast.mockReset(); });
@@ -80,6 +85,7 @@ describe('ThreadPanel — the message menu works (story 4887)', () => {
     window.addEventListener(CHAT_MESSAGE_DELETED_EVENT, listen);
     await openMenu('내 답글');
     await click(menuItem(koMessages.common.delete)!);
+    await confirmDelete();
     window.removeEventListener(CHAT_MESSAGE_DELETED_EVENT, listen);
     expect(heard, 'the panel announces the delete so the room LIST blanks a preview that showed this reply').toEqual([{ conversationId: 'conv-1', createdAt: '2026-11-11T00:01:00.000Z', messageId: 'r-mine', threadId: 'p1', deletedAt: '2026-11-11T01:00:00.000Z' }]); // story 4903 (codex on 5664): with the message's id
     const del = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE');
@@ -94,6 +100,7 @@ describe('ThreadPanel — the message menu works (story 4887)', () => {
     stubFetch(false); await mount();
     await openMenu('내 답글');
     await click(menuItem(koMessages.common.delete)!);
+    await confirmDelete();
     expect(addToast).toHaveBeenCalledTimes(1);
     expect(addToast.mock.calls[0]![0]).toMatchObject({ type: 'error', title: koMessages.chats.deleteMessageErrorTitle });
     expect(container.textContent).toContain('내 답글');
@@ -103,6 +110,7 @@ describe('ThreadPanel — the message menu works (story 4887)', () => {
     stubFetch(true); const onDeleteParent = vi.fn(); await mount(onDeleteParent);
     await openMenu('내 원본 글');
     await click(menuItem(koMessages.common.delete)!);
+    await confirmDelete();
     expect(onDeleteParent).toHaveBeenCalledWith('p1');
     expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(false);
   });
@@ -111,6 +119,7 @@ describe('ThreadPanel — the message menu works (story 4887)', () => {
     stubFetch(true); await mount();
     await openMenu('내 답글');
     await click(menuItem(koMessages.common.delete)!);
+    await confirmDelete();
     const tomb = [...container.querySelectorAll('[data-testid="thread-replies"] .group\\/bubble')].find((r) => r.textContent?.includes(koMessages.chats.deletedMessagePlaceholder)) as HTMLElement; // the tombstone row has no text test-id: find the ROW by its words
     await act(async () => { tomb.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 50 })); });
     expect(menuItem(koMessages.common.delete)).toBeUndefined(); // reverted (a gate on isMine alone) → a second DELETE is offered for a message that is gone

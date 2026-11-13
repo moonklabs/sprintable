@@ -5714,6 +5714,8 @@
     "sendFailed": "메시지 전송에 실패했어요. 다시 시도해 주세요.",
     "deleteMessageErrorTitle": "삭제 실패",
     "deleteMessageErrorBody": "메시지를 삭제하지 못했어요. 다시 시도해 주세요.",
+    "deleteMessageConfirmTitle": "이 메시지를 삭제할까요?",
+    "deleteMessageConfirmBody": "삭제하면 대화 참여자 모두에게 지워진 자리만 남고, 되돌릴 수 없어요.",
     "deletedMessagePlaceholder": "삭제된 메시지예요",
     "emptyMessagePlaceholder": "표시할 내용이 없는 메시지예요",
     "blockedSenderMessagePlaceholder": "차단한 사용자의 메시지예요",

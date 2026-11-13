@@ -9,6 +9,7 @@ import { Check, Copy, MessageSquare, MessageSquareReply, MoreHorizontal } from '
 import { Card } from '@/components/ds/card';
 import { Chip } from '@/components/ds/chip';
 import { useTranslations } from 'next-intl';
+import { ConfirmDialog } from '@/components/ds/dialog';
 import { ViewerDate } from '@/components/viewer-time-zone';
 import { VIEWER_TIME_OPTIONS } from '@/lib/viewer-time-zone';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
@@ -670,9 +671,25 @@ export function ChatBubble({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMine, plainRow, message.id]);
 
+  // story 4912 follow-up (PO 11-13): «삭제» used to delete at once (no way back — the row turns into a tombstone for everybody). It asks ONCE, with the ds confirm (danger: the first focus lands on «취소»);
+  // the confirm lives in the bubble, so the room's rows, a thread's original and a thread's replies — all of them reach the delete through this menu — ask the same way.
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const handleDelete = useCallback(() => {
+    setConfirmDeleteOpen(true);
+  }, []);
+  // the menu's «삭제» item is gone by the time the confirm opens, so Base UI has no trigger to hand the focus back to (it would fall to <body>): the message's own row takes it (codex round 1)
+  // …only if nothing else took the focus in the meantime (the user may already be somewhere else — codex round 2)
+  const returnFocusToRow = useCallback(() => {
+    window.setTimeout(() => {
+      const a = document.activeElement;
+      if (!a || a === document.body) rowRef.current?.focus({ preventScroll: true });
+    }, 0);
+  }, []);
+  const handleConfirmDelete = useCallback(() => {
+    setConfirmDeleteOpen(false);
     onDelete?.(message.id);
-  }, [message.id, onDelete]);
+    returnFocusToRow();
+  }, [message.id, onDelete, returnFocusToRow]);
 
   const handleOpenThread = useCallback(() => {
     (onOpenThread ?? onMenuReply)?.(message);
@@ -684,13 +701,14 @@ export function ChatBubble({
       <div
         id={`msg-${message.id}`}
         ref={rowRef}
+        tabIndex={-1}
         onClickCapture={(e) => {
           if (!longPressFiredRef.current) return;
           longPressFiredRef.current = false;
           e.preventDefault();
           e.stopPropagation();
         }}
-        className={`group/bubble flex scroll-mt-4 gap-2 transition-shadow ${isMine && !plainRow ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-0.5' : 'mt-2'} ${highlight ? 'rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-background' : ''} ${(isCiteAnchor || isCiteInRange) ? 'border-l-[3px] border-l-primary pl-1' : ''}`}
+        className={`group/bubble flex scroll-mt-4 gap-2 transition-shadow ${isMine && !plainRow ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-0.5' : 'mt-2'} ${highlight ? 'rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-background' : ''} ${(isCiteAnchor || isCiteInRange) ? 'border-l-[3px] border-l-primary pl-1' : ''} outline-none focus-visible:ring-2 focus-visible:ring-ds-action`}
         onContextMenu={handleContextMenu}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
@@ -1069,6 +1087,19 @@ export function ChatBubble({
           onBlock={onBlockUser}
         />
       )}
+
+      {onDelete ? (
+        <ConfirmDialog
+          open={confirmDeleteOpen && !isDeleted}
+          onOpenChange={(open) => { setConfirmDeleteOpen(open); if (!open) returnFocusToRow(); }}
+          title={t('deleteMessageConfirmTitle')}
+          description={t('deleteMessageConfirmBody')}
+          confirmLabel={tc('delete')}
+          cancelLabel={tc('cancel')}
+          tone="danger"
+          onConfirm={handleConfirmDelete}
+        />
+      ) : null}
 
       {/* story #2349 — "상대 프로필" 진입점 */}
       {profilePopover && (
