@@ -4,6 +4,7 @@ import { useId, type ReactNode } from 'react';
 import { Radio as RadioPrimitive } from '@base-ui/react/radio';
 import { RadioGroup as RadioGroupPrimitive } from '@base-ui/react/radio-group';
 import { cn } from '@/lib/utils';
+import { DATA_DISABLED_FACE } from './disabled-face';
 
 /** 묶음의 접근성 이름이 필수다(보이는 제목 id를 `aria-labelledby`로, 없으면 `aria-label`) — 이름 없는 radiogroup은 스크린리더가 «무엇을 고르는지» 알 수 없다. */
 type RadioGroupName = { 'aria-label': string; 'aria-labelledby'?: never } | { 'aria-labelledby': string; 'aria-label'?: never };
@@ -42,7 +43,7 @@ export function Radio({ label, className, onKeyDown, ...props }: RadioProps) {
             event.currentTarget.click();
           }
         }}
-        className="inline-flex size-4 shrink-0 items-center justify-center rounded-full border border-ds-line-control bg-ds-surface-sunk outline-none focus-visible:ring-2 focus-visible:ring-ds-action focus-visible:ring-offset-1 focus-visible:ring-offset-ds-background data-checked:border-ds-action data-disabled:cursor-not-allowed data-disabled:border-dashed data-disabled:bg-transparent data-disabled:data-checked:border-ds-line-control aria-invalid:border-ds-failed"
+        className={`inline-flex size-4 shrink-0 items-center justify-center rounded-full border border-ds-line-control bg-ds-surface-sunk outline-none focus-visible:ring-2 focus-visible:ring-ds-action focus-visible:ring-offset-1 focus-visible:ring-offset-ds-background data-checked:border-ds-action data-disabled:cursor-not-allowed ${DATA_DISABLED_FACE} aria-invalid:border-ds-failed data-disabled:aria-invalid:border-ds-failed data-disabled:data-checked:aria-invalid:border-ds-failed`}
         {...props}
       >
         <RadioPrimitive.Indicator data-slot="ds-radio-indicator" className="size-2 rounded-full bg-ds-action data-disabled:bg-ds-ink-3" />

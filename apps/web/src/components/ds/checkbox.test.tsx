@@ -74,20 +74,21 @@ describe('ds Checkbox', () => {
     expect(box().querySelector('[data-icon="check"]')).toBeNull();
   });
 
-  it('비활성은 스페이스에도 안 바뀌고 점선 윤곽 클래스를 가진다', async () => {
+  it('비활성은 스페이스에도 안 바뀌고 실선 흐린 면 클래스를 가진다', async () => {
     const seen: boolean[] = [];
     await render(<Checkbox label="x" disabled checked={false} onCheckedChange={(v) => seen.push(v)} />);
     await press(box(), ' ');
     expect(seen).toEqual([]);
-    expect(box().className).toContain('data-disabled:border-dashed');
+    expect(box().className).toContain('data-disabled:bg-ds-surface-high');
+    expect(box().className).not.toContain('border-dashed');
   });
 
   it('⭐비활성 + 켜짐 · 일부 선택은 활성 색(action 면)을 잃는다 — 켜진 상태는 글리프로만 남는다', async () => {
     await render(<Checkbox label="x" disabled defaultChecked />);
     const cls = box().className;
-    expect(cls).toContain('data-disabled:data-checked:bg-transparent');
-    expect(cls).toContain('data-disabled:data-checked:border-ds-line-control');
-    expect(cls).toContain('data-disabled:data-indeterminate:bg-transparent');
+    expect(cls).toContain('data-disabled:data-checked:bg-ds-surface-high');
+    expect(cls).toContain('data-disabled:data-checked:border-ds-line');
+    expect(cls).toContain('data-disabled:data-indeterminate:bg-ds-surface-high');
     expect(box().querySelector('[data-icon="check"]')).not.toBeNull();
   });
 

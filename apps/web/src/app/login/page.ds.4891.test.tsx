@@ -41,7 +41,7 @@ const email = () => container.querySelector('input[type="email"]') as HTMLInputE
 const password = () => container.querySelector('input[type="password"]') as HTMLInputElement;
 
 describe('[SID:4891] LoginPage on ds parts', () => {
-  it('⭐the e-mail and password boxes are ds Inputs with a NAME (the placeholder is the hint, the name is the word); [로그인] is a ds Button that is off until both are typed', async () => {
+  it('⭐the e-mail and password boxes are ds Inputs with a NAME (the placeholder is the hint, the name is the word); [로그인] is a ds Button that stays ON with empty boxes (4924 — it says what is missing when pressed; page.empty-fields.4924.test.tsx)', async () => {
     await mount();
     for (const [el, name] of [[email(), L.email], [password(), L.password]] as const) {
       expect(el.getAttribute('data-slot')).toBe('ds-input');
@@ -50,9 +50,9 @@ describe('[SID:4891] LoginPage on ds parts', () => {
     }
     expect(signIn().getAttribute('data-slot')).toBe('ds-button'); // the ds Button, not a hand-made <button>…
     expect(signIn().className).toContain('bg-ds-action'); // …in the primary look
-    expect(signIn().disabled).toBe(true);
+    expect(signIn().disabled).toBe(false);
     await type(email(), 'a@b.co');
-    expect(signIn().disabled).toBe(true);
+    expect(signIn().disabled).toBe(false);
     await type(password(), 'pw');
     expect(signIn().disabled).toBe(false);
   });

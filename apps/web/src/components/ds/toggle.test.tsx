@@ -68,11 +68,12 @@ describe('ds Toggle', () => {
     expect(document.activeElement).toBe(sw());
   });
 
-  it('비활성: 점선 윤곽 클래스 · 클릭해도 안 바뀐다', async () => {
+  it('비활성: 실선 흐린 면 클래스 · 클릭해도 안 바뀐다', async () => {
     const seen: boolean[] = [];
     await render(<Toggle label="x" onText="켬" offText="끔" disabled onCheckedChange={(v) => seen.push(v)} />);
-    expect(sw().className).toContain('data-disabled:border-dashed');
-    expect(sw().className).toContain('data-disabled:data-checked:bg-transparent');
+    expect(sw().className).toContain('data-disabled:bg-ds-surface-high');
+    expect(sw().className).not.toContain('border-dashed');
+    expect(sw().className).toContain('data-disabled:data-checked:bg-ds-surface-high');
     expect(sw().querySelector('span')!.className).toContain('group-data-[disabled]/toggle:data-checked:bg-ds-ink-3');
     await act(async () => { sw().click(); });
     expect(seen).toEqual([]);

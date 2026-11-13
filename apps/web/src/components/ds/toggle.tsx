@@ -3,6 +3,7 @@
 import { Switch as SwitchPrimitive } from '@base-ui/react/switch';
 import { useId, useState } from 'react';
 import { cn } from '@/lib/utils';
+import { DATA_DISABLED_FACE } from './disabled-face';
 
 export type ToggleProps = Omit<SwitchPrimitive.Root.Props, 'className' | 'children'> & {
   className?: string;
@@ -33,7 +34,7 @@ export function Toggle({ label, onText, offText, className, checked, defaultChec
           // 호출부가 details.cancel()로 바꿈을 막았으면 Base UI는 그대로이므로 글도 따라 바꾸지 않는다(글과 실제 상태가 갈리지 않게).
           if (!details.isCanceled) setInner(next);
         }}
-        className="group/toggle relative inline-flex h-4 w-7 shrink-0 items-center rounded-full border border-ds-line-control bg-ds-surface-sunk outline-none focus-visible:ring-2 focus-visible:ring-ds-action focus-visible:ring-offset-1 focus-visible:ring-offset-ds-background data-checked:border-ds-action data-checked:bg-ds-action data-disabled:cursor-not-allowed data-disabled:border-dashed data-disabled:bg-transparent data-disabled:data-checked:border-ds-line-control data-disabled:data-checked:bg-transparent"
+        className={`group/toggle relative inline-flex h-4 w-7 shrink-0 items-center rounded-full border border-ds-line-control bg-ds-surface-sunk outline-none focus-visible:ring-2 focus-visible:ring-ds-action focus-visible:ring-offset-1 focus-visible:ring-offset-ds-background data-checked:border-ds-action data-checked:bg-ds-action data-disabled:cursor-not-allowed ${DATA_DISABLED_FACE}`}
         {...props}
       >
         <SwitchPrimitive.Thumb className="pointer-events-none block size-3 translate-x-0.5 rounded-full bg-ds-ink-2 transition-transform duration-(--ds-duration-fast) motion-reduce:transition-none data-checked:translate-x-3.5 data-checked:bg-ds-on-action group-data-[disabled]/toggle:bg-ds-ink-3 group-data-[disabled]/toggle:data-checked:bg-ds-ink-3" />
