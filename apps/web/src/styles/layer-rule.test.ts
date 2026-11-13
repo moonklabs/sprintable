@@ -11,6 +11,7 @@ import { ARTIFACT_CARD_FACE, ARTIFACT_CARD_WELL, ARTIFACT_PANEL } from '../compo
 import { HYPOTHESES_FACE, HYPOTHESIS_BAND_FACE } from '../components/hypotheses/hypotheses-face';
 import { GOALS_FRAME_FACE } from '../app/(authenticated)/[ws]/[proj]/goals/goals-layer';
 import { AGENT_RUNS_PANEL_FACE, AGENT_RUNS_ROW_FACE } from '../components/agents/agent-runs-list';
+import { LOOP_PANEL_FACE, LOOP_ROW_FACE, LOOP_ROW_HOVER } from '../app/(authenticated)/[ws]/[proj]/loops/loops-layer';
 
 const css = readFileSync(join(__dirname, 'design-system.css'), 'utf8');
 
@@ -186,7 +187,7 @@ describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
   // 4913(셸 바탕 PR · codex 검수) — 셸 안에서 «쪽 바탕 자리»를 옛 bg-background로 칠하던 곳(붙는 띠 · 전폭 면 · 채팅 · 문서 바탕 · 오류 화면)은 같은 토큰(LAYER.page = bg-ds-background)이다. 하나라도 옛 색으로 되돌아가면
   // 셸(차가운 ds 바탕) 위에 따뜻한 옛 바탕 띠가 떠 보인다. 아래 문자열은 그 자리의 클래스 한 줄 그대로다(셸 밖 화면 — 로그인 · 온보딩 · 초대 · 폰 첫 화면 · v3 /today · /chat(`app/(v3)`, DashboardShell 밖) — 은 몸통 바탕(옛 토큰) 위라 대상이 아니다: 거기 서 있는 칸을 ds 색으로 바꾸면 오히려 따뜻한 바탕 위에 차가운 칸이 뜬다).
   const PAGE_FILLS: Array<[string, string]> = [
-  ['app/(authenticated)/[ws]/[proj]/loops/loops-client.tsx', "sticky top-0 z-10 flex flex-wrap gap-1 bg-ds-background px-4 pt-3 pb-1"],
+  ['app/(authenticated)/[ws]/[proj]/loops/loops-layer.ts', "sticky top-0 z-10 -mx-4 bg-ds-background px-4 py-2 sm:-mx-6 sm:px-6"],
   ['app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx', "sticky top-0 z-10 space-y-1 border-b border-border/80 bg-ds-background px-6 py-3"],
   ['app/(authenticated)/[ws]/[proj]/standup/standup-client.tsx', "sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b border-border/80 bg-ds-background px-4 py-2 lg:hidden"],
   ['app/(authenticated)/channel/page.tsx', "flex flex-col bg-ds-background"],
@@ -251,5 +252,29 @@ describe('실행 기록 목록(4911) — 바탕 → 그룹 칸 → 행', () => {
   it.each(themes)('⭐%s: 바탕 → 그룹 칸 ≥ 문턱 · 그룹 칸 → 행 ≥ 문턱', (_name, t) => {
     expect(step(t, 'page', 'panel')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.panelOverPage);
     expect(step(t, 'panel', 'rowOthers')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPanel);
+  });
+});
+
+// 4911 AC3 — 실행(루프) 목록: 구획 패널(RowList = Card) = 내용 칸 · 행 얼굴 = 남의 글 줄 층. 옛 목록은 행(`bg-card`)과 바탕이 라이트 +0.027로 선 아래였다(dev 실측 11-12) — 이제 화면이 층 표 이름을 그대로 쓰고 그 사이가 선을 지킨다.
+describe('실행 목록(4911) — 바탕 → 패널 → 행', () => {
+  it('화면이 층 표 이름을 그대로 쓴다: 패널 = panel · 행 얼굴 = rowOthers', () => {
+    expect(LOOP_PANEL_FACE).toBe(LAYER.panel);
+    expect(LOOP_ROW_FACE).toBe(LAYER.rowOthers);
+    expect(LOOP_ROW_HOVER).toContain(`hover:${LAYER.well}`);
+    expect(LOOP_ROW_HOVER).toContain('hover:[&_div.font-mono]:text-ds-ink-2');
+  });
+
+  it.each(themes)('⭐%s: 호버 면(well) 위 — 둘째 줄 ink-2는 4.5:1 이상이고, 옛 ink-3은 아래라서 호버 동안 ink-2로 올린다', (_name, t) => {
+    expect(contrast(t['ink-2']!, t[LAYER_TOKEN.well]!)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(t['ink-3']!, t[LAYER_TOKEN.well]!)).toBeLessThan(4.5);
+  });
+
+  it.each(themes)('⭐%s: 바탕 → 패널 ≥ 0.03 · 패널 → 행 얼굴 ≥ 0.05 (옛 «행 ↔ 내용 칸» 라이트 +0.027 · 다크 +0.059가 아니라)', (_name, t) => {
+    expect(step(t, 'page', 'panel')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.panelOverPage);
+    expect(step(t, 'panel', 'rowOthers')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.rowOthersOnPanel);
+  });
+
+  it('⭐호버 = 한 단 위(rowOthers → well)로 갈린다: 행 얼굴과 호버 면의 밝기차가 우물 선(≥ 0.03)을 지킨다', () => {
+    for (const [, t] of themes) expect(step(t, 'rowOthers', 'well')).toBeGreaterThanOrEqual(LAYER_MIN_STEP.wellOnRow);
   });
 });
