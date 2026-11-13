@@ -58,10 +58,13 @@ describe('AgentApiKeyManager — 4889 header does not push the card wider at 402
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     const card = document.querySelector('[data-testid="agent-api-key-manager"]');
     expect(card).toBeTruthy();
-    const head = card!.querySelector('h3')!.parentElement!.parentElement!; // 제목 칸의 부모 = 머리 줄
+    // story 4912 (C3): the title + description are the ds card's header (DetailCard: flex-wrap, the title column min-w-0); the three buttons are the first row of the body
+    const head = card!.querySelector('[data-slot="detail-card-header"]')!;
     expect(head.className).toContain('flex-wrap');
     expect(head.firstElementChild!.className).toContain('min-w-0');
-    const actions = head.lastElementChild!; // 버튼 묶음 칸
+    const actionRow = card!.querySelector('[data-slot="detail-card-body"]')!.firstElementChild!; // 버튼 묶음이 든 줄
+    expect(actionRow.className).toContain('flex-wrap');
+    const actions = actionRow.firstElementChild!; // 버튼 묶음 칸
     expect(actions.className).toContain('min-w-0');
     const buttonRow = actions.firstElementChild!; // 버튼 셋의 줄
     expect(buttonRow.className).toContain('flex-wrap');
@@ -90,12 +93,12 @@ describe('AgentApiKeyManager — #2526 scope chip overflow', () => {
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    const adminChip = Array.from(document.querySelectorAll('span')).find((s) => s.textContent === 'admin');
+    const adminChip = Array.from(document.querySelectorAll('[data-slot="ds-chip"]')).find((s) => s.textContent === 'admin');
     expect(adminChip).toBeTruthy();
     const chipRow = adminChip?.parentElement;
     expect(chipRow?.className).toContain('flex-wrap');
 
-    const cardRow = chipRow?.closest('div.border.rounded-md');
+    const cardRow = chipRow?.closest('div.rounded-ds-control');
     const leftCol = chipRow?.closest('div.min-w-0');
     expect(leftCol).toBeTruthy();
     expect(leftCol?.className).toContain('flex-1');
@@ -170,7 +173,7 @@ describe('AgentApiKeyManager — #2838 발급 시 만료 명시 전송', () => {
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    const select = document.querySelector('select[data-slot="select"]') as HTMLSelectElement | null;
+    const select = document.querySelector('[data-slot="ds-select"] select') as HTMLSelectElement | null;
     expect(select).toBeTruthy();
     expect(select?.value).toBe('90d');
     const options = Array.from(select?.options ?? []).map((o) => o.value);
@@ -232,7 +235,7 @@ describe('AgentApiKeyManager — #2838 발급 시 만료 명시 전송', () => {
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    const select = document.querySelector('select[data-slot="select"]') as HTMLSelectElement;
+    const select = document.querySelector('[data-slot="ds-select"] select') as HTMLSelectElement;
     const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!;
     await act(async () => {
       nativeSetter.call(select, 'never');
@@ -262,7 +265,7 @@ describe('AgentApiKeyManager — 머리 줄 라벨([SID:4311 PR 3])', () => {
       );
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(document.querySelector('h3')?.textContent).toBe(koMessages.settings.agentApiKeyListTitle.replace('{name}', '봇 · aaaa1111')); // story #4359 — ko 머리 줄
+    expect(document.querySelector('h2')?.textContent).toBe(koMessages.settings.agentApiKeyListTitle.replace('{name}', '봇 · aaaa1111')); // story #4359 — ko 머리 줄
     await act(async () => {
       root.render(
         <NextIntlClientProvider locale="ko" messages={koMessages}>
@@ -270,7 +273,7 @@ describe('AgentApiKeyManager — 머리 줄 라벨([SID:4311 PR 3])', () => {
         </NextIntlClientProvider>,
       );
     });
-    expect(document.querySelector('h3')?.textContent).toBe(koMessages.settings.agentApiKeyListTitle.replace('{name}', '봇')); // story #4359 — ko 머리 줄
+    expect(document.querySelector('h2')?.textContent).toBe(koMessages.settings.agentApiKeyListTitle.replace('{name}', '봇')); // story #4359 — ko 머리 줄
   });
 });
 
