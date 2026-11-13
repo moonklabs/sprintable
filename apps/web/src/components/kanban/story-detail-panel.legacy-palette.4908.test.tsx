@@ -27,7 +27,8 @@ const PANEL_SOURCES = [
   'kanban/story-detail-panel.tsx', 'kanban/recipe-start-section.tsx', 'kanban/concept-card-section.tsx', 'dispatch/entity-dispatch-panel.tsx',
   'integrations/pr-link-section.tsx', 'hypotheses/story-hypotheses-section.tsx', 'canvas/artifact-section.tsx', 'workcell/workcell.tsx', 'workcell/workcell-fold.tsx',
   'outcome/outcome-result-card.tsx', 'shared/rejected-relations-section.tsx', 'shared/story-origin-section.tsx', 'shared/entity-aware-textarea.tsx',
-  'insights-board/story-insights-compare-section.tsx', 'cage/story-merge-gate.tsx', 'cage/stuck-handoff-section.tsx', 'verify/evidence-section.tsx', 'verify/chat-proof-section.tsx',
+  'insights-board/story-insights-compare-section.tsx', 'insights-board/follow-up-dialog.tsx', 'cage/story-merge-gate.tsx', 'cage/stuck-handoff-section.tsx', 'cage/stuck-handoff-detail.tsx',
+  'verify/evidence-section.tsx', 'verify/chat-proof-section.tsx',
 ];
 const TOKEN_IN_SOURCE = /(?<=^|[\s"'`{(])((?:[\w-]+:)*(?:bg-(?:background|muted|secondary|primary|card|popover|accent|input)|border-(?:border|input)|text-primary|(?:bg|border|text|ring|fill|stroke|from|to|via|divide|outline)-proof-[\w-]+|proof-surface[\w-]*)(?:\/\d+)?)(?=[\s"'`})\]]|$)/g;
 function sourceHits(): string[] {
@@ -97,7 +98,7 @@ function legacyHits(): string[] {
 }
 
 /** 이 장 밖의 공용 부품(여러 화면이 같이 쓰는 것): 증거 캡슐(게이트 · 결재 · 목표 화면) · 아바타(채팅 · 목록 …) — 안쪽의 옛 클래스는 그 부품을 바꾸는 장의 몫이다. */
-const SHARED = '[data-slot="proof-capsule"], [data-slot="avatar"]';
+const SHARED = '[data-slot="proof-capsule"], [data-avatar]';
 const click = (el: Element | null | undefined) => act(async () => { (el as HTMLElement).click(); await Promise.resolve(); });
 const byText = (re: RegExp, scope: ParentNode = document) => [...scope.querySelectorAll<HTMLElement>('button, [role="tab"], [role="menuitem"]')].find((b) => re.test(b.textContent ?? ''));
 

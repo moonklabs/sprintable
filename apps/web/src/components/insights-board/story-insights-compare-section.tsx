@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useChannelLabel } from '@/lib/channel-label';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ds/button';
 import { InsightsBoardMetricCell } from './insights-board-metric-cell';
 import { FollowUpDialog } from './follow-up-dialog';
 import { declaredMetricsForChannel } from './channel-declared-metrics';
@@ -78,7 +78,7 @@ function PublicationCard({
           )}
           <p className="text-xs text-muted-foreground">{channelLabel(row.channel)}</p>
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={() => setFollowUpOpen(true)} data-testid="story-compare-follow-up-button">
+        <Button type="button" variant="secondary" className="hover:bg-ds-surface-highest" onClick={() => setFollowUpOpen(true)} data-testid="story-compare-follow-up-button">
           {tBoard('followUpAction')}
         </Button>
       </div>

@@ -131,7 +131,7 @@ export function StoryHypothesesSection({
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground">{t('linkedTitle')}</h3>
         {!pickerOpen ? (
-          <Button type="button" variant="secondary" onClick={openPicker} iconStart={<Plus className="size-3.5" />} className="h-auto px-2.5 py-1 text-xs font-medium">
+          <Button type="button" variant="secondary" onClick={openPicker} iconStart={<Plus className="size-3.5" />} className="h-auto px-2.5 py-1 text-xs font-medium hover:bg-ds-surface-highest">
             {t('linkHypothesis')}
           </Button>
         ) : null}

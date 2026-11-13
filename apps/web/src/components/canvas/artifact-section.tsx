@@ -262,7 +262,7 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
           {/* story 64010b05 §2 — 임포트는 "그리기"와 co-located된 2번째 입구(별도 숨은 경로 X). */}
           <div className="mt-1 flex items-center gap-2">
             <Button type="button" variant="primary" onClick={() => setCreating(true)}>{t('createCta')}</Button>
-            <Button type="button" variant="secondary" onClick={() => setImportOpen(true)}>{t('importCta')}</Button>
+            <Button type="button" variant="secondary" className="hover:bg-ds-surface-highest" onClick={() => setImportOpen(true)}>{t('importCta')}</Button>
           </div>
         </div>
         <ImportArtifactDialog open={importOpen} onOpenChange={setImportOpen} onImport={handleImportCommit} targetId={storyId} />

@@ -246,7 +246,7 @@ describe('EntityAwareTextarea — 바탕 부품(story 4831)', () => {
       root.render(<EntityAwareTextarea value="" onChange={onChange} className="min-h-[160px] font-mono" autoFocus />);
     });
     const el = textarea();
-    expect(el.dataset.slot).toBe('textarea');
+    expect(el.dataset.slot).toBe('ds-textarea');
     const tokens = el.className.split(/\s+/);
     expect(tokens).toContain('min-h-[160px]');
     expect(tokens).toContain('font-mono');
