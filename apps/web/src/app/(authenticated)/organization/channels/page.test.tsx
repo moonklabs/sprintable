@@ -2244,81 +2244,116 @@ describe('OrganizationChannelsPage — 헤더 주 액션(story #3743)', () => {
     delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
   });
 
-  // story #3743(로컬 캡처 中 자가 발견 — 페드루 PO 확認) — 앱 자격 등록은 owner 전용인데
-  // 헤더 버튼이 role 무관하게 서 있던 실 결함. 되돌리면(isOwnerStrict 조건 제거) RED.
-  it('⭐비-소유자는 미등록 채널이 있어도 헤더 주 액션이 안 보인다(owner 전용, §5-2)', async () => {
-    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }]);
-    await mount('member');
-    expect(container.querySelector('[data-testid="channel-connect-header-register-action"]')).toBeNull();
-  });
+  // 4913 C1 후속(PO 판정) — 머리 «앱 자격 등록 ▾»는 행마다 있는 «앱 자격 등록» 단추와 «같은 일»(그 채널 행으로 스크롤 + 펼침)이라 걷었다: 한 자리 = 행 단추.
+  // 옛 머리 단추 시험은 같은 의도를 행 단추로 옮겨 그대로 지킨다(owner 전용 · 미등록일 때만 · 누르면 그 행 펼침 + 스크롤 · 둘 이상이어도 각 행이 자기 단추).
+  const registerBtns = () => [...container.querySelectorAll('[data-testid="channel-row-primary-register"]')] as HTMLButtonElement[];
 
-  it('⭐미등록(effective_source=none) oauth 채널이 0개면 주 액션 자체를 안 그린다(그려진 컨트롤=할 수 있다는 약속)', async () => {
-    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'platform' }]);
-    await mount('owner');
-    // 채널 행 안의 AppCredentialsCard도 같은 문구("앱 자격 등록")를 쓸 수 있어(effective_
-    // source='platform'이면 재입력이 아니라 등록 문구) 텍스트 대조는 안 쓴다 — 헤더 자리
-    // 자체(testid)의 부재를 잰다.
-    expect(container.querySelector('[data-testid="channel-connect-header-register-action"]')).toBeNull();
-  });
-
-  it('⭐미등록 채널이 1개면 메뉴 없이 버튼 하나(누르면 그 채널 행으로 스크롤)', async () => {
-    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }, { channel: 'facebook', effectiveSource: 'org' }]);
-    await mount('owner');
-    const btn = container.querySelector('[data-testid="channel-connect-header-register-action"]');
-    expect(btn).toBeTruthy();
-    expect(btn?.tagName).toBe('BUTTON');
-    // 메뉴(팝업)가 아니라 단일 버튼이라 클릭해도 role="menu"가 새로 안 생긴다.
-    expect(container.querySelector('[role="menu"]')).toBeNull();
-  });
-
-  it('⭐미등록 채널이 2개 이상이면 메뉴로 고른다(항목=channelLabel 표시명, 메뉴 제목 없음)', async () => {
+  it('⭐머리(PageHead)에는 «앱 자격 등록» 단추가 없다 — 그 일은 행마다 있는 단추 한 자리다(같은 일을 두 자리에 세우지 않는다)', async () => {
     stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }, { channel: 'facebook', effectiveSource: 'none' }]);
     await mount('owner');
-    const trigger = container.querySelector('[data-testid="channel-connect-header-register-action"]');
-    expect(trigger).toBeTruthy();
-    await act(async () => { trigger!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    await flush();
-    expect(container.textContent).toContain(koMessages.channelConnect.channelThreads);
-    expect(container.textContent).toContain(koMessages.channelConnect.channelLabelFacebook);
+    expect(container.querySelector('[data-testid="channel-connect-header-register-action"]')).toBeNull();
+    expect(container.querySelector('[data-slot="ds-page-head"] button')).toBeNull();
+    expect(registerBtns()).toHaveLength(2);
   });
 
-  // 카디르 QA changes(#4090 리뷰, 2026-09-09 13:11Z) — 「클릭 뒤 동작」(그 행으로 스크롤+
-  // 펼침) 자체를 재는 단언이 0이었다(태그/메뉴 부재만 검사) — DropdownMenu로 갈아도
-  // 초록이었을 자리. scrollIntoView는 jsdom 미구현이라 스파이로 호출 자체를 잰다
-  // (실제 스크롤 여부가 아니라 "그 행을 대상으로 시도했다"만 확인 가능한 축).
-  it('⭐미등록 1개 — 헤더 버튼을 누르면 그 채널 행이 펼쳐지고 scrollIntoView가 그 행 대상으로 불린다', async () => {
+  it('⭐행마다 «앱 자격 등록» 단추의 접근 이름에 채널 이름이 든다(옛 머리 메뉴가 항목마다 채널 이름을 가졌던 것 — 보조기술 단추 목록에서 같은 이름이 되지 않게)', async () => {
+    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }, { channel: 'facebook', effectiveSource: 'none' }]);
+    await mount('owner');
+    const names = registerBtns().map((b) => b.getAttribute('aria-label'));
+    expect(new Set(names).size).toBe(2);
+    expect(names[0]).toContain(koMessages.channelConnect.channelThreads);
+    expect(names[1]).toContain(koMessages.channelConnect.channelLabelFacebook);
+    for (const n of names) expect(n).toContain(koMessages.channelConnect.appCredentialsRegisterAction);
+  });
+
+  it('⭐비-소유자는 미등록 채널이 있어도 «앱 자격 등록» 단추가 어디에도 안 보인다(owner 전용, §5-2)', async () => {
+    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }]);
+    await mount('member');
+    expect(registerBtns()).toHaveLength(0);
+  });
+
+  it('⭐미등록(effective_source=none) oauth 채널이 0개면 «앱 자격 등록» 행 단추 자체를 안 그린다(그려진 컨트롤=할 수 있다는 약속)', async () => {
+    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'platform' }]);
+    await mount('owner');
+    expect(registerBtns()).toHaveLength(0);
+  });
+
+  it('⭐미등록 1개 — 그 행의 단추 하나(메뉴 없음)를 누르면 그 채널 행이 펼쳐지고 scrollIntoView가 불린다', async () => {
     stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }, { channel: 'facebook', effectiveSource: 'org' }]);
     const scrollSpy = vi.fn();
     Element.prototype.scrollIntoView = scrollSpy;
     await mount('owner');
-    const btn = container.querySelector('[data-testid="channel-connect-header-register-action"]') as HTMLButtonElement;
+    expect(registerBtns()).toHaveLength(1);
+    expect(container.querySelector('[role="menu"]')).toBeNull();
     expect(container.querySelector('[data-testid="channel-section-body"]')).toBeNull();
-    await act(async () => { btn.click(); });
+    await act(async () => { registerBtns()[0]!.click(); });
     await flush();
-    expect(container.querySelector('[data-testid="channel-section-body"]')).not.toBeNull();
     expect(scrollSpy).toHaveBeenCalled();
     const threadsSection = [...container.querySelectorAll('[data-testid="channel-section"]')].find((el) => el.textContent?.includes(koMessages.channelConnect.channelThreads));
     expect(threadsSection?.querySelector('[data-testid="channel-section-body"]')).not.toBeNull();
   });
 
-  it('⭐미등록 2개 이상 — 메뉴 항목을 고르면 그 채널 행이 펼쳐지고 scrollIntoView가 불린다', async () => {
+  it('⭐미등록 2개 이상 — 각 행이 자기 단추를 갖고, 둘째 행 단추는 그 채널 행만 펼치고 scrollIntoView가 불린다', async () => {
     stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }, { channel: 'facebook', effectiveSource: 'none' }]);
     const scrollSpy = vi.fn();
     Element.prototype.scrollIntoView = scrollSpy;
     await mount('owner');
-    const trigger = container.querySelector('[data-testid="channel-connect-header-register-action"]');
-    await act(async () => { trigger!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    await flush();
-    const items = [...document.body.querySelectorAll('[role="menuitem"]')];
-    const facebookItem = items.find((el) => el.textContent === koMessages.channelConnect.channelLabelFacebook);
-    await act(async () => { facebookItem!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(registerBtns()).toHaveLength(2);
+    await act(async () => { registerBtns()[1]!.click(); });
     await flush();
     expect(scrollSpy).toHaveBeenCalled();
     const facebookSection = [...container.querySelectorAll('[data-testid="channel-section"]')].find((el) => el.textContent?.includes(koMessages.channelConnect.channelLabelFacebook));
     expect(facebookSection?.querySelector('[data-testid="channel-section-body"]')).not.toBeNull();
-    // threads 행은 안 펼쳐진 채(선택 대상이 아니다).
     const threadsSection = [...container.querySelectorAll('[data-testid="channel-section"]')].find((el) => el.textContent?.includes(koMessages.channelConnect.channelThreads));
     expect(threadsSection?.querySelector('[data-testid="channel-section-body"]')).toBeNull();
+  });
+
+  // 4913 C1 후속(PO 판정) — «같은 말 세 자리»: 설정 미완 사유는 채널마다 같은 문장이라 둘 이상이면 목록 위에 한 번만.
+  const REASON = koMessages.channelConnect.channelConfigIncompleteReason;
+  const occurrences = (text: string, needle: string) => text.split(needle).length - 1;
+
+  it('⭐설정 미완 채널이 둘 이상이면 사유 문장은 목록 위에 «한 번만» 서고 행 아래에는 안 선다', async () => {
+    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }, { channel: 'facebook', effectiveSource: 'none' }, { channel: 'instagram', effectiveSource: 'none' }]);
+    await mount('owner');
+    const once = container.querySelector('[data-testid="channel-config-incomplete-once"]')!;
+    expect(once.textContent).toBe(REASON);
+    expect(occurrences(container.textContent ?? '', REASON)).toBe(1);
+    for (const sec of container.querySelectorAll('[data-testid="channel-section"]')) expect(sec.textContent).not.toContain(REASON);
+    // 칩(«설정 미완»)은 행마다 그대로 — 사유만 한 번이다
+    expect(container.querySelectorAll('[data-status-chip="config_incomplete"]')).toHaveLength(3);
+  });
+
+  it('⭐설정 미완 채널이 하나면 목록 위 줄은 없고 그 행 아래에 사유가 그대로 선다(행마다 다른 사유일 때만 행 아래라는 규칙의 한 행 경우)', async () => {
+    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }, { channel: 'facebook', effectiveSource: 'org' }]);
+    await mount('owner');
+    expect(container.querySelector('[data-testid="channel-config-incomplete-once"]')).toBeNull();
+    const threads = [...container.querySelectorAll('[data-testid="channel-section"]')].find((el) => el.textContent?.includes(koMessages.channelConnect.channelThreads))!;
+    expect(threads.querySelector('[data-slot="ds-row-footnote"]')!.textContent).toContain(REASON);
+    expect(occurrences(container.textContent ?? '', REASON)).toBe(1);
+  });
+
+  it('⭐연결이 이미 있는 채널은 «설정 미완» 개수에 안 센다 — 미등록 채널이 하나뿐이면 목록 위 줄 없이 그 행 아래에 사유', async () => {
+    stubFetch({
+      connections: [{ ...CONNECTION_ACTIVE, id: 'conn-fb', channel: 'facebook', account_label: '@fb' }],
+      credentials: { configured: false, app_id_suffix: null, effective_source: 'none' },
+      availableChannels: [
+        { channel: 'threads', display_name: 'Threads', credential_kind: 'oauth', kind: 'social' },
+        { channel: 'facebook', display_name: 'Facebook', credential_kind: 'oauth', kind: 'social' },
+      ],
+    });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="channel-config-incomplete-once"]')).toBeNull();
+    const threads = [...container.querySelectorAll('[data-testid="channel-section"]')].find((el) => el.textContent?.includes(koMessages.channelConnect.channelThreads))!;
+    expect(threads.querySelector('[data-slot="ds-row-footnote"]')!.textContent).toContain(REASON);
+  });
+
+  it('⭐행마다 다른 사유(예: facebook 앱 안내)는 행 아래에 그대로 서고, 한 번만 규칙은 같은 «설정 미완» 문장에만 건다', async () => {
+    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }, { channel: 'instagram', effectiveSource: 'none' }, { channel: 'facebook', effectiveSource: 'org' }]);
+    await mount('owner');
+    expect(container.querySelector('[data-testid="channel-config-incomplete-once"]')!.textContent).toBe(REASON); // 설정 미완 둘 → 위 한 줄
+    const facebook = [...container.querySelectorAll('[data-testid="channel-section"]')].find((el) => el.textContent?.includes(koMessages.channelConnect.channelLabelFacebook))!;
+    expect(facebook.querySelector('[data-slot="ds-row-footnote"]')!.textContent).toContain(koMessages.channelConnect.channelConnectFacebookAppGuidance); // 이 행만의 사유는 행 아래
+    expect(occurrences(container.textContent ?? '', REASON)).toBe(1);
   });
 
   // 카디르 QA changes(#4090 리뷰) — 「펼침은 페이지당 1행」을 재는 테스트 0이었다(두
@@ -2542,12 +2577,12 @@ describe('OrganizationChannelsPage — 한 쪽 틀(4913 C판)', () => {
     expect(beaconRow.querySelector('[data-slot="ds-row-footnote"] [data-testid="measurement-beacon-key-panel"]')).not.toBeNull();
   });
 
-  it('⭐헤더 주 행동은 설명 한 줄 오른쪽(PageHead actions)에 서고 본문에 제목 머리(PageHeader)는 없다', async () => {
+  it('⭐머리(PageHead)는 설명 한 줄뿐이고 본문에 제목 머리(PageHeader)는 없다 — 주 행동은 행 단추 한 자리', async () => {
     stubFetch({ connections: [], credentials: { configured: false, app_id_suffix: null, effective_source: 'none' } });
     await mount('owner');
     const head = container.querySelector('[data-slot="ds-page-head"]')!;
     expect(head.textContent).toContain(GUIDE.pageDescription);
-    expect(head.querySelector('[data-testid="channel-connect-header-register-action"]')).not.toBeNull();
+    expect(head.querySelector('button, a')).toBeNull();
     expect(head.querySelector('h1, h2')).toBeNull();
   });
 

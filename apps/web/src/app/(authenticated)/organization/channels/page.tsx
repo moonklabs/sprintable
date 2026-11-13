@@ -9,8 +9,7 @@ import { Button } from '@/components/ds/button';
 import { Card } from '@/components/ds/card';
 import { Chip } from '@/components/ds/chip';
 import { EmptyState } from '@/components/ds/empty-state';
-import { Icon } from '@/components/ds/icon';
-import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ds/menu';
+
 import { PageFrame } from '@/components/ds/page-frame';
 import { PageHead } from '@/components/ds/page-head';
 import { RowList, RowListItem, type RowAction } from '@/components/ds/row-list';
@@ -29,7 +28,7 @@ import { PastedSecretConnectCard } from '@/components/channel-connect/pasted-sec
 import { ReplaceCredentialCard } from '@/components/channel-connect/replace-credential-card';
 import { OAuthResultBanner } from '@/components/channel-connect/oauth-result-banner';
 import { FacebookPageSelectCard, type SelectCandidate } from '@/components/channel-connect/facebook-page-select-card';
-import type { AppCredentialsStatusResponse, ChannelConnectionResponse, TestConnectionResponse } from '@/components/channel-connect/types';
+import { AppCredentialsStatusResponse, ChannelConnectionResponse, TestConnectionResponse } from '@/components/channel-connect/types';
 import { AgentSetupSection } from '@/components/channel-connect/agent-setup-section';
 import { ExternalPublishPauseCard } from '@/components/channel-connect/external-publish-pause-card';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
@@ -818,7 +817,7 @@ function ChannelMark({ label, color }: { label: string; color: string }) {
 
 function ChannelSection({
   item, connections, credentials, isOwnerStrict, isOwnerOrAdmin, orgId, onRefresh, t, pendingSelection,
-  ownerName, expanded, onExpand, onCollapse,
+  ownerName, expanded, onExpand, onCollapse, hideConfigIncompleteNote = false,
 }: {
   item: AvailableChannelItem;
   connections: ChannelConnectionResponse[];
@@ -842,6 +841,8 @@ function ChannelSection({
   expanded: boolean;
   onExpand: () => void;
   onCollapse: () => void;
+  /** 4913 C1 후속 — 같은 «설정 미완» 사유가 여러 행에 서는 화면이면 화면이 목록 위에 한 번만 쓰고 행 아래에서는 뺀다. */
+  hideConfigIncompleteNote?: boolean;
 }) {
   const { channel, credential_kind } = item;
   const locale = useLocale();
@@ -932,7 +933,7 @@ function ChannelSection({
   // 4913 C판 — 줄(subtitle)은 짧은 한 줄(어느 계정 · 언제)만 — 길 수 있는 «문장»(설정 미완료 · 재인증 · 만료 임박)은 행 아래 note로 간다(줄은 한 줄로 잘린다, 문장이 잘리면 안 된다). 낱말은 그대로.
   const { line, note } = ((): { line?: string; note?: string } => {
     if (connections.length === 0) {
-      return credential_kind === 'oauth' && effectiveSource === 'none' ? { note: t('channelConfigIncompleteReason') } : {};
+      return credential_kind === 'oauth' && effectiveSource === 'none' && !hideConfigIncompleteNote ? { note: t('channelConfigIncompleteReason') } : {};
     }
     if (single && singleDerived) {
       if (singleDerived.status === 'reauth_required' || singleDerived.status === 'provider_error') {
@@ -960,12 +961,13 @@ function ChannelSection({
   // 2개 이상이면(어느 계정 얘기인지 한 줄로 못 줄이는 것과 같은 이유로) 다음 발 자체가
   // 모호해 「연결 관리」로 그 행 상세를 연다 — #3504/#3549 등 기존 스토리가 이미
   // 「그려진 컨트롤=할 수 있다는 약속」으로 조건화해 둔 owner/owner|admin 폭은 그대로.
-  type PrimaryAction = { label: string; onClick?: () => void; href?: string; disabled?: boolean; testId: string };
+  type PrimaryAction = { label: string; onClick?: () => void; href?: string; disabled?: boolean; testId: string; ariaLabel?: string };
   const primaryAction: PrimaryAction | null = (() => {
     if (connections.length === 0) {
       if (credential_kind === 'oauth') {
         if (effectiveSource === 'none') {
-          return isOwnerStrict ? { label: t('appCredentialsRegisterAction'), onClick: onExpand, testId: 'channel-row-primary-register' } : null;
+          // 4913 C1 후속: 머리 메뉴는 항목마다 채널 이름이 있었다 — 행 단추는 보조기술 단추 목록에서 같은 이름이 되지 않게 «채널 이름 + 같은 낱말»을 접근 이름으로.
+          return isOwnerStrict ? { label: t('appCredentialsRegisterAction'), onClick: onExpand, testId: 'channel-row-primary-register', ariaLabel: `${channelLabel(channel)} ${t('appCredentialsRegisterAction')}` } : null;
         }
         return isOwnerStrict ? { label: t('channelConnectAction', { channel: channelLabel(channel) }), href: connectHref, testId: 'channel-row-primary-connect' } : null;
       }
@@ -1058,7 +1060,7 @@ function ChannelSection({
             <a href={primaryAction.href} data-testid={primaryAction.testId}>{primaryAction.label}</a>
           </Button>
         ) : (
-          <Button variant="secondary" onClick={primaryAction.onClick} disabled={primaryAction.disabled} data-testid={primaryAction.testId}>
+          <Button variant="secondary" onClick={primaryAction.onClick} disabled={primaryAction.disabled} data-testid={primaryAction.testId} aria-label={primaryAction.ariaLabel}>
             {primaryAction.label}
           </Button>
         )
@@ -1151,7 +1153,6 @@ export default function OrganizationChannelsPage() {
   const isOwnerOrAdmin = currentRole === 'owner' || currentRole === 'admin';
   const t = useTranslations('channelConnect');
   const tCommon = useTranslations('common');
-  const channelLabel = useChannelLabel();
   const searchParams = useSearchParams();
 
   const [availableChannels, setAvailableChannels] = useState<AvailableChannelItem[]>([]);
@@ -1227,15 +1228,14 @@ export default function OrganizationChannelsPage() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void load(); }, [load]);
 
-  // story #3743(페드루 PO 決, 유나 확認 済 — Button+DropdownMenu·집안 선례 14곳·항목=
-  // channelLabel() 표시명·버튼 낱말은 1개/N개 모두 「앱 자격 등록」 하나) — 헤더 주
-  // 액션. 미등록(oauth·자격 effective_source==='none') 채널이 없으면 안 그린다(그려진
-  // 컨트롤은 「할 수 있다」는 약속 — 「없음」을 disabled로 그리지 않는다). 1개면 메뉴
-  // 없이 그 채널로 직행, 2개 이상이면 메뉴에서 고른다. 고르면 그 채널 행으로 스크롤한다
-  // (폼은 행 자리에 항상 그대로 — 펼침 상태 자체가 없다, 위 ChannelSection 주석 참고).
-  const unregisteredOauthChannels = availableChannels.filter(
-    (it) => it.credential_kind === 'oauth' && (credentialsByChannel[it.channel]?.effective_source ?? 'none') === 'none',
+  // 4913 C1 후속(PO 판정) — «설정 미완»(앱 자격이 아직 없는 OAuth 채널 · 연결 0)의 사유 문장은 채널마다 «같은 말»이라 행마다 반복하지 않는다: 둘 이상이면 목록 위 한 줄로 한 번만, 하나면 그 행 아래 그대로.
+  // (옛 «머리 앱 자격 등록 ▾» 단추 — 행으로 스크롤 + 펼침 — 는 행마다 있는 «앱 자격 등록» 단추와 같은 일(goToChannel)이라 걷었다: 행 단추가 한 자리다.)
+  const configIncompleteChannels = availableChannels.filter(
+    (it) => it.credential_kind === 'oauth'
+      && (credentialsByChannel[it.channel]?.effective_source ?? 'none') === 'none'
+      && !connections.some((c) => c.channel === it.channel),
   );
+  const configIncompleteOnce = configIncompleteChannels.length >= 2;
   // story #3743 CHANGES(③, 페드루 PO 決 2026-09-09 11:44Z) — 앱 자격 폼·연결 상세는
   // 한 번에 한 행만 펼친다(페이지 전역 「펼친 채널」 1개). 헤더 메뉴로 고르거나 그
   // 행의 다음 발을 누르면 이 값이 그 채널로 바뀐다.
@@ -1292,33 +1292,10 @@ export default function OrganizationChannelsPage() {
 
   return (
     <>
-      {/* 4913 C판 — 제목은 위 막대, 본문은 한 쪽 틀(reading). 머리 = 설명 한 줄 + 오른쪽 주 행동 한 곳(소유자만 · 앱 자격 등록). */}
+      {/* 4913 C판 — 제목은 위 막대, 본문은 한 쪽 틀(reading). 머리 = 설명 한 줄(주 행동은 행마다 있는 «앱 자격 등록» 한 자리 — 옛 머리 단추는 같은 일이라 걷음). */}
       <OrgScreenTitle>{t('pageTitle')}</OrgScreenTitle>
       <PageFrame width="reading">
-        <PageHead
-          description={t('pageDescription')}
-          actions={
-            !isOwnerStrict || unregisteredOauthChannels.length === 0 ? undefined : unregisteredOauthChannels.length === 1 ? (
-              <Button variant="primary" data-testid="channel-connect-header-register-action" onClick={() => goToChannel(unregisteredOauthChannels[0]!.channel)}>
-                {t('appCredentialsRegisterAction')}
-              </Button>
-            ) : (
-              <Menu>
-                <MenuTrigger
-                  data-testid="channel-connect-header-register-action"
-                  render={<Button variant="primary">{t('appCredentialsRegisterAction')}<Icon name="expand_more" size={14} /></Button>}
-                />
-                <MenuContent align="end">
-                  {unregisteredOauthChannels.map((it) => (
-                    <MenuItem key={it.channel} onClick={() => goToChannel(it.channel)}>
-                      {channelLabel(it.channel)}
-                    </MenuItem>
-                  ))}
-                </MenuContent>
-              </Menu>
-            )
-          }
-        />
+        <PageHead description={t('pageDescription')} />
 
         {/* story #3953(블루프린트 §1-5) — 조직 전체 외부 발행 일시 중지 스위치.
             owner만 조작·member 이상 열람(GET이 비밀 아님). */}
@@ -1358,6 +1335,8 @@ export default function OrganizationChannelsPage() {
                 />
               </Card>
             ) : (
+              <>
+              {configIncompleteOnce ? <p className="m-0 text-ds-small text-ds-ink-3" data-testid="channel-config-incomplete-once">{t('channelConfigIncompleteReason')}</p> : null}
               <RowList aria-label={t('pageTitle')} data-testid="channel-list">
                 {availableChannels.map((it) => (
                   <ChannelSection
@@ -1374,6 +1353,7 @@ export default function OrganizationChannelsPage() {
                     expanded={expandedChannel === it.channel}
                     onExpand={() => goToChannel(it.channel)}
                     onCollapse={() => setExpandedChannel(null)}
+                    hideConfigIncompleteNote={configIncompleteOnce && configIncompleteChannels.some((c) => c.channel === it.channel)}
                     pendingSelection={
                       selectPendingChannel === it.channel && selectPendingId && selectPendingCandidates
                         ? { pendingId: selectPendingId, candidates: selectPendingCandidates }
@@ -1382,6 +1362,7 @@ export default function OrganizationChannelsPage() {
                   />
                 ))}
               </RowList>
+              </>
             )}
 
             <AgentSetupSection orgId={orgId ?? ''} />
