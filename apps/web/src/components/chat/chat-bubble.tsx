@@ -677,10 +677,13 @@ export function ChatBubble({
   const handleDelete = useCallback(() => {
     setConfirmDeleteOpen(true);
   }, []);
+  // the menu's «삭제» item is gone by the time the confirm opens, so Base UI has no trigger to hand the focus back to (it would fall to <body>): the message's own row takes it (codex round 1)
+  const returnFocusToRow = useCallback(() => { window.setTimeout(() => rowRef.current?.focus({ preventScroll: true }), 0); }, []);
   const handleConfirmDelete = useCallback(() => {
     setConfirmDeleteOpen(false);
     onDelete?.(message.id);
-  }, [message.id, onDelete]);
+    returnFocusToRow();
+  }, [message.id, onDelete, returnFocusToRow]);
 
   const handleOpenThread = useCallback(() => {
     (onOpenThread ?? onMenuReply)?.(message);
@@ -692,13 +695,14 @@ export function ChatBubble({
       <div
         id={`msg-${message.id}`}
         ref={rowRef}
+        tabIndex={-1}
         onClickCapture={(e) => {
           if (!longPressFiredRef.current) return;
           longPressFiredRef.current = false;
           e.preventDefault();
           e.stopPropagation();
         }}
-        className={`group/bubble flex scroll-mt-4 gap-2 transition-shadow ${isMine && !plainRow ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-0.5' : 'mt-2'} ${highlight ? 'rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-background' : ''} ${(isCiteAnchor || isCiteInRange) ? 'border-l-[3px] border-l-primary pl-1' : ''}`}
+        className={`group/bubble flex scroll-mt-4 gap-2 outline-none transition-shadow ${isMine && !plainRow ? 'flex-row-reverse' : 'flex-row'} ${isGrouped ? 'mt-0.5' : 'mt-2'} ${highlight ? 'rounded-lg ring-2 ring-primary ring-offset-2 ring-offset-background' : ''} ${(isCiteAnchor || isCiteInRange) ? 'border-l-[3px] border-l-primary pl-1' : ''}`}
         onContextMenu={handleContextMenu}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
@@ -1081,7 +1085,7 @@ export function ChatBubble({
       {onDelete ? (
         <ConfirmDialog
           open={confirmDeleteOpen && !isDeleted}
-          onOpenChange={setConfirmDeleteOpen}
+          onOpenChange={(open) => { setConfirmDeleteOpen(open); if (!open) returnFocusToRow(); }}
           title={t('deleteMessageConfirmTitle')}
           description={t('deleteMessageConfirmBody')}
           confirmLabel={tc('delete')}

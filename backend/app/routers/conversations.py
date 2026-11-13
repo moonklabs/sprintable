@@ -1842,6 +1842,9 @@ async def list_conversations(
 
     result = []
     for conv in convs:
+        # PO 11-13 (4912 follow-up, decided): a THREAD REPLY counts. The room's preview is the newest message that is still there, replies included — the same rule that moves the row's time, its place in the
+        # list (`updated_at`) and its unread count (every message counts): they all read «a thread reply is new activity in the room». Taking replies out of the preview alone would make a room jump to the top
+        # with «1 unread» over an older text; changing all four is a product decision about how thread activity shows in the list, not a defect fix. Pinned by test_4912_list_latest_includes_thread_realdb.py.
         # story #4903 — the room's latest message is the newest one that is NOT deleted (a tombstone is not «the latest message»: it used to be chosen, so a room whose last message was deleted
         # showed «no message» while older messages were still there). All deleted → None («no message», as for an empty room).
         latest_msg = (await db.execute(

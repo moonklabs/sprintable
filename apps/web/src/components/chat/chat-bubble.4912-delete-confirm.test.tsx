@@ -13,7 +13,7 @@ import { ThreadPanel } from './thread-panel';
 import { ChatBubble } from './chat-bubble';
 import type { ChatMessage } from '@/hooks/use-chat-sse';
 import koMessages from '../../../messages/ko.json';
-import { CHAT_MESSAGE_DELETED_EVENT, forgetKnownDeletedForTests } from '@/lib/chat-message-deleted';
+import { forgetKnownDeletedForTests } from '@/lib/chat-message-deleted';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -56,11 +56,6 @@ async function openMenu(text: string) {
   await act(async () => { rowOf(text).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 50 })); });
 }
 const menuItem = (label: string) => [...document.querySelectorAll('[role="menuitem"]')].find((b) => b.textContent?.includes(label)) as HTMLElement | undefined;
-// story 4912 follow-up: «삭제» asks once — the request goes out when the confirm's [삭제] is pressed
-const confirmDelete = async () => {
-  const b = [...document.querySelectorAll('[data-slot="ds-dialog-footer"] button')].find((x) => x.textContent === koMessages.common.delete) as HTMLElement;
-  await act(async () => { b.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
-};
 const click = async (el: Element) => { await act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); }); };
 
 beforeEach(() => { Element.prototype.scrollIntoView = vi.fn(); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); addToast.mockReset(); });
@@ -135,6 +130,27 @@ describe('delete message — asks once (4912 follow-up)', () => {
     await draw({ ...mine, content: '', deleted_at: '2026-11-13T00:00:00.000Z' } as ChatMessage);
     expect(dialog(), 'closed once the message is a tombstone').toBeNull();
     expect(onDelete).not.toHaveBeenCalled();
+  });
+
+  it('⭐확인창이 닫히면(취소 · Esc · 확인) 초점이 <body>로 떨어지지 않고 그 글의 줄로 돌아간다 — 메뉴 항목은 이미 사라져 돌려줄 곳이 없었다(codex 1차)', async () => {
+    stubFetch(true); await mount();
+    const row = () => rowOf('내 답글');
+    const later = () => act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    // cancel
+    await openMenu('내 답글'); await click(menuItem(koMessages.common.delete)!);
+    await click(footerButtons()[0]!); await later();
+    expect(document.activeElement, 'cancel → the row').toBe(row());
+    // Esc
+    (document.activeElement as HTMLElement).blur();
+    await openMenu('내 답글'); await click(menuItem(koMessages.common.delete)!);
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); }); await later();
+    expect(document.activeElement, 'Esc → the row').toBe(row());
+    // confirm
+    (document.activeElement as HTMLElement).blur();
+    await openMenu('내 답글'); await click(menuItem(koMessages.common.delete)!);
+    await click(footerButtons()[1]!); await later();
+    expect(document.activeElement?.closest('.group\\/bubble'), 'confirm → the same row (now its tombstone)').not.toBeNull();
+    expect(document.activeElement).not.toBe(document.body);
   });
 
   it('남의 글에는 «삭제»도 확인창도 없다(권한 그대로) · 이미 지워진 글에도 다시 안 물음', async () => {
