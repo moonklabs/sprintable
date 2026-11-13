@@ -13,13 +13,13 @@ const APP = join(__dirname, '..');
 const MOVED = [
   'organization/roles/page.tsx', 'organization/trust/page.tsx', 'organization/trust/trust-utils.tsx',
   'organization/content-rules/page.tsx', 'organization/generation-connectors/page.tsx', 'rewards/page.tsx',
+  'organization/channels/page.tsx',
 ];
 /** 옮긴 화면의 라우트 로딩 폴더(= FLAT_ROUTE_TOP_BAR 키) — rewards는 표에 이미 있던 키. */
-const MOVED_LOADING = ['organization/roles', 'organization/trust', 'organization/content-rules', 'organization/generation-connectors', 'rewards'];
+const MOVED_LOADING = ['organization/roles', 'organization/trust', 'organization/content-rules', 'organization/generation-connectors', 'rewards', 'organization/channels'];
 /** 옮길 화면 — 지금 옛 부품 import 수(`from '@/components/ui/…'`)의 상한. 줄이는 방향으로만 바꾼다. */
 const RATCHET: Record<string, number> = {
   'organization/insights-board/page.tsx': 5,
-  'organization/channels/page.tsx': 8,
   'organization/events/page.tsx': 9,
   'content/page.tsx': 7,
   'content/channel-posts/page.tsx': 7,
@@ -75,6 +75,10 @@ describe('조직 화면 한 쪽 틀 가드(4913)', () => {
         expect(c).not.toMatch(/ui\/page-skeleton|<PageSkeleton/);
       });
     }
+    it('⭐옮긴 화면의 위 막대 제목 행이 FLAT_ROUTE_TOP_BAR 표에 있다(없으면 로딩 폴백이 빈 막대를 그린다 · codex 4913C)', () => {
+      const table = readFileSync(join(APP, '..', '..', 'components/nav/flat-tab-top-bar.tsx'), 'utf8');
+      for (const dir of MOVED_LOADING) expect(table, dir).toMatch(new RegExp(`(?:'${dir}'|${dir}): \\{ Title: \\w+, showContextChip: (?:true|false) \\}`));
+    });
     it('⭐OrgScreenLoading은 PageFrame 위에서 «불러오는 중»을 상태로 알린다', () => {
       const c = readFileSync(join(APP, '..', '..', 'components/organization/org-screen-loading.tsx'), 'utf8');
       expect(c).toContain('<PageFrame');
@@ -82,6 +86,15 @@ describe('조직 화면 한 쪽 틀 가드(4913)', () => {
       expect(c).toMatch(/aria-busy="true"/);
       expect(c).toMatch(/sr-only/);
     });
+  });
+
+  it('⭐조직 구역 열한 화면은 «옮김(MOVED)»이나 «옮길 화면(RATCHET)» 한 쪽에 반드시 든다(목록에서 빠진 화면은 어떤 가드도 못 본다)', () => {
+    const ELEVEN = [
+      'organization/insights-board/page.tsx', 'organization/channels/page.tsx', 'organization/generation-connectors/page.tsx', 'organization/content-rules/page.tsx',
+      'organization/events/page.tsx', 'organization/trust/page.tsx', 'organization/roles/page.tsx', 'content/page.tsx', 'content/channel-posts/page.tsx', 'rewards/page.tsx', 'channel/page.tsx',
+    ];
+    for (const rel of ELEVEN) expect(MOVED.includes(rel) || rel in RATCHET, rel).toBe(true);
+    for (const rel of ELEVEN) expect(MOVED.includes(rel) && rel in RATCHET, rel + ' 둘 다에 있다').toBe(false);
   });
 
   describe('G4 ratchet — 안 옮긴 화면은 옛 부품 import를 늘리지 못한다', () => {

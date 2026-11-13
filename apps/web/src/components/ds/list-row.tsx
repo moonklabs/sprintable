@@ -40,11 +40,11 @@ export function ListRow({ leading, title, subtitle, trailing, needsHand = false,
     <>
       {needsHandCue}
       {leading ? <div className="shrink-0">{leading}</div> : null}
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-24">
         <div className="truncate text-ds-body font-semibold text-ds-ink">{title}</div>
         {subtitle ? <div className="truncate font-mono text-ds-mono-md text-ds-ink-3">{subtitle}</div> : null}
       </div>
-      {trailing ? <div className="flex shrink-0 items-center gap-2">{trailing}</div> : null}
+      {trailing ? <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">{trailing}</div> : null}
     </>
   );
   return (
@@ -54,7 +54,7 @@ export function ListRow({ leading, title, subtitle, trailing, needsHand = false,
       data-density={density}
       aria-current={selected || undefined}
       className={cn(
-        'relative flex items-center gap-3 border-b border-ds-line px-4 text-left outline-none transition-colors duration-(--ds-duration-fast) motion-reduce:transition-none',
+        'relative flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-ds-line px-4 text-left outline-none transition-colors duration-(--ds-duration-fast) motion-reduce:transition-none',
         'hover:bg-ds-surface-high focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ds-action',
         density === 'compact' ? 'min-h-ds-control py-1 touch:min-h-ds-touch' : 'min-h-ds-row py-2',
         selected && 'bg-ds-surface-high',

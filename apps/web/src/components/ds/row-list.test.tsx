@@ -259,3 +259,29 @@ describe('ds RowListItem — actionsTrigger (4912 B2)', () => {
   });
 });
 
+describe('ds RowListItem — footnote (4913 C판 행 아래 늘 서는 글)', () => {
+  it('⭐footnote는 행 줄 «아래 · 같은 listitem 안»에 접혀 있어도 서고, 펼침 칸(rowOthers 면)이 아니다', async () => {
+    await render(
+      <RowList aria-label="목록">
+        <RowListItem data-testid="row-f" title="행" detail={<div>펼침</div>} footnote={<p data-testid="fn">사유 한 줄</p>} />
+      </RowList>,
+    );
+    const item = container.querySelector('[data-testid="row-f"]')!;
+    const note = item.querySelector('[data-slot="ds-row-footnote"]');
+    expect(note?.textContent).toBe('사유 한 줄');
+    expect(item.querySelector('[data-slot="ds-row-detail"]')).toBeNull(); // 접힘 — 펼침 칸은 없고 footnote만 선다
+    expect(note?.className).not.toContain(LAYER.rowOthers);
+    const row = item.querySelector('[data-slot="ds-list-row"]')!;
+    expect(row.compareDocumentPosition(note!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // 줄 «아래»
+  });
+
+  it('⭐footnote가 비어(null · false) 있으면 칸 자체가 없다', async () => {
+    await render(
+      <RowList aria-label="목록">
+        <RowListItem data-testid="row-a" title="행 a" footnote={null} />
+        <RowListItem data-testid="row-b" title="행 b" footnote={false} />
+      </RowList>,
+    );
+    expect(container.querySelector('[data-slot="ds-row-footnote"]')).toBeNull();
+  });
+});

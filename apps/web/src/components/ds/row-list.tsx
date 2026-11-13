@@ -94,7 +94,7 @@ export function RowList({ header, 'aria-label': ariaLabel, className, children, 
         aria-label={ariaLabel}
         onFocus={onFocus}
         onKeyDown={onKeyDown}
-        className="[&>[role=listitem]:last-child:not([data-open])_[data-slot=ds-list-row]]:border-b-0 [&>[role=listitem]:last-child_[data-slot=ds-row-detail]]:border-b-0"
+        className="[&>[role=listitem]:last-child:not([data-open])_[data-slot=ds-list-row]]:border-b-0 [&>[role=listitem]:last-child_[data-slot=ds-row-detail]]:border-b-0 [&>[role=listitem]:last-child_[data-slot=ds-row-footnote]]:border-b-0"
       >
         {children}
       </div>
@@ -137,6 +137,11 @@ export type RowListItemProps = RowActionsProps & Omit<HTMLAttributes<HTMLElement
    * 펼침 칸(`detail`)이 있는 행은 Enter가 여전히 «펼침/접힘»이다. 줄 안의 단추 · 링크 · 입력 · 체크를 더블클릭한 것은 줄을 여는 뜻이 아니라 건드리지 않는다.
    */
   onOpen?: () => void;
+  /**
+   * 4913 C판 — 행 «아래» 늘 서 있는 작은 글 · 오류 줄(펼침과 무관). 접혀 있어도 보여야 하는 «이 행이 왜 이 모양인가»(권한 사유 · 실패 문장)나 행 밖 단추의 결과를 담는다.
+   * 펼침 칸(`detail`)과 달리 한 단 올린 면이 아니라 행과 같은 면이다. 비어 있으면(null · false) 아무것도 안 그린다.
+   */
+  footnote?: ReactNode;
 };
 
 /**
@@ -144,7 +149,7 @@ export type RowListItemProps = RowActionsProps & Omit<HTMLAttributes<HTMLElement
  * 행 자체가 초점을 받는다(`data-row-main`): Enter = 펼침/접힘, Esc = 닫기(펼쳐 있을 때), 안쪽 단추 · 입력에서는 건드리지 않는다.
  */
 export function RowListItem({
-  leading, title, subtitle, statusMark, trailing, actions, actionsLabel, actionsTrigger = 'visible', expanded = false, onExpandedChange, detail, expandLabel, onOpen, className, 'data-testid': testId, onDoubleClick, ...rest
+  leading, title, subtitle, statusMark, trailing, actions, actionsLabel, actionsTrigger = 'visible', expanded = false, onExpandedChange, detail, expandLabel, onOpen, footnote, className, 'data-testid': testId, onDoubleClick, ...rest
 }: RowListItemProps) {
   const detailId = useId();
   const hasDetail = detail !== undefined && detail !== null && detail !== false;
@@ -228,6 +233,7 @@ export function RowListItem({
       ) : (
         row
       )}
+      {footnote ? <div data-slot="ds-row-footnote" className="space-y-1 border-b border-ds-line px-4 py-2 text-ds-small text-ds-ink-3">{footnote}</div> : null}
       {open ? (
         <div id={detailId} data-slot="ds-row-detail" className={cn('border-b border-ds-line px-4 py-3', LAYER.rowOthers)}>
           {detail}
