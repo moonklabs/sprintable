@@ -54,6 +54,7 @@ let root: Root;
 let unmounted = false;
 let postMode: 'ok' | 'fail' | 'hang' | 'conflict-once' = 'ok';
 let resolveHungPost: (() => void) | null = null;
+let existingTitle = '남의 문서'; // slug=existing-doc 조회가 주는 제목
 const fetchMock = vi.fn();
 const setTree = vi.fn();
 const CTX = {
@@ -67,7 +68,7 @@ const created = (body: Record<string, unknown>) => ({ data: { id: 'new-doc', tit
 
 beforeEach(() => {
   vi.useFakeTimers();
-  postMode = 'ok'; resolveHungPost = null; unmounted = false; searchOverride.current = null;
+  postMode = 'ok'; resolveHungPost = null; unmounted = false; searchOverride.current = null; existingTitle = '남의 문서';
   editorProps.current = null; syncOptions.current = null;
   fetchMock.mockClear(); setTree.mockClear(); addToastMock.mockClear(); routerMock.replace.mockClear();
   global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
@@ -79,7 +80,7 @@ beforeEach(() => {
       if (postMode === 'hang') await new Promise<void>((resolve) => { resolveHungPost = resolve; });
       return new Response(JSON.stringify(created(body)), { status: 201 });
     }
-    if (url.includes('slug=existing-doc')) return new Response(JSON.stringify({ data: { id: 'doc-existing', title: '남의 문서', slug: 'existing-doc', content: '원래 내용', content_format: 'markdown', updated_at: '2026-11-13T00:00:01Z' } }), { status: 200 });
+    if (url.includes('slug=existing-doc')) return new Response(JSON.stringify({ data: { id: 'doc-existing', title: existingTitle, slug: 'existing-doc', content: '원래 내용', content_format: 'markdown', updated_at: '2026-11-13T00:00:01Z' } }), { status: 200 });
     if (url.includes('/api/docs?')) return new Response('not found', { status: 404 }); // 서버에 아직 없는 초안
     return new Response('{}', { status: 200 });
   }) as unknown as typeof fetch;
@@ -176,6 +177,38 @@ describe('router.push로 들어온 첫 렌더의 주소 (4910 ② dev 실측 결
     searchOverride.current = '';
     await renderPage();
     expect(routerMock.replace).toHaveBeenCalled();
+  });
+
+  it('⭐같은 컴포넌트가 [slug]만 바뀐 채 다시 쓰여도(첫 새 문서 저장 → 트리에서 기존 문서로 → 다시 새 문서) 옛 «새 문서» 표시가 따라가지 않고 매번 그 순간의 주소로 다시 정한다', async () => {
+    paramsMock.slug = 'untitled-111';
+    searchOverride.current = 'new=1';
+    await renderPage();
+    await type('content', '내용만'); // 기본 제목으로 만들어짐 → 첫 새 문서의 제목칸은 placeholder(값 '')
+    await wait(1600);
+    expect(posts()).toHaveLength(1);
+    expect(editorProps.current!.currentDocId).toBe('new-doc');
+    expect(editorProps.current!.title).toBe('');
+    // 2) 트리에서 기존 문서로(제목이 마침 기본 글과 같다 — 낡은 래치면 값이 비어 보인다)
+    existingTitle = KO.newDocDefaultTitle;
+    paramsMock.slug = 'existing-doc'; searchOverride.current = '';
+    await renderPage();
+    await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+    expect(syncOptions.current!.docId).toBe('doc-existing');
+    expect(syncOptions.current!.adoptBaselineSnapshot).toBeNull();
+    expect(editorProps.current!.title).toBe(KO.newDocDefaultTitle); // 값으로 보임(옛 «새 문서» 래치가 따라오면 '')
+    // 3) 다시 새 문서(두 번째 임시 슬러그)
+    paramsMock.slug = 'untitled-222'; searchOverride.current = 'new=1';
+    await renderPage();
+    await act(async () => { await vi.advanceTimersByTimeAsync(20); });
+    expect(syncOptions.current!.docId).toBeNull(); // 기존 문서의 저장 길이 아니라 새 초안
+    expect(editorProps.current!.currentDocId).toBeFalsy();
+    expect(editorProps.current!.title).toBe('');
+    expect(routerMock.replace).not.toHaveBeenCalled();
+    await type('title', '나');
+    await wait(1600);
+    expect(posts()).toHaveLength(2);
+    expect(postBody(1).slug).toBe('untitled-222');
+    expect(postBody(1).title).toBe('나');
   });
 
   it('?new=1은 한 번 켜지면 유지(래치) — 내용만 써서 기본 제목으로 만들어진 뒤 주소에서 ?new=1이 빠져도 제목칸은 값이 아니라 placeholder 그대로(쓰면 뒤에 붙던 결함이 안 돌아온다)', async () => {
