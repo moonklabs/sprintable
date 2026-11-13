@@ -11,13 +11,22 @@ import { fetchWithAuth } from '@/lib/db/client';
 export const EVENT_DEFINITION_NAMES_TTL_MS = 5 * 60_000;
 export const EVENT_DEFINITION_NAMES_FAILED_TTL_MS = 30_000;
 
-let cached: { names: Map<string, string>; expiresAt: number } | null = null;
-let inflight: Promise<Map<string, string>> | null = null;
+// per organization: an org's own definitions carry names only that org defined — a person who switches organizations must not see the previous org's name for the same key
+const cached = new Map<string, { names: Map<string, string>; expiresAt: number }>();
+const inflight = new Map<string, Promise<Map<string, string>>>();
+const scopeOf = (orgId: string | undefined | null) => orgId ?? '';
 
-function request(): Promise<Map<string, string>> {
-  if (cached && cached.expiresAt > Date.now()) return Promise.resolve(cached.names);
-  if (inflight) return inflight;
-  inflight = (async () => {
+function fresh(scope: string): Map<string, string> | null {
+  const slot = cached.get(scope);
+  return slot && slot.expiresAt > Date.now() ? slot.names : null;
+}
+
+function request(scope: string): Promise<Map<string, string>> {
+  const hit = fresh(scope);
+  if (hit) return Promise.resolve(hit);
+  const pending = inflight.get(scope);
+  if (pending) return pending;
+  const run = (async () => {
     const names = new Map<string, string>();
     let ttl = EVENT_DEFINITION_NAMES_FAILED_TTL_MS;
     try {
@@ -32,26 +41,32 @@ function request(): Promise<Map<string, string>> {
         }
       }
     } catch { /* not critical */ }
-    cached = { names, expiresAt: Date.now() + ttl };
-    inflight = null;
+    cached.set(scope, { names, expiresAt: Date.now() + ttl });
+    inflight.delete(scope);
     return names;
   })();
-  return inflight;
+  inflight.set(scope, run);
+  return run;
 }
 
 /** test seam: forget what was read (a spec that changes the answer between cases) */
 export function resetEventDefinitionNames(): void {
-  cached = null;
-  inflight = null;
+  cached.clear();
+  inflight.clear();
 }
 
-/** a lookup `key → name | undefined`; stable per answer, so a consumer may list it in a dependency array */
-export function useEventDefinitionNames(): (eventKey: string) => string | undefined {
-  const [names, setNames] = useState<Map<string, string> | null>(() => (cached && cached.expiresAt > Date.now() ? cached.names : null));
+/** a lookup `key → name | undefined` for ONE organization (the names are read again when the organization changes) */
+export function useEventDefinitionNames(orgId?: string | null): (eventKey: string) => string | undefined {
+  const scope = scopeOf(orgId);
+  const [slot, setSlot] = useState<{ scope: string; names: Map<string, string> } | null>(() => {
+    const hit = fresh(scope);
+    return hit ? { scope, names: hit } : null;
+  });
   useEffect(() => {
     let cancelled = false;
-    void request().then((n) => { if (!cancelled) setNames(n); });
+    void request(scope).then((names) => { if (!cancelled) setSlot({ scope, names }); });
     return () => { cancelled = true; };
-  }, []);
-  return (eventKey: string) => names?.get(eventKey);
+  }, [scope]);
+  // an answer that belongs to the previous organization is not used for this one (until this one's own read arrives)
+  return (eventKey: string) => (slot?.scope === scope ? slot.names.get(eventKey) : undefined);
 }

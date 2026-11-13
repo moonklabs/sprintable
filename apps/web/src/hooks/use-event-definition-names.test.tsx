@@ -40,4 +40,27 @@ describe('useEventDefinitionNames (story 4921)', () => {
     await settle();
     expect(container.textContent).toBe('-/-/-');
   });
+
+  it('⭐조직마다 따로 읽는다 — 조직을 바꾸면 이전 조직의 이름이 새 조직에 보이지 않는다(조직 정의의 이름은 그 조직 것)', async () => {
+    const answers: Record<string, string> = { A: '조직 A의 이름', B: '조직 B의 이름' };
+    let releaseB!: () => void; const gateB = new Promise<void>((r) => { releaseB = r; });
+    let calls = 0;
+    const fetchMock = vi.fn(async () => { calls += 1; const org = calls === 1 ? 'A' : 'B'; if (org === 'B') await gateB; return { ok: true, json: async () => ([{ key: 'preset.workflow.kanban', name: answers[org] }]) }; });
+    vi.stubGlobal('fetch', fetchMock);
+    function OrgProbe({ orgId }: { orgId: string }) { const name = useEventDefinitionNames(orgId); return <span>{name('preset.workflow.kanban') ?? '-'}</span>; }
+    await act(async () => { root.render(<OrgProbe orgId="A" />); });
+    await settle();
+    expect(container.textContent).toBe('조직 A의 이름');
+    await act(async () => { root.render(<OrgProbe orgId="B" />); });
+    await settle();
+    expect(container.textContent).toBe('-'); // B's read is still out: nothing of A's is shown for B
+    await act(async () => { releaseB(); });
+    await settle();
+    expect(container.textContent).toBe('조직 B의 이름');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await act(async () => { root.render(<OrgProbe orgId="A" />); });
+    await settle();
+    expect(container.textContent).toBe('조직 A의 이름'); // A's own answer is kept (no third read)
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });

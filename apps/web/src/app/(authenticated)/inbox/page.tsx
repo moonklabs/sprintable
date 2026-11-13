@@ -222,7 +222,7 @@ export default function InboxPage() {
   // story #3903 AC2 — composeEventPreviewLine의 domainLabels 재료(org 커스텀 status
   // 라벨 오버라이드). chat-list-view.tsx의 기존 재사용 패턴과 동형.
   const domainLabels = useOrgDomainLabels(orgId, locale);
-  const eventDefinitionName = useEventDefinitionNames(); // story 4921 — the fallback line of an event with no sentence of its own names the event by its definition
+  const eventDefinitionName = useEventDefinitionNames(orgId); // story 4921 — the fallback line of an event with no sentence of its own names the event by its definition
   const eventPreviewHelpers: EventPreviewHelpers = {
     tBoard, tCage, tDashboard, tEventCard, tEntity, tOutcomeLoop, domainLabels, eventDefinitionName,
   };

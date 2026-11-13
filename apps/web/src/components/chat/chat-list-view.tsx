@@ -414,7 +414,9 @@ export function applyConversationMessageUpdate(
   const item = { ...updated[idx]! };
   // story #4442 — an attachment-only message (no text) updates the row too: «첨부 파일» and its time
   if (created_at && (content || hasAttachments)) {
-    item.latest_message = { ...(eventMessageId ? { id: eventMessageId } : {}), content: content ?? '', created_at, ...(hasAttachments ? { has_attachments: true } : {}) };
+    // story 4921 — an event message keeps its `event` (key · payload · refs) on a live update too: the row's sentence (a person's words, a name) is built from it — without it the row would only say «이벤트» until the next refetch
+    const liveEvent = payload.event && typeof payload.event === 'object' ? { event: payload.event as NonNullable<ConversationItem['latest_message']>['event'] } : {};
+    item.latest_message = { ...(eventMessageId ? { id: eventMessageId } : {}), content: content ?? '', created_at, ...(hasAttachments ? { has_attachments: true } : {}), ...liveEvent };
     item.updated_at = created_at;
     // story #4440 — my own message (sent from another tab or device) moves the row up but is never unread
     if (!isOwnMessage(payload, meId)) item.unread_count = (item.unread_count ?? 0) + 1;
@@ -459,7 +461,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // 개든 요청은 항상 1건.
   const locale = useLocale();
   const domainLabels = useOrgDomainLabels(orgId, locale);
-  const eventDefinitionName = useEventDefinitionNames(); // story 4921 — one read for every row (like the domain labels)
+  const eventDefinitionName = useEventDefinitionNames(orgId); // story 4921 — one read for every row (like the domain labels)
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [allConversations, setAllConversations] = useState<ConversationItem[]>([]);
   // agent 탭(allConversations·include_agent_conversations) 첫 활성화 1회만 fetch 하기 위한 가드.

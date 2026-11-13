@@ -176,4 +176,11 @@ describe('composeNotificationDisplay — story 4921 (문장이 없는 이벤트 
     expect(composeNotificationDisplay(note('conversation.message', MACHINE_BODY, { event_key: 'org.zeta.x', payload: {} } as never), t, h2).body).toBe('이벤트');
     expect(composeNotificationDisplay(note('conversation.message', '발행이 멈췄어요.', { event_key: 'org.zeta.x', payload: {} } as never), t, h2).body).toBe('발행이 멈췄어요.');
   });
+  it('⭐event 메타데이터가 없는 옛 알림(영문 머리줄 포함)의 기계 문장 body: «이벤트» 한 낱말 — 슬러그 · «- key: value» 없음', () => {
+    for (const body of ['[이벤트] preset.steer.instruct\n- instruction: x', '[Event] preset.workflow.kanban\n- stage: ready']) {
+      const d = composeNotificationDisplay(note('conversation.message', body, null as never), t, h2);
+      expect(d.body).toBe('이벤트');
+    }
+    expect(composeNotificationDisplay(note('conversation.message', '그냥 알림 글', null as never), t, h2).body).toBe('그냥 알림 글');
+  });
 });

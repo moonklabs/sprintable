@@ -68,4 +68,23 @@ describe('isMachineEventContent / composeEventPreviewFallback — 문장이 없�
   it('en 기계 머리줄도 같다', () => {
     expect(composeEventPreviewFallback('[Event] preset.workflow.kanban\n- stage: ready', 'preset.workflow.kanban', { stage: 'ready' }, helpers)).toBe('칸반 워크플로우');
   });
+  it('⭐title · body · content · reason는 사람 글 칸이 아니다(워크플로우 · 레시피 payload가 슬러그 · 경로를 싣는다) — 쓰지 않는다', () => {
+    const line = composeEventPreviewFallback(MACHINE('org.x.y'), 'org.x.y', { title: '/api/v2/stories/946300bd-434c-45d6-901d-c0d1af8603e7', body: 'body 글', content: 'content 글', reason: 'reason 글' }, helpers);
+    expect(line).toBe('이벤트');
+  });
+  it('⭐사람 글 칸이어도 id · 경로 · 링크 · entity 토큰인 줄은 글이 아니다 → 다음 칸 · 없으면 «이벤트»', () => {
+    expect(composeEventPreviewFallback(MACHINE('org.x.y'), 'org.x.y', { message: '946300bd-434c-45d6-901d-c0d1af8603e7', summary: '정리 끝' }, helpers)).toBe('이벤트 · 정리 끝');
+    for (const bad of ['/api/v2/stories/1', 'https://example.test/a', '[제목](entity:story:946300bd-434c-45d6-901d-c0d1af8603e7)', 'entity:story:abc']) {
+      expect(composeEventPreviewFallback(MACHINE('org.x.y'), 'org.x.y', { message: bad }, helpers)).toBe('이벤트');
+    }
+  });
+  it('⭐자를 때 이모지(서러게이트 쌍)를 반으로 가르지 않는다 — 60자 경계에 이모지가 걸려도 온전', () => {
+    const text = `${'가'.repeat(59)}😀뒤에 더 있는 글`;
+    const line = composeEventPreviewFallback(MACHINE('org.x.y'), 'org.x.y', { note: text }, helpers)!;
+    expect(line).toBe(`이벤트 · ${'가'.repeat(59)}😀…`);
+    expect(line).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+  });
+  it('⭐방향 지시 문장도 같은 규칙 — 지시 글이 id · 경로면 문장을 짓지 않는다(null → 폴백)', () => {
+    expect(composeEventPreviewLine('preset.steer.instruct', { instruction: '/api/v2/x' }, helpers)).toBeNull();
+  });
 });

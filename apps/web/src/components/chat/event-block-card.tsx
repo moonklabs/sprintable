@@ -749,14 +749,17 @@ export function composeEventPreviewLine(
 
 /** how much of a person's own text the one-line preview keeps */
 const PREVIEW_TEXT_MAX = 60;
-/** the payload fields that hold a PERSON'S words (not an id, a slug or a state) — the first present one, first line, is what a fallback line may show */
-const HUMAN_TEXT_FIELDS = ['instruction', 'message', 'summary', 'note', 'title', 'reason', 'body', 'content'] as const;
+/** the payload fields that hold a PERSON'S words (an instruction, a message, a summary, a note) — NOT `title` / `body` / `content` / `reason` (workflow and recipe payloads carry slugs, ids and paths there) — the first usable one, first line, is what a fallback line may show */
+const HUMAN_TEXT_FIELDS = ['instruction', 'message', 'summary', 'note'] as const;
+/** a line that is an id, a path or a link is not a person's words even in a text field */
+const NOT_WORDS_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|^\/|^[a-z][a-z0-9+.-]*:\/\/|entity:[a-z_]+:/i;
 
 function firstHumanLine(value: unknown, max: number): string | null {
   if (typeof value !== 'string') return null;
   const line = value.split('\n').map((l) => l.trim()).find((l) => l.length > 0);
-  if (!line) return null;
-  return line.length > max ? `${line.slice(0, max)}…` : line;
+  if (!line || NOT_WORDS_RE.test(line)) return null;
+  const chars = Array.from(line); // by code point: a cut never splits an emoji (a surrogate pair)
+  return chars.length > max ? `${chars.slice(0, max).join('')}…` : line;
 }
 
 /**
