@@ -4,8 +4,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { ShieldCheck, ChevronRight } from 'lucide-react';
-import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
+import type { ProofState } from '@/components/proof-capsule/proofline';
+import { Avatar } from '@/components/shared/avatar';
 import { Button } from '@/components/ds/button';
+import { Chip } from '@/components/ds/chip';
+import { ListRow } from '@/components/ds/list-row';
+import { SectionHeader } from '@/components/ds/section-header';
 import { useSseNotifications } from '@/hooks/use-sse-notifications';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { cn } from '@/lib/utils';
@@ -50,53 +54,67 @@ async function fetchAttentionQueue(
 }
 
 function RowSkeleton() {
-  return <div className="h-[52px] animate-pulse border-b border-proof-line-soft bg-proof-sunk/60 last:border-b-0" />;
+  return <div className="h-14 animate-pulse border-b border-ds-line bg-ds-surface-high/60 last:border-b-0" />;
 }
+
+// 4909 (AC3 3단계) — the row's state colour (the proof state) is a ds chip: the word stays (색만으로 뜻을 싣지 않는다), the tone carries the meaning.
+const STATE_TONE: Record<ProofState, 'failed' | 'needs-hand' | 'done' | 'info'> = { red: 'failed', amber: 'needs-hand', green: 'done', blue: 'info' };
+// the verb at the row's end («검토» …) keeps its old tone as the text's colour — it is the row's own words now, never a second button
+const ACTION_TONE: Record<AttentionQueueItem['actionTone'], string> = { primary: 'font-semibold text-ds-action-text', neutral: 'text-ds-ink-2', ready: 'text-ds-done' };
 
 // story #3052(2984-S4) — 헤어라인 액센트(회귀가드) 단위 테스트를 위해 export(전체 폴링
 // 생명주기를 시뮬레이션하지 않고 highlighted prop만 직접 검증).
+/**
+ * One «지금 개입할 것» row (4909 AC3 3단계): a ds ListRow — state chip · the claim on one line · the mono second line «종류 · 시간» · the verb at the end. The whole row IS the link (a real `<a href>`, stretched over the row), so the
+ * browser's own «open in a new tab» · ⌘-click come with it — the old separate gate button went to the same place as the row, so it is gone (one place, not two). A plain click goes through the app's router (as the row always did);
+ * a click with a modifier key (or a middle click) is left to the browser. Without an `href` the row is static (no link, no role — never an invented route).
+ */
 export function AttentionRow({ item, highlighted, onNavigate }: {
   item: AttentionQueueItem; highlighted: boolean; onNavigate: (href: string) => void;
 }) {
-  // AttentionQueueItem.href는 string | null(방어적 계약) — href가 없으면 행을 비내비게이션
-  // 처리한다(role/tabIndex/onClick/버튼 전부 생략, 정적 표시만. 있지도 않은 라우트를 지어내지
-  // 않는다는 원칙).
   const navigable = item.href !== null;
   const locale = useLocale();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
+  const when = item.enteredStateAtMs !== null ? formatViewerRelativeTime(new Date(item.enteredStateAtMs).toISOString(), locale, displayTimezone) : null;
+  const actor = item.actor ? <Avatar name={item.actor.name} actorType={item.actor.isAgent ? 'agent' : 'human'} size={22} /> : null;
+  const claim = (
+    navigable ? (
+      <a
+        href={item.href!}
+        title={item.claim}
+        data-row-focus
+        className="outline-none after:absolute after:inset-0 after:content-['']"
+        onClick={(e) => {
+          if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; // the browser's own way (new tab · window · download) stays
+          e.preventDefault();
+          onNavigate(item.href!);
+        }}
+      >
+        {item.claim}
+      </a>
+    ) : <span title={item.claim}>{item.claim}</span>
+  );
   return (
-    <div
-      role={navigable ? 'button' : undefined}
-      tabIndex={navigable ? 0 : undefined}
-      onClick={navigable ? (e) => {
-        if ((e.target as HTMLElement).closest('a')) return;
-        onNavigate(item.href!);
-      } : undefined}
-      onKeyDown={navigable ? (e) => {
-        if (e.key === 'Enter') onNavigate(item.href!);
-      } : undefined}
+    <ListRow
+      data-testid="attention-row"
+      leading={<Chip tone={STATE_TONE[item.proofState]} dot>{item.kindLabel}</Chip>}
+      title={claim}
+      subtitle={[item.bucket, when].filter(Boolean).join(' · ')}
+      trailing={actor || navigable ? (
+        <>
+          {actor}
+          {navigable ? (
+            <span className={cn('inline-flex items-center gap-0.5 text-ds-small', ACTION_TONE[item.actionTone])}>{item.actionLabel}<ChevronRight className="size-3.5" aria-hidden="true" /></span>
+          ) : null}
+        </>
+      ) : undefined}
       className={cn(
-        'border-b border-b-proof-line-soft border-l-2 border-l-transparent last:border-b-0',
-        navigable && 'cursor-pointer hover:bg-proof-sunk',
+        'border-l-2 border-l-transparent last:border-b-0 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-inset has-[a:focus-visible]:ring-ds-action',
         'motion-safe:transition-colors motion-safe:duration-700',
-        // story #3052(2984-S4) — "최근 변경" 신호는 fill(citron/15 배경 wash) 대신 헤어라인
-        // 액센트(좌측 테두리)로. 색 신호 자체는 KEEP(citron 유지) — fill만 제거.
-        highlighted && 'motion-safe:border-l-proof-citron',
+        // story #3052(2984-S4) — "최근 변경" 신호는 fill(배경 wash) 대신 왼쪽 막대로(질감 없음). 색 신호 자체는 KEEP.
+        highlighted && 'motion-safe:border-l-ds-action',
       )}
-    >
-      <ProofCapsule
-        density="row"
-        proofState={item.proofState}
-        stateLabel={item.kindLabel}
-        typeBadge={item.bucket}
-        claim={item.claim}
-        human={item.actor && !item.actor.isAgent ? { name: item.actor.name, role: '' } : undefined}
-        agent={item.actor?.isAgent ? { name: item.actor.name } : undefined}
-        gate={navigable ? { action: item.actionLabel, href: item.href!, tone: item.actionTone } : undefined}
-        duration={item.enteredStateAtMs !== null ? formatViewerRelativeTime(new Date(item.enteredStateAtMs).toISOString(), locale, displayTimezone) : undefined}
-        className="rounded-none border-0"
-      />
-    </div>
+    />
   );
 }
 
@@ -215,51 +233,39 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
     : null;
 
   return (
-    // story #7d7634ee(P0·선생님 직접 지시) — 컷코너(clip-path) 폐지, proof-surface(13px 균일
-    // 라운드)+proof-surface-lift(뜬 표면 재질) 채택. 옛 rounded-2xl은 proof-surface의
-    // --proof-radius-soft로 흡수(중복 라운드 선언 제거).
-    <div className="proof-surface proof-surface-lift overflow-hidden border border-proof-line bg-proof-panel">
-      <div className="flex items-baseline justify-between gap-3 border-b border-proof-line-soft px-5 py-3.5">
-        {/* story #3010(로드맵 P3, L5 대비) — text-proof-faint 라이트 대비 미달(story #2993
-            유나 처방과 동일 클래스) → text-proof-ink-3(아래 kicker·empty body 2곳). */}
-        <div>
-          <div className="text-editorial-meta font-bold uppercase tracking-[0.12em] text-proof-ink-3">{t('kicker')}</div>
-          {/* story #3010(로드맵 P3, L6, 유나 판정 2026-08-24) — 이 h2는 반복 그룹 라벨이 아니라
-              섹션 주 제목(단일 마운트)이라 L6 대상. weight만 font-editorial-heading(820)로
-              교체. 크기는 글자 눈금의 lg(18px) (story 4831: 눈금에 없는 19px에서). */}
-          <h2 className="text-lg font-editorial-heading leading-tight tracking-[-0.014em] text-proof-ink">{t('title')}</h2>
-        </div>
-        {!loading && !(loadFailed && shown.length === 0) ? (
-          <div className="shrink-0 text-editorial-ui font-medium text-proof-ink-3">
-            {t.rich('count', { count: shown.length, b: (chunks) => <b className="text-proof-ink">{chunks}</b> })}
-          </div>
-        ) : null}
-      </div>
+    // 4909 (AC3 3단계) — the screen on the ds parts: the panel is the same surface as the approvals list, the head is a SectionHeader (title + the same count rule), the rows are ListRows.
+    <div className="overflow-hidden rounded-ds-control border border-ds-line bg-ds-surface">
+      <SectionHeader
+        // the old kicker («홈») stays as a small muted word before the title (the copy is pinned by the nav-structure ratchet; it is not dropped, only quieter)
+        title={<><span className="mr-2 font-mono text-ds-mono-md font-normal text-ds-ink-3">{t('kicker')}</span>{t('title')}</>}
+        level={2}
+        trailing={!loading && !(loadFailed && shown.length === 0)
+          ? <span className="font-sans text-ds-small font-medium text-ds-ink-3">{t.rich('count', { count: shown.length, b: (chunks) => <b className="text-ds-ink">{chunks}</b> })}</span>
+          : undefined}
+      />
 
       {loading ? (
         <div>{Array.from({ length: 3 }).map((_, i) => <RowSkeleton key={i} />)}</div>
       ) : loadFailed && shown.length === 0 ? (
         // 4909 (가) — 읽기 실패 얼굴. «안전»이 아니라 «못 불러왔어요»(role=alert) + 다시 시도.
         <div role="alert" data-testid="attention-load-failed" className="flex flex-col items-center gap-2 px-5 py-10 text-center">
-          <p className="text-base font-semibold text-proof-ink">{t('loadFailedTitle')}</p>
-          <p className="text-xs text-proof-ink-3">{t('loadFailedBody')}</p>
+          <p className="text-ds-body font-semibold text-ds-ink">{t('loadFailedTitle')}</p>
+          <p className="text-ds-small text-ds-ink-3">{t('loadFailedBody')}</p>
           {retryButton}
         </div>
       ) : shown.length === 0 ? (
         <div className="flex flex-col items-center gap-2 px-5 py-10 text-center">
-          {/* story #3099(DS·AA 후속) — green 소형텍스트(11px bold) AA 미달, 텍스트는 중립화
-              (text-proof-ink)하고 색 신호는 아이콘 하나로 좁힌다(#3090과 동형: 색은 그래픽,
-              텍스트는 중립 — 아이콘은 3:1 non-text 기준으로 이미 PASS). */}
-          <div className="inline-flex items-center gap-1.5 text-editorial-meta font-bold tracking-[0.02em] text-proof-ink">
-            <ShieldCheck className="size-3.5 text-proof-green" aria-hidden="true" />{t('allClear')}
+          {/* story #3099(DS·AA 후속) — 텍스트는 중립(ink), 색 신호는 아이콘 하나로 좁힌다(아이콘은 3:1 non-text 기준). */}
+          <div className="inline-flex items-center gap-1.5 text-ds-small font-bold tracking-[0.02em] text-ds-ink">
+            <ShieldCheck className="size-3.5 text-ds-done" aria-hidden="true" />{t('allClear')}
           </div>
-          <p className="text-base font-semibold text-proof-ink-2">{t('emptyTitle')}</p>
-          <p className="text-xs text-proof-ink-3">{t('emptyBody')}</p>
+          <p className="text-ds-body font-semibold text-ds-ink-2">{t('emptyTitle')}</p>
+          <p className="text-ds-small text-ds-ink-3">{t('emptyBody')}</p>
         </div>
       ) : (
         <div>
           {loadFailed ? (
-            <div role="alert" data-testid="attention-load-stale" className="flex items-center gap-3 border-b border-proof-line-soft bg-proof-sunk px-5 py-2.5 text-xs text-proof-ink-2">
+            <div role="alert" data-testid="attention-load-stale" className="flex items-center gap-3 border-b border-ds-line bg-ds-surface-sunk px-4 py-2.5 text-ds-small text-ds-ink-2">
               <span className="flex-1 break-keep">{t('loadStaleLine')}</span>
               {retryButton}
             </div>
@@ -270,31 +276,22 @@ export function AttentionQueueView({ projectId }: { projectId: string }) {
               onNavigate={(href) => router.push(href)}
             />
           ))}
-          {/* story #2923(P0-E AQ3, doc attention-audit-redesign-2923) — 「결재함=완전 목록
-              overflow·Attention GATE 앵커」. 상한(cap) 초과분이 사라지지 않고 결재함(현 gates
-              탭, ApprovalsQueue=Gate 3종 완전 목록)에 그대로 있다는 걸 클릭 가능한 앵커로
-              보여준다(예전엔 순수 텍스트, 갈 곳이 없었다).
-              MEDIUM①(카디르 QA, PR#3353 2026-08-22) — overflow가 GATE 버킷 0건일 수도
-              있는데(잘린 게 전부 STEER/BLOCK/Q라면) 그때 gates 탭 앵커를 걸면 눌러도 결재함에
-              그 항목이 없다(재현: needs_input 10건→overflow 3, 전부 STEER라 GATE 0). bucket
-              필드(AQ1)로 정밀 판정 — GATE가 1개라도 잘려나갔을 때만 앵커, 0건이면 기존
-              비내비게이션 텍스트로 정직하게 폴백(「거기 전부 있다」로 과장 안 함). 착지 탭
-              기본값 변경(B3 보류)은 스코프 밖(PO 확定) — 이 앵커는 명시적 tab=gates 링크일
-              뿐 기본 착지를 바꾸지 않는다. */}
+          {/* story #2923(P0-E AQ3, doc attention-audit-redesign-2923) — 「결재함=완전 목록 overflow·Attention GATE 앵커」. 상한(cap) 초과분이 사라지지 않고 결재함(gates 탭)에 있다는 걸 클릭 가능한 앵커로 보여준다.
+              MEDIUM①(카디르 QA, PR#3353) — overflow가 GATE 버킷 0건이면 앵커 없이 비내비게이션 텍스트로 정직하게 폴백(「거기 전부 있다」로 과장 안 함). 착지 탭 기본값은 안 바꾼다(명시적 tab=gates 링크일 뿐). */}
           {overflowLine && hiddenGate ? (
             <button
               type="button"
               onClick={() => router.push(flatHref('/inbox?tab=gates'))}
-              className="flex w-full items-center gap-1.5 border-t border-proof-line-soft bg-proof-sunk px-5 py-2.5 text-left text-xs text-proof-ink-3 transition-colors hover:bg-proof-line-soft hover:text-proof-ink-2"
+              className="flex w-full items-center gap-1.5 border-t border-ds-line bg-ds-surface-sunk px-4 py-2.5 text-left text-ds-small text-ds-ink-3 transition-colors hover:bg-ds-surface-high hover:text-ds-ink-2 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ds-action focus-visible:outline-none"
             >
-              <span className="size-1 rounded-full bg-proof-faint" aria-hidden="true" />
+              <span className="size-1 rounded-full bg-ds-ink-3" aria-hidden="true" />
               <span className="flex-1 break-keep">{overflowLine}</span>
               <ChevronRight className="size-3.5 shrink-0" aria-hidden="true" />
             </button>
           ) : overflowLine ? (
             // story #4382(까디르 메모 ①) — 스토리로 묶여 넘침이 0이어도 BE가 잘랐으면 줄이 선다(수는 «더 있을 수 있어요»).
-            <div className="flex items-center gap-1.5 border-t border-proof-line-soft bg-proof-sunk px-5 py-2.5 text-xs text-proof-ink-3">
-              <span className="size-1 rounded-full bg-proof-faint" aria-hidden="true" />
+            <div className="flex items-center gap-1.5 border-t border-ds-line bg-ds-surface-sunk px-4 py-2.5 text-ds-small text-ds-ink-3">
+              <span className="size-1 rounded-full bg-ds-ink-3" aria-hidden="true" />
               <span className="break-keep">{overflowLine}</span>
             </div>
           ) : null}
