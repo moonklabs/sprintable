@@ -1116,33 +1116,34 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
     expect(container.textContent).not.toContain('작업 상태 변경');
   });
 
-  it('eventDefinitionsByKey 미제공(undefined) — 제네릭 폴백 content 그대로(AC2 비회귀)', async () => {
+  // story 4921 — the four «generic fallback» cases below used to pin the machine text (an agent's text) being SHOWN as the bubble text; a person must not read it (the PO's decision): the bubble says «이벤트» (or the
+  // definition's name), never the slug, the field names or the «[이벤트]» header. The text an agent reads (message.content) is unchanged.
+  it('eventDefinitionsByKey 미제공(undefined) — 제네릭 폴백은 기계 문장이 아니라 «이벤트» 한 낱말(story 4921)', async () => {
     await act(async () => {
       root.render(wrap(<ChatBubble message={EVENT_MESSAGE} isMine={false} />));
     });
-    expect(container.textContent).toContain('[이벤트] preset.work.status_changed');
+    const text = container.querySelector('[data-testid="chat-bubble-text"]')!.textContent;
+    expect(text).toBe('이벤트');
+    expect(container.textContent).not.toMatch(/\[이벤트\]|preset\.work|work_item_type|from_status/);
   });
 
-  it('PO 리뷰(head 80319636c ①) — 폴백은 EventBlockCard 자체 렌더가 아니라 기존 ChatMarkdown 경로를 그대로 탄다("- " 목록이 <li> 불릿으로 렌더, 하이픈 리터럴로 후퇴 안 함)', async () => {
+  it('PO 리뷰(head 80319636c ①) — 폴백은 EventBlockCard 자체 렌더가 아니라 말풍선 글 칸을 탄다(카드 아님) · 4921: «- key: value» 목록은 더는 그려지지 않는다', async () => {
     await act(async () => {
       root.render(wrap(<ChatBubble message={EVENT_MESSAGE} isMine={false} />));
     });
-    const items = Array.from(container.querySelectorAll('li')).map((li) => li.textContent);
-    expect(items).toEqual(expect.arrayContaining([
-      expect.stringContaining('work_item_type: story'),
-      expect.stringContaining('from_status: in-progress'),
-      expect.stringContaining('to_status: in-review'),
-    ]));
+    expect(container.querySelector('[data-testid="chat-bubble-text"]')).not.toBeNull();
+    expect(container.querySelectorAll('li')).toHaveLength(0);
   });
 
   it('event_key가 카탈로그에 없으면(구 정의 삭제 등) 제네릭 폴백', async () => {
     await act(async () => {
       root.render(wrap(<ChatBubble message={EVENT_MESSAGE} isMine={false} eventDefinitionsByKey={{}} />));
     });
-    expect(container.textContent).toContain('[이벤트] preset.work.status_changed');
+    expect(container.querySelector('[data-testid="chat-bubble-text"]')!.textContent).toBe('이벤트');
+    expect(container.textContent).not.toContain('preset.work.status_changed');
   });
 
-  it('정의는 있으나 block_template이 null이면 제네릭 폴백', async () => {
+  it('정의는 있으나 block_template이 null이면 제네릭 폴백(사람 글, story 4921)', async () => {
     await act(async () => {
       root.render(wrap(
         <ChatBubble
@@ -1151,7 +1152,7 @@ describe('ChatBubble — story #2637 event_definitions block_template 카드', (
         />,
       ));
     });
-    expect(container.textContent).toContain('[이벤트] preset.work.status_changed');
+    expect(container.textContent).not.toMatch(/\[이벤트\]|preset\.work|work_item_type|from_status/); // 4921 — the definition's NAME (if it has one) or «이벤트»
   });
 
   it('block_template이 있으면 header/text/fields를 payload로 치환해 렌더한다(제네릭 텍스트 대신)', async () => {

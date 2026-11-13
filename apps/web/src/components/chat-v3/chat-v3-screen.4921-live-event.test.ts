@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { threadsAfterMessage, type ChatV3Thread } from './chat-v3-screen';
+import { threadsAfterMessage } from './chat-v3-screen';
+import type { ChatV3Thread } from './chat-v3-thread-rail';
 
 // story 4921 — a live frame of an event message keeps its `event` on the thread's latest message: the rail's preview line is built from it
 describe('threadsAfterMessage — event on a live update (story 4921)', () => {

@@ -14,7 +14,7 @@ import koMessages from '../../../messages/ko.json';
 vi.mock('@/app/dashboard/dashboard-shell', () => ({
   useDashboardContext: () => ({ projectId: 'proj-1', currentTeamMemberId: 'member-1', currentMemberType: 'human', role: 'member', projectMemberships: [] }),
 }));
-vi.mock('next/image', () => ({ default: ({ src, alt }: { src?: string; alt?: string }) => /* eslint-disable-next-line @next/next/no-img-element */ <img src={src} alt={alt} /> }));
+vi.mock('next/image', () => ({ default: () => null }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: () => {} }) }));
 
 let container: HTMLDivElement; let root: Root;

@@ -509,7 +509,7 @@ export function NotificationBell() {
         icon: '/favicon.ico',
       });
     }
-  }, [t]);
+  }, [t, tEventCard]);
 
   // story #2201 — sync_status는 SseEventNotification 계약과 무관한 별도 이벤트라
   // extraEventNames/onExtraEvent로 구독한다(핸들러 파이프라인을 안 건드림). story #2686(축D) —
