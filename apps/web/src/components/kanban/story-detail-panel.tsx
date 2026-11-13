@@ -9,7 +9,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
-import { AlertTriangle, ArrowLeftRight, Check, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, Check, ChevronDown, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
 import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import type { KanbanStory, KanbanMember, DependencyEdge, GateItem } from './types';
 import { normalizeAssigneePatch } from './types';
@@ -56,7 +56,7 @@ import { LAYER } from '@/components/ds/layers';
 import { Input } from '@/components/ui/input';
 import { isImeComposing } from '@/lib/ime-composition';
 import { Textarea } from '@/components/ui/textarea';
-import { StatusBadge } from '@/components/ui/status-badge';
+import { Chip } from '@/components/ds/chip';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { COLUMNS } from './types';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -384,6 +384,12 @@ function isOlderStory(incoming: Pick<KanbanStory, 'updated_at'>, current: Pick<K
 
 /** story 4906 ⑩ — the trust-pipeline step a status comes straight from (backend trust_pipeline.derive_trust_stage: queued ← backlog / ready-for-dev · running ← in-progress · claimed_done ← in-review).
  * The Workcell gauge caption uses the story's STATUS word only while the pipeline stage is the one this status maps to. */
+/** 4908 — 머리 상태 칩의 색. 색은 «뜻»일 때만: 일하는 중 = action(점 + 글) · 끝남 = done · 나머지는 중립. 낱말은 언제나 같이 간다(색만으로 말하지 않는다). */
+const STATUS_CHIP_TONE: Record<string, 'neutral' | 'action' | 'done'> = {
+  'in-progress': 'action',
+  done: 'done',
+};
+
 const STATUS_BACKED_STAGE: Record<string, WorkcellPipelineStage | undefined> = {
   backlog: 'queued', 'ready-for-dev': 'queued', 'in-progress': 'running', 'in-review': 'claimed_done',
 };
@@ -1696,7 +1702,11 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 <DropdownMenuTrigger
                   render={
                     <Button type="button" variant="ghost" className="h-auto min-h-0 min-w-0 p-0" disabled={savingStatus} aria-label={t('status')}>
-                      <StatusBadge status={localStatus} label={statusLabel} interactive />
+                      {/* 4908 — 머리에서 가장 눈에 띄는 요소라 공용 Badge(눌린 거친 결)가 아니라 ds Chip(점 + 글 + 경계 ds-line · 결 없음)으로. 이 자리만 — 공용 Badge는 그대로. 메뉴의 ✓ 표시와 같은 낱말(statusLabel). */}
+                      <Chip tone={STATUS_CHIP_TONE[localStatus] ?? 'neutral'} dot className="h-6 cursor-pointer px-2.5 transition hover:brightness-95" data-testid="story-detail-status-chip">
+                        {statusLabel}
+                        <ChevronDown className="size-3 shrink-0" aria-hidden="true" />
+                      </Chip>
                     </Button>
                   }
                 />

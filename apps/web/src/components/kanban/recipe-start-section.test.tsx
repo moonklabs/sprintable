@@ -457,6 +457,22 @@ describe('RecipeStartSection — 이 단계 완료(story #4249)', () => {
   });
 });
 
+describe('4908 레시피 고르기 라디오 — 경계가 보인다(ds Radio · line-control)', () => {
+  it('⭐동그라미 경계는 border-ds-line-control(비글자 3:1 이상 · layer-rule.test가 값으로 잰다)이고 옛 border-input이 아니다', async () => {
+    await render([candidateStub({ key: 'org.acme.a', name: '레시피 A' }), candidateStub({ key: 'org.acme.b', name: '레시피 B' })]);
+    for (const r of container.querySelectorAll<HTMLElement>('[role="radio"]')) {
+      const c = r.className.split(/\s+/);
+      expect(c).toContain('border-ds-line-control');
+      expect(c).not.toContain('border-input');
+    }
+  });
+
+  it('묶음에 보이는 이름이 있다(스크린리더: «레시피 시작» 안에서 고른다)', async () => {
+    await render([candidateStub({ key: 'org.acme.a', name: '레시피 A' }), candidateStub({ key: 'org.acme.b', name: '레시피 B' })]);
+    expect(container.querySelector('[role="radiogroup"]')?.getAttribute('aria-label')).toBe(koMessages.board.recipeStart);
+  });
+});
+
 describe('[SID:4831] 레시피 고르기 라디오(바탕 부품)', () => {
   it('카드(라벨) 글자를 누르면 그 레시피가 골라져 시작 버튼이 나타나고 하나만 골라진다 · 스페이스로도 고른다', async () => {
     await render([
@@ -465,7 +481,7 @@ describe('[SID:4831] 레시피 고르기 라디오(바탕 부품)', () => {
     ]);
     const radios = () => [...container.querySelectorAll('[role="radio"]')] as HTMLElement[];
     const checked = () => radios().map((r) => r.getAttribute('aria-checked'));
-    expect(radios().map((r) => r.getAttribute('data-slot'))).toEqual(['radio-group-item', 'radio-group-item']);
+    expect(radios().map((r) => r.getAttribute('data-slot'))).toEqual(['ds-radio', 'ds-radio']);
     expect(checked()).toEqual(['false', 'false']);
     expect(container.querySelector('button')).toBeNull();
     await act(async () => { (container.querySelectorAll('label')[1] as HTMLElement).click(); });

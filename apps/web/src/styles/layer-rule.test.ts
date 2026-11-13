@@ -105,6 +105,11 @@ describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
     for (const ink of ['ink', 'ink-2']) expect(contrast(t[ink]!, t[LAYER_TOKEN.rowSelected]!), `${ink} on rowSelected`).toBeGreaterThanOrEqual(4.5);
   });
 
+  it.each(themes)('⭐%s: 고르는 동그라미 · 칸 경계(line-control)는 속성 칸 · 내용 칸 면 위에서 비글자 3:1 이상 — 옛 border-input은 바탕과 거의 같은 색이라 «고를 수 있는지» 안 보였다(11-13 PO)', (_name, t) => {
+    for (const face of ['rowOthers', 'panel'] as const) expect(contrast(t['line-control']!, t[LAYER_TOKEN[face]]!), `line-control on ${face}`).toBeGreaterThanOrEqual(3);
+    expect(contrast(t['line-control']!, t['surface-sunk']!), 'line-control on the radio fill (surface-sunk)').toBeGreaterThanOrEqual(3);
+  });
+
   it('층마다 토큰이 서로 다르다(같은 토큰을 두 층에 쓰지 않는다) · 클래스 이름이 토큰 이름을 가리킨다', () => {
     const tokens = Object.values(LAYER_TOKEN);
     expect(new Set(tokens).size).toBe(tokens.length);
