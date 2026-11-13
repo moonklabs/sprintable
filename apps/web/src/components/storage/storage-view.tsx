@@ -5,13 +5,14 @@ import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ds/button';
+import { IconButton } from '@/components/ds/icon-button';
 import { useToast } from '@/components/ui/toast';
 import { useContextualPanelState } from '@/components/ui/contextual-panel-layout';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { closedDrawerProps, useSwipeDrawer } from '@/lib/use-swipe-drawer';
-import { ChevronDown, Folder as FolderIcon, X } from 'lucide-react';
+import { ChevronDown, Folder as FolderIcon } from 'lucide-react';
 import { formatTotalSize } from '@/lib/storage/format';
 import { uploadStorageAsset } from '@/lib/storage/storage-upload';
 import { uploadFileAndReport } from './storage-upload-report';
@@ -420,7 +421,7 @@ export function StorageView({ projectId }: { projectId: string }) {
       <div className="px-4 pt-3 lg:hidden">
         <Button
           type="button"
-          variant="outline"
+          variant="secondary"
           onClick={openFolderDrawer}
           className="h-auto min-h-[44px] min-w-0 max-w-full justify-start gap-2 px-3 text-sm font-normal text-ds-ink"
           data-testid="storage-folder-drawer-trigger"
@@ -515,9 +516,7 @@ export function StorageView({ projectId }: { projectId: string }) {
       >
         <div className="flex flex-shrink-0 items-center justify-between border-b border-ds-line px-4 py-3">
           <span className="text-sm font-medium text-ds-ink">{t('metaFolder')}</span>
-          <Button type="button" variant="ghost" size="icon-sm" onClick={closeFolderDrawer} className="text-ds-ink-3 hover:text-ds-ink" aria-label={tc('close')}>
-            <X className="size-4" />
-          </Button>
+          <IconButton type="button" icon="close" label={tc('close')} onClick={closeFolderDrawer} />
         </div>
         <div className="focus-inset flex min-h-0 flex-1 flex-col overflow-y-auto">
           <StorageFolderTree
