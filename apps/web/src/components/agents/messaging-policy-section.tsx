@@ -212,6 +212,14 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
           })}
         </div>
 
+        {/* org_wide 경고 — story 4912 (PO 11-13): the choice's consequence is read BEFORE the [저장] that commits it, so the warning sits right under the three cards and above the button */}
+        {stagedMode === 'org_wide' && (
+          <Banner tone="note" announce="assertive" className="rounded-ds-control">
+            <span className="font-medium">{t('messagingOrgWideWarningTitle')}</span>{' '}
+            <span className="text-ds-ink-2">{t('messagingOrgWideWarningDesc')}</span>
+          </Banner>
+        )}
+
         {/* mode = staged + Save */}
         {stagedMode !== mode && (
           <div className="flex justify-end">
@@ -219,14 +227,6 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
               {savingMode ? '...' : tc('save')}
             </Button>
           </div>
-        )}
-
-        {/* org_wide 경고 */}
-        {stagedMode === 'org_wide' && (
-          <Banner tone="note" announce="assertive" className="rounded-ds-control">
-            <span className="font-medium">{t('messagingOrgWideWarningTitle')}</span>{' '}
-            <span className="text-ds-ink-2">{t('messagingOrgWideWarningDesc')}</span>
-          </Banner>
         )}
 
         {/* list 모드: allowlist (creator 잠금 + 멤버 행 + picker) */}

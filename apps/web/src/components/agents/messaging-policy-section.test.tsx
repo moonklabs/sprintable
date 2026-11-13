@@ -155,6 +155,18 @@ describe('MessagingPolicySection — card face (story 4912 · C2b)', () => {
     expect(save.className).toContain('bg-ds-action');
   });
 
+  it('⭐«조직 전체» 경고 띠는 세 장 바로 아래 · [저장] «위»에 있다(고르는 순간 결과를 읽고 나서 저장하는 차례) — 순서를 되돌리면 RED (PO 11-13)', async () => {
+    stub('creator_only');
+    await mount();
+    await act(async () => { radios()[2]!.click(); });
+    const banner = card().querySelector('[data-slot="ds-banner"]') as HTMLElement;
+    const save = [...card().querySelectorAll('button')].find((b) => b.textContent === koMessages.common.save)!;
+    const lastRadio = radios()[2]!;
+    // DOM order: the three cards → the warning → [저장]
+    expect(lastRadio.compareDocumentPosition(banner) & Node.DOCUMENT_POSITION_FOLLOWING, 'the warning follows the mode cards').toBeTruthy();
+    expect(banner.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING, 'the [저장] follows the warning').toBeTruthy();
+  });
+
   it('⭐지정 구성원 행의 빼기는 «삭제 · 이름»으로 이름이 붙는다(같은 «삭제» N개가 아니다) · 누르면 그 구성원만 DELETE · 만든 사람 행은 ds Chip', async () => {
     stub('list', ['m-1', 'm-2']);
     await mount();
