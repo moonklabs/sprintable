@@ -161,7 +161,7 @@ function CutCornerShell({ state, className, children }: { state: ProofState; cla
   // 스크롤이 원천 봉쇄된다. shrink-0으로 자기 내용 실제 높이를 지키면 초과분이 정상적으로
   // 조상 체인을 타고 올라가 진짜 스크롤러에서 스크롤 가능해진다(재질만 바뀜, 이 규칙 무변경).
   return (
-    <div className={cn('proof-surface proof-surface-lift flex shrink-0 overflow-hidden border border-proof-line bg-proof-panel', className)}>
+    <div data-slot="proof-capsule" className={cn('proof-surface proof-surface-lift flex shrink-0 overflow-hidden border border-proof-line bg-proof-panel', className)}>
       <Proofline state={state} />
       {children}
     </div>

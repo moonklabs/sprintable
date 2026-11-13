@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { GitPullRequest, ExternalLink, X, Plus, AlertTriangle, Check, Loader2 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
+import { Chip } from '@/components/ds/chip';
+import { Input } from '@/components/ds/input';
+import { Button } from '@/components/ds/button';
 
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -151,12 +151,11 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
           {t('sectionLabel')}
         </h3>
         {/* 중립 tint(가디언 ④): GitHub=옵셔널 통합·미연결은 "문제" 아님 → amber 금지(비-GitHub org 노이즈 차단). */}
-        <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
+        <div className="space-y-2 rounded-lg border border-ds-line bg-ds-surface p-3">
           <p className="text-xs font-medium text-foreground">{t('connectPromptTitle')}</p>
           <p className="text-editorial-meta text-muted-foreground">{t('connectPromptBody')}</p>
           <Button
-            size="sm"
-            variant="outline"
+            variant="secondary"
             className="h-7 gap-1"
             onClick={() => { window.location.href = '/api/integrations/github/connect'; }}
           >
@@ -186,7 +185,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
               공유했다("aria-label 있는가"만 보면 놓치는 자리). 아이콘 전용이라 보이는
               글자 라벨은 없으므로 순번만으로 가른다. */}
           {canonical.map((l, index) => (
-            <li key={l.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/20 p-2 text-editorial-meta">
+            <li key={l.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-ds-line bg-ds-surface-high [--muted-foreground:var(--ds-ink-3)] p-2 text-editorial-meta">
               <a
                 href={prUrl(l.repo_full_name, l.pr_number)}
                 target="_blank"
@@ -198,23 +197,24 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
                 <ExternalLink className="size-2.5 shrink-0 text-muted-foreground" />
               </a>
               {l.link_source === 'explicit' ? (
-                <Badge variant="default" className="shrink-0">{t('sourceExplicit')}</Badge>
+                <Chip tone="action" className="shrink-0">{t('sourceExplicit')}</Chip>
               ) : (
-                <Badge variant="outline" className="shrink-0">{t('sourceAuto')}</Badge>
+                <Chip className="shrink-0">{t('sourceAuto')}</Chip>
               )}
               <span className="inline-flex shrink-0 items-center gap-0.5 text-success">
                 <Check className="size-3" />
                 {t('confidenceConfirmed')}
               </span>
-              <button
+              <Button
                 type="button"
+                variant="quiet"
                 onClick={() => void unlink(l)}
                 disabled={busyId === l.id}
                 aria-label={t('unlinkAria', { n: index + 1 })}
-                className="ml-auto inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-destructive hover:ring-1 hover:ring-inset hover:ring-destructive/60 disabled:opacity-50"
+                className="ml-auto size-5 min-h-0 min-w-0 p-0 text-ds-ink-3 hover:text-ds-failed"
               >
                 {busyId === l.id ? <Loader2 className="size-3 animate-spin" /> : <X className="size-3" />}
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
@@ -228,7 +228,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
             {/* story #3592(§17-20 ⑧·§22-18 동형) — 행마다 같은 「명시 연결」 접근 이름이라
                 보조기술 버튼 목록에서 어느 PR 링크 행인지 못 가른다. */}
             {suggestions.map((l, index) => (
-              <li key={l.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-border bg-muted/10 p-2 text-editorial-meta">
+              <li key={l.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-ds-line bg-ds-surface-sunk p-2 text-editorial-meta">
                 <a
                   href={prUrl(l.repo_full_name, l.pr_number)}
                   target="_blank"
@@ -244,8 +244,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
                   {t('estimated', { confidence: l.confidence })}
                 </span>
                 <Button
-                  size="sm"
-                  variant="outline"
+                  variant="secondary"
                   className="ml-auto h-6 shrink-0 gap-1 text-editorial-meta"
                   disabled={busyId === l.id}
                   onClick={() => void promote(l)}
@@ -274,7 +273,7 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
             onChange={(e) => setRepoName(e.target.value)}
             placeholder={t('repoPlaceholder')}
             aria-label={t('repoAria')}
-            className="h-auto min-w-0 flex-1 px-2 py-1 font-mono lg:text-editorial-meta text-foreground bg-background dark:bg-background"
+            className="h-auto min-w-0 flex-1 px-2 py-1 font-mono lg:text-editorial-meta text-ds-ink"
           />
         </div>
         <div className="flex shrink-0 items-center gap-1 text-editorial-meta">
@@ -285,12 +284,11 @@ export function PrLinkSection({ storyId }: { storyId: string }) {
             inputMode="numeric"
             placeholder={t('prPlaceholder')}
             aria-label={t('prAria')}
-            className="h-auto w-20 px-2 py-1 lg:text-editorial-meta text-foreground bg-background dark:bg-background"
+            className="h-auto w-20 px-2 py-1 lg:text-editorial-meta text-ds-ink"
           />
         </div>
         <Button
-          size="sm"
-          variant="outline"
+          variant="secondary"
           className="h-7 shrink-0 gap-1"
           disabled={adding || !repoName.trim() || !prNum.trim()}
           onClick={() => void onAddSubmit()}

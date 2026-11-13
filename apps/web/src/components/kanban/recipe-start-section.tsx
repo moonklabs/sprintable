@@ -3,8 +3,8 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ds/button';
+import { Card } from '@/components/ds/card';
 import { RadioGroup, Radio } from '@/components/ds/radio';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -71,7 +71,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
     // story #3164 가드 — 손코딩 카드(rounded+border+card표면 bg 공존) 대신 Card 프리미티브
     // (recipe-detail-view.tsx의 surface="subtle" 관례와 동형, Dispatch 섹션의 grandfathered
     // 손코딩 div는 새로 안 따라간다).
-    <Card surface="subtle" className="p-3">
+    <Card className="p-3">
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('recipeStart')}</p>
       {body}
     </Card>
@@ -92,7 +92,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
     return sectionShell(
       <>
         <p className="text-xs text-muted-foreground">{t('recipeStartRoleUnassigned')}</p>
-        <Link href={flatHref('/organization/events')} className="mt-1 inline-block text-xs text-primary hover:underline">
+        <Link href={flatHref('/organization/events')} className="mt-1 inline-block text-xs text-ds-action-text hover:underline">
           {t('recipeStartGoToAssign')}
         </Link>
       </>,
@@ -199,15 +199,15 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
       body = confirmingKey === c.key ? (
         <div className="flex flex-wrap items-center gap-2" data-testid="recipe-complete-confirm">
           <span className="break-keep text-xs text-foreground">{question}</span>
-          <Button type="button" size="sm" disabled={busy} onClick={() => void runStageAction(c, 'complete', c.current_stage!)}>
+          <Button variant="primary" type="button" disabled={busy} onClick={() => void runStageAction(c, 'complete', c.current_stage!)}>
             {busy ? t('recipeCompletingStage') : t('recipeCompleteStageConfirmYes')}
           </Button>
-          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setConfirmingKey(null)}>
+          <Button type="button" variant="secondary" disabled={busy} onClick={() => setConfirmingKey(null)}>
             {t('recipeCompleteStageCancel')}
           </Button>
         </div>
       ) : (
-        <Button type="button" size="sm" className="self-start" onClick={() => setConfirmingKey(c.key)} data-testid="recipe-complete-stage">
+        <Button variant="primary" type="button" className="self-start" onClick={() => setConfirmingKey(c.key)} data-testid="recipe-complete-stage">
           {t('recipeCompleteStage')}
         </Button>
       );
@@ -217,7 +217,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
       body = <p className="break-keep text-editorial-meta text-muted-foreground" data-testid="recipe-needs-fields-hint">{t('recipeNeedsFieldsHint')}</p>;
     } else if (nextMine && c.current_completion === 'gate_approval') {
       body = c.current_gate_status === 'approved' ? (
-        <Button type="button" size="sm" className="self-start" disabled={busy}
+        <Button variant="primary" type="button" className="self-start" disabled={busy}
           onClick={() => void runStageAction(c, 'start', c.next_stage!)} data-testid="recipe-start-my-stage">
           {busy ? t('recipeStarting') : t('recipeStartMyStage')}
         </Button>
@@ -301,7 +301,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
         <p className="mb-2 text-sm text-foreground" data-testid="recipe-start-name">{presetName(notStarted[0], tPreset)}</p>
       )}
       {selected ? (
-        <Button type="button" size="sm" onClick={() => void handleStart(selected)} disabled={publishing}>
+        <Button variant="primary" type="button" onClick={() => void handleStart(selected)} disabled={publishing}>
           {publishing ? t('recipeStarting') : t('recipeStartButton')}
         </Button>
       ) : (

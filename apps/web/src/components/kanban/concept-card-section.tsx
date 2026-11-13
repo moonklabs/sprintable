@@ -88,7 +88,7 @@ export function ConceptCardSection({
   if (docs.length === 0) return null;
 
   return (
-    <div className="border-t border-border/60 px-4 py-3" data-testid="concept-card-section">
+    <div className="border-t border-ds-line px-4 py-3" data-testid="concept-card-section">
       <p className="mb-2 text-xs font-medium text-muted-foreground">{t('conceptCardTitle')}</p>
       <ul className="flex flex-col gap-1.5">
         {docs.map((doc) => {

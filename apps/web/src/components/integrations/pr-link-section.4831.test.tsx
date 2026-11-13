@@ -41,13 +41,13 @@ describe('PrLinkSection — 추가 줄의 바탕 부품(story 4831)', () => {
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     const repo = container.querySelector(`input[aria-label="${gh.repoAria}"]`) as HTMLInputElement;
     const pr = container.querySelector(`input[aria-label="${gh.prAria}"]`) as HTMLInputElement;
-    expect(repo.dataset.slot).toBe('input');
-    expect(pr.dataset.slot).toBe('input');
+    expect(repo.dataset.slot).toBe('ds-input');
+    expect(pr.dataset.slot).toBe('ds-input');
     expect(hasClass(repo, 'flex-1')).toBe(true);
     expect(hasClass(repo, 'font-mono')).toBe(true);
-    expect(hasClass(repo, 'text-foreground')).toBe(true);
+    expect(hasClass(repo, 'text-ds-ink')).toBe(true);
     expect(hasClass(pr, 'w-20')).toBe(true);
-    expect(hasClass(pr, 'text-foreground')).toBe(true);
+    expect(hasClass(pr, 'text-ds-ink')).toBe(true);
     expect(pr.inputMode).toBe('numeric');
     for (const input of [repo, pr]) expect(input.parentElement!.className).not.toContain('border'); // 틀이 아니라 Input이 테두리를 가진다
     expect(repo.parentElement!.textContent).toContain('acme/'); // 앞글자

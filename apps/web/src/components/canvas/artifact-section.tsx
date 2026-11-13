@@ -15,6 +15,7 @@ import { derivePendingCanonicalizeVersion, type CanonicalizeGateLookup } from '@
 import { deriveNodeOperations, type ArtifactNode } from '@/services/canvas-nodes';
 import { listSpecPins, type SpecPin } from '@/services/canvas-spec-pins';
 import { useToast } from '@/components/ui/toast';
+import { Button } from '@/components/ds/button';
 
 import { fetchWithAuth } from '@/lib/db/client';
 
@@ -251,7 +252,7 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
   if (items.length === 0 && !creating) {
     return (
       <div className={className}>
-        <div className="flex flex-col items-center gap-3 rounded-lg border border-border bg-card px-6 py-9 text-center">
+        <div className="flex flex-col items-center gap-3 rounded-lg border border-ds-line bg-ds-surface-high [--muted-foreground:var(--ds-ink-3)] px-6 py-9 text-center">
           <div className="text-editorial-meta font-medium uppercase tracking-wide text-muted-foreground">
             {t('sectionLabel')}
           </div>
@@ -260,20 +261,8 @@ export function ArtifactSection({ storyId, memberMap = {}, className }: Artifact
           <p className="max-w-sm text-xs text-muted-foreground">{t('emptyHint')}</p>
           {/* story 64010b05 §2 — 임포트는 "그리기"와 co-located된 2번째 입구(별도 숨은 경로 X). */}
           <div className="mt-1 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setCreating(true)}
-              className="rounded-md bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-            >
-              {t('createCta')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setImportOpen(true)}
-              className="rounded-md border border-border px-4 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-            >
-              {t('importCta')}
-            </button>
+            <Button type="button" variant="primary" onClick={() => setCreating(true)}>{t('createCta')}</Button>
+            <Button type="button" variant="secondary" className="hover:bg-ds-surface-highest" onClick={() => setImportOpen(true)}>{t('importCta')}</Button>
           </div>
         </div>
         <ImportArtifactDialog open={importOpen} onOpenChange={setImportOpen} onImport={handleImportCommit} targetId={storyId} />

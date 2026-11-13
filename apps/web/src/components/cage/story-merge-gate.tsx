@@ -43,7 +43,7 @@ export function StoryMergeGate({ storyId }: { storyId: string }) {
   if (!gate) return null;
 
   return (
-    <section aria-label={t('mergeGateTitle')} className="rounded-xl border border-border bg-muted/20 p-3">
+    <section aria-label={t('mergeGateTitle')} className="rounded-xl border border-ds-line bg-ds-surface-high [--muted-foreground:var(--ds-ink-3)] p-3">
       <h3 className="mb-2 text-sm font-semibold text-foreground">{t('mergeGateTitle')}</h3>
       <GateEvidence gate={gate} />
     </section>

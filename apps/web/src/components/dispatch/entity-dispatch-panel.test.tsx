@@ -57,11 +57,13 @@ describe('EntityDispatchPanel — 4908 좁은 칸(속성 칸 16rem)에서 고르
       root.render(wrap(<EntityDispatchPanel entityType="story" entityId="s1" projectId="p1" currentAssigneeId="m1" />));
     });
     await act(async () => { await Promise.resolve(); });
-    const select = container.querySelector('select')!;
-    const c = select.className.split(/\s+/);
+    // ds NativeSelect: className은 «바깥 틀»(data-slot=ds-select)에 걸린다 — 틀이 11rem 밑으로 안 줄고 줄에서 남는 폭을 채운다.
+    const frame = container.querySelector('select')!.parentElement!;
+    expect(frame.getAttribute('data-slot')).toBe('ds-select');
+    const c = frame.className.split(/\s+/);
     expect(c).toEqual(expect.arrayContaining(['min-w-44', 'flex-1']));
     expect(c).not.toContain('min-w-0');
-    expect(select.parentElement!.className.split(/\s+/)).toEqual(expect.arrayContaining(['flex', 'flex-wrap']));
+    expect(frame.parentElement!.className.split(/\s+/)).toEqual(expect.arrayContaining(['flex', 'flex-wrap']));
   });
 });
 
@@ -235,8 +237,10 @@ describe('EntityDispatchPanel — 로드맵 P2·PR-E L1(더보기 드롭다운 e
     await act(async () => { moreBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     // story #4349 — 드롭다운은 body로 포털된다(스크롤 면 밖) → container가 아니라 document에서 찾는다(뜻 그대로).
-    const dropdown = document.querySelector('.shadow-\\[var\\(--elev-overlay\\)\\]');
+    // 4908 — 더보기 팝오버 면은 ds 메뉴 상자와 같은 말(surface-raised · line-control · shadow-ds-overlay)이다.
+    const dropdown = document.querySelector('[data-dropdown-panel="dispatch-more"]');
     expect(dropdown).not.toBeNull();
+    expect(dropdown!.className.split(/\s+/)).toEqual(expect.arrayContaining(['shadow-ds-overlay', 'bg-ds-surface-raised', 'border-ds-line-control']));
     expect(document.querySelector('.shadow-md')).toBeNull();
   });
 });
@@ -262,8 +266,8 @@ describe('EntityDispatchPanel — 바탕 부품(story 4831)', () => {
     });
     await act(async () => { await Promise.resolve(); });
     const select = container.querySelector('select') as HTMLSelectElement;
-    expect(select.dataset.slot).toBe('select');
-    expect(select.className).toContain('flex-1');
+    expect(select.parentElement!.dataset.slot).toBe('ds-select');
+    expect(select.parentElement!.className).toContain('flex-1');
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, 'm1');
       select.dispatchEvent(new Event('change', { bubbles: true }));

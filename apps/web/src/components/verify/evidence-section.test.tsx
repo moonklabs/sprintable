@@ -160,7 +160,7 @@ describe('EvidenceSection — 증거 연결 POST(긴급 정정 2026-07-28: 봉�
 
     const findEvidenceAddBtn = () => Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '증거 연결');
     await act(async () => { findEvidenceAddBtn()!.click(); }); // 폼 펼침(토글 버튼 → 폼으로 치환)
-    const refInput = container.querySelector('input[data-slot="input"][placeholder="URL 또는 참조"]') as HTMLInputElement;
+    const refInput = container.querySelector('input[data-slot="ds-input"][placeholder="URL 또는 참조"]') as HTMLInputElement;
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
     await act(async () => {
       setter.call(refInput, 'https://example.com/proof');
@@ -187,7 +187,7 @@ describe('EvidenceSection — 증거 연결 POST(긴급 정정 2026-07-28: 봉�
 
     const findEvidenceAddBtn = () => Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '증거 연결');
     await act(async () => { findEvidenceAddBtn()!.click(); }); // 폼 펼침
-    const refInput = container.querySelector('input[data-slot="input"][placeholder="URL 또는 참조"]') as HTMLInputElement;
+    const refInput = container.querySelector('input[data-slot="ds-input"][placeholder="URL 또는 참조"]') as HTMLInputElement;
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
     await act(async () => {
       setter.call(refInput, 'https://example.com/proof');

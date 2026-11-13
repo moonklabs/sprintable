@@ -5,7 +5,8 @@ import { useTranslations } from 'next-intl';
 import { MoreHorizontal, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/components/ui/toast';
-import { Select } from '@/components/ui/select';
+import { NativeSelect } from '@/components/ds/select';
+import { Button } from '@/components/ds/button';
 import { normalizeAssigneePatch } from '@/components/kanban/types';
 import { useOrgSyncVersion } from '@/lib/project-context-client';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -153,11 +154,11 @@ export function EntityDispatchPanel({
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
-        <Select
+        <NativeSelect
           value={assigneeId}
           onChange={(e) => setAssigneeId(e.target.value)}
-          // 4908 — 폭 16rem 속성 칸에서 고르기 칸이 «담당자 선…»으로 잘리던 것: 11rem(min-w-44) 밑으로는 줄이지 않는다 — 모자라면 «이벤트 전달» 단추가 아래 줄로 내려가고 고르기 칸이 줄 전체를 쓴다(넓은 곳에서는 예전처럼 한 줄).
-          className="h-auto min-w-44 flex-1 px-2.5 py-1.5 bg-background dark:bg-background"
+          // 4908 — ds NativeSelect(경계 line-control · 바탕 sunk · 초점 링). 폭 16rem 속성 칸에서 고르기 칸이 «담당자 선…»으로 잘리던 것: 틀(className은 바깥 틀에 걸린다)이 11rem(min-w-44) 밑으로는 줄지 않는다 — 모자라면 «이벤트 전달» 단추가 아래 줄로 내려가고 고르기 칸이 줄 전체를 쓴다(넓은 곳에서는 예전처럼 한 줄).
+          className="min-w-44 flex-1"
         >
           <option value="">{t('assigneeSelectPlaceholder')}</option>
           {members.map((m) => (
@@ -165,42 +166,39 @@ export function EntityDispatchPanel({
               {rowLabels.get(m.id)}
             </option>
           ))}
-        </Select>
-        <button
+        </NativeSelect>
+        <Button
           type="button"
+          variant="primary"
           disabled={dispatching}
           aria-disabled={needsAssignee || undefined}
           aria-describedby={needsAssignee ? reasonId : undefined}
           onClick={() => void handleDispatch()}
           title={needsAssignee ? undefined : t('dispatchTooltip')}
-          className={cn(
-            'shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition',
-            mobileMode === 'assignee-only' ? 'hidden md:flex' : 'flex',
-            assigneeId && !dispatching
-              ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-              : 'cursor-not-allowed bg-muted text-muted-foreground',
-          )}
+          iconStart={<Zap className="size-3.5" />}
+          // 4908 — ds Button(주 단추 · 비활성 = 점선 윤곽). 담당자가 없으면 눌러도 안 가는 «꺼진» 모양(aria-disabled)이고 까닭 줄이 아래에 선다.
+          className={cn('shrink-0', mobileMode === 'assignee-only' ? 'hidden md:inline-flex' : 'inline-flex')}
         >
-          <Zap className="size-3.5" />
           {dispatching ? t('dispatching') : t('dispatch')}
-        </button>
+        </Button>
         {mobileMode === 'assignee-only' && (
           <div ref={moreRef} className="relative md:hidden">
-            <button
+            <Button
               ref={moreBtnRef}
               {...moreKeys.triggerProps}
               type="button"
+              variant="secondary"
               onClick={() => setMoreOpen((o) => !o)}
               // story #4355 — 열린 채 초점이 트리거에 남아도(포인터로 연 뒤 등) Esc로 닫힘 · Tab은 메뉴로(공용 훅).
               onKeyDown={moreKeys.onTriggerKeyDown}
-              className="flex items-center justify-center rounded-md border border-border px-2 py-1.5 text-muted-foreground transition hover:bg-muted"
+              className="px-2"
               aria-label={t('moreOptionsAria')}
             >
               <MoreHorizontal className="size-4" />
-            </button>
+            </Button>
             {/* story #3007(로드맵 P2·PR-E, L1) — 드롭다운은 floating이라 --elev-overlay. */}
             {moreOpen && (
-              <AnchoredPopover anchorRef={moreRef} popoverRef={moreMenuRef} align="end" gap={4} onKeyDown={moreKeys.onPopoverKeyDown} {...moreKeys.popoverProps} data-dropdown-panel="dispatch-more" className="z-50 min-w-[140px] max-w-[calc(100vw-1rem)] rounded-md border border-border bg-background py-1 shadow-[var(--elev-overlay)]">
+              <AnchoredPopover anchorRef={moreRef} popoverRef={moreMenuRef} align="end" gap={4} onKeyDown={moreKeys.onPopoverKeyDown} {...moreKeys.popoverProps} data-dropdown-panel="dispatch-more" className="z-50 min-w-[140px] max-w-[calc(100vw-1rem)] rounded-ds-panel border border-ds-line-control bg-ds-surface-raised py-1 text-ds-ink shadow-ds-overlay">
                 <button
                   type="button"
                   role="menuitem"
@@ -213,7 +211,7 @@ export function EntityDispatchPanel({
                   className={cn(
                     'flex w-full items-center gap-1.5 px-3 py-2 text-sm transition',
                     assigneeId && !dispatching
-                      ? 'text-foreground hover:bg-muted'
+                      ? 'text-ds-ink hover:bg-ds-surface-high'
                       : 'cursor-not-allowed text-muted-foreground',
                   )}
                 >
@@ -222,7 +220,7 @@ export function EntityDispatchPanel({
                 </button>
                 {needsAssignee && (
                   // 까디르(4761 비차단 ②) — role=menu 안의 자식은 menuitem · group · separator뿐 → 까닭 줄은 role="none"(읽기는 describedby로).
-                  <p id={menuReasonId} role="none" className="mt-1 break-keep border-t border-border px-3 pb-1 pt-1.5 text-editorial-meta text-muted-foreground">{t('dispatchNeedsAssignee')}</p>
+                  <p id={menuReasonId} role="none" className="mt-1 break-keep border-t border-ds-line px-3 pb-1 pt-1.5 text-editorial-meta text-muted-foreground">{t('dispatchNeedsAssignee')}</p>
                 )}
               </AnchoredPopover>
             )}
