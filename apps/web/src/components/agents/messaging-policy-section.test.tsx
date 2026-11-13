@@ -109,3 +109,70 @@ describe('MessagingPolicySection — 고르기 목록 이름 없는 둘([SID:428
   });
 });
 
+// story 4912 (C2b) — the card's face: DetailCard (ds Card), ds Banner for the org-wide warning, ds Chip for the creator, a remove control NAMED BY WHOSE ROW it is, ds Buttons; the radio-card keeps its radio semantics.
+describe('MessagingPolicySection — card face (story 4912 · C2b)', () => {
+  const calls: Array<{ url: string; method: string }> = [];
+  function stub(mode: 'creator_only' | 'list' | 'org_wide', allowlist: string[] = []) {
+    calls.length = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET' });
+      if (url === '/api/agents/agent-1/message-policy' && !init?.method) return { ok: true, json: async () => ({ data: { mode, allowlist } }) };
+      if (url === '/api/agents/agent-1/message-policy/candidates') return { ok: true, json: async () => ({ data: [{ id: 'm-1', user_id: 'u-9', name: '멤버 하나' }, { id: 'm-2', user_id: 'u-8', name: '멤버 둘' }] }) };
+      if (url.startsWith('/api/agents/agent-1/message-policy/allowlist/') && init?.method === 'DELETE') return { ok: true, json: async () => ({ data: { allowlist: [] } }) };
+      return { ok: true, json: async () => ({ data: {} }) };
+    }));
+  }
+  async function mount() {
+    await act(async () => { root.render(wrap(<MessagingPolicySection agentId="agent-1" creatorUserId="u-1" />)); });
+    await flush(); await flush();
+  }
+  const card = () => container.querySelector('[data-testid="agent-detail-card-messaging-policy"]') as HTMLElement;
+  const radios = () => [...container.querySelectorAll<HTMLElement>('[role="radio"]')];
+  const S = koMessages.settings;
+
+  it('⭐카드는 DetailCard(ds Card · bg-ds-surface) · 모드 고르기는 radiogroup/radio 그대로(고른 쪽 aria-checked · ds action 테두리)', async () => {
+    stub('creator_only');
+    await mount();
+    expect(card().getAttribute('data-slot')).toBe('ds-card');
+    expect(card().className).toContain('bg-ds-surface');
+    expect(card().querySelector('[role="radiogroup"]')).not.toBeNull();
+    expect(radios()).toHaveLength(3);
+    const on = radios().filter((r) => r.getAttribute('aria-checked') === 'true');
+    expect(on).toHaveLength(1);
+    expect(on[0]!.className).toContain('border-ds-action');
+    expect(radios().filter((r) => r.getAttribute('aria-checked') === 'false').every((r) => r.className.includes('border-ds-line'))).toBe(true);
+  });
+
+  it('⭐«조직 전체»를 고르면 ds Banner(주의 띠)가 뜨고 [저장]이 ds primary로 나타난다 — 옛 Alert · hero 단추가 아니다', async () => {
+    stub('creator_only');
+    await mount();
+    await act(async () => { radios()[2]!.click(); });
+    const banner = card().querySelector('[data-slot="ds-banner"]') as HTMLElement;
+    expect(banner).not.toBeNull();
+    expect(banner.textContent).toContain(S.messagingOrgWideWarningTitle);
+    const save = [...card().querySelectorAll('button')].find((b) => b.textContent === koMessages.common.save)!;
+    expect(save.className).toContain('bg-ds-action');
+  });
+
+  it('⭐지정 구성원 행의 빼기는 «삭제 · 이름»으로 이름이 붙는다(같은 «삭제» N개가 아니다) · 누르면 그 구성원만 DELETE · 만든 사람 행은 ds Chip', async () => {
+    stub('list', ['m-1', 'm-2']);
+    await mount();
+    expect(card().querySelector('[data-slot="ds-chip"]')?.textContent).toBe(S.messagingCreatorBadge);
+    const names = [...card().querySelectorAll('button[aria-label]')].map((b) => b.getAttribute('aria-label')).filter((n) => n?.startsWith(koMessages.common.delete));
+    expect(names).toEqual([`${koMessages.common.delete} · 멤버 하나`, `${koMessages.common.delete} · 멤버 둘`]);
+    await act(async () => { (card().querySelector(`button[aria-label="${koMessages.common.delete} · 멤버 하나"]`) as HTMLElement).click(); });
+    await flush();
+    expect(calls.filter((c) => c.method === 'DELETE').map((c) => c.url)).toEqual(['/api/agents/agent-1/message-policy/allowlist/m-1']);
+  });
+
+  it('⭐소스: ui/section-card · ui/alert · ui/badge · ui/button이 없고(토스트 훅만 예외) 옛 글자 · 색 토큰이 없다 — 되돌리면 RED', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const src = readFileSync(join(__dirname, 'messaging-policy-section.tsx'), 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n').replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
+    expect([...src.matchAll(/from '@\/components\/ui\/([\w-]+)'/g)].map((m) => m[1])).toEqual(['toast']);
+    expect(src).not.toMatch(/text-(muted-foreground|foreground|destructive|xs|sm|base|brand)\b|border-brand|bg-brand|bg-muted|border-border/);
+    expect(src).not.toMatch(/variant="(hero|outline)"/);
+    expect(src).toContain('<DetailCard');
+  });
+});
+

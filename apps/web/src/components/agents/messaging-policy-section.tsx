@@ -2,13 +2,14 @@
 
 import { firstGraphemes } from '@/lib/first-graphemes';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { Check, Plus, TriangleAlert, X } from 'lucide-react';
+import { Check, Plus } from 'lucide-react';
 import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { useTranslations } from 'next-intl';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Chip } from '@/components/ds/chip';
+import { IconButton } from '@/components/ds/icon-button';
+import { DetailCard } from '@/components/agents/detail-card';
 import { useToast } from '@/components/ui/toast';
 
 import { fetchWithAuth } from '@/lib/db/client';
@@ -182,14 +183,7 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
   };
 
   return (
-    <SectionCard>
-      <SectionCardHeader>
-        <div className="space-y-1">
-          <h2 className="text-base font-semibold text-foreground">{t('messagingPolicyTitle')}</h2>
-          <p className="text-sm text-muted-foreground">{t('messagingPolicyHelper')}</p>
-        </div>
-      </SectionCardHeader>
-      <SectionCardBody className="space-y-4">
+    <DetailCard data-testid="agent-detail-card-messaging-policy" title={t('messagingPolicyTitle')} description={t('messagingPolicyHelper')}>
         {/* 모드 선택 (radio-card) */}
         <div role="radiogroup" aria-label={t('messagingPolicyTitle')} className="grid gap-2 sm:grid-cols-3">
           {MODES.map((m, i) => {
@@ -204,15 +198,15 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
                 tabIndex={selected ? 0 : -1}
                 onClick={() => setStagedMode(m)}
                 onKeyDown={(e) => handleRadioKeyDown(e, i)}
-                className={`flex flex-col items-start gap-0.5 rounded-lg border p-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                  selected ? 'border-brand bg-brand/5' : 'border-border hover:bg-muted/50'
+                className={`flex flex-col items-start gap-0.5 rounded-ds-control border p-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-ds-action ${
+                  selected ? 'border-ds-action bg-ds-action-soft' : 'border-ds-line hover:bg-ds-surface-high'
                 }`}
               >
                 <div className="flex w-full items-center justify-between gap-2">
-                  <span className="text-sm font-medium text-foreground">{modeLabel[m].label}</span>
-                  {selected && <Check className="h-4 w-4 shrink-0 text-brand" />}
+                  <span className="text-ds-body font-medium text-ds-ink">{modeLabel[m].label}</span>
+                  {selected && <Check className="h-4 w-4 shrink-0 text-ds-action-text" />}
                 </div>
-                <span className="text-xs text-muted-foreground">{modeLabel[m].hint}</span>
+                <span className="text-ds-small text-ds-ink-3">{modeLabel[m].hint}</span>
               </button>
             );
           })}
@@ -221,7 +215,7 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
         {/* mode = staged + Save */}
         {stagedMode !== mode && (
           <div className="flex justify-end">
-            <Button variant="hero" size="sm" onClick={() => void handleSaveMode()} disabled={savingMode}>
+            <Button variant="primary" onClick={() => void handleSaveMode()} disabled={savingMode}>
               {savingMode ? '...' : tc('save')}
             </Button>
           </div>
@@ -229,51 +223,46 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
 
         {/* org_wide 경고 */}
         {stagedMode === 'org_wide' && (
-          <Alert variant="warning" className="grid grid-cols-[auto_1fr] gap-x-3">
-            <TriangleAlert className="h-4 w-4 translate-y-0.5" aria-hidden />
-            <div>
-              <AlertTitle>{t('messagingOrgWideWarningTitle')}</AlertTitle>
-              <AlertDescription>{t('messagingOrgWideWarningDesc')}</AlertDescription>
-            </div>
-          </Alert>
+          <Banner tone="note" className="rounded-ds-control">
+            <span className="font-medium">{t('messagingOrgWideWarningTitle')}</span>{' '}
+            <span className="text-ds-ink-2">{t('messagingOrgWideWarningDesc')}</span>
+          </Banner>
         )}
 
         {/* list 모드: allowlist (creator 잠금 + 멤버 행 + picker) */}
         {stagedMode === 'list' && (
           <div className="space-y-2">
             {/* creator 고정·제거불가 행 */}
-            <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
-              <span className="truncate text-foreground">
+            <div className="flex items-center justify-between gap-3 rounded-ds-control border border-ds-line bg-ds-surface-sunk px-3 py-2 text-ds-body">
+              <span className="truncate text-ds-ink">
                 {creatorMemberId ? nameOf(creatorMemberId) : t('messagingCreatorSelf')}
               </span>
-              <Badge variant="secondary" className="shrink-0">{t('messagingCreatorBadge')}</Badge>
+              <Chip>{t('messagingCreatorBadge')}</Chip>
             </div>
 
             {/* allowlist 멤버 행 (creator 제외) */}
             {allowlist.filter((id) => id !== creatorMemberId).map((id) => (
-              <div key={id} className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm">
-                <span className="truncate text-foreground">{nameOf(id)}</span>
-                <button
-                  type="button"
+              <div key={id} className="flex items-center justify-between gap-3 rounded-ds-control border border-ds-line bg-ds-surface-sunk px-3 py-2 text-ds-body">
+                <span className="truncate text-ds-ink">{nameOf(id)}</span>
+                {/* story 4912 (C2b): the remove control is named by WHOSE row it is («삭제 · 이름») — N identical «삭제» buttons told a screen reader nothing */}
+                <IconButton
+                  icon="close"
+                  label={`${tc('delete')} · ${nameOf(id)}`}
                   onClick={() => void handleRemoveMember(id)}
                   disabled={pendingId === id}
-                  className="shrink-0 text-muted-foreground transition hover:text-destructive disabled:opacity-50"
-                  aria-label={tc('delete')}
-                >
-                  <X className="h-4 w-4" />
-                </button>
+                />
               </div>
             ))}
 
             {allowlist.filter((id) => id !== creatorMemberId).length === 0 && (
-              <p className="px-1 py-2 text-xs text-muted-foreground">{t('messagingAllowlistEmpty')}</p>
+              <p className="px-1 py-2 text-ds-small text-ds-ink-3">{t('messagingAllowlistEmpty')}</p>
             )}
 
             {/* 멤버 추가 picker */}
             {showPicker ? (
-              <div className="rounded-md border border-border">
+              <div className="rounded-ds-control border border-ds-line">
                 {pickerCandidates.length === 0 ? (
-                  <p className="px-3 py-3 text-xs text-muted-foreground">{t('messagingNoCandidates')}</p>
+                  <p className="px-3 py-3 text-ds-small text-ds-ink-3">{t('messagingNoCandidates')}</p>
                 ) : (
                   <ul className="max-h-56 overflow-y-auto p-1">
                     {pickerCandidates.map((m) => (
@@ -282,15 +271,15 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
                           type="button"
                           onClick={() => void handleAddMember(m.id)}
                           disabled={pendingId === m.id}
-                          className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-foreground transition hover:bg-muted disabled:opacity-50"
+                          className="flex w-full items-center gap-3 rounded-ds-control px-3 py-2 text-left text-ds-body text-ds-ink transition hover:bg-ds-surface-high disabled:opacity-50"
                         >
-                          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-micro font-medium text-muted-foreground">
+                          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-ds-surface-high text-ds-small font-medium text-ds-ink-2">
                             {/* [SID:4286 · 유나 결정 2] 이름이 없으면 날것 «?» 대신 사람 아이콘 — 4646 공용 표식(UnnamedMemberIcon · 이 목록은 사람만). */}
                             {m.name ? firstGraphemes(m.name, 2).toUpperCase() : <UnnamedMemberIcon type="human" className="h-3 w-3" aria-hidden />}
                           </div>
                           {/* [SID:4286 · PO 12:06Z 같은 부류] 이메일 없이 이름만 그리는 고르기 목록 — 이름 없는 사람이 둘 이상이면 겹친 행에만 «· ID 앞 8자». */}
                           <RowName className="flex-1" label={pickerRowLabels.get(m.id) ?? memberDisplayLabel(m.name, tc)} id={m.id} />
-                          {pendingId === m.id && <Check className="h-3.5 w-3.5 shrink-0 text-brand" />}
+                          {pendingId === m.id && <Check className="h-3.5 w-3.5 shrink-0 text-ds-action-text" />}
                         </button>
                       </li>
                     ))}
@@ -298,14 +287,12 @@ export function MessagingPolicySection({ agentId, creatorUserId }: MessagingPoli
                 )}
               </div>
             ) : (
-              <Button variant="outline" size="sm" onClick={() => setShowPicker(true)}>
-                <Plus className="mr-1 h-3.5 w-3.5" />
+              <Button variant="secondary" onClick={() => setShowPicker(true)} iconStart={<Plus className="h-3.5 w-3.5" aria-hidden />}>
                 {t('messagingAddMember')}
               </Button>
             )}
           </div>
         )}
-      </SectionCardBody>
-    </SectionCard>
+    </DetailCard>
   );
 }
