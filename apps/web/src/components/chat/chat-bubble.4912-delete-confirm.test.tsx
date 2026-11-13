@@ -148,9 +148,33 @@ describe('delete message — asks once (4912 follow-up)', () => {
     // confirm
     (document.activeElement as HTMLElement).blur();
     await openMenu('내 답글'); await click(menuItem(koMessages.common.delete)!);
+    const sameRow = row();
     await click(footerButtons()[1]!); await later();
-    expect(document.activeElement?.closest('.group\\/bubble'), 'confirm → the same row (now its tombstone)').not.toBeNull();
-    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement, 'confirm → the SAME row (now its tombstone), not another one').toBe(sameRow);
+  });
+
+  it('⭐돌려주기는 그 사이 초점을 가져간 사람을 밀어내지 않는다 — 닫힌 직후 사용자가 다른 칸에 초점을 두면 그대로(codex 2차)', async () => {
+    stubFetch(true); await mount();
+    const other = document.createElement('input'); document.body.appendChild(other);
+    await openMenu('내 답글'); await click(menuItem(koMessages.common.delete)!);
+    // hold the row's deferred hand-back (the one that touches rowRef) so the user's move can come first, deterministically
+    const held: Array<() => void> = [];
+    const real = window.setTimeout.bind(window);
+    const spy = vi.spyOn(window, 'setTimeout').mockImplementation(((fn: TimerHandler, ...rest: unknown[]) => (
+      String(fn).includes('rowRef') ? (held.push(fn as () => void), 0) : real(fn as () => void, ...(rest as []))
+    )) as unknown as typeof window.setTimeout);
+    await click(footerButtons()[0]!); // cancel → the hand-back is scheduled (held)
+    expect(held, 'the hand-back was scheduled').toHaveLength(1);
+    other.focus(); // the user moved on before it fires
+    spy.mockRestore();
+    await act(async () => { held[0]!(); });
+    expect(document.activeElement, 'not pushed off').toBe(other);
+    other.remove();
+  });
+
+  it('줄의 초점 표시: 키보드로 올 때만 보이는 링(focus-visible) — 윤곽선을 무조건 지우지 않는다(codex 2차)', async () => {
+    stubFetch(true); await mount();
+    expect(rowOf('내 답글').className).toContain('focus-visible:ring-2');
   });
 
   it('남의 글에는 «삭제»도 확인창도 없다(권한 그대로) · 이미 지워진 글에도 다시 안 물음', async () => {
