@@ -1,14 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
+import { useAdoptPrehydrationValues } from '@/hooks/use-adopt-prehydration-values';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { Input } from '@/components/ui/input';
 
 export default function ForgotPasswordPage() {
   const t = useTranslations('forgotPassword');
   const [email, setEmail] = useState('');
+  const emailRef = useRef<HTMLInputElement>(null); // story 4937 — what was typed before the screen came alive is taken into the state once
+  useAdoptPrehydrationValues([{ ref: emailRef, initial: '', set: setEmail }]);
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -52,6 +55,7 @@ export default function ForgotPasswordPage() {
               placeholder={t('emailPlaceholder')}
               autoComplete="email"
               className="h-auto px-4 py-3"
+              ref={emailRef}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}

@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { useAdoptPrehydrationValues } from '@/hooks/use-adopt-prehydration-values';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { Input } from '@/components/ui/input';
 
@@ -19,6 +20,8 @@ export function MfaClient({ chatsHref }: MfaClientProps) {
   const router = useRouter();
   const t = useTranslations('mfa'); // story #4359 — 이 화면은 i18n이 없어 ko 조직에도 영어였다
   const [code, setCode] = useState('');
+  const codeRef = useRef<HTMLInputElement>(null); // story 4937 — what was typed before the screen came alive is taken into the state once (digits only, as the field's own onChange keeps them)
+  useAdoptPrehydrationValues([{ ref: codeRef, initial: '', set: setCode, normalize: (v) => v.replace(/\D/g, '').slice(0, 6) }]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -75,6 +78,7 @@ export function MfaClient({ chatsHref }: MfaClientProps) {
             maxLength={6}
             placeholder="000000"
             className="h-auto px-4 py-3 text-center text-xl font-mono tracking-widest lg:text-xl"
+            ref={codeRef}
             value={code}
             onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
             onKeyDown={(e) => e.key === 'Enter' && handleVerify()}

@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
+import { useAdoptPrehydrationValues } from '@/hooks/use-adopt-prehydration-values';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { loginWithPassword } from '@/lib/db/client';
 import { Banner } from '@/components/ds/banner';
@@ -37,6 +38,10 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [totpCode, setTotpCode] = useState('');
+  // story 4937 — what was typed before the screen came alive is taken into the state once, right after it does (the code box is not drawn yet then)
+  const emailRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  useAdoptPrehydrationValues([{ ref: emailRef, initial: '', set: setEmail }, { ref: passwordRef, initial: '', set: setPassword }]);
   const [showTotp, setShowTotp] = useState(false);
   const [error, setError] = useState<string | null>(
     errorCode ? (oauthErrors[errorCode] ?? t('loginFailed')) : null
@@ -166,6 +171,7 @@ export default function LoginPage() {
             placeholder={t('email')}
             aria-label={t('email')}
             autoComplete="email"
+            ref={emailRef}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
@@ -176,6 +182,7 @@ export default function LoginPage() {
             placeholder={t('password')}
             aria-label={t('password')}
             autoComplete="current-password"
+            ref={passwordRef}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleLogin()}

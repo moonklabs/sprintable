@@ -18,6 +18,7 @@ import { FirstScreen } from './first-screen';
 import { existingOrgIdFromMe } from './existing-org';
 import { emitOnboardingEvent } from './onboarding-telemetry';
 import { withProjectParam } from '@/hooks/use-flat-href';
+import { useAdoptPrehydrationValues } from '@/hooks/use-adopt-prehydration-values';
 import { resolveOnboardingLandingHref } from '@/lib/onboarding-landing-href';
 
 const AGENT_ROLES = ['developer', 'designer', 'pm', 'qa', 'devops'];
@@ -97,6 +98,10 @@ export function OnboardingForm({
   const [orgName, setOrgName] = useState<string | null>(null);
   const [projectName, setProjectName] = useState('');
   const [projectDesc, setProjectDesc] = useState('');
+  // story 4937 — the project step the server draws (`?step=project`): what was typed before the screen came alive is taken into the state once (nothing is there to take on any other way in: the step is reached by a press, after it is alive)
+  const projectNameRef = useRef<HTMLInputElement>(null);
+  const projectDescRef = useRef<HTMLTextAreaElement>(null);
+  useAdoptPrehydrationValues([{ ref: projectNameRef, initial: '', set: setProjectName }, { ref: projectDescRef, initial: '', set: setProjectDesc }]);
   const [orgId, setOrgId] = useState<string | null>(initialOrgId ?? null);
   const [projectId, setProjectId] = useState<string | null>(null);
   // story #3196 ⑥ — 하드코딩 영문 기본값 제거. 빈 값으로 두면 이미 로컬라이즈돼 있던
@@ -594,6 +599,7 @@ export function OnboardingForm({
               <label className="text-sm font-medium text-foreground">{t('projectName')}</label>
               <OperatorInput
                 type="text"
+                ref={projectNameRef}
                 value={projectName}
                 onChange={(e) => setProjectName(e.target.value)}
                 placeholder={t('projectNamePlaceholder')}
@@ -602,6 +608,7 @@ export function OnboardingForm({
             <div className="space-y-1.5">
               <label className="text-sm font-medium text-foreground">{t('projectDesc')}</label>
               <OperatorTextarea
+                ref={projectDescRef}
                 value={projectDesc}
                 onChange={(e) => setProjectDesc(e.target.value)}
                 placeholder={t('projectDescPlaceholder')}
