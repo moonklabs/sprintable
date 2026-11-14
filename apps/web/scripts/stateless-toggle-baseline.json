@@ -144,6 +144,12 @@
       "match": "handleToggleMute()",
       "count": 1,
       "why": "방 머리 «⋯» 메뉴 항목이 누르면 할 일을 글자로 말함 — «알림 끄기» ↔ «알림 켜기»(menuitem에는 aria-pressed가 유효하지 않아 속성 대신 문구가 말하고, 꺼짐 상태는 머리의 role=status로 따로 보임)"
+    },
+    {
+      "file": "components/chat/room-row-context-menu.tsx",
+      "match": "onToggleMute",
+      "count": 1,
+      "why": "story 4946 — 대화 목록 방 줄 우클릭 메뉴의 같은 항목(방 머리 «⋯» 메뉴와 같은 글자): 누르면 할 일을 «알림 끄기» ↔ «알림 켜기»로 말함(menuitem에는 aria-pressed가 유효하지 않음)"
     }
   ],
   "counts": {},

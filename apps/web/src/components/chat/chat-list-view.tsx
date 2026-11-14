@@ -28,6 +28,11 @@ import { useChatRailOptional } from '@/app/(authenticated)/chats/chat-rail-conte
 import { isNoProjectAtAll, projectsUnknownBecauseFailed } from '@/app/(authenticated)/chats/no-project';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { handleListKeys } from '@/lib/list-keys';
+import { useToast } from '@/components/ui/toast';
+import { RoomRowContextMenu } from './room-row-context-menu';
+import { ROOM_MUTED_EVENT } from './room-muted-event';
+import { DeliveryContractModal } from './delivery-contract-modal';
 import { participantDisplayLabel } from '@/lib/member-display';
 import { composeEventPreviewLine, composeEventPreviewFallback } from './event-block-card';
 import { toListPreview } from './list-preview';
@@ -61,6 +66,9 @@ interface Participant {
 interface ConversationItem {
   id: string;
   type: 'dm' | 'group';
+  /** story 4946 — the caller's own mute flag and the room's free-response flag (the list endpoint already sends both): the room row's right-click menu reads and flips them */
+  muted?: boolean;
+  free_response?: boolean;
   title: string | null;
   // story #3888(§⑤·Chat) — event(event_key+payload)는 BE list_conversations가 새로
   // 실어주는 additive 필드(msg_metadata['event'], _event_payload()와 동형 — conversations.py
@@ -172,6 +180,7 @@ function ConversationRow({
   eventDefinitionName,
   projectLabel,
   onClick,
+  onContextMenu,
 }: {
   conv: ConversationItem;
   currentMemberId: string;
@@ -184,6 +193,8 @@ function ConversationRow({
   /** story 4921 — the event definition's human name by key (read once by the parent, like the domain labels) — for the fallback line of an event with no sentence of its own */
   eventDefinitionName: (eventKey: string) => string | undefined;
   onClick: () => void;
+  /** story 4946 — a right-click on the row (the desktop app): the list opens the room's menu at the pointer */
+  onContextMenu?: (e: React.MouseEvent, conv: ConversationItem) => void;
 }) {
   const t = useTranslations('chats');
   const tc = useTranslations('common');
@@ -281,9 +292,12 @@ function ConversationRow({
   ) : null;
 
   return (
+    // story 4946 — the row is a `data-row-key` element (the keys of `handleListKeys` · ↑ ↓ walk the rows) and answers a right-click with the room's menu; the layout is the button's, unchanged
+    <div data-row-key={conv.id} onContextMenu={onContextMenu ? (e) => onContextMenu(e, conv) : undefined}>
     <Button
       type="button"
       variant="ghost"
+      data-row-focus
       onClick={onClick}
       // story 4853 (phone · point 1) — while the round support button floats over this list (it carries `data-support-launcher` on <html>, support-widget-launcher.tsx) the row keeps its
       // right side clear of it at phone width, so the time and the unread badge are not hidden behind it. A class literal on purpose (Tailwind reads it as written): the attribute is the launcher's SUPPORT_LAUNCHER_ATTR.
@@ -334,6 +348,7 @@ function ConversationRow({
         <p className="truncate text-xs text-muted-foreground">{preview}</p>
       </div>
     </Button>
+    </div>
   );
 }
 
@@ -460,6 +475,44 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const eventDefinitionName = useEventDefinitionNames(orgId); // story 4921 — one read for every row (like the domain labels)
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [allConversations, setAllConversations] = useState<ConversationItem[]>([]);
+  // story 4946 (the desktop app) — ↑ ↓ walk the room rows (focus only: Enter · Space open one, as a button does — a press of an arrow never navigates), and a right-click on a row opens the room's menu (the room's «⋯» items, no more)
+  // the keys act only from a room row: «load more» (inside the same container, no row around it) keeps its own behaviour
+  const moveBetweenRooms = useCallback((e: React.KeyboardEvent<HTMLElement>) => {
+    if (!(e.target as HTMLElement).closest?.('[data-row-key]')) return;
+    handleListKeys(e, () => undefined);
+  }, []);
+  const { addToast } = useToast();
+  // the menu keeps the room's ID (not a copy of the room): it reads the room as the list holds it NOW, so a refetch that changes the mute flag never leaves a stale label, and a room that left the list closes the menu
+  const [rowMenu, setRowMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [contractId, setContractId] = useState<string | null>(null);
+  const rowFocusRef = useRef<HTMLElement | null>(null); // the row's button: where the focus goes back when the menu or the settings window closes
+  const openRowMenu = useCallback((e: React.MouseEvent, conv: ConversationItem) => {
+    e.preventDefault();
+    rowFocusRef.current = (e.currentTarget as HTMLElement).querySelector<HTMLElement>('[data-row-focus]');
+    setRowMenu({ id: conv.id, x: e.clientX, y: e.clientY });
+  }, []);
+  const roomById = (id: string | null) => (id ? [...conversations, ...allConversations].find((c) => c.id === id) ?? null : null);
+  const menuRoom = roomById(rowMenu?.id ?? null);
+  const contractRoom = roomById(contractId);
+  const openingSettingsRef = useRef(false);
+  const patchRoom = useCallback((id: string, patch: Partial<ConversationItem>) => {
+    const apply = (list: ConversationItem[]) => list.map((c) => (c.id === id ? { ...c, ...patch } : c));
+    setConversations(apply);
+    setAllConversations(apply);
+  }, []);
+  /** the room's mute flag, flipped here as the room's own menu does: optimistic, then PATCH /mute, put back when it fails */
+  const toggleRoomMute = useCallback(async (conv: ConversationItem) => {
+    const next = !(conv.muted ?? false);
+    patchRoom(conv.id, { muted: next });
+    try {
+      const res = await fetchWithAuth(`/api/conversations/${conv.id}/mute`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ muted: next }) });
+      if (!res.ok) { addToast({ title: t('muteToggleFailed'), type: 'error' }); patchRoom(conv.id, { muted: !next }); }
+      else window.dispatchEvent(new CustomEvent(ROOM_MUTED_EVENT, { detail: { id: conv.id, muted: next } })); // the open room (beside this list) keeps its own copy of the flag
+    } catch {
+      addToast({ title: t('muteToggleFailed'), type: 'error' });
+      patchRoom(conv.id, { muted: !next });
+    }
+  }, [patchRoom, addToast, t]);
   // agent 탭(allConversations·include_agent_conversations) 첫 활성화 1회만 fetch 하기 위한 가드.
   const agentLoadedRef = useRef(false);
   const [loading, setLoading] = useState(true);
@@ -992,10 +1045,10 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       </div>
     )
   ) : (
-    <div className="space-y-1">
+    <div className="space-y-1" onKeyDown={moveBetweenRooms}>
       {/* story 4887 (UI-4 screen PR · the approved layout) — ONE list: the «DM» / «그룹» sub-heads are gone (the room's own glyph says which it is), in the order the server gave them */}
       {conversations.map((conv) => (
-        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} eventDefinitionName={eventDefinitionName} projectLabel={projectLabelOf(conv)} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
+        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onContextMenu={openRowMenu} domainLabels={domainLabels} eventDefinitionName={eventDefinitionName} projectLabel={projectLabelOf(conv)} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
       ))}
       {conversations.length < myTotal && (
         <Button
@@ -1066,12 +1119,12 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       <EmptyState title={t('noAgentConversations')} className="w-full max-w-xs" />
     </div>
   ) : (
-    <div>
+    <div onKeyDown={moveBetweenRooms}>
       <p className="mb-1 px-3 text-editorial-meta font-medium text-muted-foreground">
         {t('agentSection')}
       </p>
       {agentOnlyConvs.map((conv) => (
-        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} isAgentConv domainLabels={domainLabels} eventDefinitionName={eventDefinitionName} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
+        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onContextMenu={openRowMenu} isAgentConv domainLabels={domainLabels} eventDefinitionName={eventDefinitionName} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
       ))}
       {allConversations.length < agentTotal && (
         <Button
@@ -1189,6 +1242,31 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       <div className="flex-1 overflow-y-auto px-2 py-2" data-testid="chat-list-rooms">
         {isAdminOrOwner && activeList === 'agent' ? agentConversationList : myConversationList}
       </div>
+
+      {rowMenu && menuRoom && (
+        <RoomRowContextMenu
+          x={rowMenu.x}
+          y={rowMenu.y}
+          muted={menuRoom.muted ?? false}
+          onToggleMute={() => void toggleRoomMute(menuRoom)}
+          onOpenSettings={() => { openingSettingsRef.current = true; setContractId(menuRoom.id); }}
+          onClose={() => {
+            setRowMenu(null);
+            if (openingSettingsRef.current) { openingSettingsRef.current = false; return; } // the settings window takes the focus (and gives it back to the row when it closes)
+            queueMicrotask(() => rowFocusRef.current?.focus());
+          }}
+        />
+      )}
+      {contractRoom && (
+        <DeliveryContractModal
+          conversationId={contractRoom.id}
+          conversationType={contractRoom.type}
+          freeResponse={contractRoom.free_response ?? false}
+          onClose={() => setContractId(null)}
+          returnFocusRef={rowFocusRef}
+          onFreeResponseChange={(next) => patchRoom(contractRoom.id, { free_response: next })}
+        />
+      )}
 
       {showModal && (
         <NewConversationModal
