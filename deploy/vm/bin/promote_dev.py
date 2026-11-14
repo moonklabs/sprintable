@@ -34,7 +34,7 @@ from deployer import DeployError, validate_desired  # noqa: E402
 
 DEV_BUCKET = "sprintable-vm-dev-deploy"
 REPO = "moonklabs/sprintable"
-PROJECT_FALLBACK = "sprintable-494803"
+IMAGE_PREFIX = "asia-northeast3-docker.pkg.dev/sprintable-494803/"   # the images a candidate names must be in our own registry (the VM deployer checks the same prefix before it logs in)
 WEB_HEALTH = "https://dev-app.sprintable.ai/api/health"
 API_HEALTH = "https://dev-api.sprintable.ai/api/v2/health"
 CANDIDATE_WAIT_SEC = 40 * 60
@@ -46,7 +46,6 @@ CAS_TRIES = 3
 READ_NEEDED = ("storage.objects.get", "storage.objects.list")
 # the write grant is CONDITIONAL on the object name (desired.json only): a bucket-level testIamPermissions says «no» for it by design, so the write is probed by a write that cannot succeed (see Gcs.write_probe)
 WRITE_NEEDED = ("storage.objects.create", "storage.objects.delete")
-IMPOSSIBLE_GENERATION = 1   # object generations are microsecond timestamps (~1.7e15): nothing ever has generation 1
 SERVICE_ACCOUNT = "github-actions@sprintable-494803.iam.gserviceaccount.com"
 SHA_RE = re.compile(r"[0-9a-f]{40}")
 CI_RUNNING = {"queued", "in_progress", "waiting", "pending", "requested"}
@@ -91,15 +90,18 @@ class Gcs:
         except urllib.error.HTTPError as e:
             raise Stop(f"testIamPermissions on the dev deploy bucket answered {e.code}: the service account may not even ask") from e
 
-    def write_probe(self) -> bool | None:
-        """may this account write desired.json? Asked by a write that CANNOT succeed: `--if-generation-match=1` (no object has generation 1). Authorization is decided before the precondition:
-        403 = not allowed (False) · 412 = allowed, and nothing was written (True) · anything else = could not tell (None: the real write will say)."""
+    def write_probe(self, current_generation: int | None) -> bool | None:
+        """may this account write desired.json? Asked by a write that CANNOT succeed: `--if-generation-match=<current generation − 1>`. Generations only grow, so the object can never have that generation
+        again (the current one is ≥ the one just read, a newer write is higher still) — the precondition fails whatever happens in between, and nothing is written. Authorization is decided before the
+        precondition: 403 = not allowed (False) · 412 = allowed, nothing written (True) · anything else = could not tell (None: the real write will say). No object yet (None) = nothing to anchor on: not probed."""
+        if current_generation is None:
+            return None
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "desired.json"
             p.write_bytes(b"{}\n")
-            r = self._run("storage", "cp", str(p), f"gs://{self.bucket}/desired.json", f"--if-generation-match={IMPOSSIBLE_GENERATION}")
+            r = self._run("storage", "cp", str(p), f"gs://{self.bucket}/desired.json", f"--if-generation-match={current_generation - 1}")
         if r.returncode == 0:
-            raise Stop("the write probe was accepted although no object has generation 1 — stopping; a person must look at desired.json")
+            raise Stop("the write probe was accepted although its generation is below the current one — stopping; a person must look at desired.json")
         if re.search(r"\b412\b|conditionNotMet|PreconditionFailed|precondition", r.stderr, re.I):
             return True
         if re.search(r"\b403\b|forbidden|does not have storage|AccessDenied", r.stderr, re.I):
@@ -184,7 +186,7 @@ def promote(sha: str, gcs, ci, *, health: Callable[[str], str] = _health_sha, sl
     # 2. permissions first: a missing grant must fail in seconds, not after an hour of waiting
     have = gcs.permissions(READ_NEEDED)
     missing = [p for p in READ_NEEDED if p not in have]
-    can_write = gcs.write_probe()
+    can_write = gcs.write_probe(gcs.generation("desired.json")) if not missing else None
     if can_write is False:
         missing += [f"{p} (on desired.json)" for p in WRITE_NEEDED]
     if missing:
@@ -214,7 +216,7 @@ def promote(sha: str, gcs, ci, *, health: Callable[[str], str] = _health_sha, sl
         sleep(POLL_SEC)
 
     try:
-        cand = validate_desired(json.loads(cand_raw))
+        cand = validate_desired(json.loads(cand_raw), IMAGE_PREFIX)
     except (DeployError, ValueError) as e:
         raise Stop(f"candidates/{sha[:9]}.json is not a valid desired.json: {e}") from e
     if cand["sha"] != sha:

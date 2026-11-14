@@ -16,6 +16,14 @@ on:
         description: "the full sha the dev build was made from"
         required: true
         type: string
+    # exactly the three the authentication and the SDK setup read — not `secrets: inherit` (a called workflow then sees every secret of the repository)
+    secrets:
+      GCP_WORKLOAD_IDENTITY_PROVIDER:
+        required: true
+      GCP_SERVICE_ACCOUNT:
+        required: true
+      GCP_PROJECT_ID:
+        required: true
 
 # one promotion at a time; a run waiting behind another is replaced by a newer waiting one (the newest build is the one that matters — the script refuses anything not newer than what is wanted)
 concurrency:

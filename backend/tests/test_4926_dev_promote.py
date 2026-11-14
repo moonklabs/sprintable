@@ -66,6 +66,7 @@ class FakeGcs:
         self.after_generation = None   # hooks: somebody else writes right after this call returned (once)
         self.after_read = None
         self.probed = 0
+        self.gen_calls = 0
         self.writes: list[tuple[str, int]] = []
         self.read_perms, self.write_perms = set(read), (set(write) if write is not None else None)
         self.asked: list[tuple] = []
@@ -88,8 +89,9 @@ class FakeGcs:
         self.asked.append(tuple(perms))
         return {p for p in perms if p in self.read_perms}
 
-    def write_probe(self):
+    def write_probe(self, current_generation):
         self.probed += 1
+        self.probed_with = current_generation
         if self.write_perms is None:
             return None
         return set(P.WRITE_NEEDED) <= self.write_perms
@@ -108,7 +110,9 @@ class FakeGcs:
 
     def generation(self, name: str):
         g = self.gens.get(name)
-        if name == "desired.json" and self.after_generation:
+        if name == "desired.json":
+            self.gen_calls += 1   # the first call is the preflight's (the write probe is anchored on it); the hook is about the CAS loop's reads
+        if name == "desired.json" and self.after_generation and self.gen_calls >= 2:
             hook, self.after_generation = self.after_generation, None
             hook(self)
         return g
@@ -229,6 +233,16 @@ def test_a_candidate_whose_bundle_is_missing_is_refused() -> None:
     assert code == 1 and not g.writes and any("bundle" in l for l in logs)
 
 
+@pytest.mark.parametrize("registry", ["evil.example.com/x/backend", "asia-northeast3-docker.pkg.dev/another-project/r/backend", "us-docker.pkg.dev/sprintable-494803/r/backend"])
+def test_a_candidate_whose_image_is_not_in_our_own_registry_is_refused(registry) -> None:
+    g = FakeGcs()
+    bad = json.loads(desired(SHA))
+    bad["backend_image"] = f"{registry}@{DIGEST}"
+    g.put(f"candidates/{SHA}.json", json.dumps(bad).encode())
+    code, logs, _ = run(g, FakeCi())
+    assert code == 1 and not g.writes and any("not a valid desired.json" in l for l in logs)
+
+
 def test_a_candidate_that_is_not_a_valid_desired_json_is_refused() -> None:
     g = FakeGcs()
     g.put(f"candidates/{SHA}.json", b'{"sha": "' + SHA.encode() + b'"}')
@@ -345,8 +359,10 @@ def test_a_missing_permission_stops_before_any_waiting_and_names_the_commands_th
 
 def test_the_write_grant_is_probed_by_a_write_that_cannot_succeed_and_the_bucket_is_asked_about_reading_only() -> None:
     g = FakeGcs()
+    before = g.gens["desired.json"]
     run(g, FakeCi())
     assert g.probed == 1 and g.asked == [P.READ_NEEDED]
+    assert g.probed_with == before, "the probe is anchored on the generation read before the real write"
 
 
 def test_when_the_write_probe_cannot_tell_the_run_goes_on_and_the_write_decides() -> None:
@@ -371,17 +387,25 @@ def _real_gcs_with_fake_gcloud(tmp_path, stderr: str, rc: int = 1):
     ("AccessDenied: 403 Forbidden", False),
     ("ERROR: network unreachable", None),
 ])
-def test_the_real_write_probe_reads_412_as_allowed_403_as_not_allowed_and_anything_else_as_unknown(tmp_path, monkeypatch, stderr, expected) -> None:
+@pytest.mark.parametrize("generation", [1, 2, 1731542400000000])
+def test_the_real_write_probe_reads_412_as_allowed_403_as_not_allowed_and_anything_else_as_unknown(tmp_path, monkeypatch, stderr, expected, generation) -> None:
     monkeypatch.setenv("PATH", f"{_real_gcs_with_fake_gcloud(tmp_path, stderr)}:/usr/bin:/bin")
-    assert P.Gcs().write_probe() is expected
+    assert P.Gcs().write_probe(generation) is expected
     call = (tmp_path / "calls.txt").read_text()
-    assert f"--if-generation-match={P.IMPOSSIBLE_GENERATION}" in call and "gs://sprintable-vm-dev-deploy/desired.json" in call
+    assert f"--if-generation-match={generation - 1}" in call and "gs://sprintable-vm-dev-deploy/desired.json" in call
+    assert f"--if-generation-match={generation} " not in call + " ", "never the current generation: that write would succeed"
+
+
+def test_a_probe_without_an_existing_object_is_not_sent_at_all(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("PATH", f"{_real_gcs_with_fake_gcloud(tmp_path, '')}:/usr/bin:/bin")
+    assert P.Gcs().write_probe(None) is None
+    assert not (tmp_path / "calls.txt").exists(), "with no object, a generation condition of 0 would CREATE it"
 
 
 def test_a_write_probe_that_is_accepted_stops_the_run(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("PATH", f"{_real_gcs_with_fake_gcloud(tmp_path, '', rc=0)}:/usr/bin:/bin")
     with pytest.raises(P.Stop):
-        P.Gcs().write_probe()
+        P.Gcs().write_probe(1731542400000000)
 
 
 def test_the_real_generation_read_tells_an_absent_object_from_a_failure(tmp_path, monkeypatch) -> None:
@@ -471,7 +495,7 @@ def test_the_script_writes_exactly_one_object_desired_json_and_only_with_a_gener
     assert len(writes) == 2, writes   # the probe (a generation no object has: it cannot write) and the real write
     for w in writes:
         assert "gs://{self.bucket}/desired.json" in w and "--if-generation-match=" in w, w
-    assert "IMPOSSIBLE_GENERATION" in writes[0] and "{generation}" in writes[1]
+    assert "{current_generation - 1}" in writes[0] and "{generation}" in writes[1]
     assert not re.search(r'"(rm|mv|rsync|compose)"|storage", "(rm|mv|rsync)"', _SCRIPT)
 
 
@@ -482,6 +506,17 @@ def test_only_a_run_on_develop_reaches_the_promotion_and_main_never_does() -> No
     wf = yaml.safe_load(_PROMOTE_WF)
     assert wf[True]["workflow_call"]["inputs"]["sha"]["required"] is True and "workflow_dispatch" not in wf[True] and "push" not in wf[True] and "schedule" not in wf[True]
     assert wf["jobs"]["promote"]["if"] == "github.ref == 'refs/heads/develop'"
+
+
+def test_the_called_workflow_gets_exactly_the_three_secrets_it_reads_and_never_inherits() -> None:
+    names = {"GCP_WORKLOAD_IDENTITY_PROVIDER", "GCP_SERVICE_ACCOUNT", "GCP_PROJECT_ID"}
+    job = _CB["jobs"]["promote-dev"]
+    assert isinstance(job["secrets"], dict) and set(job["secrets"]) == names, "no `secrets: inherit`"
+    assert all(job["secrets"][n] == "${{ secrets.%s }}" % n for n in names)
+    wf = yaml.safe_load(_PROMOTE_WF)
+    assert set(wf[True]["workflow_call"]["secrets"]) == names and all(v == {"required": True} for v in wf[True]["workflow_call"]["secrets"].values())
+    used = set(re.findall(r"secrets\.([A-Z0-9_]+)", _PROMOTE_WF))
+    assert used == names, used
 
 
 def test_no_other_workflow_runs_the_script_and_the_build_job_is_untouched() -> None:
