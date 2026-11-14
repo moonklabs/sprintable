@@ -1608,6 +1608,8 @@
     "invalidLink": "This verification link is invalid.",
     "verifying": "Verifying your email...",
     "verifiedSuccess": "Your email has been verified.",
+    "verifiedNoSession": "Go back to the app or screen where you signed up — it carries on there.",
+    "loginHere": "Sign in in this browser",
     "linkExpired": "This verification link is invalid or has expired.",
     "userNotFound": "We couldn't find your account.",
     "verifyFailed": "Verification failed.",
