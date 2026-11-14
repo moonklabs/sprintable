@@ -4,7 +4,7 @@ The `content` of an event message is what an AGENT reads: «[이벤트] <key>» 
 It is the whole channel for agents (story 4076) and stays. A person must not read it, so every surface that turns the content into a preview calls `human_event_text` first:
 - `preset.steer.instruct` → «방향 전환 · {instruction}[ → {target's name}]» (the name comes from `refs.target`, resolved at publish; none for a message published before it existed — then no « → name»);
 - any other event → «이벤트», plus the person's own words from the payload when there are some («이벤트 · {words}») — `instruction · message · summary · note`, first line (never `title / body / content / reason`: workflow and recipe payloads carry slugs and paths
-  there; never a line that is an id, a path, a link or an entity token); cut by code point;
+  there; never a line that is an id, a path, a link or an entity token — an entity link inside a line reads as its label); cut by code point;
 - a content that is NOT machine text (a sentence somebody wrote, e.g. the publish-stopped explanation) → None: the caller keeps it.
 The definition's own name (which the web's room list and inbox add) is not read here: this runs on a hot path with no database; the surface that can read it says it.
 The web has the same rules in `event-block-card.tsx` (`composeEventPreviewFallback`) — keep the two in step (the tests of both pin the same samples).
@@ -37,10 +37,23 @@ def is_machine_event_content(content: str | None) -> bool:
     return any(content.startswith(p) and len(content) > len(p) and not content[len(p)].isspace() for p in _machine_prefixes())
 
 
+# story 4925 — a person's words may carry a reference written as a link («[이 일감](entity:story:<id>)», the label escaped like «\\[결함\\]»): a preview has no chip to draw, so it reads as its LABEL (the id never shows).
+# A link with no label (or a label that is itself an id) stays as it was — so it is still «not words». Only the chat's own token shape counts (a UUID id) and a label holds no bare `[` (a long run of brackets is scanned once, not once per bracket). The web has the same rule (`entityLinksToLabels`).
+_ENTITY_LINK_RE = re.compile(r"\[((?:\\.|[^\[\]\\])*)\]\(entity:\w+:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\)", re.IGNORECASE)
+
+
+def _entity_links_to_labels(text: str) -> str:
+    def _label(m: "re.Match[str]") -> str:
+        plain = re.sub(r"\\([\[\]()\\])", r"\1", m.group(1)).strip()
+        return plain if plain and not _NOT_WORDS_RE.search(plain) else m.group(0)
+
+    return _ENTITY_LINK_RE.sub(_label, text)
+
+
 def first_human_line(value: Any, max_chars: int = _PREVIEW_TEXT_MAX) -> str | None:
     if not isinstance(value, str):
         return None
-    line = next((ln.strip() for ln in value.split("\n") if ln.strip()), "")
+    line = next((ln.strip() for ln in _entity_links_to_labels(value).split("\n") if ln.strip()), "")
     if not line or _NOT_WORDS_RE.search(line):
         return None
     return line if len(line) <= max_chars else line[:max_chars] + "…"  # `str` slices by code point

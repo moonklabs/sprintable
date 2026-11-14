@@ -20,6 +20,7 @@ import { toPlainPreview } from '@/components/chat/entity-ref';
 import { humanizeMachineEventSummary } from '@/components/chat/event-block-card';
 import { CountBadge } from '@/components/ds/count-badge';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useEventDefinitionNames } from '@/hooks/use-event-definition-names';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { useSseNotifications, type SseEventNotification } from '@/hooks/use-sse-notifications';
@@ -287,6 +288,8 @@ function NotificationPanel({
   const tEventCard = useTranslations('eventCard');
   const tCommon = useTranslations('common');
   const locale = useLocale();
+  const { orgId: panelOrgId } = useDashboardContext();
+  const eventDefinitionName = useEventDefinitionNames(panelOrgId); // story 4925 — an event with no sentence of its own is named by its definition here too (the room list and the inbox already do)
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
@@ -335,7 +338,7 @@ function NotificationPanel({
             </span>
           )}
           <span className="min-w-0 flex-1">
-            <span data-testid="notification-line-headline" className={cn('block truncate text-ds-body text-ds-ink', !n.read_at && 'font-semibold')}>{headline(t, n, tEventCard)}</span>
+            <span data-testid="notification-line-headline" className={cn('block truncate text-ds-body text-ds-ink', !n.read_at && 'font-semibold')}>{headline(t, n, tEventCard, eventDefinitionName)}</span>
             <span className="block truncate text-ds-small text-ds-ink-3">
               {room ? <span data-testid="notification-line-room">{room}</span> : null}
               {room && sender ? ' · ' : null}
@@ -425,9 +428,9 @@ function NotificationPanel({
 // story #4182 — summary는 서버가 만든 미리보기지만 이미 저장된 옛 행엔 내부 HTML 주석이 남아 있다.
 // 렌더에서도 평문화하고, 비면(주석뿐이던 경우) 이벤트 타입 문구로 폴백한다.
 // 벨 줄 머리글: summary → (dispatched면) 실어 온 꼴의 문구 → 이벤트 종류 폴백(story #4520).
-function headline(t: (key: string) => string, n: Pick<EventNotification, 'event_type' | 'payload'>, tEventCard: (key: string) => string): string {
+function headline(t: (key: string) => string, n: Pick<EventNotification, 'event_type' | 'payload'>, tEventCard: (key: string) => string, eventDefinitionName?: (eventKey: string) => string | undefined): string {
   // story 4921 — a row stored BEFORE the server wrote a human summary for event messages still carries «{sender}: [이벤트] preset.x …» (the machine text an agent reads): shown as «{sender}: 이벤트[ · the person's words]»
-  const summary = humanizeMachineEventSummary(n.payload?.summary, n.payload?.['event'], tEventCard);
+  const summary = humanizeMachineEventSummary(n.payload?.summary, n.payload?.['event'], tEventCard, eventDefinitionName, n.event_type === 'conversation.message_created' || n.event_type === 'conversation:mention');
   return plainSummary(summary, getDispatchedHeadline(t, n.event_type, n.payload) ?? getEventTypeCopy(t, n.event_type));
 }
 
@@ -438,7 +441,10 @@ export function NotificationBell() {
   const router = useRouter();
   const t = useTranslations('inbox');
   const tEventCard = useTranslations('eventCard');
-  const { projectId } = useDashboardContext();
+  const { projectId, orgId } = useDashboardContext();
+  const eventDefinitionName = useEventDefinitionNames(orgId);
+  const eventNameRef = useRef(eventDefinitionName); // the live handler below is not re-made when the names arrive
+  eventNameRef.current = eventDefinitionName;
   const { addToast } = useToast();
   const [open, setOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -491,7 +497,7 @@ export function NotificationBell() {
     // story #3074 — 데스크톱 셸(bridge-init.js가 top-frame+정확 origin에서만 window.__sprintableBridge를
     // 노출)이 있으면 그 경로«만» 쓴다 — 중복/포커스 억제는 네이티브 단독 판정이라 document.hidden
     // 조건 없이 항상 부른다. 브리지가 없을 때(일반 브라우저)만 기존 웹 Notification 경로(회귀 0).
-    const summary = headline(t, incoming, tEventCard);
+    const summary = headline(t, incoming, tEventCard, (key) => eventNameRef.current(key));
     if (hasDesktopNotifyBridge()) {
       const body = incoming.payload?.sender_name ? `${incoming.payload.sender_name} · ${summary}` : summary;
       void notifyViaDesktopBridge({
