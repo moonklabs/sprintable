@@ -96,7 +96,11 @@ describe('[SID:4887] ChatListView — the DM line (P2-c)', () => {
     await mount([conv('c1', [ME, AGENT])]);
     const line = lines()[0]!;
     const agentChip = [...line.querySelectorAll('span')].find((s) => s.textContent === koMessages.chats.agent) as HTMLElement;
-    expect(agentChip.className).toContain('flex-shrink-0');
+    expect(agentChip.className).toContain('shrink-0');
+    // story 4930 follow-up: the chip IS the shared AgentIdentity part (hairline + blue signal dot + muted word) — the same one the bubble · inbox · participant window draw — not a hand-copied tinted chip
+    expect(agentChip.className).toContain('border-proof-line');
+    expect(agentChip.querySelector('.bg-proof-blue')).not.toBeNull();
+    expect(agentChip.className).not.toMatch(/bg-ds-action|bg-info/);
     const chip = line.querySelector('[data-testid="device-chip"]')!;
     expect(agentChip.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });

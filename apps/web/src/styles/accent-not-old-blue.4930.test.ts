@@ -22,10 +22,17 @@ describe('강조 자리에 옛 파랑(info · proof-blue)이 없다 — 4930 AC3
     expect(code).not.toMatch(/\bbg-info\b|border-info\/|\bborder-info\b|\bbg-info\//);
   });
 
-  it('대화 목록 «Agent» 표는 ds action 틴트이고 info 틴트가 아니다', () => {
+  it('대화 목록 «에이전트» 표는 공용 부품 AgentIdentity다 — 손으로 복사한 틴트 칩(info든 ds action이든)이 없다(방 안 말풍선 · 받은함 · 참여자 창과 한 꼴)', () => {
     const code = strip(read('components/chat/chat-list-view.tsx'));
-    expect(code).toContain('border-ds-action/30 bg-ds-action/12');
-    expect(code).not.toContain('border-info/30 bg-info/12');
+    expect(code).toMatch(/import \{ AgentIdentity \} from '@\/components\/ui\/agent-identity';/);
+    expect(code).toMatch(/\{isAgentInConv && <AgentIdentity\b/);
+    expect(code).not.toMatch(/border-(info|ds-action)\/30 bg-(info|ds-action)\/12/);
+  });
+
+  it('«에이전트» 표를 그리는 다섯 곳(목록 · 말풍선 · 받은함 · 참여자 창 · 새 대화 창)이 모두 같은 AgentIdentity를 쓴다', () => {
+    for (const f of ['components/chat/chat-list-view.tsx', 'components/chat/chat-bubble.tsx', 'app/(authenticated)/inbox/page.tsx', 'components/chat/add-participant-modal.tsx', 'components/chat/new-conversation-modal.tsx']) {
+      expect(strip(read(f)), f).toMatch(/import \{(?:[^}](?!\bas\s+AgentIdentity\b))*?\bAgentIdentity\b[^}]*\} from '@\/components\/ui\/agent-identity'/); // a rename (`X as AgentIdentity`) is not the part
+    }
   });
 
   it('ds 안 읽음 규칙: CountBadge unread = bg-ds-action (받은함 막대 · 사이드바 알약이 따르는 기준)', () => {

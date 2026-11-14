@@ -21,6 +21,7 @@ import { Avatar } from '@/components/ds/avatar';
 import { Icon } from '@/components/ds/icon';
 import { Button } from '@/components/ui/button';
 import { CountBadge } from '@/components/ui/count-badge';
+import { AgentIdentity } from '@/components/ui/agent-identity';
 import { NowStrip } from './now-strip';
 import { PulseCard } from './pulse-card';
 import { useChatRailOptional } from '@/app/(authenticated)/chats/chat-rail-context';
@@ -262,13 +263,8 @@ function ConversationRow({
           // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, formatParticipantNames와 동일 사람언어 폴백으로 통일('...'는 비인간어). story #3758(9번째) — resolved 비트.
           <span className="min-w-0 truncate font-medium" data-testid="room-dm-other">{dmOtherLabel}</span>
         ) : null}
-        {/* story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
-        {isAgentInConv && (
-          // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
-          <span className="flex-shrink-0 rounded border border-ds-action/30 bg-ds-action/12 px-1.5 py-0.5 text-micro font-medium text-foreground">
-            {t('agent')}
-          </span>
-        )}
+        {/* story 4930 follow-up (PO): the «agent» mark is ONE shared part (ui/agent-identity.tsx — hairline + blue signal dot + muted word, the same one the bubble · inbox · participant window use), not a hand copy of a tinted chip here. */}
+        {isAgentInConv && <AgentIdentity className="shrink-0" />}
         {/* story 4675 (F2): a DM with an agent names its computer after the «에이전트» chip; a group row says nothing (several · Q-b) */}
         {isAgentInConv ? <DeviceChip name={others[0]?.device_name} className="min-w-0 shrink text-micro" /> : null}
       </div>
