@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -64,6 +64,8 @@ class AgentPermissionRequest(Base):
     masked: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     workdir: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # story 4949: what a file tool is about to write / change — the Mac's masked, cut lines (never the original). Held while the request is pending only
+    preview: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     input_hash: Mapped[str | None] = mapped_column(Text, nullable=True)  # story #4590: never on a terminal-only row (nothing to sign)
     # story #4590: a question only that computer's terminal can answer — shown as a card with no buttons, no notice (no push)
     terminal_only: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")

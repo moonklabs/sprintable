@@ -17,7 +17,7 @@ import hashlib
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import func, select, update
@@ -705,6 +705,49 @@ def _uuid(value) -> uuid.UUID | None:
 # ── ① the daemon reports · withdraws ─────────────────────────────────────────────────────────────────────────────────────
 
 
+# story 4949 — the preview of a file tool's input (Write · Edit · MultiEdit). The Mac masks it (the 4938 free-text rules) and cuts it; these are the
+# server's own limits (the same numbers as the daemon's) — a body over them is refused (422), never trimmed here
+PREVIEW_LINE_MAX = 120
+PREVIEW_REMOVED_MAX = 10
+PREVIEW_ADDED_MAX = 12
+PREVIEW_BLOCKS_MAX = 3
+PREVIEW_CHARS_MAX = 2400
+PREVIEW_COUNT_MAX = 10_000_000
+
+
+class PreviewBlock(BaseModel):
+    """One edit shown: the lines taken out and the lines put in, and how many more of each were left out (counted, never guessed)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    removed: list[Annotated[str, Field(max_length=PREVIEW_LINE_MAX)]] = Field(default_factory=list, max_length=PREVIEW_REMOVED_MAX)
+    added: list[Annotated[str, Field(max_length=PREVIEW_LINE_MAX)]] = Field(default_factory=list, max_length=PREVIEW_ADDED_MAX)
+    removed_more: int = Field(default=0, ge=0, le=PREVIEW_COUNT_MAX)
+    added_more: int = Field(default=0, ge=0, le=PREVIEW_COUNT_MAX)
+
+
+class PermissionPreview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    op: Literal["write", "edit"]
+    blocks: list[PreviewBlock] = Field(default_factory=list, max_length=PREVIEW_BLOCKS_MAX)
+    blocks_more: int = Field(default=0, ge=0, le=PREVIEW_COUNT_MAX)
+    replace_all: bool = False
+    # a file that looks like a secrets file: its content is not sent at all — only that it was left out
+    withheld: Literal["sensitive_path"] | None = None
+
+    @model_validator(mode="after")
+    def _shape(self) -> "PermissionPreview":
+        if self.withheld is not None and (self.blocks or self.blocks_more or self.replace_all):
+            raise ValueError("a withheld preview carries no lines")
+        if self.op == "write" and (len(self.blocks) > 1 or any(b.removed or b.removed_more for b in self.blocks) or self.blocks_more or self.replace_all):
+            raise ValueError("a write has one block of added lines only")
+        chars = sum(len(line) for b in self.blocks for line in (*b.removed, *b.added))
+        if chars > PREVIEW_CHARS_MAX:
+            raise ValueError(f"a preview carries at most {PREVIEW_CHARS_MAX} characters")
+        return self
+
+
 class PermissionRequestReport(BaseModel):
     """What a person sees — a masked, cut summary; no raw input, no full path, no key (extra fields → 422)."""
 
@@ -719,6 +762,8 @@ class PermissionRequestReport(BaseModel):
     masked: bool = False
     truncated: bool = False
     workdir: str | None = Field(default=None, max_length=200)
+    # story 4949: only on an answerable request (a terminal-only one has nothing to sign and nothing to look at before pressing)
+    preview: PermissionPreview | None = None
     input_hash: str | None = Field(default=None, pattern=_HASH_PATTERN)
     expires_at: AwareDatetime
     # story #4590 (Mirko's contract v1.14 ①): a question only that computer's terminal can answer — nothing to sign, so no hash;
@@ -730,6 +775,8 @@ class PermissionRequestReport(BaseModel):
         if self.terminal_only:
             if self.input_hash is not None:
                 raise ValueError("a terminal-only request carries no input_hash (nothing is signed)")
+            if self.preview is not None:
+                raise ValueError("a terminal-only request carries no preview (nothing is pressed on a phone)")
         elif self.tool is None or self.summary is None or self.input_hash is None:
             raise ValueError("tool, summary and input_hash are required unless the request is terminal_only")
         return self
@@ -746,6 +793,14 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
     existing = (await db.execute(q)).scalar_one_or_none()
     if existing is not None:
         return existing, False
+    # story 4949: a preview is kept while its question waits and no longer — a request of this computer whose window passed without an
+    # answer or a withdrawal (the computer went quiet) lets go of its lines here, on the next report
+    await db.execute(
+        update(AgentPermissionRequest)
+        .where(AgentPermissionRequest.setup_id == setup.id, AgentPermissionRequest.state == "pending",
+               AgentPermissionRequest.expires_at <= now, AgentPermissionRequest.preview.is_not(None))
+        .values(preview=None)
+    )
     session = (await db.execute(
         select(DesktopSession.agent_member_id).where(DesktopSession.setup_id == setup.id, DesktopSession.session_key == body.session_key)
     )).scalar_one_or_none()
@@ -760,6 +815,7 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
         id=uuid.uuid4(), setup_id=setup.id, request_id=body.request_id, session_key=body.session_key,
         agent_member_id=body.agent_member_id, runtime=body.runtime, tool=body.tool, summary=body.summary, masked=body.masked,
         truncated=body.truncated, workdir=body.workdir, input_hash=body.input_hash, expires_at=body.expires_at, state="pending",
+        preview=body.preview.model_dump() if body.preview is not None else None,
         recipient_member_id=recipient, recipient_reason=reason, terminal_only=body.terminal_only,
     )
     try:
@@ -847,12 +903,12 @@ async def withdraw_request(db: AsyncSession, setup: DesktopSetup, request_id: uu
         # it may trust in Claude's own text; the request ends with nothing allowed (Yuna 2-7)
         if row.runtime != "claude" or row.tool != SANDBOX_NET_TOOL or row.stage != "ask" or row.state != "answered" or row.decision != "allow":
             raise DesktopRelayError(409, "not_allowed_yet", "only a network question answered «allow…» can end with its host unread")
-        row.state, row.result_code = "withdrawn", "host_unread"
+        row.state, row.result_code, row.preview = "withdrawn", "host_unread", None
         await db.flush()
         _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612
         return row
     if row.state == "pending":
-        row.state, row.result_code = "withdrawn", body.reason
+        row.state, row.result_code, row.preview = "withdrawn", body.reason, None  # story 4949: the lines go with the question
         await db.flush()
         _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612
     return row
@@ -1005,6 +1061,8 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
             "tool_name": {lang: shown_tool(r.runtime, r.tool, lang) for lang in ("ko", "en")} if r.tool is not None else None,
             "terminal_only": r.terminal_only,
             "summary": r.summary, "masked": r.masked, "truncated": r.truncated, "workdir": r.workdir,
+            # story 4949: the lines a file tool is about to write / change — on a request that still waits (inside its window) only; never in a notice
+            "preview": r.preview if shown == "pending" and not r.terminal_only else None,
             "created_at": r.created_at.isoformat(), "expires_at": r.expires_at.isoformat(), "state": shown,
             "answered_by_name": names.get(r.answered_by) if r.answered_by else None, "decision": r.decision,
             "device_reachable": s.id in reachable, "recipient_reason": r.recipient_reason,
@@ -1095,6 +1153,7 @@ async def answer_request(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid
     )
     row.state, row.answered_by, row.answered_phone_key_id = "answered", member_id, phone.id
     row.decision, row.answered_at = body.decision, now
+    row.preview = None  # story 4949: answered — the file's lines are no longer needed here
     phone.last_used_at = now
     await db.flush()
     _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612: other open screens
