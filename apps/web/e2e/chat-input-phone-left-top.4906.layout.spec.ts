@@ -27,7 +27,7 @@ async function build() {
         window.__mount = () => {
           createRoot(document.getElementById('root')).render(React.createElement(NextIntlClientProvider, { locale: 'ko', messages: ko, timeZone: 'Asia/Seoul' },
             React.createElement('div', { id: 'composer', style: { width: '100%', padding: '8px' } },
-              React.createElement(ChatInput, { onSend: async () => {}, onUploadFile: async (f) => ({ url: 'u', name: f.name, content_type: f.type, size: f.size }), threadId: 't1', projectId: 'p1', currentTeamMemberId: 'me-1', participants: [{ member_id: 'me-1', name: '나' }, { member_id: 'a-1', name: '개발 에이전트' }] }))));
+              React.createElement(ChatInput, { onSend: async (t) => { (window.__sent = window.__sent || []).push(t); }, onUploadFile: async (f) => ({ url: 'u', name: f.name, content_type: f.type, size: f.size }), threadId: 't1', projectId: 'p1', currentTeamMemberId: 'me-1', participants: [{ member_id: 'me-1', name: '나' }, { member_id: 'a-1', name: '개발 에이전트' }] }))));
         };`,
       resolveDir: WEB, loader: 'tsx',
     },
@@ -45,14 +45,16 @@ async function build() {
   return built;
 }
 
-async function open(page: Page, width: number) {
+let dark = false;
+async function open(page: Page, width: number, opts?: { dark?: boolean }) {
+  dark = Boolean(opts?.dark);
   const { js, css } = await build();
   await page.setViewportSize({ width, height: 700 });
   await page.unrouteAll();
   await page.route('http://preview.test/**', async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === '/') {
-      return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body style="margin:0"><div id="root"></div></body></html>` });
+      return route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="ko" class="${dark ? 'dark' : ''}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body style="margin:0"><div id="root"></div></body></html>` });
     }
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [] }) });
   });
@@ -91,6 +93,7 @@ for (const width of [320, 360, 390, 639]) {
     expect(clip.x - box.x, 'the clip is at the left of the second row').toBeLessThanOrEqual(10);
     expect(box.r - send.r, 'send is at the right end of the second row').toBeLessThanOrEqual(10);
     expect(send.y, 'send is on the second row').toBeGreaterThanOrEqual(ta.b - 1);
+    expect(Math.abs((send.y + send.h / 2) - (clip.y + clip.h / 2)), 'send is on the SAME row as the clip (not a third row)').toBeLessThan(6);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
     expect(overflow, 'no sideways scroll').toBe(false);
   });
@@ -107,3 +110,67 @@ for (const width of [640, 1100, 1440]) {
     expect(send.x, 'send is right of the field').toBeGreaterThan(ta.r - 1);
   });
 }
+
+// what the second row must still be, and what the keys still do (the change is CSS only: nothing of this may move)
+test.describe('a touch phone', () => {
+  test.use({ hasTouch: true, isMobile: true });
+  for (const width of [320, 360, 390]) {
+    test(`[SID:4906] ${width}: every press in the composer — the clip · ▾ · compass and send — is still at least 44 × 44, and all four sit on ONE row under the field`, async ({ page }) => {
+      await open(page, width);
+      const sizes = await page.evaluate((box) => [...document.querySelector(box)!.querySelectorAll('button')].map((b) => { const r = b.getBoundingClientRect(); return { label: b.getAttribute('aria-label') || b.getAttribute('data-testid') || b.textContent!.trim(), w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10, y: Math.round(r.top) }; }).filter((b) => b.w > 0), BOX);
+      expect(sizes.length, 'clip · ▾ · compass · send').toBeGreaterThanOrEqual(4);
+      expect(sizes.filter((b) => b.w < 43.5 || b.h < 43.5), `presses under 44 px: ${JSON.stringify(sizes)}`).toEqual([]);
+      const ys = sizes.map((b) => b.y);
+      expect(Math.max(...ys) - Math.min(...ys), `one row, not a third: ${JSON.stringify(sizes)}`).toBeLessThan(6);
+      const g = await geometry(page);
+      expect(Math.min(...ys), 'under the field').toBeGreaterThanOrEqual(g.ta!.b - 1);
+    });
+  }
+  test('[SID:4906] on a touch screen Enter is a new line and only the send button sends', async ({ page }) => {
+    await open(page, 390);
+    await page.locator(TA).fill('줄 하나');
+    await page.locator(TA).press('Enter');
+    await page.keyboard.type('줄 둘');
+    expect(await page.locator(TA).inputValue()).toBe('줄 하나\n줄 둘');
+    expect(await page.evaluate(() => (window as unknown as { __sent?: string[] }).__sent ?? [])).toEqual([]);
+    await page.getByTestId('chat-send').tap();
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __sent?: string[] }).__sent ?? [])).toEqual(['줄 하나\n줄 둘']);
+  });
+});
+
+test.describe('a 390 px window with a mouse and a keyboard', () => {
+  test('[SID:4906] Enter sends · Shift+Enter breaks the line · the field grows with the text up to 160 px and no further', async ({ page }) => {
+    await open(page, 390);
+    const ta = page.locator(TA);
+    await ta.fill('첫 줄');
+    await ta.press('Shift+Enter');
+    await page.keyboard.type('둘째 줄');
+    expect(await ta.inputValue()).toBe('첫 줄\n둘째 줄');
+    expect(await page.evaluate(() => (window as unknown as { __sent?: string[] }).__sent ?? [])).toEqual([]);
+    await ta.press('Enter');
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __sent?: string[] }).__sent ?? [])).toEqual(['첫 줄\n둘째 줄']);
+    const short = (await geometry(page)).ta!.h;
+    await ta.fill(Array.from({ length: 14 }, (_, i) => `줄 ${i + 1}`).join('\n'));
+    const tall = await geometry(page);
+    expect(tall.ta!.h, 'it grew').toBeGreaterThan(short);
+    expect(tall.ta!.h, 'and stops at 160').toBeLessThanOrEqual(160.5);
+    expect(tall.clip!.y, 'the buttons stay under the field').toBeGreaterThanOrEqual(tall.ta!.b - 1);
+  });
+});
+
+test('[SID:4906] dark: the same two rows (text top-left, buttons under it)', async ({ page }) => {
+  await open(page, 390, { dark: true });
+  await page.locator(TA).fill('첫 글 — 방 시험');
+  const g = await geometry(page);
+  expect(g.ta!.x - g.box!.x).toBeLessThanOrEqual(10);
+  expect(g.ta!.b).toBeLessThanOrEqual(g.clip!.y + 1);
+  expect(await page.evaluate(() => document.documentElement.classList.contains('dark'))).toBe(true);
+});
+
+test('[SID:4906] right-to-left: send goes to the row\'s END (the left edge), not next to the compass — the offset is logical', async ({ page }) => {
+  await open(page, 390);
+  await page.evaluate(() => { document.documentElement.dir = 'rtl'; });
+  const g = await geometry(page);
+  expect(g.send!.x - g.box!.x, 'send is at the left end of the second row').toBeLessThanOrEqual(10);
+  expect(g.box!.r - g.clip!.r, 'the clip is at the right of the second row').toBeLessThanOrEqual(10);
+});
