@@ -175,9 +175,9 @@ describe('OrgBriefingShell — story #3831 AC1(3구역, 3823 route 단일 소비
     await mount();
     expect(container.textContent).toContain('Threads에 글 발행');
     expect(container.textContent).toContain('서명 대기');
-    expect(container.textContent).toContain('승인하고 서명');
+    expect(container.textContent).toContain('서명하러 열기');
     expect(container.textContent).toContain('외부로 나가요 — 되돌릴 수 없어요');
-    const link = [...container.querySelectorAll('a')].find((a) => a.textContent === '승인하고 서명');
+    const link = [...container.querySelectorAll('a')].find((a) => a.textContent === '서명하러 열기');
     expect(link?.getAttribute('href')).toBe('/gates/g1');
   });
 
@@ -193,7 +193,7 @@ describe('OrgBriefingShell — story #3831 AC1(3구역, 3823 route 단일 소비
     const row = container.querySelector('[data-row-key="gate:g1"] [data-slot="ds-list-row"]');
     expect(row?.getAttribute('data-needs-hand')).toBe('true');
     expect(row?.querySelector('.sr-only')?.textContent).toBe('내 손이 필요');
-    const link = [...container.querySelectorAll('a')].find((a) => a.textContent === '승인하고 서명');
+    const link = [...container.querySelectorAll('a')].find((a) => a.textContent === '서명하러 열기');
     expect(link?.className).toContain('bg-ds-action');
   });
 

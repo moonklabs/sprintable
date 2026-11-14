@@ -21,9 +21,9 @@ import { withProjectParam } from '@/lib/with-project-param';
 interface Shown { row: AgentStateRow; rank: number; word: ReturnType<typeof shownState> | null }
 
 export function toShown(rows: AgentStateRow[]): Shown[] {
-  // an agent that is on no computer at all (no session, not bound) is not «running» anywhere — the list is for agents on computers
-  const onAComputer = rows.filter((r) => r.state !== null || r.bound_setup_id !== null);
-  return sortAgentStates(onAComputer.map((row) => {
+  // story 4950 (the Mac app's home · PO 11-14): EVERY agent of the org gets a line. Until now an agent that was on no computer at all (made on the web and never run · no session · not bound) was left out and the strip
+  // read «연결된 에이전트가 아직 없어요» beside an agent that exists — a person who just added one saw nothing. It is listed last (rank 7, «never ran») and its state is «연결 안 됨» (the agents screen's own word).
+  return sortAgentStates(rows.map((row) => {
     if (row.state === null) return { row, rank: stateRank(null, false, false), word: null };
     const word = shownState(row);
     const limitShown = limitHeld(word, row.limit) || limitLooksAgain(word, row.limit) || (word === 'waiting_input' && !!row.limit?.self_resume);
@@ -41,7 +41,7 @@ function Row({ item, now }: { item: Shown; now: number }) {
   const embedded = useEmbeddedServer(); // story 4832: one computer in the app's own server — no device name and no «아직 안 돌았어요» line
   const device = embedded ? null : row.device_name ?? row.bound_device_name;
   const state = word === null
-    ? (row.bound_device_name && !embedded ? tAgents('boundNotRunYet', { name: row.bound_device_name }) : '')
+    ? (row.bound_device_name && !embedded ? tAgents('boundNotRunYet', { name: row.bound_device_name }) : tAgents('agentNotConnected'))
     : sessionStateLabel(row, tState);
   const rest = word === null ? null : limitLine(word, row.limit, now);
   const restText = rest ? restSentence(tState, rest.key, rest.at ? limitTime(rest.at, now, locale) : '') : null;

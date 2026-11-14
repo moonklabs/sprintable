@@ -41,10 +41,10 @@ describe('ListDetailShell — the «frame gives the height» mode (story 4909 de
   it('⭐OFF (the default): every screen that does not ask for it stands exactly as before — the page-scroll grid and the sticky, height-capped column', async () => {
     await show({ wide: true });
     expect(root_().className).toBe('lg:grid lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] lg:items-start lg:gap-4');
-    expect(column().className).toBe('sticky top-4 max-h-[calc(100svh-6rem)]');
+    expect(column().className).toBe('sticky top-4 max-h-[calc(100svh-6rem)] empty:hidden');
     await show({ wide: true, fill: false });
     expect(root_().className).toBe('lg:grid lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] lg:items-start lg:gap-4');
-    expect(column().className).toBe('sticky top-4 max-h-[calc(100svh-6rem)]');
+    expect(column().className).toBe('sticky top-4 max-h-[calc(100svh-6rem)] empty:hidden');
   });
   it('⭐ON: the row takes the frame\'s height (flex-1 · min-h-0 · one minmax(0,1fr) row), the column fills it — no sticky and no viewport-height guess', async () => {
     await show({ wide: true, fill: true });

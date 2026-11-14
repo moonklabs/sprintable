@@ -6,7 +6,6 @@ import { Avatar } from '@/components/ds/avatar';
 import { Button } from '@/components/ds/button';
 import { Card } from '@/components/ds/card';
 import { Chip } from '@/components/ds/chip';
-import { EmptyState } from '@/components/ds/empty-state';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { withProjectParam } from '@/lib/with-project-param';
 import type { HomeModel, HomeRow } from './derive-home';
@@ -29,15 +28,16 @@ export function HomeDetail({ row, model, sources, now, partial = false }: { row:
   if (!row) {
     // the same rule the list follows: an empty list is «all caught up» only when EVERYTHING was read — a partial read or approvals the server counted but gave no rows for are said in words, never passed off as done
     const hiddenNeedsMe = Math.max(0, sources.snapshot.needsMeCount - sources.snapshot.needsMe.length);
+    // story 4950 (the Mac app's first screen of a new account): when the list on the left already says «모두 확인했어요 · 지금 사람 손이 필요한 일이 없어요», the detail beside it does NOT say the same two lines again —
+    // two cards with one sentence is noise; the left card is the one place that says it. Anything else the detail said before (a partial read · approvals the server counted but gave no rows for · «pick one») is unchanged.
+    if (model.needsHand.length === 0 && !partial && hiddenNeedsMe === 0) return null;
     return (
       <div data-testid="home-detail-empty" className="rounded-ds-control border border-ds-line bg-ds-surface">
         {model.needsHand.length === 0 && partial && hiddenNeedsMe === 0
           ? <p className="m-0 px-4 py-10 text-center text-ds-small text-ds-ink-2" data-testid="home-detail-partial">{tb('loadErrorTitle')}</p>
           : model.needsHand.length === 0 && hiddenNeedsMe > 0
             ? <p className="m-0 px-4 py-10 text-center text-ds-small text-ds-ink-2" data-testid="home-detail-hidden">{tb('needsMeHiddenCountNotice', { count: hiddenNeedsMe })}</p>
-            : model.needsHand.length === 0
-              ? <EmptyState icon="check_circle" title={t('emptyAllTitle')} description={t('emptyAllDescription')} />
-              : <p className="m-0 px-4 py-10 text-center text-ds-small text-ds-ink-3">{t('detailPick')}</p>}
+            : <p className="m-0 px-4 py-10 text-center text-ds-small text-ds-ink-3">{t('detailPick')}</p>}
       </div>
     );
   }

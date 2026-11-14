@@ -38,6 +38,8 @@ import { agentOnDevice, permissionLine, requestAge, shownToolName, type Permissi
 import { useListDetailWide } from '@/hooks/use-list-detail-wide';
 import { GateQueueList, type GateQueueMenuItem, type GateQueueRow, type GateQueueSection } from './gate-queue-list';
 import { useTeamTimeZone } from '@/components/team-time-zone';
+import { useToast } from '@/components/ui/toast';
+import { copyTextSafely } from '@/lib/clipboard';
 
 // story #1960(P2-S4) — 결재함 통합 큐. Gate 3종(게이트·문서결재·머지게이트, gate_type/
 // work_item_type discriminator로 단일 Gate 테이블에 자연 수렴 — #1954에서 확定된 스코프
@@ -170,6 +172,10 @@ export function ApprovalsQueue() {
   // story #4082(유나 design CHANGES 2026-09-21) — recipe-detail-view.tsx가 쓰는 같은
   // SSOT(organization 네임스페이스)로 stage/role 낱말을 통일.
   const tOrg = useTranslations('organization');
+  const tCommon = useTranslations('common');
+  const { addToast } = useToast();
+  // story 4950 — «질문 복사» in a row's right-click menu: the row's own title (a decision's title IS its question) goes to the clipboard; a refusal is said in words, never a silent no-op
+  const copyTitle = (title: string) => { void copyTextSafely(title).then((r) => { if (!r.ok) addToast({ type: 'error', title: tCommon('copyFailedSelectManually') }); }); };
   const locale = useLocale();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const router = useRouter();
@@ -940,17 +946,21 @@ export function ApprovalsQueue() {
   };
   // the right-click menu of ONE row (Mac / desktop): the actions the detail column's card ALSO has — approve · reject · hold · open the page — never a right-click-only action.
   // An approval that needs an option NEVER decides from the menu: «승인» picks the row (its detail opens) so the option is chosen there; a signature-flow approval opens the signature dialog, as its button does.
+  // the one title of a gate row (a decision's QUESTION · else its work item's title · else the short id) — the row shows it and «질문 복사 / 제목 복사» copies exactly it
+  const gateTitleOf = (item: GateItem): string => (isDecisionGate(item) ? deriveDecisionFacts(item)?.question : null) ?? item.work_item_summary?.title ?? `#${item.work_item_id.slice(0, 8)}`;
   const menuFor = (item: GateInboxItem): GateQueueMenuItem[] => {
     if (isHitl(item)) {
       if (!canResolveHitl) return []; // an agent account sees no approve / reject here (and gets the browser's own menu)
       return [
         { id: 'approve', icon: 'check_circle', label: t('gateApprove'), disabled: resolvingIds.has(item.id), onSelect: () => void resolveHitl(item.id, 'approved') },
         { id: 'reject', icon: 'cancel', label: t('gateReject'), disabled: resolvingIds.has(item.id), onSelect: () => void resolveHitl(item.id, 'rejected') },
+        { id: 'copy', icon: 'content_copy', label: t('queueMenuCopyTitle'), onSelect: () => copyTitle(item.title) },
       ];
     }
     const gate = item;
     const open: GateQueueMenuItem = { id: 'open', icon: 'open_in_new', label: t('queueMenuOpen'), onSelect: () => router.push(gateHref(gate)) };
-    if (isHeld(gate) || resolvedGates[gate.id] || !canInlineResolve(gate)) return [open];
+    const copy: GateQueueMenuItem = { id: 'copy', icon: 'content_copy', label: isDecisionGate(gate) ? t('queueMenuCopyQuestion') : t('queueMenuCopyTitle'), onSelect: () => copyTitle(gateTitleOf(gate)) };
+    if (isHeld(gate) || resolvedGates[gate.id] || !canInlineResolve(gate)) return [open, copy];
     const decisionFacts = isDecisionGate(gate) ? deriveDecisionFacts(gate) : null;
     const needsOption = decisionFacts !== null && decisionFacts.options.length > 0;
     const isSigFlow = usesSignatureFlow(deriveRiskLevel(gate));
@@ -967,17 +977,17 @@ export function ApprovalsQueue() {
       { id: 'reject', icon: 'cancel', label: t('sigReject'), disabled: blocked, onSelect: () => setSignatureTargetId(gate.id) },
       { id: 'hold', icon: 'pause', label: t('gateDiscussSubmit'), disabled: blocked, onSelect: () => setDiscussTargetId(gate.id) },
       open,
+      copy,
     ];
   };
 
   const rowOf = (item: GateInboxItem): GateQueueRow => {
     if (isHitl(item)) return { key: item.id, chip: t('hitlRequestBadge'), title: item.title, subtitle: formatAge(item.created_at, t), menu: menuFor(item) };
-    const facts = isDecisionGate(item) ? deriveDecisionFacts(item) : null;
     const done = resolvedGates[item.id];
     return {
       key: item.id,
       chip: gateTypeLabel(tDashboard, item.gate_type),
-      title: facts?.question ?? item.work_item_summary?.title ?? `#${item.work_item_id.slice(0, 8)}`,
+      title: gateTitleOf(item),
       subtitle: [`#${item.work_item_id.slice(0, 8)}`, item.pr_number ? `PR #${item.pr_number}${item.github_check_run_sha ? ` · ${item.github_check_run_sha.slice(0, 7)}` : ''}` : null, formatAge(item.created_at, t)].filter(Boolean).join(' · '),
       doneLabel: done === 'approved' ? t('queueResolvedApproved') : done === 'rejected' ? t('queueResolvedRejected') : undefined,
       menu: menuFor(item),

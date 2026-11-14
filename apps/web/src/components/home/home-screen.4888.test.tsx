@@ -185,7 +185,9 @@ describe('홈 — 넓은 화면: 목록 + 상세 열(story #4888)', () => {
     next = after([]);
     await rerender(next.model, next.sources);
     expect(detail()).toBeNull();
-    expect(container.querySelector('[data-testid="home-detail-empty"]')!.textContent).toContain(H.emptyAllTitle);
+    // [SID:4950] the all-clear is said ONCE (the list's card) — the empty detail column does not repeat it
+    expect(container.querySelector('[data-testid="home-detail-empty"]')).toBeNull();
+    expect(container.textContent!.split(H.emptyAllTitle).length - 1).toBe(1);
   });
 
   it('⭐고른 행이 그대로 목록에 있으면(다른 행이 바뀐 읽기) 선택이 옮겨 가지 않는다', async () => {
@@ -252,12 +254,14 @@ describe('홈 — 넓은 화면: 목록 + 상세 열(story #4888)', () => {
     expect(empty.querySelector('[data-testid="home-detail-hidden"]')!.textContent).toContain('2');
   });
 
-  it('손 필요 행이 하나도 없으면 상세 열은 «모두 확인했어요»다', async () => {
+  it('손 필요 행이 하나도 없으면 «모두 확인했어요 · 지금 사람 손이 필요한 일이 없어요»는 목록 카드 한 곳에서만 말하고 상세 열은 같은 두 줄을 되풀이하지 않는다 [SID:4950]', async () => {
     stubWidth(true);
     const { model, sources } = build([]);
     await mount(model, sources);
     expect(detail()).toBeNull();
-    expect(container.querySelector('[data-testid="home-detail-empty"]')!.textContent).toContain(H.emptyAllTitle);
+    expect(container.querySelector('[data-testid="home-detail-empty"]')).toBeNull();
+    expect(container.textContent!.split(H.emptyAllTitle).length - 1).toBe(1);
+    expect(container.textContent!.split(H.emptyAllDescription).length - 1).toBe(1);
   });
 
   it('⭐알림에서 온 «손 필요» 행(멘션)은 종류 · 열기 링크가 있는 상세를 가진다(승인용 블록은 없다)', async () => {
