@@ -93,9 +93,9 @@ class Gcs:
     def write_probe(self, current_generation: int | None) -> bool | None:
         """may this account write desired.json? Asked by a write that CANNOT succeed: `--if-generation-match=<current generation − 1>`. Generations only grow, so the object can never have that generation
         again (the current one is ≥ the one just read, a newer write is higher still) — the precondition fails whatever happens in between, and nothing is written. Authorization is decided before the
-        precondition: 403 = not allowed (False) · 412 = allowed, nothing written (True) · anything else = could not tell (None: the real write will say). No object yet (None) = nothing to anchor on: not probed."""
-        if current_generation is None:
-            return None
+        precondition: 403 = not allowed (False) · 412 = allowed, nothing written (True) · anything else = could not tell (None: the real write will say). No object yet (None) or a generation below 2 (the condition would be 0 = «must not exist») = nothing safe to anchor on: not probed."""
+        if current_generation is None or current_generation <= 1:
+            return None   # generation 0 means «must not exist» — it would CREATE the object if it vanished meanwhile (real generations are microsecond timestamps, never this small)
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "desired.json"
             p.write_bytes(b"{}\n")

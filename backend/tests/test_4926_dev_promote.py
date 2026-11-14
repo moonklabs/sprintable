@@ -387,7 +387,7 @@ def _real_gcs_with_fake_gcloud(tmp_path, stderr: str, rc: int = 1):
     ("AccessDenied: 403 Forbidden", False),
     ("ERROR: network unreachable", None),
 ])
-@pytest.mark.parametrize("generation", [1, 2, 1731542400000000])
+@pytest.mark.parametrize("generation", [2, 3, 1731542400000000])
 def test_the_real_write_probe_reads_412_as_allowed_403_as_not_allowed_and_anything_else_as_unknown(tmp_path, monkeypatch, stderr, expected, generation) -> None:
     monkeypatch.setenv("PATH", f"{_real_gcs_with_fake_gcloud(tmp_path, stderr)}:/usr/bin:/bin")
     assert P.Gcs().write_probe(generation) is expected
@@ -396,10 +396,11 @@ def test_the_real_write_probe_reads_412_as_allowed_403_as_not_allowed_and_anythi
     assert f"--if-generation-match={generation} " not in call + " ", "never the current generation: that write would succeed"
 
 
-def test_a_probe_without_an_existing_object_is_not_sent_at_all(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("generation", [None, 0, 1, -5])
+def test_a_probe_without_an_object_or_with_a_generation_whose_condition_would_be_zero_is_not_sent_at_all(tmp_path, monkeypatch, generation) -> None:
     monkeypatch.setenv("PATH", f"{_real_gcs_with_fake_gcloud(tmp_path, '')}:/usr/bin:/bin")
-    assert P.Gcs().write_probe(None) is None
-    assert not (tmp_path / "calls.txt").exists(), "with no object, a generation condition of 0 would CREATE it"
+    assert P.Gcs().write_probe(generation) is None
+    assert not (tmp_path / "calls.txt").exists(), "a generation condition of 0 means «must not exist»: it would CREATE desired.json if the object vanished meanwhile"
 
 
 def test_a_write_probe_that_is_accepted_stops_the_run(tmp_path, monkeypatch) -> None:
