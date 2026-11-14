@@ -44,21 +44,34 @@ export default function VerifyEmailPage() {
   // 막다른 /inbox로 갈 수 있었다(useState 기본값 레이스). ref에 Promise를 캐시해 effect든
   // 클릭이든 «같은 promise»를 공유·await하게 해 판정 前 클릭도 정확한 목적지를 기다렸다
   // 라우팅한다(중복 fetch도 안 남).
-  const destinationRef = useRef<Promise<string> | null>(null);
-  function resolveDestination(): Promise<string> {
+  //
+  // story #4939 — 이 «인증 성공» 화면이 열린 브라우저에 **세션이 없을** 수 있다: 맥 앱(웹뷰)에서 가입한 고객이 인증 메일을 자기 기본 브라우저에서 열면(그 브라우저엔 로그인이 없다) `/api/auth/me`가
+  // 401이다. 그때 «시작하기»는 `/onboarding`으로 갔고 거기서 로그인 벽(`/login?next=%2Fonboarding`)이 설명 없이 떴다 — 정작 앱 웹뷰는 그 사이 스스로 이어지고 있는데(3초 폴), 이 브라우저는 그 사실을 말하지 않았다.
+  // 그래서 401을 «세션 없음»으로 알아보고(알 수 없는 실패 — 5xx · 네트워크 — 는 지금 동작 그대로: 모르는 것을 «세션 없음»이라 하지 않는다) 설명 한 줄 + 이 브라우저에서 이어 갈 로그인 길 하나를 보인다.
+  const destinationRef = useRef<Promise<{ signedIn: boolean; to: string }> | null>(null);
+  function resolveDestination(): Promise<{ signedIn: boolean; to: string }> {
     if (!destinationRef.current) {
       destinationRef.current = fetch('/api/auth/me')
-        .then((res) => (res.ok ? res.json() : null))
-        .then((json: { data?: { org_id?: string | null } } | null) => (json?.data?.org_id ? '/inbox' : '/onboarding'))
-        .catch(() => '/inbox'); // 조회 실패는 이전 동작(/inbox)으로 저하
+        .then(async (res): Promise<{ signedIn: boolean; to: string }> => {
+          if (res.status === 401) return { signedIn: false, to: '/onboarding' }; // no session in THIS browser: the login wall is where «시작하기» would land — say so instead
+          const json = (res.ok ? await res.json() : null) as { data?: { org_id?: string | null } } | null;
+          return { signedIn: true, to: json?.data?.org_id ? '/inbox' : '/onboarding' };
+        })
+        .catch(() => ({ signedIn: true, to: '/inbox' })); // 조회 실패는 이전 동작(/inbox)으로 저하
     }
     return destinationRef.current;
   }
-  useEffect(() => { void resolveDestination(); }, []);
+  const [noSession, setNoSession] = useState(false);
+  useEffect(() => { void resolveDestination().then((d) => setNoSession(!d.signedIn)); }, []);
 
   const handleStart = () => {
-    void resolveDestination().then((destination) => router.push(destination));
+    void resolveDestination().then((d) => {
+      if (!d.signedIn) { setNoSession(true); return; } // a click before the answer came: never into the login wall — the page says what it is
+      router.push(d.to);
+    });
   };
+  // where a person who WANTS to go on in this browser signs in, and where they land afterwards: the screen «시작하기» would have reached
+  const loginHref = `/login?next=${encodeURIComponent('/onboarding')}`;
 
   useEffect(() => {
     if (!token) return;
@@ -113,12 +126,25 @@ export default function VerifyEmailPage() {
         {status === 'success' && (
           <div className="space-y-4">
             <p className="text-sm font-medium text-success" role="status" aria-live="polite" aria-atomic="true">{message}</p>
-            <button
-              onClick={handleStart}
-              className="flex w-full min-h-[44px] items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90"
-            >
-              {t('startButton')}
-            </button>
+            {noSession ? (
+              <>
+                <p className="text-sm text-muted-foreground" data-testid="verify-no-session-hint">{t('verifiedNoSession')}</p>
+                <Link
+                  href={loginHref}
+                  data-testid="verify-login-here"
+                  className="flex w-full min-h-[44px] items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90"
+                >
+                  {t('loginHere')}
+                </Link>
+              </>
+            ) : (
+              <button
+                onClick={handleStart}
+                className="flex w-full min-h-[44px] items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90"
+              >
+                {t('startButton')}
+              </button>
+            )}
             {onPhone ? (
               <a
                 href={appHref}

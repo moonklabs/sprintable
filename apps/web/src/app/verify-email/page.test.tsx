@@ -200,3 +200,92 @@ describe('VerifyEmailPage — 앱으로 돌아가기 (story #4762 AC6)', () => {
     expect(container.querySelector('[data-testid="verify-back-to-app"]')).toBeNull();
   });
 });
+
+// story #4939 — the mailed link opened in a browser that has NO session (a customer who signed up in the Mac app's web view opens the mail in their own default browser): `/api/auth/me` answers 401. «시작하기» used to go to
+// `/onboarding` and land on the login wall without a word, while the app's web view carries on by itself. Now the page says that and offers one way to sign in HERE. A session that exists → exactly as before.
+describe('VerifyEmailPage — 세션 없는 브라우저(story #4939)', () => {
+  const verifiedOk = { json: async () => ({ data: { message: 'Email verified successfully' } }) };
+  const meAnswer = (answer: unknown) => vi.fn(async (url: string) => (url === '/api/auth/me' ? (answer as { ok?: boolean; status?: number; json?: () => Promise<unknown> }) : verifiedOk));
+  const startBtn = () => [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.verifyEmail.startButton);
+  const hint = () => container.querySelector('[data-testid="verify-no-session-hint"]');
+  const loginLink = () => container.querySelector('[data-testid="verify-login-here"]') as HTMLAnchorElement | null;
+
+  it('⭐401 → «가입하던 앱이나 화면으로 돌아가면 이어져요» + [이 브라우저에서 로그인](→ 로그인 뒤 /onboarding) — «시작하기»도 로그인 벽으로의 자동 이동도 없다', async () => {
+    vi.stubGlobal('fetch', meAnswer({ ok: false, status: 401, json: async () => ({}) }));
+    await mountAndWait();
+    expect(container.textContent).toContain(koMessages.verifyEmail.verifiedSuccess); // the verification itself succeeded
+    expect(hint()?.textContent).toBe('가입하던 앱이나 화면으로 돌아가면 이어져요.');
+    expect(loginLink()?.textContent).toBe('이 브라우저에서 로그인');
+    expect(loginLink()?.getAttribute('href')).toBe('/login?next=%2Fonboarding'); // after the sign-in: where «시작하기» would have gone
+    expect(startBtn()).toBeUndefined(); // that button went to the login wall without a word
+    expect(pushMock).not.toHaveBeenCalled(); // nothing moved the person anywhere by itself
+  });
+
+  it('⭐answer not here yet when «시작하기» is pressed, then 401 → no push into the login wall; the page shows the line and the login way', async () => {
+    let resolveMe!: (v: unknown) => void;
+    const mePromise = new Promise((r) => { resolveMe = r; });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === '/api/auth/me' ? mePromise : verifiedOk)));
+    await mountAndWait();
+    await act(async () => { startBtn()?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pushMock).not.toHaveBeenCalled();
+    await act(async () => { resolveMe({ ok: false, status: 401, json: async () => ({}) }); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(pushMock).not.toHaveBeenCalled(); // reverted (the old `router.push(destination)`) → '/onboarding' here
+    expect(hint()).not.toBeNull();
+    expect(loginLink()).not.toBeNull();
+  });
+
+  it('a session that exists → as before: no hint · no login link · «시작하기» goes by the organization (/inbox · /onboarding)', async () => {
+    vi.stubGlobal('fetch', meAnswer({ ok: true, status: 200, json: async () => ({ data: { org_id: 'org-1' } }) }));
+    await mountAndWait();
+    expect(hint()).toBeNull();
+    expect(loginLink()).toBeNull();
+    await act(async () => { startBtn()?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pushMock).toHaveBeenCalledWith('/inbox');
+  });
+
+  it('⭐an answer that is NOT a «no session» (a 5xx · a network failure) is not called «no session»: the button stays and goes where it went before', async () => {
+    vi.stubGlobal('fetch', meAnswer({ ok: false, status: 500, json: async () => ({}) }));
+    await mountAndWait();
+    expect(hint()).toBeNull();
+    expect(loginLink()).toBeNull();
+    await act(async () => { startBtn()?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pushMock).toHaveBeenCalledWith('/onboarding');
+    pushMock.mockClear(); root.unmount(); root = createRoot(container); vi.resetModules();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => { if (url === '/api/auth/me') throw new Error('offline'); return verifiedOk; }));
+    await mountAndWait();
+    expect(hint()).toBeNull();
+    await act(async () => { startBtn()?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pushMock).toHaveBeenCalledWith('/inbox');
+  });
+
+  it('a phone with no session keeps «앱으로 돌아가기» (and its hint) beside the login way', async () => {
+    const realUa = Object.getOwnPropertyDescriptor(window.navigator, 'userAgent');
+    Object.defineProperty(window.navigator, 'userAgent', { value: 'Mozilla/5.0 (Linux; Android 14; Pixel) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36', configurable: true });
+    try {
+      vi.stubGlobal('fetch', meAnswer({ ok: false, status: 401, json: async () => ({}) }));
+      await mountAndWait();
+      expect(container.querySelector('[data-testid="verify-back-to-app"]')?.textContent).toBe(koMessages.verifyEmail.backToApp);
+      expect(container.querySelector('[data-testid="verify-back-to-app-hint"]')).not.toBeNull();
+      expect(loginLink()).not.toBeNull();
+    } finally { if (realUa) Object.defineProperty(window.navigator, 'userAgent', realUa); else delete (window.navigator as { userAgent?: string }).userAgent; }
+  });
+
+  it('a failed verification shows its own error with 401 too — never the «돌아가면 이어져요» line (nothing was verified)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === '/api/auth/me' ? { ok: false, status: 401, json: async () => ({}) } : { json: async () => ({ error: { code: 'INVALID_TOKEN', message: 'x' } }) })));
+    await mountAndWait();
+    expect(hint()).toBeNull();
+    expect(loginLink()).toBeNull();
+    expect(container.textContent).toContain(koMessages.verifyEmail.linkExpired);
+  });
+
+  it('reads in English (the same line and the same one way to sign in)', async () => {
+    const enMessages = (await import('../../../messages/en.json')).default;
+    vi.stubGlobal('fetch', meAnswer({ ok: false, status: 401, json: async () => ({}) }));
+    const { default: VerifyEmailPage } = await import('./page');
+    await act(async () => { root.render(<NextIntlClientProvider locale="en" messages={enMessages} timeZone="UTC"><VerifyEmailPage /></NextIntlClientProvider>); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    expect(hint()?.textContent).toBe('Go back to the app or screen where you signed up — it carries on there.');
+    expect(loginLink()?.textContent).toBe('Sign in in this browser');
+    expect(container.textContent).toContain(enMessages.verifyEmail.verifiedSuccess);
+  });
+});
