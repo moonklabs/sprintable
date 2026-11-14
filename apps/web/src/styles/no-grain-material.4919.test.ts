@@ -1,5 +1,5 @@
 // story 4919 (UI-R6) — 선생님 11-14: 8-25의 «결 · 깊이»(종이 그레인 + 뜬 · 눌린 그림자)를 걷어 다른 화면처럼 평평하게. 이 시험이 못 박는 것:
-// ① globals.css에 그레인 · 뜸/눌림 그림자 토큰이 없고, `.proof-surface`를 고르는 규칙은 모두 모양(position + border-radius)뿐이다 — 겹(::before/::after) · background-image · 그림자 · 블렌드 0, 규칙은 하나
+// ① globals.css에 그레인 · 뜸/눌림 그림자 토큰이 없고, «proof-surface»는 모든 CSS 파일을 통틀어 globals.css의 규칙 하나뿐이며 그 몸통은 모양(position + border-radius)뿐이다 — 겹 · background-image · 그림자 · 블렌드 · 안쪽 규칙 0
 // ② apps/web 전체(src · scripts · e2e · 고정 입력 파일 — 시험 파일만 뺀다)에 `proof-surface-lift` · `proof-surface-press` · 토큰 이름이 «원문 그대로» 한 곳도 없다 — 주석을 걷어내는 일도 하지 않는다
 //    (걷어내기는 `//` · `/*`가 든 진짜 클래스 문자열을 지워 가드를 속일 수 있다. 그래서 옛 이름은 주석에도 적지 않는다)
 // ③ 실제로 `.proof-surface`를 입는 부품(결재 상세 우 열 · 목표 상세 카드 둘 · ProofCapsule · Badge · label-chip)이 아직 그 클래스(모양)를 쓴다 — 가드가 빈 껍데기가 아닌지(양성 대조)
@@ -34,13 +34,23 @@ describe('4919 — 결(그레인) · 뜸/눌림 그림자를 걷었다', () => {
     expect(/feTurbulence|fractalNoise/.test(globals), '노이즈 SVG가 남아 있다').toBe(false);
   });
 
-  it('`.proof-surface`를 고르는 규칙은 하나이고 모양(position + border-radius)만 갖는다 — 겹 · background · 그림자 · 블렌드 0', () => {
-    const rules = [...globals.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ sel: m[1]!.trim(), body: m[2]! })).filter((r) => r.sel.includes('proof-surface'));
-    expect(rules.map((r) => r.sel), '.proof-surface를 고르는 규칙(::before · -lift · -press 포함)은 정확히 이 하나').toEqual(['.proof-surface']);
-    const props = [...rules[0]!.body.matchAll(/([\w-]+)\s*:/g)].map((m) => m[1]).sort();
-    expect(props).toEqual(['border-radius', 'position']);
-    // 다른 규칙이 `.proof-surface` 부품에 그림 · 그림자를 얹는 길(자손 · 속성 선택자)도 없다
-    expect(/proof-surface[^{}]*\{[^{}]*(?:background-image|box-shadow|mix-blend-mode)/.test(globals)).toBe(false);
+  it('`.proof-surface`는 모든 CSS 파일을 통틀어 규칙 하나뿐이고 모양(position + border-radius)만 갖는다 — 겹 · background · 그림자 · 블렌드 · 안쪽 규칙/조건부 규칙 0', () => {
+    // 모든 CSS 파일(globals.css가 @import하는 design-system.css 포함)에서 «proof-surface»가 들어간 곳은 globals.css의 이 규칙 하나여야 한다(주석은 파서도 걷는다)
+    const hits: string[] = [];
+    for (const f of files(WEB).filter((p) => p.endsWith('.css'))) {
+      const text = stripCss(readFileSync(f, 'utf8'));
+      for (const m of text.matchAll(/proof-surface/g)) hits.push(`${rel(f)}@${m.index}`);
+    }
+    expect(hits.map((h) => h.split('@')[0]), '«proof-surface»가 CSS 어디에 몇 번 나오는지 — globals.css의 규칙 하나').toEqual(['src/app/globals.css']);
+    const at = globals.indexOf('.proof-surface');
+    expect(globals.slice(at, at + 16)).toBe('.proof-surface {');
+    // 이 규칙의 몸통을 중괄호 짝으로 읽는다 — 안쪽에 또 규칙(@supports · @media · & ::before)이 있으면 `{`가 보인다
+    const open = globals.indexOf('{', at);
+    let depth = 1, i = open + 1;
+    while (i < globals.length && depth > 0) { depth += globals[i] === '{' ? 1 : globals[i] === '}' ? -1 : 0; i += 1; }
+    const body = globals.slice(open + 1, i - 1);
+    expect(/[{}]/.test(body), '규칙 안에 또 규칙이 있다').toBe(false);
+    expect([...body.matchAll(/([\w-]+)\s*:/g)].map((m) => m[1]).sort()).toEqual(['border-radius', 'position']);
   });
 
   it('apps/web 전체(주석 포함 원문)에 proof-surface-lift · proof-surface-press · 그 토큰 이름이 없다', () => {
