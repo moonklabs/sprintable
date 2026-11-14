@@ -87,6 +87,7 @@ export default function DocSlugPage() {
   const newParamRef = useRef(newParam); newParamRef.current = newParam;
   const parentParamRef = useRef(parentParam); parentParamRef.current = parentParam;
   const liveSlugRef = useRef<{ param: string; slug: string } | null>(null); // the doc's own slug after the address moved, paired with the route param it was moved from
+  if (liveSlugRef.current && liveSlugRef.current.param !== slug) liveSlugRef.current = null; // a new route: the old pairing must never answer for a DIFFERENT doc that happens to carry the old name
   const newLatchRef = useRef<{ key: string; isNew: boolean } | null>(null);
   const draftEnteredForSlugRef = useRef<string | null>(null); // 이 주소(slug)로 이미 초안에 들어와 있으면 같은 조회가 다시 돌아도 쓴 글(상태)을 비우지 않는다
 
@@ -100,6 +101,8 @@ export default function DocSlugPage() {
   if (newLatchRef.current?.key !== latchKey) newLatchRef.current = { key: latchKey, isNew: newParam };
   else if (newParam) newLatchRef.current.isNew = true;
   const isNew = newLatchRef.current.isNew;
+  // the slug of the doc that is OPEN (the route param keeps the old `untitled-…` name after the first save moved the address without a navigation)
+  const liveDocSlug = selectedDoc?.slug ?? slug;
   const [docLoading, setDocLoading] = useState(true);
   const [title, setTitle] = useState('');
   // 4910 — «새 문서»로 막 만든 초안(?new=1): 서버엔 기본 제목(«제목 없음»)이 들어 있지만 그 글은 «진짜 글자»가 아니라 자리 표시여야 한다(쓰면 뒤에 붙던 결함).
@@ -148,7 +151,8 @@ export default function DocSlugPage() {
     // page up: the editor remounted, the cursor was gone and what the person typed while the save was in flight was overwritten by the refetched doc («회의 메모» → 3~4 s → the next words never arrived). The layout is told which doc
     // is open now (reportLiveSlug) because the route params it reads keep the old value.
     if (doc.slug && !samePath(window.location.pathname, docUrl(wsSlug, projSlug, doc.slug))) {
-      window.history.replaceState(window.history.state, '', docUrl(wsSlug, projSlug, doc.slug));
+      // `null`, as Next documents: the router copies its own history state itself — passing `window.history.state` back carries its `__NA` marker and the router then skips syncing `usePathname` / `useSearchParams` (Next 16.2.2, app-router.js)
+      window.history.replaceState(null, '', docUrl(wsSlug, projSlug, doc.slug));
     }
     if (doc.slug) { liveSlugRef.current = { param: slug, slug: doc.slug }; reportLiveSlug?.(doc.slug); }
   }, [setTree, slug, wsSlug, projSlug, reportLiveSlug]);
@@ -481,8 +485,8 @@ export default function DocSlugPage() {
           in the same header place on both screens. The old story-#2967 note: the reader entry must stay discoverable — it is now a visible word. */}
       <DocModeSwitch
         mode="edit"
-        readHref={`${docUrl(wsSlug, projSlug, slug)}/view`}
-        editHref={docUrl(wsSlug, projSlug, slug)}
+        readHref={`${docUrl(wsSlug, projSlug, liveDocSlug)}/view`}
+        editHref={docUrl(wsSlug, projSlug, liveDocSlug)}
         readLabel={t('modeRead')}
         editLabel={t('editDoc')}
         groupLabel={t('modeSwitchLabel')}

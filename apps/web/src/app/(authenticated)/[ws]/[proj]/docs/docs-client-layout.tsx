@@ -59,6 +59,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
   // It counts only while the params are the ones it was reported for — a real navigation (another doc, the list) brings new params and the report is ignored.
   const [liveSlug, setLiveSlug] = useState<{ param: string | null; slug: string } | null>(null);
   const currentSlug = liveSlug && liveSlug.param === paramSlug ? liveSlug.slug : paramSlug;
+  useEffect(() => { if (liveSlug && liveSlug.param !== paramSlug) setLiveSlug(null); }, [liveSlug, paramSlug]); // dropped as soon as the route changes — a later doc may carry the old name
   const reportLiveSlug = useCallback((slug: string) => setLiveSlug({ param: paramSlug, slug }), [paramSlug]);
   const t = useTranslations('docs');
   const tc = useTranslations('common');

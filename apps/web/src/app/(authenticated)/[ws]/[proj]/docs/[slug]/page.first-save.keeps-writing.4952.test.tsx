@@ -11,7 +11,7 @@ import koMessages from '../../../../../../../messages/ko.json';
 
 type EditorProps = {
   title?: string; titlePlaceholder?: string; currentDocId?: string; isDirty?: boolean;
-  onTitleChange?: (v: string) => void; onChange?: (v: string) => void; onSave?: () => Promise<boolean>;
+  actions?: React.ReactNode; onTitleChange?: (v: string) => void; onChange?: (v: string) => void; onSave?: () => Promise<boolean>;
 };
 type SyncOpts = { docId: string | null; savePayload: { title: string; content: string; content_format: string }; adoptBaselineSnapshot?: string | null; onSaved?: (doc: never) => void };
 const { routerMock, paramsMock, editorProps, addToastMock, syncOptions, searchOverride } = vi.hoisted(() => ({
@@ -34,7 +34,7 @@ vi.mock('@/components/docs/use-doc-sync', () => ({
   unwrapDocResponse: (json: unknown) => { const root = (json ?? {}) as { data?: unknown }; return { doc: root.data ?? root, updatedAt: undefined }; },
 }));
 vi.mock('@/components/docs/doc-editor', () => ({
-  DocEditor: (props: EditorProps) => { editorProps.current = props; return <div data-testid="editor-stub" />; },
+  DocEditor: (props: EditorProps) => { editorProps.current = props; return <div data-testid="editor-stub">{props.actions}</div>; },
 }));
 vi.mock('@/components/docs/doc-gate-section', () => ({ DocGateSection: () => null }));
 vi.mock('@/components/docs/doc-assignee-control', () => ({ DocAssigneeControl: () => null }));
@@ -173,6 +173,46 @@ describe('첫 저장이 주소를 «화면은 그대로» 옮긴다 (4952 D1)', 
     expect(urls).toHaveLength(1);
     expect(urls[0]).toContain('slug=회의-메모');
     expect(urls[0]).not.toContain('untitled-');
+  });
+
+  it('⭐주소를 옮길 때 history 상태로 Next의 내부 표시(__NA)를 되돌려 넘기지 않는다 — null을 넘긴다(Next는 __NA가 실린 호출은 라우터 동기화를 건너뛴다: usePathname · useSearchParams가 옛 값으로 남음)', async () => {
+    await open();
+    await type('title', '회의 메모');
+    await wait(1600);
+    window.history.replaceState({ __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: [] }, '', window.location.pathname + window.location.search);
+    const spy = vi.spyOn(window.history, 'replaceState');
+    await act(async () => { syncOptions.current!.onSaved?.(SAVED('회의-메모') as never); });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]![0]).toBeNull();
+    spy.mockRestore();
+  });
+
+  it('⭐첫 저장 뒤 «읽기 | 고치기»는 열린 문서의 이름(회의-메모)으로 간다 — 라우트 params의 옛 임시 이름(untitled-…)이 아니다', async () => {
+    await open();
+    await type('title', '회의 메모');
+    await wait(1600);
+    await act(async () => { syncOptions.current!.onSaved?.(SAVED('회의-메모') as never); });
+    const hrefs = [...container.querySelectorAll('[data-slot="doc-mode-switch"] a')].map((a) => decodeURIComponent(a.getAttribute('href') ?? ''));
+    expect(hrefs).toEqual(['/moonklabs/sprintable/docs/회의-메모/view', '/moonklabs/sprintable/docs/회의-메모']);
+  });
+
+  it('⭐옮겨 둔 이름은 그 라우트에서만 쓴다 — 다른 라우트(existing-doc)를 거쳐 같은 임시 이름으로 돌아와도 옛 이름(회의-메모)으로 조회하지 않는다', async () => {
+    await open();
+    await type('title', '회의 메모');
+    await wait(1600);
+    await act(async () => { syncOptions.current!.onSaved?.(SAVED('회의-메모') as never); });
+    const rerender = (projectId: string) => act(async () => {
+      root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DocsLayoutContext.Provider value={{ ...CTX, projectId }}><DocSlugPage /></DocsLayoutContext.Provider></NextIntlClientProvider>);
+      await vi.advanceTimersByTimeAsync(5);
+    });
+    paramsMock.slug = 'existing-doc';
+    await rerender('proj-1');
+    paramsMock.slug = 'untitled-123456789';
+    fetchMock.mockClear();
+    await rerender('proj-1b'); // 같은 라우트 이름으로 돌아와 다시 조회
+    const urls = docGets().map(([u]) => String(u));
+    expect(urls.some((u) => u.includes('slug=untitled-123456789'))).toBe(true);
+    expect(urls.some((u) => u.includes('slug=회의-메모'))).toBe(false);
   });
 
   it('이미 그 주소에 있으면(슬러그가 그대로) 주소를 다시 쓰지 않는다 — 인코딩만 다른 같은 경로도 같은 것으로 본다', async () => {
