@@ -36,6 +36,30 @@ async function scrollWidthOverflow(page: Page): Promise<{ scrollWidth: number; i
   }));
 }
 
+// story #4927 — the width check below passes on ANY page: a server WITHOUT the v3 flags answers /today · /chat · /connect-rules with a bare «Loading…» shell
+// (measured: 86 characters of text, no «Connections & Rules» in the nav) and that shell has no overflow either. CI starts this spec's server with the three
+// flags (a second `next start` on the same build) — these tests fail when it is not that server, so a width pass means a v3 screen was measured.
+test.describe('이 서버는 v3 플래그가 켜져 있다 — 꺼진 서버는 같은 주소에 «Loading…» 껍데기만 내고, 가로 넘침 시험은 그 껍데기도 통과한다', () => {
+  test.use({ locale: 'en-US' });
+  const bodyText = async (page: Page): Promise<string> => (await page.locator('body').textContent()) ?? '';
+  test('/today: 화면 본문(검색 · 지시 칸)과 내비의 «Connections & Rules»가 그려진다', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/today', { waitUntil: 'domcontentloaded' });
+    await expect.poll(() => bodyText(page), { timeout: 15_000 }).toContain('Search or give an instruction');
+    expect(await bodyText(page)).toContain('Connections & Rules');
+  });
+  test('/connect-rules: 화면 본문이 그려진다', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/connect-rules', { waitUntil: 'domcontentloaded' });
+    await expect.poll(() => bodyText(page), { timeout: 15_000 }).toContain('Connections & rules');
+  });
+  test('/chat: 대화 화면(chat-v3-screen)이 그려진다(꺼진 서버의 껍데기엔 없음)', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('chat-v3-screen')).toBeAttached({ timeout: 15_000 });
+  });
+});
+
 for (const { path: screenPath, label } of SCREENS) {
   test.describe(`v3 좁은 폭 가로 넘침 0 — ${label}(${screenPath})`, () => {
     for (const width of WIDTHS) {

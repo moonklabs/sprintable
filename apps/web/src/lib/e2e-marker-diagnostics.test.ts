@@ -679,13 +679,30 @@ describe('스펙 · 설정이 진단에 연결돼 있다 (story 4927)', () => {
     // the stop steps run even when an e2e step failed
     expect(steps.find((st) => st.startsWith('- name: Stop production server\n'))).toContain('if: always()');
     expect(steps[at('Stop production server (v3 flags)')]).toContain('if: always()');
-    // the stop is by the LISTENing socket (pnpm exec's pid is not the server's) and the port must be free before the second server binds it
+    // each server runs in its own session and is stopped by killing the process GROUP (pnpm exec's pid is not the server's), and «the port is free» is
+    // asked of the port itself — never of `lsof`, which the runner does not have (PR 5795's first run: a missing lsof read as «free», the v3 server died
+    // with EADDRINUSE and the v3 spec passed on the first, flag-off server)
+    expect(code).not.toMatch(/lsof|kill-port/);
+    expect(first).toContain('nohup setsid pnpm exec next start --port 3108 > /tmp/next-start.log');
+    expect(v3).toContain('nohup setsid pnpm exec next start --port 3108 > /tmp/next-start-v3.log');
     const stop1 = steps.find((st) => st.startsWith('- name: Stop production server\n'))!;
-    expect(stop1).toContain('bash apps/web/scripts/kill-port.sh 3108');
-    expect(stop1).toMatch(/if lsof -ti tcp:3108 -sTCP:LISTEN[^\n]*; then echo [^\n]*exit 1; fi/);
+    expect(stop1).toContain('kill -- "-$(cat /tmp/next-start.pid)"');
+    // «free» = the connection is REFUSED (curl exit 7): an old server answering 4xx/5xx, or a stalled listener, is still the port's owner (so no `curl -f` here)
+    const refused = 'curl -s -o /dev/null --max-time 2 http://localhost:3108/login || rc=$?';
+    expect(stop1).toContain(refused);
+    expect(stop1).toContain('if [ "$rc" -ne 7 ]; then echo "port 3108 is not free after the stop');
     expect(stop1).not.toMatch(/kill "\$\(cat \/tmp\/next-start\.pid/);
-    expect(v3).toMatch(/if lsof -ti tcp:3108 -sTCP:LISTEN[^\n]*; then echo [^\n]*exit 1; fi\n\s+nohup pnpm exec next start/);
-    expect(steps[at('Stop production server (v3 flags)')]).toContain('bash apps/web/scripts/kill-port.sh 3108');
+    expect(v3).toMatch(/rc=0; curl -s -o \/dev\/null --max-time 2 http:\/\/localhost:3108\/login \|\| rc=\$\?\n\s+if \[ "\$rc" -ne 7 \]; then echo [^\n]*exit 1; fi\n\s+nohup setsid pnpm exec next start/);
+    // every probe of :3108 has a time limit (a listener that accepts and stalls must not hang the job)
+    for (const line of code.split('\n').filter((l) => l.includes('curl') && l.includes('localhost:3108'))) expect(line, line.trim()).toContain('--max-time 2');
+    expect(v3).toContain('kill -0 "$(cat /tmp/next-start-v3.pid)"'); // the server that answers is THIS one (an EADDRINUSE death leaves the old one answering)
+    expect(v3).toContain('grep -q "Ready in" /tmp/next-start-v3.log');
+    expect(steps[at('Stop production server (v3 flags)')]).toContain('kill -- "-$(cat /tmp/next-start-v3.pid)"');
+    // the v3 spec itself proves it is attached to the FLAG-ON server (a width-only check passes on a flag-off server's bare shell too)
+    const v3spec = readFileSync(join(WEB, 'e2e/v3-narrow-width-overflow.spec.ts'), 'utf8');
+    expect(v3spec).toContain("toContain('Search or give an instruction')"); // /today
+    expect(v3spec).toContain("toContain('Connections & rules')"); // /connect-rules
+    expect(v3spec).toMatch(/goto\('\/chat'[\s\S]*?getByTestId\('chat-v3-screen'\)\)\.toBeAttached/); // /chat · the chat screen itself (the shell has no chat-v3-screen)
     // the marker wait stays 5000 ms: a flake is not covered with time (PO)
     expect(wait).toContain('export const PAGE_MARKER_TIMEOUT_MS = 5000;');
   });

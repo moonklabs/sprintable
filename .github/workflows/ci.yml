@@ -3017,10 +3017,10 @@ jobs:
       - name: Start production server (next start · :3108 · story #4927)
         working-directory: apps/web
         run: |
-          nohup pnpm exec next start --port 3108 > /tmp/next-start.log 2>&1 &
+          nohup setsid pnpm exec next start --port 3108 > /tmp/next-start.log 2>&1 &
           echo $! > /tmp/next-start.pid
-          for i in $(seq 1 60); do curl -sf -o /dev/null http://localhost:3108/login && break; sleep 2; done
-          curl -sf -o /dev/null http://localhost:3108/login || { echo "production server did not come up"; tail -20 /tmp/next-start.log; exit 1; }
+          for i in $(seq 1 60); do curl -sf -o /dev/null --max-time 2 http://localhost:3108/login && break; sleep 2; done
+          curl -sf -o /dev/null --max-time 2 http://localhost:3108/login || { echo "production server did not come up"; tail -20 /tmp/next-start.log; exit 1; }
 
       # e2e/global-setup이 owner 로그인 → playwright/.auth/owner.json storageState를 만든 뒤 contrast-guard.spec을 돈다.
       # PLAYWRIGHT_BASE_URL이 있으면 playwright.config의 webServer는 없다(이미 떠 있는 위 서버를 씀).
@@ -3061,16 +3061,18 @@ jobs:
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:3108
 
-      # `$!` of `nohup pnpm exec next start` is pnpm's pid, not the node server that listens on :3108 — so stop by the LISTENing socket
-      # (apps/web/scripts/kill-port.sh, the same helper `pnpm dev` used) and then REQUIRE the port to be free: the v3-flag server below binds the
-      # same port, and a leftover flag-off server would answer its readiness check while the new one died with EADDRINUSE.
+      # `$!` of `nohup pnpm exec next start` is pnpm's pid, not the node server that listens on :3108 (a local probe: the listener's pid differs and
+      # survives `kill $!`). So each server is started with `setsid` (its own session · process group = the pid in the pid file) and stopped by
+      # killing the GROUP. Whether the port is free is asked of the port itself (a connection to it must be REFUSED — curl exit 7; any HTTP answer, even a 4xx/5xx, or a stalled listener means it is still owned) — NOT of `lsof`: this
+      # runner has no `lsof`, and a missing `lsof` reads as «nothing listens» (PR 5795's first run: the stop looked fine in 0.07 s, the v3 server died
+      # with EADDRINUSE, and the v3 spec passed on the first, flag-off server). The v3-flag server binds the same port, so a leftover must fail the job.
       - name: Stop production server
         if: always()
         run: |
           tail -20 /tmp/next-start.log 2>/dev/null || true
-          bash apps/web/scripts/kill-port.sh 3108
-          for i in $(seq 1 10); do lsof -ti tcp:3108 -sTCP:LISTEN >/dev/null 2>&1 || break; sleep 1; done
-          if lsof -ti tcp:3108 -sTCP:LISTEN >/dev/null 2>&1; then echo "port 3108 is still taken after the stop"; exit 1; fi
+          if [ -s /tmp/next-start.pid ]; then kill -- "-$(cat /tmp/next-start.pid)" 2>/dev/null || true; fi
+          for i in $(seq 1 15); do rc=0; curl -s -o /dev/null --max-time 2 http://localhost:3108/login || rc=$?; [ "$rc" -eq 7 ] && break; sleep 1; done
+          if [ "$rc" -ne 7 ]; then echo "port 3108 is not free after the stop (curl exit $rc)"; exit 1; fi
 
       # story #4006(critical, 5pt) AC3 — v3 화면(오늘·대화·연결·규칙·일감·결과, 「가설」은
       # #3989/#4383 착지 뒤 별도) 390·768·1440 가로 넘침 0. 이 스텝만 v3 플래그 3개를 켠다(위 e2e들은 플래그 OFF 기준을 전제로 하므로
@@ -3084,11 +3086,15 @@ jobs:
           CHAT_V3_ENABLED: 'true'
           CONNECT_RULES_V3_ENABLED: 'true'
         run: |
-          if lsof -ti tcp:3108 -sTCP:LISTEN >/dev/null 2>&1; then echo "port 3108 is taken — the first server was not stopped"; exit 1; fi
-          nohup pnpm exec next start --port 3108 > /tmp/next-start-v3.log 2>&1 &
+          rc=0; curl -s -o /dev/null --max-time 2 http://localhost:3108/login || rc=$?
+          if [ "$rc" -ne 7 ]; then echo "port 3108 is not free (curl exit $rc) — the first server was not stopped"; exit 1; fi
+          nohup setsid pnpm exec next start --port 3108 > /tmp/next-start-v3.log 2>&1 &
           echo $! > /tmp/next-start-v3.pid
-          for i in $(seq 1 60); do curl -sf -o /dev/null http://localhost:3108/login && break; sleep 2; done
-          curl -sf -o /dev/null http://localhost:3108/login || { echo "production server (v3 flags) did not come up"; tail -20 /tmp/next-start-v3.log; exit 1; }
+          for i in $(seq 1 60); do curl -sf -o /dev/null --max-time 2 http://localhost:3108/login && break; sleep 2; done
+          curl -sf -o /dev/null --max-time 2 http://localhost:3108/login || { echo "production server (v3 flags) did not come up"; tail -20 /tmp/next-start-v3.log; exit 1; }
+          # the one that answers must be THIS server (an EADDRINUSE death would leave the old one answering)
+          kill -0 "$(cat /tmp/next-start-v3.pid)" || { echo "the v3-flag server is not running"; tail -20 /tmp/next-start-v3.log; exit 1; }
+          grep -q "Ready in" /tmp/next-start-v3.log || { echo "the v3-flag server log has no Ready line"; tail -20 /tmp/next-start-v3.log; exit 1; }
 
       - name: Run v3 narrow-width overflow e2e (story #4006 AC3)
         run: pnpm --filter web e2e:v3-narrow-width
@@ -3099,7 +3105,7 @@ jobs:
         if: always()
         run: |
           tail -20 /tmp/next-start-v3.log 2>/dev/null || true
-          bash apps/web/scripts/kill-port.sh 3108
+          if [ -s /tmp/next-start-v3.pid ]; then kill -- "-$(cat /tmp/next-start-v3.pid)" 2>/dev/null || true; fi
 
       - name: Dump backend log on failure
         if: failure()
