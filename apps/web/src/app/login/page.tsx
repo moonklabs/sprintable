@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { useAdoptPrehydrationValues } from '@/hooks/use-adopt-prehydration-values';
+import { useSubmitLatch } from '@/hooks/use-submit-latch';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { loginWithPassword } from '@/lib/db/client';
 import { Banner } from '@/components/ds/banner';
@@ -46,10 +47,15 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(
     errorCode ? (oauthErrors[errorCode] ?? t('loginFailed')) : null
   );
-  const [loading, setLoading] = useState(false);
+  // story 4940 — the two roads (password · Firebase) share ONE latch: one press = one request across both, and one road's lock holds the other's buttons and the fields too
+  const [road, setRoad] = useState<'password' | 'firebase' | null>(null);
+  const loading = road === 'password';
+  const firebaseLoading = road === 'firebase';
+  const busy = road !== null;
+  const nextRoad = useRef<'password' | 'firebase'>('password');
+  const latch = useSubmitLatch((on) => setRoad(on ? nextRoad.current : null));
   // 4924 — bumped on every «a box is empty» press so the reason Banner is a NEW node each time (an unchanged role=alert node is not read again)
   const [reasonSeq, setReasonSeq] = useState(0);
-  const [firebaseLoading, setFirebaseLoading] = useState(false);
 
   // story #3118 AC0 — 기본값 false(SSR과 하이드레이션 첫 프레임 모두 비노출, fail-closed).
   // 마운트 후에만 셸 신호를 읽어 iOS/macOS로 확認되면 true로 올라간다 — 신호가 없거나
@@ -81,7 +87,8 @@ export default function LoginPage() {
       setReasonSeq((n) => n + 1);
       return;
     }
-    setFirebaseLoading(true);
+    nextRoad.current = 'firebase';
+    if (!latch.enter()) return;
     setError(null);
     try {
       const result = await signInAndExchangeFirebaseSession(email.trim(), password);
@@ -99,10 +106,14 @@ export default function LoginPage() {
       }
       // story #1959(P2-S3) AC: 로그인 복귀 후 /login history 잔존 0 — push 는 스택에 남아
       // 복귀 화면에서 BACK 1회가 로그인 폼으로 돌아가 버린다(재제출 위험). replace 로 스왑.
+      latch.hold(); // story 4940 — locked until the page is left
       router.replace(safeNextPath(nextParam));
       router.refresh();
+    } catch (e) {
+      latch.unhold(); // the navigation itself threw after hold(): let go at once
+      throw e;
     } finally {
-      setFirebaseLoading(false);
+      latch.exit();
     }
   };
 
@@ -113,7 +124,8 @@ export default function LoginPage() {
       setReasonSeq((n) => n + 1);
       return;
     }
-    setLoading(true);
+    nextRoad.current = 'password';
+    if (!latch.enter()) return;
     setError(null);
     try {
       const result = await loginWithPassword(email.trim(), password, showTotp ? totpCode : undefined);
@@ -141,12 +153,14 @@ export default function LoginPage() {
         return;
       }
       // story #1959(P2-S3): 위와 동일 사유 — replace 로 /login history 잔존 방지.
+      latch.hold(); // story 4940 — locked until the page is left
       router.replace(safeNextPath(nextParam));
       router.refresh();
     } catch {
+      latch.unhold(); // the navigation itself threw after hold(): let go at once
       setError(t('loginFailed'));
     } finally {
-      setLoading(false);
+      latch.exit();
     }
   };
 
@@ -175,7 +189,7 @@ export default function LoginPage() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-            disabled={loading}
+            disabled={busy}
           />
           <Input
             type="password"
@@ -186,7 +200,7 @@ export default function LoginPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-            disabled={loading}
+            disabled={busy}
           />
           {showTotp && (
             <Input
@@ -200,7 +214,7 @@ export default function LoginPage() {
               onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
               onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
               autoFocus
-              disabled={loading}
+              disabled={busy}
             />
           )}
           {/* story #2105 1차 — 계정 없는 사람이 제품에서 처음 만나는 화면(들어오는 경로)인데
@@ -209,11 +223,11 @@ export default function LoginPage() {
               단락이 매 시도마다 언마운트→리마운트되므로(토스트의 "나타남"과 동형), 동일한
               실패 사유가 연속으로 떠도 매번 새 DOM 노드로 안착해 안정적으로 낭독된다. */}
           {error && <Banner key={reasonSeq} tone="failed">{error}</Banner>}
-          <Button type="button" variant="primary" size="lg" className="w-full" onClick={handleLogin} disabled={loading}>
+          <Button type="button" variant="primary" size="lg" className="w-full" onClick={handleLogin} disabled={busy}>
             {loading ? t('signingIn') : t('signIn')}
           </Button>
           {FIREBASE_AUTH_ENABLED && (
-            <Button type="button" variant="secondary" size="lg" className="w-full" onClick={handleFirebaseLogin} disabled={firebaseLoading}>
+            <Button type="button" variant="secondary" size="lg" className="w-full" onClick={handleFirebaseLogin} disabled={busy}>
               {firebaseLoading ? t('signingIn') : t('firebaseSignIn')}
             </Button>
           )}

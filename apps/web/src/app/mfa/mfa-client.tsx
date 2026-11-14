@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useAdoptPrehydrationValues } from '@/hooks/use-adopt-prehydration-values';
+import { useSubmitLatch } from '@/hooks/use-submit-latch';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { Input } from '@/components/ui/input';
 
@@ -24,10 +25,11 @@ export function MfaClient({ chatsHref }: MfaClientProps) {
   useAdoptPrehydrationValues([{ ref: codeRef, initial: '', set: setCode, normalize: (v) => v.replace(/\D/g, '').slice(0, 6) }]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const latch = useSubmitLatch(setLoading); // story 4940
 
   const handleVerify = async () => {
     if (!code.trim()) return;
-    setLoading(true);
+    if (!latch.enter()) return;
     setError(null);
     try {
       const res = await fetch('/api/auth/2fa/verify', {
@@ -55,11 +57,13 @@ export function MfaClient({ chatsHref }: MfaClientProps) {
         }
         return;
       }
+      latch.hold(); // story 4940 — locked until the page is left
       router.push(chatsHref); // story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. story #4017 CHANGES 2 — 목적지 모듈 경유.
     } catch {
+      latch.unhold(); // story 4940 — the navigation itself threw after hold(): let go at once
       setError(t('errorFailed'));
     } finally {
-      setLoading(false);
+      latch.exit();
     }
   };
 
