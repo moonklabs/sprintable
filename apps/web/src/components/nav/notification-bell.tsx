@@ -1,5 +1,6 @@
 'use client';
 
+import { handleListKeys } from '@/lib/list-keys';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnchoredPopover, isOutsidePress, usePortalMenuKeys } from '@/components/shared/anchored-popover';
@@ -321,7 +322,7 @@ function NotificationPanel({
     const room = n.target_conversation_title;
     const sender = n.payload?.sender_name;
     return (
-      <li key={n.id}>
+      <li key={n.id} data-row-key={n.id}>
         <Button
           type="button"
           variant="quiet"
@@ -384,7 +385,8 @@ function NotificationPanel({
       </div>
 
       {/* 목록 */}
-      <div className="focus-inset min-h-0 flex-1 overflow-y-auto">
+      {/* story 4954 (the desktop app) — ↑ ↓ (j k) walk the rows, focus only: the same list keys the home · goals · runs lists use (`handleListKeys`); Enter / Space open a row as a button does */}
+      <div className="focus-inset min-h-0 flex-1 overflow-y-auto" onKeyDown={(e) => handleListKeys(e, () => undefined)}>
         {loading ? (
           <div className="py-12 text-center text-ds-body text-ds-ink-3">{tCommon('loading')}</div>
         ) : filtered.length === 0 ? (

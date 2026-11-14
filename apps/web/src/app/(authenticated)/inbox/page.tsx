@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { handleListKeys } from '@/lib/list-keys';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { ArrowLeft, Bell, Bot, CheckCheck, ChevronDown, ChevronRight, Inbox as InboxIcon, Info, Zap, ZapOff, type LucideIcon } from 'lucide-react';
@@ -634,7 +635,8 @@ export default function InboxPage() {
                 <p className="text-sm text-muted-foreground">{t('noNotifications')}</p>
               </div>
             ) : (
-              inboxSections.map((section) => (
+              <div onKeyDown={(e) => handleListKeys(e, () => undefined)}>{/* story 4954 (the desktop app) — ↑ ↓ (j k) walk the rows (focus only; Enter / Space open as before): the list keys the home · goals · runs lists use */}
+              {inboxSections.map((section) => (
                 <div key={section.label}>
                   {/* 목업 ③: 날짜 section 라벨(calm·NOT uppercase) */}
                   <p className="px-3 pt-3 pb-1 text-editorial-meta font-medium text-muted-foreground">{section.label}</p>
@@ -645,7 +647,7 @@ export default function InboxPage() {
                       if (item.kind === 'group') {
                         const expanded = expandedGroups.has(item.key);
                         return (
-                          <div key={`group-${item.key}`}>
+                          <div key={`group-${item.key}`} data-row-key={`group-${item.key}`}>
                             <div className="relative flex items-stretch transition hover:bg-muted/40">
                               {/* story #2023 ⓑ: 미읽음=L5(시스템 상태), 브랜드 아님 */}
                               {item.hasUnread ? <span className="absolute left-0 top-0 h-full w-0.5 bg-ds-action" aria-hidden /> : null}
@@ -661,6 +663,7 @@ export default function InboxPage() {
                               <button
                                 type="button"
                                 onClick={() => void openGroup(item)}
+                                data-row-focus
                                 className="flex min-w-0 flex-1 items-start gap-3 py-2.5 pr-3 text-left"
                               >
                                 <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-overlay-fill-1 text-muted-foreground">
@@ -751,8 +754,8 @@ export default function InboxPage() {
                       // story #3903 AC2 — 렌더 시점 title/body 조합(3888 eventCard 재사용).
                       const display = composeNotificationDisplay(notification, t, eventPreviewHelpers);
                       return (
+                        <div key={notification.id} data-row-key={notification.id}>
                         <button
-                          key={notification.id}
                           type="button"
                           onClick={() => void selectNotification(notification)}
                           aria-current={isSelected ? 'true' : undefined}
@@ -784,11 +787,13 @@ export default function InboxPage() {
                             ) : null}
                           </div>
                         </button>
+                        </div>
                       );
                     })}
                   </div>
                 </div>
-              ))
+              ))}
+              </div>
             )}
             {/* story #2195 — hasMore가 참일 때만 노출(서버가 못 줄 때 서 있지 않게). */}
             {!loading && hasMore ? (
