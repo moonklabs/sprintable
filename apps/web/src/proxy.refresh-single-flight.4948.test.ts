@@ -6,7 +6,7 @@ import { SignJWT } from 'jose';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', (...args: unknown[]) => mockFetch(...args));
-import { proxy as middleware, REFRESH_JOIN_WINDOW_MS, pendingRefreshCount } from './proxy';
+import { proxy as middleware, REFRESH_JOIN_WINDOW_MS, REFRESH_IN_FLIGHT_MAX, pendingRefreshCount } from './proxy';
 
 const JWT_SECRET = 'test-secret-for-proxy-tests';
 async function accessToken(exp: number, sub = 'user-123'): Promise<string> {
@@ -138,6 +138,23 @@ describe('one rotation per refresh token in flight (story 4948 PR 2)', () => {
     spy.mockRestore();
     expect(pendingRefreshCount() - before, 'the three hung ones are gone, the new one is there').toBe(1);
   });
+
+  it('⭐the map has a ceiling: with a stalled backend and many DIFFERENT bogus tokens it stops at REFRESH_IN_FLIGHT_MAX, and a request past it still gets its own answer (it runs alone)', async () => {
+    const fresh = await accessToken(Math.floor(Date.now() / 1000) + 3600);
+    const g = gate();
+    mockFetch.mockImplementation(async () => { await g.p; return answer(200, { data: { access_token: fresh, refresh_token: 'new-rt' } }); });
+    const before = pendingRefreshCount();
+    const room = REFRESH_IN_FLIGHT_MAX - before;
+    const all: Promise<Response>[] = [];
+    for (let i = 0; i < room + 5; i += 1) all.push(middleware(api({ sp_rt: `bogus-${i}` })));
+    await new Promise((r) => setTimeout(r, 200));
+    expect(pendingRefreshCount(), 'the map stops at the ceiling').toBe(REFRESH_IN_FLIGHT_MAX);
+    expect(refreshCalls().length, 'the five past the ceiling were still sent, on their own').toBe(room + 5);
+    g.release(undefined);
+    const results = await Promise.all(all);
+    for (const res of results.slice(-5)) expect(setCookies(res), 'a request past the ceiling still gets its renewal').toContain('sp_rt=new-rt');
+    expect(pendingRefreshCount()).toBe(before);
+  }, 30_000);
 
   it('⭐what is shared is the BACKEND answer only — each waiter still decides for itself (RC2 with its own cookies) and forwards its OWN cookies to the page', async () => {
     const fresh = await accessToken(Math.floor(Date.now() / 1000) + 3600, 'user-123');

@@ -608,6 +608,8 @@ async function readErrorCode(res: Response): Promise<string | undefined> {
 export const REFRESH_JOIN_WINDOW_MS = 3000;
 /** a rotation still unanswered after this long is forgotten by the map (its request goes on by itself): a hung backend must not make the map grow with one entry per distinct token */
 const REFRESH_ENTRY_TTL_MS = 30_000;
+/** at most this many rotations are held at once: past it a new one is not registered (it runs alone, as before this story) — a stalled backend plus many different bogus refresh cookies cannot grow the map, and each registration sweeps at most this many entries */
+export const REFRESH_IN_FLIGHT_MAX = 1000;
 const refreshesInFlight = new Map<string, { flight: Promise<RefreshOutcome>; startedAt: number }>();
 /** how many rotations the map holds right now (tests · diagnostics) */
 export function pendingRefreshCount(): number { return refreshesInFlight.size; }
@@ -624,6 +626,7 @@ async function refreshWithToken(rt: string): Promise<RefreshOutcome> {
   if (running && Date.now() - running.startedAt < REFRESH_JOIN_WINDOW_MS) return running.flight;
   const now = Date.now();
   for (const [k, e] of refreshesInFlight) if (now - e.startedAt >= REFRESH_ENTRY_TTL_MS) refreshesInFlight.delete(k); // hung rotations are dropped from the map, not awaited
+  if (refreshesInFlight.size >= REFRESH_IN_FLIGHT_MAX) return refreshWithTokenOnce(rt); // the map is full: this one runs alone and is not registered
   const entry = { flight: undefined as unknown as Promise<RefreshOutcome>, startedAt: now };
   // the slot is freed when THIS flight settles — and only if it is still the one registered (a newer flight for the same token must not be deleted by an older one's `finally`)
   entry.flight = refreshWithTokenOnce(rt).finally(() => { if (refreshesInFlight.get(key) === entry) refreshesInFlight.delete(key); });
