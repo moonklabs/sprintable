@@ -9,7 +9,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
-import { AlertTriangle, ArrowLeftRight, Check, ChevronDown, GitFork, Loader2, Paperclip, Plus, Tag, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, Check, ChevronDown, GitFork, Loader2, MoreHorizontal, Paperclip, Plus, Tag, X } from 'lucide-react';
 import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import type { KanbanStory, KanbanMember, DependencyEdge, GateItem } from './types';
 import { normalizeAssigneePatch } from './types';
@@ -138,6 +138,13 @@ interface StoryDetailPanelProps {
    * 위치를 안다). top+heightPx(px, 확정)를 쓰는 이유 — top/bottom 자동조합은 높이가
    * 암묵값이 되어 내부 `h-full` flex 레이아웃(헤더 고정+본문 스크롤)이 깨진다. */
   overlayPosition?: { top: number; heightPx: number };
+}
+
+/** story 4945 — ⌘Enter / Ctrl+Enter in the description · acceptance-criteria editor saves it (the comment box already does). An IME's Enter is a letter-confirm key, never a save. */
+function saveOnCmdEnter(e: React.KeyboardEvent<HTMLElement>, saving: boolean, save: () => void | Promise<void>) {
+  if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey) || isImeComposing(e)) return;
+  e.preventDefault();
+  if (!saving) void save();
 }
 
 function taskTone(status: string) {
@@ -1775,15 +1782,27 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 수 없는 조작). 에이전트 계정에도 트리거를 열어두면 #2091/#2103과 같은 결함이라
                 미리 숨긴다. */}
             <HumanOnlyAction>
-              <Button
-                type="button"
-                variant="quiet"
-                onClick={() => setShowDeleteConfirm(true)}
-                className="h-auto min-h-0 min-w-0 flex items-center gap-1 rounded-md border border-destructive/40 px-2.5 py-1.5 text-xs text-foreground hover:bg-destructive-tint"
-                aria-label={t('deleteStory')}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+              {/* story 4945 — 닫기(✕) 바로 옆에 지우기가 늘 떠 있어 잘못 누르기 쉬웠다(PO 11-14). 지우기는 «더 보기 ⋯» 안으로 — 같은 동작 · 확인 창(ConfirmDialog)은 그대로. */}
+              <Menu>
+                <MenuTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="quiet"
+                      className="h-auto min-h-0 min-w-0 rounded-md border border-ds-line px-2.5 py-2 text-muted-foreground hover:text-foreground"
+                      aria-label={t('panelMoreActions')}
+                      data-testid="story-detail-more"
+                    >
+                      <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+                    </Button>
+                  }
+                />
+                <MenuContent align="end">
+                  <MenuItem variant="danger" onClick={() => setShowDeleteConfirm(true)} data-testid="story-detail-delete">
+                    {t('deleteStory')}
+                  </MenuItem>
+                </MenuContent>
+              </Menu>
             </HumanOnlyAction>
             <Button type="button" variant="quiet" onClick={onClose} className="h-auto min-h-0 min-w-0 rounded-md border border-ds-line px-3 py-2 text-muted-foreground hover:text-foreground">✕</Button>
           </div>
@@ -2077,7 +2096,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 )}
               </div>
               {editingDescription ? (
-                <div className="mt-2 space-y-2">
+                <div className="mt-2 space-y-2" onKeyDown={(e) => saveOnCmdEnter(e, savingDescription, handleSaveDescription)}>
                   {/* story #2264(C-6) AC3: 새 자리 비용 = 설정 한 줄 — <textarea>를
                       <EntityAwareTextarea>로 바꾸고 projectId만 넘기면 `#` 피커가 붙는다.
                       참조 코어(chat-input-entity-tokens.ts/use-entity-picker.ts) diff 0. */}
@@ -2141,7 +2160,7 @@ export function StoryDetailPanel({ story, tasks, tasksTotalCount = null, tasksLo
                 )}
               </div>
               {editingAC ? (
-                <div className="mt-2 space-y-2">
+                <div className="mt-2 space-y-2" onKeyDown={(e) => saveOnCmdEnter(e, savingAC, handleSaveAC)}>
                   {/* story #2264(C-6) AC3: 같은 설정 한 줄 — description과 동일 컴포넌트 재사용. */}
                   <EntityAwareTextarea
                     value={acDraft}

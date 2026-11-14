@@ -104,6 +104,11 @@ function legacyHits(): string[] {
 /** 이 장 밖의 공용 부품(여러 화면이 같이 쓰는 것): 증거 캡슐(게이트 · 결재 · 목표 화면) · 아바타(채팅 · 목록 …) — 안쪽의 옛 클래스는 그 부품을 바꾸는 장의 몫이다. */
 const SHARED = '[data-slot="proof-capsule"], [data-avatar]';
 const click = (el: Element | null | undefined) => act(async () => { (el as HTMLElement).click(); await Promise.resolve(); });
+/** story 4945 — 지우기는 «더 보기 ⋯» 메뉴의 «스토리 삭제» 항목(닫기 옆 늘 떠 있던 휴지통을 옮김). */
+const openDelete = async () => {
+  await click(document.querySelector(`button[aria-label="${koMessages.board.panelMoreActions}"]`));
+  await click([...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((i) => (i.textContent ?? '').trim() === koMessages.board.deleteStory));
+};
 const byText = (re: RegExp, scope: ParentNode = document) => [...scope.querySelectorAll<HTMLElement>('button, [role="tab"], [role="menuitem"]')].find((b) => re.test(b.textContent ?? ''));
 
 /** 패널이 낼 수 있는 «열린 상태»를 차례로 열며 옛 클래스 히트를 상태 이름별로 모은다(히트가 없는 상태는 빼서 실패 메시지가 곧 일 목록이 된다). */
@@ -123,7 +128,7 @@ async function walkStates(): Promise<Record<string, string[]>> {
   note('assigneePicker');
   const descEdit = byText(/편집/, main);
   if (descEdit) { await click(descEdit); note('descriptionEdit'); }
-  await click(document.querySelector(`button[aria-label="${koMessages.board.deleteStory}"]`));
+  await openDelete();
   note('deleteConfirm');
   return report;
 }
@@ -168,7 +173,7 @@ describe('4908 카드 상세 — 옛 proof 팔레트 부품 0 (머리 · 몸통 
 
   it('⭐삭제 확인 창은 ds 확인 창(ds-dialog-content · 위험 단추)이다 — 옛 Dialog가 아니다', async () => {
     await mount({ ...story, self_reported: false } as KanbanStory);
-    await click(document.querySelector(`button[aria-label="${koMessages.board.deleteStory}"]`));
+    await openDelete();
     const dlg = document.querySelector('[data-slot="ds-dialog-content"]');
     expect(dlg, '삭제 확인 창').not.toBeNull();
     expect(dlg!.textContent).toContain(koMessages.board.permanentDelete);

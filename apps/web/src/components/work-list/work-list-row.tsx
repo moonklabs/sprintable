@@ -47,6 +47,7 @@ export function WorkListRowView({
     <div
       role={onSelect ? 'button' : undefined}
       tabIndex={onSelect ? 0 : undefined}
+      data-work-row={onSelect ? '' : undefined}
       aria-pressed={onSelect ? isSelected : undefined}
       onClick={onSelect ? () => onSelect(row.id) : undefined}
       onKeyDown={onSelect ? (e) => {

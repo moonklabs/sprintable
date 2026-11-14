@@ -86,8 +86,8 @@ interface KanbanBoardProps {
 }
 
 // story #4888 — 보드 머리 줄의 틀(불러오는 동안의 자리 표시와 실제 머리가 같은 틀이라 칩이 안 흔들린다)
-// story #4923 — 낮은 창(높이 ≤ 520 · 맥 앱 작은 창 1100×420 · 데스크톱 폭 lg 이상만 — 폰 가로 보기는 그대로)에서 머리 높이 44 → 약 38(줄 하나 34 + 위아래 여백 4). 줄이 넘칠 때 거르기를 «거르기 · n» 단추 하나로 접는 것은 높이가 아니라 머리 폭 몫이다(board-head-fold.tsx).
-const BOARD_HEAD_CLASS = 'focus-inset flex min-h-11 flex-shrink-0 flex-nowrap items-center gap-2 overflow-x-auto border-b border-border/80 px-4 py-1.5 lg:[@media(max-height:520px)]:min-h-9 lg:[@media(max-height:520px)]:py-0.5 lg:flex-wrap lg:overflow-visible';
+// story #4923 — 낮은 창(높이 ≤ 520 · 맥 앱 작은 창 1100×420 · 데스크톱 폭 lg 이상만 — 폰 가로 보기는 그대로)에서 · story 4945: 한계를 520 → 600으로(맥 앱 웹 영역 539에서 열이 카드 2장뿐이었다 — 같은 간격 토큰만, 새 모양 0) 머리 높이 44 → 약 38(줄 하나 34 + 위아래 여백 4). 줄이 넘칠 때 거르기를 «거르기 · n» 단추 하나로 접는 것은 높이가 아니라 머리 폭 몫이다(board-head-fold.tsx).
+const BOARD_HEAD_CLASS = 'focus-inset flex min-h-11 flex-shrink-0 flex-nowrap items-center gap-2 overflow-x-auto border-b border-border/80 px-4 py-1.5 lg:[@media(max-height:600px)]:min-h-9 lg:[@media(max-height:600px)]:py-0.5 lg:flex-wrap lg:overflow-visible';
 
 // WIP limit localStorage 키
 function wipLimitKey(projectId: string | undefined, status: string): string {
@@ -2017,6 +2017,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
               onToggleAssignee={handleToggleAssignee}
               onRenameStory={handleRenameStory}
               onKickoffStory={handleKickoff}
+              onEditStory={handleEditStory}
+              onDeleteStory={isHuman ? handleDeleteStory : undefined}
               onCreateStory={(title) => createStoryReporting('backlog', title)}
             />
           </div>
@@ -2035,7 +2037,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
           >
             {/* story #4923(재오픈 · PO 11-14) — 낮은 데스크톱 창(높이 ≤ 520)에선 칸 안 스크롤 상자가 카드 한 장(78)을 통째로 못 담았다(1100×420 dev 실측: 상자 69px). 틀(206)은 그대로 두고(지원 단추 틈 · 문서 비스크롤 규칙 4913)
                 칸 «바깥 여백»에서 24px를 낸다: 칸 줄 위아래 12 → 6(각 6씩 = 12) · 칸 안 위아래 12 → 8(8) · 칸 머리 아래 12 → 8(4) → 상자 69 → 93 = 카드 78 + 위아래 6 + 3. 카드 · 상자 안쪽 여백은 그대로. */}
-            <div className="flex h-full gap-3 overflow-x-auto px-3 py-3 lg:[@media(max-height:520px)]:py-1.5">
+            <div className="flex h-full gap-3 overflow-x-auto px-3 py-3 lg:[@media(max-height:600px)]:py-1.5">
               {TRUST_COLUMNS.map((col) => {
                 const colStories = storiesByTrustColumn(col.id);
                 return (
@@ -2108,7 +2110,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
           >
             {/* story #4923(재오픈 · PO 11-14) — 낮은 데스크톱 창(높이 ≤ 520)에선 칸 안 스크롤 상자가 카드 한 장(78)을 통째로 못 담았다(1100×420 dev 실측: 상자 69px). 틀(206)은 그대로 두고(지원 단추 틈 · 문서 비스크롤 규칙 4913)
                 칸 «바깥 여백»에서 24px를 낸다: 칸 줄 위아래 12 → 6(각 6씩 = 12) · 칸 안 위아래 12 → 8(8) · 칸 머리 아래 12 → 8(4) → 상자 69 → 93 = 카드 78 + 위아래 6 + 3. 카드 · 상자 안쪽 여백은 그대로. */}
-            <div className="flex h-full gap-3 overflow-x-auto px-3 py-3 lg:[@media(max-height:520px)]:py-1.5">
+            <div className="flex h-full gap-3 overflow-x-auto px-3 py-3 lg:[@media(max-height:600px)]:py-1.5">
               {COLUMNS.map((col) => {
                 const colStories = storiesByColumn(col.id);
                 const wipState = wipLimits[col.id] ?? { limit: null, editing: false, draft: '' };

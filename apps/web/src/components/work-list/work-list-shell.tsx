@@ -22,6 +22,7 @@ import { GoalGroupView } from './work-list-goal-group';
 import { EmptyState } from '@/components/ds/empty-state';
 import { useWorkListSelection } from './use-work-list-selection';
 import { WorkListDetailPanel } from './work-list-detail-panel';
+import { moveWorkRowFocus } from './row-keys';
 import { findSelectedRowContext, isRowVisibleInFiltered } from './work-list-detail-actions';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -276,7 +277,7 @@ export function WorkListShell({ projectId }: { projectId: string }) {
                 description={hasActiveFilters ? t('emptyStateFilteredHint') : undefined}
               />
             ) : (
-              <div className="space-y-4" data-testid="work-list-groups">
+              <div className="space-y-4" data-testid="work-list-groups" onKeyDown={moveWorkRowFocus}>
                 {filtered.groups.map((group) => (
                   <GoalGroupView
                     key={group.goalId}

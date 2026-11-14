@@ -77,10 +77,12 @@ export default function VerifyEmailPage() {
     return destinationRef.current;
   }
   const [noSession, setNoSession] = useState(false);
+  // story 4945 — 인증이 끝난 직후 ~1초는 세션 판정이 아직이다. 그동안 «시작하기»를 보였다가 «한 줄 + 로그인 길»로 바뀌는 깜빡임이 있었다 → 판정이 오기 前엔 같은 단추 자리를 «확인하는 중…»(눌리지 않음)으로 둔다(새 부품 X).
+  const [sessionKnown, setSessionKnown] = useState(false);
   const aliveRef = useRef(true);
   useEffect(() => {
     aliveRef.current = true;
-    void resolveDestination().then((d) => { if (aliveRef.current) setNoSession(!d.signedIn); });
+    void resolveDestination().then((d) => { if (aliveRef.current) { setNoSession(!d.signedIn); setSessionKnown(true); } });
     return () => { aliveRef.current = false; };
   }, []);
 
@@ -161,9 +163,11 @@ export default function VerifyEmailPage() {
             ) : (
               <button
                 onClick={handleStart}
-                className="flex w-full min-h-[44px] items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90"
+                disabled={!sessionKnown}
+                aria-busy={!sessionKnown}
+                className="flex w-full min-h-[44px] items-center justify-center rounded-lg bg-brand px-4 py-3 text-sm font-medium text-brand-foreground transition hover:bg-brand/90 disabled:cursor-wait disabled:opacity-70"
               >
-                {t('startButton')}
+                {sessionKnown ? t('startButton') : t('checkingSession')}
               </button>
             )}
             {onPhone ? (

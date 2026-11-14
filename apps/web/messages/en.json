@@ -1377,6 +1377,7 @@
     "changeStatus": "Change Status",
     "assignMember": "Assign Member",
     "deleteStory": "Delete Story",
+    "panelMoreActions": "More actions",
     "removeItemAction": "Remove {item}",
     "deleteStoryDialogTitle": "Delete this story?",
     "deleteStoryDialogBody": "Deleting <b>{title}</b> can't be undone.",
@@ -1616,6 +1617,7 @@
     "verifyFailed": "Verification failed.",
     "verifyError": "Something went wrong during verification.",
     "startButton": "Get started",
+    "checkingSession": "Checking…",
     "backToApp": "Back to the app",
     "backToAppHint": "Works if the Sprintable app is installed on this phone.",
     "backToLogin": "Back to login"

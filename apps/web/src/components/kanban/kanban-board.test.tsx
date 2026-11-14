@@ -1147,7 +1147,9 @@ describe('StoryDetailPanel — 영구삭제 트리거 authz(story #2104)', () =>
     stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium' }]);
     await mount();
     await openPanel('S1');
-    expect(container.querySelector('[role="dialog"] button[aria-label="스토리 삭제"]')).not.toBeNull();
+    // story 4945 — 지우기는 닫기 옆 휴지통이 아니라 «더 보기 ⋯» 메뉴 안(사람에게만 ⋯ 단추가 뜬다)
+    expect(container.querySelector('[role="dialog"] button[aria-label="더 보기"]')).not.toBeNull();
+    expect(container.querySelector('[role="dialog"] button[aria-label="스토리 삭제"]')).toBeNull();
   });
 
   it('agent면 스토리 영구삭제 트리거가 안 뜬다', async () => {
@@ -1159,6 +1161,7 @@ describe('StoryDetailPanel — 영구삭제 트리거 authz(story #2104)', () =>
     await mount();
     await openPanel('S1');
     expect(container.querySelector('[role="dialog"] button[aria-label="스토리 삭제"]')).toBeNull();
+    expect(container.querySelector('[role="dialog"] button[aria-label="더 보기"]')).toBeNull(); // story 4945 — ⋯ 도 사람에게만
   });
 });
 

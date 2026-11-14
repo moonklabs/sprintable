@@ -4,6 +4,18 @@
  * 옮겨 간 카드가 화면 밖이면 가장 가까운 자리로 스크롤한다. 이동했으면 true.
  */
 export function moveCardFocus(card: HTMLElement, key: string): boolean {
+  // story 4945 — 목록 보기: 상태 묶음들이 위에서 아래로 한 줄로 이어진다. ↑↓ = 화면 순서의 이웃 카드(묶음을 가로질러 · 접힌 묶음의 카드는 DOM에 없다) · ←→ = 갈 곳 없음.
+  const list = card.closest<HTMLElement>('[data-board-list]');
+  if (list) {
+    if (key !== 'ArrowUp' && key !== 'ArrowDown') return false;
+    const all = [...list.querySelectorAll<HTMLElement>('[data-story-card]')];
+    const at = all.indexOf(card);
+    const to = at < 0 ? undefined : all[at + (key === 'ArrowDown' ? 1 : -1)];
+    if (!to) return false;
+    to.focus();
+    to.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    return true;
+  }
   const column = card.closest<HTMLElement>('[data-board-column]');
   if (!column) return false;
   const cardsOf = (col: Element) => [...col.querySelectorAll<HTMLElement>('[data-story-card]')];
