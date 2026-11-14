@@ -205,7 +205,12 @@ describe('VerifyEmailPage — 앱으로 돌아가기 (story #4762 AC6)', () => {
 // `/onboarding` and land on the login wall without a word, while the app's web view carries on by itself. Now the page says that and offers one way to sign in HERE. A session that exists → exactly as before.
 describe('VerifyEmailPage — 세션 없는 브라우저(story #4939)', () => {
   const verifiedOk = { json: async () => ({ data: { message: 'Email verified successfully' } }) };
-  const meAnswer = (answer: unknown) => vi.fn(async (url: string) => (url === '/api/auth/me' ? (answer as { ok?: boolean; status?: number; json?: () => Promise<unknown> }) : verifiedOk));
+  type Answer = { ok?: boolean; status?: number; json?: () => Promise<unknown> };
+  // `/api/auth/refresh` as the route answers a browser with NO refresh cookie (the default: nothing to renew → the session is not here)
+  const refreshNone: Answer = { ok: false, status: 401, json: async () => ({ error: { code: 'NO_REFRESH_TOKEN', message: 'No refresh token' } }) };
+  const refreshOk: Answer = { ok: true, status: 200, json: async () => ({ data: { access_token: 'a', refresh_token: 'r' } }) };
+  const refreshUnavailable: Answer = { ok: false, status: 503, json: async () => ({ error: { code: 'REFRESH_UNAVAILABLE', message: 'x' } }) };
+  const meAnswer = (answer: unknown, refresh: Answer = refreshNone) => vi.fn(async (url: string) => (url === '/api/auth/me' ? (answer as Answer) : url === '/api/auth/refresh' ? refresh : verifiedOk));
   const startBtn = () => [...container.querySelectorAll('button')].find((b) => b.textContent === koMessages.verifyEmail.startButton);
   const hint = () => container.querySelector('[data-testid="verify-no-session-hint"]');
   const loginLink = () => container.querySelector('[data-testid="verify-login-here"]') as HTMLAnchorElement | null;
@@ -224,7 +229,7 @@ describe('VerifyEmailPage — 세션 없는 브라우저(story #4939)', () => {
   it('⭐answer not here yet when «시작하기» is pressed, then 401 → no push into the login wall; the page shows the line and the login way', async () => {
     let resolveMe!: (v: unknown) => void;
     const mePromise = new Promise((r) => { resolveMe = r; });
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === '/api/auth/me' ? mePromise : verifiedOk)));
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === '/api/auth/me' ? mePromise : url === '/api/auth/refresh' ? refreshNone : verifiedOk)));
     await mountAndWait();
     await act(async () => { startBtn()?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(pushMock).not.toHaveBeenCalled();
@@ -232,6 +237,40 @@ describe('VerifyEmailPage — 세션 없는 브라우저(story #4939)', () => {
     expect(pushMock).not.toHaveBeenCalled(); // reverted (the old `router.push(destination)`) → '/onboarding' here
     expect(hint()).not.toBeNull();
     expect(loginLink()).not.toBeNull();
+  });
+
+  it('⭐a SIGNED-IN browser whose access token has expired: 401 → renewed once → read again → 200 — the person keeps «시작하기» (no hint · no login link) and it goes where it went before', async () => {
+    let meCalls = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/auth/me') { meCalls += 1; return meCalls === 1 ? { ok: false, status: 401, json: async () => ({}) } : { ok: true, status: 200, json: async () => ({ data: { org_id: 'org-1' } }) }; }
+      if (url === '/api/auth/refresh') return refreshOk;
+      return verifiedOk;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await mountAndWait();
+    expect(fetchMock.mock.calls.filter(([u]) => u === '/api/auth/refresh')).toHaveLength(1); // one renewal, not a loop
+    expect(meCalls).toBe(2);
+    expect(hint()).toBeNull();
+    expect(loginLink()).toBeNull();
+    await act(async () => { startBtn()?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pushMock).toHaveBeenCalledWith('/inbox');
+  });
+
+  it('⭐renewed, but the read after it is still 401 → now it is «no session»', async () => {
+    vi.stubGlobal('fetch', meAnswer({ ok: false, status: 401, json: async () => ({}) }, refreshOk));
+    await mountAndWait();
+    expect(hint()).not.toBeNull();
+    expect(loginLink()).not.toBeNull();
+    expect(startBtn()).toBeUndefined();
+  });
+
+  it('⭐the renewal «could not be confirmed» (REFRESH_UNAVAILABLE) → NOT called «no session»: the button stays and goes where it went before', async () => {
+    vi.stubGlobal('fetch', meAnswer({ ok: false, status: 401, json: async () => ({}) }, refreshUnavailable));
+    await mountAndWait();
+    expect(hint()).toBeNull();
+    expect(loginLink()).toBeNull();
+    await act(async () => { startBtn()?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pushMock).toHaveBeenCalledWith('/onboarding');
   });
 
   it('a session that exists → as before: no hint · no login link · «시작하기» goes by the organization (/inbox · /onboarding)', async () => {
@@ -271,7 +310,7 @@ describe('VerifyEmailPage — 세션 없는 브라우저(story #4939)', () => {
   });
 
   it('a failed verification shows its own error with 401 too — never the «돌아가면 이어져요» line (nothing was verified)', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === '/api/auth/me' ? { ok: false, status: 401, json: async () => ({}) } : { json: async () => ({ error: { code: 'INVALID_TOKEN', message: 'x' } }) })));
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === '/api/auth/me' ? { ok: false, status: 401, json: async () => ({}) } : url === '/api/auth/refresh' ? refreshNone : { json: async () => ({ error: { code: 'INVALID_TOKEN', message: 'x' } }) })));
     await mountAndWait();
     expect(hint()).toBeNull();
     expect(loginLink()).toBeNull();
