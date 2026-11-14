@@ -157,7 +157,8 @@ const measure = (page: Page) => page.evaluate(() => {
     const sb = s.getBoundingClientRect(); const lb = label.getBoundingClientRect();
     const range = document.createRange(); range.selectNodeContents(label);
     const lines = new Set(Array.from(range.getClientRects()).map((q) => Math.round(q.left))).size; // vertical-rl: one text line = one distinct x
-    return { id: s.getAttribute('data-trust-column'), text: (label.textContent ?? '').trim(), stripH: Math.round(sb.height), fits: s.scrollHeight <= s.clientHeight + 0.5, labelInside: lb.top >= sb.top - 0.5 && lb.bottom <= sb.bottom + 0.5, lines };
+    const count = Array.from(s.querySelectorAll('span')).find((x) => x.classList.contains('tabular-nums'))!.getBoundingClientRect();
+    return { id: s.getAttribute('data-trust-column'), text: (label.textContent ?? '').trim(), labelBottom: lb.bottom, countTop: count.top, stripH: Math.round(sb.height), fits: s.scrollHeight <= s.clientHeight + 0.5, labelInside: lb.top >= sb.top - 0.5 && lb.bottom <= sb.bottom + 0.5, lines };
   });
   const scroller = document.getElementById('scroller')!;
   return { vh, frameH: Math.round(r(frame).h), cols, strips, scrollerOverflow: scroller.scrollHeight - scroller.clientHeight, docOverflow: document.documentElement.scrollHeight - vh };
@@ -231,6 +232,18 @@ test('[SID:4923] 1100×420, the classic 5-step axis: every column box ≥ 90px a
   }
 });
 
+test('[SID:4923] a strip with too little room (a window below 420px, browser zoom, a longer name) cuts its label with an ellipsis — never a second line, never over the count', async ({ page }) => {
+  await open(page, { viewport: [1100, 420] });
+  await page.evaluate(() => { for (const s of Array.from(document.querySelectorAll('[data-testid^="trust-column-strip-"]'))) (s as HTMLElement).style.height = '95px'; });
+  const m = await measure(page);
+  expect(m.strips.length).toBe(3);
+  for (const s of m.strips) {
+    expect(s.lines, `${s.text}: one line`).toBe(1);
+    expect(s.labelBottom, `${s.text}: the label ends above the count`).toBeLessThanOrEqual(s.countTop + 0.5);
+    expect(s.fits, `${s.text}: nothing — label or count — hangs out of the ${s.stripH}px strip (the label gives way instead)`).toBe(true);
+  }
+});
+
 // a window taller than 520 gets none of the three paddings (nothing changes); the 520-high window (1280×520) gets them — a roomier box, never a smaller one
 for (const vp of [[1440, 900], [1100, 800]] as Array<[number, number]>) {
   test(`[SID:4923] ${vp.join('×')}: untouched — the same column boxes with and without the low-window paddings`, async ({ page }) => {
@@ -268,15 +281,23 @@ const dragTo = async (page: Page, fromSel: string, toSel: string, opts?: { toBot
   // the target is in view; pull the pointer back from the edge (so the sideways auto-scroll stops), then aim at where the target column is NOW and check the pointer really is over it before letting go
   const rowBox = (await page.locator('[data-board-column]').first().evaluate((e) => (e.parentElement as HTMLElement).getBoundingClientRect().toJSON())) as { left: number; right: number };
   await page.mouse.move((rowBox.left + rowBox.right) / 2, from.y + 24, { steps: 6 });
-  for (let i = 0; i < 6; i += 1) {
-    await page.waitForTimeout(250);
+  const targetId = await target.getAttribute('data-board-column');
+  let over = false;
+  for (let i = 0; i < 12 && !over; i += 1) {
+    await page.waitForTimeout(200);
     const t = (await target.boundingBox())!;
     const y = opts?.toBottom ? t.y + t.height - 12 : t.y + Math.min(t.height / 2, 60);
-    await page.mouse.move(Math.min(Math.max(t.x + t.width / 2, rowBox.left + 80), rowBox.right - 80), y, { steps: 6 });
+    // the point inside the target column that is also inside the visible row (the column may be partly scrolled out)
+    const x = Math.min(Math.max(t.x + t.width / 2, Math.max(t.x, rowBox.left) + 20), Math.min(t.x + t.width, rowBox.right) - 20);
+    await page.mouse.move(x, y, { steps: 6 });
     await page.waitForTimeout(250);
-    const now = (await target.boundingBox())!;
-    if (Math.abs(now.x - t.x) < 1) break; // the row stopped moving
+    // no fixed guess: the pointer is released only when the element under it is really the target column and the row has stopped moving
+    const before = (await target.boundingBox())!.x;
+    await page.waitForTimeout(150);
+    const after = (await target.boundingBox())!.x;
+    over = Math.abs(after - before) < 1 && (await page.evaluate(([px, py, id]) => document.elementsFromPoint(px as number, py as number).some((e) => e.closest(`[data-board-column="${id}"]`)), [x, y, targetId] as const));
   }
+  expect(over, `the pointer is over the target column ${targetId} before it is released`).toBe(true);
   await page.mouse.up();
   await page.waitForTimeout(300);
 };

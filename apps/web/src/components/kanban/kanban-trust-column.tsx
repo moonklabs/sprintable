@@ -162,10 +162,10 @@ export function KanbanTrustColumn({
         className={`flex h-full w-10 min-w-10 shrink-0 flex-col items-center gap-2 rounded-xl border border-dashed border-ds-line ${LAYER.panel} py-3 transition lg:[@media(max-height:520px)]:py-2 ${closedDuringDrag ? 'opacity-45' : ''}`}
       >
         <span className={`size-1.5 shrink-0 rounded-full ${dotClass}`} aria-hidden="true" />
-        {/* story #4923(재오픈) — 띠가 낮은 창(1100×420: 칸 127px)에서 세로 글이 «입력필 / 요»로 두 줄로 갈라졌다: 글은 줄을 바꾸지 않고(whitespace-nowrap) 한 줄로 서고, 낮은 데스크톱 창(높이 ≤ 520)에선 장식인 자물쇠를 빼고(잠금은 점선 테두리 · title · 스크린리더 글이 그대로 말한다 · 20px)
+        {/* story #4923(재오픈) — 띠가 낮은 창(1100×420: 칸 127px)에서 세로 글이 «입력필 / 요»로 두 줄로 갈라졌다: 글은 줄을 바꾸지 않고(whitespace-nowrap) 한 줄로 서되 자리가 모자라면(더 낮은 창 · 확대 · 더 긴 글) 줄바꿈 · 겹침 대신 «…»로 잘린다(min-h-0 · overflow-hidden · text-ellipsis — 전체 이름은 띠 title이 말한다), 낮은 데스크톱 창(높이 ≤ 520)에선 장식인 자물쇠를 빼고(잠금은 점선 테두리 · title · 스크린리더 글이 그대로 말한다 · 20px)
             위아래 여백을 12 → 8로 줄인다(8px). 띠 = 점 6 + 글(ko ≈ 58 · en ≈ 74) + 0 16 + 사이 16 + 위아래 16이 칸 높이(139: 칸 바깥 여백을 줄인 뒤) 안에 한 줄로 든다. */}
         <Lock className="size-3 text-ds-ink-3 lg:[@media(max-height:520px)]:hidden" aria-hidden="true" />
-        <span className="whitespace-nowrap text-xs font-extrabold text-ds-ink [writing-mode:vertical-rl]">{label}</span>
+        <span className="min-h-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-extrabold text-ds-ink [writing-mode:vertical-rl]">{label}</span>
         <span className="text-xs tabular-nums text-ds-ink-3">0</span>
         <span className="sr-only">{t('trustLockedDropHint')}</span>
       </div>

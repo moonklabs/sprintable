@@ -265,6 +265,8 @@ describe('KanbanTrustColumn — 빈 잠긴 열은 좁은 띠(story #4888)', () =
     await render({});
     const label = Array.from(strip()!.querySelectorAll('span')).find((s) => s.textContent === '입력 필요')!;
     expect(label.className.split(/\s+/)).toContain('whitespace-nowrap');
+    // 자리가 모자라면 줄바꿈 · 겹침 대신 «…»로 잘린다(전체 이름은 띠 title이 말한다)
+    for (const c of ['min-h-0', 'overflow-hidden', 'text-ellipsis']) expect(label.className.split(/\s+/)).toContain(c);
     expect(label.className).toContain('[writing-mode:vertical-rl]');
     // 낮은 창에선 띠 위아래 여백도 12 → 8(글자 폭이 더 넓은 실제 글꼴 — Pretendard — 에서도 영문 «Needs Input»이 한 줄로 들도록 8px 더 — 시험 브라우저엔 그 글꼴이 없어 e2e는 이 한 줄을 가르지 못한다)
     expect(strip()!.className).toContain('lg:[@media(max-height:520px)]:py-2');
