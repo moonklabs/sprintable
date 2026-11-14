@@ -143,6 +143,8 @@ interface StoryDetailPanelProps {
 /** story 4945 — ⌘Enter / Ctrl+Enter in the description · acceptance-criteria editor saves it (the comment box already does). An IME's Enter is a letter-confirm key, never a save. */
 function saveOnCmdEnter(e: React.KeyboardEvent<HTMLElement>, saving: boolean, save: () => void | Promise<void>) {
   if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey) || isImeComposing(e)) return;
+  // 글 칸에서 누른 것만 — 취소 단추 같은 곳의 ⌘Enter는 저장이 아니다. 그리고 `#` 피커가 이미 이 Enter를 먹었으면(preventDefault) 저장하지 않는다(고른 참조가 낡은 초안으로 덮이며 창이 닫힘).
+  if (e.defaultPrevented || !(e.target instanceof HTMLTextAreaElement)) return;
   e.preventDefault();
   if (!saving) void save();
 }

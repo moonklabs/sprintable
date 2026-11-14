@@ -76,6 +76,21 @@ describe('설명 · 완료 조건 편집기 ⌘Enter 저장', () => {
     await flush();
     expect(patches).toEqual([{ description: '쓰는 중' }]);
   });
+  it('⭐이미 처리된 ⌘Enter(# 피커가 먹음) · 취소 단추 위의 ⌘Enter는 저장하지 않는다', async () => {
+    await mountPanel();
+    const ta = await openEditor(board.addDescription!);
+    await act(async () => { setText(ta, '새 설명'); });
+    // 글 칸에서 먼저 preventDefault 된 Enter(피커) — 바깥 틀까지 올라와도 저장 0
+    ta.addEventListener('keydown', (e) => e.preventDefault());
+    await act(async () => { key(ta, { metaKey: true }); });
+    await flush();
+    expect(patches).toEqual([]);
+    const cancel = [...container.querySelectorAll('button')].find((b) => (b.textContent ?? '').trim() === board.cancel)!;
+    await act(async () => { key(cancel, { metaKey: true }); });
+    await flush();
+    expect(patches).toEqual([]);
+    expect(container.querySelector('textarea')).not.toBeNull();
+  });
   it('⭐완료 조건: ⌘Enter → acceptance_criteria PATCH', async () => {
     await mountPanel();
     const ta = await openEditor(board.addAcceptanceCriteria!);

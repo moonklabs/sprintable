@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 //
 // story 4945 — 일감 목록 탭: 행 사이 방향키 ↑↓(격리 맥 앱 실측: ↓를 눌러도 초점이 그대로였다 — Tab만 다음 행으로 갔다) · 눌리는 스토리 행의 손가락 커서(화살표였다).
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -58,5 +60,12 @@ describe('스토리 행 — 눌리는 줄이다', () => {
     const row = container.querySelector<HTMLElement>('[data-work-row]')!;
     expect(row).not.toBeNull();
     expect(row.className).toContain('cursor-pointer');
+  });
+});
+
+describe('연결 — 진짜 일감 목록 틀이 이 키 처리를 단다(가드: 글 그대로)', () => {
+  it('⭐work-list-shell의 묶음 뿌리에 onKeyDown={moveWorkRowFocus}가 있다(없으면 진짜 목록은 ↑↓를 무시한다)', () => {
+    const src = readFileSync(join(__dirname, 'work-list-shell.tsx'), 'utf8');
+    expect(/data-testid="work-list-groups"[^>]*onKeyDown=\{moveWorkRowFocus\}/.test(src)).toBe(true);
   });
 });

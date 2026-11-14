@@ -2,6 +2,8 @@
 //
 // story 4945 (맥 앱 데스크톱 손길 · 일감) — 격리 맥 앱에서 진짜 마우스 · 키로 잰 불편 중 웹 쪽 넷. 되돌리면 RED:
 // ② 이름 바꾸기 입력창 우클릭은 글자 칸의 것(카드 메뉴가 가로채지 않는다) · ③ 목록 보기 ↑↓ = 상태 묶음을 가로지른 이웃 카드 · ④ 목록 행 우클릭 메뉴에 «스토리 수정» · «스토리 삭제»(보드 카드와 같은 두 항목).
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -99,5 +101,16 @@ describe('④ 목록 행 우클릭 메뉴 — 수정 · 삭제', () => {
     await act(async () => { rightClick(container.querySelector('[data-story-card]')!); });
     expect(menuLabels()).toContain(board.editStory);
     expect(menuLabels()).not.toContain(board.deleteStory);
+  });
+});
+
+describe('연결 — 진짜 KanbanBoard가 목록 보기에 수정 · 삭제 콜백을 넘긴다(가드: 글 그대로)', () => {
+  it('⭐목록 보기 자리에 onEditStory={handleEditStory} + 사람만 onDeleteStory(에이전트는 undefined)', () => {
+    const src = readFileSync(join(__dirname, 'kanban-board.tsx'), 'utf8');
+    const at = src.indexOf('<KanbanListView');
+    expect(at).toBeGreaterThan(0);
+    const tag = src.slice(at, src.indexOf('/>', at));
+    expect(tag).toContain('onEditStory={handleEditStory}');
+    expect(tag).toContain('onDeleteStory={isHuman ? handleDeleteStory : undefined}');
   });
 });
