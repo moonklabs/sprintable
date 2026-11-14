@@ -114,6 +114,22 @@ describe('the words', () => {
   });
 });
 
+describe('story #4931 — a terminal question on the computer of someone else', () => {
+  it('⭐the right column names the computer exactly ONCE: the state sentence of another person\'s Mac does not repeat the name (the line below it prints it) — mine reads as before', async () => {
+    await mount([
+      row({ agent_name: 'theirs', state: 'working', activity: 'working', first_screen: { ask: 'trust' }, device_is_mine: false, device_name: 'ZZ-다른-맥', bound_device_name: 'ZZ-다른-맥' }),
+      row({ agent_name: 'mine', state: 'working', activity: 'working', first_screen: { ask: 'trust' }, device_is_mine: true, device_name: 'ZZ-내-맥', bound_device_name: 'ZZ-내-맥' }),
+    ]);
+    const theirs = rowOf('theirs').textContent ?? '';
+    expect(theirs).toContain('그 맥에서 답을 기다려요');
+    expect(theirs).not.toContain('당신');
+    expect(theirs.split('ZZ-다른-맥').length - 1, '기기 이름은 줄에 한 번').toBe(1);
+    const mine = rowOf('mine').textContent ?? '';
+    expect(mine).toContain(ko.state.waiting_first_screen);
+    expect(mine.split('ZZ-내-맥').length - 1).toBe(1);
+  });
+});
+
 describe('looks only', () => {
   it('no row carries a button or a role=button; the name is a link to the conversation when the person has one, text when not', async () => {
     await mount([

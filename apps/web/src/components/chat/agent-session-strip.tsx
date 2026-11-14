@@ -123,16 +123,14 @@ export function restSentence(t: (key: string, values?: Record<string, string>) =
   }[key]();
 }
 
-export function sessionStateLabel(view: { state: string | null; activity?: string | null; limit?: SessionLimit | null; first_screen?: { ask: FirstScreenAsk } | null; device_is_mine?: boolean; device_name?: string | null; bound_device_name?: string | null }, t: (key: string, values?: Record<string, string>) => string): string {
+export function sessionStateLabel(view: { state: string | null; activity?: string | null; limit?: SessionLimit | null; first_screen?: { ask: FirstScreenAsk } | null; device_is_mine?: boolean }, t: (key: string) => string): string {
   const state = shownState(view);
   // story #4763 (AC4 · AC12): a session that waits on a question at its computer — before it has begun to run, or after an instruction went in (the CLI stands on the question) — says so, not
   // «시작됨» / «작업 중»; the server sends the question only while the computer is heard and the session lives
-  // story #4931: the question stands at a computer that is NOT the reader's own (the server says `device_is_mine: false`): «your answer» is untrue for this reader — only the person at that Mac can answer, so the line names the Mac instead.
-  // A server that does not say (`device_is_mine` absent) keeps the line as it was.
+  // story #4931: the question stands at a computer that is NOT the reader's own (the server says `device_is_mine: false`): «your answer» is untrue for this reader — only the person at that Mac can answer, so the line says «that Mac».
+  // The computer's NAME is not in the sentence: the row already prints it on its own line right below (a second copy was a repeat). A server that does not say (`device_is_mine` absent) keeps the line as it was.
   if ((state === 'starting' || state === 'working' || state === 'idle') && view.first_screen?.ask) {
-    if (view.device_is_mine !== false) return t('state.waiting_first_screen');
-    const device = (view.device_name ?? view.bound_device_name ?? '').trim();
-    return device !== '' ? t('state.waiting_first_screen_other', { device }) : t('state.waiting_first_screen_other_unnamed');
+    return view.device_is_mine === false ? t('state.waiting_first_screen_other') : t('state.waiting_first_screen');
   }
   // story #4685 (Yuna §③): a limit the app looks at again by itself (`limit.looks`) is «한도로 쉬는 중»; only a held one, or one from a
   // daemon that does not look (no `looks`), keeps «사용 한도» — the strip's dot and line follow the same decision (limitLooksAgain)

@@ -5484,8 +5484,7 @@
       "state": {
         "starting": "Started",
         "waiting_first_screen": "Waiting for your answer in the Mac terminal",
-        "waiting_first_screen_other": "Waiting for an answer on that Mac ({device})",
-        "waiting_first_screen_other_unnamed": "Waiting for an answer on that Mac",
+        "waiting_first_screen_other": "Waiting for an answer on that Mac",
         "working": "Working",
         "idle": "Waiting for work",
         "waiting_permission": "Waiting for permission",
