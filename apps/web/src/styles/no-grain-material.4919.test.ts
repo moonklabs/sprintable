@@ -38,7 +38,8 @@ describe('4919 — 결(그레인) · 뜸/눌림 그림자를 걷었다', () => {
     // 모든 CSS 파일(globals.css가 @import하는 design-system.css 포함)에서 «proof-surface»가 들어간 곳은 globals.css의 이 규칙 하나여야 한다(주석은 파서도 걷는다)
     const hits: string[] = [];
     for (const f of files(WEB).filter((p) => p.endsWith('.css'))) {
-      const text = stripCss(readFileSync(f, 'utf8'));
+      // CSS 이스케이프(`.proof\\-surface` · `.proof\\2d surface`)로도 같은 클래스를 고를 수 있다 — 이스케이프를 풀어 읽는다
+      const text = stripCss(readFileSync(f, 'utf8')).replace(/\\([0-9a-fA-F]{1,6}\s?|[^0-9a-fA-F\n])/g, (_, c: string) => (/^[0-9a-fA-F]/.test(c) ? String.fromCodePoint(parseInt(c, 16)) : c));
       for (const m of text.matchAll(/proof-surface/g)) hits.push(`${rel(f)}@${m.index}`);
     }
     expect(hits.map((h) => h.split('@')[0]), '«proof-surface»가 CSS 어디에 몇 번 나오는지 — globals.css의 규칙 하나').toEqual(['src/app/globals.css']);
