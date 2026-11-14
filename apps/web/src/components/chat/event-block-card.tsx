@@ -207,6 +207,13 @@ function renderTextWithMissingMarkers(text: string, withProject: (href: string) 
  * admin/owner — team_members.role, `/api/me`가 내려주는 그 값)이다. 직무 템플릿 slug(예:
  * "backend-engineer")가 아니다 — 이름이 비슷해 헷갈리기 쉬운 축이라 명시한다.
  */
+/**
+ * story 4906 (PO 11-14) — the ONE shell of an event card: its face (the ds panel layer `bg-ds-surface`) · its hairline (`border-ds-line`) · its corners (the message tail at the top left) · its padding. The template card (`EventBlockCard`) and the template-less
+ * event drawn as text (chat-bubble.tsx) both use it, so two events in one room are the same shape; the old `bg-card` / `border-border` names resolve to the same colours — only the names moved to the ds tokens. A message a PERSON wrote keeps its bubble (`LAYER.rowOthers`).
+ * Tailwind reads the whole string, so it stays a literal.
+ */
+export const EVENT_CARD_SHELL = 'min-w-0 max-w-full rounded-xl rounded-tl-sm border border-ds-line bg-ds-surface px-3.5 py-3';
+
 export function EventBlockCard({ template, payload, refs, definition }: EventBlockCardProps) {
   const t = useTranslations('chats');
   const tBoard = useTranslations('board');
@@ -455,7 +462,7 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
   const storyHref = storyPath ? pickProject(storyPath) : null;
 
   return (
-    <div className="min-w-0 max-w-full space-y-3 rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">
+    <div className={`${EVENT_CARD_SHELL} space-y-3`}>
       {blocks.map((block, i) => (
         <EventBlockRow
           key={i}

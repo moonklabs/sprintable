@@ -38,7 +38,7 @@ import { parseHitlRequest } from '@/lib/hitl-classifier';
 import { WithheldDeliveryLine } from './withheld-delivery-line';
 import { HitlApprovalCard, type HitlAnswer } from './hitl-approval-card';
 import { ApprovalRequestCard, type CardState } from './approval-request-card';
-import { EventBlockCard, isMachineEventContent } from './event-block-card';
+import { EVENT_CARD_SHELL, EventBlockCard, isMachineEventContent } from './event-block-card';
 import { EventTextFallback } from './event-text-fallback';
 import { parseBlockTemplate, type EventDefinitionSummary } from '@/lib/block-template';
 import { segmentMessageContent } from './message-segments';
@@ -876,6 +876,17 @@ export function ChatBubble({
                 </div>
               )}
             </Card>
+          ) : eventTextFallback ? (
+            // story 4906 (PO 11-14, «이벤트는 카드 · 사람이 한 말은 말풍선»): an event message with no card template is drawn in the SAME shell as the template card (EVENT_CARD_SHELL: one face · one line · one corner) — its head · words · list are the card's own structure; the gray bubble reads as something a person said
+            <div data-testid="chat-bubble-text" data-event-card="text" className={`${EVENT_CARD_SHELL} text-sm leading-relaxed text-foreground [overflow-wrap:anywhere]`}>
+              <EventTextFallback
+                content={message.content} eventKey={eventTarget?.event_key} payload={eventTarget?.payload}
+                refs={eventTarget?.refs as Record<string, unknown> | undefined}
+                definition={eventTarget?.event_key ? eventDefinitionsByKey?.[eventTarget.event_key] : null}
+                eventDefinitionName={(key) => eventDefinitionsByKey?.[key]?.name ?? undefined}
+                renderWords={(words) => <ChatMarkdown content={words} isMine={isMine} references={message.references} entityStatusByKey={entityStatusByKey} onOpenReadingPanel={onOpenReadingPanel} eventDefinitionsByKey={eventDefinitionsByKey} />}
+              />
+            </div>
           ) : noVisibleText ? (
             hasAttachments ? null : (
               // story #4197·#4200(유나 확정) — 보여 줄 글자도 첨부도 없는 메시지. 빈 말풍선 대신 «삭제된 메시지»와
@@ -905,15 +916,7 @@ export function ChatBubble({
                   적용한다(진단·처방 전부 "에이전트 report성 메시지" 범위, human 메시지는
                   무변경). ReportMessageSummary 내부가 발동 조건(computeReportDensity) 미충족
                   이면 곧바로 ChatMarkdown으로 폴백하므로 인간 메시지 경로는 항상 원본 그대로. */}
-              {eventTextFallback ? (
-                <EventTextFallback
-                  content={message.content} eventKey={eventTarget?.event_key} payload={eventTarget?.payload}
-                  refs={eventTarget?.refs as Record<string, unknown> | undefined}
-                  definition={eventTarget?.event_key ? eventDefinitionsByKey?.[eventTarget.event_key] : null}
-                  eventDefinitionName={(key) => eventDefinitionsByKey?.[key]?.name ?? undefined}
-                  renderWords={(words) => <ChatMarkdown content={words} isMine={isMine} references={message.references} entityStatusByKey={entityStatusByKey} onOpenReadingPanel={onOpenReadingPanel} eventDefinitionsByKey={eventDefinitionsByKey} />}
-                />
-              ) : isAgent ? (
+              {isAgent ? (
                 <ReportMessageSummary
                   content={displayContent} messageKind={message.message_kind} isMine={isMine}
                   references={message.references} entityStatusByKey={entityStatusByKey}
