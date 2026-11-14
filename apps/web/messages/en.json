@@ -7486,6 +7486,7 @@
         "limit": {
           "title": "The free plan has one project",
           "body": "You can add this folder's agent to the {project} project and create it — the agent works in this folder.",
+          "line": "The free plan has one project · it goes into the {project} project",
           "addStart": "Add and create"
         }
       },

@@ -424,7 +424,7 @@ describe('[4532] phone pairing screen', () => {
     await render();
     await press('QR 찍기');
     await press('페어링');
-    expect(line()).toBe('이 폰은 Moonklabs 조직의 컴퓨터와 이미 페어링돼 있어 여기서는 페어링할 수 없어요 — 그 조직의 웹 «데스크톱 앱 › 원격 기기»에서 이 폰을 뺀 뒤 다시 찍어 주세요');
+    expect(line()).toBe('이 폰은 Moonklabs의 컴퓨터와 이미 페어링돼 있어 여기서는 페어링할 수 없어요 — 그 조직의 웹 «데스크톱 앱 › 원격 기기»에서 이 폰을 뺀 뒤 다시 찍어 주세요');
     expect(buttons()).toEqual(['다시 찍기']);
   });
 
