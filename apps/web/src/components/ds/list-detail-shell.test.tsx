@@ -90,6 +90,14 @@ describe('ListDetailShell', () => {
     expect(container.querySelector('[data-testid="list-detail-detail-column"]')).toBeNull();
   });
 
+  it('[4938] the narrow sheet draws no header band of its own — the empty bordered strip above the card is gone; the title stays for screen readers', async () => {
+    await show({ wide: false, sheetOpen: true });
+    const sheet = document.body.querySelector('[data-testid="list-detail-detail-sheet"]')!;
+    expect(sheet.querySelector('[data-panel-header]')).toBeNull();
+    expect(sheet.querySelector('.sr-only')?.textContent).toBe('상세 시트');
+    expect(sheet.firstElementChild?.className ?? '').not.toContain('border-b');
+  });
+
   it('the sheet asks the caller to close it (the close button)', async () => {
     const onChange = vi.fn();
     await show({ wide: false, sheetOpen: true, onSheetOpenChange: onChange });

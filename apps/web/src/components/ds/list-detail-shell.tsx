@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { Panel, PanelBody, PanelContent, PanelHeader } from './panel';
+import { Panel, PanelBody, PanelContent } from './panel';
 import { DialogTitle } from './dialog';
 
 /**
@@ -44,7 +44,8 @@ export function ListDetailShell({
       ) : (
         <Panel open={sheetOpen} onOpenChange={onSheetOpenChange}>
           <PanelContent aria-label={sheetLabel} data-testid={sheetTestId ?? `${testId}-detail-sheet`}>
-            <PanelHeader><DialogTitle className="sr-only">{sheetLabel}</DialogTitle></PanelHeader>
+            {/* story 4938: the title is for screen readers only — it used to sit in a PanelHeader, which drew an empty bordered band (padding + a line) above the card on a phone */}
+            <DialogTitle className="sr-only">{sheetLabel}</DialogTitle>
             <PanelBody className="p-0">{detail}</PanelBody>
           </PanelContent>
         </Panel>

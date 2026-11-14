@@ -92,6 +92,15 @@ export function shownToolName(r: Pick<PermissionRequest, 'tool' | 'tool_name'>, 
   return (n && (locale === 'en' ? n.en : n.ko)) || r.tool || null;
 }
 
+/**
+ * story 4938: the summary as the card shows it. The Mac's masking block used to carry a Korean word («••••(가림)») — on an English
+ * screen one line read in two languages; the block is now only «••••» (the card's note «Values that look like secrets were masked» says
+ * what it means, in the screen's language). A request an older Mac app already sent still has the old word: it is shown without it.
+ */
+export function shownSummary(summary: string): string {
+  return summary.replaceAll('••••(가림)', '••••');
+}
+
 /** story 4542 (Yuna · Kadir ④): «{agent} · {computer}» — the computer not again when the agent's name already ends in exactly
  *  « · {computer}» (the same rule as the phone's sheet and the push) */
 export function agentOnDevice(agent: string | null | undefined, device: string | null | undefined): string {
