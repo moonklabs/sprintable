@@ -213,6 +213,18 @@ for (const width of [390, 1440]) {
       expect(await loginCalls(page)).toBe(0);
     });
 
+    test(`[SID:4940] login, the Firebase road — a navigation that THROWS after the hold lets go at once (the error still surfaces, as before)`, async ({ page }) => {
+      const pageErrors: string[] = [];
+      page.on('pageerror', (e) => pageErrors.push(e.message));
+      await open(page, 'login', width, {}, undefined, {});
+      await navThrows(page);
+      await page.locator(EMAIL).fill('a@example.test'); await page.locator(PASSWORD).fill('Abcdef1!x');
+      await page.getByRole('button', { name: 'Firebase로 로그인' }).click();
+      await expect(page.getByRole('button', { name: 'Firebase로 로그인' })).toBeEnabled();
+      await expect(page.getByRole('button', { name: '로그인', exact: true })).toBeEnabled();
+      await expect.poll(() => pageErrors.some((m) => m.includes('navigation failed'))).toBe(true);
+    });
+
     test(`[SID:4940] login, the Firebase road — a refusal lets go: the button is back and the next press calls again`, async ({ page }) => {
       await open(page, 'login', width, {}, undefined, { error: { code: 'NETWORK_ERROR' } });
       await page.locator(EMAIL).fill('a@example.test'); await page.locator(PASSWORD).fill('Abcdef1!x');
