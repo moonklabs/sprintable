@@ -42,6 +42,13 @@
 	# no `encode`: compressing would hold SSE frames back. flush_interval -1 sends every chunk as it arrives.
 	reverse_proxy backend:8000 {
 		flush_interval -1
+		# story 4947 — a deploy replaces `backend` / `frontend`; for ~25 s the name does not answer (dev 11-14, deploy-81: 491 × 502 → Cloudflare's error page). Hold the request and try the upstream again instead of a 502:
+		# only a request that could not be SENT is tried again (refused / unreachable upstream — nothing of it reached the app), for at most 60 s (> twice the measured gap, < Cloudflare's 100 s proxy limit). A live upstream answers
+		# at once; the wait exists only while there is none. request_buffers: a retried request must still have its body — without it the second try goes out with an EMPTY body (measured, Caddy 2.8.4 "invalid Read on closed Body");
+		# up to 1 MiB is kept for that (a bigger body streams through as before, and is not retried). The same three lines on every reverse_proxy here; no host or path is named, so the production VM reads the same file.
+		lb_try_duration 60s
+		lb_try_interval 250ms
+		request_buffers 1MiB
 	}
 }
 
@@ -72,6 +79,10 @@
 	handle /api/v2/* {
 		reverse_proxy backend:8000 {
 			flush_interval -1
+			# story 4947 — same retry lines as the first reverse_proxy of this file (see its comment)
+			lb_try_duration 60s
+			lb_try_interval 250ms
+			request_buffers 1MiB
 		}
 	}
 
@@ -79,6 +90,10 @@
 		encode zstd gzip
 		reverse_proxy frontend:3000 {
 			flush_interval -1
+			# story 4947 — same retry lines as the first reverse_proxy of this file (see its comment)
+			lb_try_duration 60s
+			lb_try_interval 250ms
+			request_buffers 1MiB
 		}
 	}
 }
