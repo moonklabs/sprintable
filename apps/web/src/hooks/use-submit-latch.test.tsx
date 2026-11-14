@@ -66,11 +66,12 @@ describe('useSubmitLatch', () => {
   it('the page being left (unmount) clears the fallback: no state is set on a gone page', async () => {
     await mount();
     await act(async () => { latch.enter(); latch.hold(); latch.exit(); });
+    expect(vi.getTimerCount()).toBe(1); // the fallback is waiting
     const before = rendered;
     await act(async () => { root!.unmount(); root = null; });
+    expect(vi.getTimerCount(), 'the page is gone: no fallback is left waiting').toBe(0);
     await act(async () => { vi.advanceTimersByTime(SUBMIT_HOLD_FALLBACK_MS * 2); });
     expect(rendered).toBe(before);
-    expect(vi.getTimerCount()).toBe(0);
   });
   it('a new attempt after a held one was released starts clean (hold does not leak into the next road)', async () => {
     await mount();
