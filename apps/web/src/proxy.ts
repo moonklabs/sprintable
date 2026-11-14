@@ -951,6 +951,14 @@ async function proxyImpl(incoming: NextRequest) {
     return NextResponse.rewrite(url, { request: { headers: request.headers } });
   }
 
+  // story 4948 — the root `/` is public (a first visit has no session), but its page (`RootPage` → `getServerSession`) reads the ACCESS cookie only: with the access cookie gone (its 1-hour max-age) and the refresh cookie alive,
+  // `/` sent the person to /login while the session was fine (a page under /chats renewed it at once). The Mac app opens `/` every time it starts, so every start after an hour without a renewal showed the sign-in.
+  // Only `/`: another public page that is opened signed-in (a login, the terms) has nothing to renew.
+  if (pathname === '/') {
+    const renewed = await renewSessionForRoot(request);
+    if (renewed) return renewed;
+  }
+
   const isPublicPath =
     PUBLIC_EXACT.includes(pathname) ||
     PUBLIC_PREFIX.some((prefix) => matchesPublicPrefix(pathname, prefix));
@@ -1003,6 +1011,41 @@ async function proxyImpl(incoming: NextRequest) {
   }
 
   return resolveAndRespond(request, pathname, accessToken, claims, request.headers);
+}
+
+/**
+ * story 4948 — the root `/` with no usable access token but a session signal: renew ONCE here, as a protected page would, so `RootPage` reads the fresh access cookie (it is forwarded on this very request) and goes on to
+ * the signed-in home. `null` = leave the request to the public passthrough: anything but a document read (a POST / a HEAD / a prefetch / an RSC fetch is not a page load), a Firebase session, a first visit with no signal, a live access token, a stale refresh for another account (RC2),
+ * and a «superseded» answer. A refresh that could not be confirmed is answered with the «다시 시도» page (a rewrite; nothing is cleared: the next visit asks again). A refresh the backend REFUSED (401, not superseded) is a dead session: the cookies are cleared — the same line every other branch draws.
+ */
+async function renewSessionForRoot(request: NextRequest): Promise<NextResponse | null> {
+  if (!isDocumentRead(request)) return null; // a page load only: not a prefetch · an RSC fetch · a HEAD · a POST (each would spend one more rotation for nothing)
+  if (request.cookies.get('__Host-sp_fs')?.value) return null; // lib/auth/firebase-session.ts SP_FS_COOKIE (a literal: that module is not imported into the proxy): a Firebase session is read by the page itself, nothing here to renew
+  if (!hadAnySessionSignal(request)) return null;
+  const accessToken = request.cookies.get(SP_AT_COOKIE)?.value;
+  if (accessToken && (await verifyAccessToken(accessToken))) return null;
+  const outcome = await tryRefreshViaFastapi(request);
+  if (outcome.kind === 'ok') {
+    if (!(await refreshMatchesActive(request, outcome.accessToken))) return null;
+    const response = NextResponse.next({ request: { headers: buildRefreshedHeaders(request, outcome) } });
+    applyTokenCookies(response, outcome.accessToken, outcome.refreshToken);
+    captureSignupAttribution(request, response); // `/` stays a public page: its first-touch capture is not skipped by the early return
+    return response;
+  }
+  if (outcome.kind === 'invalid') {
+    const response = NextResponse.next({ request });
+    clearAuthCookies(response);
+    captureSignupAttribution(request, response); // a dead session is an effectively anonymous visit: the first touch is still recorded
+    return response;
+  }
+  if (outcome.kind === 'transient') {
+    // «could not be confirmed» (a 503 · the network · a deploy's few seconds) is NOT «signed out»: the page load is REWRITTEN to the public «다시 시도» page (cookies untouched), as every protected page load does since 4915 PR 2 —
+    // never handed to RootPage, which would show the sign-in to a person whose session is alive (the Mac app opening `/` while the server was being replaced)
+    const response = handleUnauthenticated(request, false, false, true, true);
+    captureSignupAttribution(request, response);
+    return response;
+  }
+  return null;
 }
 
 type ResolveWiringResult =
