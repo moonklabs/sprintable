@@ -442,7 +442,9 @@ describe('[4532] phone pairing screen', () => {
       '화면 잠금이 없는 폰에서는 답할 수 없어요 — 폰 설정에서 화면 잠금을 켜 주세요',
       'QR은 만든 지 5분 안에 써야 해요 — 지났으면 컴퓨터에서 새 QR을 만들어 다시 찍어 주세요',
     ]);
-    expect(line()).toBe('아직 페어링하지 않았어요 — 아무것도 보내지 않았어요'); // the first line is the one that says what happened (it takes the focus)
+    expect(line()).toBe('아직 페어링하지 않았어요 — 아무것도 보내지 않았어요'); // the first line is the one that says what happened…
+    const all = [...container.querySelectorAll('[data-testid="phone-pairing-line"]')];
+    expect(document.activeElement, 'the first line takes the focus the vanished [Pair] button had').toBe(all[0]); // …and it is the one that takes the focus (a second or third line holding it would read the middle first)
     expect(buttons()).toEqual(['설정 열기', '다시 찍기']);
     expect(nothingSent()).toBe(true); // the claim is true: no key registered, no offer, no MAC
     await press('설정 열기');
