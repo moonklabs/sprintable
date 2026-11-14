@@ -63,18 +63,18 @@ async function open(page: Page, height: number, fold = true) {
 
 const geometry = (page: Page) => page.evaluate(() => {
   const head = document.querySelector('[data-testid="room-head"]') as HTMLElement;
-  const ul = head.querySelector(':scope > ul[data-testid="room-head-chips"]') as HTMLElement;
+  const ul = head.querySelector(':scope > ul[data-testid="room-head-chips"]') as HTMLElement | null;
   const btn = head.querySelector('[data-testid="room-bar-people"]') as HTMLElement | null;
   const r = (e: Element | null) => (e ? Math.round(e.getBoundingClientRect().height) : null);
-  return { headH: Math.round(head.getBoundingClientRect().height), ulDisplay: getComputedStyle(ul).display, ulH: r(ul), btnW: btn ? Math.round(btn.getBoundingClientRect().width) : null, btnH: r(btn), btnDisplay: btn ? getComputedStyle(btn).display : null, btnName: btn ? (btn.textContent ?? '').trim() : null };
+  return { headH: Math.round(head.getBoundingClientRect().height), ulDisplay: ul ? getComputedStyle(ul).display : 'none', ulH: r(ul), chipLists: head.querySelectorAll('[data-testid="room-head-chips"]').length, peopleButtons: head.querySelectorAll('[data-testid="room-bar-people"]').length, btnW: btn ? Math.round(btn.getBoundingClientRect().width) : null, btnH: r(btn), btnDisplay: btn ? getComputedStyle(btn).display : null, btnName: btn ? (btn.textContent ?? '').trim() : null };
 });
 
 test.describe('the room head folds its chips in a short window (story 4946)', () => {
   test('[SID:4946] ⭐539 high (the Mac app\'s small window): the chip row is gone, a «people 3» button is there, the head is LOWER (3 rows → 2)', async ({ page }) => {
     await open(page, 539);
     const g = await geometry(page);
-    expect(g.ulDisplay).toBe('none');
-    expect(g.btnDisplay).not.toBe('none'); expect(g.btnW).toBeGreaterThan(30); expect(g.btnH).toBeGreaterThanOrEqual(28);
+    expect(g.ulDisplay).toBe('none'); expect(g.chipLists, 'the chips are in the popup only once it is open').toBe(0); expect(g.peopleButtons).toBe(1);
+    expect(g.btnDisplay).not.toBeNull(); expect(g.btnW).toBeGreaterThan(30); expect(g.btnH).toBeGreaterThanOrEqual(28);
     expect(g.btnName).toContain('3');
     expect(g.headH, 'the folded head').toBeLessThan(72);
   });
@@ -83,7 +83,7 @@ test.describe('the room head folds its chips in a short window (story 4946)', ()
       await open(page, h);
       const g = await geometry(page);
       expect(g.ulDisplay, `${h}`).not.toBe('none'); expect(g.ulH, `${h}`).toBeGreaterThan(20);
-      expect(g.btnDisplay, `${h}`).toBe('none');
+      expect(g.btnDisplay, `${h}`).toBeNull(); expect(g.peopleButtons, `${h}`).toBe(0); // not drawn at all (no hidden copy)
       expect(g.headH, `${h}`).toBeGreaterThan(95);
     }
   });

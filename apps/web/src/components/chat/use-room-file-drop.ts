@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 
 const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
 
@@ -36,5 +36,13 @@ export function useRoomFileDrop(onFiles: (files: File[]) => void) {
     const files = Array.from(e.dataTransfer.files);
     if (files.length > 0) onFiles(files);
   }, [onFiles]);
+  // A file dropped on a part of the page that takes no drop (the thread panel's messages · a dialog) would be OPENED by the browser in place of the room — the page says «not here» (nothing is attached) instead.
+  // The window listens last (bubbling): every part that takes drops (the composer's strip · the room) has already had it.
+  useEffect(() => {
+    const guard = (e: globalThis.DragEvent) => { if (Array.from(e.dataTransfer?.types ?? []).includes('Files')) e.preventDefault(); };
+    window.addEventListener('dragover', guard);
+    window.addEventListener('drop', guard);
+    return () => { window.removeEventListener('dragover', guard); window.removeEventListener('drop', guard); };
+  }, []);
   return { dragging, handlers: { onDragEnter, onDragOver, onDragLeave, onDrop } };
 }

@@ -5,6 +5,7 @@ import { Button } from '@/components/ds/button';
 import { Chip } from '@/components/ds/chip';
 import { Icon } from '@/components/ds/icon';
 import { IconButton } from '@/components/ds/icon-button';
+import { useMediaQuery } from '@/hooks/use-media-query';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 export interface RoomHeadChip {
@@ -40,7 +41,9 @@ export interface RoomHeadProps {
  * It carries no button of its own except the «+» that ends the chip row (add a participant) and whatever the caller puts at the right end («⋯»). From lg up only — a phone gets RoomBarTitle in the shell's header row.
  */
 export function RoomHead({ title, tag, subline, chips, moreCount = 0, addLabel, onAdd, trailing, peopleLabel, peopleCount }: RoomHeadProps) {
-  const canFold = Boolean(peopleLabel) && (peopleCount ?? 0) > 0;
+  // story 4946 — in a SHORT window (under 600 px high) the chip row is replaced by the «people N» button; the same content is never drawn twice (a media query in JS, not a hidden copy: one set of testids · one tab order)
+  const short = useMediaQuery('(max-height: 600px)');
+  const folded = short && Boolean(peopleLabel) && (peopleCount ?? 0) > 0;
   return (
     // below lg (the phone shell) this head is NOT drawn: the room's name · people · «⋯» live in the shell's own 48 px header row (RoomBarTitle) — a second head under it cost 135 px of reading column
     <header data-testid="room-head" className="flex-shrink-0 border-b border-ds-line px-4 pb-2 pt-3 max-lg:hidden">
@@ -48,13 +51,14 @@ export function RoomHead({ title, tag, subline, chips, moreCount = 0, addLabel, 
         <h1 className="m-0 min-w-0 truncate text-ds-card-title font-semibold text-ds-ink">{title}</h1>
         {tag ? <Chip data-testid="room-head-tag">{tag}</Chip> : null}
         {/* story 4946 — only in a short window: the people button that the chip row folds into */}
-        {canFold ? (
-          <RoomPeoplePopover peopleLabel={peopleLabel!} peopleCount={peopleCount!} chips={chips} moreCount={moreCount} addLabel={addLabel} onAdd={onAdd} className="hidden [@media(max-height:600px)]:inline-flex" />
+        {folded ? (
+          <RoomPeoplePopover peopleLabel={peopleLabel!} peopleCount={peopleCount!} chips={chips} moreCount={moreCount} addLabel={addLabel} onAdd={onAdd} />
         ) : null}
         {trailing ? <div className="ml-auto flex flex-shrink-0 items-center gap-1">{trailing}</div> : null}
       </div>
       {subline ? <p className="mt-0.5 truncate font-mono text-ds-mono-md text-ds-ink-3" data-testid="room-head-subline">{subline}</p> : null}
-      <ul className={`mt-2 flex flex-wrap items-center gap-1.5${canFold ? ' [@media(max-height:600px)]:hidden' : ''}`} data-testid="room-head-chips">
+      {folded ? null : (
+      <ul className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="room-head-chips">
         {chips.map((c) => (
           <li key={c.id} data-testid="room-head-chip" className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-ds-control border border-ds-line px-2 text-ds-small text-ds-ink">
             {c.who}
@@ -64,6 +68,7 @@ export function RoomHead({ title, tag, subline, chips, moreCount = 0, addLabel, 
         {moreCount > 0 ? <li data-testid="room-head-more" className="font-mono text-ds-mono-md text-ds-ink-3">+{moreCount}</li> : null}
         {onAdd ? <li><IconButton icon="add" label={addLabel} onClick={onAdd} data-testid="room-head-add" /></li> : null}
       </ul>
+      )}
     </header>
   );
 }

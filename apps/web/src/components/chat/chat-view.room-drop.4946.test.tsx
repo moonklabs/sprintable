@@ -100,6 +100,14 @@ describe('[SID:4946] ChatView — a file over the room shows the drop guide; a d
     expect(attached()).toBe('strip:twice.png'); // the strip's, once — not also «twice.png» from the room
     expect(overlay()).toBeNull();
   });
+  it('⭐a file dropped OUTSIDE the room column (the thread panel · a dialog) is not opened by the browser: the page takes the drop (preventDefault on the window), and nothing is attached', async () => {
+    await mount();
+    const outside = document.body;
+    expect((await fire(outside, drag(outside, 'dragover'))).defaultPrevented).toBe(true);
+    expect((await fire(outside, drag(outside, 'drop', [file('x.pdf')]))).defaultPrevented).toBe(true);
+    expect(attached()).toBe('');
+    expect((await fire(outside, drag(outside, 'dragover', null, ['text/plain']))).defaultPrevented).toBe(false); // a text drag is none of its business
+  });
   it('a drop with no files (text) is ignored: nothing attached, not prevented', async () => {
     await mount();
     const e = await fire(column(), drag(column(), 'drop', null, ['text/plain']));
