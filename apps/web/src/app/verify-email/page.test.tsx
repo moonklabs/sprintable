@@ -249,6 +249,40 @@ describe('VerifyEmailPage — 세션 없는 브라우저(story #4939)', () => {
     expect(container.textContent).not.toContain(koMessages.verifyEmail.startButton); // the button never said «시작하기» on the way
   });
 
+  it('⭐a SIGNED-IN browser whose access token has expired: 401 → renewed once → read again → 200 — the person keeps «시작하기» (no hint · no login link) and it goes where it went before', async () => {
+    let meCalls = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/auth/me') { meCalls += 1; return meCalls === 1 ? { ok: false, status: 401, json: async () => ({}) } : { ok: true, status: 200, json: async () => ({ data: { org_id: 'org-1' } }) }; }
+      if (url === '/api/auth/refresh') return refreshOk;
+      return verifiedOk;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await mountAndWait();
+    expect(fetchMock.mock.calls.filter(([u]) => u === '/api/auth/refresh')).toHaveLength(1); // one renewal, not a loop
+    expect(meCalls).toBe(2);
+    expect(hint()).toBeNull();
+    expect(loginLink()).toBeNull();
+    await act(async () => { startBtn()?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pushMock).toHaveBeenCalledWith('/inbox');
+  });
+
+  it('⭐renewed, but the read after it is still 401 → now it is «no session»', async () => {
+    vi.stubGlobal('fetch', meAnswer({ ok: false, status: 401, json: async () => ({}) }, refreshOk));
+    await mountAndWait();
+    expect(hint()).not.toBeNull();
+    expect(loginLink()).not.toBeNull();
+    expect(startBtn()).toBeUndefined();
+  });
+
+  it('⭐the renewal «could not be confirmed» (REFRESH_UNAVAILABLE) → NOT called «no session»: the button stays and goes where it went before', async () => {
+    vi.stubGlobal('fetch', meAnswer({ ok: false, status: 401, json: async () => ({}) }, refreshUnavailable));
+    await mountAndWait();
+    expect(hint()).toBeNull();
+    expect(loginLink()).toBeNull();
+    await act(async () => { startBtn()?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(pushMock).toHaveBeenCalledWith('/onboarding');
+  });
+
   it('a session that exists → as before: no hint · no login link · «시작하기» goes by the organization (/inbox · /onboarding)', async () => {
     vi.stubGlobal('fetch', meAnswer({ ok: true, status: 200, json: async () => ({ data: { org_id: 'org-1' } }) }));
     await mountAndWait();
