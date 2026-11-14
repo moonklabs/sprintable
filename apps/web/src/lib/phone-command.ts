@@ -16,6 +16,8 @@ import type { PhoneAnswer } from './phone-bridge';
 
 export type CommandOutcome =
   | { kind: 'stopped' } // the daemon interrupted the turn — the session lives on
+  // story 4943 (PO 11-14 ③ A): the turn is stopped, but a command Claude put in the background still runs (the daemon pressed Claude's own stop only on a screen it knew — else it says so) — a line that stays true
+  | { kind: 'stopped_commands_running' }
   | { kind: 'already_stopped' } // nothing was working
   | { kind: 'sent_now' } // the instruction went into the turn
   | { kind: 'sent_after_step' } // pasted — it goes in as soon as the step the agent is on ends (PO 10:20Z · Yuna)
@@ -197,7 +199,7 @@ async function follow(agentId: string, pending: Pending, deps: CommandDeps): Pro
     } catch {
       continue;
     }
-    if (r.state === 'done') return prompt ? { kind: r.result_code === 'after_step' ? 'sent_after_step' : 'sent_now' } : pending.verb === 'end' ? { kind: 'ended' } : { kind: 'stopped' };
+    if (r.state === 'done') return prompt ? { kind: r.result_code === 'after_step' ? 'sent_after_step' : 'sent_now' } : pending.verb === 'end' ? { kind: 'ended' } : r.result_code === 'commands_running' ? { kind: 'stopped_commands_running' } : { kind: 'stopped' };
     // story #4599 (Mirko 385): the daemon found a macOS window holding the turn when the stop reached it — the same closed reason
     if (r.state === 'rejected' && r.result_code === 'system_wait_end_only') return { kind: 'system_wait_end_only' };
     // the daemon found the turn ended: it never put it in — the instruction becomes a message (nothing went in twice)

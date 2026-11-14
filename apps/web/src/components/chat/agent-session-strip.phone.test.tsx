@@ -246,6 +246,18 @@ describe('[4534] the strip inside the phone app', () => {
     expect(JSON.parse(post.init!.body as string)).toMatchObject({ kind: 'stop_session', session_key: 's-9', signed: 'S' });
   });
 
+  // story 4943 (PO 11-14 ③ A): the daemon stopped the turn but a background command still runs → the line says exactly that (never the plain «멈췄어요»)
+  it('[멈춤] done with commands_running → «턴은 멈췄지만 백그라운드에서 도는 명령은 계속 돌고 있어요», not the plain stopped line', async () => {
+    vi.useFakeTimers();
+    server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'acked' }), res(200, { state: 'done', result_code: 'commands_running' })]);
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9' });
+    await render();
+    await press(ko.button.stop);
+    await poll(2);
+    expect(commandLine()?.textContent).toBe(ko.command.stoppedCommandsRunning);
+    expect(ko.command.stoppedCommandsRunning).not.toBe(ko.command.stopped);
+  });
+
   it('[멈춤]: the shell signs a stop (agent only) → posted → followed to «멈췄어요 …», the line takes focus', async () => {
     vi.useFakeTimers();
     const calls = server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'acked' }), res(200, { state: 'done' })]);

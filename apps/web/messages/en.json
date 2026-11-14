@@ -5573,6 +5573,7 @@
         "stopping": "Stopping…",
         "sending": "Sending…",
         "stopped": "Stopped — the session is still there; send the next instruction and it carries on",
+        "stoppedCommandsRunning": "The turn stopped, but a command in the background is still running",
         "alreadyStopped": "It had already stopped",
         "stopUnreachable": "Lost the connection to that computer, so it wasn't stopped",
         "stopSystemWait": "macOS is asking on that computer's screen whether to use a folder, so it couldn't be stopped — only [End without a handoff] works right now. Answer the prompt at that computer and the agent carries on",

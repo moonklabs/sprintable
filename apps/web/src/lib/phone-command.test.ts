@@ -62,6 +62,16 @@ describe('[4534] commandOnPhone — what the web asks and posts', () => {
     expect(JSON.parse(calls[0]!.init!.body as string)).toEqual({ kind: 'stop_session', idempotency_key: 'idem-1', session_key: 's-9', signed: 'SIGNED-S', phone_key_id: 'k-1' });
   });
 
+  // story 4943 (PO 11-14 ③ A): the daemon stopped the turn but a command Claude put in the background still runs — the result says so, the line stays true
+  it('a stop done with commands_running → «stopped_commands_running» (not «stopped»); a plain done → stopped; an end is never it', async () => {
+    server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'done', result_code: 'commands_running' })]);
+    await expect(commandOnPhone(stop, deps(signedStop))).resolves.toEqual({ kind: 'stopped_commands_running' });
+    server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'done' })]);
+    await expect(commandOnPhone(stop, deps(signedStop))).resolves.toEqual({ kind: 'stopped' });
+    server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'done', result_code: 'commands_running' })]);
+    await expect(commandOnPhone({ agentId: AGENT, kind: 'end_session' }, deps({ ...signedStop, kind: 'end_session' }))).resolves.toEqual({ kind: 'ended' });
+  });
+
   // story #4599 (contract v1.13.2 · PO 14:08Z · 14:25Z · Min 387): an end of the whole session — its own kind, signed as such
   it('an end: the shell gets agent · kind end_session; the post carries the kind the shell signed (never a stop) · done → ended', async () => {
     const calls = server(json(201, { command_id: CMD, state: 'queued' }), [json(200, { state: 'done' })]);
@@ -177,6 +187,16 @@ describe('[4534] commandOnPhone — the ends', () => {
       expect(out.kind === 'unknown' && out.pending.key).toBe('idem-1');
       expect(d.sent).toEqual([]);
     }
+  });
+
+  // story 4943 (codex r1 LOW): the lost-answer re-check and a send never turn commands_running into anything else
+  it('[결과 확인] a stop whose answer was lost: the re-check reads done + commands_running → stopped_commands_running; the same code on a SEND is just sent_now', async () => {
+    const knownStop: Pending = { verb: 'stop', key: 'idem-1', commandId: CMD, body: { kind: 'stop_session', session_key: 's-9', signed: 'SIGNED', phone_key_id: 'k-1' } };
+    server(json(201, {}), [json(200, { state: 'done', result_code: 'commands_running' })]);
+    await expect(checkCommand(AGENT, knownStop, deps(signedStop))).resolves.toEqual({ kind: 'stopped_commands_running' });
+    const knownSend: Pending = { verb: 'send', key: 'idem-2', commandId: CMD, body: { kind: 'send_prompt', session_key: 's-9', signed: 'SIGNED', phone_key_id: 'k-1', text: 'go', conversation_id: CONV } };
+    server(json(201, {}), [json(200, { state: 'done', result_code: 'commands_running' })]);
+    await expect(checkCommand(AGENT, knownSend, deps(signedPrompt))).resolves.toEqual({ kind: 'sent_now' });
   });
 
   it('[결과 확인] follows THAT command: its id → polls only (no post · no signature) · no id yet → the same key and body again', async () => {
