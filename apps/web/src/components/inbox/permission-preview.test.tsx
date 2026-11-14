@@ -70,6 +70,15 @@ describe('PermissionPreviewView (story 4949)', () => {
     expect(toggle()).toBeNull();
   });
 
+  it('⭐the lines say in words that they are part of it and for reference — always with lines; a secrets file has its own words instead', async () => {
+    await show(EDIT);
+    expect(container.querySelector('[data-testid="agent-permission-preview-partial"]')!.textContent).toBe('일부만 보여 줘요 · 참고용이에요');
+    await show(WRITE(12, 6), 'en');
+    expect(container.querySelector('[data-testid="agent-permission-preview-partial"]')!.textContent).toBe('Only part of it is shown · for reference');
+    await show({ op: 'write', blocks: [], blocks_more: 0, replace_all: false, withheld: 'sensitive_path' });
+    expect(container.querySelector('[data-testid="agent-permission-preview-partial"]')).toBeNull();
+  });
+
   it('an empty preview draws nothing', async () => {
     await show({ op: 'edit', blocks: [], blocks_more: 0, replace_all: false, withheld: null });
     expect(container.querySelector('[data-testid="agent-permission-preview"]')).toBeNull();

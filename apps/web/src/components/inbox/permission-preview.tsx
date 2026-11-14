@@ -40,6 +40,8 @@ export function PermissionPreviewView({ preview }: { preview: PermissionPreview 
     <div className="space-y-1.5" data-testid="agent-permission-preview">
       <p className="text-xs font-medium text-foreground">{t(preview.op === 'write' ? 'preview.writeTitle' : 'preview.editTitle')}</p>
       <ChangeLines rows={shown} label={t(preview.op === 'write' ? 'preview.writeTitle' : 'preview.editTitle')} words={{ add: t('preview.added'), del: t('preview.removed') }} />
+      {/* story 4949 (security lens): the lines are a cut view — 12 lines · 120 characters · 3 blocks — and what is not shown is not shown; the card says so in words, always */}
+      <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-preview-partial">{t('preview.partial')}</p>
       {rows.length > PREVIEW_FOLDED_ROWS ? (
         <Button type="button" variant="ghost" size="sm" className="touch:min-h-11 touch:px-4" aria-expanded={open} onClick={() => setOpen((v) => !v)} data-testid="agent-permission-preview-toggle">
           {open ? t('preview.fold') : t('preview.unfold', { count: hidden })}

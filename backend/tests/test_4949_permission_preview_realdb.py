@@ -6,6 +6,7 @@ from __future__ import annotations
 import pytest
 
 from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (autouse ones apply here too)
+    ORG,
     OWNER,
     _addresses,
     _client,
@@ -67,6 +68,8 @@ async def test_a_request_without_a_preview_serves_none_and_a_withdrawal_empties_
         device = await _device(c, name="d4424 mac 4949b")
         token = device["device_token"]
         agent = await _with_session(c, device)
+        phone_id, der = await _register(c)
+        await _pair(c, token, der)  # a paired phone: the rows are answerable, so the lines are served
         plain = _ask(agent)
         assert (await _post_ask(c, device, plain)).status_code == 201
         with_lines = _write_ask(agent)
@@ -78,6 +81,46 @@ async def test_a_request_without_a_preview_serves_none_and_a_withdrawal_empties_
         assert await _stored(with_lines["request_id"]) is None
         views = {v["request_id"]: v for v in (await c.get(REQS, headers=_person(OWNER))).json()["requests"]}
         assert views[with_lines["request_id"]]["preview"] is None
+
+
+async def test_the_lines_are_served_only_on_a_row_that_can_be_answered_the_same_condition_as_the_input_hash(world):  # security lens 4949 · item 2
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4949g")
+        token, sid = device["device_token"], device["setup_id"]
+        agent = await _with_session(c, device)
+        body = _write_ask(agent)
+        assert (await _post_ask(c, device, body)).status_code == 201
+        async def view():
+            [v] = (await c.get(REQS, headers=_person(OWNER))).json()["requests"]
+            return v
+        v = await view()
+        assert (v["answerable"], v["preview"], v["input_hash"]) == (False, None, None)  # no phone paired with that computer: nothing can be decided
+        assert await _stored(body["request_id"]) == PREVIEW  # (held, not served)
+        phone_id, der = await _register(c)
+        await _pair(c, token, der)
+        v = await view()
+        assert (v["answerable"], v["preview"] == PREVIEW, v["input_hash"] is not None) == (True, True, True)
+        await _sql(f"UPDATE desktop_device_tokens SET last_used_at = now() - interval '5 minutes' WHERE setup_id = '{sid}'")
+        v = await view()
+        assert (v["answerable"], v["preview"]) == (False, None)  # the computer has not been heard from
+        await _sql(f"UPDATE desktop_device_tokens SET last_used_at = now() WHERE setup_id = '{sid}'")
+        assert (await view())["preview"] == PREVIEW
+        await _sql(f"UPDATE organizations SET remote_control_enabled_at = NULL WHERE id = '{ORG}'")
+        v = await view()
+        assert (v["answerable"], v["preview"]) == (False, None)  # remote control off: nothing can be answered
+
+
+async def test_the_list_is_never_cached_and_a_refused_preview_does_not_come_back_in_the_refusal(world):  # security lens 4949 · item 5
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4949h")
+        agent = await _with_session(c, device)
+        listed = await c.get(REQS, headers=_person(OWNER))
+        assert listed.status_code == 200 and listed.headers.get("cache-control") == "private, no-store"
+        marker = "ECHO-MARKER-4949"
+        too_long = {**PREVIEW, "blocks": [{"removed": [], "added": [marker + "x" * 130], "removed_more": 0, "added_more": 0}]}
+        r = await _post_ask(c, device, _ask(agent, tool="Edit", summary="a.md", masked=False, preview=too_long))
+        assert r.status_code == 422
+        assert marker not in r.text and '"input"' not in r.text, r.text[:300]
 
 
 async def test_a_request_past_its_window_is_not_served_and_the_next_report_of_that_computer_lets_go_of_its_lines(world):

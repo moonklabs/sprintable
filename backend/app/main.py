@@ -369,6 +369,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         _CLOCK_PRESS_PATH.fullmatch(request.url.path)
         or (settings.is_embedded and request.url.path.startswith(_AUTH_PATH_PREFIX))
         or (request.method == "POST" and request.url.path.rstrip("/") == "/api/v2/events")
+        # story 4949 (security lens): a refused permission report (a preview line over the bound · a character it may not carry) would carry the masked file lines back in `input`
+        or (request.method == "POST" and request.url.path.rstrip("/") == "/api/v2/desktop/relay/permission-requests")
     ):
         exc = RequestValidationError([{k: v for k, v in err.items() if k != "input"} for err in exc.errors()])
     return await request_validation_exception_handler(request, exc)

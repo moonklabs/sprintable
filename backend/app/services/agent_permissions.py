@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
@@ -717,7 +718,9 @@ PREVIEW_COUNT_MAX = 10_000_000
 PREVIEW_TOOL_OP = {"Write": "write", "Edit": "edit", "MultiEdit": "edit"}
 
 
-_LINE_BREAKS = ("\n", "\r", "\u2028", "\u2029", "\x0b", "\x0c", "\x85")
+# a preview line is plain text on one line: no control character (C0 · DEL · C1 — a line break, ESC, NUL included), no bidi control (U+200E/F · 061C · 202A–202E · 2066–2069 — an override can make
+# later text read as if it belonged to another row: Trojan Source), no zero-width character (U+200B–200D · FEFF) and no line/paragraph separator (U+2028/2029). A conforming host replaces them (security lens, 4949)
+_LINE_CHARS_REFUSED = re.compile("[\x00-\x1f\x7f-\x9f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]")
 
 
 def _u16(text: str) -> int:
@@ -746,8 +749,8 @@ class PreviewBlock(BaseModel):
     @classmethod
     def _one_line_each(cls, lines: list[str]) -> list[str]:
         # a «line» is one line: the Mac splits on line breaks, and a string that carries one would draw as several rows (codex 4949)
-        if any(any(b in line for b in _LINE_BREAKS) for line in lines):
-            raise ValueError("a preview line carries no line break")
+        if any(_LINE_CHARS_REFUSED.search(line) for line in lines):
+            raise ValueError("a preview line is plain text: no control, bidi, zero-width or line-separator character")
         if any(_u16(line) > PREVIEW_LINE_MAX for line in lines):
             raise ValueError(f"a preview line is at most {PREVIEW_LINE_MAX} characters (UTF-16 units, as the Mac counts)")
         return lines
@@ -1095,8 +1098,8 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
             "tool_name": {lang: shown_tool(r.runtime, r.tool, lang) for lang in ("ko", "en")} if r.tool is not None else None,
             "terminal_only": r.terminal_only,
             "summary": r.summary, "masked": r.masked, "truncated": r.truncated, "workdir": r.workdir,
-            # story 4949: the lines a file tool is about to write / change — on a request that still waits (inside its window) only; never in a notice
-            "preview": r.preview if shown == "pending" and not r.terminal_only else None,
+            # story 4949: the lines a file tool is about to write / change — only on a row the person can ANSWER now (the same condition as `input_hash`: remote control on, the computer reachable, a paired phone — else nothing can be decided and the lines have no reason to leave the Mac); never in a notice
+            "preview": r.preview if shown == "pending" and answerable and not r.terminal_only else None,
             "created_at": r.created_at.isoformat(), "expires_at": r.expires_at.isoformat(), "state": shown,
             "answered_by_name": names.get(r.answered_by) if r.answered_by else None, "decision": r.decision,
             "device_reachable": s.id in reachable, "recipient_reason": r.recipient_reason,

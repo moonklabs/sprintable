@@ -7914,6 +7914,7 @@
     "role": "Sent to the {role} role",
     "preview": {
       "writeTitle": "What it will write",
+      "partial": "Only part of it is shown · for reference",
       "editTitle": "Lines it will change",
       "added": "Added",
       "removed": "Removed",

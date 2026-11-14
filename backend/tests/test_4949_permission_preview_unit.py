@@ -107,3 +107,12 @@ def test_the_limits_count_characters_the_way_the_mac_cuts_them_UTF16_units_not_c
     # the total too: 22 lines of 120 units = 2,640 > 2,400, though only 1,320 code points
     line = smile * (PREVIEW_LINE_MAX // 2)
     _bad({"op": "edit", "blocks": [{"removed": [line] * PREVIEW_REMOVED_MAX, "added": [line] * PREVIEW_ADDED_MAX}]})
+
+
+def test_a_line_carries_no_control_bidi_zero_width_or_separator_character():  # security lens 4949 · item 3 (Trojan Source)
+    refused = [0x00, 0x01, 0x08, 0x09, 0x1B, 0x7F, 0x80, 0x85, 0x9F, 0x061C, 0x200B, 0x200C, 0x200D, 0x200E, 0x200F, 0x2028, 0x2029, 0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2066, 0x2067, 0x2068, 0x2069, 0xFEFF]
+    for code in refused:
+        _bad({"op": "write", "blocks": [{"added": [f"before{chr(code)}after"]}]})
+        _bad({"op": "edit", "blocks": [{"removed": [f"x{chr(code)}"], "added": ["y"]}]})
+    # ordinary text of every script stays
+    _ok({"op": "write", "blocks": [{"added": ["plain text · \u00e9 \u4e2d\ud55c\U0001F600 \u05e9\u05dc\u05d5\u05dd", "  indented", "\u2022 bullet \u2014 dash"]}]})

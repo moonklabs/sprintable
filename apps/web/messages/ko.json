@@ -7914,6 +7914,7 @@
     "role": "{role} 역할로 받은 요청이에요",
     "preview": {
       "writeTitle": "쓰려는 내용",
+      "partial": "일부만 보여 줘요 · 참고용이에요",
       "editTitle": "바꾸려는 줄",
       "added": "추가",
       "removed": "삭제",
