@@ -865,9 +865,10 @@ async def changes_purge(
     """story #4951 (Kadir lens A): a changed-file list a person never came back to read is deleted when its 120 seconds are over — the sweep that does not wait for anyone's next read."""
     verify_cron(request)
     try:
-        from app.services.desktop_changes import purge_expired
+        from app.services.desktop_changes import purge_audit, purge_expired
         purged = await purge_expired(session)  # (the session commits at the end of the request, as the other sweeps rely on)
-        return _ok({"purged": purged})
+        audit = await purge_audit(session)  # the audit lines past their 90 days
+        return _ok({"purged": purged, "audit_purged": audit})
     except Exception as exc:
         logger.exception("cron error (changes-purge): %s", type(exc).__name__)
         return _err("INTERNAL_ERROR", "Internal server error", 500)

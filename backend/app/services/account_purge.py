@@ -58,6 +58,8 @@ async def purge_deleted_accounts(session: AsyncSession, *, now: datetime | None 
     await session.execute(
         text("DELETE FROM push_devices WHERE user_id = ANY(CAST(:ids AS uuid[])) OR member_id IN (SELECT id FROM members WHERE user_id = ANY(CAST(:ids AS uuid[])))"), arg,
     )
+    # story #4951 (Kadir 5817 lens #5): the person's «changed files» audit lines (who read which computer's list, how many files — no names) are personal data too
+    await session.execute(text("DELETE FROM desktop_changes_audit WHERE viewer_id = ANY(CAST(:ids AS uuid[]))"), arg)
     for table in ("auth_identities", "device_proof_challenges", "device_installations", "refresh_tokens", "oauth_handoff_codes", "auth_native_bootstrap_codes"):
         await session.execute(text(f"DELETE FROM {table} WHERE user_id = ANY(CAST(:ids AS uuid[]))"), arg)  # noqa: S608 — the table names are this module's own constants
     return len(ids)

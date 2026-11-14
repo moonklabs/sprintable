@@ -30,7 +30,7 @@ from tests.test_4534_desktop_commands_realdb import _commands, _grant, _remote_c
 pytestmark = pytest.mark.anyio
 
 SESSION = "s-1"
-SECRET = "SECRET-BODY-OF-A-FILE-NAME-Zq9"  # what must never reach a log line
+SECRET = "ZQ9-LEAK-MARKER-NAME"  # what must never reach a log line (not a word the sensitive-name rule hides: it must reach the list to be able to leak)
 
 
 async def _setup(c, name):
@@ -81,6 +81,11 @@ async def _fresh(sid):
     """…and its commands closed too, so the one-open-read rule lets the next ask through."""
     await _age(sid)
     await _sql(f"UPDATE desktop_commands SET state = 'done' WHERE setup_id = '{sid}' AND kind = 'read_changes'")
+
+
+async def _unpolled(cid):
+    """The last look at a pending read is a second old (the poll pause, without waiting)."""
+    await _sql(f"UPDATE desktop_changes_reads SET polled_at = NULL WHERE command_id = '{cid}'")
 
 
 async def _ask_ready(c, device, agent):
@@ -231,6 +236,9 @@ async def test_07_the_computers_list_is_cut_cleaned_and_hidden_again_by_the_serv
             _file(long_name, "added", binary=True),
             _file("img.png", "added", hidden=False, adds=None, dels=None, binary=True),
             _file(".e\u200bnv", "added"), _file(".netrc\u00a0", "added"), _file("x\uff0f.env", "added"),  # invisible format character · no-break space · full-width slash: the same names, drawn differently
+            _file("secrets.yaml", "added"), _file("cfg/client_secret.json", "added"), _file("infra/prod.tfvars.json", "added"), _file("a/login.keychain-db", "added"), _file("x/.token", "added"),  # lens #1
+            _file("d/" + "p" * 300 + "/.env", "added"),  # lens #2: the secret segment is past the 240 a name is SHOWN at — judged on the whole name, so it is hidden
+            _file("docs/conf\u200big.json", "added"),  # lens #3: a zero-width character is not kept in what is shown
         ]
         r = await _put(c, device, cid, _list(*files))
         assert (r.status_code, r.json()) == (200, {"files": len(files)}), r.text
@@ -240,7 +248,8 @@ async def test_07_the_computers_list_is_cut_cleaned_and_hidden_again_by_the_serv
         # the plain files are shown with their counts; the renamed secret and every sensitive spelling are hidden — no name, no old name, no counts
         assert shown["src/app.ts"]["adds"] == 3 and "img.png" in shown and shown["img.png"]["binary"] is True
         hidden = [f for f in rows if f["hidden"]]
-        assert len(hidden) == 15
+        assert len(hidden) == 21
+        assert "docs/config.json" in shown and not any("\u200b" in n for n in shown)
         assert all(f["name"] is None and f["old_name"] is None and f["adds"] is None and f["dels"] is None for f in hidden)
         assert "notes.txt" not in shown and ".env" not in str(rows)
         assert "docs/readme.txt" in shown  # the override character and the control character are gone
@@ -319,6 +328,7 @@ async def test_11_a_list_is_read_once_and_the_row_is_deleted_by_the_reading(worl
         assert len(await _rows(sid)) == 1
         assert (await _put(c, device, cid, _list(_file("a.txt"), _file("b.txt", "added")))).status_code == 200
         assert r.headers["cache-control"] == "no-store"
+        await _unpolled(cid)  # (the look above was a poll: the next look is a second away — see test_23)
         r = await _get(c, agent, cid)
         assert (r.status_code, [f["name"] for f in r.json()["files"]]) == (200, ["a.txt", "b.txt"])
         assert await _rows(sid) == []  # gone with the reading
@@ -538,6 +548,49 @@ async def test_22_the_limits_are_counted_under_advisory_locks_a_second_ask_waits
         await blocked_while_held(f"changes-machine:{ORG}:mk-4951-lock", agent, c)
 
 
+async def test_23_a_pending_read_is_looked_at_once_a_second(world):
+    async with _client() as c:
+        device, agent = await _setup(c, "d4424 mac 4951v")
+        cid = await _ask_ready(c, device, agent)
+        r = await _get(c, agent, cid)
+        assert (r.status_code, r.json()["state"]) == (200, "delivered")
+        r = await _get(c, agent, cid)  # at once again: no lock is asked for, the person is told to wait a second
+        assert (r.status_code, r.json()["error"]["code"], r.json()["error"]["detail"]) == (429, "changes_polled_too_fast", {"retry_after": 1})
+        await _unpolled(cid)
+        assert (await _get(c, agent, cid)).status_code == 200
+        assert (await _put(c, device, cid, _list(_file("a.txt")))).status_code == 200
+        assert (await _get(c, agent, cid)).status_code == 429  # the look that takes the list is held to the same second
+        await _unpolled(cid)
+        assert [f["name"] for f in (await _get(c, agent, cid)).json()["files"]] == ["a.txt"]
+
+
+async def test_24_an_audit_line_lives_ninety_days_and_goes_with_its_persons_account_purge(world):
+    from app.core.database import async_session_factory
+    from app.services.account_purge import purge_deleted_accounts
+    from app.services.desktop_changes import purge_audit
+
+    async def line(viewer, days):
+        await _sql(f"INSERT INTO desktop_changes_audit (id, org_id, viewer_id, setup_id, command_id, file_count, created_at) "
+                   f"VALUES (gen_random_uuid(), '{ORG}', '{viewer}', gen_random_uuid(), gen_random_uuid(), 3, now() - interval '{days} days')")
+
+    async def lines():
+        return sorted(str(v) + ":" + str(n) for v, n in await _sql(fetch="SELECT viewer_id, file_count FROM desktop_changes_audit"))
+
+    await line(OWNER, 91)   # past its ninety days
+    await line(OWNER, 89)   # inside them
+    await line(PLAIN, 1)
+    async with async_session_factory() as s:
+        assert await purge_audit(s) == 1
+        await s.commit()
+    assert await lines() == sorted([f"{OWNER}:3", f"{PLAIN}:3"])
+    # the account purge of a person whose grace is over takes that person's lines — and only theirs
+    await _sql(f"UPDATE users SET deleted_at = now() - interval '31 days' WHERE id = '{PLAIN}'")
+    async with async_session_factory() as s:
+        assert await purge_deleted_accounts(s) >= 1
+        await s.commit()
+    assert await lines() == [f"{OWNER}:3"]
+
+
 async def test_16_no_log_line_and_no_error_carries_a_file_name_on_any_road_of_the_read(world, caplog):
     from app.main import app  # noqa: F401 — importing the app configures logging and clears the root handlers (caplog's included): attach it again
     logging.getLogger().addHandler(caplog.handler)
@@ -572,10 +625,11 @@ def test_18_the_sensitive_name_rule_reads_every_segment_both_names_and_every_spe
     from app.services.desktop_changes import clean_name, is_sensitive_path
 
     for path in (".env", "a/b/.env.local", "A/.ENV", ".env.", ".env ", "dir/id_ed25519", "x/server.key", "x/Cert.PEM", "a/.aws/credentials", ".aws/config", "k/my-credentials-2.txt",
-                 "svc/service-account-x.json", "t/terraform.tfstate.backup", ".docker/config.json", "app/.npmrc", "b/.netrc", "x/vpn.ovpn", "p/.htpasswd", "k/kubeconfig", "a\\.env", ".docker\u1680/config.json", ".docker./config.json\u00a0",
+                 "svc/service-account-x.json", "t/terraform.tfstate.backup", ".docker/config.json", "app/.npmrc", "b/.netrc", "x/vpn.ovpn", "p/.htpasswd", "k/kubeconfig", "a\\.env", "secrets.yaml", "cfg/client_secret.json", "my-secret.txt", "infra/prod.tfvars.json", "a.keychain", "login.keychain-db", "x/.token", ".docker\u1680/config.json", ".docker./config.json\u00a0",
                  ".e\u200bnv", ".netrc\u00a0", ".env\u2003", "x\uff0f.env", "a/.ENV\u200d", "ｋ/.env", ".aws\u200b/config"):
         assert is_sensitive_path(path), path
     for path in ("src/app.ts", "README.md", "environment.ts", "docs/key-notes.md", "assets/keyboard.png", "src/envelope.ts", "env\u200bironment.ts", "", None):
         assert not is_sensitive_path(path), path
     assert clean_name("a‮b⁦c‎d\u0000e\u0085f g") == "abcdefg"
     assert len(clean_name("가" * 300)) == 240
+    assert clean_name("conf\u200big\u00adfile\ufeff.json") == "configfile.json"  # Cf never reaches what is shown

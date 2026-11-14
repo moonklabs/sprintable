@@ -24,7 +24,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.desktop_relay import DesktopChangesAudit, DesktopChangesRead, DesktopCommand, DesktopSession
@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 READ_TTL = timedelta(seconds=120)
 COMMAND_EXPIRY = timedelta(seconds=30)
 PER_PERSON_INTERVAL = timedelta(seconds=3)
+POLL_INTERVAL = timedelta(seconds=1)  # one look at a pending read per second (Kadir 5817 lens #4): every look takes the command row's lock
+AUDIT_RETENTION = timedelta(days=90)  # an audit line (who · which computer · how many) lives 90 days, then the sweep takes it; the account purge takes a person's lines at once (lens #5)
 LIST_MAX = 200
 REPORT_FILES_MAX = 1000  # what a computer may SEND (the server keeps LIST_MAX of them and says there is more)
 NAME_MAX = 240
@@ -56,10 +58,15 @@ def _now() -> datetime:
 _BIDI = {chr(c) for c in (*range(0x202A, 0x202F), *range(0x2066, 0x206A), 0x200E, 0x200F, 0x061C, 0x2028, 0x2029)}
 
 
+def _shown(text: str) -> str:
+    """A name without what must never be drawn: control characters (Cc), every invisible format character (Cf: zero-width space / joiner, soft hyphen, BOM, bidirectional marks), line separators.
+    NOT cut: the sensitive-name rule is judged on this (the schema already holds it to 4096), and only what is SHOWN is cut (Kadir 5817 lens #2 · #3)."""
+    return "".join(ch for ch in text if ch not in _BIDI and unicodedata.category(ch) not in ("Cc", "Cf"))
+
+
 def clean_name(text: str) -> str:
-    """What may be shown of a file name: no control character (C0 · DEL · C1), no bidirectional override, no line separator — then cut at NAME_MAX code points."""
-    kept = "".join(ch for ch in text if ch not in _BIDI and unicodedata.category(ch) != "Cc")
-    return kept[:NAME_MAX]
+    """What may be shown of a file name: `_shown`, then cut at NAME_MAX code points."""
+    return _shown(text)[:NAME_MAX]
 
 
 # Names whose very existence is not shown (Kadir lens D ⑤). Matched on EVERY path segment, case-insensitively, after trailing dots and spaces are dropped — and on the old name of a
@@ -70,9 +77,10 @@ _SENSITIVE_EXACT = frozenset((
 ))
 _SENSITIVE_PREFIX = ("id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", ".env", "service-account")
 _SENSITIVE_SUFFIX = (
-    ".pem", ".key", ".p12", ".p8", ".pfx", ".jks", ".keystore", ".gpg", ".asc", ".kdbx", ".tfstate", ".tfstate.backup", ".tfvars", ".ovpn",
+    ".pem", ".key", ".p12", ".p8", ".pfx", ".jks", ".keystore", ".gpg", ".asc", ".kdbx", ".tfstate", ".tfstate.backup", ".tfvars", ".tfvars.json", ".ovpn",
+    ".keychain", ".keychain-db", ".token",
 )
-_SENSITIVE_CONTAINS = ("credentials",)
+_SENSITIVE_CONTAINS = ("credentials", "secret")
 _SENSITIVE_DIRS = frozenset((".aws", ".ssh", ".gnupg", ".kube"))
 
 
@@ -151,8 +159,9 @@ def shaped(report: ChangesReport) -> dict:
     """The stored list: at most LIST_MAX rows, every name cleaned and cut, every sensitive name hidden (name and old name both), counts kept only for a shown row."""
     rows: list[dict] = []
     for f in report.files[:LIST_MAX]:
-        name, old = clean_name(f.name), clean_name(f.old_name) if f.old_name else None
-        hidden = f.hidden or is_sensitive_path(name) or is_sensitive_path(old)
+        full, old_full = _shown(f.name), _shown(f.old_name) if f.old_name else None  # judged on the whole name, cut only for showing
+        name, old = full[:NAME_MAX], old_full[:NAME_MAX] if old_full else None
+        hidden = f.hidden or is_sensitive_path(full) or is_sensitive_path(old_full)
         if hidden:
             rows.append({"status": f.status, "name": None, "old_name": None, "adds": None, "dels": None, "binary": False, "hidden": True})
         else:
@@ -191,6 +200,12 @@ async def purge_expired(db: AsyncSession, *, now: datetime | None = None) -> int
     if ids:
         await db.execute(delete(DesktopChangesRead).where(DesktopChangesRead.command_id.in_(ids)))
     return len(ids)
+
+
+async def purge_audit(db: AsyncSession, *, now: datetime | None = None) -> int:
+    """The audit lines older than AUDIT_RETENTION go (the cron's job, after the expired rows)."""
+    gone = await db.execute(delete(DesktopChangesAudit).where(DesktopChangesAudit.created_at < (now or _now()) - AUDIT_RETENTION))
+    return gone.rowcount or 0
 
 
 async def forget(db: AsyncSession, setup_ids: list[uuid.UUID], *, lock: bool = True) -> None:
@@ -321,6 +336,8 @@ async def read_result(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID
     if row.expires_at <= now:
         await db.execute(delete(DesktopChangesRead).where(DesktopChangesRead.command_id == command_id))
         raise not_found
+    if row.polled_at is not None and now - row.polled_at < POLL_INTERVAL:  # before any lock is asked for: a tight poll costs the person a 429, not the computer's command row a queue
+        raise DesktopRelayError(429, "changes_polled_too_fast", "ask again in a second", detail={"retry_after": 1})
     cmd = (await db.execute(select(DesktopCommand).where(DesktopCommand.id == command_id, DesktopCommand.setup_id == row.setup_id, DesktopCommand.kind == "read_changes").with_for_update())).scalar_one_or_none()  # command row first (the module's one lock order); held until the row is deleted, so a failure / rejection cannot slip in between the state check and the delete (r2 #2)
     setup = (await db.execute(select(DesktopSetup).where(DesktopSetup.id == row.setup_id, DesktopSetup.org_id == org_id))).scalar_one_or_none()
     session = None
@@ -341,6 +358,8 @@ async def read_result(db: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID
     if row.payload is None:
         if cmd.state in ("done", "failed", "rejected"):  # the computer ended without a list: that is the answer, and the row has nothing left to hold
             await db.execute(delete(DesktopChangesRead).where(DesktopChangesRead.command_id == command_id))
+        else:
+            await db.execute(update(DesktopChangesRead).where(DesktopChangesRead.command_id == command_id).values(polled_at=now))  # after the command row's lock: the module's one order
         return {"state": cmd.state, "code": cmd.result_code, "files": None, "more": False, "total": 0}
     if cmd.state not in ("delivered", "acked", "done"):  # a list whose command ended failed / rejected (a stale rejection that came after it was stored): not given, and not kept
         await db.execute(delete(DesktopChangesRead).where(DesktopChangesRead.command_id == command_id))

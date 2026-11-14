@@ -8,7 +8,8 @@
   remote control turned off (the lens's I). The row cascades with its command and with its computer.
 
 - desktop_changes_audit: one line per list a person actually read — who (viewer_id), which computer (setup_id), which command, how many files, when. No name, no content (Kadir lens G). No foreign key to the
-  computer or the command (the line outlives a disconnect); it goes with its organization. (`permission_audit_logs` only takes member_added / member_removed / role_changed, so this has its own table.)
+  computer or the command (the line outlives a disconnect); it goes with its organization, after 90 days (the cron's sweep), and with its person's account purge (`viewer_id`).
+  (`permission_audit_logs` only takes member_added / member_removed / role_changed, so this has its own table.)
 
 Additive only: no backfill. Downgrade deletes the `read_changes` commands (a server from before has no such word) and drops the table.
 
@@ -47,6 +48,7 @@ def upgrade() -> None:
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("payload", postgresql.JSONB(), nullable=True),
         sa.Column("written_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("polled_at", sa.DateTime(timezone=True), nullable=True),
         sa.CheckConstraint("(payload IS NULL) = (written_at IS NULL)", name="ck_desktop_changes_reads_written"),
     )
     op.create_table(
@@ -60,6 +62,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
     op.create_index("ix_desktop_changes_audit_org_created", "desktop_changes_audit", ["org_id", "created_at"])
+    op.create_index("ix_desktop_changes_audit_created", "desktop_changes_audit", ["created_at"])
     # the sweep reads rows by expiry; the per-computer limit reads a computer's open rows; the person's pause reads their last ask among the read commands (a partial index)
     op.create_index("ix_desktop_changes_reads_expires_at", "desktop_changes_reads", ["expires_at"])
     op.create_index("ix_desktop_changes_reads_setup_created", "desktop_changes_reads", ["setup_id", "created_at"])

@@ -231,6 +231,7 @@ class DesktopChangesRead(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     written_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # the last look at this pending read (one per second per read)
 
 
 class DesktopChangesAudit(Base):
@@ -238,7 +239,10 @@ class DesktopChangesAudit(Base):
     No foreign key to the computer or the command (the line outlives a disconnect); it goes with its organization."""
 
     __tablename__ = "desktop_changes_audit"
-    __table_args__ = (Index("ix_desktop_changes_audit_org_created", "org_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_desktop_changes_audit_org_created", "org_id", "created_at"),
+        Index("ix_desktop_changes_audit_created", "created_at"),  # the 90-day sweep
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
