@@ -110,6 +110,16 @@ describe('the root `/` renews a session whose access cookie is gone (story 4948)
     expect(res.headers.get('location')).toBeNull();
   });
 
+  it('`/` is still a public page: the sign-up first-touch (utm · referrer) is recorded whether the renewal succeeds, the session is dead, or nothing was renewed', async () => {
+    const fresh = await accessToken(Math.floor(Date.now() / 1000) + 3600);
+    mockFetch.mockResolvedValue(answer(200, { data: { access_token: fresh, refresh_token: 'new-rt' } }));
+    const renewed = await middleware(req('/?utm_source=newsletter', { sp_rt: 'rt' }));
+    expect(setCookies(renewed).join('\n')).toContain('sp_attr_src=newsletter');
+    mockFetch.mockReset(); mockFetch.mockResolvedValue(answer(401, { error: { code: 'TOKEN_REVOKED' } }));
+    const dead = await middleware(req('/?utm_source=newsletter', { sp_rt: 'dead-rt' }));
+    expect(setCookies(dead).join('\n')).toContain('sp_attr_src=newsletter');
+  });
+
   it('a refresh that could not be confirmed (503 · the network) clears NOTHING: the session may be alive, the next visit asks again', async () => {
     for (const fail of [() => mockFetch.mockResolvedValue(answer(503, {})), () => mockFetch.mockRejectedValue(new TypeError('fetch failed'))]) {
       mockFetch.mockReset(); fail();
@@ -129,5 +139,6 @@ describe('the root `/` renews a session whose access cookie is gone (story 4948)
     mockFetch.mockResolvedValue(answer(200, { data: { access_token: other, refresh_token: 'other-rt' } }));
     const res = await middleware(req('/', { sp_rt: 'rt', sp_active_account: 'user-123' }));
     expect(setCookies(res).filter((c) => /sp_(at|rt)=/.test(c))).toEqual([]);
+    expect(res.headers.get('x-middleware-request-cookie') ?? '', 'the other account\'s token is not forwarded to the page either').not.toContain(other);
   });
 });

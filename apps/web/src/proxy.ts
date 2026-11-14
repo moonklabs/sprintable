@@ -1029,11 +1029,13 @@ async function renewSessionForRoot(request: NextRequest): Promise<NextResponse |
     if (!(await refreshMatchesActive(request, outcome.accessToken))) return null;
     const response = NextResponse.next({ request: { headers: buildRefreshedHeaders(request, outcome) } });
     applyTokenCookies(response, outcome.accessToken, outcome.refreshToken);
+    captureSignupAttribution(request, response); // `/` stays a public page: its first-touch capture is not skipped by the early return
     return response;
   }
   if (outcome.kind === 'invalid') {
     const response = NextResponse.next({ request });
     clearAuthCookies(response);
+    captureSignupAttribution(request, response); // a dead session is an effectively anonymous visit: the first touch is still recorded
     return response;
   }
   return null;
