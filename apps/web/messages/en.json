@@ -474,6 +474,7 @@
     "waitedHours": "{count} h",
     "waitedDays": "{count} d",
     "detailRequest": "Request",
+    "detailSheetHeader": "Details",
     "detailTarget": "Target",
     "detailUndo": "Undo",
     "detailRequestedBy": "Requested by {name}",

@@ -474,6 +474,7 @@
     "waitedHours": "{count}시간",
     "waitedDays": "{count}일",
     "detailRequest": "요청",
+    "detailSheetHeader": "상세",
     "detailTarget": "대상",
     "detailUndo": "되돌리기",
     "detailRequestedBy": "{name}님이 요청했어요",

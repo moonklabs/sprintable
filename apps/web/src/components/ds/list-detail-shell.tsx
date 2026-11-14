@@ -11,13 +11,15 @@ import { DialogTitle } from './dialog';
  * The caller owns the width decision (`useListDetailWide()` — from 1024px the detail sits beside the list), what is picked and whether the sheet is open: this part only lays them out.
  */
 export function ListDetailShell({
-  list, detail, wide, detailLabel, sheetLabel, sheetOpen, onSheetOpenChange, testId = 'list-detail', columnTestId, sheetTestId, fill = false,
+  list, detail, wide, detailLabel, sheetHeader, sheetLabel, sheetOpen, onSheetOpenChange, testId = 'list-detail', columnTestId, sheetTestId, fill = false,
 }: {
   list: ReactNode;
   detail: ReactNode;
   wide: boolean;
   /** the accessible name of the wide detail column */
   detailLabel: string;
+  /** narrow only — the short text DRAWN in the sheet's header row (default: `detailLabel`). A screen whose card already says that word passes another one (the home's card has a «요청» block of its own) */
+  sheetHeader?: string;
   /** the accessible name (and the screen-reader title) of the narrow sheet */
   sheetLabel: string;
   /** narrow only — the caller passes `false` while nothing is picked, so an empty sheet never opens */
@@ -45,9 +47,10 @@ export function ListDetailShell({
         <Panel open={sheetOpen} onOpenChange={onSheetOpenChange}>
           <PanelContent aria-label={sheetLabel} data-testid={sheetTestId ?? `${testId}-detail-sheet`}>
             {/* story 4938: the header row used to hold only a screen-reader title — an empty bordered band above the card on a phone, and the close (X) floating over the card. It now draws the SHORT generic label (`detailLabel` — «요청» · «결재 상세»), on one line, in the row that already keeps the X's place; the card under it names the row, so the long `sheetLabel` («{title} 자세히») stays the screen-reader title and is not drawn twice */}
-            <PanelHeader>
+            {/* the row is as tall as the close button's place (8 + 44 → 60): the label and the X share one centre line, and the X sits inside the row, not on the card */}
+            <PanelHeader className="min-h-[3.75rem] justify-center py-0">
               <DialogTitle className="sr-only">{sheetLabel}</DialogTitle>
-              <span aria-hidden="true" className="block truncate text-ds-small font-medium text-ds-ink-2" data-slot="sheet-header-label">{detailLabel}</span>
+              <span aria-hidden="true" className="block truncate text-ds-small font-medium text-ds-ink-2" data-slot="sheet-header-label">{sheetHeader ?? detailLabel}</span>
             </PanelHeader>
             <PanelBody className="p-0">{detail}</PanelBody>
           </PanelContent>

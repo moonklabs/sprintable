@@ -296,6 +296,19 @@ describe('홈 — 좁은 화면: 목록 + 아래에서 오르는 시트(story #4
     expect(sheet.querySelector('[data-testid="home-detail-undo"]')).not.toBeNull();
   });
 
+  it('[4938] 시트 머리 줄은 비지 않는다 — 카드가 이미 가진 말(제목 · «요청» 블록)을 다시 그리지 않고 «상세»만 그리며, 긴 «{제목} 자세히»는 화면 읽기용으로만 남는다', async () => {
+    stubWidth(false);
+    const { model, sources } = THREE();
+    await mount(model, sources);
+    await act(async () => { titleButton('gate:g2').click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const sheet = document.body.querySelector('[role="dialog"]') as HTMLElement;
+    const label = sheet.querySelector('[data-panel-header] [data-slot="sheet-header-label"]') as HTMLElement;
+    expect(label.textContent).toBe(H.detailSheetHeader);
+    expect(H.detailSheetHeader).not.toBe(H.detailRequest); // the card has a «요청» block of its own
+    expect(sheet.querySelector('[data-panel-header] .sr-only')!.textContent).toBe('Threads에 글 발행 자세히');
+  });
+
   it('⭐넓은 화면에서 고른 뒤 창이 좁아져도 시트가 저절로 열리지 않는다(누르지 않았다)', async () => {
     let wide = true; let listener: (() => void) | null = null;
     vi.stubGlobal('matchMedia', (q: string) => ({ get matches() { return wide; }, media: q, addEventListener: (_: string, l: () => void) => { listener = l; }, removeEventListener: () => {} }));
