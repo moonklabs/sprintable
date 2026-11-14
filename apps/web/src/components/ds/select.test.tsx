@@ -55,10 +55,11 @@ describe('ds NativeSelect', () => {
     expect(icon.getAttribute('class')).toContain('pointer-events-none');
   });
 
-  it('오류(aria-invalid)는 failed 경계, 비활성은 실선 흐린 면 + ink-3', async () => {
+  it('오류(aria-invalid)는 failed 경계, 비활성은 메워진 우물(바탕과 같은 면) + 흐린 선 + ink-3', async () => {
     await render(<NativeSelect aria-label="역할" aria-invalid disabled><option>x</option></NativeSelect>);
     expect(sel().className).toContain('aria-invalid:border-ds-failed');
-    expect(sel().className).toContain('disabled:bg-ds-surface-high');
+    expect(sel().className).toContain('disabled:bg-ds-background');
+    expect(sel().className).not.toContain('disabled:bg-ds-surface-high');
     expect(sel().className).not.toContain('border-dashed');
     expect(sel().disabled).toBe(true);
   });

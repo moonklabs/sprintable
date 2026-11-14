@@ -3,8 +3,14 @@
 // carries `disabled` / `aria-disabled` / `data-disabled` (read by screen readers). Every disabled ds part takes these constants — nothing spells its own disabled look (disabled-face.4924.test.ts pins it).
 // Class names are written out whole (Tailwind finds them by scanning source text, so they cannot be built from pieces).
 
-/** native `:disabled` — Button · IconButton(primary) · Input · Textarea · NativeSelect · DatePicker trigger */
+/** native `:disabled` — Button · IconButton(primary): a raised part, so its disabled face is the dimmer raised face (surface-high) */
 export const DISABLED_FACE = 'disabled:border-ds-line disabled:bg-ds-surface-high disabled:text-ds-ink-3';
+/**
+ * native `:disabled` — Input · Textarea · NativeSelect · DatePicker trigger (a WELL, not a raised part). PO 11-14 (dev b85b2dbee, seen in the real screens): with the raised face the disabled well was
+ * brighter than the enabled one in dark (#262a32 over #080c12 — it «filled in» and jumped forward) and indistinguishable from it in light (ΔL −0.018). A disabled well is FILLED IN to the page
+ * (background): in light it is lighter than the enabled well and flat with the page, in dark it does not jump forward. Border faint (line) and text ink-3 stay.
+ */
+export const DISABLED_INPUT_FACE = 'disabled:border-ds-line disabled:bg-ds-background disabled:text-ds-ink-3';
 /** `aria-disabled` — a link/child under `Button asChild` has no native :disabled */
 export const ARIA_DISABLED_FACE = 'aria-disabled:border-ds-line aria-disabled:bg-ds-surface-high aria-disabled:text-ds-ink-3';
 /** Base UI roots (`data-disabled`) — Checkbox · Radio · Toggle; the CHECKED variants win over `data-checked:` so a checked-but-disabled control does not keep the action fill */

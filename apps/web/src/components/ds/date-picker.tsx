@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 import { Calendar, type CalendarLabels } from './calendar';
 import { Icon } from './icon';
 import { parseIso, toIso } from './calendar-math';
-import { DISABLED_FACE } from './disabled-face';
+import { DISABLED_INPUT_FACE } from './disabled-face';
 import { useDsPortalContainer } from './portal-container';
 
 export interface DatePickerLabels extends CalendarLabels {
@@ -64,7 +64,7 @@ export function DatePicker({ value, onChange, today, min, max, locale, weekStart
         className={cn(
           'flex h-ds-control w-full min-w-0 items-center justify-between gap-2 rounded-ds-control border border-ds-line-control bg-ds-surface-sunk px-3 text-left text-base text-ds-ink outline-none transition-colors duration-(--ds-duration-fast) motion-reduce:transition-none lg:text-ds-body touch:h-ds-touch',
           'focus-visible:border-ds-action focus-visible:ring-2 focus-visible:ring-ds-action',
-          `disabled:pointer-events-none disabled:cursor-not-allowed ${DISABLED_FACE}`,
+          `disabled:pointer-events-none disabled:cursor-not-allowed ${DISABLED_INPUT_FACE}`,
           'aria-invalid:border-ds-failed aria-invalid:focus-visible:ring-ds-failed',
           className,
         )}
