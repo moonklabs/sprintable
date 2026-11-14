@@ -41,7 +41,7 @@ function CardTitle({ children }: { children: React.ReactNode }) {
   return <h3 className="m-0 mb-2 text-ds-card-title font-semibold text-ds-ink">{children}</h3>;
 }
 
-export function GoalDetailColumn({ goal, projectId, onUpdate }: { goal: Goal; projectId: string; onUpdate: (goal: Goal) => void }) {
+export function GoalDetailColumn({ goal, projectId, onUpdate, editRequested, onEditRequestHandled }: { goal: Goal; projectId: string; onUpdate: (goal: Goal) => void; editRequested?: boolean; onEditRequestHandled?: () => void }) {
   const t = useTranslations('goals');
   const tBoard = useTranslations('board');
   const router = useRouter();
@@ -52,6 +52,12 @@ export function GoalDetailColumn({ goal, projectId, onUpdate }: { goal: Goal; pr
   const outcome = useOutcomeChip(goal);
   const headingId = useId();
   const [editing, setEditing] = useState(false);
+  // story 4954 — the list's right-click «목표 수정» asks this column to open the edit form (once): the list clears the request when it is taken
+  useEffect(() => {
+    if (!editRequested) return;
+    setEditing(true);
+    onEditRequestHandled?.();
+  }, [editRequested, onEditRequestHandled]);
   // the list response carries the story COUNTS only; the story rows (and with them the SP sums) are read once for the chosen goal
   // a goal that arrives WITH its stories (just created: BE's answer carries them) is shown from those — no second read of what was just received
   const [cameWithStories] = useState(() => !!goal.stories);
