@@ -78,8 +78,8 @@ async function shells(page: Page) {
       person: pick(document.querySelector('#m3 [data-testid="chat-bubble-text"]')),
       probe: pick(document.querySelector('#probe')),
       textEventHead: document.querySelector('#m2 [data-event-card="text"] p')?.textContent ?? null,
-      cardHeadType: (() => { const e = document.querySelector('#m1 .rounded-tl-sm.border-ds-line p'); if (!e) return null; const cs = getComputedStyle(e); return { fontSize: cs.fontSize, fontWeight: cs.fontWeight, lineHeight: cs.lineHeight, color: cs.color }; })(),
-      textEventHeadType: (() => { const e = document.querySelector('#m2 [data-event-card="text"] p'); if (!e) return null; const cs = getComputedStyle(e); return { fontSize: cs.fontSize, fontWeight: cs.fontWeight, lineHeight: cs.lineHeight, color: cs.color }; })(),
+      cardHeadType: (() => { const e = document.querySelector('#m1 .rounded-tl-sm.border-ds-line p'); if (!e) return null; const cs = getComputedStyle(e); return { fontSize: cs.fontSize, fontWeight: cs.fontWeight, lineHeight: cs.lineHeight, color: cs.color, overflowWrap: cs.overflowWrap }; })(),
+      textEventHeadType: (() => { const e = document.querySelector('#m2 [data-event-card="text"] p'); if (!e) return null; const cs = getComputedStyle(e); return { fontSize: cs.fontSize, fontWeight: cs.fontWeight, lineHeight: cs.lineHeight, color: cs.color, overflowWrap: cs.overflowWrap }; })(),
       cardHead: document.querySelector('#m1 .rounded-tl-sm.border-ds-line')?.textContent ?? '',
     };
   }, SHELL_PROPS as unknown as string[]);
@@ -98,6 +98,7 @@ for (const [width, isDark] of [[1440, false], [1440, true], [390, false], [390, 
     expect(s.card!['borderTopWidth']).toBe('1px');
     expect(s.textEventHeadType, 'the template-less event\'s head is set like the template card\'s header (size · weight · line height · colour)').toEqual(s.cardHeadType);
     expect(s.cardHeadType!.fontWeight, 'a semibold head').toBe('600');
+    expect(s.cardHeadType!.overflowWrap, 'a long unbroken name wraps instead of running past the card').toBe('anywhere');
     expect(s.person!['backgroundColor'], 'what a PERSON wrote keeps its bubble: another face than the card').not.toBe(s.card!['backgroundColor']);
     expect(s.person!['borderTopWidth'], 'and no line').toBe('0px');
   });

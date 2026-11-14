@@ -215,9 +215,9 @@ function renderTextWithMissingMarkers(text: string, withProject: (href: string) 
 export const EVENT_CARD_SHELL = 'min-w-0 max-w-full rounded-xl rounded-tl-sm border border-ds-line bg-ds-surface px-3.5 py-3';
 
 /**
- * story 4906 (PO 11-14) — the ONE type of an event card's head: the template card's `header` block and the head line of a template-less event (its definition's name, `EventTextFallback`) are set the same, so two cards in one room do not read as two heads.
+ * story 4906 (PO 11-14) — the ONE type of an event card's head (an org-defined name may be one long unbroken word, so it wraps anywhere — the v3 room's card is capped at 78 %): the template card's `header` block and the head line of a template-less event (its definition's name, `EventTextFallback`) are set the same, so two cards in one room do not read as two heads.
  */
-export const EVENT_CARD_HEADER = 'text-base font-semibold text-foreground';
+export const EVENT_CARD_HEADER = 'text-base font-semibold text-foreground [overflow-wrap:anywhere]';
 
 export function EventBlockCard({ template, payload, refs, definition }: EventBlockCardProps) {
   const t = useTranslations('chats');
