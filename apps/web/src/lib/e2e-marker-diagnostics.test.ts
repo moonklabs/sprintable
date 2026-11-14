@@ -647,6 +647,66 @@ describe('스펙 · 설정이 진단에 연결돼 있다 (story 4927)', () => {
     expect(step).not.toMatch(/include-hidden-files/); // no hidden file goes up by switch either
   });
 
+  it('⭐CI 잡(contrast-guard-e2e)의 웹 e2e는 전부 프로덕션 빌드 한 번 + `next start` 위에서 돈다 — 빌드 1 · 서버 → 대비 → 카드 면 → 모바일 폭 → 데스크톱 설정 → 서버 끔 → (v3 플래그 서버 → v3 좁은 폭 → 끔) · 스텝마다 PLAYWRIGHT_BASE_URL · `pnpm dev` 0 (story 4927)', () => {
+    const start = ci.indexOf('\n  contrast-guard-e2e:');
+    expect(start).toBeGreaterThan(0);
+    const after = ci.slice(start + 1);
+    const nextJob = after.search(/\n  [a-z0-9-]+:\n/);
+    const job = nextJob > 0 ? after.slice(0, nextJob) : after;
+    const steps = job.split('\n      - name:').slice(1).map((chunk) => '- name:' + chunk);
+    const at = (needle: string) => steps.findIndex((st) => st.startsWith(`- name: ${needle}`) || st.startsWith(`- name: "${needle}`));
+    const order = ['Run layout e2e', 'Build web (production', 'Start production server (next start', 'Run contrast-guard e2e', 'Run card-surface e2e', 'Run mobile-width overflow e2e', 'Run desktop setup', 'Stop production server\n', 'Start production server with the v3 flags', 'Run v3 narrow-width overflow e2e', 'Stop production server (v3 flags)'];
+    const idx = order.map((n) => (n.endsWith('\n') ? steps.findIndex((st) => st.startsWith('- name: Stop production server\n')) : at(n)));
+    order.forEach((n, i) => expect(idx[i], `step «${n.trim()}» exists`).toBeGreaterThanOrEqual(0));
+    for (let i = 1; i < idx.length; i += 1) expect(idx[i], `«${order[i].trim()}» comes after «${order[i - 1].trim()}»`).toBeGreaterThan(idx[i - 1]);
+    // one production build in the job (the step before the contrast guard) — no second build, no dev server
+    const code = job.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n'); // the comments may name `pnpm dev` (they say why it is gone)
+    expect(code.split('pnpm --filter web build').length - 1).toBe(1);
+    expect(code).not.toMatch(/pnpm dev|next dev/);
+    // every e2e step that talks to the app uses the server that is already up
+    for (const name of ['Run contrast-guard e2e', 'Run card-surface e2e', 'Run mobile-width overflow e2e', 'Run desktop setup', 'Run v3 narrow-width overflow e2e']) {
+      expect(steps[at(name)], name).toContain('PLAYWRIGHT_BASE_URL: http://localhost:3108');
+    }
+    // the v3 flags live on the SECOND server only (the first one — and so contrast · card-surface · mobile-width — runs with them OFF)
+    const first = steps[at('Start production server (next start')];
+    const v3 = steps[at('Start production server with the v3 flags')];
+    for (const flag of ['TODAY_V3_ENABLED', 'CHAT_V3_ENABLED', 'CONNECT_RULES_V3_ENABLED']) {
+      expect(first, `first server has no ${flag}`).not.toContain(flag);
+      expect(v3, `v3 server has ${flag}`).toContain(`${flag}: 'true'`);
+      expect(code.split(flag).length - 1, `${flag} appears once in the job's steps (the v3 server)`).toBe(1);
+    }
+    expect(steps[at('Run v3 narrow-width overflow e2e')]).not.toContain('TODAY_V3_ENABLED: ');
+    // the stop steps run even when an e2e step failed
+    expect(steps.find((st) => st.startsWith('- name: Stop production server\n'))).toContain('if: always()');
+    expect(steps[at('Stop production server (v3 flags)')]).toContain('if: always()');
+    // each server runs in its own session and is stopped by killing the process GROUP (pnpm exec's pid is not the server's), and «the port is free» is
+    // asked of the port itself — never of `lsof`, which the runner does not have (PR 5795's first run: a missing lsof read as «free», the v3 server died
+    // with EADDRINUSE and the v3 spec passed on the first, flag-off server)
+    expect(code).not.toMatch(/lsof|kill-port/);
+    expect(first).toContain('nohup setsid pnpm exec next start --port 3108 > /tmp/next-start.log');
+    expect(v3).toContain('nohup setsid pnpm exec next start --port 3108 > /tmp/next-start-v3.log');
+    const stop1 = steps.find((st) => st.startsWith('- name: Stop production server\n'))!;
+    expect(stop1).toContain('kill -- "-$(cat /tmp/next-start.pid)"');
+    // «free» = the connection is REFUSED (curl exit 7): an old server answering 4xx/5xx, or a stalled listener, is still the port's owner (so no `curl -f` here)
+    const refused = 'curl -s -o /dev/null --max-time 2 http://localhost:3108/login || rc=$?';
+    expect(stop1).toContain(refused);
+    expect(stop1).toContain('if [ "$rc" -ne 7 ]; then echo "port 3108 is not free after the stop');
+    expect(stop1).not.toMatch(/kill "\$\(cat \/tmp\/next-start\.pid/);
+    expect(v3).toMatch(/rc=0; curl -s -o \/dev\/null --max-time 2 http:\/\/localhost:3108\/login \|\| rc=\$\?\n\s+if \[ "\$rc" -ne 7 \]; then echo [^\n]*exit 1; fi\n\s+nohup setsid pnpm exec next start/);
+    // every probe of :3108 has a time limit (a listener that accepts and stalls must not hang the job)
+    for (const line of code.split('\n').filter((l) => l.includes('curl') && l.includes('localhost:3108'))) expect(line, line.trim()).toContain('--max-time 2');
+    expect(v3).toContain('kill -0 "$(cat /tmp/next-start-v3.pid)"'); // the server that answers is THIS one (an EADDRINUSE death leaves the old one answering)
+    expect(v3).toContain('grep -q "Ready in" /tmp/next-start-v3.log');
+    expect(steps[at('Stop production server (v3 flags)')]).toContain('kill -- "-$(cat /tmp/next-start-v3.pid)"');
+    // the v3 spec itself proves it is attached to the FLAG-ON server (a width-only check passes on a flag-off server's bare shell too)
+    const v3spec = readFileSync(join(WEB, 'e2e/v3-narrow-width-overflow.spec.ts'), 'utf8');
+    expect(v3spec).toContain("toContain('Search or give an instruction')"); // /today
+    expect(v3spec).toContain("toContain('Connections & rules')"); // /connect-rules
+    expect(v3spec).toMatch(/goto\('\/chat'[\s\S]*?getByTestId\('chat-v3-screen'\)\)\.toBeAttached/); // /chat · the chat screen itself (the shell has no chat-v3-screen)
+    // the marker wait stays 5000 ms: a flake is not covered with time (PO)
+    expect(wait).toContain('export const PAGE_MARKER_TIMEOUT_MS = 5000;');
+  });
+
   it('⭐서버 껍데기는 CI 기본 꺼짐(E2E_SERVER_LOG=1일 때만) — 꺼짐일 때 webServer는 develop과 같은 `pnpm dev` · 키 집합까지 같음 · 켜짐이면 껍데기 + pipe', async () => {
     const load = async (env: Record<string, string | undefined>) => {
       const keys = ['E2E_SERVER_LOG', 'E2E_WEBSERVER_LOG', 'PLAYWRIGHT_BASE_URL', 'CI'];
@@ -667,6 +727,10 @@ describe('스펙 · 설정이 진단에 연결돼 있다 (story 4927)', () => {
       expect(off.cfg.webServer, JSON.stringify(env)).toStrictEqual({ command: 'pnpm dev', url: 'http://localhost:3108', reuseExistingServer: !env.CI });
       expect(Object.keys(off.cfg.webServer!)).toEqual(['command', 'url', 'reuseExistingServer']);
       expect(off.logPath, 'no log path is exported while the switch is off').toBeUndefined();
+    }
+    // CI starts the production server itself and hands Playwright its address: then there is NO webServer (Playwright would otherwise try `pnpm dev` on the taken :3108)
+    for (const env of [{ CI: '1', PLAYWRIGHT_BASE_URL: 'http://localhost:3108' }, { PLAYWRIGHT_BASE_URL: 'http://localhost:3108', E2E_SERVER_LOG: '1' }]) {
+      expect((await load(env)).cfg.webServer, JSON.stringify(env)).toBeUndefined();
     }
     const on = await load({ CI: '1', E2E_SERVER_LOG: '1' });
     expect(on.cfg.webServer).toMatchObject({ command: 'node e2e/support/dev-server-logged.mjs', stdout: 'pipe', stderr: 'pipe' });

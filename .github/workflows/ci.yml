@@ -2744,7 +2744,7 @@ jobs:
     # story #2590 (B): (A) 정적 프리필터(ci 잡)가 원리적으로 못 재는 교차-요소·교차-계열·알파·
     # 상태(hover) 대비를 실제 렌더된 픽셀에서 axe-core color-contrast로 전수한다(최종 authority).
     # 인증 로그인(owner@sprintable.dev)이 필요해 backend-test처럼 pgvector postgres + alembic을
-    # 세우고, 그 위에 FastAPI(uvicorn)와 Next(dev)를 띄운 뒤 chromium을 돌린다. docs/contrast-guard.md 참조.
+    # 세우고, 그 위에 FastAPI(uvicorn)와 Next(프로덕션 빌드 + `next start` · story #4927)를 띄운 뒤 chromium을 돌린다. docs/contrast-guard.md 참조.
     services:
       postgres:
         image: pgvector/pgvector:pg15@sha256:47af0b65960b14f1c6945aa4ccae37836c632e9a6fe0eea9160936e616e5b2e9
@@ -2998,10 +2998,36 @@ jobs:
       - name: Run layout e2e (no server · story #4557)
         run: pnpm --filter web e2e:layout
 
-      # playwright.config webServer가 `pnpm dev`로 Next(:3108)를 띄우고 e2e/global-setup이
-      # owner 로그인 → playwright/.auth/owner.json storageState를 만든 뒤 contrast-guard.spec을 돈다.
+      # story #4927 — 이 잡에서 서버를 쓰는 웹 e2e는 전부 «프로덕션 빌드 한 번» 위에서 `next start`로 돈다(고객이 받는 빌드를 잰다 · 서버는 둘: 플래그 OFF 하나 → 끄고 → v3 플래그 하나 · 서버 없는 layout e2e는 빌드 앞).
+      # 왜: Contrast guard의 «page marker not seen»(5초 못 봄)은 `pnpm dev`(webpack dev)가 라우트를 처음 방문할 때 컴파일하느라
+      # 페이지 스크립트가 늦게 떠서 났다(PR 5781 진단 · 같은 베이스 가르기 · 로컬 세 갈래: dev 콜드 첫 시도 놓침 3/57 · 같은 서버 재방문 0/14 ·
+      # 프로덕션 0/56, 묶음 시간 66~110초 vs 10.5~12.3초). 프로덕션 서버엔 처음 방문 컴파일이 없다. 표식 대기 5000ms는 그대로(시간으로 덮지 않음).
+      # 빌드는 아래 «Build web» 한 번 — 예전엔 mobile-width 스텝 앞에서 따로 한 번 했고(story #4277), 그 때문에 contrast · card-surface가
+      # dev 서버 위에서 돌았다. 서버 env가 스텝마다 다른 곳은 v3 narrow-width 하나뿐(아래: TODAY_V3_ENABLED 등 — 런타임 env라 같은 빌드로
+      # 서버만 다시 띄움). 로컬은 PLAYWRIGHT_BASE_URL이 없으면 예전처럼 playwright.config의 webServer(`pnpm dev`)가 뜬다(reuseExistingServer).
+      # 포트는 잡 env의 3108 그대로(로그인 CSRF가 NEXT_PUBLIC_APP_URL 오리진을 본다). NEXT_PUBLIC_* 는 빌드 때 박히므로 잡 env(FASTAPI_URL ·
+      # APP_URL)가 이 빌드에 들어간다.
+      - name: Build web (production · every web e2e step below runs on this build · story #4927)
+        run: pnpm --filter web build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
+          LICENSE_CONSENT: agreed
+
+      - name: Start production server (next start · :3108 · story #4927)
+        working-directory: apps/web
+        run: |
+          nohup setsid pnpm exec next start --port 3108 > /tmp/next-start.log 2>&1 &
+          echo $! > /tmp/next-start.pid
+          for i in $(seq 1 60); do curl -sf -o /dev/null --max-time 2 http://localhost:3108/login && break; sleep 2; done
+          curl -sf -o /dev/null --max-time 2 http://localhost:3108/login || { echo "production server did not come up"; tail -20 /tmp/next-start.log; exit 1; }
+
+      # e2e/global-setup이 owner 로그인 → playwright/.auth/owner.json storageState를 만든 뒤 contrast-guard.spec을 돈다.
+      # PLAYWRIGHT_BASE_URL이 있으면 playwright.config의 webServer는 없다(이미 떠 있는 위 서버를 씀).
       - name: Run contrast-guard e2e (axe color-contrast)
         run: pnpm --filter web e2e:contrast
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:3108
 
       # story #3785(2026-09-10) — 이 잡이 이미 세운 풀스택(같은 storageState) 위에 얹는다.
       # 판정선 5조건 + 라우트별 양성대조 3종(표면 있는/투명/bg-background 재도색 합성 카드
@@ -3009,57 +3035,77 @@ jobs:
       # verify:no-card-surfaceless-box가 보조).
       - name: Run card-surface e2e (background-adjacent surfaceless box)
         run: pnpm --filter web e2e:card-surface
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:3108
 
       # story #4277(high · 민 기기 탐색 점검 배포 27) — 402폭 전 경로 가로 넘침 가드. 목적지는 /more 메뉴 링크 + 하단 탭바 링크를 실행 때 읽어
       # 모으고(새 화면 자동 포함), documentElement뿐 아니라 셸의 세로 스크롤러(가로도 암묵 스크롤)까지 잰다 — 옛 자(documentElement만)는
       # 셸 스크롤러 안의 넘침을 0으로 쟀다. 데이터 있는 상태(빈 화면 = 거짓 PASS)를 spec의 beforeAll이 API로만 심는다(NEXT_PUBLIC_FASTAPI_URL).
-      # 플래그 OFF 기본 탭바 기준이라 위 두 e2e와 같은 env.
+      # 플래그 OFF 기본 탭바 기준이라 위 두 e2e와 같은 env(같은 서버).
       # 이 가드는 전 경로(탭 4 + 전체 메뉴 ~19)를 돈다 — `pnpm dev`(webpack dev) 위에서는 경로마다 첫 컴파일(CI 러너 1~2분) · 메모리 재시작
       # («Server is approaching the used memory threshold») · 재시작 중 이동(«Router action dispatched before initialization»)이 겹쳐
-      # 18분 넘게 돌다 잡 제한(25분)에 걸렸다(PR 4639 run 36087407788 · 두 번 같은 자리). 프로덕션 빌드 한 번(~3.5분 · ci-work Build 실측) +
-      # `next start` 위에서 돈다 — 컴파일이 없어 경로당 몇 초. 포트는 잡 env의 3108 그대로(로그인 CSRF가 NEXT_PUBLIC_APP_URL 오리진을 본다).
-      # 다음 스텝(v3 narrow-width)의 `pnpm dev`는 kill-port.sh로 3108을 비우고 뜬다(아래 정리 스텝은 안전망).
-      - name: Build web for mobile-width overflow e2e (production)
-        run: pnpm --filter web build
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
-          LICENSE_CONSENT: agreed
-
+      # 18분 넘게 돌다 잡 제한(25분)에 걸렸다(PR 4639 run 36087407788 · 두 번 같은 자리). 프로덕션 서버 위에서는 컴파일이 없어 경로당 몇 초.
       - name: Run mobile-width overflow e2e (story #4277)
         working-directory: apps/web
-        run: |
-          nohup pnpm exec next start --port 3108 > /tmp/next-start-mobile-width.log 2>&1 &
-          echo $! > /tmp/next-start-mobile-width.pid
-          for i in $(seq 1 60); do curl -sf -o /dev/null http://localhost:3108/login && break; sleep 2; done
-          PLAYWRIGHT_BASE_URL=http://localhost:3108 pnpm exec playwright test mobile-width-overflow.spec.ts
+        run: pnpm exec playwright test mobile-width-overflow.spec.ts
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:3108
 
       # story #4446 — the desktop setup page's «시작» is in sight right after sign-in, with no scrolling, in both modes and their
       # real parent chains ((가) an existing org inside the app shell · (나) a new org, the window scrolls) at the app's web area
       # sizes (1440×900 · 1280×700 · 1512×860 windows minus the shell's bottom bar), on the real recipe list. Same production
-      # server as the step above (still running).
+      # server as the steps above (still running).
       - name: Run desktop setup «시작» in sight e2e (story #4446)
         working-directory: apps/web
-        run: PLAYWRIGHT_BASE_URL=http://localhost:3108 pnpm exec playwright test desktop-setup-start-visible.spec.ts
+        run: pnpm exec playwright test desktop-setup-start-visible.spec.ts
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:3108
 
-      - name: Stop production server (mobile-width)
+      # `$!` of `nohup pnpm exec next start` is pnpm's pid, not the node server that listens on :3108 (a local probe: the listener's pid differs and
+      # survives `kill $!`). So each server is started with `setsid` (its own session · process group = the pid in the pid file) and stopped by
+      # killing the GROUP. Whether the port is free is asked of the port itself (a connection to it must be REFUSED — curl exit 7; any HTTP answer, even a 4xx/5xx, or a stalled listener means it is still owned) — NOT of `lsof`: this
+      # runner has no `lsof`, and a missing `lsof` reads as «nothing listens» (PR 5795's first run: the stop looked fine in 0.07 s, the v3 server died
+      # with EADDRINUSE, and the v3 spec passed on the first, flag-off server). The v3-flag server binds the same port, so a leftover must fail the job.
+      - name: Stop production server
         if: always()
         run: |
-          kill "$(cat /tmp/next-start-mobile-width.pid 2>/dev/null)" 2>/dev/null || true
-          cat /tmp/next-start-mobile-width.log 2>/dev/null | tail -20 || true
+          tail -20 /tmp/next-start.log 2>/dev/null || true
+          if [ -s /tmp/next-start.pid ]; then kill -- "-$(cat /tmp/next-start.pid)" 2>/dev/null || true; fi
+          for i in $(seq 1 15); do rc=0; curl -s -o /dev/null --max-time 2 http://localhost:3108/login || rc=$?; [ "$rc" -eq 7 ] && break; sleep 1; done
+          if [ "$rc" -ne 7 ]; then echo "port 3108 is not free after the stop (curl exit $rc)"; exit 1; fi
 
       # story #4006(critical, 5pt) AC3 — v3 화면(오늘·대화·연결·규칙·일감·결과, 「가설」은
-      # #3989/#4383 착지 뒤 별도) 390·768·1440 가로 넘침 0. 이 스텝만 별도 env로 v3 플래그
-      # 3개를 켠다(job 레벨 env엔 안 실음 — 위 contrast/card-surface e2e는 플래그 OFF 기준을
-      # 전제로 하므로 오염 방지). `pnpm --filter web e2e:X`는 매번 독립 `pnpm dev`를 새로
-      # 띄우므로(playwright.config webServer, reuseExistingServer=false in CI) 이 스텝의
-      # env만 그 서버 프로세스에 반영된다.
-      - name: Run v3 narrow-width overflow e2e (story #4006 AC3)
+      # #3989/#4383 착지 뒤 별도) 390·768·1440 가로 넘침 0. 이 스텝만 v3 플래그 3개를 켠다(위 e2e들은 플래그 OFF 기준을 전제로 하므로
+      # 오염 방지 — 그래서 서버를 한 번 더 띄운다). 플래그는 서버가 런타임에 읽는 env라(같은 빌드 · 로컬 실측: 켠 서버의 /today는 «0 decisions need your call …»까지 그려져 본문 359자 ·
+      # 끈 서버는 «Loading…»뿐 86자 — 단 이 spec은 가로 넘침만 재서 둘 다 통과하므로, 켜 두는 것은 서버를 따로 띄우는 이 스텝의 몫) 빌드는 다시 안 한다.
+      # 이 서버 env만 v3 플래그를 가진다.
+      - name: Start production server with the v3 flags (story #4006 AC3 · story #4927)
+        working-directory: apps/web
         env:
           TODAY_V3_ENABLED: 'true'
           CHAT_V3_ENABLED: 'true'
           CONNECT_RULES_V3_ENABLED: 'true'
+        run: |
+          rc=0; curl -s -o /dev/null --max-time 2 http://localhost:3108/login || rc=$?
+          if [ "$rc" -ne 7 ]; then echo "port 3108 is not free (curl exit $rc) — the first server was not stopped"; exit 1; fi
+          nohup setsid pnpm exec next start --port 3108 > /tmp/next-start-v3.log 2>&1 &
+          echo $! > /tmp/next-start-v3.pid
+          for i in $(seq 1 60); do curl -sf -o /dev/null --max-time 2 http://localhost:3108/login && break; sleep 2; done
+          curl -sf -o /dev/null --max-time 2 http://localhost:3108/login || { echo "production server (v3 flags) did not come up"; tail -20 /tmp/next-start-v3.log; exit 1; }
+          # the one that answers must be THIS server (an EADDRINUSE death would leave the old one answering)
+          kill -0 "$(cat /tmp/next-start-v3.pid)" || { echo "the v3-flag server is not running"; tail -20 /tmp/next-start-v3.log; exit 1; }
+          grep -q "Ready in" /tmp/next-start-v3.log || { echo "the v3-flag server log has no Ready line"; tail -20 /tmp/next-start-v3.log; exit 1; }
+
+      - name: Run v3 narrow-width overflow e2e (story #4006 AC3)
         run: pnpm --filter web e2e:v3-narrow-width
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:3108
+
+      - name: Stop production server (v3 flags)
+        if: always()
+        run: |
+          tail -20 /tmp/next-start-v3.log 2>/dev/null || true
+          if [ -s /tmp/next-start-v3.pid ]; then kill -- "-$(cat /tmp/next-start-v3.pid)" 2>/dev/null || true; fi
 
       - name: Dump backend log on failure
         if: failure()
