@@ -141,9 +141,11 @@ describe('one rotation per refresh token in flight (story 4948 PR 2)', () => {
 
   it('⭐the map has a ceiling: with a stalled backend and many DIFFERENT bogus tokens it stops at REFRESH_IN_FLIGHT_MAX, and a request past it still gets its own answer (it runs alone)', async () => {
     const fresh = await accessToken(Math.floor(Date.now() / 1000) + 3600);
+    mockFetch.mockResolvedValue(answer(200, { data: { access_token: fresh, refresh_token: 'new-rt' } }));
+    await middleware(api({ sp_rt: 'sweep-first' })); // any stale leftovers of earlier cases are swept before the count is taken
+    mockFetch.mockReset();
     const g = gate();
     mockFetch.mockImplementation(async () => { await g.p; return answer(200, { data: { access_token: fresh, refresh_token: 'new-rt' } }); });
-    await middleware(api({ sp_rt: 'sweep-first' })).catch(() => undefined); // any stale leftovers of earlier cases are swept before the count is taken
     const before = pendingRefreshCount();
     const room = REFRESH_IN_FLIGHT_MAX - before;
     const all: Promise<Response>[] = [];
