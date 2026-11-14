@@ -606,7 +606,11 @@ async function readErrorCode(res: Response): Promise<string | undefined> {
  */
 /** how long after a rotation STARTED another request may still join it: the requests of one page load leave within moments of each other; a rotation older than this is not joined, so a slow or hung one never holds the others (and the window in which a logout can land between a rotation and a joiner stays small) */
 export const REFRESH_JOIN_WINDOW_MS = 3000;
+/** a rotation still unanswered after this long is forgotten by the map (its request goes on by itself): a hung backend must not make the map grow with one entry per distinct token */
+const REFRESH_ENTRY_TTL_MS = 30_000;
 const refreshesInFlight = new Map<string, { flight: Promise<RefreshOutcome>; startedAt: number }>();
+/** how many rotations the map holds right now (tests · diagnostics) */
+export function pendingRefreshCount(): number { return refreshesInFlight.size; }
 
 async function refreshKey(rt: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(rt));
@@ -618,7 +622,9 @@ async function refreshWithToken(rt: string): Promise<RefreshOutcome> {
   // no `await` between the lookup and the registration: two callers that resumed from the hash one after the other see each other
   const running = refreshesInFlight.get(key);
   if (running && Date.now() - running.startedAt < REFRESH_JOIN_WINDOW_MS) return running.flight;
-  const entry = { flight: undefined as unknown as Promise<RefreshOutcome>, startedAt: Date.now() };
+  const now = Date.now();
+  for (const [k, e] of refreshesInFlight) if (now - e.startedAt >= REFRESH_ENTRY_TTL_MS) refreshesInFlight.delete(k); // hung rotations are dropped from the map, not awaited
+  const entry = { flight: undefined as unknown as Promise<RefreshOutcome>, startedAt: now };
   // the slot is freed when THIS flight settles — and only if it is still the one registered (a newer flight for the same token must not be deleted by an older one's `finally`)
   entry.flight = refreshWithTokenOnce(rt).finally(() => { if (refreshesInFlight.get(key) === entry) refreshesInFlight.delete(key); });
   refreshesInFlight.set(key, entry);

@@ -6,7 +6,7 @@ import { SignJWT } from 'jose';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', (...args: unknown[]) => mockFetch(...args));
-import { proxy as middleware, REFRESH_JOIN_WINDOW_MS } from './proxy';
+import { proxy as middleware, REFRESH_JOIN_WINDOW_MS, pendingRefreshCount } from './proxy';
 
 const JWT_SECRET = 'test-secret-for-proxy-tests';
 async function accessToken(exp: number, sub = 'user-123'): Promise<string> {
@@ -123,6 +123,20 @@ describe('one rotation per refresh token in flight (story 4948 PR 2)', () => {
     expect(refreshCalls(), 'two rotations, not three').toHaveLength(2);
     gates[1]!.release(undefined);
     await Promise.all([second, third]);
+  });
+
+  it('⭐a backend that never answers does not grow the map for ever: rotations unanswered after 30 s are dropped from it when the next one is registered', async () => {
+    mockFetch.mockImplementation(() => new Promise(() => {})); // never settles
+    const before = pendingRefreshCount();
+    for (const rt of ['hung-1', 'hung-2', 'hung-3']) void middleware(api({ sp_rt: rt }));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(pendingRefreshCount() - before).toBe(3);
+    const realNow = Date.now;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + 40_000);
+    void middleware(api({ sp_rt: 'new-one' }));
+    await new Promise((r) => setTimeout(r, 30));
+    spy.mockRestore();
+    expect(pendingRefreshCount() - before, 'the three hung ones are gone, the new one is there').toBe(1);
   });
 
   it('⭐what is shared is the BACKEND answer only — each waiter still decides for itself (RC2 with its own cookies) and forwards its OWN cookies to the page', async () => {
