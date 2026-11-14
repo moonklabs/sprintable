@@ -318,11 +318,12 @@ describe('AppSidebar — story #3824 → #4885 새 구조 렌더 회귀가드(�
 
   // story #3054(2984-S6) — Chat Center CTA가 헤어라인+elev를 쓰고 bg-proof-blue-soft는
   // 안 쓴다.
-  it('Chat Center CTA는 bg-proof-blue-soft를 안 쓰고 글자는 늘 파랑이다(story #4906: 테두리 · 그림자는 «현재 페이지»가 아닐 때 없다 — 아래 «대화 카드는 지금 페이지일 때만» 묶음)', async () => {
+  it('Chat Center CTA는 bg-proof-blue-soft를 안 쓰고 글자는 늘 ds action 색이다(story #4906: 테두리 · 그림자는 «현재 페이지»가 아닐 때 없다 · story 4930: 옛 파랑 text-proof-blue → text-ds-action-text — 아래 «대화 카드는 지금 페이지일 때만» 묶음)', async () => {
     await mount();
     const link = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/chats');
     expect(link).toBeDefined();
-    expect(link!.className).toContain('text-proof-blue'); // 2930's meaning stays: always conspicuous
+    expect(link!.className).toContain('text-ds-action-text'); // 2930's meaning stays: always conspicuous — in the ds action colour (story 4930)
+    expect(link!.className).not.toContain('text-proof-blue'); // the old info blue (rgb 31,95,191) is not an accent colour
     expect(link!.className).not.toContain('bg-proof-blue-soft');
   });
 
@@ -697,7 +698,8 @@ describe('AppSidebar — «대화» 카드는 지금 페이지일 때만 «현�
     expect(cls).not.toContain('border-proof-blue');
     expect(cls.some((c) => c.startsWith('shadow'))).toBe(false);
     expect(cls).not.toContain('bg-sidebar-accent');
-    expect(cls).toContain('text-proof-blue');
+    expect(cls).toContain('text-ds-action-text');
+    expect(cls).not.toContain('text-proof-blue');
   });
 
   it('⭐/chats 와 /chats/<방>에서: aria-current=page + 다른 항목과 같은 «현재 페이지» 채움(bg-sidebar-accent)', async () => {

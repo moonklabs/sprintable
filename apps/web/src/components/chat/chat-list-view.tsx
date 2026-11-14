@@ -265,7 +265,7 @@ function ConversationRow({
         {/* story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
         {isAgentInConv && (
           // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
-          <span className="flex-shrink-0 rounded border border-info/30 bg-info/12 px-1.5 py-0.5 text-micro font-medium text-foreground">
+          <span className="flex-shrink-0 rounded border border-ds-action/30 bg-ds-action/12 px-1.5 py-0.5 text-micro font-medium text-foreground">
             {t('agent')}
           </span>
         )}

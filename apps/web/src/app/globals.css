@@ -205,6 +205,7 @@
   --color-warning-strong: var(--warning-strong);
   --color-info: var(--info);
   --color-brand: var(--brand);
+  --color-brand-wordmark: var(--brand-wordmark);
   --color-brand-foreground: var(--brand-foreground);
   /* story #2529: 마크 v2(2단 듀오톤) 색 토큰 — Tailwind 유틸(fill-brand-mark-primary 등)로도
      쓸 수 있게 매핑. SprintableMark 자체는 raw var()로 SVG fill을 직접 참조한다. */
@@ -373,11 +374,13 @@
   --sidebar-active-fill: var(--ds-action-soft);
   --sidebar-active-fill-foreground: var(--ds-action-text);
 
-  /* Sprintable brand (blue) — 254/0.17 hue/chroma는 스펙 그대로, L만 0.58→0.56(AA 4.5:1 확保) */
-  --brand: oklch(0.56 0.17 254);
-  /* story #2318: 4.50:1(턱걸이)→순백으로 4.69:1 확保 */
-  --brand-foreground: oklch(1 0 0);
-  --primary-tint: oklch(0.97 0.02 255);
+  /* story 4930 (UI «옛 파랑 걷기»): 옛 brand 파랑(oklch 254)은 ds action 보라 옆에 남아 «강조색이 둘»이었다(보드 렌즈 알약 · 조직 아바타 · 링크 · 인증 단추 · ↗). --primary · --ring처럼 ds 토큰의 별칭 —
+     색 값은 design-system.css 한 곳이 정한다(시험 = styles/old-palette-alias.4919.test.ts 의 brand 표). 로고 마크 색(--brand-mark-*)은 그대로. */
+  --brand: var(--ds-action);
+  --brand-foreground: var(--ds-on-action);
+  --primary-tint: var(--ds-action-soft);
+  /* story 4930 조건 가(PO): 로고 워드마크는 «상표 표시»라 ds 별칭 밖 — 옛 brand 파랑 값을 이 이름으로 그대로 둔다(소비처 = 로그인 화면 SprintableLogo 한 곳 · 시험이 «로고 소비처 목록»을 못 박는다). */
+  --brand-wordmark: oklch(0.56 0.17 254);
 
   /* story #2529(유나 핸드오프 brand-mark-v2-handoff-2529 §3-1): 마크 v2 — 2단 듀오톤.
      Figma 실측 sRGB HEX가 정본(SVG/ICO 등 정적 자산이 이 값에서 빌드타임으로 파생됨,
@@ -433,10 +436,10 @@
   --scrollbar-thumb-hover: oklch(0 0 0 / 65%);
   --scrollbar-track: transparent;
 
-  --brand-soft: oklch(0.90 0.06 258);
-  --brand-strong: oklch(0.45 0.20 258);
-  --brand-text: var(--brand-strong); /* story #4315 — 밝은 테마 브랜드 글자(배경 7.05 · 흰 패널 7.62 · brand/14 틴트 6.32) */
-  --brand-contrast: oklch(0.96 0.03 258);
+  --brand-soft: var(--ds-action-soft);
+  --brand-strong: var(--ds-action-text);
+  --brand-text: var(--brand-strong); /* story #4315 — 밝은 테마 브랜드 글자(대비는 old-palette-alias.4919.test.ts가 풀어 쓴 값으로 계산 · story 4930: 값은 ds action-text) */
+  --brand-contrast: var(--ds-action-soft);
 
   /* DS-S13: Extended semantic tokens */
   --overlay-backdrop: oklch(0 0 0 / 50%);
@@ -492,14 +495,14 @@
   /* Tiptap editor */
   --tiptap-code-bg: oklch(0.22 0 0);
   --tiptap-pre-bg: oklch(0.14 0 0);
-  --tiptap-blockquote-border: oklch(0.66 0.18 258);
+  --tiptap-blockquote-border: var(--ds-action); /* story 4930: 옛 파랑(258) → ds action */
   --tiptap-blockquote-bg: oklch(0.97 0 0);
   --tiptap-table-border: oklch(0.88 0 0);
   --tiptap-th-bg: oklch(0.96 0 0);
   --tiptap-hr-border: oklch(0.88 0 0);
   --tiptap-placeholder: oklch(0.60 0 0);
-  --tiptap-selection: oklch(0.66 0.18 258);
-  --tiptap-link: oklch(0.55 0.18 258);
+  --tiptap-selection: var(--ds-action);
+  --tiptap-link: var(--ds-action-text);
   /* story 4831: 노드가 인라인 style로 호박색(#f59e0b)을 주고 있어 이 초록 토큰은 에디터에서 가려져 있었다 — 호박색을 바탕 토큰으로 옮기며 이 두 토큰도 같은 값으로 맞춰 한 곳에서 정한다. */
   --tiptap-callout-border: var(--proof-amber);
   --tiptap-callout-bg: var(--proof-amber-soft);
@@ -672,12 +675,10 @@
   --sidebar-border: var(--proof-line);
   --sidebar-ring: var(--ds-action);
 
-  /* Sprintable brand (blue, lighter for dark) — hue/chroma 스펙 그대로, L은 라이트와 동일 규칙 */
-  --brand: oklch(0.64 0.17 254);
-  /* story #2318: 신설(라이트와 다른 값) — 다크 brand는 밝은 파랑이라 밝은 텍스트로는 3.24:1
-     미달. --primary-foreground(다크)와 동일 패턴(어두운 남색)으로 보정해 5.74:1 확保. */
-  --brand-foreground: oklch(0.16 0.038 262);
-  --primary-tint: oklch(0.28 0.075 260);
+  /* story 4930: 다크도 ds action 별칭(위 라이트와 같은 이유) — 다크 action(#8e7fff) 위 글은 ds on-action(어두운 남보라)이라 옛 «밝은 파랑 위 어두운 글» 보정(story #2318)은 ds가 이미 한다. */
+  --brand: var(--ds-action);
+  --brand-foreground: var(--ds-on-action);
+  --primary-tint: var(--ds-action-soft);
 
   /* story #2529(유나 핸드오프 §1): 다크 표면에선 라이트용 인디고(#42549B)가 제품 다크배경
      (#111114) 위에서 대비가 부족해 Figma가 의도적으로 모노(흰+회)로 뺐다 — 듀오톤 아님. */
@@ -714,10 +715,10 @@
   --scrollbar-thumb-hover: oklch(1 0 0 / 80%);
   --scrollbar-track: transparent;
 
-  --brand-soft: oklch(0.80 0.10 258);
-  --brand-strong: oklch(0.55 0.22 258);
-  --brand-text: var(--brand-soft); /* story #4315 — 어두운 테마 브랜드 글자(배경 10.48 · 패널 9.42 · brand/14 틴트 7.87 · brand-strong은 3.92라 아님) */
-  --brand-contrast: oklch(0.22 0.05 258);
+  --brand-soft: var(--ds-action-text);
+  --brand-strong: var(--ds-action);
+  --brand-text: var(--brand-soft); /* story #4315 — 어두운 테마 브랜드 글자(옅은 쪽이 읽힌다 · story 4930: 값은 ds action-text · 대비는 old-palette-alias.4919.test.ts가 계산) */
+  --brand-contrast: var(--ds-action-soft);
 
   /* DS-S13: Extended semantic tokens */
   --overlay-backdrop: oklch(0 0 0 / 60%);
@@ -756,14 +757,14 @@
   /* Tiptap editor (dark) */
   --tiptap-code-bg: oklch(0.22 0 0);
   --tiptap-pre-bg: oklch(0.14 0 0);
-  --tiptap-blockquote-border: oklch(0.70 0.18 258);
+  --tiptap-blockquote-border: var(--ds-action);
   --tiptap-blockquote-bg: oklch(0.14 0 0 / 50%);
   --tiptap-table-border: oklch(0.30 0 0);
   --tiptap-th-bg: oklch(0.18 0 0);
   --tiptap-hr-border: oklch(0.25 0 0);
   --tiptap-placeholder: oklch(0.50 0 0);
-  --tiptap-selection: oklch(0.70 0.18 258);
-  --tiptap-link: oklch(0.75 0.14 258);
+  --tiptap-selection: var(--ds-action);
+  --tiptap-link: var(--ds-action-text);
   --tiptap-callout-border: var(--proof-amber);
   --tiptap-callout-bg: var(--proof-amber-soft);
 

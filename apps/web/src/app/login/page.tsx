@@ -151,7 +151,7 @@ export default function LoginPage() {
         <div className="flex flex-col items-center gap-3 text-center">
           <SprintableLogo
             variant="stacked"
-            className="text-brand dark:text-foreground"
+            className="text-brand-wordmark dark:text-foreground"
             markClassName="h-14"
             wordmarkClassName="h-5"
           />

@@ -77,6 +77,25 @@ const ALIAS_DIRECT: Record<string, string> = {
   '--sidebar-active-fill': DS('action-soft'),
   '--sidebar-active-fill-foreground': DS('action-text'),
 };
+// 표 3 (story 4930) — 옛 brand 파랑(oklch 254 · 258)은 ds action 보라의 별칭이다. «강조색이 둘» 방지: --brand 계열을 옛 oklch 값으로 되돌리면 이 표 · 아래 «옛 파랑 값 0»이 빨개진다.
+const BRAND_LIGHT: Record<string, string> = {
+  '--brand': DS('action'),
+  '--brand-foreground': DS('on-action'),
+  '--primary-tint': DS('action-soft'),
+  '--brand-soft': DS('action-soft'),
+  '--brand-strong': DS('action-text'),
+  '--brand-text': 'var(--brand-strong)',
+  '--brand-contrast': DS('action-soft'),
+};
+const BRAND_DARK: Record<string, string> = {
+  '--brand': DS('action'),
+  '--brand-foreground': DS('on-action'),
+  '--primary-tint': DS('action-soft'),
+  '--brand-soft': DS('action-text'),
+  '--brand-strong': DS('action'),
+  '--brand-text': 'var(--brand-soft)',
+  '--brand-contrast': DS('action-soft'),
+};
 // 표 2 — proof를 거쳐 ds로 가는 별칭(값은 위 표 1을 따른다)
 const ALIAS_VIA_PROOF: Record<string, string> = {
   '--background': 'var(--proof-bg)',
@@ -125,6 +144,18 @@ describe('옛 별칭 · --proof-* → ds 토큰 (4919 AC2 표 1 · 2)', () => {
       for (const [name, ref] of Object.entries(ALIAS_VIA_PROOF)) expect(d[name], `${label} ${name}`).toBe(ref);
     });
   }
+
+  it('⭐story 4930 — --brand 계열 일곱 줄은 ds action 보라의 별칭이다(라이트 · 다크) — 옛 파랑 oklch 값이 아니다', () => {
+    for (const [name, ref] of Object.entries(BRAND_LIGHT)) expect(light[name], `라이트 ${name}`).toBe(ref);
+    for (const [name, ref] of Object.entries(BRAND_DARK)) expect(dark[name], `다크 ${name}`).toBe(ref);
+  });
+
+  it('⭐story 4930 — 옛 파랑 값이 globals.css 선언 어디에도 없다: 색상 245~275°의 oklch 리터럴(brand 254 · 258 · 260 · 255)이 CSS 선언 값으로 남지 않는다(주석 제외)', () => {
+    const bad = [...strip(globalsRaw).matchAll(/(--[\w-]+)\s*:\s*oklch\(\s*([\d.]+)\s+([\d.]+)\s+(2[4-7]\d(?:\.\d+)?)\s*\)/g)]
+      .filter((m) => Number(m[3]) >= 0.03 && !['--brand-wordmark', '--info-foreground', '--role-accent-1'].includes(m[1]!)) // 상표 워드마크 · 정보 위 글 · 사람 구분 색판은 의도된 값(accent-not-old-blue.4930.test.ts가 목록을 못 박는다)
+      .map((m) => `${m[1]}: oklch(${m[2]} ${m[3]} ${m[4]})`);
+    expect(bad, '채도 있는 파랑 oklch 리터럴').toEqual([]);
+  });
 
   it('ds에 맞는 값이 없는 것은 값을 그대로 둔다 — citron(시그니처 연두) · slate(에이전트 진행) · line-strong 공식', () => {
     expect(light['--proof-citron']).toBe('#5F8706');
@@ -194,6 +225,15 @@ describe('이은 값이 층 규칙 · 대비 선을 지킨다(풀어 쓴 실제 
     });
     it(`${label}: 입력 경계(--input)는 내용 칸 위에서 3:1 이상 — 옛 값은 1.27이었다`, () => {
       expect(contrast(resolvedHex(key, '--input'), resolvedHex(key, '--card'))).toBeGreaterThanOrEqual(3);
+    });
+    it(`⭐story 4930 ${label}: 이은 brand 글 · 면은 대비선을 지킨다 — brand-text는 카드 · brand/10 · brand/14 틴트 위에서 4.5:1, brand-foreground는 고체 brand 위에서 4.5:1`, () => {
+      const mix = (fg: string, bg: string, a: number) => '#' + [1, 3, 5].map((i) => Math.round(parseInt(fg.slice(i, i + 2), 16) * a + parseInt(bg.slice(i, i + 2), 16) * (1 - a)).toString(16).padStart(2, '0')).join('');
+      const text = resolvedHex(key, '--brand-text');
+      const card = resolvedHex(key, '--card');
+      const brand = resolvedHex(key, '--brand');
+      expect(contrast(text, card), `${label} brand-text on card`).toBeGreaterThanOrEqual(4.5);
+      for (const alpha of [0.1, 0.14]) expect(contrast(text, mix(brand, card, alpha)), `${label} brand-text on brand/${alpha * 100}`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(resolvedHex(key, '--brand-foreground'), brand), `${label} brand-foreground on brand`).toBeGreaterThanOrEqual(4.5);
     });
     it(`${label}: 고체 --destructive 위 글(text-background — 바탕을 뚫은 글)은 4.5:1 이상, 글 --destructive는 카드 · 옅은 면 위에서 4.5:1 이상`, () => {
       const solid = resolvedHex(key, '--destructive');
