@@ -19,6 +19,7 @@ import type { PresenceStatus } from '@/components/chat/presence-dot';
 const PRESENCE_WORD: Record<PresenceStatus, string> = { online: 'presenceOnline', idle: 'presenceIdle', offline: 'presenceOffline' };
 import { AddParticipantModal } from '@/components/chat/add-participant-modal';
 import { DeliveryContractModal } from '@/components/chat/delivery-contract-modal';
+import { ROOM_MUTED_EVENT } from '@/components/chat/room-muted-event';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { RoomProjectAsk } from '@/components/chat/room-project-ask';
@@ -205,6 +206,16 @@ export default function ConversationPage() {
       setMeta((m) => (m ? { ...m, muted: !next } : m));
     }
   }, [meta, conversation_id, addToast, t]);
+
+  // story 4946 — the list beside this room flipped its mute flag from the room row's menu: take the same value
+  useEffect(() => {
+    const onMuted = (e: Event) => {
+      const d = (e as CustomEvent<{ id: string; muted: boolean }>).detail;
+      if (d?.id === conversation_id) setMeta((m) => (m ? { ...m, muted: d.muted } : m));
+    };
+    window.addEventListener(ROOM_MUTED_EVENT, onMuted);
+    return () => window.removeEventListener(ROOM_MUTED_EVENT, onMuted);
+  }, [conversation_id]);
 
   // EF-S2: rename a group room. Optimistic; the BE PATCH persists the title.
   const handleSaveTitle = useCallback(async () => {

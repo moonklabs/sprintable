@@ -31,6 +31,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { handleListKeys } from '@/lib/list-keys';
 import { useToast } from '@/components/ui/toast';
 import { RoomRowContextMenu } from './room-row-context-menu';
+import { ROOM_MUTED_EVENT } from './room-muted-event';
 import { DeliveryContractModal } from './delivery-contract-modal';
 import { participantDisplayLabel } from '@/lib/member-display';
 import { composeEventPreviewLine, composeEventPreviewFallback } from './event-block-card';
@@ -475,14 +476,25 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [allConversations, setAllConversations] = useState<ConversationItem[]>([]);
   // story 4946 (the desktop app) — ↑ ↓ walk the room rows (focus only: Enter · Space open one, as a button does — a press of an arrow never navigates), and a right-click on a row opens the room's menu (the room's «⋯» items, no more)
-  const moveBetweenRooms = useCallback((e: React.KeyboardEvent<HTMLElement>) => handleListKeys(e, () => undefined), []);
+  // the keys act only from a room row: «load more» (inside the same container, no row around it) keeps its own behaviour
+  const moveBetweenRooms = useCallback((e: React.KeyboardEvent<HTMLElement>) => {
+    if (!(e.target as HTMLElement).closest?.('[data-row-key]')) return;
+    handleListKeys(e, () => undefined);
+  }, []);
   const { addToast } = useToast();
-  const [rowMenu, setRowMenu] = useState<{ conv: ConversationItem; x: number; y: number; returnTo: HTMLElement | null } | null>(null);
-  const [contractFor, setContractFor] = useState<ConversationItem | null>(null);
+  // the menu keeps the room's ID (not a copy of the room): it reads the room as the list holds it NOW, so a refetch that changes the mute flag never leaves a stale label, and a room that left the list closes the menu
+  const [rowMenu, setRowMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [contractId, setContractId] = useState<string | null>(null);
+  const rowFocusRef = useRef<HTMLElement | null>(null); // the row's button: where the focus goes back when the menu or the settings window closes
   const openRowMenu = useCallback((e: React.MouseEvent, conv: ConversationItem) => {
     e.preventDefault();
-    setRowMenu({ conv, x: e.clientX, y: e.clientY, returnTo: (e.currentTarget as HTMLElement).querySelector<HTMLElement>('[data-row-focus]') });
+    rowFocusRef.current = (e.currentTarget as HTMLElement).querySelector<HTMLElement>('[data-row-focus]');
+    setRowMenu({ id: conv.id, x: e.clientX, y: e.clientY });
   }, []);
+  const roomById = (id: string | null) => (id ? [...conversations, ...allConversations].find((c) => c.id === id) ?? null : null);
+  const menuRoom = roomById(rowMenu?.id ?? null);
+  const contractRoom = roomById(contractId);
+  const openingSettingsRef = useRef(false);
   const patchRoom = useCallback((id: string, patch: Partial<ConversationItem>) => {
     const apply = (list: ConversationItem[]) => list.map((c) => (c.id === id ? { ...c, ...patch } : c));
     setConversations(apply);
@@ -495,6 +507,7 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     try {
       const res = await fetchWithAuth(`/api/conversations/${conv.id}/mute`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ muted: next }) });
       if (!res.ok) { addToast({ title: t('muteToggleFailed'), type: 'error' }); patchRoom(conv.id, { muted: !next }); }
+      else window.dispatchEvent(new CustomEvent(ROOM_MUTED_EVENT, { detail: { id: conv.id, muted: next } })); // the open room (beside this list) keeps its own copy of the flag
     } catch {
       addToast({ title: t('muteToggleFailed'), type: 'error' });
       patchRoom(conv.id, { muted: !next });
@@ -1230,23 +1243,28 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
         {isAdminOrOwner && activeList === 'agent' ? agentConversationList : myConversationList}
       </div>
 
-      {rowMenu && (
+      {rowMenu && menuRoom && (
         <RoomRowContextMenu
           x={rowMenu.x}
           y={rowMenu.y}
-          muted={rowMenu.conv.muted ?? false}
-          onToggleMute={() => void toggleRoomMute(rowMenu.conv)}
-          onOpenSettings={() => setContractFor(rowMenu.conv)}
-          onClose={() => { const back = rowMenu.returnTo; setRowMenu(null); queueMicrotask(() => back?.focus()); }}
+          muted={menuRoom.muted ?? false}
+          onToggleMute={() => void toggleRoomMute(menuRoom)}
+          onOpenSettings={() => { openingSettingsRef.current = true; setContractId(menuRoom.id); }}
+          onClose={() => {
+            setRowMenu(null);
+            if (openingSettingsRef.current) { openingSettingsRef.current = false; return; } // the settings window takes the focus (and gives it back to the row when it closes)
+            queueMicrotask(() => rowFocusRef.current?.focus());
+          }}
         />
       )}
-      {contractFor && (
+      {contractRoom && (
         <DeliveryContractModal
-          conversationId={contractFor.id}
-          conversationType={contractFor.type}
-          freeResponse={contractFor.free_response ?? false}
-          onClose={() => setContractFor(null)}
-          onFreeResponseChange={(next) => patchRoom(contractFor.id, { free_response: next })}
+          conversationId={contractRoom.id}
+          conversationType={contractRoom.type}
+          freeResponse={contractRoom.free_response ?? false}
+          onClose={() => setContractId(null)}
+          returnFocusRef={rowFocusRef}
+          onFreeResponseChange={(next) => patchRoom(contractRoom.id, { free_response: next })}
         />
       )}
 

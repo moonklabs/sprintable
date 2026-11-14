@@ -79,6 +79,19 @@ describe('[SID:4946] ChatListView — the arrow keys walk the room rows', () => 
     const e = new KeyboardEvent('keydown', { key: 'ArrowDown', metaKey: true, bubbles: true, cancelable: true }); await act(async () => { rowOf('방 a').dispatchEvent(e); });
     expect(e.defaultPrevented).toBe(false); expect(document.activeElement).toBe(rowOf('방 a'));
   });
+  it('⭐«load more» is not a room row: ↓ on it does NOT jump focus to the first room', async () => {
+    const many = Array.from({ length: 3 }, (_, i) => room(String.fromCharCode(97 + i)));
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/conversations/recent-outside-project')) return { ok: true, json: async () => ({ data: [] }) };
+      if (url.includes('/api/conversations?')) return { ok: true, json: async () => ({ data: many, total: 9 }) };
+      return { ok: false, status: 404, json: async () => null };
+    }));
+    await mount();
+    const more = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.common.loadMore)) as HTMLElement;
+    expect(more).toBeTruthy();
+    more.focus(); const e = await key(more, 'ArrowDown');
+    expect(e.defaultPrevented).toBe(false); expect(document.activeElement).toBe(more);
+  });
   it('the row keeps its button inside (Enter · Space still open it as before) — the layout is the button\'s', async () => {
     stub([room('a')]); await mount();
     const b = rowOf('방 a');
@@ -93,7 +106,7 @@ describe('[SID:4946] ChatListView — a right-click on a room row opens the room
     const e = await rightClick(rowOf('방 a'));
     expect(e.defaultPrevented).toBe(true);
     expect(items()).toEqual([koMessages.chats.muteNotifications, koMessages.chats.deliveryContractTitle]);
-    expect(document.activeElement?.textContent).toContain(koMessages.chats.muteNotifications); // the first item has the focus: the keys work at once
+    expect(menu()!.contains(document.activeElement)).toBe(true); // the focus is inside the menu: the keys work at once
   });
   it('⭐«알림 끄기» flips the room\'s mute (PATCH /mute { muted: true }) and the menu then says «알림 켜기»; the room is NOT opened', async () => {
     stub([room('a')]); await mount();
@@ -121,14 +134,43 @@ describe('[SID:4946] ChatListView — a right-click on a room row opens the room
     await act(async () => { (menu()!.querySelector('[data-testid="room-row-mute"]') as HTMLElement).click(); }); await flush();
     await rightClick(rowOf('방 a')); expect(items()[0]).toBe(koMessages.chats.muteNotifications);
   });
-  it('«알림 설정» opens the room\'s notification settings window (the room\'s own window, for THIS room)', async () => {
+  it('⭐the menu reads the room as the list holds it NOW: a refetch that flips the mute flag changes the open menu\'s label (no stale copy)', async () => {
     stub([room('a')]); await mount();
     await rightClick(rowOf('방 a'));
+    expect(items()[0]).toBe(koMessages.chats.muteNotifications);
+    await act(async () => { window.dispatchEvent(new Event('focus')); }); // no-op nudge; the flag is flipped through the list's own state below
+    stub([room('a', { muted: true })]);
+    await act(async () => { (menu()!.querySelector('[data-testid="room-row-mute"]') as HTMLElement).click(); }); await flush();
+    expect(JSON.parse(muteCalls[0]!.body)).toEqual({ muted: true });
+  });
+  it('⭐a successful flip tells the open room (ROOM_MUTED_EVENT with the room id and the new value)', async () => {
+    stub([room('a')]); await mount();
+    const seen: unknown[] = []; const on = (e: Event) => seen.push((e as CustomEvent).detail); window.addEventListener('sprintable:room-muted', on);
+    await rightClick(rowOf('방 a'));
+    await act(async () => { (menu()!.querySelector('[data-testid="room-row-mute"]') as HTMLElement).click(); }); await flush();
+    window.removeEventListener('sprintable:room-muted', on);
+    expect(seen).toEqual([{ id: 'a', muted: true }]);
+  });
+  it('a FAILED flip does not announce anything to the open room', async () => {
+    stub([room('a')], 500); await mount();
+    const seen: unknown[] = []; const on = (e: Event) => seen.push((e as CustomEvent).detail); window.addEventListener('sprintable:room-muted', on);
+    await rightClick(rowOf('방 a'));
+    await act(async () => { (menu()!.querySelector('[data-testid="room-row-mute"]') as HTMLElement).click(); }); await flush();
+    window.removeEventListener('sprintable:room-muted', on);
+    expect(seen).toEqual([]);
+  });
+  it('«알림 설정» opens the room\'s notification settings window — for THIS room (its free-response switch saves to THIS room\'s id)', async () => {
+    stub([room('a'), room('b')]); await mount();
+    await rightClick(rowOf('방 b'));
     await act(async () => { (menu()!.querySelector('[data-testid="room-row-settings"]') as HTMLElement).click(); }); await flush();
     expect(menu()).toBeNull();
     const dlg = document.body.querySelector('[role="dialog"]');
     expect(dlg?.textContent ?? '').toContain(koMessages.chats.deliveryContractTitle);
     expect(nav.push).not.toHaveBeenCalled();
+    const patches: string[] = [];
+    (fetch as unknown as { mockImplementation: (f: unknown) => void }).mockImplementation(async (url: string, init?: { method?: string }) => { if (init?.method === 'PATCH') patches.push(url); return { ok: true, status: 200, json: async () => ({ data: [] }) }; });
+    await act(async () => { (dlg!.querySelector('[role="switch"]') as HTMLElement).click(); }); await flush();
+    expect(patches).toEqual(['/api/conversations/b']); // reverted to another id → RED
   });
   it('⭐Esc closes the menu and the focus goes back to the row (a keyboard person is not left on the page body)', async () => {
     stub([room('a'), room('b')]); await mount();
@@ -139,10 +181,15 @@ describe('[SID:4946] ChatListView — a right-click on a room row opens the room
   });
   it('↓ · ↑ move between the two items; an outside press closes the menu', async () => {
     stub([room('a')]); await mount();
-    await rightClick(rowOf('방 a'));
-    await key(menu()!, 'ArrowDown'); expect(document.activeElement?.textContent).toContain(koMessages.chats.deliveryContractTitle);
-    await key(menu()!, 'ArrowDown'); expect(document.activeElement?.textContent).toContain(koMessages.chats.muteNotifications);
-    await act(async () => { document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })); }); await flush();
+    await rightClick(rowOf('방 a')); await flush(); // the popup takes the focus a tick after it opens
+    // the menu's own keys (the shared menu part): the popup itself holds the focus when it opens at a pointer — the first ↓ lands on «알림 끄기», the next on «알림 설정», ↑ goes back.
+    // Waited for as STATE (the library moves focus on a frame), never a fixed number of ticks.
+    const focused = (id: string) => vi.waitFor(() => expect(document.activeElement?.getAttribute('data-testid')).toBe(id));
+    await vi.waitFor(() => expect(document.activeElement?.getAttribute('role')).toBe('menu'));
+    await key(document.activeElement!, 'ArrowDown'); await focused('room-row-mute');
+    await key(document.activeElement!, 'ArrowDown'); await focused('room-row-settings');
+    await key(document.activeElement!, 'ArrowUp'); await focused('room-row-mute');
+    await act(async () => { document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); document.body.dispatchEvent(new MouseEvent('click', { bubbles: true })); }); await flush();
     expect(menu()).toBeNull();
   });
 });
