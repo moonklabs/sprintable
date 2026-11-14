@@ -944,7 +944,12 @@ def test_the_migration_reading_block_lists_what_a_running_old_revision_could_not
     # story 4921: 0475 is the same kind of line — a data-only `UPDATE` of the platform «preset.steer.instruct» row (its card template only), written in upgrade() itself so the reading lists it; the key and `org_id IS NULL` bound the rows.
     card = [h for h in hits if h.startswith("0475_")]
     assert len(card) == 1 and "UPDATE event_definitions SET block_template" in card[0] and "org_id IS NULL" in card[0] and not any(k in card[0] for k in ("DROP", "ALTER", "VALIDATE")), card
-    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_"))]
+    # story #4951: 0477 puts one more word into the command-kind CHECK (`read_changes`: the CHECK is dropped and made again — an old revision never writes the new word, every value it does write still passes), makes two new tables with
+    # their indexes and one partial index on `desktop_commands`; nothing existing is altered, backfilled or locked for long. The reading lists exactly those lines (upgrade and downgrade): the CHECK swap and index builds, nothing else.
+    kinds = [h for h in hits if h.startswith("0477_")]
+    assert any("drop_constraint" in h and "ck_desktop_commands_kind" in h for h in kinds) and any("create_check_constraint" in h and "ck_desktop_commands_kind" in h for h in kinds), kinds
+    assert all("create_index" in h or "ck_desktop_commands_kind" in h for h in kinds), kinds
+    hits = [h for h in hits if not h.startswith(("0471_", "0472_", "0473_", "0474_", "0475_", "0477_"))]
     assert len(hits) >= 2 and all("create_index" in line for line in hits), hits
     assert not any("0466_" in h for h in hits), "the version prod is at is not one of the revisions to run"
     assert any(h.startswith("0467_desktop_session_limit_cleared_at.py:") and "create_index" in h for h in hits) and any(h.startswith("0468_refresh_tokens_family_id.py:") and "create_index" in h for h in hits)

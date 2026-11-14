@@ -287,6 +287,8 @@ _ID_MUTATION_FALSE_POSITIVE_ALLOWLIST: dict[str, str] = {
     "app.routers.watches:clear_watch": "agent-owned row, selected by the caller's own member id (services.agent_watches.cancel_watch)",
     # story #4535 — the org's «원격 제어» switch: an org-level setting (organizations row), changed only by that org's owner
     # (resolve_member of the path org · role owner · a person's session)
+    # story #4951 — the device's «changed files» list: a row of THIS device (command id AND the device token's own setup id), written once; another computer's command id is «not found» — no project entity
+    "app.routers.desktop_relay:put_changes": "the device token's own read row (command id + the token's setup id, written once; another computer's id is not found) — services.desktop_changes.write_result",
     "app.routers.remote_control:put_remote_control": "org-level setting, owner of the path org only (routers.remote_control._person_of + role check)",
     # story #4533 — [빼기] one phone ↔ computer pair: the phone is selected in the caller's org (remote_devices.org_id) and must be
     # the caller's own phone unless the caller is that org's owner/admin; the pair is that phone's — no project axis
