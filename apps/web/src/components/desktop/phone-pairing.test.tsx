@@ -217,13 +217,13 @@ describe('[4532] phone pairing screen', () => {
     expect(buttons()).toEqual(left);
   });
 
-  it('already paired with that computer → «이미 페어링된 컴퓨터예요» + [닫기], nothing offered', async () => {
+  it('already paired with that computer → «이미 페어링된 컴퓨터예요 · {컴퓨터}» + [닫기], nothing offered', async () => {
     pairs = [{ setup_id: HEAD.setup_id }];
     installShell();
     await render();
     await press('QR 찍기');
     await press('페어링');
-    expect(line()).toBe('이미 페어링된 컴퓨터예요');
+    expect(line()).toBe('이미 페어링된 컴퓨터예요 · SYJ-MacBook-Pro'); // story 4932: the computer is named (was «이미 페어링된 컴퓨터예요»)
     expect(buttons()).toEqual(['닫기']);
     expect(sent.some((s) => s.type === 'pair.mac')).toBe(false);
   });
@@ -251,7 +251,7 @@ describe('[4532] phone pairing screen', () => {
       await render('ko', '/today?p=proj-1');
       await press('QR 찍기');
       await press('페어링');
-      expect(line()).toBe('이미 페어링된 컴퓨터예요');
+      expect(line()).toBe('이미 페어링된 컴퓨터예요 · SYJ-MacBook-Pro'); // story 4932: the computer is named (was «이미 페어링된 컴퓨터예요»)
       expect(closeHref()).toBe('/today?p=proj-1'); // reverted (the fixed /desktop) → '/desktop'
     });
 
@@ -428,16 +428,73 @@ describe('[4532] phone pairing screen', () => {
     expect(buttons()).toEqual(['다시 찍기']);
   });
 
-  it('a phone with no screen lock → the line + [설정 열기] (the shell opens the settings) + [다시 찍기]', async () => {
+  const lines = () => [...container.querySelectorAll('[data-testid="phone-pairing-line"]')].map((e) => e.textContent);
+  const nothingSent = () => fetchWithAuth.mock.calls.every(([url, init]) => !(String(url).startsWith('/api/remote-devices') && (init as RequestInit | undefined)?.method === 'POST')) && !sent.some((x) => x.type === 'pair.mac');
+
+  it('⭐a phone with no screen lock → FIRST «아직 페어링하지 않았어요 — 아무것도 보내지 않았어요», then what to do, then the QR\'s 5 minutes; [설정 열기] + [다시 찍기] (story 4932)', async () => {
     shell['device.key.info'] = { ok: false, code: 'no_screen_lock' };
     installShell();
     await render();
     await press('QR 찍기');
     await press('페어링');
-    expect(line()).toBe('화면 잠금이 없는 폰에서는 답할 수 없어요 — 폰 설정에서 화면 잠금을 켜 주세요');
+    expect(lines()).toEqual([
+      '아직 페어링하지 않았어요 — 아무것도 보내지 않았어요',
+      '화면 잠금이 없는 폰에서는 답할 수 없어요 — 폰 설정에서 화면 잠금을 켜 주세요',
+      'QR은 만든 지 5분 안에 써야 해요 — 지났으면 컴퓨터에서 새 QR을 만들어 다시 찍어 주세요',
+    ]);
+    expect(line()).toBe('아직 페어링하지 않았어요 — 아무것도 보내지 않았어요'); // the first line is the one that says what happened…
+    const all = [...container.querySelectorAll('[data-testid="phone-pairing-line"]')];
+    expect(document.activeElement, 'the first line takes the focus the vanished [Pair] button had').toBe(all[0]); // …and it is the one that takes the focus (a second or third line holding it would read the middle first)
     expect(buttons()).toEqual(['설정 열기', '다시 찍기']);
+    expect(nothingSent()).toBe(true); // the claim is true: no key registered, no offer, no MAC
     await press('설정 열기');
     expect(sent.at(-1)).toEqual({ type: 'app.settings', args: {} });
+  });
+
+  it('⭐a phone that can answer only with a fingerprint is refused the same way: «아직 페어링하지 않았어요 …» first, its own line second, the 5 minutes third', async () => {
+    shell['device.key.info'] = { ok: false, code: 'biometric_required' };
+    installShell();
+    await render();
+    await press('QR 찍기');
+    await press('페어링');
+    expect(lines()).toEqual([
+      '아직 페어링하지 않았어요 — 아무것도 보내지 않았어요',
+      '이 폰은 지문으로만 답할 수 있어요 — 폰 설정에서 지문을 등록한 뒤 다시 눌러 주세요',
+      'QR은 만든 지 5분 안에 써야 해요 — 지났으면 컴퓨터에서 새 QR을 만들어 다시 찍어 주세요',
+    ]);
+    expect(nothingSent()).toBe(true);
+  });
+
+  it('the refusal reads in English too, and «already paired» names the computer in English', async () => {
+    shell['device.key.info'] = { ok: false, code: 'no_screen_lock' };
+    installShell();
+    await render('en');
+    await press('Scan QR');
+    await press('Pair');
+    expect(lines()).toEqual([
+      'Not paired yet — nothing was sent',
+      'Answers need a screen lock on this phone — turn one on in the phone\'s settings',
+      'A QR works for 5 minutes after it is made — if it has passed, make a new one on the computer and scan again',
+    ]);
+    await act(async () => { root.unmount(); });
+    container.remove(); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    shell['device.key.info'] = { ok: true, public_key: 'SPKI', key_number: '482 917' };
+    pairs = [{ setup_id: HEAD.setup_id }];
+    installShell();
+    await render('en');
+    await press('Scan QR');
+    await press('Pair');
+    expect(line()).toBe('Already paired with this computer · SYJ-MacBook-Pro');
+  });
+
+  it('a refusal that is NOT before-sending (the QR expired · the offer was used) does not say «아무것도 보내지 않았어요» — only the screen-lock refusals do', async () => {
+    offerPost = () => res(409, { error: { code: 'offer_used' } });
+    installShell();
+    await render();
+    await press('QR 찍기');
+    await press('페어링');
+    expect(line()).toBe('이 QR은 이미 쓰였어요 — 컴퓨터에서 새 QR을 만들어 다시 찍어 주세요');
+    expect(lines().join(' ')).not.toContain('아무것도 보내지 않았어요');
   });
 
   it('reads in English', async () => {
