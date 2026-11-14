@@ -597,7 +597,31 @@ async function readErrorCode(res: Response): Promise<string | undefined> {
   }
 }
 
+/**
+ * story 4948 (PR 2) — ONE refresh in flight per refresh token, in this server instance. The proxy renews for EVERY request whose access token is missing · expired · inside its last 5 minutes (the proactive refresh), so a page that opens
+ * with a dozen requests at once asked for a dozen rotations of the SAME token (19 measured on dev: 19 live children of one parent, 19 Set-Cookie pairs, the backend queueing them on the person's lock 0.85 s apart = 16 s). The backend
+ * survives that on purpose (a straggler inside the 180 s window forks an independent child), but it is a dozen rows and a dozen cookie changes for one renewal. Requests that carry the SAME token while one rotation of it is still running
+ * now share its answer. Only what is IN FLIGHT is shared — nothing is kept after it settles (no TTL cache: a finished answer is never replayed, so a logout that lands right after cannot be undone by a late request carrying the old token).
+ * The key is a hash of the token (the token itself is not a map key); another instance still asks the backend on its own — its fork stays the safety net.
+ */
+const refreshesInFlight = new Map<string, Promise<RefreshOutcome>>();
+
+async function refreshKey(rt: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(rt));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 async function refreshWithToken(rt: string): Promise<RefreshOutcome> {
+  const key = await refreshKey(rt);
+  // no `await` between the lookup and the registration: two callers that resumed from the hash one after the other see each other
+  const running = refreshesInFlight.get(key);
+  if (running) return running;
+  const flight = refreshWithTokenOnce(rt).finally(() => { refreshesInFlight.delete(key); });
+  refreshesInFlight.set(key, flight);
+  return flight;
+}
+
+async function refreshWithTokenOnce(rt: string): Promise<RefreshOutcome> {
   const fastapiUrl = fastapiBaseUrl();
   try {
     const res = await fetch(`${fastapiUrl}/api/v2/auth/refresh`, {
