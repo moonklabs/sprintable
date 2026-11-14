@@ -199,7 +199,7 @@ describe('화면 층 규칙 — 이웃한 층은 눈으로 갈린다', () => {
   ['components/chat/chat-input.tsx', "relative flex-shrink-0 border-t border-ds-line bg-ds-background px-2 py-3 sm:px-3"],
   ['components/chat/embed-card.tsx', "flex h-full flex-col overflow-hidden bg-ds-background"],
   ['components/chat/reading-panel.tsx', "flex h-full flex-col overflow-hidden border-l border-border bg-ds-background"],
-  ['components/org-briefing/org-briefing-shell.tsx', "sticky bottom-0 -mx-4 bg-ds-background px-4 pb-4 lg:-mx-6 lg:px-6"],
+  ['components/org-briefing/instruction-strip.tsx', "sticky bottom-[calc(-1*var(--shell-launcher-clear,0px))] -mx-4 mb-[calc(-1*(var(--shell-launcher-clear,0px)_+_1rem))] bg-ds-background px-4 pb-[calc(1rem+var(--shell-launcher-clear,0px))] lg:-mx-6 lg:mb-[calc(-1*(var(--shell-launcher-clear,0px)_+_1.5rem))] lg:px-6"],
   ['components/ui/route-error-state.tsx', "min-h-screen bg-ds-background"],
   ['components/workspace/work-tabs-frame.tsx', "sticky top-0 z-10 bg-ds-background px-4 pt-3"],
   ['components/docs/doc-editor.tsx', 'border-t border-border/60 bg-ds-background/95 pb-[env(safe-area-inset-bottom)]'],
