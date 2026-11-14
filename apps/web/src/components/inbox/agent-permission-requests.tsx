@@ -280,7 +280,7 @@ export function PermissionCard({ request: r, now, phone, auth, answer, onAnswer 
         <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-net">{t('net.askLine')}</p>
       ) : r.summary === null ? null : ( // story #4590: no detail read → no summary box
         <div className="rounded-md bg-muted/50 px-2 py-1.5">
-          <p className="break-all font-mono text-xs text-foreground">{shownSummary(r.summary)}</p>
+          <p className="break-all font-mono text-xs text-foreground">{shownSummary(r.summary, r.masked)}</p>
           {notes.length > 0 ? <p className="mt-0.5 text-editorial-meta text-muted-foreground">{notes.join(' · ')}</p> : null}
         </div>
       )}

@@ -97,8 +97,8 @@ export function shownToolName(r: Pick<PermissionRequest, 'tool' | 'tool_name'>, 
  * screen one line read in two languages; the block is now only «••••» (the card's note «Values that look like secrets were masked» says
  * what it means, in the screen's language). A request an older Mac app already sent still has the old word: it is shown without it.
  */
-export function shownSummary(summary: string): string {
-  return summary.replaceAll('••••(가림)', '••••');
+export function shownSummary(summary: string, masked: boolean): string {
+  return masked ? summary.replaceAll('••••(가림)', '••••') : summary; // only a summary the Mac says it masked — a command that happens to contain those characters is shown as it is
 }
 
 /** story 4542 (Yuna · Kadir ④): «{agent} · {computer}» — the computer not again when the agent's name already ends in exactly

@@ -79,11 +79,10 @@ describe('AgentPermissionRequests (story #4533)', () => {
   });
 
   it('[4938] the masked block carries no word of its own: an older Mac app\'s «(가림)» is shown without it, a new one\'s «••••» as it is — and a file name beside the block stays', async () => {
-    fetchWithAuth.mockResolvedValueOnce(answer([req({ summary: '••••(가림).txt' }), req({ id: 'r2', request_id: 'q2', summary: '••••.txt' }), req({ id: 'r3', request_id: 'q3', summary: 'note.txt', masked: false })]));
+    fetchWithAuth.mockResolvedValueOnce(answer([req({ summary: '••••(가림).txt' }), req({ id: 'r2', request_id: 'q2', summary: '••••.txt' }), req({ id: 'r3', request_id: 'q3', summary: 'note.txt', masked: false }), req({ id: 'r4', request_id: 'q4', summary: 'echo ••••(가림)', masked: false })]));
     await render();
-    expect(text()).not.toContain('(가림)');
     const lines = [...container.querySelectorAll('p.font-mono')].map((n) => n.textContent);
-    expect(lines).toEqual(['••••.txt', '••••.txt', 'note.txt']);
+    expect(lines).toEqual(['••••.txt', '••••.txt', 'note.txt', 'echo ••••(가림)']); // the last one the Mac did not mask: shown as it is
   });
 
   it('a quiet computer: «연결 끊김 · 상태 모름» and no waiting time; a passed window and no paired phone say why it cannot be answered here', async () => {

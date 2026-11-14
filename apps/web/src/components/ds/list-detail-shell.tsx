@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { Panel, PanelBody, PanelContent } from './panel';
+import { Panel, PanelBody, PanelContent, PanelHeader } from './panel';
 import { DialogTitle } from './dialog';
 
 /**
@@ -44,8 +44,8 @@ export function ListDetailShell({
       ) : (
         <Panel open={sheetOpen} onOpenChange={onSheetOpenChange}>
           <PanelContent aria-label={sheetLabel} data-testid={sheetTestId ?? `${testId}-detail-sheet`}>
-            {/* story 4938: the title is for screen readers only — it used to sit in a PanelHeader, which drew an empty bordered band (padding + a line) above the card on a phone */}
-            <DialogTitle className="sr-only">{sheetLabel}</DialogTitle>
+            {/* story 4938: the header row used to hold only a screen-reader title — an empty bordered band above the card on a phone, and the close (X) floating over the card. The title is now drawn, on one line, in the row that already keeps the X's place */}
+            <PanelHeader><DialogTitle className="truncate text-ds-small font-medium text-ds-ink-2">{sheetLabel}</DialogTitle></PanelHeader>
             <PanelBody className="p-0">{detail}</PanelBody>
           </PanelContent>
         </Panel>
