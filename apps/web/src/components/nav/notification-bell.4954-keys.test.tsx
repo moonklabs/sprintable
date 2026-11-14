@@ -18,13 +18,13 @@ const item = (id: string, headline: string, read = false) => ({
   id, event_type: 'dispatched', source_entity_type: 'gate', source_entity_id: `${id}-g`,
   payload: { title: headline, event_type: 'gate.pending_approval', gate_name: headline }, read_at: read ? '2026-11-10T12:00:00Z' : null, created_at: '2026-11-10T12:00:00Z',
 });
-let container: HTMLDivElement; let root: Root; let listItems: unknown[] = [];
+let container: HTMLDivElement; let root: Root; let listItems: unknown[] = []; let more = false;
 beforeEach(() => {
-  nav.push.mockReset();
+  nav.push.mockReset(); more = false;
   vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
   vi.stubGlobal('EventSource', class { addEventListener() {} close() {} });
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-    if (url.includes('/api/event-notifications?')) return new Response(JSON.stringify({ data: listItems, meta: { hasMore: false } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (url.includes('/api/event-notifications?')) return new Response(JSON.stringify({ data: listItems, meta: { hasMore: more } }), { status: 200, headers: { 'content-type': 'application/json' } });
     return new Response(JSON.stringify({ count: listItems.length }), { status: 200, headers: { 'content-type': 'application/json' } });
   }));
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
@@ -63,5 +63,12 @@ describe('[SID:4954] the bell panel — ↑ ↓ walk the rows', () => {
     listItems = [item('n1', '안읽음 하나'), item('n2', '읽은 하나', true)]; await openBell();
     const rows = rowButtons(); expect(rows).toHaveLength(2);
     rows[0]!.focus(); await key(rows[0]!, 'ArrowDown'); expect(document.activeElement).toBe(rows[1]);
+  });
+  it('⭐«더 보기» is not a row: ↓ · ↑ on it do NOT jump the focus to the first / last notification', async () => {
+    more = true; listItems = [item('n1', '첫째'), item('n2', '둘째')]; await openBell();
+    const loadMore = [...document.querySelectorAll<HTMLElement>('[data-dropdown-panel="notification-bell"] button')].find((b) => b.textContent?.includes(koMessages.inbox.loadMore));
+    expect(loadMore, 'the «더 보기» button').toBeTruthy(); loadMore!.focus();
+    const d = await key(loadMore!, 'ArrowDown'); expect(d.defaultPrevented).toBe(false); expect(document.activeElement).toBe(loadMore);
+    const u = await key(loadMore!, 'k'); expect(u.defaultPrevented).toBe(false); expect(document.activeElement).toBe(loadMore);
   });
 });

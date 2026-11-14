@@ -26,7 +26,7 @@ function classesFromSource() {
     root: pick(/return \(\s*<div className="([^"]+)">\s*\{\/\* 헤더 \*\/\}/, 'the panel root'),
     mobile: pick(/className="(fixed inset-0[^"]*lg:hidden)"/, 'the < lg full-screen panel'),
     header: pick(/\{\/\* 헤더 \*\/\}\s*<div className="([^"]+)">/, 'the header'),
-    list: pick(/\{\/\* 목록 \*\/\}\s*<div className="([^"]+)"(?:\s+[\w-]+=\{[^}]*\})*>/, 'the list'), // other attributes (the row keys' onKeyDown, story 4954) may follow the class string
+    list: pick(/\{\/\* 목록 \*\/\}\s*<div className="([^"]+)"(?:\s+[\w-]+=\{(?:[^{}]|\{[^{}]*\})*\})*>/, 'the list'), // other attributes (the row keys' onKeyDown, story 4954) may follow the class string
   };
 }
 

@@ -49,6 +49,7 @@ describe('[SID:4954] the notification list — ↑ ↓ walk the rows', () => {
     await key(f[2]!, 'k'); expect(document.activeElement).toBe(f[1]);
     await key(f[1]!, 'ArrowUp'); expect(document.activeElement).toBe(f[0]);
     expect(nav.push).not.toHaveBeenCalled();
+    expect(container.querySelector('[aria-current="true"]'), 'moving never CHOOSES a row (no row is the selected one)').toBeNull();
   });
   it('⭐a grouped line is one row: the keys land on its HEADER button (not the chevron), and move on to the next row', async () => {
     const same = (id: string) => n(id, '시스템 발행님이 나를 멘션했어요', 'conversation.mention', { title: '시스템 발행님이 나를 멘션했어요' });
