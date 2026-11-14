@@ -41,6 +41,25 @@ describe('the root `/` renews a session whose access cookie is gone (story 4948)
     expect(res.headers.get('x-middleware-request-cookie') ?? '').toContain('sp_rt=new-rt');
   });
 
+  it('⭐a response that SETS the session cookies carries `Cache-Control: private, no-store` itself (not left to RootPage being dynamic): a shared cache must never replay one person\'s Set-Cookie to another', async () => {
+    const fresh = await accessToken(Math.floor(Date.now() / 1000) + 3600);
+    mockFetch.mockResolvedValue(answer(200, { data: { access_token: fresh, refresh_token: 'new-rt' } }));
+    const res = await middleware(req('/', { sp_rt: 'old-rt' }));
+    expect(setCookies(res).join('\n')).toContain('sp_rt=new-rt');
+    const cc = res.headers.get('cache-control') ?? '';
+    expect(cc).toContain('private');
+    expect(cc).toContain('no-store');
+  });
+
+  it('⭐and so does the response that CLEARS them (a dead session)', async () => {
+    mockFetch.mockResolvedValue(answer(401, { error: { code: 'TOKEN_REVOKED' } }));
+    const res = await middleware(req('/', { sp_rt: 'dead-rt' }));
+    expect(setCookies(res).join('\n')).toMatch(/sp_rt=;/);
+    const cc = res.headers.get('cache-control') ?? '';
+    expect(cc).toContain('private');
+    expect(cc).toContain('no-store');
+  });
+
   it('⭐an access cookie that is present but past its expiry renews the same way', async () => {
     const expired = await accessToken(Math.floor(Date.now() / 1000) - 60);
     const fresh = await accessToken(Math.floor(Date.now() / 1000) + 3600);

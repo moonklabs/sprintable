@@ -1053,12 +1053,14 @@ async function renewSessionForRoot(request: NextRequest): Promise<NextResponse |
     if (!(await refreshMatchesActive(request, outcome.accessToken))) return null;
     const response = NextResponse.next({ request: { headers: buildRefreshedHeaders(request, outcome) } });
     applyTokenCookies(response, outcome.accessToken, outcome.refreshToken);
+    response.headers.set('Cache-Control', 'private, no-store'); // a response that sets the session cookies is never replayed to someone else by a shared cache (markShell's line) — not left to RootPage being dynamic
     captureSignupAttribution(request, response); // `/` stays a public page: its first-touch capture is not skipped by the early return
     return response;
   }
   if (outcome.kind === 'invalid') {
     const response = NextResponse.next({ request });
     clearAuthCookies(response);
+    response.headers.set('Cache-Control', 'private, no-store'); // the same: a response that clears the session cookies is not shared either
     captureSignupAttribution(request, response); // a dead session is an effectively anonymous visit: the first touch is still recorded
     return response;
   }
