@@ -2998,7 +2998,7 @@ jobs:
       - name: Run layout e2e (no server · story #4557)
         run: pnpm --filter web e2e:layout
 
-      # story #4927 — 이 잡의 웹 e2e는 전부 «프로덕션 빌드 한 번 + `next start` 한 번» 위에서 돈다(고객이 받는 빌드를 잰다).
+      # story #4927 — 이 잡의 웹 e2e는 전부 «프로덕션 빌드 한 번» 위에서 `next start`로 돈다(고객이 받는 빌드를 잰다 · 서버는 둘: 플래그 OFF 하나 → 끄고 → v3 플래그 하나).
       # 왜: Contrast guard의 «page marker not seen»(5초 못 봄)은 `pnpm dev`(webpack dev)가 라우트를 처음 방문할 때 컴파일하느라
       # 페이지 스크립트가 늦게 떠서 났다(PR 5781 진단 · 같은 베이스 가르기 · 로컬 세 갈래: dev 콜드 첫 시도 놓침 3/57 · 같은 서버 재방문 0/14 ·
       # 프로덕션 0/56, 묶음 시간 66~110초 vs 10.5~12.3초). 프로덕션 서버엔 처음 방문 컴파일이 없다. 표식 대기 5000ms는 그대로(시간으로 덮지 않음).

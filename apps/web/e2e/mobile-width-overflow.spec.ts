@@ -17,7 +17,7 @@ import { storageAssetList } from './helpers/storage-list';
 
 // 민 기기와 같은 조건: 402×874 · 한국어(글자 버튼 폭이 로케일마다 달라 en만 재면 «새 실행 시작하기» 같은 긴 한국어 라벨을 놓친다).
 test.use({ storageState: 'playwright/.auth/owner.json', viewport: { width: 402, height: 874 }, locale: 'ko-KR' });
-// 두 테스트가 같은 dev 서버 · 같은 시드 데이터를 쓴다 — 병렬로 돌면 서로의 이동이 섞인다(CI는 workers=1이지만 로컬 기본은 병렬).
+// 두 테스트가 같은 서버(CI는 프로덕션 `next start`) · 같은 시드 데이터를 쓴다 — 병렬로 돌면 서로의 이동이 섞인다(CI는 workers=1이지만 로컬 기본은 병렬).
 test.describe.configure({ mode: 'serial' });
 
 const FASTAPI = process.env['NEXT_PUBLIC_FASTAPI_URL'] ?? 'http://localhost:8000';
