@@ -10,6 +10,7 @@ import { createRequire } from 'node:module';
 import { expect, test, type Page } from '@playwright/test';
 import { compile, optimize } from '@tailwindcss/node';
 import { layoutStubPlugin } from './support/layout-stubs';
+import { tailwindCandidates } from './support/tailwind-candidates';
 
 const req = createRequire(__filename);
 const WEB = path.join(__dirname, '..');
@@ -124,7 +125,7 @@ async function build() {
     plugins: [layoutStubPlugin()],
   });
   const js = out.outputFiles[0]!.text;
-  const candidates = [...new Set([...js.matchAll(/"([^"\n]+)"/g)].flatMap((m) => m[1]!.split(/\s+/)).filter(Boolean)), 'flex flex-col overflow-hidden'];
+  const candidates = [...tailwindCandidates(js), 'flex flex-col overflow-hidden'];
   built = { js, css: await css(candidates) };
   return built;
 }

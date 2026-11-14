@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { expect, test, type Page } from '@playwright/test';
+import { tailwindCandidates } from './support/tailwind-candidates';
 import { compile, optimize } from '@tailwindcss/node';
 
 const req = createRequire(__filename);
@@ -52,7 +53,7 @@ async function build() {
     define: { 'process.env.NODE_ENV': '"production"' },
   });
   const js = out.outputFiles[0]!.text;
-  const candidates = [...new Set(js.match(/[^\s"'`${}<>;,]+/g) ?? [])];
+  const candidates = tailwindCandidates(js);
   const compiler = await compile(readFileSync(path.join(APP, 'globals.css'), 'utf8'), { base: APP, onDependency: () => {} });
   const css = (optimize as unknown as (c: string, o?: object) => { code: string })(compiler.build(candidates), { minify: false }).code;
   built = { js, css };

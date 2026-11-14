@@ -11,6 +11,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { compile, optimize } from '@tailwindcss/node';
 import type { Plugin } from 'esbuild';
 import { layoutStubPlugin } from './support/layout-stubs';
+import { tailwindCandidates } from './support/tailwind-candidates';
 
 const req = createRequire(__filename);
 const WEB = path.join(__dirname, '..');
@@ -56,7 +57,7 @@ async function build() {
   });
   const js = out.outputFiles[0]!.text;
   // class names live in "…" strings, in `…` template literals and inside `${…}` expressions of those (quotes nest and pair up wrongly): take every token, Tailwind ignores the ones that are not utilities
-  const candidates = [...new Set(js.match(/[^\s"'`${}<>;,]+/g) ?? [])];
+  const candidates = tailwindCandidates(js);
   const compiler = await compile(readFileSync(path.join(APP, 'globals.css'), 'utf8'), { base: APP, onDependency: () => {} });
   const css = (optimize as unknown as (c: string, o?: object) => { code: string })(compiler.build(candidates), { minify: false }).code;
   built = { js, css };
