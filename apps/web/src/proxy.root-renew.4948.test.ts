@@ -61,6 +61,7 @@ describe('the root `/` renews a session whose access cookie is gone (story 4948)
     expect(mockFetch).not.toHaveBeenCalled();
     expect(res.status).toBe(200);
     expect(res.headers.get('location')).toBeNull();
+    expect(setCookies(res).filter((c) => /sp_(at|rt)=/.test(c)), 'an anonymous visit gets no auth cookie, not even a clearing one').toEqual([]);
   });
 
   it('only `/`: another public page opened with the same cookies renews nothing (a login · the terms · the register page)', async () => {
