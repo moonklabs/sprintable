@@ -320,8 +320,9 @@ export function AppSidebar({
         // hover:text-white/sidebar-primary-foreground 분기 자체가 불필요해졌다.
         aria-current={chatCenterActive ? 'page' : undefined}
         // story #4906 (PO 11-12): the card stays the always-conspicuous first-class place (2930's meaning) but its blue outline read as «you are here» on every screen, next to the real current-page mark. Now: the filled
-        // look of the current page ONLY on /chats; anywhere else no outline — the icon and the word are blue, nothing more.
-        className={`flex items-center gap-2 rounded-xl px-2.5 py-2 text-proof-blue transition hover:bg-sidebar-accent ${chatCenterActive ? 'bg-sidebar-accent' : 'bg-transparent'}`}
+        // look of the current page ONLY on /chats; anywhere else no outline — the icon and the word carry the ds action colour, nothing more.
+        // story 4930: it was `text-proof-blue` (the old info blue, rgb 31,95,191 — always on, neither «unread» nor «active»), a second accent next to the ds action violet; now the ds action-text.
+        className={`flex items-center gap-2 rounded-xl px-2.5 py-2 text-ds-action-text transition hover:bg-sidebar-accent ${chatCenterActive ? 'bg-sidebar-accent' : 'bg-transparent'}`}
         data-chat-center-active={chatCenterActive ? 'true' : 'false'}
       >
         <MessageSquare className="size-[18px] shrink-0" />

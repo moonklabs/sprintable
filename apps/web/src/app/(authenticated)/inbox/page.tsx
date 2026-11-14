@@ -648,7 +648,7 @@ export default function InboxPage() {
                           <div key={`group-${item.key}`}>
                             <div className="relative flex items-stretch transition hover:bg-muted/40">
                               {/* story #2023 ⓑ: 미읽음=L5(시스템 상태), 브랜드 아님 */}
-                              {item.hasUnread ? <span className="absolute left-0 top-0 h-full w-0.5 bg-info" aria-hidden /> : null}
+                              {item.hasUnread ? <span className="absolute left-0 top-0 h-full w-0.5 bg-ds-action" aria-hidden /> : null}
                               <button
                                 type="button"
                                 onClick={() => toggleGroup(item.key)}
@@ -678,7 +678,7 @@ export default function InboxPage() {
                                       {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
                                       {/* story #0d1c69f3(v2 4호) — generic 그룹은 status_change와 다른 문구(반복
                                           알림 건수일 뿐 "상태 변경" 의미가 아니다)를 쓴다. */}
-                                      <span className="shrink-0 rounded-full border border-info/30 bg-info/10 px-1.5 py-0.5 text-micro font-medium text-foreground">
+                                      <span className="shrink-0 rounded-full border border-ds-action/30 bg-ds-action/10 px-1.5 py-0.5 text-micro font-medium text-foreground">
                                         {/* story #4302(유나 판정) — 묶음 수는 불러온 쪽 안의 수다(전체 아님). 더 불러올 쪽이 남았으면 «48+건».
                                             en 복수형 키는 `+`를 숫자에 못 붙여 형제 키(statusChangeCountAtLeast). */}
                                         {item.groupKind === 'status_change'
@@ -759,7 +759,7 @@ export default function InboxPage() {
                           className={`relative flex w-full items-start gap-3 px-3 py-2.5 text-left transition ${isSelected ? 'bg-accent' : 'hover:bg-muted/40'}`}
                         >
                           {/* 목업 ④: unread=좌측 accent strip(박시 카드 bg 대체). story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
-                          {!notification.is_read ? <span className="absolute left-0 top-0 h-full w-0.5 bg-info" aria-hidden /> : null}
+                          {!notification.is_read ? <span className="absolute left-0 top-0 h-full w-0.5 bg-ds-action" aria-hidden /> : null}
                           <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-overlay-fill-1 text-muted-foreground">
                             <NotifIcon type={notification.type} fallback={Info} className="size-4" />
                           </div>

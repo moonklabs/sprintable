@@ -488,8 +488,10 @@ describe('real repo globals.css — 실제 정의가 전 조합 AA(4.5)를 통�
       .map((r) => r.familyColorOnBackgroundRatio)
       .filter((v) => !Number.isNaN(v));
     const min = Math.min(...familyColorRatios);
-    expect(min).toBeGreaterThanOrEqual(4.5);
-    expect(min).toBeLessThan(4.7); // 문턱에서 크게 안 멀어졌는지 — 멀어지면 팔레트가 또 바뀐 것. story 4919: ds 팔레트로 최솟값이 4.50 → 4.62(여전히 AA 위, «반례 복원» 없음).
+    // story 4930: `--primary-tint`가 ds action-soft(#efedfc)의 별칭이 되어(옛 파랑 oklch .97 .02 255 → 보라 틴트) primary 계열의 «family color 글자 × 자기 틴트»가 4.62 → 4.27로 내려가 다시 AA 밑이 됐다.
+    // 위 주석이 정한 대로 «원래 반례 존재» 단언을 복원한다 — 이 규칙(-foreground를 써라, family color를 글자로 쓰지 마라)이 여전히 필요하다는 증거. 같은 값 범위(4.0 ~ 4.5)에 머무는지만 pin.
+    expect(min).toBeLessThan(4.5);
+    expect(min).toBeGreaterThan(4.0);
   });
 
   // story #2575 AC1 — -bg가 이 스토리 이전엔 아예 안 잡혔다는 것 자체가 #2960의 근본원인.
