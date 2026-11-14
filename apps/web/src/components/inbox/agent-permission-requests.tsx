@@ -111,6 +111,8 @@ export function useAgentPermissionRequests() {
   }, [hasLines]);
   // story 4949 (codex): the last read FAILED — what is shown is from before; a file's lines are not kept on screen on a row nobody has confirmed since (the server may have let go of them)
   const [stale, setStale] = useState(false);
+  // story 4949 (codex round 5): a change frame for a request means its question is no longer what the lines were shown for — they go at once, before any read, even for a request answered HERE (whose read is held back)
+  const [linesGone, setLinesGone] = useState<ReadonlySet<string>>(new Set());
   const readFor = useRef(-1);
   // story 4949 (codex): reads can overlap — an older answer that comes after a newer one is ignored (it must not undo what the newer one said: a failed read marks the rows stale)
   const readSeq = useRef(0);
@@ -134,6 +136,7 @@ export function useAgentPermissionRequests() {
     onExtraEvent: (name, data) => {
       if (name === PERMISSION_CHANGED_EVENT) {
         const id = (data as { request_id?: unknown } | null)?.request_id;
+        if (typeof id === 'string') setLinesGone((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
         if (typeof id === 'string' && !answeredHere.current.has(id)) setNotices((k) => k + 1);
         return;
       }
@@ -192,7 +195,7 @@ export function useAgentPermissionRequests() {
     </div>
   ) : null;
 
-  return { shown, now, phone, auth, offLine, stale, answerFor: (r: PermissionRequest): Answer | null => answerFor(answers, r), onAnswer: (r: PermissionRequest, decision: 'allow' | 'deny') => void answer(r, decision) };
+  return { shown: shown.map((r) => (r.preview && linesGone.has(r.request_id) ? { ...r, preview: null } : r)), now, phone, auth, offLine, stale, answerFor: (r: PermissionRequest): Answer | null => answerFor(answers, r), onAnswer: (r: PermissionRequest, decision: 'allow' | 'deny') => void answer(r, decision) };
 }
 
 export function AgentPermissionRequests() {

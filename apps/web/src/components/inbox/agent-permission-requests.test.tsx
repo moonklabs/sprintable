@@ -191,6 +191,20 @@ describe('AgentPermissionRequests (story #4533)', () => {
     expect(has(), 'past the window, with no read having answered').toBe(false);
   });
 
+  it('[4949 · codex round 5] a change frame for a request takes its lines off at once — before any read, and also when the request was answered here (whose read is held back)', async () => {
+    const preview: PermissionPreview = { op: 'edit', blocks: [{ removed: ['a = 1'], added: ['a = 2'], removed_more: 0, added_more: 0 }], blocks_more: 0, replace_all: false, withheld: null };
+    const row = req({ tool: 'Edit', summary: 'src/a.ts', masked: false, preview });
+    const other = req({ id: 'r2', request_id: 'q2', tool: 'Edit', summary: 'src/b.ts', masked: false, preview });
+    fetchWithAuth.mockResolvedValueOnce(answer([row, other]));
+    await render();
+    const count = () => container.querySelectorAll('[data-testid="agent-permission-preview"]').length;
+    expect(count()).toBe(2);
+    fetchWithAuth.mockImplementation(() => new Promise<Response>(() => {})); // the read this frame starts hangs
+    await act(async () => { onExtra?.('agent.permission_request.changed', { request_id: row.request_id, state: 'withdrawn' }); });
+    expect(count(), 'the changed request lost its lines before any read answered').toBe(1);
+    expect(container.querySelectorAll('[data-testid="agent-permission-card"]')).toHaveLength(2); // the cards stay until a read says otherwise
+  });
+
   it('[4938] the masked block carries no word of its own: an older Mac app\'s «(가림)» is shown without it, a new one\'s «••••» as it is — and a file name beside the block stays', async () => {
     fetchWithAuth.mockResolvedValueOnce(answer([req({ summary: '••••(가림).txt' }), req({ id: 'r2', request_id: 'q2', summary: '••••.txt' }), req({ id: 'r3', request_id: 'q3', summary: 'note.txt', masked: false }), req({ id: 'r4', request_id: 'q4', summary: 'echo ••••(가림)', masked: false })]));
     await render();
