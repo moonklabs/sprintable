@@ -12,6 +12,8 @@ if (existsSync(localEnvFile)) dotenvConfig({ path: localEnvFile });
 const devServerLog = process.env['E2E_WEBSERVER_LOG'] ?? resolve(__dirname, 'playwright/server-logs/next-dev.log');
 process.env['E2E_WEBSERVER_LOG'] = devServerLog;
 
+const noWrapper = process.env['E2E_NO_WRAPPER'] === '1'; // PROOF BRANCH ONLY (story 4927 bisect)
+
 export default defineConfig({
   testDir: './e2e',
   globalSetup: './e2e/global-setup.ts',
@@ -33,11 +35,10 @@ export default defineConfig({
   webServer: process.env['PLAYWRIGHT_BASE_URL']
     ? undefined
     : {
-        command: 'node e2e/support/dev-server-logged.mjs',
+        command: noWrapper ? 'pnpm dev' : 'node e2e/support/dev-server-logged.mjs',
         url: 'http://localhost:3108',
         reuseExistingServer: !process.env['CI'],
         // default 'ignore' dropped Next's own lines (compile times) from the CI log — only stderr reached it, with no time
-        stdout: 'pipe',
-        stderr: 'pipe',
+        ...(noWrapper ? {} : { stdout: 'pipe' as const, stderr: 'pipe' as const }),
       },
 });

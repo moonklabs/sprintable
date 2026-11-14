@@ -31,6 +31,7 @@ const WATCHES = new WeakMap<Page, Watching>();
 
 /** Call once at the top of a spec file: every test of the file starts watching its page (and notes when the test began). */
 export function installMarkerWatch(): void {
+  if (process.env['E2E_NO_WATCH'] === '1') return; // PROOF BRANCH ONLY (story 4927 bisect)
   test.beforeEach(({ page }) => { WATCHES.set(page, { watch: watchNetwork(page), startedAt: Date.now() }); });
 }
 
