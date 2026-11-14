@@ -18,7 +18,7 @@ import { handleListKeys } from '@/lib/list-keys';
  */
 /** one entry of a row's right-click menu — an action the detail column ALSO has (never a right-click-only action) */
 export interface GateQueueMenuItem {
-  id: 'approve' | 'reject' | 'hold' | 'open';
+  id: 'approve' | 'reject' | 'hold' | 'open' | 'copy';
   label: string;
   icon: IconName;
   onSelect: () => void;
@@ -67,10 +67,10 @@ function GateQueueRowView({ row, section, selected, onSelect, onOpen }: { row: G
   );
   const rowProps = { 'data-row-key': row.key, 'data-testid': 'gate-queue-row', onClick: () => onSelect(row.key), onDoubleClick: onOpen ? () => onOpen(row.key) : undefined };
   if (!row.menu || row.menu.length === 0) return <div {...rowProps}>{rowEl}</div>;
-  const decide = row.menu.filter((m) => m.id !== 'open');
-  const open = row.menu.filter((m) => m.id === 'open');
+  const decide = row.menu.filter((m) => m.id !== 'open' && m.id !== 'copy');
+  const open = row.menu.filter((m) => m.id === 'open' || m.id === 'copy'); // «open the page» · «copy the question» (story 4950) — the entries that decide nothing sit under the separator
   return (
-    // the right-click menu — the same ds ContextMenu the storage screen uses; its entries are actions the detail column has too (approve · reject · hold · open the page)
+    // the right-click menu — the same ds ContextMenu the storage screen uses; its entries are actions the detail column has too (approve · reject · hold · open the page · copy the question)
     <ContextMenu>
       <ContextMenuTrigger render={<div {...rowProps} />}>{rowEl}</ContextMenuTrigger>
       <MenuContent align="start">

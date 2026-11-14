@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Avatar } from '@/components/ds/avatar';
@@ -8,7 +8,10 @@ import { Button } from '@/components/ds/button';
 import { CountBadge } from '@/components/ds/count-badge';
 import { EmptyState } from '@/components/ds/empty-state';
 import { ListRow } from '@/components/ds/list-row';
+import { ContextMenu, ContextMenuTrigger, MenuContent, MenuItem, MenuSeparator } from '@/components/ds/menu';
 import { SectionHeader } from '@/components/ds/section-header';
+import { useToast } from '@/components/ui/toast';
+import { copyTextSafely } from '@/lib/clipboard';
 import { hrefForNeedsMeItem } from '@/components/org-briefing/derive-today';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { handleListKeys } from '@/lib/list-keys';
@@ -56,11 +59,12 @@ export const AGENT_STATUS_KEY: Record<string, string> = {
   hitl_pending: 'agentStatusHitlPending',
 };
 
-export type RowAction = 'approve' | 'approveAndSign' | 'answer' | 'open';
+export type RowAction = 'approve' | 'approveAndSign' | 'decide' | 'answer' | 'open';
 export function actionLabel(t: ReturnType<typeof useTranslations>, action: RowAction): string {
   switch (action) {
     case 'approve': return t('rowApprove');
     case 'approveAndSign': return t('rowApproveAndSign');
+    case 'decide': return t('rowDecide');
     case 'answer': return t('actionAnswer');
     case 'open': return t('actionOpen');
   }
@@ -76,7 +80,9 @@ export function useRowLink(sources: HomeSources): (row: HomeRow) => { action: Ro
       case 'answer': {
         const item = sources.snapshot.needsMe.find((i) => `${i.source}:${i.id}` === row.key);
         if (!item) return null;
-        return { action: NEEDS_ACTION[row.kind] ?? 'open', href: hrefForNeedsMeItem(item, flatHref) };
+        // story 4950: this link only OPENS the request (the choice and the decision are made on its page) — so a decision request says «결정하러 열기», not «승인»
+        const action: RowAction = row.kind === 'approval' && item.workItemType === 'agent_decision' ? 'decide' : NEEDS_ACTION[row.kind] ?? 'open';
+        return { action, href: hrefForNeedsMeItem(item, flatHref) };
       }
       case 'mention':
       case 'assigned':
@@ -108,6 +114,10 @@ function HomeRowView({ row, sources, needsHand, selected, onSelect }: { row: Hom
   const flatHref = useFlatHref();
   const linkFor = useRowLink(sources);
   const link = linkFor(row);
+  const tCage = useTranslations('cage'); // the SAME words as the approvals screen's row menu
+  const tCommon = useTranslations('common');
+  const { addToast } = useToast();
+  const rowRef = useRef<HTMLDivElement>(null);
   // what the old rows also said: an approval's reason (or who asked), the status word of an agent run, and — on an approval that needs a signature — the notice that it cannot be undone
   const need = needsHand && (row.kind === 'approval' || row.kind === 'signature' || row.kind === 'answer') ? sources.snapshot.needsMe.find((i) => `${i.source}:${i.id}` === row.key) ?? null : null;
   const run = row.kind === 'agent-run' ? sources.snapshot.agentProgress.find((r) => r.runId === row.ref.id) ?? null : null;
@@ -126,20 +136,36 @@ function HomeRowView({ row, sources, needsHand, selected, onSelect }: { row: Hom
         {conversationHref ? <Link href={conversationHref} className="text-ds-small text-ds-action hover:underline">{tb('conversationOpenLink')}</Link> : null}
         {link ? (
           <Button asChild size="md" variant={needsHand ? 'primary' : 'secondary'}>
-            <Link href={link.href}>{actionLabel(t, link.action)}</Link>
+            <Link href={link.href} data-home-row-action="">{actionLabel(t, link.action)}</Link>
           </Button>
         ) : null}
       </>
     ) : undefined,
   } as const;
-  return (
-    // a click anywhere on the row selects it (a click on the row's own link goes where the link goes and does not also select)
-    <div data-row-key={row.key} onClick={(e) => { if (!(e.target as HTMLElement).closest('a')) onSelect(row.key); }}>
+  const inner = (
+    <>
       {needsHand
         ? <ListRow {...common} selected={selected} needsHand needsHandLabel={t('needsHandLabel')} className="has-[button:focus-visible]:ring-2 has-[button:focus-visible]:ring-inset has-[button:focus-visible]:ring-ds-action" />
         : <ListRow {...common} selected={selected} className="has-[button:focus-visible]:ring-2 has-[button:focus-visible]:ring-inset has-[button:focus-visible]:ring-ds-action" />}
       {need?.state === 'signature' ? <p className="m-0 border-b border-ds-line px-4 pb-2 text-ds-small text-ds-ink-3">{tb('signatureRiskNotice')}</p> : null}
-    </div>
+    </>
+  );
+  // a click anywhere on the row selects it (a click on the row's own link goes where the link goes and does not also select)
+  const rowProps = { 'data-row-key': row.key, ref: rowRef, onClick: (e: ReactMouseEvent) => { if (!(e.target as HTMLElement).closest('a')) onSelect(row.key); } };
+  if (!needsHand || !link) return <div {...rowProps}>{inner}</div>;
+  // story 4950 — the right-click menu of a «내 손이 필요해요» row (Mac / desktop): the approvals screen's own ds ContextMenu with the same entries that need nothing new here: open the request (a click on the row's own link) · copy its question / title.
+  // Reject and hold stay on the approvals screen (they ask for a reason in a dialog that lives there); nothing here is right-click-only — the row's button and the detail card have the open action too.
+  const isDecision = need?.workItemType === 'agent_decision';
+  const copyTitle = () => { void copyTextSafely(rowTitle(t, row)).then((r) => { if (!r.ok) addToast({ type: 'error', title: tCommon('copyFailedSelectManually') }); }); };
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger render={<div {...rowProps} />}>{inner}</ContextMenuTrigger>
+      <MenuContent align="start">
+        <MenuItem icon="open_in_new" onClick={() => (rowRef.current?.querySelector('a[data-home-row-action]') as HTMLAnchorElement | null)?.click()}>{tCage('queueMenuOpen')}</MenuItem>
+        <MenuSeparator />
+        <MenuItem icon="content_copy" onClick={copyTitle}>{isDecision ? tCage('queueMenuCopyQuestion') : tCage('queueMenuCopyTitle')}</MenuItem>
+      </MenuContent>
+    </ContextMenu>
   );
 }
 

@@ -27,6 +27,10 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: pushMock, replace: vi.fn() }),
 }));
 
+// story 4950 — the copy entry says a refused copy in words (a toast): the test sees the toast call (no provider draws it here)
+const { addToastMock } = vi.hoisted(() => ({ addToastMock: vi.fn() }));
+vi.mock('@/components/ui/toast', async (importActual) => ({ ...(await importActual<typeof import('@/components/ui/toast')>()), useToast: () => ({ addToast: addToastMock, removeToast: vi.fn(), toasts: [] }) }));
+
 // story #2985 AC2 — approval-request-card.test.tsx와 동일 전략.
 // story #3069(2026-08-25) — 이 파일이 이제 mux.subscribe를 직접 안 부르고
 // useSseNotifications(use-sse-notifications.ts)를 경유한다(그 훅이 mux 有/無를 갈라
@@ -2028,7 +2032,7 @@ describe('ApprovalsQueue — 4909 AC3 the list + detail screen', () => {
     await mount();
     expect(detailText()).toContain('첫째 결재 항목'); // g1 is the picked one
     await rightClick('g2');
-    expect(menuLabels()).toEqual([koMessages.cage.gateApprove, koMessages.cage.sigReject, koMessages.cage.gateDiscussSubmit, koMessages.cage.queueMenuOpen]);
+    expect(menuLabels()).toEqual([koMessages.cage.gateApprove, koMessages.cage.sigReject, koMessages.cage.gateDiscussSubmit, koMessages.cage.queueMenuOpen, koMessages.cage.queueMenuCopyTitle]);
     await clickMenuItem(koMessages.cage.gateApprove);
     expect(calls.filter((c) => c.method === 'POST').map((c) => c.url)).toEqual(['/api/gates/g2/transition']); // reverted → no menu at all
     expect(rowEl('g2').textContent).toContain(koMessages.cage.queueResolvedApproved);
@@ -2080,12 +2084,40 @@ describe('ApprovalsQueue — 4909 AC3 the list + detail screen', () => {
     expect(document.body.querySelector('[data-slot="dialog-title"]')?.textContent).toBe(koMessages.cage.gateDiscussTitle);
   });
 
+  it('⭐[SID:4950] the menu has «질문 복사» for a decision (its title IS the question) and «제목 복사» for any other request — each copies THAT row\'s title and sends nothing', async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const calls = mockFetches([lowGate('g1', '첫째 결재 항목'), decision('d1', '랜딩 문구를 가격 먼저로 바꿔도 될까요?')], []);
+    await mount();
+    await rightClick('d1');
+    expect(menuLabels()).toContain(koMessages.cage.queueMenuCopyQuestion);
+    await clickMenuItem(koMessages.cage.queueMenuCopyQuestion);
+    expect(writeText).toHaveBeenLastCalledWith('랜딩 문구를 가격 먼저로 바꿔도 될까요?'); // reverted (no entry) → no copy
+    await rightClick('g1');
+    expect(menuLabels()).toContain(koMessages.cage.queueMenuCopyTitle);
+    await clickMenuItem(koMessages.cage.queueMenuCopyTitle);
+    expect(writeText).toHaveBeenLastCalledWith('첫째 결재 항목');
+    expect(calls.filter((c) => c.method === 'POST' || c.method === 'PATCH')).toHaveLength(0);
+  });
+
+  it('[SID:4950] when the browser refuses the copy it is said in words (a toast), never a silent no-op', async () => {
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: vi.fn(async () => { throw new Error('denied'); }) }, configurable: true });
+    Object.defineProperty(document, 'execCommand', { value: vi.fn(() => false), configurable: true }); // jsdom has none: the old-style copy fallback fails too
+    mockFetches([lowGate('g1', '첫째 결재 항목')], []);
+    await mount();
+    await rightClick('g1');
+    await clickMenuItem(koMessages.cage.queueMenuCopyTitle);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(addToastMock).toHaveBeenCalledWith({ type: 'error', title: koMessages.common.copyFailedSelectManually }); // reverted (a silent no-op) → never called
+    delete (document as unknown as { execCommand?: unknown }).execCommand;
+  });
+
   it('a request that cannot be decided here (on hold · already decided · no permission) only offers «자세히 열기», which opens its page', async () => {
     mockFetches([lowGate('g1', '첫째 결재 항목'), lowGate('g2', '권한 없는 항목', { can_approve: false })], [lowGate('g3', '보류된 항목', { status: 'held', held_until: null })]);
     await mount();
     for (const key of ['g2', 'g3']) {
       await rightClick(key);
-      expect(menuLabels()).toEqual([koMessages.cage.queueMenuOpen]);
+      expect(menuLabels()).toEqual([koMessages.cage.queueMenuOpen, koMessages.cage.queueMenuCopyTitle]);
       pushMock.mockClear();
       await clickMenuItem(koMessages.cage.queueMenuOpen);
       expect(pushMock).toHaveBeenCalledWith(`/gates/${key}`);
@@ -2098,14 +2130,14 @@ describe('ApprovalsQueue — 4909 AC3 the list + detail screen', () => {
     await rightClick('g1');
     await clickMenuItem(koMessages.cage.gateApprove);
     await rightClick('g1');
-    expect(menuLabels()).toEqual([koMessages.cage.queueMenuOpen]);
+    expect(menuLabels()).toEqual([koMessages.cage.queueMenuOpen, koMessages.cage.queueMenuCopyTitle]);
   });
 
   it('a HITL request: approve · reject from the menu send the PATCH for THAT request; an agent account gets no menu', async () => {
     const calls = mockFetches([hitl({ id: 'h1', title: '첫째 승인 요청' }), hitl({ id: 'h2', title: '둘째 승인 요청' })], []);
     await mount();
     await rightClick('h2');
-    expect(menuLabels()).toEqual([koMessages.cage.gateApprove, koMessages.cage.gateReject]);
+    expect(menuLabels()).toEqual([koMessages.cage.gateApprove, koMessages.cage.gateReject, koMessages.cage.queueMenuCopyTitle]);
     await clickMenuItem(koMessages.cage.gateReject);
     const patches = () => calls.filter((c) => c.method === 'PATCH');
     expect(patches().map((c) => c.url)).toEqual(['/api/v1/hitl-requests/h2']);
@@ -2136,9 +2168,10 @@ describe('ApprovalsQueue — 4909 AC3 the list + detail screen', () => {
     for (const key of ['g1', 'd1']) {
       await rightClick(key);
       const labels = menuLabels();
-      expect(labels).toHaveLength(4);
+      expect(labels).toHaveLength(5);
       for (const label of labels.slice(0, 3)) expect(disabledOf(label as string)).toBe(true); // reverted → the option-approval entry stays enabled
       expect(disabledOf(labels[3] as string)).toBe(false);
+      expect(disabledOf(labels[4] as string)).toBe(false); // «copy» stays on: it decides nothing
       await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
     }
   });
@@ -2154,7 +2187,7 @@ describe('ApprovalsQueue — 4909 AC3 the list + detail screen', () => {
     await act(async () => { approve.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await rightClick('g1');
     const labels = menuLabels();
-    expect(labels).toEqual([koMessages.cage.gateApprove, koMessages.cage.sigReject, koMessages.cage.gateDiscussSubmit, koMessages.cage.queueMenuOpen]); // the menu IS there (an empty menu would make the loop below vacuous)
+    expect(labels).toEqual([koMessages.cage.gateApprove, koMessages.cage.sigReject, koMessages.cage.gateDiscussSubmit, koMessages.cage.queueMenuOpen, koMessages.cage.queueMenuCopyTitle]); // the menu IS there (an empty menu would make the loop below vacuous)
     for (const label of labels.slice(0, 3)) expect(disabledOf(label as string)).toBe(true);
     expect(disabledOf(labels[3] as string)).toBe(false);
   });
