@@ -5,12 +5,12 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const badgeVariants = cva(
-  // story 4919 — 결(그레인)과 눌린 엠보스(proof-surface-press)는 걷었다: 배지 면은 평평하고 모양(소프트 라운드)은 그대로다.
+  // story 4919 — 결(그레인)과 눌린 엠보스는 걷었다: 배지 면은 평평하고 모양(소프트 라운드)은 그대로다.
   // story #7d7634ee(P0·선생님 직접 지시, 감確認 doc ea94dac4) — 코너컷(proof-cut proof-cut-xs)
   // 전면 폐지, 소프트 라운드+체감되는 재질(그레인+엠보스)로 교체. badge.tsx가 이 base
   // className에 무조건 굽고 있던 게 앱 전체 76파일/223콜사이트의 "75곳" 체감 뿌리였다 —
-  // 이 한 줄 교체가 그 전부에 자동 캐스케이드된다. proof-surface-press(눌린 엠보스)는 doc
-  // §⑤ 토큰표가 "씰/칩"을 emboss-press의 명시 예시로 들었다.
+  // 이 한 줄 교체가 그 전부에 자동 캐스케이드된다. 눌린 엠보스는 doc
+  // §⑤ 토큰표가 "씰/칩"을 명시 예시로 들었다(4919가 걷음).
   // story #2969 §1.4/§2 PR-1(doc proofline-system-layer-2969) — shadow-sm 제거(§1.2: 인라인
   // 표면은 그림자 대신 라인 — border-transparent(default/success 등)는 이미 그 자리 없이도
   // 무회귀, 계열 variant는 기존 border-*/70 hairline이 그대로 그 역할). ⚠️mono 라벨(라틴

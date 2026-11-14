@@ -1,7 +1,7 @@
 // FROZEN FIXTURE (story 4892) — the old tinted status-header markup of components/docs/doc-status-rail.tsx as it was before the ds rebuild. verify-no-muted-on-tint.test.ts mutates THIS copy
 // (the real file now uses ds tokens) so the analyzer's template-literal-ternary axis keeps a real-shaped positive control.
   return (
-    <div className={`proof-surface proof-surface-lift flex flex-wrap items-center gap-3 border px-4 py-3.5 ${
+    <div className={`proof-surface flex flex-wrap items-center gap-3 border px-4 py-3.5 ${
       state === 'confirmed' ? 'border-success/30 bg-success-tint' : state === 'denied' ? 'border-destructive/30 bg-destructive-tint' : 'border-warning/30 bg-warning-tint'
     }`}
     >

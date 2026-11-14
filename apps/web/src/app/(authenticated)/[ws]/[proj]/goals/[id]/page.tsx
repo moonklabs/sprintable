@@ -459,7 +459,7 @@ export default function EpicDetailPage() {
               폐지. 강조 색은 이 카드의 항상-고정 blue(상태별 분기 없음, 기존 동작 그대로)를
               proof-line 헤어라인+깊이로 이전 — 텍스트 강조는 유지(신호가 아니라 위계라 색
               텍스트는 남긴다, MaterialChip류의 "장식 fill"과는 다른 자리).
-              story #7d7634ee(P0) — elev-card는 proof-surface-lift로 흡수(두 elevation
+              story #7d7634ee(P0) — elev-card는 뜬 표면 재질로 흡수(이후 4919가 그 그림자를 걷음)(두 elevation
               시스템 이중 적용 방지, box-shadow 충돌 제거). */}
           <div className="proof-surface border border-proof-line bg-proof-panel px-4 py-3.5">
             <div className="font-mono text-micro uppercase tracking-[0.1em] text-proof-blue">{t('outcomeCapsuleTitle')}</div>
