@@ -191,5 +191,5 @@ test('[SID:4923] a filter MENU opens from the popover by keyboard: Esc closes th
 test('[SID:4923] the board frame keeps 8px above and below on a low window (16px on a tall one) — the frame class that carries the rule', () => {
   const cls = frameClass();
   expect(cls).toContain('py-4');
-  expect(cls).toContain('lg:[@media(max-height:520px)]:py-2');
+  expect(cls).toContain('lg:[@media(max-height:600px)]:py-2');
 });

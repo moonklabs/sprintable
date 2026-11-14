@@ -30,7 +30,7 @@ const frameClassFull = (): string => {
   return m[1]!;
 };
 // the three low-window padding tokens of 4923 (row · column · header): a control takes them off to reproduce the dev numbers (box 69 at 1100×420) and show that THEY are what makes the box
-const LOW = 'lg:[@media(max-height:520px)]:';
+const LOW = 'lg:[@media(max-height:600px)]:'; // story 4945: the low-window line moved 520 → 600
 const SQUEEZE_TOKENS = [`${LOW}py-1.5`, `${LOW}py-2`, `${LOW}mb-2`];
 
 const STORY = (id: string, n: number, status: string, trust: string | undefined) => ({
@@ -354,6 +354,6 @@ for (const c of KEY_CASES) {
 test('[SID:4923] the board frame is the one 4923 already had (8px above and below on a low window) — no height floor on it', () => {
   const cls = frameClassFull();
   expect(cls).toContain('py-4');
-  expect(cls).toContain('lg:[@media(max-height:520px)]:py-2');
+  expect(cls).toContain('lg:[@media(max-height:600px)]:py-2');
   expect(cls).not.toContain(':h-[max(');
 });
