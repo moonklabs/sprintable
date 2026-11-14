@@ -9,7 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
-import type { PermissionRequest } from '@/lib/agent-permissions';
+import type { PermissionPreview, PermissionRequest } from '@/lib/agent-permissions';
 
 const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
@@ -76,6 +76,133 @@ describe('AgentPermissionRequests (story #4533)', () => {
     }
     expect(line()).toBe('페어링된 폰에서 답할 수 있어요');
     expect(container.querySelectorAll('button')).toHaveLength(0);
+  });
+
+  it('[4949] a request that carries a preview shows its lines under the file name; one without shows none; the buttons stay (44 high on a phone)', async () => {
+    const preview: PermissionPreview = { op: 'edit', blocks: [{ removed: ['a = 1'], added: ['a = 2'], removed_more: 0, added_more: 0 }], blocks_more: 0, replace_all: false, withheld: null };
+    fetchWithAuth.mockResolvedValueOnce(answer([req({ tool: 'Edit', summary: 'src/a.ts', masked: false, preview }), req({ id: 'r2', request_id: 'q2', tool: 'Bash', summary: 'ls', masked: false })]));
+    await render();
+    const previews = container.querySelectorAll('[data-testid="agent-permission-preview"]');
+    expect(previews).toHaveLength(1);
+    expect(previews[0]!.textContent).toContain('바꾸려는 줄');
+    expect(previews[0]!.textContent).toContain('a = 2');
+    // the preview sits after the file name's box (the card reads: who · what tool · which file · which lines)
+    const card = previews[0]!.closest('[data-testid="agent-permission-card"]')!;
+    expect(card.textContent!.indexOf('src/a.ts')).toBeLessThan(card.textContent!.indexOf('바꾸려는 줄'));
+  });
+
+  it('[4949 · codex] once an answer was accepted the card shows no lines — a row still cached from before the answer is not a reason to keep a file\'s content on screen', async () => {
+    const { PermissionCard } = await import('./agent-permission-requests');
+    const preview: PermissionPreview = { op: 'edit', blocks: [{ removed: ['a = 1'], added: ['a = 2'], removed_more: 0, added_more: 0 }], blocks_more: 0, replace_all: false, withheld: null };
+    const row = req({ tool: 'Edit', summary: 'src/a.ts', masked: false, preview });
+    const mount = async (answerState: Parameters<typeof PermissionCard>[0]['answer']) => {
+      await act(async () => {
+        root.render(
+          <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+            <PermissionCard request={row} now={NOW} phone auth={null} answer={answerState} onAnswer={() => {}} />
+          </NextIntlClientProvider>,
+        );
+      });
+    };
+    await mount(null);
+    expect(container.querySelector('[data-testid="agent-permission-preview"]')).not.toBeNull();
+    for (const a of [{ kind: 'sending', decision: 'allow' }, { kind: 'answered', decision: 'allow' }, { kind: 'answered', decision: 'deny' }] as const) {
+      await mount(a as never);
+      expect(container.querySelector('[data-testid="agent-permission-preview"]'), a.kind).toBeNull();
+    }
+    await mount(null);
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><PermissionCard request={{ ...row, state: 'answered' }} now={NOW} phone auth={null} answer={null} onAnswer={() => {}} /></NextIntlClientProvider>); });
+    expect(container.querySelector('[data-testid="agent-permission-preview"]'), 'a row that is no longer pending').toBeNull();
+  });
+
+  it('[4949 · codex round 2] no lines of a file on a row nobody has confirmed since: past its window · or the last read failed (the server may have let go of them already)', async () => {
+    const { PermissionCard } = await import('./agent-permission-requests');
+    const preview: PermissionPreview = { op: 'edit', blocks: [{ removed: ['a = 1'], added: ['a = 2'], removed_more: 0, added_more: 0 }], blocks_more: 0, replace_all: false, withheld: null };
+    const row = req({ tool: 'Edit', summary: 'src/a.ts', masked: false, preview });
+    const mount = async (now: number, stale?: boolean) => {
+      await act(async () => {
+        root.render(
+          <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+            <PermissionCard request={row} now={now} phone auth={null} answer={null} stale={stale} onAnswer={() => {}} />
+          </NextIntlClientProvider>,
+        );
+      });
+    };
+    const has = () => container.querySelector('[data-testid="agent-permission-preview"]') !== null;
+    await mount(NOW); expect(has()).toBe(true);
+    await mount(Date.parse(row.expires_at) + 1); expect(has(), 'past its window').toBe(false);
+    await mount(NOW, true); expect(has(), 'the last read failed').toBe(false);
+    // and through the hook: a read that fails keeps the card but takes its lines off; the next good read brings them back
+    fetchWithAuth.mockResolvedValueOnce(answer([row]));
+    await render();
+    expect(has()).toBe(true);
+    fetchWithAuth.mockResolvedValueOnce(new Response('{}', { status: 500 }));
+    await act(async () => { onNotice?.({ event_type: 'dispatched', payload: { event_type: 'agent.permission_request' } }); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="agent-permission-card"]')).not.toBeNull();
+    expect(has(), 'a failed read hides the lines').toBe(false);
+    fetchWithAuth.mockResolvedValueOnce(answer([row]));
+    await act(async () => { onNotice?.({ event_type: 'dispatched', payload: { event_type: 'agent.permission_request' } }); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(has(), 'a good read brings them back').toBe(true);
+  });
+
+  it('[4949 · codex round 3] an older read that answers AFTER a newer one is ignored — it cannot undo a failed read\'s «stale» and bring a file\'s lines back', async () => {
+    const preview: PermissionPreview = { op: 'edit', blocks: [{ removed: ['a = 1'], added: ['a = 2'], removed_more: 0, added_more: 0 }], blocks_more: 0, replace_all: false, withheld: null };
+    const row = req({ tool: 'Edit', summary: 'src/a.ts', masked: false, preview });
+    let resolveOlder: (r: Response) => void = () => {};
+    fetchWithAuth.mockImplementationOnce(() => new Promise<Response>((r) => { resolveOlder = r; })); // the mount read — slow
+    await render();
+    fetchWithAuth.mockResolvedValueOnce(new Response('{}', { status: 500 })); // a newer read that fails — started by the page being seen again (the same effect run: a notice would re-run the effect and drop the older read on its own)
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    await act(async () => { resolveOlder(answer([row])); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="agent-permission-preview"]'), 'the older answer did not undo the newer failure').toBeNull();
+    expect(container.querySelector('[data-testid="agent-permission-card"]'), 'nor did it bring back a list the newer read replaced').toBeNull();
+  });
+
+  it('[4949 · codex round 4] an answer whose outcome is uncertain (the POST may have committed) hides the lines; one that was never sent keeps them', async () => {
+    const { PermissionCard } = await import('./agent-permission-requests');
+    const preview: PermissionPreview = { op: 'edit', blocks: [{ removed: ['a = 1'], added: ['a = 2'], removed_more: 0, added_more: 0 }], blocks_more: 0, replace_all: false, withheld: null };
+    const row = req({ tool: 'Edit', summary: 'src/a.ts', masked: false, preview });
+    const mount = async (a: Parameters<typeof PermissionCard>[0]['answer']) => {
+      await act(async () => {
+        root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><PermissionCard request={row} now={NOW} phone auth={null} answer={a} onAnswer={() => {}} /></NextIntlClientProvider>);
+      });
+    };
+    const has = () => container.querySelector('[data-testid="agent-permission-preview"]') !== null;
+    await mount({ kind: 'failed' } as never); expect(has(), 'failed: the answer may have gone through').toBe(false);
+    for (const kind of ['cancelled', 'not_paired', 'unreachable', 'signed_out'] as const) { await mount({ kind } as never); expect(has(), kind).toBe(true); }
+  });
+
+  it('[4949 · codex round 4] the card\'s clock ticks on its own: a read that hangs cannot keep an expired preview on screen', async () => {
+    const preview: PermissionPreview = { op: 'edit', blocks: [{ removed: ['a = 1'], added: ['a = 2'], removed_more: 0, added_more: 0 }], blocks_more: 0, replace_all: false, withheld: null };
+    const row = req({ tool: 'Edit', summary: 'src/a.ts', masked: false, preview, expires_at: new Date(NOW + 12_000).toISOString() });
+    fetchWithAuth.mockResolvedValueOnce(answer([row]));
+    await render();
+    const has = () => container.querySelector('[data-testid="agent-permission-preview"]') !== null;
+    expect(has()).toBe(true);
+    fetchWithAuth.mockImplementation(() => new Promise<Response>(() => {})); // every later read hangs
+    await act(async () => { vi.advanceTimersByTime(6_000); });
+    expect(has(), 'inside the window').toBe(true);
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    expect(has(), 'past the window, with no read having answered').toBe(false);
+  });
+
+  it('[4949 · codex round 5] a change frame for a request takes its lines off at once — before any read, and also when the request was answered here (whose read is held back)', async () => {
+    const preview: PermissionPreview = { op: 'edit', blocks: [{ removed: ['a = 1'], added: ['a = 2'], removed_more: 0, added_more: 0 }], blocks_more: 0, replace_all: false, withheld: null };
+    const row = req({ tool: 'Edit', summary: 'src/a.ts', masked: false, preview });
+    const other = req({ id: 'r2', request_id: 'q2', tool: 'Edit', summary: 'src/b.ts', masked: false, preview });
+    fetchWithAuth.mockResolvedValueOnce(answer([row, other]));
+    await render();
+    const count = () => container.querySelectorAll('[data-testid="agent-permission-preview"]').length;
+    expect(count()).toBe(2);
+    fetchWithAuth.mockImplementation(() => new Promise<Response>(() => {})); // the read this frame starts hangs
+    await act(async () => { onExtra?.('agent.permission_request.changed', { request_id: row.request_id, state: 'withdrawn' }); });
+    expect(count(), 'the changed request lost its lines before any read answered').toBe(1);
+    expect(container.querySelectorAll('[data-testid="agent-permission-card"]')).toHaveLength(2); // the cards stay until a read says otherwise
   });
 
   it('[4938] the masked block carries no word of its own: an older Mac app\'s «(가림)» is shown without it, a new one\'s «••••» as it is — and a file name beside the block stays', async () => {

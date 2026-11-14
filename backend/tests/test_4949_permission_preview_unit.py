@@ -1,0 +1,118 @@
+"""story 4949 — the preview a file tool's permission request carries: the report's own limits (422, never trimmed), the shapes that cannot exist
+(a withdrawn preview with lines · a write that removes · a terminal-only one), and nothing a field name can smuggle (extra → 422)."""
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timedelta, timezone
+
+import pytest
+from pydantic import ValidationError
+
+from app.services.agent_permissions import (
+    PREVIEW_ADDED_MAX, PREVIEW_BLOCKS_MAX, PREVIEW_CHARS_MAX, PREVIEW_LINE_MAX, PREVIEW_REMOVED_MAX, PermissionRequestReport,
+)
+
+
+def _report(**extra):
+    return {"request_id": str(uuid.uuid4()), "session_key": "s-1", "agent_member_id": str(uuid.uuid4()), "runtime": "claude", "tool": "Write",
+            "summary": "note.txt", "input_hash": "sha256:" + "a" * 64, "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(), **extra}
+
+
+def _tool_of(preview):
+    return "Write" if isinstance(preview, dict) and preview.get("op") == "write" else "Edit"
+
+
+def _ok(preview, **extra):
+    return PermissionRequestReport.model_validate(_report(preview=preview, **{"tool": _tool_of(preview), **extra}))
+
+
+def _bad(preview, **extra):
+    with pytest.raises(ValidationError):
+        PermissionRequestReport.model_validate(_report(preview=preview, **{"tool": _tool_of(preview), **extra}))
+
+
+def test_a_write_and_an_edit_preview_pass_and_none_is_none():
+    assert PermissionRequestReport.model_validate(_report()).preview is None
+    w = _ok({"op": "write", "blocks": [{"added": ["a", "b"], "added_more": 3}]})
+    assert w.preview.blocks[0].added == ["a", "b"] and w.preview.blocks[0].removed == []
+    e = _ok({"op": "edit", "blocks": [{"removed": ["old"], "added": ["new"]}], "replace_all": True})
+    assert e.preview.replace_all is True
+    assert _ok({"op": "edit", "blocks": [{"removed": ["x"], "added": ["y"]}] * PREVIEW_BLOCKS_MAX, "blocks_more": 4}, tool="MultiEdit").preview.blocks_more == 4
+
+
+def test_the_limits_are_the_servers_own_and_a_body_over_them_is_refused_not_trimmed():
+    _bad({"op": "edit", "blocks": [{"removed": ["x"] * (PREVIEW_REMOVED_MAX + 1)}]})
+    _bad({"op": "edit", "blocks": [{"added": ["x"] * (PREVIEW_ADDED_MAX + 1)}]})
+    _bad({"op": "edit", "blocks": [{"added": ["x" * (PREVIEW_LINE_MAX + 1)]}]})
+    _bad({"op": "edit", "blocks": [{"added": ["x"]}] * (PREVIEW_BLOCKS_MAX + 1)})
+    # the total: 3 blocks of 10 + 12 lines at 120 characters is over 2,400
+    full = {"removed": ["y" * PREVIEW_LINE_MAX] * PREVIEW_REMOVED_MAX, "added": ["z" * PREVIEW_LINE_MAX] * PREVIEW_ADDED_MAX}
+    assert (PREVIEW_REMOVED_MAX + PREVIEW_ADDED_MAX) * PREVIEW_LINE_MAX > PREVIEW_CHARS_MAX
+    _bad({"op": "edit", "blocks": [full]})
+    _bad({"op": "edit", "blocks": [{"added": ["x"], "added_more": -1}]})
+
+
+def test_a_shape_that_cannot_be_is_refused():
+    _bad({"op": "write", "blocks": [{"removed": ["old"], "added": ["new"]}]})  # a write removes nothing
+    _bad({"op": "write", "blocks": [{"added": ["a"]}, {"added": ["b"]}]})  # a write is one block
+    _bad({"op": "write", "blocks": [{"added": ["a"]}], "replace_all": True})
+    _bad({"op": "edit", "blocks": [{"added": ["a"]}], "withheld": "sensitive_path"})  # a withheld preview carries no lines
+    assert _ok({"op": "write", "blocks": [], "withheld": "sensitive_path"}).preview.withheld == "sensitive_path"
+    _bad({"op": "write", "blocks": [], "withheld": "anything-else"})
+    _bad({"op": "move", "blocks": []})
+
+
+def test_a_preview_belongs_to_a_claude_file_tool_and_the_right_kind_of_it(  # codex 4949 · security
+):
+    ok = {"op": "write", "blocks": [{"added": ["a"]}]}
+    edit = {"op": "edit", "blocks": [{"removed": ["a"], "added": ["b"]}]}
+    for tool in ("Bash", "Read", "SandboxNetwork", "mcp__x__Write"):
+        with pytest.raises(ValidationError):
+            PermissionRequestReport.model_validate(_report(tool=tool, preview=ok))  # free text has its own masking path — no preview of it
+    with pytest.raises(ValidationError):
+        PermissionRequestReport.model_validate(_report(tool="Edit", preview=ok))  # a write's preview on an Edit
+    with pytest.raises(ValidationError):
+        PermissionRequestReport.model_validate(_report(tool="Write", preview=edit))  # an edit's preview on a Write
+    with pytest.raises(ValidationError):
+        PermissionRequestReport.model_validate(_report(tool="Write", runtime="codex", preview=ok))  # only Claude's inputs are read
+    assert PermissionRequestReport.model_validate(_report(tool="MultiEdit", preview=edit)).preview.op == "edit"
+    assert PermissionRequestReport.model_validate(_report(tool="Write", preview=ok)).preview.op == "write"
+
+
+def test_an_empty_preview_and_a_loose_type_or_a_line_break_are_refused():  # codex 4949
+    _bad({"op": "write", "blocks": []})  # a write shows one block
+    _bad({"op": "edit", "blocks": []})  # an edit shows at least one
+    _bad({"op": "write", "blocks": [{}]})  # a block with no line and no count is not a preview (codex 4949 round 2)
+    _bad({"op": "edit", "blocks": [{"removed": [], "added": [], "removed_more": 0, "added_more": 0}]})
+    _ok({"op": "edit", "blocks": [{"added_more": 3}]})  # counts alone are something: lines were left out
+    _bad({"op": "write", "blocks": [{"added": ["a"]}], "replace_all": "false"})  # strict: a string is not a boolean
+    _bad({"op": "edit", "blocks": [{"removed": ["a"], "added_more": True}]})  # nor a boolean a count
+    for sep in ("\n", "\r", "\u2028", "\u2029", "\x0b", "\x0c", "\x85"):
+        _bad({"op": "write", "blocks": [{"added": [f"one{sep}two"]}]})
+        _bad({"op": "edit", "blocks": [{"removed": [f"one{sep}two"], "added": ["x"]}]})
+
+
+def test_nothing_else_can_ride_in_it_and_a_terminal_only_question_carries_none():
+    _bad({"op": "write", "blocks": [{"added": ["a"], "path": "/Users/me/x"}]})
+    _bad({"op": "write", "blocks": [], "content": "the whole file"})
+    with pytest.raises(ValidationError):
+        PermissionRequestReport.model_validate({**_report(preview={"op": "write", "blocks": [{"added": ["a"]}]}), "terminal_only": True, "input_hash": None})
+
+
+def test_the_limits_count_characters_the_way_the_mac_cuts_them_UTF16_units_not_code_points():  # codex 4949 round 3 · security
+    smile = chr(0x1F600)  # one code point, two UTF-16 units
+    _ok({"op": "write", "blocks": [{"added": [smile * (PREVIEW_LINE_MAX // 2)]}]})  # 120 units — the limit exactly
+    _bad({"op": "write", "blocks": [{"added": [smile * (PREVIEW_LINE_MAX // 2 + 1)]}]})  # 122 units: 61 code points would have passed
+    _bad({"op": "write", "blocks": [{"added": [smile * PREVIEW_LINE_MAX]}]})  # 240 units (120 code points) — the bypass
+    # the total too: 22 lines of 120 units = 2,640 > 2,400, though only 1,320 code points
+    line = smile * (PREVIEW_LINE_MAX // 2)
+    _bad({"op": "edit", "blocks": [{"removed": [line] * PREVIEW_REMOVED_MAX, "added": [line] * PREVIEW_ADDED_MAX}]})
+
+
+def test_a_line_carries_no_control_bidi_zero_width_or_separator_character():  # security lens 4949 · item 3 (Trojan Source)
+    refused = [0x00, 0x01, 0x08, 0x09, 0x1B, 0x7F, 0x80, 0x85, 0x9F, 0x061C, 0x200B, 0x200C, 0x200D, 0x200E, 0x200F, 0x2028, 0x2029, 0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2066, 0x2067, 0x2068, 0x2069, 0xFEFF]
+    for code in refused:
+        _bad({"op": "write", "blocks": [{"added": [f"before{chr(code)}after"]}]})
+        _bad({"op": "edit", "blocks": [{"removed": [f"x{chr(code)}"], "added": ["y"]}]})
+    # ordinary text of every script stays
+    _ok({"op": "write", "blocks": [{"added": ["plain text · \u00e9 \u4e2d\ud55c\U0001F600 \u05e9\u05dc\u05d5\u05dd", "  indented", "\u2022 bullet \u2014 dash"]}]})

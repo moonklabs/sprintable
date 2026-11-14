@@ -15,11 +15,12 @@ from __future__ import annotations
 import base64
 import hashlib
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -705,6 +706,82 @@ def _uuid(value) -> uuid.UUID | None:
 # ── ① the daemon reports · withdraws ─────────────────────────────────────────────────────────────────────────────────────
 
 
+# story 4949 — the preview of a file tool's input (Write · Edit · MultiEdit). The Mac masks it (the 4938 free-text rules) and cuts it; these are the
+# server's own limits (the same numbers as the daemon's) — a body over them is refused (422), never trimmed here
+PREVIEW_LINE_MAX = 120
+PREVIEW_REMOVED_MAX = 10
+PREVIEW_ADDED_MAX = 12
+PREVIEW_BLOCKS_MAX = 3
+PREVIEW_CHARS_MAX = 2400
+PREVIEW_COUNT_MAX = 10_000_000
+# the tools whose input a preview may be made from, and the kind each is
+PREVIEW_TOOL_OP = {"Write": "write", "Edit": "edit", "MultiEdit": "edit"}
+
+
+# a preview line is plain text on one line: no control character (C0 · DEL · C1 — a line break, ESC, NUL included), no bidi control (U+200E/F · 061C · 202A–202E · 2066–2069 — an override can make
+# later text read as if it belonged to another row: Trojan Source), no zero-width character (U+200B–200D · FEFF) and no line/paragraph separator (U+2028/2029). A conforming host replaces them (security lens, 4949)
+_LINE_CHARS_REFUSED = re.compile("[\x00-\x1f\x7f-\x9f\u061c\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]")
+
+
+def _u16(text: str) -> int:
+    """JavaScript's `.length` of the text — UTF-16 code units. The Mac cuts by it; Python's `len` counts code points, so 120 emoji would be 120 here and 240 there (codex 4949)."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+class PreviewBlock(BaseModel):
+    """One edit shown: the lines taken out and the lines put in, and how many more of each were left out (counted, never guessed)."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    removed: list[Annotated[str, Field(max_length=PREVIEW_LINE_MAX)]] = Field(default_factory=list, max_length=PREVIEW_REMOVED_MAX)
+    added: list[Annotated[str, Field(max_length=PREVIEW_LINE_MAX)]] = Field(default_factory=list, max_length=PREVIEW_ADDED_MAX)
+    removed_more: int = Field(default=0, ge=0, le=PREVIEW_COUNT_MAX)
+    added_more: int = Field(default=0, ge=0, le=PREVIEW_COUNT_MAX)
+
+    @model_validator(mode="after")
+    def _something_to_show(self) -> "PreviewBlock":
+        # a block that carries no line and no count is nothing (a body that draws as an empty preview — codex 4949)
+        if not (self.removed or self.added or self.removed_more or self.added_more):
+            raise ValueError("a preview block carries a line or a count")
+        return self
+
+    @field_validator("removed", "added")
+    @classmethod
+    def _one_line_each(cls, lines: list[str]) -> list[str]:
+        # a «line» is one line: the Mac splits on line breaks, and a string that carries one would draw as several rows (codex 4949)
+        if any(_LINE_CHARS_REFUSED.search(line) for line in lines):
+            raise ValueError("a preview line is plain text: no control, bidi, zero-width or line-separator character")
+        if any(_u16(line) > PREVIEW_LINE_MAX for line in lines):
+            raise ValueError(f"a preview line is at most {PREVIEW_LINE_MAX} characters (UTF-16 units, as the Mac counts)")
+        return lines
+
+
+class PermissionPreview(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    op: Literal["write", "edit"]
+    blocks: list[PreviewBlock] = Field(default_factory=list, max_length=PREVIEW_BLOCKS_MAX)
+    blocks_more: int = Field(default=0, ge=0, le=PREVIEW_COUNT_MAX)
+    replace_all: bool = False
+    # a file that looks like a secrets file: its content is not sent at all — only that it was left out
+    withheld: Literal["sensitive_path"] | None = None
+
+    @model_validator(mode="after")
+    def _shape(self) -> "PermissionPreview":
+        if self.withheld is not None and (self.blocks or self.blocks_more or self.replace_all):
+            raise ValueError("a withheld preview carries no lines")
+        if self.op == "write" and self.withheld is None and len(self.blocks) != 1:
+            raise ValueError("a write has one block of added lines")
+        if self.op == "write" and (len(self.blocks) > 1 or any(b.removed or b.removed_more for b in self.blocks) or self.blocks_more or self.replace_all):
+            raise ValueError("a write has one block of added lines only")
+        if self.op == "edit" and self.withheld is None and not self.blocks:
+            raise ValueError("an edit shows at least one block")
+        chars = sum(_u16(line) for b in self.blocks for line in (*b.removed, *b.added))
+        if chars > PREVIEW_CHARS_MAX:
+            raise ValueError(f"a preview carries at most {PREVIEW_CHARS_MAX} characters")
+        return self
+
+
 class PermissionRequestReport(BaseModel):
     """What a person sees — a masked, cut summary; no raw input, no full path, no key (extra fields → 422)."""
 
@@ -719,6 +796,8 @@ class PermissionRequestReport(BaseModel):
     masked: bool = False
     truncated: bool = False
     workdir: str | None = Field(default=None, max_length=200)
+    # story 4949: only on an answerable request (a terminal-only one has nothing to sign and nothing to look at before pressing)
+    preview: PermissionPreview | None = None
     input_hash: str | None = Field(default=None, pattern=_HASH_PATTERN)
     expires_at: AwareDatetime
     # story #4590 (Mirko's contract v1.14 ①): a question only that computer's terminal can answer — nothing to sign, so no hash;
@@ -730,8 +809,13 @@ class PermissionRequestReport(BaseModel):
         if self.terminal_only:
             if self.input_hash is not None:
                 raise ValueError("a terminal-only request carries no input_hash (nothing is signed)")
+            if self.preview is not None:
+                raise ValueError("a terminal-only request carries no preview (nothing is pressed on a phone)")
         elif self.tool is None or self.summary is None or self.input_hash is None:
             raise ValueError("tool, summary and input_hash are required unless the request is terminal_only")
+        if self.preview is not None and (self.runtime != "claude" or PREVIEW_TOOL_OP.get(self.tool or "") != self.preview.op):
+            # the preview of a FILE tool only (Claude Write · Edit · MultiEdit) and the right kind of it — a Bash command's text has its own masking path (the summary)
+            raise ValueError("a preview belongs to a Claude Write · Edit · MultiEdit request, as «write» / «edit»")
         return self
 
 
@@ -740,6 +824,14 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
     now = _now()
     if not now < body.expires_at <= now + MAX_WINDOW:
         raise DesktopRelayError(422, "invalid_expiry", "expires_at must be in the next 3600 seconds")
+    # story 4949: a preview is kept while its question waits and no longer — a request of this computer whose window passed without an
+    # answer or a withdrawal (the computer went quiet) lets go of its lines here, on the next report — an idempotent retry of an existing request included (so before that early return)
+    await db.execute(
+        update(AgentPermissionRequest)
+        .where(AgentPermissionRequest.setup_id == setup.id, AgentPermissionRequest.state == "pending",
+               AgentPermissionRequest.expires_at <= now, AgentPermissionRequest.preview.is_not(None))
+        .values(preview=None)
+    )
     q = select(AgentPermissionRequest).where(
         AgentPermissionRequest.setup_id == setup.id, AgentPermissionRequest.request_id == body.request_id,
     )
@@ -760,6 +852,7 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
         id=uuid.uuid4(), setup_id=setup.id, request_id=body.request_id, session_key=body.session_key,
         agent_member_id=body.agent_member_id, runtime=body.runtime, tool=body.tool, summary=body.summary, masked=body.masked,
         truncated=body.truncated, workdir=body.workdir, input_hash=body.input_hash, expires_at=body.expires_at, state="pending",
+        preview=body.preview.model_dump() if body.preview is not None else None,
         recipient_member_id=recipient, recipient_reason=reason, terminal_only=body.terminal_only,
     )
     try:
@@ -847,12 +940,12 @@ async def withdraw_request(db: AsyncSession, setup: DesktopSetup, request_id: uu
         # it may trust in Claude's own text; the request ends with nothing allowed (Yuna 2-7)
         if row.runtime != "claude" or row.tool != SANDBOX_NET_TOOL or row.stage != "ask" or row.state != "answered" or row.decision != "allow":
             raise DesktopRelayError(409, "not_allowed_yet", "only a network question answered «allow…» can end with its host unread")
-        row.state, row.result_code = "withdrawn", "host_unread"
+        row.state, row.result_code, row.preview = "withdrawn", "host_unread", None
         await db.flush()
         _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612
         return row
     if row.state == "pending":
-        row.state, row.result_code = "withdrawn", body.reason
+        row.state, row.result_code, row.preview = "withdrawn", body.reason, None  # story 4949: the lines go with the question
         await db.flush()
         _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612
     return row
@@ -1005,6 +1098,8 @@ async def list_for_member(db: AsyncSession, *, member_id: uuid.UUID, org_id: uui
             "tool_name": {lang: shown_tool(r.runtime, r.tool, lang) for lang in ("ko", "en")} if r.tool is not None else None,
             "terminal_only": r.terminal_only,
             "summary": r.summary, "masked": r.masked, "truncated": r.truncated, "workdir": r.workdir,
+            # story 4949: the lines a file tool is about to write / change — only on a row the person can ANSWER now (the same condition as `input_hash`: remote control on, the computer reachable, a paired phone — else nothing can be decided and the lines have no reason to leave the Mac); never in a notice
+            "preview": r.preview if shown == "pending" and answerable and not r.terminal_only else None,
             "created_at": r.created_at.isoformat(), "expires_at": r.expires_at.isoformat(), "state": shown,
             "answered_by_name": names.get(r.answered_by) if r.answered_by else None, "decision": r.decision,
             "device_reachable": s.id in reachable, "recipient_reason": r.recipient_reason,
@@ -1095,6 +1190,7 @@ async def answer_request(db: AsyncSession, *, member_id: uuid.UUID, org_id: uuid
     )
     row.state, row.answered_by, row.answered_phone_key_id = "answered", member_id, phone.id
     row.decision, row.answered_at = body.decision, now
+    row.preview = None  # story 4949: answered — the file's lines are no longer needed here
     phone.last_used_at = now
     await db.flush()
     _schedule_changed(db, row.request_id, row.recipient_member_id, row.state)  # story #4612: other open screens

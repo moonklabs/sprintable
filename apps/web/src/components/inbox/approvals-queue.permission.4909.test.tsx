@@ -137,6 +137,23 @@ describe('ApprovalsQueue — 4909 2d-2 the «에이전트 권한 요청» sectio
     expect(container.querySelector('[data-testid="agent-permission-card"]')).toBeNull();
   });
 
+  it('[4949] a request\'s row says WHICH file or command in its second line — three Writes are not alike rows; a long path keeps its end; a legacy mask word is not shown', async () => {
+    permissionList = [
+      perm('r1', { tool: 'Write', summary: 'note.txt' }),
+      perm('r2', { tool: 'Write', summary: 'apps/web/src/components/inbox/approvals-queue.tsx' }),
+      perm('r3', { tool: 'Write', summary: '••••(가림).txt', masked: true }),
+      perm('r4', { tool: 'Bash', summary: 'npm install' }),
+    ];
+    await mountQueue();
+    const rows = rowsIn('perm').map((r) => r.textContent ?? '');
+    expect(rows[0]).toContain('Write · note.txt · ');
+    expect(rows[1]).toContain('Write · …/inbox/approvals-queue.tsx · ');
+    expect(rows[1]).not.toContain('apps/web');
+    expect(rows[2]).toContain('Write · ••••.txt · ');
+    expect(rows[2]).not.toContain('(가림)');
+    expect(rows[3]).toContain('Bash · npm install · ');
+  });
+
   it('⭐with approvals only ON HOLD and a request, the first pick is the held approval — a request never comes before an approval (codex 2d-2 r1)', async () => {
     held = [lowGate('g3', '보류된 항목', { status: 'held', held_until: null } as Partial<GateItem>)];
     permissionList = [perm('r1')];

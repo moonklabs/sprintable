@@ -8,6 +8,7 @@ import { Chip } from '../chip';
 import { ConfirmDialog, Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../dialog';
 import { DateNav } from '../date-nav';
 import { DatePicker } from '../date-picker';
+import { ChangeLines } from '../change-lines';
 import { ListDetailShell } from '../list-detail-shell';
 import { Metric } from '../metric';
 import { PageSplit } from '../page-split';
@@ -97,6 +98,18 @@ export function ShowcasePartsB({ today }: { today: string }) {
           sheetOpen={false}
           onSheetOpenChange={noop}
           testId="showcase-list-detail"
+        />
+      </Block>
+      <Block title="ChangeLines — 바뀌는 줄(− 빼는 줄 · + 넣는 줄 · 센 글) · 색만으로 뜻을 싣지 않는다">
+        <ChangeLines
+          label="바꾸려는 줄 견본"
+          words={{ add: '추가', del: '삭제' }}
+          rows={[
+            { kind: 'del', text: 'const a = 1;' },
+            { kind: 'add', text: 'const a = 2;' },
+            { kind: 'add', text: '  const b = 3;' },
+            { kind: 'note', text: '…4줄 더' },
+          ]}
         />
       </Block>
       <Block title="PageSplit · SummaryCard — 본문 + 옆 칸(폰은 칩 줄)">
