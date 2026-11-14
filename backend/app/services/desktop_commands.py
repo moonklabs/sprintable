@@ -344,11 +344,16 @@ async def sessions_overview(db: AsyncSession, *, member_id: uuid.UUID, user_id: 
             "conversation_id": str(dm_of[a.id][0]) if a.id in dm_of else None,
             "conversation_project_id": str(dm_of[a.id][1]) if a.id in dm_of and dm_of[a.id][1] is not None else None,  # story #4846: a room may have no project
             "setup_id": None, "device_name": None, "state": None, "activity": None, "state_at": None, "limit": None, "first_screen": None,
+            # story #4931: the computer that session runs on is the reader's own (`confirmed_by` = the reader) — the one rule `can_command` already uses for «whoever confirmed the device».
+            # A question that stands at a terminal can only be answered by the person at THAT Mac, so the home counts a wait only when this is true. No session → false; a setup nobody confirmed → false.
+            "device_is_mine": False,
         }
         pick = picks.get(a.id)
         if pick is not None:
-            full = _picked_view(pick, setup_by_id[pick.setup_id], _shown_state(pick, pick.setup_id in reachable))
+            picked_setup = setup_by_id[pick.setup_id]
+            full = _picked_view(pick, picked_setup, _shown_state(pick, pick.setup_id in reachable))
             row.update({k: full[k] for k in ("setup_id", "device_name", "state", "activity", "state_at", "limit", "first_screen")})
+            row["device_is_mine"] = picked_setup.confirmed_by is not None and picked_setup.confirmed_by == user_id
         out.append(row)
     return out, total
 

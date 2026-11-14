@@ -453,6 +453,7 @@
     "kindApproval": "승인 대기",
     "kindSignature": "서명 대기",
     "kindAnswer": "답 대기",
+    "kindTerminalWait": "Mac 터미널에서 답 기다림",
     "kindMention": "멘션",
     "kindAssigned": "내게 배정",
     "kindPermission": "권한 요청",
@@ -5483,6 +5484,8 @@
       "state": {
         "starting": "시작됨",
         "waiting_first_screen": "Mac 터미널에서 답 대기",
+        "waiting_first_screen_other": "그 맥에서 답을 기다려요 ({device})",
+        "waiting_first_screen_other_unnamed": "그 맥에서 답을 기다려요",
         "working": "작업 중",
         "idle": "다음 일 기다림",
         "waiting_permission": "권한 대기",

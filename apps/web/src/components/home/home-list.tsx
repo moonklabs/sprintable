@@ -41,6 +41,7 @@ export function kindLabel(t: ReturnType<typeof useTranslations>, kind: HomeRowKi
     case 'permission': return t('kindPermission');
     case 'stopped': return t('kindStopped');
     case 'limit-paused': return t('kindLimitPaused');
+    case 'terminal-wait': return t('kindTerminalWait');
     case 'agent-run': return t('kindAgentRun');
     case 'story': return t('kindStory');
     case 'done': return t('kindDone');
@@ -83,6 +84,12 @@ export function useRowLink(sources: HomeSources): (row: HomeRow) => { action: Ro
       case 'stopped':
       case 'limit-paused':
         return { action: 'open', href: sources.notificationHrefById[row.ref.id] ?? flatHref('/inbox') };
+      case 'terminal-wait': {
+        // story #4931: the agent's own conversation (where the person talks to it) — else the agent's page, where the same state line says where it waits; it is never answered from here
+        const wait = (sources.terminalWaits ?? []).find((w) => w.agentId === row.ref.id);
+        if (wait?.conversationId) return { action: 'open', href: wait.conversationProjectId ? withProjectParam(`/chats/${wait.conversationId}`, wait.conversationProjectId) : flatHref(`/chats/${wait.conversationId}`) };
+        return { action: 'open', href: flatHref(`/organization/workforce/${row.ref.id}`) };
+      }
       case 'story':
         return { action: 'open', href: row.ref.projectId ? withProjectParam(`/flow?story=${row.ref.id}`, row.ref.projectId) : flatHref(`/flow?story=${row.ref.id}`) };
       case 'done': {

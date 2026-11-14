@@ -73,7 +73,23 @@ describe('홈 모델 — 결재 SSE 라이브(story #4885 · 4263 AC2 이사)', 
   it('⭐게이트 · 권한 요청 이벤트를 구독한다(이름은 서버가 실제로 쓰는 것)', async () => {
     await mount();
     expect(Object.keys(muxState.handlers).filter((k) => (muxState.handlers[k] ?? []).length > 0).sort())
-      .toEqual(['agent.permission_request.changed', 'conversation.gate_created', 'conversation.gate_delegated', 'conversation.gate_resolved', 'conversation.gate_tossed', 'dispatched']);
+      // story #4931: + `desktop.session_changed` (an agent came to stand at — or left — a terminal question of my Mac)
+      .toEqual(['agent.permission_request.changed', 'conversation.gate_created', 'conversation.gate_delegated', 'conversation.gate_resolved', 'conversation.gate_tossed', 'desktop.session_changed', 'dispatched']);
+  });
+
+  // story #4931 — a wait at a terminal question appears (and goes) without waiting for the 60-second poll: the session-changed event re-reads the home model
+  it('⭐에이전트 세션이 바뀌는 이벤트(desktop.session_changed)가 오면 60초 폴을 기다리지 않고 다시 읽어 터미널 기다림이 배지에 든다', async () => {
+    const { HOME_EVENT_COALESCE_MS } = await import('./home-model-provider');
+    let sessions: unknown[] = [];
+    const base = globalThis.fetch as unknown as (url: string) => Promise<unknown>;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === '/api/agents/desktop-sessions' ? ok(sessions) : base(url))));
+    await mount();
+    expect(badge()).toBe('2');
+    sessions = [{ agent_id: 'a1', agent_name: '에이전트', conversation_id: null, conversation_project_id: null, bound_setup_id: null, bound_device_name: null, setup_id: 's1', device_name: '맥',
+      state: 'working', activity: 'working', state_at: '2026-11-14T05:00:00Z', limit: null, first_screen: { ask: 'trust' }, device_is_mine: true }];
+    await emit('desktop.session_changed', '{}');
+    await advance(HOME_EVENT_COALESCE_MS);
+    expect(badge()).toBe('3'); // reverted (no subscription) → stays '2' until the 60-second poll
   });
 
   it('⭐결재가 풀리는 이벤트가 오면 60초 폴을 기다리지 않고 다시 읽어 배지가 바뀐다', async () => {
