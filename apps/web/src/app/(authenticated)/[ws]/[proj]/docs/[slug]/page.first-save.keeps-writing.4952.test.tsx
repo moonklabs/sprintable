@@ -81,6 +81,7 @@ beforeEach(() => {
       
       return new Response(JSON.stringify(created(body)), { status: 201 });
     }
+    if (url.includes('slug=slow-doc')) return new Promise<Response>(() => {}); // the new route's doc never arrives in this test
     if (url.includes('slug=existing-doc')) return new Response(JSON.stringify({ data: { id: 'doc-existing', title: existingTitle, slug: 'existing-doc', content: '원래 내용', content_format: 'markdown', updated_at: '2026-11-13T00:00:01Z' } }), { status: 200 });
     if (url.includes('/api/docs?')) return new Response('not found', { status: 404 }); // 서버에 아직 없는 초안
     return new Response('{}', { status: 200 });
@@ -110,7 +111,7 @@ const wait = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync
 const posts = () => fetchMock.mock.calls.filter(([url, init]) => url === '/api/docs' && (init as RequestInit | undefined)?.method === 'POST');
 
 
-const SAVED = (slug: string) => ({ id: 'new-doc', title: '회의 메모', slug, parent_id: null, sort_order: 0, is_folder: false, updated_at: '2026-11-14T00:00:00Z', content: '', content_format: 'markdown' });
+const SAVED = (slug: string, id = 'new-doc') => ({ id, title: '회의 메모', slug, parent_id: null, sort_order: 0, is_folder: false, updated_at: '2026-11-14T00:00:00Z', content: '', content_format: 'markdown' });
 const docGets = () => fetchMock.mock.calls.filter(([url, init]) => String(url).startsWith('/api/docs?') && (init as RequestInit | undefined)?.method !== 'POST');
 const decodedPath = () => decodeURIComponent(window.location.pathname);
 
@@ -215,14 +216,59 @@ describe('첫 저장이 주소를 «화면은 그대로» 옮긴다 (4952 D1)', 
     expect(urls.some((u) => u.includes('slug=회의-메모'))).toBe(false);
   });
 
+  it('⭐늦게 도착한 저장(옛 문서의 첫 저장)은 다른 라우트로 옮긴 뒤에는 주소를 옮기지도 짝을 쓰지도 않는다 — 화면에 있는 문서가 아니면 무시', async () => {
+    await open();
+    await type('title', '회의 메모');
+    await wait(1600); // 문서가 만들어져 이 라우트의 화면 문서가 된다(id new-doc)
+    paramsMock.slug = 'existing-doc'; // 사람이 다른 문서로 옮겨 감
+    await act(async () => {
+      root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DocsLayoutContext.Provider value={CTX}><DocSlugPage /></DocsLayoutContext.Provider></NextIntlClientProvider>);
+      await vi.advanceTimersByTimeAsync(5);
+    });
+    await wait(50);
+    const addressBefore = window.location.pathname;
+    reportLiveSlug.mockClear();
+    const spy = vi.spyOn(window.history, 'replaceState');
+    await act(async () => { syncOptions.current!.onSaved?.(SAVED('늦은-저장') as never); }); // 옛 문서(new-doc)의 저장이 이제서야 돌아옴
+    expect(spy).not.toHaveBeenCalled();
+    expect(window.location.pathname).toBe(addressBefore);
+    expect(reportLiveSlug).not.toHaveBeenCalled();
+    spy.mockRestore();
+    fetchMock.mockClear();
+    await act(async () => {
+      root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DocsLayoutContext.Provider value={{ ...CTX, projectId: 'proj-3' }}><DocSlugPage /></DocsLayoutContext.Provider></NextIntlClientProvider>);
+      await vi.advanceTimersByTimeAsync(5);
+    });
+    const urls = docGets().map(([u]) => String(u));
+    expect(urls.some((u) => u.includes('slug=existing-doc'))).toBe(true);
+    expect(urls.some((u) => u.includes('늦은-저장'))).toBe(false); // 다시 조회가 옛 문서의 늦은 이름으로 가지 않는다
+  });
+
+  it('⭐라우트가 바뀐 뒤 새 문서가 «아직 안 온» 사이(옛 문서가 화면 상태에 남아 있는 동안)에도 옛 문서의 늦은 저장은 주소를 옮기지도 짝을 쓰지도 않는다', async () => {
+    await open();
+    await type('title', '회의 메모');
+    await wait(1600); // 이 라우트의 화면 문서 = new-doc
+    paramsMock.slug = 'slow-doc'; // 다른 문서로 옮겼고 그 문서는 아직 오지 않았다
+    await act(async () => {
+      root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DocsLayoutContext.Provider value={CTX}><DocSlugPage /></DocsLayoutContext.Provider></NextIntlClientProvider>);
+      await vi.advanceTimersByTimeAsync(5);
+    });
+    reportLiveSlug.mockClear();
+    const spy = vi.spyOn(window.history, 'replaceState');
+    await act(async () => { syncOptions.current!.onSaved?.(SAVED('늦은-저장') as never); }); // new-doc의 첫 저장이 이제서야 돌아옴
+    expect(spy).not.toHaveBeenCalled();
+    expect(reportLiveSlug).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
   it('이미 그 주소에 있으면(슬러그가 그대로) 주소를 다시 쓰지 않는다 — 인코딩만 다른 같은 경로도 같은 것으로 본다', async () => {
     await open('', 'existing-doc');
     const spy = vi.spyOn(window.history, 'replaceState');
-    await act(async () => { syncOptions.current!.onSaved?.({ ...SAVED('existing-doc') } as never); });
+    await act(async () => { syncOptions.current!.onSaved?.(SAVED('existing-doc', 'doc-existing') as never); });
     expect(spy).not.toHaveBeenCalled();
     window.history.replaceState(null, '', `/moonklabs/sprintable/docs/${encodeURIComponent('회의-메모')}`);
     spy.mockClear();
-    await act(async () => { syncOptions.current!.onSaved?.(SAVED('회의-메모') as never); });
+    await act(async () => { syncOptions.current!.onSaved?.(SAVED('회의-메모', 'doc-existing') as never); });
     expect(spy).not.toHaveBeenCalled(); // 주소창은 %EC… 로, docUrl은 한글 그대로 — 같은 경로
     spy.mockRestore();
   });

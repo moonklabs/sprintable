@@ -87,6 +87,7 @@ export default function DocSlugPage() {
   const newParamRef = useRef(newParam); newParamRef.current = newParam;
   const parentParamRef = useRef(parentParam); parentParamRef.current = parentParam;
   const liveSlugRef = useRef<{ param: string; slug: string } | null>(null); // the doc's own slug after the address moved, paired with the route param it was moved from
+  const onScreenDocIdRef = useRef<string | null>(null); // the doc this ROUTE has confirmed on screen (fetched or just created) — null from the moment the route changes until the new route's doc is there
   const newLatchRef = useRef<{ key: string; isNew: boolean } | null>(null);
   const draftEnteredForSlugRef = useRef<string | null>(null); // 이 주소(slug)로 이미 초안에 들어와 있으면 같은 조회가 다시 돌아도 쓴 글(상태)을 비우지 않는다
 
@@ -149,11 +150,13 @@ export default function DocSlugPage() {
     // story 4952 — ONLY the address moves (history.replaceState: the App Router follows it for usePathname · the reload · the back button), not the screen. `router.replace` changes the route's [slug] segment, which stands a NEW
     // page up: the editor remounted, the cursor was gone and what the person typed while the save was in flight was overwritten by the refetched doc («회의 메모» → 3~4 s → the next words never arrived). The layout is told which doc
     // is open now (reportLiveSlug) because the route params it reads keep the old value.
-    if (doc.slug && !samePath(window.location.pathname, docUrl(wsSlug, projSlug, doc.slug))) {
+    // only for the doc this route has on screen: a save that comes back late for ANOTHER doc (the person already moved on) must not move the address or write a pairing for a route that is no longer theirs
+    const onScreen = onScreenDocIdRef.current === doc.id;
+    if (doc.slug && onScreen && !samePath(window.location.pathname, docUrl(wsSlug, projSlug, doc.slug))) {
       // `null`, as Next documents: the router copies its own history state itself — passing `window.history.state` back carries its `__NA` marker and the router then skips syncing `usePathname` / `useSearchParams` (Next 16.2.2, app-router.js)
       window.history.replaceState(null, '', docUrl(wsSlug, projSlug, doc.slug));
     }
-    if (doc.slug) { liveSlugRef.current = { param: slug, slug: doc.slug }; reportLiveSlug?.(doc.slug); }
+    if (doc.slug && onScreen) { liveSlugRef.current = { param: slug, slug: doc.slug }; reportLiveSlug?.(doc.slug); }
   }, [setTree, slug, wsSlug, projSlug, reportLiveSlug]);
 
   const handleTitleChange = useCallback((value: string) => {
@@ -231,6 +234,7 @@ export default function DocSlugPage() {
       draftEnteredForSlugRef.current = null;
       setDraft(null);
       setSelectedDoc(data);
+      onScreenDocIdRef.current = data.id;
       setTitle(data.title ?? '');
       setContent(data.content ?? '');
       setContentFormat(data.content_format ?? 'markdown');
@@ -248,7 +252,7 @@ export default function DocSlugPage() {
 
   // a new route: the old pairing must never answer for a DIFFERENT doc that happens to carry the old name. An EFFECT, not a render-time write — a concurrent render that is abandoned would otherwise clear the pairing of the doc that stays on screen.
   // (The fetch below already refuses a pairing whose param is not the current route's; this drops it so it cannot come back when a later route carries the old name again.)
-  useEffect(() => { if (liveSlugRef.current && liveSlugRef.current.param !== slug) liveSlugRef.current = null; }, [slug]);
+  useEffect(() => { onScreenDocIdRef.current = null; if (liveSlugRef.current && liveSlugRef.current.param !== slug) liveSlugRef.current = null; }, [slug]);
 
   useEffect(() => { void fetchDoc(); }, [fetchDoc]);
 
@@ -284,6 +288,7 @@ export default function DocSlugPage() {
       // 기준선 = 보낸 값. 응답 오기 전에 더 친 글자는 보낸 값과 달라 dirty가 되어 다음 자동저장이 보낸다.
       setAdopt({ docId: (data as DocDetail).id, snapshot: JSON.stringify(posted) });
       setSelectedDoc(data as DocDetail);
+      onScreenDocIdRef.current = (data as DocDetail).id;
       // 제목을 한 번도 안 건드렸을 때만 기본 글을 되돌려 놓는다(만드는 중에 비운 칸은 비운 채로).
       if (!titleTouchedRef.current) setTitle((cur) => (cur === '' ? postedTitle : cur));
       setDraft(null);
