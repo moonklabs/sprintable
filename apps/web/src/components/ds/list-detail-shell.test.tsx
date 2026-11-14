@@ -95,10 +95,11 @@ describe('ListDetailShell', () => {
     const sheet = document.body.querySelector('[data-testid="list-detail-detail-sheet"]')!;
     const header = sheet.querySelector('[data-panel-header]') as HTMLElement;
     expect(header).not.toBeNull();
-    const title = header.querySelector('[id]') ?? header.firstElementChild as HTMLElement;
-    expect(title.textContent).toBe('상세 시트');
-    expect(title.className).not.toContain('sr-only');
-    expect(title.className).toContain('truncate');
+    const label = header.querySelector('[data-slot="sheet-header-label"]') as HTMLElement;
+    expect(label.textContent).toBe('상세 열'); // the short generic label (detailLabel), never the long «{title} 자세히» the card under it already says
+    expect(label.getAttribute('aria-hidden')).toBe('true');
+    expect(label.className).toContain('truncate');
+    expect(header.querySelector('.sr-only')?.textContent).toBe('상세 시트'); // the screen-reader title keeps the specific name
     expect(header.className).toContain('group-data-[close-button]/dialog:pr-9'); // the X's place stays reserved in this row
   });
 

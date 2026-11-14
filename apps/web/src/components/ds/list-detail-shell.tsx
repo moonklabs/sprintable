@@ -44,8 +44,11 @@ export function ListDetailShell({
       ) : (
         <Panel open={sheetOpen} onOpenChange={onSheetOpenChange}>
           <PanelContent aria-label={sheetLabel} data-testid={sheetTestId ?? `${testId}-detail-sheet`}>
-            {/* story 4938: the header row used to hold only a screen-reader title — an empty bordered band above the card on a phone, and the close (X) floating over the card. The title is now drawn, on one line, in the row that already keeps the X's place */}
-            <PanelHeader><DialogTitle className="truncate text-ds-small font-medium text-ds-ink-2">{sheetLabel}</DialogTitle></PanelHeader>
+            {/* story 4938: the header row used to hold only a screen-reader title — an empty bordered band above the card on a phone, and the close (X) floating over the card. It now draws the SHORT generic label (`detailLabel` — «요청» · «결재 상세»), on one line, in the row that already keeps the X's place; the card under it names the row, so the long `sheetLabel` («{title} 자세히») stays the screen-reader title and is not drawn twice */}
+            <PanelHeader>
+              <DialogTitle className="sr-only">{sheetLabel}</DialogTitle>
+              <span aria-hidden="true" className="block truncate text-ds-small font-medium text-ds-ink-2" data-slot="sheet-header-label">{detailLabel}</span>
+            </PanelHeader>
             <PanelBody className="p-0">{detail}</PanelBody>
           </PanelContent>
         </Panel>
