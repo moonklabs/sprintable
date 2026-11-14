@@ -87,7 +87,6 @@ export default function DocSlugPage() {
   const newParamRef = useRef(newParam); newParamRef.current = newParam;
   const parentParamRef = useRef(parentParam); parentParamRef.current = parentParam;
   const liveSlugRef = useRef<{ param: string; slug: string } | null>(null); // the doc's own slug after the address moved, paired with the route param it was moved from
-  if (liveSlugRef.current && liveSlugRef.current.param !== slug) liveSlugRef.current = null; // a new route: the old pairing must never answer for a DIFFERENT doc that happens to carry the old name
   const newLatchRef = useRef<{ key: string; isNew: boolean } | null>(null);
   const draftEnteredForSlugRef = useRef<string | null>(null); // 이 주소(slug)로 이미 초안에 들어와 있으면 같은 조회가 다시 돌아도 쓴 글(상태)을 비우지 않는다
 
@@ -246,6 +245,10 @@ export default function DocSlugPage() {
       setDocLoading(false);
     }
   }, [projectId, slug, router, wsSlug, projSlug]);
+
+  // a new route: the old pairing must never answer for a DIFFERENT doc that happens to carry the old name. An EFFECT, not a render-time write — a concurrent render that is abandoned would otherwise clear the pairing of the doc that stays on screen.
+  // (The fetch below already refuses a pairing whose param is not the current route's; this drops it so it cannot come back when a later route carries the old name again.)
+  useEffect(() => { if (liveSlugRef.current && liveSlugRef.current.param !== slug) liveSlugRef.current = null; }, [slug]);
 
   useEffect(() => { void fetchDoc(); }, [fetchDoc]);
 
