@@ -1,7 +1,7 @@
 /**
  * story 4887 (UI-4) — the room head on a PHONE lives in the shell's own header row. Measured in Chromium on a touch phone (390 × 844 and 320 × 640): the REAL `TopBar` (with its bell) + `TopBarProvider` + `TopBarSlot` carrying the REAL `RoomBarTitle`, the real `ChatInput` with the hint ChatView passes on a phone,
  * a timeline, and a 56 px stand-in for the bottom tab bar (its real height). Before (dev, 5612): the shell row (48) + a head block under it (135) = 183 px of top, the composer region 122 → at 390 × 844 the reading column was 482 (the version before 5612: 635).
- * Rule: the top is the shell row alone (48), the reading column is at least what it was before 5612 (635 at 390 × 844), nothing runs past the screen at 390 or 320, every press ≥ 44 × 44, the people popover is on the screen with the participants and the «+».
+ * Rule: the top is the shell row alone (48), the reading column is at least 619 at 390 × 844 (4887: ≥ 635, what it was before 5612 → 4906 lap 3, PO 11-14: ≥ 619 with the two-row phone input — the input row is 38 px taller (83 → 121) because the text is now written from the left at the top, which is the root fix of that lap; 619 is still 137 px above the 482 that 5612 left, so what 4887 won back stays), nothing runs past the screen at 390 or 320, every press ≥ 44 × 44, the people popover is on the screen with the participants and the «+».
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -124,7 +124,7 @@ const measure = (page: Page) => page.evaluate(() => {
     topBar: r('[data-testid="top-bar"]'), bar: r('[data-testid="room-bar"]'), timeline: r('#timeline'), composerBox: r('[data-testid="chat-composer-box"]'), composerRegion: r('#col > div:last-child'),
     h1: [...document.querySelectorAll('h1')].filter(vis).length, h1Text: [...document.querySelectorAll('h1')].find(vis)?.textContent, // the VISIBLE h1s: the page never renders the in-column head below lg, and this scene keeps it only to prove it is display:none
     bell: r('[data-testid="top-bar"] button[aria-label*="알림"]'), more: r('[data-testid="room-head-menu"]'),
-    roomHeadDisplay: (() => { const e = document.querySelector('[data-testid="room-head"]'); return e ? getComputedStyle(e).display : null; })(), taW: ta ? Math.round(ta.clientWidth) : null, small, overflowX: document.documentElement.scrollWidth > innerWidth + 1, screenH: innerHeight,
+    roomHeadDisplay: (() => { const e = document.querySelector('[data-testid="room-head"]'); return e ? getComputedStyle(e).display : null; })(), taW: ta ? Math.round(ta.clientWidth) : null, taH: ta ? ta.clientHeight : null, taScroll: ta ? ta.scrollHeight : null, small, overflowX: document.documentElement.scrollWidth > innerWidth + 1, screenH: innerHeight,
   };
 });
 
@@ -145,15 +145,17 @@ test.describe('the room head on a touch phone', () => {
       expect(m.more && m.more.r <= w, 'the «⋯» is on the screen').toBeTruthy();
       expect(m.overflowX, 'nothing runs past the screen sideways').toBe(false);
       expect(m.small, `presses under 44 px: ${m.small.join(' · ')}`).toEqual([]);
-      expect(m.composerRegion!.h, `the composer is one line of text even at ${w} (the hint is cut with an ellipsis, never wrapped): region ${m.composerRegion!.h}px`).toBeLessThanOrEqual(104);
+      // story 4906: what this line means is «the HINT is not wrapped» (5612 found it wrapping to two lines: the region was 122) — so it is asked of the FIELD, not of the whole region (below 640 px the buttons sit in a second row under the field, which is taller than one line of text by design)
+      expect(m.taH!, `the composer is one line of text even at ${w} (the hint is cut with an ellipsis, never wrapped): the field is ${m.taH}px`).toBeLessThanOrEqual(40);
+      expect(m.taScroll!, 'and nothing of the hint is hidden below the first line').toBeLessThanOrEqual(m.taH! + 1);
     });
   }
 
-  test('[SID:4887] 390 × 844: the reading column is at least what it was before 5612 (635), the composer region is not taller than it was (104)', async ({ page }) => {
+  test('[SID:4887] 390 × 844: the reading column is at least 619 (was 635 before 5612; 4906 PO 11-14: the two-row phone input costs 38 px — 657 → 619), the field is one line, the hint not wrapped', async ({ page }) => {
     await open(page, 390, 844, '시스템 발행');
     const m = await measure(page);
-    expect(m.timeline!.h, `the reading column is ${m.timeline!.h}px (before 5612: 635 · on dev after 5612: 482)`).toBeGreaterThanOrEqual(635);
-    expect(m.composerRegion!.h, `the composer region is ${m.composerRegion!.h}px (before 5612: 104)`).toBeLessThanOrEqual(104);
+    expect(m.timeline!.h, `the reading column is ${m.timeline!.h}px (floor 619 — 4906 PO 11-14, was 635 before 5612; on dev after 5612: 482). Any less is RED.`).toBeGreaterThanOrEqual(619);
+    expect(m.taH!, `the field is ${m.taH}px — one line of text, the hint not wrapped (before 5612 the whole region was 104; below 640 px the buttons are a second row now, see 4906)`).toBeLessThanOrEqual(40);
   });
 
   test('[SID:4887] the people button opens the participants and the «+» on the screen; Escape closes it and the focus returns to the button', async ({ page }) => {
