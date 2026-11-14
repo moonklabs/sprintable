@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { useAdoptPrehydrationValues } from '@/hooks/use-adopt-prehydration-values';
+import { useSubmitLatch } from '@/hooks/use-submit-latch';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { loginWithPassword } from '@/lib/db/client';
 import { Banner } from '@/components/ds/banner';
@@ -50,6 +51,9 @@ export default function LoginPage() {
   // 4924 — bumped on every «a box is empty» press so the reason Banner is a NEW node each time (an unchanged role=alert node is not read again)
   const [reasonSeq, setReasonSeq] = useState(0);
   const [firebaseLoading, setFirebaseLoading] = useState(false);
+  // story 4940 — one press = one request · a success stays locked until the next screen is there (one latch per road)
+  const loginLatch = useSubmitLatch(setLoading);
+  const firebaseLatch = useSubmitLatch(setFirebaseLoading);
 
   // story #3118 AC0 — 기본값 false(SSR과 하이드레이션 첫 프레임 모두 비노출, fail-closed).
   // 마운트 후에만 셸 신호를 읽어 iOS/macOS로 확認되면 true로 올라간다 — 신호가 없거나
@@ -81,7 +85,7 @@ export default function LoginPage() {
       setReasonSeq((n) => n + 1);
       return;
     }
-    setFirebaseLoading(true);
+    if (!firebaseLatch.enter()) return;
     setError(null);
     try {
       const result = await signInAndExchangeFirebaseSession(email.trim(), password);
@@ -99,10 +103,11 @@ export default function LoginPage() {
       }
       // story #1959(P2-S3) AC: 로그인 복귀 후 /login history 잔존 0 — push 는 스택에 남아
       // 복귀 화면에서 BACK 1회가 로그인 폼으로 돌아가 버린다(재제출 위험). replace 로 스왑.
+      firebaseLatch.hold(); // story 4940 — locked until the page is left
       router.replace(safeNextPath(nextParam));
       router.refresh();
     } finally {
-      setFirebaseLoading(false);
+      firebaseLatch.exit();
     }
   };
 
@@ -113,7 +118,7 @@ export default function LoginPage() {
       setReasonSeq((n) => n + 1);
       return;
     }
-    setLoading(true);
+    if (!loginLatch.enter()) return;
     setError(null);
     try {
       const result = await loginWithPassword(email.trim(), password, showTotp ? totpCode : undefined);
@@ -141,12 +146,13 @@ export default function LoginPage() {
         return;
       }
       // story #1959(P2-S3): 위와 동일 사유 — replace 로 /login history 잔존 방지.
+      loginLatch.hold(); // story 4940 — locked until the page is left
       router.replace(safeNextPath(nextParam));
       router.refresh();
     } catch {
       setError(t('loginFailed'));
     } finally {
-      setLoading(false);
+      loginLatch.exit();
     }
   };
 

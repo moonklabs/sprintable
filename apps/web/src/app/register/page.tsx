@@ -14,6 +14,7 @@ import { LegalFooter } from '@/components/legal/legal-footer';
 import { safeNextPath } from '@/lib/auth/session-redirect';
 import { isImeComposing } from '@/lib/ime-composition';
 import { useAdoptPrehydrationValues } from '@/hooks/use-adopt-prehydration-values';
+import { useSubmitLatch } from '@/hooks/use-submit-latch';
 
 function checkPasswordRules(pw: string) {
   return {
@@ -50,6 +51,7 @@ export default function RegisterPage() {
   );
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const latch = useSubmitLatch(setLoading); // story 4940 — one press = one request · a success stays locked until the next screen is there
   const consentIds = { prefix: useId(), terms: useId(), and: useId(), privacy: useId() }; // the box is named by the WHOLE sentence: the words beside it and the two documents' names
   // story 4669 (U6 · Yuna A-5): with Google on, Google leads — the way with no mail round trip (email-verify-gate treats a social sign-in as verified).
   // story 4891 (UI-8 U1 · PO 11-10): the e-mail form is NOT folded behind a second press any more — one screen: the terms line, Google, the three fields, [가입]. The terms
@@ -67,7 +69,7 @@ export default function RegisterPage() {
       setPasswordTouched(true);
       return;
     }
-    setLoading(true);
+    if (!latch.enter()) return;
     setError(null);
     try {
       const res = await fetch('/api/auth/register', {
@@ -102,12 +104,13 @@ export default function RegisterPage() {
       // 있을 수 있어(예: /invite/accept?token=…) `?signup=1` 고정 대신 구분자를 판별한다.
       const destination = nextParam ? safeNextPath(nextParam) : (meJson.data?.org_id ? '/inbox' : '/onboarding');
       const separator = destination.includes('?') ? '&' : '?';
+      latch.hold(); // the push does not wait for the screen: the button stays «계정 만드는 중…» until the page is left (story 4940)
       router.push(`${destination}${separator}signup=1`);
       router.refresh();
     } catch {
       setError(t('registrationFailed'));
     } finally {
-      setLoading(false);
+      latch.exit();
     }
   };
 
