@@ -1315,6 +1315,9 @@ async def _retire_same_machine(
     if old:
         from app.services import desktop_clock
 
+        from app.services import desktop_changes
+
+        await desktop_changes.forget(db, [o.id for o in old], lock=False)  # story #4951 — a replaced line keeps no changed-file list either
         await desktop_clock.forget(db, [o.id for o in old], lock=False)  # story #4733 — a replaced line keeps no clock view (its row is already held: `_lock_in_order` in the exchange)
         await db.execute(
             update(DesktopDeviceToken)
@@ -1617,6 +1620,9 @@ async def _disconnect_setup(
     desktop_relay.schedule_disconnected_after_commit(db, setup.id)
     from app.services import desktop_clock
 
+    from app.services import desktop_changes
+
+    await desktop_changes.forget(db, [setup.id], lock=False)  # story #4951 — no changed-file list outlives the computer's connection (the row is held: `_lock_in_order` above)
     await desktop_clock.forget(db, [setup.id], lock=False)  # story #4733 — a clock view (draft first lines) does not outlive the computer's connection (the row is held: `_lock_in_order` above)
     # story #4565: only the agents this setup made — an existing agent attached here keeps running elsewhere once moved on
     # (its keys from this setup are revoked above; the agent itself is not stopped)
