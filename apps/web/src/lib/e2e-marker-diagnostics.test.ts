@@ -603,6 +603,20 @@ describe('스펙 · 설정이 진단에 연결돼 있다 (story 4927)', () => {
     expect(wait).toContain('── 진단 만들기 실패 (story 4927) ──');
   });
 
+  it('⭐실패 때 올리는 artifact의 `path:`는 정확히 두 폴더(playwright-report · server-logs) — 로그인 상태(`playwright/.auth/`) · 그 밖의 어떤 경로도 못 얹는다(카디르 렌즈: 변이가 살아남았던 자리)', () => {
+    const at = ci.indexOf('- name: Upload Playwright report');
+    expect(at).toBeGreaterThan(0);
+    const step = ci.slice(at, ci.indexOf('\n\n', at) > 0 ? ci.indexOf('\n\n', at) : undefined);
+    expect(ci.split('- name: Upload Playwright report').length - 1).toBe(1); // one such step
+    const block = /path: \|\n((?:\s+\S.*\n?)+)/.exec(step);
+    expect(block, 'the upload path is a two-line block').not.toBeNull();
+    const paths = block![1]!.split('\n').map((l) => l.trim()).filter(Boolean).filter((l) => !/^(retention-days|if-no-files-found|name|uses|with|if):/.test(l));
+    expect(paths.slice(0, 2)).toEqual(['apps/web/playwright-report/', 'apps/web/playwright/server-logs/']);
+    expect(paths).toHaveLength(2);
+    expect(step).not.toMatch(/\.auth|storageState|owner\.json/);
+    expect(step).not.toMatch(/include-hidden-files/); // no hidden file goes up by switch either
+  });
+
   it('⭐서버는 시각 찍는 껍데기로 뜨고 stdout을 CI 로그로 받으며, 로그 파일은 실패 때 artifact로 올라간다', () => {
     expect(config).toContain("command: 'node e2e/support/dev-server-logged.mjs'");
     expect(config).toContain("stdout: 'pipe'");
