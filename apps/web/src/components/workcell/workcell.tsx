@@ -267,7 +267,7 @@ export function Workcell({ title, pipelineStage, brief, run, evidence, conversat
   const railState = pipelineStage ? PIPELINE_STAGE_TRUST_COLOR[pipelineStage] : undefined;
   return (
     // story #7d7634ee(P0·선생님 직접 지시) — 컷코너(clip-path) 폐지, proof-surface(13px 균일
-    // 라운드)+proof-surface-lift(뜬 표면 재질) 채택. 옛 rounded-[6px]는 proof-surface의
+    // 라운드)+뜬 표면 재질 채택(이후 4908이 걷음). 옛 rounded-[6px]는 proof-surface의
     // --proof-radius-soft로 흡수.
     // 4908 — 거친 결(종이 알갱이 · 뜬 그림자) 판을 걷고 층 토큰 면으로: 바깥 판 = rowOthers · 안의 칸 = panel(서랍과 같은 면) · 경계는 ds-line. 층 사이는 면 차이(≥0.05)로 갈린다.
     <div className={cn('flex overflow-hidden rounded-xl border border-ds-line', LAYER.rowOthers, className)}>

@@ -558,7 +558,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
               level={2}
             />
             {/* story #2963 §2 — collapsible pill 칩. selectedTags state·toggle 로직은 완전
-                무변경. story #7d7634ee(P0) — proof-cut-xs(컷코너) 폐지, proof-surface-press
+                무변경. story #7d7634ee(P0) — proof-cut-xs(컷코너) 폐지, 눌린 표면 재질(이후 4919가 걷음)
                 (재질 언어) 채택. */}
             {!tagsCollapsed && (
               <div className="flex max-h-[120px] flex-wrap gap-1 overflow-y-auto px-4 py-1">

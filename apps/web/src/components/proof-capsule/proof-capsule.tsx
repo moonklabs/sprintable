@@ -150,7 +150,7 @@ export function ProofCapsule({
 
 function CutCornerShell({ state, className, children }: { state: ProofState; className?: string; children: React.ReactNode }) {
   // story #7d7634ee(P0·선생님 직접 지시, 감確認 doc ea94dac4) — 컷코너(clip-path) 전면 폐지,
-  // 소프트 라운드(proof-surface, --proof-radius-soft 13px)+뜬 표면 그림자(proof-surface-lift)
+  // 소프트 라운드(proof-surface, --proof-radius-soft) — story 4919: 결 · 뜬 그림자는 걷었다(면 + 헤어라인뿐)
   // 로 교체. 옛 `cut`(24/16px) prop은 클립 크기 조절용이었는데 클립 자체가 없어져 무의미 —
   // 제거(호출부 3곳 전부 --proof-cut 오버라이드가 아니라 그냥 균일 13px 라운드로 수렴).
   // story #2978(선생님 실사용 발견) — 이 셸의 `overflow-hidden`은 CSS flexbox 스펙상 자신의
@@ -161,7 +161,7 @@ function CutCornerShell({ state, className, children }: { state: ProofState; cla
   // 스크롤이 원천 봉쇄된다. shrink-0으로 자기 내용 실제 높이를 지키면 초과분이 정상적으로
   // 조상 체인을 타고 올라가 진짜 스크롤러에서 스크롤 가능해진다(재질만 바뀜, 이 규칙 무변경).
   return (
-    <div data-slot="proof-capsule" className={cn('proof-surface proof-surface-lift flex shrink-0 overflow-hidden border border-proof-line bg-proof-panel', className)}>
+    <div data-slot="proof-capsule" className={cn('proof-surface flex shrink-0 overflow-hidden border border-proof-line bg-proof-panel', className)}>
       <Proofline state={state} />
       {children}
     </div>
