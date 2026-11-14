@@ -43,9 +43,11 @@
 	reverse_proxy backend:8000 {
 		flush_interval -1
 		# story 4947 — a deploy replaces `backend` / `frontend`; for ~25 s the name does not answer (dev 11-14, deploy-81: 491 × 502 → Cloudflare's error page). Hold the request and try the upstream again instead of a 502:
-		# only a request that could not be SENT is tried again (refused / unreachable upstream — nothing of it reached the app), for at most 60 s (> twice the measured gap, < Cloudflare's 100 s proxy limit). A live upstream answers
-		# at once; the wait exists only while there is none. request_buffers: a retried request must still have its body — without it the second try goes out with an EMPTY body (measured, Caddy 2.8.4 "invalid Read on closed Body");
-		# up to 1 MiB is kept for that (a bigger body streams through as before, and is not retried). The same three lines on every reverse_proxy here; no host or path is named, so the production VM reads the same file.
+		# a dial that fails (refused / unreachable — Caddy takes it that no byte of the request left) is tried again every 250 ms for at most 60 s (> twice the measured gap, < Cloudflare's 100 s proxy limit). A live upstream answers
+		# at once; the wait exists only while there is none; while the backend is really down a request waits the 60 s, then gets the 502. request_buffers: a retried request must still have its body — without it the second
+		# try goes out with an EMPTY body (measured, Caddy 2.8.4 "invalid Read on closed Body"). Up to 1 MiB is kept for that; the request is read in full before it is sent on (a slow upload waits here, not at the app). A body
+		# BIGGER than that is also tried again but arrives cut short — the app sees an aborted upload and the answer is the 502, as before this change (measured; pinned in test_4947). The same three lines on every
+		# reverse_proxy here; no host or path is named, so the production VM reads the same file.
 		lb_try_duration 60s
 		lb_try_interval 250ms
 		request_buffers 1MiB

@@ -8,7 +8,7 @@ Pinned here:
   - the Caddyfile text: EVERY `reverse_proxy` of the file (the API name, the app name's `/api/v2/*`, its catch-all) carries `lb_try_duration` (more than twice the measured gap, under Cloudflare's 100 s proxy limit) and a short
     `lb_try_interval`, and keeps its `flush_interval -1`;
   - with a real Caddy (`SPRINTABLE_TEST_CADDY`, or `caddy` on the PATH; skipped without one, as in test_4843 - the CI image has none, the text pins run there): the REAL Caddyfile with the service names pointed at ports that
-    do not answer yet; a request sent now is answered 200 once the upstream starts a few seconds later (not 502) on all three roads; a POST (body up to the 1 MiB buffer) reaches the upstream exactly once with its body, a bigger one still streams whole through a live upstream; with no upstream at all the answer is a 502
+    do not answer yet; a request sent now is answered 200 once the upstream starts a few seconds later (not 502) on all three roads; a POST (body up to the 1 MiB buffer) reaches the upstream exactly once with its body, a bigger one still streams whole through a live upstream, and during the gap is answered 502 (never delivered whole); with no upstream at all the answer is a 502
     only after the hold time (shortened to 2 s in a copy for the test); a live upstream is answered at once (no added wait).
 """
 from __future__ import annotations
@@ -89,9 +89,16 @@ def test_the_retry_lines_do_not_name_a_host_or_a_path_so_the_production_vm_reads
 
 # ───────────────────────── a real Caddy ─────────────────────────
 
+PINNED = re.search(r"FROM caddy:(\d+\.\d+\.\d+)-alpine", (_ROOT / "deploy/vm/forwarder/Dockerfile").read_text()).group(1)   # the version the VM runs
+
+
 def _caddy() -> str | None:
+    """the binary for the real-Caddy cells - only when it IS the pinned version (a newer Caddy has other retry / body code and would test nothing about the VM)"""
     found = os.environ.get("SPRINTABLE_TEST_CADDY") or shutil.which("caddy")
-    return found if found and os.access(found, os.X_OK) else None
+    if not (found and os.access(found, os.X_OK)):
+        return None
+    out = subprocess.run([found, "version"], capture_output=True, text=True, timeout=20).stdout
+    return found if out.lstrip().startswith(f"v{PINNED}") else None
 
 
 def _free_port() -> int:
@@ -139,7 +146,7 @@ class _Front:
     def __init__(self, tmp_path: Path, hold: str | None = None) -> None:
         caddy = _caddy()
         if caddy is None:
-            pytest.skip("no caddy binary (set SPRINTABLE_TEST_CADDY)")
+            pytest.skip(f"no caddy {PINNED} binary (set SPRINTABLE_TEST_CADDY)")
         _Upstream.log = []
         self.be_port, self.web_port, self.app_port, self.api_port, rt_port, admin = (_free_port() for _ in range(6))
         self.servers: list[ThreadingHTTPServer] = []
@@ -208,8 +215,19 @@ def front_short_hold(tmp_path: Path):
 def _during_the_gap(front: _Front, port: int, method: str, path: str, body: bytes | None = None, comes_up_after: float = 3.0) -> tuple[int, bytes, float]:
     """send the request now, with nothing listening; the upstreams start `comes_up_after` seconds later"""
     res: list[tuple[int, bytes, float]] = []
-    th = threading.Thread(target=lambda: res.append(front.request(port, method, path, body)))
+    sending = threading.Event()
+
+    def send() -> None:
+        sending.set()
+        t0 = time.monotonic()
+        try:
+            res.append(front.request(port, method, path, body))
+        except (OSError, http.client.HTTPException):
+            res.append((0, b"", time.monotonic() - t0))   # 0 = the front door closed the connection under the client (a body it would not take whole)
+
+    th = threading.Thread(target=send)
     th.start()
+    assert sending.wait(10)
     time.sleep(comes_up_after)
     front.start_upstreams()
     th.join(timeout=30)
@@ -244,6 +262,14 @@ def test_a_post_body_bigger_than_the_buffer_still_streams_through_whole_when_the
     front.start_upstreams()
     status, _, _ = front.request(front.api_port, "POST", "/api/v2/upload", b"x" * 5_000_000)
     assert status == 200 and [(m, len(b)) for (m, _p, b) in _Upstream.log] == [("POST", 5_000_000)]
+
+
+def test_a_post_body_bigger_than_the_buffer_during_the_gap_is_answered_with_the_502_and_never_reaches_the_app_whole(front: _Front) -> None:
+    """the documented limit (Caddyfile comment): only the first MiB is kept, so the retried request goes out cut short - the answer is the 502 of before, and the app never gets a complete body it could act on"""
+    size = 3 * 1024 * 1024
+    status, _, _ = _during_the_gap(front, front.api_port, "POST", "/api/v2/upload", b"x" * size)
+    assert status in (502, 0), status   # 502, or the connection closed while the client was still sending: the same failure seen from the client
+    assert all(len(b) < size for (_m, _p, b) in _Upstream.log), "a complete body reached the app after a retry - the comment in the Caddyfile is out of date"
 
 
 def test_a_live_upstream_is_answered_at_once_no_hold_is_added(front: _Front) -> None:
