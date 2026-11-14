@@ -52,9 +52,10 @@ async function build() {
         import React from 'react'; import { createRoot } from 'react-dom/client'; import { NextIntlClientProvider } from 'next-intl';
         import ko from './messages/ko.json';
         import { ChatListView } from './src/components/chat/chat-list-view';
+        import { ToastProvider } from './src/components/ui/toast'; // the list's row menu reports a failed mute flip through the shell's toast (the real list always sits under the shell's provider)
         window.__mount = (w) => {
           createRoot(document.getElementById('root')).render(React.createElement(NextIntlClientProvider, { locale: 'ko', messages: ko, timeZone: 'Asia/Seoul' },
-            React.createElement('div', { id: 'rail', style: { width: (w || 270) + 'px', padding: '0 8px' } }, React.createElement(ChatListView, { projectId: 'p1', currentTeamMemberId: 'me-1' }))));
+            React.createElement('div', { id: 'rail', style: { width: (w || 270) + 'px', padding: '0 8px' } }, React.createElement(ToastProvider, null, React.createElement(ChatListView, { projectId: 'p1', currentTeamMemberId: 'me-1' })))));
         };`,
       resolveDir: WEB, loader: 'tsx',
     },
