@@ -107,8 +107,12 @@ const rowOf = (id: string) => q(`[data-testid="goal-row"][data-row-key="${id}"]`
 const flush = async () => { for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); }); };
 const menu = () => document.body.querySelector<HTMLElement>('[data-testid="goal-row-menu"]');
 const items = () => [...(menu()?.querySelectorAll('[role="menuitem"]') ?? [])].map((b) => b.textContent?.trim());
-const rightClick = async (el: Element) => { const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 200 }); await act(async () => { el.dispatchEvent(e); }); await flush(); return e; };
-const dbl = async (el: Element) => { await act(async () => { el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true })); }); await flush(); };
+// a real right-press is a pointerdown with button 2 first (the list's drag sensor sees it) and the contextmenu after; a real double-click is two clicks (the first one chooses the row) then dblclick
+const rightClick = async (el: Element) => {
+  await act(async () => { el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 2, buttons: 2, pointerType: 'mouse', clientX: 300, clientY: 200 })); });
+  const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 200, button: 2 }); await act(async () => { el.dispatchEvent(e); }); await flush(); return e;
+};
+const dbl = async (el: Element) => { await act(async () => { (el as HTMLElement).click(); }); await act(async () => { (el as HTMLElement).click(); }); await act(async () => { el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true })); }); await flush(); };
 const pick = async (id: string) => { await act(async () => { (menu()!.querySelector(`[data-testid="${id}"]`) as HTMLElement).click(); }); await flush(); };
 
 describe('[SID:4954] goals list — double-click and right-click', () => {
@@ -165,5 +169,19 @@ describe('[SID:4954] goals list — double-click and right-click', () => {
     await act(async () => { menu()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); }); await flush();
     await vi.waitFor(() => expect(menu()).toBeNull());
     await vi.waitFor(() => expect(document.activeElement).toBe(rowOf('g2').querySelector('[data-row-focus]')));
+  });
+  it('⭐«목표 수정» on the goal that is ALREADY chosen opens its edit form (the column is already on screen)', async () => {
+    stubMedia(true); stubFetch(); await mount();
+    const chosen = q('[data-testid="goal-detail"]')!.getAttribute('data-goal-id')!;
+    await rightClick(rowOf(chosen)); await pick('goal-row-edit');
+    expect(q('[data-testid="goal-detail"] form')).not.toBeNull();
+  });
+  it('⭐changing the project drops what pointed at the old project\'s list: an open menu closes and a pending delete confirmation is withdrawn (its goal belongs to the project that was left)', async () => {
+    stubMedia(true); stubFetch(); await mount();
+    await rightClick(rowOf('g1')); await pick('goal-row-delete');
+    expect(document.body.textContent).toContain(koMessages.goals.deleteConfirmTitle);
+    await mount('ko', { projectId: 'proj-2' });
+    expect(document.body.textContent).not.toContain(koMessages.goals.deleteConfirmTitle); // reverted → the old project's confirmation stays and could delete its goal
+    expect(menu()).toBeNull();
   });
 });

@@ -380,6 +380,9 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
   }, []);
   const openFullGoal = useCallback((goal: Goal) => router.push(`/${wsSlug}/${projSlug}/goals/${goal.id}`), [router, wsSlug, projSlug]);
   const clearEditRequest = useCallback(() => setEditRequestId(null), []);
+  // a menu whose goal has left the list (a refresh · a project change) closes; an edit request nobody took (its goal's column is not on the screen) is dropped
+  useEffect(() => { if (rowMenu && !epics.some((g) => g.id === rowMenu.id)) setRowMenu(null); }, [rowMenu, epics]);
+  useEffect(() => { setEditRequestId((cur) => (cur && (!isWide || cur !== selectedId) ? null : cur)); }, [selectedId, isWide]);
   const [deleting, setDeleting] = useState(false);
   // wedge #2 로드맵 조타
   const [capped, setCapped] = useState(false);          // 상위 STEER_LIMIT 초과(honest 표시·silent-truncation 금지)
@@ -535,6 +538,10 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
       setGoals([]);
       setCapped(false);
       setSelectedId(null);
+      // story 4954 — what was pointed at in the OLD project's list goes with it: the open row menu · a pending edit request · a delete confirmation (its goal belongs to the project that was left)
+      setRowMenu(null);
+      setEditRequestId(null);
+      setDeleteConfirmId(null);
       listProjectRef.current = null;
     }
     // «읽음» 표시도 같이 비운다 — 비운 목록을 «이 프로젝트의 목록을 읽은 것»으로 보고 0 · 0을 정확한 수처럼 보이는 구멍(A → B(스윔레인) → A)을 막는다. 처음 열 때는 이미 null이다.
