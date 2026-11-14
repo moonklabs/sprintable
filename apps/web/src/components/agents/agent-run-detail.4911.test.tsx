@@ -11,6 +11,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
 import { AgentRunDetail, AGENT_RUN_DETAIL_PANEL_FACE, AGENT_RUN_DETAIL_STRIP_FACE } from './agent-run-detail';
+import { AGENT_RUNS_BODY_FRAME } from './agent-runs-frame';
 import { LAYER } from '@/components/ds/layers';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -259,5 +260,46 @@ describe('실행 상세는 화면 층 규칙의 토큰을 쓴다 · 옛 부품 0
   it('⭐옛 손 만든 카드 · 칩 · 알림 · 헤더(StatCard · MetaCard · SectionCard · PageHeader · Badge · Alert · overlay-fill · bg-muted) 0 — ds 부품(Chip · Banner · Button)', () => {
     for (const legacy of ['StatCard', 'MetaCard', 'SectionCard', 'PageHeader', '<Badge', '<Alert', 'overlay-fill', 'overlay-line', 'bg-muted', 'text-muted-foreground', 'rounded-xl']) expect(src, legacy).not.toContain(legacy);
     for (const part of ["from '@/components/ds/chip'", "from '@/components/ds/banner'", "from '@/components/ds/button'"]) expect(src, part).toContain(part);
+  });
+});
+
+describe('실행 상세의 본문 여백 — 목록과 같은 쪽 틀 (story 4911 후속)', () => {
+  // dev b85b2dbee 1440: the detail's card and the «도구 호출» panel sat flush at the page panel's edge (x≈313) while the list's panels, filter bar and the tabs stood 16px in (x≈329);
+  // on a phone the card touched both screen edges and its rounded corners were cut. Cause: the detail's outermost box had no side margin.
+  const frameTokens = AGENT_RUNS_BODY_FRAME.split(/\s+/).filter(Boolean);
+  const rootOf = () => (q('[data-testid="run-detail-back"]') as HTMLElement).parentElement!.parentElement as HTMLElement;
+
+  it('⭐여백 상수는 좌우 여백(px-*)을 가진다 — 목록 본문과 같은 값(px-4 py-3)', () => {
+    expect(AGENT_RUNS_BODY_FRAME).toBe('px-4 py-3');
+    expect(frameTokens.some((t) => /^px-[1-9]/.test(t))).toBe(true);
+  });
+
+  it('⭐정상: 맨 바깥 상자가 그 여백을 갖고, 내용 칸(카드)과 «도구 호출» 구역은 그 상자의 바로 아래 자식이다 — 카드 왼쪽이 판 가장자리에 붙지 않음', async () => {
+    stubFetch();
+    await renderDetail();
+    const root = rootOf();
+    for (const token of frameTokens) expect(root.classList.contains(token), token).toBe(true);
+    expect(panel().parentElement).toBe(root);
+    expect((q('[data-testid="agent-run-tool-calls"]') as HTMLElement).parentElement).toBe(root);
+  });
+
+  it('⭐불러오는 중 · 불러오기 실패 · 빈 얼굴 · 정상 — 네 갈래 모두 같은 여백(한 갈래만 빠져 다시 붙지 않게)', async () => {
+    const fresh = async () => { await act(async () => { root.unmount(); }); container.remove(); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); };
+    const expectFramed = () => { const r = rootOf(); for (const token of frameTokens) expect(r.classList.contains(token), token).toBe(true); };
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {}))); // loading
+    await renderDetail(); expectFramed();
+    await fresh(); vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) }) as Response)); // load error
+    await renderDetail(); expectFramed();
+    await fresh(); vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: null }) }) as Response)); // empty
+    await renderDetail(); expectFramed();
+    await fresh(); stubFetch(); // loaded
+    await renderDetail(); expectFramed();
+  });
+
+  it('⭐소스: 상세는 여백을 상수 한 곳에서 가져오고(손으로 px-4를 또 쓰지 않음) 맨 바깥 상자가 맨몸 space-y-3으로 돌아가지 않는다', () => {
+    const src = readFileSync(join(__dirname, 'agent-run-detail.tsx'), 'utf8');
+    expect(src).toContain("import { AGENT_RUNS_BODY_FRAME } from './agent-runs-frame';");
+    expect(src.match(/space-y-3 \$\{AGENT_RUNS_BODY_FRAME\}/g)?.length).toBe(4);
+    expect(src).not.toContain('<div className="space-y-3">');
   });
 });

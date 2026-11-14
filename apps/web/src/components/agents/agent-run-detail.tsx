@@ -15,6 +15,7 @@ import { formatViewerScheduledAt } from '@/lib/schedule-format';
 import type { AgentRunStatus } from '@/lib/agent-run-status';
 import { statusTone } from './agent-run-status-tone';
 import { AgentRunToolCallsSection } from './agent-run-tool-calls-section';
+import { AGENT_RUNS_BODY_FRAME } from './agent-runs-frame';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 
 interface RunDetail {
@@ -138,7 +139,7 @@ export function AgentRunDetail({
 
   if (loading) {
     return (
-      <div className="space-y-3">
+      <div className={`space-y-3 ${AGENT_RUNS_BODY_FRAME}`}>
         {slot}
         {head}
         <div className="h-48 animate-pulse rounded-ds-panel bg-ds-surface-high" />
@@ -150,7 +151,7 @@ export function AgentRunDetail({
     return (
       // story #2105 2차 — load()가 재시도 전 setLoadError(false)를 먼저 호출해(위 정의) 매
       // retryKey 변경마다 언마운트→리마운트된다.
-      <div className="space-y-3">
+      <div className={`space-y-3 ${AGENT_RUNS_BODY_FRAME}`}>
         {slot}
         {head}
         <div role="alert" aria-live="assertive" aria-atomic="true" className="flex flex-col items-center gap-3 py-12 text-center">
@@ -166,7 +167,7 @@ export function AgentRunDetail({
 
   if (!run) {
     return (
-      <div className="space-y-3">
+      <div className={`space-y-3 ${AGENT_RUNS_BODY_FRAME}`}>
         {slot}
         {head}
         <div className="py-12 text-center text-ds-body text-ds-ink-3">{tc('noData')}</div>
@@ -191,7 +192,7 @@ export function AgentRunDetail({
   ];
 
   return (
-    <div className="space-y-3">
+    <div className={`space-y-3 ${AGENT_RUNS_BODY_FRAME}`}>
       {slot}
       {head}
 

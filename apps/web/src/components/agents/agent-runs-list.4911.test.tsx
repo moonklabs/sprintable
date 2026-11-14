@@ -14,6 +14,7 @@ import { TopBarProvider } from '@/components/nav/top-bar-context';
 const { useDashboardContextMock } = vi.hoisted(() => ({ useDashboardContextMock: vi.fn() }));
 vi.mock('@/app/dashboard/dashboard-shell', () => ({ useDashboardContext: () => useDashboardContextMock() }));
 
+import { AGENT_RUNS_BODY_FRAME } from './agent-runs-frame';
 import { AgentRunsList, AGENT_RUN_STATUS_SLOT, groupRuns } from './agent-runs-list';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -268,6 +269,27 @@ describe('AgentRunsList — 키 · 우클릭(story 4911, PO Q3: 열기 · 메모
     await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
     await flush();
     expect(await openMenuOn(b.id)).toEqual([T.menuOpen]);
+  });
+});
+
+describe('실행 기록 목록의 본문 여백 — 상세와 같은 쪽 틀 (story 4911 후속)', () => {
+  it('⭐목록 본문 칸(칸들을 담는 스크롤 상자)의 여백 클래스 = 상세가 쓰는 상수 — 같은 왼쪽 가장자리(목록이 px-4 py-3을 바꾸면 상수도 같이 바꿔야 빨갛지 않음)', async () => {
+    const f = run('failed');
+    stubRuns((s) => ({ status: 200, items: s === 'failed' ? [f] : s === 'hitl_pending' ? [] : [f] }));
+    await act(async () => { root.render(wrap(<AgentRunsList />)); });
+    await flush();
+    const body = container.querySelector('[data-testid="agent-runs-section"]')!.closest('.overflow-y-auto') as HTMLElement;
+    expect(body).not.toBeNull();
+    for (const token of AGENT_RUNS_BODY_FRAME.split(/\s+/)) expect(body.classList.contains(token), token).toBe(true);
+    // and nothing else of the side/vertical padding is there besides the constant's own tokens
+    const pad = Array.from(body.classList).filter((c) => /^p[xy]?-\d/.test(c)).sort();
+    expect(pad).toEqual(AGENT_RUNS_BODY_FRAME.split(/\s+/).sort());
+  });
+
+  it('⭐소스: 목록의 스크롤 상자는 여백을 글자 그대로 갖고(verify:focus-inset-coverage가 그 줄의 패딩을 읽음) 그 글자가 상수와 같다', () => {
+    const src = readFileSync(join(__dirname, 'agent-runs-list.tsx'), 'utf8');
+    const m = src.match(/ref=\{listRef\} className="flex-1 overflow-y-auto ([^"]+)"/);
+    expect(m?.[1]).toBe(AGENT_RUNS_BODY_FRAME);
   });
 });
 
