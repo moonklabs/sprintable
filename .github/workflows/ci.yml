@@ -3001,6 +3001,9 @@ jobs:
       # playwright.config webServer가 `pnpm dev`로 Next(:3108)를 띄우고 e2e/global-setup이
       # owner 로그인 → playwright/.auth/owner.json storageState를 만든 뒤 contrast-guard.spec을 돈다.
       - name: Run contrast-guard e2e (axe color-contrast)
+        env:
+          E2E_NO_WATCH: '1'
+          E2E_NO_WRAPPER: '1'
         run: pnpm --filter web e2e:contrast
 
       # story #3785(2026-09-10) — 이 잡이 이미 세운 풀스택(같은 storageState) 위에 얹는다.
