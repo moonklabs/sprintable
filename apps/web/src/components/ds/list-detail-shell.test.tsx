@@ -14,7 +14,7 @@ let root: Root;
 beforeEach(() => { container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container); });
 afterEach(async () => { await act(async () => { root.unmount(); }); container.remove(); document.body.innerHTML = ''; vi.unstubAllGlobals(); });
 
-async function show(props: { wide: boolean; sheetOpen?: boolean; onSheetOpenChange?: (o: boolean) => void; testId?: string; fill?: boolean }) {
+async function show(props: { wide: boolean; sheetOpen?: boolean; onSheetOpenChange?: (o: boolean) => void; testId?: string; fill?: boolean; sheetHeader?: string }) {
   await act(async () => {
     root.render(
       <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
@@ -24,6 +24,7 @@ async function show(props: { wide: boolean; sheetOpen?: boolean; onSheetOpenChan
           wide={props.wide}
           detailLabel="상세 열"
           sheetLabel="상세 시트"
+          sheetHeader={props.sheetHeader}
           sheetOpen={props.sheetOpen ?? false}
           onSheetOpenChange={props.onSheetOpenChange ?? (() => {})}
           testId={props.testId}
@@ -88,6 +89,27 @@ describe('ListDetailShell', () => {
     expect(sheet?.textContent).toContain('상세 시트'); // the sr-only title
     expect(sheet?.querySelector('[data-testid="the-detail"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="list-detail-detail-column"]')).toBeNull();
+  });
+
+  it('[4938] the narrow sheet\'s header row is never empty: the title is DRAWN (one line, not screen-reader-only) in the row that keeps the close button\'s place', async () => {
+    await show({ wide: false, sheetOpen: true });
+    const sheet = document.body.querySelector('[data-testid="list-detail-detail-sheet"]')!;
+    const header = sheet.querySelector('[data-panel-header]') as HTMLElement;
+    expect(header).not.toBeNull();
+    const label = header.querySelector('[data-slot="sheet-header-label"]') as HTMLElement;
+    expect(label.textContent).toBe('상세 열'); // the short generic label (detailLabel), never the long «{title} 자세히» the card under it already says
+    expect(label.getAttribute('aria-hidden')).toBe('true');
+    expect(label.className).toContain('truncate');
+    expect(header.querySelector('.sr-only')?.textContent).toBe('상세 시트'); // the screen-reader title keeps the specific name
+    expect(header.className).toContain('group-data-[close-button]/dialog:pr-9'); // the X's place stays reserved in this row
+  });
+
+  it('[4938] a screen whose card already says the generic word passes its own header text; the header row is as tall as the close button\'s place so label and X share a centre line', async () => {
+    await show({ wide: false, sheetOpen: true, sheetHeader: '자세히' });
+    const header = document.body.querySelector('[data-testid="list-detail-detail-sheet"] [data-panel-header]') as HTMLElement;
+    expect((header.querySelector('[data-slot="sheet-header-label"]') as HTMLElement).textContent).toBe('자세히');
+    expect(header.className).toContain('min-h-[3.75rem]');
+    expect(header.className).toContain('justify-center');
   });
 
   it('the sheet asks the caller to close it (the close button)', async () => {

@@ -71,11 +71,18 @@ describe('AgentPermissionRequests (story #4533)', () => {
     await render();
     expect(fetchWithAuth.mock.calls[0][0]).toBe('/api/agent-permission-requests');
     for (const piece of ['에이전트 권한 요청 · 1', '권한 요청', '12분째 기다림', 'Dev · SYJ-MacBook-Pro', '개발 역할로 받은 요청이에요', 'Bash',
-      'npm install --save ••••(가림) …', '비밀처럼 보이는 값은 가려서 보냈어요 · 앞 200자만 보여요', '작업 폴더 · ~/Sprintable/블로그 글']) {
+      'npm install --save •••• …', '비밀처럼 보이는 값은 가려서 보냈어요 · 앞 200자만 보여요', '작업 폴더 · ~/Sprintable/블로그 글']) {
       expect(text()).toContain(piece);
     }
     expect(line()).toBe('페어링된 폰에서 답할 수 있어요');
     expect(container.querySelectorAll('button')).toHaveLength(0);
+  });
+
+  it('[4938] the masked block carries no word of its own: an older Mac app\'s «(가림)» is shown without it, a new one\'s «••••» as it is — and a file name beside the block stays', async () => {
+    fetchWithAuth.mockResolvedValueOnce(answer([req({ summary: '••••(가림).txt' }), req({ id: 'r2', request_id: 'q2', summary: '••••.txt' }), req({ id: 'r3', request_id: 'q3', summary: 'note.txt', masked: false }), req({ id: 'r4', request_id: 'q4', summary: 'echo ••••(가림)', masked: false })]));
+    await render();
+    const lines = [...container.querySelectorAll('p.font-mono')].map((n) => n.textContent);
+    expect(lines).toEqual(['••••.txt', '••••.txt', 'note.txt', 'echo ••••(가림)']); // the last one the Mac did not mask: shown as it is
   });
 
   it('a quiet computer: «연결 끊김 · 상태 모름» and no waiting time; a passed window and no paired phone say why it cannot be answered here', async () => {

@@ -41,6 +41,7 @@ export function HomeScreen({ model, sources, partial = false }: { model: HomeMod
       list={<HomeList model={model} sources={sources} partial={partial} selectedKey={selectedKey} onSelect={onSelect} />}
       detail={<HomeDetail row={selectedRow} model={model} sources={sources} now={now} partial={partial} />}
       detailLabel={t('detailRequest')}
+      sheetHeader={t('detailSheetHeader')}
       sheetLabel={sheetLabel}
       sheetOpen={sheetOpen && selectedRow !== null}
       onSheetOpenChange={setSheetOpen}
