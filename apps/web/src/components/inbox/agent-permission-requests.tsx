@@ -13,6 +13,7 @@ import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
 import { answerOnPhone, type AnswerOutcome } from '@/lib/phone-answer';
 import { RemoteControlLink, useRemoteOff } from '@/components/desktop/remote-off';
+import { PermissionPreviewView } from '@/components/inbox/permission-preview';
 
 /**
  * story #4533 (E-DESKTOP-2 B-2 · 명세 모음 «B-2 폰 권한 요청 카드(웹은 읽기 전용)») — the approvals inbox's top group «에이전트 권한
@@ -284,6 +285,7 @@ export function PermissionCard({ request: r, now, phone, auth, answer, onAnswer 
           {notes.length > 0 ? <p className="mt-0.5 text-editorial-meta text-muted-foreground">{notes.join(' · ')}</p> : null}
         </div>
       )}
+      {net === null && r.preview ? <PermissionPreviewView preview={r.preview} /> : null}
       {r.workdir ? <p className="text-editorial-meta text-muted-foreground">{t('workdir', { path: r.workdir })}</p> : null}
       {net === 'ask' && r.host_unread && answer === null ? (
         <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-line">{t('net.hostUnread')}</p>
@@ -325,8 +327,8 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '',
   ) : (
     <div className="flex gap-2" data-testid="agent-permission-buttons">
       {/* the person's one judgement here: both the same weight, as the desktop band (Yuna 4951 · no default pushed) */}
-      <Button size="sm" variant="outline" onClick={() => onAnswer('allow')}>{net === 'ask' ? t('net.allowMore') : t('phone.allow')}</Button>
-      <Button size="sm" variant="outline" onClick={() => onAnswer('deny')}>{t('phone.deny')}</Button>
+      <Button size="sm" variant="outline" className="touch:min-h-11 touch:px-4" onClick={() => onAnswer('allow')}>{net === 'ask' ? t('net.allowMore') : t('phone.allow')}</Button>
+      <Button size="sm" variant="outline" className="touch:min-h-11 touch:px-4" onClick={() => onAnswer('deny')}>{t('phone.deny')}</Button>
     </div>
   );
   const settings = (

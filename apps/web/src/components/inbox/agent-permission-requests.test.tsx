@@ -9,7 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import enMessages from '../../../messages/en.json';
-import type { PermissionRequest } from '@/lib/agent-permissions';
+import type { PermissionPreview, PermissionRequest } from '@/lib/agent-permissions';
 
 const fetchWithAuth = vi.fn();
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: (...args: unknown[]) => fetchWithAuth(...args) }));
@@ -76,6 +76,19 @@ describe('AgentPermissionRequests (story #4533)', () => {
     }
     expect(line()).toBe('페어링된 폰에서 답할 수 있어요');
     expect(container.querySelectorAll('button')).toHaveLength(0);
+  });
+
+  it('[4949] a request that carries a preview shows its lines under the file name; one without shows none; the buttons stay (44 high on a phone)', async () => {
+    const preview: PermissionPreview = { op: 'edit', blocks: [{ removed: ['a = 1'], added: ['a = 2'], removed_more: 0, added_more: 0 }], blocks_more: 0, replace_all: false, withheld: null };
+    fetchWithAuth.mockResolvedValueOnce(answer([req({ tool: 'Edit', summary: 'src/a.ts', masked: false, preview }), req({ id: 'r2', request_id: 'q2', tool: 'Bash', summary: 'ls', masked: false })]));
+    await render();
+    const previews = container.querySelectorAll('[data-testid="agent-permission-preview"]');
+    expect(previews).toHaveLength(1);
+    expect(previews[0]!.textContent).toContain('바꾸려는 줄');
+    expect(previews[0]!.textContent).toContain('a = 2');
+    // the preview sits after the file name's box (the card reads: who · what tool · which file · which lines)
+    const card = previews[0]!.closest('[data-testid="agent-permission-card"]')!;
+    expect(card.textContent!.indexOf('src/a.ts')).toBeLessThan(card.textContent!.indexOf('바꾸려는 줄'));
   });
 
   it('[4938] the masked block carries no word of its own: an older Mac app\'s «(가림)» is shown without it, a new one\'s «••••» as it is — and a file name beside the block stays', async () => {
