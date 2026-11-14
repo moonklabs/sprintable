@@ -1016,7 +1016,7 @@ async function proxyImpl(incoming: NextRequest) {
 /**
  * story 4948 — the root `/` with no usable access token but a session signal: renew ONCE here, as a protected page would, so `RootPage` reads the fresh access cookie (it is forwarded on this very request) and goes on to
  * the signed-in home. `null` = leave the request to the public passthrough: anything but a document read (a POST / a HEAD / a prefetch / an RSC fetch is not a page load), a Firebase session, a first visit with no signal, a live access token, a stale refresh for another account (RC2),
- * and a refresh that could not be confirmed (nothing is cleared: the next visit asks again). A refresh the backend REFUSED (401, not superseded) is a dead session: the cookies are cleared — the same line every other branch draws.
+ * and a «superseded» answer. A refresh that could not be confirmed is answered with the «다시 시도» page (a rewrite; nothing is cleared: the next visit asks again). A refresh the backend REFUSED (401, not superseded) is a dead session: the cookies are cleared — the same line every other branch draws.
  */
 async function renewSessionForRoot(request: NextRequest): Promise<NextResponse | null> {
   if (!isDocumentRead(request)) return null; // a page load only: not a prefetch · an RSC fetch · a HEAD · a POST (each would spend one more rotation for nothing)
@@ -1036,6 +1036,13 @@ async function renewSessionForRoot(request: NextRequest): Promise<NextResponse |
     const response = NextResponse.next({ request });
     clearAuthCookies(response);
     captureSignupAttribution(request, response); // a dead session is an effectively anonymous visit: the first touch is still recorded
+    return response;
+  }
+  if (outcome.kind === 'transient') {
+    // «could not be confirmed» (a 503 · the network · a deploy's few seconds) is NOT «signed out»: the page load is REWRITTEN to the public «다시 시도» page (cookies untouched), as every protected page load does since 4915 PR 2 —
+    // never handed to RootPage, which would show the sign-in to a person whose session is alive (the Mac app opening `/` while the server was being replaced)
+    const response = handleUnauthenticated(request, false, false, true, true);
+    captureSignupAttribution(request, response);
     return response;
   }
   return null;

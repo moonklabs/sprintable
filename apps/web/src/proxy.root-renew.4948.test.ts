@@ -120,10 +120,13 @@ describe('the root `/` renews a session whose access cookie is gone (story 4948)
     expect(setCookies(dead).join('\n')).toContain('sp_attr_src=newsletter');
   });
 
-  it('a refresh that could not be confirmed (503 · the network) clears NOTHING: the session may be alive, the next visit asks again', async () => {
-    for (const fail of [() => mockFetch.mockResolvedValue(answer(503, {})), () => mockFetch.mockRejectedValue(new TypeError('fetch failed'))]) {
+  it('⭐a refresh that could not be confirmed (503 · the network · a deploy window) is not a sign-out: `/` is REWRITTEN to the «다시 시도» page and NO auth cookie is touched — never handed to RootPage (which would show the sign-in)', async () => {
+    for (const fail of [() => mockFetch.mockResolvedValue(answer(503, {})), () => mockFetch.mockResolvedValue(answer(502, {})), () => mockFetch.mockRejectedValue(new TypeError('fetch failed'))]) {
       mockFetch.mockReset(); fail();
       const res = await middleware(req('/', { sp_rt: 'rt' }));
+      expect(res.headers.get('x-middleware-rewrite') ?? '', 'rewritten to the unconfirmed page').toContain('/session-unconfirmed');
+      expect(res.headers.get('location')).toBeNull();
+      expect(res.headers.get('cache-control') ?? '').toContain('no-store');
       expect(setCookies(res).filter((c) => /sp_(at|rt)=/.test(c)), 'no auth cookie is touched').toEqual([]);
     }
   });
