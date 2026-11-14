@@ -21,7 +21,7 @@ import { AddParticipantModal } from '@/components/chat/add-participant-modal';
 import { DeliveryContractModal } from '@/components/chat/delivery-contract-modal';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
+import { RoomProjectAsk } from '@/components/chat/room-project-ask';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { Avatar } from '@/components/shared/avatar';
@@ -450,15 +450,7 @@ export default function ConversationPage() {
             </div>
           ) : null}
           {askRoomProject ? (
-            <div className="flex items-center gap-2 border-b border-border px-4 py-2" data-testid="room-project-ask">
-              <label htmlFor="room-project" className="flex-shrink-0 text-xs text-muted-foreground">{t('roomProjectAsk')}</label>
-              <Select id="room-project" value={chosenProjectId ?? ''} onChange={(e) => setChosen(e.target.value ? { convId: conversation_id, projectId: e.target.value } : null)} className="max-w-xs">
-                <option value="">{t('newRoomProjectPick')}</option>
-                {projectMemberships.map((p) => (
-                  <option key={p.projectId} value={p.projectId}>{p.projectName}</option>
-                ))}
-              </Select>
-            </div>
+            <RoomProjectAsk value={chosenProjectId ?? ''} projects={projectMemberships} onChange={(projectId) => setChosen(projectId ? { convId: conversation_id, projectId } : null)} />
           ) : null}
           <AgentsPausedBand key={conversation_id} conversationId={conversation_id} state={meta?.agentsPaused ?? null} onResumed={() => void fetchMeta()} />
           <ChatView
