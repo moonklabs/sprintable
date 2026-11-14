@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { throwForFailedResponse } from '@/lib/chat-attachment-error';
 import { LAYER } from '@/components/ds/layers';
+import { ComposeMovedNotice } from './compose-moved-notice';
 import { ChevronLeft, RefreshCw, UserX } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -79,6 +80,10 @@ interface ChatViewProps {
   // 채운다. 새 프리필 기전을 짓지 않는다 — #92f00dc4 prefillCommand(모호 명령 후보 클릭)와
   // 동일 경로를 그대로 재사용(마운트 시 1회 시드).
   initialComposeText?: string;
+  /** story 4906 — a line above the composer saying the text in it was moved here from «홈» and not sent (and why). Gone once the person sends or clears the text. */
+  composeNotice?: string;
+  /** story 4906 — the id of the hand-over that brought the line here (the URL's `composeNote`): the note's «done» memory is per room + id, so a reload of the same hand-over stays quiet and a later hand-over is new. */
+  composeNoticeId?: string;
 }
 
 interface MessageGroup {
@@ -163,7 +168,7 @@ function blockFailureIsRetryable(status: number): boolean {
   return status >= 500 || status === 408 || status === 429;
 }
 
-export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = CHAT_API_PREFIX, backHref: backHrefProp, commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants, initialComposeText }: ChatViewProps) {
+export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix = CHAT_API_PREFIX, backHref: backHrefProp, commandTargets, presenceById, scrollToMessageId, initialLastReadAt, participants, initialComposeText, composeNotice, composeNoticeId }: ChatViewProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   // story #4231 3차 — 기본 복귀 목적지(대화 목록 · flat)도 현재 프로젝트를 싣는다(넘겨받은 값은 호출처 책임).
   const backHref = backHrefProp ?? flatHref('/chats');
@@ -207,6 +212,24 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   const handleFillComposer = useCallback((text: string) => {
     setPrefillCommand((prev) => ({ text, nonce: (prev?.nonce ?? 0) + 1 }));
   }, []);
+  // story 4906 — the note lives while the moved text is in the composer: it goes when the person has had text there and the box is empty again (sent or cleared).
+  // `sawDraft` keeps the first empty report (before the prefill lands) from closing it.
+  const [composeNoticeOpen, setComposeNoticeOpen] = useState(true);
+  const sawDraftRef = useRef(false);
+  // Once the person has sent or cleared the moved line the note is DONE for that hand-over: the marked URL (`?compose=…&composeNote=<id>`) stays in the address bar, and a reload / a visit back to it re-seeds the
+  // composer (3831) — without this the note would come back and say «not sent» about a line that was sent (a duplicate-send nudge). The memory is per room + the hand-over's OWN id (never the words, never a hash of
+  // them): a later hand-over of the same text into the same room has a new id and is a new note; a picked room (no id) writes nothing. Browser storage, per tab; unreadable → just no memory.
+  const noticeDoneKey = composeNoticeId ? `sprintable:compose-note-done:${threadId}:${composeNoticeId}` : null;
+  useEffect(() => {
+    if (!noticeDoneKey) return;
+    try { if (window.sessionStorage.getItem(noticeDoneKey)) setComposeNoticeOpen(false); } catch { /* storage unreadable: the note simply has no memory */ }
+  }, [noticeDoneKey]);
+  const handleDraftChange = useCallback((draft: string) => {
+    if (draft.trim()) { sawDraftRef.current = true; return; }
+    if (!sawDraftRef.current) return;
+    setComposeNoticeOpen(false);
+    if (noticeDoneKey) { try { window.sessionStorage.setItem(noticeDoneKey, '1'); } catch { /* as above */ } }
+  }, [noticeDoneKey]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -1216,6 +1239,8 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
             />
           )}
 
+          {composeNotice && composeNoticeOpen ? <ComposeMovedNotice text={composeNotice} /> : null}
+
           {/* Input — story 4906: while the round support button is drawn the composer keeps its right 64px free, so [Send] is not under it */}
           <SupportLauncherClearance>
             <ChatInput
@@ -1229,6 +1254,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
               currentTeamMemberId={currentTeamMemberId}
               participants={participants}
               prefillCommand={prefillCommand}
+              onDraftChange={handleDraftChange}
             />
           </SupportLauncherClearance>
 

@@ -655,7 +655,7 @@ describe('ChatListView — 옛 서버(422)에서는 지금 화면과 같다 (sto
     searchParamsValueRef.current = 'compose=' + encodeURIComponent('지시');
     oldServer(); ctx();
     await mount({ projectId: 'proj-a' });
-    expect(replaceMock).toHaveBeenCalledWith('/chats/conv-dm?compose=' + encodeURIComponent('지시') + '&p=proj-a');
+    expect(replaceMock).toHaveBeenCalledWith(expect.stringMatching(new RegExp('^/chats/conv-dm\\?compose=' + encodeURIComponent('지시') + '&composeNote=[0-9a-z]+&p=proj-a$'))); // 4906 — the hand-over marks the arrival so the room can say the line was moved here, not sent
   });
 
   it('⭐ the «pick a project» fallback still carries the rail\'s name (the overlay rail is labelled by #chat-rail-heading) — an h2 when it sits beside a room', async () => {
@@ -754,7 +754,7 @@ describe('ChatListView — 옛 서버(422)에서는 지금 화면과 같다 (sto
     ctx();
     await act(async () => { root.render(wrap(<ChatListView projectId="proj-a" currentTeamMemberId="me-1" open={false} onOpenChange={onOpenChange} />)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
-    expect(replaceMock).toHaveBeenCalledWith('/chats/conv-dm?compose=' + encodeURIComponent('지시') + '&p=proj-a');
+    expect(replaceMock).toHaveBeenCalledWith(expect.stringMatching(new RegExp('^/chats/conv-dm\\?compose=' + encodeURIComponent('지시') + '&composeNote=[0-9a-z]+&p=proj-a$'))); // 4906 — the hand-over marks the arrival so the room can say the line was moved here, not sent
   });
 });
 

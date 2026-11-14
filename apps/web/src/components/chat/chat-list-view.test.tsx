@@ -1420,7 +1420,7 @@ describe('ChatListView — story #3831 지시 한 줄 compose 경유(새 API 0·
       return { ok: false, status: 404, json: async () => null };
     }));
     await mount();
-    expect(replaceMock).toHaveBeenCalledWith('/chats/conv-recent?compose=' + encodeURIComponent('유튜브 챕터 3개로 나눠줘'));
+    expect(replaceMock).toHaveBeenCalledWith(expect.stringMatching(new RegExp('^/chats/conv-recent\\?compose=' + encodeURIComponent('유튜브 챕터 3개로 나눠줘') + '&composeNote=[0-9a-z]+$'))); // 4906 — marked: the room says the line was moved here, not sent
   });
 
   it('story #4231 — compose 경유 이동도 현재 프로젝트(`?p=`)를 싣는다', async () => {
@@ -1434,7 +1434,7 @@ describe('ChatListView — story #3831 지시 한 줄 compose 경유(새 API 0·
       return { ok: false, status: 404, json: async () => null };
     }));
     await mount();
-    expect(replaceMock).toHaveBeenCalledWith('/chats/conv-recent?compose=' + encodeURIComponent('지시') + '&p=proj-A');
+    expect(replaceMock).toHaveBeenCalledWith(expect.stringMatching(new RegExp('^/chats/conv-recent\\?compose=' + encodeURIComponent('지시') + '&composeNote=[0-9a-z]+&p=proj-A$')));
   });
 
   it('compose 없이 마운트되면 리다이렉트가 전혀 안 일어난다(회귀 0)', async () => {

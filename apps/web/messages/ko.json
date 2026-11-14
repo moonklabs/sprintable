@@ -5650,6 +5650,7 @@
     "intentSuggestionFailed": "처리에 실패했어요",
     "inputPlaceholderMobile": "메시지 쓰기 — / 로 명령, @ 로 멘션",
     "inputPlaceholderFull": "메시지 쓰기 — / 명령 · @ 멘션 · # 엔티티",
+    "composeMovedNotice": "홈에서 쓴 글을 가장 최근 방 «{room}»에 옮겨 두었어요 — 받을 에이전트를 정할 수 없어 바로 보내지 않았어요. 이 방이 맞으면 보내기, 아니면 다른 방을 골라 주세요.",
     "isTyping": "{name} 님이 입력 중",
     "othersTyping": "{name} 외 {count}명 입력 중",
     "presenceOnline": "온라인",
