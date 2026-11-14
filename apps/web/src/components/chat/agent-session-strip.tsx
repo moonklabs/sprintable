@@ -401,6 +401,7 @@ function ResultLine({ result }: { result: Result }) {
   const settings = <Button size="sm" variant="outline" onClick={() => void phoneCall('app.settings')}>{t('command.openSettings')}</Button>;
   switch (result.outcome.kind) {
     case 'stopped': return line(t('command.stopped'));
+    case 'stopped_commands_running': return line(t('command.stoppedCommandsRunning'));
     case 'already_stopped': return line(t('command.alreadyStopped'));
     case 'sent_now': return line(t('command.sentNow'));
     case 'sent_after_step': return line(t('command.sentAfterStep'));

@@ -5571,6 +5571,7 @@
         "stopping": "멈추는 중…",
         "sending": "보내는 중…",
         "stopped": "멈췄어요 — 세션은 그대로예요, 다음 지시를 보내면 이어서 해요",
+        "stoppedCommandsRunning": "턴은 멈췄지만 백그라운드에서 도는 명령은 계속 돌고 있어요",
         "alreadyStopped": "이미 멈춰 있었어요",
         "stopUnreachable": "그 컴퓨터와 연결이 끊겨 멈추지 못했어요",
         "stopSystemWait": "macOS가 그 컴퓨터 화면에서 폴더를 쓸지 묻고 있어 멈추지 못했어요 — 지금은 [인계 없이 끝내기]만 돼요. 그 컴퓨터 앞에서 창에 답하면 이어서 일해요",
