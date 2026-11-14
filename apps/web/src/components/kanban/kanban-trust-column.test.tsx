@@ -261,6 +261,22 @@ describe('KanbanTrustColumn — 빈 잠긴 열은 좁은 띠(story #4888)', () =
     expect(strip()!.getAttribute('title')).toContain('입력 필요');
   });
 
+  it('[4923 재오픈] 띠 세로 글은 줄을 바꾸지 않고(whitespace-nowrap), 낮은 데스크톱 창(높이 ≤ 520)에선 장식 자물쇠만 뺀다 — 낮은 창서 «입력필 / 요»로 갈라지던 것', async () => {
+    await render({});
+    const label = Array.from(strip()!.querySelectorAll('span')).find((s) => s.textContent === '입력 필요')!;
+    expect(label.className.split(/\s+/)).toContain('whitespace-nowrap');
+    // 자리가 모자라면 줄바꿈 · 겹침 대신 «…»로 잘린다(전체 이름은 띠 title이 말한다)
+    for (const c of ['min-h-0', 'overflow-hidden', 'text-ellipsis']) expect(label.className.split(/\s+/)).toContain(c);
+    expect(label.className).toContain('[writing-mode:vertical-rl]');
+    // 낮은 창에선 띠 위아래 여백도 12 → 8(글자 폭이 더 넓은 실제 글꼴 — Pretendard — 에서도 영문 «Needs Input»이 한 줄로 들도록 8px 더 — 시험 브라우저엔 그 글꼴이 없어 e2e는 이 한 줄을 가르지 못한다)
+    expect(strip()!.className).toContain('lg:[@media(max-height:520px)]:py-2');
+    const lock = strip()!.querySelector('svg')!;
+    expect(lock.getAttribute('class')).toContain('lg:[@media(max-height:520px)]:hidden');
+    // 잠금 안내는 자물쇠 그림이 아니라 글이 말한다(title · 스크린리더 글) — 그림을 빼도 정보 0 손실
+    expect(strip()!.textContent).toContain(koMessages.board.trustLockedDropHint);
+    expect(strip()!.getAttribute('title')).toContain(koMessages.board.trustLockedDropHint);
+  });
+
   it('카드가 1장이라도 있으면 원래 칸이다(띠 아님)', async () => {
     await render({ stories: [story({ trust_stage: 'needs_input' })] });
     expect(strip()).toBeNull();

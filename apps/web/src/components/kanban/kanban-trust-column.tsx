@@ -159,11 +159,13 @@ export function KanbanTrustColumn({
         data-testid={`trust-column-strip-${id}`}
         data-trust-column={id}
         title={`${label} · ${t('trustLockedDropHint')}`}
-        className={`flex h-full w-10 min-w-10 shrink-0 flex-col items-center gap-2 rounded-xl border border-dashed border-ds-line ${LAYER.panel} py-3 transition ${closedDuringDrag ? 'opacity-45' : ''}`}
+        className={`flex h-full w-10 min-w-10 shrink-0 flex-col items-center gap-2 rounded-xl border border-dashed border-ds-line ${LAYER.panel} py-3 transition lg:[@media(max-height:520px)]:py-2 ${closedDuringDrag ? 'opacity-45' : ''}`}
       >
         <span className={`size-1.5 shrink-0 rounded-full ${dotClass}`} aria-hidden="true" />
-        <Lock className="size-3 text-ds-ink-3" aria-hidden="true" />
-        <span className="text-xs font-extrabold text-ds-ink [writing-mode:vertical-rl]">{label}</span>
+        {/* story #4923(재오픈) — 띠가 낮은 창(1100×420: 칸 127px)에서 세로 글이 «입력필 / 요»로 두 줄로 갈라졌다: 글은 줄을 바꾸지 않고(whitespace-nowrap) 한 줄로 서되 자리가 모자라면(더 낮은 창 · 확대 · 더 긴 글) 줄바꿈 · 겹침 대신 «…»로 잘린다(min-h-0 · overflow-hidden · text-ellipsis — 전체 이름은 띠 title이 말한다), 낮은 데스크톱 창(높이 ≤ 520)에선 장식인 자물쇠를 빼고(잠금은 점선 테두리 · title · 스크린리더 글이 그대로 말한다 · 20px)
+            위아래 여백을 12 → 8로 줄인다(8px). 띠 = 점 6 + 글(ko ≈ 58 · en ≈ 74) + 0 16 + 사이 16 + 위아래 16이 칸 높이(139: 칸 바깥 여백을 줄인 뒤) 안에 한 줄로 든다. */}
+        <Lock className="size-3 text-ds-ink-3 lg:[@media(max-height:520px)]:hidden" aria-hidden="true" />
+        <span className="min-h-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-extrabold text-ds-ink [writing-mode:vertical-rl]">{label}</span>
         <span className="text-xs tabular-nums text-ds-ink-3">0</span>
         <span className="sr-only">{t('trustLockedDropHint')}</span>
       </div>
@@ -175,11 +177,11 @@ export function KanbanTrustColumn({
       ref={setNodeRef}
       data-board-column={id}
       // 4908 — 열은 «내용 칸 층»(LAYER.panel): 바탕과 카드 사이를 면으로 가른다(바탕 → 열 ≥ 0.03 · 열 → 카드 ≥ 0.05, layer-rule.test). 잠긴 열은 같은 면에 안내 글만 다르다.
-      className={`flex h-full w-[280px] min-w-[240px] flex-col rounded-xl border p-3 transition ${LAYER.panel} ${
+      className={`flex h-full w-[280px] min-w-[240px] flex-col rounded-xl border p-3 transition lg:[@media(max-height:520px)]:py-2 ${LAYER.panel} ${
         closedDuringDrag ? 'border-ds-line opacity-45' : isOver ? 'border-ds-action ring-1 ring-ds-action' : 'border-ds-line'
       }`}
     >
-      <div className="mb-3 flex items-center justify-between gap-2">
+      <div className="mb-3 flex items-center justify-between gap-2 lg:[@media(max-height:520px)]:mb-2">
         {/* story #2969 §1.3-b(doc proofline-system-layer-2969, PR-6) — 유나 실픽셀 갭 fix:
             kanban-column.tsx(클래식 축)만 하고 이 파일(6단계 신뢰축=기본 보드 화면)을
             놓쳤던 것. 컬럼헤더=소헤딩(Heading 무게), 크기(text-xs)·sans 불변. */}
