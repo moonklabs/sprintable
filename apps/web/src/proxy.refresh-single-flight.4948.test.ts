@@ -143,6 +143,7 @@ describe('one rotation per refresh token in flight (story 4948 PR 2)', () => {
     const fresh = await accessToken(Math.floor(Date.now() / 1000) + 3600);
     const g = gate();
     mockFetch.mockImplementation(async () => { await g.p; return answer(200, { data: { access_token: fresh, refresh_token: 'new-rt' } }); });
+    await middleware(api({ sp_rt: 'sweep-first' })).catch(() => undefined); // any stale leftovers of earlier cases are swept before the count is taken
     const before = pendingRefreshCount();
     const room = REFRESH_IN_FLIGHT_MAX - before;
     const all: Promise<Response>[] = [];
@@ -150,6 +151,11 @@ describe('one rotation per refresh token in flight (story 4948 PR 2)', () => {
     await new Promise((r) => setTimeout(r, 200));
     expect(pendingRefreshCount(), 'the map stops at the ceiling').toBe(REFRESH_IN_FLIGHT_MAX);
     expect(refreshCalls().length, 'the five past the ceiling were still sent, on their own').toBe(room + 5);
+    const sentFor = refreshCalls().map((c) => JSON.parse((c[1] as { body: string }).body).refresh_token);
+    for (let i = room; i < room + 5; i += 1) expect(sentFor, `bogus-${i} (past the ceiling) was sent`).toContain(`bogus-${i}`);
+    void middleware(api({ sp_rt: 'bogus-0' })); // the map is full, but a YOUNG rotation of the same token is still joined
+    await new Promise((r) => setTimeout(r, 50));
+    expect(refreshCalls().length, 'joining a registered rotation needs no new call even when the map is full').toBe(room + 5);
     g.release(undefined);
     const results = await Promise.all(all);
     for (const res of results.slice(-5)) expect(setCookies(res), 'a request past the ceiling still gets its renewal').toContain('sp_rt=new-rt');
