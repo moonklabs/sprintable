@@ -340,6 +340,12 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
   const name = runtime ? RUNTIME_LABEL[runtime] : '';
   const starting = view.kind === 'starting';
   const blockLine = block === 'no-agent' ? t('quick.blockNoAgent') : block === 'no-folder' ? t('quick.blockNoFolder') : block === 'wide-unconfirmed' ? t('quick.blockWide') : nameBlank ? t('quick.blockName') : null;
+  // story 4941: the ONE sentence beside the stuck button — why it cannot be pressed (the reasons the question's box used to list), else what the press does
+  const failLine = errorLine ?? rateLine ?? null; // (a failed press · a rate limit: the sentence beside the button says it, in red)
+  const lineText = limitAsk
+    ? (block !== null || nameBlank ? (blockLine ?? '') : roomFull ? t('room.soloNone') : t('quick.limit.line', { project: limitAsk.name }))
+    : agent ? (agentProject ? t('quick.projectChosen', { name: orgProjects.find((p) => p.projectId === agentProject)?.projectName ?? '' }) : '')
+      : blockLine ?? (runtime && projectLine ? t('quick.createLine', { name: agentName, runtime: `${name}`, project: projectLine.name }) : '');
   const withVersion = (r: DesktopRuntime) => query.versions?.[r];
   return (
     <div className="flex flex-col gap-3">
@@ -389,12 +395,12 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
           <h2 id="quick-step-name" className="text-sm font-medium">② {t('quick.stepName')}</h2>
           <div className="flex flex-col gap-1">
             <label htmlFor="quick-agent-name" className="text-xs text-muted-foreground">{t('quick.nameLabel')}</label>
-            <Input id="quick-agent-name" data-testid="quick-agent-name" value={nameTyped ?? RUNTIME_LABEL[runtime]} maxLength={AGENT_NAME_MAX} disabled={starting}
+            <Input id="quick-agent-name" data-testid="quick-agent-name" className="scroll-mb-32" value={nameTyped ?? RUNTIME_LABEL[runtime]} maxLength={AGENT_NAME_MAX} disabled={starting}
               aria-invalid={nameBlank} onChange={(e) => { setNameTyped(e.target.value); setErrorLine(null); }} />
           </div>
           <div className="flex flex-col gap-1">
             <label htmlFor="quick-agent-role" className="text-xs text-muted-foreground">{t('quick.roleLabel')}</label>
-            <Input id="quick-agent-role" data-testid="quick-agent-role" value={roleTyped} maxLength={AGENT_ROLE_MAX} disabled={starting}
+            <Input id="quick-agent-role" data-testid="quick-agent-role" className="scroll-mb-32" value={roleTyped} maxLength={AGENT_ROLE_MAX} disabled={starting}
               placeholder={t('quick.rolePlaceholder')} aria-describedby="quick-role-hint" onChange={(e) => setRoleTyped(e.target.value)} />
             <p id="quick-role-hint" className="text-xs text-muted-foreground" data-testid="quick-role-hint">{t('quick.roleHint')}</p>
           </div>
@@ -416,7 +422,7 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
             <>
               <p className="flex flex-wrap items-center gap-2 text-sm">
                 <code className="min-w-0 truncate text-xs" data-testid="quick-folder">{folder.shown}</code>
-                <Button asChild variant="ghost" size="sm"><a href={folderLink}>{t('quick.folderChange')}</a></Button>
+                <Button asChild variant="ghost" size="sm" className="scroll-mb-32"><a href={folderLink}>{t('quick.folderChange')}</a></Button>
               </p>
               {projectLine ? (
                 <p className="text-sm text-muted-foreground" data-testid="quick-project">
@@ -429,14 +435,14 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
                 <div role="status" className="flex flex-col gap-2 rounded-md border p-3 text-sm" data-testid="quick-wide">
                   <p>{t('quick.wideAsk')}</p>
                   <div className="flex gap-2">
-                    <Button size="sm" onClick={() => setWideOk(true)}>{t('quick.wideYes')}</Button>
-                    <Button asChild size="sm" variant="outline"><a href={folderLink}>{t('quick.folderOther')}</a></Button>
+                    <Button size="sm" className="scroll-mb-32" onClick={() => setWideOk(true)}>{t('quick.wideYes')}</Button>
+                    <Button asChild size="sm" variant="outline" className="scroll-mb-32"><a href={folderLink}>{t('quick.folderOther')}</a></Button>
                   </div>
                 </div>
               ) : null}
             </>
           ) : (
-            runtime ? <div><Button asChild variant="outline"><a href={folderLink}>{t('quick.folderPick')}</a></Button></div> : null
+            runtime ? <div><Button asChild variant="outline" className="scroll-mb-32"><a href={folderLink}>{t('quick.folderPick')}</a></Button></div> : null
           )}
         </section>
         )}
@@ -444,13 +450,12 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
         {/* what the agents ask and what they do not stays just above the start row, as on the recipe page (4446) */}
         <p className="text-xs text-muted-foreground">{t('toolNote')}</p>
 
-        {/* story 4934: the start row (or the free plan's question + its [넣고 만들기]) is stuck to the bottom of whatever scrolls, the way the recipe page's «시작» row is (4446):
-            the app's default window shows the web at 539px high, and this card is taller — the button sat below the fold and the first press looked like nothing happened.
-            Spans the card's padding so it reads as the card's last row. */}
-        <footer className="sticky bottom-0 -mx-6 -mb-6 flex flex-col gap-2 rounded-b-[inherit] border-t bg-card px-6 pt-3 pb-6" data-testid="quick-start-row">
-          {errorLine ? <p role="alert" className="text-sm text-destructive" data-testid="quick-error">{errorLine}</p> : null}
-          {rateLine ? <p role="alert" className="text-sm text-destructive">{rateLine}</p> : null}
-          {showPhoneControl ? (
+        {/* story 4941 (PO · the real Mac window, 539 high): the stuck row is ONE line — the button and one sentence beside it (what the press does · or why it cannot be pressed). The question's whole box and the phone tick
+            stand IN the flow, above the row (the 271 px row of 4934 covered «② 이름과 역할» · the name · role fields · «③ 폴더» on the first screen at 539 — dev b47453275/44ba8abe9 measured). 4934's promise holds:
+            the question is in sight before the press (as the sentence beside the button), and its whole box is one scroll away. The fields it could still cover come above it when focused:
+            `scroll-mb-32` = 128 px = this row (61: 44 button + 2×8 + 1 border) + the shell scroller's 64 px under it (the launcher's clear) + a little air — a margin that does not reach past the scroller's
+            bottom edge asks for no scroll, and the field would stay under the row. */}
+        {showPhoneControl ? (
             // story 4670 AC1 (Yuna §M): a bordered box, the phone icon, a semibold label, a bigger tick — one line inside the third step, just above «시작».
             // story 4934: drawn with the free plan's question too — [넣고 만들기] is the same start (it sends the PUT when the tick is on), so the tick is in view there as well
             <div className="flex gap-3 rounded-md border p-3" data-testid="setup-phone-control">
@@ -461,40 +466,39 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
               </label>
             </div>
           ) : null}
-          {limitAsk ? (
-            <div role="status" className="flex flex-col gap-2 rounded-md border p-3 text-sm" data-testid="quick-limit">
-              <p className="font-medium">{t('quick.limit.title')}</p>
-              <p>{t('quick.limit.body', { project: limitAsk.name })}</p>
-              {/* codex self-QA (4717): the room can fill after the press that raised this question — the button is held and the reason said, never a silent no-op */}
-              {roomFull && agentRoom ? (
-                <RoomShortBox room={agentRoom} line={t('room.soloNone')}
-                  hint={<p className="text-xs text-muted-foreground" data-testid="quick-room-use-team">{t('room.soloUseTeam')}</p>} />
-              ) : null}
-              {nameBlank ? <p className="text-xs text-muted-foreground" data-testid="quick-limit-name-blank">{t('quick.blockName')}</p> : null}
-              {/* story 4934: the question now stands from the moment a folder is picked — a start the folder still holds (no tool · wide folder not confirmed) says why, never a press that does nothing */}
-              {block !== null ? <p className="text-xs text-muted-foreground" data-testid="quick-limit-block">{blockLine}</p> : null}
-              <div className="flex flex-wrap items-center gap-3">
-                <Button disabled={starting || roomFull || nameBlank || block !== null} onClick={() => void start(limitAsk.id)}>{starting ? t('quick.creating') : t('quick.limit.addStart')}</Button>
-                {isEEEnabled() ? <a className="text-xs underline underline-offset-2" href={flatHref('/settings?tab=billing')}>{tNav('orgLimitUpgradeLink')}</a> : null}
-              </div>
-            </div>
-          ) : (
-            // the free-plan question has its own primary [넣고 만들기] — the start row is not drawn beside it (Yuna 5121 ①)
-            <div className="flex flex-col gap-2">
-              {roomFull && agentRoom ? (
-                <RoomShortBox room={agentRoom} line={t('room.soloNone')}
-                  hint={<p className="text-xs text-muted-foreground" data-testid="quick-room-use-team">{t('room.soloUseTeam')}</p>} />
-              ) : null}
-              <div><Button disabled={starting || (agent ? !agentProject : block !== null || nameBlank || roomFull)} aria-describedby="quick-start-line" onClick={() => void (agent ? startAgent() : start())}>{agent ? (starting ? t('quick.starting') : t('quick.start')) : (starting ? t('quick.creating') : t('quick.create'))}</Button></div>
-              <p id="quick-start-line" className="text-sm text-muted-foreground" data-testid="quick-start-line">
-                {agent ? (agentProject ? t('quick.projectChosen', { name: orgProjects.find((p) => p.projectId === agentProject)?.projectName ?? '' }) : '')
-                  : blockLine ?? (runtime && projectLine
-                    ? t('quick.createLine', { name: agentName, runtime: `${name}`, project: projectLine.name })
-                    : '')}
-              </p>
-              {agent ? null : <p className="text-xs text-muted-foreground" data-testid="quick-create-nothing">{t('quick.createNothing')}</p>}
-            </div>
-          )}
+        {limitAsk ? (
+          <div role="status" className="flex flex-col gap-2 rounded-md border p-3 text-sm" data-testid="quick-limit">
+            <p className="font-medium">{t('quick.limit.title')}</p>
+            <p>{t('quick.limit.body', { project: limitAsk.name })}</p>
+            {/* codex self-QA (4717): the room can fill after the press that raised this question — the button is held and the reason said, never a silent no-op */}
+            {roomFull && agentRoom ? (
+              <RoomShortBox room={agentRoom} line={t('room.soloNone')}
+                hint={<p className="text-xs text-muted-foreground" data-testid="quick-room-use-team">{t('room.soloUseTeam')}</p>} />
+            ) : null}
+            {isEEEnabled() ? <a className="text-xs underline underline-offset-2" href={flatHref('/settings?tab=billing')}>{tNav('orgLimitUpgradeLink')}</a> : null}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {roomFull && agentRoom ? (
+              <RoomShortBox room={agentRoom} line={t('room.soloNone')}
+                hint={<p className="text-xs text-muted-foreground" data-testid="quick-room-use-team">{t('room.soloUseTeam')}</p>} />
+            ) : null}
+            {agent ? null : <p className="text-xs text-muted-foreground" data-testid="quick-create-nothing">{t('quick.createNothing')}</p>}
+          </div>
+        )}
+
+        <footer className="sticky bottom-0 -mx-6 -mb-6 flex flex-col gap-2 rounded-b-[inherit] border-t bg-card px-6 py-2" data-testid="quick-start-row">
+          <div className="flex items-center gap-3">
+            {limitAsk ? (
+              <Button className="shrink-0" disabled={starting || roomFull || nameBlank || block !== null} aria-describedby="quick-start-line" onClick={() => void start(limitAsk.id)}>{starting ? t('quick.creating') : t('quick.limit.addStart')}</Button>
+            ) : (
+              <Button className="shrink-0" disabled={starting || (agent ? !agentProject : block !== null || nameBlank || roomFull)} aria-describedby="quick-start-line" onClick={() => void (agent ? startAgent() : start())}>{agent ? (starting ? t('quick.starting') : t('quick.start')) : (starting ? t('quick.creating') : t('quick.create'))}</Button>
+            )}
+            {/* ONE sentence (never two lines tall — the row stays 60 px): why the button cannot be pressed, else what the press does. Only facts the question's whole box already says (4941 · PO). */}
+            {/* a failed press says why HERE, in the same one line (red) — never a second line in the stuck row (it would grow upward over the fields again; codex 4941 r1) */}
+            <p id="quick-start-line" role={failLine ? 'alert' : undefined} className={`min-w-0 flex-1 text-xs line-clamp-2 ${failLine ? 'text-destructive' : 'text-muted-foreground'}`} title={failLine ?? lineText}
+              data-testid={errorLine ? 'quick-error' : rateLine ? 'quick-rate' : limitAsk ? (block !== null ? 'quick-limit-block' : nameBlank ? 'quick-limit-name-blank' : roomFull ? 'quick-limit-room' : 'quick-limit-line') : 'quick-start-line'}>{failLine ?? lineText}</p>
+          </div>
         </footer>
       </Card>
       {agent ? null : (

@@ -91,7 +91,7 @@ const sight = (page: Page, label: string) => page.evaluate((lab) => {
   const view = sc ? sc.getBoundingClientRect() : { top: 0, bottom: innerHeight };
   const bottom = Math.min(view.bottom, innerHeight);
   const r = b.getBoundingClientRect();
-  const box = document.querySelector('[data-testid="quick-limit"]')?.getBoundingClientRect();
+  const box = document.querySelector('#quick-start-line')?.getBoundingClientRect(); // story 4941: the question stands as the sentence beside the button (its whole box is in the flow, above the row)
   const row = document.querySelector('[data-testid="quick-start-row"]')!.getBoundingClientRect();
   return {
     found: true as const, inSight: r.top >= view.top && r.bottom <= bottom, top: Math.round(r.top), bottom: Math.round(r.bottom), viewBottom: Math.round(bottom),
