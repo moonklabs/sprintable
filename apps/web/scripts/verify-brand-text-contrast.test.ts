@@ -8,8 +8,8 @@ const CSS = readGlobalsCss(path.resolve(__dirname, '../src/app/globals.css'));
 describe('story #4315 — 브랜드 글자 토큰 대비', () => {
   it('⭐양 테마 --brand-text가 배경 · 카드 · 칩 틴트에서 4.5:1 이상(기대값 pin)', () => {
     const [light, dark] = computeBrandTextContrasts(CSS);
-    expect(light!.onBackground).toBeCloseTo(7.05, 1);
-    expect(dark!.onBackground).toBeCloseTo(9.93, 1); // story 4919 — 다크 바탕이 ds-background #0f141a로 이어졌다(옛 10.48 = #0B0C0D 위)
+    expect(light!.onBackground).toBeCloseTo(6.99, 1); // story 4930 — --brand-text는 ds action-text #4a3bc8의 별칭이다(옛 7.05 = 옛 파랑 brand-strong)
+    expect(dark!.onBackground).toBeCloseTo(10.86, 1); // story 4930 — 다크 --brand-text = ds action-text #c7bfff on ds-background #0f141a (옛 9.93 = 옛 파랑 brand-soft)
     for (const c of [light!, dark!]) {
       expect(c.onBackground).toBeGreaterThanOrEqual(4.5);
       expect(c.onCard).toBeGreaterThanOrEqual(4.5);
@@ -18,16 +18,16 @@ describe('story #4315 — 브랜드 글자 토큰 대비', () => {
     }
   });
 
-  it('양성대조 — 밝은 테마 글자가 brand-soft였다면 1.25로 FAIL(예전 모양)', () => {
+  it('양성대조 — 밝은 테마 글자가 brand-soft(옅은 틴트)였다면 1.06으로 FAIL(예전 모양: 옛 파랑일 때 1.25)', () => {
     const regressed = CSS.replace('--brand-text: var(--brand-strong);', '--brand-text: var(--brand-soft);');
     expect(regressed).not.toBe(CSS);
     const [light] = computeBrandTextContrasts(regressed);
-    expect(light!.onBackground).toBeCloseTo(1.25, 1);
+    expect(light!.onBackground).toBeCloseTo(1.06, 1);
     expect(light!.onBackground).toBeLessThan(4.5);
   });
 
-  it('양성대조 — 어두운 테마를 brand-strong으로 바꾸면(3.92) FAIL — 테마마다 다른 토큰이어야 한다', () => {
-    const regressed = CSS.replace('--brand-text: var(--brand-soft);', '--brand-text: var(--brand-strong);');
+  it('양성대조 — 어두운 테마 글자를 어두운 틴트 토큰(brand-contrast)으로 바꾸면 FAIL — 테마마다 읽히는 쪽 토큰이어야 한다(story 4930: 다크 brand-strong은 ds action이라 AA를 넘어 옛 «3.92» 대조는 쓸 수 없다)', () => {
+    const regressed = CSS.replace('--brand-text: var(--brand-soft);', '--brand-text: var(--brand-contrast);');
     expect(regressed).not.toBe(CSS);
     const [, dark] = computeBrandTextContrasts(regressed);
     expect(dark!.onBackground).toBeLessThan(4.5);
