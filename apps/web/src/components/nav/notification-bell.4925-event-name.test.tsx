@@ -23,6 +23,7 @@ const ITEMS = [
   row('no-name', { summary: '페드루: 이벤트 · 말', event: { event_key: 'org.acme.unknown', payload: { note: '말' } } }),
   row('steer', { summary: '페드루: 방향 전환 · 먼저 봐 주세요 → 미르코', event: { event_key: 'preset.steer.instruct', payload: { instruction: '먼저 봐 주세요' } } }),
   row('not-chat', { summary: '시스템: 이벤트 · 그대로', event: { event_key: 'org.acme.deploy', payload: { note: '바뀌면 안 되는' } } }, 'gate.pending_approval'),
+  row('person-wrote', { summary: '시스템: 발행이 멈췄어요. 작업 상세에서 다시 시도해 주세요.', event: { event_key: 'org.acme.deploy', payload: { note: '말' } } }),
   row('plain', { summary: '미르코: 안녕하세요' }),
 ];
 
@@ -48,7 +49,7 @@ async function openBell() {
 const headlines = () => Array.from(document.querySelectorAll('[data-dropdown-panel="notification-bell"] [data-testid="notification-line-headline"]')).map((p) => p.textContent);
 
 describe('NotificationBell — an event named by its definition (story 4925)', () => {
-  it('⭐«{보낸 이}: 정의 이름 · 말», 링크는 라벨 — 서버가 «이벤트»만 말한 줄도; 이름 모르면 «이벤트 · 말»; 문장이 있는 프리셋 · 채팅 줄이 아닌 행 · 보통 글은 그대로', async () => {
+  it('⭐«{보낸 이}: 정의 이름 · 말», 링크는 라벨 — 서버가 «이벤트»만 말한 줄도; 이름 모르면 «이벤트 · 말»; 문장이 있는 프리셋 · 채팅 줄이 아닌 행 · 사람이 쓴 글 · 보통 글은 그대로', async () => {
     await openBell();
     const lines = headlines();
     expect(lines).toEqual([
@@ -57,6 +58,7 @@ describe('NotificationBell — an event named by its definition (story 4925)', (
       '페드루: 이벤트 · 말',
       '페드루: 방향 전환 · 먼저 봐 주세요 → 미르코',
       '시스템: 이벤트 · 그대로',
+      '시스템: 발행이 멈췄어요. 작업 상세에서 다시 시도해 주세요.',
       '미르코: 안녕하세요',
     ]);
     for (const l of lines) expect(l).not.toMatch(/entity:|97470487|org\.acme|\]\(/);

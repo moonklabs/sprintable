@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  composeEventBodyFallback, composeEventPreviewFallback, composeGenericEventLine, entityLinksToLabels, humanizeMachineEventSummary,
+  composeEventBodyFallback, composeEventPreviewFallback, composeGenericEventLine, entityLinksToLabels, humanizeMachineEventSummary, isServerGenericEventLine,
   type EventPreviewHelpers,
 } from './event-block-card';
 
@@ -73,5 +73,15 @@ describe('humanizeMachineEventSummary — the bell\'s line', () => {
     expect(humanizeMachineEventSummary('페드루: 이벤트', card, tEventCard, eventDefinitionName, false)).toBe('페드루: 이벤트');
     expect(humanizeMachineEventSummary('페드루: 작업 배정 · 스토리 → 미르코', { event_key: 'preset.work.assigned', payload: { note: 'x' } }, tEventCard, eventDefinitionName, true)).toBe('페드루: 작업 배정 · 스토리 → 미르코');
     expect(humanizeMachineEventSummary('미르코: 안녕하세요', undefined, tEventCard, eventDefinitionName, true)).toBe('미르코: 안녕하세요');
+  });
+});
+
+describe('isServerGenericEventLine — only the server\'s own line is said again with a name', () => {
+  it('⭐«이벤트» · «이벤트 · words» · «Event» · «Event · words» are; a text a person wrote is not', () => {
+    for (const t of ['이벤트', '이벤트 · 확인', 'Event', 'Event · done']) expect(isServerGenericEventLine(t, tEventCard), t).toBe(true);
+    for (const t of ['발행이 멈췄어요. 작업 상세에서 다시 시도해 주세요.', '이벤트가 끝났어요', '', null, undefined]) expect(isServerGenericEventLine(t, tEventCard), String(t)).toBe(false);
+  });
+  it('⭐the bell keeps a person-written summary on a row that carries an event card', () => {
+    expect(humanizeMachineEventSummary('시스템: 발행이 멈췄어요. 다시 시도해 주세요.', { event_key: 'org.acme.deploy', payload: { note: '말' } }, tEventCard, eventDefinitionName, true)).toBe('시스템: 발행이 멈췄어요. 다시 시도해 주세요.');
   });
 });

@@ -74,7 +74,8 @@ describe('isMachineEventContent / composeEventPreviewFallback — 문장이 없�
   });
   it('⭐사람 글 칸이어도 id · 경로 · 링크 · entity 토큰인 줄은 글이 아니다 → 다음 칸 · 없으면 «이벤트»', () => {
     expect(composeEventPreviewFallback(MACHINE('org.x.y'), 'org.x.y', { message: '946300bd-434c-45d6-901d-c0d1af8603e7', summary: '정리 끝' }, helpers)).toBe('이벤트 · 정리 끝');
-    for (const bad of ['/api/v2/stories/1', 'https://example.test/a', '[제목](entity:story:946300bd-434c-45d6-901d-c0d1af8603e7)', 'entity:story:abc']) {
+    // story 4925: a link WITH a label reads as the label (see event-preview.4925-links.test.ts); a link with no label · an id-labelled link · a bare token stay «not words»
+    for (const bad of ['/api/v2/stories/1', 'https://example.test/a', '[946300bd-434c-45d6-901d-c0d1af8603e7](entity:story:946300bd-434c-45d6-901d-c0d1af8603e7)', '[](entity:story:946300bd-434c-45d6-901d-c0d1af8603e7)', 'entity:story:abc']) {
       expect(composeEventPreviewFallback(MACHINE('org.x.y'), 'org.x.y', { message: bad }, helpers)).toBe('이벤트');
     }
   });

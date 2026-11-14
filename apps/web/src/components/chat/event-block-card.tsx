@@ -897,7 +897,8 @@ export function humanizeMachineEventSummary(
   if (!m) {
     // story 4925 — the server's own line for an event with no sentence of its own is «이벤트[ · words]» (it reads no definition names): this screen has them, so it says the NAME (the same line the room list gives)
     const head = /^([^\n]*?): /.exec(summary);
-    const named = isChatLine && head && eventKey ? composeGenericEventLine(eventKey, payload, { tEventCard, eventDefinitionName }, refs) : null;
+    const rest = head ? summary.slice(head[0].length) : '';
+    const named = isChatLine && head && eventKey && isServerGenericEventLine(rest, tEventCard) ? composeGenericEventLine(eventKey, payload, { tEventCard, eventDefinitionName }, refs) : null;
     return named ? `${head![1]}: ${named}` : summary;
   }
   const line = composeEventPreviewFallback(m[2], eventKey, payload, { tEventCard, eventDefinitionName }, refs);
@@ -938,6 +939,15 @@ function eventNameLine(
     if (text) break;
   }
   return text ? `${name} · ${text}` : name;
+}
+
+/**
+ * story 4925 — is this text the line the SERVER wrote for an event with no sentence of its own («이벤트» or «이벤트 · {words}», «Event» in an English message)? Only that line is said again with the definition's name: a text a person wrote
+ * (the publish-stopped explanation …) on a row that carries an event card stays exactly as written.
+ */
+export function isServerGenericEventLine(text: string | null | undefined, tEventCard: (key: string) => string): boolean {
+  if (typeof text !== 'string') return false;
+  return [tEventCard('genericEventHeader'), '이벤트', 'Event'].some((head) => text === head || text.startsWith(`${head} · `));
 }
 
 /** the events that have a sentence of their own (composeEventPreviewSentence) — every other event is named by its definition */
