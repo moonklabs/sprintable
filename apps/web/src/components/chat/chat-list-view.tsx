@@ -708,7 +708,9 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     if (pool.length > 0) {
       const mostRecent = pool.reduce((a, b) => (a.updated_at > b.updated_at ? a : b));
       // 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트.
-      router.replace(flatHref(`/chats/${mostRecent.id}?compose=${encodeURIComponent(composeParam)}`));
+      // story 4906 — the line was moved here without being sent (the person has no single agent DM to send to, «no receiver invented» · 3831): `composeNote=<id>` makes the room say so above its input.
+      // The id is THIS hand-over's own (a time token + a random tail, so two hand-overs never share one): the room remembers «that note is done» per id, so a reload of the same URL stays quiet while a later hand-over of the same text into the same room is new.
+      router.replace(flatHref(`/chats/${mostRecent.id}?compose=${encodeURIComponent(composeParam)}&composeNote=${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`));
     } else {
       setShowModal(true);
     }

@@ -200,9 +200,11 @@ interface ChatInputProps {
    * 클릭"임을 구분).
    */
   prefillCommand?: { text: string; nonce: number } | null;
+  /** story 4906 — told the whole text of the box whenever it changes (the room's «moved from 홈» note goes when the box is emptied). */
+  onDraftChange?: (text: string) => void;
 }
 
-export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets, threadId, onEscape, currentTeamMemberId, participants, prefillCommand }: ChatInputProps) {
+export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets, threadId, onEscape, currentTeamMemberId, participants, prefillCommand, onDraftChange }: ChatInputProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('chats');
   const tc = useTranslations('common');
@@ -229,6 +231,7 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
   // draft differs from that HTML — React does not patch an attribute that differs, so on a reload the box showed the draft while [보내기] stayed `disabled` (measured on dev: React's prop
   // `disabled=false`, the DOM button `disabled`). The first client render now equals the server's; the restore is an ordinary state update (the effect below), and the DOM follows.
   const [text, setText] = useState('');
+  useEffect(() => { onDraftChange?.(text); }, [text, onDraftChange]);
   // true from the restore until the save effect has run once: that first save would write the still-empty `text` and REMOVE the stored draft for the instant before the restored text is written
   // back (a tab closing in that instant lost the draft — codex on 5657)
   const restoringDraftRef = useRef(false);

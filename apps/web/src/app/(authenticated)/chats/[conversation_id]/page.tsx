@@ -113,6 +113,11 @@ export default function ConversationPage() {
   // story #3831 — 「오늘」 지시 한 줄이 chat-list-view.tsx의 기존 리다이렉트/새 대화 경로를
   // 거쳐 `?compose=`로 도착하면 ChatView의 기존 prefillCommand 기전에 그대로 싣는다.
   const composeText = searchParams.get('compose');
+  // story 4906 — arrived by the list's hand-over of the home line (not by the person picking this room): the room says where the line is and why it was not sent
+  // the id is the list's own token (base36) — anything else in the URL (a hand-made or shared link) is not a hand-over and says nothing
+  const composeNoteRaw = searchParams.get('composeNote');
+  const composeNoteId = composeNoteRaw && /^[0-9a-z]{6,24}$/.test(composeNoteRaw) ? composeNoteRaw : null;
+  const composeMoved = !!composeText && !!composeNoteId;
   const t = useTranslations('chats');
   const tc = useTranslations('common');
   const { currentTeamMemberId, projectMemberships } = useDashboardContext();
@@ -454,7 +459,7 @@ export default function ConversationPage() {
           ) : null}
           <AgentsPausedBand key={conversation_id} conversationId={conversation_id} state={meta?.agentsPaused ?? null} onResumed={() => void fetchMeta()} />
           <ChatView
-            key={conversation_id}
+            key={`${conversation_id}:${composeNoteId ?? ''}`}
             threadId={conversation_id}
             currentTeamMemberId={currentTeamMemberId}
             projectId={roomProjectId}
@@ -465,6 +470,8 @@ export default function ConversationPage() {
             initialLastReadAt={meta ? meta.lastReadAt : undefined}
             participants={(meta?.participants ?? []).map((p) => ({ ...p, verified: verifiedById[p.member_id] }))}
             initialComposeText={composeText ?? undefined}
+            composeNotice={composeMoved && meta ? t('composeMovedNotice', { room: formatHeaderTitle(meta, currentTeamMemberId, t, tc) }) : undefined}
+            composeNoticeId={composeMoved ? composeNoteId ?? undefined : undefined}
           />
           </>
         )}
