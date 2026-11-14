@@ -42,6 +42,7 @@ from app.services.desktop_setup import (
     revoke_setup,
     setup_agent_room,
     setup_hands,
+    setup_project_room,
     setup_status,
 )
 
@@ -701,10 +702,24 @@ class SetupAgentRoom(BaseModel):
     tier: str  # as a 402's `tier` — the web words the limit with it (free names the plan)
 
 
+class SetupExistingProject(BaseModel):
+    id: str
+    name: str
+
+
+class SetupProjectRoom(BaseModel):
+    """story 4934 — the plan's project limit as confirm-solo will hold a NEW project to it (see services.desktop_setup.setup_project_room):
+    present only when no new project can be made; `existing_project` = the one project the person can put the agent into (null = none to name)."""
+    limit: int | None = None
+    existing_project: SetupExistingProject | None = None
+
+
 class SetupRecipesResponse(BaseModel):
     recipes: list[SetupRecipe]
     # story 4717 AC1: how many more agents can be made — null = no limit is enforced (nothing to say before [시작])
     agent_room: SetupAgentRoom | None = None
+    # story 4934: null = a new project can be made (or no limit is enforced) — the solo card then says «만들기» as it always did
+    project_room: SetupProjectRoom | None = None
 
 
 @router.get("/recipes", response_model=SetupRecipesResponse)
@@ -715,10 +730,11 @@ async def get_setup_recipes(
 ):
     """PO 16:03Z — the recipes the desktop setup page can start, each with its setup rows worked out by the same function the
     confirmation checks with (the web draws them as they come)."""
-    _human_only(auth)
+    user_id = _human_only(auth)
     return SetupRecipesResponse(
         recipes=[SetupRecipe(**r) for r in await list_setup_recipes(db, org_id=org_id)],
         agent_room=await setup_agent_room(db, org_id),
+        project_room=await setup_project_room(db, org_id, user_id),
     )
 
 

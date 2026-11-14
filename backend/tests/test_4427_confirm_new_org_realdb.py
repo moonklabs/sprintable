@@ -224,7 +224,9 @@ async def test_a_person_without_an_organization_starts_a_setup_and_owns_the_new_
         listed = await c.get("/api/v2/desktop/recipes/for-new-org", headers=_person(who))
         assert listed.status_code == 200, listed.text
         # story 4717 AC1: + the plan's agent room (null where no limit holds) — still nothing organization-only
-        assert set(listed.json()) == {"recipes", "agent_room"} and listed.json()["recipes"], "the migrated presets are offered"
+        # story 4934: + the project room — always null here (a person with no organization has no project limit to read)
+        assert set(listed.json()) == {"recipes", "agent_room", "project_room"} and listed.json()["recipes"], "the migrated presets are offered"
+        assert listed.json()["project_room"] is None
         for recipe in listed.json()["recipes"]:
             assert set(recipe) == set(SetupRecipe.model_fields), "no organization-only field (bindings · channel connections)"
         code, verifier = await _code(c)

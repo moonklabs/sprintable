@@ -19,7 +19,7 @@ import { EmailVerifyGateCard, useEmailVerifyGate } from '@/components/auth/email
 import { appSetupLink, nativeReturnApp, RETURN_APP_PARAM } from '@/lib/auth/native-return-app';
 import { putOrgRemoteControl, useOrgRemoteControl } from '@/lib/org-remote-control';
 import { useSearchParams } from 'next/navigation';
-import { agentRoomOf, roomShort, setupFragment, isFolderRefused, moveConfirmBody, movableState, type AgentRoom, type AttachableAgent, type DesktopRuntime, type SetupQuery } from '@/lib/desktop-setup';
+import { agentRoomOf, heldProjectOf, roomShort, setupFragment, isFolderRefused, moveConfirmBody, movableState, type AgentRoom, type AttachableAgent, type HeldProject, type DesktopRuntime, type SetupQuery } from '@/lib/desktop-setup';
 import { agentLimitOf, type AgentLimit } from '@/lib/agent-limit';
 import { pickEuroJosa, pickIGaJosa } from '@/lib/korean-particle'; // 4713: «{file}가 · {runtime}로» — the particle follows the word (the scoped honorific guard forbids a fixed one after a placeholder)
 import { AGENT_NAME_MAX, AGENT_ROLE_MAX, defaultSoloRuntime, folderTracePick, readTypedAgent, shownProjectName, soloConfirmBody, soloNewOrgConfirmBody, soloOutcome, soloStartBlock, usableRuntimes, writeTypedAgent } from '@/lib/desktop-setup-quick';
@@ -109,12 +109,15 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
   // The recipe list carries it (the server's one count — «시스템 발행» left out). A new organization always has room for this one agent,
   // so it is not read there. Not read · no limit · a shape this page does not read → nothing said and nothing held.
   const [agentRoom, setAgentRoom] = useState<AgentRoom | null>(null);
+  // story 4934: the plan's «one project» read with the same list, BEFORE [만들기] — the project the server would name in the 402 of the first press, so the card
+  // says it (and the button is «넣고 만들기») the moment a folder is picked instead of after a press that looked like nothing happened. null = not a block · not read.
+  const [heldProject, setHeldProject] = useState<HeldProject | null>(null);
   useEffect(() => {
     if (orgMode.kind !== 'has-org' || !isAdmin || agent) return; // the `agent=` move makes no new agent — nothing to count
     let off = false;
     fetchWithAuth('/api/desktop/recipes')
       .then((res) => (res.ok ? res.json() : null))
-      .then((body: { agent_room?: unknown } | null) => { if (!off) setAgentRoom(agentRoomOf(body?.agent_room)); })
+      .then((body: { agent_room?: unknown; project_room?: unknown } | null) => { if (!off) { setAgentRoom(agentRoomOf(body?.agent_room)); setHeldProject(heldProjectOf(body?.project_room)); } })
       .catch(() => { /* nothing said */ });
     return () => { off = true; };
   }, [orgMode.kind, isAdmin, orgId, agent]);
@@ -157,10 +160,13 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
   const traceHit = agent ? null : folderTracePick(folder, usable);
   const runtime = agent ? agent.runtime : pickedRuntime && usable.includes(pickedRuntime) ? pickedRuntime : traceHit?.runtime ?? defaultSoloRuntime(usable, query.pick);
   // codex self-QA: the free plan's «넣고 시작» question belongs to the folder it was asked for — another folder picked afterwards (same page, new address) must not start into A's project
-  const limitAsk = limitAskRaw && limitAskRaw.folderKey === (folder?.shown ?? '') ? limitAskRaw : null;
+  const askedByPress = limitAskRaw && limitAskRaw.folderKey === (folder?.shown ?? '') ? limitAskRaw : null;
   const refused = isFolderRefused(query.folder) ? query.folder.refused : null;
   // the project the app found for this folder counts only if this organization really has it — else it is a new project by the folder's name
   const matched = folder?.projectId && !newOrg ? orgProjects.find((p) => p.projectId === folder.projectId) : undefined;
+  // story 4934: a folder that would need a NEW project in an organization whose plan has no room for one asks at once — the same project the 402 names, chosen by
+  // [넣고 만들기] only (nothing is put there on its own). A folder whose project the organization has (matched) makes no new project: no question.
+  const limitAsk = askedByPress ?? (folder && !agent && !newOrg && !matched && heldProject ? { id: heldProject.id, name: heldProject.name, folderKey: folder.shown } : null);
   const projectLine = !folder ? null
     : limitAsk ? { kind: 'chosen' as const, name: limitAsk.name }
     : matched ? { kind: 'existing' as const, name: matched.projectName }
@@ -435,39 +441,46 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
         </section>
         )}
 
-        {limitAsk ? (
-          <div role="status" className="flex flex-col gap-2 rounded-md border p-3 text-sm" data-testid="quick-limit">
-            <p className="font-medium">{t('quick.limit.title')}</p>
-            <p>{t('quick.limit.body', { project: limitAsk.name })}</p>
-            {/* codex self-QA (4717): the room can fill after the press that raised this question — the button is held and the reason said, never a silent no-op */}
-            {roomFull && agentRoom ? (
-              <RoomShortBox room={agentRoom} line={t('room.soloNone')}
-                hint={<p className="text-xs text-muted-foreground" data-testid="quick-room-use-team">{t('room.soloUseTeam')}</p>} />
-            ) : null}
-            {nameBlank ? <p className="text-xs text-muted-foreground" data-testid="quick-limit-name-blank">{t('quick.blockName')}</p> : null}
-            <div className="flex flex-wrap items-center gap-3">
-              <Button disabled={starting || roomFull || nameBlank} onClick={() => void start(limitAsk.id)}>{starting ? t('quick.creating') : t('quick.limit.addStart')}</Button>
-              {isEEEnabled() ? <a className="text-xs underline underline-offset-2" href={flatHref('/settings?tab=billing')}>{tNav('orgLimitUpgradeLink')}</a> : null}
-            </div>
-          </div>
-        ) : null}
+        {/* what the agents ask and what they do not stays just above the start row, as on the recipe page (4446) */}
+        <p className="text-xs text-muted-foreground">{t('toolNote')}</p>
 
-        <section className="flex flex-col gap-2">
+        {/* story 4934: the start row (or the free plan's question + its [넣고 만들기]) is stuck to the bottom of whatever scrolls, the way the recipe page's «시작» row is (4446):
+            the app's default window shows the web at 539px high, and this card is taller — the button sat below the fold and the first press looked like nothing happened.
+            Spans the card's padding so it reads as the card's last row. */}
+        <footer className="sticky bottom-0 -mx-6 -mb-6 flex flex-col gap-2 rounded-b-[inherit] border-t bg-card px-6 pt-3 pb-6" data-testid="quick-start-row">
           {errorLine ? <p role="alert" className="text-sm text-destructive" data-testid="quick-error">{errorLine}</p> : null}
           {rateLine ? <p role="alert" className="text-sm text-destructive">{rateLine}</p> : null}
-          {/* the free-plan question has its own primary [넣고 시작] — the start row is not drawn beside it (Yuna 5121 ①) */}
-          {limitAsk ? null : (
-            <div className="flex flex-col gap-2">
-              {showPhoneControl ? (
-                // story 4670 AC1 (Yuna §M): a bordered box, the phone icon, a semibold label, a bigger tick — one line inside the third step, just above «시작»
-                <div className="flex gap-3 rounded-md border p-3" data-testid="setup-phone-control">
-                  <Checkbox id="quick-phone-control" checked={phoneControl} onCheckedChange={(checked) => setPhoneControl(checked === true)} disabled={starting} className="mt-0.5 size-5 self-start" />
-                  <label htmlFor="quick-phone-control" className="block min-w-0 flex-1 cursor-pointer break-keep">
-                    <span className="flex items-center gap-1.5 text-sm font-semibold"><Smartphone className="size-4 shrink-0 text-primary" aria-hidden />{t('phoneControl.label')}</span>
-                    <span className="mt-0.5 block text-xs text-muted-foreground">{t('phoneControl.help')}</span>
-                  </label>
-                </div>
+          {showPhoneControl ? (
+            // story 4670 AC1 (Yuna §M): a bordered box, the phone icon, a semibold label, a bigger tick — one line inside the third step, just above «시작».
+            // story 4934: drawn with the free plan's question too — [넣고 만들기] is the same start (it sends the PUT when the tick is on), so the tick is in view there as well
+            <div className="flex gap-3 rounded-md border p-3" data-testid="setup-phone-control">
+              <Checkbox id="quick-phone-control" checked={phoneControl} onCheckedChange={(checked) => setPhoneControl(checked === true)} disabled={starting} className="mt-0.5 size-5 self-start" />
+              <label htmlFor="quick-phone-control" className="block min-w-0 flex-1 cursor-pointer break-keep">
+                <span className="flex items-center gap-1.5 text-sm font-semibold"><Smartphone className="size-4 shrink-0 text-primary" aria-hidden />{t('phoneControl.label')}</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">{t('phoneControl.help')}</span>
+              </label>
+            </div>
+          ) : null}
+          {limitAsk ? (
+            <div role="status" className="flex flex-col gap-2 rounded-md border p-3 text-sm" data-testid="quick-limit">
+              <p className="font-medium">{t('quick.limit.title')}</p>
+              <p>{t('quick.limit.body', { project: limitAsk.name })}</p>
+              {/* codex self-QA (4717): the room can fill after the press that raised this question — the button is held and the reason said, never a silent no-op */}
+              {roomFull && agentRoom ? (
+                <RoomShortBox room={agentRoom} line={t('room.soloNone')}
+                  hint={<p className="text-xs text-muted-foreground" data-testid="quick-room-use-team">{t('room.soloUseTeam')}</p>} />
               ) : null}
+              {nameBlank ? <p className="text-xs text-muted-foreground" data-testid="quick-limit-name-blank">{t('quick.blockName')}</p> : null}
+              {/* story 4934: the question now stands from the moment a folder is picked — a start the folder still holds (no tool · wide folder not confirmed) says why, never a press that does nothing */}
+              {block !== null ? <p className="text-xs text-muted-foreground" data-testid="quick-limit-block">{blockLine}</p> : null}
+              <div className="flex flex-wrap items-center gap-3">
+                <Button disabled={starting || roomFull || nameBlank || block !== null} onClick={() => void start(limitAsk.id)}>{starting ? t('quick.creating') : t('quick.limit.addStart')}</Button>
+                {isEEEnabled() ? <a className="text-xs underline underline-offset-2" href={flatHref('/settings?tab=billing')}>{tNav('orgLimitUpgradeLink')}</a> : null}
+              </div>
+            </div>
+          ) : (
+            // the free-plan question has its own primary [넣고 만들기] — the start row is not drawn beside it (Yuna 5121 ①)
+            <div className="flex flex-col gap-2">
               {roomFull && agentRoom ? (
                 <RoomShortBox room={agentRoom} line={t('room.soloNone')}
                   hint={<p className="text-xs text-muted-foreground" data-testid="quick-room-use-team">{t('room.soloUseTeam')}</p>} />
@@ -482,8 +495,7 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
               {agent ? null : <p className="text-xs text-muted-foreground" data-testid="quick-create-nothing">{t('quick.createNothing')}</p>}
             </div>
           )}
-          <p className="text-xs text-muted-foreground">{t('toolNote')}</p>
-        </section>
+        </footer>
       </Card>
       {agent ? null : (
         <p className="flex flex-wrap gap-x-4 gap-y-1 text-sm">

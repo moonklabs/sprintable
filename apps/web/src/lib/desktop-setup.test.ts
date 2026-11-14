@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { NOT_CONNECTED_AFTER_HANDOVER_MS,
+import { NOT_CONNECTED_AFTER_HANDOVER_MS, heldProjectOf,
   endsWithAgentWord,
   activeSetupId, forgetActiveSetup, isGuideLink, rememberActiveSetup, ACTIVE_SETUP_TTL_MS,
   agentRowCount, confirmBody, setupFragment, parseSetupFragment, defaultWorkdirHint, needsAnAgent, parseSetupQuery, parseOldRuntimes, setupRoleRows, workdirInputOk,
@@ -476,5 +476,18 @@ describe('[SID:4832] caps=workdir — the app that answers the per-agent folder 
     expect(new URLSearchParams(setupFragment(q).replace(/^#/, '')).get('caps')).toBe('move,solo,workdir');
     const older = parse('move,solo')!;
     expect(new URLSearchParams(setupFragment(older).replace(/^#/, '')).get('caps')).toBe('move,solo');
+  });
+});
+
+// story 4934 — GET /desktop/recipes `project_room` → the one project the card may name before the press (never made up)
+describe('[SID:4934] heldProjectOf', () => {
+  const ID = '11111111-1111-4111-8111-111111111111';
+  it('a block that names its one project → that project', () => {
+    expect(heldProjectOf({ limit: 1, existing_project: { id: ID, name: 'Mine' } })).toEqual({ id: ID, name: 'Mine' });
+  });
+  it('anything else says nothing: no project to name · not an id · a blank name · not an object', () => {
+    for (const v of [null, undefined, 'x', 7, {}, { limit: 1 }, { existing_project: null }, { existing_project: { id: 'x', name: 'A' } }, { existing_project: { id: ID, name: '  ' } }, { existing_project: { id: ID } }, { existing_project: { name: 'A' } }, { existing_project: { id: 7, name: 'A' } }]) {
+      expect(heldProjectOf(v), JSON.stringify(v)).toBeNull();
+    }
   });
 });
