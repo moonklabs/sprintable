@@ -34,6 +34,7 @@ const ITEMS = () => build([
   need({ id: 'g1', workItemTitle: '가입 문구 발행', createdAt: '2026-11-11T09:00:00Z' }),
   need({ id: 'd1', workItemType: 'agent_decision', workItemTitle: '랜딩 문구를 가격 먼저로 바꿔도 될까요?', createdAt: '2026-11-11T09:30:00Z' }),
   need({ id: 'g2', state: 'signature', risk: 'high', workItemTitle: 'Threads에 글 발행', reason: null, requestedByName: null, createdAt: '2026-11-11T10:00:00Z', conversationId: null }),
+  need({ id: 'd2', state: 'signature', risk: 'high', workItemType: 'agent_decision', workItemTitle: '결제 수단을 바꿔도 될까요?', createdAt: '2026-11-11T10:30:00Z' }),
   need({ id: 'g3', state: 'answer', source: 'hitl', workItemTitle: '결제 연결 질문', createdAt: '2026-11-11T11:00:00Z' }),
 ]);
 
@@ -66,6 +67,8 @@ describe('ⓐ the button says what it does', () => {
     expect(actionLink('gate:g1').textContent).toBe(H.rowApprove); // reverted (the label «승인» again) → RED
     expect(actionLink('gate:d1').textContent).toBe(H.rowDecide);
     expect(actionLink('gate:g2').textContent).toBe(H.rowApproveAndSign);
+    // a decision request is a decision even when its risk is high (the row is then a «signature» kind) — codex round 1: it must not say «서명하러 열기»
+    expect(actionLink('gate:d2').textContent).toBe(H.rowDecide);
     expect(actionLink('hitl:g3').textContent).toBe(H.actionAnswer);
     expect(H.rowApprove).not.toBe('승인');
     expect([...container.querySelectorAll('a')].some((a) => a.textContent === '승인')).toBe(false);

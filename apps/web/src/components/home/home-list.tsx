@@ -81,7 +81,7 @@ export function useRowLink(sources: HomeSources): (row: HomeRow) => { action: Ro
         const item = sources.snapshot.needsMe.find((i) => `${i.source}:${i.id}` === row.key);
         if (!item) return null;
         // story 4950: this link only OPENS the request (the choice and the decision are made on its page) — so a decision request says «결정하러 열기», not «승인»
-        const action: RowAction = row.kind === 'approval' && item.workItemType === 'agent_decision' ? 'decide' : NEEDS_ACTION[row.kind] ?? 'open';
+        const action: RowAction = (row.kind === 'approval' || row.kind === 'signature') && item.workItemType === 'agent_decision' ? 'decide' : NEEDS_ACTION[row.kind] ?? 'open';
         return { action, href: hrefForNeedsMeItem(item, flatHref) };
       }
       case 'mention':
