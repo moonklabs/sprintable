@@ -82,6 +82,9 @@ def test_a_preview_belongs_to_a_claude_file_tool_and_the_right_kind_of_it(  # co
 def test_an_empty_preview_and_a_loose_type_or_a_line_break_are_refused():  # codex 4949
     _bad({"op": "write", "blocks": []})  # a write shows one block
     _bad({"op": "edit", "blocks": []})  # an edit shows at least one
+    _bad({"op": "write", "blocks": [{}]})  # a block with no line and no count is not a preview (codex 4949 round 2)
+    _bad({"op": "edit", "blocks": [{"removed": [], "added": [], "removed_more": 0, "added_more": 0}]})
+    _ok({"op": "edit", "blocks": [{"added_more": 3}]})  # counts alone are something: lines were left out
     _bad({"op": "write", "blocks": [{"added": ["a"]}], "replace_all": "false"})  # strict: a string is not a boolean
     _bad({"op": "edit", "blocks": [{"removed": ["a"], "added_more": True}]})  # nor a boolean a count
     for sep in ("\n", "\r", "\u2028", "\u2029", "\x0b", "\x0c", "\x85"):

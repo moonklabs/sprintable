@@ -102,6 +102,8 @@ export function useAgentPermissionRequests() {
   const shown = [...listed, ...[...answers.values()].filter((a) => !listed.some((r) => r.id === a.row.id)).map((a) => a.row)];
   const waiting = shown.length > 0;
   const [notices, setNotices] = useState(0);
+  // story 4949 (codex): the last read FAILED — what is shown is from before; a file's lines are not kept on screen on a row nobody has confirmed since (the server may have let go of them)
+  const [stale, setStale] = useState(false);
   const readFor = useRef(-1);
   // story #4612: the requests answered on THIS page — their change frame is not read on (the card keeps its result line until the
   // next read, story #4596 D-1; a read at once would take it away the moment it was answered)
@@ -142,6 +144,7 @@ export function useAgentPermissionRequests() {
         pending = false;
         if (off) return;
         setRequests((prev) => list ?? prev ?? []);
+        setStale(list === null);
         // story #4596 AC1: a card answered here leaves at the first read made after its answer that no longer lists it — a page kept
         // open through many answers never holds them (a failed read keeps what was shown)
         if (list) setAnswers((m) => afterRead(m, list, started));
@@ -176,12 +179,12 @@ export function useAgentPermissionRequests() {
     </div>
   ) : null;
 
-  return { shown, now, phone, auth, offLine, answerFor: (r: PermissionRequest): Answer | null => answerFor(answers, r), onAnswer: (r: PermissionRequest, decision: 'allow' | 'deny') => void answer(r, decision) };
+  return { shown, now, phone, auth, offLine, stale, answerFor: (r: PermissionRequest): Answer | null => answerFor(answers, r), onAnswer: (r: PermissionRequest, decision: 'allow' | 'deny') => void answer(r, decision) };
 }
 
 export function AgentPermissionRequests() {
   const t = useTranslations('agentPermissions');
-  const { shown, now, phone, auth, offLine, answerFor: answerOf, onAnswer } = useAgentPermissionRequests();
+  const { shown, now, phone, auth, offLine, stale, answerFor: answerOf, onAnswer } = useAgentPermissionRequests();
   if (shown.length === 0) return offLine; // nothing waiting: the inbox as it was (+ the off line)
 
   return (
@@ -192,7 +195,7 @@ export function AgentPermissionRequests() {
         {t('groupTitle')} · {shown.length}
       </h2>
       {shown.map((r) => (
-        <PermissionCard key={`${r.id}:${r.stage ?? 'ask'}`} request={r} now={now} phone={phone} auth={auth} answer={answerOf(r)}
+        <PermissionCard key={`${r.id}:${r.stage ?? 'ask'}`} request={r} now={now} phone={phone} auth={auth} stale={stale} answer={answerOf(r)}
           onAnswer={(decision) => onAnswer(r, decision)} />
       ))}
     </section>
@@ -233,8 +236,10 @@ function answerFor(answers: ReadonlyMap<string, Kept>, r: PermissionRequest): An
   return a && (a.row.stage ?? 'ask') === (r.stage ?? 'ask') ? a.answer : null;
 }
 
-export function PermissionCard({ request: r, now, phone, auth, answer, onAnswer }: {
+export function PermissionCard({ request: r, now, phone, auth, answer, onAnswer, stale = false }: {
   request: PermissionRequest; now: number; phone: boolean; auth: PhoneAuth | null; answer: Answer | null;
+  /** the last read of the list failed (the row is from before) — no lines of a file are shown on it */
+  stale?: boolean;
   onAnswer: (decision: 'allow' | 'deny') => void;
 }) {
   const t = useTranslations('agentPermissions');
@@ -285,7 +290,7 @@ export function PermissionCard({ request: r, now, phone, auth, answer, onAnswer 
           {notes.length > 0 ? <p className="mt-0.5 text-editorial-meta text-muted-foreground">{notes.join(' · ')}</p> : null}
         </div>
       )}
-      {net === null && asking && r.preview ? <PermissionPreviewView preview={r.preview} /> : null} {/* story 4949: only while the question still waits — a cached row after an accepted answer shows no lines (the server has already let go of them) */}
+      {net === null && asking && !stale && now < Date.parse(r.expires_at) && r.preview ? <PermissionPreviewView preview={r.preview} /> : null} {/* story 4949: only while the question still waits — a cached row after an accepted answer shows no lines (the server has already let go of them) */}
       {r.workdir ? <p className="text-editorial-meta text-muted-foreground">{t('workdir', { path: r.workdir })}</p> : null}
       {net === 'ask' && r.host_unread && answer === null ? (
         <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-line">{t('net.hostUnread')}</p>

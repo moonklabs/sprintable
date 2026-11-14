@@ -730,6 +730,13 @@ class PreviewBlock(BaseModel):
     removed_more: int = Field(default=0, ge=0, le=PREVIEW_COUNT_MAX)
     added_more: int = Field(default=0, ge=0, le=PREVIEW_COUNT_MAX)
 
+    @model_validator(mode="after")
+    def _something_to_show(self) -> "PreviewBlock":
+        # a block that carries no line and no count is nothing (a body that draws as an empty preview — codex 4949)
+        if not (self.removed or self.added or self.removed_more or self.added_more):
+            raise ValueError("a preview block carries a line or a count")
+        return self
+
     @field_validator("removed", "added")
     @classmethod
     def _one_line_each(cls, lines: list[str]) -> list[str]:

@@ -1021,7 +1021,7 @@ export function ApprovalsQueue() {
             ? (
               // the same card the standalone group drew (phone-app-only buttons, the one read-only line elsewhere) — the stage is in its key so the network question's second card starts fresh
               <div className="focus-inset space-y-2 lg:h-full lg:overflow-y-auto" data-testid="gate-queue-detail">
-                <PermissionCard key={`${selectedPerm.id}:${selectedPerm.stage ?? 'ask'}`} request={selectedPerm} now={perm.now} phone={perm.phone} auth={perm.auth}
+                <PermissionCard key={`${selectedPerm.id}:${selectedPerm.stage ?? 'ask'}`} request={selectedPerm} now={perm.now} phone={perm.phone} auth={perm.auth} stale={perm.stale}
                   answer={perm.answerFor(selectedPerm)} onAnswer={(decision) => perm.onAnswer(selectedPerm, decision)} />
               </div>
             )
