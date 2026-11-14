@@ -8,6 +8,7 @@ import pytest
 from tests.test_4424_desktop_setup_realdb import (  # noqa: F401 — fixtures (autouse ones apply here too)
     ORG,
     OWNER,
+    OWNER_TM,
     _addresses,
     _client,
     _dispose_global_engine_after_test,
@@ -186,6 +187,6 @@ async def test_the_lines_of_a_file_are_in_no_notice(world):
         await _pair(c, token, der)
         marker = {**PREVIEW, "blocks": [{"removed": [], "added": ["MARKER-LINE-4949-not-in-any-notice"], "removed_more": 0, "added_more": 0}]}
         assert (await _post_ask(c, device, _ask(agent, tool="Edit", summary="a.md", masked=False, preview=marker))).status_code == 201
-        events = await _sql(fetch="SELECT payload::text FROM events WHERE recipient_id = :m", params={"m": (await _sql(fetch="SELECT id FROM members WHERE name = 'Owner' LIMIT 1"))[0][0]})
+        events = await _sql(fetch="SELECT payload::text FROM events WHERE recipient_id = :m", params={"m": OWNER_TM})  # the recipient by id (a member NAMED «Owner» exists in other orgs of a shared test database)
         assert events  # the bell line was sent …
         assert all("MARKER-LINE-4949" not in row[0] for row in events)  # … and carries only the agent and the tool
