@@ -303,6 +303,18 @@ describe('첫 저장이 주소를 «화면은 그대로» 옮긴다 (4952 D1)', 
     spy.mockRestore();
   });
 
+  it('⭐임시 이름이 겹쳐 409로 한 번 다시 만든 뒤에도(draft 슬러그가 바뀌고 라우트는 그대로) 첫 저장이 주소를 옮긴다 — 화면 문서 표시가 draft 슬러그가 아니라 «만들기를 시작한 라우트»에 묶인다', async () => {
+    postMode = 'conflict-once';
+    await open();
+    await type('title', '회의 메모');
+    await wait(1600); // 첫 POST → 409 → 새 임시 이름으로 draft가 바뀜(라우트 주소는 그대로)
+    await wait(1600); // 다시 만들기(POST) 성공
+    expect(posts()).toHaveLength(2);
+    await act(async () => { syncOptions.current!.onSaved?.(SAVED('회의-메모') as never); });
+    expect(decodedPath()).toBe('/moonklabs/sprintable/docs/회의-메모');
+    expect(reportLiveSlug).toHaveBeenCalledWith('회의-메모');
+  });
+
   it('이미 그 주소에 있으면(슬러그가 그대로) 주소를 다시 쓰지 않는다 — 인코딩만 다른 같은 경로도 같은 것으로 본다', async () => {
     await open('', 'existing-doc');
     const spy = vi.spyOn(window.history, 'replaceState');

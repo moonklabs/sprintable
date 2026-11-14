@@ -267,6 +267,7 @@ export default function DocSlugPage() {
   const draftHasText = isDraft && (title.trim() !== '' || content.trim() !== '');
   const createDraftDoc = useCallback(async (): Promise<boolean> => {
     if (!draft || selectedDoc || creatingRef.current || !projectId) return false;
+    const startedForRoute = routeNowRef.current; // the route this create belongs to (NOT draft.slug: a 409 retry swaps the draft's temporary slug while the route stays the one the person is on)
     if (title.trim() === '' && content.trim() === '') return false;
     creatingRef.current = true;
     setDraftCreating(true);
@@ -290,7 +291,7 @@ export default function DocSlugPage() {
       // 기준선 = 보낸 값. 응답 오기 전에 더 친 글자는 보낸 값과 달라 dirty가 되어 다음 자동저장이 보낸다.
       setAdopt({ docId: (data as DocDetail).id, snapshot: JSON.stringify(posted) });
       setSelectedDoc(data as DocDetail);
-      if (routeNowRef.current === draft.slug) onScreenDocIdRef.current = (data as DocDetail).id; // the draft's route is its own temporary slug; a create that returns after the person moved on must not claim the new route's screen
+      if (routeNowRef.current === startedForRoute) onScreenDocIdRef.current = (data as DocDetail).id; // a create that returns after the person moved on must not claim the new route's screen
       // 제목을 한 번도 안 건드렸을 때만 기본 글을 되돌려 놓는다(만드는 중에 비운 칸은 비운 채로).
       if (!titleTouchedRef.current) setTitle((cur) => (cur === '' ? postedTitle : cur));
       setDraft(null);
