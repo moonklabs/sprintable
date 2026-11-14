@@ -82,6 +82,16 @@ describe('ⓐ the button says what it does', () => {
   });
 });
 
+describe('① the detail column of an all-clear home', () => {
+  it('draws NOTHING in the wide detail column (no repeated sentence) and the empty column is hidden so it is not an empty landmark', async () => {
+    await mount(build([]));
+    const col = container.querySelector('[data-testid="home-detail-column"]') as HTMLElement;
+    expect(col.childElementCount).toBe(0); // reverted (the old repeated card) → a card is drawn in it
+    expect(col.className).toContain('empty:hidden'); // an empty aside with a label would be an empty landmark for a screen reader
+    expect(container.textContent!.split(H.emptyAllTitle).length - 1).toBe(1);
+  });
+});
+
 describe('ⓑ the right-click menu of a «내 손이 필요해요» row', () => {
   it('⭐right-click → «자세히 열기» · «질문 복사»(a decision) / «제목 복사»(any other) — the approvals screen\'s own words', async () => {
     await mount(ITEMS());

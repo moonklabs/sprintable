@@ -40,7 +40,7 @@ export function ListDetailShell({
     <div className={fill ? 'lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)] lg:items-start lg:gap-4' : 'lg:grid lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] lg:items-start lg:gap-4'} data-testid={testId}>
       {list}
       {wide ? (
-        <aside className={fill ? 'min-h-0 lg:h-full' : 'sticky top-4 max-h-[calc(100svh-6rem)]'} aria-label={detailLabel} data-testid={columnTestId ?? `${testId}-detail-column`}>
+        <aside className={`${fill ? 'min-h-0 lg:h-full' : 'sticky top-4 max-h-[calc(100svh-6rem)]'} empty:hidden`} aria-label={detailLabel} data-testid={columnTestId ?? `${testId}-detail-column`}>
           {detail}
         </aside>
       ) : (
