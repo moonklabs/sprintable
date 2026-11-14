@@ -16,11 +16,13 @@
  *  6. After an action the next row is selected (3 taps → 1): `selectAfterHandled`.
  */
 import type { TodayAgentProgressItem, TodayNeedsMeItem, TodaySnapshot } from '../org-briefing/derive-today';
+import type { HomeTerminalWait } from './terminal-waits';
 
 export type HomeSection = 'needs-hand' | 'working' | 'just-done';
 export type HomeRowKind =
   | 'approval' | 'signature' | 'answer'                         // from the today snapshot (`needsMe`)
   | 'mention' | 'assigned' | 'permission' | 'stopped' | 'limit-paused' // from unread notifications
+  | 'terminal-wait'                                              // story #4931: an agent stands at a question in a Mac terminal of MINE (the agent-state read)
   | 'agent-run' | 'story'                                        // working
   | 'done';
 
@@ -39,7 +41,7 @@ export interface HomeRow {
   /** when the wait / the work started (ISO) — for «done» the time it finished */
   since: string;
   /** what the row points at (the caller builds the link with its own project rules) */
-  ref: { type: 'gate' | 'hitl' | 'workflow_step' | 'notification' | 'agent_run' | 'story'; id: string; projectId: string | null };
+  ref: { type: 'gate' | 'hitl' | 'workflow_step' | 'notification' | 'agent_run' | 'story' | 'agent_terminal'; id: string; projectId: string | null };
 }
 
 /** the notification as the existing list route gives it (only the fields this function reads) */
@@ -74,6 +76,8 @@ export interface HomeInput {
   notifications: HomeNotificationInput[];
   stories: HomeStoryInput[];
   completedToday: HomeDoneInput[];
+  /** story #4931: agents waiting at a question in a terminal of the reader's own Mac (`toTerminalWaits`) — each is a row in «손 필요» and counts in the one number */
+  terminalWaits?: HomeTerminalWait[];
   /** the signed-in member (human) — «my» stories */
   viewerMemberId: string | null;
 }
@@ -110,7 +114,7 @@ export const HOME_NEEDS_HAND_NOTIFICATION_TYPES: Readonly<Record<string, HomeRow
  * Found on the real thing: a decision request that had just arrived sat behind seven 38-hour-old notifications, hidden behind «5개 더 보기», though it is what a blocked agent waits for — freeing the blocked agent first is what the home is for.
  * Inside each of the two groups the order is what it was: the longest wait first, ties by key. The number (badge · header) is unchanged — only the order inside the one list.
  */
-const AGENT_WAITS_FOR_ME: ReadonlySet<HomeRowKind> = new Set<HomeRowKind>(['approval', 'signature', 'answer']);
+const AGENT_WAITS_FOR_ME: ReadonlySet<HomeRowKind> = new Set<HomeRowKind>(['approval', 'signature', 'answer', 'terminal-wait']);
 
 function needsHandOrder(a: HomeRow, b: HomeRow): number {
   const ra = AGENT_WAITS_FOR_ME.has(a.kind) ? 0 : 1;
@@ -144,6 +148,18 @@ function notificationRow(n: HomeNotificationInput, kind: HomeRowKind): HomeRow {
     actor: null,
     since: n.created_at,
     ref: { type: 'notification', id: n.id, projectId: null },
+  };
+}
+
+function terminalWaitRow(w: HomeTerminalWait): HomeRow {
+  return {
+    key: `terminal:${w.agentId}`,
+    section: 'needs-hand',
+    kind: 'terminal-wait',
+    title: w.agentName,
+    actor: { type: 'agent', name: w.agentName },
+    since: w.since,
+    ref: { type: 'agent_terminal', id: w.agentId, projectId: w.conversationProjectId },
   };
 }
 
@@ -186,6 +202,7 @@ export function deriveHome(input: HomeInput): HomeModel {
     if (!kind) continue;
     needsHand.push(notificationRow(n, kind));
   }
+  for (const w of input.terminalWaits ?? []) needsHand.push(terminalWaitRow(w));
   needsHand.sort(needsHandOrder);
 
   const working: HomeRow[] = [

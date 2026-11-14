@@ -18,6 +18,8 @@ export interface AgentStateRow {
   state_at: string | null;
   limit: SessionLimit | null;
   first_screen: { ask: 'trust' | 'mcp' | 'mcp_many' | 'update' } | null;
+  /** story #4931: the computer this session runs on is the reader's own (the server's `can_command` rule: whoever confirmed it). Absent from an older server → unknown (never read as «mine» for a count). */
+  device_is_mine?: boolean;
 }
 
 /** the rows an older or newer server sent, kept only when they name an agent — never a crash */

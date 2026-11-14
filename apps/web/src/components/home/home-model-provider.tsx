@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { fetchWithAuth } from '@/lib/db/client';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { subscribeApprovalEvents } from '@/lib/designated-pending-count-client';
+import { parseAgentStates } from '@/lib/agent-state-list';
 import { parseCursorMeta } from '@/lib/pagination';
 import { EMPTY_TODAY_SNAPSHOT, parseToday, type TodayCompletedItem, type TodaySnapshot } from '@/components/org-briefing/derive-today';
 import {
@@ -13,6 +14,7 @@ import {
   type HomeNotificationInput,
   type HomeStoryInput,
 } from './derive-home';
+import { toTerminalWaits, type HomeTerminalWait } from './terminal-waits';
 
 /**
  * story #4888 (UI-5 AC4, home) — the ONE place the home's data is read and `deriveHome` is run. The navigation bar's «홈» badge and the home screen both read this model, so
@@ -48,6 +50,8 @@ export interface HomeSources {
   snapshot: TodaySnapshot;
   notificationHrefById: Record<string, string | null>;
   runConversationById: Record<string, string | null>;
+  /** story #4931: the agents waiting at a terminal question of the reader's own Mac — a row's link (their conversation) is built from these */
+  terminalWaits?: HomeTerminalWait[];
 }
 
 export interface HomeModelState {
@@ -153,6 +157,8 @@ interface Read {
   snapshot: TodaySnapshot;
   notifications: RawNotification[];
   stories: HomeStoryInput[];
+  /** story #4931: the agent-state read (`null` = it failed → the model is `partial`: a wait may be missing) */
+  terminalWaits: HomeTerminalWait[] | null;
   /** the project the stories were read for */
   storiesFor: string | undefined;
   /** whose read this is: the organization and the member (an organization switch must not show the old organization's approvals) */
@@ -192,17 +198,18 @@ export function HomeModelProvider({ viewerMemberId, projectId, orgId, children }
       const mySeq = ++seq.current;
       inFlight.current = true;
       lastLoadStartedAt.current = Date.now();
-      const [todayJson, notifRead, storiesJson, membersJson] = await Promise.all([
+      const [todayJson, notifRead, storiesJson, membersJson, sessionsJson] = await Promise.all([
         readJson<unknown>('/api/today'),
         readUnreadNotifications(),
         projectId ? readJson<Page<RawStory>>(`/api/stories?${new URLSearchParams({ project_id: projectId, status: 'in-progress', limit: '100' })}`) : Promise.resolve(null),
         projectId ? readJson<{ data?: RawMember[] }>(`/api/members?project_id=${encodeURIComponent(projectId)}`) : Promise.resolve(null),
+        readJson<{ data?: unknown }>('/api/agents/desktop-sessions'), // story #4931: the same read «에이전트 상태» makes — an agent standing at a terminal question of my own Mac needs my hand
       ]);
       if (mySeq === seq.current) inFlight.current = false;
       if (!alive || mySeq !== seq.current) return; // a newer load owns the state now
       // a complete read of this very identity must not be replaced by one that broke off in the middle (the badge would drop and come back): the earlier one stays and the screen says the last read failed
       const prev = lastRead.current;
-      const degraded = notifRead === null || notifRead.failed || (projectId !== undefined && (storiesJson === null || membersJson === null));
+      const degraded = notifRead === null || notifRead.failed || sessionsJson === null || (projectId !== undefined && (storiesJson === null || membersJson === null));
       if (todayJson !== null && degraded && prev && prev.forOrg === orgId && prev.forViewer === viewerMemberId && prev.storiesFor === projectId && !prev.partial) {
         setErrorFor(`${orgId ?? ''}|${viewerMemberId ?? ''}`);
         return;
@@ -213,11 +220,12 @@ export function HomeModelProvider({ viewerMemberId, projectId, orgId, children }
         snapshot: parseToday(todayJson) ?? EMPTY_TODAY_SNAPSHOT,
         notifications: notifRead?.items ?? [],
         stories: toStoryInputs(storiesJson?.data ?? [], membersJson?.data ?? []),
+        terminalWaits: sessionsJson === null ? null : toTerminalWaits(parseAgentStates(sessionsJson.data)),
         storiesFor: projectId,
         forOrg: orgId,
         forViewer: viewerMemberId,
         // the other reads only add rows: a failed one leaves the model honest but incomplete
-        partial: notifRead === null || !notifRead.complete
+        partial: notifRead === null || !notifRead.complete || sessionsJson === null
           || (projectId !== undefined && (storiesJson === null || membersJson === null || !pageIsLast(storiesJson.meta, (storiesJson.data ?? []).length, STORIES_PAGE_SIZE, 'home/stories').last)),
       };
       lastRead.current = next;
@@ -246,11 +254,14 @@ export function HomeModelProvider({ viewerMemberId, projectId, orgId, children }
       coalesce = setTimeout(() => { coalesce = null; void load(); }, wait);
     };
     const onApprovalEvent = () => schedule(HOME_EVENT_COALESCE_MS, true);
+    // story #4931: an agent's session changed (it came to stand at a question, or the question was answered) — the wait row appears / goes at once, not at the next poll
+    const onSessionChanged = () => schedule(HOME_EVENT_COALESCE_MS, false);
     const onNotice = () => schedule(Math.max(HOME_EVENT_COALESCE_MS, lastLoadStartedAt.current + HOME_NOTICE_MIN_INTERVAL_MS - Date.now()), false);
     const unsubs: Array<() => void> = [];
     if (mux) {
       unsubs.push(subscribeApprovalEvents(mux, onApprovalEvent));
       unsubs.push(mux.subscribe('dispatched', onNotice));
+      unsubs.push(mux.subscribe('desktop.session_changed', onSessionChanged));
     }
     return () => {
       alive = false; clearInterval(timer); document.removeEventListener('visibilitychange', onBack); window.removeEventListener('focus', onBack);
@@ -270,6 +281,7 @@ export function HomeModelProvider({ viewerMemberId, projectId, orgId, children }
       // the stories belong to the project they were read for
       stories: read.storiesFor === projectId ? read.stories : [],
       completedToday: toDoneInputs(read.snapshot.completedToday ?? []),
+      terminalWaits: read.terminalWaits ?? [],
       viewerMemberId,
     });
     return {
@@ -282,6 +294,7 @@ export function HomeModelProvider({ viewerMemberId, projectId, orgId, children }
         snapshot: read.snapshot,
         notificationHrefById: Object.fromEntries(read.notifications.map((n) => [n.id, n.href ?? null])),
         runConversationById: Object.fromEntries((read.snapshot.completedToday ?? []).map((d) => [d.runId, d.conversationId])),
+        terminalWaits: read.terminalWaits ?? [],
       },
     };
   }, [readAny, loadError, projectId, viewerMemberId, orgId, retry]);

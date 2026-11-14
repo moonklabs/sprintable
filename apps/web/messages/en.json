@@ -453,6 +453,7 @@
     "kindApproval": "Awaiting approval",
     "kindSignature": "Awaiting signature",
     "kindAnswer": "Awaiting answer",
+    "kindTerminalWait": "Waiting in a Mac terminal",
     "kindMention": "Mention",
     "kindAssigned": "Assigned to me",
     "kindPermission": "Permission request",
@@ -5483,6 +5484,8 @@
       "state": {
         "starting": "Started",
         "waiting_first_screen": "Waiting for your answer in the Mac terminal",
+        "waiting_first_screen_other": "Waiting for an answer on that Mac ({device})",
+        "waiting_first_screen_other_unnamed": "Waiting for an answer on that Mac",
         "working": "Working",
         "idle": "Waiting for work",
         "waiting_permission": "Waiting for permission",

@@ -43,7 +43,7 @@ export function HomeDetail({ row, model, sources, now, partial = false }: { row:
   }
 
   const link = linkFor(row);
-  const isNeed = row.kind === 'approval' || row.kind === 'signature' || row.kind === 'answer';
+  const isNeed = row.kind === 'approval' || row.kind === 'signature' || row.kind === 'answer' || row.kind === 'terminal-wait';
   const need = isNeed ? sources.snapshot.needsMe.find((i) => `${i.source}:${i.id}` === row.key) ?? null : null;
   const run = row.kind === 'agent-run' ? sources.snapshot.agentProgress.find((r) => r.runId === row.ref.id) ?? null : null;
   const statusKey = run ? AGENT_STATUS_KEY[run.status] : undefined;

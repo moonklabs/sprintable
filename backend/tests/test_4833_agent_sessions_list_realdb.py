@@ -166,3 +166,27 @@ async def test_07_the_number_of_queries_does_not_grow_with_the_number_of_agents(
             event.remove(engine.sync_engine, "before_cursor_execute", count)
         assert len(listed.json()) >= 7
         assert many <= few, f"{few} queries for the list, {many} with six more agents — a query per agent is back"
+
+
+async def test_08_story_4931_device_is_mine_follows_who_confirmed_the_computer(world):
+    """story #4931 — a question that stands at a terminal can only be answered by the person at THAT Mac: the row says whether the computer the session runs on is the reader's own
+    (`confirmed_by` = the reader — the rule `can_command` uses for «whoever confirmed the device»). Mine → true · someone else's → false · a setup nobody confirmed → false · no session → false."""
+    async with _client() as c:
+        device = await _device(c, name="d4931 mac a")  # confirmed by OWNER (the reader)
+        agent = device["agents"][0]["member_id"]
+        await _state(c, device, agent, "working", 1)
+        row = _row((await _list(c)).json(), agent)
+        assert row["setup_id"] == device["setup_id"] and row["device_is_mine"] is True
+        # someone else's computer: another person of this org confirmed it — the list still shows the agent (the reader may open its DM) but the Mac is not the reader's
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = '{PLAIN}' WHERE id = '{device['setup_id']}'")
+        other = _row((await _list(c)).json(), agent)
+        assert other["setup_id"] == device["setup_id"] and other["device_is_mine"] is False
+        # a setup nobody confirmed: false, never «mine by default»
+        await _sql(f"UPDATE desktop_setups SET confirmed_by = NULL WHERE id = '{device['setup_id']}'")
+        nobody = _row((await _list(c)).json(), agent)
+        assert nobody["setup_id"] == device["setup_id"] and nobody["device_is_mine"] is False
+        # an agent with no session yet is listed with no state — and not «mine»
+        lone = await _device(c, name="d4931 mac b")
+        lone_agent = lone["agents"][0]["member_id"]
+        assert _row((await _list(c)).json(), lone_agent)["device_is_mine"] is False
+
