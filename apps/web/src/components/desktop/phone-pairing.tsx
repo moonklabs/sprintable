@@ -33,7 +33,7 @@ type View =
   | { kind: 'checking'; head: OfferHead; phoneKeyId: string }
   | { kind: 'number'; head: OfferHead; phoneKeyId: string; number: string }
   | { kind: 'paired'; device: string }
-  | { kind: 'alreadyPaired' }
+  | { kind: 'alreadyPaired'; device: string }
   | { kind: 'remoteOff' }
   | { kind: 'noScreenLock' | 'biometricRequired' }
   // story #4624 (Yuna): the limit and «another account» lines have [다시 찍기] under them (right after a phone is removed on the web)
@@ -118,7 +118,8 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
     known.current = null;
     switch (r.kind) {
       case 'sent': setView({ kind: 'checking', head, phoneKeyId: r.phoneKeyId }); return;
-      case 'alreadyPaired': case 'remoteOff': case 'noScreenLock': case 'biometricRequired': setView({ kind: r.kind }); return;
+      case 'alreadyPaired': setView({ kind: 'alreadyPaired', device: head.device_name }); return; // story 4932: the computer is named
+      case 'remoteOff': case 'noScreenLock': case 'biometricRequired': setView({ kind: r.kind }); return;
       case 'limit': void enterLimit(); return;
       case 'takenOtherOrg': setView({ kind: 'retry', line: 'takenOtherOrg', ...(r.org ? { org: r.org } : {}) }); return;
       default: setView({ kind: 'retry', line: r.kind });
@@ -234,7 +235,7 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
     case 'paired':
       return <Shell><Line focus>{t('paired', { device: view.device })}</Line><Actions>{close}</Actions></Shell>;
     case 'alreadyPaired':
-      return <Shell><Line focus>{t('alreadyPaired')}</Line><Actions>{close}</Actions></Shell>;
+      return <Shell><Line focus>{t('alreadyPaired', { device: view.device })}</Line><Actions>{close}</Actions></Shell>;
     case 'remoteOff':
       // story #4583 (Yuna copy.md row 1): the owner gets the way to the switch (and may still close) · anyone else the owner's name
       if (remoteOff?.owner) return <Shell><Line focus>{t('remoteOffOwner')}</Line><Actions><RemoteControlLink variant="button" />{close}</Actions></Shell>;
@@ -243,7 +244,11 @@ function Pairing({ returnTo }: { returnTo: string | null }) {
     case 'biometricRequired':
       return (
         <Shell>
-          <Line focus>{view.kind === 'noScreenLock' ? tp('noScreenLock') : tp('biometricRequired')}</Line>
+          {/* story 4932: this is a refusal BEFORE anything was sent (the phone's key cannot be made without a screen lock / a fingerprint) — it was read as the pairing's result. So it says first that nothing is paired
+              yet and nothing was sent, then what to do, then that the QR lives only 5 minutes (setting a lock takes a while — the same QR is often gone by the time the person comes back). */}
+          <Line focus>{t('notSentYet')}</Line>
+          <Line>{view.kind === 'noScreenLock' ? tp('noScreenLock') : tp('biometricRequired')}</Line>
+          <Line>{t('qrFiveMinutes')}</Line>
           <Actions>{settings}{rescan}</Actions>
         </Shell>
       );
