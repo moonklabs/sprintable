@@ -902,10 +902,11 @@ describe('StoryDetailPanel — Workcell Conversation 구획 대화근거 요약 
 // 내보내는지(in-flight ref 가드) 값으로 고정한다.
 describe('StoryDetailPanel — 삭제 404/이중발사 처방(story #3169)', () => {
   async function clickDeleteThenConfirm() {
-    const deleteButton = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.getAttribute('aria-label') === '스토리 삭제',
-    );
-    await act(async () => { deleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // story 4945 — 지우기는 «더 보기 ⋯» 메뉴 안(닫기 옆 늘 떠 있던 휴지통을 옮김): ⋯ → «스토리 삭제» 항목
+    const moreButton = container.querySelector<HTMLButtonElement>('button[aria-label="더 보기"]');
+    await act(async () => { moreButton?.click(); });
+    const deleteItem = Array.from(document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')).find((i) => i.textContent?.trim() === '스토리 삭제');
+    await act(async () => { deleteItem?.click(); });
     // 확認 다이얼로그는 Dialog(Radix 계열, document.body에 포탈)라 container 안에는 없다.
     const confirmButton = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '영구 삭제');
     return confirmButton;

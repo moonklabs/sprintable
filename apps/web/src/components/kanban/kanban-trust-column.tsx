@@ -177,11 +177,11 @@ export function KanbanTrustColumn({
       ref={setNodeRef}
       data-board-column={id}
       // 4908 — 열은 «내용 칸 층»(LAYER.panel): 바탕과 카드 사이를 면으로 가른다(바탕 → 열 ≥ 0.03 · 열 → 카드 ≥ 0.05, layer-rule.test). 잠긴 열은 같은 면에 안내 글만 다르다.
-      className={`flex h-full w-[280px] min-w-[240px] flex-col rounded-xl border p-3 transition lg:[@media(max-height:520px)]:py-2 ${LAYER.panel} ${
+      className={`flex h-full w-[280px] min-w-[240px] flex-col rounded-xl border p-3 transition lg:[@media(max-height:600px)]:py-2 ${LAYER.panel} ${
         closedDuringDrag ? 'border-ds-line opacity-45' : isOver ? 'border-ds-action ring-1 ring-ds-action' : 'border-ds-line'
       }`}
     >
-      <div className="mb-3 flex items-center justify-between gap-2 lg:[@media(max-height:520px)]:mb-2">
+      <div className="mb-3 flex items-center justify-between gap-2 lg:[@media(max-height:600px)]:mb-2">
         {/* story #2969 §1.3-b(doc proofline-system-layer-2969, PR-6) — 유나 실픽셀 갭 fix:
             kanban-column.tsx(클래식 축)만 하고 이 파일(6단계 신뢰축=기본 보드 화면)을
             놓쳤던 것. 컬럼헤더=소헤딩(Heading 무게), 크기(text-xs)·sans 불변. */}

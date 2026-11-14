@@ -887,9 +887,13 @@ describe('EpicSwimlaneBoard — StoryDetailPanel 배선(story #2931, QA changes 
     await act(async () => { card.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await waitForCondition(() => container.textContent?.includes('삭제될카드') ?? false, '패널 오픈');
 
-    const deleteTrigger = container.querySelector('[aria-label="스토리 삭제"]') as HTMLElement;
-    expect(deleteTrigger, '삭제 트리거를 못 찾음').not.toBeNull();
-    await act(async () => { deleteTrigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // story 4945 — 지우기는 «더 보기 ⋯» 메뉴 안(닫기 옆 늘 떠 있던 휴지통을 옮김): ⋯ → «스토리 삭제» 항목
+    const moreButton = container.querySelector<HTMLButtonElement>('button[aria-label="더 보기"]');
+    expect(moreButton, '⋯ 더 보기 단추를 못 찾음').not.toBeNull();
+    await act(async () => { moreButton!.click(); });
+    const deleteItem = Array.from(document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')).find((i) => i.textContent?.trim() === '스토리 삭제');
+    expect(deleteItem, '삭제 항목을 못 찾음').toBeDefined();
+    await act(async () => { deleteItem!.click(); });
 
     // Dialog는 document.body에 포탈되므로 container가 아닌 document 전체에서 찾는다.
     const confirmBtn = [...document.querySelectorAll('button')].find((b) => b.textContent === '영구 삭제');

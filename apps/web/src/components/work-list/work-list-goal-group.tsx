@@ -47,6 +47,7 @@ function StoryRowView({ story, selectedRowId, onSelect }: { story: WorkListStory
     'aria-pressed': selected,
     selected,
     onClick: () => onSelect(story.selfRow.id),
+    'data-work-row': '',
     onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(story.selfRow.id); } },
     title: story.title,
     subtitle,

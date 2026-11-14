@@ -633,6 +633,8 @@ export function StoryCard({ story, epicName, assignee, assignees, onClick, onEdi
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
           onDoubleClick={(e) => e.stopPropagation()}
+          // story 4945 — 입력 중인 글자 칸의 우클릭은 글자 칸의 것(잘라내기 · 복사 · 붙여넣기)이다. 카드 바깥 div의 우클릭(카드 메뉴 + preventDefault)으로 올라가면 글자 메뉴를 못 쓴다.
+          onContextMenu={(e) => e.stopPropagation()}
           onBlur={() => finishRename(true, false)}
           onKeyDown={(e) => {
             e.stopPropagation();

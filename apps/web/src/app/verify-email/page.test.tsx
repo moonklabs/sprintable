@@ -138,7 +138,7 @@ describe('VerifyEmailPage — 「시작하기」 목적지가 org_id 유무로 �
   // 유나 design:pass 비차단 ①(2026-08-29) — /api/me 응답 前 빠른 클릭 레이스. 이전엔
   // useState 기본값(/inbox)이 그대로 나가 no-org 유저가 막다른 곳으로 갔다. 지금은 클릭이
   // 판정을 "기다렸다" 라우팅해야 한다.
-  it('/api/me 응답 前 클릭해도(레이스) — 응답 도착 후 올바른 목적지(/onboarding)로 이동한다', async () => {
+  it('/api/me 응답 前엔 «시작하기»가 아니라 «확인하는 중…»(눌리지 않음) — 응답이 오면 «시작하기»가 되고 올바른 목적지(/onboarding)로 간다(story 4945: 예전엔 응답 前 클릭을 기다렸다 라우팅했다)', async () => {
     let resolveMe!: (v: { ok: true; json: () => Promise<unknown> }) => void;
     const mePromise = new Promise<{ ok: true; json: () => Promise<unknown> }>((r) => { resolveMe = r; });
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -147,15 +147,20 @@ describe('VerifyEmailPage — 「시작하기」 목적지가 org_id 유무로 �
     }));
     await mountAndWait();
 
-    const startBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '시작하기');
-    // /api/me가 아직 안 끝난 시점에 클릭 — 예전엔 여기서 이미 /inbox로 나갔다.
-    await act(async () => { startBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const btn = () => container.querySelector<HTMLButtonElement>('button')!;
+    expect(btn().textContent).toBe('확인하는 중…');
+    expect(btn().disabled).toBe(true);
+    // 눌러도 아무 데도 안 간다(예전엔 여기서 이미 /inbox로 나갔다)
+    await act(async () => { btn().dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(pushMock).not.toHaveBeenCalled();
 
     await act(async () => {
       resolveMe({ ok: true, json: async () => ({ data: { org_id: null } }) });
       await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
     });
+    expect(btn().textContent).toBe('시작하기');
+    expect(btn().disabled).toBe(false);
+    await act(async () => { btn().dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(pushMock).toHaveBeenCalledWith('/onboarding');
   });
 });
@@ -226,17 +231,22 @@ describe('VerifyEmailPage — 세션 없는 브라우저(story #4939)', () => {
     expect(pushMock).not.toHaveBeenCalled(); // nothing moved the person anywhere by itself
   });
 
-  it('⭐answer not here yet when «시작하기» is pressed, then 401 → no push into the login wall; the page shows the line and the login way', async () => {
+  it('⭐answer not here yet: the button place says «확인하는 중…» (not «시작하기», not pressable) → then 401 → the line and the login way, never a push into the login wall', async () => {
     let resolveMe!: (v: unknown) => void;
     const mePromise = new Promise((r) => { resolveMe = r; });
     vi.stubGlobal('fetch', vi.fn(async (url: string) => (url === '/api/auth/me' ? mePromise : url === '/api/auth/refresh' ? refreshNone : verifiedOk)));
     await mountAndWait();
-    await act(async () => { startBtn()?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const wait = container.querySelector<HTMLButtonElement>('button')!;
+    expect(wait.textContent).toBe(koMessages.verifyEmail.checkingSession); // story 4945: no «시작하기» flash before the answer
+    expect(wait.disabled).toBe(true);
+    expect(startBtn()).toBeUndefined();
+    await act(async () => { wait.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     expect(pushMock).not.toHaveBeenCalled();
     await act(async () => { resolveMe({ ok: false, status: 401, json: async () => ({}) }); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
-    expect(pushMock).not.toHaveBeenCalled(); // reverted (the old `router.push(destination)`) → '/onboarding' here
+    expect(pushMock).not.toHaveBeenCalled();
     expect(hint()).not.toBeNull();
     expect(loginLink()).not.toBeNull();
+    expect(container.textContent).not.toContain(koMessages.verifyEmail.startButton); // the button never said «시작하기» on the way
   });
 
   it('⭐a SIGNED-IN browser whose access token has expired: 401 → renewed once → read again → 200 — the person keeps «시작하기» (no hint · no login link) and it goes where it went before', async () => {
