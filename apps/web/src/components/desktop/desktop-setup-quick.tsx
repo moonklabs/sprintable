@@ -455,7 +455,7 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
             the question is in sight before the press (as the sentence beside the button), and its whole box is one scroll away. The fields it could still cover come above it when focused:
             `scroll-mb-32` = 128 px = this row (61: 44 button + 2×8 + 1 border) + the shell scroller's 64 px under it (the launcher's clear) + a little air — a margin that does not reach past the scroller's
             bottom edge asks for no scroll, and the field would stay under the row.
-            The row's ground reaches DOWN to the scroller's bottom edge (PO 4941: nothing of the card shows through under it): it sticks at `bottom: -clear` (the shell scroller's own `pb` is `--shell-launcher-clear`, 64 px at the Mac window) and
+            The row's ground reaches DOWN to the scroller's bottom edge (PO 4941: nothing of the card shows through under it): it sticks at `bottom: -clear` (written `calc(-1*var(…))`: not an off-canvas hide — the guard offscreen-hide-guard.test.tsx reads `*-1)]` as one) (the shell scroller's own `pb` is `--shell-launcher-clear`, 64 px at the Mac window) and
             carries that much `pb` itself, so the button + sentence stand exactly where they stood (406–467 at 539) and the ground goes on to 531; the same amount is taken back by `-mb`, and the card clips (`overflow-clip` — NOT
             `overflow-hidden`, which would make the card the scroller this row sticks to) so, scrolled to the end, the extra ground does not hang out under the card. */}
         {showPhoneControl ? (
@@ -490,7 +490,7 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
           </div>
         )}
 
-        <footer className="sticky bottom-[calc(var(--shell-launcher-clear,0px)*-1)] -mx-6 -mb-[calc(1.5rem+var(--shell-launcher-clear,0px))] flex flex-col gap-2 rounded-b-[inherit] border-t bg-card px-6 pt-2 pb-[calc(0.5rem+var(--shell-launcher-clear,0px))]" data-testid="quick-start-row">
+        <footer className="sticky bottom-[calc(-1*var(--shell-launcher-clear,0px))] -mx-6 -mb-[calc(1.5rem+var(--shell-launcher-clear,0px))] flex flex-col gap-2 rounded-b-[inherit] border-t bg-card px-6 pt-2 pb-[calc(0.5rem+var(--shell-launcher-clear,0px))]" data-testid="quick-start-row">
           <div className="flex items-center gap-3">
             {limitAsk ? (
               <Button className="shrink-0" disabled={starting || roomFull || nameBlank || block !== null} aria-describedby="quick-start-line" onClick={() => void start(limitAsk.id)}>{starting ? t('quick.creating') : t('quick.limit.addStart')}</Button>

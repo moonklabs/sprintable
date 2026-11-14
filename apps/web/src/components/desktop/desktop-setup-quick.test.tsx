@@ -1142,7 +1142,7 @@ describe('[SID:4934] the free plan\'s one project is asked at the folder pick, a
     const row = container.querySelector('[data-testid=quick-start-row]')!;
     expect(row.className).toContain('sticky');
     // 4941: it sticks at `bottom: -clear` (the shell scroller's own bottom padding, `--shell-launcher-clear`) so its ground reaches the scroller's bottom edge; the card clips (not hidden: that would make the card the scroller)
-    expect(row.className).toContain('bottom-[calc(var(--shell-launcher-clear,0px)*-1)]');
+    expect(row.className).toContain('bottom-[calc(-1*var(--shell-launcher-clear,0px))]');
     expect(row.className).toContain('pb-[calc(0.5rem+var(--shell-launcher-clear,0px))]');
     expect(row.closest('[data-testid=quick-card]')!.className).toContain('overflow-clip');
     expect(row.closest('[data-testid=quick-card]')!.className).not.toContain('overflow-hidden');
