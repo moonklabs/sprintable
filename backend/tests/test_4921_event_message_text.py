@@ -82,6 +82,16 @@ def test_an_entity_link_in_the_words_reads_as_its_label_never_as_its_id():
     assert line(f"먼저 [A](entity:story:{UUID}) 그다음 [B](entity:doc:{UUID})") == "이벤트 · 먼저 A 그다음 B"
     assert UUID not in (line(f"[이 일감](entity:story:{UUID}) 확인") or "")
     assert line(f"[{UUID}](entity:story:{UUID})") == "이벤트"  # a label that is itself an id is not words
+    assert line("[raw](entity:story:abc)") == "이벤트"  # not the chat's token shape (a UUID id): left as written, so still «not words»
+
+
+def test_a_long_run_of_brackets_is_scanned_once_not_once_per_bracket():
+    import time
+
+    odd = "[" * 20_000 + "]x"
+    started = time.monotonic()
+    assert first_human_line(odd) == "[" * 60 + "…"
+    assert time.monotonic() - started < 0.5
 
 
 def test_first_line_only_and_cut_by_code_point_never_inside_an_emoji():

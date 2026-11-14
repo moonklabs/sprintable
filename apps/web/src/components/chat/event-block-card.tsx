@@ -782,9 +782,9 @@ const NOT_WORDS_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 
 /**
  * story 4925 — a person's words may carry a reference the chat gives as a link («[이 일감](entity:story:<id>)», the label escaped like «\\[결함\\]»): where there is no chip to draw (a preview line · a plain text list) it reads as its LABEL — the id never shows.
- * A link with no label (or a label that is itself an id) stays what it was, so it is still «not words».
+ * A link with no label (or a label that is itself an id) stays what it was, so it is still «not words»; only the chat's own token shape counts (a UUID id, like entity-ref.ts), and a label holds no bare `[` — so a long run of brackets is scanned once, not once per bracket.
  */
-const ENTITY_LINK_RE = /\[((?:\\.|[^\]\\])*)\]\(entity:[a-z_]+:[^)\s]+\)/gi;
+const ENTITY_LINK_RE = /\[((?:\\.|[^[\]\\])*)\]\(entity:\w+:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\)/gi;
 export function entityLinksToLabels(text: string): string {
   return text.replace(ENTITY_LINK_RE, (whole, label: string) => {
     const plain = label.replace(/\\([[\]()\\])/g, '$1').trim();
@@ -942,12 +942,12 @@ function eventNameLine(
 }
 
 /**
- * story 4925 — is this text the line the SERVER wrote for an event with no sentence of its own («이벤트» or «이벤트 · {words}», «Event» in an English message)? Only that line is said again with the definition's name: a text a person wrote
+ * story 4925 — is this text the line the SERVER wrote for an event with no sentence of its own («이벤트» or «이벤트 · {words}», «Event» in an English message)? The screen's own word for it and the English word count (a line written in the OTHER language stays as the server wrote it). Only that line is said again with the definition's name: a text a person wrote
  * (the publish-stopped explanation …) on a row that carries an event card stays exactly as written.
  */
 export function isServerGenericEventLine(text: string | null | undefined, tEventCard: (key: string) => string): boolean {
   if (typeof text !== 'string') return false;
-  return [tEventCard('genericEventHeader'), '이벤트', 'Event'].some((head) => text === head || text.startsWith(`${head} · `));
+  return [tEventCard('genericEventHeader'), 'Event'].some((head) => text === head || text.startsWith(`${head} · `));
 }
 
 /** the events that have a sentence of their own (composeEventPreviewSentence) — every other event is named by its definition */

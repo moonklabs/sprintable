@@ -29,6 +29,19 @@ describe('entityLinksToLabels', () => {
   });
 });
 
+describe('entityLinksToLabels — only the chat\'s own token shape · linear on odd input', () => {
+  it('⭐a link whose id is not a UUID is not a reference: it stays as written (still «not words» through the bare token)', () => {
+    expect(entityLinksToLabels('[raw](entity:story:abc)')).toBe('[raw](entity:story:abc)');
+    expect(entityLinksToLabels(`[raw](entity:story:${UUID}x)`)).toBe(`[raw](entity:story:${UUID}x)`);
+  });
+  it('⭐100 000 opening brackets are scanned once (no quadratic backtracking) and come back untouched', () => {
+    const odd = `${'['.repeat(100_000)}]x`;
+    const started = Date.now();
+    expect(entityLinksToLabels(odd)).toBe(odd);
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+});
+
 describe('the preview line (room list · rail · bell · inbox) says the label', () => {
   const line = (note: string, key = 'org.acme.deploy') => composeEventPreviewFallback(MACHINE(key), key, { note }, { tEventCard, eventDefinitionName });
   it('⭐«name · words» with the link as its label — no id, no entity token', () => {

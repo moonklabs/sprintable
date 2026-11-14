@@ -34,6 +34,9 @@ describe('composeNotificationDisplay — an event with no sentence of its own, n
   it('⭐a text a PERSON wrote on a row that carries an event card (the publish-stopped explanation) stays exactly as written', () => {
     expect(composeNotificationDisplay(row({ body: '발행이 멈췄어요. 작업 상세에서 다시 시도해 주세요.' }), t, helpers).body).toBe('발행이 멈췄어요. 작업 상세에서 다시 시도해 주세요.');
   });
+  it('⭐a card with a key but NO payload: the definition name is still said', () => {
+    expect(composeNotificationDisplay(row({ body: '이벤트', event: { sender_name: '페드루', event_key: 'org.acme.deploy', payload: undefined } }), t, helpers).body).toBe('배포 확인');
+  });
   it('a row that is not a chat line keeps its own body; a plain message (no event key) keeps its text', () => {
     expect(composeNotificationDisplay(row({ type: 'dispatched', body: '그대로 둘 글' }), t, helpers).body).toBe('그대로 둘 글');
     expect(composeNotificationDisplay(row({ body: '안녕하세요', event: { sender_name: '페드루' } }), t, helpers).body).toBe('안녕하세요');

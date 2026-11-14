@@ -38,8 +38,8 @@ def is_machine_event_content(content: str | None) -> bool:
 
 
 # story 4925 — a person's words may carry a reference written as a link («[이 일감](entity:story:<id>)», the label escaped like «\\[결함\\]»): a preview has no chip to draw, so it reads as its LABEL (the id never shows).
-# A link with no label (or a label that is itself an id) stays as it was — so it is still «not words». The web has the same rule (`entityLinksToLabels`).
-_ENTITY_LINK_RE = re.compile(r"\[((?:\\.|[^\]\\])*)\]\(entity:[a-z_]+:[^)\s]+\)", re.IGNORECASE)
+# A link with no label (or a label that is itself an id) stays as it was — so it is still «not words». Only the chat's own token shape counts (a UUID id) and a label holds no bare `[` (a long run of brackets is scanned once, not once per bracket). The web has the same rule (`entityLinksToLabels`).
+_ENTITY_LINK_RE = re.compile(r"\[((?:\\.|[^\[\]\\])*)\]\(entity:\w+:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\)", re.IGNORECASE)
 
 
 def _entity_links_to_labels(text: str) -> str:
