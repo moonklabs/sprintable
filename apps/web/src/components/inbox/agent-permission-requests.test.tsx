@@ -147,6 +147,21 @@ describe('AgentPermissionRequests (story #4533)', () => {
     expect(has(), 'a good read brings them back').toBe(true);
   });
 
+  it('[4949 · codex round 3] an older read that answers AFTER a newer one is ignored — it cannot undo a failed read\'s «stale» and bring a file\'s lines back', async () => {
+    const preview: PermissionPreview = { op: 'edit', blocks: [{ removed: ['a = 1'], added: ['a = 2'], removed_more: 0, added_more: 0 }], blocks_more: 0, replace_all: false, withheld: null };
+    const row = req({ tool: 'Edit', summary: 'src/a.ts', masked: false, preview });
+    let resolveOlder: (r: Response) => void = () => {};
+    fetchWithAuth.mockImplementationOnce(() => new Promise<Response>((r) => { resolveOlder = r; })); // the mount read — slow
+    await render();
+    fetchWithAuth.mockResolvedValueOnce(new Response('{}', { status: 500 })); // a newer read that fails
+    await act(async () => { onNotice?.({ event_type: 'dispatched', payload: { event_type: 'agent.permission_request' } }); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    await act(async () => { resolveOlder(answer([row])); });
+    for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid="agent-permission-preview"]'), 'the older answer did not undo the newer failure').toBeNull();
+    expect(container.querySelector('[data-testid="agent-permission-card"]'), 'nor did it bring back a list the newer read replaced').toBeNull();
+  });
+
   it('[4938] the masked block carries no word of its own: an older Mac app\'s «(가림)» is shown without it, a new one\'s «••••» as it is — and a file name beside the block stays', async () => {
     fetchWithAuth.mockResolvedValueOnce(answer([req({ summary: '••••(가림).txt' }), req({ id: 'r2', request_id: 'q2', summary: '••••.txt' }), req({ id: 'r3', request_id: 'q3', summary: 'note.txt', masked: false }), req({ id: 'r4', request_id: 'q4', summary: 'echo ••••(가림)', masked: false })]));
     await render();

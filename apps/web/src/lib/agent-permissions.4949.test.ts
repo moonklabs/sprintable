@@ -13,6 +13,9 @@ describe('rowSummary (story 4949)', () => {
     expect(rowSummary({ tool: 'MultiEdit', summary: '/Users/me/projects/very-long-folder-name/src/index.ts', masked: false })).toBe('…/src/index.ts');
     expect(rowSummary({ tool: 'Bash', summary: 'cat /Users/me/projects/very-long-folder-name/src/index.ts', masked: false })).toBe('cat /Users/me/projects/very-long-folder-name/src/index.ts');
   });
+  it('a network question\'s address is not in its row — the card hides it until Allow, so the row does too', () => {
+    expect(rowSummary({ tool: 'SandboxNetwork', summary: 'gitlab.com', masked: false })).toBeNull();
+  });
   it('no summary → null; the old mask word is not shown on a masked summary', () => {
     expect(rowSummary({ tool: null, summary: null, masked: false })).toBeNull();
     expect(rowSummary({ tool: 'Write', summary: '', masked: false })).toBeNull();

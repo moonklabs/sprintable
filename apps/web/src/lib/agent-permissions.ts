@@ -125,6 +125,7 @@ const FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Read'
  */
 export function rowSummary(r: Pick<PermissionRequest, 'tool' | 'summary' | 'masked'>): string | null {
   if (r.summary === null || r.summary === '') return null;
+  if (r.tool === 'SandboxNetwork') return null; // the card hides a network question's address until the person presses Allow — so does the row
   const s = shownSummary(r.summary, r.masked);
   if (!FILE_TOOLS.has(r.tool ?? '') || s.length <= 32 || !s.includes('/')) return s;
   const parts = s.split('/').filter(Boolean);

@@ -105,6 +105,9 @@ export function useAgentPermissionRequests() {
   // story 4949 (codex): the last read FAILED — what is shown is from before; a file's lines are not kept on screen on a row nobody has confirmed since (the server may have let go of them)
   const [stale, setStale] = useState(false);
   const readFor = useRef(-1);
+  // story 4949 (codex): reads can overlap — an older answer that comes after a newer one is ignored (it must not undo what the newer one said: a failed read marks the rows stale)
+  const readSeq = useRef(0);
+  const appliedSeq = useRef(0);
   // story #4612: the requests answered on THIS page — their change frame is not read on (the card keeps its result line until the
   // next read, story #4596 D-1; a read at once would take it away the moment it was answered)
   const answeredHere = useRef<ReadonlySet<string>>(new Set());
@@ -140,9 +143,12 @@ export function useAgentPermissionRequests() {
     const read = () => {
       pending = true;
       const started = Date.now();
+      const seq = ++readSeq.current;
       void readRequests().then((list) => {
         pending = false;
         if (off) return;
+        if (seq < appliedSeq.current) return;
+        appliedSeq.current = seq;
         setRequests((prev) => list ?? prev ?? []);
         setStale(list === null);
         // story #4596 AC1: a card answered here leaves at the first read made after its answer that no longer lists it — a page kept

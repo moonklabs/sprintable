@@ -720,6 +720,11 @@ PREVIEW_TOOL_OP = {"Write": "write", "Edit": "edit", "MultiEdit": "edit"}
 _LINE_BREAKS = ("\n", "\r", "\u2028", "\u2029", "\x0b", "\x0c", "\x85")
 
 
+def _u16(text: str) -> int:
+    """JavaScript's `.length` of the text — UTF-16 code units. The Mac cuts by it; Python's `len` counts code points, so 120 emoji would be 120 here and 240 there (codex 4949)."""
+    return len(text.encode("utf-16-le")) // 2
+
+
 class PreviewBlock(BaseModel):
     """One edit shown: the lines taken out and the lines put in, and how many more of each were left out (counted, never guessed)."""
 
@@ -743,6 +748,8 @@ class PreviewBlock(BaseModel):
         # a «line» is one line: the Mac splits on line breaks, and a string that carries one would draw as several rows (codex 4949)
         if any(any(b in line for b in _LINE_BREAKS) for line in lines):
             raise ValueError("a preview line carries no line break")
+        if any(_u16(line) > PREVIEW_LINE_MAX for line in lines):
+            raise ValueError(f"a preview line is at most {PREVIEW_LINE_MAX} characters (UTF-16 units, as the Mac counts)")
         return lines
 
 
@@ -766,7 +773,7 @@ class PermissionPreview(BaseModel):
             raise ValueError("a write has one block of added lines only")
         if self.op == "edit" and self.withheld is None and not self.blocks:
             raise ValueError("an edit shows at least one block")
-        chars = sum(len(line) for b in self.blocks for line in (*b.removed, *b.added))
+        chars = sum(_u16(line) for b in self.blocks for line in (*b.removed, *b.added))
         if chars > PREVIEW_CHARS_MAX:
             raise ValueError(f"a preview carries at most {PREVIEW_CHARS_MAX} characters")
         return self

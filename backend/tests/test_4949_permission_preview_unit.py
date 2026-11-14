@@ -97,3 +97,13 @@ def test_nothing_else_can_ride_in_it_and_a_terminal_only_question_carries_none()
     _bad({"op": "write", "blocks": [], "content": "the whole file"})
     with pytest.raises(ValidationError):
         PermissionRequestReport.model_validate({**_report(preview={"op": "write", "blocks": [{"added": ["a"]}]}), "terminal_only": True, "input_hash": None})
+
+
+def test_the_limits_count_characters_the_way_the_mac_cuts_them_UTF16_units_not_code_points():  # codex 4949 round 3 · security
+    smile = chr(0x1F600)  # one code point, two UTF-16 units
+    _ok({"op": "write", "blocks": [{"added": [smile * (PREVIEW_LINE_MAX // 2)]}]})  # 120 units — the limit exactly
+    _bad({"op": "write", "blocks": [{"added": [smile * (PREVIEW_LINE_MAX // 2 + 1)]}]})  # 122 units: 61 code points would have passed
+    _bad({"op": "write", "blocks": [{"added": [smile * PREVIEW_LINE_MAX]}]})  # 240 units (120 code points) — the bypass
+    # the total too: 22 lines of 120 units = 2,640 > 2,400, though only 1,320 code points
+    line = smile * (PREVIEW_LINE_MAX // 2)
+    _bad({"op": "edit", "blocks": [{"removed": [line] * PREVIEW_REMOVED_MAX, "added": [line] * PREVIEW_ADDED_MAX}]})
