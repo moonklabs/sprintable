@@ -1,5 +1,10 @@
 'use client';
 
+// The corner for the round support button (PO 11-14): the row and the failure line keep their right 56px free WHILE THE BUTTON CAN MEET THEM. The button stands in the strip's own bottom room (1rem + the clear) — until a toast
+// or a banner shows: BottomDock stacks banner → toasts → button (flex-col-reverse), so the button rises by the toast's height and, on a narrow pane, sits over the row's right end ([보내기] on a phone · at 1100).
+// It can only meet the row where the body column reaches the button's box: the column is centred and capped (`max-w-4xl`), so when the PANE is at least column + 2 × (button + its offset) wide the button is outside the
+// column whatever the toasts do, and the corner is given back (the row ends at the cards' edge). The pane's width is what matters, not the window's (the sidebar folds and unfolds): it is measured here, and the cap is read
+// from the column's own CSS (one source — no second number). Not measured yet / no ResizeObserver / no cap → the corner stays kept (the safe side).
 // story 4906 (lap 3) — the home's one-line instruction strip, moved out of org-briefing-shell.tsx so a layout spec can mount it alone on a real scroller.
 // The strip is the LAST thing in the body pane (dashboard-shell's `overflow-y-auto` scroller) and stays pinned to the pane's bottom edge. PO 11-14 (dev c8ababa4a, measured):
 // the pane has `pb-[var(--shell-launcher-clear)]` (64px + safe area, kept free for the round support button) and a sticky `bottom-0` stops at the pane's content edge, so a 64px band
@@ -15,7 +20,35 @@ import { Input } from '@/components/ds/input';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { findSoleAgentDm, sendInstruction } from '@/lib/today-instruct';
 
-function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
+/** The corner kept free for the round support button (a class literal on purpose: Tailwind reads it as written; `<html data-support-launcher>` is set only while the button is drawn). */
+const KEEP_CORNER = '[:root[data-support-launcher]_&]:pe-14';
+/** the round support button's reach from the window edge: its 48px (h-12 w-12) + the dock's 16px offset (BottomDock `right-4`) */
+const BUTTON_SPAN_PX = 64;
+
+/** true once the pane is wide enough that the body column ends before the support button's box (see the header); false = keep the corner */
+function useColumnClearOfButton(stripRef: { current: HTMLElement | null }): boolean {
+  const [clear, setClear] = useState(false);
+  useLayoutEffect(() => {
+    const strip = stripRef.current;
+    const column = strip?.parentElement ?? null; // the body root: `mx-auto w-full max-w-4xl …`
+    let pane: HTMLElement | null = column?.parentElement ?? null;
+    while (pane && !/(auto|scroll)/.test(getComputedStyle(pane).overflowY)) pane = pane.parentElement;
+    if (!column || !pane) return;
+    const measure = () => {
+      const cap = parseFloat(getComputedStyle(column).maxWidth); // `none` → NaN → the corner stays kept
+      setClear(Number.isFinite(cap) && pane!.clientWidth >= cap + 2 * BUTTON_SPAN_PX);
+    };
+    // no ResizeObserver (an old WebView): a one-time measurement would go stale when the sidebar folds / unfolds — the corner stays kept (the safe side), never given back on a single reading
+    if (typeof ResizeObserver === 'undefined') return;
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(pane);
+    return () => observer.disconnect();
+  }, [stripRef]);
+  return clear;
+}
+
+function InstructionInput({ autoFocus, keepCorner }: { autoFocus: boolean; keepCorner: boolean }) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('orgBriefing');
   const router = useRouter();
@@ -71,13 +104,9 @@ function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
   };
 
   return (
-    // story #4762 (AC3) — the round support button (support-widget-launcher.tsx · 48px · fixed bottom-right) sat on [Send] on a phone; the row keeps
-    // that corner free below `lg`. 16px column padding + 56px = 72px ≥ 48px + 16px offset + 8px gap.
-    // story 4906 — «the content is centered with room on both sides from `lg`» was only true on a wide screen: at 1100px (the Mac app's default window) the row runs to the
-    // right edge and the button sat on [Send] again. From `lg` the same 56px is kept free, but only while the button is drawn (`<html data-support-launcher>`, the
-    // launcher's SUPPORT_LAUNCHER_ATTR — a class literal on purpose, Tailwind reads it as written): a person who finished the onboarding has no button and loses no width.
+    // story #4762 (AC3 · the button sat on [Send] on a phone) · story 4906 (the same at 1100): the corner stays kept while the button can meet the row — see the header and KEEP_CORNER / useColumnClearOfButton above.
     <>
-    <form onSubmit={handleSubmit} className="flex items-center gap-2 border-t border-ds-line pt-4 pe-14 lg:pe-0 lg:[:root[data-support-launcher]_&]:pe-14" data-testid="today-instruction-form">
+    <form onSubmit={handleSubmit} className={`flex items-center gap-2 border-t border-ds-line pt-4${keepCorner ? ` ${KEEP_CORNER}` : ''}`} data-testid="today-instruction-form">
       <Input
         ref={inputRef}
         value={value}
@@ -89,19 +118,22 @@ function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
       />
       <Button type="submit" variant="primary" size="md" disabled={!value.trim()} loading={sending}>{t('instructionSendButton')}</Button>
     </form>
-    {failed ? <p role={failed === 'elsewhere' ? 'status' : 'alert'} data-testid="today-instruction-failed" className={`mt-2 pe-14 text-xs lg:pe-0 lg:[:root[data-support-launcher]_&]:pe-14 ${failed === 'elsewhere' ? 'text-muted-foreground' : 'text-destructive'}`}>{failed === 'unknown' ? t('instructionSendUnknown') : failed === 'elsewhere' ? t('instructionSentElsewhere') : t('instructionSendFailed')}</p> : null}
+    {failed ? <p role={failed === 'elsewhere' ? 'status' : 'alert'} data-testid="today-instruction-failed" className={`mt-2 text-xs${keepCorner ? ` ${KEEP_CORNER}` : ''} ${failed === 'elsewhere' ? 'text-muted-foreground' : 'text-destructive'}`}>{failed === 'unknown' ? t('instructionSendUnknown') : failed === 'elsewhere' ? t('instructionSentElsewhere') : t('instructionSendFailed')}</p> : null}
     </>
   );
 }
 
 /** The strip: the instruction row on an opaque face pinned to the bottom edge of the body pane. */
 export function InstructionStrip({ autoFocus }: { autoFocus: boolean }) {
+  const stripRef = useRef<HTMLDivElement>(null);
+  const clearOfButton = useColumnClearOfButton(stripRef);
   return (
     <div
+      ref={stripRef}
       data-testid="today-instruction-strip"
       className="sticky bottom-[calc(-1*var(--shell-launcher-clear,0px))] -mx-4 mb-[calc(-1*(var(--shell-launcher-clear,0px)_+_1rem))] bg-ds-background px-4 pb-[calc(1rem+var(--shell-launcher-clear,0px))] lg:-mx-6 lg:mb-[calc(-1*(var(--shell-launcher-clear,0px)_+_1.5rem))] lg:px-6"
     >
-      <InstructionInput autoFocus={autoFocus} />
+      <InstructionInput autoFocus={autoFocus} keepCorner={!clearOfButton} />
     </div>
   );
 }

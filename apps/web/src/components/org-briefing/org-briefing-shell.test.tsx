@@ -654,16 +654,17 @@ describe('OrgBriefingShell — story #4762 AC1 한 번 누름 = 서버에 메시
   });
 });
 
-describe('OrgBriefingShell — story #4762 AC3 지원 버튼이 [보내기]를 가리지 않는다', () => {
-  it('the instruction row keeps the support button\'s corner free below lg (and gives it back from lg)', async () => {
+describe('OrgBriefingShell — story #4762 AC3 지원 버튼이 [보내기]를 가리지 않는다 (4906: 본문 칸이 단추 밖일 때만 옆자리를 돌려줌)', () => {
+  it('the row keeps the support button\'s corner free (only while the button is drawn) until the pane is measured wide enough — jsdom measures no width, so the safe side stays', async () => {
     stubToday(EMPTY_TODAY);
     await mount();
     const form = container.querySelector('[data-testid="today-instruction-form"]') as HTMLElement;
-    expect(form.className).toMatch(/(^|\s)pe-14(\s|$)/);
-    expect(form.className).toMatch(/(^|\s)lg:pe-0(\s|$)/);
-    // story 4906 — «from lg the row is free» was only true on a wide screen: at 1100px (the Mac app's default window) the row runs to the right edge and the button sat on [Send].
-    // From lg the same 56px is kept free while the button is drawn (`<html data-support-launcher>`), and only then.
-    expect(form.className).toContain('lg:[:root[data-support-launcher]_&]:pe-14');
+    // the corner is `pe-14` behind `[:root[data-support-launcher]_&]:` — only while the round button is drawn (`<html data-support-launcher>`), at every width; the old `lg:pe-0` is gone: the pane's
+    // measured width gives it back (e2e/home-instruction-strip.4906.layout.spec.ts: sidebar open / folded × 1100 · 1280 · 1440 × no toast / one / two)
+    expect(form.className).toContain('[:root[data-support-launcher]_&]:pe-14'); // reverted (the corner never kept) → RED
+    expect(form.className).not.toMatch(/(^|\s)lg:pe-0(\s|$)/);
+    const strip = container.querySelector('[data-testid="today-instruction-strip"]') as HTMLElement;
+    expect(strip.className).toContain('pb-[calc(1rem+var(--shell-launcher-clear,0px))]'); // the room the button stands in
     // the input is w-full: a wrapping row would push [Send] to a second line (codex 4762) — one row, the failure line sits BELOW the form
     expect(form.className).not.toMatch(/flex-wrap/);
   });
