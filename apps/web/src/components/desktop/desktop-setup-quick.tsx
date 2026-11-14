@@ -349,7 +349,7 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
   const withVersion = (r: DesktopRuntime) => query.versions?.[r];
   return (
     <div className="flex flex-col gap-3">
-      <Card className="break-keep flex flex-col gap-5 p-6" data-testid="quick-card">
+      <Card className="break-keep flex flex-col gap-5 overflow-clip p-6" data-testid="quick-card">
         {/* story 4710 (Yuna 4710-copy-1016 · the correction's «{name} 에이전트 시작하기»): from a hire the card is about THAT agent */}
         <h1 className="text-lg font-semibold">{agent ? t('quick.titleAgent', { name: agent.name }) : t('quick.title')}</h1>
 
@@ -454,7 +454,10 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
             stand IN the flow, above the row (the 271 px row of 4934 covered «② 이름과 역할» · the name · role fields · «③ 폴더» on the first screen at 539 — dev b47453275/44ba8abe9 measured). 4934's promise holds:
             the question is in sight before the press (as the sentence beside the button), and its whole box is one scroll away. The fields it could still cover come above it when focused:
             `scroll-mb-32` = 128 px = this row (61: 44 button + 2×8 + 1 border) + the shell scroller's 64 px under it (the launcher's clear) + a little air — a margin that does not reach past the scroller's
-            bottom edge asks for no scroll, and the field would stay under the row. */}
+            bottom edge asks for no scroll, and the field would stay under the row.
+            The row's ground reaches DOWN to the scroller's bottom edge (PO 4941: nothing of the card shows through under it): it sticks at `bottom: -clear` (the shell scroller's own `pb` is `--shell-launcher-clear`, 64 px at the Mac window) and
+            carries that much `pb` itself, so the button + sentence stand exactly where they stood (406–467 at 539) and the ground goes on to 531; the same amount is taken back by `-mb`, and the card clips (`overflow-clip` — NOT
+            `overflow-hidden`, which would make the card the scroller this row sticks to) so, scrolled to the end, the extra ground does not hang out under the card. */}
         {showPhoneControl ? (
             // story 4670 AC1 (Yuna §M): a bordered box, the phone icon, a semibold label, a bigger tick — one line inside the third step, just above «시작».
             // story 4934: drawn with the free plan's question too — [넣고 만들기] is the same start (it sends the PUT when the tick is on), so the tick is in view there as well
@@ -487,7 +490,7 @@ export function DesktopSetupQuick({ query, onTeam, onMove, agent, onNotMovable }
           </div>
         )}
 
-        <footer className="sticky bottom-0 -mx-6 -mb-6 flex flex-col gap-2 rounded-b-[inherit] border-t bg-card px-6 py-2" data-testid="quick-start-row">
+        <footer className="sticky bottom-[calc(var(--shell-launcher-clear,0px)*-1)] -mx-6 -mb-[calc(1.5rem+var(--shell-launcher-clear,0px))] flex flex-col gap-2 rounded-b-[inherit] border-t bg-card px-6 pt-2 pb-[calc(0.5rem+var(--shell-launcher-clear,0px))]" data-testid="quick-start-row">
           <div className="flex items-center gap-3">
             {limitAsk ? (
               <Button className="shrink-0" disabled={starting || roomFull || nameBlank || block !== null} aria-describedby="quick-start-line" onClick={() => void start(limitAsk.id)}>{starting ? t('quick.creating') : t('quick.limit.addStart')}</Button>

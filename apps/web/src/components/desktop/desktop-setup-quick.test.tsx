@@ -1141,7 +1141,11 @@ describe('[SID:4934] the free plan\'s one project is asked at the folder pick, a
     await mount(frag(NEW_FOLDER), mineProjects);
     const row = container.querySelector('[data-testid=quick-start-row]')!;
     expect(row.className).toContain('sticky');
-    expect(row.className).toContain('bottom-0');
+    // 4941: it sticks at `bottom: -clear` (the shell scroller's own bottom padding, `--shell-launcher-clear`) so its ground reaches the scroller's bottom edge; the card clips (not hidden: that would make the card the scroller)
+    expect(row.className).toContain('bottom-[calc(var(--shell-launcher-clear,0px)*-1)]');
+    expect(row.className).toContain('pb-[calc(0.5rem+var(--shell-launcher-clear,0px))]');
+    expect(row.closest('[data-testid=quick-card]')!.className).toContain('overflow-clip');
+    expect(row.closest('[data-testid=quick-card]')!.className).not.toContain('overflow-hidden');
     expect(row.parentElement!.lastElementChild).toBe(row); // the card's LAST child: it can stick to the bottom of what scrolls
     // 4941 (PO · the real 539 window): the stuck row is ONE line — the button and one sentence; the question's whole box stands in the flow just above it
     expect(row.querySelector('[data-testid=quick-limit]')).toBeNull();

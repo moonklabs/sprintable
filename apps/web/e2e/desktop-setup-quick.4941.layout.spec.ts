@@ -40,7 +40,7 @@ async function build() {
           // the page's own wrapper (mx-auto w-full max-w-2xl p-6, desktop/setup/page.tsx) holds the card DIRECTLY - the card is its own bordered p-6 box (no second box around it)
           const wrap = React.createElement('div', { className: 'mx-auto w-full max-w-2xl p-6' }, card);
           // the shell's scroller: flex column · overflow-y auto · 64 px under it (the launcher's clear) - the card sits in it exactly as in the app
-          const tree = React.createElement('div', { id: 'scroller', style: { height: 'calc(100vh - 16px)', margin: '8px 0', overflowY: 'auto', display: 'flex', flexDirection: 'column', paddingBottom: '64px' } }, topbar, wrap); // (the shell frame leaves 8 px above and below the scroller: dev measured scrollport y 8–531 in a 539 window)
+          const tree = React.createElement('div', { id: 'scroller', style: { height: 'calc(100vh - 16px)', margin: '8px 0', overflowY: 'auto', display: 'flex', flexDirection: 'column', '--shell-launcher-clear': '64px', paddingBottom: 'var(--shell-launcher-clear)' } }, topbar, wrap); // (the shell frame leaves 8 px above and below the scroller: dev measured scrollport y 8–531 in a 539 window)
           createRoot(document.getElementById('root')).render(tree);
         };`,
       resolveDir: WEB, loader: 'tsx',
@@ -111,7 +111,7 @@ for (const win of [{ w: 1100, h: 539 }, { w: 1440, h: 539 }, { w: 1440, h: 900 }
       if (process.env['SHOT_DIR']) await page.screenshot({ path: `${process.env['SHOT_DIR']}/after-${win.w}x${win.h}-first-screen.png` }); // (the PR's before/after picture — the real Mac window's size; not a check)
       const g = await geo(page);
       expect(g.scrollTop).toBe(0);
-      expect(g.row.h, 'the stuck row is the button and one sentence').toBeLessThanOrEqual(66);
+      expect(g.row.h - 64, 'the stuck row\'s content is the button and one sentence (its ground reaches 64 px further down, to the scroller\'s bottom edge)').toBeLessThanOrEqual(66);
       expect(g.boxInRow || g.tickInRow, 'the question\'s box and the phone tick stand in the flow').toBe(false);
       // the button and the sentence beside it are in sight (above the scroller's bottom padding, inside the visible area)
       expect(g.btn!.bottom).toBeLessThanOrEqual(g.scrollBottom);
@@ -122,6 +122,35 @@ for (const win of [{ w: 1100, h: 539 }, { w: 1440, h: 539 }, { w: 1440, h: 900 }
       expect(g.role!.bottom, `${win.w}×${win.h}: role field above the row`).toBeLessThanOrEqual(g.row.top);
       expect(g.nameHit).toBe('itself');
       expect(g.roleHit).toBe('itself');
+      // the row's ground reaches down to the scroller's bottom edge: nothing of the card (the folder line · the project line) shows through under it — the point 4 px above the bottom edge, and the centres of those lines, all hit the row
+      const under = await page.evaluate(() => {
+        const row = document.querySelector('[data-testid="quick-start-row"]')!; const sc = document.getElementById('scroller')!; const sb = sc.getBoundingClientRect().bottom;
+        const rr = row.getBoundingClientRect();
+        const hitRow = (e: Element | null) => { if (!e) return null; const r = e.getBoundingClientRect(); const t = document.elementFromPoint((r.left + r.right) / 2, Math.min((r.top + r.bottom) / 2, sb - 4)); return !!t && row.contains(t); };
+        const atEdge = document.elementFromPoint(rr.left + rr.width / 2, sb - 4);
+        return { rowBottom: Math.round(rr.bottom), scrollBottom: Math.round(sb), edgeIsRow: !!atEdge && row.contains(atEdge), folderUnder: hitRow(document.querySelector('[data-testid="quick-folder"]')), projectUnder: hitRow(document.querySelector('[data-testid="quick-project"]')) };
+      });
+      if (win.h === 539) { // (at 900 the card nearly fits: the row is not stuck at the edge there — its ground reaches down only when it is stuck)
+        expect(under.edgeIsRow, 'the point at the scroller\'s bottom edge is the row\'s ground').toBe(true);
+        expect(under.folderUnder, 'the folder line is under the row, not beside it').toBe(true);
+        expect(under.projectUnder, 'the project line is under the row, not beside it').toBe(true);
+      }
+    });
+
+    test('scrolled to the end: the extra ground does not hang out under the card — the links below the card are not covered', async ({ page }) => {
+      await open(page, win, { inner: true, room: true, phoneRowOff: true });
+      await page.evaluate(() => { const sc = document.getElementById('scroller')!; sc.scrollTop = sc.scrollHeight; });
+      await page.waitForTimeout(200);
+      const e = await page.evaluate(() => {
+        const link = document.querySelector('[data-testid="quick-move"], [data-testid="quick-card"] ~ p button, [data-testid="quick-card"] + p button') as HTMLElement | null;
+        const card = document.querySelector('[data-testid="quick-card"]')!.getBoundingClientRect();
+        const row = document.querySelector('[data-testid="quick-start-row"]')!;
+        const btn = row.querySelector('button')!.getBoundingClientRect();
+        const lr = link?.getBoundingClientRect(); const t = lr ? document.elementFromPoint((lr.left + lr.right) / 2, (lr.top + lr.bottom) / 2) : null;
+        return { link: !!link, linkHit: t ? (t === link || link!.contains(t)) : null, btnBottom: Math.round(btn.bottom), cardBottom: Math.round(card.bottom) };
+      });
+      expect(e.btnBottom, 'the button stands inside the card (8 px above its bottom edge), not under it').toBeLessThanOrEqual(e.cardBottom);
+      if (e.link) expect(e.linkHit, 'the link under the card is not covered by the row\'s ground').toBe(true);
     });
 
     test('a failed press: the message is the row\'s one sentence (red) — the row stays ≤ 66 px and the name field stays clear', async ({ page }) => {
@@ -130,7 +159,7 @@ for (const win of [{ w: 1100, h: 539 }, { w: 1440, h: 539 }, { w: 1440, h: 900 }
       await expect(page.locator('[data-testid="quick-error"]')).toBeVisible();
       await page.waitForTimeout(200);
       const g = await geo(page);
-      expect(g.row.h, 'the error is the one sentence beside the button').toBeLessThanOrEqual(66);
+      expect(g.row.h - 64, 'the error is the one sentence beside the button').toBeLessThanOrEqual(66);
       expect(g.name!.bottom).toBeLessThanOrEqual(g.row.top);
       expect(g.nameHit).toBe('itself');
     });
