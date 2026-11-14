@@ -42,7 +42,7 @@ async function serve(page: string, markerDelayMs: number | null): Promise<{ url:
 const asksMarker = (streamCount = 0) => `<script>for (let i = 0; i < ${streamCount}; i++) new EventSource('/stream/' + i); setTimeout(() => fetch('/api/activation/checklist?token=SECRETVALUE'), 40);</script>ok`;
 
 test('the defaults of the wait are the ones the guard always had (5000 ms limit)', () => {
-  expect(PAGE_MARKER_TIMEOUT_MS).toBe(5000);
+  expect(PAGE_MARKER_TIMEOUT_MS).toBe(1); // PROOF BRANCH ONLY: the limit is 1 ms here on purpose, so the layout step stays green and the contrast step (which then misses on purpose) is reached
   expect(LATE_WATCH_MAX_MS).toBeGreaterThan(0);
 });
 
