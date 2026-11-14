@@ -102,6 +102,8 @@ describe('ds DatePicker', () => {
   it('⭐비활성이면 열리지 않는다 · 오류면 aria-invalid', async () => {
     await render(<DatePicker {...base} disabled />);
     expect(trigger().disabled).toBe(true);
+    expect(trigger().className).toContain('disabled:bg-ds-background'); // 입력 칸과 같은 «메워진 우물» (4924 후속)
+    expect(trigger().className).not.toContain('disabled:bg-ds-surface-high');
     await open();
     expect(popup()).toBeNull();
     await render(<DatePicker {...base} invalid />);

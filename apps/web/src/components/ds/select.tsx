@@ -1,7 +1,7 @@
 import type { ComponentProps } from 'react';
 import { cn } from '@/lib/utils';
 import { FIELD_FOCUS } from './field-focus';
-import { DISABLED_FACE } from './disabled-face';
+import { DISABLED_INPUT_FACE } from './disabled-face';
 import { Icon } from './icon';
 
 export type NativeSelectProps = ComponentProps<'select'>;
@@ -19,7 +19,7 @@ export function NativeSelect({ className, children, ...props }: NativeSelectProp
         className={cn(
           'h-ds-control touch:h-ds-touch w-full min-w-0 appearance-none rounded-ds-control border border-ds-line-control bg-ds-surface-sunk py-0 pr-8 pl-3 text-base text-ds-ink outline-none transition-colors duration-(--ds-duration-fast) motion-reduce:transition-none lg:text-ds-body',
           FIELD_FOCUS,
-          `disabled:pointer-events-none disabled:cursor-not-allowed ${DISABLED_FACE}`,
+          `disabled:pointer-events-none disabled:cursor-not-allowed ${DISABLED_INPUT_FACE}`,
           'aria-invalid:border-ds-failed',
         )}
         {...props}
