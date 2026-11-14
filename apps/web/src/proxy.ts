@@ -1015,11 +1015,12 @@ async function proxyImpl(incoming: NextRequest) {
 
 /**
  * story 4948 — the root `/` with no usable access token but a session signal: renew ONCE here, as a protected page would, so `RootPage` reads the fresh access cookie (it is forwarded on this very request) and goes on to
- * the signed-in home. `null` = leave the request to the public passthrough: a document read only (a POST / a HEAD is not a page load), a first visit with no signal, a live access token, a stale refresh for another account (RC2),
+ * the signed-in home. `null` = leave the request to the public passthrough: anything but a document read (a POST / a HEAD / a prefetch / an RSC fetch is not a page load), a Firebase session, a first visit with no signal, a live access token, a stale refresh for another account (RC2),
  * and a refresh that could not be confirmed (nothing is cleared: the next visit asks again). A refresh the backend REFUSED (401, not superseded) is a dead session: the cookies are cleared — the same line every other branch draws.
  */
 async function renewSessionForRoot(request: NextRequest): Promise<NextResponse | null> {
-  if (request.method !== 'GET') return null;
+  if (!isDocumentRead(request)) return null; // a page load only: not a prefetch · an RSC fetch · a HEAD · a POST (each would spend one more rotation for nothing)
+  if (request.cookies.get('__Host-sp_fs')?.value) return null; // lib/auth/firebase-session.ts SP_FS_COOKIE (a literal: that module is not imported into the proxy): a Firebase session is read by the page itself, nothing here to renew
   if (!hadAnySessionSignal(request)) return null;
   const accessToken = request.cookies.get(SP_AT_COOKIE)?.value;
   if (accessToken && (await verifyAccessToken(accessToken))) return null;

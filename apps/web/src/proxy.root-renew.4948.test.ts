@@ -13,8 +13,9 @@ async function accessToken(exp: number, sub = 'user-123'): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   return new SignJWT({ type: 'access', email: 't@example.com' }).setProtectedHeader({ alg: 'HS256' }).setSubject(sub).setIssuedAt(now - 4000).setExpirationTime(exp).sign(new TextEncoder().encode(JWT_SECRET));
 }
-const req = (path: string, cookies: Record<string, string> = {}, method = 'GET'): NextRequest => {
-  const r = new NextRequest(`https://app.example.com${path}`, { method });
+const DOC = { accept: 'text/html,application/xhtml+xml', 'sec-fetch-dest': 'document' }; // what the browser (and the Mac app's window) sends for a page load
+const req = (path: string, cookies: Record<string, string> = {}, method = 'GET', headers: Record<string, string> = DOC): NextRequest => {
+  const r = new NextRequest(`https://app.example.com${path}`, { method, headers });
   for (const [k, v] of Object.entries(cookies)) r.cookies.set(k, v);
   return r;
 };
@@ -62,6 +63,7 @@ describe('the root `/` renews a session whose access cookie is gone (story 4948)
     expect(res.status).toBe(200);
     expect(res.headers.get('location')).toBeNull();
     expect(setCookies(res).filter((c) => /sp_(at|rt)=/.test(c)), 'an anonymous visit gets no auth cookie, not even a clearing one').toEqual([]);
+    expect(res.headers.get('x-session-changed'), 'and no «the session changed» mark').toBeNull();
   });
 
   it('only `/`: another public page opened with the same cookies renews nothing (a login · the terms · the register page)', async () => {
@@ -72,9 +74,31 @@ describe('the root `/` renews a session whose access cookie is gone (story 4948)
     }
   });
 
-  it('only a page read: a POST to `/` renews nothing', async () => {
-    await middleware(req('/', { sp_rt: 'old-rt' }, 'POST'));
+  it('⭐only a page LOAD: a POST · a HEAD · a prefetch · an RSC fetch · a JSON fetch of `/` renew nothing (each would spend one more rotation for nothing)', async () => {
+    const cases: [string, string, Record<string, string>][] = [
+      ['POST', 'POST', DOC], ['HEAD', 'HEAD', DOC],
+      ['prefetch', 'GET', { ...DOC, 'next-router-prefetch': '1' }], ['RSC', 'GET', { ...DOC, rsc: '1' }], ['JSON', 'GET', { accept: 'application/json' }],
+    ];
+    for (const [name, method, headers] of cases) {
+      mockFetch.mockReset();
+      await middleware(req('/', { sp_rt: 'old-rt' }, method, headers));
+      expect(refreshCalls(), name).toBe(0);
+    }
+  });
+
+  it('a Firebase session (the page reads its own cookie): nothing is renewed, nothing is cleared', async () => {
+    const res = await middleware(req('/', { sp_rt: 'old-rt', '__Host-sp_fs': 'firebase-session' }));
     expect(refreshCalls()).toBe(0);
+    expect(setCookies(res).filter((c) => /sp_(at|rt)=/.test(c))).toEqual([]);
+  });
+
+  it('the multi-account vault: no sp_rt, the ACTIVE account\'s vault token is the one renewed (the pointer-scoped fallback every protected path has)', async () => {
+    const fresh = await accessToken(Math.floor(Date.now() / 1000) + 3600, 'user-123');
+    mockFetch.mockResolvedValue(answer(200, { data: { access_token: fresh, refresh_token: 'vault-new-rt' } }));
+    const res = await middleware(req('/', { sp_active_account: 'user-123', 'sp_acct_rt_user-123': 'vault-rt' }));
+    expect(refreshCalls()).toBe(1);
+    expect(String(mockFetch.mock.calls.find((c) => String(c[0]).includes('/auth/refresh'))?.[1]?.body)).toContain('vault-rt');
+    expect(setCookies(res).join('\n')).toContain(`sp_at=${fresh}`);
   });
 
   it('a refresh the backend REFUSED (a dead session): the cookies are cleared and the request goes on (the page sends the person to sign in)', async () => {
