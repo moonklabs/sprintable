@@ -9,6 +9,7 @@ import { createRequire } from 'node:module';
 import { expect, test, type Page } from '@playwright/test';
 import { compile, optimize } from '@tailwindcss/node';
 import { layoutStubPlugin } from './support/layout-stubs';
+import { tailwindCandidates } from './support/tailwind-candidates';
 
 const req = createRequire(__filename);
 const WEB = path.join(__dirname, '..');
@@ -37,8 +38,7 @@ async function build() {
     plugins: [layoutStubPlugin()],
   });
   const js = out.outputFiles[0]!.text;
-  // the quoted strings AND the template literals (the composer box's classes are in a template literal — Tailwind's own scan reads both)
-  const candidates = [...new Set([...js.matchAll(/"([^"\n]+)"/g), ...js.matchAll(/`([^`]+)`/g)].flatMap((m) => m[1]!.split(/\s+/)).filter((c) => c && !c.includes('${') && !c.includes('}')))];
+    const candidates = tailwindCandidates(js);
   const compiler = await compile(readFileSync(path.join(APP, 'globals.css'), 'utf8'), { base: APP, onDependency: () => {} });
   const css = (optimize as unknown as (c: string, o?: object) => { code: string })(compiler.build(candidates), { minify: false }).code;
   built = { js, css };
