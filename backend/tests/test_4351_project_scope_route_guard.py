@@ -34,6 +34,8 @@ _KNOWN = {
     "app/routers/desktop_relay.py::device_setup_facts",
     "app/routers/desktop_relay.py::get_device_sessions",
     "app/routers/desktop_relay.py::post_command_result",
+    # story #4951 — the same device token: its «changed files» list for one read command (the row is that device's own: command id + the token's setup id; a session of an agent it reads names, never a project's entity)
+    "app/routers/desktop_relay.py::put_changes",
     "app/routers/desktop_relay.py::post_session_state",
     "app/routers/desktop_relay.py::put_sessions",
     # story #4533 — the same device token: a permission prompt on that device (its own session · its own agent), its withdrawal

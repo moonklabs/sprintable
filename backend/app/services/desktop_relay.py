@@ -974,6 +974,13 @@ class ClockPayload(_Payload):
         return self
 
 
+class ReadChangesPayload(_Payload):
+    """story #4951 (①a): the pairing person's read of the changed-file LIST of one session's folder — exactly {session_key}. No folder, no path, no signature (PO 11-14): the computer
+    finds the folder in its own table and answers with names · a status word · line counts only."""
+
+    session_key: str = Field(pattern=SESSION_KEY_PATTERN)
+
+
 PAYLOAD_SCHEMAS: dict[str, type[_Payload]] = {
     "start_session": StartSessionPayload,
     "send_prompt": SendPromptPayload,
@@ -981,6 +988,7 @@ PAYLOAD_SCHEMAS: dict[str, type[_Payload]] = {
     "stop_session": StopSessionPayload,
     "end_session": EndSessionPayload,
     "clock": ClockPayload,
+    "read_changes": ReadChangesPayload,
 }
 assert tuple(PAYLOAD_SCHEMAS) == COMMAND_KINDS, "every command kind has one payload schema"
 
@@ -1061,6 +1069,10 @@ async def commands_to_send(db: AsyncSession, setup_id: uuid.UUID, after_seq: int
         .limit(100)
     )).scalars().all()
     now = _now()
+    if any(r.kind == "read_changes" for r in rows):  # story #4951 (Kadir F): a read that waited past its 30 s is never delivered
+        from app.services.desktop_changes import reject_stale_commands
+
+        rows = await reject_stale_commands(db, rows, now=now)
     for r in rows:
         if r.state == "queued":
             r.state, r.delivered_at = "delivered", now

@@ -857,6 +857,23 @@ async def clock_edit_scrub(
         return _err("INTERNAL_ERROR", "Internal server error", 500)
 
 
+@router.post("/changes-purge")
+async def changes_purge(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """story #4951 (Kadir lens A): a changed-file list a person never came back to read is deleted when its 120 seconds are over — the sweep that does not wait for anyone's next read."""
+    verify_cron(request)
+    try:
+        from app.services.desktop_changes import purge_audit, purge_expired
+        purged = await purge_expired(session)  # (the session commits at the end of the request, as the other sweeps rely on)
+        audit = await purge_audit(session)  # the audit lines past their 90 days
+        return _ok({"purged": purged, "audit_purged": audit})
+    except Exception as exc:
+        logger.exception("cron error (changes-purge): %s", type(exc).__name__)
+        return _err("INTERNAL_ERROR", "Internal server error", 500)
+
+
 # ─── POST /api/v2/internal/cron/account-purge ─────────────────────────────────
 # story #4752: the personal data of an account deleted at least ACCOUNT_PURGE_GRACE_DAYS ago is anonymized (what the deletion copy promises). Bounded per run, idempotent.
 

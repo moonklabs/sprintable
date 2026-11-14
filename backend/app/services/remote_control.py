@@ -139,6 +139,9 @@ async def set_enabled(db: AsyncSession, *, org: Organization, actor_id: uuid.UUI
         from app.services import desktop_clock
 
         await desktop_clock.forget(db, setup_ids)  # story #4733 — the line is off: no clock view stays on the server
+        from app.services import desktop_changes
+
+        await desktop_changes.forget(db, setup_ids)  # story #4951 — nor a changed-file list
         await db.flush()
         return rejected
     return await _wake_devices(db, org.id)

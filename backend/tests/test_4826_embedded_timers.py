@@ -54,9 +54,9 @@ def _deadline(job: dict) -> float:
 
 # ─── the list ────────────────────────────────────────────────────────────────
 
-def test_fifteen_local_jobs_and_twelve_left_to_the_hosted_deployment() -> None:
+def test_fifteen_local_jobs_and_thirteen_left_to_the_hosted_deployment() -> None:
     assert len(LOCAL_JOBS) == 15
-    assert len(EXCLUDED) == 12
+    assert len(EXCLUDED) == 13
     assert all(reason.strip() for reason in EXCLUDED.values())
 
 
