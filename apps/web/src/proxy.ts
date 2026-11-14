@@ -597,7 +597,44 @@ async function readErrorCode(res: Response): Promise<string | undefined> {
   }
 }
 
+/**
+ * story 4948 (PR 2) — ONE refresh in flight per refresh token, in this server instance. The proxy renews for EVERY request whose access token is missing · expired · inside its last 5 minutes (the proactive refresh), so a page that opens
+ * with a dozen requests at once asked for a dozen rotations of the SAME token (19 measured on dev: 19 live children of one parent, 19 Set-Cookie pairs, the backend queueing them on the person's lock 0.85 s apart = 16 s). The backend
+ * survives that on purpose (a straggler inside the 180 s window forks an independent child), but it is a dozen rows and a dozen cookie changes for one renewal. Requests that carry the SAME token while one rotation of it is still running
+ * now share its answer, for as long as that rotation is young (`REFRESH_JOIN_WINDOW_MS`). Only what is IN FLIGHT is shared — nothing is kept after it settles (no TTL cache: a finished answer is never replayed, so a logout that lands right after cannot be undone by a late request carrying the old token).
+ * The key is a hash of the token (the token itself is not a map key); another instance still asks the backend on its own — its fork stays the safety net.
+ */
+/** how long after a rotation STARTED another request may still join it: the requests of one page load leave within moments of each other; a rotation older than this is not joined, so a slow or hung one never holds the others (and the window in which a logout can land between a rotation and a joiner stays small) */
+export const REFRESH_JOIN_WINDOW_MS = 3000;
+/** a rotation still unanswered after this long is forgotten by the map (its request goes on by itself): a hung backend must not make the map grow with one entry per distinct token */
+const REFRESH_ENTRY_TTL_MS = 30_000;
+/** at most this many rotations are held at once: past it a new one is not registered (it runs alone, as before this story) — a stalled backend plus many different bogus refresh cookies cannot grow the map, and each registration sweeps at most this many entries */
+export const REFRESH_IN_FLIGHT_MAX = 1000;
+const refreshesInFlight = new Map<string, { flight: Promise<RefreshOutcome>; startedAt: number }>();
+/** how many rotations the map holds right now (tests · diagnostics) */
+export function pendingRefreshCount(): number { return refreshesInFlight.size; }
+
+async function refreshKey(rt: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(rt));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 async function refreshWithToken(rt: string): Promise<RefreshOutcome> {
+  const key = await refreshKey(rt);
+  // no `await` between the lookup and the registration: two callers that resumed from the hash one after the other see each other
+  const running = refreshesInFlight.get(key);
+  if (running && Date.now() - running.startedAt < REFRESH_JOIN_WINDOW_MS) return running.flight;
+  const now = Date.now();
+  for (const [k, e] of refreshesInFlight) if (now - e.startedAt >= REFRESH_ENTRY_TTL_MS) refreshesInFlight.delete(k); // hung rotations are dropped from the map, not awaited
+  if (refreshesInFlight.size >= REFRESH_IN_FLIGHT_MAX) return refreshWithTokenOnce(rt); // the map is full: this one runs alone and is not registered
+  const entry = { flight: undefined as unknown as Promise<RefreshOutcome>, startedAt: now };
+  // the slot is freed when THIS flight settles — and only if it is still the one registered (a newer flight for the same token must not be deleted by an older one's `finally`)
+  entry.flight = refreshWithTokenOnce(rt).finally(() => { if (refreshesInFlight.get(key) === entry) refreshesInFlight.delete(key); });
+  refreshesInFlight.set(key, entry);
+  return entry.flight;
+}
+
+async function refreshWithTokenOnce(rt: string): Promise<RefreshOutcome> {
   const fastapiUrl = fastapiBaseUrl();
   try {
     const res = await fetch(`${fastapiUrl}/api/v2/auth/refresh`, {
@@ -1029,12 +1066,14 @@ async function renewSessionForRoot(request: NextRequest): Promise<NextResponse |
     if (!(await refreshMatchesActive(request, outcome.accessToken))) return null;
     const response = NextResponse.next({ request: { headers: buildRefreshedHeaders(request, outcome) } });
     applyTokenCookies(response, outcome.accessToken, outcome.refreshToken);
+    response.headers.set('Cache-Control', 'private, no-store'); // a response that sets the session cookies is never replayed to someone else by a shared cache (markShell's line) — not left to RootPage being dynamic
     captureSignupAttribution(request, response); // `/` stays a public page: its first-touch capture is not skipped by the early return
     return response;
   }
   if (outcome.kind === 'invalid') {
     const response = NextResponse.next({ request });
     clearAuthCookies(response);
+    response.headers.set('Cache-Control', 'private, no-store'); // the same: a response that clears the session cookies is not shared either
     captureSignupAttribution(request, response); // a dead session is an effectively anonymous visit: the first touch is still recorded
     return response;
   }
