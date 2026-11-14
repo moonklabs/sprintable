@@ -282,6 +282,18 @@ describe('proxy', () => {
     expect(loc).not.toContain('reason=session_expired');
   });
 
+  it('[SID:4936] a logged-out link whose path hides a control character (`/%09/evil.com` · `/%0A/…`) is sent to the sign-in WITHOUT a `next` — the address is no internal path (measured on dev: it used to ride along, and the login page then left the app with it)', async () => {
+    for (const hostile of ['/%09/evil.com', '/%0A/evil.com', '/%0D/evil.com', '/%2509/evil.com', '/%2e%2e//evil.com']) {
+      const response = await middleware(makeRequest(hostile));
+      expect(response.status, hostile).toBe(307);
+      const loc = new URL(response.headers.get('location') ?? '');
+      expect(loc.pathname, hostile).toBe('/login');
+      expect(loc.searchParams.has('next'), hostile).toBe(false);
+    }
+    const ordinary = new URL((await middleware(makeRequest('/flow'))).headers.get('location') ?? '');
+    expect(ordinary.searchParams.get('next')).toBe('/flow'); // an ordinary path still comes back after the sign-in
+  });
+
   it('[SID:4427] the desktop setup request carries no code to the server; the login round trip returns to the setup page (PO 09:45Z)', async () => {
     // 앱은 설정 값을 `#` 뒤로 넘긴다 — 브라우저는 fragment를 서버로 보내지 않으므로 서버가 받는 요청은 경로뿐이다.
     const code = `${'A'.repeat(20)}_-${'b'.repeat(21)}`;

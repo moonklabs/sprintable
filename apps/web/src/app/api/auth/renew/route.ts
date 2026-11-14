@@ -9,6 +9,7 @@ import { decodeJwt } from 'jose';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { cookieBase, markSessionChanged, SP_AT_MAX_AGE_SECONDS, SP_RENEW_TRIED_COOKIE, SP_RENEW_TRIED_MAX_AGE_SECONDS, SP_RENEW_UNCONFIRMED_COOKIE, SP_RENEW_UNCONFIRMED_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { buildLoginRedirect, safeNextPath } from '@/lib/auth/session-redirect';
+import { decodeOneLayer, isSafeInternalPath } from '@/lib/auth/internal-path';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { ACTIVE_ACCOUNT_COOKIE } from '@/lib/auth/account-vault';
 import { isRecentlySuperseded } from '@/lib/auth/switch-epoch';
@@ -27,8 +28,26 @@ const TOKEN_SUPERSEDED = 'TOKEN_SUPERSEDED';
 /** the app's own safe landing (the place the sign-in falls to when it has no usable `next`) — not a literal flat link written here (story #4226 ratchet) */
 const landing = (): string => safeNextPath(null, readNavV3FlagsFromEnv());
 
+/** Does this address, with its dot segments folded and every encoding layer read, land on an `/api/…` road? (`/./api/auth/renew` · `/a/../api/…` · `/%2561pi/…` all do — the plain `startsWith('/api/')` missed them.) */
+function reachesApiRoad(raw: string): boolean {
+  let form = raw;
+  for (let layer = 0; layer < 4; layer += 1) {
+    try {
+      const { pathname } = new URL(form, 'https://renew.invalid');
+      if (pathname === '/api' || pathname.startsWith('/api/')) return true;
+    } catch {
+      return true; // cannot be read: not followed
+    }
+    const decoded = decodeOneLayer(form); // the same layer reading as the helper (a broken `%ZZ` elsewhere does not stop the loop)
+    if (decoded === form) return false;
+    form = decoded;
+  }
+  return false;
+}
+
 function internalPage(raw: string | null): string {
-  if (!raw || !raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\') || raw.startsWith('/api/') || /[\r\n]/.test(raw)) return landing();
+  // story 4936 — the guard is lib/auth/internal-path.ts (it also refuses a TAB between the slashes, which the old `/[\r\n]/` test did not); `/api/…` stays refused here (the loop guard of this road).
+  if (!isSafeInternalPath(raw) || reachesApiRoad(raw)) return landing();
   return raw;
 }
 
