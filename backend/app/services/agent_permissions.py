@@ -19,7 +19,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -713,21 +713,34 @@ PREVIEW_ADDED_MAX = 12
 PREVIEW_BLOCKS_MAX = 3
 PREVIEW_CHARS_MAX = 2400
 PREVIEW_COUNT_MAX = 10_000_000
+# the tools whose input a preview may be made from, and the kind each is
+PREVIEW_TOOL_OP = {"Write": "write", "Edit": "edit", "MultiEdit": "edit"}
+
+
+_LINE_BREAKS = ("\n", "\r", "\u2028", "\u2029", "\x0b", "\x0c", "\x85")
 
 
 class PreviewBlock(BaseModel):
     """One edit shown: the lines taken out and the lines put in, and how many more of each were left out (counted, never guessed)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     removed: list[Annotated[str, Field(max_length=PREVIEW_LINE_MAX)]] = Field(default_factory=list, max_length=PREVIEW_REMOVED_MAX)
     added: list[Annotated[str, Field(max_length=PREVIEW_LINE_MAX)]] = Field(default_factory=list, max_length=PREVIEW_ADDED_MAX)
     removed_more: int = Field(default=0, ge=0, le=PREVIEW_COUNT_MAX)
     added_more: int = Field(default=0, ge=0, le=PREVIEW_COUNT_MAX)
 
+    @field_validator("removed", "added")
+    @classmethod
+    def _one_line_each(cls, lines: list[str]) -> list[str]:
+        # a «line» is one line: the Mac splits on line breaks, and a string that carries one would draw as several rows (codex 4949)
+        if any(any(b in line for b in _LINE_BREAKS) for line in lines):
+            raise ValueError("a preview line carries no line break")
+        return lines
+
 
 class PermissionPreview(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     op: Literal["write", "edit"]
     blocks: list[PreviewBlock] = Field(default_factory=list, max_length=PREVIEW_BLOCKS_MAX)
@@ -740,8 +753,12 @@ class PermissionPreview(BaseModel):
     def _shape(self) -> "PermissionPreview":
         if self.withheld is not None and (self.blocks or self.blocks_more or self.replace_all):
             raise ValueError("a withheld preview carries no lines")
+        if self.op == "write" and self.withheld is None and len(self.blocks) != 1:
+            raise ValueError("a write has one block of added lines")
         if self.op == "write" and (len(self.blocks) > 1 or any(b.removed or b.removed_more for b in self.blocks) or self.blocks_more or self.replace_all):
             raise ValueError("a write has one block of added lines only")
+        if self.op == "edit" and self.withheld is None and not self.blocks:
+            raise ValueError("an edit shows at least one block")
         chars = sum(len(line) for b in self.blocks for line in (*b.removed, *b.added))
         if chars > PREVIEW_CHARS_MAX:
             raise ValueError(f"a preview carries at most {PREVIEW_CHARS_MAX} characters")
@@ -779,6 +796,9 @@ class PermissionRequestReport(BaseModel):
                 raise ValueError("a terminal-only request carries no preview (nothing is pressed on a phone)")
         elif self.tool is None or self.summary is None or self.input_hash is None:
             raise ValueError("tool, summary and input_hash are required unless the request is terminal_only")
+        if self.preview is not None and (self.runtime != "claude" or PREVIEW_TOOL_OP.get(self.tool or "") != self.preview.op):
+            # the preview of a FILE tool only (Claude Write · Edit · MultiEdit) and the right kind of it — a Bash command's text has its own masking path (the summary)
+            raise ValueError("a preview belongs to a Claude Write · Edit · MultiEdit request, as «write» / «edit»")
         return self
 
 
@@ -787,20 +807,20 @@ async def report_request(db: AsyncSession, setup: DesktopSetup, body: Permission
     now = _now()
     if not now < body.expires_at <= now + MAX_WINDOW:
         raise DesktopRelayError(422, "invalid_expiry", "expires_at must be in the next 3600 seconds")
-    q = select(AgentPermissionRequest).where(
-        AgentPermissionRequest.setup_id == setup.id, AgentPermissionRequest.request_id == body.request_id,
-    )
-    existing = (await db.execute(q)).scalar_one_or_none()
-    if existing is not None:
-        return existing, False
     # story 4949: a preview is kept while its question waits and no longer — a request of this computer whose window passed without an
-    # answer or a withdrawal (the computer went quiet) lets go of its lines here, on the next report
+    # answer or a withdrawal (the computer went quiet) lets go of its lines here, on the next report — an idempotent retry of an existing request included (so before that early return)
     await db.execute(
         update(AgentPermissionRequest)
         .where(AgentPermissionRequest.setup_id == setup.id, AgentPermissionRequest.state == "pending",
                AgentPermissionRequest.expires_at <= now, AgentPermissionRequest.preview.is_not(None))
         .values(preview=None)
     )
+    q = select(AgentPermissionRequest).where(
+        AgentPermissionRequest.setup_id == setup.id, AgentPermissionRequest.request_id == body.request_id,
+    )
+    existing = (await db.execute(q)).scalar_one_or_none()
+    if existing is not None:
+        return existing, False
     session = (await db.execute(
         select(DesktopSession.agent_member_id).where(DesktopSession.setup_id == setup.id, DesktopSession.session_key == body.session_key)
     )).scalar_one_or_none()

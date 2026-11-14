@@ -285,7 +285,7 @@ export function PermissionCard({ request: r, now, phone, auth, answer, onAnswer 
           {notes.length > 0 ? <p className="mt-0.5 text-editorial-meta text-muted-foreground">{notes.join(' · ')}</p> : null}
         </div>
       )}
-      {net === null && r.preview ? <PermissionPreviewView preview={r.preview} /> : null}
+      {net === null && asking && r.preview ? <PermissionPreviewView preview={r.preview} /> : null} {/* story 4949: only while the question still waits — a cached row after an accepted answer shows no lines (the server has already let go of them) */}
       {r.workdir ? <p className="text-editorial-meta text-muted-foreground">{t('workdir', { path: r.workdir })}</p> : null}
       {net === 'ask' && r.host_unread && answer === null ? (
         <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-line">{t('net.hostUnread')}</p>
@@ -321,8 +321,8 @@ function PhoneAnswerPlace({ tool, auth, answer, onAnswer, net = null, host = '',
   const buttons = net === 'confirm' ? (
     // Yuna «4580 AC2» ②: the opening one filled · «허용하지 않기» outline and focused first (the person picks the opening side)
     <div className="flex gap-2" data-testid="agent-permission-buttons">
-      <Button size="sm" onClick={() => onAnswer('allow')}>{t('net.allowAndGo')}</Button>
-      <Button size="sm" variant="outline" autoFocus onClick={() => onAnswer('deny')}>{t('net.dontAllow')}</Button>
+      <Button size="sm" className="touch:min-h-11 touch:px-4" onClick={() => onAnswer('allow')}>{t('net.allowAndGo')}</Button>
+      <Button size="sm" variant="outline" className="touch:min-h-11 touch:px-4" autoFocus onClick={() => onAnswer('deny')}>{t('net.dontAllow')}</Button>
     </div>
   ) : (
     <div className="flex gap-2" data-testid="agent-permission-buttons">

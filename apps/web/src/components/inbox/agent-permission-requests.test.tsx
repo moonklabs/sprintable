@@ -91,6 +91,30 @@ describe('AgentPermissionRequests (story #4533)', () => {
     expect(card.textContent!.indexOf('src/a.ts')).toBeLessThan(card.textContent!.indexOf('바꾸려는 줄'));
   });
 
+  it('[4949 · codex] once an answer was accepted the card shows no lines — a row still cached from before the answer is not a reason to keep a file\'s content on screen', async () => {
+    const { PermissionCard } = await import('./agent-permission-requests');
+    const preview: PermissionPreview = { op: 'edit', blocks: [{ removed: ['a = 1'], added: ['a = 2'], removed_more: 0, added_more: 0 }], blocks_more: 0, replace_all: false, withheld: null };
+    const row = req({ tool: 'Edit', summary: 'src/a.ts', masked: false, preview });
+    const mount = async (answerState: Parameters<typeof PermissionCard>[0]['answer']) => {
+      await act(async () => {
+        root.render(
+          <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+            <PermissionCard request={row} now={NOW} phone auth={null} answer={answerState} onAnswer={() => {}} />
+          </NextIntlClientProvider>,
+        );
+      });
+    };
+    await mount(null);
+    expect(container.querySelector('[data-testid="agent-permission-preview"]')).not.toBeNull();
+    for (const a of [{ kind: 'sending', decision: 'allow' }, { kind: 'answered', decision: 'allow' }, { kind: 'answered', decision: 'deny' }] as const) {
+      await mount(a as never);
+      expect(container.querySelector('[data-testid="agent-permission-preview"]'), a.kind).toBeNull();
+    }
+    await mount(null);
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><PermissionCard request={{ ...row, state: 'answered' }} now={NOW} phone auth={null} answer={null} onAnswer={() => {}} /></NextIntlClientProvider>); });
+    expect(container.querySelector('[data-testid="agent-permission-preview"]'), 'a row that is no longer pending').toBeNull();
+  });
+
   it('[4938] the masked block carries no word of its own: an older Mac app\'s «(가림)» is shown without it, a new one\'s «••••» as it is — and a file name beside the block stays', async () => {
     fetchWithAuth.mockResolvedValueOnce(answer([req({ summary: '••••(가림).txt' }), req({ id: 'r2', request_id: 'q2', summary: '••••.txt' }), req({ id: 'r3', request_id: 'q3', summary: 'note.txt', masked: false }), req({ id: 'r4', request_id: 'q4', summary: 'echo ••••(가림)', masked: false })]));
     await render();

@@ -34,7 +34,7 @@ PREVIEW = {"op": "edit", "blocks": [{"removed": ["const a = 1;"], "added": ["con
 
 
 def _write_ask(agent, **extra):
-    return _ask(agent, tool="Write", summary="notes/a.md", masked=False, preview=PREVIEW, **extra)
+    return _ask(agent, tool="Edit", summary="notes/a.md", masked=False, preview=PREVIEW, **extra)
 
 
 async def _stored(request_id):
@@ -94,6 +94,20 @@ async def test_a_request_past_its_window_is_not_served_and_the_next_report_of_th
         assert await _stored(quiet["request_id"]) is None
 
 
+async def test_an_idempotent_retry_of_an_existing_request_also_lets_go_of_a_quiet_ones_lines(world):  # codex 4949 · security
+    async with _client() as c:
+        device = await _device(c, name="d4424 mac 4949f")
+        agent = await _with_session(c, device)
+        quiet = _write_ask(agent)
+        made = (await _post_ask(c, device, quiet)).json()
+        live = _ask(agent)
+        assert (await _post_ask(c, device, live)).status_code == 201
+        await _sql(f"UPDATE agent_permission_requests SET expires_at = now() - interval '1 second' WHERE id = '{made['id']}'")
+        assert await _stored(quiet["request_id"]) == PREVIEW
+        assert (await _post_ask(c, device, live)).status_code in (200, 201)  # the same request_id again: the early return
+        assert await _stored(quiet["request_id"]) is None
+
+
 async def test_a_preview_over_the_limits_or_in_a_shape_that_cannot_be_is_refused(world):
     async with _client() as c:
         device = await _device(c, name="d4424 mac 4949d")
@@ -105,9 +119,13 @@ async def test_a_preview_over_the_limits_or_in_a_shape_that_cannot_be_is_refused
             {"op": "write", "blocks": [{"removed": ["x"], "added": ["y"]}]},
             {"op": "write", "blocks": [], "withheld": "sensitive_path", "replace_all": True},
             {**PREVIEW, "content": "the whole file"},
+            {**PREVIEW, "blocks": [{"removed": [], "added": ["one\ntwo"]}]},
         ):
-            r = await _post_ask(c, device, _ask(agent, tool="Write", summary="a.md", masked=False, preview=bad))
+            r = await _post_ask(c, device, _ask(agent, tool="Edit" if bad["op"] == "edit" else "Write", summary="a.md", masked=False, preview=bad))
             assert r.status_code == 422, (bad, r.text)
+        # a preview of anything that is not a Claude file tool's input (a Bash command's text) is refused — and a kind that is not the tool's
+        assert (await _post_ask(c, device, _ask(agent, preview=PREVIEW))).status_code == 422
+        assert (await _post_ask(c, device, _ask(agent, tool="Write", summary="a.md", masked=False, preview=PREVIEW))).status_code == 422
         body = _ask(agent, terminal_only=True, preview=PREVIEW)
         del body["input_hash"]
         assert (await _post_ask(c, device, body)).status_code == 422  # nothing is pressed on a phone for a terminal-only question
@@ -124,7 +142,7 @@ async def test_the_lines_of_a_file_are_in_no_notice(world):
         phone_id, der = await _register(c)
         await _pair(c, token, der)
         marker = {**PREVIEW, "blocks": [{"removed": [], "added": ["MARKER-LINE-4949-not-in-any-notice"], "removed_more": 0, "added_more": 0}]}
-        assert (await _post_ask(c, device, _ask(agent, tool="Write", summary="a.md", masked=False, preview=marker))).status_code == 201
+        assert (await _post_ask(c, device, _ask(agent, tool="Edit", summary="a.md", masked=False, preview=marker))).status_code == 201
         events = await _sql(fetch="SELECT payload::text FROM events WHERE recipient_id = :m", params={"m": (await _sql(fetch="SELECT id FROM members WHERE name = 'Owner' LIMIT 1"))[0][0]})
         assert events  # the bell line was sent …
         assert all("MARKER-LINE-4949" not in row[0] for row in events)  # … and carries only the agent and the tool
