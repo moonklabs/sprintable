@@ -6,7 +6,7 @@ import { SignJWT } from 'jose';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', (...args: unknown[]) => mockFetch(...args));
-import { proxy as middleware } from './proxy';
+import { proxy as middleware, REFRESH_JOIN_WINDOW_MS } from './proxy';
 
 const JWT_SECRET = 'test-secret-for-proxy-tests';
 async function accessToken(exp: number, sub = 'user-123'): Promise<string> {
@@ -86,6 +86,60 @@ describe('one rotation per refresh token in flight (story 4948 PR 2)', () => {
     expect(setCookies(ra)).toContain('sp_rt=new-a');
     expect(setCookies(ra)).not.toContain('new-b');
     expect(setCookies(rb)).toContain('sp_rt=new-b');
+  });
+
+  it('⭐a rotation older than the join window is NOT joined: a slow or hung one never holds the later requests (they start their own)', async () => {
+    const fresh = await accessToken(Math.floor(Date.now() / 1000) + 3600);
+    const g = gate();
+    mockFetch.mockImplementation(async () => { await g.p; return answer(200, { data: { access_token: fresh, refresh_token: 'new-rt' } }); });
+    const first = middleware(api({ sp_rt: 'slow-rt' }));
+    await new Promise((r) => setTimeout(r, 30));
+    const realNow = Date.now;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + REFRESH_JOIN_WINDOW_MS + 1000); // the first rotation is now «old»
+    const second = middleware(api({ sp_rt: 'slow-rt' }));
+    await new Promise((r) => setTimeout(r, 30));
+    spy.mockRestore();
+    expect(refreshCalls(), 'the late request started its own rotation').toHaveLength(2);
+    g.release(undefined);
+    await Promise.all([first, second]);
+  });
+
+  it('⭐an OLD flight settling does not free a NEWER flight\'s slot: a request that arrives while the newer one runs still joins it', async () => {
+    const fresh = await accessToken(Math.floor(Date.now() / 1000) + 3600);
+    const gates = [gate(), gate()];
+    let n = 0;
+    mockFetch.mockImplementation(async () => { const g = gates[Math.min(n++, 1)]!; await g.p; return answer(200, { data: { access_token: fresh, refresh_token: `rt-${n}` } }); });
+    const first = middleware(api({ sp_rt: 'same-rt' }));
+    await new Promise((r) => setTimeout(r, 30));
+    const realNow = Date.now;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + REFRESH_JOIN_WINDOW_MS + 1000);
+    const second = middleware(api({ sp_rt: 'same-rt' })); // the first is old: this one starts the second flight, which takes the slot
+    await new Promise((r) => setTimeout(r, 30));
+    gates[0]!.release(undefined); // the OLD flight settles: its `finally` must leave the newer flight's slot alone
+    await first;
+    const third = middleware(api({ sp_rt: 'same-rt' })); // arrives while the second flight is young and running: joins it
+    await new Promise((r) => setTimeout(r, 30));
+    spy.mockRestore();
+    expect(refreshCalls(), 'two rotations, not three').toHaveLength(2);
+    gates[1]!.release(undefined);
+    await Promise.all([second, third]);
+  });
+
+  it('⭐what is shared is the BACKEND answer only — each waiter still decides for itself (RC2 with its own cookies) and forwards its OWN cookies to the page', async () => {
+    const fresh = await accessToken(Math.floor(Date.now() / 1000) + 3600, 'user-123');
+    const g = gate();
+    mockFetch.mockImplementation(async () => { await g.p; return answer(200, { data: { access_token: fresh, refresh_token: 'new-rt' } }); });
+    // A is the active account (pointer = the token's subject); B points at ANOTHER account: its RC2 refuses the same answer
+    const a = middleware(api({ sp_rt: 'same-rt', tz: 'A-zone', sp_active_account: 'user-123' }));
+    const b = middleware(api({ sp_rt: 'same-rt', tz: 'B-zone', sp_active_account: 'someone-else' }));
+    await new Promise((r) => setTimeout(r, 30));
+    g.release(undefined);
+    const [ra, rb] = await Promise.all([a, b]);
+    expect(refreshCalls()).toHaveLength(1);
+    expect(setCookies(ra)).toContain('sp_rt=new-rt');
+    expect(ra.headers.get('x-middleware-request-cookie') ?? '').toContain('tz=A-zone');
+    expect(ra.headers.get('x-middleware-request-cookie') ?? '').not.toContain('B-zone');
+    expect(setCookies(rb)).not.toContain('sp_rt=new-rt'); // B's own RC2 said no
   });
 
   it('a REFUSED rotation is shared as well (every overlapping request is told the same, the cookies are cleared once per response) and is not remembered', async () => {
