@@ -67,9 +67,21 @@ def test_every_other_event_is_one_word_plus_the_persons_words_never_the_machine_
 def test_only_person_text_fields_count_and_an_id_or_path_is_not_words():
     ev = {"event_key": "org.x.y", "payload": {"title": "/api/v2/stories/1", "body": "body 글", "content": "content 글", "reason": "reason 글"}}
     assert human_event_text(machine("org.x.y"), ev) == "이벤트"
-    for bad in (UUID, "/api/v2/stories/1", "https://example.test/a", f"[제목](entity:story:{UUID})", "entity:story:abc"):
+    for bad in (UUID, "/api/v2/stories/1", "https://example.test/a", f"[{UUID}](entity:story:{UUID})", f"[](entity:story:{UUID})", "entity:story:abc"):
         assert human_event_text(machine("org.x.y"), {"event_key": "org.x.y", "payload": {"message": bad}}) == "이벤트"
     assert human_event_text(machine("org.x.y"), {"event_key": "org.x.y", "payload": {"message": UUID, "summary": "정리 끝"}}) == "이벤트 · 정리 끝"
+
+
+def test_an_entity_link_in_the_words_reads_as_its_label_never_as_its_id():
+    """story 4925 — «[이 일감](entity:story:<id>)» in a person's words: a preview has no chip to draw, so the line says the LABEL (the web's `entityLinksToLabels` has the same rule)"""
+    def line(words):
+        return human_event_text(machine("org.x.y"), {"event_key": "org.x.y", "payload": {"note": words}})
+
+    assert line(f"[이 일감](entity:story:{UUID}) 배포를 확인했어요") == "이벤트 · 이 일감 배포를 확인했어요"
+    assert line(f"[\\[결함\\] 제목 \\(1\\)](entity:story:{UUID})") == "이벤트 · [결함] 제목 (1)"  # the escaped label the chat writes for a title with brackets
+    assert line(f"먼저 [A](entity:story:{UUID}) 그다음 [B](entity:doc:{UUID})") == "이벤트 · 먼저 A 그다음 B"
+    assert UUID not in (line(f"[이 일감](entity:story:{UUID}) 확인") or "")
+    assert line(f"[{UUID}](entity:story:{UUID})") == "이벤트"  # a label that is itself an id is not words
 
 
 def test_first_line_only_and_cut_by_code_point_never_inside_an_emoji():

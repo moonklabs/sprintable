@@ -43,7 +43,9 @@ export interface BacklinkItem {
      * recipe-stage-label.ts/gate-approver-label.ts(#4464) SSOT 재구성 렌더를 쓴다.
      * role/gate_type/approver/name은 BE가 정의를 못 찾으면(삭제 등) 지어내지 않고 null. */
     event: {
-      definition_key: string; name: string | null; stage: string;
+      definition_key: string; name: string | null;
+      /** story 4925 — null for an event with no stage (the steer instruction · an org's own event): the card is then the key and the name only */
+      stage: string | null;
       role: string | null; gate_type: string | null; approver: string | null;
     } | null;
   } | null;

@@ -215,7 +215,8 @@ def _chat_message_event_summary(
     """story #4091(§c) — msg_metadata['event']가 있으면(story #2637 AC 0-a) `{definition_key,
     name, stage, role, gate_type, approver}`를 구조화해 낸다. role/gate_type/approver는
     EventDefinition.stage_metadata[stage]에서 뽑는다(_render_event_message_content·
-    get_recipe_start_candidates와 동일 SSOT — payload 자체엔 role/gate가 없다). name은
+    get_recipe_start_candidates와 동일 SSOT — payload 자체엔 role/gate가 없다). story 4925: stage가 없는
+    이벤트도 `{definition_key, name, stage: null, role/gate/approver: null}`를 낸다(payload는 안 냄). name은
     definition.name(사람 표시명, «영상 제작» 등, PO 예시 렌더 그대로) — FE가 raw key로 두
     번째 이름표를 짓지 않게 원본을 그대로 전달한다. 정의를 못 찾거나(삭제 등) stage가 그
     정의에 미등재면 지어내지 않고 null — definition_key·stage는 메시지 자체가 이미 아는
@@ -229,15 +230,17 @@ def _chat_message_event_summary(
     payload = event_meta.get("payload")
     if not isinstance(event_key, str) or not isinstance(payload, dict):
         return None
+    # story 4925 — an event with no `stage` (the steer instruction · an org's own event) gets the same card: its key and its definition's name, `stage` null, no role / gate. Before this it
+    # got none, because story 4091 wrote the field for the recipe stage events only («raw stage / approver resolved»; nothing about who may read it) — so the screen could only say «이벤트».
+    # Nothing is added to what the row already shows its reader: the key is in the content snippet, the name is the definition's own (read for the same org), the payload stays out.
     stage = payload.get("stage")
-    if not isinstance(stage, str):
-        return None
+    stage = stage if isinstance(stage, str) else None
 
     role: str | None = None
     gate_type: str | None = None
     approver: str | None = None
     definition = definition_by_key.get(event_key)
-    if definition is not None and isinstance(definition.stage_metadata, dict):
+    if stage is not None and definition is not None and isinstance(definition.stage_metadata, dict):
         stage_meta = definition.stage_metadata.get(stage)
         if isinstance(stage_meta, dict):
             role = stage_meta.get("role") if isinstance(stage_meta.get("role"), str) else None

@@ -780,9 +780,21 @@ const HUMAN_TEXT_FIELDS = ['instruction', 'message', 'summary', 'note'] as const
 /** a line that is an id, a path or a link is not a person's words even in a text field */
 const NOT_WORDS_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|^\/|^[a-z][a-z0-9+.-]*:\/\/|entity:[a-z_]+:/i;
 
+/**
+ * story 4925 — a person's words may carry a reference the chat gives as a link («[이 일감](entity:story:<id>)», the label escaped like «\\[결함\\]»): where there is no chip to draw (a preview line · a plain text list) it reads as its LABEL — the id never shows.
+ * A link with no label (or a label that is itself an id) stays what it was, so it is still «not words».
+ */
+const ENTITY_LINK_RE = /\[((?:\\.|[^\]\\])*)\]\(entity:[a-z_]+:[^)\s]+\)/gi;
+export function entityLinksToLabels(text: string): string {
+  return text.replace(ENTITY_LINK_RE, (whole, label: string) => {
+    const plain = label.replace(/\\([[\]()\\])/g, '$1').trim();
+    return plain && !NOT_WORDS_RE.test(plain) ? plain : whole;
+  });
+}
+
 function firstHumanLine(value: unknown, max: number): string | null {
   if (typeof value !== 'string') return null;
-  const line = value.split('\n').map((l) => l.trim()).find((l) => l.length > 0);
+  const line = entityLinksToLabels(value).split('\n').map((l) => l.trim()).find((l) => l.length > 0);
   if (!line || NOT_WORDS_RE.test(line)) return null;
   const chars = Array.from(line); // by code point: a cut never splits an emoji (a surrogate pair)
   return chars.length > max ? `${chars.slice(0, max).join('')}…` : line;
@@ -847,7 +859,7 @@ export function composeEventBodyFallback(
   for (const [key, raw] of Object.entries(payload ?? {})) {
     if (key === wordsField || said.has(key) || raw === null || raw === undefined) continue;
     let value: string;
-    if (typeof raw === 'string') value = raw.trim();
+    if (typeof raw === 'string') value = entityLinksToLabels(raw).trim(); // story 4925 — a link in a listed value reads as its label
     else if (typeof raw === 'number' || typeof raw === 'boolean') value = String(raw);
     else { try { value = JSON.stringify(raw); } catch { continue; } }
     if (!value) continue;
@@ -872,14 +884,23 @@ export function humanizeMachineEventSummary(
   summary: string | null | undefined,
   event: unknown,
   tEventCard: (key: string) => string,
+  eventDefinitionName?: (eventKey: string) => string | undefined,
+  /** the row is a chat line (a message · a mention): its summary is a message preview, so the server's «이벤트 · …» may be re-said with the definition's name. Any other row's summary is its own sentence and stays. */
+  isChatLine = false,
 ): string | null | undefined {
   if (typeof summary !== 'string') return summary;
-  const m = /^([^\n]*?): (\[(?:이벤트|Event)\] [\s\S]*)$/.exec(summary);
-  if (!m) return summary;
   const card = (event && typeof event === 'object' ? event : {}) as { event_key?: unknown; payload?: unknown; refs?: unknown };
   const payload = card.payload && typeof card.payload === 'object' ? (card.payload as Record<string, unknown>) : undefined;
   const refs = card.refs && typeof card.refs === 'object' ? (card.refs as Record<string, unknown>) : undefined;
-  const line = composeEventPreviewFallback(m[2], typeof card.event_key === 'string' ? card.event_key : undefined, payload, { tEventCard }, refs);
+  const eventKey = typeof card.event_key === 'string' ? card.event_key : undefined;
+  const m = /^([^\n]*?): (\[(?:이벤트|Event)\] [\s\S]*)$/.exec(summary);
+  if (!m) {
+    // story 4925 — the server's own line for an event with no sentence of its own is «이벤트[ · words]» (it reads no definition names): this screen has them, so it says the NAME (the same line the room list gives)
+    const head = /^([^\n]*?): /.exec(summary);
+    const named = isChatLine && head && eventKey ? composeGenericEventLine(eventKey, payload, { tEventCard, eventDefinitionName }, refs) : null;
+    return named ? `${head![1]}: ${named}` : summary;
+  }
+  const line = composeEventPreviewFallback(m[2], eventKey, payload, { tEventCard, eventDefinitionName }, refs);
   return line ? `${m[1]}: ${line}` : summary;
 }
 
@@ -901,6 +922,15 @@ export function composeEventPreviewFallback(
     const steer = steerPreviewSentence(payload, refs, tEventCard);
     if (steer) return steer.line;
   }
+  return eventNameLine(eventKey, payload, helpers);
+}
+
+function eventNameLine(
+  eventKey: string | undefined,
+  payload: Record<string, unknown> | undefined,
+  helpers: Pick<EventPreviewHelpers, 'tEventCard' | 'eventDefinitionName'>,
+): string {
+  const { tEventCard, eventDefinitionName } = helpers;
   const name = (eventKey ? eventDefinitionName?.(eventKey)?.trim() : '') || tEventCard('genericEventHeader');
   let text: string | null = null;
   for (const field of HUMAN_TEXT_FIELDS) {
@@ -908,4 +938,24 @@ export function composeEventPreviewFallback(
     if (text) break;
   }
   return text ? `${name} · ${text}` : name;
+}
+
+/** the events that have a sentence of their own (composeEventPreviewSentence) — every other event is named by its definition */
+const SENTENCE_PRESET_KEYS: ReadonlySet<string> = new Set([
+  'preset.gate.verdict', 'preset.work.status_changed', 'preset.work.assigned', 'preset.goal.measured', 'preset.steer.instruct',
+]);
+
+/**
+ * story 4925 — the line for an event MESSAGE (its card is known: key · payload) that the SERVER already turned into words («이벤트 · …»): the same line the fallback gives — the definition's name and the person's words — but only when the event has no
+ * sentence of its own (a known preset's sentence · the steer sentence the server wrote stay as they are). Null when there is nothing to add.
+ */
+export function composeGenericEventLine(
+  eventKey: string,
+  payload: Record<string, unknown> | undefined,
+  helpers: Pick<EventPreviewHelpers, 'tEventCard' | 'eventDefinitionName'>,
+  // the refs a sentence would read — none of the events this line is for has one
+  _refs?: Record<string, unknown>,
+): string | null {
+  if (SENTENCE_PRESET_KEYS.has(eventKey)) return null;
+  return eventNameLine(eventKey, payload, helpers);
 }

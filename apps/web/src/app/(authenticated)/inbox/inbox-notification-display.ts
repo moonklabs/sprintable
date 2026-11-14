@@ -1,4 +1,4 @@
-import { composeEventPreviewLine, composeEventPreviewFallback, type EventPreviewHelpers } from '@/components/chat/event-block-card';
+import { composeEventPreviewLine, composeEventPreviewFallback, composeGenericEventLine, type EventPreviewHelpers } from '@/components/chat/event-block-card';
 import { unescapeReferenceLabel, toPlainPreview } from '@/components/chat/entity-ref';
 import { gateTypeLabel } from '@/lib/gate-type-label';
 
@@ -184,7 +184,11 @@ export function composeNotificationDisplay(
   if (event?.event_key && event.payload) {
     // story 4921 — an event with no sentence of its own whose body is the machine text («[이벤트] preset.x» …) reads as its definition's name + the person's own words (or «이벤트») — never a slug or an id
     const composed = composeEventPreviewLine(event.event_key, event.payload, eventPreviewHelpers, event.refs)
-      ?? composeEventPreviewFallback(body, event.event_key, event.payload, eventPreviewHelpers);
+      ?? composeEventPreviewFallback(body, event.event_key, event.payload, eventPreviewHelpers)
+      // story 4925 — a chat line whose body the SERVER already turned into words («이벤트 · …», it reads no definition names): this screen has the names, so it says the definition's name (the same line as the room list)
+      ?? (notification.type === 'conversation.message' || notification.type === 'conversation.mention'
+        ? composeGenericEventLine(event.event_key, event.payload, eventPreviewHelpers)
+        : null);
     if (composed) body = composed;
   } else if (event == null) {
     // 카디르 QA 적발(PR#4344, codex 뮤테이션 6건 中 5건 발산) — 원래 `else`였던 이 분기가

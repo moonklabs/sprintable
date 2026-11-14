@@ -911,6 +911,7 @@ export function ChatBubble({
                   refs={eventTarget?.refs as Record<string, unknown> | undefined}
                   definition={eventTarget?.event_key ? eventDefinitionsByKey?.[eventTarget.event_key] : null}
                   eventDefinitionName={(key) => eventDefinitionsByKey?.[key]?.name ?? undefined}
+                  renderWords={(words) => <ChatMarkdown content={words} isMine={isMine} references={message.references} entityStatusByKey={entityStatusByKey} onOpenReadingPanel={onOpenReadingPanel} eventDefinitionsByKey={eventDefinitionsByKey} />}
                 />
               ) : isAgent ? (
                 <ReportMessageSummary
