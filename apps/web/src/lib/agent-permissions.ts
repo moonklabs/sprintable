@@ -116,6 +116,21 @@ export function shownSummary(summary: string, masked: boolean): string {
   return masked ? summary.replaceAll('••••(가림)', '••••') : summary; // only a summary the Mac says it masked — a command that happens to contain those characters is shown as it is
 }
 
+const FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Read']);
+
+/**
+ * story 4949: the second line of a request's ROW in the approvals list says WHICH file or command — three rows of «Claude Code · SYJ-MacBook-Pro / Write» are alike until one is opened.
+ * The summary as the card shows it; for a file tool's path longer than a row can hold, its end (the folder it sits in and the file name) behind «…/» — the end is what tells files apart.
+ * null = no summary (a terminal-only question whose detail was not read).
+ */
+export function rowSummary(r: Pick<PermissionRequest, 'tool' | 'summary' | 'masked'>): string | null {
+  if (r.summary === null || r.summary === '') return null;
+  const s = shownSummary(r.summary, r.masked);
+  if (!FILE_TOOLS.has(r.tool ?? '') || s.length <= 32 || !s.includes('/')) return s;
+  const parts = s.split('/').filter(Boolean);
+  return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : s;
+}
+
 /** story 4542 (Yuna · Kadir ④): «{agent} · {computer}» — the computer not again when the agent's name already ends in exactly
  *  « · {computer}» (the same rule as the phone's sheet and the push) */
 export function agentOnDevice(agent: string | null | undefined, device: string | null | undefined): string {

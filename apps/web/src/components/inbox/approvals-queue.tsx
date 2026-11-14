@@ -34,7 +34,7 @@ import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { ListDetailShell } from '@/components/ds/list-detail-shell';
 import { useListSelection, selectNextAfterLeft } from '@/hooks/use-list-selection';
 import { PermissionCard, useAgentPermissionRequests } from '@/components/inbox/agent-permission-requests';
-import { agentOnDevice, permissionLine, requestAge, shownToolName, type PermissionRequest } from '@/lib/agent-permissions';
+import { agentOnDevice, permissionLine, requestAge, rowSummary, shownToolName, type PermissionRequest } from '@/lib/agent-permissions';
 import { useListDetailWide } from '@/hooks/use-list-detail-wide';
 import { GateQueueList, type GateQueueMenuItem, type GateQueueRow, type GateQueueSection } from './gate-queue-list';
 import { useTeamTimeZone } from '@/components/team-time-zone';
@@ -988,7 +988,8 @@ export function ApprovalsQueue() {
     key: permKeyOf(r),
     chip: permissionLine(r) === 'unknown' ? tPerm('chipUnknown') : tPerm('chip'),
     title: agentOnDevice(r.agent_name, r.device_name),
-    subtitle: [shownToolName(r, locale) ?? tPerm('toolUnread'), tPerm('asked', requestAge(r, perm.now))].join(' · '),
+    // story 4949: the summary (which file · which command) sits between the tool and the age — three alike rows are told apart without opening them
+    subtitle: [shownToolName(r, locale) ?? tPerm('toolUnread'), rowSummary(r), tPerm('asked', requestAge(r, perm.now))].filter((x): x is string => x !== null).join(' · '),
   });
   const sections: GateQueueSection[] = [
     { id: 'hand', title: t('queueSectionHand'), rows: handItems.map(rowOf) },
