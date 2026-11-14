@@ -200,11 +200,13 @@ interface ChatInputProps {
    * 클릭"임을 구분).
    */
   prefillCommand?: { text: string; nonce: number } | null;
+  /** story 4946 — files the ROOM took (a drop on the messages, not on this strip): the composer attaches them as it does its own drops. A new `nonce` is a new set (the same file dropped twice still counts twice). */
+  incomingFiles?: { nonce: number; files: File[] } | null;
   /** story 4906 — told the whole text of the box whenever it changes (the room's «moved from 홈» note goes when the box is emptied). */
   onDraftChange?: (text: string) => void;
 }
 
-export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets, threadId, onEscape, currentTeamMemberId, participants, prefillCommand, onDraftChange }: ChatInputProps) {
+export function ChatInput({ onSend, onUploadFile, disabled, placeholder, projectId, onMentionIdsChange, commandTargets, threadId, onEscape, currentTeamMemberId, participants, prefillCommand, incomingFiles, onDraftChange }: ChatInputProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('chats');
   const tc = useTranslations('common');
@@ -645,6 +647,15 @@ export function ChatInput({ onSend, onUploadFile, disabled, placeholder, project
     e.preventDefault();
     addFiles(Array.from(e.dataTransfer.files));
   };
+
+  // story 4946 — files the room took are attached once per `nonce` (the effect re-runs on every render; the ref remembers what was already applied)
+  const appliedIncomingNonceRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!incomingFiles || appliedIncomingNonceRef.current === incomingFiles.nonce) return;
+    appliedIncomingNonceRef.current = incomingFiles.nonce;
+    addFiles(incomingFiles.files);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- addFiles is re-made each render; the nonce is the signal
+  }, [incomingFiles]);
 
   const removePendingFile = (index: number) => {
     setPendingFiles((prev) => prev.filter((_, i) => i !== index));
