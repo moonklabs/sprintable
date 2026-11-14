@@ -163,6 +163,34 @@ describe('AgentPermissionRequests (story #4533)', () => {
     expect(container.querySelector('[data-testid="agent-permission-card"]'), 'nor did it bring back a list the newer read replaced').toBeNull();
   });
 
+  it('[4949 · codex round 4] an answer whose outcome is uncertain (the POST may have committed) hides the lines; one that was never sent keeps them', async () => {
+    const { PermissionCard } = await import('./agent-permission-requests');
+    const preview: PermissionPreview = { op: 'edit', blocks: [{ removed: ['a = 1'], added: ['a = 2'], removed_more: 0, added_more: 0 }], blocks_more: 0, replace_all: false, withheld: null };
+    const row = req({ tool: 'Edit', summary: 'src/a.ts', masked: false, preview });
+    const mount = async (a: Parameters<typeof PermissionCard>[0]['answer']) => {
+      await act(async () => {
+        root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><PermissionCard request={row} now={NOW} phone auth={null} answer={a} onAnswer={() => {}} /></NextIntlClientProvider>);
+      });
+    };
+    const has = () => container.querySelector('[data-testid="agent-permission-preview"]') !== null;
+    await mount({ kind: 'failed' } as never); expect(has(), 'failed: the answer may have gone through').toBe(false);
+    for (const kind of ['cancelled', 'not_paired', 'unreachable', 'signed_out'] as const) { await mount({ kind } as never); expect(has(), kind).toBe(true); }
+  });
+
+  it('[4949 · codex round 4] the card\'s clock ticks on its own: a read that hangs cannot keep an expired preview on screen', async () => {
+    const preview: PermissionPreview = { op: 'edit', blocks: [{ removed: ['a = 1'], added: ['a = 2'], removed_more: 0, added_more: 0 }], blocks_more: 0, replace_all: false, withheld: null };
+    const row = req({ tool: 'Edit', summary: 'src/a.ts', masked: false, preview, expires_at: new Date(NOW + 12_000).toISOString() });
+    fetchWithAuth.mockResolvedValueOnce(answer([row]));
+    await render();
+    const has = () => container.querySelector('[data-testid="agent-permission-preview"]') !== null;
+    expect(has()).toBe(true);
+    fetchWithAuth.mockImplementation(() => new Promise<Response>(() => {})); // every later read hangs
+    await act(async () => { vi.advanceTimersByTime(6_000); });
+    expect(has(), 'inside the window').toBe(true);
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    expect(has(), 'past the window, with no read having answered').toBe(false);
+  });
+
   it('[4938] the masked block carries no word of its own: an older Mac app\'s «(가림)» is shown without it, a new one\'s «••••» as it is — and a file name beside the block stays', async () => {
     fetchWithAuth.mockResolvedValueOnce(answer([req({ summary: '••••(가림).txt' }), req({ id: 'r2', request_id: 'q2', summary: '••••.txt' }), req({ id: 'r3', request_id: 'q3', summary: 'note.txt', masked: false }), req({ id: 'r4', request_id: 'q4', summary: 'echo ••••(가림)', masked: false })]));
     await render();

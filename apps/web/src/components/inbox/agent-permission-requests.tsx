@@ -102,6 +102,13 @@ export function useAgentPermissionRequests() {
   const shown = [...listed, ...[...answers.values()].filter((a) => !listed.some((r) => r.id === a.row.id)).map((a) => a.row)];
   const waiting = shown.length > 0;
   const [notices, setNotices] = useState(0);
+  // story 4949 (codex): a card's clock must not wait for a read — a row with lines on screen is re-judged against its window every 5 s on its own (a read that hangs cannot keep an expired preview up)
+  const hasLines = shown.some((r) => r.preview);
+  useEffect(() => {
+    if (!hasLines) return;
+    const id = setInterval(() => setNow(Date.now()), 5_000);
+    return () => clearInterval(id);
+  }, [hasLines]);
   // story 4949 (codex): the last read FAILED — what is shown is from before; a file's lines are not kept on screen on a row nobody has confirmed since (the server may have let go of them)
   const [stale, setStale] = useState(false);
   const readFor = useRef(-1);
@@ -296,7 +303,7 @@ export function PermissionCard({ request: r, now, phone, auth, answer, onAnswer,
           {notes.length > 0 ? <p className="mt-0.5 text-editorial-meta text-muted-foreground">{notes.join(' · ')}</p> : null}
         </div>
       )}
-      {net === null && asking && !stale && now < Date.parse(r.expires_at) && r.preview ? <PermissionPreviewView preview={r.preview} /> : null} {/* story 4949: only while the question still waits — a cached row after an accepted answer shows no lines (the server has already let go of them) */}
+      {net === null && asking && !stale && answer?.kind !== 'failed' && now < Date.parse(r.expires_at) && r.preview ? <PermissionPreviewView preview={r.preview} /> : null} {/* story 4949: only while the question still waits — a cached row after an accepted answer shows no lines (the server has already let go of them) */}
       {r.workdir ? <p className="text-editorial-meta text-muted-foreground">{t('workdir', { path: r.workdir })}</p> : null}
       {net === 'ask' && r.host_unread && answer === null ? (
         <p className="break-keep text-pretty text-xs text-muted-foreground" data-testid="agent-permission-line">{t('net.hostUnread')}</p>
