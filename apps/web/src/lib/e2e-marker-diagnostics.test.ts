@@ -679,6 +679,13 @@ describe('스펙 · 설정이 진단에 연결돼 있다 (story 4927)', () => {
     // the stop steps run even when an e2e step failed
     expect(steps.find((st) => st.startsWith('- name: Stop production server\n'))).toContain('if: always()');
     expect(steps[at('Stop production server (v3 flags)')]).toContain('if: always()');
+    // the stop is by the LISTENing socket (pnpm exec's pid is not the server's) and the port must be free before the second server binds it
+    const stop1 = steps.find((st) => st.startsWith('- name: Stop production server\n'))!;
+    expect(stop1).toContain('bash apps/web/scripts/kill-port.sh 3108');
+    expect(stop1).toMatch(/if lsof -ti tcp:3108 -sTCP:LISTEN[^\n]*; then echo [^\n]*exit 1; fi/);
+    expect(stop1).not.toMatch(/kill "\$\(cat \/tmp\/next-start\.pid/);
+    expect(v3).toMatch(/if lsof -ti tcp:3108 -sTCP:LISTEN[^\n]*; then echo [^\n]*exit 1; fi\n\s+nohup pnpm exec next start/);
+    expect(steps[at('Stop production server (v3 flags)')]).toContain('bash apps/web/scripts/kill-port.sh 3108');
     // the marker wait stays 5000 ms: a flake is not covered with time (PO)
     expect(wait).toContain('export const PAGE_MARKER_TIMEOUT_MS = 5000;');
   });

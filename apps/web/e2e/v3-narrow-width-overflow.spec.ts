@@ -5,7 +5,7 @@
  * 6화면(오늘·대화·연결·규칙·일감·가설·결과) 전부 단언한다.
  *
  * 이 spec은 TODAY_V3_ENABLED/CHAT_V3_ENABLED/CONNECT_RULES_V3_ENABLED=true 전제라
- * ci.yml의 전용 스텝(v3-narrow-width-e2e job, 이 스텝만 독립 pnpm dev 재기동)에서만
+ * ci.yml의 전용 스텝(contrast-guard-e2e job의 «v3 플래그 서버» — 같은 프로덕션 빌드를 `next start`로 한 번 더 띄움 · story #4927)에서만
  * 돈다 — contrast-guard/card-surface e2e와 같은 job의 env를 공유하지 않는다(그 스펙들은
  * v3 플래그 OFF 기준을 전제로 해 오염을 막는다).
  */

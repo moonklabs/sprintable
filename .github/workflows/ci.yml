@@ -2744,7 +2744,7 @@ jobs:
     # story #2590 (B): (A) 정적 프리필터(ci 잡)가 원리적으로 못 재는 교차-요소·교차-계열·알파·
     # 상태(hover) 대비를 실제 렌더된 픽셀에서 axe-core color-contrast로 전수한다(최종 authority).
     # 인증 로그인(owner@sprintable.dev)이 필요해 backend-test처럼 pgvector postgres + alembic을
-    # 세우고, 그 위에 FastAPI(uvicorn)와 Next(dev)를 띄운 뒤 chromium을 돌린다. docs/contrast-guard.md 참조.
+    # 세우고, 그 위에 FastAPI(uvicorn)와 Next(프로덕션 빌드 + `next start` · story #4927)를 띄운 뒤 chromium을 돌린다. docs/contrast-guard.md 참조.
     services:
       postgres:
         image: pgvector/pgvector:pg15@sha256:47af0b65960b14f1c6945aa4ccae37836c632e9a6fe0eea9160936e616e5b2e9
@@ -3061,12 +3061,16 @@ jobs:
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:3108
 
+      # `$!` of `nohup pnpm exec next start` is pnpm's pid, not the node server that listens on :3108 — so stop by the LISTENing socket
+      # (apps/web/scripts/kill-port.sh, the same helper `pnpm dev` used) and then REQUIRE the port to be free: the v3-flag server below binds the
+      # same port, and a leftover flag-off server would answer its readiness check while the new one died with EADDRINUSE.
       - name: Stop production server
         if: always()
         run: |
-          kill "$(cat /tmp/next-start.pid 2>/dev/null)" 2>/dev/null || true
-          sleep 2
           tail -20 /tmp/next-start.log 2>/dev/null || true
+          bash apps/web/scripts/kill-port.sh 3108
+          for i in $(seq 1 10); do lsof -ti tcp:3108 -sTCP:LISTEN >/dev/null 2>&1 || break; sleep 1; done
+          if lsof -ti tcp:3108 -sTCP:LISTEN >/dev/null 2>&1; then echo "port 3108 is still taken after the stop"; exit 1; fi
 
       # story #4006(critical, 5pt) AC3 — v3 화면(오늘·대화·연결·규칙·일감·결과, 「가설」은
       # #3989/#4383 착지 뒤 별도) 390·768·1440 가로 넘침 0. 이 스텝만 v3 플래그 3개를 켠다(위 e2e들은 플래그 OFF 기준을 전제로 하므로
@@ -3080,6 +3084,7 @@ jobs:
           CHAT_V3_ENABLED: 'true'
           CONNECT_RULES_V3_ENABLED: 'true'
         run: |
+          if lsof -ti tcp:3108 -sTCP:LISTEN >/dev/null 2>&1; then echo "port 3108 is taken — the first server was not stopped"; exit 1; fi
           nohup pnpm exec next start --port 3108 > /tmp/next-start-v3.log 2>&1 &
           echo $! > /tmp/next-start-v3.pid
           for i in $(seq 1 60); do curl -sf -o /dev/null http://localhost:3108/login && break; sleep 2; done
@@ -3093,9 +3098,8 @@ jobs:
       - name: Stop production server (v3 flags)
         if: always()
         run: |
-          kill "$(cat /tmp/next-start-v3.pid 2>/dev/null)" 2>/dev/null || true
-          sleep 2
           tail -20 /tmp/next-start-v3.log 2>/dev/null || true
+          bash apps/web/scripts/kill-port.sh 3108
 
       - name: Dump backend log on failure
         if: failure()
