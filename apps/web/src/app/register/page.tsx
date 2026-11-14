@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { LegalFooter } from '@/components/legal/legal-footer';
 import { safeNextPath } from '@/lib/auth/session-redirect';
 import { isImeComposing } from '@/lib/ime-composition';
+import { useAdoptPrehydrationValues } from '@/hooks/use-adopt-prehydration-values';
 
 function checkPasswordRules(pw: string) {
   return {
@@ -38,6 +39,15 @@ export default function RegisterPage() {
   const [password, setPassword] = useState('');
   const [passwordTouched, setPasswordTouched] = useState(false);
   const [tosAccepted, setTosAccepted] = useState(false);
+  // story 4937 — what was typed / ticked before the screen came alive is taken into the state once, right after it does
+  const nameRef = useRef<HTMLInputElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const tosRef = useRef<HTMLInputElement>(null);
+  useAdoptPrehydrationValues(
+    [{ ref: nameRef, initial: '', set: setDisplayName }, { ref: emailRef, initial: '', set: setEmail }, { ref: passwordRef, initial: '', set: setPassword, onAdopted: () => setPasswordTouched(true) }],
+    [{ ref: tosRef, initial: false, set: setTosAccepted }],
+  );
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const consentIds = { prefix: useId(), terms: useId(), and: useId(), privacy: useId() }; // the box is named by the WHOLE sentence: the words beside it and the two documents' names
@@ -122,6 +132,7 @@ export default function RegisterPage() {
         <div data-testid="register-consent" className="flex flex-wrap items-center gap-x-1.5 text-ds-small text-ds-ink-3">
           {/* the box and the words beside it are ONE press (the ds Checkbox is its own label, ≥ 44 on touch); the box is named by the WHOLE sentence (the two documents are links beside the label, not inside it — a screen reader must still hear what is agreed to) */}
           <Checkbox
+            inputRef={tosRef}
             checked={tosAccepted}
             onCheckedChange={(checked) => setTosAccepted(checked === true)}
             disabled={loading}
@@ -182,6 +193,7 @@ export default function RegisterPage() {
             placeholder={t('namePlaceholder')}
             aria-label={t('namePlaceholder')}
             autoComplete="name"
+            ref={nameRef}
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             onKeyDown={(e) => {
@@ -196,6 +208,7 @@ export default function RegisterPage() {
             placeholder={t('emailPlaceholder')}
             aria-label={t('emailPlaceholder')}
             autoComplete="email"
+            ref={emailRef}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
@@ -207,6 +220,7 @@ export default function RegisterPage() {
             aria-label={t('passwordPlaceholder')}
             autoComplete="new-password"
             aria-invalid={showRules && !isPasswordValid ? true : undefined}
+            ref={passwordRef}
             value={password}
             onChange={(e) => { setPassword(e.target.value); setPasswordTouched(true); }}
             onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
