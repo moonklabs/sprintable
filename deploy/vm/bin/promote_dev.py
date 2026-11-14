@@ -166,12 +166,20 @@ class Ci:
             return "unknown"
 
 
+# the dev web front answers urllib's default user agent with HTTP 403 (found on the first real run, story 4926 AC4: the API answered, the web did not, for 12 minutes) — a browser-like one is answered
+HEALTH_USER_AGENT = "Mozilla/5.0 (compatible; sprintable-dev-promote)"
+
+
 def _health_sha(url: str) -> str:
+    """the commit the server says it runs; «?» + the reason when it cannot be read (so a red job says WHY, not just «?»)"""
+    req = urllib.request.Request(url, headers={"User-Agent": HEALTH_USER_AGENT, "Accept": "application/json"})
     try:
-        with urllib.request.urlopen(url, timeout=10) as r:
+        with urllib.request.urlopen(req, timeout=10) as r:
             return str(json.load(r).get("commit_sha", "?"))
-    except Exception:  # a down / restarting server is simply «not yet»
-        return "?"
+    except urllib.error.HTTPError as e:
+        return f"?:HTTP {e.code}"
+    except Exception as e:  # a down / restarting server is simply «not yet» — but say what was seen
+        return f"?:{type(e).__name__}"
 
 
 # ───────────────────────────── the promotion ─────────────────────────────
@@ -266,7 +274,7 @@ def promote(sha: str, gcs, ci, *, health: Callable[[str], str] = _health_sha, sl
             log(f"PROMOTED OK web {web[:9]} api {api[:9]}")
             return 0
         if now() - t1 >= SERVING_WAIT_SEC:
-            raise Stop(f"desired.json names {sha[:9]} but after {SERVING_WAIT_SEC // 60} min the dev web serves {web[:9]} and the API {api[:9]} — look at the VM deployer (journalctl -u sprintable-deploy)")
+            raise Stop(f"desired.json names {sha[:9]} but after {SERVING_WAIT_SEC // 60} min the dev web serves {web[:24]} and the API {api[:24]} — look at the VM deployer (journalctl -u sprintable-deploy)")
         sleep(SERVING_POLL_SEC)
 
 

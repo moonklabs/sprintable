@@ -542,3 +542,67 @@ def test_the_wait_limits_and_the_job_limit_fit_together() -> None:
     wf = yaml.safe_load(_PROMOTE_WF)
     worst = (P.CI_WAIT_SEC + P.SERVING_WAIT_SEC) / 60  # the candidate wait overlaps the CI wait
     assert worst + 5 <= wf["jobs"]["promote"]["timeout-minutes"]
+
+
+# ─────────────────────────────── the serving check reads the real health endpoints (first real run: dev-app answered urllib's default agent with 403) ───────────────────────────────
+
+import http.server
+import threading
+
+
+class _Health(http.server.BaseHTTPRequestHandler):
+    mode = "ok"
+    seen: list = []
+
+    def do_GET(self):  # noqa: N802
+        _Health.seen.append(self.headers.get("User-Agent"))
+        if self.headers.get("User-Agent", "").startswith("Python-urllib") or _Health.mode == "403":
+            self.send_response(403)
+            self.end_headers()
+            return
+        body = b"not json" if _Health.mode == "html" else json.dumps({"status": "ok", "commit_sha": SHA}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *a):
+        pass
+
+
+@pytest.fixture()
+def health_server():
+    _Health.seen = []
+    _Health.mode = "ok"
+    srv = http.server.HTTPServer(("127.0.0.1", 0), _Health)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_address[1]}/api/health"
+    srv.shutdown()
+
+
+def test_the_health_read_sends_a_browser_like_user_agent_because_the_dev_web_front_refuses_urllibs(health_server) -> None:
+    assert P._health_sha(health_server) == SHA
+    assert _Health.seen == [P.HEALTH_USER_AGENT] and P.HEALTH_USER_AGENT.startswith("Mozilla/5.0"), _Health.seen
+
+
+def test_a_health_read_that_is_refused_says_why_instead_of_a_bare_question_mark(health_server) -> None:
+    _Health.mode = "403"
+    assert P._health_sha(health_server) == "?:HTTP 403"
+    _Health.mode = "html"
+    assert P._health_sha(health_server).startswith("?:") and "JSON" in P._health_sha(health_server)
+
+
+def test_a_health_read_of_a_server_that_is_down_says_what_it_saw() -> None:
+    out = P._health_sha("http://127.0.0.1:9/api/health")
+    assert out.startswith("?:") and len(out) > 3, out
+
+
+def test_a_red_serving_check_names_what_each_side_answered() -> None:
+    g = FakeGcs()
+    answers = {P.WEB_HEALTH: "?:HTTP 403", P.API_HEALTH: SHA}
+    clock = Clock()
+    g.clock = clock
+    logs: list[str] = []
+    with pytest.raises(P.Stop) as e:
+        P.promote(SHA, g, FakeCi(), health=lambda url: answers[url], sleep=clock.sleep, now=clock.now, log=logs.append)
+    assert "serves ?:HTTP 403" in str(e.value) and "len(g.writes)" not in str(e.value) and len(g.writes) == 1
