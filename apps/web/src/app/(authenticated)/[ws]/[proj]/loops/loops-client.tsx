@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ds/button';
 import { Banner } from '@/components/ds/banner';
 import { Chip } from '@/components/ds/chip';
+import { DataText, joinDot } from '@/components/ds/data-text';
 import { CountBadge } from '@/components/ds/count-badge';
 import { EmptyState } from '@/components/ds/empty-state';
 import { FilterBar } from '@/components/ds/filter-bar';
@@ -93,7 +94,7 @@ export function loopSectionOf(status: string): (typeof SECTIONS)[number] {
 function LoopRow({ loop, onOpen }: { loop: Loop; onOpen: () => void }) {
   const t = useTranslations('loops');
   const lineage = loop.parent_loop_id ? t('lineageFrom', { id: loop.parent_loop_id.slice(0, 8) }) : null;
-  const subtitle = [lineage, loop.recipe_slug].filter(Boolean).join(' · ');
+  const subtitle = joinDot([lineage, loop.recipe_slug ? <DataText key="recipe">{loop.recipe_slug}</DataText> : null].filter(Boolean));
   // 줄 전체가 «열기» 단추다(옛 role=button 그대로): 클릭 · Enter(행 부품) · Space(여기).
   // Space는 단추처럼 «눌렀다 뗄 때» 열린다: 누를 때(keydown)는 쪽이 밀리지 않게 막고 이 줄을 «장전»해 두며, 뗄 때(keyup) 장전된 그 줄에 초점이 그대로일 때만 연다(누른 채 초점이 옮겨 간 다른 줄이 열리지 않는다).
   const armed = useRef<HTMLElement | null>(null);
@@ -115,7 +116,7 @@ function LoopRow({ loop, onOpen }: { loop: Loop; onOpen: () => void }) {
       data-loop-row-status={loop.status}
       className={`${LOOP_ROW_FACE} ${LOOP_ROW_HOVER} cursor-pointer`}
       title={loop.title}
-      subtitle={subtitle || undefined}
+      subtitle={subtitle.length > 0 ? subtitle : undefined}
       leading={(
         <span data-slot="loop-state-column" className="flex items-center gap-2">
           <LoopStageBar status={loop.status} />

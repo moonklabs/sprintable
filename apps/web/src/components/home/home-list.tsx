@@ -161,7 +161,7 @@ export function HomeList({ model, sources, partial = false, selectedKey = null, 
   return (
     // story #4888 — j / k / ↑ / ↓ move the selection between the rows that are on screen (and the focus with it); Enter on a row's title selects it. No new command key: this only walks the list.
     <div className="overflow-hidden rounded-ds-control border border-ds-line bg-ds-surface" data-testid="home-list" onKeyDown={(e) => handleListKeys(e, onSelect)}>
-      <p className="m-0 px-4 py-2 font-mono text-ds-mono-md text-ds-ink-3" data-testid="home-header-line">
+      <p className="m-0 px-4 py-2 font-sans text-ds-mono-md tabular-nums text-ds-ink-3" data-testid="home-header-line">
         {t('headerLine', { needsHand: model.header.needsHand, working: model.header.working, justDone: model.header.justDone })}
       </p>
       <section aria-label={t('sectionNeedsHand')} data-testid="home-section-needs-hand">

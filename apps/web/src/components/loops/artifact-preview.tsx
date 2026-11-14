@@ -159,7 +159,7 @@ function TypeChipFallback({ contentType, fallbackLabel }: { contentType: string;
   return (
     <div className={cn('absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-3 text-center text-ds-ink-2', LAYER.well)}>
       <span className="line-clamp-2 text-ds-small font-medium">{fallbackLabel}</span>
-      <Chip className="uppercase">{subtype}</Chip>
+      <Chip mono className="uppercase">{subtype}</Chip>
     </div>
   );
 }

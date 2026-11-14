@@ -7,6 +7,7 @@ import { Card, CardInset } from '../card';
 import { Checkbox } from '../checkbox';
 import { AgentTag, Chip, Tag } from '../chip';
 import { CountBadge } from '../count-badge';
+import { DataText } from '../data-text';
 import { EmptyState } from '../empty-state';
 import { Field } from '../field';
 import { FilterBar } from '../filter-bar';
@@ -70,6 +71,11 @@ export function ShowcasePartsA() {
           {(['neutral', 'needs-hand', 'done', 'failed', 'info', 'action'] as const).map((t) => (
             <Chip key={t} tone={t} dot>{t}</Chip>
           ))}
+        </Row>
+        <Row label="Chip · DataText (4928 — 한국어 글은 본문 글꼴 · 데이터 조각만 고정폭)">
+          <Chip tone="needs-hand" dot>서명 대기</Chip>
+          <Chip mono>#4821</Chip>
+          <span className="text-ds-small text-ds-ink-3">실행 시각 <DataText>10-02 10:44</DataText> · 토큰 <DataText>1,204</DataText></span>
         </Row>
         <Row label="Tag">
           <Tag>읽기 전용</Tag>

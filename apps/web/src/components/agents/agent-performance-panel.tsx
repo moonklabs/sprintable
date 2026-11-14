@@ -227,8 +227,8 @@ export function AgentPerformancePanel() {
                 <li key={agent.id} className="grid gap-3 py-3 first:pt-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] sm:items-center" data-testid={`agent-stats-row-${agent.id}`}>
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <RowName className="text-ds-body font-semibold text-ds-ink" label={rowLabels.get(agent.id)} id={agent.id} />
-                    {!leaderboardFailed && agent.rank != null ? <Chip>#{agent.rank}</Chip> : null}
-                    {!leaderboardFailed ? <Chip>{agent.balance} TJSB</Chip> : null}
+                    {!leaderboardFailed && agent.rank != null ? <Chip mono>#{agent.rank}</Chip> : null}
+                    {!leaderboardFailed ? <Chip mono>{agent.balance} TJSB</Chip> : null}
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     <Metric
@@ -280,7 +280,7 @@ export function AgentPerformancePanel() {
                     <li key={agent.id} className="flex items-center gap-3 py-2 first:pt-0 last:pb-0">
                       <span className="w-6 shrink-0 text-center font-mono text-ds-body font-semibold tabular-nums text-ds-ink-2">{idx + 1}</span>
                       <RowName className="flex-1 text-ds-body font-medium text-ds-ink" label={rowLabels.get(agent.id)} id={agent.id} />
-                      <Chip className="shrink-0">{agent.balance} TJSB</Chip>
+                      <Chip mono className="shrink-0">{agent.balance} TJSB</Chip>
                     </li>
                   ))}
               </ol>

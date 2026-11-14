@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { ListRow } from './list-row';
+import { DataText } from './data-text';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -36,8 +37,19 @@ describe('ds ListRow', () => {
     });
     expect(row().querySelector('[data-testid="lead"]')).not.toBeNull();
     expect(row().textContent).toContain('결제 수단 두 개 추가 승인');
-    expect(row().querySelector('.font-mono')!.textContent).toBe('개발 에이전트 · 12분 전');
+    expect(row().querySelector('[data-slot="ds-list-row-subtitle"]')!.textContent).toBe('개발 에이전트 · 12분 전');
     expect(row().querySelector('button')!.textContent).toBe('허용');
+  });
+
+  it('⭐4928 둘째 줄은 본문 글꼴이 기본 — 한국어 낱말 사이가 고정폭 칸으로 벌어지지 않는다 · 데이터 조각만 DataText로 고정폭', async () => {
+    await act(async () => { root.render(<ListRow title="줄" subtitle={<>구성원 · 모델 <DataText>claude-haiku-5-5</DataText></>} />); });
+    const sub = row().querySelector('[data-slot="ds-list-row-subtitle"]') as HTMLElement;
+    expect(sub.className).toContain('font-sans');
+    expect(sub.className).not.toContain('font-mono');
+    const data = sub.querySelector('[data-slot="ds-data-text"]') as HTMLElement;
+    expect(data.className).toContain('font-mono');
+    expect(data.className).toContain('tabular-nums');
+    expect(data.textContent).toBe('claude-haiku-5-5');
   });
 
   it('⭐손 필요 줄은 왼쪽 4px 막대 + data-needs-hand', async () => {

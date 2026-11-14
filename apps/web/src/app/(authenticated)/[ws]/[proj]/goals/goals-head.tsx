@@ -42,7 +42,7 @@ export function GoalsHead({
       <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 py-2 lg:flex-nowrap">
         <div className="flex items-baseline gap-3">
           <h1 className="m-0 text-ds-title font-semibold text-ds-ink">{t('title')}</h1>
-          {counts ? <span className="font-mono text-ds-mono-md text-ds-ink-3">{t('indexCountActive', { count: counts.active })} · {t('indexCountDone', { count: counts.done })}</span> : null}
+          {counts ? <span className="font-sans text-ds-mono-md tabular-nums text-ds-ink-3">{t('indexCountActive', { count: counts.active })} · {t('indexCountDone', { count: counts.done })}</span> : null}
         </div>
         <div
           data-testid="goals-head-controls"

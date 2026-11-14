@@ -45,7 +45,7 @@ async function mount() {
   await settle();
 }
 const row = (id: string) => container.querySelector(`[data-testid="api-key-row-${id}"]`)!;
-const sub = (id: string) => row(id).querySelector('[data-slot="ds-list-row"] .font-mono')?.textContent ?? '';
+const sub = (id: string) => row(id).querySelector('[data-slot="ds-list-row-subtitle"]')?.textContent ?? '';
 const S = koMessages.settings;
 
 describe('summarizeKeys — 한 줄이 말하는 것', () => {

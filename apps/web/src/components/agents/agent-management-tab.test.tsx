@@ -65,7 +65,7 @@ const openMenu = async (id: string) => {
 };
 const closeMenu = async () => { await act(async () => { document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); }); };
 const chips = () => [...container.querySelectorAll('[data-slot="ds-chip"]')].map((el) => el.textContent?.trim());
-const subtitleOf = (id: string) => rowEl(id).querySelector('[data-slot="ds-list-row"] .font-mono')?.textContent ?? '';
+const subtitleOf = (id: string) => rowEl(id).querySelector('[data-slot="ds-list-row-subtitle"]')?.textContent ?? '';
 
 // story #3994(«거짓 경고» 클래스, PO 확定) — 「시스템 발행」(runtime_type==='system-
 // publisher')은 verified가 항상 false지만 연결 대상이 아니다. 행은 남기되(선생님
@@ -98,7 +98,7 @@ describe('AgentManagementTab — 시스템 발행 거짓 경고 중립화(story 
 // 비활성은 칩 줄로(secondary) · 이름 줄엔 이름만.
 describe('AgentManagementTab — 역할 · 비활성 칩(SID:4282)', () => {
   // story 4912 — the org role is part of the row's second line now (a chip used to say it): the texts of the second lines
-  const badgeTexts = () => [...container.querySelectorAll('[role="listitem"][data-testid^="agent-row-"]')].flatMap((r) => (r.querySelector('[data-slot="ds-list-row"] .font-mono')?.textContent ?? '').split(' · '));
+  const badgeTexts = () => [...container.querySelectorAll('[role="listitem"][data-testid^="agent-row-"]')].flatMap((r) => (r.querySelector('[data-slot="ds-list-row-subtitle"]')?.textContent ?? '').split(' · '));
   it('member → «구성원» · admin → «관리자» · owner → «소유자», 원문 0', async () => {
     stubFetch({ agents: [
       { id: 'a1', name: '멤버 에이전트', role: 'member', is_active: true },

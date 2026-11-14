@@ -8,11 +8,12 @@ import { Icon, type IconName } from './icon';
 
 /**
  * UI-3(a9d56577) Chip · Tag — doc §4 #5. 칩 = 상태(점 + 글) · 필터 · 커맨드 · AI 표시, 태그 = 고정폭 꼬리표(에이전트).
+ * 4928: 칩 글은 본문 글꼴이 기본이다(한국어 낱말 사이가 고정폭에선 2.4배로 벌어진다) — 칩 전체가 데이터일 때만 `mono`.
  * 색은 «뜻»일 때만(`needs-hand` 손 필요 · `done` 끝남 · `failed` 실패 · `info` AI 표시 / 중립 안내 · `action` 선택) — 그 밖에는 중립.
  * 경계는 항상 중립 `ds-line`(뜻 색은 글과 옅은 바탕에만) — 색만으로 뜻을 싣지 않게 점 · 아이콘 · 글이 함께 간다.
  */
 export const chipVariants = cva(
-  'inline-flex h-5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-ds-tag border border-ds-line px-1.5 font-mono text-ds-mono-md',
+  'inline-flex h-5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-ds-tag border border-ds-line px-1.5 text-ds-mono-md tabular-nums',
   {
     variants: {
       tone: {
@@ -23,8 +24,10 @@ export const chipVariants = cva(
         info: 'bg-ds-info-soft text-ds-info',
         action: 'bg-ds-action-soft text-ds-action-text',
       },
+      // 4928: 기본 = 본문 글꼴(한국어 상태 · 이름). 칩 전체가 데이터(영문 키 · 모델 이름 · 형식 · 번호)면 mono — 호출처가 명시한다.
+      mono: { true: 'font-mono', false: 'font-sans' },
     },
-    defaultVariants: { tone: 'neutral' },
+    defaultVariants: { tone: 'neutral', mono: false },
   },
 );
 
@@ -42,9 +45,9 @@ type ChipMarker = { dot?: false; icon?: IconName } | { dot: true; icon?: never }
 export type ChipProps = Omit<HTMLAttributes<HTMLSpanElement>, 'children'> & VariantProps<typeof chipVariants> & ChipMarker & { children: ReactNode };
 
 /** 글 앞 표시는 점(상태) **또는** 아이콘 하나 — 둘을 같이 주면(타입이 막는다) 점만 그린다. */
-export function Chip({ tone = 'neutral', dot = false, icon, className, children, ...props }: ChipProps) {
+export function Chip({ tone = 'neutral', mono = false, dot = false, icon, className, children, ...props }: ChipProps) {
   return (
-    <span data-slot="ds-chip" data-tone={tone} className={cn(chipVariants({ tone }), className)} {...props}>
+    <span data-slot="ds-chip" data-tone={tone} className={cn(chipVariants({ tone, mono }), className)} {...props}>
       {dot ? <span aria-hidden="true" data-chip-dot className={cn('size-1.5 shrink-0 rounded-full', DOT_BG[tone ?? 'neutral'])} /> : null}
       {icon && !dot ? <Icon name={icon} size={12} /> : null}
       {children}

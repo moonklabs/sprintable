@@ -50,6 +50,20 @@ describe('ds Chip', () => {
     expect(chip().querySelector('[data-icon="touch_app"]')).not.toBeNull();
   });
 
+  it('⭐4928 칩 글은 본문 글꼴이 기본 — 한국어 낱말 사이가 고정폭 칸으로 벌어지지 않는다 · 숫자 칸 맞춤은 tabular-nums', async () => {
+    await act(async () => { root.render(<Chip tone="needs-hand">서명 대기</Chip>); });
+    expect(chip().className).toContain('font-sans');
+    expect(chip().className).not.toContain('font-mono');
+    expect(chip().className).toContain('tabular-nums');
+  });
+
+  it('⭐4928 칩 전체가 데이터면 mono를 명시한다(영문 키 · 모델 이름) — 다른 모양은 그대로', async () => {
+    await act(async () => { root.render(<Chip mono tone="info">claude-haiku-5-5</Chip>); });
+    expect(chip().className).toContain('font-mono');
+    expect(chip().className).not.toContain('font-sans');
+    expect(chip().className).toContain('text-ds-info');
+  });
+
   it('Tag는 중립 고정폭 · AgentTag는 현행 chats.agent 낱말(ko 에이전트)', async () => {
     await act(async () => { root.render(<Tag>AI</Tag>); });
     expect(container.querySelector('[data-slot="ds-tag"]')!.className).toContain('bg-ds-surface-high');

@@ -429,7 +429,7 @@ function AgentApiKeyManagerCard({ agentId, agentName, agentLabel, onNewKey, onKe
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="shrink-0 font-mono text-ds-small text-ds-ink">{key.key_prefix}...</p>
                   {(key.scope ?? ['read', 'write']).map((s) => (
-                    <Chip key={s} title={s} tone={s === 'admin' ? 'needs-hand' : 'neutral'} className="max-w-full truncate">
+                    <Chip mono key={s} title={s} tone={s === 'admin' ? 'needs-hand' : 'neutral'} className="max-w-full truncate">
                       {s}
                     </Chip>
                   ))}

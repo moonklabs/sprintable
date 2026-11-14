@@ -23,6 +23,12 @@ import { StatusLabel, type StatusKind } from './status-label';
 const el = () => container.querySelector('[data-slot="ds-status-label"]') as HTMLElement;
 
 describe('ds StatusLabel', () => {
+  it('⭐4928 상태 글은 본문 글꼴 — 한국어 상태 낱말 사이가 고정폭 칸으로 벌어지지 않는다', async () => {
+    await render(<StatusLabel status="online" label="연결 끊김 · 상태 모름" />);
+    expect(el().className).toContain('font-sans');
+    expect(el().className).not.toContain('font-mono');
+  });
+
   it('⭐뜻은 항상 글이 싣는다 — 표시(점)는 aria-hidden', async () => {
     await render(<StatusLabel status="online" label="연결됨" />);
     expect(el().textContent).toBe('연결됨');

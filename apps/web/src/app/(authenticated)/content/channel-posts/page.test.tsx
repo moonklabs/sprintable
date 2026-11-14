@@ -456,6 +456,19 @@ describe('ChannelPostListPage (story #3402)', () => {
       expect(outgoingCell()?.textContent).toContain('09-15');
     });
 
+    it('⭐4928 나가는 시각은 «데이터 조각» — 고정폭(DataText) · 그 줄(부제) 자체는 본문 글꼴이라 한국어 낱말 사이가 벌어지지 않는다', async () => {
+      stubFetch([{ ...DRAFT_A, scheduled_at: '2026-09-15T09:00:00+00:00' }]);
+      await act(async () => { root.render(wrap(<ChannelPostListPage />)); });
+      await flush();
+
+      const cell = outgoingCell() as HTMLElement;
+      expect(cell.getAttribute('data-slot')).toBe('ds-data-text');
+      expect(cell.className).toContain('font-mono');
+      const line = cell.closest('[data-slot="ds-list-row-subtitle"]') as HTMLElement;
+      expect(line.className).toContain('font-sans');
+      expect(line.className).not.toContain('font-mono');
+    });
+
     it('scheduled_at 없음(막힘·발행도 없음) — 「—」로 떨어진다(지어내지 않음)', async () => {
       stubFetch([DRAFT_A]);
       await act(async () => { root.render(wrap(<ChannelPostListPage />)); });

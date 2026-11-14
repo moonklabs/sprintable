@@ -201,7 +201,7 @@ export function DocsIndex() {
                 <button type="button" onClick={() => goToDoc(doc.slug)} className="flex h-full w-full flex-col items-start gap-2 rounded-ds-control p-4 text-left outline-none transition-colors hover:bg-ds-surface-high focus-visible:ring-2 focus-visible:ring-ds-action touch:min-h-11">
                   <DocStatusChip status={doc.status} />
                   <span className="line-clamp-2 text-ds-card-title font-semibold text-ds-ink">{doc.title}</span>
-                  <span className="mt-auto font-mono text-ds-mono-md text-ds-ink-3">{formatDate(doc.updated_at)}</span>
+                  <span className="mt-auto font-sans tabular-nums text-ds-mono-md text-ds-ink-3">{formatDate(doc.updated_at)}</span>
                 </button>
               </Card>
             ))}
@@ -216,7 +216,7 @@ export function DocsIndex() {
                     <span className="text-ds-small text-ds-ink-3">{t('indexLeadBadge')}</span>
                   </div>
                   <h2 className="m-0 text-ds-title font-semibold text-ds-ink">{lead.title}</h2>
-                  <div className="font-mono text-ds-mono-md text-ds-ink-3">{formatDate(lead.updated_at)}</div>
+                  <div className="font-sans tabular-nums text-ds-mono-md text-ds-ink-3">{formatDate(lead.updated_at)}</div>
                 </button>
               </Card>
             ) : null}
@@ -232,7 +232,7 @@ export function DocsIndex() {
                     <button type="button" onClick={() => goToDoc(doc.slug)} className="grid w-full grid-cols-[auto_1fr_auto] items-center gap-3 text-left">
                       <DocStatusChip status={doc.status} />
                       <span className="min-w-0 truncate text-ds-body font-semibold text-ds-ink">{doc.title}</span>
-                      <span className="shrink-0 font-mono text-ds-mono-md text-ds-ink-3">{formatDate(doc.updated_at)}</span>
+                      <span className="shrink-0 font-sans tabular-nums text-ds-mono-md text-ds-ink-3">{formatDate(doc.updated_at)}</span>
                     </button>
                   </ListRow>
                 </li>

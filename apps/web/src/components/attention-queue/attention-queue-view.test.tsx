@@ -271,7 +271,7 @@ describe('AttentionRow — 4909 행 하나 = 진짜 링크', () => {
     const chip = container.querySelector('[data-slot="ds-chip"]');
     expect(chip?.textContent).toContain('게이트');
     expect(chip?.getAttribute('data-tone')).toBe('needs-hand'); // amber
-    const sub = container.querySelector('.truncate.font-mono'); // the row's second line (the chip is font-mono too, but never truncates)
+    const sub = container.querySelector('[data-slot="ds-list-row-subtitle"]'); // the row's second line (4928: body font — the second line is found by its slot, not by the old mono class)
     expect(sub?.textContent).toMatch(/^GATE · /);
     expect(container.querySelector('[data-slot="ds-list-row"]')).toBeTruthy();
   });
