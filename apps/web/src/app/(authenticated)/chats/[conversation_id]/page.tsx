@@ -439,6 +439,8 @@ export default function ConversationPage() {
           addLabel={t('addParticipants')}
           onAdd={meta ? () => setShowAddParticipant(true) : undefined}
           trailing={meta ? headTrailing : null}
+          peopleLabel={t('roomPeopleOpen')}
+          peopleCount={meta?.participants.length ?? 0}
           />
       )}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-ds-background">

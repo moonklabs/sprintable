@@ -20,6 +20,7 @@ import { agentsStillToWake, recalledAgentWake } from '@/lib/chat/agent-wake';
 import { ReferenceDropNotice, parseDroppedReferences, type DroppedReference } from './reference-drop-notice';
 import { ChatInput, type CommandTarget } from './chat-input';
 import { SupportLauncherClearance } from '@/components/support-widget/support-launcher-clearance';
+import { useRoomFileDrop } from './use-room-file-drop';
 import { ThreadPanel } from './thread-panel';
 import { ReadingPanel, type ReadingPanelTarget } from './reading-panel';
 import { useReadingPanelStack } from './use-reading-panel-stack';
@@ -206,6 +207,9 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
   // story #3831 — initialComposeText가 있으면 마운트 시 그 값으로 시드(nonce 0). threadId가
   // 바뀌어도(다른 대화로 재마운트) 이 초기값 계산은 최초 렌더 1회뿐이라 재프리필되지 않는다
   // (useState 초기화자 관례 그대로 — 의도적으로 effect가 아니라 이 자리에 둔다).
+  // story 4946 — files dropped on the room (not on the composer's strip) go to the composer as attachments, once per drop
+  const [incomingFiles, setIncomingFiles] = useState<{ nonce: number; files: File[] } | null>(null);
+  const roomDrop = useRoomFileDrop(useCallback((files: File[]) => setIncomingFiles((prev) => ({ nonce: (prev?.nonce ?? 0) + 1, files })), []));
   const [prefillCommand, setPrefillCommand] = useState<{ text: string; nonce: number } | null>(
     () => (initialComposeText ? { text: initialComposeText, nonce: 0 } : null),
   );
@@ -1025,7 +1029,13 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
       <div className="flex min-h-0 flex-1 overflow-hidden">
 
         {/* Main chat — AC8: 모바일에서 스레드/리딩패널 뷰 활성 시 hidden */}
-        <div className={`flex min-w-0 flex-1 flex-col overflow-hidden ${isMobileRightPanelView ? 'hidden lg:flex' : 'flex'}`}>
+        <div className={`relative flex min-w-0 flex-1 flex-col overflow-hidden ${isMobileRightPanelView ? 'hidden lg:flex' : 'flex'}`} {...roomDrop.handlers}>
+          {/* story 4946 — the drop guide while a file is over the room (the storage screen's own guide: the same dashed panel, no new part) */}
+          {roomDrop.dragging ? (
+            <div data-testid="room-drop-overlay" role="status" className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-ds-panel border-2 border-dashed border-ds-action bg-ds-action-soft/80 text-ds-body font-semibold text-ds-action-text">
+              {t('dropToAttach')}
+            </div>
+          ) : null}
           {/* story #2987 AC2 후반+#3621(유나 CHANGES, 단일화) — ConnectionLostBanner
               (connection-lost-banner.tsx) 참고. */}
           {showDisconnectedBanner && (
@@ -1254,6 +1264,7 @@ export function ChatView({ threadId, currentTeamMemberId, projectId, apiPrefix =
               currentTeamMemberId={currentTeamMemberId}
               participants={participants}
               prefillCommand={prefillCommand}
+              incomingFiles={incomingFiles}
               onDraftChange={handleDraftChange}
             />
           </SupportLauncherClearance>

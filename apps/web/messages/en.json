@@ -5890,6 +5890,7 @@
     "deliveryContractReasonGapNote": "Why a message wasn't delivered (e.g. chain limit reached) isn't shown here yet.",
     "deliveryContractSaveFailed": "Failed to save. Please try again.",
     "muteToggleFailed": "Failed to update notification settings.",
+    "dropToAttach": "Drop to attach",
     "you": "You",
     "team": "Team",
     "agent": "Agent",

@@ -5890,6 +5890,7 @@
     "deliveryContractReasonGapNote": "메시지가 전달되지 않은 이유(연쇄 한도 초과 등)는 아직 이 화면에서 바로 보이지 않아요.",
     "deliveryContractSaveFailed": "저장에 실패했어요. 다시 시도해 주세요.",
     "muteToggleFailed": "알림 설정 변경에 실패했어요.",
+    "dropToAttach": "여기에 놓으면 첨부돼요",
     "you": "나",
     "team": "팀",
     "agent": "에이전트",

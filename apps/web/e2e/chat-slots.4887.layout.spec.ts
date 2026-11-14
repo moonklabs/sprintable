@@ -25,7 +25,7 @@ function slotClasses() {
   if (!rail) throw new Error('the list slot classes not found');
   const thread = /<div className="(motion-safe:animate-in[^"]*)">\s*<ThreadPanel/.exec(view);
   if (!thread) throw new Error('the thread slot classes not found');
-  const main = /className=\{`(flex min-w-0 flex-1 flex-col overflow-hidden) \$\{isMobileRightPanelView \? '(hidden lg:flex)' : 'flex'\}`\}/.exec(view);
+  const main = /className=\{`(?:relative )?(flex min-w-0 flex-1 flex-col overflow-hidden) \$\{isMobileRightPanelView \? '(hidden lg:flex)' : 'flex'\}`\}/.exec(view);
   if (!main) throw new Error('the main column classes not found');
   const overlay = /const railOverlayClass = railMode === 'overlay'\s*\? '([^']+)'/.exec(layout);
   if (!overlay) throw new Error('the overlay rail classes not found');
