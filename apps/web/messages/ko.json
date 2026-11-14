@@ -487,6 +487,8 @@
   "orgBriefing": {
     "title": "홈",
     "projectRequiredBannerNext": "프로젝트를 선택하면 원래 보려던 화면으로 이동해요.",
+    "projectRequiredCreate": "프로젝트가 있어야 열려요 — 먼저 하나 만들어 주세요.",
+    "projectRequiredCreateButton": "프로젝트 만들기",
     "loadErrorTitle": "불러오지 못했어요",
     "needsMeSectionTitle": "사람 손이 필요한 일 {count}",
     "needsMeHint": "돈·외부 발송은 하나씩 서명해요",

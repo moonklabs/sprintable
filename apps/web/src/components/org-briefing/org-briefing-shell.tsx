@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ViewerDate } from '@/components/viewer-time-zone';
@@ -10,6 +11,8 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { PublishedSection } from './today-sections';
 import { CountBadge } from '@/components/ds/count-badge';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { isSafeInternalPath } from '@/lib/auth/internal-path';
 import { ActivationChecklistBanner } from '@/components/dashboard/activation-checklist-banner';
 import { HomeScreen } from '@/components/home/home-screen';
 import { useHomeModel } from '@/components/home/home-model-provider';
@@ -41,6 +44,11 @@ export function OrgBriefingShell() {
   // session restore puts there (`/org-briefing?next=/glance?_prRetry=1`, AC8 lap 10-24) with the project already chosen (`?p=` on the page, every flat link carrying it): a line that sent the person
   // looking for a choice already made. With no project to pick (none yet) «pick» cannot be done either — Chats says «no project yet» for that.
   const showPickBanner = Boolean(nextTarget) && !projectId && projectMemberships.length > 0;
+  // story #4935 — the other half of the same case: a person with NO project at all who pressed 일감 · 목표 · 문서 (the proxy sent them here with `?next=`, story #2212) was shown nothing — «고를 게 없다»는 이유로 띠가 꺼져 있었고
+  // 대화 화면은 거치지 않는 길이라 까닭도 돌아갈 길도 없었다. One line + the existing «프로젝트 만들기» (the settings screen), carrying `next` so the first project sends them back. Never together with the pick band
+  // (that one needs ≥1 project, this one needs 0), and only for a `next` the one shared check accepts.
+  const flatHref = useFlatHref();
+  const showCreateBanner = isSafeInternalPath(nextTarget) && !projectId && projectMemberships.length === 0;
   // story #4888 — the home reads the SAME model the navigation bar's badge reads (components/home/home-model-provider)
   const { model, sources, loadError, partial, retry } = useHomeModel();
   const th = useTranslations('home');
@@ -68,6 +76,16 @@ export function OrgBriefingShell() {
     <div className="mx-auto w-full max-w-4xl space-y-6 p-4 lg:p-6">
       {/* story 4773 (AC3, PO 10-25) — the top band: the phone app, a phone paired with nothing → one line + [컴퓨터와 페어링]. The instruction box below stays where hands expect it (4762 AC3: Send clear of the support button). */}
       <TodayPairCard />
+      {showCreateBanner ? (
+        <Alert role="status" data-testid="home-create-project-banner">
+          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+            <span>{t('projectRequiredCreate')}</span>
+            <Button asChild size="sm" data-testid="home-create-project-button">
+              <Link href={flatHref(`/settings?tab=projects&next=${encodeURIComponent(nextTarget as string)}`)}>{t('projectRequiredCreateButton')}</Link>
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
       {showPickBanner ? (
         <Alert role="status">
           <AlertDescription>{t('projectRequiredBannerNext')}</AlertDescription>

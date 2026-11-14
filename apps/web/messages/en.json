@@ -487,6 +487,8 @@
   "orgBriefing": {
     "title": "Home",
     "projectRequiredBannerNext": "Pick a project and we'll take you back to what you were viewing.",
+    "projectRequiredCreate": "This opens once you have a project — make one first.",
+    "projectRequiredCreateButton": "Create a project",
     "loadErrorTitle": "Couldn't load this",
     "needsMeSectionTitle": "{count} need your input",
     "needsMeHint": "Sign off on money and external posts one at a time",

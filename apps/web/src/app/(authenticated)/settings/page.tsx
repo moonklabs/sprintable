@@ -63,6 +63,7 @@ import { fetchWithAuth } from '@/lib/db/client';
 import { fetchMe } from '@/lib/me-client';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { withProjectParam } from '@/lib/with-project-param';
+import { returnHrefAfterProjectCreate } from '@/lib/return-after-project-create';
 import { resolveChatsHref } from '@/lib/nav-v3-destinations';
 import { memberRowLabels } from '@/lib/member-display';
 
@@ -154,6 +155,9 @@ export default function SettingsPage() {
   // story 4906 (PO 11-12): a project made from the chat list's empty state («프로젝트 만들기» there) sends the person BACK where they came from — the list, where «에이전트 추가» already stands. A whitelist of one
   // word (not a free address: no open redirect); made from settings itself (no `return`) the person stays here as before.
   const returnToChats = searchParamsHook.get('return') === 'chats';
+  // story #4935: a project made from the home's «프로젝트 만들기» (a person who pressed 일감 · 목표 · 문서 with no project yet) sends the person back to the screen they first pressed: `next` — read by the SAME check every other `?next=` reader uses
+  // (lib/auth/internal-path: internal paths only — story 4936), and put back together by the URL API with `?p=<new>` and without the retry mark. `return=chats` keeps its own meaning and wins when both are present.
+  const nextRaw = searchParamsHook.get('next');
   const { orgId: ctxOrgId, orgMemberships, navV3Flags } = useDashboardContext();
   const { inPhoneApp } = usePhoneBridge(); // story 4762 — the «이 폰» tab exists only inside the phone app
   const [activeTab, setActiveTab] = useState(() => resolveSettingsTab(searchParamsHook.get('tab'), inPhoneApp));
@@ -697,6 +701,10 @@ export default function SettingsPage() {
     // a WHOLE-PAGE load, not router.push: a client push would supersede the pending router.refresh() above and `/chats?p=<new>` could meet the old (stale) project memberships — and the v3 chat screen reads its
     // project from /api/me, not from `p`. A fresh load re-reads both; this happens once (the first project of a new organization).
     if (returnToChats) window.location.assign(withProjectParam(resolveChatsHref(navV3Flags), project.id));
+    else {
+      const back = returnHrefAfterProjectCreate(nextRaw, project.id, window.location.origin);
+      if (back) window.location.assign(back);
+    }
   };
 
   const handleDeleteProject = async (projectId: string) => {
