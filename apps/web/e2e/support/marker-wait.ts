@@ -21,8 +21,8 @@ import { normalizeRoute, safeErrorName, safeReadyState } from './server-line-all
 //  ② networkidle — DashboardShell 밖이라 그 위젯이 없는 페이지(예: /onboarding, 독자 레이아웃 — SSE 연결이 없어 networkidle이 실제로 선다).
 export type PageWaitMarker = { kind: 'response'; urlIncludes: string } | { kind: 'networkidle' };
 
-export const PAGE_MARKER_TIMEOUT_MS = 5000; // 근거: #3839 AC3 실측 CI 네트워크 지연 최대 ~2s의 2.5배 여유
-export const LATE_WATCH_MAX_MS = 12_000;
+export const PAGE_MARKER_TIMEOUT_MS = 1; // PROOF BRANCH ONLY (story 4927): a miss on purpose so CI takes the diagnostics path once — never merge // 근거: #3839 AC3 실측 CI 네트워크 지연 최대 ~2s의 2.5배 여유
+export const LATE_WATCH_MAX_MS = 800; // PROOF BRANCH ONLY
 const TEST_BUDGET_MARGIN_MS = 8000;
 
 interface Watching { watch: NetworkWatch; startedAt: number }
