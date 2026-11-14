@@ -153,8 +153,9 @@ describe('AgentPermissionRequests (story #4533)', () => {
     let resolveOlder: (r: Response) => void = () => {};
     fetchWithAuth.mockImplementationOnce(() => new Promise<Response>((r) => { resolveOlder = r; })); // the mount read — slow
     await render();
-    fetchWithAuth.mockResolvedValueOnce(new Response('{}', { status: 500 })); // a newer read that fails
-    await act(async () => { onNotice?.({ event_type: 'dispatched', payload: { event_type: 'agent.permission_request' } }); });
+    fetchWithAuth.mockResolvedValueOnce(new Response('{}', { status: 500 })); // a newer read that fails — started by the page being seen again (the same effect run: a notice would re-run the effect and drop the older read on its own)
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     await act(async () => { resolveOlder(answer([row])); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
