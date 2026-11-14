@@ -1048,3 +1048,114 @@ describe('[SID:4832] the card has its own way to «이미 있는 에이전트 �
   });
 });
 
+
+// story 4934 — the free plan's «one project» is said when the folder is picked (GET /desktop/recipes `project_room`), not after a first press that looked like nothing happened.
+describe('[SID:4934] the free plan\'s one project is asked at the folder pick, and [넣고 만들기] is the one press', () => {
+  const MINE = { id: PROJ, name: 'Mine' };
+  const room = (v: unknown) => () => new Response(JSON.stringify({ recipes: [], agent_room: null, project_room: v }), { status: 200 });
+  const NEW_FOLDER = '&fshown=~/new/folder&fname=folder';
+  const mineProjects = { projectId: PROJ, projects: [{ projectId: PROJ, projectName: 'Mine', orgId: 'o-1' }] };
+  const solos = () => calls.filter((c) => c.url.endsWith('/confirm-solo'));
+  const settle = async () => { for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); }); };
+
+  it('a folder that would need a NEW project in an organization with no room: the question and «넣고 만들기» are there before any press — and one press makes the agent', async () => {
+    recipesNow = room({ limit: 1, existing_project: MINE });
+    await mount(frag(NEW_FOLDER), mineProjects);
+    const ask = container.querySelector('[data-testid=quick-limit]')!;
+    expect(ask.textContent).toContain('무료 플랜은 프로젝트가 하나예요');
+    expect(ask.textContent).toContain('이 폴더의 에이전트를 Mine 프로젝트에 넣어 만들 수 있어요');
+    expect(container.querySelector('[data-testid=quick-project]')!.textContent).toBe('프로젝트 · Mine');
+    expect(buttonOf('만들기')).toBeUndefined(); // the one primary is «넣고 만들기» from the start
+    expect(buttonOf('넣고 만들기')!.disabled).toBe(false);
+    expect(solos()).toHaveLength(0); // nothing was sent to learn it
+    await act(async () => { buttonOf('넣고 만들기')!.click(); });
+    await settle();
+    expect(solos().map((p) => p.body)).toEqual([{ code: CODE, runtime: 'claude', project_id: PROJ, agent_name: 'Claude Code', folder_name: 'folder' }]); // ONE request, into that project
+  });
+
+  it('room left (project_room null): «만들기» as it always was — a new project by the folder\'s name', async () => {
+    recipesNow = room(null);
+    await mount(frag(NEW_FOLDER), mineProjects);
+    expect(container.querySelector('[data-testid=quick-limit]')).toBeNull();
+    expect(buttonOf('넣고 만들기')).toBeUndefined();
+    await act(async () => { buttonOf('만들기')!.click(); });
+    await settle();
+    expect(solos().map((p) => p.body)).toEqual([{ code: CODE, runtime: 'claude', project_name: 'folder', agent_name: 'Claude Code', folder_name: 'folder' }]);
+  });
+
+  it('a folder whose project this organization HAS makes no new project: no question even when the plan has no room for one', async () => {
+    recipesNow = room({ limit: 1, existing_project: MINE });
+    await mount(frag(`${NEW_FOLDER}&fproject=${PROJ}`), mineProjects);
+    expect(container.querySelector('[data-testid=quick-limit]')).toBeNull();
+    expect(container.querySelector('[data-testid=quick-project]')!.textContent).toBe('이 폴더의 프로젝트 · Mine');
+    await act(async () => { buttonOf('만들기')!.click(); });
+    await settle();
+    expect(solos().map((p) => (p.body as { project_id?: string }).project_id)).toEqual([PROJ]);
+  });
+
+  it('no project to name (none the person can open · two projects) or a shape this page does not read: nothing is asked early, the card is the one it was (the 402 after the press still tells it)', async () => {
+    for (const v of [{ limit: 1, existing_project: null }, { limit: 1 }, { limit: 1, existing_project: { id: 'not-a-uuid', name: 'X' } }, { limit: 1, existing_project: { id: PROJ, name: '  ' } }, 'x', 7]) {
+      recipesNow = room(v);
+      await mount(frag(NEW_FOLDER), mineProjects);
+      expect(container.querySelector('[data-testid=quick-limit]'), JSON.stringify(v)).toBeNull();
+      expect(buttonOf('만들기'), JSON.stringify(v)).toBeDefined();
+    }
+  });
+
+  it('the question follows the FOLDER: another folder matched to a project of the organization drops it, a new one asks again', async () => {
+    recipesNow = room({ limit: 1, existing_project: MINE });
+    await mount(frag('&fshown=~/a/folder-a&fname=folder-a'), mineProjects);
+    expect(container.querySelector('[data-testid=quick-limit]')).not.toBeNull();
+    await mount(frag(`&fshown=~/b/folder-b&fname=folder-b&fproject=${PROJ}`), mineProjects);
+    expect(container.querySelector('[data-testid=quick-limit]')).toBeNull();
+    await mount(frag('&fshown=~/c/folder-c&fname=folder-c'), mineProjects);
+    expect(container.querySelector('[data-testid=quick-limit]')).not.toBeNull();
+  });
+
+  it('a wide folder not yet confirmed holds [넣고 만들기] and says why — never a press that does nothing', async () => {
+    recipesNow = room({ limit: 1, existing_project: MINE });
+    await mount(frag(`${NEW_FOLDER}&fwide=1`), mineProjects);
+    expect(buttonOf('넣고 만들기')!.disabled).toBe(true);
+    expect(container.querySelector('[data-testid=quick-limit-block]')!.textContent).toBe('폴더를 확인하면 만들 수 있어요');
+    await act(async () => { buttonOf('맞아요')!.click(); });
+    expect(buttonOf('넣고 만들기')!.disabled).toBe(false);
+    expect(container.querySelector('[data-testid=quick-limit-block]')).toBeNull();
+  });
+
+  it('the «폰으로도 에이전트 다루기» tick is in view beside [넣고 만들기] (the same start sends its PUT) — it is not ticked out of sight', async () => {
+    remoteGet = remoteOf({ enabled: false, can_change: true, enabled_at: null });
+    recipesNow = room({ limit: 1, existing_project: MINE });
+    await mount(frag(NEW_FOLDER), mineProjects);
+    expect(container.querySelector('[data-testid=quick-limit]')).not.toBeNull();
+    expect((container.querySelector('#quick-phone-control') as HTMLInputElement).checked).toBe(true);
+    await act(async () => { buttonOf('넣고 만들기')!.click(); });
+    await settle();
+    expect(calls.filter((c) => c.method === 'PUT' && c.url.includes('/remote-control'))).toHaveLength(1);
+  });
+
+  it('the start row is the card\'s sticky last row (the app\'s 539px-high window cannot hide it below the fold) — in both cases', async () => {
+    recipesNow = room({ limit: 1, existing_project: MINE });
+    await mount(frag(NEW_FOLDER), mineProjects);
+    const row = container.querySelector('[data-testid=quick-start-row]')!;
+    expect(row.className).toContain('sticky');
+    expect(row.className).toContain('bottom-0');
+    expect(row.querySelector('[data-testid=quick-limit]')).not.toBeNull();
+    expect(row.parentElement!.lastElementChild).toBe(row); // the card's LAST child: it can stick to the bottom of what scrolls
+  });
+
+  it('the same sticky last row when the plan has room («만들기»)', async () => {
+    recipesNow = room(null);
+    await mount(frag(NEW_FOLDER), mineProjects);
+    const row2 = container.querySelector('[data-testid=quick-start-row]')!;
+    expect(row2.className).toContain('sticky');
+    expect(row2.parentElement!.lastElementChild).toBe(row2);
+    expect([...row2.querySelectorAll('button')].some((b) => b.textContent === '만들기')).toBe(true);
+  });
+
+  it('a member (not owner/admin) is never shown the question — the not-admin card, no recipes read for them', async () => {
+    recipesNow = room({ limit: 1, existing_project: MINE });
+    await mount(frag(NEW_FOLDER), { ...mineProjects, role: 'member' });
+    expect(container.querySelector('[data-testid=quick-limit]')).toBeNull();
+    expect(calls.some((c) => c.url.endsWith('/api/desktop/recipes'))).toBe(false);
+  });
+});

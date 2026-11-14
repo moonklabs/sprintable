@@ -12,7 +12,7 @@ import type { Plugin } from 'esbuild';
  * called and needs a real value still fails, and says so on the page (the harness names the module it did not start on).
  */
 export const STUBS: Record<string, string> = {
-  '@/lib/db/client': 'export const fetchWithAuth = (u, i) => fetch(u, i); export const switchOrg = async () => ({}); export const switchProject = async () => ({});',
+  '@/lib/db/client': 'export const fetchWithAuth = (u, i) => fetch(u, i); export const switchOrg = async () => ({}); export const switchProject = async () => ({}); export const logoutUser = async () => {}; export const refreshSessionAfterChange = async () => {};',
   '@/hooks/use-sse-notifications': 'export function useSseNotifications() {}',
   '@/hooks/use-flat-href': 'export function useFlatHref() { return (h) => h; }',
   '@/lib/phone-bridge': `export const isPhoneApp = () => !!window.__phone;
