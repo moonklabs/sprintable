@@ -353,7 +353,7 @@ describe('EpicDetailPage — 결과 캡슐 재조립(§2 이중 신호·§4 신�
     await mountByUrl({ outcome_status: 'hit' });
     const capsule = container.querySelector('.proof-surface.border-proof-line');
     expect(capsule).toBeTruthy();
-    expect(capsule?.className).toContain('proof-surface-lift');
+    expect(capsule?.className).not.toContain('proof-surface-lift'); // story 4919: 뜬 그림자는 걷었다(면 + 헤어라인)
     expect(container.querySelector('.bg-proof-blue-soft')).toBeNull();
   });
 

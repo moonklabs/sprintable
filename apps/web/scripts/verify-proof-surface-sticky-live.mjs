@@ -38,7 +38,7 @@ const html = `<!doctype html>
   <div style="height:2000px">
     <div class="mx-auto flex min-h-full w-full max-w-2xl flex-1 flex-col gap-5 px-4 py-5 lg:max-w-6xl lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-6">
       <div style="background:#eee;height:1500px;padding:8px">좌 열(스크롤 대상)</div>
-      <div data-testid="gate-detail-action-column" class="proof-surface proof-surface-lift mt-3 space-y-3 border border-proof-line bg-proof-panel p-4 lg:mt-0 lg:sticky lg:top-12 lg:self-start" style="background:#fff">우 열(sticky 승인 패널)</div>
+      <div data-testid="gate-detail-action-column" class="proof-surface mt-3 space-y-3 border border-proof-line bg-proof-panel p-4 lg:mt-0 lg:sticky lg:top-12 lg:self-start" style="background:#fff">우 열(sticky 승인 패널)</div>
     </div>
   </div>
 </body></html>`;
