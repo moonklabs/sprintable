@@ -2,7 +2,7 @@
 
 import { useTranslations } from 'next-intl';
 import type { ReactNode } from 'react';
-import { composeEventBodyFallback, entityLinksToLabels } from './event-block-card';
+import { composeEventBodyFallback, entityLinksToLabels, EVENT_CARD_HEADER } from './event-block-card';
 
 // the bubble has no organization domain labels at hand (reading them per bubble would be one request per message): a status the org renamed shows the standard label, an unknown slug shows as it is
 const NO_DOMAIN_LABELS = { statusLabel: () => undefined, entityTypeLabel: () => undefined };
@@ -34,7 +34,7 @@ export function EventTextFallback({ content, eventKey, payload, refs, definition
   if (!model) return null;
   return (
     <div data-testid="event-text-fallback" className="min-w-0 space-y-1">
-      <p className="font-medium">{model.head}</p>
+      <p className={EVENT_CARD_HEADER}>{model.head}</p>
       {model.words ? (renderWords ? <div className="whitespace-pre-wrap">{renderWords(model.words)}</div> : <p className="whitespace-pre-wrap">{entityLinksToLabels(model.words)}</p>) : null}
       {model.items.length > 0 ? (
         <ul className="list-disc space-y-0.5 pl-4">

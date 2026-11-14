@@ -214,6 +214,11 @@ function renderTextWithMissingMarkers(text: string, withProject: (href: string) 
  */
 export const EVENT_CARD_SHELL = 'min-w-0 max-w-full rounded-xl rounded-tl-sm border border-ds-line bg-ds-surface px-3.5 py-3';
 
+/**
+ * story 4906 (PO 11-14) — the ONE type of an event card's head (an org-defined name may be one long unbroken word, so it wraps anywhere — the v3 room's card is capped at 78 %): the template card's `header` block and the head line of a template-less event (its definition's name, `EventTextFallback`) are set the same, so two cards in one room do not read as two heads.
+ */
+export const EVENT_CARD_HEADER = 'text-base font-semibold text-foreground [overflow-wrap:anywhere]';
+
 export function EventBlockCard({ template, payload, refs, definition }: EventBlockCardProps) {
   const t = useTranslations('chats');
   const tBoard = useTranslations('board');
@@ -506,7 +511,7 @@ export function renderStaticEventBlock(block: BlockTemplateBlock, key: number, w
   // text 본문 > actions 하단 액션열) — 렌더 «순서»는 템플릿 저자가 선언한 그대로 따르되
   // (임의 재배열 안 함), 각 블록 타입의 폰트 크기/굵기로 위계만 표현한다.
   if (block.type === 'header') {
-    return <p key={key} className="text-base font-semibold text-foreground">{renderTextWithMissingMarkers(block.text, withProject)}</p>;
+    return <p key={key} className={EVENT_CARD_HEADER}>{renderTextWithMissingMarkers(block.text, withProject)}</p>;
   }
   if (block.type === 'text') {
     return <p key={key} className="text-sm leading-relaxed text-foreground [overflow-wrap:anywhere]">{renderTextWithMissingMarkers(block.text, withProject)}</p>;
