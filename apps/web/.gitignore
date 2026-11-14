@@ -17,6 +17,7 @@
 /test-results
 /blob-report
 /playwright/.auth
+/playwright/server-logs
 
 # next.js
 /.next/

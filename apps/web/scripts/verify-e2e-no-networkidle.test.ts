@@ -125,7 +125,7 @@ describe('scanE2eForNetworkidle — 픽스처', () => {
 });
 
 describe('실 소스(apps/web/e2e) 스캔 — story #4160', () => {
-  it('실 e2e 트리 — 위반 0(등재된 예외 1건뿐, count-pin·구조 검증 통과)', () => {
+  it('실 e2e 트리 — 위반 0(등재된 예외 2건뿐: contrast-guard 표 0건 + marker-wait 가지 2건, count-pin·구조 검증 통과)', () => {
     expect(scanE2eForNetworkidle()).toEqual([]);
   });
 
@@ -134,10 +134,54 @@ describe('실 소스(apps/web/e2e) 스캔 — story #4160', () => {
     expect(violations).toEqual([]);
   });
 
-  it('⭐음성 대조 — contrast-guard.spec.ts 예외 항목을 지우면(ALLOWED_EXCEPTIONS에서 제외) RED', () => {
-    const withoutException = ALLOWED_EXCEPTIONS.filter((e) => e.file !== 'contrast-guard.spec.ts');
+  it('⭐음성 대조 — support/marker-wait.ts 예외 항목을 지우면(ALLOWED_EXCEPTIONS에서 제외) RED', () => {
+    const withoutException = ALLOWED_EXCEPTIONS.filter((e) => e.file !== 'support/marker-wait.ts');
     const violations = scanE2eForNetworkidle(undefined, withoutException);
-    expect(violations.some((v) => v.file === 'contrast-guard.spec.ts' && v.kind === 'unexpected')).toBe(true);
+    expect(violations.some((v) => v.file === 'support/marker-wait.ts' && v.kind === 'unexpected')).toBe(true);
+  });
+
+  it('⭐contrast-guard.spec.ts는 networkidle 호출 0건(대기 코드는 marker-wait로 옮겨졌고, 이 파일엔 표만 남음) — 호출을 다시 이 파일에 넣으면 count-exceeded', () => {
+    const violations = scanE2eForNetworkidle().filter((v) => v.file === 'contrast-guard.spec.ts');
+    expect(violations).toEqual([]);
+    expect(ALLOWED_EXCEPTIONS.find((e) => e.file === 'contrast-guard.spec.ts')?.count).toBe(0);
+  });
+
+  it('⭐음성 대조 — marker-wait.ts의 networkidle 호출이 `if (marker.kind === networkidle)` 블록 «안»에 있을 때만 통과 — 블록이 닫힌 바로 다음 줄도 · else 가지도 · 다른 if도 밖이다(줄 거리가 아니라 중괄호 중첩으로 판정)', () => {
+    const exc = ALLOWED_EXCEPTIONS.find((e) => e.file === 'support/marker-wait.ts')!;
+    const inBranch = `
+      if (marker.kind === 'networkidle') {
+        await page.reload();
+        await page.waitForLoadState('networkidle', { timeout: 1 });
+      }`;
+    expect(exc.verify!(inBranch).ok).toBe(true);
+    // right after the block closed (one line away)
+    expect(exc.verify!(`
+      if (marker.kind === 'networkidle') {
+        await page.reload();
+      }
+      await page.waitForLoadState('networkidle', { timeout: 1 });`).ok).toBe(false);
+    // the else branch of the same if
+    expect(exc.verify!(`
+      if (marker.kind === 'networkidle') {
+        await page.reload();
+      } else {
+        await page.waitForLoadState('networkidle', { timeout: 1 });
+      }`).ok).toBe(false);
+    // inside another if
+    expect(exc.verify!(`
+      if (marker.kind === 'response') {
+        await page.waitForLoadState('networkidle', { timeout: 1 });
+      }`).ok).toBe(false);
+    // inside a nested block of the right if still counts (the call is inside it)
+    expect(exc.verify!(`
+      if (marker.kind === 'networkidle') {
+        try {
+          await page.waitForLoadState('networkidle', { timeout: \`\${1}\` });
+        } catch {}
+      }`).ok).toBe(true);
+    expect(exc.verify!(`await page.waitForLoadState('networkidle');`).ok).toBe(false);
+    // and the real file passes
+    expect(scanE2eForNetworkidle().filter((v) => v.file === 'support/marker-wait.ts')).toEqual([]);
   });
 
   it('⭐음성 대조 — 예외 reason을 비우면 RED', () => {
