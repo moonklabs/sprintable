@@ -13,6 +13,7 @@ import { PublishedSection } from './today-sections';
 import { CountBadge } from '@/components/ds/count-badge';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { isSafeInternalPath } from '@/lib/auth/internal-path';
+import { isNoProjectAtAll, projectsUnknownBecauseFailed } from '@/app/(authenticated)/chats/no-project';
 import { ActivationChecklistBanner } from '@/components/dashboard/activation-checklist-banner';
 import { HomeScreen } from '@/components/home/home-screen';
 import { useHomeModel } from '@/components/home/home-model-provider';
@@ -35,7 +36,8 @@ export function OrgBriefingShell() {
   const t = useTranslations('orgBriefing');
   const tc = useTranslations('common');
   // today route는 org 스코프뿐 — 내용은 project를 안 쓴다. project는 오직 «복귀 안내 띠»(아래)만 본다.
-  const { projectId, projectMemberships } = useDashboardContext();
+  const dashboard = useDashboardContext();
+  const { projectId, projectMemberships } = dashboard;
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -48,7 +50,9 @@ export function OrgBriefingShell() {
   // 대화 화면은 거치지 않는 길이라 까닭도 돌아갈 길도 없었다. One line + the existing «프로젝트 만들기» (the settings screen), carrying `next` so the first project sends them back. Never together with the pick band
   // (that one needs ≥1 project, this one needs 0), and only for a `next` the one shared check accepts.
   const flatHref = useFlatHref();
-  const showCreateBanner = isSafeInternalPath(nextTarget) && !projectId && projectMemberships.length === 0;
+  // «no project at all» is the ONE rule the chat surfaces already use (`isNoProjectAtAll`: not while the shell is still resolving a project from the address or the organization is still syncing), and a failed read of
+  // the person's projects (`projectMemberships` is `[]` then) is not «none» — the person may have projects (story 4891, `projectsUnknownBecauseFailed`).
+  const showCreateBanner = isSafeInternalPath(nextTarget) && isNoProjectAtAll(dashboard) && !projectsUnknownBecauseFailed(dashboard);
   // story #4888 — the home reads the SAME model the navigation bar's badge reads (components/home/home-model-provider)
   const { model, sources, loadError, partial, retry } = useHomeModel();
   const th = useTranslations('home');

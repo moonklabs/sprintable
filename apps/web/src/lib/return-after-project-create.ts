@@ -13,5 +13,7 @@ export function returnHrefAfterProjectCreate(next: string | null | undefined, pr
   if (url.origin !== new URL(origin).origin) return null;
   url.searchParams.delete('_prRetry');
   url.searchParams.set('p', projectId);
-  return `${url.pathname}${url.search}${url.hash}`;
+  // the URL API normalizes dot segments: `/..//evil.com` · `/.//evil.com` · `/a/..//evil.com` pass the check above but come out as `//evil.com?p=…` — another site. So the FINISHED address goes through the same check again.
+  const href = `${url.pathname}${url.search}${url.hash}`;
+  return isSafeInternalPath(href) ? href : null;
 }

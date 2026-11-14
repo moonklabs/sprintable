@@ -28,6 +28,14 @@ describe('returnHrefAfterProjectCreate — where the first project sends the per
     }
   });
 
+  it('⭐dot segments cannot turn a checked path into another site: /..//evil.com · /%2e%2e//evil.com · /a/..//evil.com · /.//evil.com → null (the URL API would answer «//evil.com?p=…»)', () => {
+    for (const v of ['/..//evil.com', '/%2e%2e//evil.com', '/a/..//evil.com', '/.//evil.com', '/%2e//evil.com']) expect(returnHrefAfterProjectCreate(v, 'P3', ORIGIN), v).toBeNull();
+  });
+
+  it('a dot segment that stays inside the app is fine: /a/../flow → /flow?p=P3', () => {
+    expect(returnHrefAfterProjectCreate('/a/../flow', 'P3', ORIGIN)).toBe('/flow?p=P3');
+  });
+
   it('the answer is always an in-app path (starts with a single «/»)', () => {
     const r = returnHrefAfterProjectCreate('/flow?x=1', 'P3', ORIGIN)!;
     expect(r.startsWith('/') && !r.startsWith('//')).toBe(true);

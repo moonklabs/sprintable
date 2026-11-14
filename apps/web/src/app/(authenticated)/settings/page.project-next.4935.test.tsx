@@ -127,7 +127,7 @@ describe('[SID:4935] settings › 프로젝트: the first project sends the pers
   });
 
   it('⭐the open-redirect set sends nobody anywhere: //evil.com · https://… · /\\evil · %2F%2F · javascript: · TAB-hidden //', async () => {
-    for (const v of ['//evil.com', 'https://evil.com/x', '/\\evil.com', '%2F%2Fevil.com', 'javascript:alert(1)', '/\t/evil.com', '/\n/evil.com']) {
+    for (const v of ['//evil.com', 'https://evil.com/x', '/\\evil.com', '%2F%2Fevil.com', 'javascript:alert(1)', '/\t/evil.com', '/\n/evil.com', '/..//evil.com', '/%2e%2e//evil.com', '/.//evil.com']) {
       assignMock.mockClear();
       await mountPage(withNext(v));
       await createProjectNamed('감마');

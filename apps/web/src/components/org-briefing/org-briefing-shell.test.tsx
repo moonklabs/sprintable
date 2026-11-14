@@ -222,6 +222,26 @@ describe('OrgBriefingShell — story #4935: 프로젝트가 하나도 없는 사
     }
   });
 
+  it('⭐프로젝트 목록을 못 읽었으면(projectMembershipsFailed — 목록이 []로 보임) «프로젝트가 있어야 열려요»를 말하지 않는다 — 프로젝트가 있는 사람일 수 있다', async () => {
+    searchParamsValueRef.current = 'next=%2Fflow';
+    useDashboardContextMock.mockReturnValue({ projectId: undefined, projectMemberships: [], projectMembershipsFailed: true, orgMemberships: [] });
+    stubToday(EMPTY_TODAY);
+    await mount();
+    expect(banner()).toBeNull();
+  });
+
+  it('⭐아직 프로젝트를 주소에서 풀고 있거나(projectPathUnresolved) 조직이 맞춰지는 중(orgSyncPending)이면 «없음»으로 읽지 않는다 — 띠가 없다', async () => {
+    for (const extra of [{ projectPathUnresolved: true }, { orgSyncPending: true }]) {
+      await act(async () => { root.unmount(); });
+      container.remove(); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+      searchParamsValueRef.current = 'next=%2Fflow';
+      useDashboardContextMock.mockReturnValue({ projectId: undefined, projectMemberships: [], orgMemberships: [], ...extra });
+      stubToday(EMPTY_TODAY);
+      await mount();
+      expect(banner(), JSON.stringify(extra)).toBeNull();
+    }
+  });
+
   it('프로젝트가 이미 골라졌으면(세션 복원이 붙인 재시도 표식 next) 띠가 없다', async () => {
     await mountNoProject('next=%2Fglance%3F_prRetry%3D1&p=p1', [], 'p1');
     expect(banner()).toBeNull();
