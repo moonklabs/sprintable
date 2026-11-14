@@ -348,7 +348,7 @@
     "goDestination": "Go to {label}",
     "documents": "Documents",
     "goSprints": "Go to Sprints",
-    "goEpics": "Go to Goals",
+    "goEpics": "Go to Goals (Swimlane)",
     "goRetro": "Go to Retro",
     "goWorkList": "Go to List",
     "goHypotheses": "Go to Hypothesis",
