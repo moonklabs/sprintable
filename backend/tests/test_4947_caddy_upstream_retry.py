@@ -1,8 +1,8 @@
 """story 4947 - the front door holds a request and tries the upstream again while a deploy replaces `backend` / `frontend`, instead of answering 502.
 
 The incident (dev, 2026-11-14, deploy-81): a deploy replaces the two containers and for about 25 s (15:29:22 -> 15:29:46Z, the new container started 15:29:31Z) the names do not answer: Caddy answered 502 491 times and
-Cloudflare put its error page in front of the person. Caddy's `lb_try_duration` / `lb_try_interval` make it try a refused or unreachable upstream again for that long before it gives up; only a request that could not be SENT is
-tried again (nothing of it reached the app), so a POST is as safe as a GET.
+Cloudflare put its error page in front of the person. Caddy's `lb_try_duration` / `lb_try_interval` make it try a refused or unreachable upstream again for that long before it gives up; a dial that FAILS (refused / unreachable - Caddy takes it that no
+byte of the request left) is tried again, whatever the method; a request whose connection was made and then broke is not tried again for a POST (a GET may be, Caddy's default).
 
 Pinned here:
   - the Caddyfile text: EVERY `reverse_proxy` of the file (the API name, the app name's `/api/v2/*`, its catch-all) carries `lb_try_duration` (more than twice the measured gap, under Cloudflare's 100 s proxy limit) and a short
@@ -89,7 +89,9 @@ def test_the_retry_lines_do_not_name_a_host_or_a_path_so_the_production_vm_reads
 
 # ───────────────────────── a real Caddy ─────────────────────────
 
-PINNED = re.search(r"FROM caddy:(\d+\.\d+\.\d+)-alpine", (_ROOT / "deploy/vm/forwarder/Dockerfile").read_text()).group(1)   # the version the VM runs
+_FROM = re.search(r"(?m)^FROM\s+(?:\S+/)?caddy:(\d+\.\d+\.\d+)(?:-alpine)?\s*$", (_ROOT / "deploy/vm/forwarder/Dockerfile").read_text())
+assert _FROM, "deploy/vm/forwarder/Dockerfile no longer has an anchored `FROM caddy:<x.y.z>[-alpine]` line - read this test's version check again"
+PINNED = _FROM.group(1)   # the version the VM runs
 
 
 def _caddy() -> str | None:
@@ -98,7 +100,7 @@ def _caddy() -> str | None:
     if not (found and os.access(found, os.X_OK)):
         return None
     out = subprocess.run([found, "version"], capture_output=True, text=True, timeout=20).stdout
-    return found if out.lstrip().startswith(f"v{PINNED}") else None
+    return found if (out.split() or [""])[0] == f"v{PINNED}" else None
 
 
 def _free_port() -> int:
@@ -232,6 +234,7 @@ def _during_the_gap(front: _Front, port: int, method: str, path: str, body: byte
     front.start_upstreams()
     th.join(timeout=30)
     assert res, "the request never came back"
+    assert res[0][2] >= comes_up_after - 0.5, f"answered after {res[0][2]:.1f}s - the upstream started only after {comes_up_after}s, so this request was not held through the gap"
     return res[0]
 
 
@@ -269,7 +272,8 @@ def test_a_post_body_bigger_than_the_buffer_during_the_gap_is_answered_with_the_
     size = 3 * 1024 * 1024
     status, _, _ = _during_the_gap(front, front.api_port, "POST", "/api/v2/upload", b"x" * size)
     assert status in (502, 0), status   # 502, or the connection closed while the client was still sending: the same failure seen from the client
-    assert all(len(b) < size for (_m, _p, b) in _Upstream.log), "a complete body reached the app after a retry - the comment in the Caddyfile is out of date"
+    posts = [len(b) for (m, _p, b) in _Upstream.log if m == "POST"]
+    assert len(posts) == 1 and 0 < posts[0] < size, f"the retried request should reach the app once, cut short; the app saw {posts} of {size} bytes - the Caddyfile comment is out of date"
 
 
 def test_a_live_upstream_is_answered_at_once_no_hold_is_added(front: _Front) -> None:
