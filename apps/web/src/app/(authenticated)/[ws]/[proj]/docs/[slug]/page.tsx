@@ -87,6 +87,7 @@ export default function DocSlugPage() {
   const newParamRef = useRef(newParam); newParamRef.current = newParam;
   const parentParamRef = useRef(parentParam); parentParamRef.current = parentParam;
   const liveSlugRef = useRef<{ param: string; slug: string } | null>(null); // the doc's own slug after the address moved, paired with the route param it was moved from
+  const routeNowRef = useRef(slug); // the route this page is on RIGHT NOW (kept by the [slug] effect) — a response that comes back for an earlier route must not claim the screen
   const onScreenDocIdRef = useRef<string | null>(null); // the doc this ROUTE has confirmed on screen (fetched or just created) — null from the moment the route changes until the new route's doc is there
   const newLatchRef = useRef<{ key: string; isNew: boolean } | null>(null);
   const draftEnteredForSlugRef = useRef<string | null>(null); // 이 주소(slug)로 이미 초안에 들어와 있으면 같은 조회가 다시 돌아도 쓴 글(상태)을 비우지 않는다
@@ -194,6 +195,7 @@ export default function DocSlugPage() {
 
   const fetchDoc = useCallback(async () => {
     if (!projectId || !slug) return;
+    const startedForRoute = slug;
     const fetchSlug = liveSlugRef.current?.param === slug ? liveSlugRef.current.slug : slug; // 4952 — after the address moved to the doc's own slug the route param is still the old name
     setDocLoading(true);
     try {
@@ -234,7 +236,7 @@ export default function DocSlugPage() {
       draftEnteredForSlugRef.current = null;
       setDraft(null);
       setSelectedDoc(data);
-      onScreenDocIdRef.current = data.id;
+      if (routeNowRef.current === startedForRoute) onScreenDocIdRef.current = data.id; // a fetch that comes back after the person moved on must not make its doc the screen's again
       setTitle(data.title ?? '');
       setContent(data.content ?? '');
       setContentFormat(data.content_format ?? 'markdown');
@@ -252,7 +254,7 @@ export default function DocSlugPage() {
 
   // a new route: the old pairing must never answer for a DIFFERENT doc that happens to carry the old name. An EFFECT, not a render-time write — a concurrent render that is abandoned would otherwise clear the pairing of the doc that stays on screen.
   // (The fetch below already refuses a pairing whose param is not the current route's; this drops it so it cannot come back when a later route carries the old name again.)
-  useEffect(() => { onScreenDocIdRef.current = null; if (liveSlugRef.current && liveSlugRef.current.param !== slug) liveSlugRef.current = null; }, [slug]);
+  useEffect(() => { routeNowRef.current = slug; onScreenDocIdRef.current = null; if (liveSlugRef.current && liveSlugRef.current.param !== slug) liveSlugRef.current = null; }, [slug]);
 
   useEffect(() => { void fetchDoc(); }, [fetchDoc]);
 
@@ -288,7 +290,7 @@ export default function DocSlugPage() {
       // 기준선 = 보낸 값. 응답 오기 전에 더 친 글자는 보낸 값과 달라 dirty가 되어 다음 자동저장이 보낸다.
       setAdopt({ docId: (data as DocDetail).id, snapshot: JSON.stringify(posted) });
       setSelectedDoc(data as DocDetail);
-      onScreenDocIdRef.current = (data as DocDetail).id;
+      if (routeNowRef.current === draft.slug) onScreenDocIdRef.current = (data as DocDetail).id; // the draft's route is its own temporary slug; a create that returns after the person moved on must not claim the new route's screen
       // 제목을 한 번도 안 건드렸을 때만 기본 글을 되돌려 놓는다(만드는 중에 비운 칸은 비운 채로).
       if (!titleTouchedRef.current) setTitle((cur) => (cur === '' ? postedTitle : cur));
       setDraft(null);

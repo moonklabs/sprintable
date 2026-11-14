@@ -53,6 +53,8 @@ let container: HTMLDivElement;
 let root: Root;
 let unmounted = false;
 let postMode: 'ok' | 'fail' | 'hang' | 'conflict-once' = 'ok';
+let releasePost: (() => void) | null = null;
+let releaseSlow: (() => void) | null = null;
 let existingTitle = '남의 문서'; // slug=existing-doc 조회가 주는 제목
 const fetchMock = vi.fn();
 const setTree = vi.fn();
@@ -69,7 +71,7 @@ const created = (body: Record<string, unknown>) => ({ data: { id: 'new-doc', tit
 
 beforeEach(() => {
   vi.useFakeTimers();
-  postMode = 'ok'; unmounted = false; searchOverride.current = null; existingTitle = '남의 문서';
+  postMode = 'ok'; releasePost = null; releaseSlow = null; unmounted = false; searchOverride.current = null; existingTitle = '남의 문서';
   editorProps.current = null; syncOptions.current = null;
   fetchMock.mockClear(); setTree.mockClear(); addToastMock.mockClear(); routerMock.replace.mockClear(); routerMock.push.mockClear(); reportLiveSlug.mockClear();
   global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
@@ -78,10 +80,11 @@ beforeEach(() => {
       const body = JSON.parse(init.body as string);
       if (postMode === 'fail') return new Response('{}', { status: 500 });
       if (postMode === 'conflict-once') { postMode = 'ok'; return new Response('{}', { status: 409 }); }
+      if (postMode === 'hang') await new Promise<void>((resolve) => { releasePost = resolve; });
       
       return new Response(JSON.stringify(created(body)), { status: 201 });
     }
-    if (url.includes('slug=slow-doc')) return new Promise<Response>(() => {}); // the new route's doc never arrives in this test
+    if (url.includes('slug=slow-doc')) return new Promise<Response>((resolve) => { releaseSlow = () => resolve(new Response(JSON.stringify({ data: { id: 'doc-slow', title: '느린 문서', slug: 'slow-doc', content: '', content_format: 'markdown', updated_at: '2026-11-14T00:00:00Z' } }), { status: 200 })); });
     if (url.includes('slug=existing-doc')) return new Response(JSON.stringify({ data: { id: 'doc-existing', title: existingTitle, slug: 'existing-doc', content: '원래 내용', content_format: 'markdown', updated_at: '2026-11-13T00:00:01Z' } }), { status: 200 });
     if (url.includes('/api/docs?')) return new Response('not found', { status: 404 }); // 서버에 아직 없는 초안
     return new Response('{}', { status: 200 });
@@ -256,6 +259,45 @@ describe('첫 저장이 주소를 «화면은 그대로» 옮긴다 (4952 D1)', 
     reportLiveSlug.mockClear();
     const spy = vi.spyOn(window.history, 'replaceState');
     await act(async () => { syncOptions.current!.onSaved?.(SAVED('늦은-저장') as never); }); // new-doc의 첫 저장이 이제서야 돌아옴
+    expect(spy).not.toHaveBeenCalled();
+    expect(reportLiveSlug).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('⭐옛 생성(POST)이 라우트를 옮긴 뒤에 돌아와도 그 문서를 새 라우트의 화면 문서로 되돌려 놓지 않는다 — 그 문서의 늦은 저장은 새 라우트의 주소를 옮기지 않는다', async () => {
+    postMode = 'hang';
+    await open();
+    await type('title', '회의 메모');
+    await wait(1600); // POST가 응답 없이 걸려 있다
+    paramsMock.slug = 'existing-doc';
+    await act(async () => {
+      root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DocsLayoutContext.Provider value={CTX}><DocSlugPage /></DocsLayoutContext.Provider></NextIntlClientProvider>);
+      await vi.advanceTimersByTimeAsync(5);
+    });
+    await wait(50);
+    await act(async () => { releasePost?.(); await vi.advanceTimersByTimeAsync(5); }); // 이제서야 옛 생성이 돌아옴(id new-doc)
+    await wait(50);
+    reportLiveSlug.mockClear();
+    const spy = vi.spyOn(window.history, 'replaceState');
+    await act(async () => { syncOptions.current!.onSaved?.(SAVED('늦은-저장') as never); });
+    expect(spy).not.toHaveBeenCalled();
+    expect(reportLiveSlug).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('⭐옛 조회(GET)가 라우트를 옮긴 뒤에 돌아와도 그 문서를 화면 문서로 되돌려 놓지 않는다', async () => {
+    await open('', 'slow-doc'); // 이 라우트의 조회는 아직 안 돌아옴
+    paramsMock.slug = 'existing-doc';
+    await act(async () => {
+      root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><DocsLayoutContext.Provider value={CTX}><DocSlugPage /></DocsLayoutContext.Provider></NextIntlClientProvider>);
+      await vi.advanceTimersByTimeAsync(5);
+    });
+    await wait(50);
+    await act(async () => { releaseSlow?.(); await vi.advanceTimersByTimeAsync(5); }); // 옛 라우트의 조회가 이제서야 돌아옴(id doc-slow)
+    await wait(50);
+    reportLiveSlug.mockClear();
+    const spy = vi.spyOn(window.history, 'replaceState');
+    await act(async () => { syncOptions.current!.onSaved?.(SAVED('늦은-저장', 'doc-slow') as never); });
     expect(spy).not.toHaveBeenCalled();
     expect(reportLiveSlug).not.toHaveBeenCalled();
     spy.mockRestore();
