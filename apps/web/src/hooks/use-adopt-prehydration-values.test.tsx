@@ -4,8 +4,9 @@
 // the state is still the first value. Real server markup (`renderToString`) · a value put into the DOM BEFORE `hydrateRoot` · the real hook.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act, useRef, useState } from 'react';
-import { hydrateRoot, type Root } from 'react-dom/client';
+import { createRoot, hydrateRoot, type Root } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
+import { OperatorInput, OperatorTextarea } from '@/components/ui/operator-control';
 import { useAdoptPrehydrationValues } from './use-adopt-prehydration-values';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -71,8 +72,37 @@ describe('useAdoptPrehydrationValues', () => {
     await alive(<Probe normalize={(v) => v.replace(/\D/g, '').slice(0, 6)} />, ({ f }) => { f!.value = '12a345'; });
     expect(state().v).toBe('12345');
   });
+  it('an auto-fill that arrives AFTER the screen is alive (a value set with no input event, then a re-render) is not taken by the hook: the state stays what React holds', async () => {
+    await alive(<Probe />, () => {});
+    const f = container.querySelector('[data-testid="f"]') as HTMLInputElement;
+    f.value = 'late-autofill';
+    await act(async () => { (container.querySelector('[data-testid="b"]') as HTMLInputElement).click(); }); // a re-render
+    expect(state().v).toBe('');
+    expect(state().touched).toBe(false);
+  });
   it('a field that is not drawn (no ref) is skipped — nothing throws', async () => {
     await alive(<Probe withField={false} />, ({ b }) => { b.checked = true; });
     expect(state()).toEqual({ v: '', on: true, touched: false });
+  });
+});
+
+// the onboarding's project step draws OperatorInput / OperatorTextarea (the ds Input / a native textarea behind a class wrapper): the hook's refs must reach the real elements
+describe('the refs of the onboarding project step reach the real elements', () => {
+  it('OperatorInput and OperatorTextarea hand their ref to the <input> / <textarea> (so the hook reads what is on the screen)', async () => {
+    const got: { input: HTMLElement | null; area: HTMLTextAreaElement | null } = { input: null, area: null };
+    const tree = (
+      <div>
+        <OperatorInput type="text" ref={(el: HTMLElement | null) => { got.input = el; }} defaultValue="a" />
+        <OperatorTextarea ref={(el: HTMLTextAreaElement | null) => { got.area = el; }} defaultValue="b" />
+      </div>
+    );
+    const host = document.createElement('div'); document.body.appendChild(host);
+    const r = createRoot(host);
+    await act(async () => { r.render(tree); });
+    expect(got.input?.tagName).toBe('INPUT');
+    expect((got.input as HTMLInputElement | null)?.value).toBe('a');
+    expect(got.area?.tagName).toBe('TEXTAREA');
+    expect(got.area?.value).toBe('b');
+    await act(async () => { r.unmount(); }); host.remove();
   });
 });
