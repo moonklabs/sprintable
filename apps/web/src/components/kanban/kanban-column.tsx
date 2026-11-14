@@ -145,7 +145,7 @@ export function KanbanColumn({
     <div
       ref={setNodeRef}
       data-board-column={id}
-      className={`flex h-full flex-col rounded-xl border p-3 transition ${collapsed ? 'w-[52px] min-w-[52px]' : 'w-[280px] min-w-[240px]'} ${colClass}`}
+      className={`flex h-full flex-col rounded-xl border p-3 transition lg:[@media(max-height:520px)]:py-2 ${collapsed ?'w-[52px] min-w-[52px]' : 'w-[280px] min-w-[240px]'} ${colClass}`}
     >
       {isDragging && isValidTarget && (
         // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
@@ -155,7 +155,7 @@ export function KanbanColumn({
       )}
 
       {/* 컬럼 헤더 */}
-      <div className={`mb-3 flex flex-col gap-2 ${collapsed ? 'items-center' : ''}`}>
+      <div className={`mb-3 flex flex-col gap-2 lg:[@media(max-height:520px)]:mb-2 ${collapsed ? 'items-center' : ''}`}>
         <div className={`flex gap-3 ${collapsed ? 'flex-col items-center' : 'items-center justify-between'}`}>
           {collapsed ? (
             <>

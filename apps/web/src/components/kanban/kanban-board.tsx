@@ -2033,7 +2033,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
             onDragEnd={handleTrustDragEnd}
             onDragCancel={handleDragCancel}
           >
-            <div className="flex h-full gap-3 overflow-x-auto px-3 py-3">
+            {/* story #4923(재오픈 · PO 11-14) — 낮은 데스크톱 창(높이 ≤ 520)에선 칸 안 스크롤 상자가 카드 한 장(78)을 통째로 못 담았다(1100×420 dev 실측: 상자 69px). 틀(206)은 그대로 두고(지원 단추 틈 · 문서 비스크롤 규칙 4913)
+                칸 «바깥 여백»에서 24px를 낸다: 칸 줄 위아래 12 → 6(각 6씩 = 12) · 칸 안 위아래 12 → 8(8) · 칸 머리 아래 12 → 8(4) → 상자 69 → 93 = 카드 78 + 위아래 6 + 3. 카드 · 상자 안쪽 여백은 그대로. */}
+            <div className="flex h-full gap-3 overflow-x-auto px-3 py-3 lg:[@media(max-height:520px)]:py-1.5">
               {TRUST_COLUMNS.map((col) => {
                 const colStories = storiesByTrustColumn(col.id);
                 return (
@@ -2104,7 +2106,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoa
             onDragEnd={handleDragEnd}
             onDragCancel={handleDragCancel}
           >
-            <div className="flex h-full gap-3 overflow-x-auto px-3 py-3">
+            {/* story #4923(재오픈 · PO 11-14) — 낮은 데스크톱 창(높이 ≤ 520)에선 칸 안 스크롤 상자가 카드 한 장(78)을 통째로 못 담았다(1100×420 dev 실측: 상자 69px). 틀(206)은 그대로 두고(지원 단추 틈 · 문서 비스크롤 규칙 4913)
+                칸 «바깥 여백»에서 24px를 낸다: 칸 줄 위아래 12 → 6(각 6씩 = 12) · 칸 안 위아래 12 → 8(8) · 칸 머리 아래 12 → 8(4) → 상자 69 → 93 = 카드 78 + 위아래 6 + 3. 카드 · 상자 안쪽 여백은 그대로. */}
+            <div className="flex h-full gap-3 overflow-x-auto px-3 py-3 lg:[@media(max-height:520px)]:py-1.5">
               {COLUMNS.map((col) => {
                 const colStories = storiesByColumn(col.id);
                 const wipState = wipLimits[col.id] ?? { limit: null, editing: false, draft: '' };
