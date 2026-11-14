@@ -168,6 +168,12 @@ describe('[4714] landingHome — the home it goes to is only an address of THIS 
     expect(landingHome('/phone-start')).toBe('/phone-start'); // the start screen has its own way out: not a loop
   });
 
+  it('[4936] the landing itself is refused however it is written: dot segments · every encoding layer (`/%2570hone-landing` is `/phone-landing` two reads later) → the site root', () => {
+    for (const loop of ['/phone-landing', '/./phone-landing', '/a/../phone-landing', '/%70hone-landing', '/%2570hone-landing', '/%252570hone-landing', '/phone-landing/?x=1']) {
+      expect([loop, landingHome(loop)]).toEqual([loop, '/']);
+    }
+  });
+
   it('the landing itself (any spelling that reaches it: query · trailing slash · case · dot segments · percent-encoding) is the site root — it would send the person round and round', () => {
     for (const loop of ['/phone-landing', '/phone-landing?next=/phone-landing', '/phone-landing/', '/PHONE-LANDING', '/x/../phone-landing', '/phone%2Dlanding', '/phone-landing%2F', '/phone-landing#x']) {
       expect([loop, landingHome(loop)]).toEqual([loop, '/']);

@@ -237,6 +237,12 @@ describe('useUnifiedSwitcher — switchProject의 ?next= 복귀 (story #2212)', 
     ['//evil.com', 'protocol-relative'],
     ['https://evil.com', '절대 URL'],
     ['/\\evil.com', '백슬래시 트릭'],
+    ['/\t/evil.com', '탭 — 브라우저가 지워 //evil.com (story 4936)'],
+    ['/\n/evil.com', 'LF (story 4936)'],
+    ['/\r/evil.com', 'CR (story 4936)'],
+    ['/\t\\evil.com', '탭 + 백슬래시 (story 4936)'],
+    ['/%09/evil.com', '퍼센트 부호 탭 — 한 번 풀면 탭 (story 4936)'],
+    ['/%2509/evil.com', '두 겹 부호 탭 (story 4936)'],
   ])('?next=%s(%s)는 신뢰하지 않고 무시한다(open-redirect 방지, story #2212)', async (malicious) => {
     searchParamsValueRef.current = `next=${encodeURIComponent(malicious)}`;
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { ok: true } }) })));

@@ -164,6 +164,18 @@ describe('GET /auth/login — native OAuth-start branch', () => {
     expect(deletedNames()).toEqual(['oauth_link_google']); // only the connect flag, which a sign-in never carries (below)
   });
 
+  it('[4936] a next that is not this app\'s own path is not stored (the cookie is dropped, like a missing one); an own path is stored as it came', async () => {
+    for (const bad of ['/\t/evil.com', '/\n/evil.com', '/%09/evil.com', '//evil.com', 'https://evil.com', '/\\evil.com']) {
+      h.cookiesSetMock.mockReset(); h.cookiesDeleteMock.mockReset();
+      await GET(makeRequest({ provider: 'google', next: bad }));
+      expect(setNames(), JSON.stringify(bad)).not.toContain('oauth_next_google');
+      expect(deletedNames(), JSON.stringify(bad)).toContain('oauth_next_google');
+    }
+    h.cookiesSetMock.mockReset(); h.cookiesDeleteMock.mockReset();
+    await GET(makeRequest({ provider: 'google', next: '/flow?story=a%26b' }));
+    expect(h.cookiesSetMock.mock.calls.find((c) => c[0] === 'oauth_next_google')?.[1]).toBe('/flow?story=a%26b');
+  });
+
   it('[4628 follow-up] every sign-in start drops oauth_link_* (set by /auth/link · a sign-in never carries it) and never sets it', async () => {
     for (const provider of ['google', 'apple'] as const) {
       h.cookiesSetMock.mockReset(); h.cookiesDeleteMock.mockReset();

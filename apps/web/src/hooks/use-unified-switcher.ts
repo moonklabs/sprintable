@@ -8,6 +8,7 @@ import { TAB_PROJECT_STORAGE_KEY } from '@/lib/project-context-client';
 import { fetchWithAuth, switchOrg as switchOrgSession, switchProject as switchProjectSession } from '@/lib/db/client';
 import { canGrantProjectAccess } from '@/lib/project-access-role';
 import { desktopApp } from '@/lib/desktop-app';
+import { isSafeInternalPath } from '@/lib/auth/internal-path';
 import { homeAsTilde } from '@/lib/home-tilde';
 import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
 import { useRenderNonce } from '@/hooks/use-render-nonce';
@@ -61,9 +62,7 @@ async function fetchProjectSlug(projectId: string): Promise<string | null> {
 // `https://evil.com`, `/\evil.com` 등). proxy.ts의 redirectToProjectPicker에도 같은 형태의
 // 가드가 있지만(생성 쪽 방어는 originalPathname이 항상 안전해 이론상 불필요에 가깝다), 진짜
 // 열린 문은 여기다 — 방어는 양쪽 다.
-function isSafeInternalNext(value: string | null): value is string {
-  return !!value && value.startsWith('/') && !value.startsWith('//') && !value.includes('\\');
-}
+// story 4936 — the guard is lib/auth/internal-path.ts `isSafeInternalPath` (the old `startsWith('/')` one let `/<TAB>/evil.com` through: the browser deletes the tab and the router leaves the app). One function for every `next`.
 
 // story f401139e — switchProject/switchOrgAndProject 예전엔 현재 searchParams를 통째로
 // 이월하고 `p`만 갈아끼웠다. `withSwitchedSlugs`는 pathname 세그먼트[0]/[1](org/project slug)만
@@ -312,7 +311,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
       // ("고르면 여기로 돌아온다"). CURRENT_PROJECT_COOKIE는 위 switch-project 응답이 이미
       // Set-Cookie로 반영했으므로 이 시점에 next로 이동하면 그 목적지는 정상 해소된다.
       const nextRaw = searchParams.get('next');
-      const nextTarget = isSafeInternalNext(nextRaw) ? nextRaw : null;
+      const nextTarget = isSafeInternalPath(nextRaw) ? nextRaw : null;
       if (nextTarget) {
         router.push(nextTarget);
         return;
@@ -344,7 +343,7 @@ export function useUnifiedSwitcher({ orgs, currentOrgId, projects, currentProjec
       // 기존 경로(낙관적 push 먼저·fetch 나중)와 달리 여기선 push 전에 반드시 fetch가 반영돼야
       // 한다(안 그러면 next로 이동해도 쿠키가 아직 안 실려 다시 같은 처방으로 튕긴다).
       const nextRaw = searchParams.get('next');
-      const nextTarget = isSafeInternalNext(nextRaw) ? nextRaw : null;
+      const nextTarget = isSafeInternalPath(nextRaw) ? nextRaw : null;
       if (nextTarget) {
         await switchProjectSession(nextProjectId).catch(() => null); // story 4778
         router.push(nextTarget);

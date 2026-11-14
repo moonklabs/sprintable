@@ -62,3 +62,27 @@ describe('safeNextPath/buildLoginRedirect — story #4017 navV3Flags', () => {
     expect(safeNextPath('/board', CHAT_V3_ON_FLAGS)).toBe('/board');
   });
 });
+
+// story 4936 — the old guard (starts with `/`, not `//`, not `/\`) let a TAB · LF · CR between the slashes through: the browser deletes it and the router leaves the app. These left dev on 11-14; the login page's own
+// `router.replace(safeNextPath(next))` is where a link from outside (`/%09/evil.com` → the proxy's `/login?next=…`) arrives.
+describe('safeNextPath — control characters (story 4936)', () => {
+  it.each([
+    ['/\t/evil.com'], ['/\n/evil.com'], ['/\r/evil.com'], ['/\t\\evil.com'],
+    [encodeURIComponent('/\t/evil.com')], ['/%09/evil.com'], ['/%0A/evil.com'], ['/%0D/evil.com'], ['/%2509/evil.com'], ['/%255C/evil.com'],
+    // what the proxy's loginRedirect really hands the login page for a logged-out GET /%09/evil.com (measured on dev: Location /login?next=%2F%2509%2Fevil.com → searchParams.get)
+    [new URLSearchParams('next=%2F%2509%2Fevil.com').get('next')],
+  ])('%j → /chats (never the path)', (next) => {
+    expect(safeNextPath(next)).toBe('/chats');
+  });
+
+  it('buildLoginRedirect does not carry an address that is not an internal path (it used to test `startsWith(\'/\')` only)', () => {
+    for (const bad of ['//evil.com', '/\t/evil.com', '/\n/evil.com', '/..//evil.com', 'https://evil.com']) {
+      expect(buildLoginRedirect(bad), JSON.stringify(bad)).toBe('/login?next=%2Fchats&reason=session_expired');
+    }
+  });
+
+  it('an ordinary internal path with a query still comes back as it was', () => {
+    expect(safeNextPath('/flow?story=abc&p=1')).toBe('/flow?story=abc&p=1');
+    expect(safeNextPath(encodeURIComponent('/flow?story=abc&p=1'))).toBe('/flow?story=abc&p=1');
+  });
+});
