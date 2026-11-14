@@ -384,8 +384,8 @@ function NotificationPanel({
         </Button>
       </div>
 
-      {/* 목록 */}
       {/* story 4954 (the desktop app) — ↑ ↓ (j k) walk the rows, focus only: the same list keys the home · goals · runs lists use (`handleListKeys`); Enter / Space open a row as a button does */}
+      {/* 목록 */}
       <div className="focus-inset min-h-0 flex-1 overflow-y-auto" onKeyDown={(e) => handleListKeys(e, () => undefined)}>
         {loading ? (
           <div className="py-12 text-center text-ds-body text-ds-ink-3">{tCommon('loading')}</div>
