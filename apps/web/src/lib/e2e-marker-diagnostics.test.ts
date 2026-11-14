@@ -711,6 +711,10 @@ describe('스펙 · 설정이 진단에 연결돼 있다 (story 4927)', () => {
       expect(Object.keys(off.cfg.webServer!)).toEqual(['command', 'url', 'reuseExistingServer']);
       expect(off.logPath, 'no log path is exported while the switch is off').toBeUndefined();
     }
+    // CI starts the production server itself and hands Playwright its address: then there is NO webServer (Playwright would otherwise try `pnpm dev` on the taken :3108)
+    for (const env of [{ CI: '1', PLAYWRIGHT_BASE_URL: 'http://localhost:3108' }, { PLAYWRIGHT_BASE_URL: 'http://localhost:3108', E2E_SERVER_LOG: '1' }]) {
+      expect((await load(env)).cfg.webServer, JSON.stringify(env)).toBeUndefined();
+    }
     const on = await load({ CI: '1', E2E_SERVER_LOG: '1' });
     expect(on.cfg.webServer).toMatchObject({ command: 'node e2e/support/dev-server-logged.mjs', stdout: 'pipe', stderr: 'pipe' });
     expect(on.logPath).toContain('playwright/server-logs/next-dev.log');
