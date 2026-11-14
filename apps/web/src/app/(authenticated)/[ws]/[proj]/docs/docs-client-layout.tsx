@@ -54,7 +54,13 @@ interface DocsClientLayoutProps {
 export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: DocsClientLayoutProps) {
   const router = useRouter();
   const params = useParams();
-  const currentSlug = typeof params.slug === 'string' ? params.slug : null;
+  const paramSlug = typeof params.slug === 'string' ? params.slug : null;
+  // story 4952 — a new doc's address moves from `untitled-…` to its own slug WITHOUT a navigation (the editor keeps the person's cursor and the keystrokes they are in the middle of); the route params stay the old ones, so the editor reports the live slug here.
+  // It counts only while the params are the ones it was reported for — a real navigation (another doc, the list) brings new params and the report is ignored.
+  const [liveSlug, setLiveSlug] = useState<{ param: string | null; slug: string } | null>(null);
+  const currentSlug = liveSlug && liveSlug.param === paramSlug ? liveSlug.slug : paramSlug;
+  useEffect(() => { if (liveSlug && liveSlug.param !== paramSlug) setLiveSlug(null); }, [liveSlug, paramSlug]); // dropped as soon as the route changes — a later doc may carry the old name
+  const reportLiveSlug = useCallback((slug: string) => setLiveSlug({ param: paramSlug, slug }), [paramSlug]);
   const t = useTranslations('docs');
   const tc = useTranslations('common');
   const { recentSlugs, pushRecent } = useRecentDocs(projectId);
@@ -661,7 +667,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
 
 
   return (
-    <DocsLayoutContext.Provider value={{ wsSlug, projSlug, projectId, tree, setTree, loading, loadError, handleNewDoc, fetchTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer: openDrawer }}>
+    <DocsLayoutContext.Provider value={{ wsSlug, projSlug, projectId, tree, setTree, loading, loadError, handleNewDoc, fetchTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer: openDrawer, reportLiveSlug }}>
       {/* 근본 재구현(2076 회귀 후속, 유나양 규격) — currentSlug 없음(목록)=켬, 있음(문서 하나)=
           끔. 이 shell은 단일 문서가 화면을 꽉 채우는 구조(목록+본문 동시 2단 아님)라 이 분기가
           맞다(2단 shell이었다면 항상 켜야 함 — 유나양 규격 예외 조항). */}

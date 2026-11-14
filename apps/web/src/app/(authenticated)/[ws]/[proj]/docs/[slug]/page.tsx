@@ -58,6 +58,12 @@ interface DocDetail {
   revisions?: { count: number; latest_at?: string | null } | null;
 }
 
+/** two addresses name the same path — the browser reports `location.pathname` percent-encoded and `docUrl` builds it raw (a Korean title makes a Korean slug), so compare them decoded */
+function samePath(a: string, b: string): boolean {
+  const dec = (v: string) => { try { return decodeURIComponent(v); } catch { return v; } };
+  return dec(a) === dec(b);
+}
+
 export default function DocSlugPage() {
   const params = useParams();
   const slug = typeof params.slug === 'string' ? params.slug : '';
@@ -76,10 +82,17 @@ export default function DocSlugPage() {
   const searchParams = useSearchParams();
   const newParam = searchParams?.get('new') === '1';
   const parentParam = searchParams?.get('parent') || null;
+  // story 4952 — the fetch below must not run AGAIN just because the query lost `?new=1` (the first save moves the address to the doc's own slug with history.replaceState): it would ask for the old `untitled-…` name, get a 404 and send the
+  // person to the list, or refill the editor from the server over what they are typing. So it reads these two at the moment it runs (a ref the render keeps current) and they are not its dependencies; a new route (`slug`) still refetches.
+  const newParamRef = useRef(newParam); newParamRef.current = newParam;
+  const parentParamRef = useRef(parentParam); parentParamRef.current = parentParam;
+  const liveSlugRef = useRef<{ param: string; slug: string } | null>(null); // the doc's own slug after the address moved, paired with the route param it was moved from
+  const routeNowRef = useRef(slug); // the route this page is on RIGHT NOW (kept by the [slug] effect) — a response that comes back for an earlier route must not claim the screen
+  const onScreenDocIdRef = useRef<string | null>(null); // the doc this ROUTE has confirmed on screen (fetched or just created) — null from the moment the route changes until the new route's doc is there
   const newLatchRef = useRef<{ key: string; isNew: boolean } | null>(null);
   const draftEnteredForSlugRef = useRef<string | null>(null); // 이 주소(slug)로 이미 초안에 들어와 있으면 같은 조회가 다시 돌아도 쓴 글(상태)을 비우지 않는다
 
-  const { wsSlug, projSlug, projectId, tree, setTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer } = useDocsLayout();
+  const { wsSlug, projSlug, projectId, tree, setTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer, reportLiveSlug } = useDocsLayout();
   const { addToast } = useToast();
 
   const [selectedDoc, setSelectedDoc] = useState<DocDetail | null>(null);
@@ -89,6 +102,8 @@ export default function DocSlugPage() {
   if (newLatchRef.current?.key !== latchKey) newLatchRef.current = { key: latchKey, isNew: newParam };
   else if (newParam) newLatchRef.current.isNew = true;
   const isNew = newLatchRef.current.isNew;
+  // the slug of the doc that is OPEN (the route param keeps the old `untitled-…` name after the first save moved the address without a navigation)
+  const liveDocSlug = selectedDoc?.slug ?? slug;
   const [docLoading, setDocLoading] = useState(true);
   const [title, setTitle] = useState('');
   // 4910 — «새 문서»로 막 만든 초안(?new=1): 서버엔 기본 제목(«제목 없음»)이 들어 있지만 그 글은 «진짜 글자»가 아니라 자리 표시여야 한다(쓰면 뒤에 붙던 결함).
@@ -133,10 +148,17 @@ export default function DocSlugPage() {
     setTree((prev) => prev.map((d) => (d.id === doc.id ? { ...d, title: doc.title, slug: doc.slug } : d)));
     if (typeof doc.slug_locked === 'boolean') setSlugLocked(doc.slug_locked);
     // Slug auto-derived / canonicalized server-side → move the URL to the canonical slug.
-    if (doc.slug && doc.slug !== slug) {
-      router.replace(docUrl(wsSlug, projSlug, doc.slug));
+    // story 4952 — ONLY the address moves (history.replaceState: the App Router follows it for usePathname · the reload · the back button), not the screen. `router.replace` changes the route's [slug] segment, which stands a NEW
+    // page up: the editor remounted, the cursor was gone and what the person typed while the save was in flight was overwritten by the refetched doc («회의 메모» → 3~4 s → the next words never arrived). The layout is told which doc
+    // is open now (reportLiveSlug) because the route params it reads keep the old value.
+    // only for the doc this route has on screen: a save that comes back late for ANOTHER doc (the person already moved on) must not move the address or write a pairing for a route that is no longer theirs
+    const onScreen = onScreenDocIdRef.current === doc.id;
+    if (doc.slug && onScreen && !samePath(window.location.pathname, docUrl(wsSlug, projSlug, doc.slug))) {
+      // `null`, as Next documents: the router copies its own history state itself — passing `window.history.state` back carries its `__NA` marker and the router then skips syncing `usePathname` / `useSearchParams` (Next 16.2.2, app-router.js)
+      window.history.replaceState(null, '', docUrl(wsSlug, projSlug, doc.slug));
     }
-  }, [setTree, slug, router, wsSlug, projSlug]);
+    if (doc.slug && onScreen) { liveSlugRef.current = { param: slug, slug: doc.slug }; reportLiveSlug?.(doc.slug); }
+  }, [setTree, slug, wsSlug, projSlug, reportLiveSlug]);
 
   const handleTitleChange = useCallback((value: string) => {
     setTitleUntouched(false);
@@ -173,15 +195,17 @@ export default function DocSlugPage() {
 
   const fetchDoc = useCallback(async () => {
     if (!projectId || !slug) return;
+    const startedForRoute = slug;
+    const fetchSlug = liveSlugRef.current?.param === slug ? liveSlugRef.current.slug : slug; // 4952 — after the address moved to the doc's own slug the route param is still the old name
     setDocLoading(true);
     try {
       // AC3 (fc4d4264): never serve the doc body from HTTP/bf cache — a stale load
       // re-seeds the editor with an outdated baseline and can re-trigger an overwrite.
-      const res = await fetchWithAuth(`/api/docs?project_id=${projectId}&slug=${slug}`, { cache: 'no-store' });
+      const res = await fetchWithAuth(`/api/docs?project_id=${projectId}&slug=${fetchSlug}`, { cache: 'no-store' });
       if (!res.ok) {
         // 4910 ② — 임시 주소(`untitled-…`)에 `?new=1`로 왔는데 문서가 없으면(404) 서버에 아직 안 만든 «새 문서 초안»이다(오류가 아님). 그 밖의 404는 아래 옛 회복 그대로(목록으로).
         // 들어올 때의 판정은 «지금 주소의 ?new=1»(newParam)로 한다 — 래치(isNew)는 화면에 있는 문서에 딸린 표시지 주소 판정이 아니다.
-        if (res.status === 404 && newParam && isUntitledSlug(slug)) {
+        if (res.status === 404 && newParamRef.current && isUntitledSlug(slug)) {
           if (draftEnteredForSlugRef.current === slug) return; // 같은 초안의 재조회 — 쓴 글 · 만든 문서 상태를 건드리지 않는다
           draftEnteredForSlugRef.current = slug;
           // 같은 컴포넌트가 앞서 다른 문서(또는 다른 초안)를 보였다면 그 상태를 비우고 새 초안으로 — 안 비우면 isDraft가 거짓인 채 옛 문서의 저장 길을 타고 옛 글이 새 초안처럼 보인다.
@@ -189,7 +213,7 @@ export default function DocSlugPage() {
           setTitle(''); setContent(''); setContentFormat('markdown'); setSlugLocked(false);
           setTitleUntouched(true); titleTouchedRef.current = false; slugRetriesRef.current = 0;
           setAdopt(null);
-          setDraft({ slug, parentId: parentParam });
+          setDraft({ slug, parentId: parentParamRef.current });
           return;
         }
         // prod P0(2026-07-14) — 이전엔 setSelectedDoc(null)만 하고 끝나 이 슬러그가 현재
@@ -212,6 +236,7 @@ export default function DocSlugPage() {
       draftEnteredForSlugRef.current = null;
       setDraft(null);
       setSelectedDoc(data);
+      if (routeNowRef.current === startedForRoute) onScreenDocIdRef.current = data.id; // a fetch that comes back after the person moved on must not make its doc the screen's again
       setTitle(data.title ?? '');
       setContent(data.content ?? '');
       setContentFormat(data.content_format ?? 'markdown');
@@ -219,13 +244,17 @@ export default function DocSlugPage() {
       // AC3: the request resolved via an old/alias slug → canonicalize the URL so
       // bookmarks and internal links settle on the live address (BE sends canonical_slug).
       const canonical = data.canonical_slug ?? data.slug;
-      if (canonical && canonical !== slug) router.replace(docUrl(wsSlug, projSlug, canonical));
+      if (canonical && canonical !== fetchSlug) router.replace(docUrl(wsSlug, projSlug, canonical));
     } catch {
       setSelectedDoc(null);
     } finally {
       setDocLoading(false);
     }
-  }, [projectId, slug, router, wsSlug, projSlug, newParam, parentParam]);
+  }, [projectId, slug, router, wsSlug, projSlug]);
+
+  // a new route: the old pairing must never answer for a DIFFERENT doc that happens to carry the old name. An EFFECT, not a render-time write — a concurrent render that is abandoned would otherwise clear the pairing of the doc that stays on screen.
+  // (The fetch below already refuses a pairing whose param is not the current route's; this drops it so it cannot come back when a later route carries the old name again.)
+  useEffect(() => { routeNowRef.current = slug; onScreenDocIdRef.current = null; if (liveSlugRef.current && liveSlugRef.current.param !== slug) liveSlugRef.current = null; }, [slug]);
 
   useEffect(() => { void fetchDoc(); }, [fetchDoc]);
 
@@ -238,6 +267,7 @@ export default function DocSlugPage() {
   const draftHasText = isDraft && (title.trim() !== '' || content.trim() !== '');
   const createDraftDoc = useCallback(async (): Promise<boolean> => {
     if (!draft || selectedDoc || creatingRef.current || !projectId) return false;
+    const startedForRoute = routeNowRef.current; // the route this create belongs to (NOT draft.slug: a 409 retry swaps the draft's temporary slug while the route stays the one the person is on)
     if (title.trim() === '' && content.trim() === '') return false;
     creatingRef.current = true;
     setDraftCreating(true);
@@ -261,6 +291,7 @@ export default function DocSlugPage() {
       // 기준선 = 보낸 값. 응답 오기 전에 더 친 글자는 보낸 값과 달라 dirty가 되어 다음 자동저장이 보낸다.
       setAdopt({ docId: (data as DocDetail).id, snapshot: JSON.stringify(posted) });
       setSelectedDoc(data as DocDetail);
+      if (routeNowRef.current === startedForRoute) onScreenDocIdRef.current = (data as DocDetail).id; // a create that returns after the person moved on must not claim the new route's screen
       // 제목을 한 번도 안 건드렸을 때만 기본 글을 되돌려 놓는다(만드는 중에 비운 칸은 비운 채로).
       if (!titleTouchedRef.current) setTitle((cur) => (cur === '' ? postedTitle : cur));
       setDraft(null);
@@ -465,8 +496,8 @@ export default function DocSlugPage() {
           in the same header place on both screens. The old story-#2967 note: the reader entry must stay discoverable — it is now a visible word. */}
       <DocModeSwitch
         mode="edit"
-        readHref={`${docUrl(wsSlug, projSlug, slug)}/view`}
-        editHref={docUrl(wsSlug, projSlug, slug)}
+        readHref={`${docUrl(wsSlug, projSlug, liveDocSlug)}/view`}
+        editHref={docUrl(wsSlug, projSlug, liveDocSlug)}
         readLabel={t('modeRead')}
         editLabel={t('editDoc')}
         groupLabel={t('modeSwitchLabel')}
