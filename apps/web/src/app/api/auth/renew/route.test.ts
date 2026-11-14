@@ -41,7 +41,7 @@ describe('GET /api/auth/renew (story 4904)', () => {
     expect(JSON.parse(String(mockFetch.mock.calls[0]![1].body))).toEqual({ refresh_token: 'old-rt' });
   });
 
-  it.each(['//evil.example/x', 'https://evil.example/x', '/\\evil.example', '/api/auth/renew', '/api/auth/renew?next=%2Fchats', null])('next=%s is never followed off the app: the chat home', async (next) => {
+  it.each(['//evil.example/x', 'https://evil.example/x', '/\\evil.example', '/\t/evil.example', '/\t\\evil.example', '/%09/evil.example', '/%2509/evil.example', '/api/auth/renew', '/api/auth/renew?next=%2Fchats', null])('next=%s is never followed off the app: the chat home', async (next) => {
     mockFetch.mockResolvedValue({ ok: true, json: async () => ({ data: { access_token: AT, refresh_token: 'r' } }) });
     const res = await get(next);
     expect(res.headers.get('location')).toBe('https://app.test/chats');

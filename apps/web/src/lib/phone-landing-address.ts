@@ -1,9 +1,11 @@
-// story 4714 (AC3 · AC4) — the addresses of the phone app's landing. No imports: the proxy (edge) and the screens both read them.
+// story 4714 (AC3 · AC4) — the addresses of the phone app's landing. One import only (the pure, dependency-free internal-path test): the proxy (edge) and the screens both read them.
 //
 // The shell starts every top-frame load with `X-Sprintable-Nav` (a number that rises per load · lib/initialSource.js of the mobile shell) — it is the
 // one thing a load the SHELL made carries and a browser's never does. Until now the server ignored it; the proxy reads it for one thing: the shell's
 // own `/glance` (its home address) is sent through `/phone-landing?next=/` first (story 4906: `next` is the site root — the landing page itself turns it
 // into the person's home, «오늘» — not the address `/glance` resolved to, which was the empty Board).
+import { isSafeInternalPath } from '@/lib/auth/internal-path';
+
 export const SHELL_NAV_HEADER = 'x-sprintable-nav';
 // story 4906 (F · PO 11-12) — the header above rides only on a load the SHELL starts. The next steps of the same phone app — a login form's `router.replace('/glance')`, a sign-up that ends
 // there, an in-page move — are client-side requests (RSC · fetch) with no such header, so the shell was invisible to the server exactly where a new customer's first screen is decided
@@ -21,7 +23,7 @@ export const PHONE_LANDING_NEXT_PARAM = 'next';
  * would send the person round and round); anything else is the site root, which the session sends on to the person's own home.
  */
 export function landingHome(next: string | null | undefined): string {
-  if (typeof next !== 'string' || !next.startsWith('/') || next.startsWith('//') || next.includes('\\') || /[\u0000-\u001f]/.test(next)) return '/';
+  if (!isSafeInternalPath(next)) return '/'; // story 4936: the one «this app's own path» test (lib/auth/internal-path.ts)
   let path: string;
   try { path = decodeURIComponent(new URL(next, 'http://app.invalid').pathname); } catch { return '/'; }
   if (path.replace(/\/+$/, '').toLowerCase() === PHONE_LANDING_PATH) return '/';

@@ -9,6 +9,7 @@ import { decodeJwt } from 'jose';
 import { SP_AT_COOKIE, SP_RT_COOKIE } from '@/lib/db/server';
 import { cookieBase, markSessionChanged, SP_AT_MAX_AGE_SECONDS, SP_RENEW_TRIED_COOKIE, SP_RENEW_TRIED_MAX_AGE_SECONDS, SP_RENEW_UNCONFIRMED_COOKIE, SP_RENEW_UNCONFIRMED_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { buildLoginRedirect, safeNextPath } from '@/lib/auth/session-redirect';
+import { isSafeInternalPath } from '@/lib/auth/internal-path';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { ACTIVE_ACCOUNT_COOKIE } from '@/lib/auth/account-vault';
 import { isRecentlySuperseded } from '@/lib/auth/switch-epoch';
@@ -28,7 +29,8 @@ const TOKEN_SUPERSEDED = 'TOKEN_SUPERSEDED';
 const landing = (): string => safeNextPath(null, readNavV3FlagsFromEnv());
 
 function internalPage(raw: string | null): string {
-  if (!raw || !raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\') || raw.startsWith('/api/') || /[\r\n]/.test(raw)) return landing();
+  // story 4936 — the guard is lib/auth/internal-path.ts (it also refuses a TAB between the slashes, which the old `/[\r\n]/` test did not); `/api/…` stays refused here (the loop guard of this road).
+  if (!isSafeInternalPath(raw) || raw.startsWith('/api/')) return landing();
   return raw;
 }
 

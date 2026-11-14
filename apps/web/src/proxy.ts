@@ -2,6 +2,7 @@ import { jwtVerify } from 'jose';
 import { NextRequest, NextResponse } from 'next/server';
 import { cookieBase, markSessionChanged, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
+import { isSafeInternalPath } from '@/lib/auth/internal-path';
 import { isRecentlySuperseded } from '@/lib/auth/switch-epoch';
 import { carryOnToTarget, embeddedApiTarget, embeddedHostRefusal } from '@/lib/embedded-api-origin';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
@@ -490,9 +491,7 @@ const RESOLVE_RETRY_PARAM = '_prRetry';
 // 한다. 여기(생성 쪽)의 originalPathname은 항상 request.nextUrl.pathname에서 유도돼 구조적으로
 // 안전하지만, 진짜 위험한 소비 지점은 use-unified-switcher.ts(그쪽은 사용자가 URL로 조작 가능한
 // ?next=를 읽어 router.push한다) — 방어는 그쪽에도 동일하게 있어야 한다(양쪽 다, 한쪽만으론 뚫림).
-function isSafeInternalPath(value: string): boolean {
-  return value.startsWith('/') && !value.startsWith('//') && !value.includes('\\');
-}
+// story 4936 — the guard is lib/auth/internal-path.ts `isSafeInternalPath` (imported above): control characters · backslash · `//` · origin re-parse · every decoded form. The old inline one let `/<TAB>/x` through.
 
 // story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:31Z) — env 읽기는
 // readNavV3FlagsFromEnv() 한 곳(nav-v3-flags-server.ts)으로, 목적지 문자열은
@@ -730,7 +729,8 @@ function loginRedirect(request: NextRequest, sessionExpired: boolean): NextRespo
   const nextTarget = request.nextUrl.pathname + request.nextUrl.search;
   url.pathname = '/login';
   url.search = '';
-  url.searchParams.set('next', nextTarget); // searchParams.set 이 encode
+  // story 4936: the `next` this puts in the sign-in address comes from the request's own path — a link someone sends (`/%09/evil.com`) is a request too — so it is planted only when it is an internal path (the login page checks it again on the way out)
+  if (isSafeInternalPath(nextTarget)) url.searchParams.set('next', nextTarget); // searchParams.set 이 encode
   if (sessionExpired) url.searchParams.set('reason', SESSION_EXPIRED_REASON);
   return NextResponse.redirect(url);
 }

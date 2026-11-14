@@ -7,6 +7,7 @@ import { firstGraphemes } from '@/lib/first-graphemes';
 import { AGENT_MARK_FILL_CLASS } from '@/components/ui/agent-identity';
 import type { AssetSourceLink } from '@/lib/storage/types';
 import { formatScheduledAt, toDateKey } from '@/lib/schedule-format';
+import { safeInternalPath } from '@/lib/auth/internal-path';
 
 /** 파일 아이콘 틴트 분류 — 목업 `.fic.*` 5종에 1:1 대응. */
 export type FileTint = 'img' | 'pdf' | 'doc' | 'zip' | 'code';
@@ -175,22 +176,9 @@ export function formatDate(iso: string, tz: string | null): string {
 }
 
 /**
- * BE-제공 string deeplink 안전화 — **내부 절대경로만** 허용.
- * `javascript:`·외부 URL·프로토콜-상대(`//host`)·제어문자 href 를 거부해 source title 클릭 XSS/오픈리다이렉트 차단.
- */
-function safeInternalPath(path: string): string | null {
-  if (typeof path !== 'string' || path.length === 0) return null;
-  // '/' 로 시작하되 '//'(프로토콜-상대) 아님 → 내부 경로
-  if (!path.startsWith('/') || path.startsWith('//')) return null;
-  // 제어문자(개행/탭 등) 포함 시 거부
-  if (/[\u0000-\u001f]/.test(path)) return null;
-  return path;
-}
-
-/**
  * 딥링크 resolve — BE 계약상 type별 형상이 달라(string·객체) 단일 href 로 정규화.
  * null 반환 시 UI는 평문(arrow 제거). manual 은 항상 null.
- * 보안: string 은 safeInternalPath 통과분만, 객체 동적 세그먼트는 encodeURIComponent.
+ * 보안: string 은 lib/auth/internal-path.ts 의 safeInternalPath 통과분만(story 4936), 객체 동적 세그먼트는 encodeURIComponent.
  * 객체 형상 → 레포 라우팅 관례 재사용:
  *   - conversation: `/chats/{conversation_id}` (+ message 강조 `?messageId=`; 전용 관례 부재→가정)
  *   - doc: `/docs/{doc_slug}`
@@ -200,7 +188,7 @@ function safeInternalPath(path: string): string | null {
 export function resolveDeeplinkHref(link: AssetSourceLink, withProject: (href: string) => string): string | null {
   const d = link.deeplink;
   if (d == null) return null;
-  if (typeof d === 'string') return safeInternalPath(d);
+  if (typeof d === 'string') return safeInternalPath(d, '') || null; // story 4936: BE-provided deeplink → the one internal-path test (lib/auth/internal-path.ts); not this app's own path → no link (plain text)
   if ('conversation_id' in d && d.conversation_id) {
     const messageId = 'message_id' in d ? d.message_id : undefined;
     return withProject(messageId
