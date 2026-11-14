@@ -121,7 +121,7 @@ export function GenerationConnectorRegisterForm({
       <div className="flex flex-col gap-1">
         <span className="text-ds-small font-semibold text-ds-ink">{t('gcFieldProvider')}</span>
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-ds-control border border-ds-line bg-ds-surface-high px-3 py-2 text-ds-body text-ds-ink-2">
-          <span className="flex items-center gap-2">{t('gcProviderVertexGeminiLabel')} <Chip>vertex_gemini</Chip></span>
+          <span className="flex items-center gap-2">{t('gcProviderVertexGeminiLabel')} <Chip mono>vertex_gemini</Chip></span>
           <span className="text-ds-small text-ds-ink-3">{t('gcFieldProviderCurrentNote')}</span>
         </div>
       </div>

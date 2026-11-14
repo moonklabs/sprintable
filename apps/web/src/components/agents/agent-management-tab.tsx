@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
@@ -8,6 +8,7 @@ import { Banner } from '@/components/ds/banner';
 import { Button } from '@/components/ds/button';
 import { Checkbox } from '@/components/ds/checkbox';
 import { Chip } from '@/components/ds/chip';
+import { DataText, joinDot } from '@/components/ds/data-text';
 import { Icon } from '@/components/ds/icon';
 import { useEmbeddedServer } from '@/components/embedded-server-context';
 import { EmptyState } from '@/components/ds/empty-state';
@@ -287,17 +288,17 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
     return list;
   };
 
-  const subtitleOf = (agent: OrgAgent): string => {
-    const parts: string[] = [];
+  const subtitleOf = (agent: OrgAgent): ReactNode[] => {
+    const parts: ReactNode[] = [];
     const roleText = agentRoleLabel(agent.role, to); // story 4912 D8: the ONE role label function (org roles + default job keys; an unknown value shows raw) — the detail's chip uses the same one
     if (roleText) parts.push(roleText);
     parts.push(ta('manageProjectsGranted', { count: grantCounts[agent.id] ?? 0 }));
-    if (agent.device_name && !embedded) parts.push(agent.device_name); // story 4675 (F2): the computer — two agents with one name are told apart here (hidden where there is one computer, story 4832)
+    if (agent.device_name && !embedded) parts.push(<DataText key="device">{agent.device_name}</DataText>); // story 4675 (F2): the computer — two agents with one name are told apart here (hidden where there is one computer, story 4832)
     if (agent.run_model_unset === true) parts.push(ta('modelUnsetBadge')); // story 4686 (AC3): no model named → the runtime's default runs
     if (isSystemPublisher(agent.runtime_type)) parts.push(ta('systemPublisherNeutralDescription'));
     const runtimeLine = formatAgentRuntimeLine(agent, locale, displayTimezone, ta);
     if (runtimeLine) parts.push(runtimeLine);
-    return parts.join(' · ');
+    return joinDot(parts);
   };
 
   const addAgentButton = isAdmin ? (
@@ -357,7 +358,7 @@ export function AgentManagementTab({ onAddAgent }: AgentManagementTabProps) {
                   <RowName label={label} id={agent.id} />
                 </Link>
               ),
-              subtitle: subtitleOf(agent) || undefined,
+              subtitle: subtitleOf(agent),
               // bounded + wrapping: the state chips sit in the row's right slot, which does not shrink — with all four at 402px they would push the row wider than the screen (the 402px overflow guard)
               statusMark: (
                 <span className="flex max-w-56 flex-wrap items-center justify-end gap-1.5">

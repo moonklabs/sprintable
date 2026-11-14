@@ -100,7 +100,8 @@ describe('EventDefRow — 행 레이아웃(RowList · 4212 규격을 틀의 행�
     await renderWorkflowTab();
     const sub = document.querySelector(`[data-testid="event-def-key-subtitle-${PRESET.key}"]`)!;
     const cell = sub.parentElement!;
-    for (const c of ['truncate', 'font-mono']) expect(classesOf(cell).has(c), c).toBe(true);
+    expect(classesOf(cell).has('truncate'), 'truncate').toBe(true);   // the second line still truncates on one line
+    expect(classesOf(sub).has('font-mono'), 'font-mono').toBe(true); // 4928: the key is a DataText (code font) inside a body-font line
   });
 
   it('오른쪽 묶음(활성 · 버전 칩 · «프로젝트에 적용»): 오른쪽 끝에 붙은 채 줄바꿈 · 행 밖으로 안 넘친다(max-w-full)', async () => {

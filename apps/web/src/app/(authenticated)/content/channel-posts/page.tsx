@@ -8,6 +8,7 @@ import { useChatsHref, useConnectRulesHref, useDashboardContext } from '@/app/da
 import { Banner } from '@/components/ds/banner';
 import { Button } from '@/components/ds/button';
 import { Chip, Tag } from '@/components/ds/chip';
+import { DataText } from '@/components/ds/data-text';
 import { EmptyState } from '@/components/ds/empty-state';
 import { PageFrame } from '@/components/ds/page-frame';
 import { PageHead } from '@/components/ds/page-head';
@@ -347,7 +348,7 @@ export default function ChannelPostListPage() {
           <>
             <span>{channelLabel(draft.channel)}</span>
             {isSandboxChannelDraft(draft.channel) ? <>{' '}<SandboxTestBadge /></> : null}
-            {failureAction ? null : <>{' · '}<span data-testid="channel-post-outgoing-at">{outgoingText}</span></>}
+            {failureAction ? null : <>{' · '}<DataText data-testid="channel-post-outgoing-at">{outgoingText}</DataText></>}
             {originDiffers ? <>{' '}<span data-testid="channel-post-origin-author"><AuthorTag kind={draft.origin_author_kind} /></span></> : null}
           </>
         )}

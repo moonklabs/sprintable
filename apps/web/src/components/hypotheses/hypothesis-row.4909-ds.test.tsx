@@ -45,21 +45,21 @@ describe('HypothesisRow — 4909 ds ListRow 문법', () => {
     expect(row().querySelector('[data-slot="ds-chip"]')?.getAttribute('data-status')).toBe('active');
     const statement = [...row().querySelectorAll('span')].find((s) => s.textContent === '랜딩 첫 화면에 후기를 넣으면 가입 전환이 오른다')!;
     expect(statement.className).toContain('line-clamp-2');
-    expect(row().querySelector('.font-mono')).toBeTruthy();
+    expect(row().querySelector('[data-slot="ds-list-row-subtitle"]')).toBeTruthy();
     expect(row().querySelector('[aria-label]')?.getAttribute('aria-label')).toBe(T.actions);
     expect(row().className).not.toMatch(/rounded-xl|bg-background/);
   });
 
   it('the second line carries «지표 · 날짜 · 🔗 연결 수 · @담당» — ≤ for a downward metric, the link count only when linked, the owner always', async () => {
     await draw(hyp({ metric_definition: { metric: 'bounce', target: 3.5, direction: 'down' } as never, story_ids: ['s1', 's2'] }), actionsMock(), (id) => (id === 'm1' ? '송윤재' : ''));
-    const sub = row().querySelector('.truncate.font-mono')!.textContent!;
+    const sub = row().querySelector('[data-slot="ds-list-row-subtitle"]')!.textContent!;
     expect(sub).toContain('bounce ≤ 3.50');
     expect(sub).toContain('2026-12-01');
     expect(sub).toContain('🔗 2');
     expect(sub).toContain('@송윤재');
     await act(async () => { root.unmount(); }); root = createRoot(container);
     await draw(hyp({ story_ids: [] }));
-    expect(row().querySelector('.truncate.font-mono')!.textContent).not.toContain('🔗');
+    expect(row().querySelector('[data-slot="ds-list-row-subtitle"]')!.textContent).not.toContain('🔗');
   });
 
   it('a killed hypothesis keeps its statement struck through and quiet', async () => {

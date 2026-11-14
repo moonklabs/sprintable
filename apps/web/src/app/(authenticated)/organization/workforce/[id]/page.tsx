@@ -839,7 +839,7 @@ export default function AgentDetailPage() {
           <DetailCard
             data-testid="agent-detail-card-sse"
             title={t('agentFakechatTitle')}
-            chips={<Chip tone="info">SSE</Chip>}
+            chips={<Chip mono tone="info">SSE</Chip>}
             description={t('agentFakechatDescription')}
             action={freshApiKey ? (
               <DsButton variant="secondary" onClick={() => void handleCopyFakechatEnvKey()}>

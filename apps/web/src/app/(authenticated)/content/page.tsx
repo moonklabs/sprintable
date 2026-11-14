@@ -8,6 +8,7 @@ import { useChatsHref, useDashboardContext } from '@/app/dashboard/dashboard-she
 import { Banner } from '@/components/ds/banner';
 import { Button } from '@/components/ds/button';
 import { Chip, Tag } from '@/components/ds/chip';
+import { DataText } from '@/components/ds/data-text';
 import { EmptyState } from '@/components/ds/empty-state';
 import { PageFrame } from '@/components/ds/page-frame';
 import { PageHead } from '@/components/ds/page-head';
@@ -251,7 +252,7 @@ export default function ContentPostListPage() {
           <>
             <span data-testid="content-current-version">
               {formatViewerRelativeTime(draft.updated_at, locale, displayTimezone)}
-              <span> · v{draft.current_version}</span>
+              <span> · <DataText>v{draft.current_version}</DataText></span>
             </span>
             {' '}
             <span data-testid="content-latest-author"><AuthorTag kind={draft.latest_author_kind} /></span>

@@ -6,6 +6,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Banner } from '@/components/ds/banner';
 import { Card } from '@/components/ds/card';
 import { Chip } from '@/components/ds/chip';
+import { DataText } from '@/components/ds/data-text';
 import { EmptyState } from '@/components/ds/empty-state';
 import { PageFrame } from '@/components/ds/page-frame';
 import { PageHead } from '@/components/ds/page-head';
@@ -155,7 +156,7 @@ export default function OrganizationRolesPage() {
                     <RowListItem
                       key={member.id}
                       title={name}
-                      subtitle={member.email}
+                      subtitle={member.email ? <DataText>{member.email}</DataText> : undefined}
                       statusMark={
                         canEdit ? (
                           <NativeSelect

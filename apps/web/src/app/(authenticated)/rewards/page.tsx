@@ -159,7 +159,7 @@ export default function RewardsPage() {
             leaderboard.map((e, i) => (
               <RowListItem
                 key={e.member_id}
-                leading={<Chip>#{i + 1}</Chip>}
+                leading={<Chip mono>#{i + 1}</Chip>}
                 title={memberMap[e.member_id] ?? t('unknown')}
                 statusMark={(
                   <span className={balanceClass(e.balance)}>

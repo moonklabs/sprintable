@@ -7,6 +7,7 @@ import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Banner } from '@/components/ds/banner';
 import { Button } from '@/components/ds/button';
 import { Chip } from '@/components/ds/chip';
+import { DataText } from '@/components/ds/data-text';
 import { CountBadge } from '@/components/ds/count-badge';
 import { EmptyState } from '@/components/ds/empty-state';
 import { PageFrame } from '@/components/ds/page-frame';
@@ -346,7 +347,7 @@ function EventDefRow({
     <RowListItem
       data-testid={`event-def-row-${def.key}`}
       title={titleLabel}
-      subtitle={titleLabel !== def.key ? <span data-testid={`event-def-key-subtitle-${def.key}`}>{def.key}</span> : undefined}
+      subtitle={titleLabel !== def.key ? <DataText data-testid={`event-def-key-subtitle-${def.key}`}>{def.key}</DataText> : undefined}
       statusMark={(
         <>
           <Chip tone={def.enabled ? 'done' : 'neutral'} dot>{def.enabled ? t('eventEnabledBadge') : t('eventDisabledBadge')}</Chip>

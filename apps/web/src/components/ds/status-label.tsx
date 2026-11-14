@@ -26,13 +26,13 @@ export interface StatusLabelProps extends Omit<HTMLAttributes<HTMLSpanElement>, 
 }
 
 /**
- * UI-3(a9d56577) StatusLabel — doc §4 #15. 표시(점 · 속 빈 점 · 깜빡이는 점 · 아이콘) + 고정폭 글 한 줄.
+ * UI-3(a9d56577) StatusLabel — doc §4 #15. 표시(점 · 속 빈 점 · 깜빡이는 점 · 아이콘) + 글 한 줄(4928: 본문 글꼴 — 한국어 상태 글이라 고정폭이 아니다).
  * 표시는 장식(`aria-hidden`)이고 뜻은 항상 글이 싣는다. 손 필요 · 실패는 점이 아니라 아이콘이 붙는다.
  */
 export function StatusLabel({ status, label, className, ...props }: StatusLabelProps) {
   const spec = STATUS[status];
   return (
-    <span data-slot="ds-status-label" data-status={status} className={cn('inline-flex items-center gap-1.5 whitespace-nowrap font-mono text-ds-mono-md', spec.text, className)} {...props}>
+    <span data-slot="ds-status-label" data-status={status} className={cn('inline-flex items-center gap-1.5 whitespace-nowrap font-sans text-ds-mono-md tabular-nums', spec.text, className)} {...props}>
       {spec.mark === 'icon' ? (
         <Icon name={spec.icon} size={14} className={cn('shrink-0', spec.color)} />
       ) : (

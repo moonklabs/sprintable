@@ -205,8 +205,8 @@ export function AgentRunDetail({
           ) : null}
           <span className="text-ds-small text-ds-ink-2">{t('startedAt')}: {toLocaleStr(run.started_at, locale, displayTimezone)}</span>
           {run.finished_at ? <span className="text-ds-small text-ds-ink-2">{t('finishedAt')}: {toLocaleStr(run.finished_at, locale, displayTimezone)}</span> : null}
-          {run.model ? <Chip>{run.model}</Chip> : null}
-          {run.trigger ? <Chip>{run.trigger}</Chip> : null}
+          {run.model ? <Chip mono>{run.model}</Chip> : null}
+          {run.trigger ? <Chip mono>{run.trigger}</Chip> : null}
         </div>
 
         <dl data-testid="agent-run-detail-stats" className={`${AGENT_RUN_DETAIL_STRIP_FACE} grid grid-cols-2 gap-x-4 gap-y-2 rounded-ds-control px-3 py-2 sm:grid-cols-4`}>

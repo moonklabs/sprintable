@@ -315,7 +315,7 @@ export function ArtifactViewer({
         <PageHead
           meta={
             <span className="inline-flex flex-wrap items-center gap-1.5 align-middle">
-              <Chip>{artifact.format}</Chip>
+              <Chip mono>{artifact.format}</Chip>
               {artifact.source === 'imported' ? <Chip icon="upload">{t('provenanceImportedBadge')}</Chip> : null}
               {artifact.anchor_version != null ? <Chip tone="done" icon="check">{t('anchorBadge', { version: artifact.anchor_version })}</Chip> : null}
             </span>

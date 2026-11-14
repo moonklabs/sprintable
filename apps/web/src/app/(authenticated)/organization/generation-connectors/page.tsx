@@ -211,7 +211,7 @@ export default function OrganizationGenerationConnectorsPage() {
                   title={
                     <span className="flex flex-wrap items-center gap-2 whitespace-normal">
                       <span>{c.label}</span>
-                      <Chip>{c.provider_key}</Chip>
+                      <Chip mono>{c.provider_key}</Chip>
                       {/* story #4140 — 제품 리전 정책값 가시화(crew가 이 값으로만 호출). story #4166 — owner/admin·active 커넥터는 칩 대신 select(값 자체가 즉시-적용 행 액션, 자격 무접촉). 그 외는 읽기전용 칩. */}
                       {canEdit ? (
                         <NativeSelect
@@ -227,7 +227,7 @@ export default function OrganizationGenerationConnectorsPage() {
                           ))}
                         </NativeSelect>
                       ) : (
-                        <Chip data-testid="gc-location-chip">{c.location}</Chip>
+                        <Chip mono data-testid="gc-location-chip">{c.location}</Chip>
                       )}
                       <Chip tone={c.status === 'active' ? 'done' : 'failed'} dot data-status-chip={c.status}>
                         {c.status === 'active' ? t('gcStatusActive') : t('gcStatusRevoked')}

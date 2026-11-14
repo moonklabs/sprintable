@@ -89,7 +89,7 @@ describe('홈 — 넓은 화면: 목록 + 상세 열(story #4888)', () => {
     expect(listRowOf('gate:g2').getAttribute('aria-current')).toBe('true');
     expect(listRowOf('gate:g1').getAttribute('aria-current')).toBeNull();
     // 줄의 빈 자리(부제)를 눌러도 선택된다
-    await act(async () => { (listRowOf('hitl:g3').querySelector('.font-mono') as HTMLElement).click(); });
+    await act(async () => { (listRowOf('hitl:g3').querySelector('[data-slot="ds-list-row-subtitle"]') as HTMLElement).click(); });
     expect(detail()!.getAttribute('data-row-key')).toBe('hitl:g3');
   });
 

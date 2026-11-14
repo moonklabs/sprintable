@@ -44,7 +44,7 @@ export function ListRow({ leading, leadingClassName, title, subtitle, trailing, 
       {leading ? <div data-slot="ds-list-row-leading" className={cn('shrink-0', leadingClassName)}>{leading}</div> : null}
       <div className="min-w-0 flex-1 basis-24">
         <div className="truncate text-ds-body font-semibold text-ds-ink">{title}</div>
-        {subtitle ? <div className="truncate font-mono text-ds-mono-md text-ds-ink-3">{subtitle}</div> : null}
+        {subtitle ? <div data-slot="ds-list-row-subtitle" className="truncate font-sans text-ds-mono-md tabular-nums text-ds-ink-3">{subtitle}</div> : null}
       </div>
       {trailing ? <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">{trailing}</div> : null}
     </>

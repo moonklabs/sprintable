@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { RotateCw } from 'lucide-react';
 import { Button } from '@/components/ds/button';
 import { Chip } from '@/components/ds/chip';
+import { DataText, joinDot } from '@/components/ds/data-text';
 import { Input } from '@/components/ds/input';
 import { LAYER } from '@/components/ds/layers';
 import { ListRow } from '@/components/ds/list-row';
@@ -134,11 +135,13 @@ function RunRow({ run, active, onOpen, onActive }: { run: AgentRun; active: bool
     ? (getRunErrorDisplay(run.error_message, run.last_error_code).message ?? run.result_summary)
     : run.status === 'hitl_pending' ? (run.result_summary ?? t('hitlWaiting')) : run.result_summary;
   const billing = run.llm_provider ? t(`billingMode_${run.llm_provider}`) : null;
-  const meta = [
-    run.model, run.llm_provider_key, billing,
-    `${run.llm_call_count} ${t('llmCalls')}`, `${formatTokens(run.input_tokens)}/${formatTokens(run.output_tokens)} tok`,
-    formatDuration(run.duration_ms), formatCost(run.cost_usd), formatViewerRelativeTime(run.created_at, locale, displayTimezone),
-  ].filter(Boolean).join(' · ');
+  // 4928: 모델 · 제공자 키 · 토큰 · 시간 · 비용은 데이터 조각(고정폭), 과금 방식 · 호출 횟수 · «N시간 전»은 한국어 글(본문 글꼴).
+  const data = (key: string, text: string | null | undefined) => (text ? <DataText key={key}>{text}</DataText> : null);
+  const meta = joinDot([
+    data('model', run.model), data('provider', run.llm_provider_key), billing,
+    `${run.llm_call_count} ${t('llmCalls')}`, data('tokens', `${formatTokens(run.input_tokens)}/${formatTokens(run.output_tokens)} tok`),
+    data('duration', formatDuration(run.duration_ms)), data('cost', formatCost(run.cost_usd)), formatViewerRelativeTime(run.created_at, locale, displayTimezone),
+  ].filter(Boolean));
   const memoHref = run.memo_id ? getTriggerMemoHref(run.memo_id) : null;
   // the accessible name tells two runs of the same agent apart by when each started (to the second, in the viewer's zone) — «story #3592: the same open name on every row cannot tell the rows apart»
   const startedAt = new Intl.DateTimeFormat(locale, { dateStyle: 'short', timeStyle: 'medium', timeZone: displayTimezone ?? undefined }).format(new Date(run.created_at));

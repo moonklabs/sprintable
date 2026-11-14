@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button as DsButton } from '@/components/ds/button';
 import { Card } from '@/components/ds/card';
 import { Chip } from '@/components/ds/chip';
+import { DataText } from '@/components/ds/data-text';
 import { IconButton } from '@/components/ds/icon-button';
 import { Metric } from '@/components/ds/metric';
 import { ListRow } from '@/components/ds/list-row';
@@ -843,7 +844,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
                   selected={selected?.id === sprint.id}
                   className="has-[button:focus-visible]:ring-2 has-[button:focus-visible]:ring-inset has-[button:focus-visible]:ring-ds-action"
                   title={<DsButton type="button" variant="quiet" className="h-auto max-w-full justify-start px-0 text-left text-ds-body font-semibold text-ds-ink hover:bg-transparent hover:text-ds-ink focus-visible:ring-0"><span className="truncate">{sprint.title}</span></DsButton>}
-                  subtitle={`${sprint.start_date} ~ ${sprint.end_date} · ${sprintDurationDays(sprint.start_date, sprint.end_date)}${t('days')}`}
+                  subtitle={<><DataText>{sprint.start_date} ~ {sprint.end_date}</DataText>{` · ${sprintDurationDays(sprint.start_date, sprint.end_date)}${t('days')}`}</>}
                   trailing={
                     <>
                       {sprint.report_doc_id ? (
@@ -922,7 +923,7 @@ export function SprintsClient({ projectId }: SprintsClientProps) {
       {/* Plan stats — story #4888: 손으로 만든 rounded-md border 칸 → ds Chip(아이콘은 장식, 뜻은 글이 싣는다). 값이 있을 때만(예전과 같은 조건). */}
       {(selected.capacity != null || selected.team_size != null) ? (
         <div className="mb-4 flex flex-wrap gap-2">
-          {selected.capacity != null ? <Chip icon="schedule">{selected.capacity} SP</Chip> : null}
+          {selected.capacity != null ? <Chip mono icon="schedule">{selected.capacity} SP</Chip> : null}
           {selected.team_size != null ? <Chip icon="groups">{selected.team_size}{t('personCountUnit')}</Chip> : null}
           <Chip icon="calendar_month">{sprintDurationDays(selected.start_date, selected.end_date)}{t('days')}</Chip>
         </div>

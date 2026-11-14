@@ -186,6 +186,27 @@ describe('OrganizationRolesPage — 이름 칸 폴백(story #4286)', () => {
     expect(container.textContent).not.toContain('u-abcdef');
     expect(container.textContent).toContain('noname@moonklabs.com');
   });
+
+  it('⭐4928 이메일은 «데이터 조각» — 고정폭(DataText), 줄 둘째 줄 자체는 본문 글꼴 · 이메일이 없으면 둘째 줄 칸 자체를 그리지 않는다(빈 칸 0)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/org-members') {
+        return {
+          ok: true,
+          json: async () => ({ data: [
+            { id: 'm-4', user_id: 'u-4', name: '이메일 있는 구성원', email: 'has@moonklabs.com', role: 'member' },
+            { id: 'm-5', user_id: 'u-5', name: '이메일 없는 구성원', email: null, role: 'member' },
+          ] }),
+        };
+      }
+      throw new Error('unexpected fetch: ' + url);
+    }));
+    await mount();
+    const data = container.querySelectorAll('[data-slot="ds-data-text"]');
+    expect(data.length).toBe(1);
+    expect(data[0]!.textContent).toBe('has@moonklabs.com');
+    expect(data[0]!.className).toContain('font-mono');
+    expect(container.querySelectorAll('[data-slot="ds-list-row-subtitle"]').length).toBe(1);
+  });
 });
 
 // 4913(UI-R5 · 한 쪽 틀 A판) — 제목은 위 막대 한 곳, 본문은 틀 안에서 시작하고, 모든 분기에서 머리가 남는다.
