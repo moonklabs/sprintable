@@ -36,6 +36,15 @@ export function installMarkerWatch(): void {
 
 export interface MarkerWaitOptions { timeoutMs?: number; lateWatchMaxMs?: number }
 
+/**
+ * How long the late watch may run after a miss. Only a test's FIRST attempt watches (PO 11-14): the retries of a miss repeat the same observation, and a CI job has a hard limit (timeout-minutes 25) —
+ * the worst added time is (first-attempt misses) × lateWatchMaxMs (12 s), not (every failed attempt) × 12 s. Never past the test's own budget (a margin for the fixture time that began before the clock).
+ */
+export function lateWatchBudgetMs(input: { retry: number; testTimeoutMs: number; elapsedMs: number; maxMs: number; marginMs?: number }): number {
+  if (input.retry > 0) return 0;
+  return Math.max(0, Math.min(input.maxMs, input.testTimeoutMs - input.elapsedMs - (input.marginMs ?? TEST_BUDGET_MARGIN_MS)));
+}
+
 async function reportMarkerMiss(page: Page, marker: PageWaitMarker, pagePath: string, reloadAt: number, reloadDoneAt: number | null, timeoutMs: number, lateWatchMaxMs: number): Promise<string> {
   const info = test.info();
   const now = Date.now();
@@ -46,7 +55,7 @@ async function reportMarkerMiss(page: Page, marker: PageWaitMarker, pagePath: st
   const testStartedAt = existing?.startedAt ?? reloadAt;
   // never watch past the test's own budget (a timeout of the test would hide this report)
   // (the test's own clock began before the page fixture was made, so keep a wide margin)
-  const budget = Math.max(0, Math.min(lateWatchMaxMs, info.timeout - (now - testStartedAt) - TEST_BUDGET_MARGIN_MS));
+  const budget = lateWatchBudgetMs({ retry: info.retry, testTimeoutMs: info.timeout, elapsedMs: now - testStartedAt, maxMs: lateWatchMaxMs });
   let lateIdleAt: number | null = null;
   const watchStartedAt = Date.now();
   if (budget > 0) {
@@ -75,6 +84,7 @@ async function reportMarkerMiss(page: Page, marker: PageWaitMarker, pagePath: st
     timedOutAt,
     reloadDoneAt,
     lateWatchMs: watchEndedAt - watchStartedAt,
+    lateWatchSkipped: info.retry > 0,
     endAt: end,
     lateIdleAt,
     records: watch.records(),

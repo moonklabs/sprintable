@@ -6,12 +6,13 @@ import { EventEmitter } from 'node:events';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DOC_READY_STATES, ERROR_CODES, ERROR_NAMES, HTTP_METHODS, NET_ERRORS, RESOURCE_TYPES, formatRecord, isCompileFamily, normalizeRoute, parseServerLine, pickAllowed, safeErrorCode, safeErrorName, safeMethod, safeNetError, safeReadyState, safeResourceType } from '../../e2e/support/server-line-allowlist.mjs';
 import {
   MAX_LOG_TAIL_BYTES, classifyMarker, formatMarkerReport, openAt, parseServerLog, pendingAt, pickMarker, readServerLog, safeFailure, watchNetwork,
   type MarkerReportInput, type NetRecord,
 } from '../../e2e/support/marker-diagnostics';
+import { lateWatchBudgetMs } from '../../e2e/support/marker-wait';
 
 const WEB = join(__dirname, '..', '..');
 const T0 = 1_000_000; // test start
@@ -448,6 +449,33 @@ describe('담을 칸 allowlist — 서버 줄 한 줄에서 뽑는 것 (story 49
   });
 });
 
+describe('더 지켜보기는 시험의 첫 시도에서만 (story 4927 · PO 11-14)', () => {
+  it('⭐재시도(retry>0)는 0 — 첫 시도만 최대 maxMs까지, 시험 예산(시간 한도 − 지난 시간 − 여유 8초) 안에서', () => {
+    const base = { testTimeoutMs: 30_000, elapsedMs: 8_000, maxMs: 12_000 };
+    expect(lateWatchBudgetMs({ ...base, retry: 0 })).toBe(12_000); // 30 − 8 − 8 = 14 s left → capped at maxMs
+    expect(lateWatchBudgetMs({ ...base, retry: 1 })).toBe(0);
+    expect(lateWatchBudgetMs({ ...base, retry: 2 })).toBe(0);
+    expect(lateWatchBudgetMs({ ...base, retry: 0, elapsedMs: 20_000 })).toBe(2_000); // 30 − 20 − 8
+    expect(lateWatchBudgetMs({ ...base, retry: 0, elapsedMs: 25_000 })).toBe(0); // never negative
+    expect(lateWatchBudgetMs({ ...base, retry: 0, elapsedMs: 20_000, marginMs: 4_000 })).toBe(6_000); // an explicit margin
+  });
+
+  it('⭐최악 더 지켜보기 시간 = 첫 시도 놓침 수 × 12초 — 25분 잡 상한과 견준 숫자(PR 본문)', () => {
+    const maxMs = 12_000;
+    const worst = (firstAttemptMisses: number) => firstAttemptMisses * lateWatchBudgetMs({ retry: 0, testTimeoutMs: 30_000, elapsedMs: 0, maxMs });
+    expect(worst(17)).toBe(204_000); // the 5781 CI run had 17 first-attempt misses: 3.4 min at worst (was 33 misses × 12 s = 6.6 min)
+    expect(worst(28)).toBe(336_000); // all 28 contrast tests missing on the first attempt: 5.6 min — inside the 25 min job limit
+    const everyAttempt = (attempts: number) => attempts * maxMs;
+    expect(everyAttempt(33)).toBe(396_000);
+  });
+
+  it('⭐보고서는 재시도라 안 지켜봤다고 적는다(0ms가 «아무것도 안 왔다»로 읽히지 않게)', () => {
+    expect(formatMarkerReport(input({ lateWatchSkipped: true }))).toContain('(재시도라 안 지켜봄 — 첫 시도에서만 지켜봄)');
+    expect(formatMarkerReport(input({ lateWatchSkipped: false }))).not.toContain('안 지켜봄');
+    expect(formatMarkerReport(input({}))).not.toContain('안 지켜봄');
+  });
+});
+
 describe('서버 줄 파일은 끝 2MB만 읽는다 (story 4927)', () => {
   it('⭐2MB보다 큰 파일이면 앞쪽은 버리고 · 잘린 첫 줄도 버리고 · 끝쪽 줄을 읽는다(한 CI 잡이 여러 e2e 단계를 같은 파일에 이어 씀) · 파일 없으면 available=false', () => {
     const dir = mkdtempSync(join(tmpdir(), 'tail4927-'));
@@ -594,6 +622,8 @@ describe('스펙 · 설정이 진단에 연결돼 있다 (story 4927)', () => {
 
   it('⭐페이지 상태의 path는 pathname을 normalizeRoute로 거친 것 · 진단 실패 줄은 오류 이름만', () => {
     expect(wait).toContain('normalizeRoute(d.path)');
+    expect(wait).toContain('lateWatchBudgetMs({ retry: info.retry,');
+    expect(wait).toContain('lateWatchSkipped: info.retry > 0,');
     expect(wait).toContain('readyState=${safeReadyState(d.readyState)}');
     expect(wait).toContain("safeErrorName(e instanceof Error ? e.name : '')");
   });
@@ -617,10 +647,33 @@ describe('스펙 · 설정이 진단에 연결돼 있다 (story 4927)', () => {
     expect(step).not.toMatch(/include-hidden-files/); // no hidden file goes up by switch either
   });
 
-  it('⭐서버는 시각 찍는 껍데기로 뜨고 stdout을 CI 로그로 받으며, 로그 파일은 실패 때 artifact로 올라간다', () => {
-    expect(config).toContain("command: 'node e2e/support/dev-server-logged.mjs'");
-    expect(config).toContain("stdout: 'pipe'");
-    expect(config).toContain("process.env['E2E_WEBSERVER_LOG'] = devServerLog;");
+  it('⭐서버 껍데기는 CI 기본 꺼짐(E2E_SERVER_LOG=1일 때만) — 꺼짐일 때 webServer는 develop과 같은 `pnpm dev` · 키 집합까지 같음 · 켜짐이면 껍데기 + pipe', async () => {
+    const load = async (env: Record<string, string | undefined>) => {
+      const keys = ['E2E_SERVER_LOG', 'E2E_WEBSERVER_LOG', 'PLAYWRIGHT_BASE_URL', 'CI'];
+      const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+      try {
+        for (const k of keys) delete process.env[k];
+        for (const [k, v] of Object.entries(env)) if (v !== undefined) process.env[k] = v;
+        vi.resetModules();
+        const mod = await import('../../playwright.config');
+        return { cfg: mod.default as { webServer?: Record<string, unknown> }, logPath: process.env['E2E_WEBSERVER_LOG'] };
+      } finally {
+        for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+      }
+    };
+    // develop's webServer, letter for letter: command · url · reuseExistingServer — nothing else (no stdout / stderr keys)
+    for (const env of [{ CI: '1' }, {}, { CI: '1', E2E_SERVER_LOG: '0' }]) {
+      const off = await load(env);
+      expect(off.cfg.webServer, JSON.stringify(env)).toStrictEqual({ command: 'pnpm dev', url: 'http://localhost:3108', reuseExistingServer: !env.CI });
+      expect(Object.keys(off.cfg.webServer!)).toEqual(['command', 'url', 'reuseExistingServer']);
+      expect(off.logPath, 'no log path is exported while the switch is off').toBeUndefined();
+    }
+    const on = await load({ CI: '1', E2E_SERVER_LOG: '1' });
+    expect(on.cfg.webServer).toMatchObject({ command: 'node e2e/support/dev-server-logged.mjs', stdout: 'pipe', stderr: 'pipe' });
+    expect(on.logPath).toContain('playwright/server-logs/next-dev.log');
+    // the source says why it is off, with the measured numbers
+    expect(config).toContain("process.env['E2E_SERVER_LOG'] === '1'");
+    expect(config).toContain('wrapper only: 1 failed');
     // upload-artifact@v4 skips hidden files by default: a «.logs» directory would upload nothing and the step would still be green — so the directory is not hidden
     expect(ci).toContain('apps/web/playwright/server-logs/');
     expect(ci).not.toContain('playwright/.logs');

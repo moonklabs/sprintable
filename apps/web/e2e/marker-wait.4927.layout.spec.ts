@@ -131,3 +131,24 @@ test('a diagnostics failure never hides the original error: the first line is st
     expect(err!.message).toContain('── 진단 만들기 실패 (story 4927) ──'); // and the fallback line says why there is no report
   } finally { await s.close(); }
 });
+
+// the late watch runs on a test's FIRST attempt only (PO 11-14: a CI job has a hard limit, and the retries of a miss repeat the same observation)
+test.describe('late watch on the first attempt only', () => {
+  test.describe.configure({ retries: 1 });
+  test('a miss watches (≥ 600 ms) on attempt 1 and does not watch on the retry (< 200 ms)', async ({ page }, testInfo) => {
+    const s = await serve(asksMarker(), null);
+    try {
+      await page.goto(s.url);
+      const err = await waitForPageMarker(page, MARKER, '/retry', { timeoutMs: 400, lateWatchMaxMs: 1200 }).then(() => null, (e: Error) => e);
+      expect(err, 'must throw').not.toBeNull();
+      const watched = Number(/그 뒤 더 지켜본 시간: (\d+)ms/.exec(err!.message)?.[1]);
+      if (testInfo.retry === 0) {
+        expect(watched).toBeGreaterThanOrEqual(600);
+        expect(err!.message).not.toContain('안 지켜봄');
+        throw new Error('first attempt done — fail on purpose so the retry runs'); // reported as flaky, not failed (it passes on the retry)
+      }
+      expect(watched).toBeLessThan(200);
+      expect(err!.message).toContain('(재시도라 안 지켜봄 — 첫 시도에서만 지켜봄)');
+    } finally { await s.close(); }
+  });
+});

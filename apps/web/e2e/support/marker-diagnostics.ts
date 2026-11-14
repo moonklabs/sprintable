@@ -48,6 +48,8 @@ export interface MarkerReportInput {
   lateWatchMs: number;
   /** when the report was finished (the end of the server-record window); defaults to timedOutAt + lateWatchMs. */
   endAt?: number;
+  /** true on a retry attempt: the late watch only runs on a test's first attempt, so «0 ms» there means «skipped», not «nothing came». */
+  lateWatchSkipped?: boolean;
   /** networkidle marker only: the time it became idle during the late watch, or null. */
   lateIdleAt: number | null;
   records: NetRecord[];
@@ -159,7 +161,7 @@ export function formatMarkerReport(input: MarkerReportInput): string {
   const out: string[] = [];
   out.push(`── 진단 (story 4927) · 시도 #${attempt} · ${pagePath} ──`);
   out.push(`판정: ${classifyMarker(input)}`);
-  out.push(`시험 시작 → reload 호출: ${Math.round(reloadAt - testStartedAt)}ms · reload → 시간 초과: ${Math.round(timedOutAt - reloadAt)}ms (한도 ${timeoutMs}ms) · 그 뒤 더 지켜본 시간: ${lateWatchMs}ms`);
+  out.push(`시험 시작 → reload 호출: ${Math.round(reloadAt - testStartedAt)}ms · reload → 시간 초과: ${Math.round(timedOutAt - reloadAt)}ms (한도 ${timeoutMs}ms) · 그 뒤 더 지켜본 시간: ${lateWatchMs}ms${input.lateWatchSkipped ? '(재시도라 안 지켜봄 — 첫 시도에서만 지켜봄)' : ''}`);
   out.push(`reload 호출이 돌아온 때: ${reloadDoneAt != null ? `reload ${rel(reloadDoneAt, reloadAt)}${reloadDoneAt > timedOutAt ? ' (시간 초과 뒤 — 문서가 늦게 뜸)' : ''}` : '안 돌아옴(문서가 안 뜸)'}`);
 
   const afterReload = records.filter((r) => r.requestAt >= reloadAt).sort((a, b) => a.requestAt - b.requestAt);
@@ -194,7 +196,7 @@ export function formatMarkerReport(input: MarkerReportInput): string {
   if (afterReload.length > MAX_REQUEST_ROWS) out.push(`  … ${afterReload.length - MAX_REQUEST_ROWS}개 더`);
 
   if (!serverLogAvailable) {
-    out.push('Next 서버 기록: 수집 안 됨(E2E_WEBSERVER_LOG 파일 없음 — webServer를 이 설정이 띄우지 않았다)');
+    out.push('Next 서버 기록: 수집 안 됨(서버 껍데기 꺼짐 — 기본값. E2E_SERVER_LOG=1로 켬 · 켜면 판이 흔들린다는 실측이 있어 기본은 끔)');
   } else {
     const end = input.endAt ?? timedOutAt + lateWatchMs;
     const inTest = serverLines.filter((l) => l.at >= testStartedAt && l.at <= end);

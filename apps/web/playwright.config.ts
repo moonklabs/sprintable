@@ -7,10 +7,16 @@ import { resolve } from 'path';
 const localEnvFile = resolve(__dirname, '.env.playwright');
 if (existsSync(localEnvFile)) dotenvConfig({ path: localEnvFile });
 
-// story #4927 AC1 — the web server runs through e2e/support/dev-server-logged.mjs, which stamps each output line and keeps a copy in this file;
-// the contrast guard reads the window of a failing test from it. The env var is set here so the runner, the server and the workers share one path.
-const devServerLog = process.env['E2E_WEBSERVER_LOG'] ?? resolve(__dirname, 'playwright/server-logs/next-dev.log');
-process.env['E2E_WEBSERVER_LOG'] = devServerLog;
+// story #4927 AC1 — OPT-IN server log. With E2E_SERVER_LOG=1 the web server runs through e2e/support/dev-server-logged.mjs, which stamps each output line
+// and keeps a copy of the allowed fields in this file; the contrast guard reads the window of a failing test from it.
+// DEFAULT OFF (also in CI): measured on the same base (8074c746c) the wrapper + piped stdout/stderr made the Contrast guard flaky — wrapper only: 1 failed ·
+// 12 flaky · 8.9 min (red); watch only: 3 flaky · 5.2 min; neither: 2 flaky · 4.9 min. So with the switch off the webServer is byte-for-byte develop's
+// (`pnpm dev`, no stdout/stderr keys). Turn it on knowingly (e.g. the 3-way compile repro) and mark the numbers «server log on».
+const serverLogOn = process.env['E2E_SERVER_LOG'] === '1';
+if (serverLogOn) {
+  // one path shared by the runner, the server and the workers
+  process.env['E2E_WEBSERVER_LOG'] = process.env['E2E_WEBSERVER_LOG'] ?? resolve(__dirname, 'playwright/server-logs/next-dev.log');
+}
 
 export default defineConfig({
   testDir: './e2e',
@@ -33,11 +39,10 @@ export default defineConfig({
   webServer: process.env['PLAYWRIGHT_BASE_URL']
     ? undefined
     : {
-        command: 'node e2e/support/dev-server-logged.mjs',
+        command: serverLogOn ? 'node e2e/support/dev-server-logged.mjs' : 'pnpm dev',
         url: 'http://localhost:3108',
         reuseExistingServer: !process.env['CI'],
-        // default 'ignore' dropped Next's own lines (compile times) from the CI log — only stderr reached it, with no time
-        stdout: 'pipe',
-        stderr: 'pipe',
+        // default 'ignore' drops Next's own lines (compile times) from the CI log — piped only when the server log is on
+        ...(serverLogOn ? { stdout: 'pipe' as const, stderr: 'pipe' as const } : {}),
       },
 });
