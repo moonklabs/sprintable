@@ -174,6 +174,7 @@ async def _setup_app_human(app, Session, user_id, org_id):
 
 
 
+_STAGE_METADATA = {"draft": {"role": "Creator", "action": "초안 작성"}}
 _CARD_KEYS = {"definition_key", "name", "stage", "role", "gate_type", "approver"}
 
 
@@ -301,6 +302,125 @@ async def test_a_person_without_access_to_the_story_gets_nothing_of_the_card():
             assert denied.status_code == 404, denied.text
             for secret in ("배포 확인 4925", key, "비밀 메모 4925"):
                 assert secret not in denied.text, f"{secret!r} leaked to a person without access"
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_deleted_event_message_gives_no_card_whatever_its_kind():
+    """⭐카디르 보안 렌즈 — 지운(묘비) 메시지: 삭제는 content만 비우고 msg_metadata를 남기고 행은 still_exists=false로 남는다. 잘못 보냈다 지운 이벤트의 키 · 정의 이름이 «이것을 가리키는 것들»에 남으면 안 된다
+    (stage 있는 이벤트 · 없는 이벤트 둘 다 — 되돌리면 RED)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    stage_key = f"preset.test4925.sample_{uuid.uuid4().hex[:8]}"
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id, "P")
+            member_id, user_id = await _make_human_member(s, org.id, project.id)
+            no_stage_key = await _make_org_definition(s, org.id, org.slug, name="지운 정의 이름 4925")
+            await _make_event_definition(s, stage_key, _STAGE_METADATA, name="지운 레시피 이름 4925")
+            story = await _make_story(s, org.id, project.id, title="Target Story")
+            conv_id = await _make_conversation(s, org.id, project.id, [member_id], member_id)
+            for key, payload in ((no_stage_key, {"note": "x"}), (stage_key, {"stage": "draft"})):
+                msg = await _add_message(s, conv_id, member_id, f"[이벤트] {key}", msg_metadata={"event": {"event_key": key, "payload": payload}})
+                msg.deleted_at = datetime.now(UTC)
+                msg.content = ""
+                await s.commit()
+                await _make_reference(s, org.id, "chat_message", msg.id, "story", story.id, created_by=member_id)
+
+        await _setup_app_human(app, Session, user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/stories/{story.id}/backlinks")
+            assert resp.status_code == 200, resp.text
+            data = resp.json()["data"]
+            assert len(data) == 2 and all(row["still_exists"] is False for row in data), data
+            assert all(row["message"]["event"] is None for row in data), data
+            for secret in ("지운 정의 이름 4925", "지운 레시피 이름 4925", no_stage_key, stage_key):
+                assert secret not in resp.text, f"{secret!r} stayed on a deleted message's row"
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        from sqlalchemy import text
+        async with engine.begin() as conn:
+            await conn.execute(text("DELETE FROM event_definitions WHERE key = :k AND org_id IS NULL"), {"k": stage_key})
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_person_with_the_story_but_not_in_the_room_gets_no_row_and_no_card():
+    """카디르 렌즈 보탬 — 스토리 접근은 있으나 그 대화방 참가자가 아닌 사람: 행도 카드도 없다(방 가시성 술어가 그대로)."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            project = await _make_project(s, org.id, "P")
+            in_room, user_in_room = await _make_human_member(s, org.id, project.id)
+            _outside, user_outside = await _make_human_member(s, org.id, project.id)  # the same project, so the story is reachable
+            key = await _make_org_definition(s, org.id, org.slug, name="방 밖 이름 4925")
+            story = await _make_story(s, org.id, project.id, title="Target Story")
+            conv_id = await _make_conversation(s, org.id, project.id, [in_room], in_room)
+            msg = await _add_message(s, conv_id, in_room, f"[이벤트] {key}\n- note: x", msg_metadata={"event": {"event_key": key, "payload": {"note": "x"}}})
+            await _make_reference(s, org.id, "chat_message", msg.id, "story", story.id, created_by=in_room)
+
+        await _setup_app_human(app, Session, user_in_room, org.id)
+        client = _client_for(app)
+        try:
+            ok = await client.get(f"/api/v2/stories/{story.id}/backlinks")
+            assert ok.status_code == 200 and ok.json()["data"][0]["message"]["event"]["name"] == "방 밖 이름 4925", ok.text
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+
+        await _setup_app_human(app, Session, user_outside, org.id)
+        client = _client_for(app)
+        try:
+            out = await client.get(f"/api/v2/stories/{story.id}/backlinks")
+            assert out.status_code == 200, out.text
+            assert out.json()["data"] == [], out.text
+            for secret in ("방 밖 이름 4925", key):
+                assert secret not in out.text
+        finally:
+            await client.aclose()
+            app.dependency_overrides.clear()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_key_that_belongs_to_another_organizations_definition_gets_no_name():
+    """카디르 렌즈 보탬 — 다른 조직의 정의 키를 부른 메시지: 그 조직 정의의 이름을 읽지 않는다(name null) — 되돌리면(조직 조건 제거) RED."""
+    from app.main import app
+
+    engine, Session = await _session_factory()
+    try:
+        async with Session() as s:
+            org = await _make_org(s)
+            other_org = await _make_org(s, name="Other")
+            project = await _make_project(s, org.id, "P")
+            member_id, user_id = await _make_human_member(s, org.id, project.id)
+            foreign_key = await _make_org_definition(s, other_org.id, other_org.slug, name="남의 조직 이름 4925")
+            story = await _make_story(s, org.id, project.id, title="Target Story")
+            conv_id = await _make_conversation(s, org.id, project.id, [member_id], member_id)
+            msg = await _add_message(s, conv_id, member_id, f"[이벤트] {foreign_key}", msg_metadata={"event": {"event_key": foreign_key, "payload": {}}})
+            await _make_reference(s, org.id, "chat_message", msg.id, "story", story.id, created_by=member_id)
+
+        await _setup_app_human(app, Session, user_id, org.id)
+        client = _client_for(app)
+        try:
+            resp = await client.get(f"/api/v2/stories/{story.id}/backlinks")
+            assert resp.status_code == 200, resp.text
+            event = resp.json()["data"][0]["message"]["event"]
+            assert event["name"] is None, event
+            assert "남의 조직 이름 4925" not in resp.text
         finally:
             await client.aclose()
             app.dependency_overrides.clear()

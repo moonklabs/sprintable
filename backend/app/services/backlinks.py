@@ -867,7 +867,9 @@ async def list_entity_backlinks(
                 # 재구성 렌더를 하게 한다. stage_metadata 조회가 실패하면(정의 삭제·미등재
                 # stage 등) role/gate_type/approver는 지어내지 않고 null — definition_key·
                 # stage는 메시지 자체가 이미 아는 값이라 항상 present.
-                "event": _chat_message_event_summary(r.msg_metadata, definition_by_key),
+                # story 4925 (카디르 보안 렌즈) — a deleted message gives no card: the delete empties `content` but keeps `msg_metadata`, and the row is still listed (`still_exists: false`) — the key and the
+                # definition's name of an event somebody sent by mistake and removed must not stay on «이것을 가리키는 것들» (story 4903's rule: a deleted message shows no card)
+                "event": None if r.msg_deleted_at is not None else _chat_message_event_summary(r.msg_metadata, definition_by_key),
             }
             # story #2319: tombstone된 메시지도 행은 살아있다(하드삭제 아님) — 그래서 아래는
             # "행이 있는가"가 아니라 "지워졌는가"를 잰다. FE는 still_exists=False를 보면 기존
