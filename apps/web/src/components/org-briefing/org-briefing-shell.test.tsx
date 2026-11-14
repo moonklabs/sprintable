@@ -165,6 +165,89 @@ describe('OrgBriefingShell — 프로젝트 안내 배너(story #2212, story #38
   });
 });
 
+describe('OrgBriefingShell — story #4935: 프로젝트가 하나도 없는 사람이 일감 · 목표 · 문서를 눌러 홈으로 온 길', () => {
+  const CREATE = '프로젝트가 있어야 열려요 — 먼저 하나 만들어 주세요.';
+  const mountNoProject = async (query: string, memberships: Array<{ id: string; name: string }> = [], projectId: string | undefined = undefined) => {
+    searchParamsValueRef.current = query;
+    useDashboardContextMock.mockReturnValue({ projectId, projectMemberships: memberships, orgMemberships: [] });
+    stubToday(EMPTY_TODAY);
+    await mount();
+  };
+  const banner = () => container.querySelector('[data-testid="home-create-project-banner"]');
+  const button = () => container.querySelector('[data-testid="home-create-project-button"]') as HTMLAnchorElement | null;
+
+  it('⭐프로젝트 0 + next=/flow → 까닭 한 줄과 기존 «프로젝트 만들기» 단추 하나, 그 단추는 settings 프로젝트 탭에 next를 실어 간다', async () => {
+    await mountNoProject('next=%2Fflow%3F_prRetry%3D1');
+    expect(banner()?.textContent).toContain(CREATE);
+    expect(button()?.textContent).toBe('프로젝트 만들기');
+    expect(container.querySelectorAll('[data-testid="home-create-project-button"]')).toHaveLength(1);
+    const href = button()!.getAttribute('href')!;
+    expect(href).toContain('/settings?tab=projects&next=');
+    expect(new URL(href, 'https://x.test').searchParams.get('next')).toBe('/flow?_prRetry=1'); // the address they pressed, intact (encoded once)
+  });
+
+  it('⭐next에 `&`가 들어 있어도(/goals?filter=a&_prRetry=1) 단추가 그 주소를 한 덩어리로 실어 간다 — 인코딩이 빠지면 뒷부분이 떨어져 나간다', async () => {
+    await mountNoProject(`next=${encodeURIComponent('/goals?filter=a&_prRetry=1')}`);
+    const href = button()!.getAttribute('href')!;
+    const params = new URL(href, 'https://x.test').searchParams;
+    expect(params.get('tab')).toBe('projects');
+    expect(params.get('next')).toBe('/goals?filter=a&_prRetry=1');
+  });
+
+  it.each(['%2Fgoals', '%2Fdocs'])('목표 · 문서도 같은 길이다 (next=%s)', async (n) => {
+    await mountNoProject(`next=${n}`);
+    expect(banner()).not.toBeNull();
+  });
+
+  it('⭐겹치지 않는다 — 프로젝트가 하나라도 있고 아직 안 골랐으면 «고르기» 띠만 뜬다(지금 그대로), 만들기 띠는 없다', async () => {
+    await mountNoProject('next=%2Fflow', [{ id: 'p1', name: 'P1' }]);
+    expect(container.textContent).toContain('프로젝트를 선택하면 원래 보려던 화면으로 이동해요.');
+    expect(banner()).toBeNull();
+    expect(container.textContent).not.toContain(CREATE);
+  });
+
+  it('프로젝트 0이고 next가 없으면(홈을 그냥 연 사람) 두 띠 모두 없다', async () => {
+    await mountNoProject('');
+    expect(banner()).toBeNull();
+    expect(container.textContent).not.toContain('프로젝트를 선택하면');
+  });
+
+  it('⭐안전하지 않은 next(//evil.com · https://… · /\\evil · %2F%2F · javascript: · 탭으로 숨긴 //)는 띠도 단추도 안 만든다 — 그 값을 단추에 싣지 않는다', async () => {
+    for (const bad of ['%2F%2Fevil.com', 'https%3A%2F%2Fevil.com', '%2F%5Cevil.com', '%252F%252Fevil.com', 'javascript%3Aalert(1)', '%2F%09%2Fevil.com']) {
+      await act(async () => { root.unmount(); });
+      container.remove(); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+      await mountNoProject(`next=${bad}`);
+      expect(banner(), bad).toBeNull();
+      expect(container.innerHTML, bad).not.toContain('evil.com');
+    }
+  });
+
+  it('⭐프로젝트 목록을 못 읽었으면(projectMembershipsFailed — 목록이 []로 보임) «프로젝트가 있어야 열려요»를 말하지 않는다 — 프로젝트가 있는 사람일 수 있다', async () => {
+    searchParamsValueRef.current = 'next=%2Fflow';
+    useDashboardContextMock.mockReturnValue({ projectId: undefined, projectMemberships: [], projectMembershipsFailed: true, orgMemberships: [] });
+    stubToday(EMPTY_TODAY);
+    await mount();
+    expect(banner()).toBeNull();
+  });
+
+  it('⭐아직 프로젝트를 주소에서 풀고 있거나(projectPathUnresolved) 조직이 맞춰지는 중(orgSyncPending)이면 «없음»으로 읽지 않는다 — 띠가 없다', async () => {
+    for (const extra of [{ projectPathUnresolved: true }, { orgSyncPending: true }]) {
+      await act(async () => { root.unmount(); });
+      container.remove(); container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+      searchParamsValueRef.current = 'next=%2Fflow';
+      useDashboardContextMock.mockReturnValue({ projectId: undefined, projectMemberships: [], orgMemberships: [], ...extra });
+      stubToday(EMPTY_TODAY);
+      await mount();
+      expect(banner(), JSON.stringify(extra)).toBeNull();
+    }
+  });
+
+  it('프로젝트가 이미 골라졌으면(세션 복원이 붙인 재시도 표식 next) 띠가 없다', async () => {
+    await mountNoProject('next=%2Fglance%3F_prRetry%3D1&p=p1', [], 'p1');
+    expect(banner()).toBeNull();
+  });
+});
+
 describe('OrgBriefingShell — story #3831 AC1(3구역, 3823 route 단일 소비)', () => {
   it('오늘 내 결정 항목이 있으면 제목·상태·행동 버튼이 뜬다', async () => {
     stubToday({ ...EMPTY_TODAY, needs_me: [{
