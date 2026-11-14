@@ -89,6 +89,7 @@ for (const width of [640, 1100, 1440]) {
     const g = await geometry(page);
     expect(g.sel.x, 'the select is right of the label').toBeGreaterThanOrEqual(g.label.r - 1);
     expect(Math.abs((g.sel.y + g.sel.h / 2) - (g.label.y + g.label.h / 2)), 'one line').toBeLessThan(g.sel.h);
+    expect(g.label.h, `the label stays ONE line (a wrapped / shrunk label is taller than 20 px): ${g.label.h}`).toBeLessThanOrEqual(20);
     // the label keeps its one 310 px line (`sm:flex-shrink-0`), the select takes what is left up to `max-w-xs` (320): 289 at 640 (as before — the row was always one line), 320 from ~ 666 up
     const left = Math.round(width - 32 - g.label.w - 8);
     expect(Math.abs(Math.round(g.sel.w) - Math.min(320, left)), `the select is ${g.sel.w} wide: what the label leaves (${left}) up to 320`).toBeLessThanOrEqual(1);
