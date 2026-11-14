@@ -48,7 +48,6 @@ function StoryRowView({ story, selectedRowId, onSelect }: { story: WorkListStory
     selected,
     onClick: () => onSelect(story.selfRow.id),
     'data-work-row': '',
-    className: 'cursor-pointer', // story 4945 — 눌리는 행이다(커서가 화살표로 남아 있었다)
     onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(story.selfRow.id); } },
     title: story.title,
     subtitle,

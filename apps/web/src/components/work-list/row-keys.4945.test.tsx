@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 //
-// story 4945 — 일감 목록 탭: 행 사이 방향키 ↑↓(격리 맥 앱 실측: ↓를 눌러도 초점이 그대로였다 — Tab만 다음 행으로 갔다) · 눌리는 스토리 행의 손가락 커서(화살표였다).
+// story 4945 — 일감 목록 탭: 행 사이 방향키 ↑↓(격리 맥 앱 실측: ↓를 눌러도 초점이 그대로였다 — Tab만 다음 행으로 갔다) · (커서는 건드리지 않는다 — 화살표 그대로가 맥 앱 관례).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -47,8 +47,8 @@ describe('moveWorkRowFocus — 화면 순서의 이웃 행', () => {
   });
 });
 
-describe('스토리 행 — 눌리는 줄이다', () => {
-  it('⭐스토리 행은 data-work-row + 손가락 커서(cursor-pointer)', async () => {
+describe('스토리 행 — 방향키 대상이다(커서는 맥 앱 관례대로 화살표 그대로)', () => {
+  it('⭐스토리 행은 data-work-row · 손가락 커서(cursor-pointer)는 안 단다(손가락은 글 링크뿐 — PO 11-15)', async () => {
     const group = {
       goalId: 'g1', goalTitle: '목표', stories: [{
         storyId: 'st1', title: '스토리 하나', status: 'in-progress',
@@ -59,7 +59,7 @@ describe('스토리 행 — 눌리는 줄이다', () => {
     await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><GoalGroupView group={group} selectedRowId={null} onSelect={() => {}} /></NextIntlClientProvider>); });
     const row = container.querySelector<HTMLElement>('[data-work-row]')!;
     expect(row).not.toBeNull();
-    expect(row.className).toContain('cursor-pointer');
+    expect(row.className).not.toContain('cursor-pointer');
   });
 });
 
