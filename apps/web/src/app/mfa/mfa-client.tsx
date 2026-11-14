@@ -60,6 +60,7 @@ export function MfaClient({ chatsHref }: MfaClientProps) {
       latch.hold(); // story 4940 — locked until the page is left
       router.push(chatsHref); // story #3179(S3c) — /dashboard 폐합, 홈=chat 재조준. story #4017 CHANGES 2 — 목적지 모듈 경유.
     } catch {
+      latch.unhold(); // story 4940 — the navigation itself threw after hold(): let go at once
       setError(t('errorFailed'));
     } finally {
       latch.exit();

@@ -21,7 +21,7 @@ const stubs = () => ({
       contents: a.path === '@/lib/auth/firebase-login-flow'
         ? "export const signInAndExchangeFirebaseSession = async () => { window.__firebaseCalls = (window.__firebaseCalls || 0) + 1; await new Promise((r) => setTimeout(r, 300)); return window.__firebaseOutcome || {}; };"
         : a.path === 'next/navigation'
-        ? "const nav = (kind) => (url) => { (window.__nav = window.__nav || []).push(kind + ' ' + url); }; export const useRouter = () => ({ push: nav('push'), replace: nav('replace'), refresh() {}, back() {} }); export const useSearchParams = () => new URLSearchParams(''); export const usePathname = () => '/'; export const redirect = () => {};"
+        ? "const nav = (kind) => (url) => { if (window.__navThrows) throw new Error('navigation failed'); (window.__nav = window.__nav || []).push(kind + ' ' + url); }; export const useRouter = () => ({ push: nav('push'), replace: nav('replace'), refresh() {}, back() {} }); export const useSearchParams = () => new URLSearchParams(''); export const usePathname = () => '/'; export const redirect = () => {};"
         : "export const fetchWithAuth = (u, i) => fetch(u, i); export const loginWithPassword = async () => { window.__loginCalls = (window.__loginCalls || 0) + 1; await new Promise((r) => setTimeout(r, 300)); return window.__loginOutcome || {}; }; export const switchOrg = async () => ({}); export const switchProject = async () => ({});",
       loader: 'js',
     }));
@@ -84,6 +84,7 @@ async function open(page: Page, key: ScreenKey, width: number, answers: Answers,
   await page.evaluate(() => (window as unknown as { __mount: () => void }).__mount());
   return calls;
 }
+const navThrows = (page: Page) => page.evaluate(() => { (window as unknown as { __navThrows: boolean }).__navThrows = true; });
 const nav = (page: Page) => page.evaluate(() => (window as unknown as { __nav?: string[] }).__nav ?? []);
 const firebaseCalls = (page: Page) => page.evaluate(() => (window as unknown as { __firebaseCalls?: number }).__firebaseCalls ?? 0);
 const loginCalls = (page: Page) => page.evaluate(() => (window as unknown as { __loginCalls?: number }).__loginCalls ?? 0);
@@ -131,6 +132,26 @@ for (const width of [390, 1440]) {
       await expect.poll(() => calls.register).toBe(2);
     });
 
+    test(`[SID:4940] a success whose navigation THROWS lets go at once (register · login · the code): the hold is taken back, the reason is on the screen`, async ({ page }) => {
+      await open(page, 'register', width, {});
+      await navThrows(page);
+      await fillRegister(page);
+      await page.locator(SUBMIT).click();
+      await expect(page.locator(SUBMIT)).toHaveText('회원가입');
+      await expect(page.locator(SUBMIT)).toBeEnabled();
+      await expect(page.getByRole('alert').first()).toBeVisible();
+      await open(page, 'login', width, {}, {});
+      await navThrows(page);
+      await page.locator(EMAIL).fill('a@example.test'); await page.locator(PASSWORD).fill('Abcdef1!x');
+      await loginButton(page).click();
+      await expect(page.getByRole('button', { name: '로그인', exact: true })).toBeEnabled();
+      await open(page, 'mfa', width, {});
+      await navThrows(page);
+      await page.locator('input[inputmode="numeric"]').fill('123456');
+      await mfaButton(page).click();
+      await expect(page.getByRole('button', { name: '확인', exact: true })).toBeEnabled();
+    });
+
     test(`[SID:4940] register — a double press in one frame is ONE request`, async ({ page }) => {
       const calls = await open(page, 'register', width, { register: { status: 201, body: { data: { ok: true } }, delayMs: 400 } });
       await fillRegister(page);
@@ -161,7 +182,9 @@ for (const width of [390, 1440]) {
       await page.waitForTimeout(900);
       await expect(page.getByRole('button', { name: '로그인 중…' })).toBeDisabled();
       await expect(page.locator(EMAIL)).toBeDisabled();
+      await expect(page.getByRole('button', { name: 'Firebase로 로그인' })).toBeDisabled(); // the other road is locked too
       expect(await loginCalls(page)).toBe(1);
+      expect(await firebaseCalls(page)).toBe(0);
     });
 
     test(`[SID:4940] login — a refusal (wrong password) lets go: «로그인» again, enabled, the next press calls again`, async ({ page }) => {
@@ -183,7 +206,11 @@ for (const width of [390, 1440]) {
       await expect.poll(async () => (await nav(page)).length).toBe(1);
       await page.waitForTimeout(900);
       await expect(page.getByRole('button', { name: '로그인 중…' })).toBeDisabled();
+      // the other road is locked too: one press = one request across both roads, the fields stay locked
+      await expect(page.getByRole('button', { name: '로그인', exact: true })).toBeDisabled();
+      await expect(page.locator(EMAIL)).toBeDisabled();
       expect(await firebaseCalls(page)).toBe(1);
+      expect(await loginCalls(page)).toBe(0);
     });
 
     test(`[SID:4940] login, the Firebase road — a refusal lets go: the button is back and the next press calls again`, async ({ page }) => {

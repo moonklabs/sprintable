@@ -108,6 +108,7 @@ export default function RegisterPage() {
       router.push(`${destination}${separator}signup=1`);
       router.refresh();
     } catch {
+      latch.unhold(); // the navigation itself threw after hold(): let go at once, the reason is on screen
       setError(t('registrationFailed'));
     } finally {
       latch.exit();

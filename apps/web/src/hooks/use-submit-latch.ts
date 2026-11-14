@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 /** How long a button that was HELD for a navigation may stay locked if that navigation never happens (offline · a push to where the person already is). */
 export const SUBMIT_HOLD_FALLBACK_MS = 15_000;
@@ -11,9 +11,10 @@ export const SUBMIT_HOLD_FALLBACK_MS = 15_000;
  * - **a success keeps the button locked until the page is left.** `router.push` / `replace` does not wait for the new screen: a `finally { setLoading(false) }` right after it hands the same form back, enabled, for the seconds the next screen takes
  *   (3 s measured on dev with CPU ×4 + Slow 4G — it looks like a fresh form, and presses again). So the success road calls `hold()` where it starts the navigation; `exit()` (the `finally`) then releases only a road that did NOT hold.
  *   The lock ends with the page (the form unmounts when the screen changes); if the navigation never happens it lets go by itself after `fallbackMs`, so nobody is locked for good.
- * A failure road never calls `hold()`: `exit()` releases at once and the reason is on screen.
+ * A failure road never calls `hold()`: `exit()` releases at once and the reason is on screen. A road that held and THEN failed (the navigation itself threw) calls `unhold()` first, so its `exit()` releases at once as well.
+ * `setLoading` is any `(busy: boolean) => void` — a `useState` setter, or one setter for a form with several roads (the login: ONE latch for the password road and the Firebase road, so one road's lock holds the other's buttons too).
  */
-export function useSubmitLatch(setLoading: Dispatch<SetStateAction<boolean>>, fallbackMs: number = SUBMIT_HOLD_FALLBACK_MS) {
+export function useSubmitLatch(setLoading: (busy: boolean) => void, fallbackMs: number = SUBMIT_HOLD_FALLBACK_MS) {
   const busy = useRef(false);
   const held = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -34,6 +35,7 @@ export function useSubmitLatch(setLoading: Dispatch<SetStateAction<boolean>>, fa
 
   /** The success road, right where it starts the navigation: keep the button locked until the page is left. */
   const hold = useCallback((): void => {
+    if (!alive.current) return; // the page is already gone (the answer came after it was left): no lock, no timer
     held.current = true;
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => {
@@ -44,6 +46,12 @@ export function useSubmitLatch(setLoading: Dispatch<SetStateAction<boolean>>, fa
     }, fallbackMs);
   }, [setLoading, fallbackMs]);
 
+  /** The road held and then FAILED (the navigation threw): take the hold back, so the `finally` releases at once. */
+  const unhold = useCallback((): void => {
+    held.current = false;
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+  }, []);
+
   /** The `finally`: release unless this road held. */
   const exit = useCallback((): void => {
     if (held.current) return;
@@ -51,5 +59,5 @@ export function useSubmitLatch(setLoading: Dispatch<SetStateAction<boolean>>, fa
     setLoading(false);
   }, [setLoading]);
 
-  return { enter, hold, exit };
+  return { enter, hold, unhold, exit };
 }
