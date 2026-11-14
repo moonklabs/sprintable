@@ -44,8 +44,9 @@ POLL_SEC = 30
 SERVING_POLL_SEC = 10
 CAS_TRIES = 3
 READ_NEEDED = ("storage.objects.get", "storage.objects.list")
-# the write grant is CONDITIONAL on the object name (desired.json only), so it is only visible when the question is asked about that object — a bucket-level answer says «no» for it by design
+# the write grant is CONDITIONAL on the object name (desired.json only): a bucket-level testIamPermissions says «no» for it by design, so the write is probed by a write that cannot succeed (see Gcs.write_probe)
 WRITE_NEEDED = ("storage.objects.create", "storage.objects.delete")
+IMPOSSIBLE_GENERATION = 1   # object generations are microsecond timestamps (~1.7e15): nothing ever has generation 1
 SERVICE_ACCOUNT = "github-actions@sprintable-494803.iam.gserviceaccount.com"
 SHA_RE = re.compile(r"[0-9a-f]{40}")
 CI_RUNNING = {"queued", "in_progress", "waiting", "pending", "requested"}
@@ -77,35 +78,51 @@ class Gcs:
     def _run(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(["gcloud", *args], capture_output=True, text=True, timeout=120)
 
-    def permissions(self, perms: tuple[str, ...], object_name: str | None = None) -> set[str] | None:
-        """what this service account holds, asked of the bucket (or of one object — the conditional write grant only shows there). Nothing is written.
-        None = the API could not answer for an object (not a «no»: the real write then says it)"""
+    def permissions(self, perms: tuple[str, ...]) -> set[str]:
+        """what this service account holds on the BUCKET (unconditional grants only). Nothing is written."""
         tok = self._run("auth", "print-access-token")
         if tok.returncode != 0:
             raise Stop("cannot get an access token (is the workflow authenticated?): " + tok.stderr.strip()[-300:])
         q = "&".join("permissions=" + p for p in perms)
-        target = f"b/{self.bucket}" + (f"/o/{object_name}" if object_name else "")
-        req = urllib.request.Request(
-            f"https://storage.googleapis.com/storage/v1/{target}/iam/testPermissions?{q}", method="GET",
-            headers={"Authorization": "Bearer " + tok.stdout.strip()})
+        req = urllib.request.Request(f"https://storage.googleapis.com/storage/v1/b/{self.bucket}/iam/testPermissions?{q}", method="GET", headers={"Authorization": "Bearer " + tok.stdout.strip()})
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
                 return set(json.load(r).get("permissions", []))
         except urllib.error.HTTPError as e:
-            if object_name and e.code in (400, 404, 501):
-                return None
             raise Stop(f"testIamPermissions on the dev deploy bucket answered {e.code}: the service account may not even ask") from e
+
+    def write_probe(self) -> bool | None:
+        """may this account write desired.json? Asked by a write that CANNOT succeed: `--if-generation-match=1` (no object has generation 1). Authorization is decided before the precondition:
+        403 = not allowed (False) · 412 = allowed, and nothing was written (True) · anything else = could not tell (None: the real write will say)."""
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "desired.json"
+            p.write_bytes(b"{}\n")
+            r = self._run("storage", "cp", str(p), f"gs://{self.bucket}/desired.json", f"--if-generation-match={IMPOSSIBLE_GENERATION}")
+        if r.returncode == 0:
+            raise Stop("the write probe was accepted although no object has generation 1 — stopping; a person must look at desired.json")
+        if re.search(r"\b412\b|conditionNotMet|PreconditionFailed|precondition", r.stderr, re.I):
+            return True
+        if re.search(r"\b403\b|forbidden|does not have storage|AccessDenied", r.stderr, re.I):
+            return False
+        return None
 
     def exists(self, name: str) -> bool:
         return self._run("storage", "objects", "describe", f"gs://{self.bucket}/{name}", "--format=value(name)").returncode == 0
 
-    def read(self, name: str) -> bytes | None:
-        r = subprocess.run(["gcloud", "storage", "cat", f"gs://{self.bucket}/{name}"], capture_output=True, timeout=120)
+    def read(self, name: str, generation: int | None = None) -> bytes | None:
+        """the object's bytes — of exactly one generation when given (`name#generation`), so the bytes and the generation a write is conditioned on always belong together"""
+        suffix = f"#{generation}" if generation else ""
+        r = subprocess.run(["gcloud", "storage", "cat", f"gs://{self.bucket}/{name}{suffix}"], capture_output=True, timeout=120)
         return r.stdout if r.returncode == 0 else None
 
     def generation(self, name: str) -> int | None:
+        """the current generation; None = the object does not exist (any other failure stops the run: «absent» must not be guessed)"""
         r = self._run("storage", "objects", "describe", f"gs://{self.bucket}/{name}", "--format=value(generation)")
-        return int(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip() else None
+        if r.returncode == 0 and r.stdout.strip().isdigit():
+            return int(r.stdout.strip())
+        if re.search(r"not found|404|No URLs matched|matched no objects|No such object|does not exist", r.stderr, re.I):
+            return None
+        raise Stop(f"cannot read the generation of {name}: " + r.stderr.strip()[-300:])
 
     def write_desired(self, data: bytes, generation: int) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -165,12 +182,14 @@ def promote(sha: str, gcs, ci, *, health: Callable[[str], str] = _health_sha, sl
     log(f"promote {sha[:9]} → dev VM (bucket {gcs.bucket})")
 
     # 2. permissions first: a missing grant must fail in seconds, not after an hour of waiting
-    have = gcs.permissions(READ_NEEDED) or set()
-    have_w = gcs.permissions(WRITE_NEEDED, "desired.json")
-    missing = [p for p in READ_NEEDED if p not in have] + ([p for p in WRITE_NEEDED if p not in have_w] if have_w is not None else [])
+    have = gcs.permissions(READ_NEEDED)
+    missing = [p for p in READ_NEEDED if p not in have]
+    can_write = gcs.write_probe()
+    if can_write is False:
+        missing += [f"{p} (on desired.json)" for p in WRITE_NEEDED]
     if missing:
         raise Stop("the service account lacks " + ", ".join(missing) + " on the dev deploy bucket — nothing was waited for or written.\n" + GRANT_HELP)
-    log("permissions: " + ", ".join(READ_NEEDED) + " on the bucket granted; " + ("write on desired.json granted" if have_w is not None else "write on desired.json could not be asked (the write itself will tell)"))
+    log("permissions: " + ", ".join(READ_NEEDED) + " on the bucket granted; " + ("write on desired.json granted (probe: precondition failed, nothing written)" if can_write else "write on desired.json could not be probed (the write itself will tell)"))
 
     # 3. the candidate (and its bundle) and this sha's own develop CI
     t0 = now()
@@ -205,10 +224,15 @@ def promote(sha: str, gcs, ci, *, health: Callable[[str], str] = _health_sha, sl
 
     # 4 + 5. newer than what is wanted now, and written only if nobody wrote in between
     for attempt in range(1, CAS_TRIES + 1):
-        cur_raw = gcs.read("desired.json")
-        gen = gcs.generation("desired.json") if cur_raw is not None else 0
-        if cur_raw is not None and gen is None:
-            raise Stop("desired.json exists but its generation could not be read — nothing written")
+        gen = gcs.generation("desired.json")
+        cur_raw = None
+        if gen is None:
+            gen = 0   # absent: the write must find no object
+        else:
+            cur_raw = gcs.read("desired.json", gen)   # the bytes of exactly that generation: a write in between cannot make them disagree
+            if cur_raw is None:
+                log(f"desired.json changed under us (try {attempt}/{CAS_TRIES}) — reading again")
+                continue
         cur_sha = None
         if cur_raw is not None:
             try:

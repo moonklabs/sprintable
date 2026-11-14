@@ -62,6 +62,10 @@ class FakeGcs:
                  write=("storage.objects.create", "storage.objects.delete")) -> None:
         self.objs: dict[str, bytes] = {}
         self.gens: dict[str, int] = {}
+        self.versions: dict[tuple[str, int], bytes] = {}   # every generation ever written stays readable by its number (a real bucket drops old ones: reading one then fails, which the code handles)
+        self.after_generation = None   # hooks: somebody else writes right after this call returned (once)
+        self.after_read = None
+        self.probed = 0
         self.writes: list[tuple[str, int]] = []
         self.read_perms, self.write_perms = set(read), (set(write) if write is not None else None)
         self.asked: list[tuple] = []
@@ -78,23 +82,36 @@ class FakeGcs:
     def put(self, name: str, data: bytes) -> None:
         self.objs[name] = data
         self.gens[name] = self.gens.get(name, 0) + 1
+        self.versions[(name, self.gens[name])] = data
 
-    def permissions(self, perms, object_name=None):
-        self.asked.append((tuple(perms), object_name))
-        if object_name:
-            return None if self.write_perms is None else {p for p in perms if p in self.write_perms}
+    def permissions(self, perms):
+        self.asked.append(tuple(perms))
         return {p for p in perms if p in self.read_perms}
+
+    def write_probe(self):
+        self.probed += 1
+        if self.write_perms is None:
+            return None
+        return set(P.WRITE_NEEDED) <= self.write_perms
 
     def exists(self, name: str) -> bool:
         if name == f"candidates/{SHA}.json" and self.clock and self.clock.t < self.candidate_appears_after:
             return False
         return name in self.objs
 
-    def read(self, name: str):
-        return self.objs.get(name)
+    def read(self, name: str, generation=None):
+        data = self.objs.get(name) if generation is None else self.versions.get((name, generation))
+        if name == "desired.json" and self.after_read:
+            hook, self.after_read = self.after_read, None
+            hook(self)
+        return data
 
     def generation(self, name: str):
-        return self.gens.get(name)
+        g = self.gens.get(name)
+        if name == "desired.json" and self.after_generation:
+            hook, self.after_generation = self.after_generation, None
+            hook(self)
+        return g
 
     def write_desired(self, data: bytes, generation: int) -> None:
         if self.before_write:
@@ -266,6 +283,38 @@ def test_if_the_other_write_is_older_than_ours_it_is_replaced_on_the_second_try(
     assert code == 0 and current(g) == SHA and len(g.writes) == 1
 
 
+def test_a_newer_write_right_after_the_generation_was_read_is_not_overwritten() -> None:
+    g = FakeGcs()
+    g.after_generation = lambda gg: gg.put("desired.json", desired(NEWER))
+    code, logs, _ = run(g, FakeCi(relations={(OLD, SHA): "ahead", (NEWER, SHA): "behind"}))
+    assert code == 1 and not g.writes and current(g) == NEWER, logs
+
+
+def test_a_newer_write_right_after_the_bytes_were_read_is_not_overwritten() -> None:
+    """the flaw codex found: bytes read first, generation read second — the generation of the NEWER write would have been used for the older bytes' decision. The bytes are now those of the generation read first."""
+    g = FakeGcs()
+    g.after_read = lambda gg: gg.put("desired.json", desired(NEWER))
+    code, logs, _ = run(g, FakeCi(relations={(OLD, SHA): "ahead", (NEWER, SHA): "behind"}))
+    assert code == 1 and not g.writes and current(g) == NEWER, logs
+    assert any("changed under us" in l for l in logs)
+
+
+def test_a_generation_that_is_gone_when_its_bytes_are_asked_for_is_read_again() -> None:
+    g = FakeGcs()
+    real_read = g.read
+
+    def gone_once(name, generation=None):
+        if name == "desired.json" and generation is not None and not getattr(gone_once, "done", False):
+            gone_once.done = True
+            g.put("desired.json", desired(OLD))   # somebody replaced it: the old generation no longer exists
+            return None
+        return real_read(name, generation)
+
+    g.read = gone_once
+    code, logs, _ = run(g, FakeCi())
+    assert code == 0 and len(g.writes) == 1 and any("changed under us" in l for l in logs)
+
+
 def test_a_desired_json_that_keeps_changing_stops_after_three_tries() -> None:
     g = FakeGcs()
 
@@ -282,8 +331,8 @@ def test_a_desired_json_that_keeps_changing_stops_after_three_tries() -> None:
 
 @pytest.mark.parametrize("read,write,missing", [
     (("storage.objects.list",), ("storage.objects.create", "storage.objects.delete"), "storage.objects.get"),
-    (("storage.objects.get", "storage.objects.list"), ("storage.objects.create",), "storage.objects.delete"),
-    (("storage.objects.get", "storage.objects.list"), (), "storage.objects.create"),
+    (("storage.objects.get", "storage.objects.list"), ("storage.objects.create",), "storage.objects.create (on desired.json)"),
+    (("storage.objects.get", "storage.objects.list"), (), "storage.objects.delete (on desired.json)"),
 ])
 def test_a_missing_permission_stops_before_any_waiting_and_names_the_commands_that_grant_it(read, write, missing) -> None:
     g = FakeGcs(read=read, write=write)
@@ -294,16 +343,59 @@ def test_a_missing_permission_stops_before_any_waiting_and_names_the_commands_th
     assert missing in text and "add-iam-policy-binding" in text and "objectUser" in text and "desired.json" in text
 
 
-def test_the_write_grant_is_asked_about_the_object_because_it_is_conditional_on_its_name() -> None:
+def test_the_write_grant_is_probed_by_a_write_that_cannot_succeed_and_the_bucket_is_asked_about_reading_only() -> None:
     g = FakeGcs()
     run(g, FakeCi())
-    assert (P.WRITE_NEEDED, "desired.json") in g.asked and (P.READ_NEEDED, None) in g.asked
+    assert g.probed == 1 and g.asked == [P.READ_NEEDED]
 
 
-def test_when_the_object_level_question_cannot_be_answered_the_run_goes_on_and_the_write_decides() -> None:
+def test_when_the_write_probe_cannot_tell_the_run_goes_on_and_the_write_decides() -> None:
     g = FakeGcs(write=None)
     code, logs, _ = run(g, FakeCi())
-    assert code == 0 and len(g.writes) == 1 and any("could not be asked" in l for l in logs)
+    assert code == 0 and len(g.writes) == 1 and any("could not be probed" in l for l in logs)
+
+
+def _real_gcs_with_fake_gcloud(tmp_path, stderr: str, rc: int = 1):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    t = bin_dir / "gcloud"
+    t.write_text(f'#!/bin/sh\necho "$@" >> "{tmp_path}/calls.txt"\necho "{stderr}" >&2\nexit {rc}\n')
+    t.chmod(0o755)
+    return bin_dir
+
+
+@pytest.mark.parametrize("stderr,expected", [
+    ("HTTPError 412: At least one of the pre-conditions you specified did not hold.", True),
+    ("ERROR: Gaxios conditionNotMet", True),
+    ("HTTPError 403: github-actions@x does not have storage.objects.create access", False),
+    ("AccessDenied: 403 Forbidden", False),
+    ("ERROR: network unreachable", None),
+])
+def test_the_real_write_probe_reads_412_as_allowed_403_as_not_allowed_and_anything_else_as_unknown(tmp_path, monkeypatch, stderr, expected) -> None:
+    monkeypatch.setenv("PATH", f"{_real_gcs_with_fake_gcloud(tmp_path, stderr)}:/usr/bin:/bin")
+    assert P.Gcs().write_probe() is expected
+    call = (tmp_path / "calls.txt").read_text()
+    assert f"--if-generation-match={P.IMPOSSIBLE_GENERATION}" in call and "gs://sprintable-vm-dev-deploy/desired.json" in call
+
+
+def test_a_write_probe_that_is_accepted_stops_the_run(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("PATH", f"{_real_gcs_with_fake_gcloud(tmp_path, '', rc=0)}:/usr/bin:/bin")
+    with pytest.raises(P.Stop):
+        P.Gcs().write_probe()
+
+
+def test_the_real_generation_read_tells_an_absent_object_from_a_failure(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("PATH", f"{_real_gcs_with_fake_gcloud(tmp_path, 'ERROR: (gcloud.storage.objects.describe) The following URLs matched no objects: gs://b/desired.json')}:/usr/bin:/bin")
+    assert P.Gcs().generation("desired.json") is None
+    monkeypatch.setenv("PATH", f"{_real_gcs_with_fake_gcloud(tmp_path, 'ERROR: HTTPError 500 backend error')}:/usr/bin:/bin")
+    with pytest.raises(P.Stop):
+        P.Gcs().generation("desired.json")
+
+
+def test_the_real_read_of_a_generation_asks_for_that_generation_only(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("PATH", f"{_real_gcs_with_fake_gcloud(tmp_path, '', rc=0)}:/usr/bin:/bin")
+    P.Gcs().read("desired.json", 1731542400000000)
+    assert "gs://sprintable-vm-dev-deploy/desired.json#1731542400000000" in (tmp_path / "calls.txt").read_text()
 
 
 def test_the_grant_text_touches_the_dev_bucket_only_and_one_object() -> None:
@@ -376,7 +468,10 @@ def test_neither_the_script_nor_its_workflow_names_anything_but_the_dev_bucket()
 
 def test_the_script_writes_exactly_one_object_desired_json_and_only_with_a_generation_condition() -> None:
     writes = re.findall(r'"cp"[^\n]*', _SCRIPT)
-    assert len(writes) == 1 and "gs://{self.bucket}/desired.json" in writes[0] and "--if-generation-match=" in writes[0], writes
+    assert len(writes) == 2, writes   # the probe (a generation no object has: it cannot write) and the real write
+    for w in writes:
+        assert "gs://{self.bucket}/desired.json" in w and "--if-generation-match=" in w, w
+    assert "IMPOSSIBLE_GENERATION" in writes[0] and "{generation}" in writes[1]
     assert not re.search(r'"(rm|mv|rsync|compose)"|storage", "(rm|mv|rsync)"', _SCRIPT)
 
 
