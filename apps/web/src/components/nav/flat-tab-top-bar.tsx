@@ -170,6 +170,12 @@ export function AgentRunsTopBarTitle() {
   return <h1 className="text-sm font-medium">{tAgentRuns('title')}</h1>;
 }
 
+/** «구성원»(/organization/members) 상단바 제목(story 4956 — 같은 «팀» 탭줄의 에이전트 · 실행 기록 · API 키는 제목이 있는데 구성원만 막대가 비어 있었다; 화면과 로딩 폴백이 같은 컴포넌트를 쓴다). */
+export function OrgMembersTopBarTitle() {
+  const tNav = useTranslations('nav');
+  return <h1 className="text-sm font-medium">{tNav('orgMembers')}</h1>;
+}
+
 /** «에이전트 API 키»(/organization/workforce/api-keys) 상단바 제목(story 4912 B1 — 화면이 같은 컴포넌트로 슬롯을 채운다). */
 export function AgentApiKeysTopBarTitle() {
   const tSettings = useTranslations('settings');
@@ -227,6 +233,7 @@ export const FLAT_ROUTE_TOP_BAR = {
   '[ws]/[proj]/artifacts': { Title: () => <ArtifactsTopBarTitle />, showContextChip: true },
   activity: { Title: ActivityTopBarTitle, showContextChip: true },
   'organization/workforce': { Title: AgentsTopBarTitle, showContextChip: true },
+  'organization/members': { Title: OrgMembersTopBarTitle, showContextChip: true }, // story 4956 — 같은 «팀» 탭줄의 에이전트 화면들과 같은 칩(탭을 옮길 때 칩이 켜졌다 꺼지지 않게)
   // 4913 — 조직 구역 «한 쪽 틀» 화면: 제목은 위 막대 · 칩은 조직 화면이라 없음(화면의 OrgScreenTitle과 같다).
   'organization/roles': { Title: OrgRolesTopBarTitle, showContextChip: false },
   'organization/trust': { Title: OrgTrustTopBarTitle, showContextChip: false },

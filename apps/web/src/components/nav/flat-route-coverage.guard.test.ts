@@ -92,9 +92,10 @@ function classify(route: string): { kind: Kind } | { kind: 'unclassified'; slotI
 }
 
 describe('상단바 폴백 표 — 실제 라우트 전수(story #4326 · 까디르 4688)', () => {
-  it('따라가기 기준점 — 실행 목록은 TopBarSlot에 닿고(양성) · 멤버 화면은 안 닿는다(음성) · 문서는 자기 layout으로 닿는다', () => {
+  it('따라가기 기준점 — 실행 목록은 TopBarSlot에 닿고(양성) · 커넥터 화면(서버 redirect 입구)은 안 닿는다(음성 · 4956: 예전 음성이던 구성원은 이제 제목을 채워 양성) · 문서는 자기 layout으로 닿는다', () => {
     expect(routeReachesTopBarSlot('organization/workforce/runs'), '양성 대조').not.toBeNull();
-    expect(routeReachesTopBarSlot('organization/members'), '음성 대조').toBeNull();
+    expect(routeReachesTopBarSlot('organization/members'), '구성원 — 4956부터 제목을 채운다(양성)').not.toBeNull();
+    expect(routeReachesTopBarSlot('organization/connectors'), '음성 대조').toBeNull();
     expect(routeReachesTopBarSlot('[ws]/[proj]/docs'), 'layout 입구').not.toBeNull();
   });
 
