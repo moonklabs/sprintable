@@ -143,7 +143,7 @@ export function SupportWidgetLauncher() {
         aria-expanded={open}
         aria-controls={PANEL_ID}
         aria-label={open ? t('closeLabel') : t('launcherLabel')}
-        className="pointer-events-auto flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 [:root:has(:is([role=dialog][aria-modal=true],[role=alertdialog]):not([aria-hidden=true]):not([inert]):not([class~='lg:hidden']))_&]:invisible max-lg:[:root:has(:is([role=dialog][aria-modal=true],[role=alertdialog]):not([aria-hidden=true]):not([inert])[class~='lg:hidden'])_&]:invisible"
+        className="pointer-events-auto flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 [:root:has(:is([role=dialog][aria-modal=true],[role=alertdialog],[data-modal-popup][data-open]):not([aria-hidden=true]):not([inert]):not([class~='lg:hidden']))_&]:invisible max-lg:[:root:has(:is([role=dialog][aria-modal=true],[role=alertdialog],[data-modal-popup][data-open]):not([aria-hidden=true]):not([inert])[class~='lg:hidden'])_&]:invisible"
       >
         {open ? <X className="h-5 w-5" aria-hidden /> : <LifeBuoy className="h-5 w-5" aria-hidden />}
       </button>

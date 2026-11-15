@@ -67,6 +67,17 @@ describe('the support launcher hides under an open modal (4952 S1)', () => {
     expect(open('<div role="dialog" aria-modal="true" inert></div>')).toBe(false);
   });
 
+  it('⭐an OPEN Base UI modal popup (data-modal-popup + data-open: the goal delete confirmation, every ui/dialog · ui/sheet · ds/panel) matches — it has no aria-modal, so the marker is what the rule reads', () => {
+    expect(open('<div role="dialog" data-modal-popup data-open></div>')).toBe(true);
+    expect(open('<div data-modal-popup data-open></div>')).toBe(true);
+  });
+
+  it('a Base UI popup that is not open (data-closed · exit transition) or hidden does NOT match', () => {
+    expect(open('<div role="dialog" data-modal-popup data-closed></div>')).toBe(false);
+    expect(open('<div role="dialog" data-modal-popup data-open aria-hidden="true"></div>')).toBe(false);
+    expect(open('<div role="dialog" data-modal-popup data-open inert></div>')).toBe(false);
+  });
+
   it('the support panel itself (role=dialog, no aria-modal), a menu, a tooltip and a toast do NOT match', () => {
     expect(open('<div role="dialog" aria-label="문의"></div><div role="menu"></div><div role="tooltip"></div><div role="status"></div>')).toBe(false);
   });
