@@ -554,7 +554,7 @@ async def test_gate_check_publish_fires_on_base_retarget_edit_when_story_linked(
     # story #3039 — resolve_story_for_pr가 sid(비-stored) 경로로 해소되면 upsert_link()가
     # 그 자리서 링크를 영속화한다(기존 PullRequestStoryLink 존재여부 확인 SELECT 1건 추가).
     session.execute = AsyncMock(
-        side_effect=[installation_result, no_gate_result, no_gate_result, no_gate_result, no_gate_result]
+        side_effect=[installation_result, no_gate_result, no_gate_result, no_gate_result, no_gate_result, SimpleNamespace(one=lambda: (None, 'newsha123'))]  # story 4955: + the UPDATE that records the PR's head (RETURNING watermark, head)
     )
     evaluate = AsyncMock(return_value=SimpleNamespace(gate_id=gate_id))
     gate_check_publish: list[dict] = []
@@ -577,6 +577,7 @@ async def test_gate_check_publish_fires_on_base_retarget_edit_when_story_linked(
         session, org_id, story_id, pr_number=42, repo="moonklabs/sprintable",
         ci_result=None, pr_result=None, head_sha="newsha123",
     )
+    assert session.execute.await_count == 6, "story 4955: the auto-created gate also records the PR head (one more statement)"
     assert gate_check_publish == [{
         "org_id": org_id, "gate_id": gate_id, "head_sha": "newsha123",
         "repo_full_name": "moonklabs/sprintable", "pr_number": 42,

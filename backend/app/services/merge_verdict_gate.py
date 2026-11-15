@@ -34,7 +34,11 @@ from app.services.gate_service import (
     create_gate,
     find_gate_slot_with_pr_fallback,
     find_pending_merge_gates_by_head_sha,
+    HeadUnconfirmedError,
+    is_stale_head_event,
+    parse_github_timestamp,
     resolve_work_item_project_id,
+    set_observed_head,
 )
 from app.services.trust_score import compute_member_trust_scores
 from app.services.verdict_capture import (
@@ -733,6 +737,58 @@ async def evaluate_merge_gate(
     )
 
 
+async def _event_is_for_old_head(
+    session: AsyncSession, org_id: uuid.UUID, gate: Gate, event_sha: str | None, *, repo: str | None, pr_number: int | None, resolve_unknown: bool = False,
+) -> bool:
+    """story 4955 — «this CI event is about a commit that is not the PR's current head». The recorded head (`pr_head_observed_sha`) only comes from lifecycle webhooks, and a lost one would leave
+    it behind a push: so when the event's commit differs from it, GitHub is asked for the PR's real head (one GET, only in this mismatch). Real head == the event's commit → the record was
+    behind: corrected, and the event is processed. Otherwise → an old commit's late news (the record is corrected to the real head if it differed). The lookup failing (after one retry) is never
+    «process it» (a wrong anchor / check-run rebind is the incident) and never a silent drop: it raises `HeadUnconfirmedError`, so the delivery (CI or lifecycle) is rolled back and answered 500 —
+    visible in GitHub's delivery log and re-sendable. Not stale (no record, or the same commit) → False without a lookup — except `resolve_unknown`: a lifecycle delivery that could not be ordered by time
+    and met a gate with NO recorded head (one from before migration 0478, which has a watermark but no head: such a delivery may not seed it) is settled through the same lookup, which records
+    GitHub's real head — so a late CI event of an old commit that follows is judged against it instead of finding «unknown»."""
+    from app.models.github_installation import GithubInstallation
+    from app.services.github_app import get_pull_request
+
+    if not is_stale_head_event(gate, event_sha) and not (resolve_unknown and event_sha and not gate.pr_head_observed_sha):
+        return False
+    gate_repo = gate.repo_full_name or (gate.neutral_facts or {}).get("repo") or repo
+    gate_pr = gate.pr_number or pr_number
+    real_head: str | None = None
+    real_updated_at: datetime | None = None
+    try:
+        installation = (
+            await session.execute(
+                select(GithubInstallation).where(GithubInstallation.org_id == org_id, GithubInstallation.suspended_at.is_(None))
+            )
+        ).scalar_one_or_none()
+        if installation is not None and gate_repo and gate_pr:
+            for _attempt in range(2):  # one retry: a transient failure must not drop a legitimate CI event (the webhook is answered 200 either way — GitHub does not redeliver)
+                try:
+                    pr = await get_pull_request(installation.installation_id, gate_repo, gate_pr)
+                except Exception:  # noqa: BLE001
+                    pr = None
+                real_head = ((pr or {}).get("head") or {}).get("sha")
+                if real_head:
+                    real_updated_at = parse_github_timestamp((pr or {}).get("updated_at"))
+                    break
+    except Exception:  # noqa: BLE001 — a failing lookup must not break the webhook: fail-closed (ignore the event) below
+        logger.warning("merge gate: PR head lookup failed (gate=%s pr=%s) — stale-head check fail-closed", gate.id, gate_pr, exc_info=True)
+    if not real_head:
+        logger.warning(
+            "merge gate: stale-head CI event ignored, PR head could not be confirmed (gate=%s event_sha=%s observed_head=%s)", gate.id, event_sha, gate.pr_head_observed_sha,
+        )
+        raise HeadUnconfirmedError("the PR's current head could not be confirmed")
+    # always compare-and-set, also when GitHub's head equals the record: the watermark still moves up to GitHub's own PR `updated_at` (B→C→B with the last lifecycle webhook lost: a delayed
+    # lifecycle webhook of C must find a watermark newer than itself)
+    applied = await set_observed_head(session, gate.id, real_head, expected=gate.pr_head_observed_sha, observed_at=real_updated_at, gate=gate)
+    if not applied:
+        # a lifecycle webhook committed its own head meanwhile — it is newer than GitHub's answer we hold: judge against the fresh record, no second lookup
+        await session.refresh(gate)
+        return is_stale_head_event(gate, event_sha)
+    return real_head != event_sha
+
+
 async def reconcile_merge_gate_with_real_evidence(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -744,6 +800,8 @@ async def reconcile_merge_gate_with_real_evidence(
     merged: bool,
     head_sha: str | None = None,
     gate_check_publish: list[dict] | None = None,
+    head_is_current: bool = False,
+    head_observed_at: datetime | None = None,
 ) -> MergeGateDecision | None:
     """story #2156 AC2(2026-08-07) — GitHub 웹훅이 잡은 실 CI/PR verdict를 merge-type
     게이트에 반영한다.
@@ -811,6 +869,25 @@ async def reconcile_merge_gate_with_real_evidence(
         repo_full_name=(repo or None),
     )
     if existing is not None and existing.status in ("pending", "auto_passed"):
+        # story 4955 — a CI event about a commit that is NOT the PR's current head (CI that finished after a newer push) is an old commit's late news: it must not re-evaluate this gate
+        # (it would set the approval anchor `approved_head_sha` to the old commit and write the old commit's CI result onto the new head's gate). A merge event is a fact about the
+        # PR, not about a commit's CI, so it is never dropped here.
+        if head_is_current:
+            # a caller that has just read the PR's real head from GitHub (the manual re-evaluation) — the record is corrected to it, nothing is judged stale
+            if head_sha:
+                applied = await set_observed_head(session, existing.id, head_sha, expected=existing.pr_head_observed_sha, observed_at=head_observed_at, gate=existing)
+                if not applied:
+                    # a lifecycle webhook committed a newer head after the GitHub read the caller holds: that read is the older one — never evaluate (anchor / check) on it
+                    await session.refresh(existing)
+                    if is_stale_head_event(existing, head_sha):
+                        logger.info("merge gate reconcile: manual re-evaluation head is behind a newer lifecycle head (gate=%s sha=%s) — not evaluated", existing.id, head_sha)
+                        return None
+        elif not merged and await _event_is_for_old_head(session, org_id, existing, head_sha, repo=repo, pr_number=pr_number):
+            logger.info(
+                "merge gate reconcile: stale-head CI event ignored (gate=%s event_sha=%s observed_head=%s pr_number=%s)",
+                existing.id, head_sha, existing.pr_head_observed_sha, pr_number,
+            )
+            return None
         return await evaluate_merge_gate(
             session, org_id, story_id,
             pr_number=pr_number, repo=repo, ci_result=ci_result,
@@ -821,6 +898,14 @@ async def reconcile_merge_gate_with_real_evidence(
     if not head_sha:
         return None
     sibling_gates = await find_pending_merge_gates_by_head_sha(session, org_id=org_id, head_sha=head_sha)
+    # story 4955 — the same rule for the sha fallback: a sibling gate still bound to this (old) commit whose PR has since moved on is not this event's gate. A MERGE of the event's own PR is no
+    # evidence for a sibling (it gets no merge result below, `pr_result=None`), so the filter does not look at `merged` here
+    if not head_is_current:
+        _kept = []
+        for g in sibling_gates:
+            if not await _event_is_for_old_head(session, org_id, g, head_sha, repo=g.repo_full_name or repo, pr_number=g.pr_number):
+                _kept.append(g)
+        sibling_gates = _kept
     if not sibling_gates:
         logger.warning(
             "merge gate reconcile: no pending/auto_passed gate matched by pr_number(=%s) or "
