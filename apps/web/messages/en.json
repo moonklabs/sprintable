@@ -5653,6 +5653,7 @@
           "not_repo_root": "This folder is not the top folder of its git repository",
           "unsafe_repo_config": "This repository's git settings name a program to run, so it was not read",
         "unsupported_repo": "This repository's format (SHA-256 or a split index) cannot be read yet",
+          "state_inside": "This session's working folder holds the folder where the app keeps its own data (a wide folder such as your home folder), so changed files are not read. Pick a narrower project folder to see them",
           "git_missing": "git was not found on this computer",
           "timeout": "Reading took too long and was stopped — reload it",
           "upload_failed": "The computer could not send the list it read — reload it",

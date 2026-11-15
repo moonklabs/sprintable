@@ -75,7 +75,7 @@ describe('loadChanges (story 4951 ①c)', () => {
   });
 
   it('every outcome word of the computer is a closed word of the screen; an unknown one is the generic «failed», retryable', async () => {
-    for (const [code, problem] of [['no_folder', 'no_folder'], ['not_a_repo', 'not_a_repo'], ['not_repo_root', 'not_repo_root'], ['unsafe_repo_config', 'unsafe_repo_config'], ['git_missing', 'git_missing'], ['timeout', 'timeout'], ['busy', 'busy'], ['upload_failed', 'upload_failed'], ['something_new', 'failed']] as const) {
+    for (const [code, problem] of [['no_folder', 'no_folder'], ['not_a_repo', 'not_a_repo'], ['not_repo_root', 'not_repo_root'], ['unsafe_repo_config', 'unsafe_repo_config'], ['state_inside', 'state_inside'], ['git_missing', 'git_missing'], ['timeout', 'timeout'], ['busy', 'busy'], ['upload_failed', 'upload_failed'], ['something_new', 'failed']] as const) {
       const states = await run(world({ look: [json(200, { state: 'failed', code, files: null })] }));
       expect(states.at(-1)).toMatchObject({ kind: 'problem', problem });
     }
