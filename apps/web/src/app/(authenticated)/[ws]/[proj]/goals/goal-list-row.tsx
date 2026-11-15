@@ -66,11 +66,15 @@ interface GoalListRowProps {
   /** a click anywhere on the row (a click on the row's own button does not select twice) */
   onSelect: (goal: Goal) => void;
   onDeleteRequest: (id: string) => void;
+  /** story 4954 (the desktop app) — a double-click on the row opens the goal's own page (the detail column's «전체 보기») */
+  onOpen?: (goal: Goal) => void;
+  /** story 4954 — a right-click on the row: the list opens the goal's menu at the pointer */
+  onContextMenu?: (e: React.MouseEvent, goal: Goal) => void;
   /** only while the list is the whole list: the drag handle and the «curated» marker show */
   sortable: boolean;
 }
 
-export function GoalListRow({ goal, selected, onSelect, onDeleteRequest, sortable }: GoalListRowProps) {
+export function GoalListRow({ goal, selected, onSelect, onDeleteRequest, onOpen, onContextMenu, sortable }: GoalListRowProps) {
   const t = useTranslations('goals');
   const displayTimezone = useViewerTimeZone();
   const labels = useGoalLabels();
@@ -94,6 +98,8 @@ export function GoalListRow({ goal, selected, onSelect, onDeleteRequest, sortabl
       data-row-key={goal.id}
       className={`group relative ${isDragging ? 'shadow-[var(--elev-overlay)]' : ''}`}
       onClick={(e) => { if (!(e.target as HTMLElement).closest('a, [data-row-stop]')) onSelect(goal); }}
+      onDoubleClick={onOpen ? (e) => { if (!(e.target as HTMLElement).closest('a, button, [data-row-stop]')) onOpen(goal); } : undefined}
+      onContextMenu={onContextMenu ? (e) => onContextMenu(e, goal) : undefined}
     >
       <ListRow
         selected={selected}

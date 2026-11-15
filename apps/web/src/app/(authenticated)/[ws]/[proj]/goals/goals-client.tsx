@@ -51,6 +51,7 @@ import { useMediaQuery } from '@/hooks/use-media-query';
 import { handleListKeys } from '@/lib/list-keys';
 import { GoalDetailColumn } from './goal-detail-column';
 import { GoalListRow } from './goal-list-row';
+import { GoalRowContextMenu } from './goal-row-context-menu';
 import { GoalsHead } from './goals-head';
 import type { Goal, GoalEditDraft, GoalPriority, GoalStatus } from './goal-model';
 
@@ -368,6 +369,20 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
   const [showCreate, setShowCreate] = useState(false);
   const [statusFilter, setStatusFilter] = useState<GoalStatus | 'all'>('all');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  // story 4954 (the desktop app) — a right-click on a goal row opens its menu at the pointer; «목표 수정» chooses the goal and asks the detail column beside the list to open its edit form
+  const [rowMenu, setRowMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [editRequestId, setEditRequestId] = useState<string | null>(null);
+  const rowFocusRef = useRef<HTMLElement | null>(null);
+  const openRowMenu = useCallback((e: React.MouseEvent, goal: Goal) => {
+    e.preventDefault();
+    rowFocusRef.current = (e.currentTarget as HTMLElement).querySelector<HTMLElement>('[data-row-focus]');
+    setRowMenu({ id: goal.id, x: e.clientX, y: e.clientY });
+  }, []);
+  const openFullGoal = useCallback((goal: Goal) => router.push(`/${wsSlug}/${projSlug}/goals/${goal.id}`), [router, wsSlug, projSlug]);
+  const clearEditRequest = useCallback(() => setEditRequestId(null), []);
+  // a menu whose goal has left the list (a refresh · a project change) closes; an edit request nobody took (its goal's column is not on the screen) is dropped
+  useEffect(() => { if (rowMenu && !epics.some((g) => g.id === rowMenu.id)) setRowMenu(null); }, [rowMenu, epics]);
+  useEffect(() => { setEditRequestId((cur) => (cur && (!isWide || cur !== selectedId) ? null : cur)); }, [selectedId, isWide]);
   const [deleting, setDeleting] = useState(false);
   // wedge #2 로드맵 조타
   const [capped, setCapped] = useState(false);          // 상위 STEER_LIMIT 초과(honest 표시·silent-truncation 금지)
@@ -523,6 +538,10 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
       setGoals([]);
       setCapped(false);
       setSelectedId(null);
+      // story 4954 — what was pointed at in the OLD project's list goes with it: the open row menu · a pending edit request · a delete confirmation (its goal belongs to the project that was left)
+      setRowMenu(null);
+      setEditRequestId(null);
+      setDeleteConfirmId(null);
       listProjectRef.current = null;
     }
     // «읽음» 표시도 같이 비운다 — 비운 목록을 «이 프로젝트의 목록을 읽은 것»으로 보고 0 · 0을 정확한 수처럼 보이는 구멍(A → B(스윔레인) → A)을 막는다. 처음 열 때는 이미 null이다.
@@ -666,6 +685,8 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
                     sortable={sortable}
                     selected={effectiveSelectedId === epic.id}
                     onSelect={handleSelectGoal}
+                    onOpen={openFullGoal}
+                    onContextMenu={openRowMenu}
                     onDeleteRequest={(id) => setDeleteConfirmId(id)}
                   />
                 ))}
@@ -709,7 +730,7 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
             {listColumn}
             {showDetail && selectedGoal ? (
               <aside data-testid="goals-detail-column" className="flex min-h-0 min-w-0 flex-1">
-                <GoalDetailColumn key={selectedGoal.id} goal={selectedGoal} projectId={projectId} onUpdate={handleUpdate} />
+                <GoalDetailColumn key={selectedGoal.id} goal={selectedGoal} projectId={projectId} onUpdate={handleUpdate} editRequested={editRequestId === selectedGoal.id} onEditRequestHandled={clearEditRequest} />
               </aside>
             ) : null}
           </div>
@@ -739,6 +760,22 @@ export function GoalsClient({ projectId, orgId, initialView }: GoalsClientProps)
       ) : null}
 
       {/* Delete confirm dialog */}
+      {rowMenu && (() => {
+        const goal = epics.find((g) => g.id === rowMenu.id);
+        if (!goal) return null; // the goal left the list while the menu was open
+        return (
+          <GoalRowContextMenu
+            x={rowMenu.x}
+            y={rowMenu.y}
+            canEdit={isWide}
+            onOpenFull={() => openFullGoal(goal)}
+            onEdit={() => { setSelectedId(goal.id); setEditRequestId(goal.id); }}
+            onDelete={() => setDeleteConfirmId(goal.id)}
+            onClose={() => { setRowMenu(null); queueMicrotask(() => rowFocusRef.current?.focus()); }}
+          />
+        );
+      })()}
+
       <Dialog open={!!deleteConfirmId} onOpenChange={(open) => { if (!open) setDeleteConfirmId(null); }}>
         <DialogContent>
           <DialogHeader>
