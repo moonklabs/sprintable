@@ -234,6 +234,7 @@ HELPERS: dict[str, str] = {
     "components/content/publication-retry.tsx::postPublicationRetry": "exempt",       # reads only the status / an error body
     "components/desktop/desktop-remote-confirm.tsx::post": "raw",  # story #4548 — peek/confirm answer a plain object (errors: the app envelope)
     "lib/db/client.ts::callAuthRoute": "exempt",                   # the auth routes' own envelope (data | error)
+    "lib/agent-changes.ts::loadChanges": "exempt",                 # story #4951 ①c — takes a path builder (deps.paths); the answers are the BFF's plain objects ({ command_id } · { state, files, … }), read by closed words, never as a { data } envelope
     "components/home/home-model-provider.tsx::readJson": "raw",    # story #4888 — returns the body as is (null when not ok); its call sites read `.data` where they use it
 }
 _FN_DEF = re.compile(r"(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)|(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*(?::[^=]+)?=>")
