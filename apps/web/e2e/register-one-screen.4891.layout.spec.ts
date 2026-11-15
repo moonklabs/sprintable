@@ -80,6 +80,7 @@ const where = (page: Page) => page.evaluate(() => {
     foldButton: !!document.querySelector('[data-testid="register-email-open"]'),
     // only what is DRAWN counts (a hidden form is not «on the screen»)
     inputs: [...document.querySelectorAll('input[type="text"], input[type="email"], input[type="password"]')].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden'; }).length,
+    afterSubmit: (() => { const f = document.querySelector('[data-testid="register-email-form"]'); const kids = [...(f?.children ?? [])]; const i = kids.findIndex((c) => (c as HTMLElement).dataset.testid === 'register-submit'); return i < 0 ? ['(no submit)'] : kids.slice(i + 1).map((c) => (c as HTMLElement).dataset.testid ?? c.tagName.toLowerCase()); })(),
     lastInputBottom: (() => { const els = [...document.querySelectorAll('input[type="text"], input[type="email"], input[type="password"]')]; const e = els[els.length - 1] as HTMLElement | undefined; return e ? Math.round(e.getBoundingClientRect().bottom + scrollY) : null; })(),
     submitDrawn: (() => { const e = document.querySelector('[data-testid="register-submit"]'); if (!e) return false; const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; })(),
     docH: document.documentElement.scrollHeight, vw: innerWidth, vh: innerHeight, overflowX: document.documentElement.scrollWidth > innerWidth + 1,
@@ -106,6 +107,7 @@ test.describe('on a phone (390 × 844)', () => {
     const m = await where(page);
     expect(m.terms!.top).toBeLessThan(m.google!.top);
     expect(m.google!.bottom).toBeLessThanOrEqual(m.form!.top);
+    expect(m.afterSubmit.filter((x) => x !== 'register-submit-reason'), 'nothing but its reason line follows [회원가입] inside the form — no fold, no extra block after the button').toEqual([]);
     expect(m.lastInputBottom!, 'the fields end above [회원가입] (story 4960: the form also holds the reason line under it, so the form itself ends later)').toBeLessThanOrEqual(m.submit!.top);
   });
 });

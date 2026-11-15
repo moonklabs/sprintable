@@ -78,12 +78,41 @@ describe.each([['ko', koMessages.register], ['en', enMessages.register]] as cons
     expect(reason()).toBeNull();
   });
 
+  it('⭐filling then clearing (or ticking then unticking) leaves the button off AND the reason up', async () => {
+    await mount(locale);
+    await fill('Test User', 'a@b.com', 'Abc123!!');
+    await fill('', '', '');
+    expect(submit().disabled).toBe(true);
+    expect(reason()?.textContent, 'cleared again: the fields are still the reason').toBe(T.fieldsRequiredHint);
+    await fill('Test User', 'a@b.com', 'Abc123!!');
+    await tick(); await tick(); // ticked, then unticked
+    expect(submit().disabled).toBe(true);
+    expect(reason()?.textContent).toBe(T.tosRequiredError);
+  });
+
+  it('the line is a polite status (it is announced when it appears or changes)', async () => {
+    await mount(locale);
+    await fill('Test User', 'a@b.com', 'Abc123!!');
+    expect(reason()?.getAttribute('role')).toBe('status');
+  });
+
+  it('⭐after the Google press the terms sentence is in the banner: the line does not say it a second time', async () => {
+    process.env.NEXT_PUBLIC_OAUTH_ENABLED = 'true';
+    await mount(locale);
+    await fill('Test User', 'a@b.com', 'Abc123!!');
+    expect(container.textContent!.split(T.tosRequiredError).length - 1, 'before the press: the line only').toBe(1);
+    await act(async () => { (container.querySelector('[data-testid="register-google"]') as HTMLElement).click(); });
+    expect(container.textContent!.split(T.tosRequiredError).length - 1, 'after the press: said once (the banner)').toBe(1);
+    expect(reason(), 'the line gives way to the banner').toBeNull();
+    delete process.env.NEXT_PUBLIC_OAUTH_ENABLED;
+  });
+
   it('the two sentences exist in both languages and are not empty', () => {
     expect(T.fieldsRequiredHint.trim().length).toBeGreaterThan(5);
     expect(T.tosRequiredError.trim().length).toBeGreaterThan(5);
   });
 
-  it('while the request runs the button says «creating…» and the reason is not drawn (it is not blocked by a missing thing)', async () => {
+  it('while the request runs the button says «creating…» and no reason is drawn (a running request has every field and the box — nothing is missing)', async () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {}))); // never answers: the press stays in flight
     await mount(locale);
     await fill('Test User', 'a@b.com', 'Abc123!!');

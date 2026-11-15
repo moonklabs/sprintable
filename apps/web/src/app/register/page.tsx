@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
@@ -61,8 +61,12 @@ export default function RegisterPage() {
 
   // story 4960 (the 4959 lap · PO rule 11-13: a block says WHY, in place): while [가입] is off for a reason the person can fix, the reason is one line under it — the empty field first, then the terms (the same sentence the Google press says)
   // (a screen nothing has been put into yet says nothing: an empty form needs no line to be read as «fill me» — and the first screen keeps its room on a phone)
+  // — and once something was put in it stays on (filling then clearing, or ticking then unticking, leaves the button off and the reason up)
   const startedFilling = [displayName, password].some((v) => v !== '') || email.length > 0 || tosAccepted;
-  const submitReason = !startedFilling ? null : !displayName.trim() || !email.trim() || !password.trim() ? t('fieldsRequiredHint') : !tosAccepted ? t('tosRequiredError') : null;
+  const [touched, setTouched] = useState(false);
+  useEffect(() => { if (startedFilling) setTouched(true); }, [startedFilling]);
+  // the Google press already says the terms sentence in the banner above: the same words are not drawn twice
+  const submitReason = !(touched || startedFilling) ? null : !displayName.trim() || !email.trim() || !password.trim() ? t('fieldsRequiredHint') : !tosAccepted && error !== t('tosRequiredError') ? t('tosRequiredError') : null;
 
   const rules = checkPasswordRules(password);
   const categoriesMet = countCategories(rules);
@@ -253,12 +257,12 @@ export default function RegisterPage() {
             className="w-full"
             onClick={handleRegister}
             disabled={loading || !displayName.trim() || !email.trim() || !password.trim() || !tosAccepted}
-            aria-describedby={submitReason && !loading ? submitReasonId : undefined}
+            aria-describedby={submitReason ? submitReasonId : undefined}
             data-testid="register-submit"
           >
             {loading ? t('creatingAccount') : t('submit')}
           </Button>
-          {submitReason && !loading && <p id={submitReasonId} data-testid="register-submit-reason" className="text-center text-ds-small text-ds-ink-3">{submitReason}</p>}
+          {submitReason && <p id={submitReasonId} role="status" data-testid="register-submit-reason" className="text-center text-ds-small text-ds-ink-3">{submitReason}</p>}
         </div>
 
         <p className="flex flex-wrap items-center justify-center gap-x-1 text-center text-ds-body text-ds-ink-3">
