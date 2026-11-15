@@ -9,6 +9,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { CommandPalette } from './command-palette';
 import { NAV_GROUPS, OTHER_NAV_ITEMS, CHAT_CENTER_ITEM } from '@/lib/nav-config';
 import koMessagesRaw from '../../../messages/ko.json';
+import enMessagesRaw from '../../../messages/en.json';
 
 type LooseMessages = { [key: string]: string | LooseMessages };
 const koMessages = koMessagesRaw as unknown as LooseMessages;
@@ -66,6 +67,15 @@ describe('CommandPalette — existing navigate/search behavior (regression guard
     // 여전히 팔레트에 남아 있는 다른 항목(목표=goals, OTHER_NAV_ITEMS)으로 교체.
     expect(document.body.textContent).toContain('목표로 이동'); // 표=받침없음
     expect(document.body.textContent).toContain('문서로 이동'); // 서=받침없음
+  });
+
+  it('⭐story 4954 — the two entries that open the goals screen are told apart by their words: «목표로 이동» (the list view, the sidebar\'s «목표») and «목표(스윔레인)로 이동» (the same screen opened in the swimlane view — `/epics`); never two lines with the same label', async () => {
+    await mount();
+    const labels = [...document.querySelectorAll('[role="option"]')].map((o) => (o.textContent ?? '').trim());
+    expect(labels.filter((l) => l === '목표로 이동')).toHaveLength(1); // reverted (both read «목표로 이동») → 2
+    expect(labels.filter((l) => l === '목표(스윔레인)로 이동')).toHaveLength(1);
+    expect((koMessagesRaw as { commandPalette: { goEpics: string } }).commandPalette.goEpics).toBe('목표(스윔레인)로 이동');
+    expect((enMessagesRaw as { commandPalette: { goEpics: string } }).commandPalette.goEpics).toBe('Go to Goals (Swimlane)'); // the same pair in English (the goals screen's own view button words)
   });
 
   it('shows no context chip when there is no contextStoryId', async () => {

@@ -348,7 +348,7 @@
     "goDestination": "{label}{particle} 이동",
     "documents": "문서",
     "goSprints": "스프린트로 이동",
-    "goEpics": "목표로 이동",
+    "goEpics": "목표(스윔레인)로 이동",
     "goRetro": "회고로 이동",
     "goWorkList": "목록으로 이동",
     "goHypotheses": "가설로 이동",
