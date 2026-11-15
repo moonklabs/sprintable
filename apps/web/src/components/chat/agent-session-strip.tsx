@@ -22,6 +22,7 @@ import { limitHeld, limitLine, limitLooksAgain, limitTime, type RestLineKey, typ
 import { runInfoLine, type SessionRun } from '@/lib/agent-session-run';
 import { inboxStop, type SessionInbox } from '@/lib/agent-session-inbox';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { AgentChangesSheet } from '@/components/chat/agent-changes-sheet';
 
 /**
  * story #4534 (명세 모음 B-3 · «상태 칩 ↔ 서버 세션 상태») — the agent's session in its DM: the desktop bar's words and shapes
@@ -43,6 +44,10 @@ type SessionState = 'starting' | 'working' | 'idle' | 'waiting_permission' | 'wa
   | 'unrecognized';
 export type WorkHoldWhy = 'tools_unconfirmed' | 'tools_failed';
 interface View {
+  // story #4951 (①c): the session's key (the «바뀐 파일» ask names it) and whether THIS person may read the changed-file list — the computer's pairing person alone, the
+  // server's value (an older server sends neither → no button)
+  session_key?: string | null;
+  can_read_changes?: boolean;
   // story #4733: the computer this session runs on (the server sends it with the session; an older one sends none)
   setup_id?: string | null;
   device_name: string | null;
@@ -217,6 +222,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
   // story #4599 (Yuna ① · PO 14:25Z): [세션 끝내기] asks once — it cannot be undone (the destructive weight of 4580's second card); the
   // first focus is [취소]
   const [endOpen, setEndOpen] = useState(false);
+  const [changesOpen, setChangesOpen] = useState(false); // story #4951 ①c: the «바뀐 파일» sheet
   // story #4733 (Yuna 4733 §6): the hard end's dialog points at the phone's own [세션 종료] — drawn only where that button exists for this agent (its computer speaks
   // `clock` and this person may command it); an old app or a person without the right gets no line that points at nothing. Asked when the dialog opens.
   const [clockAvailable, setClockAvailable] = useState(false);
@@ -304,6 +310,8 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
     settle(pending.verb, await checkCommand(agentId, pending, deps));
   };
 
+  const showChanges = view.can_read_changes === true && typeof view.session_key === 'string' && view.session_key !== '';
+  const changesButton = showChanges ? <Button size="sm" variant="outline" onClick={() => setChangesOpen(true)} data-testid="agent-changes-open">{t('changes.button')}</Button> : null;
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border px-4 py-2 text-xs" data-testid="agent-session-strip">
       <span
@@ -317,6 +325,7 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
       {view.device_name ? <span className="text-muted-foreground">{view.device_name}</span> : null}
       {canStop ? (
         <span className="ml-auto flex gap-2" data-testid="agent-session-buttons">
+          {changesButton}
           {checkOnly ? null : <Button size="sm" variant="outline" disabled={busy} onClick={() => void run('stop')}>{t('button.stop')}</Button>}
           {pending
             ? <Button size="sm" variant="outline" disabled={busy} onClick={() => void check()}>{t('button.checkResult')}</Button>
@@ -324,16 +333,23 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
         </span>
       ) : canEnd ? (
         <span className="ml-auto flex gap-2" data-testid="agent-session-buttons">
+          {changesButton}
           {pending
             ? <Button size="sm" variant="outline" disabled={busy} onClick={() => void check()}>{t('button.checkResult')}</Button>
             : <Button size="sm" variant="outline" disabled={busy} onClick={() => setEndOpen(true)}>{t('button.endSession')}</Button>}
         </span>
+      ) : changesButton ? (
+        // no other buttons: this one stands alone at the right end. With others it joins THEIR group — two `ml-auto` groups would split the free space and leave it floating mid-row
+        <span className="ml-auto flex gap-2" data-testid="agent-changes-buttons">{changesButton}</span>
       ) : null}
       {result ? <ResultLine result={result} /> : <Line view={view} now={readAt} phone={phone} href={flatHref('/inbox?tab=gates')} />}
       <InboxLine view={view} />
       <WorkHoldLine view={view} />
       <WidenedLine view={view} />
       <RunLine run={view.run ?? null} />
+      {showChanges ? (
+        <AgentChangesSheet agentId={agentId} sessionKey={view.session_key ?? ''} deviceName={view.device_name} open={changesOpen} onOpenChange={setChangesOpen} />
+      ) : null}
       <Dialog open={endOpen} onOpenChange={setEndOpen}>
         <DialogContent showCloseButton={false} initialFocus={endCancelRef}>
           <DialogHeader>

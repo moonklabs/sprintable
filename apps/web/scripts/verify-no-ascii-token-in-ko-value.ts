@@ -388,6 +388,11 @@ export const LOWERCASE_WORD_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   'settings.agentFakechatWebhookActiveNote::launch',
   'settings.agentFakechatWebhookActiveNote::true',
   'settings.agentFakechatWebhookOffNote::true',
+  // story 4951 — «git»: the tool's name as the user sees it in a terminal (the same kind as the commands typed as they are, aws · gcloud · kubectl above) — PO approved 11-15 03:0xZ. One key at a time, only this word.
+  'chats.agentSession.changes.problem.git_missing::git',
+  'chats.agentSession.changes.problem.not_a_repo::git',
+  'chats.agentSession.changes.problem.not_repo_root::git',
+  'chats.agentSession.changes.problem.unsafe_repo_config::git',
 ]);
 
 // story #3926 처방 — 이 3926 PR이 처리하는 게 아니라 같은 자리를 동시에 고치는 다른
