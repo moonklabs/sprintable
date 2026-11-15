@@ -72,6 +72,7 @@ async function render(locale: 'ko' | 'en' = 'ko') {
   });
   await settle();
 }
+const strip = () => container.querySelector('[data-testid="agent-session-strip"]')!;
 const buttons = () => [...container.querySelectorAll('[data-testid="agent-session-buttons"] button')].map((b) => b.textContent);
 const press = async (name: string) => {
   const b = [...document.querySelectorAll('button')].find((x) => x.textContent === name) as HTMLButtonElement | undefined;
@@ -663,5 +664,22 @@ describe('[4733 S4b] the hard end\'s dialog points at the phone\'s own [세션 �
     expect(enMessagesAgent.button.endSession).toBe('End without a handoff');
     expect(document.body.textContent).toContain('End the session without a handoff?');
     expect(document.querySelector('[data-testid="agent-end-use-clock"]')?.textContent).toBe('No handoff is left — to leave one, use [End session].');
+  });
+});
+
+describe('the «바뀐 파일» button next to the stop / instruct buttons (story 4951 ①c)', () => {
+  it('joins THEIR group — one right-aligned group in the strip, not two (two `ml-auto` groups split the free space and the button floats mid-row)', async () => {
+    sessionView = { ...sessionView, can_read_changes: true, session_key: 's-1' };
+    server(res(201, { command_id: CMD }));
+    await render();
+    expect(buttons()).toEqual(['바뀐 파일', '멈춤', '지금 지시']);
+    expect([...strip().children].filter((c) => c.classList.contains('ml-auto'))).toHaveLength(1);
+    // with nothing else to press it stands alone at the right end — still one group
+    sessionView = { ...sessionView, state: 'idle', can_read_changes: true, session_key: 's-1' };
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    server(res(201, { command_id: CMD }));
+    await render();
+    expect(container.querySelector('[data-testid="agent-changes-open"]')).not.toBeNull();
+    expect([...strip().children].filter((c) => c.classList.contains('ml-auto'))).toHaveLength(1);
   });
 });

@@ -310,6 +310,8 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
     settle(pending.verb, await checkCommand(agentId, pending, deps));
   };
 
+  const showChanges = view.can_read_changes === true && typeof view.session_key === 'string' && view.session_key !== '';
+  const changesButton = showChanges ? <Button size="sm" variant="outline" onClick={() => setChangesOpen(true)} data-testid="agent-changes-open">{t('changes.button')}</Button> : null;
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border px-4 py-2 text-xs" data-testid="agent-session-strip">
       <span
@@ -321,13 +323,9 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
         {label}
       </span>
       {view.device_name ? <span className="text-muted-foreground">{view.device_name}</span> : null}
-      {view.can_read_changes === true && typeof view.session_key === 'string' && view.session_key !== '' ? (
-        <span className="ml-auto flex gap-2" data-testid="agent-changes-buttons">
-          <Button size="sm" variant="outline" onClick={() => setChangesOpen(true)} data-testid="agent-changes-open">{t('changes.button')}</Button>
-        </span>
-      ) : null}
       {canStop ? (
         <span className="ml-auto flex gap-2" data-testid="agent-session-buttons">
+          {changesButton}
           {checkOnly ? null : <Button size="sm" variant="outline" disabled={busy} onClick={() => void run('stop')}>{t('button.stop')}</Button>}
           {pending
             ? <Button size="sm" variant="outline" disabled={busy} onClick={() => void check()}>{t('button.checkResult')}</Button>
@@ -335,18 +333,22 @@ function Strip({ view, readAt, agentId, conversationId, reread }: { view: View &
         </span>
       ) : canEnd ? (
         <span className="ml-auto flex gap-2" data-testid="agent-session-buttons">
+          {changesButton}
           {pending
             ? <Button size="sm" variant="outline" disabled={busy} onClick={() => void check()}>{t('button.checkResult')}</Button>
             : <Button size="sm" variant="outline" disabled={busy} onClick={() => setEndOpen(true)}>{t('button.endSession')}</Button>}
         </span>
+      ) : changesButton ? (
+        // no other buttons: this one stands alone at the right end. With others it joins THEIR group — two `ml-auto` groups would split the free space and leave it floating mid-row
+        <span className="ml-auto flex gap-2" data-testid="agent-changes-buttons">{changesButton}</span>
       ) : null}
       {result ? <ResultLine result={result} /> : <Line view={view} now={readAt} phone={phone} href={flatHref('/inbox?tab=gates')} />}
       <InboxLine view={view} />
       <WorkHoldLine view={view} />
       <WidenedLine view={view} />
       <RunLine run={view.run ?? null} />
-      {view.can_read_changes === true && typeof view.session_key === 'string' && view.session_key !== '' ? (
-        <AgentChangesSheet agentId={agentId} sessionKey={view.session_key} deviceName={view.device_name} open={changesOpen} onOpenChange={setChangesOpen} />
+      {showChanges ? (
+        <AgentChangesSheet agentId={agentId} sessionKey={view.session_key ?? ''} deviceName={view.device_name} open={changesOpen} onOpenChange={setChangesOpen} />
       ) : null}
       <Dialog open={endOpen} onOpenChange={setEndOpen}>
         <DialogContent showCloseButton={false} initialFocus={endCancelRef}>
