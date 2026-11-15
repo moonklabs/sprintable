@@ -136,13 +136,14 @@ export function SupportWidgetLauncher() {
           우하단에 고정돼 있어, 이 버튼은 그 안의 평범한 flex 자식이다. 컬럼 자체가
           pointer-events-none(빈 공간 클릭 통과)이라 실제 버튼은 pointer-events-auto로
           되돌린다. */}
+      {/* story 4952 — while a modal (an OPEN `role=dialog` + `aria-modal`, or an `alertdialog`: the detail drawers · dialogs — the same «open modal» rule as storage-asset-list's dropBelongsToStorage: a drawer that is closed keeps its role but carries `aria-hidden` + `inert`, and does not count) is open this button is NOT drawn: it shares the bottom dock's `z-50` with those drawers and sat ON TOP of their bottom-right action (the storage file drawer's «삭제» was 25% covered; pressing its right end opened the support panel). The dock also carries the toasts, so the dock itself must stay above — only this button steps aside. The support panel (`role=dialog`, no aria-modal) is not a modal for this rule. */}
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-controls={PANEL_ID}
         aria-label={open ? t('closeLabel') : t('launcherLabel')}
-        className="pointer-events-auto flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+        className="pointer-events-auto flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 [:root:has(:is([role=dialog][aria-modal=true],[role=alertdialog]):not([aria-hidden=true]):not([inert]):not([class~='lg:hidden']))_&]:invisible max-lg:[:root:has(:is([role=dialog][aria-modal=true],[role=alertdialog]):not([aria-hidden=true]):not([inert])[class~='lg:hidden'])_&]:invisible"
       >
         {open ? <X className="h-5 w-5" aria-hidden /> : <LifeBuoy className="h-5 w-5" aria-hidden />}
       </button>
