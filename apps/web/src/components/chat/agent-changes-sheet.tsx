@@ -134,6 +134,7 @@ function problemText(t: T, problem: ChangesProblem): string {
     case 'not_repo_root': return t('problem.not_repo_root');
     case 'unsafe_repo_config': return t('problem.unsafe_repo_config');
     case 'unsupported_repo': return t('problem.unsupported_repo');
+    case 'state_inside': return t('problem.state_inside');
     case 'git_missing': return t('problem.git_missing');
     case 'timeout': return t('problem.timeout');
     case 'upload_failed': return t('problem.upload_failed');

@@ -24,7 +24,7 @@ export interface ChangedFile {
 /** the closed words a read can end with — the computer's (`code` of a failed read) and the server's refusals; the screen writes the sentence */
 export type ChangesProblem =
   | 'not_allowed' | 'unreachable' | 'remote_off' | 'busy' | 'too_fast' | 'session_gone' | 'expired'
-  | 'no_folder' | 'not_a_repo' | 'not_repo_root' | 'unsafe_repo_config' | 'unsupported_repo' | 'git_missing' | 'timeout' | 'upload_failed' | 'failed';
+  | 'no_folder' | 'not_a_repo' | 'not_repo_root' | 'unsafe_repo_config' | 'unsupported_repo' | 'state_inside' | 'git_missing' | 'timeout' | 'upload_failed' | 'failed';
 
 export type ChangesState =
   | { kind: 'idle' }
@@ -80,6 +80,7 @@ export function problemOf(httpStatus: number, code: string | undefined): { probl
   if (c === 'not_repo_root') return { problem: 'not_repo_root', retry: false };
   if (c === 'unsafe_repo_config') return { problem: 'unsafe_repo_config', retry: false };
   if (c === 'unsupported_repo') return { problem: 'unsupported_repo', retry: false };
+  if (c === 'state_inside') return { problem: 'state_inside', retry: false }; // the session's folder holds the app's own data folder (a wide folder such as home): said, not read
   if (c === 'git_missing') return { problem: 'git_missing', retry: false };
   if (c === 'timeout') return { problem: 'timeout', retry: true };
   if (c === 'upload_failed') return { problem: 'upload_failed', retry: true };

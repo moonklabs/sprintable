@@ -103,6 +103,19 @@ describe('AgentChangesSheet (story 4951 ①c)', () => {
     }
   });
 
+  it('the computer refusing because the session\'s folder holds the app\'s own data folder (`state_inside`) is said in one plain sentence in ko AND en, with no reload (a new ask would be refused the same way) — never a bare «failed»', async () => {
+    for (const locale of ['ko', 'en'] as const) {
+      await act(async () => { root.unmount(); }); root = createRoot(container);
+      await open(deps([json(200, { state: 'failed', code: 'state_inside', files: null })]).d, locale);
+      const el = q('[data-testid="agent-changes-problem"]')!;
+      expect(el.getAttribute('data-problem')).toBe('state_inside');
+      expect(el.textContent!.length).toBeGreaterThan(20);
+      expect(el.textContent).not.toMatch(/^changes\./);
+      expect(el.textContent).not.toBe((locale === 'ko' ? koMessages : enMessages).chats.agentSession.changes.problem.failed); // not the generic «failed» sentence
+      expect(q('[data-testid="agent-changes-reload"]')).toBeNull();
+    }
+  });
+
   it('a 404 after asking offers «다시 불러오기» (not a fault line)', async () => {
     await open(deps([json(404, { error: { code: 'changes_read_not_found' } })]).d);
     expect(q('[data-testid="agent-changes-problem"]')!.getAttribute('data-problem')).toBe('expired');
