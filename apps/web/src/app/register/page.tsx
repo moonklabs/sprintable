@@ -52,11 +52,17 @@ export default function RegisterPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const latch = useSubmitLatch(setLoading); // story 4940 — one press = one request · a success stays locked until the next screen is there
+  const submitReasonId = useId();
   const consentIds = { prefix: useId(), terms: useId(), and: useId(), privacy: useId() }; // the box is named by the WHOLE sentence: the words beside it and the two documents' names
   // story 4669 (U6 · Yuna A-5): with Google on, Google leads — the way with no mail round trip (email-verify-gate treats a social sign-in as verified).
   // story 4891 (UI-8 U1 · PO 11-10): the e-mail form is NOT folded behind a second press any more — one screen: the terms line, Google, the three fields, [가입]. The terms
   // checkbox (unticked by default, AUTH-07) still gates BOTH ways: Google goes nowhere until it is ticked and [가입] stays off; the server still refuses `tos_accepted=false`.
   const googleEnabled = process.env.NEXT_PUBLIC_OAUTH_ENABLED === 'true';
+
+  // story 4960 (the 4959 lap · PO rule 11-13: a block says WHY, in place): while [가입] is off for a reason the person can fix, the reason is one line under it — the empty field first, then the terms (the same sentence the Google press says)
+  // (a screen nothing has been put into yet says nothing: an empty form needs no line to be read as «fill me» — and the first screen keeps its room on a phone)
+  const startedFilling = [displayName, password].some((v) => v !== '') || email.length > 0 || tosAccepted;
+  const submitReason = !startedFilling ? null : !displayName.trim() || !email.trim() || !password.trim() ? t('fieldsRequiredHint') : !tosAccepted ? t('tosRequiredError') : null;
 
   const rules = checkPasswordRules(password);
   const categoriesMet = countCategories(rules);
@@ -247,10 +253,12 @@ export default function RegisterPage() {
             className="w-full"
             onClick={handleRegister}
             disabled={loading || !displayName.trim() || !email.trim() || !password.trim() || !tosAccepted}
+            aria-describedby={submitReason && !loading ? submitReasonId : undefined}
             data-testid="register-submit"
           >
             {loading ? t('creatingAccount') : t('submit')}
           </Button>
+          {submitReason && !loading && <p id={submitReasonId} data-testid="register-submit-reason" className="text-center text-ds-small text-ds-ink-3">{submitReason}</p>}
         </div>
 
         <p className="flex flex-wrap items-center justify-center gap-x-1 text-center text-ds-body text-ds-ink-3">

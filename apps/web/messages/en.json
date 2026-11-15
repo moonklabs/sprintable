@@ -1603,6 +1603,7 @@
     "or": "or",
     "continueWithGoogle": "Continue with Google",
     "tosRequiredError": "Please agree to the Terms of Service and Privacy Policy first.",
+    "fieldsRequiredHint": "Fill in your name, email and password to sign up.",
     "registrationFailed": "Registration failed. Please try again.",
     "registerEmailTaken": "This email is already registered.",
     "registerTosRequired": "You must accept the Terms of Service.",
