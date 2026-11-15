@@ -123,9 +123,9 @@ describe('FollowUpDialog — 바탕 부품(story 4831)', () => {
     await render(<FollowUpDialog orgId="org-1" publicationId="pub-1" originalTitle="가을 캠페인" onClose={() => {}} />);
     const title = document.body.querySelector('#follow-up-title') as HTMLInputElement;
     const note = document.body.querySelector('#follow-up-note') as HTMLTextAreaElement;
-    expect(title.dataset.slot).toBe('input');
-    expect(note.dataset.slot).toBe('textarea');
+    expect(title.dataset.slot).toBe('ds-input');
+    expect(note.dataset.slot).toBe('ds-textarea');
     expect(note.rows).toBe(3);
-    for (const el of [title, note]) expect(el.className.split(/\s+/)).toContain('text-foreground');
+    for (const el of [title, note]) expect(el.className.split(/\s+/)).toContain('text-ds-ink');
   });
 });

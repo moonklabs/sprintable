@@ -5,9 +5,9 @@
 // back and does no computing. Like the phone's start screen, asking makes the key if the phone has none yet (nothing is registered on the server by looking).
 import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ds/button';
 import { usePhoneBridge } from '@/components/providers/phone-bridge-context';
+import { SettingsSection } from './settings-section';
 
 /** «### ###» — the shape both ends print; anything else the shell sends is not shown as a number */
 const CHECK_NUMBER = /^\d{3} \d{3}$/;
@@ -43,24 +43,23 @@ export function ThisPhoneCard() {
   if (!inPhoneApp) return null;
   const result = answer && answer.nonce === nonce && answer.call === phoneCall ? answer.result : null; // an answer of another request or another bridge is not this one's
   return (
-    <Card className="break-keep flex flex-col gap-3 p-6" data-testid="this-phone-card">
-      <h2 className="text-base font-semibold">{t('thisPhoneTitle')}</h2>
-      {result === null && <p className="text-sm text-muted-foreground" data-testid="this-phone-reading">{t('thisPhoneReading')}</p>}
+    <SettingsSection title={t('thisPhoneTitle')} testId="this-phone-card">
+      {result === null && <p className="text-ds-body text-ds-ink-3" data-testid="this-phone-reading">{t('thisPhoneReading')}</p>}
       {result?.kind === 'number' && (
         <>
-          <p className="font-mono text-3xl font-semibold tracking-widest" data-testid="this-phone-number">{result.value}</p>
-          <p className="text-sm text-muted-foreground" data-testid="this-phone-hint">{t('thisPhoneHint')}</p>
+          <p className="font-mono text-3xl font-semibold tracking-widest text-ds-ink" data-testid="this-phone-number">{result.value}</p>
+          <p className="text-ds-body text-ds-ink-3" data-testid="this-phone-hint">{t('thisPhoneHint')}</p>
         </>
       )}
-      {result?.kind === 'no_screen_lock' && <p className="text-sm" data-testid="this-phone-no-screen-lock">{t('thisPhoneNoScreenLock')}</p>}
+      {result?.kind === 'no_screen_lock' && <p className="text-ds-body text-ds-ink" data-testid="this-phone-no-screen-lock">{t('thisPhoneNoScreenLock')}</p>}
       {result?.kind === 'failed' && (
         <>
-          <p className="text-sm" data-testid="this-phone-failed">{t('thisPhoneFailed')}</p>
-          <Button type="button" variant="outline" size="sm" className="self-start" data-testid="this-phone-retry" onClick={() => setNonce((n) => n + 1)}>
+          <p className="text-ds-body text-ds-ink" data-testid="this-phone-failed">{t('thisPhoneFailed')}</p>
+          <Button type="button" variant="secondary" className="self-start" data-testid="this-phone-retry" onClick={() => setNonce((n) => n + 1)}>
             {t('thisPhoneRetry')}
           </Button>
         </>
       )}
-    </Card>
+    </SettingsSection>
   );
 }

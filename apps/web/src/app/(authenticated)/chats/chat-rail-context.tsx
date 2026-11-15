@@ -15,6 +15,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
  * ④ 접힌 rail은 토글로 다시 부를 수 있다 — 그땐 모바일과 동형인 오버레이(main/reading을
  *    다시 눌러 앉히지 않고 그 위를 덮는다).
  *
+ * (story 4887 P6-b — lg~xl 구간의 rail은 지금 232px · Thread 슬롯은 300px이다; 접힘 규칙 ①~④는 그대로, xl↑는 270 · 320 그대로. 그 전까지 Thread 슬롯은 데스크톱에서도 `flex-1`이었다 —
+ *  본문과 반반 나눠 가졌다 — 고정 폭 분기가 죽은 코드였기 때문; 위 «w-80=320px 고정»은 설계 의도였고 실제 폭이 아니었다. 또 아래 ③의 «main 544 보장»은 1024px 경계에서 shell 내용폭 952 − 480 = 472라 정확하지 않다(옛 부정확, 이번 PR이 만든 것 아님).)
  * ⛔Thread 패널(w-80=320px 고정)은 이 규칙 대상이 아니다 — reading(480)보다 훨씬 좁아 같은
  * 폭에서 눌림이 덜하고, 유나 확定 문구도 "Reading 열림"만 명시했다(임의 확장 안 함).
  */

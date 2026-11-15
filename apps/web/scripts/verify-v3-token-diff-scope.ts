@@ -224,6 +224,19 @@ export function countProofTokenLineChanges(contentLines: string[]): number {
   return contentLines.filter((l) => RAW_TOKEN_LINE_RE.test(l)).length;
 }
 
+/** story 4919(UI-R6, PO 판정 2026-11-13) — 이 가드는 «옛 doc 표의 hex 값을 새 hex로 바꾸는» v3 토큰 교체 PR의 diff 범위를 재는 울타리다.
+ * `--proof-*`를 ds 토큰 참조(`var(--ds-*)`)로 잇는 PR은 값 SSOT를 design-system.css로 옮기는 다른 종류의 변경이라(대응 = `styles/old-palette-alias.4919.test.ts`가 못 박는다)
+ * 이 울타리 대상이 아니다: 추가된(+) `--proof-*` 값 줄이 하나 이상 있고 전부 `var(--ds-…)` 참조이면 true. hex 값을 새로 쓰는 줄이 하나라도 섞이면 false(그 PR은 여전히 토큰 교체 PR). */
+export function isDsReferenceMigration(unifiedPatch: string): boolean {
+  const added = unifiedPatch
+    .split('\n')
+    .filter((l) => l.startsWith('+') && !l.startsWith('+++'))
+    .map((l) => l.slice(1))
+    .filter((l) => RAW_TOKEN_LINE_RE.test(l));
+  if (added.length === 0) return false;
+  return added.every((l) => /^\s*--proof-[a-zA-Z0-9-]+:\s*var\(--ds-[\w-]+\)\s*;\s*$/.test(l));
+}
+
 // story #4011 AC1 — base ref가 `main`(bare 또는 `origin/main`)이면 승격 PR로 본다.
 // ci.yml이 `V3_TOKEN_DIFF_BASE: origin/${{ github.base_ref || 'develop' }}`로 배선해
 // PR의 실 base 브랜치명이 그대로 이 값에 실린다(develop·스택 부모 브랜치는 이 정규식에
@@ -280,6 +293,11 @@ function main(): number {
   }
   const contentLines = parseChangedContentLines(strippedPatch);
   const proofTokenLineChangeCount = countProofTokenLineChanges(contentLines);
+
+  if (isDsReferenceMigration(strippedPatch)) {
+    console.log(`OK: --proof-* 값을 ds 토큰 참조로 잇는 PR(story 4919) — 값 SSOT는 design-system.css이고 대응은 styles/old-palette-alias.4919.test.ts가 지킨다(이 울타리 대상 밖).`);
+    return 0;
+  }
 
   const scope = classifyDiffScope(changedFiles, proofTokenLineChangeCount);
   if (scope.kind === 'out_of_scope') {

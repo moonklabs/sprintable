@@ -4,23 +4,24 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ChevronDown, Search, MessageSquare } from 'lucide-react';
+import { LayoutGrid, Search, MessageSquare } from 'lucide-react';
 import { LocaleSwitcher } from '@/components/locale-switcher';
 import { ThemeToggle } from '@/components/nav/theme-toggle';
 import { CommandPalette } from '@/components/command-palette/command-palette';
+import { findActiveStaticItemId, isResourceItemActive } from '@/lib/nav-active';
+import { isRealShortcut } from '@/lib/keyboard-shortcuts';
 import { useCommandPalette } from '@/components/command-palette/command-palette-context';
 import { ProfileMenu } from '@/components/nav/profile-menu';
 import { BusinessInfoDisclosure } from '@/components/nav/business-info-disclosure';
 import { MoveAgentsEntry, NewProjectEntry } from '@/components/nav/new-project-entry';
 import { UnifiedSwitcher, type OrgSwitcherItem } from '@/components/nav/unified-switcher';
-import { Button } from '@/components/ui/button';
+import { NavGroupHeader, NavRow } from '@/components/nav/sidebar-nav-parts';
 import { fetchDesignatedPendingCount, subscribeDesignatedPendingCount } from '@/lib/designated-pending-count-client';
-import { cn } from '@/lib/utils';
 import {
+  ALL_SCREENS_ITEM,
+  CHAT_CENTER_ITEM,
   NAV_GROUPS,
-  groupVisibleLegacyByTarget,
   resolveNavGroups,
-  resolveChatCenterItem,
 } from '@/lib/nav-config';
 import { DEFAULT_NAV_V3_FLAGS, type NavV3Flags, scopedResourceHref } from '@/lib/nav-v3-destinations';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
@@ -31,12 +32,8 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuBadge,
-  SidebarMenuButton,
-  SidebarMenuItem,
   SidebarRail,
   useSidebar,
 } from '@/components/ui/sidebar';
@@ -71,12 +68,8 @@ interface AppSidebarProps {
 // 없는 그룹은 위 동적 기본값을 따른다(AC3 "기억이 없을 때도 기본값으로 온전히 선다").
 const SIDEBAR_GROUP_COLLAPSED_STORAGE_KEY = 'sidebar_group_collapsed';
 
-// story #3836(UX-v3·셸 후속, 선생님 지적 2026-09-14) — NAV_GROUPS 밖의 새 접힘 절(「더보기」,
-// LEGACY_NAV_ITEMS 17개). id는 모바일 /more의 legacyGroup.id('legacy')와 맞춰(같은 개념,
-// 두 화면에서 같은 이름) collapsedOverrides가 이 그룹도 NAV_GROUPS와 동일한 «사람별 기억»
-// 경로를 그대로 탄다(아래 mergeStoredCollapsedOverrides가 group id 목록을 인자로 받도록
-// 넓혀 NAV_GROUPS 밖 이 id도 포함시킨다 — 전용 코드 경로 0).
-const LEGACY_GROUP_ID = 'legacy';
+// story #4885(UI-2 AC4 PR 1) — 「더보기」 서랍은 걷혔다. 조직 항목은 NAV_GROUPS의 'org' 묶음 안에 있고 그 묶음만 기본 접힘이다(사람이 펼치면 기억 · 지금 화면이 그 안이면 열려 있다).
+const DEFAULT_COLLAPSED_GROUP_IDS: readonly string[] = ['org'];
 
 function readStoredCollapsedOverrides(): Record<string, boolean> {
   if (typeof window === 'undefined') return {};
@@ -105,36 +98,6 @@ function mergeStoredCollapsedOverrides(
   return next;
 }
 
-function KbdHint({ children }: { children: React.ReactNode }) {
-  return (
-    // 3826-pre — text-sidebar-foreground/60(알파 합성)이 v3 ink 재조정 후 실 브라우저
-    // 대비 미달(#767573/#fbfaf9 = 4.43:1)로 바뀌었다. solid text-muted-foreground(=
-    // --proof-ink-3, AA 조정 済)로 교체 — active 상태는 알파 대신 solid 전체 강조.
-    <kbd className="hidden rounded border border-sidebar-border/60 bg-sidebar-accent/40 px-1.5 py-0 font-mono text-micro font-medium text-muted-foreground group-data-[active=true]/menu-button:text-sidebar-foreground sm:inline-flex">
-      {children}
-    </kbd>
-  );
-}
-
-// story #9c5e82dc(IA·S3, 유나 § 確定 2026-09-08) — 「이 항목은 프로젝트 것」이라는 «성질»
-// 표식. 칩/배지 모양(테두리·배경) 금지 — 칩은 "누를 수 있는 것"으로 읽히는데 이건 행위가
-// 아니라 성질이다. 라틴 약어("PJ")·아이콘 단독+sr-only 둘 다 기각(유나 § 그대로 — 약어는
-// 배워야 하는 어휘, sr-only는 시각 사용자에게 아무 말도 안 함). kbd(#KbdHint)와 같은
-// 자리·비슷한 크기(10px)지만 mono가 아니라 본문 폰트(한글이라). 순서는 라벨→표식→kbd
-// (성질이 이름에 붙고 행위가 끝에 간다).
-//
-// ⛔️무표식 = 조직 범위가 아니다(유나 § 명시) — org 11항목 + 애매 4항목(inbox·settings·
-// org-briefing·org-workforce, 카디르 QA 재감사로 2→4 정정) 둘 다 무표식이다. 이 표식은
-// "project임을 말한다"만 하지 "무표식=org"를 말하지 않는다.
-function ScopeMark({ children }: { children: React.ReactNode }) {
-  return (
-    // 3826-pre — KbdHint와 동일 사유(알파 합성 → solid muted 교체).
-    <span className="text-micro font-medium text-muted-foreground group-data-[active=true]/menu-button:text-sidebar-foreground">
-      {children}
-    </span>
-  );
-}
-
 export function AppSidebar({
   orgId,
   orgMemberships = [],
@@ -147,11 +110,11 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  // story #4003 — nav-v3-destinations.ts 결정 함수를 그대로 재사용(복붙 규칙 0, AC2).
+  // story #4885 — 새 셸은 플래그 없이 하나: 버전 플래그는 안 읽고, `desktopDownloadEnabled`(화면 존재 플래그)만 설정 묶음의 항목 유무를 정한다.
   const navGroups = useMemo(() => resolveNavGroups(navV3Flags), [navV3Flags]);
   // story #4226 — static(flat) 항목 링크는 `?p=`를 싣는다(use-flat-href · 셸의 착지 정규화 router.replace 0).
   const flatHref = useFlatHref();
-  const chatCenterItem = useMemo(() => resolveChatCenterItem(navV3Flags), [navV3Flags]);
+  const chatCenterItem = CHAT_CENTER_ITEM;
   // story a539c649(S2 최초·S3 리소스 확장) — 실 ws/proj slug 있으면 직접 path(리다이렉트 홉
   // 절약) — 없으면 bare `/{resource}`(미들웨어의 bare→쿠키 default 해소 301 안전망이 받는다).
   const orgSlug = orgMemberships.find((o) => o.orgId === orgId)?.orgSlug;
@@ -162,9 +125,7 @@ export function AppSidebar({
   // 하나 늘리면 이 판정도 자동으로 늘어난다. href는 여전히 resource(주 진입점) 기준.
   function resourceLink(resource: string, extraActivePaths: readonly string[] = []): { href: string; isActive: boolean } {
     const href = scopedResourceHref(resource, orgSlug, currentProjectSlug, flatHref);
-    const isActivePath = (p: string) => pathname === `/${p}` || pathname.startsWith(`/${p}/`)
-      || Boolean(orgSlug && currentProjectSlug && pathname.startsWith(`/${orgSlug}/${currentProjectSlug}/${p}`));
-    const isActive = [resource, ...extraActivePaths].some(isActivePath);
+    const isActive = isResourceItemActive(pathname, resource, orgSlug, currentProjectSlug, extraActivePaths);
     return { href, isActive };
   }
   // story #2224(IA v2.2 §7-3, AC12) — 기본 진입은 /flow, 사이드바가 통합뷰를 가리킨다.
@@ -175,9 +136,12 @@ export function AppSidebar({
   // story #d986fd6c(IA·S4) — 정적 항목 active 판정. 원래 렌더 루프 바로 앞(구 위치)에
   // 있었으나, 활성 구역 계산(아래)이 접힘 state보다 먼저 알아야 해 이 자리로 옮겼다 —
   // pathname/href만의 순수 함수라 위치 이동에 따른 의미 변화 없음.
-  function isActive(href: string) {
-    return pathname === href || (href !== '/' && pathname.startsWith(href));
-  }
+  // story #4885 (codex 1판) — 정적 항목의 «지금 여기» 판정 한 곳. 예전 isActive(href)는 쿼리 달린 경로(`/inbox?tab=gates`)를 pathname과 글자 그대로 비교해 영영 켜지지 않았고,
+  // 접두 비교라 `/organization/workforce/runs`가 «에이전트»와 «실행 기록»을 함께 켜고 `/content/channel-posts`가 «블로그 포스트»와 «채널 포스트»를 함께 켰다.
+  // 이제 lib/nav-active.ts 한 곳(아이콘 막대와 같은 판정): ① 쿼리는 경로와 따로 보고 ② 맞는 항목이 여럿이면 가장 구체적인 하나만 ③ 정확히 맞는 항목이 없으면 같은 화면의 가장 구체적인 항목(탭만 다른 경우).
+  const activeStaticItemId = findActiveStaticItemId([...navGroups.flatMap((g) => g.items), ALL_SCREENS_ITEM], pathname, searchParams);
+  // story #4906 — the chat card is outside the groups (2930), so «here» is asked of it on its own, by the same rule as every other static item
+  const chatCenterActive = findActiveStaticItemId([chatCenterItem], pathname, searchParams) === chatCenterItem.id;
   const t = useTranslations('nav');
   const { isMobile, setOpenMobile } = useSidebar();
   // ⌘K 액션 확장(story 4f991165) — 스토리 상세(`/flow?view=list&story={id}`)에서 열렸을
@@ -224,11 +188,8 @@ export function AppSidebar({
   // 만들던 계산(activeGroupId·viewportHeight)도 이제 이 자리에선 쓸모가 없다 — 기본값은
   // 뷰포트/활성 구역과 무관한 빈 Set(전부 펼침). 아래 collapsedOverrides(사람별 기억)가
   // 유일한 접힘 경로다.
-  // story #3836 — 위 f81657f8 규칙(NAV_GROUPS는 기본 전부 펼침)은 그대로 두되, 「더보기」
-  // (LEGACY_GROUP_ID)만 이 카드의 명시 AC1대로 기본 접힘이다 — 서로 다른 두 그룹 «종류»의
-  // 기본값이 다른 것이지 f81657f8 결정을 뒤집는 게 아니다(그 결정은 NAV_GROUPS 대상으로
-  // 그대로 유효).
-  const defaultCollapsedGroupIds = useMemo(() => new Set<string>([LEGACY_GROUP_ID]), []);
+  // story #4885 — 기본은 전부 펼침(f81657f8)이되 조직 묶음만 접힘(위 DEFAULT_COLLAPSED_GROUP_IDS).
+  const defaultCollapsedGroupIds = useMemo(() => new Set<string>(DEFAULT_COLLAPSED_GROUP_IDS), []);
 
   // story #d986fd6c(IA·S4) — 그룹별 접힘 «기억». 서버 렌더는 항상 빈 overrides({})로
   // 시작해(하이드레이션 불일치 방지, sidebar_width의 SIDEBAR_WIDTH_STORAGE_KEY 마운트-후
@@ -257,7 +218,7 @@ export function AppSidebar({
     }
   }, []);
   const collapsibleGroupIds = useMemo(
-    () => [...NAV_GROUPS.map((g) => g.id), LEGACY_GROUP_ID],
+    () => NAV_GROUPS.map((g) => g.id),
     [],
   );
   const collapsedGroupIds = useMemo(
@@ -306,7 +267,7 @@ export function AppSidebar({
         // 결재자로 지정된 미해소 건이 몇 개인가", room 추론 0)로 교체. #3001부터 카드가
         // 지정 라인 전용으로만 발행되므로 이 좁은 쿼리가 GNB "미확認" 뱃지의 정확한 SSOT다
         // (BE 문서 gates.py::get_designated_pending_count — "AC1이 이 층에서 닫히는 근거").
-        // story #4171 — 하단 탭바와 진행 중 요청 공유(모바일 첫 화면 중복 1건 제거).
+        // story #4171 — 진행 중 요청 공유(모바일 첫 화면 중복 1건 제거 — 폰 탭바는 story #4885부터 이 수를 따로 안 센다).
         const count = await fetchDesignatedPendingCount();
         if (count !== null && !cancelled) setInboxPendingCount(count);
       } catch { /* noop */ }
@@ -328,10 +289,10 @@ export function AppSidebar({
   }, []);
 
   // story #3084(2026-08-25 층1) — "라이브 카운트"(유나 규격 §3). 승인/토스/위임 어느 쪽이든
-  // 이 뱃지가 세는 집합(designated_approver_id=me AND status=pending)을 바꿀 수 있는 3
-  // 이벤트 전부에서 즉시 재조회(30초 폴링은 mux 미연결/이벤트 유실 대비 안전망으로 유지).
+  // 이 뱃지가 세는 집합(designated_approver_id=me AND status=pending)을 바꿀 수 있는
+  // 이벤트 전부(story #4885부터 «새로 생김» conversation.gate_created 포함 — DESIGNATED_PENDING_COUNT_EVENTS)에서 즉시 재조회(30초 폴링은 mux 미연결/이벤트 유실 대비 안전망으로 유지).
   // story #4245 — 연결 직후 백필 중 **마지막 수에 이미 보였던** 이벤트는 다시 묻지 않는다(dev 배포 21 · 기동마다 designated-pending-count
-  // 2번째 요청의 발신 지점이 이 자리였다). story #4263 — 그 구독 · 판정을 모바일 탭바와 공유하는 한 곳(subscribeDesignatedPendingCount)으로.
+  // 2번째 요청의 발신 지점이 이 자리였다). story #4263 — 그 구독 · 판정을 한 곳(subscribeDesignatedPendingCount)으로.
   // 실패는 null — 다음 정상 이벤트나 30초 폴링으로 자연 회복.
   useEffect(() => {
     if (!mux) return;
@@ -340,9 +301,9 @@ export function AppSidebar({
 
   // story #2930(P0-G) I2, doc ia-4zone-redesign-2930 — 챗 「center(중심 꽃)」. 4구역
   // «밖» 1급으로 승격(선생님 확定) — NAV_GROUPS 순회에 안 실린다(구역에 묻으면 강등이라는
-  // 게 이 승격의 요점). 시안 아티팩트(6242dffb .chatc) 그대로: 상시 blue-soft 카드,
-  // active/inactive로 톤이 안 바뀐다(항상 눈에 띄어야 하는 1급 자리라 일반 nav 항목의
-  // "현재 페이지만 강조" 관례를 안 따름 — 시안에도 active 변형이 없다).
+  // 게 이 승격의 요점). «항상 눈에 띄어야 하는 1급 자리» — 이 뜻은 그대로다.
+  // story #4906(PO 11-12): 처음엔 시안(6242dffb .chatc) 그대로 상시 파란 테두리 카드(active/inactive 톤 동일)였으나, 그 테두리가 모든 화면에서 «지금 이 화면»으로 읽혀
+  // 진짜 현재 페이지 표시와 두 군데가 강조됐다 — 지금은 /chats일 때만 다른 항목과 같은 «현재 페이지» 채움 + aria-current, 아닐 때는 테두리 · 그림자 없이 아이콘 · 글자만 파랑.
   // story #3824 CHANGES①(페드루 PO 確定, 2026-09-13 09:01Z) — 정본 순서는 오늘→대화→
   // 일감→결과→연결·규칙(「오늘」=첫 화면). NAV_GROUPS는 계속 "구역 밖 1급"이라 순회
   // 대상은 아니지만(승격 자체는 무변경), 렌더 위치만 옮겨 NAV_GROUPS[0](오늘) 바로
@@ -352,11 +313,17 @@ export function AppSidebar({
     <div className="mx-2.5 mt-2">
       <Link
         href={flatHref(chatCenterItem.path)}
+        data-nav-id={chatCenterItem.id}
         // story #3054(2984-S6) — GATE_BUTTON_TONE.primary(proof-capsule.tsx)와 동형으로
         // 헤어라인+elev 채택, bg-proof-blue-soft 채움 폐지. hover는 이제 solid 전환 대신
         // bg-sidebar-accent(기존 다른 nav 항목의 hover 관례와 정합) — AA 대비 이슈였던
         // hover:text-white/sidebar-primary-foreground 분기 자체가 불필요해졌다.
-        className="flex items-center gap-2 rounded-xl border border-proof-blue bg-transparent px-2.5 py-2 text-proof-blue shadow-[var(--elev-card)] transition hover:bg-sidebar-accent"
+        aria-current={chatCenterActive ? 'page' : undefined}
+        // story #4906 (PO 11-12): the card stays the always-conspicuous first-class place (2930's meaning) but its blue outline read as «you are here» on every screen, next to the real current-page mark. Now: the filled
+        // look of the current page ONLY on /chats; anywhere else no outline — the icon and the word carry the ds action colour, nothing more.
+        // story 4930: it was `text-proof-blue` (the old info blue, rgb 31,95,191 — always on, neither «unread» nor «active»), a second accent next to the ds action violet; now the ds action-text.
+        className={`flex items-center gap-2 rounded-xl px-2.5 py-2 text-ds-action-text transition hover:bg-sidebar-accent ${chatCenterActive ? 'bg-sidebar-accent' : 'bg-transparent'}`}
+        data-chat-center-active={chatCenterActive ? 'true' : 'false'}
       >
         <MessageSquare className="size-[18px] shrink-0" />
         <span className="flex-1 truncate text-editorial-ui font-bold">{t(chatCenterItem.labelKey)}</span>
@@ -375,7 +342,12 @@ export function AppSidebar({
 
   return (
     <>
-    <Sidebar variant="inset" collapsible="offcanvas">
+    {/* story #4885 B 셸 — 이 칸은 «목록» 칸이다: 왼쪽 끝은 아이콘 막대(nav-rail · w-14 = 3.5rem)가 쥐고, 이 칸은 그 오른쪽에 선다(접히면 막대 뒤로 들어감). */}
+    <Sidebar
+      variant="inset"
+      collapsible="offcanvas"
+      className="data-[side=left]:left-14 data-[side=left]:group-data-[collapsible=offcanvas]:left-[calc(3.5rem-var(--sidebar-width))]"
+    >
       <SidebarHeader className="py-3">
         <UnifiedSwitcher
           orgs={orgMemberships}
@@ -421,33 +393,22 @@ export function AppSidebar({
           // 1개뿐이라 접어 봤자 얻는 게 없고, ia-4zone 확定이 이미 "라벨 없는 유틸 그룹"
           // 으로 못박아 뒀다 — 헤더 자체가 없으니 토글할 자리도 없다).
           const isCollapsible = Boolean(group.labelKey);
-          const isCollapsed = isCollapsible && collapsedGroupIds.has(group.id);
+          // story #4885 — 접힌 묶음이어도 지금 화면이 그 안이면 열어 둔다(현재 위치가 사라지지 않게; 접힘 기억은 건드리지 않는다).
+          const groupHasActiveItem = group.items.some((item) => (
+            item.kind === 'static' ? item.id === activeStaticItemId : resourceLink(item.path, item.id === 'board' ? WORKSPACE_FRAME_TAB_PATHS : []).isActive
+          ));
+          const isCollapsed = isCollapsible && collapsedGroupIds.has(group.id) && !groupHasActiveItem;
           const groupLabel = group.labelKey ? t(group.labelKey) : '';
-          // 카디르 QA(a11y, §22-18 가드) — render prop이 넘기는 버튼 요소는 SidebarGroupLabel의
-          // children(그룹명 텍스트+쉐브론 아이콘)을 감싸기만 할 뿐 버튼 자체에 접근가능한
-          // 이름이 안 실린다(스크린리더가 7구역 토글을 구별 못 함) — aria-label에 그룹명+
-          // 접힘상태를 명시로 채워 넣는다.
-          const toggleAriaLabel = isCollapsed
-            ? t('groupExpand', { group: groupLabel })
-            : t('groupCollapse', { group: groupLabel });
+          // 접힘 상태는 aria-expanded, 접근 가능한 이름은 그룹명(SectionHeader 단추) — 이름에 «접기/펼치기»를 또 싣지 않는다.
           return (
           <Fragment key={group.id}>
           <SidebarGroup>
             {group.labelKey ? (
-              <SidebarGroupLabel
-                render={
-                  <button
-                    type="button"
-                    onClick={() => toggleGroupCollapsed(group.id)}
-                    aria-expanded={!isCollapsed}
-                    aria-label={toggleAriaLabel}
-                  />
-                }
-                className="w-full cursor-pointer justify-between hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              >
-                <span>{groupLabel}</span>
-                <ChevronDown className={cn('size-3.5 shrink-0 transition-transform duration-150', isCollapsed && '-rotate-90')} />
-              </SidebarGroupLabel>
+              <NavGroupHeader
+                label={groupLabel}
+                collapsed={isCollapsed}
+                onToggle={() => toggleGroupCollapsed(group.id)}
+              />
             ) : null}
             {!isCollapsed ? (
             <SidebarGroupContent>
@@ -462,34 +423,27 @@ export function AppSidebar({
                   // retro/flow 탭에서도 사이드바가 계속 활성으로 뜬다(story #3844
                   // 선례와 동일 계약 — 탭 커버리지 무변, 1차 href만 갱신).
                   const link = item.kind === 'static'
-                    ? { href: flatHref(item.path), isActive: isActive(item.path) }
+                    ? { href: flatHref(item.path), isActive: item.id === activeStaticItemId }
                     : resourceLink(item.path, item.id === 'board' ? WORKSPACE_FRAME_TAB_PATHS : []);
                   const Icon = item.icon;
                   const badgeCount = item.badgeKey === 'inbox' ? inboxPendingCount : 0;
                   const badgeCap = item.badgeKey === 'inbox' ? 9 : 99;
                   const label = t(item.labelKey);
                   return (
-                    <SidebarMenuItem key={item.id}>
-                      <SidebarMenuButton
-                        render={<Link href={link.href} ref={link.isActive ? activeMenuItemRef : undefined} />}
-                        isActive={link.isActive}
-                        tooltip={label}
-                      >
-                        <Icon />
-                        <span data-nav-label>{label}</span>
-                        {item.scope === 'project' || item.kbdHint ? (
-                          <span className="ml-auto flex shrink-0 items-center gap-1.5">
-                            {item.scope === 'project' ? <ScopeMark>{t('scopeProject')}</ScopeMark> : null}
-                            {item.kbdHint ? <KbdHint>{item.kbdHint}</KbdHint> : null}
-                          </span>
-                        ) : null}
-                        {item.badgeKey && badgeCount > 0 ? (
-                          <SidebarMenuBadge>
-                            {badgeCount > badgeCap ? `${badgeCap}+` : badgeCount}
-                          </SidebarMenuBadge>
-                        ) : null}
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
+                    <NavRow
+                      key={item.id}
+                      navId={item.id}
+                      href={link.href}
+                      label={label}
+                      Icon={Icon}
+                      isActive={link.isActive}
+                      activeRef={link.isActive ? activeMenuItemRef : undefined}
+                      scopeMark={item.scope === 'project' ? t('scopeProject') : null}
+                      kbd={item.kbdHint && isRealShortcut([item.kbdHint]) ? item.kbdHint : null}
+                      badgeCount={item.badgeKey ? badgeCount : 0}
+                      badgeCap={badgeCap}
+                      badgeLabel={item.badgeKey === 'inbox' ? t('railNeedsHand') : undefined}
+                    />
                   );
                 })}
               </SidebarMenu>
@@ -503,122 +457,21 @@ export function AppSidebar({
           </Fragment>
           );
         })}
-        {/* story #3836(UX-v3·셸 후속, 선생님 지적 2026-09-14) — 3824가 5항목으로 줄이며
-            사이드바에서 빠진 LEGACY_NAV_ITEMS 17개(⌘K 팔레트·모바일 /more가 이미 그 1급
-            진입점)를 이 접힘 절로 되돌린다. 항목 자체는 VISIBLE_LEGACY_NAV_ITEMS(nav-
-            config.ts SSOT, 모바일 /more와 정확히 같은 정의) 그대로 순회 — 이 파일이
-            자기만의 목록을 다시 짓지 않는다(AC2/AC3). 기본 접힘(AC1) — 위 f81657f8은
-            NAV_GROUPS(전부 펼침)만의 결정이라 이 새 그룹엔 안 걸린다. */}
-        {(() => {
-          // story #3855(customer-zero·셸) — 「더보기」 안 항목을 §② 흡수 지도 머리말별로
-          // 묶는다(groupVisibleLegacyByTarget, nav-config.ts SSOT — more/page.tsx와 같은
-          // 함수 재사용). 링크 계산 자체는 3836과 동일(static/resource 링크, 새 축 0) —
-          // 그룹마다 반복하지 않고 전 항목을 한 번에 링크로 만든 뒤 그룹별로 다시 읽는다.
-          const legacyGroups = groupVisibleLegacyByTarget();
-          const legacyLinkByItemId = new Map(
-            legacyGroups.flatMap((group) => group.items).map((item) => [
-              item.id,
-              item.kind === 'static' ? { href: flatHref(item.path), isActive: isActive(item.path) } : resourceLink(item.path),
-            ]),
-          );
-          const legacyHasActiveItem = [...legacyLinkByItemId.values()].some((link) => link.isActive);
-          const legacyIsCollapsed = collapsedGroupIds.has(LEGACY_GROUP_ID) && !legacyHasActiveItem;
-          const legacyGroupLabel = t('navMore');
-          const legacyToggleAriaLabel = legacyIsCollapsed
-            ? t('groupExpand', { group: legacyGroupLabel })
-            : t('groupCollapse', { group: legacyGroupLabel });
-          return (
-            <SidebarGroup>
-              <SidebarGroupLabel
-                render={
-                  // story #3164(DS 게이트 키스톤) 가드 — raw-button-baseline.json이 이
-                  // 파일에 고정한 2건(기존 NAV_GROUPS 토글·⌘K 검색)은 grandfather라
-                  // 그대로 두지만, 이 신규 토글은 소문자 버튼 태그를 새로 추가하는
-                  // 자리라 baseline 초과로 걸린다(2026-09-14 CI 실측 — verify-no-new-
-                  // raw-button.ts는 소스 텍스트를 문자 그대로 스캔해 주석 속 예시
-                  // 표기까지 태그로 오인하므로 이 코멘트에도 그 표기를 쓰지 않는다).
-                  // 캐노니컬 Button(@/components/ui/button)으로 — variant="ghost"의
-                  // 부가 스타일(aria-expanded 틴트·citron 포커스 링)은 아래 className
-                  // 에서 명시로 되돌려 기존 그룹 토글과 시각 동일(실 브라우저 재캡처로
-                  // 확認, AC5 캡처 2 갱신).
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => toggleGroupCollapsed(LEGACY_GROUP_ID)}
-                    aria-expanded={!legacyIsCollapsed}
-                    aria-label={legacyToggleAriaLabel}
-                  />
-                }
-                // 유나 QA 코드리뷰 지적(2026-09-14, 페드루 전달) — mergeProps(Base UI, 일반
-                // React prop 병합)는 이 저장소 cn()의 tailwind-merge와 다른 함수라 Button
-                // size="default"의 `min-h-11`(44px)이 `h-8`(32px, min-height가 아닌 height라
-                // twMerge 충돌군이 애초에 다름)과 절대 충돌하지 않고 살아남는다 — min-height가
-                // 선언된 height보다 크면 렌더 높이는 min-height를 따른다(CSS 규격). `min-h-8`
-                // 명시로 그 최소치를 형제 라벨과 맞춘다(min-w-11도 동형 이유로 함께 되돌림).
-                className="w-full min-h-8 min-w-0 cursor-pointer justify-between rounded-md border-0 bg-transparent aria-expanded:bg-transparent hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:border-transparent"
-              >
-                <span>{legacyGroupLabel}</span>
-                <ChevronDown className={cn('size-3.5 shrink-0 transition-transform duration-150', legacyIsCollapsed && '-rotate-90')} />
-              </SidebarGroupLabel>
-              {!legacyIsCollapsed ? (
-                <SidebarGroupContent>
-                  {/* story #3855 AC2 — 캡션 1줄(§⑤ 해요체·「이사 안내판」 취지). 링크·머리말
-                      둘 다 아닌 순수 안내문이라 SidebarMenu 밖, 첫 그룹 위에 한 번만. */}
-                  <p className="px-2 pt-px pb-1 text-editorial-meta text-muted-foreground" data-testid="legacy-moving-caption">
-                    {t('moreLegacyMovingCaption')}
-                  </p>
-                  {legacyGroups.map((group, groupIndex) => (
-                    <div key={group.target} className="space-y-0.5" data-legacy-group={group.target}>
-                      {/* 픽셀 커밋(페드루 PO 판정 2026-09-14 07:34Z, 유나 시안 77731332
-                          getComputedStyle 대조) — 묶음 사이 구분선(border 토큰) 1px·margin
-                          4px 8px 4px(story 4831: 위 5px를 눈금의 4px로), 첫 그룹 앞엔 없음. */}
-                      {groupIndex > 0 ? <div className="mx-2 mt-1 mb-1 h-px bg-border" /> : null}
-                      {/* AC2 — 머리말은 링크·버튼이 아니다(순수 텍스트, 클릭 불가). 시안이
-                          지정한 안내 문구(머리말 옆 회색 note, 예: 「만드는 곳(일)…」)는 PO가
-                          §⑤ 내부 낱말·사이드바 폭 이유로 명시 제외했다 — 이름+개수 pill만. */}
-                      <p className="flex items-baseline gap-1.5 px-2 pt-0.5 pb-px text-editorial-meta font-bold tracking-[.03em] text-muted-foreground">
-                        <span>{t(group.labelKey)}</span>
-                        <span className="rounded-full bg-muted px-1.5 text-micro font-bold leading-[15px] text-muted-foreground">
-                          {group.items.length}
-                        </span>
-                      </p>
-                      <SidebarMenu>
-                        {group.items.map((item) => {
-                          const link = legacyLinkByItemId.get(item.id)!;
-                          const Icon = item.icon;
-                          const label = t(item.labelKey);
-                          return (
-                            <SidebarMenuItem key={item.id}>
-                              <SidebarMenuButton
-                                render={
-                                  <Link
-                                    href={link.href}
-                                    ref={link.isActive ? activeMenuItemRef : undefined}
-                                    data-legacy-nav-id={item.id}
-                                  />
-                                }
-                                isActive={link.isActive}
-                                tooltip={label}
-                              >
-                                <Icon />
-                                <span data-nav-label>{label}</span>
-                                {item.scope === 'project' ? (
-                                  <span className="ml-auto flex shrink-0 items-center gap-1.5">
-                                    <ScopeMark>{t('scopeProject')}</ScopeMark>
-                                  </span>
-                                ) : null}
-                              </SidebarMenuButton>
-                            </SidebarMenuItem>
-                          );
-                        })}
-                      </SidebarMenu>
-                    </div>
-                  ))}
-                </SidebarGroupContent>
-              ) : null}
-            </SidebarGroup>
-          );
-        })()}
+        {/* story #4885(UI-2 AC4 PR 1) — «전체»: 위 구역 전부 + «그 밖»의 평평한 목록(폰 하단 탭 «전체»와 같은 화면, 같은 이름). 구역이 아니라 입구 하나. */}
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <NavRow
+                href={flatHref(ALL_SCREENS_ITEM.path)}
+                label={t(ALL_SCREENS_ITEM.labelKey)}
+                Icon={LayoutGrid}
+                isActive={activeStaticItemId === ALL_SCREENS_ITEM.id}
+                activeRef={activeStaticItemId === ALL_SCREENS_ITEM.id ? activeMenuItemRef : undefined}
+                navId="all-screens"
+              />
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter className="space-y-2 p-2">

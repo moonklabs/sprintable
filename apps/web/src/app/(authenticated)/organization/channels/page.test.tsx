@@ -31,6 +31,7 @@ vi.mock('next/navigation', () => ({
 }));
 
 import OrganizationChannelsPage from './page';
+import { TopBarProvider, useTopBar } from '@/components/nav/top-bar-context';
 import { formatScheduledAt, resolveDisplayTimezone } from '@/lib/schedule-format';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -38,10 +39,15 @@ import { formatScheduledAt, resolveDisplayTimezone } from '@/lib/schedule-format
 let container: HTMLDivElement;
 let root: Root;
 
+// 4913 C판 — 화면 제목은 앱 틀 위 막대(TopBarSlot)로 간다: 막대 컨텍스트를 감싸고(이 파일은 모듈을 비우지 않아 정적 import가 화면과 같은 컨텍스트다), 막대에 올라간 제목을 읽는 프로브를 둔다.
+function TopBarTitleProbe() {
+  const { title } = useTopBar();
+  return <div data-testid="topbar-probe">{title}</div>;
+}
 function wrap(node: React.ReactNode) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      {node}
+      <TopBarProvider><TopBarTitleProbe />{node}</TopBarProvider>
     </NextIntlClientProvider>
   );
 }
@@ -252,10 +258,10 @@ async function expandChannelRow(opts: { viaMenuLabel?: string; rowChannel?: stri
   // 화면에 채널이 2개 이상이면 ⋯ 트리거도 여럿(채널마다 하나) — rowChannel로
   // aria-label(channelRowMoreActionsAriaLabel="{channel} 더보기")을 지정해 그 행만 집는다.
   const moreBtn = opts.rowChannel
-    ? [...container.querySelectorAll('[data-testid="channel-row-more-actions"]')].find(
+    ? [...container.querySelectorAll('[data-slot="ds-row-actions-trigger"]')].find(
         (el) => el.getAttribute('aria-label') === koMessages.channelConnect.channelRowMoreActionsAriaLabel.replace('{channel}', opts.rowChannel!),
       )
-    : container.querySelector('[data-testid="channel-row-more-actions"]');
+    : container.querySelector('[data-slot="ds-row-actions-trigger"]');
   await act(async () => { moreBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
   await flush();
   // base-ui Menu.Popup은 Portal로 document.body 바로 아래(container 밖)에 뜬다 —
@@ -364,6 +370,8 @@ describe('OrganizationChannelsPage — 목록·상태(story #3376)', () => {
     await act(async () => { disconnectBtn.click(); });
     await flush();
     expect(container.textContent).toContain('연결 해제에 실패했어요');
+    // 4913 C판 — 실패는 ds Banner(failed = role="alert")로 즉시 읽힌다(글만 서는 것이 아니다)
+    expect(container.querySelector('[data-testid="channel-disconnect-error"] [role="alert"][data-slot="ds-banner"]')).not.toBeNull();
   });
 
   it('member도 연결 시험은 할 수 있다', async () => {
@@ -757,7 +765,7 @@ describe('OrganizationChannelsPage — 헤더 rollup 칩 임계값(story dd29e6d
   it('⭐연결 0개 — 헤더 자리에 자격 상태 칩(설정 미완)이 그대로 남는다(rollup과는 다른 신호, 지우면 회귀)', async () => {
     stubFetch({ connections: [], credentials: { configured: false, app_id_suffix: null, effective_source: 'none' } });
     await mount('owner');
-    const header = container.querySelector('[data-testid="channel-section-header"]')!;
+    const header = container.querySelector('[data-testid="channel-section"] [data-slot="ds-list-row"]')!;
     const headerChips = header.querySelectorAll('[data-status-chip]');
     expect(headerChips).toHaveLength(1);
     expect(headerChips[0]?.getAttribute('data-status-chip')).toBe('config_incomplete');
@@ -773,7 +781,7 @@ describe('OrganizationChannelsPage — 헤더 rollup 칩 임계값(story dd29e6d
     await mount('owner');
     // story #3743 CHANGES — 연결 목록(channel-section-rows)은 이제 펼친 상세 안에만.
     await expandChannelRow({ viaMenuLabel: koMessages.channelConnect.channelManageConnectionsAction });
-    const header = container.querySelector('[data-testid="channel-section-header"]')!;
+    const header = container.querySelector('[data-testid="channel-section"] [data-slot="ds-list-row"]')!;
     const rows = container.querySelector('[data-testid="channel-section-rows"]')!;
     const headerChips = header.querySelectorAll('[data-status-chip]');
     expect(headerChips).toHaveLength(1);
@@ -791,7 +799,7 @@ describe('OrganizationChannelsPage — 헤더 rollup 칩 임계값(story dd29e6d
     await mount('owner');
     // story #3743 CHANGES — 연결 2개면 다음 발 자체가 「연결 관리」(직접 펼침).
     await expandChannelRow();
-    const header = container.querySelector('[data-testid="channel-section-header"]')!;
+    const header = container.querySelector('[data-testid="channel-section"] [data-slot="ds-list-row"]')!;
     const rows = container.querySelector('[data-testid="channel-section-rows"]')!;
     const headerChips = header.querySelectorAll('[data-status-chip]');
     expect(headerChips).toHaveLength(1);
@@ -2236,81 +2244,116 @@ describe('OrganizationChannelsPage — 헤더 주 액션(story #3743)', () => {
     delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
   });
 
-  // story #3743(로컬 캡처 中 자가 발견 — 페드루 PO 확認) — 앱 자격 등록은 owner 전용인데
-  // 헤더 버튼이 role 무관하게 서 있던 실 결함. 되돌리면(isOwnerStrict 조건 제거) RED.
-  it('⭐비-소유자는 미등록 채널이 있어도 헤더 주 액션이 안 보인다(owner 전용, §5-2)', async () => {
-    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }]);
-    await mount('member');
-    expect(container.querySelector('[data-testid="channel-connect-header-register-action"]')).toBeNull();
-  });
+  // 4913 C1 후속(PO 판정) — 머리 «앱 자격 등록 ▾»는 행마다 있는 «앱 자격 등록» 단추와 «같은 일»(그 채널 행으로 스크롤 + 펼침)이라 걷었다: 한 자리 = 행 단추.
+  // 옛 머리 단추 시험은 같은 의도를 행 단추로 옮겨 그대로 지킨다(owner 전용 · 미등록일 때만 · 누르면 그 행 펼침 + 스크롤 · 둘 이상이어도 각 행이 자기 단추).
+  const registerBtns = () => [...container.querySelectorAll('[data-testid="channel-row-primary-register"]')] as HTMLButtonElement[];
 
-  it('⭐미등록(effective_source=none) oauth 채널이 0개면 주 액션 자체를 안 그린다(그려진 컨트롤=할 수 있다는 약속)', async () => {
-    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'platform' }]);
-    await mount('owner');
-    // 채널 행 안의 AppCredentialsCard도 같은 문구("앱 자격 등록")를 쓸 수 있어(effective_
-    // source='platform'이면 재입력이 아니라 등록 문구) 텍스트 대조는 안 쓴다 — 헤더 자리
-    // 자체(testid)의 부재를 잰다.
-    expect(container.querySelector('[data-testid="channel-connect-header-register-action"]')).toBeNull();
-  });
-
-  it('⭐미등록 채널이 1개면 메뉴 없이 버튼 하나(누르면 그 채널 행으로 스크롤)', async () => {
-    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }, { channel: 'facebook', effectiveSource: 'org' }]);
-    await mount('owner');
-    const btn = container.querySelector('[data-testid="channel-connect-header-register-action"]');
-    expect(btn).toBeTruthy();
-    expect(btn?.tagName).toBe('BUTTON');
-    // 메뉴(팝업)가 아니라 단일 버튼이라 클릭해도 role="menu"가 새로 안 생긴다.
-    expect(container.querySelector('[role="menu"]')).toBeNull();
-  });
-
-  it('⭐미등록 채널이 2개 이상이면 메뉴로 고른다(항목=channelLabel 표시명, 메뉴 제목 없음)', async () => {
+  it('⭐머리(PageHead)에는 «앱 자격 등록» 단추가 없다 — 그 일은 행마다 있는 단추 한 자리다(같은 일을 두 자리에 세우지 않는다)', async () => {
     stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }, { channel: 'facebook', effectiveSource: 'none' }]);
     await mount('owner');
-    const trigger = container.querySelector('[data-testid="channel-connect-header-register-action"]');
-    expect(trigger).toBeTruthy();
-    await act(async () => { trigger!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    await flush();
-    expect(container.textContent).toContain(koMessages.channelConnect.channelThreads);
-    expect(container.textContent).toContain(koMessages.channelConnect.channelLabelFacebook);
+    expect(container.querySelector('[data-testid="channel-connect-header-register-action"]')).toBeNull();
+    expect(container.querySelector('[data-slot="ds-page-head"] button')).toBeNull();
+    expect(registerBtns()).toHaveLength(2);
   });
 
-  // 카디르 QA changes(#4090 리뷰, 2026-09-09 13:11Z) — 「클릭 뒤 동작」(그 행으로 스크롤+
-  // 펼침) 자체를 재는 단언이 0이었다(태그/메뉴 부재만 검사) — DropdownMenu로 갈아도
-  // 초록이었을 자리. scrollIntoView는 jsdom 미구현이라 스파이로 호출 자체를 잰다
-  // (실제 스크롤 여부가 아니라 "그 행을 대상으로 시도했다"만 확인 가능한 축).
-  it('⭐미등록 1개 — 헤더 버튼을 누르면 그 채널 행이 펼쳐지고 scrollIntoView가 그 행 대상으로 불린다', async () => {
+  it('⭐행마다 «앱 자격 등록» 단추의 접근 이름에 채널 이름이 든다(옛 머리 메뉴가 항목마다 채널 이름을 가졌던 것 — 보조기술 단추 목록에서 같은 이름이 되지 않게)', async () => {
+    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }, { channel: 'facebook', effectiveSource: 'none' }]);
+    await mount('owner');
+    const names = registerBtns().map((b) => b.getAttribute('aria-label'));
+    expect(new Set(names).size).toBe(2);
+    expect(names[0]).toContain(koMessages.channelConnect.channelThreads);
+    expect(names[1]).toContain(koMessages.channelConnect.channelLabelFacebook);
+    for (const n of names) expect(n).toContain(koMessages.channelConnect.appCredentialsRegisterAction);
+  });
+
+  it('⭐비-소유자는 미등록 채널이 있어도 «앱 자격 등록» 단추가 어디에도 안 보인다(owner 전용, §5-2)', async () => {
+    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }]);
+    await mount('member');
+    expect(registerBtns()).toHaveLength(0);
+  });
+
+  it('⭐미등록(effective_source=none) oauth 채널이 0개면 «앱 자격 등록» 행 단추 자체를 안 그린다(그려진 컨트롤=할 수 있다는 약속)', async () => {
+    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'platform' }]);
+    await mount('owner');
+    expect(registerBtns()).toHaveLength(0);
+  });
+
+  it('⭐미등록 1개 — 그 행의 단추 하나(메뉴 없음)를 누르면 그 채널 행이 펼쳐지고 scrollIntoView가 불린다', async () => {
     stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }, { channel: 'facebook', effectiveSource: 'org' }]);
     const scrollSpy = vi.fn();
     Element.prototype.scrollIntoView = scrollSpy;
     await mount('owner');
-    const btn = container.querySelector('[data-testid="channel-connect-header-register-action"]') as HTMLButtonElement;
+    expect(registerBtns()).toHaveLength(1);
+    expect(container.querySelector('[role="menu"]')).toBeNull();
     expect(container.querySelector('[data-testid="channel-section-body"]')).toBeNull();
-    await act(async () => { btn.click(); });
+    await act(async () => { registerBtns()[0]!.click(); });
     await flush();
-    expect(container.querySelector('[data-testid="channel-section-body"]')).not.toBeNull();
     expect(scrollSpy).toHaveBeenCalled();
     const threadsSection = [...container.querySelectorAll('[data-testid="channel-section"]')].find((el) => el.textContent?.includes(koMessages.channelConnect.channelThreads));
     expect(threadsSection?.querySelector('[data-testid="channel-section-body"]')).not.toBeNull();
   });
 
-  it('⭐미등록 2개 이상 — 메뉴 항목을 고르면 그 채널 행이 펼쳐지고 scrollIntoView가 불린다', async () => {
+  it('⭐미등록 2개 이상 — 각 행이 자기 단추를 갖고, 둘째 행 단추는 그 채널 행만 펼치고 scrollIntoView가 불린다', async () => {
     stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }, { channel: 'facebook', effectiveSource: 'none' }]);
     const scrollSpy = vi.fn();
     Element.prototype.scrollIntoView = scrollSpy;
     await mount('owner');
-    const trigger = container.querySelector('[data-testid="channel-connect-header-register-action"]');
-    await act(async () => { trigger!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    await flush();
-    const items = [...document.body.querySelectorAll('[role="menuitem"]')];
-    const facebookItem = items.find((el) => el.textContent === koMessages.channelConnect.channelLabelFacebook);
-    await act(async () => { facebookItem!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(registerBtns()).toHaveLength(2);
+    await act(async () => { registerBtns()[1]!.click(); });
     await flush();
     expect(scrollSpy).toHaveBeenCalled();
     const facebookSection = [...container.querySelectorAll('[data-testid="channel-section"]')].find((el) => el.textContent?.includes(koMessages.channelConnect.channelLabelFacebook));
     expect(facebookSection?.querySelector('[data-testid="channel-section-body"]')).not.toBeNull();
-    // threads 행은 안 펼쳐진 채(선택 대상이 아니다).
     const threadsSection = [...container.querySelectorAll('[data-testid="channel-section"]')].find((el) => el.textContent?.includes(koMessages.channelConnect.channelThreads));
     expect(threadsSection?.querySelector('[data-testid="channel-section-body"]')).toBeNull();
+  });
+
+  // 4913 C1 후속(PO 판정) — «같은 말 세 자리»: 설정 미완 사유는 채널마다 같은 문장이라 둘 이상이면 목록 위에 한 번만.
+  const REASON = koMessages.channelConnect.channelConfigIncompleteReason;
+  const occurrences = (text: string, needle: string) => text.split(needle).length - 1;
+
+  it('⭐설정 미완 채널이 둘 이상이면 사유 문장은 목록 위에 «한 번만» 서고 행 아래에는 안 선다', async () => {
+    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }, { channel: 'facebook', effectiveSource: 'none' }, { channel: 'instagram', effectiveSource: 'none' }]);
+    await mount('owner');
+    const once = container.querySelector('[data-testid="channel-config-incomplete-once"]')!;
+    expect(once.textContent).toBe(REASON);
+    expect(occurrences(container.textContent ?? '', REASON)).toBe(1);
+    for (const sec of container.querySelectorAll('[data-testid="channel-section"]')) expect(sec.textContent).not.toContain(REASON);
+    // 칩(«설정 미완»)은 행마다 그대로 — 사유만 한 번이다
+    expect(container.querySelectorAll('[data-status-chip="config_incomplete"]')).toHaveLength(3);
+  });
+
+  it('⭐설정 미완 채널이 하나면 목록 위 줄은 없고 그 행 아래에 사유가 그대로 선다(행마다 다른 사유일 때만 행 아래라는 규칙의 한 행 경우)', async () => {
+    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }, { channel: 'facebook', effectiveSource: 'org' }]);
+    await mount('owner');
+    expect(container.querySelector('[data-testid="channel-config-incomplete-once"]')).toBeNull();
+    const threads = [...container.querySelectorAll('[data-testid="channel-section"]')].find((el) => el.textContent?.includes(koMessages.channelConnect.channelThreads))!;
+    expect(threads.querySelector('[data-slot="ds-row-footnote"]')!.textContent).toContain(REASON);
+    expect(occurrences(container.textContent ?? '', REASON)).toBe(1);
+  });
+
+  it('⭐연결이 이미 있는 채널은 «설정 미완» 개수에 안 센다 — 미등록 채널이 하나뿐이면 목록 위 줄 없이 그 행 아래에 사유', async () => {
+    stubFetch({
+      connections: [{ ...CONNECTION_ACTIVE, id: 'conn-fb', channel: 'facebook', account_label: '@fb' }],
+      credentials: { configured: false, app_id_suffix: null, effective_source: 'none' },
+      availableChannels: [
+        { channel: 'threads', display_name: 'Threads', credential_kind: 'oauth', kind: 'social' },
+        { channel: 'facebook', display_name: 'Facebook', credential_kind: 'oauth', kind: 'social' },
+      ],
+    });
+    await mount('owner');
+    expect(container.querySelector('[data-testid="channel-config-incomplete-once"]')).toBeNull();
+    const threads = [...container.querySelectorAll('[data-testid="channel-section"]')].find((el) => el.textContent?.includes(koMessages.channelConnect.channelThreads))!;
+    expect(threads.querySelector('[data-slot="ds-row-footnote"]')!.textContent).toContain(REASON);
+  });
+
+  it('⭐행마다 다른 사유(예: facebook 앱 안내)는 행 아래에 그대로 서고, 한 번만 규칙은 같은 «설정 미완» 문장에만 건다', async () => {
+    stubFetchPerChannel([{ channel: 'threads', effectiveSource: 'none' }, { channel: 'instagram', effectiveSource: 'none' }, { channel: 'facebook', effectiveSource: 'org' }]);
+    await mount('owner');
+    expect(container.querySelector('[data-testid="channel-config-incomplete-once"]')!.textContent).toBe(REASON); // 설정 미완 둘 → 위 한 줄
+    const facebook = [...container.querySelectorAll('[data-testid="channel-section"]')].find((el) => el.textContent?.includes(koMessages.channelConnect.channelLabelFacebook))!;
+    expect(facebook.querySelector('[data-slot="ds-row-footnote"]')!.textContent).toContain(koMessages.channelConnect.channelConnectFacebookAppGuidance); // 이 행만의 사유는 행 아래
+    expect(occurrences(container.textContent ?? '', REASON)).toBe(1);
   });
 
   // 카디르 QA changes(#4090 리뷰) — 「펼침은 페이지당 1행」을 재는 테스트 0이었다(두
@@ -2372,5 +2415,186 @@ describe('OrganizationChannelsPage — 만료 임박 실값(story #3743)', () =>
     // 부연 문장(정보성)은 여전히 뜬다 — channelExpiringInfoNote 축(자동으로 갱신돼요).
     expect(container.textContent).toContain(koMessages.channelConnect.channelExpiringToday);
     expect(container.textContent).toContain('자동으로 갱신돼요');
+  });
+});
+
+// ── 4913(UI-R5) C판 — 채널 연결이 «한 쪽 틀» 안에 선다: 제목은 위 막대 · 본문은 reading 틀 · 채널 목록은 RowList(우클릭 = «⋯» · 더블클릭 · Enter · Esc) · 행 아래 늘 서는 사유(footnote) ──
+describe('OrganizationChannelsPage — 한 쪽 틀(4913 C판)', () => {
+  const GUIDE = koMessages.channelConnect;
+  const menuLabels = () => [...document.body.querySelectorAll('[role="menuitem"]')].map((e) => e.textContent);
+  const rowOf = (channelKey: string) => container.querySelector<HTMLElement>(`#channel-row-${channelKey}`)!;
+  const keyOn = (el: Element, k: string) => act(async () => { el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })); });
+
+  it('⭐제목은 위 막대의 h1 하나뿐이고(본문 h1 0) 본문은 reading 틀(PageFrame) 안에 선다', async () => {
+    stubFetch({ connections: [CONNECTION_ACTIVE] });
+    await mount('owner');
+    const h1s = [...container.querySelectorAll('h1')];
+    expect(h1s).toHaveLength(1);
+    expect(h1s[0]!.textContent).toBe(GUIDE.pageTitle);
+    expect(container.querySelector('[data-testid="topbar-probe"] h1')).not.toBeNull(); // 막대 자리에 오른다
+    const frame = container.querySelector('[data-slot="ds-page-frame"]')!;
+    expect(frame.getAttribute('data-width')).toBe('reading');
+    expect(frame.querySelector('h1')).toBeNull(); // 틀 안에는 제목이 없다
+  });
+
+  it('⭐채널 목록은 RowList(role=list · 이름 = 화면 이름)이고 채널 하나 = 행 하나(listitem)다', async () => {
+    stubFetch({
+      connections: [],
+      availableChannels: [
+        { channel: 'threads', display_name: 'Threads', credential_kind: 'oauth', kind: 'social' },
+        { channel: 'wordpress', display_name: 'WordPress', credential_kind: 'pasted_secret', kind: 'blog' },
+      ],
+    });
+    await mount('owner');
+    const list = container.querySelector('[data-testid="channel-list"] [role="list"]')!;
+    expect(list.getAttribute('aria-label')).toBe(GUIDE.pageTitle);
+    expect(list.querySelectorAll('[data-testid="channel-section"]')).toHaveLength(2);
+    expect(list.querySelectorAll('[data-testid="channel-section"][role="listitem"]')).toHaveLength(2);
+  });
+
+  it('⭐행 우클릭 = 그 행 «⋯» 메뉴와 같은 항목이다(같은 배열) — 연결이 있는 행', async () => {
+    stubFetch({ connections: [CONNECTION_ACTIVE] });
+    await mount('owner');
+    const trigger = container.querySelector('[data-testid="channel-section"] [data-slot="ds-row-context-trigger"]')!;
+    await act(async () => { trigger.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 30, button: 2 })); });
+    const viaContext = menuLabels();
+    expect(viaContext.length).toBeGreaterThan(0);
+    expect(viaContext).toContain(GUIDE.channelManageConnectionsAction);
+    await act(async () => { document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    const more = container.querySelector('[data-testid="channel-section"] [data-slot="ds-row-actions-trigger"]') as HTMLElement;
+    expect(more.getAttribute('aria-label')).toBe(GUIDE.channelRowMoreActionsAriaLabel.replace('{channel}', GUIDE.channelThreads));
+    await act(async () => { more.click(); });
+    expect(menuLabels()).toEqual(viaContext);
+  });
+
+  it('⭐우클릭으로 고른 «연결 관리»도 행을 펼친다(우클릭 길 = «⋯» 길과 같은 일)', async () => {
+    stubFetch({ connections: [CONNECTION_ACTIVE] });
+    await mount('owner');
+    const trigger = container.querySelector('[data-testid="channel-section"] [data-slot="ds-row-context-trigger"]')!;
+    await act(async () => { trigger.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 30, button: 2 })); });
+    const manage = [...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((e) => e.textContent === GUIDE.channelManageConnectionsAction)!;
+    await act(async () => { manage.click(); });
+    await flush();
+    expect(container.querySelector('[data-testid="channel-section-body"]')).not.toBeNull();
+  });
+
+  it('⭐더블클릭 = 행 펼침 · Enter = 펼침/접힘 · Esc = 접힘(펼침 칸은 한 번에 채널 하나)', async () => {
+    stubFetch({
+      connections: [],
+      availableChannels: [
+        { channel: 'threads', display_name: 'Threads', credential_kind: 'oauth', kind: 'social' },
+        { channel: 'wordpress', display_name: 'WordPress', credential_kind: 'pasted_secret', kind: 'blog' },
+      ],
+    });
+    await mount('owner');
+    const bodies = () => container.querySelectorAll('[data-testid="channel-section-body"]').length;
+    expect(bodies()).toBe(0);
+    await act(async () => { rowOf('threads').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true })); });
+    await flush();
+    expect(bodies()).toBe(1);
+    expect(container.querySelector('[data-testid="channel-section"][data-open] #channel-row-threads')).not.toBeNull();
+    // Esc — 행에 초점이 있을 때 접힌다
+    rowOf('threads').focus();
+    await keyOn(rowOf('threads'), 'Escape');
+    await flush();
+    expect(bodies()).toBe(0);
+    // Enter — 다른 행을 펼치면 앞의 펼침은 접힌다(한 번에 하나)
+    rowOf('threads').focus();
+    await keyOn(rowOf('threads'), 'Enter');
+    await flush();
+    expect(bodies()).toBe(1);
+    rowOf('wordpress').focus();
+    await keyOn(rowOf('wordpress'), 'Enter');
+    await flush();
+    expect(bodies()).toBe(1);
+    expect(container.querySelector('[data-testid="channel-section"][data-open] #channel-row-wordpress')).not.toBeNull();
+    await keyOn(rowOf('wordpress'), 'Enter'); // 같은 행 Enter = 접힘
+    await flush();
+    expect(bodies()).toBe(0);
+  });
+
+  it('⭐행이 접혀 있어도 사유 문장은 행 아래(footnote)에 선다 — 설정 미완 사유 · 권한 사유', async () => {
+    stubFetch({ connections: [], credentials: { configured: false, app_id_suffix: null, effective_source: 'none' } });
+    await mount('owner');
+    const note = rowOf('threads').closest('[data-testid="channel-section"]')!.querySelector('[data-slot="ds-row-footnote"]')!;
+    expect(note.textContent).toContain(GUIDE.channelConfigIncompleteReason);
+    expect(container.querySelector('[data-testid="channel-section-body"]')).toBeNull(); // 접힘 — 펼침 칸은 없다
+    // member: «owner만 연결할 수 있어요» 사유
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    stubFetch({ connections: [], credentials: { configured: true, app_id_suffix: 'abcd', effective_source: 'org' } });
+    await mount('member');
+    const note2 = container.querySelector('[data-testid="channel-section"] [data-slot="ds-row-footnote"]')!;
+    expect(note2.textContent).toContain(GUIDE.channelConnectOwnerOnlyReason.replace('{channel}', GUIDE.channelThreads));
+  });
+
+  it('⭐행 줄(subtitle)에는 짧은 «계정 · 시각»만, 긴 문장(재인증)은 footnote로 간다(줄은 한 줄로 잘린다)', async () => {
+    stubFetch({ connections: [{ ...CONNECTION_ACTIVE, status: 'expired', token_expires_at: '2020-01-01T00:00:00Z', can_auto_refresh: false }] });
+    await mount('owner');
+    const section = container.querySelector('[data-testid="channel-section"]')!;
+    const row = section.querySelector('[data-slot="ds-list-row"]')!;
+    expect(row.textContent).not.toContain(GUIDE.channelReauthExpired); // 줄 안에 문장이 없다
+    expect(section.querySelector('[data-slot="ds-row-footnote"]')!.textContent).toContain(GUIDE.channelReauthExpired);
+  });
+
+  it('⭐불러오는 중에는 상태(role=status · aria-busy)로 알리고 틀 안에 스켈레톤이 선다', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [{ orgId: ORG_ID, orgName: 'Org', orgSlug: 'org', role: 'owner' }], projectMemberships: [] });
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {}))); // 영영 안 끝나는 요청
+    await act(async () => { root.render(wrap(<OrganizationChannelsPage />)); });
+    const status = container.querySelector('[data-slot="ds-page-frame"] [role="status"][aria-busy="true"]');
+    expect(status).not.toBeNull();
+    expect(container.querySelectorAll('h1')).toHaveLength(1); // 로딩에서도 제목은 위 막대에
+  });
+
+  it('⭐채널 종류가 하나도 없으면 Card 안 EmptyState다(옛 ui/empty-state 아님)', async () => {
+    stubFetch({ connections: [], availableChannels: [] });
+    await mount('owner');
+    const empty = container.querySelector('[data-slot="ds-empty-state"]')!;
+    expect(empty.textContent).toContain(GUIDE.channelsEmptyTitle);
+    expect(empty.closest('[data-slot="ds-card"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="channel-list"]')).toBeNull();
+  });
+
+  it('⭐성과 수집은 RowList(h2 머리 + 설명 한 줄 + 행 셋)이고, 키 패널은 행 아래(footnote)에 선다', async () => {
+    stubFetch({
+      connections: [CONNECTION_ACTIVE],
+      measurementConnections: [
+        { key: 'beacon', status: 'not_started', last_seen_at: null, count_7d: null, settings_path: null },
+        { key: 'utm', status: 'auto', last_seen_at: null, count_7d: null, settings_path: '/settings' },
+        { key: 'ga4', status: 'disconnected', last_seen_at: null, count_7d: null, settings_path: null },
+      ],
+    });
+    await mount('owner');
+    const section = container.querySelector('[data-testid="measurement-connections-section"]')!;
+    const list = section.querySelector('[data-slot="ds-row-list"]')!;
+    expect(list.querySelector('h2')!.textContent).toBe(GUIDE.measurementSectionTitle);
+    expect(list.textContent).toContain(GUIDE.measurementSectionSubtitle);
+    expect(list.querySelectorAll('[role="listitem"]')).toHaveLength(3);
+    const startBtn = [...section.querySelectorAll('button')].find((b) => b.textContent === GUIDE.measurementBeaconStartAction)!;
+    await act(async () => { startBtn.click(); });
+    await flush();
+    const beaconRow = section.querySelector('[data-testid="measurement-beacon-row"]')!;
+    expect(beaconRow.querySelector('[data-slot="ds-row-footnote"] [data-testid="measurement-beacon-key-panel"]')).not.toBeNull();
+  });
+
+  it('⭐머리(PageHead)는 설명 한 줄뿐이고 본문에 제목 머리(PageHeader)는 없다 — 주 행동은 행 단추 한 자리', async () => {
+    stubFetch({ connections: [], credentials: { configured: false, app_id_suffix: null, effective_source: 'none' } });
+    await mount('owner');
+    const head = container.querySelector('[data-slot="ds-page-head"]')!;
+    expect(head.textContent).toContain(GUIDE.pageDescription);
+    expect(head.querySelector('button, a')).toBeNull();
+    expect(head.querySelector('h1, h2')).toBeNull();
+  });
+
+  it('⭐채널 목록을 못 불러오면 ds Banner(failed · role=alert)로 알린다 · 틀과 제목은 그대로다', async () => {
+    useDashboardContextMock.mockReturnValue({ orgId: ORG_ID, orgMemberships: [{ orgId: ORG_ID, orgName: 'Org', orgSlug: 'org', role: 'owner' }], projectMemberships: [] });
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({ data: null, error: { code: 'INTERNAL' } }) }) as Response));
+    await act(async () => { root.render(wrap(<OrganizationChannelsPage />)); });
+    await flush();
+    const banner = container.querySelector('[data-slot="ds-page-frame"] [data-slot="ds-banner"][data-tone="failed"]')!;
+    expect(banner.getAttribute('role')).toBe('alert');
+    expect(banner.textContent).toContain(GUIDE.channelLoadFailed);
+    expect(container.querySelectorAll('h1')).toHaveLength(1);
+    expect(container.querySelector('[data-testid="channel-list"]')).toBeNull();
   });
 });

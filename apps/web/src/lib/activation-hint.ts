@@ -53,22 +53,28 @@ export function writeActivationHint(orgId: string, complete: boolean): void {
 /**
  * story #4219 F1(PO 리뷰 CLS) — 배너 접힘 상태. 예전엔 sessionStorage라 서버가 몰라 자리 표시(스켈레톤)가 늘 펼친 배너 크기였고,
  * 접어 둔 사용자에겐 스켈레톤 → 접힌 칩으로 줄며 흔들렸다. 서버·클라가 같은 값을 읽게 **세션 쿠키**(Max-Age 없음 = 브라우저 세션
- * 동안 · 예전 sessionStorage와 비슷한 수명)로 옮긴다. 값 = 접어 둔 org id(다른 org면 펼침). ⛔표시 외 판단 금지(위와 같음).
+ * 동안 · 예전 sessionStorage와 비슷한 수명)로 옮긴다. ⛔표시 외 판단 금지(위와 같음).
+ *
+ * story #4888 (UI-5, AC3 §4-5) — **기본이 «접힘»이다**(예전엔 펼침: 폰 390 첫 화면에 234px 띠가 서서 일감 · 보드 · 목표 · 스프린트 위를 가렸다). 접힌 한 줄(«시작하기 n/m»)이 기본이고,
+ * 사람이 펼치면 그 org만 `open:<org id>`로 기억한다(세션 동안). 저장된 선택이 없거나 다른 org의 것이면 접힘. org를 모르면(범위 없음) 예전처럼 «접힘 아님».
  */
 export const ACTIVATION_COLLAPSED_COOKIE = 'sp_activation_collapsed';
+const ACTIVATION_OPEN_PREFIX = 'open:';
 
 export function isActivationCollapsed(value: string | undefined | null, orgId: string | undefined | null): boolean {
-  return Boolean(value && orgId && value === orgId);
+  if (!orgId) return false;
+  return value !== `${ACTIVATION_OPEN_PREFIX}${orgId}`;
 }
 
 export function writeActivationCollapsed(orgId: string, collapsed: boolean): void {
   if (typeof document === 'undefined') return;
   const secure = typeof location !== 'undefined' && location.protocol === 'https:' ? '; Secure' : '';
   try {
+    // 접힘 = 기본값이라 쿠키를 지운다 · 펼침 = 이 org를 «열어 둔 org»로 기억
     document.cookie = collapsed
-      ? `${ACTIVATION_COLLAPSED_COOKIE}=${encodeURIComponent(orgId)}; Path=/; SameSite=Lax${secure}`
-      : `${ACTIVATION_COLLAPSED_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
+      ? `${ACTIVATION_COLLAPSED_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${secure}`
+      : `${ACTIVATION_COLLAPSED_COOKIE}=${encodeURIComponent(`${ACTIVATION_OPEN_PREFIX}${orgId}`)}; Path=/; SameSite=Lax${secure}`;
   } catch {
-    // 쿠키 차단 — 이번 렌더만 토글(다음 문서는 펼침)
+    // 쿠키 차단 — 이번 렌더만 토글(다음 문서는 기본 접힘)
   }
 }

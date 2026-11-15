@@ -1,5 +1,5 @@
 // [SID:4345] 부류 가드 — 호버로 드러나는 조작 요소(`group-hover:opacity-100` · `group-hover:block` 등)가
-//   ① 호버 없는 기기(터치)에서 숨거나(숨김 토큰에 `pointer-fine:`이 없음 — 맨 `opacity-0` · 폭 기준 `sm:opacity-0` 등)
+//   ① 호버 없는 기기(터치)에서 숨거나(숨김 토큰에 `mouse:`가 없음 — 맨 `opacity-0` · 폭 기준 `sm:opacity-0` · `pointer-fine:` 하나만 등. pointer-fine만으로 숨기면 에뮬 웹뷰 · 스타일러스 폰(pointer fine + hover none)에서 숨은 채 안 드러난다)
 //   ② 키보드 초점에서 안 보이거나(초점 드러냄 `focus-within` · `focus-visible` · `group-focus-within`이 없음)
 //   ③ `hidden` · `invisible`로 숨어 탭 순서에서 빠지면(드러냄이 display · visibility) RED다.
 // 올바른 모양은 `lib/hover-reveal.ts`의 HOVER_REVEAL(4277 storage 선례와 같은 모양)이다.
@@ -13,7 +13,7 @@ const SRC = path.resolve(__dirname, '..');
 const PIECE = /"[^"\n]*"|'[^'\n]*'|`[^`\n]*`/g;
 const B = String.raw`(?:^|[\s"'\x60])`; // 토큰 앞 경계(공백 · 따옴표)
 const E = String.raw`(?=[\s"'\x60]|$)`; // 토큰 뒤 경계
-const CHAIN = String.raw`((?:[^\s"'\x60:]+:)*)`; // 변형 사슬(`pointer-fine:sm:` 등)
+const CHAIN = String.raw`((?:[^\s"'\x60:]+:)*)`; // 변형 사슬(`mouse:sm:` 등)
 const REVEAL = new RegExp(`${B}${CHAIN}(?:group-hover|peer-hover)(?:/[\\w-]+)?:(opacity-100|visible|block|flex|inline-flex|inline-block|grid)${E}`, 'g');
 const HIDE = new RegExp(`${B}${CHAIN}(opacity-0|hidden|invisible)${E}`, 'g');
 const FOCUS = new RegExp(`${B}${CHAIN}(?:group-)?focus(?:-visible|-within)(?:/[\\w-]+)?:opacity-100${E}`);
@@ -26,7 +26,7 @@ export function hoverRevealProblem(piece: string): string | null {
   const hides = [...piece.matchAll(HIDE)];
   if (!hides.length) return null; // 숨지 않는다(흐리게만 · 강조만)
   if (hides.some((m) => m[2] !== 'opacity-0')) return '숨김형(display · visibility) — 탭 순서에서 빠진다';
-  if (hides.some((m) => !m[1].split(':').includes('pointer-fine'))) return '호버 없는 기기에서 숨는다(pointer-fine 아닌 숨김)';
+  if (hides.some((m) => !m[1].split(':').includes('mouse'))) return '호버 없는 기기에서 숨는다(mouse: 아닌 숨김 — pointer-fine만으로는 에뮬 웹뷰 · 스타일러스 폰에서 안 드러난다)';
   if (!FOCUS.test(piece)) return '키보드 초점에서 안 보인다(초점 드러냄 없음)';
   return null;
 }
@@ -87,14 +87,19 @@ export function hoverRevealRingProblems(src: string, file = 'sample.tsx'): { pro
 // 이유가 있는 제외 — 자리마다 조각 안 글자(needle)로 짚고, 짚은 자리가 사라지면(낡음) RED.
 const EXEMPT: { file: string; needle: string; reason: string }[] = [
   {
-    file: 'components/docs/doc-tree.tsx',
-    needle: 'cursor-grab touch-none opacity-0',
-    reason: '끌기 손잡이 = 마우스 전용: 센서가 터치를 안 받고(#1988) 키보드 센서도 없다 → tabIndex -1 · aria-hidden(PO 08:45Z · 렌더 테스트가 핀)',
+    file: 'components/ds/tree-row.tsx',
+    needle: 'z-10 flex items-center opacity-0',
+    reason: '끌기 손잡이 자리 = 마우스 전용(UI-3 4886 TreeRow가 doc-tree 줄 구조를 부품으로 옮긴 것): 센서가 터치를 안 받고 키보드 센서도 없다 → 터치(pointer-coarse)에서는 아예 없고(hidden) 마우스에서만 호버 때 보인다. 손잡이 노드(aria-hidden · tabIndex -1)는 호출부가 준다 · 키보드 대체 길은 줄 «⋮» 메뉴(위로/아래로/폴더로)',
   },
   {
     file: 'app/(authenticated)/chats/[conversation_id]/page.tsx',
     needle: 'group-hover/title:opacity-100',
     reason: '장식(aria-hidden 연필) — 조작은 늘 보이는 방 이름 버튼(aria-label «방 이름 바꾸기»)',
+  },
+  {
+    file: 'components/chat/chat-bubble.tsx',
+    needle: 'pointer-fine:group-hover/bubble:opacity-100',
+    reason: '마우스 쌍둥이 — 터치(`pointer-coarse` · `hover:none`)에서만 display:none이고, 그 자리엔 «⋯» 옆에 늘 보이는 44×44 터치 쌍둥이(chat-bubble-reply-button-touch)가 같은 두 조건으로 선다 → 어느 기기에서도 하나는 보이고 탭 순서에 든다(jsdom 시험 + Chromium spec이 핀)',
   },
   {
     file: 'components/kanban/story-detail-panel.tsx',
@@ -125,17 +130,19 @@ describe('호버 전용 조작 요소 부류 가드([SID:4345])', () => {
       ['h-auto min-h-0 min-w-0 hidden shrink-0 rounded p-0.5 hover:bg-muted group-hover:block', /숨김형/],
       ['hidden group-hover:flex items-center justify-center rounded-md p-1', /숨김형/],
       ['invisible group-hover:visible', /숨김형/],
-      // pointer-fine로 숨겼어도 초점 드러냄이 없으면
-      ['opacity-100 pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100', /키보드 초점/],
+      // mouse:로 숨겼어도 초점 드러냄이 없으면
+      ['opacity-100 mouse:opacity-0 mouse:group-hover:opacity-100', /키보드 초점/],
       // 이름 붙은 group도
       ['size-3 opacity-0 group-hover/title:opacity-100', /호버 없는 기기/],
+      // pointer-fine만으로 숨기면 에뮬 웹뷰 · 스타일러스 폰(pointer fine + hover none)에서 안 드러난다 — mouse:여야 한다
+      ['opacity-100 pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 pointer-fine:focus-within:opacity-100', /호버 없는 기기/],
     ];
     for (const [s, why] of bad) expect(hoverRevealProblem(`"${s}"`), s).toMatch(why);
     const ok = [
       // HOVER_REVEAL · storage 선례 · shadcn 사이드바(고친 뒤)
-      'opacity-100 pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 pointer-fine:group-focus-within:opacity-100 pointer-fine:focus-within:opacity-100',
-      'grid size-[26px] opacity-100 transition-opacity pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 pointer-fine:focus-visible:opacity-100 data-[popup-open]:opacity-100',
-      'group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 aria-expanded:opacity-100 pointer-fine:lg:opacity-0',
+      'opacity-100 mouse:opacity-0 mouse:group-hover:opacity-100 mouse:group-focus-within:opacity-100 mouse:focus-within:opacity-100',
+      'grid size-[26px] opacity-100 transition-opacity mouse:opacity-0 mouse:group-hover:opacity-100 mouse:focus-visible:opacity-100 data-[popup-open]:opacity-100',
+      'group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 aria-expanded:opacity-100 mouse:lg:opacity-0',
       // 숨지 않음(흐리게 · 강조만)
       'absolute right-1 top-1 rounded p-1 opacity-60 transition hover:bg-black/10 group-hover/code:opacity-100',
     ];

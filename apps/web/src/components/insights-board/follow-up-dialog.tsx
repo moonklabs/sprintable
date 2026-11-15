@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { useJsonFieldDraft } from '@/hooks/use-json-field-draft';
 import { useTranslations } from 'next-intl';
 import {
@@ -10,16 +10,15 @@ import {
   DialogTitle,
   DialogFooter,
   DialogClose,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+} from '@/components/ds/dialog';
+import { Button } from '@/components/ds/button';
+import { Banner } from '@/components/ds/banner';
 import { fetchWithAuth } from '@/lib/db/client';
 import { getEntityHref } from '@/components/chat/embed-card';
 import { parseInsightsBoardApiError } from './insights-board-error';
 import type { FollowUpCreateResponse, FollowUpKind } from './types';
 import { useFlatHref } from '@/hooks/use-flat-href';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { Input, Textarea } from '@/components/ds/input';
 
 /**
  * story #3503 — hypothesis-resolve-dialog.tsx의 다이얼로그 골격(Dialog>DialogContent
@@ -41,6 +40,7 @@ const KIND_OPTIONS: FollowUpKind[] = ['republish', 'edit', 'stop'];
 
 export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }: FollowUpDialogProps) {
   const flatHref = useFlatHref(); // story #4231 3차 — 엔티티 링크(문서 · flat)는 현재 프로젝트를 싣는다
+  const titleId = useId();
   const t = useTranslations('insightsBoard');
   const tc = useTranslations('common');
   const kindLabel: Record<FollowUpKind, string> = {
@@ -101,28 +101,26 @@ export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }:
 
   return (
     <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
-      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-lg">
+      <DialogContent aria-labelledby={titleId} className="flex max-h-[85vh] flex-col sm:max-w-lg">
         <DialogHeader className="shrink-0">
-          <DialogTitle>{t('followUpDialogTitle')}</DialogTitle>
+          <DialogTitle id={titleId}>{t('followUpDialogTitle')}</DialogTitle>
         </DialogHeader>
 
         {successStoryId ? (
           <div className="flex min-h-0 flex-1 flex-col gap-3">
-            <Alert variant="success" role="status" aria-live="polite" aria-atomic="true">
-              <AlertDescription>
-                {t('followUpSuccessMessage')}
-                {storyHref ? (
-                  <>
-                    {' '}
-                    <a href={storyHref} className="underline" data-testid="follow-up-success-link">
-                      {t('followUpSuccessLink')}
-                    </a>
-                  </>
-                ) : null}
-              </AlertDescription>
-            </Alert>
+            <Banner tone="info">
+              {t('followUpSuccessMessage')}
+              {storyHref ? (
+                <>
+                  {' '}
+                  <a href={storyHref} className="underline" data-testid="follow-up-success-link">
+                    {t('followUpSuccessLink')}
+                  </a>
+                </>
+              ) : null}
+            </Banner>
             <DialogFooter className="shrink-0">
-              <DialogClose render={<Button type="button" variant="outline" onClick={onClose}>{t('followUpClose')}</Button>} />
+              <DialogClose render={<Button type="button" variant="secondary" onClick={onClose}>{t('followUpClose')}</Button>} />
             </DialogFooter>
           </div>
         ) : (
@@ -134,7 +132,7 @@ export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }:
             }}
           >
             <div className="shrink-0 space-y-1.5">
-              <p className="text-xs font-medium text-muted-foreground">{t('followUpKindLabel')}</p>
+              <p className="text-ds-small font-medium text-ds-ink-3">{t('followUpKindLabel')}</p>
               <div className="flex gap-2">
                 {KIND_OPTIONS.map((option) => (
                   <button
@@ -149,10 +147,10 @@ export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }:
                       setForm((f) => ({ ...f, kind: option, title: f.title === prefillTitle(f.kind) ? prefillTitle(option) : f.title }));
                     }}
                     aria-pressed={kind === option}
-                    className={`rounded-md border px-3 py-1.5 text-sm ${
+                    className={`rounded-ds-control border px-3 py-1.5 text-ds-body ${
                       kind === option
-                        ? 'border-primary bg-primary/10 text-foreground'
-                        : 'border-border text-muted-foreground hover:text-foreground'
+                        ? 'border-ds-action bg-ds-action-soft text-ds-ink'
+                        : 'border-ds-line text-ds-ink-2 hover:text-ds-ink'
                     }`}
                     data-testid={`follow-up-kind-${option}`}
                   >
@@ -163,7 +161,7 @@ export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }:
             </div>
 
             <div className="shrink-0 space-y-1">
-              <label className="text-xs font-medium text-muted-foreground" htmlFor="follow-up-title">
+              <label className="text-ds-small font-medium text-ds-ink-3" htmlFor="follow-up-title">
                 {t('followUpTitleLabel')}
               </label>
               <Input
@@ -172,12 +170,12 @@ export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }:
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder={t('followUpTitlePlaceholder')}
-                className="h-auto text-foreground bg-background dark:bg-background"
+                className="h-auto text-ds-ink"
               />
             </div>
 
             <div className="shrink-0 space-y-1">
-              <label className="text-xs font-medium text-muted-foreground" htmlFor="follow-up-note">
+              <label className="text-ds-small font-medium text-ds-ink-3" htmlFor="follow-up-note">
                 {t('followUpNoteLabel')}
               </label>
               <Textarea
@@ -186,19 +184,19 @@ export function FollowUpDialog({ orgId, publicationId, originalTitle, onClose }:
                 onChange={(e) => setNote(e.target.value)}
                 placeholder={t('followUpNotePlaceholder')}
                 rows={3}
-                className="min-h-0 text-foreground bg-background dark:bg-background"
+                className="min-h-0 text-ds-ink"
               />
             </div>
 
             {errorMessage ? (
-              <Alert variant="destructive" role="alert" aria-live="assertive" aria-atomic="true">
-                <AlertDescription data-testid="follow-up-error">{errorMessage}</AlertDescription>
-              </Alert>
+              <Banner tone="failed">
+                <span data-testid="follow-up-error">{errorMessage}</span>
+              </Banner>
             ) : null}
 
             <DialogFooter className="shrink-0">
-              <DialogClose render={<Button type="button" variant="ghost" disabled={submitting} onClick={() => { clearFormDraft(); onClose(); }}>{t('followUpCancel')}</Button>} />
-              <Button type="submit" disabled={submitting}>
+              <DialogClose render={<Button type="button" variant="quiet" disabled={submitting} onClick={() => { clearFormDraft(); onClose(); }}>{t('followUpCancel')}</Button>} />
+              <Button type="submit" variant="primary" disabled={submitting}>
                 {submitting ? tc('creating') : t('followUpSubmit')}
               </Button>
             </DialogFooter>

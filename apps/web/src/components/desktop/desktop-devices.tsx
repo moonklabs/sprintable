@@ -5,7 +5,8 @@ import { useFormatter, useTranslations } from 'next-intl';
 import { InvisibleSample, useViewerTimeZone } from '@/components/viewer-time-zone';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Card } from '@/components/ds/card';
+import { DesktopEmptyState } from '@/components/desktop/desktop-empty-state';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
@@ -167,7 +168,7 @@ export function DesktopDevices() {
 
   return (
     <section ref={sectionRef} className="space-y-2" data-testid="desktop-devices" aria-labelledby="desktop-devices-heading">
-      <h2 id="desktop-devices-heading" ref={headingRef} tabIndex={-1} className="text-sm font-semibold text-foreground outline-none">
+      <h2 id="desktop-devices-heading" ref={headingRef} tabIndex={-1} className="text-ds-card-title font-semibold text-ds-ink outline-none">
         {t('title')}
       </h2>
       {!manage ? (
@@ -187,10 +188,7 @@ export function DesktopDevices() {
               {tDesktop('loading')}
             </p>
           ) : computers.length === 0 ? (
-            <Card className="border-dashed px-4 py-5" data-testid="desktop-devices-empty">
-              <p className="text-sm font-medium text-foreground">{t('emptyTitle')}</p>
-              <p className="text-xs text-muted-foreground">{t('emptyBody')}</p>
-            </Card>
+            <DesktopEmptyState title={t('emptyTitle')} testId="desktop-devices-empty">{t('emptyBody')}</DesktopEmptyState>
           ) : (
             <Card className="overflow-hidden p-0">
               <ul className="divide-y divide-border">

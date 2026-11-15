@@ -59,6 +59,17 @@ export interface TodayAgentProgressItem {
   cancel: TodayAgentCancel | null;
 }
 
+/** story #4888 — one delegation that finished today (BE `completed_today`): what the «방금 끝남» section of the home lists */
+export interface TodayCompletedItem {
+  runId: string;
+  agentName: string;
+  workItemTitle: string | null;
+  status: string;
+  resultSummary: string | null;
+  finishedAt: string;
+  conversationId: string | null;
+}
+
 export interface TodayPublishedByChannel {
   channelKind: string;
   count: number;
@@ -106,6 +117,8 @@ export interface TodaySnapshot {
   needsMe: TodayNeedsMeItem[];
   needsMeCount: number;
   agentProgress: TodayAgentProgressItem[];
+  /** story #4888 — absent in older fixtures; the parser always sets it */
+  completedToday?: TodayCompletedItem[];
   published: TodayPublished;
   usage: TodayUsage;
   landedToday?: TodayCount;
@@ -221,6 +234,25 @@ function parseAgentProgressItem(raw: unknown): TodayAgentProgressItem | null {
   };
 }
 
+function parseCompletedItem(raw: unknown): TodayCompletedItem | null {
+  if (!isRecord(raw)) return null;
+  const runId = str(raw['run_id']);
+  const status = str(raw['status']);
+  const finishedAt = str(raw['finished_at']);
+  if (!runId || !status || !finishedAt) return null;
+  const agent = isRecord(raw['agent']) ? raw['agent'] : null;
+  const workItem = isRecord(raw['work_item']) ? raw['work_item'] : null;
+  return {
+    runId,
+    agentName: (agent ? str(agent['name']) : null) ?? '',
+    workItemTitle: workItem ? str(workItem['title']) : null,
+    status,
+    resultSummary: str(raw['result_summary']),
+    finishedAt,
+    conversationId: str(raw['conversation_id']),
+  };
+}
+
 function parsePublished(raw: unknown): TodayPublished {
   if (!isRecord(raw)) return { count: 0, byChannel: [] };
   const count = num(raw['count']) ?? 0;
@@ -294,10 +326,20 @@ export function parseToday(json: unknown): TodaySnapshot {
     }
   }
 
+  const completedRaw = inner['completed_today'];
+  const completedToday: TodayCompletedItem[] = [];
+  if (Array.isArray(completedRaw)) {
+    for (const raw of completedRaw) {
+      const item = parseCompletedItem(raw);
+      if (item) completedToday.push(item);
+    }
+  }
+
   return {
     needsMe,
     needsMeCount: num(inner['needs_me_count']) ?? needsMe.length,
     agentProgress,
+    completedToday,
     published: parsePublished(inner['published_today']),
     usage: parseUsage(inner['usage']),
     landedToday: parseTodayCount(inner['landed_today']),

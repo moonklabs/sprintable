@@ -68,9 +68,9 @@ function GateGroup({ refs, eventDefinitionsByKey }: { refs: EmbedGroupProps['ref
         onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}
         className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-foreground transition hover:bg-muted/40"
       >
-        <ShieldCheck className="size-4 shrink-0 text-muted-foreground" />
+        <ShieldCheck className="size-4 shrink-0 text-ds-ink-2" />
         <span className="min-w-0 flex-1 truncate">{headerLabel}</span>
-        {expanded ? <ChevronUp className="size-4 shrink-0 text-muted-foreground" /> : <ChevronDown className="size-4 shrink-0 text-muted-foreground" />}
+        {expanded ? <ChevronUp className="size-4 shrink-0 text-ds-ink-2" /> : <ChevronDown className="size-4 shrink-0 text-ds-ink-2" />}
       </button>
       {expanded && (
         <div className="space-y-2 border-t border-border p-2">

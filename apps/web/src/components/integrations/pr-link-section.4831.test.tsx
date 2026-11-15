@@ -41,13 +41,13 @@ describe('PrLinkSection — 추가 줄의 바탕 부품(story 4831)', () => {
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
     const repo = container.querySelector(`input[aria-label="${gh.repoAria}"]`) as HTMLInputElement;
     const pr = container.querySelector(`input[aria-label="${gh.prAria}"]`) as HTMLInputElement;
-    expect(repo.dataset.slot).toBe('input');
-    expect(pr.dataset.slot).toBe('input');
+    expect(repo.dataset.slot).toBe('ds-input');
+    expect(pr.dataset.slot).toBe('ds-input');
     expect(hasClass(repo, 'flex-1')).toBe(true);
     expect(hasClass(repo, 'font-mono')).toBe(true);
-    expect(hasClass(repo, 'text-foreground')).toBe(true);
+    expect(hasClass(repo, 'text-ds-ink')).toBe(true);
     expect(hasClass(pr, 'w-20')).toBe(true);
-    expect(hasClass(pr, 'text-foreground')).toBe(true);
+    expect(hasClass(pr, 'text-ds-ink')).toBe(true);
     expect(pr.inputMode).toBe('numeric');
     for (const input of [repo, pr]) expect(input.parentElement!.className).not.toContain('border'); // 틀이 아니라 Input이 테두리를 가진다
     expect(repo.parentElement!.textContent).toContain('acme/'); // 앞글자
@@ -71,5 +71,20 @@ describe('PrLinkSection — 추가 줄의 바탕 부품(story 4831)', () => {
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('/api/integrations/github/links');
     expect(JSON.parse(String(init.body))).toEqual({ story_id: 's-1', repo_full_name: 'acme/web', pr_number: 123 });
+  });
+
+  it('⭐긴 설치 계정 이름이 속성 칸(16rem) 밖으로 안 나간다 — 앞글자는 줄어들고(min-w-0 truncate) 전체는 title에 있다(4908)', async () => {
+    const LONG = 'a-very-long-github-installation-account-login-name-for-an-organisation';
+    fetchWithAuth.mockImplementation(async (url: string) => {
+      if (url.includes('/status')) return { ok: true, json: async () => ({ data: { connected: true, account_login: LONG } }) };
+      return { ok: true, json: async () => ({ data: [] }) };
+    });
+    await act(async () => { root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><PrLinkSection storyId="s-1" /></NextIntlClientProvider>); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    const prefix = [...container.querySelectorAll('span')].find((n) => n.textContent === `${LONG}/`)!;
+    expect(prefix, '계정 앞글자').toBeTruthy();
+    expect(prefix.getAttribute('title')).toBe(LONG);
+    for (const t of ['min-w-0', 'truncate']) expect(hasClass(prefix, t), t).toBe(true);
+    expect(hasClass(prefix, 'shrink-0')).toBe(false);
   });
 });

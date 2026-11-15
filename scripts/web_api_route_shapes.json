@@ -296,6 +296,16 @@
 },
 {
 "method": "POST",
+"path": "/api/v2/agents/{}/desktop-changes",
+"kind": "unknown"
+},
+{
+"method": "GET",
+"path": "/api/v2/agents/{}/desktop-changes/{}",
+"kind": "unknown"
+},
+{
+"method": "POST",
 "path": "/api/v2/agents/{}/desktop-commands",
 "kind": "unknown"
 },
@@ -903,6 +913,11 @@
 "method": "GET",
 "path": "/api/v2/desktop/recipes/for-new-org",
 "kind": "object"
+},
+{
+"method": "PUT",
+"path": "/api/v2/desktop/relay/changes/{}",
+"kind": "unknown"
 },
 {
 "method": "PUT",
@@ -1762,6 +1777,11 @@
 {
 "method": "GET",
 "path": "/api/v2/internal/cron/assets-grace-hard-delete",
+"kind": "unknown"
+},
+{
+"method": "POST",
+"path": "/api/v2/internal/cron/changes-purge",
 "kind": "unknown"
 },
 {

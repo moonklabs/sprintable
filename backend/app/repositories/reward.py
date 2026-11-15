@@ -80,19 +80,21 @@ class RewardRepository:
     ) -> list[dict]:
         limit = min(limit, 100)
 
-        # S20 전수스캔(산티아고 SME fast-follow): reward_balances 뷰는 org_id 컬럼이 없어(member_id,
-        # project_id, balance만) SQL 레벨 org_id 필터가 불가 — project_id가 caller org 소속인지는
-        # 라우터(get_leaderboard)에서 사전 검증한다(project_id는 org 1:1이라 그걸로 충분).
+        # story 4912 (PO 11-13): the all-time board is the ledger's own sum — `SUM(amount) GROUP BY member_id` over reward_ledger, exactly what the old `reward_balances` materialized view held.
+        # That view was defined only in a Supabase migration (packages/db/supabase) and never in alembic, so every database built by alembic (dev · CI · a fresh install) answered 500
+        # («relation "reward_balances" does not exist») for period=all; nobody saw it because the reads of the web screen swallowed the error. The ledger is always current (no refresh trigger,
+        # no new object in the database). The org filter is the same as the period branch's (reward_ledger carries org_id; the router has already checked that the project is the caller org's).
         if period == "all":
             q = (
-                "SELECT member_id, balance FROM reward_balances"
-                " WHERE project_id = :pid"
+                "SELECT member_id, CAST(SUM(amount) AS float) AS balance FROM reward_ledger"
+                " WHERE project_id = :pid AND org_id = :org_id"
+                " GROUP BY member_id"
             )
-            params: dict = {"pid": str(project_id), "lim": limit}
+            params: dict = {"pid": str(project_id), "org_id": str(self.org_id), "lim": limit}
             if cursor:
-                q += " AND balance < :cursor"
+                q += " HAVING SUM(amount) < :cursor"
                 params["cursor"] = float(cursor)
-            q += " ORDER BY balance DESC LIMIT :lim"
+            q += " ORDER BY balance DESC, member_id LIMIT :lim"
             result = await self.session.execute(text(q), params)
             return [{"member_id": r[0], "balance": float(r[1])} for r in result.all()]
 

@@ -1,12 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { RefreshCw } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { EmptyState } from '@/components/ui/empty-state';
+import { Button } from '@/components/ui/button';   // (the row's overlay hit-box below — a ghost, full-row button the ds Button has no variant for)
+import { Button as DsButton } from '@/components/ds/button';
+import { Icon } from '@/components/ds/icon';
+import { useToast } from '@/components/ui/toast';
+import { EmptyState } from '@/components/ds/empty-state';
+import { Input } from '@/components/ds/input';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
+import { FilterSelect, type FilterOption } from './filter-select';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
 import { ProofCapsule } from '@/components/proof-capsule/proof-capsule';
 import { deriveAuditProofState } from './derive-audit-proof-state';
 import { fetchWithAuth } from '@/lib/db/client';
@@ -16,6 +20,10 @@ import { actorRowLabels, memberDisplayLabel, memberOptionLabels } from '@/lib/me
 import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/lib/schedule-format';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { ActivityTopBarTitle } from '@/components/nav/flat-tab-top-bar';
+import { useMediaQuery } from '@/lib/use-media-query';
+import { SectionHeader } from '@/components/ds/section-header';
+import { AuditDetail } from './audit-detail';
+import { formatDayHeader, groupByDay, isValidTime } from './group-by-day';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -71,10 +79,6 @@ const DEFAULT_RANGE_PAST_DAYS = 7;
 
 // ─── Row skeleton ─────────────────────────────────────────────────────────────
 
-function RowSkeleton() {
-  return <div className="h-9 animate-pulse rounded-[6px] bg-muted" />;
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
 
 interface ActivityLogViewProps {
@@ -84,6 +88,7 @@ interface ActivityLogViewProps {
 export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   const t = useTranslations('activityLog');
   const tc = useTranslations('common');
+  const { addToast } = useToast();
 
   const [items, setItems] = useState<ActivityLogItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -92,6 +97,11 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [forbidden, setForbidden] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  // story 4892 — one «generation» for every first-page load (the filter effect AND «다시 시도»/«새로고침»): only the newest one may write the list / the error state, so a late answer of an older
+  // request (a retry still in flight while a filter changed) can never put an error over a newer, successful result.
+  const firstPageGen = useRef(0);
+  // leaving the screen makes every request still in flight stale (a late «더 보기» failure must not toast on another page)
+  useEffect(() => () => { firstPageGen.current += 1; }, []);
 
   const [actorFilter, setActorFilter] = useState(ALL);
   const [actionFilter, setActionFilter] = useState(ALL);
@@ -139,10 +149,13 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   );
 
   const fetchLogs = useCallback(
-    async (nextOffset = 0) => {
+    async (nextOffset = 0, onForbidden?: () => void, firstPage = false) => {
       const res = await fetchWithAuth(`/api/activity-logs?${buildParams(nextOffset)}`);
-      if (res.status === 403) { setForbidden(true); return null; }
-      if (!res.ok) return null;
+      // the 403 is REPORTED to the caller (who writes the «접근 불가» state only while its own load is still the newest) — never written from here, so a late older answer cannot turn a newer result into it.
+      if (res.status === 403) { onForbidden?.(); return null; }
+      // story 4892 (found while rebuilding this screen — the team feed had the same defect, §5 #1): a FIRST page that the server refused (500 …) was shown as «활동 내역이 없어요», the empty state.
+      // It is an error state with a retry now (the same state a network error always had). «더 보기» keeps its own answer: null → the shared toast.
+      if (!res.ok) { if (firstPage) throw new Error(`activity-logs ${res.status}`); return null; }
       const json = await res.json() as { data?: ActivityLogResponse };
       return json.data ?? null;
     },
@@ -156,20 +169,23 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
   // reset + reload on filter change
   useEffect(() => {
     let cancelled = false;
+    const gen = ++firstPageGen.current;
+    const current = () => !cancelled && gen === firstPageGen.current;
     async function load() {
       setLoading(true);
+      setLoadingMore(false);   // a «더 보기» still in flight belongs to the old list — this load supersedes it
       setForbidden(false);
       setLoadError(false);
       setOffset(0);
       try {
-        const result = await fetchLogs(0);
-        if (cancelled) return;
+        const result = await fetchLogs(0, () => { if (current()) setForbidden(true); }, true);
+        if (!current()) return;
         setItems(result?.items ?? []);
         setTotal(result?.total ?? 0);
       } catch {
-        if (!cancelled) setLoadError(true);
+        if (current()) setLoadError(true);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (current()) setLoading(false);
       }
     }
     void load();
@@ -178,34 +194,46 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
 
   const loadMore = async () => {
     const nextOffset = offset + PAGE_SIZE;
+    const gen = firstPageGen.current;   // «더 보기» belongs to the list that was on screen when it was pressed — a filter change / reload in the meantime makes its answer stale
+    const stale = () => gen !== firstPageGen.current;
     setLoadingMore(true);
+    let forbidden403 = false;
     try {
-      const result = await fetchLogs(nextOffset);
+      const result = await fetchLogs(nextOffset, () => { forbidden403 = true; if (!stale()) setForbidden(true); });
+      if (stale()) return;
       if (result) {
         setItems((prev) => [...prev, ...result.items]);
         setOffset(nextOffset);
         setTotal(result.total);
+      } else if (!forbidden403) {
+        // story 4892 — a refused answer used to do nothing at all. The button stays (offset unchanged) so pressing it again asks again;
+        // the same shared line the team activity feed uses. A 403 is not this: the page already turns into the «접근 불가» state.
+        addToast({ title: tc('loadMoreFailed'), type: 'error' });
       }
     } catch {
-      // 더보기 실패는 조용히 두고 버튼을 그대로 남겨(재클릭으로 재시도 가능).
+      // story 4892 — the same for a network error: say so, keep the button (a second press retries).
+      if (!stale()) addToast({ title: tc('loadMoreFailed'), type: 'error' });
     } finally {
-      setLoadingMore(false);
+      if (!stale()) setLoadingMore(false);   // a stale one must not clear the spinner of the newer load (that load reset it itself)
     }
   };
 
   const reload = async () => {
+    const gen = ++firstPageGen.current;   // a newer first-page load (this one, or a filter change) supersedes every older one
+    setLoadingMore(false);
     setForbidden(false);
     setLoadError(false);
     setLoading(true);
     setOffset(0);
     try {
-      const result = await fetchLogs(0);
+      const result = await fetchLogs(0, () => { if (gen === firstPageGen.current) setForbidden(true); }, true);
+      if (gen !== firstPageGen.current) return;
       setItems(result?.items ?? []);
       setTotal(result?.total ?? 0);
     } catch {
-      setLoadError(true);
+      if (gen === firstPageGen.current) setLoadError(true);
     } finally {
-      setLoading(false);
+      if (gen === firstPageGen.current) setLoading(false);
     }
   };
 
@@ -213,14 +241,63 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
 
   // [SID:4286 · 유나 규칙] 드롭다운 선택지는 타입 표식이 없어 라벨이 타입을 대신 · 같은 라벨이 둘 이상이면 행 꼬리(한 규칙).
   const actorLabelById = memberOptionLabels(members, tc);
-  const actorOptions: SelectOption[] = [
+  const actorOptions: FilterOption[] = [
     { value: ALL, label: t('filterAll') },
     ...members.map((m) => ({ value: m.id, label: actorLabelById.get(m.id) ?? '' })),
   ];
   // [SID:4311 PR 2 · 유나] 피드 행의 행위자 — actor_id마다 한 번 · 시스템 행 제외 · 불러온 줄들 안에서만 겹침 판정.
   const actorLabels = actorRowLabels(items.map((item) => ({ id: item.actor_id, label: item.actor_id ? memberDisplayLabel(item.actor_name, tc) : null })));
 
-  const entityTypeOptions: SelectOption[] = [
+  // story 4892 (UI-9 활동 §2) — a row is chosen to read its details (the hover-only tooltip's facts, made visible). Wide (lg+): the details sit in a column beside the
+  // list; narrow: they open right under the chosen row and the keyboard focus moves into them. One instance is drawn at a time, so the row's `aria-controls` id is unique.
+  const isWide = useMediaQuery('(min-width: 1024px)');
+  // lg (1024–1279): the list needs the width — the details column is not held open while nothing is chosen (a held-open column cut 23 of 24 one-line claims at 1024).
+  // xl (1280+): the column stays, with its «pick a row» line.
+  const isXl = useMediaQuery('(min-width: 1280px)');
+  // «lg only» (1024–1279) for the row's compact-actor fold. Media-query states update independently during a resize (isWide, isXl, isLgOnly each in its own effect), so any ONE of them can lag for a
+  // render: the fold therefore needs all three to agree with the column (open only when isWide && !isXl, and only while a row is chosen) — no glitch in either direction (lg → xl, lg → narrow).
+  const isLgOnly = useMediaQuery('(min-width: 1024px) and (max-width: 1279.99px)');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const detailRef = useRef<HTMLElement | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLButtonElement>());
+  const selected = selectedId ? items.find((i) => i.id === selectedId) ?? null : null;
+  useEffect(() => {
+    // a new list (filter change, reload) that no longer holds the chosen row clears the choice
+    if (selectedId && !items.some((i) => i.id === selectedId)) setSelectedId(null);
+  }, [items, selectedId]);
+  // Focus moves only on a KEYBOARD activation (Enter / Space fire `click` with detail 0; a mouse or touch click has detail >= 1 and must not steal the focus), and it is
+  // done by an effect after the commit — the details element exists by then, and a pending timer can never fire after an unmount.
+  const [focusRequest, setFocusRequest] = useState<{ kind: 'detail' | 'row'; id: string } | null>(null);
+  useEffect(() => {
+    if (!focusRequest) return;
+    if (focusRequest.kind === 'detail') detailRef.current?.focus();
+    else rowRefs.current.get(focusRequest.id)?.focus();
+    setFocusRequest(null);
+  }, [focusRequest]);
+  // Crossing 1024 while a row is chosen swaps where the details are drawn (under the row ↔ in the column): the old element is unmounted, so a focus that was inside it
+  // falls to <body>. Hand it back to the chosen row (which stays mounted) instead of letting it vanish.
+  const prevWide = useRef(isWide);
+  useEffect(() => {
+    if (prevWide.current === isWide) return;
+    prevWide.current = isWide;
+    if (selectedId && (!document.activeElement || document.activeElement === document.body)) setFocusRequest({ kind: 'row', id: selectedId });
+  }, [isWide, selectedId]);
+  const toggleRow = (id: string, viaKeyboard: boolean) => {
+    setSelectedId((cur) => (cur === id ? null : id));
+    if (!isWide && viaKeyboard && selectedId !== id) setFocusRequest({ kind: 'detail', id });
+  };
+  const closeDetail = () => {
+    const id = selectedId;
+    setSelectedId(null);
+    if (id) setFocusRequest({ kind: 'row', id });   // the close button disappears with the details — hand the focus back to the row that opened them
+  };
+  const displayTz = useViewerTimeZone() ?? 'UTC';
+  const locale = useLocale();
+  const dayGroups = groupByDay(items, displayTz);
+  const auditHeading = (g: { key: string; kind: 'today' | 'yesterday' | 'date' | 'undated' }) => (g.kind === 'today' ? t('dayToday') : g.kind === 'yesterday' ? t('dayYesterday') : g.kind === 'undated' ? t('dayUndated') : formatDayHeader(g.key, locale));
+  const DETAIL_ID = 'audit-detail';
+
+  const entityTypeOptions: FilterOption[] = [
     { value: ALL, label: t('filterAll') },
     ...ENTITY_TYPES.map((et) => ({ value: et, label: et })),
   ];
@@ -236,51 +313,41 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
         <div className="flex-shrink-0 border-b border-border/80 px-6 py-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <div className="flex flex-wrap items-center gap-2">
-              <OperatorDropdownSelect
-                value={actorFilter}
-                onValueChange={setActorFilter}
-                options={actorOptions}
-                placeholder={t('filterActor')}
-                className="w-36"
-              />
-              <OperatorDropdownSelect
-                value={entityTypeFilter}
-                onValueChange={setEntityTypeFilter}
-                options={entityTypeOptions}
-                placeholder={t('filterEntityType')}
-                className="w-36"
-              />
-              <input
+              <FilterSelect value={actorFilter} onValueChange={setActorFilter} options={actorOptions} label={t('filterActor')} className="w-36" />
+              <FilterSelect value={entityTypeFilter} onValueChange={setEntityTypeFilter} options={entityTypeOptions} label={t('filterEntityType')} className="w-36" />
+              <Input
                 type="text"
                 value={actionFilter === ALL ? '' : actionFilter}
                 onChange={(e) => setActionFilter(e.target.value || ALL)}
                 placeholder={t('filterAction')}
+                aria-label={t('filterAction')}
                 maxLength={ACTION_FILTER_MAX_LENGTH}
-                className="rounded-md border border-input bg-background px-3 py-1.5 text-base lg:text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                className="w-44"
               />
             </div>
             <div className="flex items-center gap-2 sm:ml-auto">
-              <input
+              <Input
                 type="date"
                 value={fromDate}
                 onChange={(e) => setFromDate(e.target.value)}
-                className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-base lg:text-sm text-foreground outline-none sm:flex-none sm:px-3"
+                className="min-w-0 flex-1 px-2 sm:w-auto sm:flex-none sm:px-3"
                 aria-label={t('fromDate')}
               />
               <span className="text-xs text-muted-foreground">~</span>
-              <input
+              <Input
                 type="date"
                 value={toDate}
                 onChange={(e) => setToDate(e.target.value)}
-                className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-base lg:text-sm text-foreground outline-none sm:flex-none sm:px-3"
+                className="min-w-0 flex-1 px-2 sm:w-auto sm:flex-none sm:px-3"
                 aria-label={t('toDate')}
               />
             </div>
           </div>
         </div>
 
-        {/* Table */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">
+        {/* List column (+ the details column beside it from lg) */}
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+        <div className="min-w-0 flex-1 overflow-y-auto px-6 py-4">
           {forbidden ? (
             <div className="flex h-64 items-center justify-center">
               <EmptyState title={t('forbiddenTitle')} description={t('forbiddenDescription')} />
@@ -291,42 +358,73 @@ export function ActivityLogView({ projectId }: ActivityLogViewProps) {
                 title={tc('error')}
                 description={tc('errorDescription')}
                 action={
-                  <Button variant="glass" size="sm" onClick={reload}>
-                    <RefreshCw className="mr-1.5 size-3.5" />
+                  <DsButton onClick={reload} iconStart={<Icon name="refresh" size={14} />}>
                     {tc('retry')}
-                  </Button>
+                  </DsButton>
                 }
               />
             </div>
           ) : loading ? (
-            <div className="space-y-1.5">
-              {Array.from({ length: 8 }).map((_, i) => <RowSkeleton key={i} />)}
-            </div>
+            <SkeletonGroup label={tc('loading')} className="space-y-1.5">
+              {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-9" />)}
+            </SkeletonGroup>
           ) : items.length === 0 ? (
             <EmptyState
               title={t('emptyTitle')}
               description={t('emptyDescription')}
               action={
-                <Button variant="glass" size="sm" onClick={reload}>
-                  <RefreshCw className="mr-1.5 size-3.5" />
+                <DsButton onClick={reload} iconStart={<Icon name="refresh" size={14} />}>
                   {t('reload')}
-                </Button>
+                </DsButton>
               }
             />
           ) : (
             <div className="space-y-1.5">
-              {items.map((item) => (
-                <ActivityRow key={item.id} item={item} rowLabel={item.actor_id ? actorLabels.get(item.actor_id) : undefined} />
+              {dayGroups.map((group) => (
+                <section key={group.key} aria-label={auditHeading(group)} data-testid="audit-day-group" className="space-y-1.5">
+                  <SectionHeader title={auditHeading(group)} level={2} className="rounded-ds-control" />
+                  {group.items.map((item) => {
+                    const isSelected = item.id === selectedId;
+                    return (
+                      <div key={item.id}>
+                        <ActivityRow
+                          item={item}
+                          rowLabel={item.actor_id ? actorLabels.get(item.actor_id) : undefined}
+                          selected={isSelected}
+                          compactActor={isLgOnly && isWide && !isXl && !!selected}   // lg (1024–1279) while the details column is open: the list is ~344px — names yield to the claim
+                          controlsId={DETAIL_ID}
+                          onToggle={(viaKeyboard) => toggleRow(item.id, viaKeyboard)}
+                          buttonRef={(el) => { if (el) rowRefs.current.set(item.id, el); else rowRefs.current.delete(item.id); }}
+                        />
+                        {isSelected && !isWide ? (
+                          <div className="mt-1.5">
+                            <AuditDetail ref={detailRef} id={DETAIL_ID} item={item} actorLabel={item.actor_id ? actorLabels.get(item.actor_id) ?? null : null} claim={auditClaim(item)} onClose={closeDetail} />
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </section>
               ))}
               {offset + PAGE_SIZE < total && (
                 <div className="pt-3 text-center">
-                  <Button variant="glass" size="sm" onClick={loadMore} disabled={loadingMore}>
-                    {loadingMore ? tc('loading') : t('loadMore')}
-                  </Button>
+                  <DsButton onClick={loadMore} loading={loadingMore}>
+                    {t('loadMore')}
+                  </DsButton>
                 </div>
               )}
             </div>
           )}
+        </div>
+        {isWide && !forbidden && !loadError && (isXl || selected) ? (
+          <aside aria-label={t('detailHeading')} className="w-[360px] shrink-0 overflow-y-auto border-l border-ds-line p-4">
+            {selected ? (
+              <AuditDetail ref={detailRef} id={DETAIL_ID} item={selected} actorLabel={selected.actor_id ? actorLabels.get(selected.actor_id) ?? null : null} claim={auditClaim(selected)} onClose={closeDetail} />
+            ) : (
+              <p className="m-0 text-ds-small text-ds-ink-3">{t('detailPickRow')}</p>
+            )}
+          </aside>
+        ) : null}
         </div>
       </div>
     </>
@@ -340,11 +438,6 @@ export function auditClaim(item: ActivityLogItem): string {
   return item.action;
 }
 
-export function auditContextTooltip(item: ActivityLogItem): string | undefined {
-  const entries = item.context ? Object.entries(item.context) : [];
-  const lines = [`action: ${item.action}`, ...entries.map(([k, v]) => `${k}: ${String(v)}`)];
-  return lines.join('\n');
-}
 
 // story #2923(P0-E AQ4, 그라운딩 발견) — actor_type 무관하게 항상 human prop으로만 넘겨(agent
 // prop 미사용) 시안의 "아바타 shape로 human/agent 구분"이 이 표면에서 안 걸렸다. AuditRow가
@@ -375,26 +468,55 @@ export function auditActorProps(item: ActivityLogItem, t: (key: string) => strin
   return { human: { name, ...label, role: item.actor_type ?? 'human' } };
 }
 
-function ActivityRow({ item, rowLabel }: { item: ActivityLogItem; rowLabel?: string }) {
+function ActivityRow({ item, rowLabel, selected, compactActor, controlsId, onToggle, buttonRef }: {
+  item: ActivityLogItem;
+  rowLabel?: string;
+  selected: boolean;
+  /** the list column is narrow (the details column is open below xl): the row drops the actor's NAME text and keeps the avatar badge; the name stays in the overlay button's accessible name + title */
+  compactActor: boolean;
+  controlsId: string;
+  onToggle: (viaKeyboard: boolean) => void;
+  buttonRef: (el: HTMLButtonElement | null) => void;
+}) {
   // story #3493 — 감사로그 created_at은 "기록" — 3436 묶음 8 정본(formatRelativeTime)
   // 으로 통일. document.documentElement.lang 수동 판독도 useLocale()로 정리(같은 뜻,
   // 정본 훅 사용).
   const locale = useLocale();
   // story #4443 PR3a (PO 00:07Z) — a row says when it happened: the viewer's zone (was the org's, story #4280). The period above
   // (ActivityLogView's range) stays the org's — a team looks at the same days.
-  const time = formatViewerRelativeTime(item.created_at, locale, useViewerTimeZone());
+  const rowTz = useViewerTimeZone();   // (a hook — called every render, not inside the ternary below)
+  const time = isValidTime(item.created_at) ? formatViewerRelativeTime(item.created_at, locale, rowTz) : '';
   const tc = useTranslations('common');
   const { human, agent } = auditActorProps(item, tc, rowLabel);
+  // story 4892 — a row opens its details (aria-expanded + aria-controls). The visible row is a ProofCapsule — block elements, and for an agent a focusable avatar — which may not sit inside
+  // a button element; so the row is two layers: the visible capsule (inert: no tab stop, not read twice) and a transparent button laid over it whose accessible name is the row's own words.
+  const actor = rowLabel ?? item.actor_name ?? '';
+  const rowName = [actor, auditClaim(item), time].filter(Boolean).join(' · ');
   return (
-    <div title={auditContextTooltip(item)}>
-      <ProofCapsule
-        density="audit"
-        proofState={deriveAuditProofState(item.action)}
-        stateLabel={item.action}
-        claim={auditClaim(item)}
-        now={time}
-        human={human}
-        agent={agent}
+    <div data-selected={selected} className="group/row relative rounded-ds-panel transition-colors hover:bg-ds-surface-high data-[selected=true]:bg-ds-surface-high">
+      <div inert aria-hidden="true">
+        <ProofCapsule
+          density="audit"
+          proofState={deriveAuditProofState(item.action)}
+          stateLabel={item.action}
+          claim={auditClaim(item)}
+          now={time}
+          human={human}
+          agent={agent}
+          compactActor={compactActor}
+        />
+      </div>
+      <Button
+        ref={buttonRef}
+        type="button"
+        variant="ghost"
+        aria-label={rowName}
+        title={rowName}   // the overlay covers the row, so the truncated-claim hover tooltip now lives here (the whole words of the row)
+        aria-expanded={selected}
+        aria-controls={selected ? controlsId : undefined}
+        onClick={(e) => onToggle(e.detail === 0)}
+        data-audit-row
+        className="absolute inset-0 h-auto min-h-0 w-full min-w-0 rounded-ds-panel p-0 hover:bg-transparent aria-expanded:bg-transparent"
       />
     </div>
   );

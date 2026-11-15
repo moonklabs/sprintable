@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link';
 import { useFormatter, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Card } from '@/components/ds/card';
+import { DesktopEmptyState } from '@/components/desktop/desktop-empty-state';
 import { fetchWithAuth } from '@/lib/db/client';
 import { deviceDateOptions } from '@/lib/desktop-devices';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
@@ -131,19 +132,16 @@ export function DesktopRemoteDevices() {
 
   return (
     <section className="break-keep flex flex-col gap-2" data-testid="desktop-remote-devices" aria-labelledby="desktop-remote-devices-title">
-      <h2 id="desktop-remote-devices-title" className="text-base font-semibold">{t('title')}</h2>
+      <h2 id="desktop-remote-devices-title" className="text-ds-card-title font-semibold text-ds-ink">{t('title')}</h2>
       {/* story 4697 AC5 (Yuna's prod pass): «the org's remote control is off — a paired computer's status shows but control does not work» is about phones that ARE paired.
           With none, it sat above «아직 페어링된 폰이 없어요» for every new customer (new orgs start with remote control off — the card just above already says so) */}
       {remoteControlOn === false && orgName && phones.length > 0 ? (
         <p className="text-xs text-muted-foreground">{t('orgOff', { org: orgName })}</p>
       ) : null}
       {phones.length === 0 ? (
-        <>
-          <p className="text-sm text-muted-foreground">{t('empty')}</p>
-          {/* story 4645 AC7: the web cannot open the app's pairing window — say where it is. Only when the org's remote control is known on: off or not yet
-              known, the tail names no pairing (PO · Yuna 19:00Z · design CHANGES) */}
-          {remoteControlOn === true ? <p className="text-xs text-muted-foreground">{t('pairHint')}</p> : null}
-        </>
+        // story 4645 AC7: the web cannot open the app's pairing window — say where it is. Only when the org's remote control is known on: off or not yet known, the tail names no pairing (PO · Yuna 19:00Z · design CHANGES)
+        // 4913: the same dashed empty shape as «연결된 기기» (one empty shape on the screen)
+        <DesktopEmptyState title={t('empty')} testId="desktop-remote-devices-empty">{remoteControlOn === true ? t('pairHint') : null}</DesktopEmptyState>
       ) : (
         <Card className="p-0">
         <ul className="flex flex-col divide-y divide-border">

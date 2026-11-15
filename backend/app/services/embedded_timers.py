@@ -114,6 +114,7 @@ EXCLUDED: dict[str, str] = {
     "entity-references-orphan-check": "hosted operations check (read-only, log)",
     "zero-referenced-entities-check": "hosted operations check (read-only, log)",
     "clock-edit-scrub": "phone relay — off in local mode (story 4829)",
+    "changes-purge": "phone relay — off in local mode (story 4951)",
     "account-purge": "hosted account-deletion grace (a local install has one owner)",
 }
 

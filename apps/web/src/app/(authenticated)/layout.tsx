@@ -3,6 +3,7 @@ import { cookies, headers } from 'next/headers';
 import { ACTIVATION_COLLAPSED_COOKIE, ACTIVATION_HINT_COOKIE, isActivationCollapsed, parseActivationHint } from '@/lib/activation-hint';
 import { getServerSession } from '@/lib/db/server';
 import { buildLoginRedirect } from '@/lib/auth/session-redirect';
+import { AccountContextFailure } from '@/components/auth/account-context-failure';
 import { onboardingRedirect, staysForNewOrgSetup } from '@/lib/auth/onboarding-next';
 import { ME_REASON_MEMBERSHIP_ELSEWHERE, readMe404Reason } from '@/lib/auth/me-reason';
 import { resolveProjectMemberships, resolveServerProjectId } from '@/lib/resolve-project-memberships';
@@ -15,6 +16,7 @@ import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { logServerTiming, withServerTiming } from '@/lib/server-timing';
 import { TabOwnerGate } from '@/components/auth/tab-owner-gate';
 import { fastapiBaseUrl } from '@/lib/fastapi-url';
+import { SP_RENEW_TRIED_COOKIE, SP_RENEW_UNCONFIRMED_COOKIE } from '@/lib/auth/cookies';
 
 interface MemberContext {
   id: string;
@@ -80,7 +82,14 @@ async function AuthenticatedLayoutBody({
   ]);
 
   // 401(인증 만료)만 /login 리다이렉트, 다른 에러(500 등)는 children 렌더링 유지
-  if (!meRes || meRes.status === 401) redirect(buildLoginRedirect(currentPath, navV3Flags));
+  // story 4915 · 11-12 (dev 로그인 풀림 재현): 요청이 «거절»돼(연결 끊김 · 거부 · 시간 초과 — 위 `.catch(() => null)`) meRes가 null이면 세션이 끝난 게 아니라 서버를 못 만난 것이다. 예전엔 이것도
+  // /login으로 보내(쿠키는 그대로인데 화면만 로그인 — dev 교체 창 · 느린 응답 뒤 «자주 풀림») 5xx와 다르게 읽었다. 지금은 5xx와 같이 오류 경계(다시 시도)로 — 세션은 그대로.
+  // 그 «못 만남»은 던지지 않고 이 레이아웃이 직접 «다시 시도» 화면을 돌려준다 — 레이아웃에서 던진 에러는 같은 세그먼트의 error.tsx가 못 잡는다(경계는 세그먼트의 children을 감싼다) → Next 기본 500 화면.
+  if (!meRes) {
+    console.warn(JSON.stringify({ message: 'authenticated_layout_account_context_failed', status: 'rejected' }));
+    return { userId: session.user_id, node: <AccountContextFailure /> };
+  }
+  if (meRes.status === 401) redirect(buildLoginRedirect(currentPath, navV3Flags));
 
   // 🔴 org 없는 유저(신규 OAuth 가입자 등 — team_member 미생성 시 /me 404) → 온보딩으로.
   // auth/callback이 is_new_user 무관 /inbox 리다이렉트하는 결함을 layout에서 OAuth+email/pw 공통 커버
@@ -92,7 +101,17 @@ async function AuthenticatedLayoutBody({
     // the onboarding (and the desktop setup's «새 조직» mode) would let them create a second organization. The session is out of step with the membership —
     // a new sign-in issues a token with the right claim (the proxy reads the same field the same way: only `no_membership` is «no organization»).
     // Any other 404 (no reason · an older backend · an unreadable body) keeps the old reading, as before.
-    if ((await readMe404Reason(meRes)) === ME_REASON_MEMBERSHIP_ELSEWHERE) redirect(buildLoginRedirect(currentPath, navV3Flags));
+    if ((await readMe404Reason(meRes)) === ME_REASON_MEMBERSHIP_ELSEWHERE) {
+      // story 4904 — «the token names no organization the person belongs to» is not yet «the session ended»: a token minted before the organization existed (the same new
+      // account in a second window) is one refresh away from the right claim. Renew ONCE, read again; only when the renewal was already tried (the marker the renew road
+      // leaves for a minute) and it is still none is it the sign-in.
+      const renewTried = (await cookies()).get(SP_RENEW_TRIED_COOKIE)?.value;
+      // story 4915 (PR 2): the renew road could not CONFIRM anything just now (the refresh call was rejected · 5xx; it left this short cookie, cleared nothing) — not a sign-in, not another round
+      // through the road (that would loop): the «다시 시도» screen. A retry after the cookie is gone goes through the road afresh.
+      if (!renewTried && (await cookies()).get(SP_RENEW_UNCONFIRMED_COOKIE)?.value) return { userId: session.user_id, node: <AccountContextFailure /> };
+      if (!renewTried) redirect(`/api/auth/renew?next=${encodeURIComponent(currentPath || '/')}`);
+      redirect(buildLoginRedirect(currentPath, navV3Flags));
+    }
     if (staysForNewOrgSetup(currentPath)) return { userId: session.user_id, node: children };
     redirect(onboardingRedirect(currentPath));
   }
@@ -101,7 +120,9 @@ async function AuthenticatedLayoutBody({
   // 렌더하지 않고 에러 경계(error.tsx)로 넘긴다. 기존 `me = meRes.ok ? ... : null`이 403/500을
   // 삼켜 DashboardShell이 org/project 컨텍스트 없이 깨진 화면을 무에러로 렌더하던 footgun 제거.
   if (!meRes.ok) {
-    throw new Error(`Failed to load account context (HTTP ${meRes.status})`);
+    // story 4915 — 같은 이유로 던지지 않고 «다시 시도» 화면을 돌려준다(5xx · 403 모두; 세션은 그대로). 서버 로그엔 상태만(값 없음) 남긴다.
+    console.warn(JSON.stringify({ message: 'authenticated_layout_account_context_failed', status: meRes.status }));
+    return { userId: session.user_id, node: <AccountContextFailure /> };
   }
 
   const me = (await meRes.json()) as MemberContext | null;
@@ -111,6 +132,8 @@ async function AuthenticatedLayoutBody({
   }
   const memberships: { projectId: string; projectName: string; projectSlug?: string | null; orgId?: string | null }[] =
     membershipsRes?.ok ? ((await membershipsRes.json()) as { projectId: string; projectName: string; projectSlug?: string | null; orgId?: string | null }[]) : [];
+  // story 4891 — a failed request is not «no projects»: the list above is `[]` for both, so the failure is told on its own.
+  const projectMembershipsFailed = !membershipsRes?.ok;
   // story #2885 — sentinel(0-프로젝트 org) 오염 가드, 근거는 resolve-project-memberships.ts 참고.
   let projectMemberships = resolveProjectMemberships(memberships, me);
 
@@ -232,6 +255,7 @@ async function AuthenticatedLayoutBody({
         role={me?.role}
         currentMemberType={me?.type}
         projectMemberships={projectMemberships}
+        projectMembershipsFailed={projectMembershipsFailed}
         orgMemberships={orgMemberships}
         pathOrgId={pathOrgId}
         pathProjectId={pathProjectId}

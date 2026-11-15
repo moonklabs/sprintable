@@ -1,20 +1,24 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect } from 'react';
+import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ViewerDate } from '@/components/viewer-time-zone';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { EMPTY_TODAY_SNAPSHOT, useTodaySnapshot } from './use-today-snapshot';
-import { AgentProgressSection, NeedsMeSection, PublishedSection } from './today-sections';
-import { AgentStateSection } from './agent-state-section';
+import { PublishedSection } from './today-sections';
+import { CountBadge } from '@/components/ds/count-badge';
 import { useFlatHref } from '@/hooks/use-flat-href';
-import { findSoleAgentDm, sendInstruction } from '@/lib/today-instruct';
+import { isSafeInternalPath } from '@/lib/auth/internal-path';
+import { isNoProjectAtAll, projectsUnknownBecauseFailed } from '@/app/(authenticated)/chats/no-project';
+import { ActivationChecklistBanner } from '@/components/dashboard/activation-checklist-banner';
+import { HomeScreen } from '@/components/home/home-screen';
+import { useHomeModel } from '@/components/home/home-model-provider';
+import { AgentStateSection } from './agent-state-section';
+import { InstructionStrip } from './instruction-strip';
 import { TodayPairCard } from './today-pair-card';
 
 // story #3831(UX-v3·FE 3·오늘, 페드루 PO 確定 2026-09-13) — 옛 조직 브리핑(NowFace·
@@ -28,87 +32,12 @@ import { TodayPairCard } from './today-pair-card';
 // 파라미터 자체가 없다) 그 조건은 이제 거짓이 된다(项目 없어도 내용은 뜬다). `next`(#2212
 // 리다이렉트 복귀 안내)만 남긴다.
 
-function InstructionInput({ autoFocus }: { autoFocus: boolean }) {
-  const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
-  const t = useTranslations('orgBriefing');
-  const router = useRouter();
-  const { projectId, currentTeamMemberId } = useDashboardContext();
-  const [value, setValue] = useState('');
-  // story #4762 (AC1) — one press sends when the person has exactly one agent DM; `sending` holds a second press, `failed` keeps the text and says so
-  const [sending, setSending] = useState(false);
-  // what the line under the box says: a refusal · no answer at all · «it was sent, to the project you have just left»
-  const [failed, setFailed] = useState<null | 'refused' | 'unknown' | 'elsewhere'>(null);
-  const sendingRef = useRef(false); // a second press in the same tick sees the state of the render before — the ref holds it at once
-  const mountedRef = useRef(true);
-  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
-  const projectRef = useRef(projectId);
-  // the project the person is on NOW — the answer of a read made on another project must not send anything. A LAYOUT effect: it runs inside the commit, so no
-  // continuation of an earlier press can run between «the new project is on screen» and «the ref knows» (a passive effect leaves that gap — codex 4762)
-  useLayoutEffect(() => { projectRef.current = projectId; }, [projectId]);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // story #3831 후속(페드루 PO 確定, 2026-09-13 14:22Z) — 컴패니언 단축키가 `?focus=compose`
-  // 딥링크로 이 화면을 열면 하단 지시 한 줄에 바로 포커스한다(웹은 포커스만 — 단축키 자체는
-  // 3832, 데스크톱 전용 축).
-  useEffect(() => {
-    if (autoFocus) inputRef.current?.focus();
-  }, [autoFocus]);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = value.trim();
-    if (!trimmed || sendingRef.current) return;
-    setFailed(null);
-    // story #3831 PO 確定(c)(2026-09-13 14:04Z) — 수신자 발명 0. 「대화」의 기존 두 경로
-    // (최근 대화 프리필 / 0건이면 새 대화 모달, chat-list-view.tsx 참고)로 위임만 한다.
-    const handOver = () => router.push(flatHref(`/chats?compose=${encodeURIComponent(trimmed)}`));
-    if (!projectId || !currentTeamMemberId) { handOver(); return; }
-    // story #4762 (AC1, PO 10-24) — the person's ONE agent DM is not a receiver invented for them (it is the only one there is): a plain
-    // message goes there at once, and the person lands on that DM where the answer arrives. Anything else keeps the hand-over above.
-    sendingRef.current = true;
-    setSending(true);
-    const target = await findSoleAgentDm(projectId, currentTeamMemberId);
-    // the person left the screen, or moved to another project, while the list was being read: nothing is sent (the DM found belongs to the project they left)
-    if (!mountedRef.current || projectRef.current !== projectId) { sendingRef.current = false; if (mountedRef.current) setSending(false); return; }
-    if (!target) { sendingRef.current = false; setSending(false); handOver(); return; }
-    const outcome = await sendInstruction(target, trimmed);
-    sendingRef.current = false;
-    if (!mountedRef.current) return; // sent, and the person has gone elsewhere: no state to set, nowhere to take them
-    setSending(false);
-    if (outcome !== 'sent') { setFailed(outcome); return; }
-    setValue('');
-    // it went to the DM of the project the person WAS on: if they moved to another project during the send, they are not taken back to the one they left
-    if (projectRef.current !== projectId) { setFailed('elsewhere'); return; } // not a failure — it IS sent; the line says where it went
-    // 대상-프로젝트: 현재 p가 곧 대상 프로젝트다 — findSoleAgentDm이 현재 프로젝트(project_id=현재)의 대화 목록만 읽어 고른 대화다.
-    router.push(flatHref(`/chats/${encodeURIComponent(target)}`));
-  };
-
-  return (
-    // story #4762 (AC3) — the round support button (support-widget-launcher.tsx · 48px · fixed bottom-right) sat on [Send] on a phone; the row keeps
-    // that corner free below `lg` (the content is centered with room on both sides from `lg`). 16px column padding + 56px = 72px ≥ 48px + 16px offset + 8px gap.
-    <>
-    <form onSubmit={handleSubmit} className="flex items-center gap-2 border-t border-border pt-4 pe-14 lg:pe-0" data-testid="today-instruction-form">
-      <Input
-        ref={inputRef}
-        value={value}
-        onChange={(e) => { setValue(e.target.value); setFailed(null); }} // a line under the box is about the text that was there — a new edit puts it away
-        placeholder={t('instructionInputPlaceholder')}
-        aria-label={t('instructionInputPlaceholder')}
-        data-testid="today-instruction-input"
-        disabled={sending}
-      />
-      <Button type="submit" size="sm" disabled={!value.trim() || sending} aria-busy={sending}>{t('instructionSendButton')}</Button>
-    </form>
-    {failed ? <p role={failed === 'elsewhere' ? 'status' : 'alert'} data-testid="today-instruction-failed" className={`mt-2 pe-14 text-xs lg:pe-0 ${failed === 'elsewhere' ? 'text-muted-foreground' : 'text-destructive'}`}>{failed === 'unknown' ? t('instructionSendUnknown') : failed === 'elsewhere' ? t('instructionSentElsewhere') : t('instructionSendFailed')}</p> : null}
-    </>
-  );
-}
-
 export function OrgBriefingShell() {
   const t = useTranslations('orgBriefing');
   const tc = useTranslations('common');
   // today route는 org 스코프뿐 — 내용은 project를 안 쓴다. project는 오직 «복귀 안내 띠»(아래)만 본다.
-  const { projectId, projectMemberships } = useDashboardContext();
+  const dashboard = useDashboardContext();
+  const { projectId, projectMemberships } = dashboard;
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -117,8 +46,16 @@ export function OrgBriefingShell() {
   // session restore puts there (`/org-briefing?next=/glance?_prRetry=1`, AC8 lap 10-24) with the project already chosen (`?p=` on the page, every flat link carrying it): a line that sent the person
   // looking for a choice already made. With no project to pick (none yet) «pick» cannot be done either — Chats says «no project yet» for that.
   const showPickBanner = Boolean(nextTarget) && !projectId && projectMemberships.length > 0;
-  const { data, loadError, retry } = useTodaySnapshot();
-  const snapshot = data ?? EMPTY_TODAY_SNAPSHOT;
+  // story #4935 — the other half of the same case: a person with NO project at all who pressed 일감 · 목표 · 문서 (the proxy sent them here with `?next=`, story #2212) was shown nothing — «고를 게 없다»는 이유로 띠가 꺼져 있었고
+  // 대화 화면은 거치지 않는 길이라 까닭도 돌아갈 길도 없었다. One line + the existing «프로젝트 만들기» (the settings screen), carrying `next` so the first project sends them back. Never together with the pick band
+  // (that one needs ≥1 project, this one needs 0), and only for a `next` the one shared check accepts.
+  const flatHref = useFlatHref();
+  // «no project at all» is the ONE rule the chat surfaces already use (`isNoProjectAtAll`: not while the shell is still resolving a project from the address or the organization is still syncing), and a failed read of
+  // the person's projects (`projectMemberships` is `[]` then) is not «none» — the person may have projects (story 4891, `projectsUnknownBecauseFailed`).
+  const showCreateBanner = isSafeInternalPath(nextTarget) && isNoProjectAtAll(dashboard) && !projectsUnknownBecauseFailed(dashboard);
+  // story #4888 — the home reads the SAME model the navigation bar's badge reads (components/home/home-model-provider)
+  const { model, sources, loadError, partial, retry } = useHomeModel();
+  const th = useTranslations('home');
 
   // story #3831 후속(페드루 PO 確定, 2026-09-13 14:22Z) — `?focus=compose` 딥링크(컴패니언
   // 단축키, story #3832)는 소비 뒤 URL에서 지운다(뒤로가기·새로고침마다 재포커스되면
@@ -143,6 +80,16 @@ export function OrgBriefingShell() {
     <div className="mx-auto w-full max-w-4xl space-y-6 p-4 lg:p-6">
       {/* story 4773 (AC3, PO 10-25) — the top band: the phone app, a phone paired with nothing → one line + [컴퓨터와 페어링]. The instruction box below stays where hands expect it (4762 AC3: Send clear of the support button). */}
       <TodayPairCard />
+      {showCreateBanner ? (
+        <Alert role="status" data-testid="home-create-project-banner">
+          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+            <span>{t('projectRequiredCreate')}</span>
+            <Button asChild size="sm" data-testid="home-create-project-button">
+              <Link href={flatHref(`/settings?tab=projects&next=${encodeURIComponent(nextTarget as string)}`)}>{t('projectRequiredCreateButton')}</Link>
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
       {showPickBanner ? (
         <Alert role="status">
           <AlertDescription>{t('projectRequiredBannerNext')}</AlertDescription>
@@ -154,43 +101,46 @@ export function OrgBriefingShell() {
           <h1 className="text-lg font-semibold tracking-tight text-foreground">{t('title')}</h1>
           <p className="mt-1 text-sm text-muted-foreground"><ViewerDate value={today} options={{ month: 'long', day: 'numeric', weekday: 'long' }} /></p>
         </div>
-        {data && snapshot.needsMeCount > 0 ? (
-          // story #3853(§③ 토큰 표 「사람 손 필요=경고 amber」) — 하드코딩 bg-primary/10
-          // (파랑)을 캐노니컬 Badge variant="warning"으로 교체(badge.tsx 기존 변형, 새
-          // 토큰 발명 0). data-testid는 org-briefing-shell.test.tsx가 그대로 쓴다.
-          <Badge variant="warning" data-testid="needs-me-header-badge" className="shrink-0">
-            {t('needsMeBadge', { count: snapshot.needsMeCount })}
-          </Badge>
+        {model && model.badge > 0 ? (
+          // story #4888 — the number is the model's one number: the rows in «내 손이 필요해요» (= the bar's badge)
+          <CountBadge kind="needs-hand" label={th('needsHandLabel')} count={model.badge} data-testid="needs-me-header-badge" />
         ) : null}
       </div>
 
-      {loadError ? (
+      {/* story #4888 — the start checklist is a card at the top of the home list (it used to stand over /chats and every other page as a band). It stands here, outside the data branch below: it draws its
+          own skeleton while it loads, so it does not arrive late and push the list down */}
+      <div className="empty:hidden" data-testid="home-checklist-slot">
+        <ActivationChecklistBanner placement="home" />
+      </div>
+
+      {loadError && !model ? (
         <div className="flex flex-col items-center gap-3 py-10 text-center">
           <p role="alert" className="text-sm text-destructive">{t('loadErrorTitle')}</p>
           <Button size="sm" variant="outline" onClick={retry}>{tc('retry')}</Button>
         </div>
-      ) : !data ? (
+      ) : !model || !sources ? (
         <div className="space-y-3" aria-hidden="true">
           <Card className="h-24 animate-pulse bg-muted/30" />
           <Card className="h-24 animate-pulse bg-muted/30" />
         </div>
       ) : (
         <div className="space-y-6">
-          <NeedsMeSection items={snapshot.needsMe} count={snapshot.needsMeCount} />
-          <AgentProgressSection items={snapshot.agentProgress} />
+          {loadError || partial ? (
+            // the last read failed, or part of it could not be read: the list below is what WAS read — said, with a way to read again (never passed off as complete)
+            <div role="status" className="flex items-center justify-between gap-3 text-sm text-muted-foreground" data-testid="home-incomplete-notice">
+              <span>{loadError ? t('loadErrorTitle') : th('partialNotice')}</span>
+              <Button size="sm" variant="outline" onClick={retry}>{tc('retry')}</Button>
+            </div>
+          ) : null}
+          <HomeScreen model={model} sources={sources} partial={partial || loadError} />
           <AgentStateSection />
-          <PublishedSection published={snapshot.published} usage={snapshot.usage} />
+          <PublishedSection published={sources.snapshot.published} usage={sources.snapshot.usage} />
         </div>
       )}
 
-      {/* 페드루 PO CHANGES(2026-09-14 00:58Z, PR #4256) — 1440×900에서 이 입력이 스크롤
-          없이는 안 보이던 결함(「오늘」의 주 액션이라 접혀선 안 된다) → 본문 pane
-          (dashboard-shell.tsx의 overflow-y-auto 스크롤 조상) 하단에 sticky. -mx/px로
-          부모의 좌우 패딩을 상쇄해 배경이 그 폭 그대로 깔린다(border-t는 InstructionInput
-          자신의 form에 이미 있음 — 경계선 중복 0). */}
-      <div className="sticky bottom-0 -mx-4 bg-background px-4 pb-4 lg:-mx-6 lg:px-6">
-        <InstructionInput autoFocus={shouldAutoFocusInstruction} />
-      </div>
+      {/* 페드루 PO CHANGES(2026-09-14 00:58Z, PR #4256) — 1440×900에서 이 입력이 스크롤 없이는 안 보이던 결함(「오늘」의 주 액션이라 접혀선 안 된다) → 본문 pane(dashboard-shell.tsx의 overflow-y-auto
+          스크롤 조상) 하단에 sticky. 4906 셋째 바퀴 — 띠는 pane의 «바닥 가장자리»까지 닿는 불투명 면(instruction-strip.tsx). */}
+      <InstructionStrip autoFocus={shouldAutoFocusInstruction} />
     </div>
   );
 }

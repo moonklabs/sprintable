@@ -4,12 +4,13 @@ import { firstGraphemes } from '@/lib/first-graphemes';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
-import { Inbox } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/ds/button';
 import { useToast } from '@/components/ui/toast';
-import { EmptyState } from '@/components/ui/empty-state';
+import { EmptyState } from '@/components/ds/empty-state';
+import { Input } from '@/components/ds/input';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
+import { FilterSelect, type FilterOption } from './filter-select';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { OperatorDropdownSelect, type SelectOption } from '@/components/ui/operator-dropdown-select';
 import { getEventTypeCopy, KNOWN_EVENT_TYPE_VERBS } from '@/services/notification-display';
 import { getEntityHref } from '@/components/chat/embed-card';
 import { cn } from '@/lib/utils';
@@ -20,6 +21,9 @@ import { withProjectParam } from '@/lib/with-project-param';
 import { dateKeysToInstants, defaultPastDaysDateRange, resolveDisplayTimezone } from '@/lib/schedule-format';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { RowName } from '@/components/shared/row-name';
+import { SectionHeader } from '@/components/ds/section-header';
+import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { formatDayHeader, groupByDay, isValidTime } from './group-by-day';
 
 // ─── Types (BE ActivityStreamItem flat 실측 — doc §10 정정 정합) ──────────────
 interface ActivityStreamItem {
@@ -81,6 +85,7 @@ function objectLabel(item: ActivityStreamItem): string | null {
 }
 
 function relativeTime(iso: string, locale: string): string {
+  if (!isValidTime(iso)) return '—';   // an empty, null or broken time must not throw inside render (Intl.RelativeTimeFormat rejects NaN) nor read as 1970
   const diffMs = Date.now() - new Date(iso).getTime();
   const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
   const sec = Math.round(diffMs / 1000);
@@ -112,12 +117,13 @@ function ActorAvatar({ name, isSystem }: { name: string; isSystem: boolean }) {
 }
 
 function RowSkeleton() {
+  // story 4892 — the feed row's placeholder (avatar circle + two text bars) on ds Skeleton bars; the «불러오는 중» is said once by the SkeletonGroup around the rows
   return (
-    <div className="flex animate-pulse items-start gap-3 px-3 py-2.5">
-      <span className="size-7 shrink-0 rounded-full bg-muted" />
+    <div className="flex items-start gap-3 px-3 py-2.5">
+      <Skeleton variant="circle" className="size-7 shrink-0" />
       <div className="min-w-0 flex-1 space-y-1.5 pt-1">
-        <span className="block h-3 w-[70%] rounded bg-muted" />
-        <span className="block h-3 w-[40%] rounded bg-muted" />
+        <Skeleton className="h-3 w-[70%]" />
+        <Skeleton className="h-3 w-[40%]" />
       </div>
     </div>
   );
@@ -193,13 +199,19 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   const t = useTranslations('teamActivity');
   const tInbox = useTranslations('inbox'); // verb 사람카피(event* 키)는 inbox 네임스페이스
   const tc = useTranslations('common');
+  const tDay = useTranslations('activityLog'); // «오늘» / «어제» — the same two words the audit log's day headers use
   const { addToast } = useToast();
+  const viewerTz = useViewerTimeZone() ?? 'UTC';
   const locale =
     typeof document !== 'undefined' ? document.documentElement.lang || 'en' : 'en';
+  const dayLabel = (g: { key: string; kind: 'today' | 'yesterday' | 'date' | 'undated' }) => (g.kind === 'today' ? tDay('dayToday') : g.kind === 'yesterday' ? tDay('dayYesterday') : g.kind === 'undated' ? tDay('dayUndated') : formatDayHeader(g.key, locale));
 
   const [items, setItems] = useState<ActivityStreamItem[] | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [forbidden, setForbidden] = useState(false);
+  // story 4892 (UI-9 §5 #1) — a first page that failed to load is NOT an empty feed: it is an error with a retry (reloadTick asks again).
+  const [loadError, setLoadError] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
   // story #4297 — «더 보기» 커서: 지금까지 받은 가장 오래된 활동의 activity_seq(서버가 준 next_before_seq). null이면 더 없음.
   const [nextBeforeSeq, setNextBeforeSeq] = useState<number | null>(null);
   // story #4297(까디르 판정) — 필터 · 날짜 · 프로젝트가 바뀌어 첫 쪽을 다시 받을 때마다 세대를 올린다. 그 전에 출발한 «더 보기» 응답이
@@ -296,11 +308,13 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
     async function load() {
       setItems(null);
       setForbidden(false);
+      setLoadError(false);
       setNextBeforeSeq(null);
       setLoadingMore(false); // 옛 조건의 «더 보기»가 걸려 있어도 새 목록의 버튼은 막히지 않게(그 응답은 세대가 달라 버려진다)
       const result = await fetchPage(rangeFrom, rangeTo, null);
       if (cancelled || generation !== generationRef.current) return;
       if (result.kind === 'forbidden') setForbidden(true);
+      if (result.kind === 'error') setLoadError(true);
       const page = result.kind === 'ok' ? result.page : null;
       setItems(page?.items ?? []);
       setNextBeforeSeq(page?.nextBeforeSeq ?? null);
@@ -309,7 +323,7 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [fetchPage, rangeFrom, rangeTo]);
+  }, [fetchPage, rangeFrom, rangeTo, reloadTick]);
 
   // 더 보기 = 같은 경계 안에서 지금까지 받은 가장 오래된 활동보다 이전 쪽(before_seq). 실패하면 커서를 그대로 둬 다시 누르면 다시 시도.
   const loadMore = async () => {
@@ -343,17 +357,17 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
   // ─── Dropdown options ──────────────────────────────────────────────────────
   // [SID:4286 · 유나 규칙] 드롭다운 선택지는 타입 표식이 없어 라벨이 타입을 대신 · 같은 라벨이 둘 이상이면 행 꼬리(한 규칙).
   const actorLabelById = memberOptionLabels(members, tc);
-  const actorOptions: SelectOption[] = [
+  const actorOptions: FilterOption[] = [
     { value: ALL, label: t('filterAll') },
     ...members.map((m) => ({ value: m.id, label: actorLabelById.get(m.id) ?? '' })),
   ];
 
-  const objectTypeOptions: SelectOption[] = [
+  const objectTypeOptions: FilterOption[] = [
     { value: ALL, label: t('filterAll') },
     ...OBJECT_TYPES.map((ot) => ({ value: ot, label: ot })),
   ];
 
-  const verbOptions: SelectOption[] = useMemo(
+  const verbOptions: FilterOption[] = useMemo(
     () => [
       { value: ALL, label: t('filterAll') },
       ...KNOWN_EVENT_TYPE_VERBS.map((v) => ({ value: v, label: getEventTypeCopy(tInbox, v) })),
@@ -386,42 +400,24 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
         <div className="flex-shrink-0 border-b border-border/80 px-6 py-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <div className="flex flex-wrap items-center gap-2">
-              <OperatorDropdownSelect
-                value={actorFilter}
-                onValueChange={setActorFilter}
-                options={actorOptions}
-                placeholder={t('filterActor')}
-                className="w-36"
-              />
-              <OperatorDropdownSelect
-                value={objectTypeFilter}
-                onValueChange={setObjectTypeFilter}
-                options={objectTypeOptions}
-                placeholder={t('filterObject')}
-                className="w-36"
-              />
-              <OperatorDropdownSelect
-                value={verbFilter}
-                onValueChange={setVerbFilter}
-                options={verbOptions}
-                placeholder={t('filterVerb')}
-                className="w-44"
-              />
+              <FilterSelect value={actorFilter} onValueChange={setActorFilter} options={actorOptions} label={t('filterActor')} className="w-36" />
+              <FilterSelect value={objectTypeFilter} onValueChange={setObjectTypeFilter} options={objectTypeOptions} label={t('filterObject')} className="w-36" />
+              <FilterSelect value={verbFilter} onValueChange={setVerbFilter} options={verbOptions} label={t('filterVerb')} className="w-44" />
             </div>
             <div className="flex items-center gap-2 sm:ml-auto">
-              <input
+              <Input
                 type="date"
                 value={fromDate}
                 onChange={(e) => setFromDate(e.target.value)}
-                className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-base lg:text-sm text-foreground outline-none sm:flex-none sm:px-3"
+                className="min-w-0 flex-1 px-2 sm:w-auto sm:flex-none sm:px-3"
                 aria-label={t('fromDate')}
               />
               <span className="text-xs text-muted-foreground">~</span>
-              <input
+              <Input
                 type="date"
                 value={toDate}
                 onChange={(e) => setToDate(e.target.value)}
-                className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-base lg:text-sm text-foreground outline-none sm:flex-none sm:px-3"
+                className="min-w-0 flex-1 px-2 sm:w-auto sm:flex-none sm:px-3"
                 aria-label={t('toDate')}
               />
             </div>
@@ -435,39 +431,60 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
               <EmptyState title={t('forbiddenTitle')} description={t('forbiddenDescription')} />
             </div>
           ) : loading ? (
-            <div className="space-y-1">
+            <SkeletonGroup label={tc('loading')} className="space-y-1">
               {Array.from({ length: 3 }).map((_, i) => (
                 <RowSkeleton key={i} />
               ))}
+            </SkeletonGroup>
+          ) : loadError ? (
+            <div className="flex h-64 items-center justify-center" role="alert">
+              <EmptyState
+                title={tc('error')}
+                description={tc('errorDescription')}
+                action={(
+                  <Button onClick={() => setReloadTick((n) => n + 1)}>
+                    {tc('retry')}
+                  </Button>
+                )}
+              />
             </div>
           ) : items.length === 0 ? (
             <div className="flex h-64 items-center justify-center">
               <EmptyState
-                icon={<Inbox className="size-8 text-muted-foreground" />}
+                icon="inbox"
                 title={t('emptyTitle')}
                 description={t('emptyDesc')}
               />
             </div>
           ) : (
-            <ul className="space-y-0.5">
-              {items.map((item) => {
-                const delivered = item.recipient_ids.length;
-                return (
-                  <FeedRow
-                    key={item.activity_id}
-                    item={item}
-                    actorName={memberName(item.actor_id)}
-                    actorLabel={(item.actor_id ? actorLabels.get(item.actor_id) : undefined) ?? memberName(item.actor_id)}
-                    verbCopy={getEventTypeCopy(tInbox, item.verb)}
-                    locale={locale}
-                    deliveredLabel={delivered > 0 ? t('deliveredCount', { count: delivered }) : null}
-                  />
-                );
-              })}
+            <div className="space-y-3">
+              {/* story 4892 (UI-9 활동 §2) — the feed is grouped by DAY in the viewer's zone (오늘 · 어제 · the date), like the audit log. Each day is its own list. */}
+              {groupByDay(items, viewerTz, new Date(), (it) => it.occurred_at).map((group) => (
+                <section key={group.key} aria-label={dayLabel(group)} data-testid="feed-day-group">
+                  <SectionHeader title={dayLabel(group)} level={2} className="mb-1 rounded-ds-control" />
+                  <ul className="space-y-0.5">
+                    {group.items.map((item) => {
+                      const delivered = item.recipient_ids.length;
+                      return (
+                        <FeedRow
+                          key={item.activity_id}
+                          item={item}
+                          actorName={memberName(item.actor_id)}
+                          actorLabel={(item.actor_id ? actorLabels.get(item.actor_id) : undefined) ?? memberName(item.actor_id)}
+                          verbCopy={getEventTypeCopy(tInbox, item.verb)}
+                          locale={locale}
+                          deliveredLabel={delivered > 0 ? t('deliveredCount', { count: delivered }) : null}
+                        />
+                      );
+                    })}
+                  </ul>
+                </section>
+              ))}
+              <ul className="space-y-0.5">
               {nextBeforeSeq !== null ? (
                 <li className="pt-3 text-center">
-                  <Button variant="glass" size="sm" onClick={() => void loadMore()} disabled={loadingMore}>
-                    {loadingMore ? tc('loading') : t('loadMore')}
+                  <Button onClick={() => void loadMore()} loading={loadingMore}>
+                    {t('loadMore')}
                   </Button>
                 </li>
               ) : (
@@ -477,7 +494,8 @@ export function TeamActivityView({ projectId }: { projectId: string }) {
                   {rangeFrom ? t('endOfRange') : t('endOfAll')}
                 </li>
               )}
-            </ul>
+              </ul>
+            </div>
           )}
         </div>
       </div>

@@ -1,37 +1,47 @@
 'use client';
 
-import { firstGraphemes } from '@/lib/first-graphemes';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useSseMultiplexerContext } from '@/components/realtime-provider';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { MessageSquare, Users } from 'lucide-react';
-import { UnnamedMemberIcon } from '@/components/shared/unnamed-member-icon';
 import { useLocale, useTranslations } from 'next-intl';
 import { EmptyState } from '@/components/ui/empty-state';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { IconButton } from '@/components/ds/icon-button';
+import { Button as DsButton } from '@/components/ds/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select } from '@/components/ui/select';
 import { NewConversationModal } from './new-conversation-modal';
+import { ChatListEmptyState } from './no-peers-next-steps';
 import { ConnectionLostBanner } from './connection-lost-banner';
 import { isOwnMessage, useChatSse, type SseConversationReadPayload } from '@/hooks/use-chat-sse';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { queuePendingToast } from './cross-project-toast-provider';
-import { Avatar } from '@/components/shared/avatar';
+import { Avatar } from '@/components/ds/avatar';
+import { Icon } from '@/components/ds/icon';
 import { Button } from '@/components/ui/button';
 import { CountBadge } from '@/components/ui/count-badge';
+import { AgentIdentity } from '@/components/ui/agent-identity';
 import { NowStrip } from './now-strip';
 import { PulseCard } from './pulse-card';
 import { useChatRailOptional } from '@/app/(authenticated)/chats/chat-rail-context';
-import { isNoProjectAtAll } from '@/app/(authenticated)/chats/no-project';
+import { isNoProjectAtAll, projectsUnknownBecauseFailed } from '@/app/(authenticated)/chats/no-project';
 
 import { fetchWithAuth } from '@/lib/db/client';
+import { handleListKeys } from '@/lib/list-keys';
+import { useToast } from '@/components/ui/toast';
+import { RoomRowContextMenu } from './room-row-context-menu';
+import { ROOM_MUTED_EVENT } from './room-muted-event';
+import { DeliveryContractModal } from './delivery-contract-modal';
 import { participantDisplayLabel } from '@/lib/member-display';
-import { composeEventPreviewLine } from './event-block-card';
-import { toPlainPreview } from './entity-ref';
+import { composeEventPreviewLine, composeEventPreviewFallback } from './event-block-card';
+import { toListPreview } from './list-preview';
 import { useOrgDomainLabels, type OrgDomainLabels } from '@/hooks/use-org-domain-labels';
+import { useEventDefinitionNames } from '@/hooks/use-event-definition-names';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { DeviceChip } from '@/components/desktop/device-chip';
+import { blankKnownDeletedPreviews, isDeletedLatest, isoToMicros, knownDeletedAt, onChatMessageDeleted } from '@/lib/chat-message-deleted';
 
 interface Participant {
   member_id: string;
@@ -56,6 +66,9 @@ interface Participant {
 interface ConversationItem {
   id: string;
   type: 'dm' | 'group';
+  /** story 4946 — the caller's own mute flag and the room's free-response flag (the list endpoint already sends both): the room row's right-click menu reads and flips them */
+  muted?: boolean;
+  free_response?: boolean;
   title: string | null;
   // story #3888(§⑤·Chat) — event(event_key+payload)는 BE list_conversations가 새로
   // 실어주는 additive 필드(msg_metadata['event'], _event_payload()와 동형 — conversations.py
@@ -68,6 +81,8 @@ interface ConversationItem {
   // 이 타입 선언에 없어 여태 FE가 못 읽었을 뿐 — preset.work.assigned 미리보기(담당자
   // 이름)가 처음으로 이 값을 소비한다.
   latest_message: {
+    /** story 4903 — which message it is (the server sends it since 5653): a delete names its message by id; an older server sends none and the moment decides */
+    id?: string;
     content: string;
     created_at: string;
     // story #4442 — the list row reads «첨부 파일» when the latest message has no text but files (the server already sends it)
@@ -92,6 +107,10 @@ interface ChatListViewProps {
   currentTeamMemberId: string;
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
+  /** story 4887 (UI-4 screen PR) — whether the person can start a room here: the «+» in the list head (it used to be the layout's «새 대화» button). */
+  canStartRoom?: boolean;
+  /** the list's heading level: 1 on the list route (it is the page's h1), 2 beside an open room (the room head owns the h1) */
+  headingLevel?: 1 | 2;
 }
 
 // story #2168 PR-② — 현재 프로젝트 밖에서 caller가 참여 중인 최근 대화(BE
@@ -143,13 +162,25 @@ function hasAgentParticipant(participants: Participant[]): boolean {
   return participants.some((p) => p.type === 'agent');
 }
 
+/** story 4887 (UI-4 P2-d) — «we couldn't load your projects» + [Try again] (reload — the same way the Recruit tab does it, story 4891); a failure is not «no project» */
+function ProjectsLoadFailed({ t }: { t: (key: string) => string }) {
+  return (
+    <div className="flex flex-col items-center gap-3" data-testid="chats-projects-failed">
+      <p className="text-sm text-muted-foreground">{t('projectsLoadFailed')}</p>
+      <Button type="button" size="sm" variant="outline" onClick={() => window.location.reload()} data-testid="chats-retry-projects">{t('projectsRetry')}</Button>
+    </div>
+  );
+}
+
 function ConversationRow({
   conv,
   currentMemberId,
   isAgentConv,
   domainLabels,
+  eventDefinitionName,
   projectLabel,
   onClick,
+  onContextMenu,
 }: {
   conv: ConversationItem;
   currentMemberId: string;
@@ -159,7 +190,11 @@ function ConversationRow({
   // story #3888 CHANGES①(PO PR 코멘트, 2026-09-14 18:53Z) — 부모(ChatListView)가 1회만
   // 호출한 useOrgDomainLabels 결과를 prop으로 받는다(행마다 재호출 금지 — 요청 중복 방지).
   domainLabels: OrgDomainLabels;
+  /** story 4921 — the event definition's human name by key (read once by the parent, like the domain labels) — for the fallback line of an event with no sentence of its own */
+  eventDefinitionName: (eventKey: string) => string | undefined;
   onClick: () => void;
+  /** story 4946 — a right-click on the row (the desktop app): the list opens the room's menu at the pointer */
+  onContextMenu?: (e: React.MouseEvent, conv: ConversationItem) => void;
 }) {
   const t = useTranslations('chats');
   const tc = useTranslations('common');
@@ -182,16 +217,26 @@ function ConversationRow({
   // 시점에 구운 slug) 대신 「{헤더} · {요약}」로 렌더 시점 조립(composeEventPreviewLine,
   // event-block-card.tsx — 같은 재료 재사용). 조립 실패(미지원 event_key·payload 결손)는
   // null이라 기존 content 폴백으로 조용히 떨어진다.
+  const previewHelpers = { tBoard, tCage, tDashboard, tEventCard, tEntity: t, tOutcomeLoop, domainLabels, eventDefinitionName };
+  // story 4921 — an event with no sentence of its own (workflow stages · marketing recipes · recipe publish stopped · an org's custom events …) used to fall to its `content`: the MACHINE text an agent reads
+  // («[이벤트] preset.x», «- key: value» lines). A person sees the definition's name + their own words, or the one word «이벤트» — never a slug or an id. A content somebody WROTE is still shown as it is.
   const eventPreview = composeEventPreviewLine(
     conv.latest_message?.event?.event_key,
     conv.latest_message?.event?.payload,
-    { tBoard, tCage, tDashboard, tEventCard, tEntity: t, tOutcomeLoop, domainLabels },
+    previewHelpers,
     conv.latest_message?.event?.refs,
+  ) ?? composeEventPreviewFallback(
+    conv.latest_message?.content,
+    conv.latest_message?.event?.event_key,
+    conv.latest_message?.event?.payload,
+    previewHelpers,
   );
   // story #3949 — 이벤트 조립이 없으면(위 null 폴백) 남는 건 «보통» 메시지 원문 —
-  // 마크다운 링크/entity 참조 토큰이 그대로 샐 수 있어 평문화(toPlainPreview)한다.
+  // 마크다운 링크/entity 참조 토큰이 그대로 샐 수 있어 평문화(toPlainPreview → 4887: list-preview.ts의 toListPreview)한다.
+  // story 4887 (UI-4 P1) — an ordinary message goes through toListPreview (no markdown markers on a one-line summary). An event with an unsupported key or a short payload still falls to
+  // its content on purpose (the story #3888 / #3893 contract, locked by its tests) — that is not changed here.
   const preview = eventPreview
-    ?? (conv.latest_message?.content ? toPlainPreview(conv.latest_message.content) : null)
+    ?? (conv.latest_message?.content ? toListPreview(conv.latest_message.content) : null)
     ?? (conv.latest_message?.has_attachments ? t('latestAttachmentOnly') : null) // story #4442 (Yuna)
     ?? t('noMessages');
   const time = conv.latest_message?.created_at ?? conv.updated_at;
@@ -210,67 +255,53 @@ function ConversationRow({
   // — isAgentConv는 이름/actorType 폴백에서만 쓴다(agent탭 DM의 상대가 실제 에이전트임을
   // 보강하는 용도, group 판정에는 관여하지 않는다).
   const oneOnOneParticipant = conv.type === 'dm' ? others[0] : null;
+  // story 4887 (UI-4 P2-b) — who is in a group, in words: the first two names and «외 N명» (the same for a people-only group and one with agents — the agents' count leads the line, the names follow)
+  const groupNames = `${others.slice(0, 2).map((p) => participantDisplayLabel(p, tc)).join(', ')}${others.length > 2 ? ` ${t('participantsOthers', { count: others.length - 2 })}` : ''}`;
+
+  // story 4887 (UI-4 P2-e) — who a DM is with: the title already says it (a DM with no name of its own is titled with the other person's display name) and so does the avatar. The line repeats it only when the title is something else
+  // (a DM the people named · an other whose name did not resolve): then the other's NAME is kept (never «나 ↔» — the viewer is always the other side), so «who is this room with» never disappears from the row.
+  const dmOtherLabel = conv.type === 'dm' ? participantDisplayLabel(others[0] ?? { name: null, resolved: false }, tc) : '';
+  const dmNameRepeatsTitle = dmOtherLabel !== '' && dmOtherLabel === displayName;
+  const showDmOtherName = conv.type === 'dm' && !dmNameRepeatsTitle;
 
   const participantLayer = conv.participants && conv.participants.length > 0 ? (
     conv.type === 'dm' ? (
-      <div className="mt-0.5 flex items-center gap-1 text-editorial-meta text-muted-foreground">
-        <span className="rounded bg-muted px-1 py-0.5 font-medium text-muted-foreground">{t('you')}</span>
-        <span>↔</span>
-        <span className="max-w-[80px] truncate rounded bg-muted px-1 py-0.5 font-medium text-muted-foreground">
-          {/* story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, formatParticipantNames와
-              동일 사람언어 폴백으로 통일('...'는 비인간어). story #3758(9번째) — resolved 비트. */}
-          {participantDisplayLabel(others[0] ?? { name: null, resolved: false }, tc)}
-        </span>
-        {/* story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
-        {isAgentInConv && (
-          // story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙).
-          <span className="flex-shrink-0 rounded border border-info/30 bg-info/12 px-1.5 py-0.5 text-micro font-medium text-foreground">
-            {t('agent')}
-          </span>
-        )}
+      !showDmOtherName && !isAgentInConv ? null : // a person's DM whose title already says who it is with: no line at all
+      // story 4887 (UI-4 P2-c) — the DM line is ONE line that never runs past the column: the other's name is one plain text segment that gives way first, the «에이전트» chip keeps its size,
+      // and the computer chip may shrink to an ellipsis (it carried `shrink-0` and was cut mid-word at 320 px — AC1 10). Nothing is dropped. (P2-e: the segment is there only when the title does not already say it.)
+      <div className="mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden text-editorial-meta text-muted-foreground" data-testid="room-dm-line">
+        {showDmOtherName ? (
+          // story #3203(카디르 QA·PO 지시) — 같은 participants 계약 소비처, formatParticipantNames와 동일 사람언어 폴백으로 통일('...'는 비인간어). story #3758(9번째) — resolved 비트.
+          <span className="min-w-0 truncate font-medium" data-testid="room-dm-other">{dmOtherLabel}</span>
+        ) : null}
+        {/* story 4930 follow-up (PO): the «agent» mark is ONE shared part (ui/agent-identity.tsx — hairline + blue signal dot + muted word, the same one the bubble · inbox · participant window use), not a hand copy of a tinted chip here. */}
+        {isAgentInConv && <AgentIdentity className="shrink-0" />}
         {/* story 4675 (F2): a DM with an agent names its computer after the «에이전트» chip; a group row says nothing (several · Q-b) */}
-        {isAgentInConv ? <DeviceChip name={others[0]?.device_name} className="text-micro" /> : null}
+        {isAgentInConv ? <DeviceChip name={others[0]?.device_name} className="min-w-0 shrink text-micro" /> : null}
       </div>
     ) : (
       <div className="mt-0.5 flex items-center gap-1.5 text-editorial-meta text-muted-foreground">
-        <div className="flex -space-x-1.5">
-          {others.slice(0, 3).map((p) => (
-            <div
-              key={p.member_id}
-              className="relative flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full bg-muted text-micro font-medium text-muted-foreground ring-1 ring-background"
-            >
-              {/* [SID:4286 · 유나 결정 2] 이름이 없으면 날것 «?» 대신 아이콘 — 4646 공용 표식(UnnamedMemberIcon · 에이전트 Bot · 사람 User). */}
-              {p.name ? firstGraphemes(p.name, 1) : <UnnamedMemberIcon type={p.type} className="h-3 w-3" aria-hidden />}
-              {/* story #2023 ⓑ: 죽은 클래스(bg-brand-strong 미매핑)이면서 L5 위반 — info로 교체해 둘 다 닫음 */}
-              {p.type === 'agent' && (
-                <span className="absolute -bottom-px -right-px h-[6px] w-[6px] rounded-full bg-info ring-1 ring-background" />
-              )}
-            </div>
-          ))}
-          {others.length > 3 && (
-            <div className="flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full bg-muted text-micro font-medium text-muted-foreground ring-1 ring-background">
-              +{others.length - 3}
-            </div>
-          )}
-        </div>
+        {/* story 4887 (UI-4 P2-b) — the group's participants are one line of text (B3 row): the 18 px overlapping initials were unreadable beyond two people (AC1 10). The line says how many (the agents' count when there are agents, else the people's)
+            AND who: the first two names + «외 N명» — for a group with agents too (the old stack showed three initials + an agent dot; a count alone would name nobody) */}
         <span className="truncate">
-          {isAgentInConv && agentCount > 0
-            ? t('agentCount', { count: agentCount })
-            : `${t('personCount', { count: others.length + 1 })} · ${others.slice(0, 2).map((p) => participantDisplayLabel(p, tc)).join(', ')}${others.length > 2 ? ` ${t('participantsOthers', { count: others.length - 2 })}` : ''}`
-          }
+          {/* a group with nobody but the viewer (the server allows it) has no names: the count stands alone — no dangling « · » */}
+          {`${isAgentInConv && agentCount > 0 ? t('agentCount', { count: agentCount }) : t('personCount', { count: others.length + 1 })}${groupNames ? ` · ${groupNames}` : ''}`}
         </span>
       </div>
     )
   ) : null;
 
   return (
+    // story 4946 — the row is a `data-row-key` element (the keys of `handleListKeys` · ↑ ↓ walk the rows) and answers a right-click with the room's menu; the layout is the button's, unchanged
+    <div data-row-key={conv.id} onContextMenu={onContextMenu ? (e) => onContextMenu(e, conv) : undefined}>
     <Button
       type="button"
       variant="ghost"
+      data-row-focus
       onClick={onClick}
       // story 4853 (phone · point 1) — while the round support button floats over this list (it carries `data-support-launcher` on <html>, support-widget-launcher.tsx) the row keeps its
       // right side clear of it at phone width, so the time and the unread badge are not hidden behind it. A class literal on purpose (Tailwind reads it as written): the attribute is the launcher's SUPPORT_LAUNCHER_ATTR.
-      className="h-auto w-full items-center justify-start gap-3 rounded-lg px-3 py-2.5 text-left font-normal transition hover:bg-muted/60 active:bg-muted max-md:[:root[data-support-launcher]_&]:pr-16"
+      className="h-auto w-full items-center justify-start gap-3 rounded-lg px-3 py-2 text-left font-normal transition hover:bg-muted/60 active:bg-muted max-md:[:root[data-support-launcher]_&]:pr-16"
     >
       {/* story #2968 — 1:1(DM·agent 탭)은 avatar.tsx 정본으로 실사진(3단 폴백은 그 컴포넌트
           책임). group은 특정 1인 사진이 의미가 없어(다인원) 기존 아이콘 자리를 유지한다. */}
@@ -290,8 +321,8 @@ function ConversationRow({
           runtimeType={(isAgentConv || oneOnOneParticipant.type === 'agent') ? (oneOnOneParticipant.runtime_type ?? null) : null}
         />
       ) : (
-        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-info/15 text-foreground">
-          {conv.type === 'dm' ? <MessageSquare className="h-4 w-4" /> : <Users className="h-4 w-4" />}
+        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-ds-surface-high text-ds-ink-2" data-testid="room-row-glyph">
+          <Icon name={conv.type === 'dm' ? 'chat_bubble' : 'groups'} size={18} />
         </div>
       )}
 
@@ -302,20 +333,22 @@ function ConversationRow({
               재분류(구조·크기 불변). preview는 이미 text-xs+muted+기본무게(400)라 Body-small
               규칙에 이미 부합 — 무편집. */}
           <span className="truncate text-sm font-semibold text-foreground">{displayName}</span>
-          <span className="flex-shrink-0 text-micro text-muted-foreground">{formatTime(time, locale, displayTimezone)}</span>
+          {/* story 4887 (UI-4 P2-b) — the time and the unread count share the title line (B3 row); the preview below keeps the whole width */}
+          <span className="flex flex-shrink-0 items-center gap-1.5">
+            <span className="text-micro text-muted-foreground">{formatTime(time, locale, displayTimezone)}</span>
+            {unread > 0 && (
+              <span className="rounded-full bg-primary px-1.5 py-0.5 text-micro font-semibold text-primary-foreground" data-testid="room-unread">
+                {unread > 99 ? '99+' : unread}
+              </span>
+            )}
+          </span>
         </div>
         {projectLabel ? <p className="truncate text-micro text-muted-foreground" data-testid="room-project">{projectLabel}</p> : null}
         {participantLayer}
-        <div className="flex items-center justify-between gap-1">
-          <p className="truncate text-xs text-muted-foreground">{preview}</p>
-          {unread > 0 && (
-            <span className="flex-shrink-0 rounded-full bg-primary px-1.5 py-0.5 text-micro font-semibold text-primary-foreground">
-              {unread > 99 ? '99+' : unread}
-            </span>
-          )}
-        </div>
+        <p className="truncate text-xs text-muted-foreground">{preview}</p>
       </div>
     </Button>
+    </div>
   );
 }
 
@@ -374,16 +407,27 @@ export function applyConversationMessageUpdate(
   const { conversation_id, content, created_at } = payload;
   const hasAttachments = Array.isArray(payload.attachments) && payload.attachments.length > 0;
   if (!conversation_id) return prev;
+  // story 4903 AC3 — a (re-delivered) event of a message already known to be deleted changes nothing: no preview, no unread count, no «updated» moment (the ordering guard below accepts an EQUAL moment,
+  // which is what such a replay of the latest message carries)
+  const eventMessageId = typeof payload.id === 'string' ? payload.id : typeof payload.message_id === 'string' ? payload.message_id : null;
+  if (eventMessageId && knownDeletedAt(conversation_id, eventMessageId) !== undefined) return prev;
   const idx = prev.findIndex((c) => c.id === conversation_id);
   if (idx === -1) {
     onRefetch();
     return prev;
   }
+  // story 4903 AC3 — an OLDER message never takes the place of a newer latest message: a re-delivered event (a reconnect's backfill gives the last few events, in any order) used to put
+  // an earlier message into the row — after a delete it showed the one before the deleted message. Compared to the microsecond (the server's clock); an unreadable time keeps the old behaviour.
+  const incomingAt = isoToMicros(created_at);
+  const currentAt = isoToMicros(prev[idx]!.latest_message?.created_at);
+  if (incomingAt !== null && currentAt !== null && incomingAt < currentAt) return prev;
   const updated = [...prev];
   const item = { ...updated[idx]! };
   // story #4442 — an attachment-only message (no text) updates the row too: «첨부 파일» and its time
   if (created_at && (content || hasAttachments)) {
-    item.latest_message = { content: content ?? '', created_at, ...(hasAttachments ? { has_attachments: true } : {}) };
+    // story 4921 — an event message keeps its `event` (key · payload · refs) on a live update too: the row's sentence (a person's words, a name) is built from it — without it the row would only say «이벤트» until the next refetch
+    const liveEvent = payload.event && typeof payload.event === 'object' ? { event: payload.event as NonNullable<ConversationItem['latest_message']>['event'] } : {};
+    item.latest_message = { ...(eventMessageId ? { id: eventMessageId } : {}), content: content ?? '', created_at, ...(hasAttachments ? { has_attachments: true } : {}), ...liveEvent };
     item.updated_at = created_at;
     // story #4440 — my own message (sent from another tab or device) moves the row up but is never unread
     if (!isOwnMessage(payload, meId)) item.unread_count = (item.unread_count ?? 0) + 1;
@@ -396,7 +440,7 @@ const PAGE_LIMIT = 30;
 /** story 4847 — the tab's own «걸러 보기» choice (a tab-scoped convenience: it never reaches the server and never changes the current project) */
 export const CHAT_PROJECT_FILTER_KEY = 'sprintable.chats.projectFilter';
 
-export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChange }: ChatListViewProps) {
+export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChange, canStartRoom = false, headingLevel = 1 }: ChatListViewProps) {
   const flatHref = useFlatHref(); // story #4231 — flat 링크 `?p=`
   const t = useTranslations('chats');
   // story #3783 — "불러오는 중…", common ns의 기존 loading 키 재사용.
@@ -414,6 +458,8 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   const dashboardCtx = useDashboardContext();
   const { orgId, orgMemberships, projectMemberships } = dashboardCtx;
   const noProjectAtAll = isNoProjectAtAll(dashboardCtx);
+  // story 4887 (UI-4 P2-d) — the request for the person's projects FAILED (story 4891 `projectMembershipsFailed`): that is not «no project» — the person may have projects. Say so, with a way to try again.
+  const projectsFailed = projectsUnknownBecauseFailed(dashboardCtx);
   // story 4847 — the admin's «agents» tab reads the CURRENT project's agent-only rooms (`include_agent_conversations`), so it needs a current project.
   // The server gives that view to a person only as an organization owner/admin — the ORGANIZATION role (`org_members.role`, the list `/api/v2/organizations` carries into
   // `orgMemberships`), not the shell's «role» (/me: the larger of the project role and the organization role — a project admin would see a tab the server then refuses with 403).
@@ -426,8 +472,47 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // 개든 요청은 항상 1건.
   const locale = useLocale();
   const domainLabels = useOrgDomainLabels(orgId, locale);
+  const eventDefinitionName = useEventDefinitionNames(orgId); // story 4921 — one read for every row (like the domain labels)
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [allConversations, setAllConversations] = useState<ConversationItem[]>([]);
+  // story 4946 (the desktop app) — ↑ ↓ walk the room rows (focus only: Enter · Space open one, as a button does — a press of an arrow never navigates), and a right-click on a row opens the room's menu (the room's «⋯» items, no more)
+  // the keys act only from a room row: «load more» (inside the same container, no row around it) keeps its own behaviour
+  const moveBetweenRooms = useCallback((e: React.KeyboardEvent<HTMLElement>) => {
+    if (!(e.target as HTMLElement).closest?.('[data-row-key]')) return;
+    handleListKeys(e, () => undefined);
+  }, []);
+  const { addToast } = useToast();
+  // the menu keeps the room's ID (not a copy of the room): it reads the room as the list holds it NOW, so a refetch that changes the mute flag never leaves a stale label, and a room that left the list closes the menu
+  const [rowMenu, setRowMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [contractId, setContractId] = useState<string | null>(null);
+  const rowFocusRef = useRef<HTMLElement | null>(null); // the row's button: where the focus goes back when the menu or the settings window closes
+  const openRowMenu = useCallback((e: React.MouseEvent, conv: ConversationItem) => {
+    e.preventDefault();
+    rowFocusRef.current = (e.currentTarget as HTMLElement).querySelector<HTMLElement>('[data-row-focus]');
+    setRowMenu({ id: conv.id, x: e.clientX, y: e.clientY });
+  }, []);
+  const roomById = (id: string | null) => (id ? [...conversations, ...allConversations].find((c) => c.id === id) ?? null : null);
+  const menuRoom = roomById(rowMenu?.id ?? null);
+  const contractRoom = roomById(contractId);
+  const openingSettingsRef = useRef(false);
+  const patchRoom = useCallback((id: string, patch: Partial<ConversationItem>) => {
+    const apply = (list: ConversationItem[]) => list.map((c) => (c.id === id ? { ...c, ...patch } : c));
+    setConversations(apply);
+    setAllConversations(apply);
+  }, []);
+  /** the room's mute flag, flipped here as the room's own menu does: optimistic, then PATCH /mute, put back when it fails */
+  const toggleRoomMute = useCallback(async (conv: ConversationItem) => {
+    const next = !(conv.muted ?? false);
+    patchRoom(conv.id, { muted: next });
+    try {
+      const res = await fetchWithAuth(`/api/conversations/${conv.id}/mute`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ muted: next }) });
+      if (!res.ok) { addToast({ title: t('muteToggleFailed'), type: 'error' }); patchRoom(conv.id, { muted: !next }); }
+      else window.dispatchEvent(new CustomEvent(ROOM_MUTED_EVENT, { detail: { id: conv.id, muted: next } })); // the open room (beside this list) keeps its own copy of the flag
+    } catch {
+      addToast({ title: t('muteToggleFailed'), type: 'error' });
+      patchRoom(conv.id, { muted: !next });
+    }
+  }, [patchRoom, addToast, t]);
   // agent 탭(allConversations·include_agent_conversations) 첫 활성화 1회만 fetch 하기 위한 가드.
   const agentLoadedRef = useRef(false);
   const [loading, setLoading] = useState(true);
@@ -546,34 +631,38 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     }
   }, [scopeProjectId, projectFilter, projectOnly, setRoomsAreOrgWide]);
 
+  const allSeqRef = useRef(0);
   const fetchAllConversations = useCallback(async (nextOffset = 0, append = false) => {
-    // 카디르 QA(#4142) — 위 fetchConversations와 동형 stale-drop 가드(성공/실패 두 경로
-    // 대칭).
-    if (!append) { setAgentLoadError(false); setAgentForbidden(false); }
+    // 카디르 QA(#4142) — 위 fetchConversations와 동형 stale-drop 가드(성공/실패 두 경로 대칭).
+    // story 4903 (PO 결정 on 5664) — 이 PR이 «최신 글 지움 → 다시 불러오기»로 이 목록도 다시 묻는 길을 새로 만들어 겹친 물음의 응답 순서까지 이 PR 몫이다: 성공 · 실패(!res.ok) · catch · finally 네 길이
+    // 상태를 쓰는 자리는 아래 `write` 한 곳뿐이고, 거기서 «몇 번째 물음인가»(밀려난 물음이면 안 씀)와 «어느 프로젝트인가»(떠난 프로젝트면 안 씀)를 함께 본다.
+    const seq = append ? allSeqRef.current : ++allSeqRef.current;
+    const write = (apply: () => void) => { if (seq === allSeqRef.current && projectId === projectIdRef.current) apply(); };
+    write(() => { if (!append) { setAgentLoadError(false); setAgentForbidden(false); } });
     if (!projectId) return; // story 4847 — the agents tab only exists with a current project
     try {
       const res = await fetchWithAuth(
         `/api/conversations?project_id=${projectId}&include_agent_conversations=true&limit=${PAGE_LIMIT}&offset=${nextOffset}`
       );
       if (!res.ok) {
-        if (projectId === projectIdRef.current) {
+        write(() => {
           if (res.status === 403) setAgentForbidden(true); // not a failure to retry: this view is not this person's
           else if (!append) setAgentLoadError(true);
-        }
+        });
         return;
       }
       const json = await res.json() as { data: ConversationItem[]; total: number };
-      if (projectId !== projectIdRef.current) return; // 전환됨 — stale 응답 drop(B 화면 안 덮음)
-      const items = json.data ?? [];
-      setAllConversations((prev) => append ? [...prev, ...items] : items);
-      setAgentOffset(nextOffset + items.length);
-      setAgentTotal(json.total ?? 0);
+      write(() => {
+        const items = json.data ?? [];
+        setAllConversations((prev) => append ? [...prev, ...items] : items);
+        setAgentOffset(nextOffset + items.length);
+        setAgentTotal(json.total ?? 0);
+      });
     } catch {
-      if (!append && projectId === projectIdRef.current) setAgentLoadError(true);
+      write(() => { if (!append) setAgentLoadError(true); });
     } finally {
-      // story #3788(B-③ 후속) — agentLoading을 loading(my 탭)과 동형으로 finally에서 해소.
-      // 페드루 그라운딩(2026-09-10 12:34Z) — 같은 stale-drop 가드를 loading 축에도.
-      if (projectId === projectIdRef.current) setAgentLoading(false);
+      // story #3788(B-③ 후속) — agentLoading을 loading(my 탭)과 동형으로 finally에서 해소(같은 `write`를 거침: 밀려난 물음이 늦게 끝나도 새 물음의 «불러오는 중»을 못 끈다).
+      write(() => setAgentLoading(false));
     }
   }, [projectId]);
 
@@ -672,7 +761,9 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     if (pool.length > 0) {
       const mostRecent = pool.reduce((a, b) => (a.updated_at > b.updated_at ? a : b));
       // 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트.
-      router.replace(flatHref(`/chats/${mostRecent.id}?compose=${encodeURIComponent(composeParam)}`));
+      // story 4906 — the line was moved here without being sent (the person has no single agent DM to send to, «no receiver invented» · 3831): `composeNote=<id>` makes the room say so above its input.
+      // The id is THIS hand-over's own (a time token + a random tail, so two hand-overs never share one): the room remembers «that note is done» per id, so a reload of the same URL stays quiet while a later hand-over of the same text into the same room is new.
+      router.replace(flatHref(`/chats/${mostRecent.id}?compose=${encodeURIComponent(composeParam)}&composeNote=${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`));
     } else {
       setShowModal(true);
     }
@@ -700,6 +791,27 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     if (wasLoaded) { setAgentLoading(true); loadAgentConversationsOnce(); }
   }, [projectId, loadAgentConversationsOnce]);
 
+  // story 4903 — the «window» in which the list is being asked for again because of a delete, as TWO generation numbers (not a flag): a delete — or, while the window is open, a new message — raises the DIRTY
+  // generation; a refetch holds the dirty generation it started with and, however it ends (an answer · a failure · dropped for a newer ask), raises the APPLIED generation to max(applied, held). The window is
+  // open while dirty > applied: an ask pushed aside by a newer one ends with a LOWER generation and closes nothing; whichever path ends the newest ask closes it, by the same one line.
+  const dirtyGenRef = useRef(0);
+  const appliedGenRef = useRef(0);
+  const dirtyRoomsRef = useRef<Set<string>>(new Set()); // the rooms a delete touched while the window was open (a second delete of the same room is then a «hit» although the row no longer holds that message)
+  const windowOpen = () => dirtyGenRef.current > appliedGenRef.current;
+  const askListsAfterDirty = useCallback(() => {
+    const held = dirtyGenRef.current;
+    const asks: Array<Promise<unknown>> = [fetchConversations(0, false)];
+    if (agentLoadedRef.current) asks.push(fetchAllConversations(0, false));
+    void Promise.allSettled(asks).then(() => {
+      appliedGenRef.current = Math.max(appliedGenRef.current, held);
+      if (!windowOpen()) dirtyRoomsRef.current.clear();
+    });
+  }, [fetchConversations, fetchAllConversations]);
+  const markDirtyAndAsk = useCallback((room?: string) => {
+    dirtyGenRef.current += 1;
+    if (room) dirtyRoomsRef.current.add(room);
+    askListsAfterDirty();
+  }, [askListsAfterDirty]);
   const handleConversationMessage = useCallback((payload: { conversation_id?: string; content?: string; created_at?: string } & Record<string, unknown>) => {
     setConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchConversations(0, false), currentTeamMemberId));
     // agent 탭을 아직 안 연 상태에선 allConversations 를 reactive 로드하지 않는다(lazy 유지) —
@@ -707,10 +819,40 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     if (agentLoadedRef.current) {
       setAllConversations((prev) => applyConversationMessageUpdate(prev, payload, () => void fetchAllConversations(0, false), currentTeamMemberId));
     }
-  }, [fetchConversations, fetchAllConversations, currentTeamMemberId]);
+    // story 4903 (codex on 5664) — a message that arrives while the window is open would be overwritten by the (older) answer on its way: ask once more, the newest ask wins
+    if (windowOpen()) markDirtyAndAsk();
+  }, [fetchConversations, fetchAllConversations, currentTeamMemberId, markDirtyAndAsk]);
 
   // story #1977(트랙B): 다른 탭/기기에서 mark-read → conversation.read SSE(#1976, 본인 타
   // 커넥션 전파)로 이 목록이 열려있는 동안에도 unread 배지가 즉시 서버 truth로 자가정정.
+  // story 4887 — a message deleted on THIS screen (the room or its thread) that is a room's latest message: blank its preview now, as the server's refetch would (content «» · no attachment flag · no event card) — it kept showing the deleted text until the next refetch
+  // story 4903 — …and then the list asks the server again: the preview is the newest message that is STILL THERE (the server skips the deleted one and sends it with its id), «메시지 없음» only when none is left.
+  // Matched by the message id when both sides have one (else by the moment); a delete of a message that is not a room's latest changes nothing and asks nothing.
+  const listsRef = useRef<{ projectRooms: ConversationItem[]; allRooms: ConversationItem[] }>({ projectRooms: [], allRooms: [] });
+  useLayoutEffect(() => { listsRef.current = { projectRooms: conversations, allRooms: allConversations }; }, [conversations, allConversations]);
+  useEffect(() => onChatMessageDeleted((deleted) => {
+    const { conversationId } = deleted;
+    const { projectRooms, allRooms } = listsRef.current;
+    const isLatest = (c: ConversationItem) => c.id === conversationId && Boolean(c.latest_message) && isDeletedLatest(c.latest_message!, deleted);
+    const hit = [...projectRooms, ...allRooms].some(isLatest) || (windowOpen() && dirtyRoomsRef.current.has(conversationId));
+    if (!hit) return;
+    const blank = (list: ConversationItem[]) => list.map((c) => (
+      isLatest(c)
+        ? { ...c, latest_message: { ...(c.latest_message!.id ? { id: c.latest_message!.id } : {}), content: '', created_at: c.latest_message!.created_at, event: null } }
+        : c
+    ));
+    setConversations(blank);
+    setAllConversations(blank);
+    markDirtyAndAsk(conversationId);
+  }), [markDirtyAndAsk]);
+
+  // story 4903 AC3 — a list response that was already in flight when the delete frame arrived must not bring the preview back: what is known to be deleted stays blank, re-applied after every change
+  // of the lists (before paint; the same list comes back when nothing changes, so it never loops)
+  useLayoutEffect(() => {
+    setConversations(blankKnownDeletedPreviews);
+    setAllConversations(blankKnownDeletedPreviews);
+  }, [conversations, allConversations]);
+
   const handleConversationRead = useCallback((payload: SseConversationReadPayload) => {
     const applyRead = (list: ConversationItem[]) =>
       list.map((c) => (c.id === payload.conversation_id ? { ...c, unread_count: payload.unread_count } : c));
@@ -804,12 +946,14 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
   // story 4847 (AC1) — what the row says about its project: the name the list gives, else the person's own project list, «프로젝트 없음» for a room that has none, nothing in the project-only list
   const projectLabelOf = (c: ConversationItem): string | undefined => {
     if (c.project_id === undefined) return undefined;
-    if (c.project_id === null) return t('roomNoProject');
+    if (c.project_id === null) return t('roomNoProject'); // a room without a project is the odd one: it always says so
+    // story 4887 (UI-4 P2-a) — a person with ONE project has nothing to tell apart: every row of that project would carry the same name (9 of 9 on the dev capture) and a fourth line of the row for nothing.
+    // The line is spared only when it is KNOWN that the person has exactly one project and the room is that project's: an empty or not-yet-loaded membership list (unknown — `[]`), two or more projects, or a room of
+    // ANOTHER project (a person who lost access to a project can still read its rooms) keep the name — it is information there.
+    if (!dashboardCtx.projectMembershipsFailed && projectMemberships.length === 1 && projectMemberships[0]!.projectId === c.project_id) return undefined; // (a failed read can leave ONE project synthesized from /me — the person may have more: then the name stays)
     return c.project_name ?? projectMemberships.find((m) => m.projectId === c.project_id)?.projectName ?? undefined;
   };
 
-  const dmConvs = conversations.filter((c) => c.type === 'dm');
-  const groupConvs = conversations.filter((c) => c.type === 'group');
 
   const myConvIds = new Set(conversations.map((c) => c.id));
   const agentOnlyConvs = allConversations.filter((c) => !myConvIds.has(c.id));
@@ -893,35 +1037,19 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
     // A person with no project but rooms never gets here — they see their rooms. On an org-wide server a room can be made with no project, so there is somewhere to start: the ordinary empty state.
     noProjectAtAll && !roomsAreOrgWide ? (
       <div className="flex h-full items-center justify-center px-6 text-center" data-testid="chats-no-project">
-        <p className="text-sm text-muted-foreground">{t('noProjectYet')}</p>
+        {projectsFailed ? <ProjectsLoadFailed t={t} /> : <p className="text-sm text-muted-foreground">{t('noProjectYet')}</p>}
       </div>
     ) : (
       <div className="flex h-full items-center justify-center">
-        <EmptyState title={t('noConversations')} description={t('startNewConversation')} className="w-full max-w-xs" />
+        <ChatListEmptyState />
       </div>
     )
   ) : (
-    <div className="space-y-4">
-      {dmConvs.length > 0 && (
-        <div>
-          <p className="mb-1 px-3 text-editorial-meta font-medium text-muted-foreground">
-            {t('dmSection')}
-          </p>
-          {dmConvs.map((conv) => (
-            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} projectLabel={projectLabelOf(conv)} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
-          ))}
-        </div>
-      )}
-      {groupConvs.length > 0 && (
-        <div>
-          <p className="mb-1 px-3 text-editorial-meta font-medium text-muted-foreground">
-            {t('groupSection')}
-          </p>
-          {groupConvs.map((conv) => (
-            <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} domainLabels={domainLabels} projectLabel={projectLabelOf(conv)} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
-          ))}
-        </div>
-      )}
+    <div className="space-y-1" onKeyDown={moveBetweenRooms}>
+      {/* story 4887 (UI-4 screen PR · the approved layout) — ONE list: the «DM» / «그룹» sub-heads are gone (the room's own glyph says which it is), in the order the server gave them */}
+      {conversations.map((conv) => (
+        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onContextMenu={openRowMenu} domainLabels={domainLabels} eventDefinitionName={eventDefinitionName} projectLabel={projectLabelOf(conv)} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
+      ))}
       {conversations.length < myTotal && (
         <Button
           type="button"
@@ -991,12 +1119,12 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
       <EmptyState title={t('noAgentConversations')} className="w-full max-w-xs" />
     </div>
   ) : (
-    <div>
+    <div onKeyDown={moveBetweenRooms}>
       <p className="mb-1 px-3 text-editorial-meta font-medium text-muted-foreground">
         {t('agentSection')}
       </p>
       {agentOnlyConvs.map((conv) => (
-        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} isAgentConv domainLabels={domainLabels} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
+        <ConversationRow key={conv.id} conv={conv} currentMemberId={currentTeamMemberId} onContextMenu={openRowMenu} isAgentConv domainLabels={domainLabels} eventDefinitionName={eventDefinitionName} onClick={() => router.push(flatHref(`/chats/${conv.id}`) /* 대상-프로젝트: 이 목록은 현재 프로젝트의 대화만 부른다(/api/conversations?project_id=현재) — 현재 p가 곧 대화 자기 프로젝트. */)} />
       ))}
       {allConversations.length < agentTotal && (
         <Button
@@ -1016,11 +1144,30 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
 
   if (needsProject) {
     return (
-      <div className="flex h-64 items-center justify-center px-6 text-center" data-testid="chats-no-project">
-        <p className="text-sm text-muted-foreground">{projectMemberships.length === 0 ? t('noProjectYet') : t('pickProject')}</p>
-      </div>
+      <>
+        {/* the overlay rail is labelled by this id — the fallback keeps the name (codex round 1); outside the box so the box's own words stay exactly the instruction */}
+        {headingLevel === 2 ? <h2 id="chat-rail-heading" className="sr-only">{t('title')}</h2> : <h1 id="chat-rail-heading" className="sr-only">{t('title')}</h1>}
+        <div className="flex h-64 items-center justify-center px-6 text-center" data-testid="chats-no-project">
+          {projectsFailed ? <ProjectsLoadFailed t={t} /> : <p className="text-sm text-muted-foreground">{projectMemberships.length === 0 ? t('noProjectYet') : t('pickProject')}</p>}
+        </div>
+      </>
     );
   }
+
+  // the list head: the count of the list that is SHOWN (the same number the rail context lifts for the outlet), a switch between the two lists, and the narrowing chip
+  const headCount = isAdminOrOwner && activeList === 'agent' ? agentOnlyConvs.length : conversations.length;
+  const selectList = (v: 'my' | 'agent') => {
+    if (v === 'agent') loadAgentConversationsOnce();
+    setActiveList(v);
+  };
+  const filteredProjectName = projectFilter && projectFilter !== 'none' ? projectMemberships.find((m) => m.projectId === projectFilter)?.projectName ?? null : null;
+  const activeFilterLabel = isAdminOrOwner && activeList === 'agent'
+    ? t('agentChatsTab')
+    : projectFilter === 'none' ? t('roomNoProject') : filteredProjectName;
+  const clearListFilter = () => {
+    if (activeList === 'agent') setActiveList('my');
+    else handleProjectFilterChange('');
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -1034,57 +1181,91 @@ export function ChatListView({ projectId, currentTeamMemberId, open, onOpenChang
           (대화 스크롤과 분리, 훑기 밀도 보존). Tabs 밖에 둔다 — my/agent 탭 전환과 무관하게
           항상 상단 고정. AC2 합산 불변식(#3178) — expandedSurface 하나로 둘 중 최대 1개만
           펼쳐지게 끌어올린다(하나를 펼치면 다른 하나는 자동 접힘). */}
-      <div className="space-y-2 px-2 pt-2">
-        <NowStrip
-          expanded={expandedSurface === 'strip'}
-          onExpandedChange={(v) => setExpandedSurface(v ? 'strip' : null)}
-        />
-        <PulseCard
-          expanded={expandedSurface === 'pulse'}
-          onExpandedChange={(v) => setExpandedSurface(v ? 'pulse' : null)}
-        />
+      {/* story 4887 (UI-4 screen PR · the approved layout) — the list head is ONE line: «대화 N» + «+» (a new room) + «⋯». Everything that used to sit above the rooms and eat ~230 px —
+          the «지금» strip and the project card, the project filter, the «내 대화 / 에이전트 대화» tabs — lives in the «⋯» popover now (none is removed); a narrowing that is ON shows as one chip under the head so it is never forgotten. */}
+      <div className="flex flex-shrink-0 items-center gap-2 border-b border-ds-line px-4 py-2" data-testid="chat-list-head">
+        {/* one h1 per page: the list owns it on /chats only; beside an open room the room head owns it and this is an h2 (codex round 1) */}
+        {headingLevel === 2 ? <h2 id="chat-rail-heading" className="text-ds-body font-semibold text-ds-ink">{t('title')}</h2> : <h1 id="chat-rail-heading" className="text-ds-body font-semibold text-ds-ink">{t('title')}</h1>}
+        <span className="font-mono text-ds-mono-md text-ds-ink-3" data-testid="chat-list-count">{headCount}</span>
+        <div className="ml-auto flex items-center gap-1">
+          {canStartRoom ? <IconButton icon="add" label={t('newConversation')} data-testid="chat-list-new" onClick={() => setShowModal(true)} /> : null}
+          <Popover>
+            <PopoverTrigger render={<IconButton icon="more_horiz" label={t('listOptions')} data-testid="chat-list-options" />} />
+            <PopoverContent align="end" aria-label={t('listOptions')} className="flex w-80 flex-col gap-3 p-3">
+              {/* story #3177 · #3178 — the «지금» strip and the project card (one of the two open at a time) */}
+              <div className="flex flex-col gap-2" data-testid="chat-list-now">
+                <NowStrip
+                  expanded={expandedSurface === 'strip'}
+                  onExpandedChange={(v) => setExpandedSurface(v ? 'strip' : null)}
+                />
+                <PulseCard
+                  expanded={expandedSurface === 'pulse'}
+                  onExpandedChange={(v) => setExpandedSurface(v ? 'pulse' : null)}
+                />
+              </div>
+              {/* story 4847 (AC1) — 프로젝트로 걸러 보기: the organization's rooms are all here; this narrows them to one project's (or to the ones with none) without moving the person */}
+              {!projectOnly && projectMemberships.length > 1 && activeList === 'my' ? (
+                <div className="flex flex-col gap-1">
+                  <label htmlFor="chat-list-project-filter" className="text-ds-small font-semibold text-ds-ink-2">{t('projectFilterLabel')}</label>
+                  <Select
+                    id="chat-list-project-filter"
+                    aria-label={t('projectFilterLabel')}
+                    data-testid="project-filter"
+                    value={projectFilter}
+                    onChange={(e) => handleProjectFilterChange(e.target.value)}
+                  >
+                    <option value="">{t('projectFilterAll')}</option>
+                    {projectMemberships.map((m) => (
+                      <option key={m.projectId} value={m.projectId}>{m.projectName}</option>
+                    ))}
+                    <option value="none">{t('roomNoProject')}</option>
+                  </Select>
+                </div>
+              ) : null}
+              {/* an organization owner / admin also reads the agents' rooms: the two lists are one switch */}
+              {isAdminOrOwner ? (
+                <div role="group" aria-label={t('title')} className="flex gap-1" data-testid="chat-list-tabs">
+                  <DsButton type="button" variant={activeList === 'my' ? 'primary' : 'secondary'} aria-pressed={activeList === 'my'} onClick={() => selectList('my')}>{t('myChatsTab')}</DsButton>
+                  <DsButton type="button" variant={activeList === 'agent' ? 'primary' : 'secondary'} aria-pressed={activeList === 'agent'} onClick={() => selectList('agent')}>{t('agentChatsTab')}</DsButton>
+                </div>
+              ) : null}
+            </PopoverContent>
+          </Popover>
+        </div>
       </div>
-      {/* story 4847 (AC1) — 프로젝트로 걸러 보기: the organization's rooms are all here; this narrows them to one project's (or to the ones with none) without moving the person */}
-      {!projectOnly && projectMemberships.length > 1 && activeList === 'my' ? (
-        <div className="px-4 pt-2">
-          <Select
-            aria-label={t('projectFilterLabel')}
-            data-testid="project-filter"
-            value={projectFilter}
-            onChange={(e) => handleProjectFilterChange(e.target.value)}
-          >
-            <option value="">{t('projectFilterAll')}</option>
-            {projectMemberships.map((m) => (
-              <option key={m.projectId} value={m.projectId}>{m.projectName}</option>
-            ))}
-            <option value="none">{t('roomNoProject')}</option>
-          </Select>
+      {activeFilterLabel ? (
+        <div className="flex flex-shrink-0 items-center gap-1.5 border-b border-ds-line px-4 py-1.5" data-testid="chat-list-active-filter">
+          <span className="min-w-0 truncate text-ds-small text-ds-ink-2">{activeFilterLabel}</span>
+          <IconButton icon="close" label={t('clearListFilter')} className="ml-auto" onClick={clearListFilter} />
         </div>
       ) : null}
-      {isAdminOrOwner ? (
-        <Tabs
-          defaultValue="my"
-          onValueChange={(v) => {
-            if (v === 'agent') loadAgentConversationsOnce();
-            setActiveList(v as 'my' | 'agent');
+      <div className="flex-1 overflow-y-auto px-2 py-2" data-testid="chat-list-rooms">
+        {isAdminOrOwner && activeList === 'agent' ? agentConversationList : myConversationList}
+      </div>
+
+      {rowMenu && menuRoom && (
+        <RoomRowContextMenu
+          x={rowMenu.x}
+          y={rowMenu.y}
+          muted={menuRoom.muted ?? false}
+          onToggleMute={() => void toggleRoomMute(menuRoom)}
+          onOpenSettings={() => { openingSettingsRef.current = true; setContractId(menuRoom.id); }}
+          onClose={() => {
+            setRowMenu(null);
+            if (openingSettingsRef.current) { openingSettingsRef.current = false; return; } // the settings window takes the focus (and gives it back to the row when it closes)
+            queueMicrotask(() => rowFocusRef.current?.focus());
           }}
-          className="flex min-h-0 flex-1 flex-col"
-        >
-          <TabsList className="mx-4 mt-2 w-auto self-start">
-            <TabsTrigger value="my">{t('myChatsTab')}</TabsTrigger>
-            <TabsTrigger value="agent">{t('agentChatsTab')}</TabsTrigger>
-          </TabsList>
-          <TabsContent value="my" className="flex-1 overflow-y-auto px-2 py-2">
-            {myConversationList}
-          </TabsContent>
-          <TabsContent value="agent" className="flex-1 overflow-y-auto px-2 py-2">
-            {agentConversationList}
-          </TabsContent>
-        </Tabs>
-      ) : (
-        <div className="flex-1 overflow-y-auto px-2 py-2">
-          {myConversationList}
-        </div>
+        />
+      )}
+      {contractRoom && (
+        <DeliveryContractModal
+          conversationId={contractRoom.id}
+          conversationType={contractRoom.type}
+          freeResponse={contractRoom.free_response ?? false}
+          onClose={() => setContractId(null)}
+          returnFocusRef={rowFocusRef}
+          onFreeResponseChange={(next) => patchRoom(contractRoom.id, { free_response: next })}
+        />
       )}
 
       {showModal && (

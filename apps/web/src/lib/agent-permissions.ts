@@ -2,6 +2,19 @@
  * story #4533 (E-DESKTOP-2 B-2) — an agent's permission request as the web shows it (contract 02d2cf71 §9 ② · 명세 모음 B-2).
  * The web only looks: a browser holds no device key to sign with (v1 · 설계 §6-3), so the button place always holds one line.
  */
+/**
+ * story 4949: the preview of a file tool's input as the Mac sends it (masked by the 4938 rules, each line cut, the lines capped — what is left out is COUNTED, never
+ * guessed). Write → one block with `added`; Edit → one block with `removed` (the old text) and `added` (the new); MultiEdit → one block per edit shown, `blocks_more` the edits left out.
+ * `withheld` = the file looks like a secrets file (`.env` · keys · credentials): its content is not sent at all.
+ */
+export interface PermissionPreview {
+  op: 'write' | 'edit';
+  blocks: { removed: string[]; added: string[]; removed_more: number; added_more: number }[];
+  blocks_more: number;
+  replace_all: boolean;
+  withheld: 'sensitive_path' | null;
+}
+
 export interface PermissionRequest {
   id: string;
   request_id: string;
@@ -18,6 +31,8 @@ export interface PermissionRequest {
   tool_name?: { ko: string; en: string } | null;
   /** story #4590: null on a terminal-only question with no detail read */
   summary: string | null;
+  /** story 4949: what a file tool is about to write / change — the Mac's masked, cut preview (never the original); null/absent = none (an older Mac · another tool) */
+  preview?: PermissionPreview | null;
   /** story #4590: only that computer's terminal answers it — no buttons, its own line (an older server sends none) */
   terminal_only?: boolean;
   masked: boolean;
@@ -90,6 +105,31 @@ export function requestAge(r: PermissionRequest, now: number): ReturnType<typeof
 export function shownToolName(r: Pick<PermissionRequest, 'tool' | 'tool_name'>, locale: string): string | null {
   const n = r.tool_name;
   return (n && (locale === 'en' ? n.en : n.ko)) || r.tool || null;
+}
+
+/**
+ * story 4938: the summary as the card shows it. The Mac's masking block used to carry a Korean word («••••(가림)») — on an English
+ * screen one line read in two languages; the block is now only «••••» (the card's note «Values that look like secrets were masked» says
+ * what it means, in the screen's language). A request an older Mac app already sent still has the old word: it is shown without it.
+ */
+export function shownSummary(summary: string, masked: boolean): string {
+  return masked ? summary.replaceAll('••••(가림)', '••••') : summary; // only a summary the Mac says it masked — a command that happens to contain those characters is shown as it is
+}
+
+const FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Read']);
+
+/**
+ * story 4949: the second line of a request's ROW in the approvals list says WHICH file or command — three rows of «Claude Code · SYJ-MacBook-Pro / Write» are alike until one is opened.
+ * The summary as the card shows it; for a file tool's path longer than a row can hold, its end (the folder it sits in and the file name) behind «…/» — the end is what tells files apart.
+ * null = no summary (a terminal-only question whose detail was not read).
+ */
+export function rowSummary(r: Pick<PermissionRequest, 'tool' | 'summary' | 'masked'>): string | null {
+  if (r.summary === null || r.summary === '') return null;
+  if (r.tool === 'SandboxNetwork') return null; // the card hides a network question's address until the person presses Allow — so does the row
+  const s = shownSummary(r.summary, r.masked);
+  if (!FILE_TOOLS.has(r.tool ?? '') || s.length <= 32 || !s.includes('/')) return s;
+  const parts = s.split('/').filter(Boolean);
+  return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : s;
 }
 
 /** story 4542 (Yuna · Kadir ④): «{agent} · {computer}» — the computer not again when the agent's name already ends in exactly

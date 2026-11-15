@@ -157,17 +157,16 @@ describe('refKey — 안정 키(라인 번호 무관)', () => {
 
 // 실 파일 확認 — ALLOWLIST 4개(goals 스탬프)가 실제로 현재 uppercase eyebrow 라틴 노출
 // 리스트에 있는지(등재 사유의 전제).
-describe('ALLOWLIST — goals 스탬프 4개가 실제로 이 축에 걸리는 자리인지 확認', () => {
-  it('4개 전부 실 소비처 파일에 uppercase 클래스로 존재', () => {
+describe('ALLOWLIST — goals 스탬프 3개(+ canvas 1)가 실제로 이 축에 걸리는 자리인지 확認', () => {
+  it('전부 실 소비처 파일에 uppercase 클래스로 존재(story #4888 — 목록 킥커가 빠져 소비처는 상세 페이지 · 신뢰 레일)', () => {
     const files = [
       'app/(authenticated)/[ws]/[proj]/goals/[id]/page.tsx',
-      'app/(authenticated)/[ws]/[proj]/goals/goals-client.tsx',
       'components/goals/goal-trust-rail.tsx',
     ];
     for (const f of files) {
       const content = readFileSync(path.join(SRC_ROOT, f), 'utf8');
       expect(content).toContain('uppercase');
     }
-    expect(ALLOWLIST.size).toBe(5);
+    expect(ALLOWLIST.size).toBe(4);
   });
 });

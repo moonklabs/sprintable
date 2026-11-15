@@ -12,6 +12,7 @@ import uuid
 import pytest
 
 from tests.test_1994_backlink_api_realdb import _client_for, _setup_app_agent, _setup_app_human
+from tests._server_card import say_with_server_card  # story 4894: a card is sent the way the server's publisher sends it (in-process), not over the public route
 from tests.test_4846_org_chat_rooms_realdb import (  # noqa: F401 — fixtures used by name
     _REAL_DB_URL,
     _callers,
@@ -120,8 +121,8 @@ async def test_an_agent_that_cannot_add_them_leaves_the_mentioned_outsider_the_b
         assert w.h_c not in before
         # an agent that does not have the person's creator among the room's people (the agent's creator must be a participant): the sender could NOT add them
         # the message also carries an event card (a message published as an event has one): its payload must not travel either
-        msg = await _say(Session, w, "agent_participant", w.n_human, f"for the room only {words}", mentioned=[w.h_c],
-                         extra={"event_context": {"event_key": "ac9.test", "payload": {"note": words}}})
+        msg = await say_with_server_card(Session, w, "agent_participant", w.n_human, f"for the room only {words}", mentioned=[w.h_c],
+                                         event_context={"event_key": "ac9.test", "payload": {"note": words}})
         assert await _participant_ids(Session, w.n_human) == before                           # not put in the room
         mention = await _events_for(Session, msg, w.h_c)
         assert [t for t, _p in mention] == ["conversation:mention"]                           # the bell stays
@@ -185,8 +186,8 @@ async def test_what_is_pushed_live_to_a_mentioned_outsider_carries_none_of_the_w
         words = f"ac9-live-{uuid.uuid4().hex[:8]}"
         pushed: list = []
         with patch("app.routers.conversations._push_to_agent", side_effect=lambda pid, payload: pushed.append((str(pid), payload))):
-            await _say(Session, w, "agent_participant", w.n_human, f"live push {words}", mentioned=[w.h_c],
-                       extra={"event_context": {"event_key": "ac9.test", "payload": {"note": words}}})
+            await say_with_server_card(Session, w, "agent_participant", w.n_human, f"live push {words}", mentioned=[w.h_c],
+                                       event_context={"event_key": "ac9.test", "payload": {"note": words}})
         mine = [p for pid, p in pushed if pid == str(w.h_c)]
         assert mine, pushed                                                                    # the mention IS pushed to them (the bell)
         assert all(words not in json.dumps(p, default=str) for p in mine)                      # without a word

@@ -2,12 +2,14 @@ import { jwtVerify } from 'jose';
 import { NextRequest, NextResponse } from 'next/server';
 import { cookieBase, markSessionChanged, SP_AT_MAX_AGE_SECONDS } from '@/lib/auth/cookies';
 import { SESSION_EXPIRED_REASON } from '@/lib/auth/session-redirect';
+import { isSafeInternalPath } from '@/lib/auth/internal-path';
 import { isRecentlySuperseded } from '@/lib/auth/switch-epoch';
 import { carryOnToTarget, embeddedApiTarget, embeddedHostRefusal } from '@/lib/embedded-api-origin';
 import { readNavV3FlagsFromEnv } from '@/lib/nav-v3-flags-server';
 import { resolveNavV3Destinations } from '@/lib/nav-v3-destinations';
 import { MIGRATED_RESOURCES, RENAMED_RESOURCES, RETIRED_RESOURCES } from '@/lib/legacy-resource-tables';
-import { PHONE_LANDING_NEXT_PARAM, PHONE_LANDING_PATH, SHELL_NAV_HEADER } from '@/lib/phone-landing-address';
+import { PHONE_LANDING_NEXT_PARAM, PHONE_LANDING_PATH, SHELL_COOKIE, SHELL_COOKIE_MAX_AGE_SECONDS, SHELL_NAV_HEADER } from '@/lib/phone-landing-address';
+import { SESSION_UNCONFIRMED_PATH } from '@/lib/auth/session-unconfirmed';
 import {
   fetchResolve,
   looksLikeWorkspaceSegment,
@@ -36,6 +38,8 @@ const PUBLIC_EXACT = [
   // story #4763 (PO 10-26) — the Mac app download for a person with no account (the first screen's «Mac 앱 받기»): a redirect to the file and nothing else, only where
   // DESKTOP_DOWNLOAD_ENABLED is on (route.ts §desktop/get/macos). EXACT, not a prefix — the card's /desktop/downloads/macos.json stays behind a session.
   '/desktop/get/macos',
+  // story 4915 (PR 2) — the «다시 시도» page the proxy rewrites an unconfirmed page load to (static, no data; a direct visit is harmless)
+  '/session-unconfirmed',
   '/llms-baos.txt',
   // 45a5a006: 공개 정적 문서(app 자체 온보딩 가이드, 랜딩과 내용 상이해 리다이렉트 대상 아님) —
   // 누락 시 인증 미들웨어가 보호 라우트로 오인해 /login 307(공개 문서가 로그인 뒤에 묶이는 버그).
@@ -67,7 +71,9 @@ const PUBLIC_PREFIX = [
   // UI public routes
   '/share/',
   '/login',
-  '/signup',
+  // story 4891 — `/signup` is not listed any more: next.config.ts redirects it to `/register` before this proxy runs, and a public `/signup` prefix made the workspace pages of any
+  // organization with the slug `signup` (or `signup-2`) public. `signup` is NOT a reserved workspace slug: with the prefix gone it is an ordinary slug, and reserving it would break the
+  // organizations that already have it (looksLikeWorkspaceSegment would stop resolving their pages).
   '/register',
   '/forgot-password',
   '/reset-password',
@@ -119,6 +125,17 @@ const PUBLIC_PREFIX = [
   '/desktop/updates/',
 ];
 
+/**
+ * story 4891 — a public prefix without a trailing «/» names a PAGE and what is under it (`/login`, `/login/…`), not every path that merely starts with those letters. It was a plain
+ * `startsWith`, so `/login-2/…` was public too — and a reserved workspace slug gets the suffix `-2` (an organization named «login» or «signup» becomes `login-2` / `signup-2`):
+ * its workspace pages would skip the session check here. A prefix that ends with «/» (`/api/auth/`, `/.well-known/`) still matches by `startsWith`. (No real route started with a
+ * public prefix without a «/» after it — checked against `app/` when this changed.)
+ */
+export function matchesPublicPrefix(pathname: string, prefix: string): boolean {
+  if (prefix.endsWith('/')) return pathname.startsWith(prefix);
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
 export const SP_AT_COOKIE = 'sp_at';
 export const SP_RT_COOKIE = 'sp_rt';
 
@@ -152,6 +169,7 @@ const CURRENT_PROJECT_COOKIE = 'sprintable_current_project_id';
  * What `/api/v2/me` says about this session's organization — three answers, not two (story 4714 AC6):
  *  · `org`     the server answered and the person works in `orgId`;
  *  · `none`    the server answered 404 NOT_FOUND with `reason: 'no_membership'` (`me.py`): the account exists but has no organization yet — a brand-new person;
+ *  · `unauthenticated` story 4890 — the server answered 401: it does not know this session (an access token that still verifies by its signature, but whose account is gone — a deleted account's old phone session — or whose session the server ended). That is an EXPIRY, not «unknown»: a page load goes to the sign-in like any other ended session;
  *  · `unknown` anything else (a 5xx, a network error, a 200 without an org, a 404 that is not that answer): the call did not tell us — `why` names which
  *    (a fixed word, never a value: it goes to the log), `transient` says whether it is the kind that a second look can mend (a 5xx · a network
  *    error) as opposed to an answer the server meant (a 4xx — e.g. `membership_elsewhere`: the session names an organization the person does not belong to — or a 200 that names
@@ -161,7 +179,7 @@ const CURRENT_PROJECT_COOKIE = 'sprintable_current_project_id';
  * picks the road again) — see `redirectLegacyResourcePath`. A meant answer passes through as before (`/` would send that person to the authenticated layout's
  * own `/me` 404 → onboarding, where they could create an organization they do not need).
  */
-type OrgLookup = { kind: 'org'; orgId: string } | { kind: 'none' } | { kind: 'unknown'; why: string; transient: boolean };
+type OrgLookup = { kind: 'org'; orgId: string } | { kind: 'none' } | { kind: 'unauthenticated' } | { kind: 'unknown'; why: string; transient: boolean };
 async function lookupVerifiedOrg(fastapiUrl: string, accessToken: string): Promise<OrgLookup> {
   try {
     const res = await fetch(`${fastapiUrl}/api/v2/me`, { headers: { Authorization: `Bearer ${accessToken}` } });
@@ -172,6 +190,7 @@ async function lookupVerifiedOrg(fastapiUrl: string, accessToken: string): Promi
       const body = await res.json().catch(() => null) as { error?: { code?: unknown; reason?: unknown } } | null;
       return body?.error?.code === 'NOT_FOUND' && body?.error?.reason === 'no_membership' ? { kind: 'none' } : { kind: 'unknown', why: 'me_404_other', transient: false };
     }
+    if (res.status === 401) return { kind: 'unauthenticated' };
     if (!res.ok) return { kind: 'unknown', why: `me_status_${res.status}`, transient: res.status >= 500 };
     // a 200 whose body cannot be read (empty · not JSON) is NOT a transport failure: it must not fall into the catch below (that one is «transient» → `/`) — the server answered,
     // so it is a meant answer like the 4xx ones (pass through). `null` · `{}` · an empty id are the same: no organization named.
@@ -289,6 +308,11 @@ async function redirectLegacyResourcePath(
   // (no-store)이고 쿼리는 뗀다(조직이 없는 사람에겐 옮겨 갈 스토리 · 프로젝트가 없다). «모름»(me 5xx · 네트워크 · 모양이 다른 404)은 아래처럼
   // 개입 없이 통과 — 조직이 있는 사람을 순간의 실패로 온보딩에 튕기지 않는다.
   if (orgLookup.kind === 'none') return redirectToOnboarding(request);
+  // story 4890 (item 15) — «a deleted account = an ended session». The phone opens `/glance` with the old session of an account that was deleted: the access token still verifies by its
+  // signature (so the checks above let it through) but `/api/v2/me` answers 401 — and the old reading («a meant answer passes through») left a page that does not exist: a Next 404, with no step
+  // to take (measured on dev: `/glance` → 404, while `/chats` with the same cookies → 307 → /login?reason=session_expired). A page load now goes where every ended session goes. Only a page load
+  // (the same line as the transient «unknown» below: a fetch · RSC · prefetch · POST passes through untouched); the cookies are left as the layout's own 401 path leaves them.
+  if (orgLookup.kind === 'unauthenticated') return isDocumentRead(request) ? loginRedirect(request, true) : null;
   // story 4762 (AC7) — 일시적인 «모름»은 «통과»가 아니라 «세션으로 길을 다시 고르기»다. 폰 앱은 늘 `/glance`로 열고, 가입 직후의 몇 분 동안 me가 «모름»을 낸 적이 있다
   // (Android 실측 10-24: 같은 세션이 3분 동안 `/glance` → Next 404 «This page could not be found.» · 다음 걸음 없음 · 다시 로그인하면 정상). 통과시키면
   // 이 주소엔 페이지가 없어서 그 자체가 막다른 곳이다. `/`는 세션이 오늘 길(org-briefing)로 보내는 실 페이지(이 표의 이름이 아님 · 되돌이 없음).
@@ -299,7 +323,7 @@ async function redirectLegacyResourcePath(
   // 뿌리를 다음 맥 바퀴에서 같이 잡는다.
   if (orgLookup.kind === 'unknown') {
     if (!isDocumentRead(request)) return null;
-    console.warn(JSON.stringify({ message: 'proxy_org_lookup_unknown', why: orgLookup.why, resource: resourceName, shell: request.headers.has(SHELL_NAV_HEADER), redirected: orgLookup.transient }));
+    console.warn(JSON.stringify({ message: 'proxy_org_lookup_unknown', why: orgLookup.why, resource: resourceName, shell: isShellRequest(request), redirected: orgLookup.transient }));
     return orgLookup.transient ? redirectToSessionHome(request) : null;
   }
   // 위에서 org · none · unknown을 다 다뤘으므로 여기는 org뿐(타입 좁히기).
@@ -356,10 +380,10 @@ async function redirectLegacyResourcePath(
   }
 
   const home = await legacyResourceRedirect(request, resourceName, pathname, slugs, orgId, projectId);
-  // story 4714 (AC3 · AC4): the shell's own home load (the header only a shell-started load carries) — the bare address only, no query (a notification's org hint or a
+  // story 4714 (AC3 · AC4): the phone app's own home request (the header only a shell-started load carries, or the cookie planted on it — story 4906: a login's client-side move to `/glance` carries only the cookie) — the bare address only, no query (a notification's org hint or a
   // link's `?story=` is a deep link, not the app opening) — is the phone app OPENING: it lands by
   // what the server knows, not always on the home. Another flat address a shell started (a notification's path) is the usual redirect, untouched.
-  return pathname === '/glance' && !request.nextUrl.search && request.headers.has(SHELL_NAV_HEADER) ? viaPhoneLanding(home, request) : home;
+  return pathname === '/glance' && !request.nextUrl.search && isShellRequest(request) ? viaPhoneLanding(home, request) : home;
 }
 
 /**
@@ -405,19 +429,40 @@ function redirectToOnboarding(request: NextRequest): NextResponse {
 }
 
 /**
+ * story 4906 (F · PO 11-12) — «this request comes from the phone app»: the shell's own load header (only a shell-started load carries it) OR the cookie the proxy planted on that first load
+ * (`SHELL_COOKIE` — every later request of the same webview carries it: a login form's client-side move to `/glance`, an RSC fetch, a prefetch). A browser has neither.
+ */
+function isShellRequest(request: NextRequest): boolean {
+  return request.headers.has(SHELL_NAV_HEADER) || request.cookies.get(SHELL_COOKIE)?.value === '1';
+}
+
+/** Plant the shell cookie on a response to a shell-started load (the header is the proof; a client cannot gain anything from forging it — the only effect is the landing redirect for `/glance`). */
+function markShell(request: NextRequest, response: Response): Response {
+  if (!request.headers.has(SHELL_NAV_HEADER) || request.cookies.get(SHELL_COOKIE)?.value === '1') return response;
+  const secure = request.nextUrl.protocol === 'https:' ? '; Secure' : '';
+  response.headers.append('set-cookie', `${SHELL_COOKIE}=1; Path=/; Max-Age=${SHELL_COOKIE_MAX_AGE_SECONDS}; HttpOnly; SameSite=Lax${secure}`);
+  // a response that sets a cookie must not be replayed to someone else by a shared cache (a CDN would hand `sp_shell=1` to ordinary browsers): keep a guard the response already has,
+  // otherwise make it private + no-store (a shell-started load is a dynamic page load; the shell sends `Cache-Control: no-cache` on it anyway — lib/initialSource.js)
+  if (!/\b(no-store|private)\b/i.test(response.headers.get('cache-control') ?? '')) response.headers.set('cache-control', 'private, no-store');
+  return response;
+}
+
+/**
  * story 4714 (AC3 · AC4) — the phone app opens `/glance` (its home address) with the shell's own load header. For a person WITH an organization and a
- * project the home it resolved to is not gone to at once: the same 307 points at `/phone-landing?next=<that home>` instead, which reads what the server knows
+ * project the home it resolved to is not gone to at once: the same 307 points at `/phone-landing?next=/` (the person's home — story 4906) instead, which reads what the server knows
  * (a paired computer · a live session) and sends the person to the chat list · the start screen · that very home. Only the Location changes — the
  * status, `no-store` and the resolve cache cookie the redirect carried stay.
  */
 function viaPhoneLanding(response: NextResponse, request: NextRequest): NextResponse {
-  const home = response.headers.get('location');
-  if (!home) return response;
-  const target = new URL(home, request.nextUrl.origin);
+  if (!response.headers.get('location')) return response;
   const url = request.nextUrl.clone();
   url.pathname = PHONE_LANDING_PATH;
   url.search = '';
-  url.searchParams.set(PHONE_LANDING_NEXT_PARAM, `${target.pathname}${target.search}`);
+  // story 4906 (F · PO 11-12): the home «nothing to open instead» goes to is the person's HOME — the site root, which the session sends on to «오늘» (the Home tab; where the pairing
+  // entrance for a phone that is not paired lives) — NOT the address `/glance` resolved to. `/glance` is the shell's old home name and the web renamed it to `/flow` (story #2224: «glance is one
+  // piece of /flow»), so a phone with nothing to open landed on the empty 일감 board — one tab away from the Home that carries the first-run pairing banner (measured on dev 11-12, 6 taps to
+  // pair instead of 5). The resolve above still ran (an organization and a project exist — the person is not stranded); its address is just not the place the person lands.
+  url.searchParams.set(PHONE_LANDING_NEXT_PARAM, '/');
   response.headers.set('location', url.toString());
   return response;
 }
@@ -446,9 +491,7 @@ const RESOLVE_RETRY_PARAM = '_prRetry';
 // 한다. 여기(생성 쪽)의 originalPathname은 항상 request.nextUrl.pathname에서 유도돼 구조적으로
 // 안전하지만, 진짜 위험한 소비 지점은 use-unified-switcher.ts(그쪽은 사용자가 URL로 조작 가능한
 // ?next=를 읽어 router.push한다) — 방어는 그쪽에도 동일하게 있어야 한다(양쪽 다, 한쪽만으론 뚫림).
-function isSafeInternalPath(value: string): boolean {
-  return value.startsWith('/') && !value.startsWith('//') && !value.includes('\\');
-}
+// story 4936 — the guard is lib/auth/internal-path.ts `isSafeInternalPath` (imported above): control characters · backslash · `//` · origin re-parse · every decoded form. The old inline one let `/<TAB>/x` through.
 
 // story #4017 CHANGES 2(페드루 PO 지적, 2026-09-17 15:31Z) — env 읽기는
 // readNavV3FlagsFromEnv() 한 곳(nav-v3-flags-server.ts)으로, 목적지 문자열은
@@ -554,7 +597,44 @@ async function readErrorCode(res: Response): Promise<string | undefined> {
   }
 }
 
+/**
+ * story 4948 (PR 2) — ONE refresh in flight per refresh token, in this server instance. The proxy renews for EVERY request whose access token is missing · expired · inside its last 5 minutes (the proactive refresh), so a page that opens
+ * with a dozen requests at once asked for a dozen rotations of the SAME token (19 measured on dev: 19 live children of one parent, 19 Set-Cookie pairs, the backend queueing them on the person's lock 0.85 s apart = 16 s). The backend
+ * survives that on purpose (a straggler inside the 180 s window forks an independent child), but it is a dozen rows and a dozen cookie changes for one renewal. Requests that carry the SAME token while one rotation of it is still running
+ * now share its answer, for as long as that rotation is young (`REFRESH_JOIN_WINDOW_MS`). Only what is IN FLIGHT is shared — nothing is kept after it settles (no TTL cache: a finished answer is never replayed, so a logout that lands right after cannot be undone by a late request carrying the old token).
+ * The key is a hash of the token (the token itself is not a map key); another instance still asks the backend on its own — its fork stays the safety net.
+ */
+/** how long after a rotation STARTED another request may still join it: the requests of one page load leave within moments of each other; a rotation older than this is not joined, so a slow or hung one never holds the others (and the window in which a logout can land between a rotation and a joiner stays small) */
+export const REFRESH_JOIN_WINDOW_MS = 3000;
+/** a rotation still unanswered after this long is forgotten by the map (its request goes on by itself): a hung backend must not make the map grow with one entry per distinct token */
+const REFRESH_ENTRY_TTL_MS = 30_000;
+/** at most this many rotations are held at once: past it a new one is not registered (it runs alone, as before this story) — a stalled backend plus many different bogus refresh cookies cannot grow the map, and each registration sweeps at most this many entries */
+export const REFRESH_IN_FLIGHT_MAX = 1000;
+const refreshesInFlight = new Map<string, { flight: Promise<RefreshOutcome>; startedAt: number }>();
+/** how many rotations the map holds right now (tests · diagnostics) */
+export function pendingRefreshCount(): number { return refreshesInFlight.size; }
+
+async function refreshKey(rt: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(rt));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 async function refreshWithToken(rt: string): Promise<RefreshOutcome> {
+  const key = await refreshKey(rt);
+  // no `await` between the lookup and the registration: two callers that resumed from the hash one after the other see each other
+  const running = refreshesInFlight.get(key);
+  if (running && Date.now() - running.startedAt < REFRESH_JOIN_WINDOW_MS) return running.flight;
+  const now = Date.now();
+  for (const [k, e] of refreshesInFlight) if (now - e.startedAt >= REFRESH_ENTRY_TTL_MS) refreshesInFlight.delete(k); // hung rotations are dropped from the map, not awaited
+  if (refreshesInFlight.size >= REFRESH_IN_FLIGHT_MAX) return refreshWithTokenOnce(rt); // the map is full: this one runs alone and is not registered
+  const entry = { flight: undefined as unknown as Promise<RefreshOutcome>, startedAt: now };
+  // the slot is freed when THIS flight settles — and only if it is still the one registered (a newer flight for the same token must not be deleted by an older one's `finally`)
+  entry.flight = refreshWithTokenOnce(rt).finally(() => { if (refreshesInFlight.get(key) === entry) refreshesInFlight.delete(key); });
+  refreshesInFlight.set(key, entry);
+  return entry.flight;
+}
+
+async function refreshWithTokenOnce(rt: string): Promise<RefreshOutcome> {
   const fastapiUrl = fastapiBaseUrl();
   try {
     const res = await fetch(`${fastapiUrl}/api/v2/auth/refresh`, {
@@ -686,7 +766,8 @@ function loginRedirect(request: NextRequest, sessionExpired: boolean): NextRespo
   const nextTarget = request.nextUrl.pathname + request.nextUrl.search;
   url.pathname = '/login';
   url.search = '';
-  url.searchParams.set('next', nextTarget); // searchParams.set 이 encode
+  // story 4936: the `next` this puts in the sign-in address comes from the request's own path — a link someone sends (`/%09/evil.com`) is a request too — so it is planted only when it is an internal path (the login page checks it again on the way out)
+  if (isSafeInternalPath(nextTarget)) url.searchParams.set('next', nextTarget); // searchParams.set 이 encode
   if (sessionExpired) url.searchParams.set('reason', SESSION_EXPIRED_REASON);
   return NextResponse.redirect(url);
 }
@@ -699,7 +780,23 @@ function loginRedirect(request: NextRequest, sessionExpired: boolean): NextRespo
 // 이 세 실패 사유를 여기서 한 번만 구분해 양쪽 호출부의 분기를 통일한다.
 // sessionExpired(story #2745): 호출부가 hadAnySessionSignal() 등으로 판정해 넘긴다 — 세션 신호가
 // 애초에 없었던 익명 첫 진입은 false로 넘어와 loginRedirect가 reason을 안 붙인다.
-function handleUnauthenticated(request: NextRequest, isApiPath: boolean, clearCookies: boolean, sessionExpired: boolean): NextResponse {
+function handleUnauthenticated(request: NextRequest, isApiPath: boolean, clearCookies: boolean, sessionExpired: boolean, unconfirmed = false): NextResponse {
+  // story 4915 (PR 2): «the refresh call could not be confirmed» (rejected · timed out · 5xx — RefreshOutcome 'transient') is NOT «signed out». A page load used to be sent to /login anyway (cookies kept, but the
+  // person saw the sign-in while the session was alive — the same defect as the authenticated layout's `!meRes`). Now a document read or a client navigation (a Next RSC fetch, not a prefetch) is REWRITTEN to the
+  // public «다시 시도» page (the address stays; cookies are never touched). It is a rewrite, NOT «let the request continue»: handlers behind the proxy that do no session check of their own (the card's
+  // /desktop/downloads/macos.json) must not be reached without a session. Prefetches and non-page requests (a fetch · an image · JSON) keep the old answer.
+  // «a client navigation» is told apart by what the real Next passes the proxy: its `RSC` request header is NOT visible here (measured on a real Next dev server: `rsc` absent, `Accept: text/x-component` and the `_rsc`
+  // query present) — so the header, the `_rsc` parameter and the RSC content type all count (the unit tests' hand-made requests carry the header, the real server does not).
+  const clientNavigation = request.headers.has('rsc') || request.nextUrl.searchParams.has('_rsc') || (request.headers.get('accept') ?? '').includes('text/x-component');
+  const prefetch = request.headers.has('next-router-prefetch') || request.headers.has('next-router-segment-prefetch');
+  if (unconfirmed && !isApiPath && (isDocumentRead(request) || (clientNavigation && !prefetch))) {
+    const url = request.nextUrl.clone();
+    url.pathname = SESSION_UNCONFIRMED_PATH;
+    url.search = '';
+    const rewritten = NextResponse.rewrite(url, { request: { headers: request.headers } }); // the headers WITHOUT what a client sent as x-resolved-* (stripped at the entrance)
+    rewritten.headers.set('Cache-Control', 'no-store');
+    return rewritten;
+  }
   const response = isApiPath ? NextResponse.next({ request }) : loginRedirect(request, sessionExpired);
   if (clearCookies) clearAuthCookies(response);
   return response;
@@ -854,7 +951,7 @@ export async function proxy(request: NextRequest) {
   // (requests Next answers before the proxy is reached are covered at the server's entrance — story 4824 AC7)
   const foreignHost = embeddedHostRefusal(request);
   if (foreignHost) return foreignHost;
-  const response = await proxyWithTiming(request);
+  const response = markShell(request, await proxyWithTiming(request)) as Awaited<ReturnType<typeof proxyWithTiming>>;
   const target = embeddedApiTarget(request.nextUrl.pathname, request.nextUrl.search);
   return target ? carryOnToTarget(response, target) : response;
 }
@@ -891,9 +988,17 @@ async function proxyImpl(incoming: NextRequest) {
     return NextResponse.rewrite(url, { request: { headers: request.headers } });
   }
 
+  // story 4948 — the root `/` is public (a first visit has no session), but its page (`RootPage` → `getServerSession`) reads the ACCESS cookie only: with the access cookie gone (its 1-hour max-age) and the refresh cookie alive,
+  // `/` sent the person to /login while the session was fine (a page under /chats renewed it at once). The Mac app opens `/` every time it starts, so every start after an hour without a renewal showed the sign-in.
+  // Only `/`: another public page that is opened signed-in (a login, the terms) has nothing to renew.
+  if (pathname === '/') {
+    const renewed = await renewSessionForRoot(request);
+    if (renewed) return renewed;
+  }
+
   const isPublicPath =
     PUBLIC_EXACT.includes(pathname) ||
-    PUBLIC_PREFIX.some((prefix) => pathname.startsWith(prefix));
+    PUBLIC_PREFIX.some((prefix) => matchesPublicPrefix(pathname, prefix));
 
   if (isPublicPath) {
     const response = NextResponse.next({ request });
@@ -920,7 +1025,7 @@ async function proxyImpl(incoming: NextRequest) {
     // 섞여 있다 — sp_rt/활성계정 금고 신호로 실제 판정(둘 다 없으면 애초에 세션이 없었던 것).
     const sessionExpired = hadAnySessionSignal(request);
     const outcome = await tryRefreshViaFastapi(request);
-    if (outcome.kind !== 'ok') return handleUnauthenticated(request, isApiPath, outcome.kind === 'invalid', sessionExpired);
+    if (outcome.kind !== 'ok') return handleUnauthenticated(request, isApiPath, outcome.kind === 'invalid', sessionExpired, outcome.kind === 'transient');
     // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지(쿠키는 유지).
     if (!(await refreshMatchesActive(request, outcome.accessToken))) {
       return handleUnauthenticated(request, isApiPath, false, sessionExpired);
@@ -934,7 +1039,7 @@ async function proxyImpl(incoming: NextRequest) {
     // access token invalid/expired — try refresh. accessToken 쿠키가 실재했으므로(이 분기 진입
     // 조건) 이건 항상 진짜 "만료"다 — sessionExpired=true 고정.
     const outcome = await tryRefreshViaFastapi(request);
-    if (outcome.kind !== 'ok') return handleUnauthenticated(request, isApiPath, outcome.kind === 'invalid', true);
+    if (outcome.kind !== 'ok') return handleUnauthenticated(request, isApiPath, outcome.kind === 'invalid', true, outcome.kind === 'transient');
     // RC2: stale refresh(다른 계정)면 적용 안 함 — 잘못된 계정으로 복귀 방지(쿠키는 유지).
     if (!(await refreshMatchesActive(request, outcome.accessToken))) {
       return handleUnauthenticated(request, isApiPath, false, true);
@@ -943,6 +1048,43 @@ async function proxyImpl(incoming: NextRequest) {
   }
 
   return resolveAndRespond(request, pathname, accessToken, claims, request.headers);
+}
+
+/**
+ * story 4948 — the root `/` with no usable access token but a session signal: renew ONCE here, as a protected page would, so `RootPage` reads the fresh access cookie (it is forwarded on this very request) and goes on to
+ * the signed-in home. `null` = leave the request to the public passthrough: anything but a document read (a POST / a HEAD / a prefetch / an RSC fetch is not a page load), a Firebase session, a first visit with no signal, a live access token, a stale refresh for another account (RC2),
+ * and a «superseded» answer. A refresh that could not be confirmed is answered with the «다시 시도» page (a rewrite; nothing is cleared: the next visit asks again). A refresh the backend REFUSED (401, not superseded) is a dead session: the cookies are cleared — the same line every other branch draws.
+ */
+async function renewSessionForRoot(request: NextRequest): Promise<NextResponse | null> {
+  if (!isDocumentRead(request)) return null; // a page load only: not a prefetch · an RSC fetch · a HEAD · a POST (each would spend one more rotation for nothing)
+  if (request.cookies.get('__Host-sp_fs')?.value) return null; // lib/auth/firebase-session.ts SP_FS_COOKIE (a literal: that module is not imported into the proxy): a Firebase session is read by the page itself, nothing here to renew
+  if (!hadAnySessionSignal(request)) return null;
+  const accessToken = request.cookies.get(SP_AT_COOKIE)?.value;
+  if (accessToken && (await verifyAccessToken(accessToken))) return null;
+  const outcome = await tryRefreshViaFastapi(request);
+  if (outcome.kind === 'ok') {
+    if (!(await refreshMatchesActive(request, outcome.accessToken))) return null;
+    const response = NextResponse.next({ request: { headers: buildRefreshedHeaders(request, outcome) } });
+    applyTokenCookies(response, outcome.accessToken, outcome.refreshToken);
+    response.headers.set('Cache-Control', 'private, no-store'); // a response that sets the session cookies is never replayed to someone else by a shared cache (markShell's line) — not left to RootPage being dynamic
+    captureSignupAttribution(request, response); // `/` stays a public page: its first-touch capture is not skipped by the early return
+    return response;
+  }
+  if (outcome.kind === 'invalid') {
+    const response = NextResponse.next({ request });
+    clearAuthCookies(response);
+    response.headers.set('Cache-Control', 'private, no-store'); // the same: a response that clears the session cookies is not shared either
+    captureSignupAttribution(request, response); // a dead session is an effectively anonymous visit: the first touch is still recorded
+    return response;
+  }
+  if (outcome.kind === 'transient') {
+    // «could not be confirmed» (a 503 · the network · a deploy's few seconds) is NOT «signed out»: the page load is REWRITTEN to the public «다시 시도» page (cookies untouched), as every protected page load does since 4915 PR 2 —
+    // never handed to RootPage, which would show the sign-in to a person whose session is alive (the Mac app opening `/` while the server was being replaced)
+    const response = handleUnauthenticated(request, false, false, true, true);
+    captureSignupAttribution(request, response);
+    return response;
+  }
+  return null;
 }
 
 type ResolveWiringResult =

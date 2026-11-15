@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "../styles/design-system.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -204,6 +205,7 @@
   --color-warning-strong: var(--warning-strong);
   --color-info: var(--info);
   --color-brand: var(--brand);
+  --color-brand-wordmark: var(--brand-wordmark);
   --color-brand-foreground: var(--brand-foreground);
   /* story #2529: 마크 v2(2단 듀오톤) 색 토큰 — Tailwind 유틸(fill-brand-mark-primary 등)로도
      쓸 수 있게 매핑. SprintableMark 자체는 raw var()로 SVG fill을 직접 참조한다. */
@@ -249,7 +251,7 @@
 
   /* DS-S11: Loading Skeleton */
   --skeleton-base: var(--muted);
-  --skeleton-highlight: color-mix(in oklch, var(--muted) 60%, var(--background) 40%);
+  --skeleton-highlight: color-mix(in oklch, var(--muted) 60%, var(--ds-background) 40%);
   --skeleton-duration: 1.5s;
   --animate-skeleton-shimmer: skeleton-shimmer 1.5s linear infinite;
 
@@ -330,20 +332,20 @@
   --foreground: var(--proof-ink);
   --card: var(--proof-panel);
   --card-foreground: var(--proof-ink);
-  --popover: var(--proof-panel);
+  --popover: var(--ds-surface-raised);
   --popover-foreground: var(--proof-ink);
-  --primary: var(--proof-blue);
-  --primary-foreground: oklch(0.985 0 0);
+  --primary: var(--ds-action);
+  --primary-foreground: var(--ds-on-action);
   --secondary: var(--proof-sunk);
   --secondary-foreground: var(--proof-ink-2);
   --muted: var(--proof-sunk);
   --muted-foreground: var(--proof-ink-3);
   --accent: var(--proof-sunk);
   --accent-foreground: var(--proof-ink-2);
-  --destructive: var(--proof-red);
+  --destructive: var(--ds-failed);
   --border: var(--proof-line);
-  --input: var(--proof-line);
-  --ring: var(--proof-blue);
+  --input: var(--ds-line-control);
+  --ring: var(--ds-action);
   --chart-1: oklch(0.871 0.006 286.286);
   --chart-2: oklch(0.552 0.016 285.938);
   --chart-3: oklch(0.442 0.017 285.786);
@@ -359,26 +361,26 @@
      따라간다(기존 #2318 불변식 — "안 맞추면 사이드바만 옛 파랑" 그대로 유지, 소스만 proof-*로). */
   --sidebar: var(--proof-panel);
   --sidebar-foreground: var(--proof-ink);
-  --sidebar-primary: var(--proof-blue);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-primary: var(--ds-action);
+  --sidebar-primary-foreground: var(--ds-on-action);
   --sidebar-accent: var(--proof-sunk);
   --sidebar-accent-foreground: var(--proof-ink-2);
   --sidebar-border: var(--proof-line);
-  --sidebar-ring: var(--proof-blue);
+  --sidebar-ring: var(--ds-action);
 
-  /* story #2969 §2 sidebar 행(유나 확定, PR-3 carbon fill 이연분) — 활성 nav 항목 배경은
-     현재 사이트 테마(라이트/다크)와 무관하게 항상 다크 "Carbon" 톤(신규 브랜드색 아님 —
-     다크 테마의 --proof-panel/--proof-ink 값을 그대로 고정 리터럴로 재사용, 시그니처
-     디자인 결정이라 :root에 1회만 선언·.dark에서 재정의하지 않는다 — 테마 전환에도 항상
-     동일). 시트론 좌측 엣지(PR-3, sidebar.tsx)와 조합해 "활성=carbon+시트론 엣지" 완성. */
-  --sidebar-active-fill: #17191C;
-  --sidebar-active-fill-foreground: #F2F4ED;
+  /* story #2969 §2 sidebar 행(유나 확定, PR-3 carbon fill 이연분)은 «활성 nav 항목 = 어두운 Carbon 알약 + 시트론 좌측 엣지»였다.
+     story 4919(UI-R6, PO 판정 2026-11-13) — 옛 Carbon 알약(#17191C · 옛 다크 패널색)을 걷고, 다시 지은 nav 칸의 활성과 같은
+     ds 꼴(action-soft 면 + action-text 글)로 잇는다. 시트론 엣지는 그대로(소비처 sidebar.tsx · nav-v3-item-list.tsx). */
+  --sidebar-active-fill: var(--ds-action-soft);
+  --sidebar-active-fill-foreground: var(--ds-action-text);
 
-  /* Sprintable brand (blue) — 254/0.17 hue/chroma는 스펙 그대로, L만 0.58→0.56(AA 4.5:1 확保) */
-  --brand: oklch(0.56 0.17 254);
-  /* story #2318: 4.50:1(턱걸이)→순백으로 4.69:1 확保 */
-  --brand-foreground: oklch(1 0 0);
-  --primary-tint: oklch(0.97 0.02 255);
+  /* story 4930 (UI «옛 파랑 걷기»): 옛 brand 파랑(oklch 254)은 ds action 보라 옆에 남아 «강조색이 둘»이었다(보드 렌즈 알약 · 조직 아바타 · 링크 · 인증 단추 · ↗). --primary · --ring처럼 ds 토큰의 별칭 —
+     색 값은 design-system.css 한 곳이 정한다(시험 = styles/old-palette-alias.4919.test.ts 의 brand 표). 로고 마크 색(--brand-mark-*)은 그대로. */
+  --brand: var(--ds-action);
+  --brand-foreground: var(--ds-on-action);
+  --primary-tint: var(--ds-action-soft);
+  /* story 4930 조건 가(PO): 로고 워드마크는 «상표 표시»라 ds 별칭 밖 — 옛 brand 파랑 값을 이 이름으로 그대로 둔다(소비처 = 로그인 화면 SprintableLogo 한 곳 · 시험이 «로고 소비처 목록»을 못 박는다). */
+  --brand-wordmark: oklch(0.56 0.17 254);
 
   /* story #2529(유나 핸드오프 brand-mark-v2-handoff-2529 §3-1): 마크 v2 — 2단 듀오톤.
      Figma 실측 sRGB HEX가 정본(SVG/ICO 등 정적 자산이 이 값에서 빌드타임으로 파생됨,
@@ -434,10 +436,10 @@
   --scrollbar-thumb-hover: oklch(0 0 0 / 65%);
   --scrollbar-track: transparent;
 
-  --brand-soft: oklch(0.90 0.06 258);
-  --brand-strong: oklch(0.45 0.20 258);
-  --brand-text: var(--brand-strong); /* story #4315 — 밝은 테마 브랜드 글자(배경 7.05 · 흰 패널 7.62 · brand/14 틴트 6.32) */
-  --brand-contrast: oklch(0.96 0.03 258);
+  --brand-soft: var(--ds-action-soft);
+  --brand-strong: var(--ds-action-text);
+  --brand-text: var(--brand-strong); /* story #4315 — 밝은 테마 브랜드 글자(대비는 old-palette-alias.4919.test.ts가 풀어 쓴 값으로 계산 · story 4930: 값은 ds action-text) */
+  --brand-contrast: var(--ds-action-soft);
 
   /* DS-S13: Extended semantic tokens */
   --overlay-backdrop: oklch(0 0 0 / 50%);
@@ -493,14 +495,14 @@
   /* Tiptap editor */
   --tiptap-code-bg: oklch(0.22 0 0);
   --tiptap-pre-bg: oklch(0.14 0 0);
-  --tiptap-blockquote-border: oklch(0.66 0.18 258);
+  --tiptap-blockquote-border: var(--ds-action); /* story 4930: 옛 파랑(258) → ds action */
   --tiptap-blockquote-bg: oklch(0.97 0 0);
   --tiptap-table-border: oklch(0.88 0 0);
   --tiptap-th-bg: oklch(0.96 0 0);
   --tiptap-hr-border: oklch(0.88 0 0);
   --tiptap-placeholder: oklch(0.60 0 0);
-  --tiptap-selection: oklch(0.66 0.18 258);
-  --tiptap-link: oklch(0.55 0.18 258);
+  --tiptap-selection: var(--ds-action);
+  --tiptap-link: var(--ds-action-text);
   /* story 4831: 노드가 인라인 style로 호박색(#f59e0b)을 주고 있어 이 초록 토큰은 에디터에서 가려져 있었다 — 호박색을 바탕 토큰으로 옮기며 이 두 토큰도 같은 값으로 맞춰 한 곳에서 정한다. */
   --tiptap-callout-border: var(--proof-amber);
   --tiptap-callout-bg: var(--proof-amber-soft);
@@ -511,11 +513,11 @@
      AA 미달 4색(ink-3·amber·green·slate)은 시안 실값을 그대로 안 쓰고 doc이 AA 통과로
      조정한 값 — 조정 근거·대비 수치는 doc §⑥ 참고(여기서 재복사하지 않는다, SSOT는 doc).
      다크(.dark 블록, 아래)는 v3 시안이 라이트 전용이라 미정 — 이 PR에서 무변경(doc §④). */
-  --proof-bg: #F7F6F3;
-  --proof-panel: #FFFFFF;
-  --proof-sunk: #F1EFEA;
-  --proof-line: #E7E4DE;
-  --proof-line-soft: #EEEBE5;
+  --proof-bg: var(--ds-background);
+  --proof-panel: var(--ds-surface);
+  --proof-sunk: var(--ds-surface-sunk);
+  --proof-line: var(--ds-line);
+  --proof-line-soft: var(--ds-line);
   /* story #2969 §1.2(PR-4, doc proofline-system-layer-2969) — 오버레이 전용 강조 hairline.
      "오버레이는 항상 --elev-overlay + 1px hairline(--proof-line-strong) 동반 — 그림자만으론
      엣지가 흐리다"(§1.2). PR-T에서 이연했던 토큰 — 값은 기존 --proof-line을 --proof-ink
@@ -524,15 +526,15 @@
      story #3826은 이 공식을 안 건드림 — --proof-line/--proof-ink 값만 바뀌어 파생값이
      자동으로 따라간다). */
   --proof-line-strong: color-mix(in oklch, var(--proof-line) 50%, var(--proof-ink) 50%);
-  --proof-ink: #1D1C1A;
-  --proof-ink-2: #5F5C57;
+  --proof-ink: var(--ds-ink);
+  --proof-ink-2: var(--ds-ink-2);
   /* story #2917(2026-08-22)이 원값 #6D6F67을 sunk 위 AA 미달로 #63655D 조정 — story
      #3826(2026-09-13, doc 3dc24888)이 v3 룩앤필로 다시 조정: #6E6C67(sunk #F1EFEA 위
      4.56:1, doc §⑥). 다크는 무변(#8D9088, 라이트만 교체 — doc §④). */
-  --proof-ink-3: #6E6C67;
-  --proof-faint: #9C9E93;
-  --proof-blue: #3B5BA5;
-  --proof-blue-soft: #E7EDF7;
+  --proof-ink-3: var(--ds-ink-3);
+  --proof-faint: var(--ds-line-strong);
+  --proof-blue: var(--ds-info);
+  --proof-blue-soft: var(--ds-info-soft);
   /* story #2983 — 라이트 전용 재조정값(다크 #C7F85A와 hue/sat 동일, L만 하향, 유나 확定
      2026-08-24). vs proof-panel(white) 4.22:1 · vs proof-sunk(#ECEAE2) 3.50:1 — 비텍스트
      3:1 최소 위 여유 margin. 텍스트(작은 배지 라벨 등)로는 4.5:1 미달이라 그 축은 값을
@@ -542,16 +544,16 @@
   --proof-citron: #5F8706;
   /* story #3826(2026-09-13, doc 3dc24888) — v3 조정값. 시안 실값 #3E7D5A는 green-soft
      위 4.26:1로 AA 미달이라 #3B7856으로 조정(4.56:1, doc §⑥). */
-  --proof-green: #3B7856;
-  --proof-green-soft: #E9F1EC;
+  --proof-green: var(--ds-done);
+  --proof-green-soft: var(--ds-done-soft);
   /* story #3826(2026-09-13, doc 3dc24888) — v3 조정값. 시안 실값 #B07A1E는 amber-soft
      위 3.37:1로 AA 미달이라 #946719로 조정(4.51:1, doc §⑥). */
-  --proof-amber: #946719;
-  --proof-amber-soft: #FBF3E2;
+  --proof-amber: var(--ds-needs-hand);
+  --proof-amber-soft: var(--ds-needs-hand-soft);
   /* story #3826(v3) — v3는 「사람 손 필요」에 amber 1색만 쓰고 red는 시안 미사용이라
      현행 유지(doc 3dc24888 표① "빠짐 0" 원칙 — 추정값 0). */
-  --proof-red: #C33B3B;
-  --proof-red-soft: #FBEAEA;
+  --proof-red: var(--ds-failed);
+  --proof-red-soft: var(--ds-failed-soft);
   /* story #3826(신규, 2026-09-13, doc 3dc24888 §①-1) — v3 「에이전트 진행」(calm) 전용
      축. 기존 --proof-blue(주 버튼)와 뜻이 섞이면 "누른 버튼"과 "진행 중" 표시가 같은
      색으로 헷갈려 신규 토큰으로 연다(doc의 FE 결정 1 — blue 흡수 대신 신설 채택).
@@ -586,24 +588,12 @@
      story #3826(2026-09-13, doc 3dc24888 §②) — v3 값 12px로 조정(원래 13px). */
   --proof-radius-soft: 12px;
 
-  /* §⑤ 정본 — SVG fractalNoise baseFrequency 0.62. RGB는 0으로 죽이고 alpha만 노이즈값을
-     실어 순수 그레인 텍스처로 쓴다(색조는 오버레이하는 쪽의 opacity/mix-blend-mode가 결정 —
-     라이트/다크가 같은 SVG를 공유해도 되는 이유). 강도(라이트 22%/다크 16%)와 블렌드모드
-     (라이트 multiply/다크 overlay)는 별도 변수로 분리해 테마별로만 오버라이드한다. */
-  --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.62' numOctaves='2' stitchTiles='stitch' result='noise'/%3E%3CfeColorMatrix in='noise' type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  --paper-grain-opacity: .22;
-  --paper-grain-blend: multiply;
-
-  /* §⑤ 정본값 그대로 — "뜬" 표면(카드·캡슐)의 방향성 다층 그림자 + 상단 하이라이트. */
-  --elev-lift: 0 10px 24px -8px rgba(20, 21, 15, .20), 0 2px 6px -2px rgba(20, 21, 15, .14), inset 0 1px 0 rgba(255, 255, 255, .85);
-
-  /* §⑤ 정본값 그대로 — "눌린" 표면(씰·칩)의 인셋 프레스. */
-  --emboss-press: inset 0 1px 2px rgba(20, 21, 15, .14), inset 0 -1px 0 rgba(255, 255, 255, .7);
+  /* story 4919 (선생님 11-14 «재질 추천대로») — 8-25의 종이 그레인 토큰 · 겹과 뜬·눌린 그림자 토큰을 걷었다: 큰 면 · 칩 모두 결 · 그림자 없는 평평한 면이다. 되살리지 않는다(시험이 지킨다). */
 
   /* §⑤ — 프로스티드 글래스, 오버레이/모달 전용(이 PR의 A/B/C급 소비처엔 아직 없음 — 토큰만
      선신설, 실 소비는 모달/오버레이 표면 착수 시). */
   --glass-overlay-filter: blur(14px) saturate(1.3);
-  --glass-overlay-bg: rgba(252, 251, 247, .62);
+  --glass-overlay-bg: color-mix(in srgb, var(--ds-surface-raised) 62%, transparent);
 }
 
 /* story #4128 — 유나 canon 정식 결정(2026-09-21): 폼 컨트롤(checkbox/radio) accent-color를
@@ -638,41 +628,13 @@
   }
 }
 
-/* story #7d7634ee — `.proof-surface`가 재질 지오메트리 유일 정본(구 `.proof-cut` 계승,
-   doc ea94dac4 유나 확定: "컷 소멸이라 재질명으로 리네임"). 그레인은 `::before`로 얹는다 —
-   `border-radius: inherit`가 배경을 부모 라운드 안에 자동으로 가둬 별도 overflow-hidden
-   불요(배경은 기본 border-box에서 클립된다). 깊이 방향은 합성 모디파이어로 분리:
-   `proof-surface-lift`(뜬 표면)·`proof-surface-press`(눌린 표면) 중 하나를 반드시 곁들인다
-   (`className="proof-surface proof-surface-lift"` 관례, 구 `-sm`/`-xs` 합성과 동형). */
-/* story #4125(라이브 실측, 페드루 PO 2026-09-21 19:59Z) — #4121이 이 표면 위에 `lg:sticky`
-   유틸리티를 얹었는데 라이브에서 computed position이 relative로 고정됐다. 근본은 위
-   `.animate-*` 자리와 동일: 이 네 규칙이 최상위(레이어 밖)이라 Tailwind utilities 레이어의
-   `position`(sticky/absolute/fixed 등)·`border-radius`(rounded-*)·`box-shadow`(shadow-*)
-   유틸리티를 명시도·순서 무관하게 항상 이겼다(Cascade Layers 스펙 — 레이어 밖은 항상
-   레이어 안을 이긴다). PR #4498의 overflow-hidden 제거는 sticky의 스크롤 컨테이너 문제를
-   고쳤을 뿐 이 캐스케이드 문제는 그대로 남아 있었다. `@layer components`로 감싸 유틸리티가
-   정상적으로 이기게 한다(선언 내용은 무변경). */
+/* story 4919 — `.proof-surface`는 모양(position:relative + 소프트 라운드)뿐이다. 8-25의 결(그레인 `::before`)과 뜸 · 눌림 그림자(`-lift` · `-press`)는 걷었다 — 선생님 11-14: 결 · 깊이를 걷어 다른 화면처럼 평평하게.
+   모서리(--proof-radius-soft)는 이 PR의 범위가 아니라 그대로다.
+   story #4125(라이브 실측) — 이 규칙은 `@layer components` 안에 둔다: 최상위(레이어 밖)면 Tailwind utilities 레이어의 `position`(lg:sticky 등)·`border-radius`를 항상 이긴다(Cascade Layers). */
 @layer components {
   .proof-surface {
     position: relative;
     border-radius: var(--proof-radius-soft);
-  }
-  .proof-surface::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background-image: var(--paper-grain);
-    background-repeat: repeat;
-    opacity: var(--paper-grain-opacity);
-    mix-blend-mode: var(--paper-grain-blend);
-    pointer-events: none;
-  }
-  .proof-surface-lift {
-    box-shadow: var(--elev-lift);
-  }
-  .proof-surface-press {
-    box-shadow: var(--emboss-press);
   }
 }
 
@@ -684,20 +646,20 @@
   --foreground: var(--proof-ink);
   --card: var(--proof-panel);
   --card-foreground: var(--proof-ink);
-  --popover: var(--proof-panel);
+  --popover: var(--ds-surface-raised);
   --popover-foreground: var(--proof-ink);
-  --primary: var(--proof-blue);
-  --primary-foreground: oklch(0.16 0.038 262);
+  --primary: var(--ds-action);
+  --primary-foreground: var(--ds-on-action);
   --secondary: var(--proof-sunk);
   --secondary-foreground: var(--proof-ink-2);
   --muted: var(--proof-sunk);
   --muted-foreground: var(--proof-ink-3);
   --accent: var(--proof-sunk);
   --accent-foreground: var(--proof-ink-2);
-  --destructive: var(--proof-red);
+  --destructive: var(--ds-failed);
   --border: var(--proof-line);
-  --input: var(--proof-line);
-  --ring: var(--proof-blue);
+  --input: var(--ds-line-control);
+  --ring: var(--ds-action);
   --chart-1: oklch(0.871 0.006 286.286);
   --chart-2: oklch(0.75 0.016 285.938);
   --chart-3: oklch(0.62 0.017 285.786);
@@ -706,19 +668,17 @@
   /* story #2917: 라이트와 동일 별칭 원칙(sidebar가 card/primary/muted/border를 거울처럼 따름). */
   --sidebar: var(--proof-panel);
   --sidebar-foreground: var(--proof-ink);
-  --sidebar-primary: var(--proof-blue);
-  --sidebar-primary-foreground: oklch(0.16 0.038 262);
+  --sidebar-primary: var(--ds-action);
+  --sidebar-primary-foreground: var(--ds-on-action);
   --sidebar-accent: var(--proof-sunk);
   --sidebar-accent-foreground: var(--proof-ink-2);
   --sidebar-border: var(--proof-line);
-  --sidebar-ring: var(--proof-blue);
+  --sidebar-ring: var(--ds-action);
 
-  /* Sprintable brand (blue, lighter for dark) — hue/chroma 스펙 그대로, L은 라이트와 동일 규칙 */
-  --brand: oklch(0.64 0.17 254);
-  /* story #2318: 신설(라이트와 다른 값) — 다크 brand는 밝은 파랑이라 밝은 텍스트로는 3.24:1
-     미달. --primary-foreground(다크)와 동일 패턴(어두운 남색)으로 보정해 5.74:1 확保. */
-  --brand-foreground: oklch(0.16 0.038 262);
-  --primary-tint: oklch(0.28 0.075 260);
+  /* story 4930: 다크도 ds action 별칭(위 라이트와 같은 이유) — 다크 action(#8e7fff) 위 글은 ds on-action(어두운 남보라)이라 옛 «밝은 파랑 위 어두운 글» 보정(story #2318)은 ds가 이미 한다. */
+  --brand: var(--ds-action);
+  --brand-foreground: var(--ds-on-action);
+  --primary-tint: var(--ds-action-soft);
 
   /* story #2529(유나 핸드오프 §1): 다크 표면에선 라이트용 인디고(#42549B)가 제품 다크배경
      (#111114) 위에서 대비가 부족해 Figma가 의도적으로 모노(흰+회)로 뺐다 — 듀오톤 아님. */
@@ -755,10 +715,10 @@
   --scrollbar-thumb-hover: oklch(1 0 0 / 80%);
   --scrollbar-track: transparent;
 
-  --brand-soft: oklch(0.80 0.10 258);
-  --brand-strong: oklch(0.55 0.22 258);
-  --brand-text: var(--brand-soft); /* story #4315 — 어두운 테마 브랜드 글자(배경 10.48 · 패널 9.42 · brand/14 틴트 7.87 · brand-strong은 3.92라 아님) */
-  --brand-contrast: oklch(0.22 0.05 258);
+  --brand-soft: var(--ds-action-text);
+  --brand-strong: var(--ds-action);
+  --brand-text: var(--brand-soft); /* story #4315 — 어두운 테마 브랜드 글자(옅은 쪽이 읽힌다 · story 4930: 값은 ds action-text · 대비는 old-palette-alias.4919.test.ts가 계산) */
+  --brand-contrast: var(--ds-action-soft);
 
   /* DS-S13: Extended semantic tokens */
   --overlay-backdrop: oklch(0 0 0 / 60%);
@@ -797,41 +757,41 @@
   /* Tiptap editor (dark) */
   --tiptap-code-bg: oklch(0.22 0 0);
   --tiptap-pre-bg: oklch(0.14 0 0);
-  --tiptap-blockquote-border: oklch(0.70 0.18 258);
+  --tiptap-blockquote-border: var(--ds-action);
   --tiptap-blockquote-bg: oklch(0.14 0 0 / 50%);
   --tiptap-table-border: oklch(0.30 0 0);
   --tiptap-th-bg: oklch(0.18 0 0);
   --tiptap-hr-border: oklch(0.25 0 0);
   --tiptap-placeholder: oklch(0.50 0 0);
-  --tiptap-selection: oklch(0.70 0.18 258);
-  --tiptap-link: oklch(0.75 0.14 258);
+  --tiptap-selection: var(--ds-action);
+  --tiptap-link: var(--ds-action-text);
   --tiptap-callout-border: var(--proof-amber);
   --tiptap-callout-bg: var(--proof-amber-soft);
 
   /* E-UI-DAEGBYEON P0: Proof Capsule (Dark · Carbon/Fog) — proof-capsule-mockup-render 정확값.
      단순 반전 아님(§ 의미대비) — blue/green/amber/red 전부 dark 전용 값. */
-  --proof-bg: #0B0C0D;
-  --proof-panel: #17191C;
-  --proof-sunk: #111315;
-  --proof-line: #2B2E2D;
-  --proof-line-soft: #232628;
+  --proof-bg: var(--ds-background);
+  --proof-panel: var(--ds-surface);
+  --proof-sunk: var(--ds-surface-sunk);
+  --proof-line: var(--ds-line);
+  --proof-line-soft: var(--ds-line);
   /* story #2969 §1.2(PR-4) — 다크 오버레이 강조 hairline. 라이트와 동일 공식(color-mix 50%
      proof-ink) — 다크 proof-ink는 밝은 텍스트색이라 자동으로 "더 밝은/눈에 띄는" 방향으로
      간다(테마별 반전 로직 불요). 유나 확定(2026-08-23) — 이 공식 그대로. */
   --proof-line-strong: color-mix(in oklch, var(--proof-line) 50%, var(--proof-ink) 50%);
-  --proof-ink: #F2F4ED;
-  --proof-ink-2: #C4C7BE;
-  --proof-ink-3: #8D9088;
-  --proof-faint: #5F625B;
-  --proof-blue: #6B87FF;
-  --proof-blue-soft: #1C2438;
+  --proof-ink: var(--ds-ink);
+  --proof-ink-2: var(--ds-ink-2);
+  --proof-ink-3: var(--ds-ink-3);
+  --proof-faint: var(--ds-line-strong);
+  --proof-blue: var(--ds-info);
+  --proof-blue-soft: var(--ds-info-soft);
   --proof-citron: #C7F85A;
-  --proof-green: #4FB97E;
-  --proof-green-soft: #14251C;
-  --proof-amber: #D9A441;
-  --proof-amber-soft: #2A2214;
-  --proof-red: #E06767;
-  --proof-red-soft: #2A1717;
+  --proof-green: var(--ds-done);
+  --proof-green-soft: var(--ds-done-soft);
+  --proof-amber: var(--ds-needs-hand);
+  --proof-amber-soft: var(--ds-needs-hand-soft);
+  --proof-red: var(--ds-failed);
+  --proof-red-soft: var(--ds-failed-soft);
 
   /* story #2969 §1.2(PR-T) — 다크 오버레이 그림자(라이트 대응값의 doc §1.2 지정 다크값). */
   --elev-overlay: 0 1px 2px rgba(0, 0, 0, .5), 0 12px 34px -8px rgba(0, 0, 0, .62);
@@ -845,24 +805,6 @@
      패널(#17191C대)에 그대로 쓰면 과도하게 튀어(carbon-tint 위반) — 라이트보다 옅은 흰색
      상단 하이라이트(0.08)로 축소, 하단 그림자는 검정 자체가 배경과 거의 안 갈려 생략. */
   --elev-inset: inset 0 1px 0 rgba(255, 255, 255, .08);
-
-  /* story #7d7634ee — §⑤가 그레인 강도/블렌드는 명시(다크 16%·overlay)했지만 --elev-lift/
-     --emboss-press의 다크 수치는 안 줬다(라이트 전용 정본). 기존 --elev-card/--elev-inset의
-     라이트→다크 축소비(검정 베이스로 교체+하이라이트를 .6~.85→.08로 대폭 축소)를 그대로
-     따라 유도했다 — 임의 신규값 아님, 이 파일 자체의 기존 다크 변환 관례 재사용. */
-  --elev-lift: 0 10px 24px -8px rgba(0, 0, 0, .55), 0 2px 6px -2px rgba(0, 0, 0, .42), inset 0 1px 0 rgba(255, 255, 255, .08);
-  --emboss-press: inset 0 1px 2px rgba(0, 0, 0, .35), inset 0 -1px 0 rgba(255, 255, 255, .08);
-
-  /* story #7d7634ee — 카디르 QA 재측 발견: 최초 처방(다크 16%·overlay, 위 주석의 검정-베이스
-     축소 관례 그대로 적용)은 수학적으로 소멸한다 — near-black(#0B0C0D대) 패널 위에 "검정"
-     노이즈를 overlay하면 어두운 픽셀끼리 곱해져(overlay는 밝은 곳만 multiply, 어두운 곳은
-     거의 무변화) 실측상 거의 안 보였다(라이트 대비 7~8%). 유나 정정(RMS 정량 검증) — 다크는
-     흰-노이즈(feColorMatrix RGB=1·A=noise, 아래 SVG)+screen 블렌드+20% 로 라이트와 파리티
-     (RMS 20.6~22.7%, 라이트 22%와 근접) 달성. 라이트 정의(위 :root, 검정-노이즈·multiply·22%)
-     는 무변경 — 이 블록에서 다크만 --paper-grain 자체를 흰-노이즈로 오버라이드. */
-  --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.62' numOctaves='2' stitchTiles='stitch' result='noise'/%3E%3CfeColorMatrix in='noise' type='matrix' values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  --paper-grain-opacity: .20;
-  --paper-grain-blend: screen;
 }
 
 /* Sidebar: open triggers get active background.
@@ -1149,17 +1091,23 @@
 @layer components {
   .dashboard-shell-root {
     --shell-inset: 0.5rem;
-    --shell-chrome-h: calc(3rem + 2 * var(--shell-inset));
+    --shell-chrome-h: calc(3rem + 2 * var(--shell-inset) + var(--shell-bands-h, 0px) + var(--shell-launcher-clear, 0px));
   }
   .dashboard-shell-root[data-topbar-hidden] {
-    --shell-chrome-h: calc(2 * var(--shell-inset));
+    --shell-chrome-h: calc(2 * var(--shell-inset) + var(--shell-bands-h, 0px) + var(--shell-launcher-clear, 0px));
   }
   @media (max-width: 1023px) {
     .dashboard-shell-root {
-      --shell-chrome-h: calc(3rem + var(--mobile-tab-bar-h));
+      --shell-chrome-h: calc(3rem + var(--mobile-tab-bar-h) + var(--shell-bands-h, 0px) + var(--shell-launcher-clear, 0px));
     }
     .dashboard-shell-root[data-topbar-hidden] {
-      --shell-chrome-h: var(--mobile-tab-bar-h);
+      --shell-chrome-h: calc(var(--mobile-tab-bar-h) + var(--shell-bands-h, 0px) + var(--shell-launcher-clear, 0px));
     }
   }
+  /* 4913 셸 — 둥근 도움말(지원) 단추가 그려지는 동안(`<html data-support-launcher>`, 단추 컴포넌트가 «그려진다»와 같은 값으로 켜고 끈다) 화면 아래 4rem(= 단추 48px + 창 가장자리 16px)을 비워
+     단추가 화면의 눌리는 것(실제 크기 단추 · 보내기 …)을 덮지 않게 한다 — 노치 폰은 단추를 놓는 BottomDock이 `--bottom-dock-inset`에 안전 영역을 더하므로 여백도 같은 만큼(데스크톱은 0). 비운 만큼은 스크롤러 아래 여백(`pb-[var(--shell-launcher-clear)]`)이고 앵커 화면은 `--shell-chrome-h`로 같은 만큼 짧아진다. 단추가 안 그려지면(설정 · 모바일 채팅 상세 · 온보딩 완주) 0. */
+  :root[data-support-launcher] .dashboard-shell-root {
+    --shell-launcher-clear: calc(4rem + env(safe-area-inset-bottom, 0px));
+  }
+  /* --shell-bands-h: 셸 스크롤러 맨 위의 «있을 때만» 띠 셋이 먹은 높이 — 값은 셸이 잰다(components/nav/shell-bands-height.ts · ResizeObserver) — 서버가 그린 첫 값은 없음(0). */
 }

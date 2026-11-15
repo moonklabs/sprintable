@@ -11,8 +11,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ds/button';
+import { Card } from '@/components/ds/card';
 import { fetchWithAuth, logoutUser } from '@/lib/db/client';
 import { pickEuroJosa } from '@/lib/korean-particle';
 import { listenVerified } from '@/lib/auth/email-verified-signal';
@@ -138,22 +138,22 @@ export function EmailVerifyGateCard({ gate }: { gate: Extract<VerifyGate, { kind
   const answer = gate.resend === 'sent' ? t('resendSent') : gate.resend === 'limited' ? t('resendLimited') : gate.resend === 'failed' ? t('resendFailed') : null;
   return (
     <Card className="break-keep flex flex-col p-6" data-testid="email-verify-gate">
-      <p className="text-xs text-muted-foreground">{t('eyebrow')}</p>
-      <h1 className="mt-0.5 text-base font-semibold">{t('title')}</h1>
-      <p className="mt-2 text-sm">
+      <p className="text-ds-small text-ds-ink-3">{t('eyebrow')}</p>
+      <h1 className="mt-0.5 text-ds-card-title font-semibold text-ds-ink">{t('title')}</h1>
+      <p className="mt-2 text-ds-body text-ds-ink">
         {gate.email ? <BoldPart text={t('body', { email: gate.email, euro: pickEuroJosa(gate.email) })} part={gate.email} /> : t('bodyNoEmail')}
       </p>
-      <p className="mt-1 text-sm text-muted-foreground">{t('anywhere')}</p>
-      <p role="status" className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
+      <p className="mt-1 text-ds-body text-ds-ink-3">{t('anywhere')}</p>
+      <p role="status" className="mt-4 flex items-center gap-2 text-ds-small text-ds-ink-3">
         <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />{t('waiting')}
       </p>
       <div className="mt-4">
-        <Button variant="outline" size="sm" onClick={gate.sendAgain} disabled={gate.resend === 'sending'}>{t('resend')}</Button>
-        {answer ? <p role="status" className="mt-2 text-xs text-muted-foreground" data-testid="email-verify-gate-resend">{answer}</p> : null}
+        <Button type="button" variant="secondary" onClick={gate.sendAgain} disabled={gate.resend === 'sending'}>{t('resend')}</Button>
+        {answer ? <p role="status" className="mt-2 text-ds-small text-ds-ink-3" data-testid="email-verify-gate-resend">{answer}</p> : null}
       </div>
-      <p className="-mx-6 mt-5 border-t px-6 pt-3.5 text-xs text-muted-foreground">
-        {t('wrongAddress')}{' '}
-        <Button variant="link" size="sm" className="h-auto p-0 text-xs underline" onClick={gate.registerAgain}>{t('otherAddress')}</Button>
+      <p className="-mx-6 mt-5 flex flex-wrap items-center gap-x-1 border-t border-ds-line px-6 pt-3.5 text-ds-small text-ds-ink-3">
+        <span>{t('wrongAddress')}</span>
+        <Button type="button" variant="quiet" className="underline" onClick={gate.registerAgain}>{t('otherAddress')}</Button>
       </p>
     </Card>
   );
@@ -166,7 +166,7 @@ export function EmailVerifyGate({ children }: { children: ReactNode }) {
   // on its own page (/onboarding): centered like the onboarding forms it stands in for — 16px sides at 360
   if (gate.kind === 'closed') {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="flex min-h-screen items-center justify-center bg-ds-background px-4">
         <div className="w-full max-w-md"><EmailVerifyGateCard gate={gate} /></div>
       </div>
     );

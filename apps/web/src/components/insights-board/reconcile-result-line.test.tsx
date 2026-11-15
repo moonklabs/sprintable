@@ -66,8 +66,8 @@ describe('ReconcileResultLine(story #3620)', () => {
   });
 
   // story #3620 CHANGES(페드루 PO 지시, 유나 PASS 후속) — 결과 줄에서 세 판정이 한
-  // 색·굵기라 「불일치」가 안 두드러졌다. 불일치 판정 조각만 font-medium text-foreground.
-  it('불일치 판정만 font-medium text-foreground로 두드러진다(destructive 아님)', async () => {
+  // 색·굵기라 「불일치」가 안 두드러졌다. 불일치 판정 조각만 font-medium text-ds-ink.
+  it('불일치 판정만 font-medium text-ds-ink로 두드러진다(destructive 아님)', async () => {
     await act(async () => {
       root.render(wrap(<ReconcileResultLine verdicts={{ views: 'mismatch', engagements: 'match' }} />));
     });
@@ -76,7 +76,7 @@ describe('ReconcileResultLine(story #3620)', () => {
     const mismatchSpan = spans.find((s) => s.textContent === koMessages.insightsBoard.reconcileVerdictMismatch);
     const matchSpan = spans.find((s) => s.textContent === koMessages.insightsBoard.reconcileVerdictMatch);
     expect(mismatchSpan?.className).toContain('font-medium');
-    expect(mismatchSpan?.className).toContain('text-foreground');
+    expect(mismatchSpan?.className).toContain('text-ds-ink');
     expect(mismatchSpan?.className).not.toContain('destructive');
     expect(matchSpan?.className ?? '').not.toContain('font-medium');
   });

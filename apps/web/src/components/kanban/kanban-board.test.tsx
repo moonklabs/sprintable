@@ -48,15 +48,17 @@ vi.mock('@/app/dashboard/dashboard-shell', () => ({
 // useSseNotifications를 모킹해 콜백을 캡처하는 기존 관례(story-detail-panel.test.tsx)와
 // 동형으로, DndContext만 부분 모킹해 onDragEnd를 캡처한다(다른 export는 실물 그대로 재사용 —
 // useDroppable/useSortable 등은 실제 dnd-kit 훅이라야 카드 wiring 테스트가 의미 있음).
-const { capturedDragEndHandlers } = vi.hoisted(() => ({
+const { capturedDndProps, capturedDragEndHandlers } = vi.hoisted(() => ({
   capturedDragEndHandlers: [] as Array<(event: unknown) => void>,
+  capturedDndProps: [] as Array<{ sensors?: unknown; accessibility?: unknown; onDragStart?: (e: unknown) => void; onDragCancel?: () => void }>,
 }));
 vi.mock('@dnd-kit/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@dnd-kit/core')>();
   return {
     ...actual,
-    DndContext: ({ onDragEnd, children }: { onDragEnd?: (event: unknown) => void; children?: React.ReactNode }) => {
+    DndContext: ({ onDragEnd, children, sensors, accessibility, onDragStart, onDragCancel }: { onDragEnd?: (event: unknown) => void; children?: React.ReactNode; sensors?: unknown; accessibility?: unknown; onDragStart?: (e: unknown) => void; onDragCancel?: () => void }) => {
       if (onDragEnd) capturedDragEndHandlers.push(onDragEnd);
+      capturedDndProps.push({ sensors, accessibility, onDragStart, onDragCancel });
       return children;
     },
   };
@@ -163,6 +165,7 @@ beforeEach(() => {
     bottomDockBannerSlot: bannerSlot,
   });
   capturedDragEndHandlers.length = 0;
+  capturedDndProps.length = 0;
   isMobileMock = false;
   searchRef.current = '';
 });
@@ -556,8 +559,9 @@ describe('KanbanBoard — 스토리 생성 실패 접근성(story #2105 2차)', 
     expect(alertEl?.getAttribute('aria-live')).toBe('assertive');
     // story 3466 후속(무효 유틸 4곳) — 이 배너가 no-op text-destructive-foreground
     // 대신 실 렌더 색을 갖는지.
-    expect(alertEl?.className).toContain('text-on-scrim'); // story 4831: text-white → 바탕 이름(항상 흰색)
-    expect(alertEl?.className).toContain('dark:text-proof-bg');
+    expect(alertEl?.className).toContain('text-background'); // story 4919: 고체 --destructive가 ds-failed(다크 #ffb4ab)가 돼 «바탕을 뚫은 글»(text-background)로 — 양 테마 대비 ≥ 4.5
+    expect(alertEl?.className).not.toContain('text-on-scrim');
+    expect(alertEl?.className).not.toContain('dark:text-proof-bg'); // 한 이름(text-background)이 양 테마를 맡는다
     expect(alertEl?.className).not.toContain('text-destructive-foreground');
   });
 
@@ -911,7 +915,7 @@ describe('KanbanBoard — 상세 패널 story 전환 시 로컬 state 리셋(#35
       titleButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve();
     });
-    expect(dialog().querySelector('input[data-slot="input"][data-testid="story-title-input"]')).not.toBeNull();
+    expect(dialog().querySelector('input[data-slot="ds-input"][data-testid="story-title-input"]')).not.toBeNull();
 
     await openPanel('S2');
 
@@ -1143,7 +1147,9 @@ describe('StoryDetailPanel — 영구삭제 트리거 authz(story #2104)', () =>
     stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium' }]);
     await mount();
     await openPanel('S1');
-    expect(container.querySelector('[role="dialog"] button[aria-label="스토리 삭제"]')).not.toBeNull();
+    // story 4945 — 지우기는 닫기 옆 휴지통이 아니라 «더 보기 ⋯» 메뉴 안(사람에게만 ⋯ 단추가 뜬다)
+    expect(container.querySelector('[role="dialog"] button[aria-label="더 보기"]')).not.toBeNull();
+    expect(container.querySelector('[role="dialog"] button[aria-label="스토리 삭제"]')).toBeNull();
   });
 
   it('agent면 스토리 영구삭제 트리거가 안 뜬다', async () => {
@@ -1155,6 +1161,7 @@ describe('StoryDetailPanel — 영구삭제 트리거 authz(story #2104)', () =>
     await mount();
     await openPanel('S1');
     expect(container.querySelector('[role="dialog"] button[aria-label="스토리 삭제"]')).toBeNull();
+    expect(container.querySelector('[role="dialog"] button[aria-label="더 보기"]')).toBeNull(); // story 4945 — ⋯ 도 사람에게만
   });
 });
 
@@ -1295,6 +1302,26 @@ describe('KanbanBoard — 6단계 신뢰축 뷰(story #2933 H4)', () => {
     const sortableCards = Array.from(container.querySelectorAll('[aria-roledescription="sortable"]'));
     const lockedCardIsSortable = sortableCards.some((el) => el.textContent?.includes('잠긴카드'));
     expect(lockedCardIsSortable).toBe(false);
+  });
+
+  // story #4888(UI-5 보드 머리 첫 조각, AC3 §4-3) — 비어 있는 잠긴 열은 띠로. 기본 화면에서 «빈 잠긴 칸 3개 × 280px»이 가로를 먹던 것을 좁힌다.
+  // 카드가 있는 잠긴 열은 칸 그대로 · 빈 settable 열(대기 · 실행 중 · 주장 완료 · 완료)은 띠가 아니다(거기서 일감을 만든다).
+  it('⭐잠긴 열 3개(입력 필요 · 검증·잔존 · 머지 준비)가 비어 있으면 띠 3개로 선다 — 열 이름은 띠에 남는다', async () => {
+    stubFetch([{ id: 's1', title: 'S1', status: 'backlog', priority: 'medium', trust_stage: 'queued' }]);
+    await mount();
+    const strips = [...container.querySelectorAll<HTMLElement>('[data-testid^="trust-column-strip-"]')];
+    expect(strips.map((e) => e.getAttribute('data-trust-column')).sort()).toEqual(['merge_ready', 'needs_input', 'verified']);
+    for (const label of ['입력 필요', '검증·잔존', '머지 준비']) expect(container.textContent).toContain(label);
+    // 비어 있는 settable 열은 띠가 아니다 — 칸(280px)으로 선다.
+    expect(container.querySelectorAll('[class*="w-\\[280px\\]"]').length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('⭐잠긴 열에 카드가 있으면 그 열만 칸으로 서고 나머지 빈 잠긴 열은 띠다', async () => {
+    stubFetch([{ id: 's-locked', title: '잠긴카드', status: 'in-progress', priority: 'medium', trust_stage: 'needs_input' }]);
+    await mount();
+    const stripIds = [...container.querySelectorAll<HTMLElement>('[data-testid^="trust-column-strip-"]')].map((e) => e.getAttribute('data-trust-column')).sort();
+    expect(stripIds).toEqual(['merge_ready', 'verified']);
+    expect(container.textContent).toContain('잠긴카드');
   });
 
   it('trust_stage=null이어도 status="in-progress"(running, settable)면 정상적으로 드래그 wiring이 붙는다', async () => {
@@ -1524,14 +1551,102 @@ describe('KanbanBoard — story #3043 <lg 기본값=list(칸반 다열은 opt-in
     stubFetch([{ id: 's-atom', title: '원자카드', status: 'backlog', priority: 'medium' }]);
     await mount();
 
-    // CardVariant(ProofCapsule density="card")의 CutCornerShell 마커 — 예전 ListStoryRow
-    // 자체 마크업(rounded-lg border, proof-surface 없음)엔 없던 클래스라 진짜 atom 재사용의
-    // 증거. story #7d7634ee(P0)로 컷코너(proof-cut)가 재질(proof-surface)로 교체됨.
-    expect(container.innerHTML).toContain('proof-surface');
-    // max-w-[280px](desktop 컬럼 고정폭 전제) 캡이 이 경로에선 max-w-none으로 override돼야
-    // full-width row가 된다 — cn()=twMerge라 나중 클래스가 이긴다(story-card.tsx 확認).
-    expect(container.innerHTML).toContain('max-w-none');
+    // 4908 — 카드 틀은 «글 줄 층»(bg-ds-surface-high)이다. 예전 ListStoryRow 자체 마크업에는 없던 층 토큰이라 진짜 atom 재사용의 증거. 옛 ProofCapsule 틀(proof-surface)과 280px 상한은 없다 — 카드가 w-full이라 목록 행이 폭을 다 쓴다.
+    expect(container.innerHTML).toContain('bg-ds-surface-high');
+    expect(container.innerHTML).not.toContain('proof-surface');
     expect(container.innerHTML).not.toContain('max-w-[280px]');
+  });
+});
+
+// story #4888(UI-5 보드 · 목록 화면, PO 11-10 20:20Z · 디디 셸 실측) — 폰 390은 일감 탭의 기본 보기가 «목록»인데 목록 보기에는 만들기 입구가 0이라
+// 일감 → 보드 보기로 바꾸기 → 스토리 추가(3동작 + 입력)로만 만들 수 있었다. 있는 «스토리 추가»(같은 동작 · 같은 입력칸)를 목록 보기에도 한 자리.
+describe('KanbanBoard — 목록 보기의 «스토리 추가» 입구(story #4888)', () => {
+  async function stubPost(posted: Array<Record<string, unknown>>) {
+    const baseFetch = vi.mocked(fetch);
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url === '/api/stories' && init?.method === 'POST') {
+        const body = JSON.parse(init.body as string) as Record<string, unknown>;
+        posted.push(body);
+        return { ok: true, json: async () => ({ data: { id: 'new-list-1', priority: 'medium', ...body } }) };
+      }
+      return baseFetch(url, init);
+    }));
+  }
+  const addEntry = () => [...container.querySelectorAll('[data-testid="list-story-composer"] button')].find((b) => b.textContent?.includes('스토리 추가')) as HTMLButtonElement | undefined;
+
+  it('⭐폰(기본 보기 = 목록): 보드 보기로 바꾸지 않고도 «스토리 추가»가 있다 — 누르면 입력칸 · 제목 + Enter → status backlog로 POST · 목록에 바로 선다', async () => {
+    isMobileMock = true;
+    const posted: Array<Record<string, unknown>> = [];
+    stubFetch([{ id: 's-existing', title: '있던 카드', status: 'backlog', priority: 'medium' }]);
+    await stubPost(posted);
+    await mount();
+    expect(container.querySelector('button[aria-pressed="true"][title="목록 보기"]')).not.toBeNull(); // 지금 보기 = 목록
+    expect(addEntry()).toBeTruthy();
+    await act(async () => { addEntry()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const input = container.querySelector('[data-testid="list-story-composer"] input') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, '폰에서 만든 일감');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toMatchObject({ title: '폰에서 만든 일감', status: 'backlog', priority: 'medium' });
+    expect(container.textContent).toContain('폰에서 만든 일감');
+    expect(container.textContent).toContain('있던 카드');
+  });
+
+  it('⭐서버가 거절해도(POST 실패) 입력칸과 쓴 제목은 그대로 · 오류가 뜬다 · 목록에 가짜 카드 없음 (codex 5543-2)', async () => {
+    isMobileMock = true;
+    stubFetch([{ id: 's-existing', title: '있던 카드', status: 'backlog', priority: 'medium' }]);
+    const baseFetch = vi.mocked(fetch);
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url === '/api/stories' && init?.method === 'POST') return { ok: false, status: 500, json: async () => null };
+      return baseFetch(url, init);
+    }));
+    await mount();
+    await act(async () => { addEntry()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const input = container.querySelector('[data-testid="list-story-composer"] input') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, '거절당할 일감');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+    const still = container.querySelector('[data-testid="list-story-composer"] input') as HTMLInputElement | null;
+    expect(still).not.toBeNull();
+    expect(still!.value).toBe('거절당할 일감');
+    const alertEl = await waitForAlert();
+    expect(alertEl?.textContent).toContain('스토리 추가에 실패했어요');
+    expect(container.querySelectorAll('[title="거절당할 일감"]')).toHaveLength(0);
+    expect(container.textContent).toContain('있던 카드');
+  });
+
+  it('⭐입구는 목록 맨 위(상태 묶음들보다 앞)에 있다', async () => {
+    isMobileMock = true;
+    stubFetch([{ id: 's1', title: '카드1', status: 'backlog', priority: 'medium' }]);
+    await mount();
+    const entry = container.querySelector('[data-testid="list-story-composer"]')!;
+    const firstGroupButton = [...container.querySelectorAll('[data-testid="kanban-content-area"] button')].find((b) => b.getAttribute('aria-expanded') !== null)!;
+    expect(firstGroupButton).toBeTruthy();
+    expect(entry.compareDocumentPosition(firstGroupButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('보드 보기(데스크톱 기본)에는 목록용 입구가 없다 — 열 머리 «+» 컴포저와 겹치지 않는다', async () => {
+    isMobileMock = false;
+    stubFetch([{ id: 's-desktop', title: '데스크톱카드', status: 'backlog', priority: 'medium' }]);
+    await mount();
+    expect(container.querySelector('[data-testid="list-story-composer"]')).toBeNull();
+  });
+
+  it('데스크톱에서 목록 보기로 바꿔도 같은 입구가 선다(폭이 아니라 보기에 달린 입구)', async () => {
+    isMobileMock = false;
+    stubFetch([{ id: 's-desktop', title: '데스크톱카드', status: 'backlog', priority: 'medium' }]);
+    await mount();
+    const listToggle = container.querySelector<HTMLButtonElement>('button[title="목록 보기"]')!;
+    await act(async () => { listToggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(addEntry()).toBeTruthy();
   });
 });
 
@@ -2117,5 +2232,453 @@ describe('KanbanBoard — 카드 담당 이름 조직 범위 보충([SID:4300])'
     await settle();
     expect(container.querySelector('[title="우리봇"]')).not.toBeNull();
     expect(calls.filter((u) => u.startsWith('/api/team-members'))).toHaveLength(0);
+  });
+});
+
+// 4908 — 상세 패널이 열려 있는 카드가 «열린 카드»(층 + 왼쪽 막대 + aria-current)로 표시된다: 신뢰축 · 클래식 · 목록 세 길 모두 보드가 selectedStoryId를 내려보낸다.
+describe('KanbanBoard — 열린 카드 표시(4908)', () => {
+  async function openCard(title: string) {
+    const card = container.querySelector(`[title="${title}"]`) as HTMLElement | null;
+    expect(card, `${title} 카드`).not.toBeNull();
+    await act(async () => {
+      card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+  const selected = () => [...container.querySelectorAll<HTMLElement>('[data-selected="true"]')];
+  const stories = [
+    { id: 's1', title: '카드하나', status: 'backlog', priority: 'medium', trust_stage: 'queued' },
+    { id: 's2', title: '카드둘', status: 'backlog', priority: 'medium', trust_stage: 'queued' },
+  ];
+
+  it('⭐신뢰축: 누른 카드 하나만 열린 카드가 된다', async () => {
+    stubFetch(stories);
+    await mount();
+    expect(selected()).toHaveLength(0);
+    await openCard('카드둘');
+    expect(selected()).toHaveLength(1);
+    expect(selected()[0]!.getAttribute('title')).toBe('카드둘');
+    expect(selected()[0]!.getAttribute('aria-current')).toBe('true');
+  });
+
+  it('⭐클래식 5단계: 누른 카드 하나만 열린 카드가 된다', async () => {
+    stubFetch(stories);
+    await mount();
+    const classicBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '5단계 클래식');
+    await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await openCard('카드하나');
+    expect(selected()).toHaveLength(1);
+    expect(selected()[0]!.getAttribute('title')).toBe('카드하나');
+  });
+
+  it('⭐목록 보기(폰): 누른 카드 하나만 열린 카드가 된다', async () => {
+    isMobileMock = true;
+    stubFetch(stories);
+    await mount();
+    await openCard('카드하나');
+    expect(selected()).toHaveLength(1);
+  });
+});
+
+// 4908 셋째 조각 — 카드 메뉴가 직접 하는 일: 담당자 켜고 끄기(패널과 같은 PATCH) · 제목 바로 바꾸기 · 삭제는 사람 전용.
+describe('KanbanBoard — 카드 메뉴 담당자 · 이름 바꾸기 · 삭제(4908)', () => {
+  const members = [{ id: 'm1', name: '안나', type: 'human' }, { id: 'm2', name: '빌드 에이전트', type: 'agent' }];
+  const stories = [{ id: 's1', title: '카드하나', status: 'backlog', priority: 'medium', trust_stage: 'queued', assignee_id: 'm1', assignee_ids: ['m1'] }];
+
+  /** 보드 fetch 위에 PATCH(/api/stories/s1)만 가로채 기록한다. ok=false면 실패를 돌려준다. */
+  function stubPatch(ok = true) {
+    const base = vi.mocked(fetch);
+    const calls: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url === '/api/stories/s1' && init?.method === 'PATCH') {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        calls.push(body);
+        return ok ? { ok: true, json: async () => ({ data: { id: 's1', ...body } }) } : { ok: false, json: async () => ({}) };
+      }
+      return base(url, init);
+    }));
+    return calls;
+  }
+  const menuFor = async (title: string) => {
+    const card = container.querySelector(`[title="${title}"]`) as HTMLElement;
+    await act(async () => { card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 20 })); });
+    return document.body.querySelector<HTMLElement>('[role="menu"]')!;
+  };
+  const item = (scope: ParentNode, text: string) => [...scope.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"]')].find((e) => e.textContent?.includes(text));
+  const press = (el: Element) => act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+
+  it('⭐«담당자 ▸»에서 한 사람을 켜면 패널과 같은 PATCH(assignee_ids 전체 배열)가 나가고 카드 담당이 바로 바뀐다', async () => {
+    stubFetch(stories, members);
+    await mount();
+    const calls = stubPatch();
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    const agent = [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes('빌드 에이전트'))!;
+    await press(agent);
+    expect(calls).toEqual([{ assignee_ids: ['m1', 'm2'] }]);
+    const checked = [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].map((b) => b.getAttribute('aria-checked'));
+    expect(checked).toEqual(['true', 'true']);
+  });
+
+  it('⭐켠 사람을 다시 누르면 빠진다(전체 배열 교체) · 마지막 한 명을 빼면 빈 배열', async () => {
+    stubFetch(stories, members);
+    await mount();
+    const calls = stubPatch();
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    await press([...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes('안나'))!);
+    expect(calls).toEqual([{ assignee_ids: [] }]);
+  });
+
+  it('⭐담당자 PATCH가 실패하면 직전 값으로 되돌리고 패널과 같은 실패 문구를 띄운다', async () => {
+    stubFetch(stories, members);
+    await mount();
+    stubPatch(false);
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    await press([...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes('빌드 에이전트'))!);
+    const checked = [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].map((b) => b.getAttribute('aria-checked'));
+    expect(checked).toEqual(['true', 'false']);
+    expect(document.body.textContent).toContain(koMessages.board.assigneeChangeFailed);
+  });
+
+  it('⭐제목 바로 바꾸기: 메뉴 «이름 바꾸기» → 새 제목 Enter → PATCH {title} · 카드 제목이 바로 바뀐다', async () => {
+    stubFetch(stories, members);
+    await mount();
+    const calls = stubPatch();
+    await press(item(await menuFor('카드하나'), koMessages.board.renameStory)!);
+    const input = container.querySelector<HTMLInputElement>('input[aria-label^="카드하나"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '새 제목');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    expect(calls).toEqual([{ title: '새 제목' }]);
+    expect(container.textContent).toContain('새 제목');
+  });
+
+  it('⭐제목 PATCH가 실패하면 옛 제목으로 되돌리고 패널과 같은 실패 문구를 띄운다', async () => {
+    stubFetch(stories, members);
+    await mount();
+    stubPatch(false);
+    await press(item(await menuFor('카드하나'), koMessages.board.renameStory)!);
+    const input = container.querySelector<HTMLInputElement>('input[aria-label^="카드하나"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '실패할 제목');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.textContent).not.toContain('실패할 제목');
+    expect(container.textContent).toContain('카드하나');
+    expect(document.body.textContent).toContain(koMessages.board.titleSaveFailed);
+  });
+
+  it('⭐그 카드의 상세 패널이 열려 있으면 메뉴에서 바꾼 담당자가 패널에도 바로 보인다(카드와 패널이 어긋나지 않는다)', async () => {
+    stubFetch(stories, members);
+    await mount();
+    stubPatch();
+    const card = container.querySelector('[title="카드하나"]') as HTMLElement;
+    await act(async () => { card.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    const dialog = container.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog.textContent).toContain('안나');
+    expect(dialog.textContent).not.toContain('빌드 에이전트');
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    await press([...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes('빌드 에이전트'))!);
+    expect((container.querySelector('[role="dialog"]') as HTMLElement).textContent).toContain('빌드 에이전트');
+  });
+
+  it('⭐메뉴 칩으로 상태를 바꾸면 카드가 다른 열로 옮겨 가 다시 서도 초점이 그 카드에 남는다(body로 빠지지 않는다)', async () => {
+    stubFetch(stories, members);
+    await mount();
+    const classicBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '5단계 클래식');
+    await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const base = vi.mocked(fetch);
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => (
+      typeof url === 'string' && url === '/api/stories/bulk' && init?.method === 'PATCH' ? { ok: true, json: async () => ({ data: [] }) } : base(url, init)
+    )));
+    const before = container.querySelector('[data-story-id="s1"]');
+    const menu = await menuFor('카드하나');
+    await press(menu.querySelector('[data-status-chip="in-progress"]')!);
+    await flush();
+    const after = container.querySelector('[data-story-id="s1"]') as HTMLElement;
+    expect(after).not.toBeNull();
+    expect(after, '다른 열로 옮겨 다시 선 카드').not.toBe(before);
+    expect(document.activeElement).toBe(after);
+  });
+
+  /** PATCH를 손에 쥔다: 요청마다 resolve 대기열에 서고, 테스트가 순서를 정해 응답한다. */
+  function stubDeferredPatch() {
+    const base = vi.mocked(fetch);
+    const bodies: Array<Record<string, unknown>> = [];
+    const answers: Array<(ok: boolean) => void> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url === '/api/stories/s1' && init?.method === 'PATCH') {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        bodies.push(body);
+        return new Promise((resolve) => answers.push((ok) => resolve(ok ? { ok: true, json: async () => ({ data: { id: 's1', ...body } }) } : { ok: false, json: async () => ({}) })));
+      }
+      return base(url, init);
+    }));
+    return { bodies, answers };
+  }
+  const flush = () => act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+
+  it('⭐연타: 두 번째 토글은 첫 요청이 안 끝나도 «화면에 이미 그려진 값»에서 계산된다 · 첫 요청이 실패해도 새 값을 덮지 않는다', async () => {
+    stubFetch(stories, [...members, { id: 'm3', name: '카를로스', type: 'human' }]);
+    await mount();
+    const { bodies, answers } = stubDeferredPatch();
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    const box = (name: string) => [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes(name))!;
+    await press(box('빌드 에이전트'));
+    await press(box('카를로스'));
+    expect(bodies).toEqual([{ assignee_ids: ['m1', 'm2'] }, { assignee_ids: ['m1', 'm2', 'm3'] }]);
+    answers[0]!(false); await flush(); // 먼저 보낸 요청이 늦게 실패
+    answers[1]!(true); await flush();
+    const checked = [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].map((b) => b.getAttribute('aria-checked'));
+    expect(checked).toEqual(['true', 'true', 'true']);
+    expect(document.body.textContent).not.toContain(koMessages.board.assigneeChangeFailed);
+  });
+
+  it('⭐순서가 뒤바뀐 성공: 나중에 보낸 요청의 응답이 먼저 오고, 먼저 보낸 요청의 응답이 늦게 와도 새 값을 옛 값으로 덮지 않는다', async () => {
+    stubFetch(stories, [...members, { id: 'm3', name: '카를로스', type: 'human' }]);
+    await mount();
+    const { bodies, answers } = stubDeferredPatch();
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    const box = (name: string) => [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes(name))!;
+    await press(box('빌드 에이전트'));
+    await press(box('카를로스'));
+    answers[1]!(true); await flush();
+    answers[0]!(true); await flush(); // 첫 요청의 서버 값은 [m1, m2] — 이게 화면을 덮으면 카를로스가 빠진다
+    const checked = [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].map((b) => b.getAttribute('aria-checked'));
+    expect(checked).toEqual(['true', 'true', 'true']);
+    // 안쪽 기준값도 새 값이어야 한다 — 다음 토글(안나 끄기)이 [m2, m3]로 나간다([m2]가 아니라)
+    await press(box('안나'));
+    expect(bodies.at(-1)).toEqual({ assignee_ids: ['m2', 'm3'] });
+  });
+
+  it('⭐확인값은 뒤로 가지 않는다: 둘째 요청이 먼저 성공하고 첫 요청이 늦게 성공해도(셋째가 아직 진행 중) 셋째가 실패하면 첫 요청이 아니라 둘째 요청의 값으로 되돌린다', async () => {
+    stubFetch(stories, [...members, { id: 'm3', name: '카를로스', type: 'human' }]);
+    await mount();
+    const { answers } = stubDeferredPatch();
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    const box = (name: string) => [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes(name))!;
+    await press(box('빌드 에이전트')); // 요청 0: [m1, m2]
+    await press(box('카를로스'));       // 요청 1: [m1, m2, m3]
+    await press(box('안나'));           // 요청 2: [m2, m3] — 아직 진행 중이라 «대기 상태 재시작»이 확인값을 지우지 못한다
+    answers[1]!(true); await flush();
+    answers[0]!(true); await flush();   // 먼저 보낸 요청이 늦게 성공 — 확인값을 [m1, m2]로 되돌리면 안 된다
+    answers[2]!(false); await flush();
+    const checked = [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].map((b) => b.getAttribute('aria-checked'));
+    expect(checked).toEqual(['true', 'true', 'true']); // 서버가 받은 마지막 값 = 요청 1의 [m1, m2, m3]
+  });
+
+  it('⭐제목도 확인값이 뒤로 가지 않는다: 둘째 이름 바꾸기가 먼저 성공하고 첫째가 늦게 성공해도(셋째 진행 중) 셋째가 실패하면 둘째 제목으로 되돌린다', async () => {
+    stubFetch(stories, members);
+    await mount();
+    const { answers } = stubDeferredPatch();
+    let current = '카드하나';
+    const rename = async (text: string) => {
+      await press(item(await menuFor(current), koMessages.board.renameStory)!);
+      const input = container.querySelector<HTMLInputElement>('input[aria-label$="이름 바꾸기"]')!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await Promise.resolve(); });
+      current = text;
+    };
+    await rename('첫째');
+    await rename('둘째');
+    await rename('셋째');
+    answers[1]!(true); await flush();
+    answers[0]!(true); await flush();
+    answers[2]!(false); await flush();
+    expect(container.textContent).toContain('둘째');
+    expect(container.textContent).not.toContain('첫째');
+  });
+
+  it('⭐본문을 읽는 사이 더 나중 토글이 시작돼도 옛 응답 본문이 새 선택을 덮지 않는다', async () => {
+    stubFetch(stories, [...members, { id: 'm3', name: '카를로스', type: 'human' }]);
+    await mount();
+    const base = vi.mocked(fetch);
+    const releases: Array<() => void> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url === '/api/stories/s1' && init?.method === 'PATCH') {
+        const body = JSON.parse(String(init.body)) as { assignee_ids: string[] };
+        if (releases.length === 0) {
+          // 첫 요청: 응답은 왔지만 본문(json)은 손으로 풀어 줄 때까지 대기
+          return { ok: true, json: () => new Promise((resolve) => { releases.push(() => resolve({ data: { id: 's1', assignee_ids: body.assignee_ids } })); }) };
+        }
+        return new Promise(() => {}); // 둘째 요청은 끝나지 않는다
+      }
+      return base(url, init);
+    }));
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    const box = (name: string) => [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes(name))!;
+    await press(box('빌드 에이전트')); // 요청 0 — 본문 대기 중
+    await press(box('카를로스'));       // 요청 1 시작 — 화면은 [m1, m2, m3]
+    releases[0]!(); await flush();       // 옛 본문 도착([m1, m2]) — 새 선택을 덮으면 안 된다
+    const checked = [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].map((b) => b.getAttribute('aria-checked'));
+    expect(checked).toEqual(['true', 'true', 'true']);
+  });
+
+  it('⭐제목 저장이 진행 중이어도 그 사이 들어온 실시간 담당 변경(SSE)에서 다음 토글이 계산된다(옛 담당을 되살리지 않는다)', async () => {
+    stubFetch(stories, [...members, { id: 'm3', name: '카를로스', type: 'human' }]);
+    await mount();
+    const { bodies } = stubDeferredPatch();
+    await press(item(await menuFor('카드하나'), koMessages.board.renameStory)!);
+    const input = container.querySelector<HTMLInputElement>('input[aria-label$="이름 바꾸기"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '저장 중인 제목');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await Promise.resolve(); }); // 제목 요청 — 끝나지 않는다
+    await act(async () => {
+      dispatchSse('story.assignee_changed', { story_id: 's1', project_id: 'proj-1', actor_id: 'other-1', actor_name: '까심', assignee_id: 'm3', old_assignee_id: 'm1', assignees: ['m3'] });
+      await Promise.resolve();
+    });
+    await press(item(await menuFor('저장 중인 제목'), koMessages.board.assignMember)!);
+    await press([...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes('빌드 에이전트'))!);
+    expect(bodies.at(-1)).toEqual({ assignee_ids: ['m3', 'm2'] }); // 옛 [m1]에서 계산하면 [m1, m2]
+  });
+
+  it('⭐연타에서 «마지막» 요청이 실패하면 마지막으로 서버가 받은 값으로 되돌린다', async () => {
+    stubFetch(stories, [...members, { id: 'm3', name: '카를로스', type: 'human' }]);
+    await mount();
+    const { answers } = stubDeferredPatch();
+    await press(item(await menuFor('카드하나'), koMessages.board.assignMember)!);
+    const box = (name: string) => [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((b) => b.textContent?.includes(name))!;
+    await press(box('빌드 에이전트'));
+    await press(box('카를로스'));
+    answers[0]!(true); await flush();
+    answers[1]!(false); await flush();
+    const checked = [...document.body.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].map((b) => b.getAttribute('aria-checked'));
+    expect(checked).toEqual(['true', 'true', 'false']); // 서버가 받은 [m1, m2]
+    expect(document.body.textContent).toContain(koMessages.board.assigneeChangeFailed);
+  });
+
+  it('⭐제목도 같다: 먼저 보낸 이름 바꾸기가 늦게 실패해도 더 나중 이름을 옛 제목으로 덮지 않는다', async () => {
+    stubFetch(stories, members);
+    await mount();
+    const { answers } = stubDeferredPatch();
+    const rename = async (text: string) => {
+      await press(item(await menuFor(text === '첫 제목' ? '카드하나' : '첫 제목'), koMessages.board.renameStory)!);
+      const input = container.querySelector<HTMLInputElement>('input[aria-label$="이름 바꾸기"]')!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await Promise.resolve(); });
+    };
+    await rename('첫 제목');
+    await rename('둘째 제목');
+    answers[0]!(false); await flush();
+    answers[1]!(true); await flush();
+    expect(container.textContent).toContain('둘째 제목');
+    expect(document.body.textContent).not.toContain(koMessages.board.titleSaveFailed);
+  });
+
+  it('⭐더블클릭 = 열기: 카드 첫 클릭이 바로 서랍을 열고, 같은 연속 누름의 둘째 클릭이 서랍 막에 닿아도 서랍은 열린 채 — 막을 처음 누르면 닫힌다(시간 0)', async () => {
+    stubFetch(stories, members);
+    await mount();
+    const card = container.querySelector('[title="카드하나"]') as HTMLElement;
+    await act(async () => { card.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); await Promise.resolve(); await Promise.resolve(); });
+    expect(container.querySelector('[role="dialog"]'), '첫 클릭으로 바로 열림').not.toBeNull();
+    const backdrop = container.querySelector('div[aria-hidden="true"].fixed.inset-0') as HTMLElement;
+    await act(async () => { backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })); });
+    expect(container.querySelector('[role="dialog"]'), '둘째 클릭은 서랍을 닫지 않음').not.toBeNull();
+    await act(async () => { backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); });
+    expect(container.querySelector('[role="dialog"]'), '막을 처음 누르면 닫힘').toBeNull();
+  });
+
+  it('⭐보드의 두 끌기 틀(신뢰축 · 클래식) 모두 키보드 센서와 한국어 낭독을 연결한다(키보드 끌기 동작 자체는 board-dnd.4908.test.tsx — 이 파일은 DndContext를 모킹한다)', async () => {
+    const { KeyboardSensor } = await import('@dnd-kit/core');
+    const { KEYBOARD_SENSOR_OPTIONS } = await import('./board-dnd');
+    stubFetch(stories, members);
+    await mount();
+    const trust = capturedDndProps.at(-1)!;
+    const sensorOf = (props: { sensors?: unknown }) => (props.sensors as Array<{ sensor: unknown; options: unknown }>).find((x) => x.sensor === KeyboardSensor);
+    expect(sensorOf(trust)?.options).toEqual(KEYBOARD_SENSOR_OPTIONS);
+    expect((trust.accessibility as { screenReaderInstructions: { draggable: string } }).screenReaderInstructions.draggable).toBe(koMessages.board.dndInstructions);
+    const classicBtn = [...container.querySelectorAll('button')].find((bn) => bn.textContent === '5단계 클래식');
+    await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const classic = capturedDndProps.at(-1)!;
+    expect(sensorOf(classic)?.options).toEqual(KEYBOARD_SENSOR_OPTIONS);
+    expect((classic.accessibility as { screenReaderInstructions: { draggable: string } }).screenReaderInstructions.draggable).toBe(koMessages.board.dndInstructions);
+  });
+
+  it('⭐키보드로 집었다 제자리에 놓으면(over = active) 아무 일도 없다 — 카드가 맨 아래로 가거나 PATCH가 나가지 않는다(신뢰축 · 클래식)', async () => {
+    stubFetch([...stories, { id: 's2', title: '카드둘', status: 'backlog', priority: 'medium', trust_stage: 'queued' }], members);
+    await mount();
+    const patches = () => vi.mocked(fetch).mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'PATCH').length;
+    const before = patches();
+    const trustEnd = capturedDragEndHandlers.at(-1)!;
+    await act(async () => { await trustEnd({ active: { id: 's1' }, over: { id: 's1' }, activatorEvent: new KeyboardEvent('keydown') }); });
+    expect(patches()).toBe(before);
+    const order = () => [...container.querySelectorAll('[data-story-card]')].map((c) => c.getAttribute('title'));
+    expect(order()).toEqual(['카드하나', '카드둘']);
+    const classicBtn = [...container.querySelectorAll('button')].find((bn) => bn.textContent === '5단계 클래식');
+    await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    const classicEnd = capturedDragEndHandlers.at(-1)!;
+    await act(async () => { await classicEnd({ active: { id: 's1' }, over: { id: 's1' }, activatorEvent: new KeyboardEvent('keydown') }); });
+    expect(patches()).toBe(before);
+    expect(order()).toEqual(['카드하나', '카드둘']);
+  });
+
+  async function keyboardDropThenListChange(axis: 'trust' | 'classic') {
+    stubFetch(stories, members);
+    await mount();
+    if (axis === 'classic') {
+      const classicBtn = [...container.querySelectorAll('button')].find((bn) => bn.textContent === '5단계 클래식');
+      await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    }
+    const handler = capturedDragEndHandlers.at(-1)!;
+    await act(async () => { await handler({ active: { id: 's1' }, over: { id: 's1' }, activatorEvent: new KeyboardEvent('keydown') }); });
+    await act(async () => { (document.activeElement as HTMLElement | null)?.blur?.(); });
+    expect(document.activeElement).toBe(document.body);
+    // 목록이 바뀐다(실시간 담당 변경) — 신뢰축은 응답 뒤 trust_stage가 바뀌며 카드가 다시 만들어지는 때와 같은 신호
+    await act(async () => {
+      dispatchSse('story.assignee_changed', { story_id: 's1', project_id: 'proj-1', actor_id: 'other-1', actor_name: '까심', assignee_id: 'm2', old_assignee_id: 'm1', assignees: ['m2'] });
+      await Promise.resolve();
+    });
+    return (document.activeElement as HTMLElement | null)?.getAttribute('data-story-id');
+  }
+
+  it('⭐키보드로 놓은 카드는 그 뒤 목록이 바뀌어도(다시 만들어져 초점을 잃어도) 초점이 그 카드로 돌아온다 — 신뢰축', async () => {
+    expect(await keyboardDropThenListChange('trust')).toBe('s1');
+  });
+
+  it('⭐같은 규칙 — 클래식 5단계(축마다 따로 시험: 한 축의 표시가 다른 축을 가리지 않게)', async () => {
+    expect(await keyboardDropThenListChange('classic')).toBe('s1');
+  });
+
+  it('⭐Esc로 끌기를 취소하면(onDragCancel) 끌기 표시가 거둬진다 — 놓을 수 있는 열 안내가 남지 않는다(두 축)', async () => {
+    stubFetch(stories, members);
+    await mount();
+    for (const axis of ['trust', 'classic'] as const) {
+      if (axis === 'classic') {
+        const classicBtn = [...container.querySelectorAll('button')].find((bn) => bn.textContent === '5단계 클래식');
+        await act(async () => { classicBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      }
+      const props = capturedDndProps.at(-1)!;
+      expect(props.onDragCancel, `${axis}: onDragCancel 연결`).toBeTypeOf('function');
+      await act(async () => { props.onDragStart!({ active: { id: 's1' } }); });
+      if (axis === 'classic') expect(container.textContent).toContain(koMessages.board.validDrop);
+      await act(async () => { capturedDndProps.at(-1)!.onDragCancel!(); });
+      expect(container.textContent).not.toContain(koMessages.board.validDrop);
+    }
+  });
+
+  it('⭐삭제는 사람 전용 — human이면 메뉴에 «삭제», agent면 메뉴 항목이 없다(패널과 같은 규칙)', async () => {
+    stubFetch(stories, members);
+    await mount();
+    expect(item(await menuFor('카드하나'), koMessages.board.deleteStory)).toBeTruthy();
+    await act(async () => { root.unmount(); });
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    useDashboardContextMock.mockReturnValue({ currentTeamMemberId: 'me-1', projectMemberships: [], orgMemberships: [], currentMemberType: 'agent', bottomDockBannerSlot: bannerSlot });
+    stubFetch(stories, members);
+    await mount();
+    expect(item(await menuFor('카드하나'), koMessages.board.deleteStory)).toBeUndefined();
   });
 });

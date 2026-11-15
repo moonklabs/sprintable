@@ -112,7 +112,7 @@ describe('인박스 알림 그룹핑 — story #0d1c69f3(v2 4호, 라이브 121�
     expect(container.textContent).toContain('5건');
   });
 
-  it('그룹을 펼치면 항목별 구체 참조(reference_type 라벨+reference_id 조각)와 CTA가 뜬다(AC2 — 어느 게이트인지 답함)', async () => {
+  it('그룹을 펼치면 항목별 구체 참조(reference_type 라벨 + 알림 자기 문장)와 CTA가 뜬다(AC2 — 어느 게이트인지 답함) — id 앞 8자는 사람 말이 아니라 안 보인다(story 4921)', async () => {
     const items = [genericGateNotif('n1', 'gate-aaaaaaaa-1111'), genericGateNotif('n2', 'gate-bbbbbbbb-2222')];
     stubFetch(items);
     const { default: InboxPage } = await import('./page');
@@ -123,8 +123,9 @@ describe('인박스 알림 그룹핑 — story #0d1c69f3(v2 4호, 라이브 121�
     await act(async () => { chevronBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     expect(container.textContent).toContain('게이트'); // reference_type 라벨
-    expect(container.textContent).toContain('gate-aaa'); // reference_id 조각(8자)
-    expect(container.textContent).toContain('gate-bbb');
+    expect(container.textContent).toContain('merge 게이트가 승인/거부를 기다리고 있습니다.'); // the notification's own sentence says WHICH kind of gate (the body), not an id
+    expect(container.textContent).not.toContain('gate-aaa'); // reference_id 조각(8자)은 사람 말이 아니다 — 더는 안 찍는다
+    expect(container.textContent).not.toContain('gate-bbb');
     const ctaLinks = [...container.querySelectorAll('a')].filter((a) => a.textContent === '열기 →');
     expect(ctaLinks).toHaveLength(2);
   });

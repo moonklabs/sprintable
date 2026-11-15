@@ -5,6 +5,7 @@ import { oauthCookieOptions } from '@/lib/auth/oauth-cookies';
 import { isOAuthCallbackMode } from '@/lib/auth/oauth-callback-mode';
 import { nativeReturnApp } from '@/lib/auth/native-return-app';
 import { fastapiBaseUrl } from '@/lib/fastapi-url';
+import { isSafeInternalPath } from '@/lib/auth/internal-path';
 
 const FASTAPI_BASE = fastapiBaseUrl();
 
@@ -61,7 +62,7 @@ export async function GET(request: Request) {
   cookieStore.delete(`oauth_link_${provider}`);
   setOrDrop('oauth_tos', tosAccepted ? 'true' : null);
   setOrDrop('oauth_invite_token', inviteToken);
-  setOrDrop('oauth_next', next);
+  setOrDrop('oauth_next', isSafeInternalPath(next) ? next : null); // story 4936: an address that is not this app's own is not stored at all (the callback checks it again when it reads it)
   // §10.3: code_challenge는 base64url(패딩없음) 43자 이상만 수용 — 형식이 다르면 native
   // 핸드오프 자체를 시작하지 않는다(방어적, 최종 검증은 BE issue가 authoritative).
   const nativeStart = native && codeChallenge && /^[A-Za-z0-9_-]{43,}$/.test(codeChallenge);

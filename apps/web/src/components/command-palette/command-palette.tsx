@@ -13,6 +13,7 @@ import {
   FolderKanban,
   Gauge,
   GitPullRequest,
+  LayoutGrid,
   Lightbulb,
   List,
   Search,
@@ -23,9 +24,10 @@ import {
 import { cn } from '@/lib/utils';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
 import { buildActionCommands, type ActionCommand } from './command-palette-actions';
+import { isRealShortcut } from '@/lib/keyboard-shortcuts';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { fetchWithAuth } from '@/lib/db/client';
-import { NAV_GROUPS, CHAT_CENTER_ITEM, LEGACY_NAV_ITEMS } from '@/lib/nav-config';
+import { ALL_SCREENS_ITEM, NAV_GROUPS, CHAT_CENTER_ITEM, OTHER_NAV_ITEMS, type NavItemConfig } from '@/lib/nav-config';
 import { pickEuroJosa } from '@/lib/korean-particle';
 
 interface CommandItem {
@@ -53,13 +55,9 @@ interface StoryTitleResult {
 // story #3698(IA·후속, PO 確定 2026-09-08) — 사이드바 KbdHint(app-sidebar.tsx)와 같은
 // 단축키를 파생 항목에도 이식한다(id 매칭 — NAV_GROUPS 자체엔 팔레트 전용 단축키 개념이
 // 없다, kbdHint는 사이드바 표시용 다른 축이라 재사용 안 함).
-const NAV_ITEM_SHORTCUTS: Record<string, string[]> = {
-  inbox: ['G', 'I'],
-  board: ['G', 'B'],
-  chats: ['G', 'M'],
-  'org-workforce': ['G', 'A'],
-  docs: ['G', 'S'],
-};
+// story #4885 — 그 단축키(G I · G B · G M · G A · G S)를 받는 키 처리는 코드에 없었다(표시만 있던 거짓) → 표를 비웠다. 키 처리가 실제로 생기면 그 PR이 lib/keyboard-shortcuts.ts의
+// REAL_SHORTCUTS에 먼저 올리고 여기에 다시 적는다(아래 `isRealShortcut` 관문이 표에 없는 조합은 그리지 않는다).
+const NAV_ITEM_SHORTCUTS: Record<string, string[]> = {};
 
 // story #2930 I3(PO 확定 2026-08-22)·#2931 — /sprints·/epics는 nav-config.ts NAV_GROUPS에
 // 없는(S1에서 'board'가 flow+sprints를 흡수) 라우트지만, WorkspaceFrameTabs(flow/sprints
@@ -112,7 +110,11 @@ export interface DerivedNavItem {
 // 워크스페이스 없는 항목(isWorkspaceless=true)은 이 콜백을 아예 안 부른다 — 그래서 어떤
 // 더미를 넣어도 실제 href(navItem.path 그대로)가 그대로 나온다.
 export function deriveNavigateItems(resolveResourceHref: (resource: string) => string): DerivedNavItem[] {
-  const navItems = [...NAV_GROUPS.flatMap((group) => group.items), ...LEGACY_NAV_ITEMS, CHAT_CENTER_ITEM];
+  // story #4885(AC3 §5) — «이동» 목록은 길잡이와 같은 순서로 선다: 홈 · 대화 · 일감(+ 그 탭 앵커) · 팀 · 지식 · 조직 · 설정 · 전체 · 그 밖.
+  // 예전엔 대화가 목록 맨 끝, 일감 탭 앵커가 그 뒤에 따로 붙어 «매일 쓰는 길»이 위에 없었다. 목적지는 늘리지 않는다 — «전체»(/more)만 길잡이에 있고 여기 없던 입구라 더한다.
+  const groupItems = NAV_GROUPS.flatMap((group) => group.items);
+  const afterHome = NAV_GROUPS[0]?.items.length ?? 0;
+  const navItems: NavItemConfig[] = [...groupItems.slice(0, afterHome), CHAT_CENTER_ITEM, ...groupItems.slice(afterHome), ...OTHER_NAV_ITEMS];
   const fromNav: DerivedNavItem[] = navItems.map((navItem) => {
     // story #2224(선생님 정정 2026-07-30) — 'board'는 `/flow?view=list`로 흡수, 'docs'도
     // resourceHref 재계산 대상(둘 다 kind='static'이어도 워크스페이스 있는 경로로 오버라이드
@@ -143,7 +145,15 @@ export function deriveNavigateItems(resolveResourceHref: (resource: string) => s
     id: anchor.id, icon: anchor.icon, labelKey: anchor.labelKey, href: resolveResourceHref(anchor.href.replace(/^\//, '')),
     labelSource: 'anchor', isWorkspaceless: false,
   }));
-  return [...fromNav, ...fromAnchors];
+  // 일감 탭 앵커는 «일감» 바로 뒤에(길잡이에서 일감 항목이 여는 탭줄과 같은 자리).
+  const boardIndex = fromNav.findIndex((item) => item.id === 'board');
+  const ordered = boardIndex < 0 ? [...fromNav, ...fromAnchors] : [...fromNav.slice(0, boardIndex + 1), ...fromAnchors, ...fromNav.slice(boardIndex + 1)];
+  // 길잡이 맨 아래 «전체»(폰 «전체» 탭과 같은 목록) — «그 밖» 앞, 설정 뒤.
+  const allScreens: DerivedNavItem = {
+    id: ALL_SCREENS_ITEM.id, icon: LayoutGrid, labelKey: ALL_SCREENS_ITEM.labelKey, href: ALL_SCREENS_ITEM.path, labelSource: 'nav', isWorkspaceless: true,
+  };
+  const settingsIndex = ordered.findIndex((item) => item.id === 'settings');
+  return settingsIndex < 0 ? [...ordered, allScreens] : [...ordered.slice(0, settingsIndex + 1), allScreens, ...ordered.slice(settingsIndex + 1)];
 }
 
 // 명령(action)당 아이콘 — command-palette-actions.ts는 순수 데이터만 다뤄 lucide 컴포넌트를
@@ -181,7 +191,6 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   function resourceHref(resource: string): string {
     return scopedResourceHref(resource, orgSlug, currentProjectSlug, flatHref);
   }
-  const docsHref = resourceHref('docs');
   // story #2224(선생님 정정 2026-07-30, 진입점 전수 스윕) — `/board` 라우트가 삭제되고
   // `/flow?view=list`로 흡수됐다(PR#2698). "보드로 이동" 라벨은 목적지 콘텐츠(칸반)가
   // 그대로라 안 바꿨지만, href는 최종 주소를 직접 가리켜야 한다(리다이렉트 경유는 "은퇴한
@@ -213,7 +222,7 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
       label: item.labelSource === 'anchor' ? t(item.labelKey) : goDestinationLabel(tNav(item.labelKey)),
       // story #4231 — 워크스페이스 없는(flat) 목적지는 사이드바·더보기와 같이 현재 프로젝트(`?p=`)를 싣는다.
       href: item.isWorkspaceless ? flatHref(item.href) : item.href,
-      shortcut: NAV_ITEM_SHORTCUTS[item.id],
+      shortcut: isRealShortcut(NAV_ITEM_SHORTCUTS[item.id]) ? NAV_ITEM_SHORTCUTS[item.id] : undefined,
     }));
     // resourceHref는 orgSlug·currentProjectSlug의 순수 파생(그 값들이 이미 deps에 있음) —
     // 함수 참조 자체를 deps에 넣으면 매 렌더 새로 만들어져 메모가 무의미해진다.
@@ -318,7 +327,9 @@ export function CommandPalette({ open, onOpenChange, projectId, contextStoryId }
   }
 
   function handleSelectDoc(doc: DocResult) {
-    router.push(`${docsHref}/${doc.slug}`);
+    // story 4892 (D1): a document picked from the palette opens to read. Built as ONE resource path through the same helper as every palette destination, so the
+    // flat fallback (slugs not known yet) puts `?p=` AFTER the path (`/docs/{slug}/view?p=…`), never inside it.
+    router.push(resourceHref(`docs/${encodeURIComponent(doc.slug)}/view`));
     handleOpenChange(false);
   }
 

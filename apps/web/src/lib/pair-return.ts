@@ -7,6 +7,8 @@
  *   · only the phone screens that start a pairing, matched whole (no deeper path, so `/desktop/pair` itself — a loop — and an organization-prefixed path `/{org}/…` of this or another org are out)
  *   · only the project (`p`) of the query is kept: another parameter (`next` · `return` …) could send the page on somewhere else
  */
+import { isSafeInternalPath } from '@/lib/auth/internal-path';
+
 export const PAIR_RETURN_PARAM = 'from';
 
 const MAX_LEN = 512;
@@ -14,12 +16,10 @@ const PROBE_ORIGIN = 'https://pair-return.invalid';
 // the screens a pairing starts from, whole: Today (`/org-briefing` — where the Today card lives — or `/today` when TODAY_V3 is on: lib/nav-v3-destinations.ts) · the inbox · the Mac screen (원격 기기) · the phone's start screen · a conversation ·
 // a workforce member's page (the chat head's strip). The sign-up flow's first screen (`/onboarding`) is not a way back: it hands over the Today address the server resolved (`usePairHref(returnTo)`).
 const ALLOWED_PATH = /^\/(?:today|org-briefing|inbox|desktop|phone-start|chats(?:\/[A-Za-z0-9_-]{1,64})?|organization\/workforce\/[A-Za-z0-9_-]{1,64})\/?$/;
-const CONTROL_OR_BACKSLASH = /[\u0000-\u001f\u007f\\]/;
 
 export function safeReturnPath(value: unknown): string | null {
   if (typeof value !== 'string' || value.length === 0 || value.length > MAX_LEN) return null;
-  if (CONTROL_OR_BACKSLASH.test(value)) return null;
-  if (!value.startsWith('/') || value.startsWith('//')) return null;
+  if (!isSafeInternalPath(value)) return null; // story 4936: the «this app's own path» test is lib/auth/internal-path.ts (control characters · backslash · `//` · every decoded form · origin re-parse) — the whole-address list below narrows it further
   let url: URL;
   try { url = new URL(value, PROBE_ORIGIN); } catch { return null; }
   if (url.origin !== PROBE_ORIGIN) return null;

@@ -10,11 +10,11 @@ import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../messages/ko.json';
 import type { NavV3Flags } from '@/lib/nav-v3-destinations';
 
-const { pathnameRef } = vi.hoisted(() => ({ pathnameRef: { current: '/dashboard' } }));
+const { pathnameRef, queryRef } = vi.hoisted(() => ({ pathnameRef: { current: '/dashboard' }, queryRef: { current: '' } }));
 
 vi.mock('next/navigation', () => ({
   usePathname: () => pathnameRef.current,
-  useSearchParams: () => new URLSearchParams(''),
+  useSearchParams: () => new URLSearchParams(queryRef.current),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
 }));
 
@@ -61,7 +61,7 @@ function stubLocalStorage() {
 // 읽기에 낫다고 판단해 그대로 둔다(오버라이드가 기본값과 같은 값을 다시 심을 뿐 — 무해).
 function expandAllGroups() {
   localStorage.setItem('sidebar_group_collapsed', JSON.stringify({
-    'connect-rules': false,
+    org: false,
   }));
 }
 
@@ -79,6 +79,7 @@ beforeEach(() => {
   stubFetch();
   stubLocalStorage();
   pathnameRef.current = '/dashboard';
+  queryRef.current = '';
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -113,15 +114,16 @@ async function mount(userName?: string, navV3Flags?: NavV3Flags) {
 // posts·org-members·org-workforce·org-roles·org-events·inbox·settings)은 사이드바에서
 // 빠지고 LEGACY_NAV_ITEMS로 이관(커맨드 팔레트·모바일 /more 「그 밖의 화면」이 1급
 // 진입점, 별도 스위트에서 검증) — path는 전부 불변(북마크·딥링크 무손상).
+// story #4885(UI-2 AC4 PR 1) — 새 구조: 매일 다섯 + 접힌 «조직» + 설정 + «전체». 「더보기」 서랍은 걷혔고 «연결·규칙» 구역도 없다(채널 연결 · 연산 커넥터 · 콘텐츠 규칙은 «조직» 안).
+// 이 테스트는 expandAllGroups로 «조직»을 펴고 잰다(기본은 접힘 — 전용 케이스가 따로 잠근다).
 const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
-  { labelKey: null, labels: ['오늘'] },
-  { labelKey: null, labels: ['일감'] },
-  { labelKey: null, labels: ['결과'] },
-  { labelKey: 'zoneConnectRules', labels: ['채널 연결', '연산 커넥터', '콘텐츠 규칙'] },
-  // story #3836(UX-v3·셸 후속) — 「더보기」(LEGACY_GROUP_ID)는 기본 접힘(AC1)이라 이
-  // 테스트(expandAllGroups가 'connect-rules'만 편다)에선 항목이 DOM에 없다 — 그룹
-  // 자체(라벨+토글)는 렌더된다는 사실만 여기서 잠그고, 내용물은 전용 스위트에서.
-  { labelKey: 'navMore', labels: [] },
+  { labelKey: null, labels: ['홈', '결재'] },
+  { labelKey: null, labels: ['일감', '목표', '실행'] },
+  { labelKey: 'zoneTeam', labels: ['구성원', '에이전트', '실행 기록', 'API 키'] },
+  { labelKey: 'zoneKnowledge', labels: ['문서', '산출물', '스토리지'] },
+  { labelKey: 'zoneOrganization', labels: ['성과 보드', '채널 연결', '생성 연결', '콘텐츠 규칙', '레시피', '신뢰 센터', '권한', '활동 로그', '블로그 포스트', '채널 포스트'] },
+  { labelKey: null, labels: ['설정'] },
+  { labelKey: null, labels: ['전체'] },
 ];
 
 // 카디르 QA(PR#3100) 지적 — 라벨은 맞는데 href가 다른 항목과 뒤바뀐 뮤테이션은 그룹별 라벨
@@ -131,27 +133,34 @@ const EXPECTED_GROUPS: Array<{ labelKey: string | null; labels: string[] }> = [
 // 전부 지금 develop과 바이트 동일(회귀 0). 「일감」의 flag-aware work-list 전환은
 // 별도 describe(하단 "v3 nav 단일 소스" 스위트)가 ON 케이스로 검증.
 const EXPECTED_HREF_BY_LABEL: Record<string, string> = {
-  '오늘': '/org-briefing',
+  '홈': '/org-briefing',
+  '결재': '/inbox?tab=gates',
   '일감': '/flow',
-  '결과': '/organization/insights-board',
+  '구성원': '/organization/members',
+  '에이전트': '/organization/workforce',
+  '실행 기록': '/organization/workforce/runs',
+  'API 키': '/organization/workforce/api-keys',
+  '문서': '/docs',
+  '성과 보드': '/organization/insights-board',
+  '설정': '/settings',
+  '전체': '/more',
   '채널 연결': '/organization/channels',
-  '연산 커넥터': '/organization/generation-connectors',
+  '생성 연결': '/organization/generation-connectors',
   '콘텐츠 규칙': '/organization/content-rules',
 };
 
-describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·FE 1)', () => {
-  it('그룹 순서·라벨·항목 순서·라벨이 확定대로다(오늘→일감→결과→연결·규칙)', async () => {
+describe('AppSidebar — story #3824 → #4885 새 구조 렌더 회귀가드(매일 다섯 + 조직 + 설정 + 전체)', () => {
+  it('그룹 순서·라벨·항목 순서·라벨이 확定대로다(오늘 → 일감 → 팀 → 지식 → 조직 → 설정 → 전체)', async () => {
     expandAllGroups();
     await mount();
-    // 헤더리스 그룹(오늘·일감·결과)은 sidebar-group-label 자체가 없다 — 라벨 그룹은
-    // 「연결·규칙」 하나뿐.
-    const groupLabels = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')].map((el) => el.textContent);
-    expect(groupLabels).toEqual(['연결·규칙', '더보기']);
+    // 헤더리스 그룹(오늘·일감·설정·전체)은 sidebar-group-label 자체가 없다 — 라벨 그룹은 「팀」 「지식」 「조직」.
+    const groupLabels = [...container.querySelectorAll('[data-slot="ds-section-header"] button')].map((el) => el.textContent);
+    expect(groupLabels).toEqual(['팀', '지식', '조직']);
 
     const groups = [...container.querySelectorAll('[data-slot="sidebar-group"]')];
     expect(groups.length).toBe(EXPECTED_GROUPS.length);
     groups.forEach((groupEl, i) => {
-      const itemLabels = [...groupEl.querySelectorAll('[data-slot="sidebar-menu-button"] span[data-nav-label]')].map((el) => el.textContent);
+      const itemLabels = [...groupEl.querySelectorAll('[data-slot="ds-list-row"] span[data-nav-label]')].map((el) => el.textContent);
       expect(itemLabels).toEqual(EXPECTED_GROUPS[i]!.labels);
     });
   });
@@ -165,7 +174,7 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
     expandAllGroups();
     await mount();
     const links = [...container.querySelectorAll('a')];
-    const todayIndex = links.findIndex((a) => a.textContent?.includes('오늘'));
+    const todayIndex = links.findIndex((a) => a.textContent?.includes('홈'));
     const chatsIndex = links.findIndex((a) => a.textContent?.includes('대화'));
     const workIndex = links.findIndex((a) => a.textContent?.includes('일감'));
     expect(todayIndex).toBeGreaterThanOrEqual(0);
@@ -175,7 +184,7 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
     expect(chatsIndex).toBeLessThan(workIndex);
   });
 
-  it('정적 항목(연결·규칙 그룹)의 href가 무변화다(path 전부 불변)', async () => {
+  it('정적 항목(조직 묶음)의 href가 무변화다(path 전부 불변)', async () => {
     expandAllGroups();
     await mount();
     const channelsLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('채널 연결'));
@@ -201,11 +210,12 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
     expect(workLink?.getAttribute('href')).toBe('/flow');
   });
 
-  it('kbd 힌트(일감=B)가 정확히 붙는다', async () => {
+  it('⭐받는 곳 없는 kbd 힌트(일감 «B»)는 그리지 않는다(story #4885 · 단축키 표시 정직) — 일감 줄엔 「프로젝트」 표식만', async () => {
     expandAllGroups();
     await mount();
     const workBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
-    expect(workBtn?.textContent).toContain('B');
+    expect(workBtn?.textContent).toBe('일감프로젝트');
+    expect(workBtn?.querySelector('kbd')).toBeNull();
   });
 
   // story #9c5e82dc(IA·S3, 유나 § 確定 2026-09-08) — 「프로젝트」 표식은 scope:'project'
@@ -227,21 +237,17 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
   it('애매 항목(오늘)엔 「프로젝트」 표식이 안 붙는다', async () => {
     expandAllGroups();
     await mount();
-    const todayBtn = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
+    const todayBtn = [...container.querySelectorAll('a')].find((a) => a.textContent === '홈');
     expect(todayBtn?.textContent).not.toContain('프로젝트');
   });
 
-  it('순서는 라벨→표식→kbd다(일감: "일감" 다음 "프로젝트" 다음 "B")', async () => {
+  it('순서는 라벨→표식이다(일감: "일감" 다음 "프로젝트") — kbd는 실제 단축키가 있을 때만 그 뒤에 붙는다(지금은 없음)', async () => {
     expandAllGroups();
     await mount();
     const workBtn = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
     const text = workBtn?.textContent ?? '';
-    const labelIdx = text.indexOf('일감');
-    const scopeIdx = text.indexOf('프로젝트');
-    const kbdIdx = text.lastIndexOf('B');
-    expect(labelIdx).toBeGreaterThanOrEqual(0);
-    expect(scopeIdx).toBeGreaterThan(labelIdx);
-    expect(kbdIdx).toBeGreaterThan(scopeIdx);
+    expect(text.indexOf('일감')).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf('프로젝트')).toBeGreaterThan(text.indexOf('일감'));
   });
 
   it('표식은 칩/배지 모양(테두리·배경)을 안 쓴다(유나 § — 성질이지 행위가 아니다)', async () => {
@@ -257,39 +263,37 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
     pathnameRef.current = '/organization/channels';
     expandAllGroups();
     await mount();
-    const channelsBtn = [...container.querySelectorAll('[data-slot="sidebar-menu-button"]')].find((b) => b.textContent?.includes('채널 연결'));
-    expect(channelsBtn?.hasAttribute('data-active')).toBe(true);
-    const rulesBtn = [...container.querySelectorAll('[data-slot="sidebar-menu-button"]')].find((b) => b.textContent?.includes('콘텐츠 규칙'));
-    expect(rulesBtn?.hasAttribute('data-active')).toBe(false);
+    const channelsBtn = [...container.querySelectorAll('[data-slot="ds-list-row"]')].find((b) => b.textContent?.includes('채널 연결'));
+    expect(channelsBtn?.getAttribute('aria-current')).toBe('page');
+    const rulesBtn = [...container.querySelectorAll('[data-slot="ds-list-row"]')].find((b) => b.textContent?.includes('콘텐츠 규칙'));
+    expect(rulesBtn?.getAttribute('aria-current')).toBeNull();
   });
 
-  // story #1981/#3084 배지 축 — 사이드바에서 'inbox' 항목 자체가 빠졌으므로(LEGACY_NAV_
-  // ITEMS 이관, #3823 「오늘」 배지 카드가 재연결 예정) 이제 어떤 사이드바 버튼도 이
-  // 배지를 안 그린다 — 폴링 로직(app-sidebar.tsx)은 그대로 살아있다는 것만 확認한다
-  // (다음 카드가 그 값을 그대로 재사용할 수 있게).
-  it('결재 대기 카운트가 있어도(inbox 항목 자체가 사이드바에서 빠짐) 어떤 사이드바 버튼도 배지를 안 그린다', async () => {
+  // story #1981/#3084 배지 축 — story #4885에서 'inbox' 항목이 «결재»라는 이름으로 사이드바에 돌아왔다(폰 «결재» 탭과 같은 이름 · 같은 착지 · 같은 배지: 내가 지정된 대기 결재 수).
+  it('결재 대기 카운트가 있으면 «결재» 항목(만)에 배지가 붙는다', async () => {
     expandAllGroups();
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ count: 3 }), {
       status: 200, headers: { 'content-type': 'application/json' },
     })));
     await mount();
-    const badges = [...container.querySelectorAll('[data-slot="sidebar-menu-badge"]')];
-    expect(badges).toHaveLength(0);
+    const badges = [...container.querySelectorAll('[data-slot="ds-count-badge"]')];
+    expect(badges).toHaveLength(1);
+    expect(badges[0]!.closest('[data-slot="sidebar-menu-item"]')?.textContent).toContain('결재');
   });
 
-  it('헤더리스 그룹(오늘·일감·결과)엔 접기 토글이 없다(옛 설정 그룹과 동형 관례)', async () => {
+  it('헤더리스 그룹(오늘·일감·설정)엔 접기 토글이 없다(옛 설정 그룹과 동형 관례)', async () => {
     await mount();
-    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
+    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '홈');
     expect(todayLink).toBeDefined();
     const toggles = [...container.querySelectorAll('button[aria-expanded]')];
-    expect(toggles.some((b) => b.textContent?.includes('오늘'))).toBe(false);
+    expect(toggles.some((b) => b.textContent?.includes('홈'))).toBe(false);
     expect(toggles.some((b) => b.textContent?.includes('일감'))).toBe(false);
-    expect(toggles.some((b) => b.textContent?.includes('결과'))).toBe(false);
+    expect(toggles.some((b) => b.textContent?.includes('설정'))).toBe(false);
   });
 
   // 카디르 QA(PR#3100) 지적 — 라벨은 그대로인 채 href만 다른 항목과 뒤바뀌는 뮤테이션은 앞
   // 테스트들로는 못 잡는다. 5항목(챗 center 제외) 전부를 라벨→href 쌍으로 개별 대조.
-  it('전 5항목(챗 center 제외)의 라벨→href 쌍이 정확하다(뒤바뀐 목적지 방지, 카디르 QA 지적 반영)', async () => {
+  it('전 항목(챗 center 제외)의 라벨→href 쌍이 정확하다(뒤바뀐 목적지 방지, 카디르 QA 지적 반영)', async () => {
     expandAllGroups();
     await mount();
     const links = [...container.querySelectorAll('a')];
@@ -314,12 +318,12 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
 
   // story #3054(2984-S6) — Chat Center CTA가 헤어라인+elev를 쓰고 bg-proof-blue-soft는
   // 안 쓴다.
-  it('Chat Center CTA가 헤어라인+elev를 쓰고 bg-proof-blue-soft는 안 쓴다', async () => {
+  it('Chat Center CTA는 bg-proof-blue-soft를 안 쓰고 글자는 늘 ds action 색이다(story #4906: 테두리 · 그림자는 «현재 페이지»가 아닐 때 없다 · story 4930: 옛 파랑 text-proof-blue → text-ds-action-text — 아래 «대화 카드는 지금 페이지일 때만» 묶음)', async () => {
     await mount();
     const link = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/chats');
     expect(link).toBeDefined();
-    expect(link!.className).toContain('border-proof-blue');
-    expect(link!.className).toContain('shadow-[var(--elev-card)]');
+    expect(link!.className).toContain('text-ds-action-text'); // 2930's meaning stays: always conspicuous — in the ds action colour (story 4930)
+    expect(link!.className).not.toContain('text-proof-blue'); // the old info blue (rgb 31,95,191) is not an accent colour
     expect(link!.className).not.toContain('bg-proof-blue-soft');
   });
 
@@ -331,18 +335,33 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
   it('기억 없는 새 브라우저 — 활성 구역이 없어도(경로=/dashboard) 전 구역이 펼쳐진다(옛 규칙이면 전부 접혔어야 함)', async () => {
     stubViewportHeight(700);
     await mount();
-    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
+    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '홈');
     expect(todayLink).toBeDefined();
     const workLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
     expect(workLink).toBeDefined();
     // 구역 토글 버튼만 좁혀서 잰다 — 컨테이너 전체 button[aria-expanded]는 다른 컴포넌트
-    // (드롭다운·스위처 등)의 닫힌 트리거도 걸려 오탐한다. story #3836 — 「더보기」는
-    // 이 f81657f8 규칙 밖의 별도 기본값(기본 접힘, AC1)이라 이 대조에서 뺀다(전용
-    // 스위트가 그 기본값을 따로 잠근다).
-    const toggles = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')]
-      .filter((b) => b.textContent !== '더보기');
+    // (드롭다운·스위처 등)의 닫힌 트리거도 걸려 오탐한다. story #4885 — 「조직」은
+    // 이 f81657f8 규칙 밖의 별도 기본값(기본 접힘)이라 이 대조에서 뺀다(아래 전용 케이스가 따로 잠근다).
+    const toggles = [...container.querySelectorAll('[data-slot="ds-section-header"] button')]
+      .filter((b) => b.textContent !== '조직');
     expect(toggles.length).toBeGreaterThan(0);
     expect(toggles.every((b) => b.getAttribute('aria-expanded') === 'true')).toBe(true);
+  });
+
+  it('⭐«조직»은 기본 접힘이다(항목이 DOM에 없음 · aria-expanded=false) — 사람이 펼치면 기억되고, 지금 화면이 그 안이면 열려 있다', async () => {
+    await mount();
+    expect([...container.querySelectorAll('a')].find((a) => a.textContent?.includes('채널 연결'))).toBeUndefined();
+    const orgHeader = [...container.querySelectorAll('[data-slot="ds-section-header"] button')].find((b) => b.textContent === '조직');
+    expect(orgHeader?.getAttribute('aria-expanded')).toBe('false');
+    // 지금 화면이 «조직» 안(채널 연결)이면 기억이 접힘이어도 열려 있다 — 현재 위치가 사라지지 않는다.
+    await act(async () => { root.unmount(); });
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    pathnameRef.current = '/organization/channels';
+    await mount();
+    expect([...container.querySelectorAll('a')].find((a) => a.textContent?.includes('채널 연결'))).toBeDefined();
   });
 
   it('활성 구역이 있어도(경로=연결/채널) 비활성 구역(일감)까지 펼쳐진다(옛 규칙이면 접혔어야 함)', async () => {
@@ -357,9 +376,9 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
     for (const height of [800, 1080]) {
       stubViewportHeight(height);
       await mount();
-      // story #3836 — 「더보기」는 이 회귀가드 밖(별도 기본값, AC1), 위 테스트와 동일 이유로 제외.
-      const toggles = [...container.querySelectorAll('[data-slot="sidebar-group-label"]')]
-        .filter((b) => b.textContent !== '더보기');
+      // story #4885 — 「조직」은 이 회귀가드 밖(별도 기본값: 접힘), 위 테스트와 동일 이유로 제외.
+      const toggles = [...container.querySelectorAll('[data-slot="ds-section-header"] button')]
+        .filter((b) => b.textContent !== '조직');
       expect(toggles.every((b) => b.getAttribute('aria-expanded') === 'true')).toBe(true);
       await act(async () => { root.unmount(); });
       container.remove();
@@ -371,51 +390,46 @@ describe('AppSidebar — story #3824 5항목 축소 렌더 회귀가드(UX-v3·F
 
   it('구역 헤더를 클릭하면 접히고(항목 DOM에서 사라짐) 다시 클릭하면 펴진다', async () => {
     await mount();
-    const crHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('연결·규칙'));
-    expect(crHeader).toBeDefined();
-    expect(crHeader?.getAttribute('aria-expanded')).toBe('true');
+    const header = () => [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('지식'));
+    expect(header()).toBeDefined();
+    expect(header()?.getAttribute('aria-expanded')).toBe('true');
 
-    await act(async () => { crHeader!.click(); });
-    expect([...container.querySelectorAll('a')].find((a) => a.textContent?.includes('채널 연결'))).toBeUndefined();
-    const crHeaderAfter = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('연결·규칙'));
-    expect(crHeaderAfter?.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => { header()!.click(); });
+    expect([...container.querySelectorAll('a')].find((a) => a.textContent?.includes('산출물'))).toBeUndefined();
+    expect(header()?.getAttribute('aria-expanded')).toBe('false');
 
-    await act(async () => { crHeaderAfter!.click(); });
-    expect([...container.querySelectorAll('a')].find((a) => a.textContent?.includes('채널 연결'))).toBeDefined();
+    await act(async () => { header()!.click(); });
+    expect([...container.querySelectorAll('a')].find((a) => a.textContent?.includes('산출물'))).toBeDefined();
   });
 
-  // 카디르 QA(a11y, §22-18 가드) — render prop 버튼이 SidebarGroupLabel의 children(그룹명
-  // 텍스트+쉐브론)을 감싸긴 하지만, 접근성 트리에서 버튼 자체의 이름은 aria-label로
-  // 명시해야 스크린리더가 구역 토글을 구별한다(textContent만으론 landmark 목록 등에서
-  // 이름이 안 실리는 경우가 있다) — aria-label에 그룹명+접힘상태를 담는다.
-  it('구역 토글 버튼의 aria-label이 그룹명+접힘상태를 담는다(카디르 QA a11y 처방)', async () => {
-    expandAllGroups();
+  // 접힘 상태는 aria-expanded로, 접근 가능한 이름은 그룹명 그대로(SectionHeader 단추 — 이름에 «접기/펼치기»를 또 싣지 않는다).
+  it('구역 토글 단추: 이름 = 그룹명, 접힘 상태는 aria-expanded', async () => {
     await mount();
-    const crHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('연결·규칙'));
-    expect(crHeader?.getAttribute('aria-label')).toBe('연결·규칙 접기');
+    const header = () => [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('지식'));
+    expect(header()?.getAttribute('aria-expanded')).toBe('true');
+    expect(header()?.getAttribute('aria-label')).toBeNull();
+    expect(header()?.textContent?.trim()).toBe('지식');
 
-    await act(async () => { crHeader!.click(); });
-    const crHeaderAfter = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('연결·규칙'));
-    expect(crHeaderAfter?.getAttribute('aria-label')).toBe('연결·규칙 펼치기');
+    await act(async () => { header()!.click(); });
+    expect(header()?.getAttribute('aria-expanded')).toBe('false');
   });
 
   it('접힘 상태가 localStorage에 사람별로 기억된다(AC3)', async () => {
-    expandAllGroups();
     await mount();
-    const crHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('연결·규칙'));
-    await act(async () => { crHeader!.click(); });
+    const header = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('지식'));
+    await act(async () => { header!.click(); });
 
     const stored = JSON.parse(localStorage.getItem('sidebar_group_collapsed') ?? '{}');
-    expect(stored['connect-rules']).toBe(true);
+    expect(stored['knowledge']).toBe(true);
   });
 
   it('기억된 접힘 상태가 마운트 시 그대로 재현된다(기억 있으면 그 값, AC3)', async () => {
-    localStorage.setItem('sidebar_group_collapsed', JSON.stringify({ 'connect-rules': true }));
+    localStorage.setItem('sidebar_group_collapsed', JSON.stringify({ knowledge: true }));
     await mount();
-    const channelsLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('채널 연결'));
-    expect(channelsLink).toBeUndefined();
-    const crHeader = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('연결·규칙'));
-    expect(crHeader?.getAttribute('aria-expanded')).toBe('false');
+    const docsLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('산출물'));
+    expect(docsLink).toBeUndefined();
+    const header = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('지식'));
+    expect(header?.getAttribute('aria-expanded')).toBe('false');
   });
 
   // story #3762(그라운딩·유나 §定) — 4구역+관리 프레임 전체 높이가 흔한 뷰포트(≤900px)를
@@ -460,12 +474,12 @@ describe('AppSidebar — 「일감」 활성 판정은 WorkspaceFrameTabs 경로
     expect(WORKSPACE_FRAME_TAB_PATHS).toEqual(EXPECTED_WORKSPACE_FRAME_TAB_PATHS);
   });
 
-  it.each(EXPECTED_WORKSPACE_FRAME_TAB_PATHS)('/%s 에서 「일감」이 활성(data-active=true)이다', async (path) => {
+  it.each(EXPECTED_WORKSPACE_FRAME_TAB_PATHS)('/%s 에서 「일감」이 활성(aria-current=page)이다', async (path) => {
     pathnameRef.current = `/${path}`;
     expandAllGroups();
     await mount();
     const workLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
-    expect(workLink?.hasAttribute('data-active')).toBe(true);
+    expect(workLink?.getAttribute('aria-current')).toBe('page');
   });
 
   it('/chats(일감 밖 화면)에서는 「일감」이 비활성이다', async () => {
@@ -473,7 +487,67 @@ describe('AppSidebar — 「일감」 활성 판정은 WorkspaceFrameTabs 경로
     expandAllGroups();
     await mount();
     const workLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
-    expect(workLink?.hasAttribute('data-active')).toBe(false);
+    expect(workLink?.getAttribute('aria-current')).toBeNull();
+  });
+});
+
+// story #4885 (codex 1판) — 정적 항목의 «지금 여기»는 가장 구체적인 하나만 켠다 · 항목 경로의 쿼리(?tab=gates)는 지금 주소의 쿼리와 맞아야 켠다.
+describe('AppSidebar — 지금 여기 판정(story #4885)', () => {
+  const activeLabels = () => [...container.querySelectorAll('[data-slot="ds-list-row"][aria-current="page"]')].map((b) => b.querySelector('span[data-nav-label]')?.textContent);
+
+  it('⭐쿼리 달린 항목: /inbox?tab=gates에서 «결재»가 켜지고, 같은 /inbox의 알림 탭에서는 꺼진다', async () => {
+    expandAllGroups();
+    pathnameRef.current = '/inbox';
+    queryRef.current = 'tab=gates';
+    await mount();
+    expect(activeLabels()).toEqual(['결재']);
+    await act(async () => { root.unmount(); });
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    queryRef.current = 'tab=notifications';
+    await mount();
+    // 같은 화면의 다른 탭 — 정확히 맞는 항목이 없으니 이 화면의 항목(결재)이 위치를 알려 준다(예전엔 켜진 항목 0).
+    expect(activeLabels()).toEqual(['결재']);
+    await act(async () => { root.unmount(); });
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    queryRef.current = '';
+    await mount();
+    expect(activeLabels(), '탭 없는 /inbox(기본 탭 «알림»)').toEqual(['결재']);
+  });
+
+  it('⭐접두가 겹치는 형제: /organization/workforce/runs에서 «실행 기록»만 켜진다(에이전트는 꺼짐) — /content/channel-posts도 «채널 포스트»만', async () => {
+    expandAllGroups();
+    pathnameRef.current = '/organization/workforce/runs';
+    await mount();
+    expect(activeLabels()).toEqual(['실행 기록']);
+    await act(async () => { root.unmount(); });
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    pathnameRef.current = '/content/channel-posts';
+    await mount();
+    expect(activeLabels()).toEqual(['채널 포스트']);
+  });
+
+  it('상세 화면은 부모 항목을 켠다(/organization/workforce/abc → «에이전트») · «전체»는 /more에서만', async () => {
+    expandAllGroups();
+    pathnameRef.current = '/organization/workforce/abc';
+    await mount();
+    expect(activeLabels()).toEqual(['에이전트']);
+    await act(async () => { root.unmount(); });
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    pathnameRef.current = '/more';
+    await mount();
+    expect(activeLabels()).toEqual(['전체']);
   });
 });
 
@@ -525,43 +599,31 @@ describe('AppSidebar — story #3775 셸 결함(userName 빈 값이어도 Profil
   });
 });
 
-// story #4003(E-UX-OVERHAUL·셸 통합 2/N) — navV3Flags prop이 실제로 렌더된 href까지
-// 전파되는지(nav-config.ts::resolveNavGroups/resolveChatCenterItem 소비 배선 확認).
-// 결정 로직 자체(플래그 8조합 표)는 nav-v3-destinations.test.ts·nav-config-v3-flags
-// .test.ts가 전담 — 여기선 "prop을 실제로 넘기면 화면이 바뀌는가"만.
-describe('AppSidebar — v3 nav 단일 소스(story #4003) 플래그 배선', () => {
-  it('⭐navV3Flags 미전달(OFF 기본값) — 지금 develop과 바이트 동일 href', async () => {
+// story #4885(UI-2 AC4 PR 1) — 새 셸은 플래그 없이 하나다: v3 플래그를 켜도 사이드바의 «오늘» · «일감» · «연결·규칙»은 바뀌지 않는다(정본 = 지금 서 있는 화면, v3 쪽은 켜지도 떼지도 않는다).
+// 플래그로 달라지는 것은 «데스크톱 앱» 항목 하나(그 화면이 꺼지면 되돌려 보내므로 — 위 story #4524 케이스)뿐이다.
+describe('AppSidebar — 새 셸은 플래그 없이 하나(story #4885)', () => {
+  it('⭐v3 플래그를 전부 켜도 «오늘» · «일감» · «대화» href는 그대로다(/org-briefing · /flow · /chats)', async () => {
+    expandAllGroups();
+    await mount(undefined, { todayV3Enabled: true, chatV3Enabled: true, connectRulesV3Enabled: true });
+    const links = [...container.querySelectorAll('a')];
+    expect(links.find((a) => a.textContent === '홈')?.getAttribute('href')).toBe('/org-briefing');
+    expect(links.find((a) => a.textContent?.startsWith('일감'))?.getAttribute('href')).toBe('/flow');
+    expect(links.find((a) => a.textContent?.includes('대화'))?.getAttribute('href')).toBe('/chats');
+    expect(links.some((a) => a.getAttribute('href') === '/connect-rules' || a.getAttribute('href') === '/today' || a.getAttribute('href') === '/work-list')).toBe(false);
+  });
+
+  it('⭐플래그를 안 넘겨도(기본) 켜도 같은 항목 순서다', async () => {
     expandAllGroups();
     await mount();
-    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
-    expect(todayLink?.getAttribute('href')).toBe('/org-briefing');
-  });
-
-  it('todayV3Enabled — 「오늘」 href가 /today로 바뀐다', async () => {
+    const off = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href'));
+    await act(async () => { root.unmount(); });
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
     expandAllGroups();
-    await mount(undefined, { todayV3Enabled: true, chatV3Enabled: false, connectRulesV3Enabled: false });
-    const todayLink = [...container.querySelectorAll('a')].find((a) => a.textContent === '오늘');
-    expect(todayLink?.getAttribute('href')).toBe('/today');
-  });
-
-  it('connectRulesV3Enabled — 연결·규칙 그룹에 통합 항목이 앞에 추가되고 옛 2항목도 그대로 보인다(옛 진입점 유지)', async () => {
-    expandAllGroups();
-    await mount(undefined, { todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: true });
-    const links = [...container.querySelectorAll('a')];
-    const v3Link = links.find((a) => a.getAttribute('href') === '/connect-rules');
-    expect(v3Link).toBeDefined();
-    expect(links.some((a) => a.getAttribute('href') === '/organization/channels')).toBe(true);
-    expect(links.some((a) => a.getAttribute('href') === '/organization/content-rules')).toBe(true);
-  });
-
-  // CHANGES(페드루 PO, PR#4386 1차 리뷰) — 「일감」은 어느 단일 플래그에도 안 걸려있어
-  // 셋 중 하나만 켜도(여기선 connectRulesV3Enabled) work-list로 전환되는지 확認 —
-  // 반대로 셋 다 OFF면 위 「navV3Flags 미전달」 테스트와 동형으로 /flow 그대로.
-  it('임의 플래그 하나(connectRulesV3Enabled)만 ON이어도 「일감」이 work-list로 바뀐다(단일 플래그 의존 0)', async () => {
-    expandAllGroups();
-    await mount(undefined, { todayV3Enabled: false, chatV3Enabled: false, connectRulesV3Enabled: true });
-    const workLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.startsWith('일감'));
-    expect(workLink?.getAttribute('href')).toBe('/work-list');
+    await mount(undefined, { todayV3Enabled: true, chatV3Enabled: true, connectRulesV3Enabled: true });
+    expect([...container.querySelectorAll('a')].map((a) => a.getAttribute('href'))).toEqual(off);
   });
 });
 
@@ -599,3 +661,64 @@ describe('AppSidebar — 오프캔버스로 접힌 상태에서 ⌘K · 레일([
   });
 });
 
+
+// story #4885 (AC3 §5) — ⌘K 팔레트의 «이동» 순서는 길잡이가 실제로 그린 순서와 같다. 기대 순서를 손으로도 설정 파생으로도 적지 않고, 길잡이 DOM이 그린 줄 순서를 직접 읽어 비교한다.
+// 길잡이에만 있는 항목(데스크톱 앱 — 팔레트엔 안 싣는 것이 4524로 고정)과 팔레트에만 있는 항목(일감 탭 앵커 · 그 밖)은 비교에서 뺀다.
+describe('AppSidebar — 줄 순서가 ⌘K 팔레트 «이동» 순서와 같다(story #4885)', () => {
+  it('⭐길잡이가 그린 [data-nav-id] 순서 = 팔레트 이동 목록에서 길잡이에 있는 항목만 거른 순서', async () => {
+    expandAllGroups();
+    await mount();
+    const { deriveNavigateItems } = await import('@/components/command-palette/command-palette');
+    const sidebarIds = [...container.querySelectorAll('[data-nav-id]')].map((el) => el.getAttribute('data-nav-id')!);
+    expect(sidebarIds.length).toBeGreaterThan(10);
+    const paletteIds = deriveNavigateItems((resource) => `/ws/proj/${resource}`).map((item) => item.id);
+    const inSidebar = new Set(sidebarIds);
+    expect(paletteIds.filter((id) => inSidebar.has(id))).toEqual(sidebarIds.filter((id) => paletteIds.includes(id)));
+    // 길잡이에 있는 건 전부 팔레트에도 있다(데스크톱 앱만 예외 — 켜진 곳에서만 길잡이에 선다).
+    expect(sidebarIds.filter((id) => !paletteIds.includes(id)).filter((id) => id !== 'desktop-app')).toEqual([]);
+    // 대화 카드는 첫 구역(홈 · 결재) 바로 뒤, 일감보다 앞이다.
+    expect(sidebarIds.indexOf('chats')).toBe(sidebarIds.indexOf('inbox') + 1);
+    expect(sidebarIds.indexOf('chats')).toBeLessThan(sidebarIds.indexOf('board'));
+  });
+});
+
+// story #4906 (PO 11-12) — the «대화» card is always conspicuous (2930's meaning) but its blue OUTLINE read as «you are here» on every screen, next to the real current-page mark: two places looked current.
+// Now the filled current-page look and `aria-current` are on the card only on /chats; anywhere else it has no outline and no shadow — just the blue icon and word.
+describe('AppSidebar — «대화» 카드는 지금 페이지일 때만 «현재 페이지» 꼴(story #4906)', () => {
+  const chatCard = () => container.querySelector('a[data-nav-id="chats"]') as HTMLAnchorElement;
+
+  it('⭐/chats가 아닐 때(문서): 테두리 · 그림자 없음 · aria-current 없음 · 글자는 파랑 그대로(늘 눈에 띔)', async () => {
+    expandAllGroups();
+    pathnameRef.current = '/docs';
+    await mount();
+    const cls = chatCard().className.split(/\s+/);
+    expect(chatCard().getAttribute('aria-current')).toBeNull();
+    expect(chatCard().getAttribute('data-chat-center-active')).toBe('false');
+    expect(cls).not.toContain('border');
+    expect(cls).not.toContain('border-proof-blue');
+    expect(cls.some((c) => c.startsWith('shadow'))).toBe(false);
+    expect(cls).not.toContain('bg-sidebar-accent');
+    expect(cls).toContain('text-ds-action-text');
+    expect(cls).not.toContain('text-proof-blue');
+  });
+
+  it('⭐/chats 와 /chats/<방>에서: aria-current=page + 다른 항목과 같은 «현재 페이지» 채움(bg-sidebar-accent)', async () => {
+    expandAllGroups();
+    for (const path of ['/chats', '/chats/room-1']) {
+      pathnameRef.current = path;
+      await mount();
+      expect(chatCard().getAttribute('aria-current')).toBe('page');
+      expect(chatCard().getAttribute('data-chat-center-active')).toBe('true');
+      expect(chatCard().className.split(/\s+/)).toContain('bg-sidebar-accent');
+      expect(chatCard().className.split(/\s+/)).not.toContain('border-proof-blue');
+    }
+  });
+
+  it('«현재 페이지» 표시는 한 번에 한 곳: 문서 화면에서 켜진 것은 «문서»이고 «대화»가 아니다', async () => {
+    expandAllGroups();
+    pathnameRef.current = '/docs';
+    await mount();
+    const current = [...container.querySelectorAll('a[aria-current="page"]')].map((a) => a.getAttribute('data-nav-id') ?? a.textContent?.trim());
+    expect(current).not.toContain('chats');
+  });
+});

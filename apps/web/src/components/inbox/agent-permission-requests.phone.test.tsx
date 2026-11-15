@@ -90,6 +90,7 @@ async function render(rows: PermissionRequest[], locale: 'ko' | 'en' = 'ko') {
   await settle();
 }
 const buttons = () => [...container.querySelectorAll('button, a')].map((b) => b.textContent);
+const touchHeights = (labels: string[]) => labels.map((l) => [...container.querySelectorAll('button')].find((x) => x.textContent === l)!.className.includes('touch:min-h-11'));
 const phoneLines = () => [...container.querySelectorAll('[data-testid="agent-permission-phone-line"]')].map((p) => p.textContent);
 const press = async (label: string) => {
   const b = [...container.querySelectorAll('button')].find((x) => x.textContent === label);
@@ -331,6 +332,7 @@ describe('[4580 AC2] the network question on the phone', () => {
       installShell();
       await render([net()]);
       expect(buttons()).toEqual(['허용…', '거부']);
+      expect(touchHeights(['허용…', '거부'])).toEqual([true, true]); // [SID:4949] the phone's answer buttons are 44 high
       await press('허용…');
       expect(phoneLines()).toEqual(['주소를 확인하는 중…']);
       // the daemon reported the host: the next read brings the same request back at stage confirm
@@ -339,6 +341,7 @@ describe('[4580 AC2] the network question on the phone', () => {
       await settle();
       expect(phoneLines()).toEqual([]); // «확인하는 중…» does not stand on the second card
       expect(buttons()).toEqual(['허용하고 이어 가기', '허용하지 않기']);
+      expect(touchHeights(['허용하고 이어 가기', '허용하지 않기'])).toEqual([true, true]); // [SID:4949] and the second stage's too
       expect(document.activeElement?.textContent).toBe('허용하지 않기'); // first focus: the side that keeps it closed
       await press('허용하고 이어 가기');
       expect(phoneLines()).toEqual(['허용됐어요 · gitlab.com — 에이전트에게 다시 해 보라고 넘겼어요']);

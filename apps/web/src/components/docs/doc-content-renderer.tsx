@@ -290,7 +290,9 @@ export function DocContentRenderer({
   const wsSlug = params?.ws;
   const projSlug = params?.proj;
   const docHref = useCallback(
-    (slug: string) => (wsSlug && projSlug ? docUrl(wsSlug, projSlug, slug) : flatHref(`/docs/${slug}`)),
+    // story 4892 (UI-9 D1) — a link to a document opens it to READ (the reading screen), like choosing it from the list. Every internal doc link here (the [[wiki]] plugin,
+    // the DOM-built links, the equality check below) goes through this one function, so they stay consistent.
+    (slug: string) => (wsSlug && projSlug ? `${docUrl(wsSlug, projSlug, slug)}/view` : flatHref(`/docs/${slug}/view`)),
     [wsSlug, projSlug, flatHref],
   );
   const router = useRouter();

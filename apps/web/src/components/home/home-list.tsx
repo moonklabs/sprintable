@@ -1,0 +1,238 @@
+'use client';
+
+import { useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import Link from 'next/link';
+import { useTranslations } from 'next-intl';
+import { Avatar } from '@/components/ds/avatar';
+import { Button } from '@/components/ds/button';
+import { CountBadge } from '@/components/ds/count-badge';
+import { EmptyState } from '@/components/ds/empty-state';
+import { ListRow } from '@/components/ds/list-row';
+import { ContextMenu, ContextMenuTrigger, MenuContent, MenuItem, MenuSeparator } from '@/components/ds/menu';
+import { SectionHeader } from '@/components/ds/section-header';
+import { useToast } from '@/components/ui/toast';
+import { copyTextSafely } from '@/lib/clipboard';
+import { hrefForNeedsMeItem } from '@/components/org-briefing/derive-today';
+import { useFlatHref } from '@/hooks/use-flat-href';
+import { handleListKeys } from '@/lib/list-keys';
+import { withProjectParam } from '@/lib/with-project-param';
+import type { HomeModel, HomeRow, HomeRowKind } from './derive-home';
+import type { HomeSources } from './home-model-provider';
+
+/**
+ * story #4888 (UI-5 AC4, home) — the three sections of the home list: «내 손이 필요해요» (always open, the first 5 rows + «N개 더 보기») · «일하는 중» · «방금 끝남» (both folded at first).
+ * Everything here is drawn from the `HomeModel` (`deriveHome`) — the same model the navigation bar's badge reads. A row's action is the link the old screen already had for that thing
+ * (the approval details · the notification's own destination · the story on the flow board); nothing new is invented.
+ */
+
+/**
+ * story #4888 — a row whose server title is blank (a decision request that came without its question, an old gate) still has a name: «제목이 없는 요청». The row, the detail and the sheet's label
+ * all read the title through this one function, so the three never disagree and an assistive-technology name is never empty (the sheet used to be named « 자세히»).
+ */
+export function rowTitle(t: ReturnType<typeof useTranslations>, row: { title: string }): string {
+  return row.title.trim() !== '' ? row.title : t('titleFallback');
+}
+
+/** the word under a row's title that says what kind of thing it is (literal keys, so each one is visibly read) */
+export function kindLabel(t: ReturnType<typeof useTranslations>, kind: HomeRowKind): string {
+  switch (kind) {
+    case 'approval': return t('kindApproval');
+    case 'signature': return t('kindSignature');
+    case 'answer': return t('kindAnswer');
+    case 'mention': return t('kindMention');
+    case 'assigned': return t('kindAssigned');
+    case 'permission': return t('kindPermission');
+    case 'stopped': return t('kindStopped');
+    case 'limit-paused': return t('kindLimitPaused');
+    case 'terminal-wait': return t('kindTerminalWait');
+    case 'agent-run': return t('kindAgentRun');
+    case 'story': return t('kindStory');
+    case 'done': return t('kindDone');
+  }
+}
+
+/** the agent run statuses the old «에이전트가 하는 일» rows named (an unknown status gets no word — nothing is invented) */
+export const AGENT_STATUS_KEY: Record<string, string> = {
+  queued: 'agentStatusQueued',
+  held: 'agentStatusHeld',
+  running: 'agentStatusRunning',
+  hitl_pending: 'agentStatusHitlPending',
+};
+
+export type RowAction = 'approve' | 'approveAndSign' | 'decide' | 'answer' | 'open';
+export function actionLabel(t: ReturnType<typeof useTranslations>, action: RowAction): string {
+  switch (action) {
+    case 'approve': return t('rowApprove');
+    case 'approveAndSign': return t('rowApproveAndSign');
+    case 'decide': return t('rowDecide');
+    case 'answer': return t('actionAnswer');
+    case 'open': return t('actionOpen');
+  }
+}
+const NEEDS_ACTION: Partial<Record<HomeRowKind, RowAction>> = { approval: 'approve', signature: 'approveAndSign', answer: 'answer' };
+
+export function useRowLink(sources: HomeSources): (row: HomeRow) => { action: RowAction; href: string } | null {
+  const flatHref = useFlatHref();
+  return (row) => {
+    switch (row.kind) {
+      case 'approval':
+      case 'signature':
+      case 'answer': {
+        const item = sources.snapshot.needsMe.find((i) => `${i.source}:${i.id}` === row.key);
+        if (!item) return null;
+        // story 4950: this link only OPENS the request (the choice and the decision are made on its page) — so a decision request says «결정하러 열기», not «승인»
+        const action: RowAction = (row.kind === 'approval' || row.kind === 'signature') && item.workItemType === 'agent_decision' ? 'decide' : NEEDS_ACTION[row.kind] ?? 'open';
+        return { action, href: hrefForNeedsMeItem(item, flatHref) };
+      }
+      case 'mention':
+      case 'assigned':
+      case 'permission':
+      case 'stopped':
+      case 'limit-paused':
+        return { action: 'open', href: sources.notificationHrefById[row.ref.id] ?? flatHref('/inbox') };
+      case 'terminal-wait': {
+        // story #4931: the agent's own conversation (where the person talks to it) — else the agent's page, where the same state line says where it waits; it is never answered from here
+        const wait = (sources.terminalWaits ?? []).find((w) => w.agentId === row.ref.id);
+        if (wait?.conversationId) return { action: 'open', href: wait.conversationProjectId ? withProjectParam(`/chats/${wait.conversationId}`, wait.conversationProjectId) : flatHref(`/chats/${wait.conversationId}`) };
+        return { action: 'open', href: flatHref(`/organization/workforce/${row.ref.id}`) };
+      }
+      case 'story':
+        return { action: 'open', href: row.ref.projectId ? withProjectParam(`/flow?story=${row.ref.id}`, row.ref.projectId) : flatHref(`/flow?story=${row.ref.id}`) };
+      case 'done': {
+        const conversationId = sources.runConversationById[row.ref.id];
+        return conversationId ? { action: 'open', href: flatHref(`/chats/${conversationId}`) } : null;
+      }
+      default:
+        return null;
+    }
+  };
+}
+
+function HomeRowView({ row, sources, needsHand, selected, onSelect }: { row: HomeRow; sources: HomeSources; needsHand: boolean; selected: boolean; onSelect: (key: string) => void }) {
+  const t = useTranslations('home');
+  const tb = useTranslations('orgBriefing');
+  const flatHref = useFlatHref();
+  const linkFor = useRowLink(sources);
+  const link = linkFor(row);
+  const tCage = useTranslations('cage'); // the SAME words as the approvals screen's row menu
+  const tCommon = useTranslations('common');
+  const { addToast } = useToast();
+  const rowRef = useRef<HTMLDivElement>(null);
+  // what the old rows also said: an approval's reason (or who asked), the status word of an agent run, and — on an approval that needs a signature — the notice that it cannot be undone
+  const need = needsHand && (row.kind === 'approval' || row.kind === 'signature' || row.kind === 'answer') ? sources.snapshot.needsMe.find((i) => `${i.source}:${i.id}` === row.key) ?? null : null;
+  const run = row.kind === 'agent-run' ? sources.snapshot.agentProgress.find((r) => r.runId === row.ref.id) ?? null : null;
+  const statusKey = run ? AGENT_STATUS_KEY[run.status] : undefined;
+  const conversationHref = need?.conversationId
+    ? (need.conversationProjectId ? withProjectParam(`/chats/${need.conversationId}`, need.conversationProjectId) : flatHref(`/chats/${need.conversationId}`))
+    : null;
+  const subtitle = [kindLabel(t, row.kind), row.actor?.name, need?.reason, statusKey ? tb(statusKey) : null].filter(Boolean).join(' · ');
+  const common = {
+    leading: row.actor ? <Avatar name={row.actor.name} actorType={row.actor.type} size={24} /> : undefined,
+    // story #4888 — the title is a real button: Tab reaches it, Enter selects (the same as a click on the row). The row's action link stays where it was (the right slot).
+    title: <Button type="button" variant="quiet" className="h-auto max-w-full justify-start px-0 text-left text-ds-body font-semibold text-ds-ink hover:bg-transparent hover:text-ds-ink focus-visible:ring-0"><span className="truncate">{rowTitle(t, row)}</span></Button>,
+    subtitle,
+    trailing: link || conversationHref ? (
+      <>
+        {conversationHref ? <Link href={conversationHref} className="text-ds-small text-ds-action hover:underline">{tb('conversationOpenLink')}</Link> : null}
+        {link ? (
+          <Button asChild size="md" variant={needsHand ? 'primary' : 'secondary'}>
+            <Link href={link.href} data-home-row-action="">{actionLabel(t, link.action)}</Link>
+          </Button>
+        ) : null}
+      </>
+    ) : undefined,
+  } as const;
+  const inner = (
+    <>
+      {needsHand
+        ? <ListRow {...common} selected={selected} needsHand needsHandLabel={t('needsHandLabel')} className="has-[button:focus-visible]:ring-2 has-[button:focus-visible]:ring-inset has-[button:focus-visible]:ring-ds-action" />
+        : <ListRow {...common} selected={selected} className="has-[button:focus-visible]:ring-2 has-[button:focus-visible]:ring-inset has-[button:focus-visible]:ring-ds-action" />}
+      {need?.state === 'signature' ? <p className="m-0 border-b border-ds-line px-4 pb-2 text-ds-small text-ds-ink-3">{tb('signatureRiskNotice')}</p> : null}
+    </>
+  );
+  // a click anywhere on the row selects it (a click on the row's own link goes where the link goes and does not also select)
+  const rowProps = { 'data-row-key': row.key, ref: rowRef, onClick: (e: ReactMouseEvent) => { if (!(e.target as HTMLElement).closest('a')) onSelect(row.key); } };
+  if (!needsHand || !link) return <div {...rowProps}>{inner}</div>;
+  // story 4950 — the right-click menu of a «내 손이 필요해요» row (Mac / desktop): the approvals screen's own ds ContextMenu with the same entries that need nothing new here: open the request (a click on the row's own link) · copy its question / title.
+  // Reject and hold stay on the approvals screen (they ask for a reason in a dialog that lives there); nothing here is right-click-only — the row's button and the detail card have the open action too.
+  const isDecision = need?.workItemType === 'agent_decision';
+  const copyTitle = () => { void copyTextSafely(rowTitle(t, row)).then((r) => { if (!r.ok) addToast({ type: 'error', title: tCommon('copyFailedSelectManually') }); }); };
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger render={<div {...rowProps} />}>{inner}</ContextMenuTrigger>
+      <MenuContent align="start">
+        <MenuItem icon="open_in_new" onClick={() => (rowRef.current?.querySelector('a[data-home-row-action]') as HTMLAnchorElement | null)?.click()}>{tCage('queueMenuOpen')}</MenuItem>
+        <MenuSeparator />
+        <MenuItem icon="content_copy" onClick={copyTitle}>{isDecision ? tCage('queueMenuCopyQuestion') : tCage('queueMenuCopyTitle')}</MenuItem>
+      </MenuContent>
+    </ContextMenu>
+  );
+}
+
+function FoldableSection({ title, rows, sources, defaultCollapsed, emptyText, selectedKey, onSelect }: { title: string; rows: HomeRow[]; sources: HomeSources; defaultCollapsed: boolean; emptyText: string; selectedKey: string | null; onSelect: (key: string) => void }) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  return (
+    <section aria-label={title}>
+      <SectionHeader title={title} count={<CountBadge count={rows.length} />} collapsed={collapsed} onToggle={() => setCollapsed((c) => !c)} level={2} />
+      {collapsed ? null : rows.length === 0 ? (
+        <p className="m-0 px-4 py-6 text-center text-ds-small text-ds-ink-3">{emptyText}</p>
+      ) : (
+        <div>{rows.map((row) => <HomeRowView key={row.key} row={row} sources={sources} needsHand={false} selected={row.key === selectedKey} onSelect={onSelect} />)}</div>
+      )}
+    </section>
+  );
+}
+
+
+export function HomeList({ model, sources, partial = false, selectedKey = null, onSelect = () => {} }: { model: HomeModel; sources: HomeSources; partial?: boolean; selectedKey?: string | null; onSelect?: (key: string) => void }) {
+  const t = useTranslations('home');
+  const tb = useTranslations('orgBriefing');
+  const [showAll, setShowAll] = useState(false);
+  // the server counted more waiting approvals than it gave rows for (an item without its key facts is left out): never shown as «all caught up» — the difference is said in words, and is not in the one number
+  const hiddenNeedsMe = Math.max(0, sources.snapshot.needsMeCount - sources.snapshot.needsMe.length);
+  const visible = showAll ? model.needsHand : model.needsHandVisible;
+  return (
+    // story #4888 — j / k / ↑ / ↓ move the selection between the rows that are on screen (and the focus with it); Enter on a row's title selects it. No new command key: this only walks the list.
+    <div className="overflow-hidden rounded-ds-control border border-ds-line bg-ds-surface" data-testid="home-list" onKeyDown={(e) => handleListKeys(e, onSelect)}>
+      <p className="m-0 px-4 py-2 font-sans text-ds-mono-md tabular-nums text-ds-ink-3" data-testid="home-header-line">
+        {t('headerLine', { needsHand: model.header.needsHand, working: model.header.working, justDone: model.header.justDone })}
+      </p>
+      <section aria-label={t('sectionNeedsHand')} data-testid="home-section-needs-hand">
+        <SectionHeader
+          title={t('sectionNeedsHand')}
+          tone="needs-hand"
+          level={2}
+          count={<CountBadge kind="needs-hand" label={t('needsHandLabel')} count={model.header.needsHand} data-testid="home-needs-hand-count" />}
+        />
+        {/* the old section said this beside its title when there were rows (money and outbound sends are signed one at a time). It is its OWN line under the header: as the header's trailing slot
+            it is shrink-0 and ~150px (ko) / ~330px (en) wide, so on a phone (and in the 360–420 list column) it took the title's width — «내 손이 필요해요» folded to 3 lines and the hint ran over it
+            (en, 320–412: title 41.7px wide, hint overlapping it 41.7 × 16px; ko 320: 3 lines). A line of its own wraps by itself and can never take the title's room. */}
+        {model.needsHand.length > 0 ? (
+          <p className="m-0 border-b border-ds-line px-3 py-1.5 text-ds-small text-ds-ink-3" data-testid="home-needs-hand-hint">{tb('needsMeHint')}</p>
+        ) : null}
+        {model.needsHand.length === 0 && hiddenNeedsMe === 0 && partial ? (
+          // some of what feeds this list could not be read: an empty list is not «all caught up»
+          <p className="m-0 px-4 py-6 text-center text-ds-small text-ds-ink-2" data-testid="home-partial-empty">{tb('loadErrorTitle')}</p>
+        ) : model.needsHand.length === 0 && hiddenNeedsMe === 0 ? (
+          <EmptyState icon="check_circle" title={t('emptyAllTitle')} description={t('emptyAllDescription')} />
+        ) : model.needsHand.length === 0 ? (
+          <p className="m-0 px-4 py-6 text-center text-ds-small text-ds-ink-2" data-testid="home-hidden-notice">{tb('needsMeHiddenCountNotice', { count: hiddenNeedsMe })}</p>
+        ) : (
+          <div>
+            {visible.map((row) => <HomeRowView key={row.key} row={row} sources={sources} needsHand selected={row.key === selectedKey} onSelect={onSelect} />)}
+            {model.needsHandHidden > 0 ? (
+              <div className="border-b border-ds-line px-4 py-2">
+                <Button type="button" variant="quiet" aria-expanded={showAll} onClick={() => setShowAll((s) => !s)}>
+                  {showAll ? t('lessRows') : t('moreRows', { count: model.needsHandHidden })}
+                </Button>
+              </div>
+            ) : null}
+            {hiddenNeedsMe > 0 ? <p className="m-0 border-b border-ds-line px-4 py-2 text-ds-small text-ds-ink-3" data-testid="home-hidden-notice">{tb('needsMeHiddenCountNotice', { count: hiddenNeedsMe })}</p> : null}
+          </div>
+        )}
+      </section>
+      <FoldableSection title={t('sectionWorking')} rows={model.working} sources={sources} defaultCollapsed emptyText={t('emptyWorking')} selectedKey={selectedKey} onSelect={onSelect} />
+      <FoldableSection title={t('sectionJustDone')} rows={model.justDone} sources={sources} defaultCollapsed emptyText={t('emptyJustDone')} selectedKey={selectedKey} onSelect={onSelect} />
+    </div>
+  );
+}

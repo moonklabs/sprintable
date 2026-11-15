@@ -36,7 +36,7 @@ afterEach(async () => {
 
 const flush = async () => { for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); }); };
 const text = () => container.textContent ?? '';
-const sw = () => container.querySelector<HTMLElement>('[data-slot="switch"]')!;
+const sw = () => container.querySelector<HTMLElement>('[data-slot="ds-toggle"]')!;
 const button = (label: string) => Array.from(container.querySelectorAll('button')).find((b) => b.textContent === label)!;
 const OFF_LINE = '지금 조직(문클랩스)은 원격 제어가 꺼져 있어요';
 

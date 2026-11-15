@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
-import { Input } from '@/components/ui/input';
+import { Input } from '@/components/ds/input';
 import { pickIGaJosa } from '@/lib/korean-particle';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { deriveTrustStage, asVerificationSheet, type EvidenceItem, type EvidenceType, type VerificationSheetItem } from '@/services/verify';
@@ -82,7 +82,7 @@ const VERDICT_LABEL_KEY: Partial<Record<VerificationSheetItem['verdict'], string
 };
 
 // 유나 §17-24 대비 규율(2026-09-06) — 판정 낱말은 muted 금지(작은 글자×muted×
-// bg-muted 조합 실측 최저 4.77 — 이 표는 muted 배경 위가 아니지만 규율은 표
+// bg-ds-surface-sunk 조합 실측 최저 4.77 — 이 표는 muted 배경 위가 아니지만 규율은 표
 // 전체에 건다), fail만 destructive(색은 낱말 뒤에 덧붙는 것 — 낱말이 먼저).
 function VerificationSheetVerdict({
   verdict, t, naLabel,
@@ -103,7 +103,7 @@ function VerificationSheetRow({
   const items = asVerificationSheet(item.payload) ?? [];
   const hasNoteColumn = items.some((i) => i.note);
   return (
-    <li className="rounded-md px-1.5 py-1 hover:bg-muted/40">
+    <li className="rounded-md px-1.5 py-1 hover:bg-ds-surface-high">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}
@@ -304,7 +304,7 @@ export function EvidenceSection({
 
   return (
     <div className={className}>
-      <div className="rounded-lg border border-border p-2.5">
+      <div className="rounded-lg border border-ds-line p-2.5">
         <button type="button" onClick={handleToggle} aria-expanded={expanded} className="flex w-full items-center gap-2 text-left">
           <Check
             className={cn('h-3 w-3 shrink-0', trustStage === 'verified' ? 'text-success/85' : 'text-warning-strong')}
@@ -326,7 +326,7 @@ export function EvidenceSection({
         </button>
 
         {expanded ? (
-          <div className="mt-2 border-t border-border pt-2">
+          <div className="mt-2 border-t border-ds-line pt-2">
             {loading ? (
               <p className="text-editorial-meta text-muted-foreground">{tCommon('loading')}</p>
             ) : error ? (
@@ -356,7 +356,7 @@ export function EvidenceSection({
                       ? { id: item.artifact_id, versionNumber: item.artifact_version_number }
                       : null;
                     return (
-                      <li key={item.id} className="flex items-start gap-2 rounded-md px-1.5 py-1 hover:bg-muted/40">
+                      <li key={item.id} className="flex items-start gap-2 rounded-md px-1.5 py-1 hover:bg-ds-surface-high">
                         <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
                         <div className="min-w-0 flex-1">
                           {pinnedArtifact ? (
@@ -403,7 +403,7 @@ export function EvidenceSection({
             ) : null}
 
             {showAddForm ? (
-              <div className="mt-2 space-y-1.5 rounded-md border border-border bg-muted/20 p-2">
+              <div className="mt-2 space-y-1.5 rounded-md border border-ds-line bg-ds-surface-high [--muted-foreground:var(--ds-ink-3)] p-2">
                 <div className="flex flex-wrap gap-1">
                   {CLIENT_CREATABLE_TYPES.map((ty) => (
                     <button
@@ -413,7 +413,7 @@ export function EvidenceSection({
                       onClick={() => setAddType(ty)}
                       className={cn(
                         'rounded px-2 py-0.5 text-micro font-medium transition',
-                        addType === ty ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground',
+                        addType === ty ? 'bg-ds-action text-ds-on-action' : 'bg-ds-surface-sunk text-muted-foreground hover:text-foreground',
                       )}
                     >
                       {t(TYPE_LABEL_KEY[ty])}
@@ -425,14 +425,14 @@ export function EvidenceSection({
                   value={addRef}
                   onChange={(e) => setAddRef(e.target.value)}
                   placeholder={t('evidenceRefPlaceholder')}
-                  className="h-auto bg-background px-2 py-1 lg:text-xs dark:bg-background"
+                  className="h-auto bg-ds-surface px-2 py-1 lg:text-xs "
                 />
                 <Input
                   type="text"
                   value={addNote}
                   onChange={(e) => setAddNote(e.target.value)}
                   placeholder={t('evidenceNotePlaceholder')}
-                  className="h-auto bg-background px-2 py-1 lg:text-xs dark:bg-background"
+                  className="h-auto bg-ds-surface px-2 py-1 lg:text-xs "
                 />
                 {addError ? <p className="text-editorial-meta text-destructive">{t('evidenceAddFailed')}</p> : null}
                 <div className="flex justify-end gap-1.5">
@@ -443,7 +443,7 @@ export function EvidenceSection({
                     type="button"
                     onClick={() => void handleAddEvidence()}
                     disabled={!addRef.trim() || adding}
-                    className="rounded bg-primary px-2 py-1 text-editorial-meta font-medium text-primary-foreground disabled:opacity-50"
+                    className="rounded bg-ds-action px-2 py-1 text-editorial-meta font-medium text-ds-on-action disabled:opacity-50"
                   >
                     {adding ? tCommon('loading') : t('evidenceAdd')}
                   </button>

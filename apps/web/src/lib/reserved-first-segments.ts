@@ -63,6 +63,8 @@ export const RESERVED_FIRST_SEGMENTS = new Set([
   // 클래스).
   'connect-rules',
   'content', 'dashboard',
+  // story 4886(UI-3) — 새 최상위 app/(authenticated)/design-system(ds 부품 견본 페이지). 미등재 시 '/design-system'이 워크스페이스 slug로 오인될 수 있다(위 'today' · 'desktop'과 동형 결함 클래스).
+  'design-system',
   // [SID:3807] 슬라이스12 AC2 — 새 최상위 app/desktop/updates/macos.json(공개 업데이트
   // 매니페스트 중계) 신설. 미등재 시 '/desktop/...'가 워크스페이스 slug로 오인될 수 있다
   // (카디르 QA #4187 발견) — 이 카드의 AC3(다운로드 화면, /desktop) 자리도 같은 등재.
@@ -77,6 +79,8 @@ export const RESERVED_FIRST_SEGMENTS = new Set([
   // story 4714 — the phone app's landing and start screen (new top-level routes outside the session layouts); unlisted, `/phone-start` could be read as a
   // workspace slug (the same fault class as `desktop` · `today` above)
   'phone-landing', 'phone-start',
+  // story 4915 (PR 2) — the public «다시 시도» page the proxy rewrites an unconfirmed page load to (app/session-unconfirmed/page.tsx); unlisted, `/session-unconfirmed` could be read as a workspace slug.
+  'session-unconfirmed',
   'privacy', 'refund-policy', 'register', 'reset-password',
   'rewards', 'set-password', 'settings', 'share', 'terms',
   // story #3962(2026-09-17) — 새 최상위 app/today(v3 첫 화면, (authenticated) 밖

@@ -98,11 +98,19 @@ afterEach(async () => {
   container.remove();
 });
 
+// story 4887 (UI-4 screen PR) — the «지금» strip and the project card live in the list head's «⋯» popover now (a portal)
+async function openListOptions() {
+  if (document.querySelector('[data-testid="chat-list-now"]')) return;
+  const trigger = container.querySelector('[data-testid="chat-list-options"]') as HTMLElement;
+  await act(async () => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+}
+
 describe('ChatListView — S3a 스트립 + S3b pulse 카드 합산 불변식(최대 1 expand)', () => {
   it('스트립을 펼치면 pulse는 collapsed 그대로다', async () => {
     await act(async () => { root.render(wrap(<ChatListView projectId="proj-1" currentTeamMemberId="me-1" />)); });
     await flush();
-    const headers = Array.from(container.querySelectorAll('button[aria-expanded]'));
+    await openListOptions();
+    const headers = Array.from(document.querySelectorAll('[data-testid="chat-list-now"] button[aria-expanded]'));
     expect(headers).toHaveLength(2); // 스트립 헤더 + pulse 헤더.
     const stripHeader = headers.find((h) => h.textContent?.includes('지금'))!;
     const pulseHeader = headers.find((h) => h.textContent?.includes('프로젝트 현황'))!;
@@ -114,7 +122,8 @@ describe('ChatListView — S3a 스트립 + S3b pulse 카드 합산 불변식(최
   it('스트립이 펼쳐진 상태에서 pulse를 누르면 스트립이 자동으로 접히고 pulse만 펼쳐진다', async () => {
     await act(async () => { root.render(wrap(<ChatListView projectId="proj-1" currentTeamMemberId="me-1" />)); });
     await flush();
-    const headers = Array.from(container.querySelectorAll('button[aria-expanded]'));
+    await openListOptions();
+    const headers = Array.from(document.querySelectorAll('[data-testid="chat-list-now"] button[aria-expanded]'));
     const stripHeader = headers.find((h) => h.textContent?.includes('지금'))!;
     const pulseHeader = headers.find((h) => h.textContent?.includes('프로젝트 현황'))!;
 
@@ -129,7 +138,8 @@ describe('ChatListView — S3a 스트립 + S3b pulse 카드 합산 불변식(최
   it('기본 상태(마운트 직후)는 둘 다 collapsed — 첫 화면 두 줄만 점유', async () => {
     await act(async () => { root.render(wrap(<ChatListView projectId="proj-1" currentTeamMemberId="me-1" />)); });
     await flush();
-    const headers = Array.from(container.querySelectorAll('button[aria-expanded]'));
+    await openListOptions();
+    const headers = Array.from(document.querySelectorAll('[data-testid="chat-list-now"] button[aria-expanded]'));
     expect(headers.every((h) => h.getAttribute('aria-expanded') === 'false')).toBe(true);
   });
 });

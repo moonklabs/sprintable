@@ -724,6 +724,31 @@ async def _with_existing_project(db: AsyncSession, exc: HTTPException, *, org_id
     )
 
 
+async def setup_project_room(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> dict | None:
+    """story 4934 — whether a NEW project can still be made here, read before [만들기] so the solo card can say «무료 플랜은 프로젝트가
+    하나예요 — ‹이름› 프로젝트에 넣어 만들어요» the moment a folder is picked instead of after the first press (the 402 of confirm-solo).
+    The one rule: `check_project_create_allowed` is the very call confirm-solo makes (ee/plan_limits.check_project_create_limit), and the
+    name comes from `_with_existing_project` — nothing is counted twice here. None = a new project is allowed, or no limit is enforced
+    (OSS · a paid plan), or an error that is not the project limit (nothing said · nothing held — a number is never made up).
+    `{limit, existing_project}`: existing_project = the organization's one project the person can open, or None when there is none to name.
+    Nothing more is shown than the 402 of confirm-solo already hands the same person (the block and that one project's id · name)."""
+    from app.services.org_project_create import check_project_create_allowed
+    from app.services.project_auth import is_org_owner_or_admin
+
+    if not await is_org_owner_or_admin(db, user_id, org_id):
+        return None  # the same gate confirm-solo holds before it ever reaches the project limit: a member who cannot confirm is told nothing about it
+    try:
+        await check_project_create_allowed(db, org_id)
+    except HTTPException as exc:
+        held = await _with_existing_project(db, exc, org_id=org_id, user_id=user_id)
+        detail = held.detail if isinstance(held.detail, dict) else None
+        if held.status_code != 402 or not detail or detail.get("code") != "PLAN_LIMIT_EXCEEDED" or detail.get("resource") != "project":
+            return None
+        existing = detail.get("existing_project")
+        return {"limit": detail.get("limit"), "existing_project": existing if isinstance(existing, dict) else None}
+    return None
+
+
 SOLO_AGENT_NAMES = {"claude": "Claude Code", "codex": "Codex"}  # story 4711 (Yuna): the agent is called what the person picked
 
 
@@ -1290,6 +1315,9 @@ async def _retire_same_machine(
     if old:
         from app.services import desktop_clock
 
+        from app.services import desktop_changes
+
+        await desktop_changes.forget(db, [o.id for o in old], lock=False)  # story #4951 — a replaced line keeps no changed-file list either
         await desktop_clock.forget(db, [o.id for o in old], lock=False)  # story #4733 — a replaced line keeps no clock view (its row is already held: `_lock_in_order` in the exchange)
         await db.execute(
             update(DesktopDeviceToken)
@@ -1592,6 +1620,9 @@ async def _disconnect_setup(
     desktop_relay.schedule_disconnected_after_commit(db, setup.id)
     from app.services import desktop_clock
 
+    from app.services import desktop_changes
+
+    await desktop_changes.forget(db, [setup.id], lock=False)  # story #4951 — no changed-file list outlives the computer's connection (the row is held: `_lock_in_order` above)
     await desktop_clock.forget(db, [setup.id], lock=False)  # story #4733 — a clock view (draft first lines) does not outlive the computer's connection (the row is held: `_lock_in_order` above)
     # story #4565: only the agents this setup made — an existing agent attached here keeps running elsewhere once moved on
     # (its keys from this setup are revoked above; the agent itself is not stopped)

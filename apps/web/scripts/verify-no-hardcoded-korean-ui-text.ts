@@ -117,6 +117,13 @@ export const EXEMPT_FILES = new Set<string>([
   'app/privacy/page.tsx',
   'app/refund-policy/page.tsx',
   'components/locale-switcher.tsx',
+  // story 4886(UI-3) — `/design-system` 견본 화면의 네 파일. 팀 안에서 ds 부품 · 토큰 상태를 보는 내부 참고 화면이라 제품 화면이 아니고,
+  // 부품에 넣는 견본 글(라벨 · 상태 글 · 이름)은 번역 대상이 아니라 부품이 받는 «값»의 예시다. 이 폴더 밖 코드는 그대로 스캔된다.
+  // 만료: 견본 화면이 제품 로케일(en)로도 공개되면 이 네 줄을 걷는다. (PO 승인 요청: PR 본문)
+  'components/ds/showcase/ds-showcase.tsx',
+  'components/ds/showcase/showcase-parts-a.tsx',
+  'components/ds/showcase/showcase-parts-b.tsx',
+  'components/ds/showcase/showcase-tokens.tsx',
 ]);
 
 const HANGUL_RE = /[가-힣]/;

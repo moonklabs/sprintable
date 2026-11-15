@@ -3,6 +3,7 @@
 import { useTranslations } from 'next-intl';
 import type { DocHeading } from './doc-heading-utils';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ds/button';
 
 // story #f546601e(v2 5호) — 긴 문서만 우측 미니 TOC를 자동 노출한다(유나 시안 확定,
 // 실측 19헤딩 문서 기준). 기존 드롭다운 DocToc의 임계값(3, 클릭해야 보이는 팝오버라
@@ -29,28 +30,26 @@ export function DocMiniToc({ headings, activeId, onHeadingClick, className }: Do
       aria-label={t('tocOnThisDoc')}
       className={cn('sticky top-6 max-h-[calc(100vh-8rem)] overflow-y-auto', className)}
     >
-      <div className="mb-2 text-micro font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+      <div className="mb-2 text-ds-small font-semibold text-ds-ink-3">
         {t('tocOnThisDoc')}
       </div>
-      <ul className="flex flex-col gap-1.5 text-xs leading-tight">
+      <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
         {headings.map((heading) => {
           const active = heading.id === activeId;
           return (
             <li key={heading.id}>
-              <button
-                type="button"
+              <Button
+                variant="quiet"
                 onClick={() => onHeadingClick(heading.id)}
                 aria-current={active ? 'location' : undefined}
                 className={cn(
-                  'block w-full truncate border-l-2 py-0.5 text-left transition-colors',
-                  heading.level === 1 ? 'pl-2.5 font-medium' : heading.level === 2 ? 'pl-4' : 'pl-6 text-editorial-meta',
-                  active
-                    ? 'border-proof-blue font-semibold text-proof-blue'
-                    : 'border-transparent text-muted-foreground hover:text-foreground',
+                  'h-auto min-h-7 w-full justify-start rounded-none border-0 border-l-2 px-0 py-0.5 text-left text-ds-small font-normal',
+                  heading.level === 1 ? 'pl-2.5 font-medium' : heading.level === 2 ? 'pl-4' : 'pl-6',
+                  active ? 'border-l-ds-action font-semibold text-ds-action-text' : 'border-l-transparent text-ds-ink-3',
                 )}
               >
-                {heading.text}
-              </button>
+                <span className="min-w-0 truncate">{heading.text}</span>
+              </Button>
             </li>
           );
         })}

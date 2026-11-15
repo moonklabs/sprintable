@@ -67,7 +67,7 @@ async function openBell(locale: 'ko' | 'en' = 'ko') {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 }
 const panel = () => document.querySelector<HTMLElement>('[data-dropdown-panel="notification-bell"]')!;
-const headlines = () => Array.from(panel().querySelectorAll('p.truncate.text-sm')).map((p) => p.textContent);
+const headlines = () => Array.from(panel().querySelectorAll('[data-testid="notification-line-headline"]')).map((p) => p.textContent);
 async function tab(label: string) {
   const button = Array.from(panel().querySelectorAll<HTMLButtonElement>('button[aria-pressed]')).find((b) => b.textContent === label)!;
   await act(async () => { button.click(); });
@@ -111,7 +111,7 @@ describe('NotificationBell — a dispatched line reads the kind it carries (stor
 
   it('the decision request line wears the approvals icon, not ⚡ — ⚡ only on the real hand-off', async () => {
     await openBell();
-    const icons = Array.from(panel().querySelectorAll('p.truncate.text-sm')).map(
+    const icons = Array.from(panel().querySelectorAll('[data-testid="notification-line-headline"]')).map(
       (p) => p.closest('button')!.querySelector('svg')!.getAttribute('class') ?? '',
     );
     expect(icons[0]).toContain('lucide-inbox');

@@ -200,7 +200,6 @@ tests/test_e_ui_daegbyeon_claimed_vs_verified_be_contract_realdb.py::_setup_app	
 tests/test_e_ui_daegbyeon_p0_03_human_owner_realdb.py::_setup_app	1
 tests/test_e_verify_v0_s1_evidence_realdb.py::_setup_app	1
 tests/test_eventbus_s1.py::client	1
-tests/test_eventbus_s1.py::test_create_event_403_when_sender_id_does_not_match_caller	1
 tests/test_eventbus_s2.py::client	1
 tests/test_eventbus_s2.py::test_agent_stream_registers_connection	1
 tests/test_eventbus_s2.py::test_stream_delivers_pending_on_connect	1

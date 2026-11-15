@@ -74,9 +74,9 @@ describe('the order (design doc §3 ③)', () => {
     expect(toShown(rows).map((s) => s.row.agent_name)).toEqual(['ann', 'bob', 'zed', 'cy']);
   });
 
-  it('an agent that is on no computer at all (no session · not bound) is not listed', () => {
-    const rows = [row({ agent_name: 'ghost', state: null, activity: null, bound_setup_id: null, bound_device_name: null, setup_id: null, device_name: null })];
-    expect(toShown(rows)).toEqual([]);
+  it('[SID:4950] an agent that is on no computer at all (made on the web · no session · not bound) IS listed — last, as «never ran» — not left out of the strip', () => {
+    const rows = [row({ agent_name: 'ghost', state: null, activity: null, bound_setup_id: null, bound_device_name: null, setup_id: null, device_name: null }), row({ agent_name: 'busy', state: 'working', activity: 'working' })];
+    expect(toShown(rows).map((s) => [s.row.agent_name, s.rank])).toEqual([['busy', 3], ['ghost', 7]]);
   });
 });
 
@@ -108,9 +108,35 @@ describe('the words', () => {
     expect(r.textContent).toContain('mac-1');
   });
 
+  it('[SID:4950] an agent on no computer at all: its name and «연결 안 됨» (ko) / «Not connected» (en) — a line, not an empty strip; no device name under it', async () => {
+    const ghost = row({ agent_name: 'ghost', state: null, activity: null, bound_setup_id: null, bound_device_name: null, setup_id: null, device_name: null, state_at: null });
+    await mount([ghost]);
+    expect(rowOf('ghost').textContent).toContain(koMessages.agents.agentNotConnected);
+    expect(container.textContent).not.toContain('연결된 에이전트가 아직 없어요');
+    expect(container.querySelectorAll('[data-testid="agent-state-device"]')).toHaveLength(0);
+    await mount([ghost], 'en');
+    expect(rowOf('ghost').textContent).toContain(enMessages.agents.agentNotConnected);
+  });
+
   it('bound to a computer but never ran: says so with that computer\'s name', async () => {
     await mount([row({ agent_name: 'new', state: null, activity: null, setup_id: null, device_name: null, state_at: null, bound_device_name: 'd4814 mac' })]);
     expect(rowOf('new').textContent).toContain('d4814 mac에 연결됨 · 아직 안 돌았어요');
+  });
+});
+
+describe('story #4931 — a terminal question on the computer of someone else', () => {
+  it('⭐the right column names the computer exactly ONCE: the state sentence of another person\'s Mac does not repeat the name (the line below it prints it) — mine reads as before', async () => {
+    await mount([
+      row({ agent_name: 'theirs', state: 'working', activity: 'working', first_screen: { ask: 'trust' }, device_is_mine: false, device_name: 'ZZ-다른-맥', bound_device_name: 'ZZ-다른-맥' }),
+      row({ agent_name: 'mine', state: 'working', activity: 'working', first_screen: { ask: 'trust' }, device_is_mine: true, device_name: 'ZZ-내-맥', bound_device_name: 'ZZ-내-맥' }),
+    ]);
+    const theirs = rowOf('theirs').textContent ?? '';
+    expect(theirs).toContain('그 맥에서 답을 기다려요');
+    expect(theirs).not.toContain('당신');
+    expect(theirs.split('ZZ-다른-맥').length - 1, '기기 이름은 줄에 한 번').toBe(1);
+    const mine = rowOf('mine').textContent ?? '';
+    expect(mine).toContain(ko.state.waiting_first_screen);
+    expect(mine.split('ZZ-내-맥').length - 1).toBe(1);
   });
 });
 

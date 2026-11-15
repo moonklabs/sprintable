@@ -74,10 +74,11 @@ def client():
 @pytest.mark.parametrize("room", [{"limit": 3, "current": 1, "available": 2, "tier": "free"}, None])
 def test_the_recipe_list_carries_the_room(client, room):
     c, org_id = client
-    with patch("app.routers.desktop_setup.setup_agent_room", new=AsyncMock(return_value=room)) as read:
+    with patch("app.routers.desktop_setup.setup_agent_room", new=AsyncMock(return_value=room)) as read, \
+         patch("app.routers.desktop_setup.setup_project_room", new=AsyncMock(return_value=None)):  # story 4934: the project room has its own tests
         r = c.get("/api/v2/desktop/recipes")
     assert r.status_code == 200, r.text
-    assert r.json() == {"recipes": [], "agent_room": room}
+    assert r.json() == {"recipes": [], "agent_room": room, "project_room": None}
     assert read.await_args.args[1] == org_id
 
 
@@ -89,7 +90,7 @@ def test_the_new_org_recipe_list_carries_the_free_room(client):
          patch("app.routers.desktop_setup.hit_person_limits", return_value=None):
         r = c.get("/api/v2/desktop/recipes/for-new-org")
     assert r.status_code == 200, r.text
-    assert r.json() == {"recipes": [], "agent_room": room}
+    assert r.json() == {"recipes": [], "agent_room": room, "project_room": None}  # story 4934: a person with no organization has no project room to read
     assert read.await_args.args[1] is None  # no organization yet
 
 

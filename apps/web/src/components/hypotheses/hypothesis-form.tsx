@@ -2,10 +2,10 @@
 
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { cn } from '@/lib/utils';
-import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
+import { Button } from '@/components/ds/button';
+import { Field } from '@/components/ds/field';
+import { Input, Textarea } from '@/components/ds/input';
+import { NativeSelect } from '@/components/ds/select';
 import type { MetricDefinition } from '@sprintable/core-storage';
 
 export interface HypothesisFormValue {
@@ -49,99 +49,94 @@ export function HypothesisForm({
     value.statement.trim().length > 0 && md.metric.trim().length > 0 && value.measure_after.length > 0 && !submitting;
 
   return (
+    // 4909 AC3 (가설 칸 3단계) — the same three fields on the ds parts: each is a ds `Field` (visible name · the control), the inputs are the field layer (ds Input · Textarea · NativeSelect), the buttons are ds Buttons. Values and the submit are untouched.
     <form
-      className="space-y-3 rounded-xl border border-border bg-muted/20 p-3"
+      data-testid="hypothesis-form"
+      className="space-y-3 rounded-ds-control border border-ds-line p-3"
       onSubmit={(e) => {
         e.preventDefault();
         if (canSubmit) onSubmit(value);
       }}
     >
       {/* 1. statement */}
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground">{t('statementField')}</label>
-        <Textarea
-          rows={2}
-          value={value.statement}
-          onChange={(e) => setValue((v) => ({ ...v, statement: e.target.value }))}
-          placeholder={t('statementPlaceholder')}
-          className="min-h-0 bg-background dark:bg-background"
-        />
-      </div>
+      <Field label={t('statementField')}>
+        {(control) => (
+          <Textarea
+            {...control}
+            rows={2}
+            value={value.statement}
+            onChange={(e) => setValue((v) => ({ ...v, statement: e.target.value }))}
+            placeholder={t('statementPlaceholder')}
+            className="min-h-0"
+          />
+        )}
+      </Field>
 
       {/* 2. metric / threshold (one conceptual field) */}
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground">{t('metricField')}</label>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_auto_auto]">
-          <Input
-            value={md.metric}
-            onChange={(e) => setMd({ metric: e.target.value })}
-            placeholder={t('metricPlaceholder')}
-            className="h-auto bg-background dark:bg-background"
-          />
-          <Select
-            value={md.source}
-            onChange={(e) => setMd({ source: e.target.value as MetricDefinition['source'] })}
-            className="h-auto px-2 bg-background dark:bg-background"
-          >
-            {SOURCES.map((s) => (
-              <option key={s} value={s}>
-                {s === 'ga4' ? t('sourceGa4') : s === 'manual' ? t('sourceManual') : t('sourceInternal')}
-              </option>
-            ))}
-          </Select>
-          <div className="flex overflow-hidden rounded-xl border border-border">
-            {(['up', 'down'] as const).map((dir) => (
-              <button
-                key={dir}
-                type="button"
-                aria-pressed={md.direction === dir}
-                onClick={() => setMd({ direction: dir })}
-                className={cn(
-                  'px-3 py-2 text-xs font-medium transition',
-                  md.direction === dir ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:text-foreground',
-                )}
-              >
-                {dir === 'up' ? t('dirUp') : t('dirDown')}
-              </button>
-            ))}
+      <Field label={t('metricField')}>
+        {(control) => (
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_auto_auto]">
+            <Input
+              {...control}
+              value={md.metric}
+              onChange={(e) => setMd({ metric: e.target.value })}
+              placeholder={t('metricPlaceholder')}
+            />
+            <NativeSelect
+              value={md.source}
+              onChange={(e) => setMd({ source: e.target.value as MetricDefinition['source'] })}
+            >
+              {SOURCES.map((s) => (
+                <option key={s} value={s}>
+                  {s === 'ga4' ? t('sourceGa4') : s === 'manual' ? t('sourceManual') : t('sourceInternal')}
+                </option>
+              ))}
+            </NativeSelect>
+            <div className="flex gap-1">
+              {(['up', 'down'] as const).map((dir) => (
+                <Button
+                  key={dir}
+                  type="button"
+                  size="lg"
+                  variant={md.direction === dir ? 'primary' : 'secondary'}
+                  aria-pressed={md.direction === dir}
+                  onClick={() => setMd({ direction: dir })}
+                >
+                  {dir === 'up' ? t('dirUp') : t('dirDown')}
+                </Button>
+              ))}
+            </div>
+            <Input
+              type="number"
+              inputMode="decimal"
+              value={Number.isNaN(md.target) ? '' : md.target}
+              onChange={(e) => setMd({ target: e.target.value === '' ? 0 : Number(e.target.value) })}
+              placeholder={t('targetPlaceholder')}
+              className="tabular-nums sm:w-20"
+            />
           </div>
-          <Input
-            type="number"
-            inputMode="decimal"
-            value={Number.isNaN(md.target) ? '' : md.target}
-            onChange={(e) => setMd({ target: e.target.value === '' ? 0 : Number(e.target.value) })}
-            placeholder={t('targetPlaceholder')}
-            className="h-auto tabular-nums bg-background dark:bg-background sm:w-20"
-          />
-        </div>
-      </div>
+        )}
+      </Field>
 
       {/* 3. measure_after */}
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground">{t('measureAfterField')}</label>
-        <Input
-          type="date"
-          value={value.measure_after}
-          onChange={(e) => setValue((v) => ({ ...v, measure_after: e.target.value }))}
-          className="h-auto bg-background dark:bg-background"
-        />
-      </div>
+      <Field label={t('measureAfterField')}>
+        {(control) => (
+          <Input
+            {...control}
+            type="date"
+            value={value.measure_after}
+            onChange={(e) => setValue((v) => ({ ...v, measure_after: e.target.value }))}
+          />
+        )}
+      </Field>
 
       <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-lg px-3 py-1.5 text-sm text-muted-foreground transition hover:text-foreground"
-        >
+        <Button type="button" variant="quiet" size="lg" onClick={onCancel}>
           {t('cancel')}
-        </button>
-        <button
-          type="submit"
-          disabled={!canSubmit}
-          className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
-        >
+        </Button>
+        <Button type="submit" variant="primary" size="lg" disabled={!canSubmit}>
           {submitting ? tc('saving') : t('add')}
-        </button>
+        </Button>
       </div>
     </form>
   );

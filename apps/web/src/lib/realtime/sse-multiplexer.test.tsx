@@ -9,8 +9,10 @@ import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { useSseMultiplexer, type SseMultiplexerHandle } from './sse-multiplexer';
 import { fetchWithAuth } from '@/lib/db/client';
+import { isSessionExpiredSignaled } from '@/lib/auth/session-expired-signal';
 
 vi.mock('@/lib/db/client', () => ({ fetchWithAuth: vi.fn() }));
+vi.mock('@/lib/auth/session-expired-signal', () => ({ isSessionExpiredSignaled: vi.fn(() => false) }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -78,6 +80,8 @@ beforeEach(() => {
   handle = null;
   stubEventSource();
   vi.mocked(fetchWithAuth).mockReset();
+  vi.mocked(isSessionExpiredSignaled).mockReset();
+  vi.mocked(isSessionExpiredSignaled).mockReturnValue(false);
 });
 
 afterEach(async () => {
@@ -358,9 +362,10 @@ describe('useSseMultiplexer — story #2078', () => {
 
   // story #2160 — 세션이 죽었는데 탭이 401을 영원히 재폴링하던 결함의 회귀가드.
   describe('CLOSED(fatal) onerror — 세션 확認 후에만 재연결한다(#2160)', () => {
-    it('세션이 죽었으면(fetchWithAuth 401) 재연결하지 않는다', async () => {
+    it('세션이 죽었으면(fetchWithAuth 401 · 갱신 최종 실패 신호) 재연결하지 않는다', async () => {
       vi.useFakeTimers();
-      vi.mocked(fetchWithAuth).mockResolvedValue({ ok: false } as Response);
+      vi.mocked(fetchWithAuth).mockResolvedValue({ ok: false, status: 401 } as Response);
+      vi.mocked(isSessionExpiredSignaled).mockReturnValue(true);
       await act(async () => {
         root.render(<Harness memberId="me-1" />);
       });
@@ -373,6 +378,22 @@ describe('useSseMultiplexer — story #2078', () => {
       expect(fetchWithAuth).toHaveBeenCalledWith('/api/me');
       await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
       expect(instances).toHaveLength(1); // 새 EventSource 없음 — 재시도 안 함
+      vi.useRealTimers();
+    });
+
+    // story 4902 — `/api/me`가 순간 5xx를 내거나 다른 창의 갱신과 겹쳐 «superseded»(원래 401 · 세션은 서 있음)로 끝나도, 만료 신호가 없으면 스트림은 포기하지 않고 백오프로 다시 붙는다.
+    it.each([[503], [401]])('⭐ 4902: 거절로 닫힌 뒤 /api/me가 %i(ok:false)여도 만료 신호가 없으면 재연결한다 — 닫힌 채 남지 않는다', async (status) => {
+      vi.useFakeTimers();
+      vi.mocked(fetchWithAuth).mockResolvedValue({ ok: false, status } as Response);
+      vi.mocked(isSessionExpiredSignaled).mockReturnValue(false);
+      await act(async () => { root.render(<Harness memberId="me-1" />); });
+      await act(async () => {
+        instances[0]!.readyState = 2; // EventSource.CLOSED (거절)
+        instances[0]!.onerror?.();
+        await Promise.resolve();
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+      expect(instances.length).toBeGreaterThan(1);
       vi.useRealTimers();
     });
 

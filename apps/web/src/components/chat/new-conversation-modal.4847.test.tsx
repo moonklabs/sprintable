@@ -30,19 +30,19 @@ function mockFetches(posts: unknown[]) {
   });
 }
 
-function modalTree(projectId: string | null, memberships: typeof A[], allowNoProject: boolean) {
+function modalTree(projectId: string | null, memberships: typeof A[], allowNoProject: boolean, extraCtx: Record<string, unknown> = {}) {
   return (
     <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
-      <DashboardCtx.Provider value={{ projectMemberships: memberships } as never}>
+      <DashboardCtx.Provider value={{ projectMemberships: memberships, ...extraCtx } as never}>
         <NewConversationModal projectId={projectId} allowNoProject={allowNoProject} onClose={() => {}} onCreated={() => {}} />
       </DashboardCtx.Provider>
     </NextIntlClientProvider>
   );
 }
 
-async function mount(fetchMock: ReturnType<typeof vi.fn>, projectId: string | null, memberships: typeof A[], allowNoProject = false) {
+async function mount(fetchMock: ReturnType<typeof vi.fn>, projectId: string | null, memberships: typeof A[], allowNoProject = false, extraCtx: Record<string, unknown> = {}) {
   vi.stubGlobal('fetch', fetchMock);
-  await act(async () => { root.render(modalTree(projectId, memberships, allowNoProject)); });
+  await act(async () => { root.render(modalTree(projectId, memberships, allowNoProject, extraCtx)); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 }
 
@@ -281,5 +281,65 @@ describe('NewConversationModal — 프로젝트 없는 새 방(story 4847)', () 
     expect(noneOption()).toBeNull();
     await click(createBtn());
     expect(posts).toEqual([{ type: 'dm', title: null, participant_ids: ['a-bot'], project_id: 'proj-a' }]);
+  });
+});
+
+// story 4887 (UI-4 P2-d) — «the request for the person's projects failed» is not «no project at all»
+describe('NewConversationModal — a failed project read is not «no project» (story 4891 projectMembershipsFailed)', () => {
+  it('⭐ failed read + a server that allows a room with no project: the room is NOT silently filed under none — the window says why, offers [다시 시도], and the create button waits', async () => {
+    const posts: unknown[] = [];
+    await mount(mockFetches(posts), null, [], true, { projectMembershipsFailed: true });
+    expect(document.body.querySelector('[data-testid="new-room-projects-failed"]')?.textContent).toContain(koMessages.chats.projectsLoadFailed);
+    expect(document.body.querySelector('[data-testid="new-room-retry-projects"]')?.textContent).toBe(koMessages.chats.projectsRetry);
+    await click(botBtn());
+    expect(createBtn().disabled).toBe(true); // reverted → enabled: the room goes out with no project_id
+    expect(posts).toEqual([]);
+  });
+
+  it('⭐ the same person with NO failure (really no project) on that server still starts a room with none — the old behaviour, no notice', async () => {
+    const posts: unknown[] = [];
+    await mount(mockFetches(posts), null, [], true, { projectMembershipsFailed: false });
+    expect(document.body.querySelector('[data-testid="new-room-projects-failed"]')).toBeNull();
+    await click(botBtn());
+    expect(createBtn().disabled).toBe(false);
+  });
+
+  it('⭐ a persisted «no project» filter handed in as the default does NOT file the room unscoped after a failed read — the button waits', async () => {
+    const posts: unknown[] = [];
+    await mount(mockFetches(posts), 'none', [], true, { projectMembershipsFailed: true }); // the list passes its persisted filter value `none`
+    expect(document.body.querySelector('[data-testid="new-room-projects-failed"]')).not.toBeNull();
+    await click(botBtn());
+    expect(createBtn().disabled).toBe(true); // reverted (first branch ignores the failure) → enabled, POST without project_id
+    expect(posts).toEqual([]);
+  });
+
+  it('⭐ a stale project id handed in as the default is not trusted either while the read is failed', async () => {
+    await mount(mockFetches([]), 'proj-stale', [], false, { projectMembershipsFailed: true });
+    await click(botBtn());
+    expect(createBtn().disabled).toBe(true); // reverted → `projectMemberships.length === 0` trusts the given id
+  });
+
+  it('a healthy person with the same `none` filter on a server that allows it still starts an unscoped room (the filter is their explicit pick)', async () => {
+    await mount(mockFetches([]), 'none', [], true, { projectMembershipsFailed: false });
+    await click(botBtn());
+    expect(createBtn().disabled).toBe(false);
+  });
+
+  it('⭐ the window\'s [다시 시도] reloads the page', async () => {
+    const reload = vi.fn();
+    const real = window.location;
+    Object.defineProperty(window, 'location', { configurable: true, value: { ...real, reload } });
+    try {
+      await mount(mockFetches([]), null, [], true, { projectMembershipsFailed: true });
+      await click(document.body.querySelector('[data-testid="new-room-retry-projects"]')!);
+      expect(reload).toHaveBeenCalledTimes(1); // reverted → 0
+    } finally {
+      Object.defineProperty(window, 'location', { configurable: true, value: real });
+    }
+  });
+
+  it('a failed read that still has a project in hand (the shell resolved one) is not «unknown» — no notice', async () => {
+    await mount(mockFetches([]), 'proj-a', [A], false, { projectMembershipsFailed: true, projectId: 'proj-a' });
+    expect(document.body.querySelector('[data-testid="new-room-projects-failed"]')).toBeNull();
   });
 });

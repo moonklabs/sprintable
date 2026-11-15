@@ -43,13 +43,13 @@ afterEach(async () => {
 
 const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 const hasClass = (el: Element, token: string) => el.className.split(/\s+/).includes(token);
-const overlay = () => container.querySelector<HTMLElement>('[role="dialog"]');
+const overlay = () => document.body.querySelector<HTMLElement>('[role="dialog"]');
 
 async function openBell() {
   await act(async () => {
     root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><NotificationBell /></NextIntlClientProvider>);
   });
-  const bell = container.querySelector<HTMLButtonElement>('button[aria-expanded]')!;
+  const bell = document.body.querySelector<HTMLButtonElement>('button[aria-expanded]')!;
   bell.focus();
   await act(async () => { bell.click(); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
@@ -62,14 +62,15 @@ async function key(el: Element, k: string, shiftKey = false) {
 }
 
 describe('NotificationBell 좁은 화면 풀스크린 오버레이 — 덮개 명단 잠금(현재 동작)', () => {
-  it('풀스크린(fixed inset-0) 모달 role=dialog이고 접근 이름이 «알림»이며 container 안에 그려진다(포털 아님)', async () => {
+  it('풀스크린(fixed inset-0) 모달 role=dialog이고 접근 이름이 «알림»이며 <body> 직속으로 그려진다(머리줄 @container 밖 · 포털)', async () => {
     await openBell();
     const o = overlay()!;
     expect(o).not.toBeNull();
     expect(o.getAttribute('aria-modal')).toBe('true');
     expect(o.getAttribute('aria-label')).toBe(koMessages.inbox.panelTitle);
     for (const t of ['fixed', 'inset-0']) expect(hasClass(o, t), t).toBe(true); // 화면 전체를 덮는다
-    expect(container.contains(o)).toBe(true);
+    expect(o.parentElement).toBe(document.body); // 4890 P14: a child of the top bar (`@container`) would size to the 48px bar
+    expect(container.contains(o)).toBe(false);
     // jsdom은 Tailwind 반응형 클래스를 평가하지 않아 넓은 화면 패널도 DOM에 같이 있다 — 하나만 보이게 하는 것은 CSS 클래스다: 오버레이 lg:hidden · 넓은 화면 패널 hidden(lg:flex)
     expect(hasClass(o, 'lg:hidden')).toBe(true);
     const desktopPanel = document.querySelector<HTMLElement>('[data-dropdown-panel="notification-bell"]')!;

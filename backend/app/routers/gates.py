@@ -33,6 +33,7 @@ from app.services.verdict_capture import fetch_status_check_rollup
 from app.services.gate_service import (
     DECISION_REQUEST_GATE_TYPE,
     GateUndoNotSelfError,
+    parse_github_timestamp,
     resolve_work_item_project_ids_batch,
     self_anchored_gate_project_id,
     GateUndoWindowExpiredError,
@@ -2606,6 +2607,8 @@ async def _reevaluate_gate_endpoint(
     await reconcile_merge_gate_with_real_evidence(
         session, org_id, gate.work_item_id,
         pr_number=pr_number, repo=repo, ci_result=ci_result, merged=merged, head_sha=head_sha,
+        head_observed_at=parse_github_timestamp(pr.get("updated_at")),
+        head_is_current=True,  # story 4955 — the head was just read from GitHub: it corrects the gate's recorded head instead of being judged against it
     )
     await session.commit()
     # story #2459 회귀 동형 방어(2026-08-05): commit 後 model_validate 前 명시 refresh.

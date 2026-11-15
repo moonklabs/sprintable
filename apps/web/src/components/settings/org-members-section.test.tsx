@@ -223,7 +223,8 @@ describe('OrgMembersSection — 역할 변경 게이트가 BE 인가 폭과 같�
       'u-admin-self',
     );
 
-    const selects = container.querySelectorAll('select');
+    // story 4891 ⑤b: the invite form has its own role select now (it was a custom menu) — the ROW selects are the ones inside the list
+    const selects = container.querySelectorAll('.divide-y select');
     expect(selects.length).toBe(1); // owner 행·자기 자신 행은 select가 없다.
   });
 
@@ -233,7 +234,7 @@ describe('OrgMembersSection — 역할 변경 게이트가 BE 인가 폭과 같�
       'u-admin-self',
     );
 
-    const select = container.querySelector('select')!;
+    const select = container.querySelector('.divide-y select')!;
     const optionValues = Array.from(select.querySelectorAll('option')).map((o) => o.getAttribute('value'));
     expect(optionValues).toEqual(['admin', 'member']);
     expect(optionValues).not.toContain('owner');
@@ -347,15 +348,15 @@ describe('OrgMembersSection — 목록 헤더 제목 고정 + CountBadge(story #
     ], 'u1');
 
     // "조직 전체 구성원"(orgMembersHeading, 상단 초대 카드 제목)도 "구성원"을 포함해
-    // 구별해야 한다 — 목록 헤더는 CountBadge(span)를 갖는 쪽 하나뿐이다.
+    // 구별해야 한다 — 목록 헤더는 CountBadge를 갖는 쪽 하나뿐이다.
     const headings = Array.from(container.querySelectorAll('h2')).filter((h) => h.textContent?.includes('구성원'));
     expect(headings.length).toBeGreaterThan(1);
-    const heading = headings.find((h) => h.querySelector('span'));
+    const heading = headings.find((h) => h.querySelector('[data-slot="ds-count-badge"]'));
     expect(heading).toBeDefined();
     // 제목 자체엔 괄호 수식이 없다 — "구성원 (3)"처럼 한 문자열로 붙어 있으면 실패.
     expect(heading!.textContent).not.toMatch(/구성원\s*\(/);
     // 수는 헤더 안 별도 요소(CountBadge)로 존재한다.
-    const badge = heading!.querySelector('span');
+    const badge = heading!.querySelector('[data-slot="ds-count-badge"]');
     expect(badge?.textContent).toContain('3');
   });
 
@@ -380,7 +381,7 @@ describe('OrgMembersSection — 목록 헤더 제목 고정 + CountBadge(story #
     const heading = Array.from(container.querySelectorAll('h2')).find((h) => h.textContent?.includes('초대 대기'));
     expect(heading).toBeDefined();
     expect(heading!.textContent).not.toMatch(/초대 대기\s*\(/);
-    expect(heading!.querySelector('span')?.textContent).toContain('1');
+    expect(heading!.querySelector('[data-slot="ds-count-badge"]')?.textContent).toContain('1');
   });
 });
 

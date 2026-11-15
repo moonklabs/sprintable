@@ -126,7 +126,8 @@ async def list_activity_logs(
 
         from app.services.project_auth import accessible_project_ids_in_org
         accessible = await accessible_project_ids_in_org(db, uuid.UUID(auth.user_id), org_id)
-        q = q.where(or_(ActivityLog.project_id.is_(None), ActivityLog.project_id.in_(accessible)))
+        # story #4870 AC4 — an entry about a ROOM is decided by the room-read predicate alone (the clause above): a person in a room is not cut by its project (4846 AC2)
+        q = q.where(or_(ActivityLog.project_id.is_(None), ActivityLog.project_id.in_(accessible), ActivityLog.entity_type == "conversation"))
     if actor_id:
         q = q.where(ActivityLog.actor_id == actor_id)
     if action:

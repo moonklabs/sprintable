@@ -115,7 +115,9 @@ describe('[SID:4715] AC1 — no organization-name step: the organization is made
     expect(orgPosts()[0]!.body).toEqual({ name: '김지우의 조직' });
     expect(container.querySelector('input[type="text"]')).toBeNull();
     expect(h1()).toBe(first.macTitle);
-    expect(byTestId('onboarding-first-org')?.textContent).toBe('김지우의 조직에서 시작해요 · 이름은 설정에서 바꿀 수 있어요');
+    // story 4891: which organization the app attaches to stays — as «시작 조직 [이름]» (one chip), not a sentence
+    expect(byTestId('onboarding-first-org')?.textContent).toBe(`${first.orgLead} 김지우의 조직`);
+    expect(byTestId('onboarding-first-org')?.querySelector('[data-slot="ds-chip"], span')?.textContent).toBe('김지우의 조직');
   });
 
   it('T1b no display name → «내 조직» · already a member → nothing made and no organization line (the name is not known here)', async () => {
@@ -213,7 +215,16 @@ describe('[SID:4715] self-QA — the phone app card stays on the first screen (s
     await mount();
     // reverted (the card dropped from the Mac branch) → null here
     expect(byTestId('onboarding-first-mac')).not.toBeNull();
+    // story 4891 (PO 11-10): on a Mac the phone app is ONE row — «폰에서도 쓰기 ›» — and the card (QR · store links) opens in place on a press
+    expect(byTestId('phone-app-row')).not.toBeNull();
+    expect(byTestId('phone-app-card')).toBeNull();
+    expect(byTestId('phone-app-row-toggle')?.textContent).toBe(koMessages.phonePairing.useOnPhone);
+    expect(byTestId('phone-app-row-toggle')?.getAttribute('aria-expanded')).toBe('false');
+    await click(byTestId('phone-app-row-toggle'));
     expect(byTestId('phone-app-card')).not.toBeNull();
+    expect(byTestId('phone-app-row-toggle')?.getAttribute('aria-expanded')).toBe('true');
+    await click(byTestId('phone-app-row-toggle'));
+    expect(byTestId('phone-app-card')).toBeNull();
     await act(async () => { root.render(wrap(<div />)); });
 
     setUserAgent(PHONE_UA);
@@ -229,7 +240,7 @@ describe('[SID:4715] AC2 · AC3 — one screen in place of the fork and the down
     await mount();
     expect(container.textContent).toContain(first.macLead);
     expect(byTestId('desktop-download-button')?.textContent).toBe(first.macCta);
-    const primaries = [...container.querySelectorAll('a, button')].filter((el) => el.className.includes('bg-primary'));
+    const primaries = [...container.querySelectorAll('a, button')].filter((el) => el.className.split(/\s+/).includes('bg-ds-action')); // the ds primary variant (was the old ui `bg-primary`)
     expect(primaries.map((el) => el.getAttribute('data-testid'))).toEqual(['desktop-download-button']);
     // story 4766 (AC1): the web way is a FOLDED «고급» (a closed disclosure), not a link into a three-screen wizard; an app that is already
     // installed is opened, not downloaded again
@@ -240,7 +251,8 @@ describe('[SID:4715] AC2 · AC3 — one screen in place of the fork and the down
     expect(byTestId('onboarding-first-open-app')?.getAttribute('href')).toMatch(/^ai\.sprintable(\.dev)?:\/desktop\/setup$/);
     expect(byTestId('onboarding-first-connect')).toBeNull(); // the link into the wizard is gone
     expect(container.querySelector('input[type="radio"]')).toBeNull(); // reverted (the fork back) → radios
-    expect(byTestId('onboarding-first-finish')?.textContent).toBe(koMessages.onboarding.desktopFinishToToday);
+    // story 4891: the way out names its landing — this form is mounted with the Today flag off (it lands on «대화»), so it is the dashboard word (first-screen.finish-label.4891.test.tsx pins both flag states)
+    expect(byTestId('onboarding-first-finish')?.textContent).toBe(koMessages.onboarding.dashboardCta);
   });
 
   it('T4 not a Mac: «지금은 Mac 앱만 있어요» first · the web way is the button · no download card', async () => {

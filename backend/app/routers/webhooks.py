@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.log_safe import redact_urls
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.conversation_webhook_delivery import ConversationWebhookDelivery
@@ -288,7 +289,7 @@ async def list_webhook_deliveries(
             webhook_config_id=str(r.webhook_config_id) if r.webhook_config_id else None,
             status=r.status,
             attempt_count=r.attempt_count,
-            last_error=r.last_error,
+            last_error=redact_urls(r.last_error or "") or None,  # story 4869: a row written before the retry text was scrubbed may still hold a request URL
             created_at=r.created_at.isoformat(),
             updated_at=r.updated_at.isoformat() if r.updated_at else None,
         )

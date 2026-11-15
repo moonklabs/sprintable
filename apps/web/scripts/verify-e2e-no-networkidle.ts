@@ -64,13 +64,45 @@ function verifyContrastGuardOnboardingOnly(content: string): { ok: boolean; deta
   return { ok: true };
 }
 
+/** e2e/support/marker-wait.ts (story #4927 moved the contrast guard's marker wait there): every networkidle call must be INSIDE the block of an `if (marker.kind === 'networkidle')` — the branch only the /onboarding row
+ * of the PAGES table reaches (checked by verifyContrastGuardOnboardingOnly). A networkidle call outside that block would be reached by the shell pages whose SSE never lets the network go idle.
+ * «Inside» is real brace nesting (comments stripped): the innermost-to-outermost open blocks at the call are read, and one of their headers must be that `if`. A call after the block has closed — however close — is outside. */
+function verifyMarkerWaitNetworkidleBranchOnly(content: string): { ok: boolean; detail?: string } {
+  const code = stripComments(content);
+  const callRe = /waitForLoadState\(\s*['"`]networkidle['"`]|waitUntil:\s*['"`]networkidle['"`]/g;
+  const stack: string[] = []; // the text before each open `{`
+  let headerStart = 0;
+  const offending: number[] = [];
+  const calls = new Set<number>();
+  for (const m of code.matchAll(callRe)) calls.add(m.index!);
+  for (let i = 0; i < code.length; i++) {
+    if (calls.has(i)) {
+      if (!stack.some((h) => /if \(marker\.kind === ['"`]networkidle['"`]\)\s*$/.test(h))) offending.push(code.slice(0, i).split('\n').length);
+    }
+    const ch = code[i];
+    if (ch === '{') { stack.push(code.slice(headerStart, i)); headerStart = i + 1; }
+    else if (ch === '}') { stack.pop(); headerStart = i + 1; }
+    else if (ch === ';') headerStart = i + 1;
+  }
+  return offending.length > 0
+    ? { ok: false, detail: `networkidle 호출이 \`if (marker.kind === 'networkidle')\` 블록 밖에 있다(라인 ${offending.join(', ')})` }
+    : { ok: true };
+}
+
 export const ALLOWED_EXCEPTIONS: NetworkidleException[] = [
   {
     file: 'contrast-guard.spec.ts',
     reason:
-      'story #3842 고의 설계 — /onboarding은 (authenticated) 밖(DashboardShell 없음·SSE 연결 없음)이라 networkidle이 실제로 선다. 다른 모든 페이지는 response-marker(ACTIVATION_CHECKLIST_MARKER).',
-    count: 1,
+      'story #3842 고의 설계 — /onboarding은 (authenticated) 밖(DashboardShell 없음·SSE 연결 없음)이라 networkidle이 실제로 선다. 다른 모든 페이지는 response-marker(ACTIVATION_CHECKLIST_MARKER). story #4927: 호출 자체는 support/marker-wait.ts로 옮겨져 이 파일엔 0건 — 이 항목은 PAGES 표의 «networkidle은 /onboarding 행만» 구조 검증을 지킨다.',
+    count: 0,
     verify: verifyContrastGuardOnboardingOnly,
+  },
+  {
+    file: 'support/marker-wait.ts',
+    reason:
+      'story #3842 고의 설계가 story #4927에서 옮겨 온 자리 — 대기 코드(waitForPageMarker · 놓친 뒤 늦게 서는지 보는 관찰)가 여기로 나왔고, networkidle 호출은 marker.kind === networkidle 가지(= /onboarding 행)에서만 닿는다.',
+    count: 2,
+    verify: verifyMarkerWaitNetworkidleBranchOnly,
   },
 ];
 
@@ -143,7 +175,7 @@ export function scanE2eForNetworkidle(e2eRoot = E2E_ROOT, exceptions = ALLOWED_E
 function main(): number {
   const violations = scanE2eForNetworkidle();
   if (violations.length === 0) {
-    console.log('OK: apps/web/e2e 전체 networkidle 0(예외 1건 count-pin·구조 검증 통과, story #4160).');
+    console.log('OK: apps/web/e2e 전체 networkidle 0(예외 2건 count-pin·구조 검증 통과 — contrast-guard 표 + marker-wait 가지, story #4160 · #4927).');
     return 0;
   }
   console.error('FAIL: e2e networkidle 회귀가드(story #4160):');

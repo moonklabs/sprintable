@@ -80,9 +80,9 @@ describe('subscribeDesignatedPendingCount — 게이트 이벤트 재조회는 �
   });
 });
 
-// story #4263(PO 14:57Z ② · 4247 AC2) — 사이드바 · 탭바가 둘 다 마운트돼 같은 게이트 이벤트를 받아도 이벤트당 요청 1(같은 디스패치 안 fresh끼리 합류).
+// story #4263(PO 14:57Z ② · 4247 AC2) — 같은 게이트 이벤트의 구독자가 여럿(사이드바 · 훅 여러 마운트 — 폰 탭바는 story #4885부터 홈 모델을 읽어 빠졌다)이어도 이벤트당 요청 1(같은 디스패치 안 fresh끼리 합류).
 describe('같은 이벤트의 구독자 둘 → 요청 1 · 다음 이벤트는 새 요청', () => {
-  it('⭐사이드바 · 탭바 구독 둘 · gate_resolved 1건 → 요청 1 · 두 콜백 모두 새 값', async () => {
+  it('⭐구독 둘 · gate_resolved 1건 → 요청 1 · 두 콜백 모두 새 값', async () => {
     const m = await import('./designated-pending-count-client');
     m.resetDesignatedPendingCountStateForTest();
     const subs: Array<(d: string) => void> = [];

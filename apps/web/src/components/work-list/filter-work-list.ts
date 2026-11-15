@@ -40,7 +40,10 @@ export function filterWorkList(workList: WorkList, filters: WorkListFilters): Wo
     for (const story of goal.stories) {
       if (!storyMatches(story, filters)) continue;
       const rows = story.rows.filter((row) => rowMatches(row, filters));
-      if (rows.length === 0) continue;
+      // story #4888 — the list's unit is the story: with no ownership filter a story stays even with no work under it; with «내가 맡은 일» / «에이전트에 위임» a story shows only through the work that matches (a story's own
+      // row carries no owner, so a story with no matching work is not «mine» or «delegated»)
+      const ownershipFilter = filters.mineOnly || filters.delegatedOnly;
+      if (ownershipFilter && rows.length === 0) continue;
       stories.push({ ...story, rows });
     }
     if (stories.length === 0) continue;

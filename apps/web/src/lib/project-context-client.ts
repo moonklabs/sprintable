@@ -40,6 +40,12 @@ export function setEffectiveOrgId(id: string | undefined): void {
   effectiveOrgIdRef.current = id;
 }
 
+/** story 4881 — the organization the interceptor puts on requests right now (the shell sets it while it renders). A badge that counts per organization
+ * reads this to know when the organization changed under it. */
+export function getEffectiveOrgId(): string | undefined {
+  return effectiveOrgIdRef.current;
+}
+
 /** story #4184 — 인터셉터가 지금 실어 보낼 요청 맥락(org·project) 그대로의 키. 같은 요청을 나눠
  * 쓰는 쪽(lib/me-client.ts)이 «맥락이 같을 때만 합류»하는 데 쓴다 — 전환 직전에 출발한 요청에
  * 전환 뒤 호출이 붙지 않게. */

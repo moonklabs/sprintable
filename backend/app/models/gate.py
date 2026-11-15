@@ -129,6 +129,10 @@ class Gate(Base):
     # 단조증가) 워터마크. reopen_gate_if_new_sha가 이걸로 stale/순서역전 웹훅 배달을
     # 걸러 이미 최신 SHA로 승인된 게이트를 옛 배달로 부당 재-pending시키지 않는다.
     pr_head_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # story 4955 — the PR's CURRENT head commit, as the pull_request lifecycle webhooks last announced it (written in the same atomic statement as the watermark above, only when
+    # that delivery is not older). A CI / check webhook about ANY other commit is an old commit's late news: it must not rebind the gate's check-run, set the approval anchor or
+    # overwrite the CI result. NULL = no lifecycle webhook seen yet → no rule (the old behaviour).
+    pr_head_observed_sha: Mapped[str | None] = mapped_column(Text, nullable=True)
     # story #3365(Phase0 S2, 마케팅운영) — external_publish 전용 sealing. approved_head_sha
     # (위, merge gate)와 동형 축: "이 승인이 귀속된 대상"을 서버가 상신 시점에 한 번 기록하고
     # 그 뒤로는 **비교만** 한다(어떤 갱신 경로도 열지 않는다 — story 본문 «봉인 값 불변» AC).

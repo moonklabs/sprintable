@@ -501,7 +501,7 @@ describe('[SID:4576] the move\'s progress — two steps, by name', () => {
     expect(text()).toContain('댄 어윈 · Claude Code, 까디르 QA · Codex');
     expect(text()).toContain('Sprintable에 연결했어요');
     const out = container.querySelector('[data-testid=setup-way-out]') as HTMLElement;
-    expect([...out.querySelectorAll('a,button')].map((b) => b.textContent)).toEqual(['오늘로 가기']);
+    expect([...out.querySelectorAll('a,button')].map((b) => b.textContent)).toEqual(['홈으로 가기']);
     expect(text()).toContain('이제 이 컴퓨터에서 일해요 — 다음 일감은 평소처럼 받아요');
   });
 

@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
+import { useAdoptPrehydrationValues } from '@/hooks/use-adopt-prehydration-values';
 import { SprintableLogo } from '@/components/brand/sprintable-logo';
 import { Input } from '@/components/ui/input';
 import { FIREBASE_AUTH_ENABLED } from '@/lib/auth/firebase-client';
@@ -28,6 +29,8 @@ export default function ResetPasswordPage() {
 
   const [password, setPassword] = useState('');
   const [touched, setTouched] = useState(false);
+  const passwordRef = useRef<HTMLInputElement>(null); // story 4937 — what was typed before the screen came alive is taken into the state once
+  useAdoptPrehydrationValues([{ ref: passwordRef, initial: '', set: setPassword, onAdopted: () => setTouched(true) }]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
@@ -116,6 +119,7 @@ export default function ResetPasswordPage() {
               placeholder={t('placeholder')}
               autoComplete="new-password"
               className={touched && !isValid ? 'h-auto border-destructive px-4 py-3' : 'h-auto px-4 py-3'}
+              ref={passwordRef}
               value={password}
               onChange={(e) => { setPassword(e.target.value); setTouched(true); }}
               onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}

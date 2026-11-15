@@ -4,6 +4,7 @@ What was wrong: gcloud starts by asking the metadata server whether it runs on G
 """
 from __future__ import annotations
 
+import ast
 import re
 import shutil
 import socket
@@ -152,6 +153,141 @@ def test_every_test_that_starts_the_real_gcloud_goes_through_the_helper() -> Non
         if (looks_for or builds_env) and "_real_gcloud" not in src:
             offenders.append(f"{f.relative_to(_TESTS)}: uses gcloud or CLOUDSDK_ without the helper")
     assert offenders == [], offenders
+
+
+_MIN_HANG_BOUND = 90   # seconds: the suite's own limit is 30, and a start of gcloud on a crowded runner took 13-44 s (first of its shard) - the bound only has to catch a real hang
+
+
+def _mark_bound(node: ast.AST) -> float | None:
+    """the seconds of a `pytest.mark.timeout(N)` decorator, or of the largest one in a `pytestmark` list / tuple; None if `node` holds none"""
+    if isinstance(node, (ast.List, ast.Tuple)):
+        found = [b for el in node.elts for b in [_mark_bound(el)] if b is not None]
+        return max(found) if found else None
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "timeout" and isinstance(node.func.value, ast.Attribute) and node.func.value.attr == "mark":
+        for a in [*node.args, *(k.value for k in node.keywords if k.arg in (None, "timeout"))]:
+            if isinstance(a, ast.Constant) and isinstance(a.value, (int, float)):
+                return float(a.value)
+    return None
+
+
+def _gcloud_tests_without_a_hang_bound(src: str) -> list[str]:
+    """names of tests in `src` that start the REAL gcloud without a `pytest.mark.timeout(>= 90)` on the test or on the whole module (`pytestmark`, a mark or a list of marks).
+    A start is a call of the helper's `run` / `env` - through any import form (`from tests import _real_gcloud [as X]`, `import tests._real_gcloud [as X]`, `from tests._real_gcloud import run, env`) - or a call of a
+    function / method of the same file that starts one (followed by name, also as `self.name()`), or a fixture the test asks for by parameter name."""
+    tree = ast.parse(src)
+    aliases: set[str] = set()      # names the helper module is bound to
+    direct_names: dict[str, str] = {}   # local name -> "run" / "env", bound by `from tests._real_gcloud import ...`
+    dotted = False                 # `import tests._real_gcloud` (used as tests._real_gcloud.run)
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom) and n.module == "tests":
+            aliases |= {a.asname or a.name for a in n.names if a.name == "_real_gcloud"}
+        elif isinstance(n, ast.ImportFrom) and n.module == "tests._real_gcloud":
+            direct_names.update({a.asname or a.name: a.name for a in n.names if a.name in ("run", "env")})
+        elif isinstance(n, ast.Import):
+            for a in n.names:
+                if a.name == "tests._real_gcloud":
+                    if a.asname:
+                        aliases.add(a.asname)
+                    else:
+                        dotted = True
+    if not (aliases or direct_names or dotted):
+        return []
+    funcs: dict[str, list[ast.AST]] = {}
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            funcs.setdefault(n.name, []).append(n)
+
+    def helper_member(c: ast.Call) -> str | None:
+        """"run" / "env" if `c` calls that member of the helper (through any import form), else None"""
+        f = c.func
+        if isinstance(f, ast.Name):
+            return direct_names.get(f.id)
+        if isinstance(f, ast.Attribute) and f.attr in ("run", "env"):
+            if isinstance(f.value, ast.Name):
+                return f.attr if f.value.id in aliases else None
+            if dotted and isinstance(f.value, ast.Attribute) and f.value.attr == "_real_gcloud" and isinstance(f.value.value, ast.Name) and f.value.value.id == "tests":
+                return f.attr
+        return None
+
+    def is_process_call(c: ast.Call) -> bool:
+        f = c.func
+        return (isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f.value.id == "subprocess" and f.attr in ("run", "Popen", "check_output", "check_call", "call")) or (isinstance(f, ast.Name) and f.id == "Popen")
+
+    def called_names(fn: ast.AST) -> tuple[set[str], bool]:
+        names, ran, made_env, spawned = set(), False, False, False
+        for c in ast.walk(fn):
+            if isinstance(c, ast.Call):
+                member = helper_member(c)
+                if member == "run":
+                    ran = True
+                elif member == "env":
+                    made_env = True
+                elif is_process_call(c):
+                    spawned = True
+                elif isinstance(c.func, ast.Name):
+                    names.add(c.func.id)
+                elif isinstance(c.func, ast.Attribute) and isinstance(c.func.value, ast.Name) and c.func.value.id in ("self", "cls"):
+                    names.add(c.func.attr)
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            names |= {a.arg for a in [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs]}   # a fixture is asked for by the name of its function
+        # `run` starts gcloud; `env` only builds the environment of a start - it counts when the same function also spawns a process (a hand-made `subprocess.run(..., env=G.env(...))`)
+        return names, ran or (made_env and spawned)
+
+    graph = {name: [called_names(fn) for fn in fns] for name, fns in funcs.items()}
+    starts = {name for name, parts in graph.items() if any(hit for _, hit in parts)}
+    while True:   # a function that calls (or asks for) one that starts gcloud starts it too
+        more = {name for name, parts in graph.items() if name not in starts and any(names & starts for names, _ in parts)}
+        if not more:
+            break
+        starts |= more
+    module_bound = 0.0
+    for n in tree.body:
+        if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "pytestmark" for t in n.targets):
+            module_bound = max(module_bound, _mark_bound(n.value) or 0.0)
+    out = set()
+    for name, fns in funcs.items():
+        if name.startswith("test") and name in starts:
+            for fn in fns:
+                own = [b for d in fn.decorator_list for b in [_mark_bound(d)] if b is not None]
+                bound = own[-1] if own else module_bound   # pytest-timeout uses the CLOSEST mark: a 30 on the test beats a 120 on the module
+                if bound < _MIN_HANG_BOUND:
+                    out.add(name)
+    return sorted(out)
+
+
+def test_every_test_that_starts_the_real_gcloud_has_a_hang_bound_above_the_suites_30_s() -> None:
+    """a test that starts the real gcloud needs `@pytest.mark.timeout(>= 90)`: the first start on a fresh runner takes 13-44 s (measured over 40 CI runs, 140 jobs - one test per shard, the same test 5 s when it is
+    not first), and two tests without the mark failed develop and a pull request on 2026-11-11 at 30.03 s. The bound is for a hang, not a budget."""
+    offenders = []
+    for f in [*_test_files(), Path(__file__).resolve()]:   # this file too: the other guards leave it out, this one does not
+        offenders += [f"{f.relative_to(_TESTS)}::{name}" for name in _gcloud_tests_without_a_hang_bound(f.read_text())]
+    assert offenders == [], offenders
+
+
+def test_the_hang_bound_guard_sees_direct_indirect_and_module_wide_starts() -> None:
+    """the guard run on small sources: it must flag a start with no mark / a low mark, follow a helper function of the file, and accept a module-wide mark"""
+    head = "import pytest\nfrom tests import _real_gcloud as _gcloud\n"
+    bare = head + "def test_a(tmp_path):\n    _gcloud.run(['x'], tmp_path)\n"
+    assert _gcloud_tests_without_a_hang_bound(bare) == ["test_a"]
+    assert _gcloud_tests_without_a_hang_bound(head + "@pytest.mark.timeout(30)\ndef test_a(tmp_path):\n    _gcloud.run(['x'], tmp_path)\n") == ["test_a"], "30 is the suite's own limit"
+    assert _gcloud_tests_without_a_hang_bound(head + "@pytest.mark.timeout(120)\ndef test_a(tmp_path):\n    _gcloud.run(['x'], tmp_path)\n") == []
+    assert _gcloud_tests_without_a_hang_bound(head + "def test_a(tmp_path):\n    subprocess.run(['gcloud'], env=_gcloud.env(tmp_path))\n") == ["test_a"], "building the environment by hand is a start too"
+    via_helper = head + "def _parse(a, t):\n    return _gcloud.run(a, t)\n\ndef test_b(tmp_path):\n    _parse(['x'], tmp_path)\n"
+    assert _gcloud_tests_without_a_hang_bound(via_helper) == ["test_b"], "a start through a helper function of the file"
+    assert _gcloud_tests_without_a_hang_bound(head + "pytestmark = pytest.mark.timeout(240)\n" + bare.split("\n", 2)[2]) == []
+    assert _gcloud_tests_without_a_hang_bound("def test_c():\n    pass\n") == [] and _gcloud_tests_without_a_hang_bound(head + "def test_d():\n    pass\n") == []
+    # the other ways to import the helper, a method helper, a fixture, and a list of marks
+    assert _gcloud_tests_without_a_hang_bound("import tests._real_gcloud\ndef test_e(t):\n    tests._real_gcloud.run(['x'], t)\n") == ["test_e"], "dotted import"
+    assert _gcloud_tests_without_a_hang_bound("import tests._real_gcloud as G\nimport subprocess\ndef test_e(t):\n    subprocess.run(['gcloud'], env=G.env(t))\n") == ["test_e"], "dotted import with an alias, environment made for a hand-made spawn"
+    assert _gcloud_tests_without_a_hang_bound("import tests._real_gcloud as G\ndef test_e(t):\n    assert G.env(t)['HOME']\n") == [], "building or reading the environment starts nothing"
+    assert _gcloud_tests_without_a_hang_bound("from tests._real_gcloud import run as go\ndef test_f(t):\n    go(['x'], t)\n") == ["test_f"], "names imported from the helper"
+    method = head + "class T:\n    def _start(self, t):\n        return _gcloud.run(['x'], t)\n    def test_g(self, t):\n        self._start(t)\n"
+    assert _gcloud_tests_without_a_hang_bound(method) == ["test_g"], "a method of the class that starts it"
+    fixture = head + "@pytest.fixture\ndef started(tmp_path):\n    return _gcloud.run(['x'], tmp_path)\n\ndef test_h(started):\n    pass\n"
+    assert _gcloud_tests_without_a_hang_bound(fixture) == ["test_h"], "a fixture the test asks for"
+    assert _gcloud_tests_without_a_hang_bound(head + "pytestmark = [pytest.mark.anyio, pytest.mark.timeout(120)]\n" + bare.split("\n", 2)[2]) == [], "a list of marks"
+    assert _gcloud_tests_without_a_hang_bound(head + "pytestmark = [pytest.mark.anyio]\n" + bare.split("\n", 2)[2]) == ["test_a"], "a list without the timeout mark"
+    assert _gcloud_tests_without_a_hang_bound(head + "pytestmark = pytest.mark.timeout(120)\n@pytest.mark.timeout(30)\ndef test_a(tmp_path):\n    _gcloud.run(['x'], tmp_path)\n") == ["test_a"], "the closest mark wins: 30 on the test beats 120 on the module"
 
 
 def test_no_test_starts_gcloud_by_hand_or_moves_the_metadata_question() -> None:

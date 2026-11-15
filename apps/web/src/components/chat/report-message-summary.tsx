@@ -82,7 +82,7 @@ export function ReportMessageSummary({
       </p>
       {density.topLevelItems.length > 0 ? (
         <>
-          <p className="mb-1 mt-2.5 text-micro font-bold uppercase tracking-wide text-muted-foreground">
+          <p className="mb-1 mt-2.5 text-micro font-bold uppercase tracking-wide text-ds-ink-2">
             {t('reportEvidenceLabel')}
           </p>
           <ul className="mb-1.5 flex flex-col gap-0.5">

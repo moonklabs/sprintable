@@ -112,7 +112,7 @@ export function RejectedRelationsSection({ storyId }: { storyId: string }) {
   };
 
   return (
-    <div className="border-t border-border/60 px-4 py-3">
+    <div className="border-t border-ds-line px-4 py-3">
       <p className="mb-2 text-xs font-medium text-muted-foreground">
         {t('rejectedRelationsTitle', { n: state.rows.length })}
       </p>
@@ -133,7 +133,7 @@ export function RejectedRelationsSection({ storyId }: { storyId: string }) {
                   type="button"
                   disabled={restoring}
                   onClick={() => handleRestore(item.target_id)}
-                  className="focus-outset shrink-0 rounded-md border border-border px-2 py-1 text-editorial-meta font-medium disabled:opacity-50"
+                  className="focus-outset shrink-0 rounded-md border border-ds-line px-2 py-1 text-editorial-meta font-medium disabled:opacity-50"
                 >
                   {t('rejectedRelationsRestore')}
                 </button>

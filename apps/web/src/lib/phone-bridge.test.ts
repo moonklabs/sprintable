@@ -3,7 +3,7 @@
 // story #4532 — the phone bridge claim (design doc 0dceadda v3.1 ②): claimed once at boot · the sender and the receiver kept out
 // of `window` (PO 06:07Z ①) · answers matched by id, once · no call waits forever (PO 06:07Z ②) · nothing outside the phone app.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { __resetPhoneBridgeForTest, claimPhoneBridge, isPhoneApp, PHONE_CALL_MAX_MS, phoneCall, subscribePhoneApp, type PhoneAnswer } from './phone-bridge';
+import { __resetPhoneBridgeForTest, claimPhoneBridge, isPhoneApp, LATE_CLAIM_EVERY_MS, LATE_CLAIM_MAX_MS, PHONE_CALL_MAX_MS, phoneCall, subscribePhoneApp, type PhoneAnswer } from './phone-bridge';
 
 /** what the shell puts into the top frame (sprintable-mobile lib/phoneBridge): one claim, then the handle is gone */
 let shellReply: ((a: PhoneAnswer) => void) | null = null;
@@ -115,5 +115,113 @@ describe('subscribePhoneApp (story #4661)', () => {
     installShellHandle();
     claimPhoneBridge();
     expect(heard).toHaveBeenCalledTimes(1);
+  });
+});
+
+// story 4964 — the shell's handle can land AFTER the page's first render (React Native WebView on Android evaluates the «before content»
+// script from onPageStarted, not at document start). Before this, the claim looked once and the pairing screen read «open this in the phone app».
+describe('a handle that comes late (story 4964)', () => {
+  afterEach(() => { delete (window as unknown as { ReactNativeWebView?: unknown }).ReactNativeWebView; });
+  const inRnWebView = () => { (window as unknown as { ReactNativeWebView?: unknown }).ReactNativeWebView = { postMessage: () => undefined }; };
+
+  it('inside a React Native WebView: the first look finds nothing (not the phone app yet) — the handle that lands 300 ms later is taken, the readers are told once, and the call goes out', async () => {
+    vi.useFakeTimers();
+    inRnWebView();
+    const heard = vi.fn();
+    const off = subscribePhoneApp(heard);
+    claimPhoneBridge();
+    expect(isPhoneApp()).toBe(false); // the page's first render: no handle yet
+    await vi.advanceTimersByTimeAsync(300);
+    expect(isPhoneApp()).toBe(false);
+    const sent = installShellHandle(); // the shell's script lands
+    await vi.advanceTimersByTimeAsync(LATE_CLAIM_EVERY_MS);
+    expect(isPhoneApp()).toBe(true);
+    expect(heard).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0); // the look stops at the claim
+    void phoneCall('pair.scan');
+    expect(sent).toHaveLength(1);
+    expect(window.__sprintablePhone).toBeUndefined(); // the handle is still gone after the claim
+    off(); // the listener set outlives a reset
+  });
+
+  it('a root re-render that finds the handle before the look\'s next step takes it AND ends the look at once (no step fires after the claim)', async () => {
+    vi.useFakeTimers();
+    inRnWebView();
+    claimPhoneBridge();
+    expect(vi.getTimerCount()).toBe(1);
+    installShellHandle(); // lands between two steps of the look
+    claimPhoneBridge(); // the next render of the root claim
+    expect(isPhoneApp()).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('asking again while it looks starts no second look · a handle that never comes ends the look at the cap, and one after the cap is not taken', async () => {
+    vi.useFakeTimers();
+    inRnWebView();
+    claimPhoneBridge();
+    claimPhoneBridge();
+    claimPhoneBridge();
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(LATE_CLAIM_MAX_MS + LATE_CLAIM_EVERY_MS);
+    expect(vi.getTimerCount()).toBe(0);
+    installShellHandle();
+    await vi.advanceTimersByTimeAsync(LATE_CLAIM_MAX_MS);
+    expect(isPhoneApp()).toBe(false);
+  });
+
+  it('a step that runs late (a busy page) after the cap does not take a handle that came after the cap', async () => {
+    vi.useFakeTimers();
+    inRnWebView();
+    claimPhoneBridge();
+    installShellHandle();
+    vi.setSystemTime(Date.now() + LATE_CLAIM_MAX_MS + 1_000); // the clock moved past the cap before the next step ran
+    await vi.advanceTimersByTimeAsync(LATE_CLAIM_EVERY_MS);
+    expect(isPhoneApp()).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('outside a React Native WebView (a browser · the Mac app): nothing is scheduled, and a handle that appears later is not taken', async () => {
+    vi.useFakeTimers();
+    claimPhoneBridge();
+    expect(vi.getTimerCount()).toBe(0);
+    installShellHandle();
+    await vi.advanceTimersByTimeAsync(LATE_CLAIM_MAX_MS * 2);
+    expect(isPhoneApp()).toBe(false);
+    expect((await phoneCall('device.key.info')).code).toBe('not_phone_app');
+  });
+
+  it('a reader that throws when told of the late claim: the claim stands, the look is over, and the reader\'s error is not swallowed', async () => {
+    vi.useFakeTimers();
+    inRnWebView();
+    const off = subscribePhoneApp(() => { throw new Error('reader broke'); });
+    try {
+      claimPhoneBridge();
+      installShellHandle();
+      await expect(vi.advanceTimersByTimeAsync(LATE_CLAIM_EVERY_MS)).rejects.toThrow('reader broke');
+      expect(isPhoneApp()).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { off(); } // the listener set outlives a reset — nobody after this test may hear it
+  });
+
+  it('a late handle whose claim() throws ends the look at once — no interval left running, no error thrown out of the timer', async () => {
+    vi.useFakeTimers();
+    inRnWebView();
+    claimPhoneBridge();
+    let calls = 0;
+    window.__sprintablePhone = { claim: () => { calls += 1; throw new Error('shell broke'); } };
+    await vi.advanceTimersByTimeAsync(LATE_CLAIM_EVERY_MS * 3);
+    expect(calls).toBe(1); // looked once · not again every step
+    expect(vi.getTimerCount()).toBe(0);
+    expect(isPhoneApp()).toBe(false);
+  });
+
+  it('a handle somebody else already took (claim answers nothing) ends quietly at the cap — no throw, never the phone app', async () => {
+    vi.useFakeTimers();
+    inRnWebView();
+    window.__sprintablePhone = { claim: () => null };
+    claimPhoneBridge();
+    await vi.advanceTimersByTimeAsync(LATE_CLAIM_MAX_MS + LATE_CLAIM_EVERY_MS);
+    expect(isPhoneApp()).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

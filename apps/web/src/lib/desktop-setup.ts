@@ -289,6 +289,22 @@ export function agentRoomOf(value: unknown): AgentRoom | null {
   return { limit, available, free: typeof tier !== 'string' || tier === '' || tier === 'free' };
 }
 
+/**
+ * story 4934 — the plan's project limit read BEFORE [만들기] (GET /desktop/recipes `project_room`): present only when no NEW project can be made.
+ * `existing`: the organization's one project the person can put the agent into (the server names it only when there is exactly one and the person can
+ * open it — the same name the 402 of confirm-solo gives). Not a block · a shape this page does not read · a project without a real id and name → null:
+ * nothing is said and nothing is held, the card is the one it always was (the 402 after the press still tells it) — a project is never made up.
+ */
+const PROJECT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export interface HeldProject { id: string; name: string }
+export function heldProjectOf(value: unknown): HeldProject | null {
+  if (!value || typeof value !== 'object') return null;
+  const p = (value as { existing_project?: unknown }).existing_project;
+  if (!p || typeof p !== 'object') return null;
+  const { id, name } = p as { id?: unknown; name?: unknown };
+  return typeof id === 'string' && PROJECT_UUID.test(id) && typeof name === 'string' && name.trim() !== '' ? { id, name } : null;
+}
+
 /** story 4717 AC1 — the recipe as chosen makes more new agents than the plan has room for: «시작» stays off and the page shows the
  * ways (an agent the organization already has for a row · upgrade · tidy up) instead of meeting a 402 after the press. */
 export function roomShort(room: AgentRoom | null, made: number): boolean {

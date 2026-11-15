@@ -1,13 +1,16 @@
 'use client';
 
 import type { ComponentType } from 'react';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { Check, ChevronDown, LayoutGrid, LayoutList, Search, Workflow, Plus } from 'lucide-react';
-import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, DragOverlay, closestCenter } from '@dnd-kit/core';
+import { DndContext, DragEndEvent, KeyboardSensor, PointerSensor, useSensor, useSensors, DragOverlay, closestCenter } from '@dnd-kit/core';
+import { KEYBOARD_SENSOR_OPTIONS, buildDndAccessibility, useKeyboardDropRefocus } from './board-dnd';
+import { HeadFilterFold, useHeadFold } from './board-head-fold';
 import { Button } from '@/components/ui/button';
+import { isSystemPublisher } from '@/lib/runtime-capabilities';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Input } from '@/components/ui/input';
 import { MenuSearchInput } from '@/components/ui/menu-search-input';
@@ -34,7 +37,7 @@ import { KanbanListView } from './kanban-list-view';
 import { KanbanColumnsSkeleton, KanbanListRowsSkeleton, KanbanSkeleton } from './kanban-skeleton';
 import { StoryDetailPanel } from './story-detail-panel';
 import { StoryCard } from './story-card';
-import { COLUMNS, TRUST_COLUMNS, TRUST_COLUMN_TO_STATUS, normalizeAssigneePatch, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type TrustColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
+import { COLUMNS, TRUST_COLUMNS, TRUST_COLUMN_TO_STATUS, TRUST_COLUMN_FEEDER_STATUSES, normalizeAssigneePatch, type KanbanStory, type KanbanSprint, type KanbanEpic, type KanbanMember, type ColumnId, type TrustColumnId, type DependencyEdge, type GateItem, type LineStatusSummary } from './types';
 import type { LabelData } from '@/components/ui/label-chip';
 import { fetchWithAuth } from '@/lib/db/client';
 import { memberDisplayLabel, memberNameById, memberRowLabels } from '@/lib/member-display';
@@ -78,7 +81,13 @@ interface KanbanBoardProps {
   projectId?: string;
   wsSlug: string;
   projSlug: string;
+  /** story #4888 — 머리 줄 맨 앞에 서는 것(렌즈 칩). 있으면 렌즈 + 필터 + 보기 전환이 한 줄이다(폰은 가로로 미는 한 줄). */
+  headLead?: React.ReactNode;
 }
+
+// story #4888 — 보드 머리 줄의 틀(불러오는 동안의 자리 표시와 실제 머리가 같은 틀이라 칩이 안 흔들린다)
+// story #4923 — 낮은 창(높이 ≤ 520 · 맥 앱 작은 창 1100×420 · 데스크톱 폭 lg 이상만 — 폰 가로 보기는 그대로)에서 · story 4945: 한계를 520 → 600으로(맥 앱 웹 영역 539에서 열이 카드 2장뿐이었다 — 같은 간격 토큰만, 새 모양 0) 머리 높이 44 → 약 38(줄 하나 34 + 위아래 여백 4). 줄이 넘칠 때 거르기를 «거르기 · n» 단추 하나로 접는 것은 높이가 아니라 머리 폭 몫이다(board-head-fold.tsx).
+const BOARD_HEAD_CLASS = 'focus-inset flex min-h-11 flex-shrink-0 flex-nowrap items-center gap-2 overflow-x-auto border-b border-border/80 px-4 py-1.5 lg:[@media(max-height:600px)]:min-h-9 lg:[@media(max-height:600px)]:py-0.5 lg:flex-wrap lg:overflow-visible';
 
 // WIP limit localStorage 키
 function wipLimitKey(projectId: string | undefined, status: string): string {
@@ -108,6 +117,13 @@ function loadWipLimit(projectId: string | undefined, status: string): number | n
   return isNaN(n) ? null : n;
 }
 
+/** story #4888 — a column read to its end while a browser-side filter is on: page size (the route's maximum) and the most pages one column is read for (2,500 cards) */
+const COMPLETE_PAGE_SIZE = 100;
+// `done` page size, for every `done` request (first page, «더 보기», read-to-the-end). The backend board query (repositories/story.py list_board) serves at most 10 `done` cards per request and only those of the last 7 days,
+// and the route asks for one more than `limit` to learn whether a next page exists: with limit 10 (or 100) it got 10 rows back, concluded «no next page» and sent no cursor — `done` could never page. 9 + 1 = 10 keeps the cursor honest.
+const DONE_PAGE_SIZE = 9;
+const COMPLETE_MAX_PAGES = 25;
+
 function saveWipLimit(projectId: string | undefined, status: string, limit: number | null): void {
   if (typeof window === 'undefined') return;
   if (limit === null) {
@@ -136,7 +152,7 @@ function saveAxisMode(projectId: string | undefined, mode: 'status' | 'trust'): 
   localStorage.setItem(axisModeKey(projectId), mode);
 }
 
-export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
+export function KanbanBoard({ projectId, wsSlug, projSlug, headLead }: KanbanBoardProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   // story #2545(카디르 라이브 재QA 5단계) — org 불일치 자동교정(switch-org)이 이 fetchData
@@ -179,6 +195,12 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // CB-S4: status별 total count + cursor
   const [columnTotals, setColumnTotals] = useState<Record<string, number>>({});
   const [columnCursors, setColumnCursors] = useState<Record<string, string | null>>({});
+  // story #4888 — set once a browser-side filter is used while a column still has more: from then on the columns are read to their end (see fetchAllPagesOfStatus)
+  // The project that read-to-the-end was switched on for: `loadAllPages` is false at once when the project changes (no full read of the new project before a reset effect runs).
+  const [loadAllFor, setLoadAllFor] = useState<string | null | undefined>(null);
+  const loadAllPages = loadAllFor === projectId;
+  // The project the cursors in `columnCursors` were read for — right after a project switch they are still the old project's, and must not switch read-to-the-end on for the new one.
+  const [cursorsFor, setCursorsFor] = useState<string | null | undefined>(null);
   const [loadingMoreColumns, setLoadingMoreColumns] = useState<Record<string, boolean>>({});
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [epicsNextCursor, setEpicsNextCursor] = useState<string | null>(null);
@@ -302,6 +324,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // 모바일 status 변경은 long-press 메뉴/드롭다운 경로 — touch-drag-reorder 상실은 product intent.
   const sensors = useSensors(
     useSensor(MousePointerSensor, { activationConstraint: { distance: 8 } }),
+    // 4908 키보드 끌기: Space로 집고 ↑↓←→로 옮기고 Space/Enter로 놓고 Esc로 취소(Enter 단독은 «열기»라 집지 않는다). 잠긴(파생) 열은 놓을 자리가 아니라 건너뛴다(droppable disabled).
+    useSensor(KeyboardSensor, KEYBOARD_SENSOR_OPTIONS),
   );
 
   const epicMap: Record<string, string> = {};
@@ -314,13 +338,15 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   }
 
   // CB-S4: status별 stories fetch helper
-  const fetchStoriesByStatus = useCallback(async (status: string, cursor?: string): Promise<{ stories: KanbanStory[]; total: number; nextCursor: string | null; ok: boolean }> => {
+  const fetchStoriesByStatus = useCallback(async (status: string, cursor?: string, pageSize?: number): Promise<{ stories: KanbanStory[]; total: number; nextCursor: string | null; ok: boolean }> => {
     const params = new URLSearchParams();
     if (projectId) params.set('project_id', projectId);
     if (selectedSprintId) params.set('sprint_id', selectedSprintId);
     if (selectedAssigneeId) params.set('assignee_id', selectedAssigneeId);
+    // story #4888 — the list API already filters by goal (epic) on the server: send it, so the cursor pages are the filtered set (no read-to-end needed for this filter).
+    if (selectedEpicId) params.set('epic_id', selectedEpicId);
     params.set('status', status);
-    params.set('limit', status === 'done' ? '10' : '20');
+    params.set('limit', String(status === 'done' ? DONE_PAGE_SIZE : (pageSize ?? 20)));
     if (cursor) params.set('cursor', cursor);
     const res = await fetchWithAuth(`/api/stories?${params}`);
     if (!res.ok) return { stories: [], total: 0, nextCursor: null, ok: false };
@@ -335,7 +361,25 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     const nextCursor = json.meta?.nextCursor ?? null;
     const total = json.meta?.totalCount ?? stories.length;
     return { stories, total, nextCursor, ok: true };
-  }, [projectId, selectedSprintId, selectedAssigneeId]);
+  }, [projectId, selectedSprintId, selectedAssigneeId, selectedEpicId]);
+
+  // story #4888 (UI-5 «하다 나온 결함») — a filter that runs in the browser (목표 · 종류 · 라벨 · 검색) only sees the stories that are loaded: the first page of a column is 20 cards
+  // (done: 10), so with such a filter on, card 21 onward silently dropped out of the result and the column number was the loaded count. While one of those filters is on, a column is
+  // read to its end (pages of 100 — the most the route gives — up to COMPLETE_MAX_PAGES); a column that still has more after that keeps its cursor, so its number says «N+».
+  const fetchAllPagesOfStatus = useCallback(async (status: string): Promise<{ stories: KanbanStory[]; total: number; nextCursor: string | null; ok: boolean }> => {
+    const all: KanbanStory[] = [];
+    let cursor: string | undefined;
+    let next: string | null = null;
+    for (let page = 0; page < COMPLETE_MAX_PAGES; page++) {
+      const r = await fetchStoriesByStatus(status, cursor, COMPLETE_PAGE_SIZE);
+      if (!r.ok) return { stories: all, total: all.length, nextCursor: next, ok: false };
+      all.push(...r.stories);
+      next = r.nextCursor;
+      if (!next) break;
+      cursor = next;
+    }
+    return { stories: all, total: all.length, nextCursor: next, ok: true };
+  }, [fetchStoriesByStatus]);
 
   // E-POLISH (story 23ea0e1d): columnTotals는 fetchData에서 단 1회 세팅되므로
   // optimistic mutation이 setStories만 갱신하면 카운트 배지가 stale해진다.
@@ -355,7 +399,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   // 이미 로드된(페이지네이션으로 fetch된) 카드만 in-place 패치 — 전체 재fetch를 하지 않으므로
   // 스크롤 위치·컬럼 순서가 흔들리지 않는다(AC3, #2050에서 배운 레이아웃 시프트 축과 동일 원리).
   // 아직 로드 안 된 카드(다른 컬럼 페이지네이션 밖)의 신규 진입은 이 스토리 스코프 밖으로 둔다.
-  const { currentTeamMemberId, orgId, bottomDockBannerSlot } = useDashboardContext();
+  const { currentTeamMemberId, orgId, bottomDockBannerSlot, currentMemberType } = useDashboardContext();
   // story #3287([도메인탈고정·축1 Phase1]) — org별 표시 라벨 오버라이드. canonical
   // status(col.id, drag/전이/색상 전부 이걸로 판정)는 절대 안 바뀐다 — statusLabel()이
   // 있으면 그 문구로 컬럼 헤더 텍스트만 치환하고, 없으면(오버라이드 미설정) 기존
@@ -440,6 +484,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
 
   const fetchData = useCallback(async () => {
     const runId = ++fetchRunRef.current;
+    // story #4888 — a «더 보기» still on its way belongs to the old set (see handleLoadMore): its «loading» flag must not keep the new set's button disabled.
+    setLoadingMoreColumns({});
     const stale = () => runId !== fetchRunRef.current;
     const sprintParams = projectId ? `?project_id=${projectId}` : '';
     const epicParams = new URLSearchParams();
@@ -532,7 +578,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       const statuses = COLUMNS.map((c) => c.id);
       const [storyResults, epicsRes, membersRes] = await Promise.all([
         // story #4307 — 망 오류(throw)도 실패로 모은다(예전엔 그대로 새어 옛 카드가 남았다).
-        Promise.all(statuses.map((s) => fetchStoriesByStatus(s))).catch(() => null),
+        Promise.all(statuses.map((s) => (loadAllPages ? fetchAllPagesOfStatus(s) : fetchStoriesByStatus(s)))).catch(() => null),
         fetchWithAuth(`/api/goals?${epicParams.toString()}`).catch(() => null),
         fetchWithAuth(`/api/members${memberParams}`).catch(() => null),
       ]);
@@ -555,6 +601,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       setStories(allStories);
       setColumnTotals(newTotals);
       setColumnCursors(newCursors);
+      setCursorsFor(projectId);
       storyIds = allStories.map((s) => s.id);
 
       // 본문 파싱도 await라 그 사이 새 실행(프로젝트·org 전환)이 시작될 수 있다 — 파싱 뒤에도 가드.
@@ -620,21 +667,31 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       if (gates) setStoryGatesMap(gates);
     }
     await sprintsLeg;
-  }, [projectId, fetchStoriesByStatus]);
+  }, [projectId, fetchStoriesByStatus, fetchAllPagesOfStatus, loadAllPages]);
 
   // CB-S4: 컬럼별 "더 보기" 핸들러
   const handleLoadMore = useCallback(async (status: string) => {
     const cursor = columnCursors[status];
     if (!cursor) return;
     setLoadingMoreColumns((prev) => ({ ...prev, [status]: true }));
+    const runId = fetchRunRef.current;
     try {
       const result = await fetchStoriesByStatus(status, cursor);
+      // story #4888 — a page that answers after the board was loaded again (goal / sprint / assignee / project changed) belongs to the old set: drop it.
+      if (runId !== fetchRunRef.current) return;
+      // A failed page must keep the cursor (a null cursor would say «nothing more» and hide the rest); the button stays and can be pressed again.
+      if (!result.ok) return;
       setStories((prev) => [...prev, ...result.stories]);
       setColumnCursors((prev) => ({ ...prev, [status]: result.nextCursor }));
     } finally {
-      setLoadingMoreColumns((prev) => ({ ...prev, [status]: false }));
+      if (runId === fetchRunRef.current) setLoadingMoreColumns((prev) => ({ ...prev, [status]: false }));
     }
   }, [columnCursors, fetchStoriesByStatus]);
+
+  // story #4888 — «더 보기» of a trust column: next page of every status that feeds it and still has one.
+  const handleLoadMoreTrust = useCallback(async (columnId: TrustColumnId) => {
+    await Promise.all(TRUST_COLUMN_FEEDER_STATUSES[columnId].filter((st) => !!columnCursors[st]).map((st) => handleLoadMore(st)));
+  }, [columnCursors, handleLoadMore]);
 
   useEffect(() => { void fetchData(); }, [fetchData, orgSyncVersion]);
 
@@ -798,11 +855,18 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const filterActive = Boolean(
     selectedEpicId || selectedAssigneeId || assigneeTypeFilter || selectedLabelIds.length > 0 || searchQuery,
   );
-  // 9f25e74a AC1/AC2: assignee/sprint은 서버필터(cursor 페이지네이션)라 '더보기' 억제 대상서 제외 —
-  // 클라필터(epic/type/labels/search)만 hasMore 억제. assignee 필터 done이 10+ 여도 필터집합 cursor로 페이지네이션(누락 0).
+  // 9f25e74a AC1/AC2: assignee/sprint은 서버필터(cursor 페이지네이션) — 필터집합 cursor로 페이지네이션(누락 0).
+  // 클라필터(epic/type/labels/search)는 불러온 것만 거르므로 story #4888부터 켜지는 순간 열을 끝까지 읽는다(아래 loadAllPages) — hasMore를 끄던 옛 방식은 21번째부터 조용히 뺐다.
   const clientFilterActive = Boolean(
-    selectedEpicId || assigneeTypeFilter || selectedLabelIds.length > 0 || searchQuery,
+    assigneeTypeFilter || selectedLabelIds.length > 0 || searchQuery,
   );
+
+  // story #4888 — the first time a browser-side filter is on while some column still has more cards than were loaded, switch to reading the columns to their end
+  // (fetchData then re-runs with `loadAllPages`). Switching a filter off does not undo it: what is loaded stays complete. A new project starts again from the first page.
+  const someColumnHasMore = Object.values(columnCursors).some(Boolean);
+  useEffect(() => {
+    if (clientFilterActive && someColumnHasMore && !loadAllPages && !loading && cursorsFor === projectId) setLoadAllFor(projectId);
+  }, [clientFilterActive, someColumnHasMore, loadAllPages, loading, projectId, cursorsFor]);
 
   // position 기준으로 정렬
   const storiesByColumn = (columnId: string): KanbanStory[] => {
@@ -813,6 +877,12 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       return pa - pb;
     });
   };
+
+  // 키보드로 놓은 카드는 다른 열로 옮겨 가며 다시 만들어진다(신뢰축은 응답 뒤 trust_stage로) — 그때 잃은 초점을 되돌린다.
+  const markKeyboardDrop = useKeyboardDropRefocus(stories);
+
+  // Esc로 끌기를 취소하면 놓기(onDragEnd)가 아니라 취소(onDragCancel)가 온다 — 끌기 표시(activeId · 놓을 수 있는 열 안내)를 거둔다.
+  const handleDragCancel = () => setActiveId(null);
 
   const handleDragStart = (event: { active: { id: string | number } }) => {
     setActiveId(String(event.active.id));
@@ -894,7 +964,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const handleTrustDragEnd = async (event: DragEndEvent) => {
     setActiveId(null);
     const { active, over } = event;
+    if (event.activatorEvent instanceof KeyboardEvent) markKeyboardDrop(String(active.id));
     if (!over) return;
+    if (over.id === active.id) return; // 제자리에 놓기 — 아무 일도 없다(자기 자신을 뺀 목록에서 자리를 찾으면 맨 아래로 보내지 않게)
 
     const storyId = String(active.id);
     const overId = String(over.id);
@@ -1022,7 +1094,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const handleDragEnd = async (event: DragEndEvent) => {
     setActiveId(null);
     const { active, over } = event;
+    if (event.activatorEvent instanceof KeyboardEvent) markKeyboardDrop(String(active.id));
     if (!over) return;
+    if (over.id === active.id) return; // 제자리에 놓기 — 아무 일도 없다
 
     const storyId = String(active.id);
     const overId = String(over.id);
@@ -1118,6 +1192,8 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const handleChangeStatus = useCallback(async (storyId: string, newStatus: string) => {
     const story = stories.find((s) => s.id === storyId);
     if (!story || story.status === newStatus) return;
+    // 메뉴로 상태를 바꾸면 카드가 다른 열로 옮겨 다시 서 초점이 body로 빠진다 — 키보드로 놓았을 때와 같은 길로 옮겨 간 카드에 초점을 돌려준다.
+    markKeyboardDrop(storyId);
 
     // Optimistic update
     setStories((prev) =>
@@ -1166,7 +1242,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       adjustColumnTotal(newStatus, -1);
       adjustColumnTotal(story.status, +1);
     }
-  }, [stories, t, adjustColumnTotal, addToast, bumpTransitionErrorNonce]);
+  }, [stories, t, adjustColumnTotal, addToast, bumpTransitionErrorNonce, markKeyboardDrop]);
 
   const handleAssignStory = useCallback(async (storyId: string) => {
     // TODO: Implement proper member selection UI
@@ -1176,6 +1252,114 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       void handleStoryClick(story);
     }
   }, [stories, handleStoryClick]);
+
+  // ── 4908 카드 메뉴: 담당자 켜고 끄기 · 제목 바로 바꾸기 — 패널 «담당자» · 제목과 같은 PATCH(/api/stories/{id}), 같은 실패 문구, 열린 패널의 값도 같이 갱신 ──
+  const storiesRef = useRef(stories);
+  storiesRef.current = stories;
+  const applyStoryPatch = useCallback((storyId: string, patch: Partial<KanbanStory>) => {
+    setStories((prev) => prev.map((s) => (s.id === storyId ? { ...s, ...patch } : s)));
+    setSelectedStory((prev) => (prev && prev.id === storyId ? { ...prev, ...patch } : prev));
+  }, []);
+
+  // 연타 · 순서가 뒤바뀐 응답에서 새 값을 덮지 않는 규칙(스토리마다): ① 다음 값은 «화면에 이미 그려진 마지막 값»에서 계산한다(직전 요청이 아직 안 끝나도) ② 응답(성공 · 실패)은 «가장 나중에 보낸 요청»의 것만 화면을 바꾼다 — 요청은 매번 전체 값(담당 전체 배열 · 제목)을 실어 마지막 요청이 서버를 결정한다 ③ 마지막 요청이 실패하면 «마지막으로 서버가 받은 값»으로 되돌린다.
+  const pendingRef = useRef(new Map<string, { latestA: number; latestT: number; inflightA: number; inflightT: number; confirmedSeqA: number; confirmedSeqT: number; assigneeIds: string[]; confirmedAssigneeIds: string[]; title: string; confirmedTitle: string }>());
+  const pendingFor = useCallback((story: KanbanStory) => {
+    const map = pendingRef.current;
+    let st = map.get(story.id);
+    const ids = story.assignee_ids && story.assignee_ids.length > 0 ? story.assignee_ids : (story.assignee_id ? [story.assignee_id] : []);
+    if (!st) {
+      st = { latestA: 0, latestT: 0, inflightA: 0, inflightT: 0, confirmedSeqA: 0, confirmedSeqT: 0, assigneeIds: ids, confirmedAssigneeIds: ids, title: story.title, confirmedTitle: story.title };
+      map.set(story.id, st);
+    } else {
+      // 필드마다 진행 중인 요청이 없으면 화면의 값(SSE 등으로 바뀌었을 수 있다)에서 다시 시작한다 — 담당자 요청이 진행 중이어도 제목은 따로 다시 시작한다(그 반대도).
+      if (st.inflightA === 0) { st.assigneeIds = ids; st.confirmedAssigneeIds = ids; }
+      if (st.inflightT === 0) { st.title = story.title; st.confirmedTitle = story.title; }
+    }
+    return st;
+  }, []);
+
+  const handleToggleAssignee = useCallback(async (storyId: string, memberId: string) => {
+    const story = storiesRef.current.find((s) => s.id === storyId);
+    if (!story) return;
+    const st = pendingFor(story);
+    const nextIds = st.assigneeIds.includes(memberId) ? st.assigneeIds.filter((id) => id !== memberId) : [...st.assigneeIds, memberId];
+    st.assigneeIds = nextIds;
+    const mine = ++st.latestA;
+    st.inflightA += 1;
+    applyStoryPatch(storyId, normalizeAssigneePatch({ assignee_ids: nextIds }));
+    let ok = false;
+    try {
+      const res = await fetch(`/api/stories/${storyId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignee_ids: nextIds }),
+      });
+      ok = res.ok;
+      if (ok && mine === st.latestA) {
+        const json = await res.json().catch(() => null) as { data?: { assignee_ids?: string[] | null } } | null;
+        // 본문을 읽는 사이 더 나중 토글이 시작됐을 수 있다 — 다시 확인한 뒤에만 화면을 바꾼다.
+        if (mine === st.latestA) {
+          // 서버 값이 오면 그대로(손으로 assignee_id를 다시 계산하지 않는다 — normalizeAssigneePatch가 한 곳)
+          const serverIds = json?.data?.assignee_ids ?? nextIds;
+          st.assigneeIds = serverIds;
+          applyStoryPatch(storyId, normalizeAssigneePatch({ assignee_ids: serverIds }));
+        }
+      }
+    } catch {
+      ok = false;
+    } finally {
+      st.inflightA -= 1;
+    }
+    if (ok) {
+      // 서버가 받은 값은 «더 나중에 보낸» 요청의 것만 갱신한다(먼저 보낸 요청의 응답이 늦게 와도 확인값이 뒤로 가지 않는다).
+      if (mine > st.confirmedSeqA) { st.confirmedSeqA = mine; st.confirmedAssigneeIds = nextIds; }
+      return;
+    }
+    if (mine !== st.latestA) return; // 더 나중 요청이 있다 — 그 요청이 전체 값을 실어 서버를 결정한다
+    st.assigneeIds = st.confirmedAssigneeIds;
+    applyStoryPatch(storyId, normalizeAssigneePatch({ assignee_ids: st.confirmedAssigneeIds }));
+    addToast({ type: 'error', title: t('assigneeChangeFailed') });
+  }, [applyStoryPatch, addToast, t, pendingFor]);
+
+  const handleRenameStory = useCallback(async (storyId: string, title: string) => {
+    const story = storiesRef.current.find((s) => s.id === storyId);
+    if (!story) return;
+    const st = pendingFor(story);
+    if (st.title === title) return;
+    st.title = title;
+    const mine = ++st.latestT;
+    st.inflightT += 1;
+    applyStoryPatch(storyId, { title });
+    let ok = false;
+    try {
+      const res = await fetch(`/api/stories/${storyId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      });
+      ok = res.ok;
+    } catch {
+      ok = false;
+    } finally {
+      st.inflightT -= 1;
+    }
+    if (ok) {
+      if (mine > st.confirmedSeqT) { st.confirmedSeqT = mine; st.confirmedTitle = title; }
+      return;
+    }
+    if (mine !== st.latestT) return;
+    st.title = st.confirmedTitle;
+    applyStoryPatch(storyId, { title: st.confirmedTitle });
+    addToast({ type: 'error', title: t('titleSaveFailed') });
+  }, [applyStoryPatch, addToast, t, pendingFor]);
+
+  // «담당자 ▸» 후보: 시스템 발행 제외 · 중복 없음(패널 «담당자»와 같은 규칙).
+  const assignableMembers = useMemo(
+    () => members.filter((m, i, arr) => arr.findIndex((x) => x.id === m.id) === i && !isSystemPublisher(m.runtime_type)),
+    [members],
+  );
+  // 삭제는 사람 전용 — 패널(HumanOnlyAction)과 같은 규칙. 에이전트 계정에는 메뉴 항목 자체가 없다(BE도 403).
+  const isHuman = currentMemberType === 'human';
 
   const handleDeleteStory = useCallback(async (storyId: string) => {
     const story = stories.find((s) => s.id === storyId);
@@ -1211,8 +1395,9 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
     addToast({ title: msg.title, type: msg.type });
   }, [t, addToast]);
 
-  const handleCreateStory = useCallback(async (columnId: string, title: string) => {
-    if (!projectId) return;
+  // story #4888 — 만들기 결과를 돌려준다(true = 만들어짐). 목록 보기의 «스토리 추가» 입구는 실패하면 입력칸과 제목을 그대로 남겨야 해서 결과가 필요하다(열 컴포저는 예전처럼 결과를 안 본다).
+  const createStoryReporting = useCallback(async (columnId: string, title: string): Promise<boolean> => {
+    if (!projectId) return false;
     try {
       const res = await fetch('/api/stories', {
         method: 'POST',
@@ -1229,18 +1414,24 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
       if (!res.ok) {
         bumpTransitionErrorNonce();
         setTransitionError(t('createStoryFailed'));
-        return;
+        return false;
       }
       const json = await res.json();
       const created = json.data as KanbanStory;
       setStories((prev) => [...prev, created]);
       // 카드 렌더 컬럼(created.status)과 카운트를 동일 source로 정합 — BE가 status를 정규화해도 무어긋남
       adjustColumnTotal(created.status, +1);
+      return true;
     } catch {
       bumpTransitionErrorNonce();
       setTransitionError(t('createStoryFailed'));
+      return false;
     }
   }, [projectId, selectedSprintId, selectedEpicId, t, adjustColumnTotal, bumpTransitionErrorNonce]);
+
+  const handleCreateStory = useCallback(async (columnId: string, title: string) => {
+    await createStoryReporting(columnId, title);
+  }, [createStoryReporting]);
 
   // story #2949 — 트러스트 뷰의 인라인 컴포저는 TrustColumnId(예: 'queued')를 넘긴다.
   // handleCreateStory는 그 값을 그대로 story.status로 POST하므로(classic 뷰는 컬럼id=status라
@@ -1294,10 +1485,49 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
   const activeStory = activeId ? stories.find((s) => s.id === activeId) : null;
   const dragStatus = activeStory?.status ?? null;
 
+  // 4908 키보드 끌기 낭독(스크린리더) — dnd-kit 기본 안내는 영어라 한국어로: 집었을 때 · 옮기는 중 · 놓았을 때 · 취소했을 때.
+  const dndTitleOf = (id: string | number) => stories.find((st) => st.id === String(id))?.title ?? '';
+  const dndPlaceOf = (id: string | number) => {
+    const sid = String(id);
+    const onCard = stories.find((st) => st.id === sid);
+    if (onCard) return onCard.title;
+    const trustCol = TRUST_COLUMNS.find((c) => c.id === sid);
+    if (trustCol) return t(trustCol.i18nKey);
+    const classicCol = COLUMNS.find((c) => c.id === sid);
+    return classicCol ? (domainLabels.statusLabel(classicCol.id) ?? t(classicCol.i18nKey)) : '';
+  };
+  const dndAccessibility = buildDndAccessibility(t, dndTitleOf, dndPlaceOf);
+
+  // story #4923 — 보드 머리가 한 줄에 안 들어가면 거르기 묶음이 «거르기 · n» 단추 + 팝오버로 접힌다(lg 이상 · 폭 기준). n = 적용 중인 거르기 수(종류 탭 · 스프린트 · 목표 · 담당자 · 라벨 — 하나씩).
+  const headRef = useRef<HTMLDivElement>(null);
+  const activeFilterCount = (assigneeTypeFilter ? 1 : 0) + (selectedSprintId ? 1 : 0) + (selectedEpicId ? 1 : 0) + (selectedAssigneeId ? 1 : 0) + (selectedLabelIds.length > 0 ? 1 : 0);
+  const headFolded = useHeadFold(headRef, `${loading && !hasLoadedOnce}|${orgLabels.length}|${excludedCount}|${showSearch}|${viewMode}`);
+  // contentKey = 접힌 «줄»의 폭을 바꾸는 것만(첫 불러오기 · 숨긴 N · 검색 칸 열림 · 보기 전환 · 라벨 칩 유무). 거르기를 «고르는» 것(칩 글)은 접힌 줄을 안 바꾸고, 바뀌면 접힌 팝오버가 다시 서며 닫히므로 키에 넣지 않는다.
+
   // story #4307(유나 확정) — 전면 스켈레톤은 첫 불러오기만. 다시 불러오는 동안은 툴바 · 필터 버튼이 남고 컬럼(목록) 자리만 같은 스켈레톤 부품 +
   // aria-busy(툴바엔 안 검). 도중에 또 바꾸면 마지막 조건 응답만 반영된다(fetchData의 runId · stale 판정).
-  if (loading && !hasLoadedOnce) return <KanbanSkeleton />;
+  // story #4888 — 첫 불러오는 동안에도 렌즈 칩(headLead)은 머리 줄 자리에 선다: 칩이 잠깐 사라졌다 나타나지 않고(링크 · 렌즈 이동이 끊기지 않고), 줄 틀이 같아 아래가 밀리지 않는다.
+  if (loading && !hasLoadedOnce) {
+    if (!headLead) return <KanbanSkeleton />;
+    return (
+      <div className="flex h-full flex-col overflow-hidden">
+        <div data-testid="board-head" className={BOARD_HEAD_CLASS}>{headLead}</div>
+        <div className="min-h-0 flex-1 overflow-hidden"><KanbanSkeleton /></div>
+      </div>
+    );
+  }
   const refetching = loading && hasLoadedOnce;
+
+  // story #2187 — is_excluded 카드가 조용히 사라지면 "삭제 대상" 카드의 존재 자체를 아무도 모르게 된다(만든 쪽도 못 치우는데 아무도 안 보면 영영 안 놓인다) — 그래서 숨긴 수를 항상 보이는 어포던스로 남긴다.
+  // 4923 — 거르기 묶음이 접혀도 이 글은 접히지 않는다(HeadFilterFold의 excluded 자리).
+  const excludedBadge = excludedCount > 0 ? (
+    <span
+      title={t('excludedCountTitle')}
+      className="ml-1 rounded-md px-2 py-1 text-editorial-meta font-medium text-muted-foreground"
+    >
+      {t('excludedCountBadge', { count: excludedCount })}
+    </span>
+  ) : null;
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -1313,16 +1543,30 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         // story #3007(로드맵 P2·PR-E, L1) — 토스트성 배너는 floating이라 --elev-overlay.
         // story 3466 후속(무효 유틸 4곳) — text-destructive-foreground는 이 테마에
         // 매핑이 없는 no-op(라이트 3.55·다크 3.00, AA 미달). trust-seal.tsx 선례.
-        <div key={transitionErrorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="pointer-events-auto rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-on-scrim dark:text-proof-bg shadow-[var(--elev-overlay)]">
+        <div key={transitionErrorNonce} role="alert" aria-live="assertive" aria-atomic="true" className="pointer-events-auto rounded-md border border-destructive bg-destructive px-4 py-3 text-sm text-background shadow-[var(--elev-overlay)]">
           ⚠️ {transitionError}
         </div>,
         bottomDockBannerSlot,
       )}
 
-      {/* Board header */}
-      <div className="flex min-h-11 flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border/80 px-4 py-1.5">
-        {/* Left: assignee type tabs + filter chips */}
-        <div className="flex flex-wrap items-center gap-1">
+      {/* Board header — story #4888(보드 머리 통째): 렌즈 칩(headLead) + 필터 + 검색 · 보기 전환이 **한 줄**이다. 넓은 화면(lg)은 모자라면 줄바꿈, 폰은 줄바꿈 없이 가로로 미는 한 줄
+          (예전엔 폰에서 3줄로 접혀 113px · 첫 카드가 화면의 74% 아래). 눌리는 것은 터치에서 44. */}
+      <div ref={headRef} data-testid="board-head" className={BOARD_HEAD_CLASS}>
+        {headLead ? (
+          <>
+            {headLead}
+            <div className="h-5 w-px shrink-0 bg-border/80" aria-hidden="true" />
+          </>
+        ) : null}
+        {/* Left: assignee type tabs + filter chips — 한 줄에 안 들어가면 «거르기 · n» 단추 + 팝오버로 접힌다(4923): 안의 조작은 펼친 줄과 팝오버가 같은 요소다 */}
+        <HeadFilterFold
+          folded={headFolded}
+          count={activeFilterCount}
+          label={t('filterFoldLabel')}
+          labelActive={t('filterFoldLabelActive', { count: activeFilterCount })}
+          popoverLabel={t('filterFoldPopoverLabel')}
+          excluded={excludedBadge}
+        >
           {([
             { id: '' as const, label: t('filterAll') },
             { id: 'human' as const, label: t('filterMembers') },
@@ -1334,7 +1578,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               variant="ghost"
               aria-pressed={assigneeTypeFilter === id}
               onClick={() => setAssigneeTypeFilter(id)}
-              className={`h-auto min-h-0 min-w-0 rounded-md px-3 py-1.5 text-xs font-medium ${
+              className={`h-auto min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 rounded-md px-3 py-1.5 text-xs font-medium ${
                 assigneeTypeFilter === id
                   ? 'bg-foreground/10 text-foreground'
                   : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
@@ -1353,7 +1597,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 <Button
                   type="button"
                   variant="ghost"
-                  className={`h-7 min-h-0 min-w-0 gap-1 rounded-md border px-2 text-xs font-medium ${
+                  className={`h-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 gap-1 rounded-md border px-2 text-xs font-medium ${
                     selectedSprintId
                       ? 'border-primary/40 bg-primary/10 text-primary'
                       : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
@@ -1412,7 +1656,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 <Button
                   type="button"
                   variant="ghost"
-                  className={`h-7 min-h-0 min-w-0 gap-1 rounded-md border px-2 text-xs font-medium ${
+                  className={`h-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 gap-1 rounded-md border px-2 text-xs font-medium ${
                     selectedEpicId
                       ? 'border-primary/40 bg-primary/10 text-primary'
                       : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
@@ -1471,7 +1715,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 <Button
                   type="button"
                   variant="ghost"
-                  className={`h-7 min-h-0 min-w-0 gap-1 rounded-md border px-2 text-xs font-medium ${
+                  className={`h-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 gap-1 rounded-md border px-2 text-xs font-medium ${
                     selectedAssigneeId
                       ? 'border-primary/40 bg-primary/10 text-primary'
                       : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
@@ -1557,7 +1801,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                   <Button
                     type="button"
                     variant="ghost"
-                    className={`h-7 min-h-0 min-w-0 gap-1 rounded-md border px-2 text-xs font-medium ${
+                    className={`h-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 gap-1 rounded-md border px-2 text-xs font-medium ${
                       selectedLabelIds.length > 0
                         ? 'border-primary/40 bg-primary/10 text-primary'
                         : 'border-border/60 text-muted-foreground hover:border-border hover:text-foreground'
@@ -1608,21 +1852,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
             </DropdownMenu>
           )}
 
-          {/* story #2187 — is_excluded 카드가 조용히 사라지면 "삭제 대상" 카드의 존재 자체를
-              아무도 모르게 된다(만든 쪽도 못 치우는데 아무도 안 보면 영영 안 놓인다) — 그래서
-              숨긴 수를 항상 보이는 어포던스로 남긴다. */}
-          {excludedCount > 0 && (
-            <span
-              title={t('excludedCountTitle')}
-              className="ml-1 rounded-md px-2 py-1 text-editorial-meta font-medium text-muted-foreground"
-            >
-              {t('excludedCountBadge', { count: excludedCount })}
-            </span>
-          )}
-        </div>
+        </HeadFilterFold>
 
         {/* Right: search + view toggle */}
-        <div className="flex items-center gap-1">
+        <div className="ml-auto flex shrink-0 items-center gap-1">
           {/* Search toggle */}
           {showSearch ? (
             <Input
@@ -1632,15 +1865,16 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               onChange={(e) => setSearchQuery(e.target.value)}
               onBlur={() => { if (!searchQuery) setShowSearch(false); }}
               placeholder={t('searchPlaceholder')}
-              className="h-7 w-36"
+              className="h-7 w-36 touch:h-11"
             />
           ) : (
             <Button
               type="button"
               variant="ghost"
               title={t('searchPlaceholder')}
+              aria-label={t('searchPlaceholder')}
               onClick={() => setShowSearch(true)}
-              className={`size-7 min-h-0 min-w-0 rounded-md ${
+              className={`size-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 rounded-md ${
                 searchQuery ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
               }`}
             >
@@ -1657,7 +1891,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               onClick={() => setViewMode('board')}
               aria-label={t('boardViewLabel')}
               title={t('boardViewLabel')}
-              className={`size-7 min-h-0 min-w-0 rounded-none ${
+              className={`size-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 rounded-none ${
                 viewMode === 'board' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-muted-foreground'
               }`}
             >
@@ -1670,7 +1904,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               onClick={() => setViewMode('list')}
               aria-label={t('listViewLabel')}
               title={t('listViewLabel')}
-              className={`size-7 min-h-0 min-w-0 rounded-none ${
+              className={`size-7 min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 rounded-none ${
                 viewMode === 'list' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-muted-foreground'
               }`}
             >
@@ -1696,7 +1930,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 role="tab"
                 aria-selected={axisMode === 'status'}
                 onClick={() => handleSetAxisMode('status')}
-                className={`h-auto min-h-0 min-w-0 -mb-px whitespace-nowrap rounded-none border-x-0 border-t-0 border-b-2 px-0.5 pb-1.5 text-editorial-meta font-semibold ${
+                className={`h-auto min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 -mb-px whitespace-nowrap rounded-none border-x-0 border-t-0 border-b-2 px-0.5 pb-1.5 text-editorial-meta font-semibold ${
                   axisMode === 'status' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
                 }`}
               >
@@ -1708,7 +1942,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                 role="tab"
                 aria-selected={axisMode === 'trust'}
                 onClick={() => handleSetAxisMode('trust')}
-                className={`h-auto min-h-0 min-w-0 -mb-px whitespace-nowrap rounded-none border-x-0 border-t-0 border-b-2 px-0.5 pb-1.5 text-editorial-meta font-semibold ${
+                className={`h-auto min-h-0 min-w-0 touch:min-h-11 touch:min-w-11 -mb-px whitespace-nowrap rounded-none border-x-0 border-t-0 border-b-2 px-0.5 pb-1.5 text-editorial-meta font-semibold ${
                   axisMode === 'trust' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
                 }`}
               >
@@ -1778,6 +2012,14 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
               storyLineMap={storyLineMap}
               projectId={projectId}
               getStatusLabel={domainLabels.statusLabel}
+              selectedStoryId={selectedStory?.id ?? null}
+              assignableMembers={assignableMembers}
+              onToggleAssignee={handleToggleAssignee}
+              onRenameStory={handleRenameStory}
+              onKickoffStory={handleKickoff}
+              onEditStory={handleEditStory}
+              onDeleteStory={isHuman ? handleDeleteStory : undefined}
+              onCreateStory={(title) => createStoryReporting('backlog', title)}
             />
           </div>
         ) : axisMode === 'trust' ? (
@@ -1787,11 +2029,15 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
           // 드래그 시작 자체를 막는다(이중 방어 — dnd-kit listeners 부재+drop 타깃 무효 둘 다).
           <DndContext
             sensors={sensors}
+            accessibility={dndAccessibility}
             collisionDetection={closestCenter}
             onDragStart={handleDragStart}
             onDragEnd={handleTrustDragEnd}
+            onDragCancel={handleDragCancel}
           >
-            <div className="flex h-full gap-3 overflow-x-auto px-3 py-3">
+            {/* story #4923(재오픈 · PO 11-14) — 낮은 데스크톱 창(높이 ≤ 520)에선 칸 안 스크롤 상자가 카드 한 장(78)을 통째로 못 담았다(1100×420 dev 실측: 상자 69px). 틀(206)은 그대로 두고(지원 단추 틈 · 문서 비스크롤 규칙 4913)
+                칸 «바깥 여백»에서 24px를 낸다: 칸 줄 위아래 12 → 6(각 6씩 = 12) · 칸 안 위아래 12 → 8(8) · 칸 머리 아래 12 → 8(4) → 상자 69 → 93 = 카드 78 + 위아래 6 + 3. 카드 · 상자 안쪽 여백은 그대로. */}
+            <div className="flex h-full gap-3 overflow-x-auto px-3 py-3 lg:[@media(max-height:600px)]:py-1.5">
               {TRUST_COLUMNS.map((col) => {
                 const colStories = storiesByTrustColumn(col.id);
                 return (
@@ -1806,7 +2052,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     onStoryClick={handleStoryClick}
                     onEditStory={handleEditStory}
                     onChangeStatus={handleChangeStatus}
-                    onDeleteStory={handleDeleteStory}
+                    onDeleteStory={isHuman ? handleDeleteStory : undefined}
+                    assignableMembers={assignableMembers}
+                    onToggleAssignee={handleToggleAssignee}
+                    onRenameStory={handleRenameStory}
                     projectId={projectId}
                     onKickoffStory={handleKickoff}
                     executionMap={executionMap}
@@ -1818,6 +2067,13 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     onCreateStory={handleCreateStoryTrust}
                     autoComposeSignal={col.id === 'queued' ? autoComposeNonce : 0}
                     getStatusLabel={domainLabels.statusLabel}
+                    selectedStoryId={selectedStory?.id ?? null}
+                    // The derived columns (locked) share their status with a settable column (needs_input ← in-progress, verified / merge_ready ← in-review): they show «N+» (there may be more) but no «더 보기» of their own —
+                    // their cards appear as the settable column's pages are loaded (a second button for the same page would only mislead).
+                    hasMore={TRUST_COLUMN_FEEDER_STATUSES[col.id].some((st) => !!columnCursors[st])}
+                    moreViaFeeder={col.locked}
+                    loadingMore={TRUST_COLUMN_FEEDER_STATUSES[col.id].some((st) => !!loadingMoreColumns[st])}
+                    onLoadMore={() => handleLoadMoreTrust(col.id)}
                   />
                 );
               })}
@@ -1842,6 +2098,7 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
         ) : (
           <DndContext
             sensors={sensors}
+            accessibility={dndAccessibility}
             // closestCenter: 기본 rectIntersection은 모바일 narrow 가로스크롤 레이아웃에서 dragged rect가
             // 다중 컬럼에 걸쳐 over를 source로 오해소 → cross-column 이동 실패(story 1f81bc74 repro 확정).
             // center 기반은 멀티컨테이너 over 정확 해소·데스크탑 무회귀. 앱 내 DnD 충돌해소 primitive를
@@ -1849,8 +2106,11 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
             collisionDetection={closestCenter}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
+            onDragCancel={handleDragCancel}
           >
-            <div className="flex h-full gap-3 overflow-x-auto px-3 py-3">
+            {/* story #4923(재오픈 · PO 11-14) — 낮은 데스크톱 창(높이 ≤ 520)에선 칸 안 스크롤 상자가 카드 한 장(78)을 통째로 못 담았다(1100×420 dev 실측: 상자 69px). 틀(206)은 그대로 두고(지원 단추 틈 · 문서 비스크롤 규칙 4913)
+                칸 «바깥 여백»에서 24px를 낸다: 칸 줄 위아래 12 → 6(각 6씩 = 12) · 칸 안 위아래 12 → 8(8) · 칸 머리 아래 12 → 8(4) → 상자 69 → 93 = 카드 78 + 위아래 6 + 3. 카드 · 상자 안쪽 여백은 그대로. */}
+            <div className="flex h-full gap-3 overflow-x-auto px-3 py-3 lg:[@media(max-height:600px)]:py-1.5">
               {COLUMNS.map((col) => {
                 const colStories = storiesByColumn(col.id);
                 const wipState = wipLimits[col.id] ?? { limit: null, editing: false, draft: '' };
@@ -1868,7 +2128,10 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     onEditStory={handleEditStory}
                     onChangeStatus={handleChangeStatus}
                     onAssignStory={handleAssignStory}
-                    onDeleteStory={handleDeleteStory}
+                    onDeleteStory={isHuman ? handleDeleteStory : undefined}
+                    assignableMembers={assignableMembers}
+                    onToggleAssignee={handleToggleAssignee}
+                    onRenameStory={handleRenameStory}
                     projectId={projectId}
                     onKickoffStory={handleKickoff}
                     wipLimit={wipState.limit}
@@ -1885,14 +2148,15 @@ export function KanbanBoard({ projectId, wsSlug, projSlug }: KanbanBoardProps) {
                     storyLabelsMap={storyLabelsMap}
                     storyGatesMap={storyGatesMap}
                     storyLineMap={storyLineMap}
-                    totalCount={filterActive ? colStories.length : columnTotals[col.id]}
-                    hasMore={clientFilterActive ? false : !!columnCursors[col.id]}
+                    totalCount={filterActive ? colStories.length : Math.max(colStories.length, columnTotals[col.id] ?? 0)}
+                    hasMore={!!columnCursors[col.id]}
                     loadingMore={loadingMoreColumns[col.id] ?? false}
                     onLoadMore={() => handleLoadMore(col.id)}
                     collapsed={col.id === 'done' ? doneCollapsed : undefined}
                     onToggleCollapse={col.id === 'done' ? handleToggleDoneCollapse : undefined}
                     autoComposeSignal={col.id === 'backlog' ? autoComposeNonce : 0}
                     getStatusLabel={domainLabels.statusLabel}
+                    selectedStoryId={selectedStory?.id ?? null}
                   />
                 );
               })}

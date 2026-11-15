@@ -167,7 +167,7 @@ describe('/desktop card (Yuna 5a · 5b · the anchor)', () => {
     const scroll = vi.fn();
     Element.prototype.scrollIntoView = scroll;
     await render(<DesktopRemoteControlCard />);
-    const sw = container.querySelector<HTMLElement>('[data-slot="switch"]');
+    const sw = container.querySelector<HTMLElement>('[data-slot="ds-toggle"]');
     expect(document.activeElement).toBe(sw);
     expect(sw?.getAttribute('aria-checked')).toBe('false');
     expect(scroll).toHaveBeenCalledTimes(1);
@@ -187,7 +187,7 @@ describe('/desktop card (Yuna 5a · 5b · the anchor)', () => {
 // path: Next's scroll handler moving the focus after the card's effect, and the card mounting before the `#` is on the address.
 describe('arrival by an in-app link press (client navigation)', () => {
   const tick = () => act(async () => { await new Promise((r) => setTimeout(r, 5)); });
-  const sw = () => container.querySelector<HTMLElement>('[data-slot="switch"]');
+  const sw = () => container.querySelector<HTMLElement>('[data-slot="ds-toggle"]');
 
   it('Next 16 blurs the focus on a later commit → the switch takes it back', async () => {
     org = { ...OFF, can_change: true };
@@ -240,7 +240,7 @@ describe('arrival by an in-app link press (client navigation)', () => {
     Element.prototype.scrollIntoView = vi.fn();
     await render(<DesktopRemoteControlCard />);
     expect(sw()?.hasAttribute('data-arrived')).toBe(true);
-    expect(sw()?.className).toContain('data-[arrived]:ring-3');
+    expect(sw()?.closest('[class*="data-arrived"]'), 'the arrival ring is drawn from the mark (through the toggle\'s wrapper)').not.toBeNull();
     await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' })); });
     expect(sw()?.hasAttribute('data-arrived')).toBe(false);
   });

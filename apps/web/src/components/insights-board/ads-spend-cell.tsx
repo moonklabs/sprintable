@@ -31,15 +31,15 @@ export function AdsSpendCell({ adsBoost, tBoard, tContent, locale }: AdsSpendCel
   // 방어적 — 타입은 null만 선언하지만(BE Pydantic 계약상 항상 present), 목 fetch
   // 응답류(컴파일타임 미검증 JSON 리터럴)는 필드 자체가 빠진 undefined로 올 수 있다.
   if (!adsBoost) {
-    return <span className="text-muted-foreground" data-testid="ads-spend-cell-none">{tBoard('adsSpendNotApplicable')}</span>;
+    return <span className="text-ds-ink-3" data-testid="ads-spend-cell-none">{tBoard('adsSpendNotApplicable')}</span>;
   }
 
   if (adsBoost.run_status !== null && !(BOOST_RUN_STATUSES as readonly string[]).includes(adsBoost.run_status)) {
-    return <span className="text-muted-foreground" data-testid="ads-spend-cell-unavailable">{tBoard('adsSpendUnavailable')}</span>;
+    return <span className="text-ds-ink-3" data-testid="ads-spend-cell-unavailable">{tBoard('adsSpendUnavailable')}</span>;
   }
 
   if (adsBoost.run_status === null || adsBoost.run_status === 'pending') {
-    return <span className="text-muted-foreground" data-testid="ads-spend-cell-pending">{tBoard('adsSpendAggregationPending')}</span>;
+    return <span className="text-ds-ink-3" data-testid="ads-spend-cell-pending">{tBoard('adsSpendAggregationPending')}</span>;
   }
 
   const currency = adsBoost.sealed_currency as GenerationBudgetCurrency | null;
@@ -56,12 +56,12 @@ export function AdsSpendCell({ adsBoost, tBoard, tContent, locale }: AdsSpendCel
 
   return (
     <span data-testid="ads-spend-cell-value">
-      <span className="text-foreground">
+      <span className="text-ds-ink">
         {budgetDisplay
           ? tBoard('adsSpendLine', { spend: spendDisplay, budget: budgetDisplay })
           : spendDisplay}
       </span>
-      <span className={`ml-1 text-xs ${exceeded ? 'text-destructive' : 'text-muted-foreground'}`}>
+      <span className={`ml-1 text-ds-small ${exceeded ? 'text-ds-failed' : 'text-ds-ink-3'}`}>
         {exceeded
           ? tBoard('adsSpendExceeded', { amount: remainingAbsDisplay })
           : tBoard('adsSpendRemaining', { amount: remainingAbsDisplay })}

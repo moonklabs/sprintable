@@ -51,10 +51,10 @@ describe('StoryCard — story #3049(agent 아바타 헤어라인, soft-fill 폐�
     expect(markup).not.toContain('bg-accent-claim/10');
   });
 
-  it('human assignee 아바타는 무변화(border-border/bg-muted 그대로)', () => {
+  it('human assignee 아바타는 사람 동그라미 — ds 줄 · 입력칸 면 토큰(4908)', () => {
     const markup = render(makeStory(), [{ id: 'h1', name: '책임자', type: 'human' }]);
-    expect(markup).toContain('border-border');
-    expect(markup).toContain('bg-muted');
+    expect(markup).toContain('border-ds-line');
+    expect(markup).toContain('bg-ds-surface-sunk');
   });
 });
 
@@ -91,7 +91,7 @@ describe('StoryCard — story #32dcc294 제목 파싱(카테고리 칩+lead)', (
     expect(markup).toContain('Workcell·콘텐츠 ③');
     // claim(line-clamp-2) div는 lead만 담는다 — 카드 바깥 title 툴팁 속성은 접근성상 원문
     // 전체를 보존해야 하므로(별개 관심사) 거기까지 검사 범위를 넓히지 않는다.
-    const claimMatch = markup.match(/class="mt-1\.5 line-clamp-2 text-xs font-semibold leading-snug text-proof-ink">([^<]*)</);
+    const claimMatch = markup.match(/class="mt-0\.5 line-clamp-2 text-editorial-ui font-semibold leading-snug text-ds-ink">([^<]*)</);
     expect(claimMatch).toBeTruthy();
     expect(claimMatch![1]).toBe('goal/DoD 구조화 소스 트랙');
   });
@@ -276,18 +276,17 @@ describe('StoryCard — 이름 없는 검증자 씰(story #4284)', () => {
 });
 
 
-// [SID:4300 · 유나 4682 PASS 비차단] 담당 아바타(h-6)가 조직 보충 뒤 늦게 붙으면 카드 아래 줄이 20 → 24px로 늘어 카드가 +4px 흔들렸다
-// (390 · 95.2 → 99.2). 줄이 처음부터 아바타 높이(min-h-6 = 24px)를 잡는지 — 아바타 없을 때(받는 중) · 있을 때 같은 줄.
-describe('StoryCard — 담당 아바타 줄 최소 높이([SID:4300])', () => {
+// [SID:4300 → 4908] 담당 아바타가 조직 보충 뒤 늦게 붙어도 카드 줄이 늘어 카드가 흔들리면 안 된다. 4908 카드의 메타 줄(마지막 줄)은 아바타 높이(h-5 = 20px)와 같은 h-5로 처음부터 고정이다 — 아바타 없을 때(받는 중) · 있을 때 같은 줄.
+describe('StoryCard — 메타 줄 최소 높이(아바타가 늦게 붙어도 카드가 안 흔들린다)', () => {
   const rowOf = (markup: string) => {
     const d = document.createElement('div');
     d.innerHTML = markup;
-    return d.querySelector('div.min-h-6.justify-between');
+    return d.querySelector('div.mt-1.h-5');
   };
-  it('아바타 없을 때(받는 중) · 있을 때 모두 아래 줄이 min-h-6 · 아바타는 그 줄 안', () => {
-    expect(rowOf(render(makeStory({ story_points: 3 }))), '아바타 없는 카드의 아래 줄').not.toBeNull();
+  it('아바타 없을 때(받는 중) · 있을 때 모두 메타 줄이 h-5 고정 · 아바타는 그 줄 안', () => {
+    expect(rowOf(render(makeStory({ story_points: 3 }))), '아바타 없는 카드의 메타 줄').not.toBeNull();
     const withAvatar = rowOf(render(makeStory({ story_points: 3 }), [{ id: 'm1', name: '안나', type: 'human' } as KanbanMember]));
-    expect(withAvatar, '아바타 있는 카드의 아래 줄').not.toBeNull();
-    expect(withAvatar!.querySelector('div.h-6.w-6'), '아바타가 그 줄 안').not.toBeNull();
+    expect(withAvatar, '아바타 있는 카드의 메타 줄').not.toBeNull();
+    expect(withAvatar!.querySelector('div.h-5.w-5'), '아바타가 그 줄 안').not.toBeNull();
   });
 });

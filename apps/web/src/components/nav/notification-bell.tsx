@@ -1,6 +1,8 @@
 'use client';
 
+import { handleListKeys } from '@/lib/list-keys';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AnchoredPopover, isOutsidePress, usePortalMenuKeys } from '@/components/shared/anchored-popover';
 import { withProjectParam } from '@/lib/with-project-param';
 import { useRouter } from 'next/navigation';
@@ -16,17 +18,26 @@ import {
 import { useLocale, useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { toPlainPreview } from '@/components/chat/entity-ref';
-import { CornerCountBadge } from '@/components/ui/corner-count-badge';
+import { humanizeMachineEventSummary } from '@/components/chat/event-block-card';
+import { CountBadge } from '@/components/ds/count-badge';
 import { useDashboardContext } from '@/app/dashboard/dashboard-shell';
+import { useEventDefinitionNames } from '@/hooks/use-event-definition-names';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
 import { useSseNotifications, type SseEventNotification } from '@/hooks/use-sse-notifications';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useMediaQuery } from '@/lib/use-media-query';
-import { dispatchedInnerType, getDispatchedHeadline, getEventTypeCopy } from '@/services/notification-display';
+import { dispatchedInnerType, getDispatchedHeadline, getEventTypeCopy, isChatMessageBellCopy } from '@/services/notification-display';
 import { hasDesktopNotifyBridge, notifyViaDesktopBridge } from '@/lib/desktop-notify-bridge';
 import { useToast } from '@/components/ui/toast';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { Avatar } from '@/components/ds/avatar';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { EmptyState } from '@/components/ds/empty-state';
+import { Icon } from '@/components/ds/icon';
+import { IconButton } from '@/components/ds/icon-button';
+import { SectionHeader } from '@/components/ds/section-header';
 
 type FilterTab = 'all' | 'story' | 'system';
 
@@ -66,14 +77,51 @@ export interface EventNotification {
   // `project_id`(events 행)는 수신자 멤버 행의 프로젝트라 링크에 쓰지 않는다. SSE로 막 들어온 항목엔 없다(→ 주소 그대로).
   target_project_id?: string | null;
   target_doc_slug?: string | null;
+  // story 4890 — the room's name for a chat line (the list carries it only for a named room the person can read now; a live (SSE) line has none until the list is read again)
+  target_conversation_title?: string | null;
+  // story 4890 — a live (SSE) chat frame has no `source` ids and no nested payload: its room id is a top-level key, carried here so the line can open the room
+  conversation_id?: string | null;
+  // story 4890 — the same for the «cannot read this room now» flag: a live frame carries it at the top level, a listed row inside `payload`
+  content_withheld?: boolean;
+}
+
+/** story 4890 — the room id of a live (SSE) chat frame: the BE pushes the message's keys at the top level (no `source` ids, no nested `payload`). null for any other frame. */
+function liveRoomId(frame: SseEventNotification): string | null {
+  const id = (frame as { conversation_id?: unknown }).conversation_id;
+  return typeof id === 'string' && id ? id : null;
+}
+
+/** story 4890 — who wrote a chat line, when the row carries it (the message_created / mention payload's `sender`): the bell draws that person's Avatar instead of the generic bell, and the room's name under the line */
+export function chatLineSender(n: Pick<EventNotification, 'event_type' | 'payload'>): { name: string; avatarUrl: string | null; actorType: 'human' | 'agent'; runtimeType: string | null } | null {
+  if (n.event_type !== 'conversation.message_created' && n.event_type !== 'conversation:mention') return null;
+  const sender = n.payload?.sender as { name?: unknown; avatar_url?: unknown; type?: unknown; runtime_type?: unknown } | undefined;
+  if (!sender || typeof sender.name !== 'string' || !sender.name.trim()) return null;
+  return {
+    name: sender.name,
+    avatarUrl: typeof sender.avatar_url === 'string' && sender.avatar_url ? sender.avatar_url : null,
+    actorType: sender.type === 'agent' ? 'agent' : 'human',
+    runtimeType: typeof sender.runtime_type === 'string' && sender.runtime_type ? sender.runtime_type : null,
+  };
 }
 
 // export — story #2956 QA changes(카디르+codex, 2026-08-23) 회귀가드(notification-bell.test.tsx)가
 // 전체 컴포넌트 마운트 없이 딥링크 판정만 직접 검증.
 export function getEntityHref(
-  notification: Pick<EventNotification, 'source_entity_type' | 'source_entity_id' | 'payload' | 'target_project_id' | 'target_doc_slug'> & { event_type?: string },
+  notification: Pick<EventNotification, 'source_entity_type' | 'source_entity_id' | 'payload' | 'target_project_id' | 'target_doc_slug'> & { event_type?: string; conversation_id?: string | null; content_withheld?: boolean },
 ): string | null {
   const { source_entity_type, source_entity_id } = notification;
+  // story 4890 (UI-7 AC5 «알림에서 들어가기») — a chat line (a message · a mention) opens its ROOM. Before this it had no link: tapping it only marked it read and closed the panel (dev 11-12 emulator: the
+  // address did not change). It is decided BEFORE the entity check: a live (SSE) frame carries no `source` ids — only the room id (top level). A line for a room the person cannot read now
+  // (`content_withheld`: an outside-room mention, a room they left) opens nothing: the room answers 404. The room page works out its own project (story 4847), so no `?p=` is needed — one on the row is kept.
+  const chatEvent = dispatchedInnerType(notification.event_type ?? '', notification.payload) ?? notification.event_type;
+  if (source_entity_type === 'conversation_message' || source_entity_type === 'conversation' || chatEvent === 'conversation.message_created' || chatEvent === 'conversation:mention') {
+    if (notification.payload?.content_withheld === true || notification.content_withheld === true) return null;
+    const fromPayload = notification.payload?.conversation_id;
+    const roomId = typeof fromPayload === 'string' && fromPayload ? fromPayload
+      : notification.conversation_id ? notification.conversation_id
+      : (source_entity_type === 'conversation' ? source_entity_id : null);
+    return roomId ? withProjectParam(`/chats/${roomId}`, notification.target_project_id ?? null) : null;
+  }
   if (!source_entity_id) return null;
   // story #4244 — 링크는 대상 자기 프로젝트(target_project_id)를 싣는다(모르면 주소 그대로 — 틀린 p를 만들지 않는다).
   const p = notification.target_project_id ?? null;
@@ -238,16 +286,21 @@ function NotificationPanel({
   syncDegraded,
 }: NotificationPanelProps) {
   const t = useTranslations('inbox');
+  const tEventCard = useTranslations('eventCard');
   const tCommon = useTranslations('common');
   const locale = useLocale();
+  const { orgId: panelOrgId } = useDashboardContext();
+  const eventDefinitionName = useEventDefinitionNames(panelOrgId); // story 4925 — an event with no sentence of its own is named by its definition here too (the room list and the inbox already do)
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const [filterTab, setFilterTab] = useState<FilterTab>('all');
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
 
   const loading = notifications === null;
-  const hasUnread = notifications?.some((n) => !n.read_at) ?? false;
+  // story 4890 — the dispatched copy of a chat message is not a line (its message_created row is): neither drawn nor counted as «something to mark read»
+  const hasUnread = notifications?.some((n) => !n.read_at && !isChatMessageBellCopy(n.event_type, n.payload)) ?? false;
 
   const filtered = notifications?.filter((n) => {
+    if (isChatMessageBellCopy(n.event_type, n.payload)) return false;
     if (showUnreadOnly && n.read_at) return false;
     if (filterTab !== 'all') return getNotificationTab(n) === filterTab;
     return true;
@@ -258,152 +311,114 @@ function NotificationPanel({
     filterTab === 'system' ? t('emptySystem') :
     t('emptyAll');
 
-  // story #4557: a flex item that may shrink (min-h-0 · flex-1) — in the lg+ popover (a flex column capped at 480px) `h-full`
-  // resolved to the content and never shrank, so the list below got no bounded height and did not scroll
+  // story 4890 (UI-7 · 알림 화면 통째): the panel on the B skeleton — one header line (title · [전체 읽음] · ✕ 44), ONE chip row (전체 · 스토리 · 시스템 + 안읽음만), rows of TWO lines (headline / «방 · 보낸이 · 시각») with an unread dot,
+  // and on the «all» view the list is cut in two groups, «안 읽음» first (with its count) and «이전» after — before: a tab strip + a pill + rows of three or four lines (title · room · sender · time).
+  // story #4557: a flex item that may shrink (min-h-0 · flex-1) — in the lg+ popover (a flex column capped at 480px) `h-full` resolved to the content and never shrank, so the list below got no bounded height and did not scroll
+  const grouped = filterTab === 'all' && !showUnreadOnly;
+  const unreadRows = grouped ? filtered.filter((n) => !n.read_at) : [];
+  const earlierRows = grouped ? filtered.filter((n) => !!n.read_at) : [];
+  const renderRow = (n: EventNotification) => {
+    const lineSender = chatLineSender(n);
+    const room = n.target_conversation_title;
+    const sender = n.payload?.sender_name;
+    return (
+      <li key={n.id} data-row-key={n.id}>
+        <Button
+          type="button"
+          variant="quiet"
+          onClick={() => onNavigate(n)}
+          className={cn('h-auto min-h-14 w-full justify-start gap-3 rounded-none border-0 border-b border-ds-line px-4 py-3 text-left font-normal', !n.read_at && 'bg-ds-action-soft')}
+        >
+          {lineSender ? (
+            <span className="shrink-0" data-testid="notification-line-avatar">
+              <Avatar decorative name={lineSender.name} avatarUrl={lineSender.avatarUrl} actorType={lineSender.actorType} runtimeType={lineSender.runtimeType} size={32} />
+            </span>
+          ) : (
+            <span className={cn('shrink-0 rounded-full p-1.5', n.read_at ? 'bg-ds-surface-high text-ds-ink-3' : 'bg-ds-action-soft text-ds-action-text')}>
+              {getEventIcon(n)}
+            </span>
+          )}
+          <span className="min-w-0 flex-1">
+            <span data-testid="notification-line-headline" className={cn('block truncate text-ds-body text-ds-ink', !n.read_at && 'font-semibold')}>{headline(t, n, tEventCard, eventDefinitionName)}</span>
+            <span className="block truncate text-ds-small text-ds-ink-3">
+              {room ? <span data-testid="notification-line-room">{room}</span> : null}
+              {room && sender ? ' · ' : null}
+              {sender ? <span>{sender}</span> : null}
+              {room || sender ? ' · ' : null}
+              <span>{formatViewerRelativeTime(n.created_at, locale, displayTimezone)}</span>
+            </span>
+          </span>
+          {!n.read_at ? <span className="size-2 shrink-0 rounded-full bg-ds-action" aria-hidden /> : null}
+        </Button>
+      </li>
+    );
+  };
+  const chip = (active: boolean) => cn('h-8 shrink-0 px-3 text-ds-small', active && 'border-ds-action bg-ds-action-soft text-ds-action-text');
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* 헤더 */}
-      <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
-        <span className="text-sm font-semibold">{t('panelTitle')}</span>
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-ds-line px-4 py-2">
+        <h2 className="text-ds-card-title font-semibold text-ds-ink">{t('panelTitle')}</h2>
         <div className="flex items-center gap-1">
           {hasUnread && (
-            <button
-              type="button"
-              onClick={onMarkAllRead}
-              className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
-            >
-              <CheckCheck className="size-3.5" />
+            <Button variant="quiet" onClick={onMarkAllRead} iconStart={<Icon name="done_all" size={16} />} className="text-ds-small">
               {t('markAllRead')}
-            </button>
+            </Button>
           )}
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex size-7 items-center justify-center rounded text-muted-foreground transition hover:bg-accent hover:text-foreground"
-            aria-label={tCommon('close')}
-          >
-            <X className="size-4" />
-          </button>
+          <IconButton icon="close" label={tCommon('close')} size="lg" variant="quiet" onClick={onClose} />
         </div>
       </div>
 
-      {/* story #2201 — SSE backfill이 강등된 연결에서만 뜨는 옅은 회색 한 줄. no_cursor(최초
-          연결)는 제외 — "일부 유실"이 아니라 "아직 아무것도 안 받은 정상 상태"이기 때문. */}
-      {syncDegraded && (
-        <div className="shrink-0 border-b bg-muted/50 px-4 py-1.5 text-xs text-muted-foreground">
-          {t('syncDegradedBanner')}
-        </div>
-      )}
+      {/* story #2201 — SSE backfill이 강등된 연결에서만 뜨는 옅은 한 줄. no_cursor(최초 연결)는 제외 — "일부 유실"이 아니라 "아직 아무것도 안 받은 정상 상태"이기 때문. */}
+      {syncDegraded && <Banner tone="note" className="rounded-none border-x-0 border-t-0">{t('syncDegradedBanner')}</Banner>}
 
-      {/* 필터 탭 */}
-      <div className="focus-inset flex shrink-0 overflow-x-auto border-b">
+      {/* 칩 한 줄: 보는 종류 + 안읽음만 */}
+      <div className="focus-inset flex shrink-0 items-center gap-2 overflow-x-auto border-b border-ds-line px-4 py-2">
         {FILTER_TABS.map((tab) => (
-          <button
-            key={tab.value}
-            type="button"
-            onClick={() => setFilterTab(tab.value)}
-            aria-pressed={filterTab === tab.value}
-            className={cn(
-              'shrink-0 px-3 py-2 text-xs font-medium transition',
-              filterTab === tab.value
-                ? 'border-b-2 border-primary text-foreground'
-                : 'text-muted-foreground hover:text-foreground',
-            )}
-          >
+          <Button key={tab.value} type="button" variant="secondary" onClick={() => setFilterTab(tab.value)} aria-pressed={filterTab === tab.value} className={chip(filterTab === tab.value)}>
             {t(tab.labelKey)}
-          </button>
+          </Button>
         ))}
-        <div className="ml-auto flex shrink-0 items-center px-3">
-          <button
-            type="button"
-            onClick={() => setShowUnreadOnly((v) => !v)}
-            aria-pressed={showUnreadOnly}
-            className={cn(
-              // story #2062: showUnreadOnly=true면 bg-primary(링색과 동일) — focus-inset 컨테이너
-              // 안에서는 inset 링이 안 보이므로 focus-outset으로 바깥 링을 되돌린다(유나 규격).
-              'focus-outset rounded-full px-2.5 py-0.5 text-editorial-meta font-medium transition',
-              showUnreadOnly
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-muted text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {t('unreadOnly')}
-          </button>
-        </div>
+        <Button type="button" variant="secondary" onClick={() => setShowUnreadOnly((v) => !v)} aria-pressed={showUnreadOnly} className={cn('ml-auto', chip(showUnreadOnly))}>
+          {t('unreadOnly')}
+        </Button>
       </div>
 
+      {/* story 4954 (the desktop app) — ↑ ↓ (j k) walk the rows, focus only: the same list keys the home · goals · runs lists use (`handleListKeys`); Enter / Space open a row as a button does */}
       {/* 목록 */}
-      <div className="focus-inset min-h-0 flex-1 overflow-y-auto">
+      <div className="focus-inset min-h-0 flex-1 overflow-y-auto" onKeyDown={(e) => { if ((e.target as HTMLElement).closest('[data-row-key]')) handleListKeys(e, () => undefined); }}>
         {loading ? (
-          <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
-            {tCommon('loading')}
-          </div>
+          <div className="py-12 text-center text-ds-body text-ds-ink-3">{tCommon('loading')}</div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
-            <Bell className="size-8 opacity-30" />
-            <span>{emptyMessage}</span>
-          </div>
+          <EmptyState icon="notifications" title={emptyMessage} />
         ) : (
           <>
-          <ul>
-            {filtered.map((n) => (
-              <li key={n.id}>
-                <button
-                  type="button"
-                  onClick={() => onNavigate(n)}
-                  className={cn(
-                    'flex w-full gap-3 px-4 py-3 text-left transition hover:bg-accent',
-                    !n.read_at && 'bg-primary/5',
-                  )}
-                >
-                  <span
-                    className={cn(
-                      'mt-0.5 shrink-0 rounded-full p-1.5',
-                      n.read_at
-                        ? 'bg-muted text-muted-foreground'
-                        : 'bg-primary/10 text-primary',
-                    )}
-                  >
-                    {getEventIcon(n)}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p
-                      className={cn(
-                        'truncate text-sm',
-                        !n.read_at && 'font-medium',
-                      )}
-                    >
-                      {headline(t, n)}
-                    </p>
-                    {n.payload?.sender_name ? (
-                      <p className="truncate text-xs text-muted-foreground">
-                        {n.payload.sender_name}
-                      </p>
-                    ) : null}
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {formatViewerRelativeTime(n.created_at, locale, displayTimezone)}
-                    </p>
-                  </div>
-                  {!n.read_at && (
-                    <span className="mt-1.5 size-2 shrink-0 rounded-full bg-primary" />
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
-          {/* story #2192 AC3/AC4 — hasMore일 때만 렌더(음성대조: 30건 이하 계정은 버튼 자체가 없음). */}
-          {hasMore && (
-            <div className="flex justify-center py-3">
-              <button
-                type="button"
-                onClick={onLoadMore}
-                disabled={loadingMore}
-                className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
-              >
-                {loadingMore ? tCommon('loading') : t('loadMore')}
-              </button>
-            </div>
-          )}
+            {grouped ? (
+              <>
+                {unreadRows.length > 0 ? (
+                  <section data-testid="notification-group-unread">
+                    <SectionHeader title={t('groupUnread')} level={3} count={<CountBadge count={unreadRows.length} />} className="px-4" />
+                    <ul>{unreadRows.map(renderRow)}</ul>
+                  </section>
+                ) : null}
+                {earlierRows.length > 0 ? (
+                  <section data-testid="notification-group-earlier">
+                    {unreadRows.length > 0 ? <SectionHeader title={t('groupEarlier')} level={3} className="px-4" /> : null}
+                    <ul>{earlierRows.map(renderRow)}</ul>
+                  </section>
+                ) : null}
+              </>
+            ) : (
+              <ul>{filtered.map(renderRow)}</ul>
+            )}
+            {/* story #2192 AC3/AC4 — hasMore일 때만 렌더(음성대조: 30건 이하 계정은 버튼 자체가 없음). */}
+            {hasMore && (
+              <div className="flex justify-center py-3">
+                <Button variant="secondary" onClick={onLoadMore} disabled={loadingMore}>
+                  {loadingMore ? tCommon('loading') : t('loadMore')}
+                </Button>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -415,8 +430,10 @@ function NotificationPanel({
 // story #4182 — summary는 서버가 만든 미리보기지만 이미 저장된 옛 행엔 내부 HTML 주석이 남아 있다.
 // 렌더에서도 평문화하고, 비면(주석뿐이던 경우) 이벤트 타입 문구로 폴백한다.
 // 벨 줄 머리글: summary → (dispatched면) 실어 온 꼴의 문구 → 이벤트 종류 폴백(story #4520).
-function headline(t: (key: string) => string, n: Pick<EventNotification, 'event_type' | 'payload'>): string {
-  return plainSummary(n.payload?.summary, getDispatchedHeadline(t, n.event_type, n.payload) ?? getEventTypeCopy(t, n.event_type));
+function headline(t: (key: string) => string, n: Pick<EventNotification, 'event_type' | 'payload'>, tEventCard: (key: string) => string, eventDefinitionName?: (eventKey: string) => string | undefined): string {
+  // story 4921 — a row stored BEFORE the server wrote a human summary for event messages still carries «{sender}: [이벤트] preset.x …» (the machine text an agent reads): shown as «{sender}: 이벤트[ · the person's words]»
+  const summary = humanizeMachineEventSummary(n.payload?.summary, n.payload?.['event'], tEventCard, eventDefinitionName, n.event_type === 'conversation.message_created' || n.event_type === 'conversation:mention');
+  return plainSummary(summary, getDispatchedHeadline(t, n.event_type, n.payload) ?? getEventTypeCopy(t, n.event_type));
 }
 
 function plainSummary(summary: string | null | undefined, fallback: string): string {
@@ -425,7 +442,11 @@ function plainSummary(summary: string | null | undefined, fallback: string): str
 export function NotificationBell() {
   const router = useRouter();
   const t = useTranslations('inbox');
-  const { projectId } = useDashboardContext();
+  const tEventCard = useTranslations('eventCard');
+  const { projectId, orgId } = useDashboardContext();
+  const eventDefinitionName = useEventDefinitionNames(orgId);
+  const eventNameRef = useRef(eventDefinitionName); // the live handler below is not re-made when the names arrive
+  eventNameRef.current = eventDefinitionName;
   const { addToast } = useToast();
   const [open, setOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -455,6 +476,8 @@ export function NotificationBell() {
 
   // SSE 실시간 알림 수신
   const handleSseNotification = useCallback((incoming: SseEventNotification) => {
+    // story 4890 — the dispatched copy of a chat message arrives next to its message_created row: it adds no line, no +1, no second desktop / browser notification
+    if (isChatMessageBellCopy(incoming.event_type, incoming.payload)) return;
     // unread count 즉시 증가
     setUnreadCount((c) => c + 1);
     // 패널 열린 상태면 목록 맨 앞에 추가
@@ -466,6 +489,8 @@ export function NotificationBell() {
         source_entity_type: incoming.source_entity_type,
         source_entity_id: incoming.source_entity_id,
         payload: incoming.payload,
+        conversation_id: liveRoomId(incoming),
+        content_withheld: (incoming as { content_withheld?: unknown }).content_withheld === true,
         read_at: null,
         created_at: incoming.created_at,
       };
@@ -474,7 +499,7 @@ export function NotificationBell() {
     // story #3074 — 데스크톱 셸(bridge-init.js가 top-frame+정확 origin에서만 window.__sprintableBridge를
     // 노출)이 있으면 그 경로«만» 쓴다 — 중복/포커스 억제는 네이티브 단독 판정이라 document.hidden
     // 조건 없이 항상 부른다. 브리지가 없을 때(일반 브라우저)만 기존 웹 Notification 경로(회귀 0).
-    const summary = headline(t, incoming);
+    const summary = headline(t, incoming, tEventCard, (key) => eventNameRef.current(key));
     if (hasDesktopNotifyBridge()) {
       const body = incoming.payload?.sender_name ? `${incoming.payload.sender_name} · ${summary}` : summary;
       void notifyViaDesktopBridge({
@@ -492,7 +517,7 @@ export function NotificationBell() {
         icon: '/favicon.ico',
       });
     }
-  }, [t]);
+  }, [t, tEventCard]);
 
   // story #2201 — sync_status는 SseEventNotification 계약과 무관한 별도 이벤트라
   // extraEventNames/onExtraEvent로 구독한다(핸들러 파이프라인을 안 건드림). story #2686(축D) —
@@ -674,7 +699,6 @@ export function NotificationBell() {
     [handleMarkRead, router],
   );
 
-  const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount);
   const closePanel = useCallback(() => setOpen(false), []);
   const panelKeys = usePortalMenuKeys({ open, onClose: closePanel, popoverRef: desktopPanelRef, triggerRef: bellRef, kind: 'panel' });
 
@@ -698,14 +722,14 @@ export function NotificationBell() {
             ? (unreadCount > 99 ? t('bellAriaLabelCountCapped') : t('bellAriaLabelCount', { count: unreadCount }))
             : t('panelTitle')
         }
-        className="relative flex size-8 items-center justify-center rounded-md text-foreground/70 transition hover:bg-accent hover:text-foreground"
+        className="relative flex size-8 items-center justify-center rounded-md text-foreground/70 transition hover:bg-accent hover:text-foreground touch:size-11"
       >
         <Bell className="size-4" />
-        {/* story #3431(공용, PO 確定 2026-09-05) — 공용 CornerCountBadge로 통합(team-presence-
+        {/* story #3431(공용, PO 確定 2026-09-05) — 공용 배지로 통합(4890부터 ds CountBadge · team-presence-
             toggle.tsx와 동일 정의). 색 계산 근거(story 3466이 이미 확保)와 크기(9→10px,
-            AC4)는 corner-count-badge.tsx 주석 참고 — 정의를 두 곳에 중복하지 않는다. */}
+            AC4)는 ds/count-badge.tsx 참고 — 정의를 두 곳에 중복하지 않는다. */}
         {unreadCount > 0 && (
-          <CornerCountBadge variant="destructive" value={badgeLabel} className="absolute -right-0.5 -top-0.5" />
+          <CountBadge count={unreadCount} aria-hidden className="absolute right-0 top-0" />
         )}
       </button>
 
@@ -727,15 +751,18 @@ export function NotificationBell() {
       )}
 
       {/* 모바일 풀스크린 오버레이 (< lg) */}
-      {open && (
+      {/* story 4890 (UI-7 · P14): the full-screen overlay is drawn in <body>, not inside the top bar — the top bar is a CSS container (`@container` = layout containment), so a `fixed inset-0` child was sized to the 48 px bar and the
+          page showed through everything below it (dev emulator 11-11: overlay rect 412×47 on a 766 px screen). `data-anchored-popover` = «inside» for the outside-press rule (anchored-popover.tsx). */}
+      {open && typeof document !== 'undefined' && createPortal(
         <div
+          data-anchored-popover
           ref={mobileOverlayRef}
           id={`${panelKeys.id}-overlay`}
           tabIndex={-1}
           role="dialog"
           aria-modal="true"
           aria-label={t('panelTitle')}
-          className="fixed inset-0 z-50 flex flex-col bg-background outline-none lg:hidden"
+          className="fixed inset-0 z-50 flex flex-col bg-ds-background outline-none lg:hidden"
         >
           <NotificationPanel
             notifications={notifications}
@@ -747,7 +774,8 @@ export function NotificationBell() {
             onLoadMore={() => void handleLoadMore()}
             syncDegraded={syncDegraded}
           />
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

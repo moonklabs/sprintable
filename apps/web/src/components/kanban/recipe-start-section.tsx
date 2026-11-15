@@ -3,9 +3,9 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Button } from '@/components/ds/button';
+import { Card } from '@/components/ds/card';
+import { RadioGroup, Radio } from '@/components/ds/radio';
 import { extractBackendErrorMessage } from '@/lib/api-error-message';
 import { fetchWithAuth } from '@/lib/db/client';
 import { formatViewerRelativeTime } from '@/lib/storage/format';
@@ -71,7 +71,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
     // story #3164 가드 — 손코딩 카드(rounded+border+card표면 bg 공존) 대신 Card 프리미티브
     // (recipe-detail-view.tsx의 surface="subtle" 관례와 동형, Dispatch 섹션의 grandfathered
     // 손코딩 div는 새로 안 따라간다).
-    <Card surface="subtle" className="p-3">
+    <Card className="p-3">
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('recipeStart')}</p>
       {body}
     </Card>
@@ -92,7 +92,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
     return sectionShell(
       <>
         <p className="text-xs text-muted-foreground">{t('recipeStartRoleUnassigned')}</p>
-        <Link href={flatHref('/organization/events')} className="mt-1 inline-block text-xs text-primary hover:underline">
+        <Link href={flatHref('/organization/events')} className="mt-1 inline-block text-xs text-ds-action-text hover:underline">
           {t('recipeStartGoToAssign')}
         </Link>
       </>,
@@ -199,15 +199,15 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
       body = confirmingKey === c.key ? (
         <div className="flex flex-wrap items-center gap-2" data-testid="recipe-complete-confirm">
           <span className="break-keep text-xs text-foreground">{question}</span>
-          <Button type="button" size="sm" disabled={busy} onClick={() => void runStageAction(c, 'complete', c.current_stage!)}>
+          <Button variant="primary" type="button" disabled={busy} onClick={() => void runStageAction(c, 'complete', c.current_stage!)}>
             {busy ? t('recipeCompletingStage') : t('recipeCompleteStageConfirmYes')}
           </Button>
-          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setConfirmingKey(null)}>
+          <Button type="button" variant="secondary" disabled={busy} onClick={() => setConfirmingKey(null)}>
             {t('recipeCompleteStageCancel')}
           </Button>
         </div>
       ) : (
-        <Button type="button" size="sm" className="self-start" onClick={() => setConfirmingKey(c.key)} data-testid="recipe-complete-stage">
+        <Button variant="primary" type="button" className="self-start" onClick={() => setConfirmingKey(c.key)} data-testid="recipe-complete-stage">
           {t('recipeCompleteStage')}
         </Button>
       );
@@ -217,7 +217,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
       body = <p className="break-keep text-editorial-meta text-muted-foreground" data-testid="recipe-needs-fields-hint">{t('recipeNeedsFieldsHint')}</p>;
     } else if (nextMine && c.current_completion === 'gate_approval') {
       body = c.current_gate_status === 'approved' ? (
-        <Button type="button" size="sm" className="self-start" disabled={busy}
+        <Button variant="primary" type="button" className="self-start" disabled={busy}
           onClick={() => void runStageAction(c, 'start', c.next_stage!)} data-testid="recipe-start-my-stage">
           {busy ? t('recipeStarting') : t('recipeStartMyStage')}
         </Button>
@@ -271,7 +271,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
       {c.conversation_id && (
         <Link
           href={flatHref(`/chats/${c.conversation_id}${c.message_id ? `?messageId=${encodeURIComponent(c.message_id)}` : ''}`)}
-          className="text-xs font-medium text-primary hover:underline"
+          className="text-xs font-medium text-ds-action-text hover:underline"
         >
           {t('recipeStartViewConversation')}
         </Link>
@@ -288,13 +288,10 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
         </div>
       )}
       {notStarted.length > 1 && (
-        <RadioGroup name={`recipe-start-${storyId}`} className="mb-2 gap-1" value={selectedKey} onValueChange={(v) => setSelectedKey(v)}>
+        // 4908 — 고르는 동그라미가 속성 칸 면 위에서 바탕과 거의 같은 색이던 것(옛 부품의 border-input: 라이트 · 다크 모두 비글자 3:1 미달) → ds Radio(경계 line-control ≥ 3:1 · 고름 = action 테두리 + 안쪽 점). 묶음 이름은 칸 제목(레시피 시작).
+        <RadioGroup name={`recipe-start-${storyId}`} aria-label={t('recipeStart')} className="mb-2 gap-1" value={selectedKey} onValueChange={(v) => setSelectedKey(v)}>
           {notStarted.map((c) => (
-            <label key={c.key} className="flex items-center gap-2 text-sm text-foreground">
-              {/* story #4075 · 4831 — 켜진 색은 부품의 primary 면(전에는 브라우저 기본 accent를 토큰으로 덮던 자리) */}
-              <RadioGroupItem value={c.key} />
-              {presetName(c, tPreset)}
-            </label>
+            <Radio key={c.key} value={c.key} label={presetName(c, tPreset)} className="text-sm" />
           ))}
         </RadioGroup>
       )}
@@ -304,7 +301,7 @@ export function RecipeStartSection({ storyId, projectId }: RecipeStartSectionPro
         <p className="mb-2 text-sm text-foreground" data-testid="recipe-start-name">{presetName(notStarted[0], tPreset)}</p>
       )}
       {selected ? (
-        <Button type="button" size="sm" onClick={() => void handleStart(selected)} disabled={publishing}>
+        <Button variant="primary" type="button" onClick={() => void handleStart(selected)} disabled={publishing}>
           {publishing ? t('recipeStarting') : t('recipeStartButton')}
         </Button>
       ) : (

@@ -72,6 +72,7 @@ async function render(locale: 'ko' | 'en' = 'ko') {
   });
   await settle();
 }
+const strip = () => container.querySelector('[data-testid="agent-session-strip"]')!;
 const buttons = () => [...container.querySelectorAll('[data-testid="agent-session-buttons"] button')].map((b) => b.textContent);
 const press = async (name: string) => {
   const b = [...document.querySelectorAll('button')].find((x) => x.textContent === name) as HTMLButtonElement | undefined;
@@ -244,6 +245,18 @@ describe('[4534] the strip inside the phone app', () => {
     expect(commandLine()?.textContent).toBe(ko.command.stopped);
     const post = calls.find((c) => c.init?.method === 'POST')!;
     expect(JSON.parse(post.init!.body as string)).toMatchObject({ kind: 'stop_session', session_key: 's-9', signed: 'S' });
+  });
+
+  // story 4943 (PO 11-14 ③ A): the daemon stopped the turn but a background command still runs → the line says exactly that (never the plain «멈췄어요»)
+  it('[멈춤] done with commands_running → «턴은 멈췄지만 백그라운드에서 도는 명령은 계속 돌고 있어요», not the plain stopped line', async () => {
+    vi.useFakeTimers();
+    server(res(201, { command_id: CMD, state: 'queued' }), [res(200, { state: 'acked' }), res(200, { state: 'done', result_code: 'commands_running' })]);
+    phoneCall.mockResolvedValue({ id: 'w', ok: true, signed: 'S', phone_key_id: 'k-1', session_key: 's-9' });
+    await render();
+    await press(ko.button.stop);
+    await poll(2);
+    expect(commandLine()?.textContent).toBe(ko.command.stoppedCommandsRunning);
+    expect(ko.command.stoppedCommandsRunning).not.toBe(ko.command.stopped);
   });
 
   it('[멈춤]: the shell signs a stop (agent only) → posted → followed to «멈췄어요 …», the line takes focus', async () => {
@@ -651,5 +664,22 @@ describe('[4733 S4b] the hard end\'s dialog points at the phone\'s own [세션 �
     expect(enMessagesAgent.button.endSession).toBe('End without a handoff');
     expect(document.body.textContent).toContain('End the session without a handoff?');
     expect(document.querySelector('[data-testid="agent-end-use-clock"]')?.textContent).toBe('No handoff is left — to leave one, use [End session].');
+  });
+});
+
+describe('the «바뀐 파일» button next to the stop / instruct buttons (story 4951 ①c)', () => {
+  it('joins THEIR group — one right-aligned group in the strip, not two (two `ml-auto` groups split the free space and the button floats mid-row)', async () => {
+    sessionView = { ...sessionView, can_read_changes: true, session_key: 's-1' };
+    server(res(201, { command_id: CMD }));
+    await render();
+    expect(buttons()).toEqual(['바뀐 파일', '멈춤', '지금 지시']);
+    expect([...strip().children].filter((c) => c.classList.contains('ml-auto'))).toHaveLength(1);
+    // with nothing else to press it stands alone at the right end — still one group
+    sessionView = { ...sessionView, state: 'idle', can_read_changes: true, session_key: 's-1' };
+    await act(async () => { root.unmount(); }); root = createRoot(container);
+    server(res(201, { command_id: CMD }));
+    await render();
+    expect(container.querySelector('[data-testid="agent-changes-open"]')).not.toBeNull();
+    expect([...strip().children].filter((c) => c.classList.contains('ml-auto'))).toHaveLength(1);
   });
 });

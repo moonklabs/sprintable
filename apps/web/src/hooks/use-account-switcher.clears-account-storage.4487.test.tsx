@@ -146,6 +146,18 @@ describe('[SID:4487] the account\'s browser values go with the account', () => {
     expect(went).toEqual(['/login']);
   });
 
+  // (one test per value: after an «add» the hook stays busy until the page is left, so each value needs a fresh mount)
+  it.each([
+    ['/login', '/login'], ['/inbox?p=1', '/inbox?p=1'],
+    ['//evil.com', '/login'], ['https://evil.com', '/login'], ['/\t/evil.com', '/login'], ['/%09/evil.com', '/login'], ['/..//evil.com', '/login'], [undefined, '/login'],
+  ] as const)('[SID:4936] adding an account: the server\'s `redirect` %j goes to %s (an address that would leave the app, or hides a control character, goes to /login)', async (redirect, expected) => {
+    const went: string[] = [];
+    vi.stubGlobal('location', { ...window.location, assign: (u: string) => went.push(u) });
+    answer({ data: { redirect } });
+    await press('add');
+    expect(went).toEqual([expected]);
+  });
+
   it('a logout through logoutUser (session expiry paths) clears them too', async () => {
     answer({});
     await logoutUser('rt');

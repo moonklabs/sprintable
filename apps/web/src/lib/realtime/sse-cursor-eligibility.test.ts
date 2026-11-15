@@ -27,3 +27,10 @@ describe('isCursorEligibleEventName', () => {
     expect(isCursorEligibleEventName(undefined)).toBe(true);
   });
 });
+
+describe('story 4903 AC3 — conversation.message_deleted is a transient (no DB Event row) frame', () => {
+  it('its native SSE id is never promoted to the resume cursor (else every reconnect asks for an id the server cannot resolve: a replay of the last 50 events)', () => {
+    expect(isCursorEligibleEventName('conversation.message_deleted')).toBe(false);
+    expect(isCursorEligibleEventName('conversation.message_created')).toBe(true); // a DB-backed event stays eligible
+  });
+});

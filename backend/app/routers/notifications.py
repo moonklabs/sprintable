@@ -10,6 +10,7 @@ from app.dependencies.auth import AuthContext, get_current_user, get_verified_or
 from app.dependencies.database import get_db, get_read_db
 from app.dependencies.ownership import _is_org_admin
 from app.models.team import TeamMember
+from app.services.event_room_gate import room_notifications_to_withhold
 from app.repositories.notification import NotificationRepository, NotificationSettingRepository
 from app.schemas.notification import (
     NotificationListItem,
@@ -134,6 +135,12 @@ async def list_notifications(
     )
     page, has_more, next_cursor = assemble_page(rows, limit, lambda n: (n.created_at, n.id))
     data = [NotificationListItem(**NotificationResponse.model_validate(n).model_dump()) for n in page]
+    # story #4875: a row about a room's words is handed back with the words only to who may read that room NOW (the stored row is not changed)
+    withheld = await room_notifications_to_withhold(db, repo.org_id, auth, page)
+    for item in data:
+        if item.id in withheld:
+            item.body = None
+            item.event = withheld[item.id]
     await _enrich_notification_targets(db, repo.org_id, data)
     return {
         "data": data,
@@ -180,7 +187,13 @@ async def mark_read(
     notif = await repo.mark_read(id, user_id)
     if notif is None:
         raise HTTPException(status_code=404, detail="Notification not found")
-    return NotificationResponse.model_validate(notif)
+    response = NotificationResponse.model_validate(notif)
+    # story #4875: the same gate as the list (the stored row keeps the words; only the copy handed back loses them)
+    withheld = await room_notifications_to_withhold(db, repo.org_id, auth, [notif])
+    if notif.id in withheld:
+        response.body = None
+        response.event = withheld[notif.id]
+    return response
 
 
 @router.get("/notification-settings", response_model=list[NotificationSettingResponse])

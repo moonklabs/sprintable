@@ -4,7 +4,7 @@ import { useLayoutEffect, type ReactNode } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useTopBar } from '@/components/nav/top-bar-context';
-import { Badge } from '@/components/ui/badge';
+import { OrgTitle } from '@/components/organization/org-screen-title';
 
 /**
  * story #4326 — «전체» · «결재» · «대화»로 옮기는 사이(옛 화면 언마운트 → 도착 화면 마운트 전 · loading.tsx가 뜬 동안) 상단바 제목 · 칩이
@@ -67,15 +67,11 @@ export function TopBarFallbackHolder({ title, showContextChip }: { title: ReactN
   return null;
 }
 
-/** «채널»(/channel) 상단바 제목 — 연결 상태 점은 화면만 안다(폴백은 점 없이). 화면과 폴백이 같이 쓴다. */
-export function ChannelTopBarTitle({ statusDot }: { statusDot?: { className: string; label: string } }) {
+/** «채널»(/channel) 상단바 제목 — 화면(OrgScreenTitle)과 폴백이 같은 모양을 쓴다(4913 · 채널). */
+export function ChannelTopBarTitle() {
   const tChannel = useTranslations('channel');
-  return (
-    <div className="flex items-center gap-2">
-      <span className="text-sm font-medium text-foreground">{tChannel('title')}</span>
-      {statusDot ? <span className={`h-2 w-2 rounded-full ${statusDot.className}`} title={statusDot.label} /> : null}
-    </div>
-  );
+  // 연결 상태는 위 막대의 점이 아니라 화면 머리의 글 칩이 말한다(점은 «connected» 같은 영어 title만 가졌다).
+  return <OrgTitle>{tChannel('title')}</OrgTitle>;
 }
 
 /** «보상»(/rewards) 상단바 제목 — 화면과 폴백이 같이 쓴다. */
@@ -103,6 +99,60 @@ export function DocsTopBarTitle() {
 }
 
 /** «활동 로그»(/activity 첫 탭 = 감사 로그) 상단바 제목. */
+/** «권한»(`organization/roles`) 상단바 제목 — 화면(OrgScreenTitle)과 폴백이 같은 모양(OrgTitle)을 쓴다. */
+export function OrgRolesTopBarTitle() {
+  const tOrgRoles = useTranslations('organization');
+  return <OrgTitle>{tOrgRoles('rolesTitle')}</OrgTitle>;
+}
+
+/** «신뢰 센터»(`organization/trust`) 상단바 제목 — 화면(OrgScreenTitle)과 폴백이 같은 모양(OrgTitle)을 쓴다. */
+export function OrgTrustTopBarTitle() {
+  const tOrgTrust = useTranslations('organization');
+  return <OrgTitle>{tOrgTrust('trustSlotTitle')}</OrgTitle>;
+}
+
+/** «생성 연결»(`organization/generation-connectors`) 상단바 제목 — 화면(OrgScreenTitle)과 폴백이 같은 모양을 쓴다. */
+export function OrgGenerationConnectorsTopBarTitle() {
+  const tOrgGc = useTranslations('organization');
+  return <OrgTitle>{tOrgGc('gcTitle')}</OrgTitle>;
+}
+
+/** «콘텐츠 규칙»(`organization/content-rules`) 상단바 제목 — 화면(OrgScreenTitle)과 폴백이 같은 모양을 쓴다. */
+export function OrgContentRulesTopBarTitle() {
+  const tContentRules = useTranslations('contentRules');
+  return <OrgTitle>{tContentRules('pageTitle')}</OrgTitle>;
+}
+
+/** «채널 연결»(`organization/channels`) 상단바 제목 — 화면(OrgScreenTitle)과 폴백이 같은 모양을 쓴다(4913 C판). */
+export function OrgChannelsTopBarTitle() {
+  const tOrgChannels = useTranslations('channelConnect');
+  return <OrgTitle>{tOrgChannels('pageTitle')}</OrgTitle>;
+}
+
+/** «성과 보드»(`organization/insights-board`) 상단바 제목 — 화면(OrgScreenTitle)과 폴백이 같은 모양을 쓴다(4913 D1). */
+export function OrgInsightsBoardTopBarTitle() {
+  const tInsights = useTranslations('insightsBoard');
+  return <OrgTitle>{tInsights('pageTitle')}</OrgTitle>;
+}
+
+/** «레시피»(`organization/events`) 상단바 제목 — 화면(OrgScreenTitle)과 폴백이 같은 모양을 쓴다(4913 C2). */
+export function OrgEventsTopBarTitle() {
+  const tOrgEvents = useTranslations('organization');
+  return <OrgTitle>{tOrgEvents('eventsTitle')}</OrgTitle>;
+}
+
+/** «블로그 포스트»(`content`) 상단바 제목 — 화면(OrgScreenTitle)과 폴백이 같은 모양을 쓴다(4913 D물결). */
+export function ContentPostsTopBarTitle() {
+  const tContent = useTranslations('content');
+  return <OrgTitle>{tContent('title')}</OrgTitle>;
+}
+
+/** «채널 포스트»(`content/channel-posts`) 상단바 제목 — 화면(OrgScreenTitle)과 폴백이 같은 모양을 쓴다(4913 D물결). */
+export function ChannelPostsTopBarTitle() {
+  const tContent = useTranslations('content');
+  return <OrgTitle>{tContent('channelPostsTitle')}</OrgTitle>;
+}
+
 export function ActivityTopBarTitle() {
   const tActivityLog = useTranslations('activityLog');
   return <h1 className="text-sm font-medium">{tActivityLog('title')}</h1>;
@@ -120,32 +170,41 @@ export function AgentRunsTopBarTitle() {
   return <h1 className="text-sm font-medium">{tAgentRuns('title')}</h1>;
 }
 
+/** «구성원»(/organization/members) 상단바 제목(story 4956 — 같은 «팀» 탭줄의 에이전트 · 실행 기록 · API 키는 제목이 있는데 구성원만 막대가 비어 있었다; 화면과 로딩 폴백이 같은 컴포넌트를 쓴다). */
+export function OrgMembersTopBarTitle() {
+  const tNav = useTranslations('nav');
+  return <h1 className="text-sm font-medium">{tNav('orgMembers')}</h1>;
+}
+
+/** «에이전트 API 키»(/organization/workforce/api-keys) 상단바 제목(story 4912 B1 — 화면이 같은 컴포넌트로 슬롯을 채운다). */
+export function AgentApiKeysTopBarTitle() {
+  const tSettings = useTranslations('settings');
+  return <h1 className="text-sm font-medium">{tSettings('agentApiKeysPageTitle')}</h1>;
+}
+
 /**
- * «스토리지»(`[ws]/[proj]/storage`) 상단바 제목 — 브레드크럼 · 이름은 고정, «N개 자산 · 용량» 알약은 데이터라 화면만 넘긴다(폴백은 알약 없이 ·
- * PO 규칙: 폴백은 도착 화면과 글자가 똑같은 부분만). 폰은 브레드크럼을 숨기고 알약이 먼저 양보해 말줄임(story #4277).
+ * «스토리지»(`[ws]/[proj]/storage`) 상단바 제목 — 브레드크럼 · 이름뿐(4910 · 4913 규칙: 제목은 위 막대 한 곳).
+ * 예전엔 «N개 자산 · 용량» 알약이 여기 붙었다(데이터라 화면만 넘김) — 그 개수는 본문 머리 줄로 내려갔고(`storage-asset-list` 머리), 그래서 폴백과 도착 화면이 글자까지 똑같다.
+ * 폰은 브레드크럼을 숨긴다(story #4277).
  */
-export function StorageTopBarTitle({ summaryText }: { summaryText?: string }) {
+export function StorageTopBarTitle() {
   const tStorage = useTranslations('storage');
   return (
-    // grow — 남는 폭을 알약 칸까지 내려보낸다(기준 폭은 안 바뀌어 칩 · 제목 자리 그대로). 없으면 칸이 받을 폭이 0이라 1440에서도 알약이 «…»(실측 18px).
     <div className="flex min-w-0 grow items-center">
       <span className="mr-2.5 hidden shrink-0 text-xs text-muted-foreground sm:inline">{tStorage('breadcrumb')}</span>
       <span className="mr-2.5 hidden shrink-0 text-xs text-muted-foreground sm:inline">/</span>
       <h1 className="shrink-0 text-base font-[650] tracking-[-0.01em] text-foreground">{tStorage('title')}</h1>
-      {/* 유나 4688 — 알약이 붙으며 제목 묶음의 기준 폭이 커져 칩이 자리를 내주고 제목이 62px 왼쪽으로 튀었다(390 · 폴백이 먼저 서며 보이게 됨).
-          알약 칸은 너비 0에서 남는 폭만 채운다(`w-0 grow` — 묶음의 기준 폭에 안 섞임) · 알약 자체는 글자 폭 그대로 · 모자라면 말줄임(4672 의도).
-          제목과의 간격도 칸 **안**(알약의 왼쪽 여백)에 둔다 — 묶음의 gap · 칸의 margin은 너비 0 칸이어도 기준 폭에 14px를 더해 제목이 그만큼 튀었다(실측).
-          폰(sm 미만)에선 알약을 안 그린다(유나 판단 (b)) — 칩이 기준 폭을 지키면 남는 폭이 ~18px라 «…»만 남아 내용이 있는 모양만 보이는 거짓이
-          되고, 전체 글자(`title`)는 호버 전용이라 폰에선 닿을 길이 없다. «지금 어디인가»(칩)가 요약 수보다 우선. */}
-      {summaryText !== undefined ? (
-        <span className="hidden w-0 min-w-0 grow sm:flex" data-testid="storage-summary-slot">
-          <Badge variant="info" className="ml-3.5 min-w-0 max-w-[calc(100%-0.875rem)] shrink font-bold" title={summaryText} data-testid="storage-summary-badge">
-            <span className="min-w-0 truncate">{summaryText}</span>
-          </Badge>
-        </span>
-      ) : null}
     </div>
   );
+}
+
+/**
+ * «산출물»(`[ws]/[proj]/artifacts`) 상단바 제목 — 이름 하나(4910 · 4913 규칙: 제목은 위 막대 한 곳). 본문 머리에는 설명 · 개수 · «그리기 · 가져오기»만 선다.
+ * 화면(`artifact-gallery-view`)과 로딩 폴백(`loading.tsx`)이 이 한 정의를 같이 쓴다.
+ */
+export function ArtifactsTopBarTitle() {
+  const tCanvas = useTranslations('canvas');
+  return <h1 className="text-sm font-medium">{tCanvas('galleryTitle')}</h1>;
 }
 
 /** 결재 폴백 제목 — 도착 탭(?tab=)의 이름(수는 아직 모름 → 안 붙임). */
@@ -165,16 +224,29 @@ export const FLAT_ROUTE_TOP_BAR = {
   more: { Title: MoreTopBarTitle, showContextChip: true },
   inbox: { Title: InboxFallbackTitle, showContextChip: true },
   chats: { Title: ChatsTopBarTitle, showContextChip: true },
-  channel: { Title: () => <ChannelTopBarTitle />, showContextChip: true },
+  channel: { Title: ChannelTopBarTitle, showContextChip: true },
   rewards: { Title: RewardsTopBarTitle, showContextChip: true },
   '[ws]/[proj]/goals': { Title: GoalsTopBarTitle, showContextChip: true },
   '[ws]/[proj]/loops': { Title: LoopsTopBarTitle, showContextChip: true },
   '[ws]/[proj]/docs': { Title: DocsTopBarTitle, showContextChip: true },
   '[ws]/[proj]/storage': { Title: () => <StorageTopBarTitle />, showContextChip: true },
+  '[ws]/[proj]/artifacts': { Title: () => <ArtifactsTopBarTitle />, showContextChip: true },
   activity: { Title: ActivityTopBarTitle, showContextChip: true },
   'organization/workforce': { Title: AgentsTopBarTitle, showContextChip: true },
+  'organization/members': { Title: OrgMembersTopBarTitle, showContextChip: true }, // story 4956 — 같은 «팀» 탭줄의 에이전트 화면들과 같은 칩(탭을 옮길 때 칩이 켜졌다 꺼지지 않게)
+  // 4913 — 조직 구역 «한 쪽 틀» 화면: 제목은 위 막대 · 칩은 조직 화면이라 없음(화면의 OrgScreenTitle과 같다).
+  'organization/roles': { Title: OrgRolesTopBarTitle, showContextChip: false },
+  'organization/trust': { Title: OrgTrustTopBarTitle, showContextChip: false },
+  'organization/generation-connectors': { Title: OrgGenerationConnectorsTopBarTitle, showContextChip: false },
+  'organization/content-rules': { Title: OrgContentRulesTopBarTitle, showContextChip: false },
+  'organization/channels': { Title: OrgChannelsTopBarTitle, showContextChip: false },
+  'organization/events': { Title: OrgEventsTopBarTitle, showContextChip: false },
+  content: { Title: ContentPostsTopBarTitle, showContextChip: false },
+  'organization/insights-board': { Title: OrgInsightsBoardTopBarTitle, showContextChip: false },
+  'content/channel-posts': { Title: ChannelPostsTopBarTitle, showContextChip: false },
   // 까디르 4688 — 부모 workforce/loading이 덮던 하위 목록(마지막 조각 runs ≠ workforce라 «상세»로 봐서 빈 채였다) · 자기 loading.tsx로 쥔다.
   'organization/workforce/runs': { Title: AgentRunsTopBarTitle, showContextChip: true },
+  'organization/workforce/api-keys': { Title: AgentApiKeysTopBarTitle, showContextChip: true },
 } as const satisfies Record<string, { Title: () => ReactNode; showContextChip: boolean }>;
 
 export type FlatRoute = keyof typeof FLAT_ROUTE_TOP_BAR;

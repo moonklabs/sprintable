@@ -13,10 +13,10 @@ import { parseEntityRef, unescapeReferenceLabel } from '@/components/chat/entity
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { withProjectParam } from '@/lib/with-project-param';
-import { gateStatusLabel } from '@/lib/gate-status-label';
+import { GATE_STATUS_LABEL_KEYS, gateStatusLabel } from '@/lib/gate-status-label';
 import { gateTypeLabel } from '@/lib/gate-type-label';
 import { recipeStageLabel } from '@/lib/recipe-stage-label';
-import { entityTypeLabel } from '@/components/chat/chat-input-entity-tokens';
+import { entityTypeLabel, hasEntityTypeLabel } from '@/components/chat/chat-input-entity-tokens';
 import { formatLocaleDateTime } from '@/lib/i18n';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
 import { isLocalizedPlatformPreset, localizeLegacyUnnamedHeader, localizePresetBlockTemplate, localizeSeedStageTextBlocks, presetName } from '@/lib/platform-preset-copy';
@@ -43,6 +43,15 @@ const SOURCE_LABEL_KEYS: Record<string, 'sourceInternal' | 'sourceGa4'> = {
 // {{label.to_status}} 해소용. story-detail-panel.tsx:846의 statusKeyMap과 동형(그 파일은
 // export 안 해 재사용 불가 — 이 저장소 기존 관례가 이미 소비처마다 로컬 복제, kanban-
 // list-view.tsx/story-card.tsx 등도 각자 갖고 있다. 새 공유 모듈 신설은 이 스토리 범위 밖).
+/** story 4925 — a value no label knows, as a person reads it («waiting-on-legal» → «waiting on legal», «visual_artifact» → «visual artifact»): the one rule for an unmapped slug on a human line (the same underscore → space the bubble's field list uses) */
+export function readableSlug(slug: string): string {
+  return slug.replace(/[_-]+/g, ' ').trim();
+}
+const entityTypeWords = (type: string, t: (key: string) => string): string =>
+  hasEntityTypeLabel(type) ? entityTypeLabel(type, t) : readableSlug(type);
+const gateVerdictWords = (verdict: string, tCage: (key: string) => string): string =>
+  GATE_STATUS_LABEL_KEYS[verdict] ? gateStatusLabel(verdict, tCage) : readableSlug(verdict);
+
 const STORY_STATUS_KEY_MAP: Record<string, string> = {
   backlog: 'backlog',
   'ready-for-dev': 'readyForDev',
@@ -198,6 +207,18 @@ function renderTextWithMissingMarkers(text: string, withProject: (href: string) 
  * admin/owner — team_members.role, `/api/me`가 내려주는 그 값)이다. 직무 템플릿 slug(예:
  * "backend-engineer")가 아니다 — 이름이 비슷해 헷갈리기 쉬운 축이라 명시한다.
  */
+/**
+ * story 4906 (PO 11-14) — the ONE shell of an event card: its face (the ds panel layer `bg-ds-surface`) · its hairline (`border-ds-line`) · its corners (the message tail at the top left) · its padding. The template card (`EventBlockCard`) and the template-less
+ * event drawn as text (chat-bubble.tsx) both use it, so two events in one room are the same shape; the old `bg-card` / `border-border` names resolve to the same colours — only the names moved to the ds tokens. A message a PERSON wrote keeps its bubble (`LAYER.rowOthers`).
+ * Tailwind reads the whole string, so it stays a literal.
+ */
+export const EVENT_CARD_SHELL = 'min-w-0 max-w-full rounded-xl rounded-tl-sm border border-ds-line bg-ds-surface px-3.5 py-3';
+
+/**
+ * story 4906 (PO 11-14) — the ONE type of an event card's head (an org-defined name may be one long unbroken word, so it wraps anywhere — the v3 room's card is capped at 78 %): the template card's `header` block and the head line of a template-less event (its definition's name, `EventTextFallback`) are set the same, so two cards in one room do not read as two heads.
+ */
+export const EVENT_CARD_HEADER = 'text-base font-semibold text-foreground [overflow-wrap:anywhere]';
+
 export function EventBlockCard({ template, payload, refs, definition }: EventBlockCardProps) {
   const t = useTranslations('chats');
   const tBoard = useTranslations('board');
@@ -229,11 +250,11 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
     const slug = payload[key];
     if (typeof slug !== 'string') continue;
     const statusKey = STORY_STATUS_KEY_MAP[slug];
-    labels[key] = domainLabels.statusLabel(slug) ?? (statusKey ? tBoard(statusKey) : slug);
+    labels[key] = domainLabels.statusLabel(slug) ?? (statusKey ? tBoard(statusKey) : readableSlug(slug));
   }
   const verdict = payload['verdict'];
   if (typeof verdict === 'string') {
-    labels['verdict'] = gateStatusLabel(verdict, tCage);
+    labels['verdict'] = gateVerdictWords(verdict, tCage);
   }
   // 페드루 CHANGES(2026-09-14 15:26Z) — 캡처 리뷰로 실측 적출: work_item_type("story")·
   // gate_type("external_publish" 등)도 같은 클래스의 원시 slug였다(AC2 "slug 0"과 동일
@@ -241,7 +262,7 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
   // §②-1 낱말 표와 정합)·gateTypeLabel()(lib/gate-type-label.ts, dashboard 네임스페이스).
   const workItemType = payload['work_item_type'];
   if (typeof workItemType === 'string') {
-    labels['work_item_type'] = entityTypeLabel(workItemType, t);
+    labels['work_item_type'] = entityTypeWords(workItemType, t);
   }
   const gateType = payload['gate_type'];
   if (typeof gateType === 'string') {
@@ -277,7 +298,7 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
       // 아니라 "(deleted story)"). ko는 대소문자 구분이 없어 toLowerCase()가 no-op이라
       // 로케일 분기 없이 안전하게 항상 적용한다.
       labels['work_item_target'] = tEventCard('targetMissing', {
-        type: entityTypeLabel(workItemRef.type, t).toLowerCase(),
+        type: entityTypeWords(workItemRef.type, t).toLowerCase(),
       });
     }
   }
@@ -302,6 +323,13 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
       }
     }
   }
+  // story 4921 — the direction instruction's target (`refs.target`, the same two shapes): a name; a member who is gone now = «알 수 없는 구성원» (never the uuid); NO ref at all
+  // (a message published before this story) = no label → the card's optional «지시 대상자» line is left out — the member is simply not named there, and the card does not claim «unknown».
+  const targetRef = refs?.['target'];
+  if (targetRef && typeof targetRef === 'object') {
+    if (targetRef.found && typeof targetRef.name === 'string') labels['target_name'] = targetRef.name;
+    else if (!targetRef.found) labels['target_name'] = tEventCard('memberMissing');
+  }
 
   // story #3893 CHANGES②(PO PR#4298 리뷰 2026-09-15) — refs.goal(preset.goal.measured의
   // goal_id, 실은 epic.id — events.py `_render_event_notification_work_item_ref`의
@@ -312,7 +340,7 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
       labels['goal_target'] = goalRef.token;
     } else if (!goalRef.found && typeof goalRef.type === 'string') {
       labels['goal_target'] = tEventCard('targetMissing', {
-        type: entityTypeLabel(goalRef.type, t).toLowerCase(),
+        type: entityTypeWords(goalRef.type, t).toLowerCase(),
       });
     }
   }
@@ -382,6 +410,9 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
     measuredAtLabel: tEventCard('measuredAtLabel'),
     // story #4258 — preset.recipe.publish_failed(레시피 비동기 발행 멈춤) 카드 머리.
     recipePublishFailedHeader: tEventCard('recipePublishFailedHeader'),
+    // story 4921 — preset.steer.instruct: its header and the «지시 대상자» label were Korean text baked into the row (an English reader saw them in Korean)
+    steerHeader: tEventCard('steerHeader'),
+    steerTargetLabel: tEventCard('steerTargetLabel'),
   };
 
   // story #3884 — 현재 실 프리셋(status_changed·gate.verdict)은 더 이상 `{{ref.X}}`를
@@ -436,7 +467,7 @@ export function EventBlockCard({ template, payload, refs, definition }: EventBlo
   const storyHref = storyPath ? pickProject(storyPath) : null;
 
   return (
-    <div className="min-w-0 max-w-full space-y-3 rounded-xl rounded-tl-sm border border-border bg-card px-3.5 py-3">
+    <div className={`${EVENT_CARD_SHELL} space-y-3`}>
       {blocks.map((block, i) => (
         <EventBlockRow
           key={i}
@@ -480,7 +511,7 @@ export function renderStaticEventBlock(block: BlockTemplateBlock, key: number, w
   // text 본문 > actions 하단 액션열) — 렌더 «순서»는 템플릿 저자가 선언한 그대로 따르되
   // (임의 재배열 안 함), 각 블록 타입의 폰트 크기/굵기로 위계만 표현한다.
   if (block.type === 'header') {
-    return <p key={key} className="text-base font-semibold text-foreground">{renderTextWithMissingMarkers(block.text, withProject)}</p>;
+    return <p key={key} className={EVENT_CARD_HEADER}>{renderTextWithMissingMarkers(block.text, withProject)}</p>;
   }
   if (block.type === 'text') {
     return <p key={key} className="text-sm leading-relaxed text-foreground [overflow-wrap:anywhere]">{renderTextWithMissingMarkers(block.text, withProject)}</p>;
@@ -624,6 +655,8 @@ export interface EventPreviewHelpers {
     /** story #4281 — 알림 본문의 종류 낱말도 조직 커스텀 라벨이 먼저(`useOrgDomainLabels` 그대로 넘기면 채워짐). */
     entityTypeLabel?: (slug: string) => string | undefined;
   };
+  /** story 4921 — the event definition's own (human) name for a key, when the screen has the definitions (the room list and the inbox read them once). Used only by the fallback line. */
+  eventDefinitionName?: (eventKey: string) => string | undefined;
 }
 
 /**
@@ -643,7 +676,7 @@ export interface EventPreviewHelpers {
  * 필드 부재(work.assigned는 refs.assignee 미해소 포함)는 null을 돌려줘 호출부가 기존
  * content 폴백으로 떨어진다(과잉 일반화 금지, 발명 0).
  */
-export function composeEventPreviewLine(
+export function composeEventPreviewSentence(
   eventKey: string | undefined,
   payload: Record<string, unknown> | undefined,
   helpers: EventPreviewHelpers,
@@ -655,7 +688,7 @@ export function composeEventPreviewLine(
   // 그라운딩 확認: _publish_registry_event_core가 event_context 전체를 msg_metadata에
   // 저장하고 그 dict가 이미 refs를 포함).
   refs?: Record<string, string | null | { found: boolean; token?: string; type?: string; name?: string }>,
-): string | null {
+): { line: string; used: string[] } | null {
   if (!eventKey || !payload) return null;
   const { tBoard, tCage, tDashboard, tEventCard, tEntity, tOutcomeLoop, domainLabels } = helpers;
 
@@ -664,8 +697,8 @@ export function composeEventPreviewLine(
     const verdict = payload['verdict'];
     if (typeof gateType !== 'string' || typeof verdict !== 'string') return null;
     const gateTypeLbl = gateTypeLabel(tDashboard, gateType);
-    const verdictLbl = gateStatusLabel(verdict, tCage);
-    return `${tEventCard('gateVerdictHeader')} · ${gateTypeLbl} — ${verdictLbl}`;
+    const verdictLbl = gateVerdictWords(verdict, tCage);
+    return { line: `${tEventCard('gateVerdictHeader')} · ${gateTypeLbl} — ${verdictLbl}`, used: ['gate_type', 'verdict'] };
   }
 
   if (eventKey === 'preset.work.status_changed') {
@@ -674,14 +707,14 @@ export function composeEventPreviewLine(
     if (typeof fromStatus !== 'string' || typeof toStatus !== 'string') return null;
     const resolveStatusLabel = (slug: string) => {
       const statusKey = STORY_STATUS_KEY_MAP[slug];
-      return domainLabels.statusLabel(slug) ?? (statusKey ? tBoard(statusKey) : slug);
+      return domainLabels.statusLabel(slug) ?? (statusKey ? tBoard(statusKey) : readableSlug(slug));
     };
     const fromLabel = resolveStatusLabel(fromStatus);
     const toLabel = resolveStatusLabel(toStatus);
     const workItemType = payload['work_item_type'];
-    const typeLabel = typeof workItemType === 'string' ? entityTypeLabel(workItemType, tEntity) : null;
+    const typeLabel = typeof workItemType === 'string' ? entityTypeWords(workItemType, tEntity) : null;
     const summary = typeLabel ? `${typeLabel} ${fromLabel} → ${toLabel}` : `${fromLabel} → ${toLabel}`;
-    return `${tEventCard('statusChangedHeader')} · ${summary}`;
+    return { line: `${tEventCard('statusChangedHeader')} · ${summary}`, used: ['from_status', 'to_status', ...(typeLabel ? ['work_item_type'] : [])] };
   }
 
   // story #3893(유나 §⑤ 확定 2026-09-14 19:47Z) — "작업 배정 · {work_item_type 라벨} →
@@ -690,14 +723,14 @@ export function composeEventPreviewLine(
   // 담당자 없이는 문장이 성립하지 않는다, work_item_type/verdict 부재 시 null과 동형).
   if (eventKey === 'preset.work.assigned') {
     const workItemType = payload['work_item_type'];
-    const typeLabel = typeof workItemType === 'string' ? entityTypeLabel(workItemType, tEntity) : null;
+    const typeLabel = typeof workItemType === 'string' ? entityTypeWords(workItemType, tEntity) : null;
     const assigneeRef = refs?.['assignee'];
     const assigneeName =
       assigneeRef && typeof assigneeRef === 'object' && assigneeRef.found && typeof assigneeRef.name === 'string'
         ? assigneeRef.name
         : null;
     if (!typeLabel || !assigneeName) return null;
-    return `${tEventCard('workAssignedHeader')} · ${typeLabel} → ${assigneeName}`;
+    return { line: `${tEventCard('workAssignedHeader')} · ${typeLabel} → ${assigneeName}`, used: ['work_item_type', 'assignee_member_id'] };
   }
 
   // story #3893(유나 §⑤ 확定 「목표 측정 · {metric_value}{metric_unit}」) — CHANGES①(PO
@@ -716,8 +749,235 @@ export function composeEventPreviewLine(
         ? tOutcomeLoop(`metric_${metricUnit}` as 'metric_velocity')
         : null;
     const summary = unitLabel ? `${metricValue} ${unitLabel}` : `${metricValue}`;
-    return `${tEventCard('goalMeasuredHeader')} · ${summary}`;
+    return { line: `${tEventCard('goalMeasuredHeader')} · ${summary}`, used: ['metric_value', ...(unitLabel ? ['metric_unit'] : [])] };
   }
 
+  // story 4921 — «방향 전환 · {지시 글 앞부분}[ → {대상 이름}]». The target's name comes from `refs.target` (found); a message published before this story has no ref → no « → name» (the sentence stays whole);
+  // a member who is gone now → «알 수 없는 구성원». The instruction is the person's own text (first line).
+  if (eventKey === 'preset.steer.instruct') return steerPreviewSentence(payload, refs, tEventCard);
+
   return null;
+}
+
+/** the one-line sentence of the presets that have one (null for any other) — every surface but the bubble reads only the line */
+export function composeEventPreviewLine(
+  eventKey: string | undefined,
+  payload: Record<string, unknown> | undefined,
+  helpers: EventPreviewHelpers,
+  refs?: Record<string, string | null | { found: boolean; token?: string; type?: string; name?: string }>,
+): string | null {
+  return composeEventPreviewSentence(eventKey, payload, helpers, refs)?.line ?? null;
+}
+
+/** how much of a person's own text the one-line preview keeps */
+const PREVIEW_TEXT_MAX = 60;
+
+/** «방향 전환 · {지시 글}[ → {대상 이름}]» — one sentence for every surface (room list · inbox · bell · bubble · v3), so a surface that has only the text fallback says the same thing */
+function steerPreviewSentence(
+  payload: Record<string, unknown> | undefined,
+  refs: Record<string, unknown> | undefined,
+  tEventCard: (key: string) => string,
+): { line: string; used: string[] } | null {
+  const instruction = firstHumanLine(payload?.['instruction'], PREVIEW_TEXT_MAX);
+  if (!instruction) return null;
+  const targetRef = refs?.['target'] as { found?: boolean; name?: unknown } | null | undefined;
+  const targetName =
+    targetRef && typeof targetRef === 'object'
+      ? (targetRef.found && typeof targetRef.name === 'string' ? targetRef.name : (!targetRef.found ? tEventCard('memberMissing') : null))
+      : null;
+  return { line: `${tEventCard('steerHeader')} · ${instruction}${targetName ? ` → ${targetName}` : ''}`, used: ['instruction', ...(targetName ? ['target_member_id'] : [])] };
+}
+/** the payload fields that hold a PERSON'S words (an instruction, a message, a summary, a note) — NOT `title` / `body` / `content` / `reason` (workflow and recipe payloads carry slugs, ids and paths there) — the first usable one, first line, is what a fallback line may show */
+const HUMAN_TEXT_FIELDS = ['instruction', 'message', 'summary', 'note'] as const;
+/** a line that is an id, a path or a link is not a person's words even in a text field */
+const NOT_WORDS_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|^\/|^[a-z][a-z0-9+.-]*:\/\/|entity:[a-z_]+:/i;
+
+/**
+ * story 4925 — a person's words may carry a reference the chat gives as a link («[이 일감](entity:story:<id>)», the label escaped like «\\[결함\\]»): where there is no chip to draw (a preview line · a plain text list) it reads as its LABEL — the id never shows.
+ * A link with no label (or a label that is itself an id) stays what it was, so it is still «not words»; only the chat's own token shape counts (a UUID id, like entity-ref.ts), and a label holds no bare `[` — so a long run of brackets is scanned once, not once per bracket.
+ */
+const ENTITY_LINK_RE = /\[((?:\\.|[^[\]\\])*)\]\(entity:\w+:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\)/gi;
+export function entityLinksToLabels(text: string): string {
+  return text.replace(ENTITY_LINK_RE, (whole, label: string) => {
+    const plain = label.replace(/\\([[\]()\\])/g, '$1').trim();
+    return plain && !NOT_WORDS_RE.test(plain) ? plain : whole;
+  });
+}
+
+function firstHumanLine(value: unknown, max: number): string | null {
+  if (typeof value !== 'string') return null;
+  const line = entityLinksToLabels(value).split('\n').map((l) => l.trim()).find((l) => l.length > 0);
+  if (!line || NOT_WORDS_RE.test(line)) return null;
+  const chars = Array.from(line); // by code point: a cut never splits an emoji (a surrogate pair)
+  return chars.length > max ? `${chars.slice(0, max).join('')}…` : line;
+}
+
+/**
+ * story 4921 — the machine text an event message carries as its `content` (what an AGENT reads: «[이벤트] preset.x» / «[Event] preset.x», then «- key: value» lines — the server writes it, events.py
+ * `_generic_event_message_lines` / the stage renderers; it is the whole channel for agents and stays). A person never reads it: it is a slug, ids and field names.
+ */
+export function isMachineEventContent(content: string | null | undefined): boolean {
+  return typeof content === 'string' && /^\[(?:이벤트|Event)\]\s+\S/.test(content);
+}
+
+/** the words the event card already has for a payload field (eventCard) — the second place a label is looked up for the bubble's text fallback */
+const CARD_FIELD_LABEL_KEYS: Record<string, string> = {
+  note: 'noteLabel', reason: 'reasonLabel', assignee_member_id: 'assigneeLabel', assigned_by_member_id: 'assignedByLabel', goal_id: 'goalLabel',
+  metric_unit: 'unitLabel', source: 'sourceLabel', metric_value: 'metricValueLabel', measured_at: 'measuredAtLabel',
+  target_member_id: 'steerTargetLabel', work_item_id: 'targetLabel',
+};
+/** the member / work-item ref that names an id field: `target_member_id` → refs.target · `work_item_id` → refs.work_item */
+const refKeyOfIdField = (key: string) => key.replace(/_member_id$/, '').replace(/_id$/, '');
+
+export interface EventBodyFallback {
+  /** the head line: the one-line sentence of a preset that has one, else the definition's human name, else «이벤트» — never the «[이벤트] preset.x» header line or a slug */
+  head: string;
+  /** the person's own words (instruction · message · summary · note), whole */
+  words: string | null;
+  /** every other payload field as a readable «label: value» line (label: the definition's schema title → the card's own words → the key made readable; an id that refs names shows the name) */
+  items: Array<{ label: string; value: string }>;
+}
+
+/**
+ * story 4921 — what a chat BUBBLE shows for an event message that has no card template (the definition has none · could not be read · an old message): the head, the person's words and the other fields as
+ * a readable list — the content is not dropped (a bubble body keeps what happened); only the machine header line and raw key names go. «이벤트» alone is what remains when there is no field at all.
+ */
+export function composeEventBodyFallback(
+  content: string | null | undefined,
+  eventKey: string | undefined,
+  payload: Record<string, unknown> | undefined,
+  refs: Record<string, unknown> | undefined,
+  definition: { name?: string | null; payload_schema?: Record<string, unknown> } | null | undefined,
+  helpers: EventPreviewHelpers,
+): EventBodyFallback | null {
+  if (!isMachineEventContent(content)) return null;
+  const { tEventCard } = helpers;
+  const made = composeEventPreviewSentence(eventKey, payload, helpers, refs as never);
+  const sentence = made?.line ?? null;
+  // the fields the head sentence already said are not said again in the list (one place, from the sentence's own builder)
+  const said = new Set(made?.used ?? []);
+  const definitionName = (eventKey ? helpers.eventDefinitionName?.(eventKey) ?? definition?.name : definition?.name)?.trim();
+  const head = sentence || definitionName || tEventCard('genericEventHeader');
+  let words: string | null = null;
+  let wordsField: string | null = null;
+  for (const field of HUMAN_TEXT_FIELDS) {
+    const v = payload?.[field];
+    if (typeof v === 'string' && v.trim()) { words = v.trim(); wordsField = field; break; }
+  }
+  // a short one-line instruction the head sentence already says is not said twice
+  if (words && sentence && !words.includes('\n') && Array.from(words).length <= PREVIEW_TEXT_MAX && sentence.includes(words)) words = null;
+  const schemaProps = (definition?.payload_schema as { properties?: Record<string, { title?: unknown }> } | undefined)?.properties;
+  const items: Array<{ label: string; value: string }> = [];
+  for (const [key, raw] of Object.entries(payload ?? {})) {
+    if (key === wordsField || said.has(key) || raw === null || raw === undefined) continue;
+    let value: string;
+    if (typeof raw === 'string') value = entityLinksToLabels(raw).trim(); // story 4925 — a link in a listed value reads as its label
+    else if (typeof raw === 'number' || typeof raw === 'boolean') value = String(raw);
+    else { try { value = JSON.stringify(raw); } catch { continue; } }
+    if (!value) continue;
+    if (/_id$/.test(key)) {
+      const ref = refs?.[refKeyOfIdField(key)] as { found?: boolean; name?: unknown } | null | undefined;
+      if (ref && typeof ref === 'object' && ref.found && typeof ref.name === 'string' && ref.name) value = ref.name;
+      else if (ref && typeof ref === 'object' && ref.found === false) value = tEventCard('memberMissing');
+    }
+    const title = schemaProps?.[key]?.title;
+    const cardKey = CARD_FIELD_LABEL_KEYS[key];
+    const label = (typeof title === 'string' && title.trim()) || (cardKey ? tEventCard(cardKey) : '') || readableSlug(key);
+    items.push({ label, value: value.length > 200 ? `${Array.from(value).slice(0, 200).join('')}…` : value });
+  }
+  return { head, words, items };
+}
+
+/**
+ * story 4921 — a notification SUMMARY stored in the machine shape «{sender}: [이벤트] preset.x\n- key: value …» (what the server wrote for event messages before it wrote the human line) is shown as
+ * «{sender}: {the fallback line}». Anything else — a summary that is not that shape, a missing one — is returned as it is.
+ */
+export function humanizeMachineEventSummary(
+  summary: string | null | undefined,
+  event: unknown,
+  tEventCard: (key: string) => string,
+  eventDefinitionName?: (eventKey: string) => string | undefined,
+  /** the row is a chat line (a message · a mention): its summary is a message preview, so the server's «이벤트 · …» may be re-said with the definition's name. Any other row's summary is its own sentence and stays. */
+  isChatLine = false,
+): string | null | undefined {
+  if (typeof summary !== 'string') return summary;
+  const card = (event && typeof event === 'object' ? event : {}) as { event_key?: unknown; payload?: unknown; refs?: unknown };
+  const payload = card.payload && typeof card.payload === 'object' ? (card.payload as Record<string, unknown>) : undefined;
+  const refs = card.refs && typeof card.refs === 'object' ? (card.refs as Record<string, unknown>) : undefined;
+  const eventKey = typeof card.event_key === 'string' ? card.event_key : undefined;
+  const m = /^([^\n]*?): (\[(?:이벤트|Event)\] [\s\S]*)$/.exec(summary);
+  if (!m) {
+    // story 4925 — the server's own line for an event with no sentence of its own is «이벤트[ · words]» (it reads no definition names): this screen has them, so it says the NAME (the same line the room list gives)
+    const head = /^([^\n]*?): /.exec(summary);
+    const rest = head ? summary.slice(head[0].length) : '';
+    const named = isChatLine && head && eventKey && isServerGenericEventLine(rest, tEventCard) ? composeGenericEventLine(eventKey, payload, { tEventCard, eventDefinitionName }, refs) : null;
+    return named ? `${head![1]}: ${named}` : summary;
+  }
+  const line = composeEventPreviewFallback(m[2], eventKey, payload, { tEventCard, eventDefinitionName }, refs);
+  return line ? `${m[1]}: ${line}` : summary;
+}
+
+/**
+ * story 4921 — the line a person sees where `composeEventPreviewLine` has no sentence of its own (every event but the five it knows: workflow stages · marketing recipes · recipe publish stopped · an org's custom events …):
+ * the definition's own human NAME (when the screen has the definitions; else the one word «이벤트») · the person's own words from the payload (`instruction` · `message` · `summary` …, first line) when there are some.
+ * Never a slug, an id or a «- key: value» line. Returns null when the content is NOT machine text (a sentence somebody wrote — kept as it is by the caller).
+ */
+export function composeEventPreviewFallback(
+  content: string | null | undefined,
+  eventKey: string | undefined,
+  payload: Record<string, unknown> | undefined,
+  helpers: Pick<EventPreviewHelpers, 'tEventCard' | 'eventDefinitionName'>,
+  refs?: Record<string, unknown>,
+): string | null {
+  if (!isMachineEventContent(content)) return null;
+  const { tEventCard, eventDefinitionName } = helpers;
+  if (eventKey === 'preset.steer.instruct') {
+    const steer = steerPreviewSentence(payload, refs, tEventCard);
+    if (steer) return steer.line;
+  }
+  return eventNameLine(eventKey, payload, helpers);
+}
+
+function eventNameLine(
+  eventKey: string | undefined,
+  payload: Record<string, unknown> | undefined,
+  helpers: Pick<EventPreviewHelpers, 'tEventCard' | 'eventDefinitionName'>,
+): string {
+  const { tEventCard, eventDefinitionName } = helpers;
+  const name = (eventKey ? eventDefinitionName?.(eventKey)?.trim() : '') || tEventCard('genericEventHeader');
+  let text: string | null = null;
+  for (const field of HUMAN_TEXT_FIELDS) {
+    text = firstHumanLine(payload?.[field], PREVIEW_TEXT_MAX);
+    if (text) break;
+  }
+  return text ? `${name} · ${text}` : name;
+}
+
+/**
+ * story 4925 — is this text the line the SERVER wrote for an event with no sentence of its own («이벤트» or «이벤트 · {words}», «Event» in an English message)? The screen's own word for it and the English word count (a line written in the OTHER language stays as the server wrote it). Only that line is said again with the definition's name: a text a person wrote
+ * (the publish-stopped explanation …) on a row that carries an event card stays exactly as written.
+ */
+export function isServerGenericEventLine(text: string | null | undefined, tEventCard: (key: string) => string): boolean {
+  if (typeof text !== 'string') return false;
+  return [tEventCard('genericEventHeader'), 'Event'].some((head) => text === head || text.startsWith(`${head} · `));
+}
+
+/** the events that have a sentence of their own (composeEventPreviewSentence) — every other event is named by its definition */
+const SENTENCE_PRESET_KEYS: ReadonlySet<string> = new Set([
+  'preset.gate.verdict', 'preset.work.status_changed', 'preset.work.assigned', 'preset.goal.measured', 'preset.steer.instruct',
+]);
+
+/**
+ * story 4925 — the line for an event MESSAGE (its card is known: key · payload) that the SERVER already turned into words («이벤트 · …»): the same line the fallback gives — the definition's name and the person's words — but only when the event has no
+ * sentence of its own (a known preset's sentence · the steer sentence the server wrote stay as they are). Null when there is nothing to add.
+ */
+export function composeGenericEventLine(
+  eventKey: string,
+  payload: Record<string, unknown> | undefined,
+  helpers: Pick<EventPreviewHelpers, 'tEventCard' | 'eventDefinitionName'>,
+  // the refs a sentence would read — none of the events this line is for has one
+  _refs?: Record<string, unknown>,
+): string | null {
+  if (SENTENCE_PRESET_KEYS.has(eventKey)) return null;
+  return eventNameLine(eventKey, payload, helpers);
 }

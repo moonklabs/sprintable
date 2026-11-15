@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { LifeBuoy, X } from 'lucide-react';
@@ -110,7 +110,9 @@ export function SupportWidgetLauncher() {
 
   // story 4853 — the one place that says «the button is drawn»: the early return below and the `<html>` mark read the same value (they can not drift apart).
   const launcherShown = !(allComplete || !activationState || isMobileChatDetailRoute || isSettingsRoute);
-  useEffect(() => {
+  // story 4906 (codex) — a LAYOUT effect, not a passive one: the button is committed in the same pass, and a passive effect would run only after that frame was painted, so for one frame the
+  // button sat on a composer's [Send] with no clearance yet (the clearance wrapper keys off this attribute). A layout effect runs before the browser paints.
+  useLayoutEffect(() => {
     if (!launcherShown) return undefined;
     const html = document.documentElement;
     html.setAttribute(SUPPORT_LAUNCHER_ATTR, '');
@@ -134,13 +136,14 @@ export function SupportWidgetLauncher() {
           우하단에 고정돼 있어, 이 버튼은 그 안의 평범한 flex 자식이다. 컬럼 자체가
           pointer-events-none(빈 공간 클릭 통과)이라 실제 버튼은 pointer-events-auto로
           되돌린다. */}
+      {/* story 4952 — while a modal (an OPEN `role=dialog` + `aria-modal`, or an `alertdialog`: the detail drawers · dialogs — the same «open modal» rule as storage-asset-list's dropBelongsToStorage: a drawer that is closed keeps its role but carries `aria-hidden` + `inert`, and does not count) is open this button is NOT drawn: it shares the bottom dock's `z-50` with those drawers and sat ON TOP of their bottom-right action (the storage file drawer's «삭제» was 25% covered; pressing its right end opened the support panel). The dock also carries the toasts, so the dock itself must stay above — only this button steps aside. The support panel (`role=dialog`, no aria-modal) is not a modal for this rule. */}
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-controls={PANEL_ID}
         aria-label={open ? t('closeLabel') : t('launcherLabel')}
-        className="pointer-events-auto flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+        className="pointer-events-auto flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 [:root:has(:is([role=dialog][aria-modal=true],[role=alertdialog],[data-modal-popup][data-open]):not([aria-hidden=true]):not([inert]):not([class~='lg:hidden']))_&]:invisible max-lg:[:root:has(:is([role=dialog][aria-modal=true],[role=alertdialog],[data-modal-popup][data-open]):not([aria-hidden=true]):not([inert])[class~='lg:hidden'])_&]:invisible"
       >
         {open ? <X className="h-5 w-5" aria-hidden /> : <LifeBuoy className="h-5 w-5" aria-hidden />}
       </button>

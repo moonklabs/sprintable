@@ -62,17 +62,17 @@ describe('인증 코드 칸 — 큰 글자 · 입력 정리 · 자동 초점', (
     }
   });
 
-  it('로그인 TOTP 칸: 인증 코드가 필요하다는 응답 뒤에 나타나는 바탕 Input이고, 모바일 · 데스크톱 모두 18px · 숫자만 6자 · 자동 초점', async () => {
+  it('로그인 TOTP 칸: 인증 코드가 필요하다는 응답 뒤에 나타나는 바탕 Input(ds Input — story 4891)이고, 모바일 · 데스크톱 모두 18px · 숫자만 6자 · 자동 초점', async () => {
     loginWithPasswordMock.mockResolvedValue({ error: { code: 'TOTP_REQUIRED', message: 'totp' } });
     const { default: LoginPage } = await import('./login/page');
     await act(async () => { root.render(wrap(<LoginPage />)); });
-    const email = container.querySelector<HTMLInputElement>('input[data-slot="input"][type="email"]')!;
-    const pw = container.querySelector<HTMLInputElement>('input[data-slot="input"][type="password"]')!;
+    const email = container.querySelector<HTMLInputElement>('input[data-slot="ds-input"][type="email"]')!;
+    const pw = container.querySelector<HTMLInputElement>('input[data-slot="ds-input"][type="password"]')!;
     await act(async () => { setNative(email, 'a@b.co'); setNative(pw, 'secret-pass'); });
     await act(async () => { press(pw, 'Enter'); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(loginWithPasswordMock).toHaveBeenCalledTimes(1);
-    const totp = container.querySelector<HTMLInputElement>('input[data-slot="input"][inputmode="numeric"]')!;
+    const totp = container.querySelector<HTMLInputElement>('input[data-slot="ds-input"][inputmode="numeric"]')!;
     expect(totp).toBeTruthy();
     expect(totp.maxLength).toBe(6);
     await act(async () => { setNative(totp, '9x8y7654321'); });
@@ -112,7 +112,7 @@ describe('가입 화면 약관 체크박스', () => {
   it('라벨 글자를 눌러도 켜지고 다시 누르면 꺼진다 · 엔터로는 안 켜지고 스페이스로는 켜진다', async () => {
     const { default: RegisterPage } = await import('./register/page');
     await act(async () => { root.render(wrap(<RegisterPage />)); });
-    const box = () => container.querySelector<HTMLElement>('[data-slot="checkbox"]')!;
+    const box = () => container.querySelector<HTMLElement>('[data-slot="ds-checkbox"]')!;
     expect(box()).toBeTruthy();
     expect(box().getAttribute('aria-checked')).toBe('false');
     const labelText = [...container.querySelectorAll('label span')].find((s) => s.textContent?.includes(koMessages.register.tosPrefix))!;
@@ -140,9 +140,9 @@ describe('가입 제출 — 엔터 · 요청 내용 (인증은 되돌리기 어�
     }));
     const { default: RegisterPage } = await import('./register/page');
     await act(async () => { root.render(wrap(<RegisterPage />)); });
-    const name = container.querySelector<HTMLInputElement>('input[data-slot="input"][type="text"]')!;
-    const email = container.querySelector<HTMLInputElement>('input[data-slot="input"][type="email"]')!;
-    const pw = container.querySelector<HTMLInputElement>('input[data-slot="input"][type="password"]')!;
+    const name = container.querySelector<HTMLInputElement>('input[data-slot="ds-input"][type="text"]')!;
+    const email = container.querySelector<HTMLInputElement>('input[data-slot="ds-input"][type="email"]')!;
+    const pw = container.querySelector<HTMLInputElement>('input[data-slot="ds-input"][type="password"]')!;
     await act(async () => { setNative(name, '홍길동'); setNative(email, ' a@b.co '); setNative(pw, 'Str0ng!Passw0rd#2026'); });
     // 약관을 켜기 전에는 어느 칸의 엔터도 제출하지 않는다
     await act(async () => { press(name, 'Enter'); });

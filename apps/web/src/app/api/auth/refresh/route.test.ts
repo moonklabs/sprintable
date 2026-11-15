@@ -101,6 +101,22 @@ describe('POST /api/auth/refresh', () => {
       }
     });
 
+    it('⭐a 429 passes the backend\'s Retry-After on (whole seconds 1..3600); anything else is left out; other statuses never carry it; the code and the cookies are as before (story 4915)', async () => {
+      const answer = async (status: number, retryAfter: string | null) => {
+        mockFetch.mockResolvedValue({ ok: false, status, headers: { get: (n: string) => (n.toLowerCase() === 'retry-after' ? retryAfter : null) }, json: async () => ({ error: { code: 'RATE_LIMITED', message: 'later' } }) });
+        const res = await POST(makeRequest());
+        unclear(res);
+        return res;
+      };
+      const ok = await answer(429, '7');
+      expect(ok.status).toBe(429);
+      expect(ok.headers.get('Retry-After')).toBe('7');
+      expect((await ok.json() as { error: { code: string } }).error.code).toBe('REFRESH_UNAVAILABLE');
+      expect((await answer(429, ' 45 ')).headers.get('Retry-After')).toBe('45');
+      for (const bad of [null, '', 'abc', '0', '-3', '3601', '99999', '1.5', 'Wed, 21 Oct 2026 07:28:00 GMT']) expect((await answer(429, bad)).headers.get('Retry-After'), String(bad)).toBeNull();
+      for (const status of [500, 502, 503]) expect((await answer(status, '7')).headers.get('Retry-After'), String(status)).toBeNull();   // only a 429 is a rate-limit answer
+    });
+
     it('a non-401 client error and a 200 without tokens are «not confirmed» too (no clear)', async () => {
       mockFetch.mockResolvedValue({ ok: false, status: 400, headers: { get: () => null }, json: async () => ({ error: { code: 'BAD', message: 'bad' } }) });
       const a = await POST(makeRequest());

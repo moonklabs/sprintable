@@ -65,6 +65,30 @@ def _dedupe_key(work_item_type: str, work_item_id: uuid.UUID, gate_type: str | N
     return (work_item_type, work_item_id, gate_type, kind)
 
 
+def _decision_request_fields(neutral_facts: dict[str, Any] | None) -> tuple[str | None, str | None, uuid.UUID | None]:
+    """story #4888(UI-5 홈, 실물 측정 11-11 — 일회용 계정에 에이전트 키로 결재 요청 3건을 만들어 본 것) — 에이전트의 «결정 요청»(work_item_type=agent_decision,
+    gates.py::create_decision_request)은 work item이 «게이트 자신»이라 제목을 줄 스토리 · 문서가 없다. 그래서 「오늘」 needs_me가 이 행들을 제목 «» · 사유 null · 요청자 null로
+    내보내 홈 행이 빈 글자로 떴다(폰 시트의 접근 이름도 « 자세히»). 사람이 읽을 글은 게이트 `neutral_facts`에 있다 — 질문(question) = 제목, 가정(assumption) = 사유,
+    요청한 멤버(requested_by_member_id) = 요청자. 이미 조회된 행(GateResponse.neutral_facts)에서 읽으므로 **추가 쿼리 0**(요청자 이름만 아래의 기존 배치 조회에 얹는다).
+    값이 비었거나 모양이 다르면(옛 게이트 · 직접 만든 행) None — 지어내지 않는다(빈 제목의 대체 글은 화면 몫)."""
+    facts = neutral_facts or {}
+
+    def _text(key: str) -> str | None:
+        v = facts.get(key)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+        return None
+
+    requester: uuid.UUID | None = None
+    raw = facts.get("requested_by_member_id")
+    if raw:
+        try:
+            requester = raw if isinstance(raw, uuid.UUID) else uuid.UUID(str(raw))
+        except (ValueError, TypeError, AttributeError):
+            requester = None
+    return _text("question"), _text("assumption"), requester
+
+
 async def _needs_me_from_gate_inbox(
     session: AsyncSession, org_id: uuid.UUID, auth: AuthContext,
 ) -> list[dict[str, Any]]:
@@ -98,7 +122,14 @@ async def _needs_me_from_gate_inbox(
             gate_type = r.gate_type
             risk = derive_risk_grade(_posture, gate_type)
             title = r.work_item_summary.title if r.work_item_summary is not None else None
-            items.append({
+            reason: str | None = None
+            decision_requester: uuid.UUID | None = None
+            if r.work_item_type == "agent_decision":
+                # story #4888 — 에이전트의 결정 요청: 질문 = 제목 · 가정 = 사유 · 요청 멤버 = 요청자(neutral_facts에서, 추가 쿼리 0). 다른 게이트 종류는 그대로.
+                question, assumption, decision_requester = _decision_request_fields(r.neutral_facts)
+                title = title or question
+                reason = assumption
+            item: dict[str, Any] = {
                 "kind": "signature" if risk == "high" else "approval",
                 "risk": risk,
                 "source": "gate",
@@ -107,8 +138,8 @@ async def _needs_me_from_gate_inbox(
                 "work_item_id": r.work_item_id,
                 "gate_type": gate_type,
                 "title": title,
-                "requested_by": None,  # Gate엔 requester 필드 자체가 없다(지어내지 않음).
-                "reason": None,
+                "requested_by": None,  # 일반 Gate엔 requester 필드가 없다(지어내지 않음) — 결정 요청만 아래에서 neutral_facts의 요청 멤버를 batch로 채운다.
+                "reason": reason,
                 "created_at": r.created_at,
                 "actions": ["approve", "request_changes", "hold"],
                 # story #4190(유나 «본 버전 대조» 2) — 레시피 발행 게이트는 초안을 보고 승인해야 해 「오늘」 저위험 일괄에서
@@ -116,7 +147,10 @@ async def _needs_me_from_gate_inbox(
                 "recipe_publish": _is_recipe_external_publish_gate(r),
                 # story #4241 — 행 링크(`/gates/{id}`)가 «현재 프로젝트»가 아니라 이 결재의 프로젝트를 싣게(list_gates 배치 해소값).
                 "project_id": r.project_id,
-            })
+            }
+            if decision_requester is not None:
+                item["requested_by_member_id"] = decision_requester  # _resolve_needs_me의 기존 배치 조회(lookup_members_by_ids)가 이름을 채운다
+            items.append(item)
         else:  # r.source == "hitl"
             # HitlRequest.work_item_id는 실무상 항상 Story(gates.py 기존 주석 근거).
             # work_type("merge"|"done" 등 라이프사이클 단계)을 이 소스의 gate_type

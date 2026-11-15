@@ -5,12 +5,12 @@
 // a desktop setup's agents and paired phone keys are not touched (backend test). The button is outline, not destructive —
 // what it ends comes back with a sign-in.
 
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { LogOut } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { SectionCard, SectionCardBody, SectionCardHeader } from '@/components/ui/section-card';
+import { Button } from '@/components/ds/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ds/dialog';
+import { SettingsSection } from './settings-section';
 import { fetchWithAuth, logoutUser } from '@/lib/db/client';
 
 export type OtherSessionsResult = { sessions_ended: number | null; kept_this: boolean };
@@ -32,6 +32,7 @@ export function OtherSessionsSection() {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const [done, setDone] = useState<OtherSessionsResult | null>(null);
+  const titleId = useId();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
@@ -57,44 +58,40 @@ export function OtherSessionsSection() {
 
   return (
     // 5018 nit: `#other-sessions` lands on this card; scroll-mt clears the page's top edge so the button shows
-    <SectionCard id="other-sessions" className="scroll-mt-24" data-testid="other-sessions">
-      <SectionCardHeader>
-        <div className="space-y-1">
-          <h2 className="flex items-center gap-1.5 text-base font-semibold text-foreground"><LogOut className="size-4" />{t('otherSessionsTitle')}</h2>
-          <p className="break-keep text-sm text-muted-foreground">{t('otherSessionsDescription')}</p>
-        </div>
-      </SectionCardHeader>
-      <SectionCardBody className="space-y-3">
-        <p aria-live="polite" className="break-keep text-sm text-foreground" data-testid="other-sessions-done">
-          {line}
-        </p>
-        {done && !done.kept_this ? (
-          // Yuna «4630» ①: this browser's sign-in ended too (≤ 1 h until it notices) — one action only: sign out here now and
-          // sign in again, rather than be thrown out mid-work later
-          <Button ref={buttonRef} variant="outline" onClick={() => { void logoutUser().finally(() => { window.location.href = '/login'; }); }} data-testid="other-sessions-sign-in-again">
-            {t('otherSessionsSignInAgain')}
-          </Button>
-        ) : (
-          <Button ref={buttonRef} variant="outline" onClick={() => { setFailed(false); setAsking(true); }} data-testid="other-sessions-open">
-            {t('otherSessionsButton')}
-          </Button>
-        )}
-      </SectionCardBody>
+    <>
+      <div id="other-sessions" className="scroll-mt-24" data-testid="other-sessions">
+        <SettingsSection title={<span className="inline-flex items-center gap-1.5"><LogOut className="size-4" />{t('otherSessionsTitle')}</span>} description={t('otherSessionsDescription')}>
+          <p aria-live="polite" className="break-keep text-ds-body text-ds-ink" data-testid="other-sessions-done">
+            {line}
+          </p>
+          {done && !done.kept_this ? (
+            // Yuna «4630» ①: this browser's sign-in ended too (≤ 1 h until it notices) — one action only: sign out here now and
+            // sign in again, rather than be thrown out mid-work later
+            <Button ref={buttonRef} variant="secondary" size="lg" onClick={() => { void logoutUser().finally(() => { window.location.href = '/login'; }); }} data-testid="other-sessions-sign-in-again">
+              {t('otherSessionsSignInAgain')}
+            </Button>
+          ) : (
+            <Button ref={buttonRef} variant="secondary" size="lg" onClick={() => { setFailed(false); setAsking(true); }} data-testid="other-sessions-open">
+              {t('otherSessionsButton')}
+            </Button>
+          )}
+        </SettingsSection>
+      </div>
       <Dialog open={asking} onOpenChange={(open) => { if (!open && !busy) setAsking(false); }}>
-        <DialogContent showCloseButton={false} initialFocus={cancelRef}>
+        <DialogContent showCloseButton={false} initialFocus={cancelRef} aria-labelledby={titleId}>
           <DialogHeader>
-            <DialogTitle>{t('otherSessionsTitle')}</DialogTitle>
+            <DialogTitle id={titleId}>{t('otherSessionsTitle')}</DialogTitle>
             <DialogDescription className="break-keep">{t('otherSessionsConfirm')}</DialogDescription>
           </DialogHeader>
-          {failed ? <p role="alert" className="text-sm text-destructive" data-testid="other-sessions-failed">{t('otherSessionsFailed')}</p> : null}
+          {failed ? <p role="alert" className="text-ds-body text-ds-failed" data-testid="other-sessions-failed">{t('otherSessionsFailed')}</p> : null}
           <DialogFooter>
-            <Button ref={cancelRef} variant="outline" disabled={busy} onClick={() => setAsking(false)}>{tc('cancel')}</Button>
-            <Button disabled={busy} onClick={() => void signOutOthers()} data-testid="other-sessions-confirm">
+            <Button ref={cancelRef} variant="secondary" disabled={busy} onClick={() => setAsking(false)}>{tc('cancel')}</Button>
+            <Button variant="primary" disabled={busy} onClick={() => void signOutOthers()} data-testid="other-sessions-confirm">
               {busy ? t('otherSessionsWorking') : t('otherSessionsConfirmButton')}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </SectionCard>
+    </>
   );
 }

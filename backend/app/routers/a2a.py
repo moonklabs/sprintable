@@ -103,6 +103,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session_factory
+from app.core.log_safe import redact_urls
 from app.dependencies.auth import AuthContext, get_current_user, get_verified_org_id
 from app.dependencies.database import get_db
 from app.models.a2a_task import A2ATask
@@ -887,7 +888,7 @@ async def _advance_task_state(session: AsyncSession, task: A2ATask, org_id: uuid
                 latest = deliveries[0]
                 failure_reason = (
                     f"webhook delivery failed on all {len(deliveries)} channel(s) after "
-                    f"{latest.attempt_count} attempts: {latest.last_error or 'unknown error'}"
+                    f"{latest.attempt_count} attempts: {redact_urls(latest.last_error or 'unknown error')}"  # story 4869: a row written before the retry text was scrubbed may still hold a request URL
                 )
             elif datetime.now(timezone.utc) > effective_deadline(task):
                 failure_reason = (

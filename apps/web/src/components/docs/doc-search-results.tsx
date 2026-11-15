@@ -1,7 +1,7 @@
 'use client';
 
-import { FileText } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { Icon } from '@/components/ds/icon';
+import { ListRow } from '@/components/ds/list-row';
 
 // story #2167(2026-07-25, 까심): "이 문서가 있는가"의 답은 서버가 낸다(전문검색, slug 포함)
 // — 로컬 트리는 사본이라 아직 로드 안 된 문서는 못 찾는다(PO 판정 (나)). 검색어가 있을 때는
@@ -33,7 +33,7 @@ function highlightSnippet(snippet: string) {
     const match = /^<b>(.*)<\/b>$/.exec(part);
     if (match) {
       return (
-        <mark key={i} className="rounded bg-highlight-search-bg px-0.5 text-foreground">
+        <mark key={i} className="rounded-ds-control bg-ds-action-soft px-0.5 text-ds-ink">
           {match[1]}
         </mark>
       );
@@ -54,51 +54,47 @@ export function DocSearchResults({
   cap,
 }: DocSearchResultsProps) {
   if (loading && results.length === 0) {
-    return <p className="px-3 py-4 text-xs text-muted-foreground">{loadingLabel}</p>;
+    return <p className="px-4 py-4 text-ds-small text-ds-ink-3">{loadingLabel}</p>;
   }
 
   if (!loading && results.length === 0) {
-    return <p className="px-3 py-4 text-xs text-muted-foreground">{noResultsLabel}</p>;
+    return <p className="px-4 py-4 text-ds-small text-ds-ink-3">{noResultsLabel}</p>;
   }
 
   return (
-    <div className="px-2 py-1">
-      <p className="px-1 py-1 text-editorial-meta text-muted-foreground">{resultCountLabel(results.length)}</p>
-      <ul className="space-y-0.5">
+    <div className="py-1">
+      <p className="px-4 py-1 text-ds-small text-ds-ink-3">{resultCountLabel(results.length)}</p>
+      <ul>
         {results.map((doc) => (
           <li key={doc.id}>
-            <button
-              type="button"
-              onClick={() => onSelect(doc.slug)}
-              aria-current={selectedSlug === doc.slug ? 'page' : undefined}
-              className={cn(
-                'flex w-full flex-col gap-0.5 rounded-lg px-2.5 py-1.5 text-left transition-colors',
-                selectedSlug === doc.slug
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-foreground/88 hover:bg-muted hover:text-foreground',
-              )}
-            >
-              <span className="flex items-center gap-2 text-sm">
+            {/* story 4892 (UI-9 목록 열) — 결과 줄 = ds ListRow(줄 전체가 단추). 제목 · slug(mono) · 맞은 글귀(강조)는 그대로, 열린 문서만 aria-current="page". */}
+            <ListRow asChild selected={selectedSlug === doc.slug}>
+              <button
+                type="button"
+                onClick={() => onSelect(doc.slug)}
+                aria-current={selectedSlug === doc.slug ? 'page' : undefined}
+                className="w-full items-start py-2"
+              >
                 {doc.icon ? (
                   <span className="shrink-0 text-sm leading-none">{doc.icon}</span>
                 ) : (
-                  <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                  <Icon name="description" size={16} className="mt-0.5 text-ds-ink-3" />
                 )}
-                <span className="truncate">{doc.title}</span>
-              </span>
-              {/* story #2167 AC2 — slug로 찾은 결과가 어떤 slug인지 화면에 보여야 한다. */}
-              <span className="truncate pl-5 font-mono text-micro text-muted-foreground">{doc.slug}</span>
-              {doc.snippet ? (
-                <span className="truncate pl-5 text-editorial-meta text-muted-foreground">
-                  {highlightSnippet(doc.snippet)}
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="truncate text-ds-body font-semibold text-ds-ink">{doc.title}</span>
+                  {/* story #2167 AC2 — slug로 찾은 결과가 어떤 slug인지 화면에 보여야 한다. */}
+                  <span className="truncate font-mono text-ds-mono-md text-ds-ink-3">{doc.slug}</span>
+                  {doc.snippet ? (
+                    <span className="truncate text-ds-small text-ds-ink-3">{highlightSnippet(doc.snippet)}</span>
+                  ) : null}
                 </span>
-              ) : null}
-            </button>
+              </button>
+            </ListRow>
           </li>
         ))}
       </ul>
       {results.length >= cap && cappedLabel ? (
-        <p className="px-2 py-1.5 text-micro text-muted-foreground">{cappedLabel}</p>
+        <p className="px-4 py-1.5 text-ds-small text-ds-ink-3">{cappedLabel}</p>
       ) : null}
     </div>
   );

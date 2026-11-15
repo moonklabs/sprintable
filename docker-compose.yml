@@ -5,7 +5,8 @@
 services:
   db:
     # pgvector required: alembic migrations run CREATE EXTENSION vector on fresh installs
-    image: pgvector/pgvector:pg15
+    # Pinned by digest (story 4917) to the PostgreSQL 15.19 image the dev and prod VMs run — the same one deploy/vm/compose.yml carries (the floating `pg15` tag is 15.20 now).
+    image: pgvector/pgvector:pg15@sha256:47af0b65960b14f1c6945aa4ccae37836c632e9a6fe0eea9160936e616e5b2e9
     restart: unless-stopped
     volumes:
       - ./data/postgres:/var/lib/postgresql/data

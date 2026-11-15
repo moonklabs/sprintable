@@ -57,11 +57,11 @@ describe('ProofCapsule (density variants)', () => {
 
   // story #7d7634ee(P0·선생님 직접 지시) — 컷코너(clip-path) 전면 폐지, proof-surface(재질
   // 언어)로 교체(doc ea94dac4). 이 스위트 제목·assert도 그 재질로 갱신.
-  it('applies proof-surface material(soft round + lift) on full/card/row (not a plain rounded-full pill anywhere)', () => {
+  it('applies the proof-surface shape(soft round) on full/card/row, without the 8-25 lift shadow (story 4919)', () => {
     for (const density of ['full', 'card', 'row'] as const) {
       const markup = renderWithIntl(<ProofCapsule {...BASE} density={density} />);
       expect(markup).toContain('proof-surface');
-      expect(markup).toContain('proof-surface-lift');
+      expect(markup).not.toContain('proof-surface-lift');
     }
   });
 
@@ -72,12 +72,12 @@ describe('ProofCapsule (density variants)', () => {
     // overflow-hidden이 감춰 조상 스크롤러가 넘침을 못 본다.
     // ⚠️row/audit 밀도는 셸 내부 아이콘 span 등에 무관한 shrink-0가 이미 있어 단순
     // `.toContain('shrink-0')`는 이 fix와 무관하게도 통과하는 약한 assert가 된다 — 반드시
-    // CutCornerShell 자신의 리터럴 클래스 조합("proof-surface proof-surface-lift flex
-    // shrink-0", story #7d7634ee 재질 갱신)으로 특정한다(mutation-검증: shrink-0 제거 시
+    // CutCornerShell 자신의 리터럴 클래스 조합("proof-surface flex
+    // shrink-0", story 4919: lift 걷음)으로 특정한다(mutation-검증: shrink-0 제거 시
     // 이 assert만 RED, 위 span들은 무관).
     for (const density of ['full', 'card', 'row'] as const) {
       const markup = renderWithIntl(<ProofCapsule {...BASE} density={density} />);
-      expect(markup).toContain('proof-surface proof-surface-lift flex shrink-0');
+      expect(markup).toContain('proof-surface flex shrink-0');
     }
   });
 });
@@ -230,6 +230,26 @@ describe('ProofCapsule (안티패턴 자체 체크 — 도크트린 준수 회�
     );
     expect(markup).not.toContain('text-proof-faint');
     expect(markup).toContain('text-proof-ink-3');
+  });
+});
+
+describe('ProofCapsule audit density — compactActor (story 4892)', () => {
+  it('⭐compactActor drops the actor NAME text from the time chunk but keeps the avatar badge; without it the name stays', () => {
+    const full = renderWithIntl(<ProofCapsule {...BASE} density="audit" now="3일 전" human={{ name: '유나', role: '' }} />);
+    const compact = renderWithIntl(<ProofCapsule {...BASE} density="audit" now="3일 전" human={{ name: '유나', role: '' }} compactActor />);
+    expect(full).toContain('3일 전 유나');                        // the time chunk carries the name…
+    expect(compact).not.toContain('3일 전 유나');                 // …and with compactActor it does not
+    expect(compact).toContain('3일 전');                          // the time stays
+    expect(compact).toContain('aria-label="유나"');               // the avatar badge is still drawn and still carries the actor's name as its accessible name
+    expect(full).toContain('aria-label="유나"');
+  });
+
+  it('compactActor does nothing for the other densities', () => {
+    for (const density of ['full', 'card', 'row'] as const) {
+      const a = renderWithIntl(<ProofCapsule {...BASE} density={density} human={{ name: '유나', role: '' }} />);
+      const b = renderWithIntl(<ProofCapsule {...BASE} density={density} human={{ name: '유나', role: '' }} compactActor />);
+      expect(b, density).toBe(a);
+    }
   });
 });
 

@@ -227,3 +227,79 @@ describe('KanbanTrustColumn — 컬럼헤더 소헤딩(story #2969 PR-6)', () =>
     expect(header?.className).not.toContain('uppercase');
   });
 });
+
+// story #4888(UI-5 보드 머리 첫 조각, AC3 §4-3) — 비어 있는 잠긴(파생) 열은 280px 칸 대신 좁은 띠(40px)로 접힌다.
+// 좁히는 것이지 지우는 게 아니다: 이름 · 0건 · 드롭 불가 안내(title · 스크린리더)는 띠에 남는다. 카드가 생기거나 더 불러올 쪽이 있으면 다시 선다.
+describe('KanbanTrustColumn — 빈 잠긴 열은 좁은 띠(story #4888)', () => {
+  const render = async (props: Partial<React.ComponentProps<typeof KanbanTrustColumn>>) => {
+    await act(async () => {
+      root.render(wrap(
+        <KanbanTrustColumn
+          id="needs_input" label="입력 필요" locked stories={[]}
+          epicMap={{}} memberMap={{}} onStoryClick={() => {}} {...props}
+        />,
+      ));
+    });
+  };
+  const strip = () => container.querySelector<HTMLElement>('[data-testid="trust-column-strip-needs_input"]');
+
+  it('잠김 + 0건 → 띠(w-10)이고 280px 칸 · 제목 h3 · 빈 문구는 없다', async () => {
+    await render({});
+    expect(strip()).not.toBeNull();
+    expect(strip()!.className.split(/\s+/)).toContain('w-10');
+    expect(columnDiv()).toBeNull();
+    expect(container.querySelector('h3')).toBeNull();
+    expect(container.textContent).not.toContain(koMessages.board.noStories);
+  });
+
+  it('띠에도 열 이름 · 0건 · 드롭 불가 안내가 남는다(잃은 정보 0)', async () => {
+    await render({});
+    expect(strip()!.textContent).toContain('입력 필요');
+    expect(strip()!.textContent).toContain('0');
+    expect(strip()!.textContent).toContain(koMessages.board.trustLockedDropHint);
+    expect(strip()!.getAttribute('title')).toContain(koMessages.board.trustLockedDropHint);
+    expect(strip()!.getAttribute('title')).toContain('입력 필요');
+  });
+
+  it('[4923 재오픈] 띠 세로 글은 줄을 바꾸지 않고(whitespace-nowrap), 낮은 데스크톱 창(높이 ≤ 520)에선 장식 자물쇠만 뺀다 — 낮은 창서 «입력필 / 요»로 갈라지던 것', async () => {
+    await render({});
+    const label = Array.from(strip()!.querySelectorAll('span')).find((s) => s.textContent === '입력 필요')!;
+    expect(label.className.split(/\s+/)).toContain('whitespace-nowrap');
+    // 자리가 모자라면 줄바꿈 · 겹침 대신 «…»로 잘린다(전체 이름은 띠 title이 말한다)
+    for (const c of ['min-h-0', 'overflow-hidden', 'text-ellipsis']) expect(label.className.split(/\s+/)).toContain(c);
+    expect(label.className).toContain('[writing-mode:vertical-rl]');
+    // 낮은 창에선 띠 위아래 여백도 12 → 8(글자 폭이 더 넓은 실제 글꼴 — Pretendard — 에서도 영문 «Needs Input»이 한 줄로 들도록 8px 더 — 시험 브라우저엔 그 글꼴이 없어 e2e는 이 한 줄을 가르지 못한다)
+    expect(strip()!.className).toContain('lg:[@media(max-height:520px)]:py-2');
+    const lock = strip()!.querySelector('svg')!;
+    expect(lock.getAttribute('class')).toContain('lg:[@media(max-height:520px)]:hidden');
+    // 잠금 안내는 자물쇠 그림이 아니라 글이 말한다(title · 스크린리더 글) — 그림을 빼도 정보 0 손실
+    expect(strip()!.textContent).toContain(koMessages.board.trustLockedDropHint);
+    expect(strip()!.getAttribute('title')).toContain(koMessages.board.trustLockedDropHint);
+  });
+
+  it('카드가 1장이라도 있으면 원래 칸이다(띠 아님)', async () => {
+    await render({ stories: [story({ trust_stage: 'needs_input' })] });
+    expect(strip()).toBeNull();
+    expect(columnDiv()).not.toBeNull();
+    expect(container.querySelector('h3')?.textContent).toContain('입력 필요');
+  });
+
+  it('0건이어도 더 불러올 쪽이 있으면(hasMore · N+) 원래 칸이다 — 0으로 단정하는 띠 금지', async () => {
+    await render({ hasMore: true, moreViaFeeder: true });
+    expect(strip()).toBeNull();
+    expect(container.textContent).toContain('0+');
+  });
+
+  it('잠기지 않은(settable) 빈 열은 띠가 되지 않는다 — 여기서 일감을 만든다', async () => {
+    await render({ id: 'queued', label: '대기', locked: false, onCreateStory: () => {} });
+    expect(container.querySelector('[data-testid^="trust-column-strip-"]')).toBeNull();
+    expect(columnDiv()).not.toBeNull();
+    expect(container.querySelector('button[aria-label]')).not.toBeNull();
+  });
+
+  it('끌기 중에도 띠는 폭이 그대로(w-10)이고 흐려질 뿐이다 — 도중에 칸 폭이 바뀌면 놓을 자리 판정이 흔들린다', async () => {
+    await render({ isDragging: true });
+    expect(strip()!.className.split(/\s+/)).toContain('w-10');
+    expect(strip()!.className).toContain('opacity-45');
+  });
+});

@@ -570,3 +570,20 @@ describe('ChatV3Messages — story #4430 «not delivered» line', () => {
     expect(lines.map((l) => l.textContent)).toEqual(['전달되지 않았어요 — 받는 사람이 내 메시지를 받지 않도록 해 두었어요']);
   });
 });
+
+describe('ChatV3Messages — an event message in words (story 4921)', () => {
+  it('⭐an event message: the head + the person\'s words + the fields as a readable list — no «[이벤트]» header line, no raw key names; an ordinary message is as before', async () => {
+    stub({ messages: { data: [
+      { id: 'e1', created_by: 'agent-1', sender_name: '시스템', sender_type: 'agent', sender_avatar_url: null, sender_runtime_type: null, attachments: [], created_at: '2026-09-16T06:41:00Z', references: [], approval_target: null,
+        content: '[이벤트] org.acme.signup\n- message: 새 가입\n- plan_name: team', event: { event_key: 'org.acme.signup', payload: { message: '새 가입', plan_name: 'team' }, refs: {} } },
+      { id: 'm1', created_by: 'agent-1', sender_name: '담롱 온찬', sender_type: 'agent', sender_avatar_url: null, sender_runtime_type: null, content: '그냥 글입니다.', attachments: [], created_at: '2026-09-16T06:42:00Z', references: [], approval_target: null },
+    ] } });
+    await mount(createRef<ChatV3MessagesHandle>());
+    const box = container.querySelector('[data-testid="event-text-fallback"]')!;
+    expect(box.querySelector('p')!.textContent).toBe('이벤트');
+    expect(box.textContent).toContain('새 가입');
+    expect(Array.from(box.querySelectorAll('li')).map((li) => li.textContent)).toEqual(['plan name: team']);
+    expect(container.textContent).not.toMatch(/\[이벤트\]|org\.acme|plan_name/);
+    expect(container.textContent).toContain('그냥 글입니다.');
+  });
+});

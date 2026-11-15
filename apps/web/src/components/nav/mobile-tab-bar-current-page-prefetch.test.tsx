@@ -69,15 +69,16 @@ describe('MobileTabBar — 현재 페이지 탭은 프리패치하지 않는다(
     expect(byHref.get('/chats')).toBeUndefined();
   });
 
-  it('쿼리 달린 탭(/inbox?tab=gates)도 경로로 대조 — /inbox에선 결재 탭 prefetch=false', async () => {
-    const byHref = await renderAt('/inbox');
-    const inbox = [...byHref.entries()].find(([href]) => href.startsWith('/inbox'));
-    expect(inbox?.[1]).toBe(false);
+  it('홈 탭(/org-briefing)도 현재 페이지면 prefetch=false — 결재 화면(/inbox)은 «홈»이 품지만 탭 링크 자체는 /org-briefing라 거기선 기본값(홈 화면으로 가는 길이 빠르게)', async () => {
+    const onHome = await renderAt('/org-briefing');
+    expect(onHome.get('/org-briefing')).toBe(false);
+    const onInbox = await renderAt('/inbox');
+    expect(onInbox.get('/org-briefing')).toBeUndefined();
   });
 });
 
 describe('MobileTabBar — flat 탭 링크는 처음부터 `?p={현재 프로젝트}`(story #4226)', () => {
-  it('⭐flat 탭(결재·채팅·더보기)은 `?p=proj-1`을 싣고 · scoped 탭(/acme/proj/flow)은 경로가 프로젝트라 안 싣는다', async () => {
+  it('⭐flat 탭(홈·채팅·전체)은 `?p=proj-1`을 싣고 · scoped 탭(/acme/proj/flow)은 경로가 프로젝트라 안 싣는다', async () => {
     ctx.projectId = 'proj-1';
     const hrefs = [...(await renderAt('/acme/proj/flow')).keys()];
     const scoped = hrefs.filter((h) => h.startsWith('/acme/proj/'));
@@ -85,7 +86,7 @@ describe('MobileTabBar — flat 탭 링크는 처음부터 `?p={현재 프로젝
     expect(scoped).toEqual(['/acme/proj/flow']);
     expect(flat.length).toBeGreaterThanOrEqual(3);
     for (const h of flat) expect(new URLSearchParams(h.split('?')[1] ?? '').get('p'), h).toBe('proj-1');
-    expect(hrefs).toContain('/inbox?tab=gates&p=proj-1'); // 기존 쿼리 보존
+    expect(hrefs).toContain('/org-briefing?p=proj-1');
   });
 
   it('⭐전환 대기 중엔 목표 프로젝트를 싣는다(커밋 전 컨텍스트는 아직 옛 프로젝트 — 까디르 QA [P2])', async () => {
@@ -93,8 +94,8 @@ describe('MobileTabBar — flat 탭 링크는 처음부터 `?p={현재 프로젝
     ctx.projectId = 'proj-A';
     setPendingProjectTarget('proj-B');
     try {
-      const hrefs = [...(await renderAt('/inbox')).keys()];
-      expect(hrefs).toContain('/inbox?tab=gates&p=proj-B');
+      const hrefs = [...(await renderAt('/org-briefing')).keys()];
+      expect(hrefs).toContain('/org-briefing?p=proj-B');
       expect(hrefs.some((h) => h.includes('p=proj-A'))).toBe(false);
     } finally {
       setPendingProjectTarget(null);
@@ -106,9 +107,9 @@ describe('MobileTabBar — flat 탭 링크는 처음부터 `?p={현재 프로젝
     for (const h of hrefs) expect(h).not.toContain('p=');
   });
 
-  it('현재 페이지 판정은 `?p=`가 붙어도 경로로 — /inbox에서 결재 탭 prefetch=false 그대로', async () => {
+  it('현재 페이지 판정은 `?p=`가 붙어도 경로로 — /org-briefing에서 홈 탭 prefetch=false 그대로', async () => {
     ctx.projectId = 'proj-1';
-    const byHref = await renderAt('/inbox');
-    expect(byHref.get('/inbox?tab=gates&p=proj-1')).toBe(false);
+    const byHref = await renderAt('/org-briefing');
+    expect(byHref.get('/org-briefing?p=proj-1')).toBe(false);
   });
 });

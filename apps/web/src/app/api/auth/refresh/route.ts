@@ -70,7 +70,15 @@ export async function POST(request: Request) {
     // story 4778 (AC2c) — only an answer that says the token is DEAD clears the cookies (a 401). A 5xx · a 429 · any other non-answer (and a 200 without tokens) means «not confirmed»: the cookies
     // stay and the answer is a retryable one — a backend that is briefly ill must not sign the person out (proxy.ts #2124 ㉯ draws the same line).
     if (fastapiRes.status !== 401) {
-      return NextResponse.json({ error: { code: REFRESH_UNAVAILABLE, message: 'Token refresh could not be confirmed' } }, { status: fastapiRes.ok ? 502 : fastapiRes.status });
+      // story 4915 — a 429 carries the backend's `Retry-After` (the per-person / per-address refresh limit): pass it on so the caller knows how long to back off (it used to be dropped here). Only a whole number of seconds
+      // in 1..3600 is passed; anything else (absent · a date · 0 · negative · huge) is left out — the code stays REFRESH_UNAVAILABLE and the cookies stay either way.
+      const headers: Record<string, string> = {};
+      if (fastapiRes.status === 429) {
+        const raw = fastapiRes.headers.get('retry-after');
+        const seconds = raw !== null && /^\d{1,5}$/.test(raw.trim()) ? Number(raw.trim()) : 0;
+        if (seconds >= 1 && seconds <= 3600) headers['Retry-After'] = String(seconds);
+      }
+      return NextResponse.json({ error: { code: REFRESH_UNAVAILABLE, message: 'Token refresh could not be confirmed' } }, { status: fastapiRes.ok ? 502 : fastapiRes.status, headers });
     }
     if (fastapiRes.status === 401) {
       // story #2449 AC1 — BFF 로그 1줄로 클라이언트 신호를 남긴다(PII 0). BE(auth.py)의

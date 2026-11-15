@@ -90,7 +90,9 @@ describe('LoginPage — 실패 사유 접근성 (story #2105 1차)', () => {
     // story #3901 — 렌더된 문구는 t('loginInvalidCredentials')이지 mock의 message 필드가
     // 아니다(컴포넌트가 code로 분기·raw message 미사용) — 리터럴 재-pin 대신 ko.json 값 대조.
     expect(alertEl?.textContent).toBe(koMessages.login.loginInvalidCredentials);
-    expect(alertEl?.getAttribute('aria-live')).toBe('assertive');
+    // story 4891 — the line is the ds failed Banner now: `role="alert"` IS the assertive live region (the explicit aria-live attribute is no longer written)
+    expect(alertEl?.getAttribute('data-slot')).toBe('ds-banner');
+    expect(alertEl?.getAttribute('data-tone')).toBe('failed');
   });
 
   it('동일한 실패 사유가 연속으로 떠도 매번 새 DOM 노드로 안착한다(setError(null) 선-리셋 확認)', async () => {
@@ -179,7 +181,7 @@ describe('LoginPage — 회원가입 링크 next 전파(story #3220, 초대수�
 });
 
 describe('story #4318 — 로그인 화면 링크 글자는 brand-text(밝은 7.05 · muted 6.63) · text-brand(4.35 · 4.09) 아님', () => {
-  it('⭐비밀번호 찾기 · 가입 링크 — text-brand-text · hover /85 · 로고만 text-brand', async () => {
+  it('⭐비밀번호 찾기 · 가입 링크 — text-brand-text · hover /85 (로고 글자는 상표색 text-brand-wordmark — story 4930)', async () => {
     await mount();
     const links = [...container.querySelectorAll('a')].filter((a) => ['/forgot-password', '/register'].some((h) => (a.getAttribute('href') ?? '').startsWith(h)));
     expect(links.length).toBeGreaterThanOrEqual(2);

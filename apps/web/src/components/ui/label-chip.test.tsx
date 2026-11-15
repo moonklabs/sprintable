@@ -23,14 +23,14 @@ afterEach(async () => {
 });
 
 describe('LabelChip — story #7d7634ee proof-surface 뿌리 회귀가드', () => {
-  it('proof-surface + proof-surface-press를 쓰고, 폐지된 proof-cut/proof-cut-xs는 남아있지 않다', async () => {
+  it('proof-surface(모양)를 쓰고, 눌린 엠보스(proof-surface-press · story 4919)와 폐지된 proof-cut/proof-cut-xs는 남아있지 않다', async () => {
     await act(async () => {
       root.render(<LabelChip label={{ id: '1', name: '스펙', color: '#3E7DC2' }} />);
     });
     const el = container.querySelector('span') as HTMLElement;
     const classes = el.className.split(' ');
     expect(classes).toContain('proof-surface');
-    expect(classes).toContain('proof-surface-press');
+    expect(classes).not.toContain('proof-surface-press');
     expect(classes).not.toContain('proof-cut');
     expect(classes).not.toContain('proof-cut-xs');
   });

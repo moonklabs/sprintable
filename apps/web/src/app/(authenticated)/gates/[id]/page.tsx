@@ -799,7 +799,7 @@ export default function GateDetailPage() {
             // className 주석 참조) — 여기선 ProofCapsule과 우 열 액션 카드를 «형제»로만
             // 반환한다(Fragment — 감싸는 DOM 없이 그리드 아이템 2개가 그대로 노출).
             // 우 열은 캡슐과 같은 재질(proof-surface, doc ea94dac4 정본)이지만
-            // proof-surface-lift만 쓰고 overflow-hidden은 뺀다(그게 sticky를 깨는
+            // proof-surface만 쓰고(story 4919: 결 · 뜬 그림자는 걷음) overflow-hidden은 뺀다(그게 sticky를 깨는
             // 원인이었다 — CutCornerShell 주석 §2978 참조, shrink-0도 overflow-hidden의
             // 부작용 상쇄용이라 같이 불요해짐).
             return (
@@ -807,7 +807,7 @@ export default function GateDetailPage() {
                 {proofCapsuleEl}
                 <div
                   data-testid="gate-detail-action-column"
-                  className="proof-surface proof-surface-lift mt-3 space-y-3 border border-proof-line bg-proof-panel p-4 lg:mt-0 lg:sticky lg:top-12 lg:self-start"
+                  className="proof-surface mt-3 space-y-3 border border-proof-line bg-proof-panel p-4 lg:mt-0 lg:sticky lg:top-12 lg:self-start"
                 >
                   {gateMetaFacts}
                   {isSigFlowGate || rejectPanelOpen ? signatureBlock : <div className="space-y-3">{plainActionExtra}</div>}

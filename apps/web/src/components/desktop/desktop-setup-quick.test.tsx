@@ -375,14 +375,17 @@ describe('[SID:4670 AC1] «폰으로도 에이전트 다루기» on the three-st
   const FOLDER = '&fshown=~/code/my-app&fname=my-app';
   const press = async () => { await act(async () => { buttonOf('만들기')!.click(); }); for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); }); };
 
-  it('an owner of an organization whose remote control is OFF: one tick above [시작], ticked, with the words — and it sits in the start row (no new step)', async () => {
+  it('an owner of an organization whose remote control is OFF: one tick above [시작], ticked, with the words — in the flow just above the stuck start row, never inside it (4941: that row is one line)', async () => {
     remoteGet = remoteOf(OFF_OWNER);
     await mount(frag(FOLDER), { projectId: PROJ, projects: [{ projectId: PROJ, projectName: 'P', orgId: 'o-1' }] });
     expect(tick()?.checked).toBe(true);
     expect(container.querySelector('[data-testid=setup-phone-control]')!.textContent).toContain('폰으로도 에이전트 다루기');
     expect(container.querySelectorAll('[role=checkbox]')).toHaveLength(1);
-    const row = container.querySelector('[data-testid=setup-phone-control]')!;
-    expect(row.nextElementSibling?.querySelector('button')?.textContent).toBe('만들기'); // just above «만들기»
+    const tickBox = container.querySelector('[data-testid=setup-phone-control]')!;
+    const startRow = container.querySelector('[data-testid=quick-start-row]')!;
+    expect(startRow.contains(tickBox)).toBe(false); // 4941: the stuck row is the button + one line — the tick stands in the flow above it
+    expect(tickBox.compareDocumentPosition(startRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect([...startRow.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['만들기']); // just below the tick: «만들기»
   });
 
   it('[SID:4832] on the app\'s own (local) server there is no phone relay: no tick even for an owner whose remote control is off, and the start sends no PUT', async () => {
@@ -1048,3 +1051,174 @@ describe('[SID:4832] the card has its own way to «이미 있는 에이전트 �
   });
 });
 
+
+// story 4934 — the free plan's «one project» is said when the folder is picked (GET /desktop/recipes `project_room`), not after a first press that looked like nothing happened.
+describe('[SID:4934] the free plan\'s one project is asked at the folder pick, and [넣고 만들기] is the one press', () => {
+  const MINE = { id: PROJ, name: 'Mine' };
+  const room = (v: unknown) => () => new Response(JSON.stringify({ recipes: [], agent_room: null, project_room: v }), { status: 200 });
+  const NEW_FOLDER = '&fshown=~/new/folder&fname=folder';
+  const mineProjects = { projectId: PROJ, projects: [{ projectId: PROJ, projectName: 'Mine', orgId: 'o-1' }] };
+  const solos = () => calls.filter((c) => c.url.endsWith('/confirm-solo'));
+  const settle = async () => { for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); }); };
+
+  it('a folder that would need a NEW project in an organization with no room: the question and «넣고 만들기» are there before any press — and one press makes the agent', async () => {
+    recipesNow = room({ limit: 1, existing_project: MINE });
+    await mount(frag(NEW_FOLDER), mineProjects);
+    const ask = container.querySelector('[data-testid=quick-limit]')!;
+    expect(ask.textContent).toContain('무료 플랜은 프로젝트가 하나예요');
+    expect(ask.textContent).toContain('이 폴더의 에이전트를 Mine 프로젝트에 넣어 만들 수 있어요');
+    expect(container.querySelector('[data-testid=quick-project]')!.textContent).toBe('프로젝트 · Mine');
+    expect(buttonOf('만들기')).toBeUndefined(); // the one primary is «넣고 만들기» from the start
+    expect(buttonOf('넣고 만들기')!.disabled).toBe(false);
+    expect(solos()).toHaveLength(0); // nothing was sent to learn it
+    await act(async () => { buttonOf('넣고 만들기')!.click(); });
+    await settle();
+    expect(solos().map((p) => p.body)).toEqual([{ code: CODE, runtime: 'claude', project_id: PROJ, agent_name: 'Claude Code', folder_name: 'folder' }]); // ONE request, into that project
+  });
+
+  it('room left (project_room null): «만들기» as it always was — a new project by the folder\'s name', async () => {
+    recipesNow = room(null);
+    await mount(frag(NEW_FOLDER), mineProjects);
+    expect(container.querySelector('[data-testid=quick-limit]')).toBeNull();
+    expect(buttonOf('넣고 만들기')).toBeUndefined();
+    await act(async () => { buttonOf('만들기')!.click(); });
+    await settle();
+    expect(solos().map((p) => p.body)).toEqual([{ code: CODE, runtime: 'claude', project_name: 'folder', agent_name: 'Claude Code', folder_name: 'folder' }]);
+  });
+
+  it('a folder whose project this organization HAS makes no new project: no question even when the plan has no room for one', async () => {
+    recipesNow = room({ limit: 1, existing_project: MINE });
+    await mount(frag(`${NEW_FOLDER}&fproject=${PROJ}`), mineProjects);
+    expect(container.querySelector('[data-testid=quick-limit]')).toBeNull();
+    expect(container.querySelector('[data-testid=quick-project]')!.textContent).toBe('이 폴더의 프로젝트 · Mine');
+    await act(async () => { buttonOf('만들기')!.click(); });
+    await settle();
+    expect(solos().map((p) => (p.body as { project_id?: string }).project_id)).toEqual([PROJ]);
+  });
+
+  it('no project to name (none the person can open · two projects) or a shape this page does not read: nothing is asked early, the card is the one it was (the 402 after the press still tells it)', async () => {
+    for (const v of [{ limit: 1, existing_project: null }, { limit: 1 }, { limit: 1, existing_project: { id: 'not-a-uuid', name: 'X' } }, { limit: 1, existing_project: { id: PROJ, name: '  ' } }, 'x', 7]) {
+      recipesNow = room(v);
+      await mount(frag(NEW_FOLDER), mineProjects);
+      expect(container.querySelector('[data-testid=quick-limit]'), JSON.stringify(v)).toBeNull();
+      expect(buttonOf('만들기'), JSON.stringify(v)).toBeDefined();
+    }
+  });
+
+  it('the question follows the FOLDER: another folder matched to a project of the organization drops it, a new one asks again', async () => {
+    recipesNow = room({ limit: 1, existing_project: MINE });
+    await mount(frag('&fshown=~/a/folder-a&fname=folder-a'), mineProjects);
+    expect(container.querySelector('[data-testid=quick-limit]')).not.toBeNull();
+    await mount(frag(`&fshown=~/b/folder-b&fname=folder-b&fproject=${PROJ}`), mineProjects);
+    expect(container.querySelector('[data-testid=quick-limit]')).toBeNull();
+    await mount(frag('&fshown=~/c/folder-c&fname=folder-c'), mineProjects);
+    expect(container.querySelector('[data-testid=quick-limit]')).not.toBeNull();
+  });
+
+  it('a wide folder not yet confirmed holds [넣고 만들기] and says why — never a press that does nothing', async () => {
+    recipesNow = room({ limit: 1, existing_project: MINE });
+    await mount(frag(`${NEW_FOLDER}&fwide=1`), mineProjects);
+    expect(buttonOf('넣고 만들기')!.disabled).toBe(true);
+    expect(container.querySelector('[data-testid=quick-limit-block]')!.textContent).toBe('폴더를 확인하면 만들 수 있어요');
+    await act(async () => { buttonOf('맞아요')!.click(); });
+    expect(buttonOf('넣고 만들기')!.disabled).toBe(false);
+    expect(container.querySelector('[data-testid=quick-limit-block]')).toBeNull();
+  });
+
+  it('the «폰으로도 에이전트 다루기» tick is in view beside [넣고 만들기] (the same start sends its PUT) — it is not ticked out of sight', async () => {
+    remoteGet = remoteOf({ enabled: false, can_change: true, enabled_at: null });
+    recipesNow = room({ limit: 1, existing_project: MINE });
+    await mount(frag(NEW_FOLDER), mineProjects);
+    expect(container.querySelector('[data-testid=quick-limit]')).not.toBeNull();
+    expect((container.querySelector('#quick-phone-control') as HTMLInputElement).checked).toBe(true);
+    await act(async () => { buttonOf('넣고 만들기')!.click(); });
+    await settle();
+    expect(calls.filter((c) => c.method === 'PUT' && c.url.includes('/remote-control'))).toHaveLength(1);
+  });
+
+  it('the start row is the card\'s sticky last row (the app\'s 539px-high window cannot hide it below the fold) — in both cases', async () => {
+    recipesNow = room({ limit: 1, existing_project: MINE });
+    await mount(frag(NEW_FOLDER), mineProjects);
+    const row = container.querySelector('[data-testid=quick-start-row]')!;
+    expect(row.className).toContain('sticky');
+    // 4941: it sticks at `bottom: -clear` (the shell scroller's own bottom padding, `--shell-launcher-clear`) so its ground reaches the scroller's bottom edge; the card clips (not hidden: that would make the card the scroller)
+    expect(row.className).toContain('bottom-[calc(var(--shell-launcher-clear,0px)*-1)]');
+    expect(row.className).toContain('pb-[calc(0.5rem+var(--shell-launcher-clear,0px))]');
+    expect(row.closest('[data-testid=quick-card]')!.className).toContain('overflow-clip');
+    expect(row.closest('[data-testid=quick-card]')!.className).not.toContain('overflow-hidden');
+    expect(row.parentElement!.lastElementChild).toBe(row); // the card's LAST child: it can stick to the bottom of what scrolls
+    // 4941 (PO · the real 539 window): the stuck row is ONE line — the button and one sentence; the question's whole box stands in the flow just above it
+    expect(row.querySelector('[data-testid=quick-limit]')).toBeNull();
+    expect(row.previousElementSibling).toBe(container.querySelector('[data-testid=quick-limit]'));
+    expect([...row.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['넣고 만들기']);
+    expect(row.querySelector('[data-testid=quick-limit-line]')!.textContent).toBe('무료 플랜은 프로젝트가 하나예요 · Mine 프로젝트에 넣어 만들어요');
+  });
+
+  it('the same sticky last row when the plan has room («만들기»)', async () => {
+    recipesNow = room(null);
+    await mount(frag(NEW_FOLDER), mineProjects);
+    const row2 = container.querySelector('[data-testid=quick-start-row]')!;
+    expect(row2.className).toContain('sticky');
+    expect(row2.parentElement!.lastElementChild).toBe(row2);
+    expect([...row2.querySelectorAll('button')].some((b) => b.textContent === '만들기')).toBe(true);
+  });
+
+  it('a member (not owner/admin) is never shown the question — the not-admin card, no recipes read for them', async () => {
+    recipesNow = room({ limit: 1, existing_project: MINE });
+    await mount(frag(NEW_FOLDER), { ...mineProjects, role: 'member' });
+    expect(container.querySelector('[data-testid=quick-limit]')).toBeNull();
+    expect(calls.some((c) => c.url.endsWith('/api/desktop/recipes'))).toBe(false);
+  });
+
+  // ── story 4941 (PO · the real Mac window, 539 high, 64 px under the shell's scroller): the stuck row is ONE line ──
+  it('[SID:4941] the question\'s whole box (title · body · upgrade link) is NOT in the stuck row; the row is the button + one sentence', async () => {
+    ee.on = true;
+    recipesNow = room({ limit: 1, existing_project: MINE });
+    await mount(frag(NEW_FOLDER), mineProjects);
+    const row = container.querySelector('[data-testid=quick-start-row]')!;
+    const box = container.querySelector('[data-testid=quick-limit]')!;
+    expect(row.contains(box)).toBe(false);
+    expect(box.textContent).toContain('무료 플랜은 프로젝트가 하나예요');
+    expect(box.textContent).toContain('요금제 업그레이드');
+    expect(row.querySelectorAll('button')).toHaveLength(1);
+    expect(row.querySelectorAll('p:not([role=alert])')).toHaveLength(1); // ONE sentence beside the button
+    expect(row.querySelector('p')!.className).toContain('line-clamp-2'); // (never taller than the button: the row stays about 60 px)
+  });
+
+  it('[SID:4941] the one sentence says only what the question already says — what the press does; and when the press is held, why (the box\'s reasons moved here)', async () => {
+    ee.on = true;
+    recipesNow = room({ limit: 1, existing_project: MINE });
+    await mount(frag(NEW_FOLDER), mineProjects);
+    const line = () => container.querySelector('#quick-start-line')!;
+    expect(line().textContent).toBe('무료 플랜은 프로젝트가 하나예요 · Mine 프로젝트에 넣어 만들어요');
+    expect(line().getAttribute('title')).toBe(line().textContent); // (the whole sentence in the tooltip when two lines cut it)
+    const nameEl = container.querySelector('[data-testid=quick-agent-name]') as HTMLInputElement;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(nameEl, ' '); nameEl.dispatchEvent(new Event('input', { bubbles: true })); });
+    expect(line().textContent).toBe('이름을 적으면 만들 수 있어요');
+    expect(buttonOf('넣고 만들기')!.disabled).toBe(true);
+  });
+
+  it('[SID:4941] a failed press says why in the stuck row\'s ONE sentence (red · role alert) — the row never gets a second line that would grow over the fields (codex r1)', async () => {
+    confirmNow = () => new Response(JSON.stringify({ error: { code: 'whatever' } }), { status: 500 });
+    recipesNow = room(null);
+    await mount(frag(NEW_FOLDER), mineProjects);
+    await act(async () => { buttonOf('만들기')!.click(); });
+    for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
+    const row = container.querySelector('[data-testid=quick-start-row]')!;
+    const err = container.querySelector('[data-testid=quick-error]')!;
+    expect(err.textContent).toBe('만들지 못했어요 — 다시 시도해 주세요');
+    expect(row.contains(err)).toBe(true);
+    expect(err.getAttribute('role')).toBe('alert');
+    expect(err.className).toContain('text-destructive');
+    expect(err).toBe(container.querySelector('#quick-start-line'));
+    expect(row.querySelectorAll('p')).toHaveLength(1);
+    expect(row.querySelectorAll('[role=alert]')).toHaveLength(1);
+  });
+
+  it('[SID:4941] the fields the stuck row could still cover come ABOVE it when they take the focus (scroll-margin) — name · role · the folder buttons', async () => {
+    recipesNow = room({ limit: 1, existing_project: MINE });
+    await mount(frag(NEW_FOLDER), mineProjects);
+    for (const sel of ['[data-testid=quick-agent-name]', '[data-testid=quick-agent-role]']) expect(container.querySelector(sel)!.className, sel).toContain('scroll-mb-32');
+    expect(container.querySelector('[data-testid=quick-folder]')!.parentElement!.querySelector('a')!.className).toContain('scroll-mb-32');
+  });
+});

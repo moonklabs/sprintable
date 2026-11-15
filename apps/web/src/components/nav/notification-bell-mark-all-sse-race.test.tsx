@@ -52,9 +52,9 @@ describe('NotificationBell — «모두 읽음» 복구 중 SSE로 온 새 알�
     await act(async () => {
       root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><ToastProvider><NotificationBell /></ToastProvider></NextIntlClientProvider>);
     });
-    await act(async () => { (container.querySelector('button[aria-expanded]') as HTMLButtonElement).click(); });
+    await act(async () => { (document.body.querySelector('button[aria-expanded]') as HTMLButtonElement).click(); });
     await act(async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); });
-    const allRead = () => [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.inbox.markAllRead));
+    const allRead = () => [...document.body.querySelectorAll('button')].find((b) => b.textContent?.includes(koMessages.inbox.markAllRead));
     expect(allRead(), '누르기 전').toBeTruthy();
 
     await act(async () => { allRead()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
@@ -63,8 +63,8 @@ describe('NotificationBell — «모두 읽음» 복구 중 SSE로 온 새 알�
     await act(async () => { rejectPatch(new TypeError('Failed to fetch')); for (let i = 0; i < 10; i++) await Promise.resolve(); });
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
-    expect(container.textContent).toContain('알림 n2');
+    expect(document.body.textContent).toContain('알림 n2');
     expect(allRead(), '새 알림은 안 읽음 — 모두 읽음 버튼이 남는다').toBeTruthy();
-    expect(container.textContent).not.toContain(koMessages.inbox.markAllReadFailed);
+    expect(document.body.textContent).not.toContain(koMessages.inbox.markAllReadFailed);
   });
 });

@@ -15,16 +15,20 @@ import { useRecentDocs } from '@/components/docs/use-recent-docs';
 import { TreeSearchInput } from '@/components/docs/tree-search-input';
 import { DocSearchResults, type DocSearchResult } from '@/components/docs/doc-search-results';
 import { useTreeExpanded } from '@/components/docs/use-tree-expanded';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { CountBadge } from '@/components/ui/count-badge';
+import { Button as DsButton } from '@/components/ds/button';
+import { IconButton } from '@/components/ds/icon-button';
+import { Icon } from '@/components/ds/icon';
+import { Input } from '@/components/ds/input';
+import { CountBadge } from '@/components/ds/count-badge';
+import { SectionHeader } from '@/components/ds/section-header';
+import { Skeleton, SkeletonGroup } from '@/components/ds/skeleton';
 import { useToast } from '@/components/ui/toast';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
-import { ChevronDown, ChevronLeft, ChevronRight, FileText, FolderPlus, Plus, X } from 'lucide-react';
 import { DocsLayoutContext, type Doc, type DocSortMode, type DocUpdate } from './docs-context';
 import { closedDrawerProps, useSwipeDrawer } from '@/lib/use-swipe-drawer';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { newDocUrl, docUrl } from '@/components/docs/lib/doc-project-url';
+import { newUntitledSlug } from '@/components/docs/lib/doc-slug';
 import { fetchWithAuth } from '@/lib/db/client';
 import { isImeComposing } from '@/lib/ime-composition';
 import { DocsTopBarTitle } from '@/components/nav/flat-tab-top-bar';
@@ -50,7 +54,13 @@ interface DocsClientLayoutProps {
 export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: DocsClientLayoutProps) {
   const router = useRouter();
   const params = useParams();
-  const currentSlug = typeof params.slug === 'string' ? params.slug : null;
+  const paramSlug = typeof params.slug === 'string' ? params.slug : null;
+  // story 4952 — a new doc's address moves from `untitled-…` to its own slug WITHOUT a navigation (the editor keeps the person's cursor and the keystrokes they are in the middle of); the route params stay the old ones, so the editor reports the live slug here.
+  // It counts only while the params are the ones it was reported for — a real navigation (another doc, the list) brings new params and the report is ignored.
+  const [liveSlug, setLiveSlug] = useState<{ param: string | null; slug: string } | null>(null);
+  const currentSlug = liveSlug && liveSlug.param === paramSlug ? liveSlug.slug : paramSlug;
+  useEffect(() => { if (liveSlug && liveSlug.param !== paramSlug) setLiveSlug(null); }, [liveSlug, paramSlug]); // dropped as soon as the route changes — a later doc may carry the old name
+  const reportLiveSlug = useCallback((slug: string) => setLiveSlug({ param: paramSlug, slug }), [paramSlug]);
   const t = useTranslations('docs');
   const tc = useTranslations('common');
   const { recentSlugs, pushRecent } = useRecentDocs(projectId);
@@ -167,7 +177,6 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     });
   }, []);
 
-  const [isCreating, setIsCreating] = useState(false);
 
   // story #4385(까디르 codex HIGH · PO 10:07Z) — 트리 요청 세대. 새로 받기(필터 바뀜 · 다시 시도 · 다시 읽기)마다 올리고, 이어 받기는
   // 지금 세대를 싣는다. 응답이 올 때 세대가 바뀌었으면 버린다 — 옛 필터의 늦은 쪽이 새 목록에 붙지 않게.
@@ -230,7 +239,9 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     pushRecent(slug);
     // story a539c649 S2: wsSlug/projSlug 는 layout.tsx 가 항상 보장(notFound() 미보장 시 차단)
     // — #2154 폴백 분기 자체가 불필요해졌다(구조적 소거).
-    router.push(docUrl(wsSlug, projSlug, slug));
+    // story 4892 (UI-9 D1, PO 11-10) — choosing a doc from the list opens it to READ (people open documents to read; 141 of the last 30 days'
+    // documents were made by agents, 0 by people). «고치기» in the detail header is the way to the editor. A NEW doc still opens the editor (handleNewDoc).
+    router.push(`${docUrl(wsSlug, projSlug, slug)}/view`);
     setTreeDrawerOpen(false);
   }, [router, pushRecent, wsSlug, projSlug]);
 
@@ -328,30 +339,15 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     } catch { addToast({ title: t('deleteFailed'), type: 'error' }); await fetchTree(); }
   }, [fetchTree, addToast, t]);
 
-  const createDoc = useCallback(async (parentId: string | null = null) => {
-    if (!projectId || isCreating) return;
-    setIsCreating(true);
-    const slug = `untitled-${Date.now()}`;
-    try {
-      const res = await fetch('/api/docs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, title: t('newDocDefaultTitle'), slug, content: '', content_format: 'markdown', parent_id: parentId }),
-      });
-      if (!res.ok) throw new Error('Failed to create doc');
-      const { data } = await res.json();
-      setTree((prev) => [{ id: data.id, parent_id: data.parent_id || null, title: data.title, slug: data.slug, icon: data.icon || null, sort_order: data.sort_order || 0, is_folder: data.is_folder || false, updated_at: data.updated_at }, ...prev]);
-      // story a539c649 S2 — doc-project-url.ts 헤더 참고(#2154 구조적 소거).
-      router.push(newDocUrl(wsSlug, projSlug, data.slug));
-    } catch {
-      addToast({ title: t('createFailed'), type: 'error' });
-    } finally {
-      setIsCreating(false);
-    }
-  }, [projectId, isCreating, router, addToast, t, wsSlug, projSlug]);
+  // 4910 — «새 문서»는 누르는 순간 서버에 아무것도 만들지 않는다(옛 길은 빈 «제목 없음» 문서를 먼저 만들어, 안 쓰고 나가면 고아로 남았다). 서버에 없는 임시 주소(`untitled-…`)의 초안 화면으로만 가고,
+  // 문서는 편집 화면(`[slug]/page.tsx`)이 첫 «쓴 것»에서 한 번 만든다. «새 문서»를 부르는 모든 길(머리 단추 · 둘째 단추 · 빈 상태 단추 둘 · 트리 «하위 문서»)이 이 함수 하나를 지난다.
+  const createDoc = useCallback((parentId: string | null = null) => {
+    if (!projectId) return;
+    router.push(newDocUrl(wsSlug, projSlug, newUntitledSlug(), parentId));
+  }, [projectId, router, wsSlug, projSlug]);
 
   const handleNewDoc = useCallback(() => { void createDoc(null); }, [createDoc]);
-  const handleAddChild = useCallback((parentId: string) => createDoc(parentId), [createDoc]);
+  const handleAddChild = useCallback(async (parentId: string) => { createDoc(parentId); }, [createDoc]);
 
   // story #1950(prod-에스컬레이트 #43) — createDoc()은 항상 is_folder 없이 "제목 없음" 문서를
   // 만들고 바로 편집기로 보내(제목은 그 화면에서 정함) — 폴더는 컨테이너라 트리 안에 머무는
@@ -429,57 +425,56 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
     () => (
       // story #4277(민 기기 #5) — 402폭에서 «새 폴더» · «새 문서» 글자 버튼이 셸 TopBar의 shrink-0 액션 칸을 넓혀 알림 벨을 화면 밖으로
       // 밀었다. 스프린트 상단바와 같은 관례: 폰(sm 미만)은 아이콘만 · 글자는 sm 이상 · 접근 이름은 aria-label로 늘 유지.
-      <div className="flex items-center gap-1.5">
-        <Button size="sm" variant="ghost" onClick={handleNewFolder} disabled={folderSubmitting} aria-label={t('newFolder')}>
-          <FolderPlus className="h-3.5 w-3.5 sm:mr-1.5" />
+      <div className={cn('flex items-center gap-1.5', !sidebarCollapsed && 'lg:hidden')}>
+        <DsButton variant="quiet" onClick={handleNewFolder} disabled={folderSubmitting} aria-label={t('newFolder')} iconStart={<Icon name="create_new_folder" size={14} />}>
           <span className="hidden sm:inline">{t('newFolder')}</span>
-        </Button>
-        <Button size="sm" variant="outline" onClick={handleNewDoc} disabled={isCreating} aria-label={isCreating ? t('loading') : t('newDoc')}>
-          <Plus className="h-3.5 w-3.5 sm:mr-1.5" />
-          <span className="hidden sm:inline">{isCreating ? t('loading') : t('newDoc')}</span>
-        </Button>
+        </DsButton>
+        <DsButton onClick={handleNewDoc} aria-label={t('newDoc')} iconStart={<Icon name="add" size={14} />}>
+          <span className="hidden sm:inline">{t('newDoc')}</span>
+        </DsButton>
       </div>
     ),
-    [handleNewDoc, isCreating, handleNewFolder, folderSubmitting, t]
+    [handleNewDoc, handleNewFolder, folderSubmitting, t, sidebarCollapsed]
   );
+
+  const listCount = docsHasMore && docsTotal !== null ? docsTotal : tree.length;
 
   const sidebarContent = (
     <>
-      {/* story #2963 §2 — 에디토리얼 마스트헤드(1호 인덱스 축소판). 상태·핸들러 무접촉,
-          형태만 승격 — 6 능력 어디에도 속하지 않는 순수 헤더 삽입.
-          rebase 발견(2026-08-23, #2973/#3391 rebase 중) — railKicker 값이 "지식 · INDEX"
-          (한글+라틴 혼합)인데 font-mono uppercase tracking을 걸어 "지식"까지 mono로
-          흐려지고 있었다(2967 교훈과 동일 결함 클래스, 이 파일의 정렬 토글 라벨과 같은
-          이유로 그때 이미 한 번 고쳐졌던 것을 이 자리는 놓쳤음). sans로 통일 — 계열 대문자
-          표기("INDEX")는 카피 자체가 이미 담당. */}
-      <div className="px-3 pb-1.5 pt-3">
-        <div className="text-micro font-semibold text-muted-foreground">
-          {t('railKicker')}
+      {/* story 4892 (UI-9 목록 열) — 열 머리: 제목 + 새 폴더 · 새 문서(ds). 예전 에디토리얼 마스트헤드(kicker · 큰 제목 · 시그니처 선)는 걷었다.
+          두 동작은 lg(레일이 보일 때)에만 여기 있고, lg 미만은 상단 바가 같은 두 동작을 갖는다 — 한 동작이 한 화면에 한 자리. */}
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-ds-line px-3 touch:h-11 lg:pr-11">
+        {/* story 4892 (UI-9 문서 화면 배치) — 시안 목록 열 머리(«대화 5 · +»)처럼 이름 옆에 개수. 다 받았으면 받은 수(만들기 · 지우기에 늘 맞는다), 상한을 넘겨 «더 보기»가 남은 프로젝트만 서버 총량. 받기 전 · 0건이면 숨김. */}
+        <div className="flex min-w-0 flex-1 items-baseline gap-2">
+          <h2 className="m-0 min-w-0 truncate text-ds-card-title font-semibold text-ds-ink">{t('title')}</h2>
+          {listCount > 0 ? <span data-testid="docs-list-count" className="shrink-0 font-mono text-ds-mono-md text-ds-ink-3">{listCount}</span> : null}
         </div>
-        <div className="mt-0.5 font-editorial-heading text-xl leading-none tracking-[-0.03em] text-foreground">
-          {t('title')}
-        </div>
-        {/* story #2983(유나 확定) — 정적 장식 citron 퇴출(citron=live pulse 신호 전용).
-            시그니처는 무채 두께(3px)·길이로 유지. */}
-        <hr className="mt-2 h-[3px] w-8 border-0 bg-proof-line-strong" />
+        <IconButton icon="create_new_folder" label={t('newFolder')} onClick={handleNewFolder} disabled={folderSubmitting} className="hidden lg:inline-flex" />
+        <DsButton
+          type="button"
+          variant="secondary"
+          iconStart={<Icon name="add" size={14} />}
+          onClick={handleNewDoc}
+          aria-label={t('newDoc')}
+          className="hidden lg:inline-flex"
+        >
+          {t('newDoc')}
+        </DsButton>
       </div>
       <TreeSearchInput
         value={searchQuery}
         onChange={setSearchQuery}
         onClear={() => setSearchQuery('')}
         isSearching={isSearching}
-        matchCount={searchResults.length}
         placeholder={t('searchTree')}
         clearLabel={t('clearSearch')}
-        noResultsLabel={t('searchNoResults')}
-        resultCountLabel={(n) => t('searchResultCount', { count: n })}
       />
       {/* story #1950 — 새 폴더 인라인 폼(팝오버 아님, #1942 결함 클래스 회피). 검색 중이어도
           "새 폴더" 버튼은 항상 접근 가능하므로 isSearching과 무관하게 렌더한다. */}
       {folderCreation ? (
-        <div className="mx-2 mt-1.5 space-y-1.5 rounded-lg border border-border bg-card p-2">
+        <div className="mx-2 mt-1.5 space-y-1.5 rounded-ds-panel border border-ds-line bg-ds-surface p-2">
           {folderCreationParentTitle ? (
-            <p className="truncate text-editorial-meta text-muted-foreground">{t('newFolderTarget', { title: folderCreationParentTitle })}</p>
+            <p className="truncate text-ds-small text-ds-ink-3">{t('newFolderTarget', { title: folderCreationParentTitle })}</p>
           ) : null}
           <Input
             autoFocus
@@ -493,18 +488,18 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             }}
             placeholder={t('newFolderPlaceholder')}
             disabled={folderSubmitting}
-            className="h-auto min-w-0 px-2 py-1.5 lg:text-xs"
+            className="min-w-0"
           />
           {folderCreateError ? (
-            <p className="text-editorial-meta text-destructive" role="alert" aria-live="assertive" aria-atomic="true">{folderCreateError}</p>
+            <p className="text-ds-small text-ds-failed" role="alert" aria-live="assertive" aria-atomic="true">{folderCreateError}</p>
           ) : null}
           <div className="flex items-center justify-end gap-1.5">
-            <Button size="sm" variant="ghost" onClick={cancelCreateFolder} disabled={folderSubmitting}>
+            <DsButton variant="quiet" onClick={cancelCreateFolder} disabled={folderSubmitting}>
               {t('newFolderCancel')}
-            </Button>
-            <Button size="sm" onClick={() => void submitCreateFolder()} disabled={folderSubmitting}>
+            </DsButton>
+            <DsButton variant="primary" onClick={() => void submitCreateFolder()} disabled={folderSubmitting}>
               {t('newFolderConfirm')}
-            </Button>
+            </DsButton>
           </div>
         </div>
       ) : null}
@@ -512,24 +507,18 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           숨긴다(서버 전문검색 결과가 이미 답이라 그룹/트리 뷰 자체가 무의미 — sortMode
           토글과 동일한 판단). */}
       {!isSearching && (
-        <div className="flex border-b border-border/60 px-2 pt-1.5">
+        <div role="group" aria-label={t('viewModeLabel')} className="flex gap-1 border-b border-ds-line px-3 py-2">
           {(['grouped', 'folders'] as const).map((mode) => (
-            <button
+            <DsButton
               key={mode}
               type="button"
               aria-pressed={viewMode === mode}
               onClick={() => setViewMode(mode)}
-              className={cn(
-                // story #2963 §2 — 언더라인 탭(I3 정본, docs-index.tsx 카테고리 탭과 동일 클래스
-                // 조합: border-b-2 border-proof-citron). setViewMode 호출·localStorage 저장은 무변경.
-                'flex-1 border-b-2 px-2 pb-1.5 text-editorial-meta font-semibold transition-colors',
-                viewMode === mode
-                  ? 'border-proof-citron text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
+              variant={viewMode === mode ? 'secondary' : 'quiet'}
+              className="flex-1"
             >
               {mode === 'grouped' ? t('viewModeGrouped') : t('viewModeFolders')}
-            </button>
+            </DsButton>
           ))}
         </div>
       )}
@@ -545,21 +534,18 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           영문 라벨("Manual order" 등)이 한 줄 flex로 넘칠 구조였다 — flex-wrap 추가.
           #2967 교훈(mono+한글=흐림)도 반영해 font-mono 제거(이 라벨도 한글). */}
       {!isSearching && viewMode === 'folders' && (
-        <div role="group" aria-label={t('sortModeLabel')} className="flex flex-wrap items-center gap-x-2.5 gap-y-1 border-b border-border/60 px-3 py-1.5 text-editorial-meta">
-          <span className="text-muted-foreground">{t('sortModeLabel')}</span>
+        <div role="group" aria-label={t('sortModeLabel')} className="flex flex-wrap items-center gap-1 border-b border-ds-line px-3 py-2">
+          <span className="mr-1 text-ds-small text-ds-ink-3">{t('sortModeLabel')}</span>
           {(['manual', 'title', 'updated_at'] as const).map((mode) => (
-            <button
+            <DsButton
               key={mode}
               type="button"
               aria-pressed={sortMode === mode}
               onClick={() => setSortMode(mode)}
-              className={cn(
-                'transition-colors',
-                sortMode === mode ? 'font-bold text-foreground' : 'text-muted-foreground hover:text-foreground',
-              )}
+              variant={sortMode === mode ? 'secondary' : 'quiet'}
             >
               {mode === 'manual' ? t('sortModeManual') : mode === 'title' ? t('sortModeTitle') : t('sortModeUpdatedAt')}
-            </button>
+            </DsButton>
           ))}
         </div>
       )}
@@ -567,20 +553,18 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
         const allTags = [...new Set(tree.flatMap((d) => (d as unknown as { tags?: string[] | null }).tags ?? []))];
         if (allTags.length === 0) return null;
         return (
-          <div className="border-b border-border">
-            <button type="button" onClick={() => setTagsCollapsed((v) => !v)} aria-expanded={!tagsCollapsed} className="flex w-full items-center justify-between px-4 py-1 text-editorial-meta text-muted-foreground hover:text-foreground">
-              <span className="flex items-center gap-1.5">
-                {tagsCollapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
-                {t('tagFilter')}
-                {/* story #3053(2984-S5) — CountBadge(S1, mono+엠보스 inset) 채택,
-                    bg-proof-blue-soft 채움 폐지. */}
-                {tagsCollapsed && selectedTags.length > 0 && (
-                  <CountBadge count={selectedTags.length} />
-                )}
-              </span>
-            </button>
+          // the ds SectionHeader draws its own bottom line; the wrapper adds one only under the open chips (a collapsed heading would show two)
+          <div className={tagsCollapsed ? undefined : 'border-b border-ds-line'}>
+            {/* story 4892 (UI-9 목록 열) — 머리글이 ds SectionHeader: 접기 단추(`aria-expanded`) + 제목 + (접혔고 고른 태그가 있으면) 건수. 접기 상태 · 태그 고르기는 무변경. */}
+            <SectionHeader
+              title={t('tagFilter')}
+              count={tagsCollapsed && selectedTags.length > 0 ? <CountBadge count={selectedTags.length} /> : undefined}
+              collapsed={tagsCollapsed}
+              onToggle={() => setTagsCollapsed((v) => !v)}
+              level={2}
+            />
             {/* story #2963 §2 — collapsible pill 칩. selectedTags state·toggle 로직은 완전
-                무변경. story #7d7634ee(P0) — proof-cut-xs(컷코너) 폐지, proof-surface-press
+                무변경. story #7d7634ee(P0) — proof-cut-xs(컷코너) 폐지, 눌린 표면 재질(이후 4919가 걷음)
                 (재질 언어) 채택. */}
             {!tagsCollapsed && (
               <div className="flex max-h-[120px] flex-wrap gap-1 overflow-y-auto px-4 py-1">
@@ -588,11 +572,11 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
                   // story #3053(2984-S5) — 선택 상태는 subtle 헤어라인 채택, bg-proof-blue-soft
                   // 채움 폐지(비선택 bg-proof-sunk는 무채 중립 배경이라 SHIFT 대상 밖 — S1
                   // 선례와 동형).
-                  <button key={tag} type="button" onClick={() => setSelectedTags((prev) => prev.includes(tag) ? prev.filter((tg) => tg !== tag) : [...prev, tag])} className={`proof-surface proof-surface-press px-2 py-0.5 text-editorial-meta font-semibold transition ${selectedTags.includes(tag) ? 'border border-proof-line bg-transparent text-foreground' : 'bg-proof-sunk text-proof-ink-3 hover:bg-muted'}`}>
+                  <DsButton key={tag} variant={selectedTags.includes(tag) ? 'secondary' : 'quiet'} aria-pressed={selectedTags.includes(tag)} onClick={() => setSelectedTags((prev) => prev.includes(tag) ? prev.filter((tg) => tg !== tag) : [...prev, tag])}>
                     #{tag}
-                  </button>
+                  </DsButton>
                 ))}
-                {selectedTags.length > 0 && <button type="button" onClick={() => setSelectedTags([])} className="text-editorial-meta text-muted-foreground underline hover:text-foreground">{t('clearFilter')}</button>}
+                {selectedTags.length > 0 && <DsButton variant="quiet" onClick={() => setSelectedTags([])}>{t('clearFilter')}</DsButton>}
               </div>
             )}
           </div>
@@ -612,27 +596,23 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             cap={DOC_SEARCH_LIMIT}
           />
         ) : loading ? (
-          <p className="px-2 py-4 text-xs text-muted-foreground">{t('loading')}</p>
+          <SkeletonGroup label={t('loading')} className="space-y-1 px-2 py-3">
+            {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-9" />)}
+          </SkeletonGroup>
         ) : loadError ? (
           // story #3784(유나 짚음) — 오른쪽 DocsIndex가 실패 배너로 갈라졌는데 이 트리가
           // "0건"으로 남으면 한 화면이 두 말을 하는 자리가 그대로 남는다. 같은 키
           // (indexLoadError, "문서 목록")를 쓰되 폭이 좁아 Alert 대신 로딩 문구가 서던
           // 그 자리에 한 줄 + 텍스트 재시도로.
           <div className="px-2 py-4">
-            <p className="text-xs text-muted-foreground">{t('indexLoadError')}</p>
+            <p className="text-ds-small text-ds-ink-3">{t('indexLoadError')}</p>
             {/* 유나 정정(10:01Z) — raw 버튼 요소가 DS 게이트 A(verify-no-new-raw-button)를
                 건드렸다. 이 레일 자리의 정본은 variant="link"(hover 배경 자체가 없음 —
                 content/page.tsx:248 실측 그대로, ghost는 좁은 레일에서 hover 사각형이
                 뜬다). 색은 문구가 아니라 행동에 싣는다(오른쪽 destructive 문구와 대칭). */}
-            <Button
-              type="button"
-              variant="link"
-              size="xs"
-              onClick={() => void fetchTree(selectedTags.length ? selectedTags : undefined)}
-              className="mt-1 h-auto px-0 text-xs"
-            >
+            <DsButton variant="quiet" onClick={() => void fetchTree(selectedTags.length ? selectedTags : undefined)} className="mt-1">
               {tc('retry')}
-            </Button>
+            </DsButton>
           </div>
         ) : tree.length === 0 ? (
           // story #3784(페드루 짚음 09:49Z) — 고를 문서가 0건인데 왼쪽은 "선택하세요"
@@ -641,7 +621,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           // 빈 상태+상단 바에 이미 「새 문서」 둘이 있어 여기까지 셋이면 과함).
           // `selectDoc`은 그대로 둔다 — docs-shell-client.tsx의 "문서는 있는데 미선택"
           // 자리는 이 분기가 아니라 별도 자리다.
-          <p className="px-2 py-4 text-xs text-muted-foreground">{t('emptyTitle')}</p>
+          <p className="px-2 py-4 text-ds-small text-ds-ink-3">{t('emptyTitle')}</p>
         ) : (
           <>
             <RecentsSection
@@ -672,11 +652,11 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             {docsHasMore && (
               <div className="px-2 py-1">
                 {docsTotal !== null && (
-                  <p className="px-2 pb-1 text-center text-editorial-meta text-muted-foreground">{t('treeLoadedOfTotal', { loaded: tree.length, total: docsTotal })}</p>
+                  <p className="px-2 pb-1 text-center text-ds-small text-ds-ink-3">{t('treeLoadedOfTotal', { loaded: tree.length, total: docsTotal })}</p>
                 )}
-                <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground" disabled={docsLoadingMore} onClick={() => { if (!docsNextCursor || docsLoadingMore) return; setDocsLoadingMore(true); void fetchTree(selectedTags.length ? selectedTags : undefined, docsNextCursor); }}>
+                <DsButton variant="quiet" className="w-full" disabled={docsLoadingMore} onClick={() => { if (!docsNextCursor || docsLoadingMore) return; setDocsLoadingMore(true); void fetchTree(selectedTags.length ? selectedTags : undefined, docsNextCursor); }}>
                   {docsLoadingMore ? tc('loading') : tc('loadMore')}
-                </Button>
+                </DsButton>
               </div>
             )}
           </>
@@ -687,7 +667,7 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
 
 
   return (
-    <DocsLayoutContext.Provider value={{ wsSlug, projSlug, projectId, tree, setTree, loading, loadError, handleNewDoc, fetchTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer: openDrawer }}>
+    <DocsLayoutContext.Provider value={{ wsSlug, projSlug, projectId, tree, setTree, loading, loadError, handleNewDoc, fetchTree, pendingDocUpdate, clearPendingDocUpdate, expandFolder, openTreeDrawer: openDrawer, reportLiveSlug }}>
       {/* 근본 재구현(2076 회귀 후속, 유나양 규격) — currentSlug 없음(목록)=켬, 있음(문서 하나)=
           끔. 이 shell은 단일 문서가 화면을 꽉 채우는 구조(목록+본문 동시 2단 아님)라 이 분기가
           맞다(2단 shell이었다면 항상 켜야 함 — 유나양 규격 예외 조항). */}
@@ -712,25 +692,19 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
             flex-wrap으로 고쳤지만, 236px 고정폭 레일 전체에 대한 방어로 overflow-x-hidden도
             동반(다른 미래 콘텐츠의 동일 결함 클래스 재발 방지). */}
         {!sidebarCollapsed && (
-          <aside className="focus-inset relative hidden w-[236px] flex-shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r border-border/80 bg-background lg:flex">
-            <button
-              type="button"
-              onClick={handleToggleSidebar} aria-expanded={!sidebarCollapsed}
-              title={t('hideSidebar')}
-              className="absolute right-2 top-2 z-10 rounded-md border border-border p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <ChevronLeft className="size-4" />
-            </button>
+          /* story 4892 (5533 정정, PO 11-10) — 236px at lg (1024~1279: the reading column keeps its width — 544 at 1100), 300px from xl (≥1280, where 300 still leaves the body 820 at 1440) */
+          <aside className="focus-inset relative hidden w-[236px] flex-shrink-0 flex-col overflow-x-hidden overflow-y-auto border-r border-ds-line bg-ds-background lg:flex xl:w-[300px]">
+            <IconButton icon="chevron_left" label={t('hideSidebar')} aria-expanded={!sidebarCollapsed} onClick={handleToggleSidebar} className="absolute right-1 top-1.5 z-10 touch:top-0" />
             {sidebarContent}
           </aside>
         )}
-        <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
+        <section data-collapsed={sidebarCollapsed ? 'true' : undefined} className="group/docs relative flex min-w-0 flex-1 flex-col overflow-hidden bg-ds-background">
           {/* 박스1: 모바일 칩 띠는 리스트뷰(문서 미선택)서만 노출 — doc 상세는 슬림 헤더 트리 아이콘이
               트리 트리거 대체(중복 빈 띠 제거·문서명은 헤더 제목이 흡수). 리스트뷰는 칩이 유일 트리 접근이라 보존. */}
           {!currentSlug && (
           <div
             className={cn(
-              'flex-shrink-0 flex items-center gap-2 border-b border-border/80 bg-background px-4 py-2 lg:hidden',
+              'flex-shrink-0 flex items-center gap-2 border-b border-ds-line bg-ds-background px-4 py-2 lg:hidden',
               'sticky top-12 z-20 transition-transform',
               '[transition-duration:var(--gnb-hide-duration)]',
               '[transition-timing-function:var(--gnb-hide-easing)]',
@@ -738,23 +712,15 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
               gnbHidden && '-translate-y-[calc(100%+var(--gnb-mobile-height))] focus-within:translate-y-0',
             )}
           >
-            <button type="button" onClick={() => setTreeDrawerOpen(true)} className="flex min-h-[44px] min-w-0 max-w-full items-center gap-2 rounded-lg border border-border px-3 text-sm text-foreground transition-colors hover:bg-accent" aria-label={t('openDocTree')}>
-              <FileText className="size-4 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 truncate font-medium">{currentDocTitle ?? t('title')}</span>
-              <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-            </button>
+            <DsButton variant="secondary" size="lg" onClick={() => setTreeDrawerOpen(true)} aria-label={t('openDocTree')} iconStart={<Icon name="description" size={16} />} className="min-w-0 max-w-full justify-start">
+              <span className="min-w-0 truncate">{currentDocTitle ?? t('title')}</span>
+              <Icon name="expand_more" size={14} className="shrink-0 text-ds-ink-3" />
+            </DsButton>
           </div>
           )}
           {/* Desktop collapsed sidebar open button */}
           {sidebarCollapsed && (
-            <button
-              type="button"
-              onClick={handleToggleSidebar} aria-expanded={!sidebarCollapsed}
-              title={t('openSidebar')}
-              className="absolute left-2 top-2 z-10 hidden rounded-md border border-border p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground lg:block"
-            >
-              <ChevronRight className="size-4" />
-            </button>
+            <IconButton icon="chevron_right" label={t('openSidebar')} aria-expanded={!sidebarCollapsed} onClick={handleToggleSidebar} className="absolute left-1 top-1.5 z-10 hidden touch:top-0 lg:inline-flex" />
           )}
           {children}
         </section>
@@ -777,17 +743,17 @@ export function DocsClientLayout({ children, wsSlug, projSlug, projectId }: Docs
           aria-modal="true"
           aria-label={t('title')}
           // story #3007(로드맵 P2·PR-E, L1) — 모바일 드로어는 floating이라 --elev-overlay.
-          className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden border-r border-border bg-background shadow-[var(--elev-overlay)] outline-none lg:hidden"
+          className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col overflow-hidden border-r border-ds-line bg-ds-background shadow-[var(--elev-overlay)] outline-none lg:hidden"
           style={{
             transform: `translateX(${(drawerProgress - 1) * 100}%)`,
             transition: drawerDragging ? 'none' : 'transform 280ms cubic-bezier(0.4,0,0.2,1)',
           }}
           {...closedDrawerProps(drawerProgress, treeDrawerOpen)}
         >
-          <div className="flex flex-shrink-0 items-center justify-between border-b border-border/80 px-4 py-3">
-            <span className="text-sm font-medium text-foreground">{t('title')}</span>
+          <div className="flex flex-shrink-0 items-center justify-between border-b border-ds-line px-4 py-2">
+            <span className="text-ds-card-title font-semibold text-ds-ink">{t('title')}</span>
             {/* story #3776(1층B) — "닫기", common ns의 기존 close 키 재사용. */}
-            <button type="button" onClick={closeDrawer} className="rounded p-1 text-muted-foreground hover:text-foreground" aria-label={tc('close')}><X className="size-4" /></button>
+            <IconButton icon="close" label={tc('close')} onClick={closeDrawer} />
           </div>
           <div className="focus-inset flex-1 overflow-y-auto">{sidebarContent}</div>
         </div>

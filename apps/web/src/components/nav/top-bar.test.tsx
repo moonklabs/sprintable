@@ -132,3 +132,50 @@ describe('TopBar — story #2683 태블릿 전용 GNB 트리거', () => {
     expect(container.querySelector('[data-slot="sidebar-trigger"]')).toBeNull();
   });
 });
+
+// story 4890 (UI-7 · 폰 머리줄): on a width with a tab bar (<lg) the header row is «chip · title · bell» — the people (팀 현황) and what's-new buttons are drawn only from lg up (their phone place is the first card of «전체»). The classes are what a jsdom can pin (no layout);
+// the real 390 header is measured in the layout spec.
+describe('TopBar — 폰 머리줄은 알림 하나(story 4890)', () => {
+  async function mountWithPresence() {
+    stubViewport(390);
+    const { TopBar } = await import('./top-bar');
+    const { TopBarProvider } = await import('./top-bar-context');
+    const { SidebarProvider } = await import('@/components/ui/sidebar');
+    const { TeamPresenceToggleProvider } = await import('@/components/presence/team-presence-toggle');
+    await act(async () => {
+      root.render(
+        <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
+          <TopBarProvider>
+            <SidebarProvider>
+              <TeamPresenceToggleProvider value={{ toggle: () => {}, workingCount: 2, open: false }}>
+                <TopBar />
+              </TeamPresenceToggleProvider>
+            </SidebarProvider>
+          </TopBarProvider>
+        </NextIntlClientProvider>,
+      );
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  it('the people button sits in a «hidden lg:contents» wrapper; the bell does not (it is on every width)', async () => {
+    await mountWithPresence();
+    const people = container.querySelector(`button[title="${koMessages.presence.panelTitle}"]`)!;
+    expect(people).not.toBeNull();
+    const wrapper = people.parentElement!;
+    expect(wrapper.className.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', 'lg:contents']));
+    const bell = container.querySelector('button[aria-label^="알림"]');
+    expect(bell, 'the bell is drawn').not.toBeNull();
+    expect(bell!.parentElement!.className).not.toContain('hidden');
+  });
+});
+
+// 4913(셸 바탕 PR) — 막대는 쪽 바탕 층(ds-background) 위에 선다: 옛 따뜻한 bg-background를 칠하면 화면 바탕과 색이 어긋나 막대만 다른 색 띠로 보인다.
+describe('TopBar — 쪽 바탕 층(4913)', () => {
+  it('⭐막대 면은 LAYER.page(bg-ds-background)이고 옛 bg-background가 아니다', async () => {
+    await mount(1200);
+    const cls = (container.querySelector('[data-testid="top-bar"]') as HTMLElement).className.split(/\s+/);
+    expect(cls).toContain('bg-ds-background');
+    expect(cls).not.toContain('bg-background');
+  });
+});

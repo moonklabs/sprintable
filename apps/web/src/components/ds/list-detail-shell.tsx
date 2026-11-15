@@ -1,0 +1,61 @@
+'use client';
+
+import type { ReactNode } from 'react';
+import { Panel, PanelBody, PanelContent, PanelHeader } from './panel';
+import { DialogTitle } from './dialog';
+
+/**
+ * story 4909 (UI-R1 AC3) — the home's «list + detail» skeleton as one part, so the inbox's screens stand on the same bones.
+ * Wide (`wide`): the list on the left (360–420px) and the picked row's detail on the right, both on screen at once.
+ * Narrow: the list alone; a tap on a row lifts the detail as a bottom sheet — never both (the wide column is not drawn on a phone, the sheet is not drawn on a desktop).
+ * The caller owns the width decision (`useListDetailWide()` — from 1024px the detail sits beside the list), what is picked and whether the sheet is open: this part only lays them out.
+ */
+export function ListDetailShell({
+  list, detail, wide, detailLabel, sheetHeader, sheetLabel, sheetOpen, onSheetOpenChange, testId = 'list-detail', columnTestId, sheetTestId, fill = false,
+}: {
+  list: ReactNode;
+  detail: ReactNode;
+  wide: boolean;
+  /** the accessible name of the wide detail column */
+  detailLabel: string;
+  /** narrow only — the short text DRAWN in the sheet's header row (default: `detailLabel`). A screen whose card already says that word passes another one (the home's card has a «요청» block of its own) */
+  sheetHeader?: string;
+  /** the accessible name (and the screen-reader title) of the narrow sheet */
+  sheetLabel: string;
+  /** narrow only — the caller passes `false` while nothing is picked, so an empty sheet never opens */
+  sheetOpen: boolean;
+  onSheetOpenChange: (open: boolean) => void;
+  /** `<testId>` on the root; the wide column is `<testId>-detail-column` and the sheet `<testId>-detail-sheet` unless `columnTestId` / `sheetTestId` say otherwise (the home keeps its own ids) */
+  testId?: string;
+  columnTestId?: string;
+  sheetTestId?: string;
+  /**
+   * The FRAME gives the height (wide only): the caller's parent is a column of definite height (the inbox tab body), this shell takes what is left of it (`flex-1 min-h-0`) and each column scrolls inside its own row — no sticky, and no
+   * «100svh − N rem» guess of how much the app's chrome takes (that number was wrong on every frame but one: the pinned action bar fell below a short window). The caller's detail block then fills the column (`lg:h-full lg:overflow-y-auto`).
+   * Off (default): the old page-scroll layout, a sticky column — every screen that does not ask for it stands exactly as before.
+   */
+  fill?: boolean;
+}) {
+  return (
+    <div className={fill ? 'lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)] lg:items-start lg:gap-4' : 'lg:grid lg:grid-cols-[minmax(360px,420px)_minmax(0,1fr)] lg:items-start lg:gap-4'} data-testid={testId}>
+      {list}
+      {wide ? (
+        <aside className={`${fill ? 'min-h-0 lg:h-full' : 'sticky top-4 max-h-[calc(100svh-6rem)]'} empty:hidden`} aria-label={detailLabel} data-testid={columnTestId ?? `${testId}-detail-column`}>
+          {detail}
+        </aside>
+      ) : (
+        <Panel open={sheetOpen} onOpenChange={onSheetOpenChange}>
+          <PanelContent aria-label={sheetLabel} data-testid={sheetTestId ?? `${testId}-detail-sheet`}>
+            {/* story 4938: the header row used to hold only a screen-reader title — an empty bordered band above the card on a phone, and the close (X) floating over the card. It now draws the SHORT generic label (`detailLabel` — «요청» · «결재 상세»), on one line, in the row that already keeps the X's place; the card under it names the row, so the long `sheetLabel` («{title} 자세히») stays the screen-reader title and is not drawn twice */}
+            {/* the row is as tall as the close button's place (8 + 44 → 60): the label and the X share one centre line, and the X sits inside the row, not on the card */}
+            <PanelHeader className="min-h-[3.75rem] justify-center py-0">
+              <DialogTitle className="sr-only">{sheetLabel}</DialogTitle>
+              <span aria-hidden="true" className="block truncate text-ds-small font-medium text-ds-ink-2" data-slot="sheet-header-label">{sheetHeader ?? detailLabel}</span>
+            </PanelHeader>
+            <PanelBody className="p-0">{detail}</PanelBody>
+          </PanelContent>
+        </Panel>
+      )}
+    </div>
+  );
+}

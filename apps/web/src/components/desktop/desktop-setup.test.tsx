@@ -286,13 +286,13 @@ describe('[SID:4427] desktop setup page', () => {
     await setHash(`code=${CODE}&setup=s-1&runtimes=claude`);
     for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
     expect(text()).toContain('에이전트를 이 컴퓨터에서 시작해요');
-    expect(window.location.hash).toBe('');
-    expect(window.location.href).not.toContain(CODE);
+    await vi.waitFor(() => expect(window.location.hash).toBe('')); // state, not a tick count — the same race as the #progress case below
+    await vi.waitFor(() => expect(window.location.href).not.toContain(CODE));
     // a newer code (the app restarted the setup) replaces the older one — «시작» sends the newer code
     const NEWER = `${'Z'.repeat(20)}_-${'y'.repeat(21)}`;
     await setHash(`code=${NEWER}&setup=s-2&runtimes=claude`);
     for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); });
-    expect(window.location.href).not.toContain(NEWER);
+    await vi.waitFor(() => expect(window.location.href).not.toContain(NEWER)); // state, not a tick count
     await act(async () => { startButton().click(); });
     for (let i = 0; i < 4; i++) await act(async () => { await Promise.resolve(); });
     expect((calls.find((c) => c.url.includes('/confirm'))!.body as { code: string }).code).toBe(NEWER);
@@ -1284,7 +1284,7 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
   const polls = () => calls.filter((c) => c.url.includes('/api/desktop/setups/')).length;
   const resultButton = () => [...container.querySelectorAll('a, button')].find((b) => b.textContent === '결과 보기') as HTMLElement;
   // story 4492 — «오늘로 가기»: its destination comes from the one destination module (no literal path)
-  const wayOut = () => [...container.querySelectorAll('a')].find((b) => b.textContent === '오늘로 가기') ?? null;
+  const wayOut = () => [...container.querySelectorAll('a')].find((b) => b.textContent === '홈으로 가기') ?? null;
   // flat links carry the tab's project (useFlatHref) — the same as the page's other flat links
   const TODAY_HREF = `${resolveNavV3Destinations(DEFAULT_NAV_V3_FLAGS).today.path}?p=p-1`;
 
@@ -1662,7 +1662,7 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(text()).toContain('떠나도 설정은 이 컴퓨터에서 이어져요 — 첫 결과는 일감에서 볼 수 있어요.');
     // the way out stays next to «결과 보기» (that one is the main button, first)
     const row = container.querySelector('[data-testid=setup-way-out]');
-    expect([...(row?.querySelectorAll('a, button') ?? [])].map((b) => b.textContent)).toEqual(['결과 보기', '오늘로 가기']);
+    expect([...(row?.querySelectorAll('a, button') ?? [])].map((b) => b.textContent)).toEqual(['결과 보기', '홈으로 가기']);
     const n = polls();
     await tick(10_000);
     expect(polls()).toBe(n); // stops once the result is in
@@ -1687,7 +1687,7 @@ describe('[SID:4427] after «시작» — progress from the setup status (PO 12:
     expect(pair?.getAttribute('href')).toBe('ai.sprintable:/desktop/setup?intent=pair');
     expect(card?.querySelector('[data-testid=setup-phone-member]')).toBeNull();
     // the way out stays as it was, the card after it
-    expect([...(container.querySelector('[data-testid=setup-way-out]')?.querySelectorAll('a, button') ?? [])].map((b) => b.textContent)).toEqual(['결과 보기', '오늘로 가기']);
+    expect([...(container.querySelector('[data-testid=setup-way-out]')?.querySelectorAll('a, button') ?? [])].map((b) => b.textContent)).toEqual(['결과 보기', '홈으로 가기']);
     // a member: the QR block and the band line — no button
     act(() => root.unmount()); root = createRoot(container);
     await mount(<SetupProgressView setupId={SETUP_ID} recipeName="" />, 'member');
@@ -2340,7 +2340,8 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
       window.location.hash = '#progress=s-9';
       await mountNoOrg(<DesktopSetupEntry />);
       await flush();
-      expect(window.location.hash, 'taken off the address').toBe('');
+      // the component takes the fragment off the address once it has handled it — wait for THAT (a fixed number of flush ticks was enough on a quiet machine and failed 1 run of 10 under load)
+      await vi.waitFor(() => expect(window.location.hash, 'taken off the address').toBe(''));
       expect(calls.some((c) => c.url.endsWith('/api/auth/refresh'))).toBe(true);
       expect(text().includes('설정을 마쳤어요'), `ok=${ok}`).toBe(expectCard);
       expect(text()).not.toContain('데스크톱 앱에서 열어 주세요'); // never the «open in the app» card for this address
@@ -2356,8 +2357,9 @@ describe('[SID:4427] (나) no organization yet — «시작» also makes the org
     await mountNoOrg(<DesktopSetupEntry />);
     await setHash('#progress=s-8');
     await flush();
-    expect(window.location.hash).toBe('');
+    // the s-8 setup call only happens once THIS change was handled (a queued event of the loop above cannot satisfy it) — and the handler takes the fragment off the address before it reads it: wait for that call FIRST, then the address
     await vi.waitFor(() => expect(calls.some((c) => c.url.includes('/api/desktop/setups/s-8'))).toBe(true));
+    await vi.waitFor(() => expect(window.location.hash, 'taken off the address').toBe('')); // state, not a tick count (the same race as above — this line was the one that failed)
     expect(text()).not.toContain('데스크톱 앱에서 열어 주세요');
   });
 

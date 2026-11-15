@@ -27,16 +27,17 @@ def _validate_metric_definition(v: dict | None) -> dict | None:
     missing = {"metric", "source", "target", "direction"} - v.keys()
     if missing:
         raise ValueError(f"metric_definition에 필수 키 누락: {missing}")
-    if v["source"] not in _METRIC_SOURCES:
+    # story 4911 — 값이 리스트/객체면 `in frozenset`이 TypeError(unhashable)로 터져 pydantic이 안 감싸고 500이 됐다. 문자열인지 먼저 본다.
+    if not isinstance(v["source"], str) or v["source"] not in _METRIC_SOURCES:
         raise ValueError(f"metric_definition.source must be one of {_METRIC_SOURCES}")
-    if v["direction"] not in _METRIC_DIRECTIONS:
+    if not isinstance(v["direction"], str) or v["direction"] not in _METRIC_DIRECTIONS:
         raise ValueError(f"metric_definition.direction must be one of {_METRIC_DIRECTIONS}")
     # GA4 전용 필드 검증 (E-OUTCOME-LOOP S5)
     if v["source"] == "ga4":
         ga4_missing = {"property_id", "ga4_metric", "date_range_days"} - v.keys()
         if ga4_missing:
             raise ValueError(f"GA4 metric_definition에 필수 키 누락: {ga4_missing}")
-        if v["ga4_metric"] not in _GA4_SUPPORTED_METRICS:
+        if not isinstance(v["ga4_metric"], str) or v["ga4_metric"] not in _GA4_SUPPORTED_METRICS:
             raise ValueError(f"ga4_metric must be one of {_GA4_SUPPORTED_METRICS}")
         if not isinstance(v["date_range_days"], int) or v["date_range_days"] <= 0:
             raise ValueError("date_range_days must be a positive integer")

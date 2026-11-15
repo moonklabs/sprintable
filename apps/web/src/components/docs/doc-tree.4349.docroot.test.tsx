@@ -46,7 +46,7 @@ function mountOnDocument() {
     ), { onRecoverableError: () => {} });
   });
 }
-const trigger = () => Array.from(document.querySelector('[data-doc-id="d1"]')!.parentElement!.querySelectorAll<HTMLElement>(':scope > div[role="button"]')).at(-1)!;
+const trigger = () => document.querySelector('[data-doc-id="d1"]')!.parentElement!.querySelector<HTMLElement>('[data-slot="ds-tree-trailing"] button')!;
 const menu = () => document.querySelector<HTMLElement>('[data-dropdown-panel="doc-tree-menu"]');
 const key = (el: Element, k: string) => {
   const e = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true });

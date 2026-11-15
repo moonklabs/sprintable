@@ -1,15 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { handleListKeys } from '@/lib/list-keys';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { ArrowLeft, Bell, Bot, CheckCheck, ChevronDown, ChevronRight, Inbox as InboxIcon, Info, Zap, ZapOff, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Button as DsButton } from '@/components/ds/button';
 import { TopBarSlot } from '@/components/nav/top-bar-slot';
 import { Badge } from '@/components/ui/badge';
 import { AgentIdentity } from '@/components/ui/agent-identity';
 import { ApprovalsQueue } from '@/components/inbox/approvals-queue';
-import { AgentPermissionRequests } from '@/components/inbox/agent-permission-requests';
 import { AttentionQueueView } from '@/components/attention-queue/attention-queue-view';
 import { useDashboardContext } from '../../dashboard/dashboard-shell';
 import { useToast } from '@/components/ui/toast';
@@ -24,6 +25,7 @@ import { groupByIdenticalContent, referenceTypeLabel } from '@/lib/inbox-generic
 import type { EventPreviewHelpers } from '@/components/chat/event-block-card';
 import { composeNotificationDisplay, type Notification } from './inbox-notification-display';
 import { useOrgDomainLabels } from '@/hooks/use-org-domain-labels';
+import { useEventDefinitionNames } from '@/hooks/use-event-definition-names';
 import { formatAtLeast } from '@/lib/format-at-least';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { InboxTopBarTitle, useInboxTabLabels } from '@/components/nav/flat-tab-top-bar';
@@ -221,8 +223,9 @@ export default function InboxPage() {
   // story #3903 AC2 — composeEventPreviewLine의 domainLabels 재료(org 커스텀 status
   // 라벨 오버라이드). chat-list-view.tsx의 기존 재사용 패턴과 동형.
   const domainLabels = useOrgDomainLabels(orgId, locale);
+  const eventDefinitionName = useEventDefinitionNames(orgId); // story 4921 — the fallback line of an event with no sentence of its own names the event by its definition
   const eventPreviewHelpers: EventPreviewHelpers = {
-    tBoard, tCage, tDashboard, tEventCard, tEntity, tOutcomeLoop, domainLabels,
+    tBoard, tCage, tDashboard, tEventCard, tEntity, tOutcomeLoop, domainLabels, eventDefinitionName,
   };
   const activeTab = searchParams.get('tab') ?? 'notifications';
   // story #2164(2026-07-25, 까심): 예전엔 이 세 탭 중 notifications 탭 라벨과 페이지 헤더가
@@ -530,10 +533,9 @@ export default function InboxPage() {
         actions={
           // story #4277 — 402폭에서 글자 버튼이 셸 TopBar의 shrink-0 액션 칸을 넓혀 상단바가 가로로 넘쳤다(409/402). 스프린트 상단바 관례:
           // 폰은 아이콘만 · 글자는 sm 이상 · 접근 이름은 aria-label로 유지.
-          <Button variant="glass" size="sm" onClick={markAllRead} disabled={unreadCount === 0} aria-label={t('markAllRead')}>
-            <CheckCheck className="size-4 sm:hidden" aria-hidden="true" />
+          <DsButton variant="secondary" onClick={markAllRead} disabled={unreadCount === 0} aria-label={t('markAllRead')} iconStart={<CheckCheck className="size-4 sm:hidden" aria-hidden="true" />}>
             <span className="hidden sm:inline">{t('markAllRead')}</span>
-          </Button>
+          </DsButton>
         }
         showContextChip
       />
@@ -571,9 +573,9 @@ export default function InboxPage() {
             )}
           </div>
         ) : activeTab === 'gates' ? (
-          <div className="flex-1 overflow-y-auto p-4">
-            {/* story #4533 — «에이전트 권한 요청» above the approvals, a group of its own (the web only looks) */}
-            <AgentPermissionRequests />
+          // 4909: a column of definite height (the tab body) — the approvals screen takes what is left of it and its list and detail scroll inside it (wide); narrow keeps the one scrolling page
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4 lg:overflow-hidden">
+            {/* story #4533 — «에이전트 권한 요청» (the web only looks): since 4909 2d-2 it is a section of the approvals list below, read by the list's own reader — not a second block here */}
             <ApprovalsQueue />
           </div>
         ) : (
@@ -633,7 +635,8 @@ export default function InboxPage() {
                 <p className="text-sm text-muted-foreground">{t('noNotifications')}</p>
               </div>
             ) : (
-              inboxSections.map((section) => (
+              <div onKeyDown={(e) => handleListKeys(e, () => undefined)}>{/* story 4954 (the desktop app) — ↑ ↓ (j k) walk the rows (focus only; Enter / Space open as before): the list keys the home · goals · runs lists use */}
+              {inboxSections.map((section) => (
                 <div key={section.label}>
                   {/* 목업 ③: 날짜 section 라벨(calm·NOT uppercase) */}
                   <p className="px-3 pt-3 pb-1 text-editorial-meta font-medium text-muted-foreground">{section.label}</p>
@@ -644,10 +647,10 @@ export default function InboxPage() {
                       if (item.kind === 'group') {
                         const expanded = expandedGroups.has(item.key);
                         return (
-                          <div key={`group-${item.key}`}>
+                          <div key={`group-${item.key}`} data-row-key={`group-${item.key}`}>
                             <div className="relative flex items-stretch transition hover:bg-muted/40">
                               {/* story #2023 ⓑ: 미읽음=L5(시스템 상태), 브랜드 아님 */}
-                              {item.hasUnread ? <span className="absolute left-0 top-0 h-full w-0.5 bg-info" aria-hidden /> : null}
+                              {item.hasUnread ? <span className="absolute left-0 top-0 h-full w-0.5 bg-ds-action" aria-hidden /> : null}
                               <button
                                 type="button"
                                 onClick={() => toggleGroup(item.key)}
@@ -660,6 +663,7 @@ export default function InboxPage() {
                               <button
                                 type="button"
                                 onClick={() => void openGroup(item)}
+                                data-row-focus
                                 className="flex min-w-0 flex-1 items-start gap-3 py-2.5 pr-3 text-left"
                               >
                                 <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-overlay-fill-1 text-muted-foreground">
@@ -677,7 +681,7 @@ export default function InboxPage() {
                                       {/* story #2590(TIER3) — tint 위 계열색 글자는 text-foreground(#2420 규칙). */}
                                       {/* story #0d1c69f3(v2 4호) — generic 그룹은 status_change와 다른 문구(반복
                                           알림 건수일 뿐 "상태 변경" 의미가 아니다)를 쓴다. */}
-                                      <span className="shrink-0 rounded-full border border-info/30 bg-info/10 px-1.5 py-0.5 text-micro font-medium text-foreground">
+                                      <span className="shrink-0 rounded-full border border-ds-action/30 bg-ds-action/10 px-1.5 py-0.5 text-micro font-medium text-foreground">
                                         {/* story #4302(유나 판정) — 묶음 수는 불러온 쪽 안의 수다(전체 아님). 더 불러올 쪽이 남았으면 «48+건».
                                             en 복수형 키는 `+`를 숫자에 못 붙여 형제 키(statusChangeCountAtLeast). */}
                                         {item.groupKind === 'status_change'
@@ -716,13 +720,8 @@ export default function InboxPage() {
                                           {refLabel}
                                         </span>
                                       ) : null}
-                                      {n.reference_id ? (
-                                        <span className="min-w-0 flex-1 truncate font-mono text-micro text-muted-foreground">
-                                          {n.reference_id.slice(0, 8)}
-                                        </span>
-                                      ) : (
-                                        <span className="min-w-0 flex-1 truncate text-foreground">{composeNotificationDisplay(n, t, eventPreviewHelpers).title}</span>
-                                      )}
+                                      {/* story 4921 — the line says WHAT it is in words (the notification's own title), never the first 8 characters of the id it points at */}
+                                      <span className="min-w-0 flex-1 truncate text-foreground">{(() => { const d = composeNotificationDisplay(n, t, eventPreviewHelpers); return d.body ? `${d.title} · ${d.body}` : d.title; })()}</span>
                                       <span className="shrink-0 text-micro text-muted-foreground">{formatTime(n.created_at)}</span>
                                       {n.href ? (
                                         <a
@@ -755,15 +754,15 @@ export default function InboxPage() {
                       // story #3903 AC2 — 렌더 시점 title/body 조합(3888 eventCard 재사용).
                       const display = composeNotificationDisplay(notification, t, eventPreviewHelpers);
                       return (
+                        <div key={notification.id} data-row-key={notification.id}>
                         <button
-                          key={notification.id}
                           type="button"
                           onClick={() => void selectNotification(notification)}
                           aria-current={isSelected ? 'true' : undefined}
                           className={`relative flex w-full items-start gap-3 px-3 py-2.5 text-left transition ${isSelected ? 'bg-accent' : 'hover:bg-muted/40'}`}
                         >
                           {/* 목업 ④: unread=좌측 accent strip(박시 카드 bg 대체). story #2023 ⓑ: L5(시스템 상태), 브랜드 아님 */}
-                          {!notification.is_read ? <span className="absolute left-0 top-0 h-full w-0.5 bg-info" aria-hidden /> : null}
+                          {!notification.is_read ? <span className="absolute left-0 top-0 h-full w-0.5 bg-ds-action" aria-hidden /> : null}
                           <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-overlay-fill-1 text-muted-foreground">
                             <NotifIcon type={notification.type} fallback={Info} className="size-4" />
                           </div>
@@ -788,11 +787,13 @@ export default function InboxPage() {
                             ) : null}
                           </div>
                         </button>
+                        </div>
                       );
                     })}
                   </div>
                 </div>
-              ))
+              ))}
+              </div>
             )}
             {/* story #2195 — hasMore가 참일 때만 노출(서버가 못 줄 때 서 있지 않게). */}
             {!loading && hasMore ? (

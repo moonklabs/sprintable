@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { useTranslations } from 'next-intl';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ds/dialog';
+import { Input } from '@/components/ds/input';
+import { Button } from '@/components/ds/button';
 
 // story #4359 — 문서 트리 «이름 변경»이 브라우저 prompt('Enter new title:')(영어 고정 · 디자인 창 아님)였다. 같은 동작을 디자인 창으로:
 // 열리면 입력에 초점 · Esc = 닫기(Dialog) · 앞뒤 공백만인 이름과 바뀌지 않은 이름은 저장 버튼이 잠김 · Enter = 저장.
@@ -21,11 +21,13 @@ export interface DocRenameDialogProps {
 
 export function DocRenameDialog({ open, currentTitle, onClose, onSubmit, returnFocusRef }: DocRenameDialogProps) {
   const t = useTranslations('docs');
+  // story 4892 (UI-9 문서 트리) — ds Dialog(이름은 제목 id로) · ds Input · ds Button. 동작(열면 전부 선택 · Enter 저장 · 공백/무변경이면 저장 잠김 · 닫힌 뒤 초점은 «⋮»)은 그대로.
+  const titleId = useId();
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent data-testid="doc-rename-dialog" finalFocus={returnFocusRef}>
+      <DialogContent data-testid="doc-rename-dialog" finalFocus={returnFocusRef} aria-labelledby={titleId}>
         <DialogHeader>
-          <DialogTitle>{t('docTreeRename')}</DialogTitle>
+          <DialogTitle id={titleId}>{t('docTreeRename')}</DialogTitle>
         </DialogHeader>
         {open ? <RenameForm key={currentTitle} currentTitle={currentTitle} onClose={onClose} onSubmit={onSubmit} /> : null}
       </DialogContent>
@@ -55,8 +57,8 @@ function RenameForm({ currentTitle, onClose, onSubmit }: Omit<DocRenameDialogPro
         data-testid="doc-rename-input"
       />
       <DialogFooter>
-        <Button variant="ghost" onClick={onClose}>{t('cancel')}</Button>
-        <Button onClick={submit} disabled={!canSave} data-testid="doc-rename-save">{t('save')}</Button>
+        <Button variant="secondary" onClick={onClose}>{t('cancel')}</Button>
+        <Button variant="primary" onClick={submit} disabled={!canSave} data-testid="doc-rename-save">{t('save')}</Button>
       </DialogFooter>
     </>
   );

@@ -49,7 +49,7 @@ function WikiLinkView({ node, editor }: ReactNodeViewProps) {
   const handleClick = useCallback(() => {
     if (!slug) return;
     if (onNavigate) { onNavigate(slug); return; }
-    window.location.href = flatHref(`/docs/${slug}`);
+    window.location.href = flatHref(`/docs/${slug}/view`);   // story 4892 (D1): reads first
   }, [slug, onNavigate, flatHref]);
 
   const isNotFound = exists === false;
@@ -212,6 +212,8 @@ export function createWikiLinkSuggestion(
     char: '[[',
     allowSpaces: true,
     startOfLine: false,
+    // 4914 — 코드 블록 안의 «[[» 는 코드 글자(2차원 배열 `a[[0]]` 등)다 — 위키 링크 팝업을 열지 않는다.
+    allow: ({ state, range }) => !state.doc.resolve(range.from).parent.type.spec.code,
 
     items: async ({ query }) => {
       if (!projectId) return [];

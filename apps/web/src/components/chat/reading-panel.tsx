@@ -83,7 +83,7 @@ export function ReadingPanel({
   const popOne = stack.length > 1 ? () => onNavigateTo(stack.length - 2) : onClose;
 
   return (
-    <div className="flex h-full flex-col overflow-hidden border-l border-border bg-background">
+    <div className="flex h-full flex-col overflow-hidden border-l border-border bg-ds-background">
       {stack.length > 1 && (
         <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 py-1.5">
           {stack.map((item, i) => {

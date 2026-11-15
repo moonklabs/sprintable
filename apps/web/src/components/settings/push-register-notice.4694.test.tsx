@@ -86,12 +86,16 @@ describe('PushRegisterNotice — drawn only when the phone says it failed', () =
     expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(button()?.textContent).toBe(koMessages.common.retry);
     // quiet outline button, normal text colour — not red and not the primary (the section's own primary, if any, stays the primary)
-    expect(button()!.className).toContain('border-border');
-    expect(button()!.className).toContain('min-h-11'); // default size = 44px touch target (the line's only action; shown only in the phone app)
-    expect(button()!.className).not.toContain('h-7');
+    // story 4891: the ds Button's secondary look (the quiet outline on the line-control border) — not the primary, not red
+    expect(button()!.className).toContain('border-ds-line-control');
+    expect(button()!.className).not.toContain('bg-ds-action');
+    // the 44px touch target (the line's only action; shown only in the phone app): the ds Button carries the touch floor (touch:) — the big size, not the 28px one
+    expect(button()!.className).toContain('touch:min-h-ds-touch');
+    expect(button()!.className).toContain('h-ds-control');
+    expect(button()!.className).not.toContain('h-ds-control-sm');
     expect(button()!.className).not.toContain('bg-primary');
-    expect(container.querySelector('p')!.className).toContain('text-foreground');
-    expect(button()!.className).not.toContain('bg-destructive-tint');
+    expect(container.querySelector('p')!.className).toContain('text-ds-ink');
+    expect(button()!.className).not.toContain('bg-ds-failed');
     expect(container.firstElementChild!.className).not.toMatch(/destructive|red/); // the block itself is not red
   });
 
@@ -276,9 +280,13 @@ describe('words and place', () => {
   });
 
   it('the settings page draws it inside the notifications tab (a revert of the page wiring fails here)', () => {
-    const src = readFileSync(join(__dirname, '../../app/(authenticated)/settings/page.tsx'), 'utf8');
+    // story 4891: the notifications tab's body is the NotificationsPane (notifications-pane.tsx) — the page draws the pane inside the tab, and the pane draws the notice
+    const dir = join(__dirname, '../../app/(authenticated)/settings');
+    const src = readFileSync(join(dir, 'page.tsx'), 'utf8');
     const tab = src.slice(src.indexOf('<TabsContent value="notifications">'));
-    expect(tab.slice(0, 1500)).toContain('<PushRegisterNotice />');
-    expect(src).toContain("from '@/components/settings/push-register-notice'");
+    expect(tab.slice(0, 400)).toContain('<NotificationsPane');
+    const pane = readFileSync(join(dir, 'notifications-pane.tsx'), 'utf8');
+    expect(pane).toContain('<PushRegisterNotice />');
+    expect(pane).toContain("from '@/components/settings/push-register-notice'");
   });
 });

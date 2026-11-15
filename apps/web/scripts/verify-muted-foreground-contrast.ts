@@ -8,12 +8,12 @@
  * 6쌍을 globals.css 정의 시점에 재계산해 다시 4.5 밑으로 떨어지면 CI에서 잡는다 — #2420
  * AC3(tint-foreground-contrast)와 같은 검증된 oklch→sRGB 변환을 재사용한다(브라우저 불요).
  */
-import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseOklchToRgba, compositeOver } from '../src/lib/oklch-contrast';
 import { contrastRatio } from '../src/lib/color-contrast';
 import { extractCssVarBlock, resolveCssVarValue } from './verify-tint-foreground-contrast';
+import { readGlobalsCss } from './lib/read-globals-css';
 
 const GLOBALS_CSS_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/app/globals.css');
 const AA_THRESHOLD = 4.5;
@@ -55,7 +55,7 @@ export function computeMutedForegroundContrasts(css: string): MutedForegroundCon
 }
 
 function main(): number {
-  const css = readFileSync(GLOBALS_CSS_PATH, 'utf-8');
+  const css = readGlobalsCss(GLOBALS_CSS_PATH);
   const results = computeMutedForegroundContrasts(css);
 
   console.log(`[story #2480] --muted-foreground × {${BG_VARS.join('·')}} × 테마 2 = ${results.length}쌍`);

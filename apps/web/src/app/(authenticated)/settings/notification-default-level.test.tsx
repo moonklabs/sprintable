@@ -112,8 +112,8 @@ describe('SettingsPage — 기본 알림 레벨 즉시 반영(story #3222)', () 
     await mount(<SettingsPage />);
 
     const mentionsBtn = levelButton('멘션만');
-    // 선택된 버튼엔 bg-primary가 붙는다(원 컴포넌트 조건부 className).
-    expect(mentionsBtn.className).toContain('bg-primary');
+    // 선택된 버튼은 aria-pressed=true(story 4891: 보이는 모양은 ds Button의 primary — 읽히는 값이 정본).
+    expect(mentionsBtn.getAttribute('aria-pressed')).toBe('true');
   });
 
   it('«멘션만» 클릭 → PUT 응답 반영해 화면이 즉시 «멘션만»으로 갱신된다(무반영 회귀가드)', async () => {
@@ -121,7 +121,7 @@ describe('SettingsPage — 기본 알림 레벨 즉시 반영(story #3222)', () 
     await mount(<SettingsPage />);
 
     // 초기값은 all이 선택 표시.
-    expect(levelButton('전체').className).toContain('bg-primary');
+    expect(levelButton('전체').getAttribute('aria-pressed')).toBe('true');
 
     await act(async () => {
       levelButton('멘션만').click();
@@ -129,8 +129,8 @@ describe('SettingsPage — 기본 알림 레벨 즉시 반영(story #3222)', () 
       await Promise.resolve();
     });
 
-    expect(levelButton('멘션만').className).toContain('bg-primary');
-    expect(levelButton('전체').className).not.toContain('bg-primary');
+    expect(levelButton('멘션만').getAttribute('aria-pressed')).toBe('true');
+    expect(levelButton('전체').getAttribute('aria-pressed')).toBe('false');
   });
 });
 

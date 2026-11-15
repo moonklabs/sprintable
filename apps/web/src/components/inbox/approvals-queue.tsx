@@ -7,7 +7,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Radio, RadioGroup } from '@/components/ds/radio';
 import { CheckCircle, ChevronDown, ChevronUp, XCircle } from 'lucide-react';
 import { deriveRiskLevel, usesSignatureFlow, deriveDiffFacts, isDecisionGate, deriveDecisionFacts, isRecipePublishGate, reviewedDraftOf } from '@/components/cage/gate-risk';
 import { gateNeedsAction } from '@/components/cage/gate-evidence';
@@ -31,7 +31,15 @@ import { fetchGateById } from '@/lib/fetch-gate';
 import { buildGateTransitionBody, buildHitlDecisionBody, classifyGateTransitionErrorCode } from '@/lib/gate-decision-payload';
 import { useFlatHref } from '@/hooks/use-flat-href';
 import { useViewerTimeZone } from '@/components/viewer-time-zone';
+import { ListDetailShell } from '@/components/ds/list-detail-shell';
+import { useListSelection, selectNextAfterLeft } from '@/hooks/use-list-selection';
+import { PermissionCard, useAgentPermissionRequests } from '@/components/inbox/agent-permission-requests';
+import { agentOnDevice, permissionLine, requestAge, rowSummary, shownToolName, type PermissionRequest } from '@/lib/agent-permissions';
+import { useListDetailWide } from '@/hooks/use-list-detail-wide';
+import { GateQueueList, type GateQueueMenuItem, type GateQueueRow, type GateQueueSection } from './gate-queue-list';
 import { useTeamTimeZone } from '@/components/team-time-zone';
+import { useToast } from '@/components/ui/toast';
+import { copyTextSafely } from '@/lib/clipboard';
 
 // story #1960(P2-S4) — 결재함 통합 큐. Gate 3종(게이트·문서결재·머지게이트, gate_type/
 // work_item_type discriminator로 단일 Gate 테이블에 자연 수렴 — #1954에서 확定된 스코프
@@ -164,6 +172,10 @@ export function ApprovalsQueue() {
   // story #4082(유나 design CHANGES 2026-09-21) — recipe-detail-view.tsx가 쓰는 같은
   // SSOT(organization 네임스페이스)로 stage/role 낱말을 통일.
   const tOrg = useTranslations('organization');
+  const tCommon = useTranslations('common');
+  const { addToast } = useToast();
+  // story 4950 — «질문 복사» in a row's right-click menu: the row's own title (a decision's title IS its question) goes to the clipboard; a refusal is said in words, never a silent no-op
+  const copyTitle = (title: string) => { void copyTextSafely(title).then((r) => { if (!r.ok) addToast({ type: 'error', title: tCommon('copyFailedSelectManually') }); }); };
   const locale = useLocale();
   const displayTimezone = useViewerTimeZone(); // story #4443 PR2b — the viewer's zone (null until known)
   const router = useRouter();
@@ -194,7 +206,14 @@ export function ApprovalsQueue() {
   // 완료 상태+서명 기록 링크 즉시"가 재조회나 페이지 전환 없이 서야 하기 때문. resolvingIds에
   // id가 있는 동안 버튼이 비활성화되고, 성공하면 이 맵에 값이 생겨 버튼 자체가 사라지므로(아래
   // 렌더 분기) 중복 탭이 두 번째 요청을 만들 수 없다(요청 자체가 안 나감).
-  const [resolvedGates, setResolvedGates] = useState<Record<string, 'approved' | 'rejected'>>({});
+  const [resolvedGates, setResolvedGatesState] = useState<Record<string, 'approved' | 'rejected'>>({});
+  // the decided requests as of THIS moment: a request that finishes reads who else has been decided meanwhile (two requests can be in flight at once), so the value is kept in a ref that is updated
+  // synchronously with every change — a render's closure would still hold the value from when the request was SENT.
+  const resolvedRef = useRef(resolvedGates);
+  const setResolvedGates = (update: (prev: Record<string, 'approved' | 'rejected'>) => Record<string, 'approved' | 'rejected'>) => {
+    resolvedRef.current = update(resolvedRef.current);
+    setResolvedGatesState(resolvedRef.current);
+  };
   const [gateErrors, setGateErrors] = useState<Record<string, string>>({});
   // story #2631 — 오클릭 정정 5분 창. items[]의 gate 객체는 resolveGate() 성공 후에도
   // 갱신되지 않는 스냅샷(status=pending 그대로) — resolver_id/resolved_at을 못 믿으므로
@@ -218,10 +237,53 @@ export function ApprovalsQueue() {
   // 원탭 승인 전에 question/assumption/options 전문을 읽고 안을 골라야 한다. 접기/펼치기는
   // 카드마다 독립(id 키 Set, 다른 상태 추적과 동형). 선택안은 승인 시 note에 실려 영구
   // 기록(resolution_note)된다 — BE 신규 필드 없이 기존 자유텍스트 note로 충분(AC3).
-  const [expandedDecisionIds, setExpandedDecisionIds] = useState<Set<string>>(new Set());
+  // 4909 (선생님 «내용을 열 수가 없어 보지도 못하고 승인» · PO 11-13): a decision request WITH options opens EXPANDED in the detail column (the question · assumption · options are in front of the person before any approval — that is what the fold of 3113 was for), and
+  // the fold stays as it was: this set holds the requests whose state the person TOGGLED away from that start (expanded → folded; a request without options starts folded and toggles open). Approve still waits for a chosen option.
+  const [toggledDecisionIds, setToggledDecisionIds] = useState<Set<string>>(new Set());
   const [selectedOptionByGateId, setSelectedOptionByGateId] = useState<Record<string, string>>({});
+  // 4909 (라) — 서명 창으로 승인해도 «어느 안이었는지»가 메모에 남는다. 한 번에 승인 길은 선택안을 note에 싣는데(위 primaryOnClick) 서명 창 길(고위험 결정 게이트)은
+  // 사유만 실어 고른 안이 어디에도 기록되지 않았다. 안이 있는 결정 게이트면 «선택: …» 줄 + 사유 줄. (반려는 «요청 자체를 반려»라 안을 싣지 않는다 — 한 번에 길과 같은 규칙.)
+  const signatureSelectedOption = signatureGate && isDecisionGate(signatureGate) && (deriveDecisionFacts(signatureGate)?.options.length ?? 0) > 0
+    ? selectedOptionByGateId[signatureGate.id]
+    : undefined;
+
+  // story 4909 (UI-R1 AC3) — the queue as a «list + detail» screen: which row the detail shows, and (narrow) whether its sheet is up.
+  // The rows are the same items as before, in two sections — what needs a hand (decisions · approvals · signatures · HITL) and what is on hold. Nothing is picked for the person but a ROW:
+  // an option is never chosen in advance (the detail opens «not chosen yet» and approve stays off until the person chooses).
+  const wide = useListDetailWide();
+  const [sheetOpen, setSheetOpen] = useState(false);
+  // an approvals list that could not be read in full is never drawn partly (one leg may have answered): the old screen hid it behind the error, and so does this one — the requests below do not depend on it
+  const approvals = loadFailed ? [] : items;
+  const handItems = approvals.filter((it) => isHitl(it) || !isHeld(it));
+  const heldItems = approvals.filter((it) => !isHitl(it) && isHeld(it));
+  // 2d-2 — the «에이전트 권한 요청» section: the SAME hook the standalone group used (one reader on this screen = one SSE subscription + one 15 s clock; the old block on the inbox tab is gone).
+  // The web only looks at these (the phone app answers), so a row here has no menu and deciding one never moves the detail (`advanceAfterDecided` below only walks the approvals).
+  const perm = useAgentPermissionRequests();
+  const tPerm = useTranslations('agentPermissions');
+  const permKeyOf = (r: PermissionRequest) => `perm:${r.id}`;
+  // the requests take part in the pick only once the approvals have loaded: whichever read answered first must not decide the first pick (the first approval comes first whenever there is one)
+  const pickable = loading ? [] : perm.shown;
+  const { selectedKey, select } = useListSelection(
+    [handItems.map((it) => ({ key: it.id })), pickable.map((r) => ({ key: permKeyOf(r) })), heldItems.map((it) => ({ key: it.id }))],
+    handItems[0]?.id ?? heldItems[0]?.id ?? (pickable[0] ? permKeyOf(pickable[0]) : null) ?? null, // an approval (needing a hand, else on hold) always comes before a request
+  );
+  // what the person is looking at right now — read when a request finishes (it may finish after they picked another row)
+  const selectedKeyRef = useRef<string | null>(selectedKey);
+  useEffect(() => { selectedKeyRef.current = selectedKey; });
+  // a request was decided here: if its detail is on screen, the detail moves to the NEXT request of the same section that is still undecided (the decided row stays in the list, marked «승인 완료» / «반려됨»,
+  // and can be picked again for the undo line). Nothing to move to → the detail stays.
+  const sectionsRef = useRef({ hand: handItems, held: heldItems });
+  useEffect(() => { sectionsRef.current = { hand: handItems, held: heldItems }; });
+  const advanceAfterDecided = (id: string) => {
+    if (selectedKeyRef.current !== id) return;
+    // the sections and the decided set as they are NOW (not as they were when the request was sent) — a request that finished a moment ago is not a «next» one
+    const { hand, held } = sectionsRef.current;
+    const section = hand.some((it) => it.id === id) ? hand : held;
+    const next = selectNextAfterLeft(section.filter((it) => it.id === id || !resolvedRef.current[it.id]).map((it) => ({ key: it.id })), id);
+    if (next !== null && next !== id) select(next);
+  };
   const toggleDecisionExpanded = (id: string) => {
-    setExpandedDecisionIds((prev) => {
+    setToggledDecisionIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
@@ -350,6 +412,7 @@ export function ApprovalsQueue() {
   // 승인 후 원래 작업(report-done)이 통과하는지는 사용자 왕복(재시도)으로 확認된다.
   const resolveHitl = async (id: string, status: 'approved' | 'rejected') => {
     setResolvingIds((prev) => new Set(prev).add(id));
+    setGateErrors((prev) => { const next = { ...prev }; delete next[id]; return next; });
     try {
       const res = await fetch(`/api/v1/hitl-requests/${id}`, {
         method: 'PATCH',
@@ -357,6 +420,10 @@ export function ApprovalsQueue() {
         body: JSON.stringify(buildHitlDecisionBody({ status })),
       });
       if (res.ok) setItems((prev) => prev.filter((it) => it.id !== id));
+      // 4909 (다) — 실패(비정상 응답 · 네트워크 예외)가 화면에 아무 말 없이 지나가던 것: 카드에 «처리하지 못했어요» 한 줄을 남기고 카드는 그대로 둔다(다시 누를 수 있게).
+      else setGateErrors((prev) => ({ ...prev, [id]: t('gateTransitionErrorGeneric') }));
+    } catch {
+      setGateErrors((prev) => ({ ...prev, [id]: t('gateTransitionErrorGeneric') }));
     } finally {
       setResolvingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
     }
@@ -399,6 +466,7 @@ export function ApprovalsQueue() {
       if (res.ok) {
         setResolvedGates((prev) => ({ ...prev, [id]: status }));
         setResolvedAtMs((prev) => ({ ...prev, [id]: Date.now() }));
+        advanceAfterDecided(id);
         // story 22affaf2 — 서명 모달을 거친 성공이면 그 자리서 닫는다(다른 gate의 모달을
         // 잘못 닫지 않도록 대상 id 일치 확認).
         setSignatureTargetId((cur) => (cur === id ? null : cur));
@@ -430,40 +498,46 @@ export function ApprovalsQueue() {
         // 승인). 문장은 다음 승인·반려까지 남는다(resolveGate 첫 줄이 지운다).
         if (errorKind === 'draft_changed') void refetchGateRow(id);
       }
+    } catch {
+      // 4909 (다) — fetch 자체가 던진 경우(네트워크)도 같은 줄: 예전엔 try/finally뿐이라 아무 말 없이 «눌렀는데 아무 일도 없는» 화면이었다(서명 창은 error prop으로 같은 문장을 보인다).
+      setGateErrors((prev) => ({ ...prev, [id]: t('gateTransitionErrorGeneric') }));
     } finally {
       setResolvingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
     }
   };
 
-  if (loading) return <p className="text-xs text-muted-foreground">{t('gateInboxLoading')}</p>;
+  if (loading) return <>{perm.offLine}<p className="text-xs text-muted-foreground">{t('gateInboxLoading')}</p></>;
 
   // story #3521(유나 §22-2, PO 確定 2026-09-05) — "없음"보다 먼저 검사한다. leg가 실패했으면
   // items가 비어 있어도 그건 진짜 0건이 아니라 못 불러온 것 — 다른 문구+다시 시도.
-  if (loadFailed) {
+  // 2d-2: permission requests are rows of this list too — they are still drawn when the approvals could not be read (the error block above them) or there are none (no «nothing» block over a list that has rows).
+  const hasPerm = perm.shown.length > 0;
+  const loadErrorBlock = (
+    <div
+      className="rounded-xl border border-dashed border-destructive/30 bg-destructive-tint px-4 py-5 text-center"
+      data-testid="gate-inbox-load-error"
+    >
+      <p className="text-sm text-foreground">{t('gateInboxLoadError')}</p>
+      <Button variant="outline" size="sm" className="mt-2" onClick={loadGates}>
+        {t('gateInboxRetry')}
+      </Button>
+    </div>
+  );
+  if (loadFailed && !hasPerm) return <>{perm.offLine}{loadErrorBlock}</>;
+
+  if (items.length === 0 && !loadFailed && !hasPerm) {
     return (
-      <div
-        className="rounded-xl border border-dashed border-destructive/30 bg-destructive-tint px-4 py-5 text-center"
-        data-testid="gate-inbox-load-error"
-      >
-        <p className="text-sm text-foreground">{t('gateInboxLoadError')}</p>
-        <Button variant="outline" size="sm" className="mt-2" onClick={loadGates}>
-          {t('gateInboxRetry')}
-        </Button>
-      </div>
+      <>
+        {perm.offLine}
+        <div className="rounded-xl border border-dashed border-border bg-muted/20 px-4 py-5 text-center">
+          <p className="text-sm text-muted-foreground">{t('gateInboxEmpty')}</p>
+        </div>
+      </>
     );
   }
 
-  if (items.length === 0) {
-    return (
-      <div className="rounded-xl border border-dashed border-border bg-muted/20 px-4 py-5 text-center">
-        <p className="text-sm text-muted-foreground">{t('gateInboxEmpty')}</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-2">
-      {items.map((item, index) => {
+  // the card of ONE request — everything the old list showed per card (kind · title · facts · options · the action buttons · the failure line · the undo line). It now lives in the detail column.
+  const renderItemCard = (item: GateInboxItem, index: number) => {
         if (isHitl(item)) {
           return (
             <div key={item.id} className="flex flex-col gap-1.5 rounded-xl border border-info/30 bg-info/5 px-4 py-3">
@@ -473,6 +547,16 @@ export function ApprovalsQueue() {
               </div>
               <p className="text-sm text-foreground">{item.title}</p>
               <p className="line-clamp-2 text-editorial-meta text-muted-foreground">{item.prompt}</p>
+              {gateErrors[item.id] ? (
+                <p
+                  className="rounded-lg border border-destructive/30 bg-destructive-tint px-2.5 py-1.5 text-editorial-meta text-foreground"
+                  role="alert"
+                  aria-live="assertive"
+                  data-testid="hitl-resolve-error"
+                >
+                  {t('gateTransitionError', { reason: gateErrors[item.id] })}
+                </p>
+              ) : null}
               {canResolveHitl ? (
                 // story #3592(§17-20 ⑧·§22-18 동형)·story #3606(잔여, 페드루 PO 確定
                 // 2026-09-07) — gateApprove도 gateReject와 같은 자리(같은 map·같은
@@ -522,7 +606,7 @@ export function ApprovalsQueue() {
         // 항상 null이라 title 자리가 해시로만 채워졌다. question이 있으면 그걸 1행 요지로
         // 쓰고(AC1), 해시는 아래 보조 캡션으로 강등(#3038 AC1과 동형 패턴).
         const decisionFacts = isDecisionGate(gate) ? deriveDecisionFacts(gate) : null;
-        const decisionExpanded = expandedDecisionIds.has(gate.id);
+        const decisionExpanded = ((decisionFacts?.options.length ?? 0) > 0) !== toggledDecisionIds.has(gate.id); // starts expanded when it has options (see toggledDecisionIds)
         const gateBody = (
           <>
             <div className="flex w-full flex-wrap items-center gap-1.5">
@@ -614,36 +698,31 @@ export function ApprovalsQueue() {
             <button
               type="button"
               onClick={() => toggleDecisionExpanded(gate.id)} aria-expanded={decisionExpanded}
-              className="mt-1 flex items-center gap-1 text-editorial-meta font-medium text-primary hover:underline"
+              className="mt-1 flex items-center gap-1 text-ds-small font-medium text-ds-action hover:underline"
             >
               {decisionExpanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
               {t(decisionExpanded ? 'decisionCollapse' : 'decisionExpand')}
             </button>
             {decisionExpanded ? (
-              <div className="mt-1.5 space-y-2 rounded-lg border border-border bg-muted/20 p-2.5">
-                <p className="text-xs whitespace-pre-wrap text-foreground">{decisionFacts.question}</p>
+              <div className="mt-1.5 space-y-2 rounded-ds-control border border-ds-line p-2.5">
+                <p className="text-ds-small whitespace-pre-wrap text-ds-ink">{decisionFacts.question}</p>
                 {decisionFacts.assumption ? (
-                  <p className="text-editorial-meta whitespace-pre-wrap text-muted-foreground">
-                    <span className="font-medium text-foreground">{t('decisionAssumptionLabel')}</span> {decisionFacts.assumption}
+                  <p className="text-ds-small whitespace-pre-wrap text-ds-ink-2">
+                    <span className="font-medium text-ds-ink">{t('decisionAssumptionLabel')}</span> {decisionFacts.assumption}
                   </p>
                 ) : null}
                 {decisionFacts.options.length > 0 ? (
                   <div className="space-y-1">
-                    <p className="text-editorial-meta font-medium text-foreground">{t('decisionOptionsLabel')}</p>
+                    <p id={`decision-options-label-${gate.id}`} className="text-ds-small font-medium text-ds-ink">{t('decisionOptionsLabel')}</p>
                     <RadioGroup
+                      aria-labelledby={`decision-options-label-${gate.id}`}
                       name={`decision-option-${gate.id}`}
                       value={selectedOptionByGateId[gate.id] ?? null}
                       onValueChange={(value) => setSelectedOptionByGateId((prev) => ({ ...prev, [gate.id]: String(value) }))}
                       className="gap-1"
                     >
                       {decisionFacts.options.map((option) => (
-                        <label
-                          key={option}
-                          className="flex cursor-pointer items-start gap-1.5 rounded-md p-1 text-editorial-meta text-foreground hover:bg-muted/40"
-                        >
-                          <RadioGroupItem value={option} className="mt-0.5" />
-                          <span>{option}</span>
-                        </label>
+                        <Radio key={option} value={option} label={option} />
                       ))}
                     </RadioGroup>
                   </div>
@@ -661,7 +740,7 @@ export function ApprovalsQueue() {
         if (!inlineResolvable) {
           if (resolved) {
             return (
-              <div key={gate.id} className="rounded-xl border border-border bg-card px-4 py-3">
+              <div key={gate.id} className="rounded-ds-control border border-ds-line bg-ds-surface px-4 py-3">
                 <button
                   type="button"
                   onClick={() => router.push(gateHref(gate))}
@@ -773,7 +852,7 @@ export function ApprovalsQueue() {
         const rejectOnClick = () => setSignatureTargetId(gate.id);
 
         return (
-          <div key={gate.id} className="rounded-xl border border-border bg-card px-4 py-3">
+          <div key={gate.id} className="rounded-ds-control border border-ds-line bg-ds-surface px-4 py-3">
             <button
               type="button"
               onClick={() => router.push(gateHref(gate))}
@@ -805,7 +884,10 @@ export function ApprovalsQueue() {
                 행2=변경요청+보류 각 flex-1. 데스크톱(≥sm)=단일 우측정렬 행, primary 최우측.
                 order 유틸+wrapper의 sm:contents로 DOM은 한 세트만 유지한다(버튼 중복 렌더
                 금지 — 테스트·접근성 트리 둘 다 단일 소스여야 함). */}
-            <div className="mt-2 flex flex-col gap-1.5 border-t border-border pt-2 sm:flex-row sm:items-center sm:justify-end">
+            {/* story 4909 (UI-R1 AC3 step 2b) — the action bar is PINNED to the bottom of the detail column: when the card is taller than the column (a decision with a long question, options, facts)
+                the person scrolls the card and the buttons stay in reach. The select hint rides in the same bar, so «안을 골라야 승인할 수 있어요» is never scrolled away from the button it explains. */}
+            <div className="sticky bottom-0 z-10 -mx-4 -mb-3 mt-2 bg-ds-surface px-4 pb-3" data-testid="gate-detail-actions">
+            <div className="flex flex-col gap-1.5 border-t border-ds-line pt-2 sm:flex-row sm:items-center sm:justify-end">
               {/* story #3592(§17-20 ⑧·§22-18 동형)·story #3606(잔여, 페드루 PO 確定
                   2026-09-07) — primaryLabel(승인류) 버튼도 같은 기존 키로 마감.
                   disabled 중엔 화면이 "..."를 보이므로 label도 그 값 그대로(그때
@@ -853,9 +935,113 @@ export function ApprovalsQueue() {
             {requiresOptionChoice && !selectedOption ? (
               <p className="mt-1.5 text-right text-editorial-meta text-muted-foreground">{t('decisionSelectHint')}</p>
             ) : null}
+            </div>
           </div>
         );
-      })}
+  };
+
+  const onSelectRow = (key: string) => {
+    select(key);
+    if (!wide) setSheetOpen(true);
+  };
+  // the right-click menu of ONE row (Mac / desktop): the actions the detail column's card ALSO has — approve · reject · hold · open the page — never a right-click-only action.
+  // An approval that needs an option NEVER decides from the menu: «승인» picks the row (its detail opens) so the option is chosen there; a signature-flow approval opens the signature dialog, as its button does.
+  // the one title of a gate row (a decision's QUESTION · else its work item's title · else the short id) — the row shows it and «질문 복사 / 제목 복사» copies exactly it
+  const gateTitleOf = (item: GateItem): string => (isDecisionGate(item) ? deriveDecisionFacts(item)?.question : null) ?? item.work_item_summary?.title ?? `#${item.work_item_id.slice(0, 8)}`;
+  const menuFor = (item: GateInboxItem): GateQueueMenuItem[] => {
+    if (isHitl(item)) {
+      if (!canResolveHitl) return []; // an agent account sees no approve / reject here (and gets the browser's own menu)
+      return [
+        { id: 'approve', icon: 'check_circle', label: t('gateApprove'), disabled: resolvingIds.has(item.id), onSelect: () => void resolveHitl(item.id, 'approved') },
+        { id: 'reject', icon: 'cancel', label: t('gateReject'), disabled: resolvingIds.has(item.id), onSelect: () => void resolveHitl(item.id, 'rejected') },
+        { id: 'copy', icon: 'content_copy', label: t('queueMenuCopyTitle'), onSelect: () => copyTitle(item.title) },
+      ];
+    }
+    const gate = item;
+    const open: GateQueueMenuItem = { id: 'open', icon: 'open_in_new', label: t('queueMenuOpen'), onSelect: () => router.push(gateHref(gate)) };
+    const copy: GateQueueMenuItem = { id: 'copy', icon: 'content_copy', label: isDecisionGate(gate) ? t('queueMenuCopyQuestion') : t('queueMenuCopyTitle'), onSelect: () => copyTitle(gateTitleOf(gate)) };
+    if (isHeld(gate) || resolvedGates[gate.id] || !canInlineResolve(gate)) return [open, copy];
+    const decisionFacts = isDecisionGate(gate) ? deriveDecisionFacts(gate) : null;
+    const needsOption = decisionFacts !== null && decisionFacts.options.length > 0;
+    const isSigFlow = usesSignatureFlow(deriveRiskLevel(gate));
+    const opensDraftReview = !isSigFlow && isRecipePublishGate(gate);
+    const blocked = resolvingIds.has(gate.id) || gate.reapproval_required === true;
+    return [
+      needsOption
+        ? { id: 'approve', icon: 'check_circle', label: t('queueMenuApproveChoose'), disabled: blocked, onSelect: () => onSelectRow(gate.id) }
+        : {
+          id: 'approve', icon: 'check_circle', disabled: blocked,
+          label: isSigFlow ? t(sigApproveAndSignLabelKey(gate)) : opensDraftReview ? t('gateReviewDraftToApprove') : t(gateApproveLabelKey(gate)),
+          onSelect: () => { if (isSigFlow || opensDraftReview) setSignatureTargetId(gate.id); else void resolveGate(gate.id, 'approved', null); },
+        },
+      { id: 'reject', icon: 'cancel', label: t('sigReject'), disabled: blocked, onSelect: () => setSignatureTargetId(gate.id) },
+      { id: 'hold', icon: 'pause', label: t('gateDiscussSubmit'), disabled: blocked, onSelect: () => setDiscussTargetId(gate.id) },
+      open,
+      copy,
+    ];
+  };
+
+  const rowOf = (item: GateInboxItem): GateQueueRow => {
+    if (isHitl(item)) return { key: item.id, chip: t('hitlRequestBadge'), title: item.title, subtitle: formatAge(item.created_at, t), menu: menuFor(item) };
+    const done = resolvedGates[item.id];
+    return {
+      key: item.id,
+      chip: gateTypeLabel(tDashboard, item.gate_type),
+      title: gateTitleOf(item),
+      subtitle: [`#${item.work_item_id.slice(0, 8)}`, item.pr_number ? `PR #${item.pr_number}${item.github_check_run_sha ? ` · ${item.github_check_run_sha.slice(0, 7)}` : ''}` : null, formatAge(item.created_at, t)].filter(Boolean).join(' · '),
+      doneLabel: done === 'approved' ? t('queueResolvedApproved') : done === 'rejected' ? t('queueResolvedRejected') : undefined,
+      menu: menuFor(item),
+    };
+  };
+  // a permission request as a row: «에이전트 · 컴퓨터» · the tool (or the line that says it was not read) · when it was asked. No menu — the web only looks.
+  const permRowOf = (r: PermissionRequest): GateQueueRow => ({
+    key: permKeyOf(r),
+    chip: permissionLine(r) === 'unknown' ? tPerm('chipUnknown') : tPerm('chip'),
+    title: agentOnDevice(r.agent_name, r.device_name),
+    // story 4949: the summary (which file · which command) sits between the tool and the age — three alike rows are told apart without opening them
+    subtitle: [shownToolName(r, locale) ?? tPerm('toolUnread'), rowSummary(r), tPerm('asked', requestAge(r, perm.now))].filter((x): x is string => x !== null).join(' · '),
+  });
+  const sections: GateQueueSection[] = [
+    { id: 'hand', title: t('queueSectionHand'), rows: handItems.map(rowOf) },
+    { id: 'perm', title: tPerm('groupTitle'), rows: perm.shown.map(permRowOf) },
+    { id: 'held', title: t('queueSectionHeld'), rows: heldItems.map(rowOf) },
+  ];
+  const selectedItem = approvals.find((it) => it.id === selectedKey) ?? null;
+  const selectedPerm = selectedItem ? null : perm.shown.find((r) => permKeyOf(r) === selectedKey) ?? null;
+  // a double-click on a row opens the request's own page (`/gates/{id}`, the project it belongs to) — the same place the card's click-through button goes; a HITL request has no page
+  const openRow = (key: string) => {
+    const target = approvals.find((it) => it.id === key);
+    if (target && !isHitl(target)) router.push(gateHref(target));
+  };
+  // the detail block: wide → THIS column is the scroller (the pinned action bar sticks to its bottom); narrow → the sheet's own body scrolls, so it stays a plain block and the bar sticks to the sheet's bottom
+  const detailTitle = selectedItem ? rowOf(selectedItem).title : selectedPerm ? permRowOf(selectedPerm).title : '';
+  const sheetLabel = t('queueSheetLabel', { title: detailTitle });
+
+  return (
+    <>
+      {perm.offLine}
+      {loadFailed ? <div className="mb-3">{loadErrorBlock}</div> : null}
+      <ListDetailShell
+        testId="gates-screen"
+        wide={wide}
+        fill
+        list={<GateQueueList sections={sections} selectedKey={selectedKey} onSelect={onSelectRow} onOpen={openRow} />}
+        detail={selectedItem
+          ? <div className="focus-inset space-y-2 lg:h-full lg:overflow-y-auto" data-testid="gate-queue-detail">{renderItemCard(selectedItem, approvals.indexOf(selectedItem))}</div>
+          : selectedPerm
+            ? (
+              // the same card the standalone group drew (phone-app-only buttons, the one read-only line elsewhere) — the stage is in its key so the network question's second card starts fresh
+              <div className="focus-inset space-y-2 lg:h-full lg:overflow-y-auto" data-testid="gate-queue-detail">
+                <PermissionCard key={`${selectedPerm.id}:${selectedPerm.stage ?? 'ask'}`} request={selectedPerm} now={perm.now} phone={perm.phone} auth={perm.auth} stale={perm.stale}
+                  answer={perm.answerFor(selectedPerm)} onAnswer={(decision) => perm.onAnswer(selectedPerm, decision)} />
+              </div>
+            )
+            : <p className="m-0 rounded-ds-control border border-dashed border-ds-line px-4 py-6 text-center text-ds-small text-ds-ink-3">{t('queueDetailEmpty')}</p>}
+        detailLabel={t('queueDetailLabel')}
+        sheetLabel={sheetLabel}
+        sheetOpen={sheetOpen && (selectedItem !== null || selectedPerm !== null)}
+        onSheetOpenChange={setSheetOpen}
+      />
       <GateDiscussDialog
         open={discussTargetId !== null}
         onOpenChange={(open) => { if (!open) setDiscussTargetId(null); }}
@@ -896,7 +1082,12 @@ export function ApprovalsQueue() {
               gate={signatureGate}
               resolving={resolvingIds.has(signatureGate.id)}
               error={gateErrors[signatureGate.id]}
-              onApprove={(reason) => resolveGate(signatureGate.id, 'approved', reason, true)}
+              chosenOption={signatureSelectedOption ?? null}
+              onApprove={(reason) => resolveGate(
+                signatureGate.id, 'approved',
+                signatureSelectedOption ? `${t('decisionSelectedNote', { option: signatureSelectedOption })}${reason ? `\n${reason}` : ''}` : reason,
+                true,
+              )}
               onReject={(reason) => resolveGate(signatureGate.id, 'rejected', reason)}
               // story #4370(까디르 P3) — 창을 닫아도(✕ · 바깥 · Esc) 사유 초안은 남는다. 버릴 보이는 길 = «취소»(초안 지움 + 창 닫기).
               onCancel={() => setSignatureTargetId(null)}
@@ -904,6 +1095,6 @@ export function ApprovalsQueue() {
           ) : null}
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }

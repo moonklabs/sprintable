@@ -94,14 +94,14 @@ export function InsightsBoardMetricCell({ bucket, metric, tContent, tBoard, tCha
     return (
       <span data-testid="insights-board-cell-unscheduled">
         <span>{tContent('insightMetricUnavailableDash')}</span>
-        <span className="ml-1 text-xs text-muted-foreground">{tBoard('insightsBoardBucketUnscheduled')}</span>
+        <span className="ml-1 text-ds-small text-ds-ink-3">{tBoard('insightsBoardBucketUnscheduled')}</span>
       </span>
     );
   }
 
   // (ii) 버킷은 있지만 아직 수집 완료 전(또는 실패/미지원) — 상태 라벨만(명사구).
   if (bucket.status !== 'captured') {
-    const toneClass = DESTRUCTIVE_STATUSES.has(bucket.status) ? 'text-destructive' : 'text-muted-foreground';
+    const toneClass = DESTRUCTIVE_STATUSES.has(bucket.status) ? 'text-ds-failed' : 'text-ds-ink-3';
     return <span className={toneClass} data-testid="insights-board-cell-status">{tContent(STATUS_LABEL_KEYS[bucket.status])}</span>;
   }
 
@@ -125,7 +125,7 @@ export function InsightsBoardMetricCell({ bucket, metric, tContent, tBoard, tCha
     return (
       <span data-testid="insights-board-cell-value-dash">
         <span>{tContent('insightMetricUnavailableDash')}</span>
-        <span className="ml-1 text-xs text-muted-foreground">{reasonNode}</span>
+        <span className="ml-1 text-ds-small text-ds-ink-3">{reasonNode}</span>
       </span>
     );
   }

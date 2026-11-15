@@ -1,19 +1,17 @@
 'use client';
 
 import { useRef } from 'react';
-import { Search, X } from 'lucide-react';
-import { Input } from '@/components/ui/input';
+import { Icon } from '@/components/ds/icon';
+import { IconButton } from '@/components/ds/icon-button';
+import { Input } from '@/components/ds/input';
 
 interface TreeSearchInputProps {
   value: string;
   onChange: (value: string) => void;
   onClear: () => void;
   isSearching: boolean;
-  matchCount: number;
   placeholder: string;
   clearLabel: string;
-  noResultsLabel: string;
-  resultCountLabel: (n: number) => string;
 }
 
 export function TreeSearchInput({
@@ -21,44 +19,35 @@ export function TreeSearchInput({
   onChange,
   onClear,
   isSearching,
-  matchCount,
   placeholder,
   clearLabel,
-  noResultsLabel,
-  resultCountLabel,
 }: TreeSearchInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   return (
     <div className="flex-shrink-0 px-3 pb-2 pt-1">
-      {/* story #2963 §2 — 에디토리얼 검색 필드(hairline border·proof-bg). debounce·API·핸들러
-          무변경, 형태만(shadcn rounded-xl+muted bg → hairline+proof-bg). */}
+      {/* story 4892 (UI-9 목록 열) — 찾기 칸 = ds Input + ds Icon · 지우기 = ds IconButton. debounce · API · 핸들러 무변경, 부품만. */}
       <div className="relative">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+        <Icon name="search" size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ds-ink-3" />
         <Input
           ref={inputRef}
           type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className="h-auto bg-card py-1.5 pl-8 pr-8 dark:bg-card"
+          className="pl-8 pr-9"
         />
         {isSearching && (
-          <button
-            type="button"
+          <IconButton
+            icon="close"
+            label={clearLabel}
             onClick={() => { onClear(); inputRef.current?.focus(); }}
-            aria-label={clearLabel}
-            className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <X className="size-3.5" />
-          </button>
+            className="absolute right-1 top-1/2 -translate-y-1/2"
+          />
         )}
       </div>
-      {isSearching && (
-        <p className="mt-1 px-1 text-editorial-meta text-muted-foreground">
-          {matchCount === 0 ? noResultsLabel : resultCountLabel(matchCount)}
-        </p>
-      )}
+      {/* story 4892 (UI-9 문서 트리) — 개수 줄 «N개 문서 일치» · «검색 결과가 없어요»는 이 칸 아래에도, 결과 목록 맨 위(DocSearchResults)에도 있어 한 화면에 두 번 보였다(결과를 기다리는 동안에도
+          «없음»이 먼저 떴다). 결과 쪽이 답을 아는 자리라 여기 것을 걷는다 — 한 번만. */}
     </div>
   );
 }

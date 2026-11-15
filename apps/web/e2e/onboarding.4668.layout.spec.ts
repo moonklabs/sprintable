@@ -18,6 +18,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { Plugin } from 'esbuild';
 import { compile, optimize } from '@tailwindcss/node';
 import { layoutStubPlugin } from './support/layout-stubs';
+import { tailwindCandidates } from './support/tailwind-candidates';
 
 const req = createRequire(__filename);
 const WEB = path.join(__dirname, '..');
@@ -63,7 +64,7 @@ async function build() {
     plugins: [onboardingStubPlugin(), layoutStubPlugin()],
   });
   const js = out.outputFiles[0]!.text;
-  const candidates = [...new Set([...js.matchAll(/"([^"\n]+)"/g)].flatMap((m) => m[1]!.split(/\s+/)).filter(Boolean))];
+  const candidates = tailwindCandidates(js);
   const compiler = await compile(readFileSync(path.join(APP, 'globals.css'), 'utf8'), { base: APP, onDependency: () => {} });
   const css = (optimize as unknown as (c: string, o?: object) => { code: string })(compiler.build(candidates), { minify: false }).code;
   built = { js, css };
@@ -161,14 +162,16 @@ for (const width of [1440, 390]) {
       await toFirst(page);
       await expect(stepOf(page)).toHaveCount(0); // no progress strip on the first screen
       // the one primary control is the card's [Mac 앱 받기]; the web way is a CLOSED fold (story 4766) and an installed app is opened, not downloaded
-      const primaries = page.locator('a[class*="bg-primary"], button[class*="bg-primary"]');
+      const primaries = page.locator('a[class~="bg-ds-action"], button[class~="bg-ds-action"]');
       await expect(primaries).toHaveCount(1);
       await expect(primaries.first()).toHaveAttribute('data-testid', 'desktop-download-button');
       await expect(primaries.first()).toHaveText('Mac 앱 받기');
-      await expect(page.getByTestId('onboarding-first-org')).toHaveText('송윤재의 조직에서 시작해요 · 이름은 설정에서 바꿀 수 있어요');
+      // story 4891: which organization the app attaches to stays — as «시작 조직 [이름 칩]», not a sentence
+      await expect(page.getByTestId('onboarding-first-org')).toHaveText('시작 조직 송윤재의 조직');
+      await expect(page.getByTestId('onboarding-first-org').locator('[data-slot="ds-chip"]')).toHaveText('송윤재의 조직');
       await expect(page.locator('input[type="radio"]')).toHaveCount(0);
       await expect(page.getByTestId('onboarding-first-advanced')).toHaveJSProperty('open', false);
-      await expect(page.getByTestId('onboarding-first-advanced-summary')).toHaveText('고급 — 앱 없이, 이미 쓰는 Claude Code · Codex 연결');
+      await expect(page.getByTestId('onboarding-first-advanced-summary')).toHaveText('고급');
       await expect(page.getByTestId('onboarding-first-open-app')).toHaveText('앱 열기');
       await fitsViewport(page, width);
       await shot(page, card(page), `4715-1-first-mac-${tag}`);
@@ -248,3 +251,69 @@ for (const width of [1440, 390]) {
     });
   }
 }
+
+// ── story 4891 (PO 11-11) · the first screen on a phone: every press ≥ 44 (also inside the opened «고급» fold and after the one press), text ≥ 12 px, no old (non-ds) part, nothing sideways ─────────────────────────────────────
+const measureFirst = (page: Page) => page.evaluate(() => {
+  const shown = (e: Element) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden' && !e.closest('[aria-hidden="true"]') && (e as HTMLElement & { checkVisibility?: () => boolean }).checkVisibility?.() !== false; };
+  const presses = [...document.querySelectorAll('button, a[href], input, select, summary, textarea')].filter(shown);
+  const small = presses.filter((e) => { const r = e.getBoundingClientRect(); return r.width < 43.5 || r.height < 43.5; }).map((e) => `${(e.getAttribute('data-testid') || e.getAttribute('aria-label') || e.textContent || e.tagName).trim().slice(0, 24)} ${Math.round(e.getBoundingClientRect().width)}x${Math.round(e.getBoundingClientRect().height)}`);
+  const leaves = [...document.querySelectorAll('body *')].filter((e) => e.children.length === 0 && (e.textContent || '').trim() && shown(e) && !e.closest('[data-slot="ds-chip"]')); // named exemption: the ds Chip («시작 조직» name) is 11 px by its UI-3 spec — a label, not reading text
+  const tiny = leaves.filter((e) => parseFloat(getComputedStyle(e).fontSize) < 12).map((e) => `${(e.textContent || '').trim().slice(0, 20)} ${getComputedStyle(e).fontSize}`);
+  // named exemption: the read-only textarea (the copy-failed fallback) has no ds twin
+  const oldSlots = [...document.querySelectorAll('[data-slot]')].map((e) => e.getAttribute('data-slot')!).filter((s) => !s.startsWith('ds-') && s !== 'textarea');
+  return { presses: presses.length, small, tiny, oldSlots, overflowX: document.documentElement.scrollWidth > innerWidth + 1 };
+});
+async function expectFirstClean(page: Page, label: string) {
+  const m = await measureFirst(page);
+  expect(m.small, `${label}: presses under 44 px: ${m.small.join(' · ')}`).toEqual([]);
+  expect(m.tiny, `${label}: text under 12 px: ${m.tiny.join(' · ')}`).toEqual([]);
+  expect(m.oldSlots, `${label}: old (non-ds) parts drawn`).toEqual([]);
+  expect(m.overflowX, `${label}: overflow`).toBe(false);
+  return m;
+}
+
+test.describe('the first screen on a touch phone (390 × 844) — story 4891', () => {
+  test.use({ hasTouch: true, isMobile: true });
+
+  test('a Mac: [Mac 앱 받기] · «앱 열기» · «고급» · the way out are all ≥44 (the fold closed)', async ({ page }) => {
+    await open(page, { width: 390, theme: 'L' });
+    await toFirst(page);
+    // the card's download button comes with the manifest answer (an async read) — measure after it is drawn (a slower runner counted the page before it, 2 presses)
+    await expect(page.getByTestId('desktop-download-button')).toBeVisible();
+    const m = await expectFirstClean(page, 'mac · closed');
+    expect(m.presses).toBeGreaterThanOrEqual(4);
+    for (const id of ['desktop-download-button', 'onboarding-first-open-app', 'onboarding-first-advanced-summary', 'onboarding-first-finish']) {
+      const box = await page.getByTestId(id).boundingBox();
+      expect(box!.height, `${id} is a 44 press`).toBeGreaterThanOrEqual(43.5);
+    }
+  });
+
+  test('a Mac: the «고급» fold opened — the program lines\' [복사] ×2 and the one press are ≥44', async ({ page }) => {
+    await open(page, { width: 390, theme: 'L' });
+    await toFirst(page);
+    await expect(page.getByTestId('desktop-download-button')).toBeVisible();
+    await page.getByTestId('onboarding-first-advanced-summary').tap();
+    await page.getByTestId('advanced-make').waitFor();
+    const m = await expectFirstClean(page, 'mac · fold open');
+    expect(m.presses).toBeGreaterThanOrEqual(7); // + [복사] ×2 + the one press inside the fold
+  });
+
+  test('a Mac: after the one press — runtime chips · [복사] · [키 폐기] · [첫 지시] · the way out are ≥44', async ({ page }) => {
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'http://preview.test' });
+    await open(page, { width: 390, theme: 'L' });
+    await toFirst(page);
+    await expect(page.getByTestId('desktop-download-button')).toBeVisible();
+    await page.getByTestId('onboarding-first-advanced-summary').tap();
+    await page.getByTestId('advanced-make').tap();
+    await expect(page.getByTestId('advanced-line')).toBeVisible();
+    const m = await expectFirstClean(page, 'mac · the line shown');
+    expect(m.presses).toBeGreaterThanOrEqual(10);
+  });
+
+  test('not a Mac: the web way stands unfolded and every press is ≥44', async ({ page }) => {
+    await open(page, { width: 390, theme: 'L', mac: false });
+    await toFirst(page, false);
+    await expect(page.getByTestId('advanced-make')).toBeVisible();
+    await expectFirstClean(page, 'not a mac');
+  });
+});

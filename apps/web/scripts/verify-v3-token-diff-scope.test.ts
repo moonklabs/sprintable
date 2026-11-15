@@ -6,7 +6,7 @@
  * 그 판정을 고정한다((a)는 옛 로직으로 되돌리면 RED).
  */
 import { describe, expect, it } from 'vitest';
-import { classifyDiffScope, countProofTokenLineChanges, isPromotionBaseRef } from './verify-v3-token-diff-scope';
+import { classifyDiffScope, countProofTokenLineChanges, isDsReferenceMigration, isPromotionBaseRef } from './verify-v3-token-diff-scope';
 
 const TARGET_FILE = 'apps/web/src/app/globals.css';
 
@@ -103,5 +103,24 @@ describe('countProofTokenLineChanges', () => {
 
   it('빈 배열(변경 없음)은 0', () => {
     expect(countProofTokenLineChanges([])).toBe(0);
+  });
+});
+
+// story 4919(UI-R6) — --proof-*를 ds 토큰 참조로 잇는 PR은 hex 토큰 교체 PR(3826)이 아니라서 이 울타리 대상 밖이다.
+describe('isDsReferenceMigration — ds 참조로 잇는 PR은 울타리 대상 밖(story 4919)', () => {
+  it('추가된 --proof-* 값 줄이 전부 var(--ds-*) 참조이면 true(옛 hex를 지우는 - 줄은 무관)', () => {
+    const patch = ['--- a/globals.css', '+++ b/globals.css', '@@ -1,2 +1,2 @@', '-  --proof-bg: #F7F6F3;', '+  --proof-bg: var(--ds-background);', '-  --proof-ink: #1D1C1A;', '+  --proof-ink: var(--ds-ink);'].join('\n');
+    expect(isDsReferenceMigration(patch)).toBe(true);
+  });
+  it('hex 값을 새로 쓰는 --proof-* 줄이 하나라도 섞이면 false — 여전히 토큰 교체 PR이다(울타리가 산다)', () => {
+    const patch = ['@@ -1,2 +1,2 @@', '+  --proof-bg: var(--ds-background);', '+  --proof-ink: #111111;'].join('\n');
+    expect(isDsReferenceMigration(patch)).toBe(false);
+  });
+  it('추가된 --proof-* 줄이 없으면(주석 · 별칭만 바뀜) false', () => {
+    expect(isDsReferenceMigration(['@@ -1 +1 @@', '-  --background: var(--proof-bg);', '+  --background: var(--ds-background);'].join('\n'))).toBe(false);
+  });
+  it('var(--ds-…) 말고 다른 var 참조 · color-mix 안에 hex를 숨긴 줄은 인정하지 않는다', () => {
+    expect(isDsReferenceMigration('+  --proof-bg: var(--other);')).toBe(false);
+    expect(isDsReferenceMigration('+  --proof-bg: color-mix(in oklch, #ffffff 50%, #000000);')).toBe(false);
   });
 });

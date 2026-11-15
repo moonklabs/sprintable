@@ -13,6 +13,8 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
+
 _ROOT = Path(__file__).resolve().parents[2]
 SHEET = (_ROOT / "deploy/vm/REMOVALS-prod.md").read_text()
 CUTOVER = (_ROOT / "deploy/vm/CUTOVER-prod.md").read_text()
@@ -358,6 +360,8 @@ def test_the_takeover_step_has_the_realtime_host_line_and_the_declaration_names_
     assert CUTOVER.count("dns-before-cutover.json") >= 2, "the record file it names the shape of is written by step 3 of the sheet"
 
 
+# a start of gcloud on a crowded runner took over 30 s by itself (measured over 40 CI runs: the first gcloud test of each shard took 13-44 s, the same test 5 s when it was not first), so the suite's 30 s is no budget for it
+@pytest.mark.timeout(120)   # a hang bound, not a budget (tests/_real_gcloud.py)
 def test_the_buckets_lose_the_legacy_project_viewer_roles_in_the_runbook_and_the_real_gcloud_takes_the_lines(tmp_path: Path) -> None:
     sec = RUNBOOK.split("## 1. Buckets")[1].split("## 2.")[0]
     block = [b for b in re.findall(r"```(?:bash)?\n(.*?)```", sec, flags=re.S) if "remove-iam-policy-binding" in b][0]

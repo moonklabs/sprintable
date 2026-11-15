@@ -282,6 +282,18 @@ describe('proxy', () => {
     expect(loc).not.toContain('reason=session_expired');
   });
 
+  it('[SID:4936] a logged-out link whose path hides a control character (`/%09/evil.com` · `/%0A/…`) is sent to the sign-in WITHOUT a `next` — the address is no internal path (measured on dev: it used to ride along, and the login page then left the app with it)', async () => {
+    for (const hostile of ['/%09/evil.com', '/%0A/evil.com', '/%0D/evil.com', '/%2509/evil.com', '/%2e%2e//evil.com']) {
+      const response = await middleware(makeRequest(hostile));
+      expect(response.status, hostile).toBe(307);
+      const loc = new URL(response.headers.get('location') ?? '');
+      expect(loc.pathname, hostile).toBe('/login');
+      expect(loc.searchParams.has('next'), hostile).toBe(false);
+    }
+    const ordinary = new URL((await middleware(makeRequest('/flow'))).headers.get('location') ?? '');
+    expect(ordinary.searchParams.get('next')).toBe('/flow'); // an ordinary path still comes back after the sign-in
+  });
+
   it('[SID:4427] the desktop setup request carries no code to the server; the login round trip returns to the setup page (PO 09:45Z)', async () => {
     // 앱은 설정 값을 `#` 뒤로 넘긴다 — 브라우저는 fragment를 서버로 보내지 않으므로 서버가 받는 요청은 경로뿐이다.
     const code = `${'A'.repeat(20)}_-${'b'.repeat(21)}`;
@@ -352,7 +364,7 @@ describe('proxy', () => {
   it('일시 장애(503 — rate-limit이나 콜드스타트 등)에서는 sp_at/sp_rt를 지우지 않는다 — 진짜 401이 아니므로(story #2124 ㉯)', async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: { code: 'SERVICE_UNAVAILABLE' } }) });
     const response = await middleware(makeRequest('/dashboard', { sp_rt: 'still-valid-rt-503' }));
-    expect(response.status).toBe(307); // 이 요청 자체는 여전히 미인증 처리(로그인으로) — 다만 쿠키는 살아남는다
+    expect(response.status).toBe(307); // 문서 읽기가 아닌 요청(Accept 없음)은 예전 답 그대로 — 이 요청 자체는 미인증 처리(로그인으로), 다만 쿠키는 살아남는다. 문서 읽기 · 클라이언트 이동은 story 4915 PR 2: 아래 describe(공개 «다시 시도» 페이지로 rewrite)
     const setCookie = response.headers.get('set-cookie') ?? '';
     expect(setCookie).not.toContain('sp_rt=;');
     expect(setCookie).not.toContain('sp_at=;');
@@ -366,6 +378,90 @@ describe('proxy', () => {
     const setCookie = response.headers.get('set-cookie') ?? '';
     expect(setCookie).not.toContain('sp_rt=;');
     expect(setCookie).not.toContain('sp_at=;');
+  });
+
+  // story 4915 (PR 2) — «refresh 호출을 확인 못 함»(거절 · 시간 초과 · 5xx)은 로그아웃이 아니다. sp_at이 만료돼 refresh가 불리는 순간(약 1시간마다)에 교체 창 · 느린 응답이 겹쳐도 살아 있는 세션을 두고 로그인 화면으로 안 보낸다.
+  // 그리고 «그대로 통과»도 아니다(codex 1판 HIGH: 프록시 리다이렉트에만 기대는 핸들러 — /desktop/downloads/macos.json — 가 세션 없이 열림): 공개 «다시 시도» 페이지로 REWRITE(주소 그대로 · 쿠키 그대로).
+  describe('story 4915 — an unconfirmed refresh is not a sign-out, and not a pass-through either', () => {
+    const REWRITE = 'x-middleware-rewrite';
+    const NEXT = 'x-middleware-next';
+    const failing: Array<[string, () => void]> = [
+      ['refresh answers 503', () => mockFetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({}) })],
+      ['refresh answers 502 (a deploy window)', () => mockFetch.mockResolvedValue({ ok: false, status: 502, json: async () => ({}) })],
+      ['refresh is rejected (ECONNRESET)', () => mockFetch.mockRejectedValue(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } }))],
+      ['refresh is refused (ECONNREFUSED)', () => mockFetch.mockRejectedValue(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }))],
+    ];
+    const DOC = { accept: 'text/html,application/xhtml+xml', 'sec-fetch-dest': 'document' };
+
+    it.each(failing)('an EXPIRED sp_at + a live sp_rt, %s → a page load is REWRITTEN to the public «다시 시도» page: no /login, cookies untouched, not cached', async (_name, arrange) => {
+      arrange();
+      const expired = await makeAccessToken({ exp: Math.floor(Date.now() / 1000) - 3600 });
+      const response = await middleware(makeRequestWithHeaders('/chats', DOC, { sp_at: expired, sp_rt: 'live-rt' }));
+      expect(response.status).toBe(200);
+      expect(response.headers.get('location')).toBeNull();
+      expect(response.headers.get(REWRITE)).toBe('https://app.example.com/session-unconfirmed'); // the query is not carried
+      expect(response.headers.get(NEXT)).toBeNull();
+      expect(response.headers.get('cache-control')).toContain('no-store');
+      expect(response.headers.get('set-cookie') ?? '').not.toMatch(/sp_(at|rt)=;/);
+    });
+
+    it('⭐ NOT a pass-through: a handler that does no session check of its own and relies on the proxy (the card\'s /desktop/downloads/macos.json) is never reached without a session', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({}) });
+      for (const headers of [DOC, { rsc: '1' }, {}] as Array<Record<string, string>>) {
+        const response = await middleware(makeRequestWithHeaders('/desktop/downloads/macos.json', headers, { sp_rt: 'live-rt' }));
+        expect(response.headers.get(NEXT)).toBeNull(); // never «continue to the handler»
+      }
+    });
+
+    it('a flat legacy address (/glance · /board) is also answered by the page, not a Next 404 (the rewrite comes before the address resolution)', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({}) });
+      for (const p of ['/glance', '/board', '/docs']) {
+        const response = await middleware(makeRequestWithHeaders(p, DOC, { sp_rt: 'live-rt' }));
+        expect([p, response.headers.get(REWRITE)]).toEqual([p, 'https://app.example.com/session-unconfirmed']);
+      }
+    });
+
+    it('a Next RSC fetch (client navigation) gets the page too — however it shows itself to the proxy: the `RSC` header (hand-made requests), `Accept: text/x-component` or the `_rsc` parameter (what a REAL Next server passes: the `RSC` header is not visible there, measured); a PREFETCH and a plain fetch keep the old answer (the sign-in redirect) — nothing is cached as a «retry» screen', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({}) });
+      for (const [path, headers] of [
+        ['/chats', { rsc: '1', accept: 'text/x-component' }],
+        ['/chats', { accept: 'text/x-component' }],
+        ['/chats?_rsc=abc12', { accept: '*/*' }],
+        ['/chats', { rsc: '1' }],
+      ] as Array<[string, Record<string, string>]>) {
+        const rsc = await middleware(makeRequestWithHeaders(path, headers, { sp_rt: 'live-rt' }));
+        expect([path, JSON.stringify(headers), rsc.headers.get(REWRITE)]).toEqual([path, JSON.stringify(headers), 'https://app.example.com/session-unconfirmed']);
+      }
+      const prefetch = await middleware(makeRequestWithHeaders('/chats', { rsc: '1', 'next-router-prefetch': '1', accept: 'text/x-component' }, { sp_rt: 'live-rt' }));
+      expect(prefetch.status).toBe(307);
+      expect(prefetch.headers.get('location')).toContain('/login');
+      const plainFetch = await middleware(makeRequestWithHeaders('/chats', { accept: '*/*' }, { sp_rt: 'live-rt' }));
+      expect(plainFetch.status).toBe(307);
+    });
+
+    it('an API request stays untouched whatever it asks for (a page-like Accept · an RSC header — no rewrite, no redirect: the route authenticates itself, as before)', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 503, json: async () => ({}) });
+      for (const headers of [{}, DOC, { rsc: '1' }] as Array<Record<string, string>>) {
+        const response = await middleware(makeRequestWithHeaders('/api/v2/stories?limit=1', headers, { sp_rt: 'live-rt' }));
+        expect([JSON.stringify(headers), response.headers.get(REWRITE), response.headers.get('location')]).toEqual([JSON.stringify(headers), null, null]);
+      }
+    });
+
+    it('a DEAD token (401) is still the sign-in with the cookies cleared — only «not confirmed» changed (no sp_at at all, AND an expired sp_at: both refresh call sites)', async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: { code: 'TOKEN_REVOKED' } }) });
+      const expired = await makeAccessToken({ exp: Math.floor(Date.now() / 1000) - 3600 });
+      for (const cookies of [{ sp_rt: 'dead-rt' }, { sp_at: expired, sp_rt: 'dead-rt' }] as Array<Record<string, string>>) {
+        const response = await middleware(makeRequestWithHeaders('/chats', DOC, cookies));
+        expect([Object.keys(cookies).join('+'), response.status, response.headers.get('location')?.includes('/login'), response.headers.get(REWRITE)]).toEqual([Object.keys(cookies).join('+'), 307, true, null]);
+        expect(response.headers.get('set-cookie') ?? '').toMatch(/sp_rt=;/);
+      }
+    });
+
+    it('the retry page itself is public: a direct visit is served (it carries no data)', async () => {
+      mockFetch.mockImplementation(() => Promise.resolve({ ok: false, status: 401 }));
+      const response = await middleware(makeRequest('/session-unconfirmed'));
+      expect(response.headers.get('location')).toBeNull();
+    });
   });
 
   it('진짜 401(TOKEN_REVOKED)일 때는 여전히 sp_at/sp_rt를 지운다 — ㉯가 clearAuthCookies를 아예 없앤 게 아니라 조건만 좁힌 것임을 확認(story #2124 ㉯ 회귀가드)', async () => {
@@ -1292,6 +1388,82 @@ describe('proxy — a person with no organization yet is sent to the onboarding,
     }
   });
 
+  // story 4890 (item 15) — a deleted account's old phone session: the access token still verifies by its signature, `/api/v2/me` answers 401 (the server does not know the session).
+  // Measured on dev: `/glance` → a Next 404 with no step to take, while `/chats` with the same cookies → 307 → /login?reason=session_expired. «Not known to the server» is an ended session.
+  describe('a session the server does not know (/api/v2/me 401 — e.g. a deleted account) is an ended session: the sign-in, not a Next 404 (story 4890)', () => {
+    const me401 = () => new Response(JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'User not found' } }), { status: 401 });
+
+    it('/glance page load → 307 to the sign-in with the page kept as `next` and the session-expired reason (not the onboarding, not `/`, not a 404)', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1' });
+      withMe(me401);
+      const res = await middleware(page('/glance', token));
+      expect([res.status, res.headers.get('location')]).toEqual([307, 'https://app.example.com/login?next=%2Fglance&reason=session_expired']);
+    });
+
+    it('the query the link carried rides in `next` (the person lands on it after signing in)', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1' });
+      withMe(me401);
+      const res = await middleware(page('/glance?story=abc', token));
+      expect(res.headers.get('location')).toBe('https://app.example.com/login?next=%2Fglance%3Fstory%3Dabc&reason=session_expired');
+    });
+
+    it('every flat address of the table gets the same answer, not only /glance (one place)', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1' });
+      withMe(me401);
+      for (const key of Object.keys(MIGRATED_RESOURCES)) {
+        const res = await middleware(page(`/${key}`, token));
+        expect([key, res.status, res.headers.get('location')]).toEqual([key, 307, `https://app.example.com/login?next=${encodeURIComponent(`/${key}`)}&reason=session_expired`]);
+      }
+    });
+
+    it('only a page load: a POST, a HEAD, a Next RSC fetch, a prefetch, a fetch() and a JSON call pass through untouched (their own 401 handling stays)', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1' });
+      const on = (headers: Record<string, string>, init: { method?: string; body?: string } = {}) => { const r = new NextRequest('https://app.example.com/glance', { headers, ...init }); r.cookies.set('sp_at', token); return r; };
+      const cases: Array<[string, () => NextRequest]> = [
+        ['POST', () => on(HTML, { method: 'POST', body: '{}' })],
+        ['HEAD', () => on(HTML, { method: 'HEAD' })],
+        ['RSC fetch', () => on({ ...HTML, rsc: '1' })],
+        ['prefetch', () => on({ ...HTML, 'next-router-prefetch': '1' })],
+        ['fetch() with */*', () => on({ Accept: '*/*', 'Sec-Fetch-Dest': 'empty' })],
+        ['JSON call', () => on({ Accept: 'application/json' })],
+      ];
+      for (const [label, build] of cases) {
+        mockFetch.mockReset();
+        withMe(me401);
+        const res = await middleware(build());
+        expect([label, res.status, res.headers.get('location')]).toEqual([label, 200, null]);
+      }
+    });
+
+    it('it is not a log-noise or a cookie event: nothing is logged as «unknown», and the session cookies are left as the layout\'s own 401 path leaves them', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1' });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        withMe(me401);
+        const res = await middleware(page('/glance', token));
+        expect(warn).not.toHaveBeenCalled();
+        expect(res.headers.get('set-cookie') ?? '').not.toContain('sp_at=;');
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('other answers keep their reading: a 403, a 500 and a person with an organization are unchanged (the 401 door is only 401)', async () => {
+      const token = await makeAccessToken({ orgId: 'org-1' });
+      withMe(() => new Response('{}', { status: 403 }));
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const forbidden = await middleware(page('/glance', token));
+        expect([forbidden.status, forbidden.headers.get('location')]).toEqual([200, null]);
+        withMe(() => new Response('{}', { status: 503 }));
+        const ill = await middleware(page('/glance', token));
+        expect([ill.status, ill.headers.get('location')]).toEqual([307, 'https://app.example.com/']);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  });
+
   it('where `/` leads is never asked about the organization either: `/`, `/org-briefing`, `/today` are not flat addresses of the table, so the redirect cannot loop back into the lookup', async () => {
     const token = await makeAccessToken({ orgId: 'org-1' });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -1957,9 +2129,10 @@ describe('proxy — the phone app opening lands by what the server knows, throug
     return Promise.resolve({ ok: false, status: 404 });
   });
   const SHELL = { 'X-Sprintable-Nav': '3', 'Cache-Control': 'no-cache' }; // what the shell puts on every load it starts (lib/initialSource.js)
-  const LANDING = 'https://app.example.com/phone-landing?next=%2Fmoonklabs%2Fsprintable%2Fflow';
+  // story 4906 (F): the landing's `next` is the site root — the person's HOME (the session sends the root on to «오늘»), not the /flow board `/glance` resolves to for a browser
+  const LANDING = 'https://app.example.com/phone-landing?next=%2F';
 
-  it('the shell\'s own /glance (its header) with an organization → the same 307 (no-store) pointed at /phone-landing?next=<the home it resolved> — not the home itself', async () => {
+  it('the shell\'s own /glance (its header) with an organization → the same 307 (no-store) pointed at /phone-landing?next=/ (the person home — NOT the /flow board the address resolves to) — not the home itself', async () => {
     const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
     mockOrg();
     const res = await middleware(makeRequestWithHeaders('/glance', SHELL, { sp_at: token }));
@@ -1994,7 +2167,7 @@ describe('proxy — the phone app opening lands by what the server knows, throug
     }
   });
 
-  it('the landing\'s next IS the resolved home: a person who picked another project lands on THAT project\'s home (the session decides, as before)', async () => {
+  it('the landing\'s next is the site root whichever project the person picked: the SESSION decides the home («오늘» by the person\'s cookie project), the proxy does not name a project board', async () => {
     mockFetch.mockImplementation((url: string) => {
       if (url.includes('/api/v2/me')) return Promise.resolve({ ok: true, json: async () => ({ org_id: 'org-1' }) });
       if (url.includes('/api/v2/organizations/org-1')) return Promise.resolve({ ok: true, json: async () => ({ id: 'org-1', slug: 'moonklabs' }) });
@@ -2003,7 +2176,7 @@ describe('proxy — the phone app opening lands by what the server knows, throug
     });
     const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
     const res = await middleware(makeRequestWithHeaders('/glance', SHELL, { sp_at: token, sprintable_current_project_id: 'proj-2' }));
-    expect(res.headers.get('location')).toBe('https://app.example.com/phone-landing?next=%2Fmoonklabs%2Fother%2Fflow');
+    expect(res.headers.get('location')).toBe('https://app.example.com/phone-landing?next=%2F');
   });
 
   it('where the home could not be resolved (no project chosen yet → the project picker) the redirect is the usual one — nothing to land on', async () => {
@@ -2026,6 +2199,80 @@ describe('proxy — the phone app opening lands by what the server knows, throug
     const unknown = await middleware(makeRequestWithHeaders('/glance', { ...SHELL, Accept: 'text/html,application/xhtml+xml,*/*;q=0.8' }, { sp_at: token })); // the shell's page load asks for HTML like any browser's
     expect(unknown.status).toBe(307);
     expect(unknown.headers.get('location')).toBe('https://app.example.com/'); // the session picks the road again; the app is not left on a page that does not exist
+  });
+
+  // story 4906 (F · PO 11-12) — the shell's header rides only on a load the SHELL starts. Every later request of the same webview that reaches `/glance` (a login form's `router.replace`,
+  // a sign-up that ends there, an in-page move, a prefetch) is client-side and has no header: the proxy knows the phone app by a cookie it planted on the first shell load.
+  const SHELL_COOKIE_JAR = { sp_shell: '1' };
+
+  it('a shell-started load (the header) plants the shell cookie — HttpOnly · Lax · Path=/ · 30 days (Secure on https) — whatever the response is (here: the login redirect of a logged-out person)', async () => {
+    mockFetch.mockImplementation(() => Promise.resolve({ ok: false, status: 401 }));
+    const res = await middleware(makeRequestWithHeaders('/glance', SHELL));
+    expect(res.status).toBe(307);
+    // read THIS cookie's own line (the login redirect also clears the session cookies — their attributes must not satisfy these checks)
+    const set = res.headers.getSetCookie().find((c) => c.startsWith('sp_shell=')) ?? '';
+    expect(set).toContain('sp_shell=1');
+    expect(set).toContain('Path=/');
+    expect(set).toContain(`Max-Age=${30 * 24 * 60 * 60}`);
+    expect(set).toContain('HttpOnly');
+    expect(set).toContain('SameSite=Lax');
+    expect(set).toContain('Secure');
+  });
+
+  it('the cookie is planted on whatever the shell-started load gets back — a public page, a public rewrite, the API — and every such response is made private (no shared cache may replay `sp_shell=1` to a browser)', async () => {
+    mockFetch.mockImplementation(() => Promise.resolve({ ok: false, status: 401 }));
+    for (const path of ['/login', '/terms', '/connect-guide.txt', '/api/v2/stories?limit=1']) {
+      const res = await middleware(makeRequestWithHeaders(path, SHELL));
+      const planted = res.headers.getSetCookie().some((c) => c.startsWith('sp_shell=1'));
+      expect([path, planted, /\b(no-store|private)\b/i.test(res.headers.get('cache-control') ?? '')]).toEqual([path, true, true]);
+    }
+    // a response that already guards itself keeps its own guard
+    const guarded = await middleware(makeRequestWithHeaders('/glance', SHELL));
+    expect(guarded.headers.get('cache-control')).toMatch(/no-store/);
+  });
+
+  it('a browser (no header, no cookie) gets no shell cookie; a request that already carries it is not given it again', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    mockOrg();
+    const browser = await middleware(makeRequest('/glance', { sp_at: token }));
+    expect(browser.headers.get('set-cookie') ?? '').not.toContain('sp_shell');
+    const again = await middleware(makeRequestWithHeaders('/glance', SHELL, { sp_at: token, ...SHELL_COOKIE_JAR }));
+    expect(again.headers.get('set-cookie') ?? '').not.toContain('sp_shell');
+  });
+
+  it.each([
+    ['a login form\'s router.replace (a Next RSC fetch)', { rsc: '1', 'next-url': '/login', accept: 'text/x-component' }],
+    ['a sign-up / in-page move (a Next prefetch)', { rsc: '1', 'next-router-prefetch': '1', accept: 'text/x-component' }],
+    ['a client fetch of the home (accept */*)', { accept: '*/*' }],
+    ['a full reload after login (a document read, no shell header — the webview reloaded itself)', { accept: 'text/html,application/xhtml+xml', 'sec-fetch-dest': 'document' }],
+  ])('%s → /glance with only the shell COOKIE (no header) lands through /phone-landing?next=/ like the shell\'s own load', async (_name, headers) => {
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    mockOrg();
+    const res = await middleware(makeRequestWithHeaders('/glance', headers as Record<string, string>, { sp_at: token, ...SHELL_COOKIE_JAR }));
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe(LANDING);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('the same requests WITHOUT the cookie (a browser) keep the usual redirect to the /flow home — the landing stays the phone app\'s alone; a query on /glance is still a deep link', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    mockOrg();
+    const browserShapes: Array<Record<string, string>> = [{ rsc: '1', accept: 'text/x-component' }, { accept: '*/*' }];
+    for (const headers of browserShapes) {
+      const res = await middleware(makeRequestWithHeaders('/glance', headers, { sp_at: token }));
+      expect(res.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
+    }
+    const deep = await middleware(makeRequestWithHeaders('/glance?story=abc', { rsc: '1' }, { sp_at: token, ...SHELL_COOKIE_JAR }));
+    expect(deep.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow?story=abc');
+    const other = await middleware(makeRequestWithHeaders('/docs/my-doc', { rsc: '1' }, { sp_at: token, ...SHELL_COOKIE_JAR }));
+    expect(other.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/docs/my-doc');
+  });
+
+  it('a forged cookie value is not the shell: only the exact planted value counts', async () => {
+    const token = await makeAccessToken({ orgId: 'org-1', projectId: 'proj-1' });
+    mockOrg();
+    const res = await middleware(makeRequestWithHeaders('/glance', { rsc: '1' }, { sp_at: token, sp_shell: '0' }));
+    expect(res.headers.get('location')).toBe('https://app.example.com/moonklabs/sprintable/flow');
   });
 
   it('/phone-landing and /phone-start are behind the session like the onboarding: no session → /login', async () => {

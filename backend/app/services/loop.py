@@ -113,20 +113,30 @@ async def create_loop(
                 "LOOP_HYPOTHESIS_REQUIRED",
                 "hypothesis_id 또는 goal+metric_definition+measure_after가 필요합니다.",
             )
+        from pydantic import ValidationError
+
         from app.schemas.hypothesis import HypothesisCreate
         from app.services.hypothesis import HypothesisServiceError, create_hypothesis
 
+        # story 4911 — 가설 스키마 검증(metric_definition.direction 등)이 라우터 바깥(여기서 만든 HypothesisCreate)에서 터지면
+        # 처리 안 된 ValidationError가 500으로 나갔다(dev 11-12: direction이 up/down이 아니면 500). 호출자가 고칠 수 있는
+        # 입력 오류이므로 422 + 같은 메시지로 돌려준다.
         try:
-            hyp_resp = await create_hypothesis(
-                session, org_id, caller,
-                HypothesisCreate(
-                    project_id=payload.project_id,
-                    statement=payload.goal,
-                    metric_definition=payload.metric_definition,
-                    measure_after=payload.measure_after,
-                    owner_member_id=payload.owner_member_id,
-                ),
+            hyp_in = HypothesisCreate(
+                project_id=payload.project_id,
+                statement=payload.goal,
+                metric_definition=payload.metric_definition,
+                measure_after=payload.measure_after,
+                owner_member_id=payload.owner_member_id,
             )
+        except ValidationError as exc:
+            first = exc.errors()[0]
+            where = ".".join(str(p) for p in first.get("loc", ()))
+            raise LoopServiceError(
+                "LOOP_HYPOTHESIS_INVALID", f"{where}: {first.get('msg', 'invalid')}"
+            ) from exc
+        try:
+            hyp_resp = await create_hypothesis(session, org_id, caller, hyp_in)
         except HypothesisServiceError as exc:
             raise LoopServiceError(exc.code, exc.message) from exc
         hypothesis_id = hyp_resp.id

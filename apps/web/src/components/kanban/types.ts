@@ -469,6 +469,18 @@ export const TRUST_COLUMNS = [
 
 export type TrustColumnId = (typeof TRUST_COLUMNS)[number]['id'];
 
+// story #4888 — which story statuses feed each trust column (backend trust_pipeline.derive_trust_stage: queued ← backlog / ready-for-dev; in-progress → running, or needs_input when a human gate is
+// pending; in-review → claimed_done, or verified / merge_ready once a human verified it; done → done). A trust column has cards left to load while any of its feeding statuses still has a page.
+export const TRUST_COLUMN_FEEDER_STATUSES: Record<TrustColumnId, readonly string[]> = {
+  queued: ['backlog', 'ready-for-dev'],
+  running: ['in-progress'],
+  needs_input: ['in-progress'],
+  claimed_done: ['in-review'],
+  verified: ['in-review'],
+  merge_ready: ['in-review'],
+  done: ['done'],
+};
+
 // story #2933 H4 — settable 트러스트 컬럼 드롭 시 set할 status(v4 §C 매핑표 그대로). PO
 // 확定④: queued는 backlog+ready-for-dev를 흡수하지만 드롭(다른 컬럼→queued로 이동)은 항상
 // ready-for-dev로 승격 — backlog 강등은 이 보드에서 안 하고(5단계 클래식 뷰/카드 메뉴 몫).

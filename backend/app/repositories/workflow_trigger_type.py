@@ -1,14 +1,23 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.workflow_trigger_type import WorkflowTriggerType
+from app.services.i18n_catalog import LEGACY_SYSTEM_TEXTS, t
+
+# story #4888 — the system «kickoff» description said «에픽» before it said «목표» (migration 0473 corrects the rows that exist). The migration runs BEFORE the old backend is swapped out,
+# so during that window the old release can still seed a brand-new organization with the old text (`ON CONFLICT DO NOTHING` then keeps it). `list()` therefore corrects, with the
+# same exact-text rule as the migration (system row · description exactly the old text), any row that still carries it — a description a person edited is never touched.
+# Both wordings come from the catalog (`app/services/i18n_catalog.py`), the one file the Korean-sentence guard exempts — this file holds no sentence of them.
+_KICKOFF_KEY = "workflow_trigger.kickoff.description"
+_LEGACY_KICKOFF_DESCRIPTION = LEGACY_SYSTEM_TEXTS[_KICKOFF_KEY]
+_KICKOFF_DESCRIPTION = t(_KICKOFF_KEY, "ko")
 
 SYSTEM_TRIGGER_TYPES = [
-    {"slug": "kickoff", "label": "Kickoff", "description": "스프린트 또는 에픽 킥오프"},
+    {"slug": "kickoff", "label": "Kickoff", "description": _KICKOFF_DESCRIPTION},
     {"slug": "review_request", "label": "Review Request", "description": "코드 리뷰 요청"},
     {"slug": "qa_request", "label": "QA Request", "description": "QA 검수 요청"},
     {"slug": "deploy_request", "label": "Deploy Request", "description": "배포 요청"},
@@ -56,6 +65,21 @@ class WorkflowTriggerTypeRepository:
                 .order_by(WorkflowTriggerType.is_system.desc(), WorkflowTriggerType.created_at.asc(), WorkflowTriggerType.id)
             )
             items = list(result2.scalars().all())
+        stuck = [it for it in items if it.is_system and it.description == _LEGACY_KICKOFF_DESCRIPTION]
+        if stuck:
+            # one atomic UPDATE whose WHERE repeats the rule (system row · description exactly the old text): a description a person edited between the read above and this
+            # statement no longer matches, so it is never overwritten (an ORM attribute change + flush would write by primary key only). The rows are then read back as they are.
+            await self.session.execute(
+                update(WorkflowTriggerType)
+                .where(
+                    WorkflowTriggerType.id.in_([it.id for it in stuck]),
+                    WorkflowTriggerType.is_system.is_(True),
+                    WorkflowTriggerType.description == _LEGACY_KICKOFF_DESCRIPTION,
+                )
+                .values(description=_KICKOFF_DESCRIPTION)
+            )
+            for it in stuck:
+                await self.session.refresh(it)
         return items
 
     async def get(self, id: uuid.UUID) -> WorkflowTriggerType | None:

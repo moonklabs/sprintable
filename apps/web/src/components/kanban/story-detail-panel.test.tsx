@@ -28,6 +28,17 @@ vi.mock('@/hooks/use-sse-notifications', () => ({
   useSseNotifications: vi.fn(),
 }));
 
+// 4908 — 작업 칸은 서랍에서 한 줄로 접혀 서고(WorkcellFold), 펼침·접힘 자체는 workcell-fold.test.tsx와 story-detail-panel.4908.test.tsx가 진짜 컴포넌트로 잰다.
+// 이 파일의 Workcell 배선 시험(단계 · 책임자 · 근거 · 대화 요약 · 작성자 이름)은 «펼친 작업 칸»의 내용을 보므로, 여기서만 접힘 줄을 펼친 채로 대신 세운다(같은 Workcell · 같은 props · headerOwns 포함).
+vi.mock('@/components/workcell/workcell-fold', async () => {
+  const { Workcell } = await vi.importActual<typeof import('@/components/workcell/workcell')>('@/components/workcell/workcell');
+  const { createElement } = await import('react');
+  return {
+    WorkcellFold: ({ evidenceCount: _e, conversationCount: _c, ...p }: Record<string, unknown>) =>
+      createElement(Workcell, { ...(p as unknown as import('@/components/workcell/workcell').WorkcellProps), headerOwns: true }),
+  };
+});
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -330,6 +341,47 @@ describe('StoryDetailPanel — Workcell pipelineStage = story.trust_stage 직결
     await mountWithTrustStage(undefined);
     expect(container.querySelector('[aria-current="step"]')).toBeNull();
   });
+
+  // story 4906 ⑩ (PO 11-12 [A]) — one story is not called «개발 대기» on the status chip and «대기 중» under the gauge: the steps that come straight from the status say the STATUS word
+  async function mountWithStatusAndStage(status: KanbanStory['status'], trustStage: KanbanStory['trust_stage']) {
+    stubFetch();
+    await act(async () => {
+      root.render(wrap(
+        <StoryDetailPanel
+          story={makeStory({ status, assignee_id: HUMAN_ID, assignee_ids: [HUMAN_ID], trust_stage: trustStage })}
+          tasks={[]} onClose={() => {}} memberMap={memberMap}
+        />,
+      ));
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  }
+
+  // 4908 (PO 11-13): 4906 ⑩의 뜻(한 장이 «개발 대기»와 «대기 중»으로 두 이름을 갖지 않는다)을 «한 자리»로 닫는다 — 상태에서 바로 오는 단계는 게이지 밑에 글자를 다시 쓰지 않고 머리의 상태 칩이 맡는다.
+  const countOf = (needle: string) => (container.textContent ?? '').split(needle).length - 1;
+  it('⭐story 4906 ⑩ + 4908: status ready-for-dev (stage queued) → the STATUS word «개발 대기» is said once (the header chip), the stage word «대기 중» never, no caption under the gauge', async () => {
+    await mountWithStatusAndStage('ready-for-dev', 'queued');
+    expect(currentStageLabel()).toBeNull();
+    expect(countOf(koMessages.board.readyForDev)).toBe(1);
+    expect(countOf(koMessages.workcell.pipelineQueued)).toBe(0);
+  });
+
+  it('⭐story 4906 ⑩ + 4908: status in-review (stage claimed_done) → «리뷰 중» once, «완료 주장» never', async () => {
+    await mountWithStatusAndStage('in-review', 'claimed_done');
+    expect(currentStageLabel()).toBeNull();
+    expect(countOf(koMessages.board.inReview)).toBe(1);
+    expect(countOf(koMessages.workcell.pipelineClaimedDone)).toBe(0);
+  });
+
+  it('⭐story 4906 ⑩ (codex): status and stage that DISAGREE (the live stage refresh ran ahead of the status) → the stage word, never a stale status word (ready-for-dev + running → «진행 중», not «개발 대기»)', async () => {
+    await mountWithStatusAndStage('ready-for-dev', 'running');
+    expect(currentStageLabel()).toBe(koMessages.workcell.pipelineRunning);
+    expect(currentStageLabel()).not.toBe(koMessages.board.readyForDev);
+  });
+
+  it('⭐story 4906 ⑩: a DERIVED stage has no status word and keeps the stage word (in-progress + needs_input → «입력 필요»)', async () => {
+    await mountWithStatusAndStage('in-progress', 'needs_input');
+    expect(currentStageLabel()).toBe(koMessages.workcell.pipelineNeedsInput);
+  });
 });
 
 // story #2993(PO 확定①②, 2026-08-24, 선생님 실사고 「주전장이 안 보인다」) — 이전엔
@@ -505,10 +557,14 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
   // 한 곳). aria-current를 먼저 시도해 bentoLayout={false} 폴백 경로도 계속 커버한다 —
   // 이 SSE 라이브 갱신 테스트들의 관심사는 "어느 단계가 뜨는가"이지 스테퍼 시각 표현이
   // 아니므로 어느 레이아웃이든 같은 헬퍼로 잡는다.
+  // 4908 — 상태에서 바로 오는 단계는 게이지 밑 글자를 다시 쓰지 않는다(머리의 상태 칩이 맡음). 그래서 «어느 단계가 뜨는가»는 게이지의 읽는 글(aria-valuetext «n/6 · 단계 글자»)로 잰다 — 이 글은 항상 있다.
   function currentStageLabel(): string | null {
     const legacy = container.querySelector('[aria-current="step"]')?.textContent?.trim();
     if (legacy) return legacy;
-    return container.querySelector('[data-testid="workcell-current-stage"]')?.textContent?.trim() ?? null;
+    const caption = container.querySelector('[data-testid="workcell-current-stage"]')?.textContent?.trim();
+    if (caption) return caption;
+    const valueText = container.querySelector('[role="progressbar"]')?.getAttribute('aria-valuetext');
+    return valueText ? valueText.split(' · ').slice(1).join(' · ') : null;
   }
 
   beforeEach(() => { vi.useFakeTimers(); });
@@ -605,7 +661,7 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
       root.render(wrap(<StoryDetailPanel story={storyB} tasks={[]} onClose={() => {}} memberMap={memberMap} />));
     });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(currentStageLabel()).toBe('완료 주장');
+    expect(currentStageLabel()).toBe('리뷰 중'); // story 4906 ⑩ (PO [A]): story-b is in-review/claimed_done — the caption says its STATUS word, the one on its chip (the stage word was «완료 주장»)
 
     // 이제야 story-a의 응답이 늦게 도착 — story-b 패널에 새면 안 된다.
     await act(async () => {
@@ -613,7 +669,7 @@ describe('StoryDetailPanel — Workcell pipelineStage SSE 라이브 갱신(story
       await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
     });
 
-    expect(currentStageLabel()).toBe('완료 주장');
+    expect(currentStageLabel()).toBe('리뷰 중'); // story 4906 ⑩ (PO [A]): story-b is in-review/claimed_done — the caption says its STATUS word, the one on its chip (the stage word was «완료 주장»)
   });
 
   // PO 리뷰 확장(PR#3363 codex 교차모델, 2026-08-22) — 위 두 테스트가 덮는 "다른 story로
@@ -846,10 +902,11 @@ describe('StoryDetailPanel — Workcell Conversation 구획 대화근거 요약 
 // 내보내는지(in-flight ref 가드) 값으로 고정한다.
 describe('StoryDetailPanel — 삭제 404/이중발사 처방(story #3169)', () => {
   async function clickDeleteThenConfirm() {
-    const deleteButton = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.getAttribute('aria-label') === '스토리 삭제',
-    );
-    await act(async () => { deleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // story 4945 — 지우기는 «더 보기 ⋯» 메뉴 안(닫기 옆 늘 떠 있던 휴지통을 옮김): ⋯ → «스토리 삭제» 항목
+    const moreButton = container.querySelector<HTMLButtonElement>('button[aria-label="더 보기"]');
+    await act(async () => { moreButton?.click(); });
+    const deleteItem = Array.from(document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')).find((i) => i.textContent?.trim() === '스토리 삭제');
+    await act(async () => { deleteItem?.click(); });
     // 확認 다이얼로그는 Dialog(Radix 계열, document.body에 포탈)라 container 안에는 없다.
     const confirmButton = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === '영구 삭제');
     return confirmButton;
@@ -981,7 +1038,7 @@ describe('StoryDetailPanel — 제목/설명/완료기준 저장 실패 시 문�
 
     const titleBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('원래 제목'));
     await act(async () => { titleBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    const input = container.querySelector('input[data-slot="input"][data-testid="story-title-input"]') as HTMLInputElement;
+    const input = container.querySelector('input[data-slot="ds-input"][data-testid="story-title-input"]') as HTMLInputElement;
     await act(async () => { setNativeValue(input, '새 제목'); });
     const saveBtn = [...container.querySelectorAll('button')].find((b) => b.textContent === '저장');
     await act(async () => { saveBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
@@ -1539,7 +1596,7 @@ describe('StoryDetailPanel — 댓글 · 활동 작성자 동명이인([SID:4311
     const authors = [...container.querySelectorAll('li div.mt-2 > span:first-child')].map((el) => el.textContent);
     expect(authors).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '안나', '안나']);
     // 워크셀 대화(같은 댓글 목록)도 같은 표.
-    const workcell = [...container.querySelectorAll('span.whitespace-nowrap.font-semibold.text-proof-ink')].map((el) => el.textContent);
+    const workcell = [...container.querySelectorAll('span.whitespace-nowrap.font-semibold.text-ds-ink')].map((el) => el.textContent);
     expect(workcell).toEqual(['송윤재 · e75ca548', '송윤재 · 2fd14616', '안나', '안나']);
   });
 

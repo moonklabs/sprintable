@@ -62,10 +62,11 @@ describe('로그인 입력칸 글자 크기(story #4406)', () => {
     for (const el of inputs) expect(toPx(cascade.computed(el, 'font-size', 'light')), el.type).toBeGreaterThanOrEqual(16);
   });
 
-  it('데스크톱 폭(1280px) — 예전 크기(14px) 그대로', async () => {
+  // story 4891 — the two boxes are the ds Input now, like every other ds screen: 13 px (ds-body) from the side-by-side layout up (it was 14). The rule that matters (16 px on a phone) is the test above.
+  it('데스크톱 폭(1280px) — ds 본문 크기(13px)', async () => {
     const inputs = await loginInputs();
     const cascade = await loadTailwindCascade(container, { viewportWidth: 1280 });
-    for (const el of inputs) expect(toPx(cascade.computed(el, 'font-size', 'light')), el.type).toBe(14);
+    for (const el of inputs) expect(toPx(cascade.computed(el, 'font-size', 'light')), el.type).toBe(13);
   });
 });
 

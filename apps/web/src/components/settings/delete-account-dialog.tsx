@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { Banner } from '@/components/ds/banner';
+import { Button } from '@/components/ds/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ds/dialog';
 import { fetchWithAuth } from '@/lib/db/client';
 import { useFlatHref } from '@/hooks/use-flat-href';
 
@@ -32,6 +33,8 @@ export function DeleteAccountDialog({ onClose, onDeleted }: { onClose: () => voi
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [plan, setPlan] = useState<OrgPlan>({ closing: [], blocked: [] });
+  const titleId = useId();
+  const cancelRef = useRef<HTMLButtonElement>(null); // the window opens on «취소» — an irreversible action is never the one a stray Enter lands on
 
   // The preview is read once when the window opens. A failure to read it is not shown: the deletion still works and the server answers with the same list if something blocks.
   useEffect(() => {
@@ -67,43 +70,45 @@ export function DeleteAccountDialog({ onClose, onDeleted }: { onClose: () => voi
   const blocked = plan.blocked.length > 0;
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !deleting) onClose(); }}>
-      <DialogContent className="max-w-sm" showCloseButton={false}>
-        <DialogTitle className="text-lg font-semibold text-destructive">{t('deleteConfirmTitle')}</DialogTitle>
-        <p className="mt-2 text-sm text-muted-foreground">{t('deleteConfirmDesc')}</p>
+      <DialogContent className="max-w-sm" showCloseButton={false} initialFocus={cancelRef} aria-labelledby={titleId}>
+        <DialogHeader>
+          <DialogTitle id={titleId} className="text-ds-failed">{t('deleteConfirmTitle')}</DialogTitle>
+          <DialogDescription>{t('deleteConfirmDesc')}</DialogDescription>
+        </DialogHeader>
         {plan.closing.length > 0 ? (
-          <p className="mt-3 text-sm text-foreground" data-testid="delete-account-closing-orgs">
+          <p className="text-ds-body text-ds-ink [overflow-wrap:anywhere]" data-testid="delete-account-closing-orgs">
             {t('deleteClosingOrgs', { names: plan.closing.map((o) => o.name).join(', ') })}
           </p>
         ) : null}
         {blocked ? (
-          <div className="mt-3 space-y-2 text-sm" data-testid="delete-account-blocking-orgs">
-            <p role="alert" className="text-destructive">{t('deleteOwnedOrgsTitle')}</p>
-            <ul className="list-disc space-y-1 pl-5 text-foreground">
+          <div className="flex flex-col gap-2" data-testid="delete-account-blocking-orgs">
+            <Banner tone="failed">{t('deleteOwnedOrgsTitle')}</Banner>
+            <ul className="list-disc space-y-1 pl-5 text-ds-body text-ds-ink [overflow-wrap:anywhere]">
               {plan.blocked.map((o) => (
                 <li key={o.id}>{o.reason === 'active_subscription' ? t('deleteOrgSubscription', { name: o.name }) : t('deleteOwnedOrgWithOthers', { name: o.name })}</li>
               ))}
             </ul>
-            <div className="flex flex-wrap gap-3">
+            <div className="flex flex-wrap gap-2">
               {plan.blocked.some((o) => o.reason === 'other_members') ? (
-                <Link href={flatHref('/organization/members')} onClick={onClose} className="text-primary underline-offset-2 hover:underline">{t('deleteGoMembers')}</Link>
+                <Button asChild variant="secondary"><Link href={flatHref('/organization/members')} onClick={onClose}>{t('deleteGoMembers')}</Link></Button>
               ) : null}
               {plan.blocked.some((o) => o.reason === 'active_subscription') ? (
-                <Link href={flatHref('/settings?tab=billing')} onClick={onClose} className="text-primary underline-offset-2 hover:underline">{t('deleteGoBilling')}</Link>
+                <Button asChild variant="secondary"><Link href={flatHref('/settings?tab=billing')} onClick={onClose}>{t('deleteGoBilling')}</Link></Button>
               ) : null}
             </div>
           </div>
         ) : null}
         {error ? (
-          <p role="alert" className="mt-3 text-sm text-destructive" data-testid="delete-account-error">{error}</p>
+          <Banner tone="failed"><span data-testid="delete-account-error">{error}</span></Banner>
         ) : null}
-        <div className="mt-6 flex gap-3">
-          <Button variant="glass" className="flex-1" onClick={onClose} disabled={deleting}>
+        <DialogFooter>
+          <Button ref={cancelRef} variant="quiet" onClick={onClose} disabled={deleting}>
             {tc('cancel')}
           </Button>
-          <Button variant="destructive" className="flex-1" onClick={() => void confirm()} disabled={deleting || blocked} data-testid="delete-account-confirm">
+          <Button variant="danger" onClick={() => void confirm()} disabled={deleting || blocked} data-testid="delete-account-confirm">
             {deleting ? '...' : t('confirmDelete')}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

@@ -6,6 +6,7 @@ import { cookieBase, SIGNUP_ATTRIBUTION_COOKIE_NAMES, SP_AT_MAX_AGE_SECONDS, mar
 import { safeJsonParse } from '@/lib/api-response';
 import { backendFetch } from '@/lib/backend-fetch';
 import { fastapiBaseUrl } from '@/lib/fastapi-url';
+import { getLocale } from '@/i18n/request';
 
 const FASTAPI_URL = () => fastapiBaseUrl();
 
@@ -23,11 +24,16 @@ export async function POST(request: Request) {
   const utmCampaign = cookieStore.get('sp_attr_campaign')?.value;
   const referrer = cookieStore.get('sp_attr_ref')?.value;
 
+  // story 4891 (PO 11-11) — the language the screen is drawn in (cookie → Accept-Language → default, the same reading the shared proxy layer uses) goes to the backend as `Accept-Language`: it saves it as the account's locale and
+  // sends the verification mail in it. Before, only `Content-Type` was sent, so the backend always took its default (ko) and an English screen got a Korean mail.  Outside a request scope `getLocale()` throws → nothing is sent (the backend's default; the locale reading stays in the one shared place — the locale-negotiation guard).
+  let acceptLanguage: string | null = null;
+  try { acceptLanguage = await getLocale(); } catch { acceptLanguage = null; }
+
   const fastapiRes = await backendFetch(`${FASTAPI_URL()}/api/v2/auth/register`, {
     // story #4320(까디르 QA ③) — 계정 · 첫 토큰을 새로 만든다(귀속 쿠키 소비) — 브라우저가 끊어도 끝까지 간다 · 시간 제한만.
     timeLimitOnly: true,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(acceptLanguage ? { 'Accept-Language': acceptLanguage } : {}) },
     body: JSON.stringify({
       email: body.email,
       password: body.password,

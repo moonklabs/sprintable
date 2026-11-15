@@ -53,3 +53,19 @@ describe('HypothesesSection — 담당 동명이인([SID:4311 PR 3])', () => {
     expect(owners).toEqual(['@송윤재 · e75ca548', '@송윤재 · 2fd14616', '@안나', '@송윤재 · e75ca548']);
   });
 });
+
+describe('HypothesesSection — the head wraps instead of running past the card (story 4906 ⑨)', () => {
+  it('⭐the head row and the buttons group WRAP and the group is not shrink-0 — «Review draft» + «Add hypothesis» go under the title when the card is narrow (layout itself is measured in a real browser on dev: jsdom has none)', async () => {
+    fetchWithAuthMock.mockImplementation(async () => ({ ok: true, json: async () => ({ data: [] }) }));
+    await act(async () => {
+      root.render(<NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul"><HypothesesSection epicId="e1" projectId="proj-1" /></NextIntlClientProvider>);
+    });
+    for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); });
+    const head = container.querySelector('[data-testid="hypotheses-head"]') as HTMLElement;
+    const actions = container.querySelector('[data-testid="hypotheses-head-actions"]') as HTMLElement;
+    expect(head.className).toContain('flex-wrap');
+    expect(actions.className).toContain('flex-wrap');
+    expect(actions.className).not.toContain('shrink-0'); // a no-shrink group on a no-wrap row is what pushed the button out of the card
+    expect(actions.querySelectorAll('button').length).toBe(2);
+  });
+});

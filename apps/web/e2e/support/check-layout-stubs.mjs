@@ -1,11 +1,11 @@
 // Story 4586 — the shared layout stub plugin, checked with esbuild alone (no browser). Run from apps/web:
 //   node e2e/support/check-layout-stubs.mjs
-// Three checks, the ones a browser run would otherwise be the only proof of:
+// Checks (⑤ · ⑥ added in the 4924 follow-up: the Tailwind-candidates helper every layout spec shares), the ones a browser run would otherwise be the only proof of:
 //   1. a bundled component that imports an unlisted next/… and @/app/… module still bundles and runs (the stubs are in);
 //   2. the generated @/app stub exports the name the importer takes, and calling the component does not throw;
 //   3. a module that is neither listed nor under @/app or next/ fails the build, and the failure names it.
 import { build } from 'esbuild';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -87,6 +87,28 @@ try {
 } catch (e) {
   check('④ two importers taking different names from one unlisted @/app module build', false, String(e.message).split('\n')[0]);
 }
+
+// ⑤ — the shared Tailwind-candidates helper PARSES the bundle: it reads classes a component spells in a TEMPLATE LITERAL (the ds Toggle since 5771: `…${CONSTANT}`), in single-quoted strings, after an empty string or a regex literal holding a quote
+const helperBundle = await build({
+  entryPoints: [path.join(HERE, 'tailwind-candidates.ts')], bundle: true, platform: 'node', format: 'cjs', write: false, logLevel: 'silent', external: ['typescript'],
+});
+const helperFile = path.join(HERE, '.tailwind-candidates.check.cjs');
+writeFileSync(helperFile, helperBundle.outputFiles[0].text);
+const { tailwindCandidates } = req(helperFile);
+rmSync(helperFile);
+const probeSrc = ['const K = "data-disabled:border-ds-line data-disabled:bg-ds-surface-high";', 'export const a = "plain-class other-class";', 'export const b = `w-7 h-4 ${K} data-disabled:cursor-not-allowed`;', 'export const c = (x) => `inner-${x} tail-class`;', 'export const d = (x) => `${x} border-ds-action hover:border-ds-line-strong`;', 'export const e = ["", "after-empty-string-class"];', 'export const f = [/foo"/, "after-regex-literal-class"];', 'export const g = \'content-[""] single-quoted-class\';'].join('\n');
+const lowered = tailwindCandidates((await build({ stdin: { contents: probeSrc, loader: 'js' }, bundle: true, format: 'iife', write: false, logLevel: 'silent', globalName: 'p' })).outputFiles[0].text);
+check('⑤ helper finds classes in double-quoted strings', lowered.includes('plain-class') && lowered.includes('other-class'));
+check('⑤ helper finds classes written in a template literal (w-7 · h-4 · data-disabled:cursor-not-allowed)', ['w-7', 'h-4', 'data-disabled:cursor-not-allowed', 'tail-class'].every((c) => lowered.includes(c)), lowered.join(' '));
+check('⑤ helper finds a string after a regex literal holding a quote, and a string esbuild prints in single quotes (it holds a ")', ['after-regex-literal-class', 'content-[""]', 'single-quoted-class'].every((c) => lowered.includes(c)), lowered.join(' '));
+check('⑤ helper finds the classes of a template that STARTS with a splice (`${x} border-ds-action …` → "".concat(x, " border-ds-action …")) and a string after an empty one', ['border-ds-action', 'hover:border-ds-line-strong', 'after-empty-string-class'].every((c) => lowered.includes(c)), lowered.join(' '));
+
+// ⑥ — no layout spec writes its own candidate scan: each one that compiles Tailwind from its bundle takes the candidates from the helper
+const specs = readdirSync(HERE.replace(/support$/, '')).filter((f) => f.endsWith('.layout.spec.ts'));
+const own = specs.filter((f) => { const t = readFileSync(path.join(HERE, '..', f), 'utf8'); return /const candidates\s*=/.test(t) && !/const candidates\s*=\s*(\[\.\.\.)?tailwindCandidates\(js\)/.test(t); });
+check('⑥ every layout spec takes its Tailwind candidates from support/tailwind-candidates', own.length === 0, own.join(', '));
+const missingImport = specs.filter((f) => { const t = readFileSync(path.join(HERE, '..', f), 'utf8'); return t.includes('tailwindCandidates(js)') && !t.includes("from './support/tailwind-candidates'"); });
+check('⑥ and imports it', missingImport.length === 0, missingImport.join(', '));
 
 rmSync(tmp, { recursive: true, force: true });
 if (failures.length) {

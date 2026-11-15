@@ -38,19 +38,19 @@ describe('파일 목록 행 초점([SID:4380])', () => {
     expect(cls).toContain('focus-visible:-outline-offset-2');
     expect(cls).not.toContain('outline-none');
     expect(cls.some((c) => c.startsWith('focus-visible:bg-'))).toBe(false);
-    expect(cls.includes('bg-info/10')).toBe(selected);
+    expect(cls.includes('bg-ds-action-soft')).toBe(selected); // 4910 — 고름 색은 새 토큰(action-soft)
   });
 });
 
-// 유나(eb058bc7b): 파일 검색 input은 outline-none이고 감싸는 상자에 focus-within이 없어 Tab으로 들어가도 글자 커서뿐 → 상자에 제품 링.
-describe('파일 검색칸 초점([SID:4380])', () => {
-  it('input을 감싼 상자 = focus-within 제품 링', async () => {
+// 유나(eb058bc7b) → 4910: 파일 검색칸은 ds Input — 글 칸의 초점 규칙(FIELD_FOCUS = 테두리만 중립으로 짙어짐 · 파란 고리 없음)을 부품에서 그대로 받는다.
+describe('파일 검색칸 초점([SID:4380] · 4910 ds Input)', () => {
+  it('검색칸 = ds Input — 초점은 테두리만 중립으로 짙어지고, 예전 안쪽 input은 outline-none에 감싸는 상자 링이던 모양이 아니다', async () => {
     const noop = () => {};
     await act(async () => {
       root.render(
         <NextIntlClientProvider locale="ko" messages={koMessages} timeZone="Asia/Seoul">
           <StorageAssetList
-            assets={[]} viewMode="list" onViewModeChange={noop} search="" onSearchChange={noop} sort="date" onSortChange={noop}
+            assets={[]} summaryText="0개 자산 · 0 B" viewMode="list" onViewModeChange={noop} search="" onSearchChange={noop} sort="date" onSortChange={noop}
             selectedAssetId={null} onSelectAsset={noop} onDeleteAsset={noop} onDownloadAsset={noop} onUploadFile={noop}
             resolveFolderLabel={() => null} loading={false} error={false} onRetry={noop}
             isSearchActive={false} hasMore={false} loadingMore={false} onLoadMore={noop}
@@ -59,8 +59,8 @@ describe('파일 검색칸 초점([SID:4380])', () => {
       );
     });
     const input = container.querySelector<HTMLInputElement>(`input[placeholder="${koMessages.storage.searchPlaceholder}"]`)!;
-    const box = input.parentElement!.className.split(/\s+/);
-    expect(box).toContain('focus-within:ring-2');
-    expect(box).toContain('focus-within:ring-ring');
+    expect(input.getAttribute('data-slot')).toBe('ds-input');
+    expect(input.className.split(/\s+/)).toContain('focus-visible:border-ds-ink-2');
+    expect(input.getAttribute('aria-label')).toBe(koMessages.storage.searchPlaceholder);
   });
 });

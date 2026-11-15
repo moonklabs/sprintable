@@ -103,7 +103,7 @@ describe('[SID:4299] 탭 프리패치 — 첫 화면 뒤 · 이웃 둘 · 누르
     ['touchstart', (el: Element) => el.dispatchEvent(new Event('touchstart', { bubbles: true }))],
   ])('누르려는 기색(%s) 때 그 탭을 router.prefetch — 이웃 아닌 «가설»도', async (_label, fire) => {
     await render('board');
-    const tab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '가설')!;
+    const tab = [...container.querySelectorAll('[data-slot="ds-tab-nav-link"]')].find((t) => t.textContent === '가설')!;
     await act(async () => { fire(tab); });
     expect(h.prefetch).toHaveBeenCalledWith(href('hypotheses'));
   });

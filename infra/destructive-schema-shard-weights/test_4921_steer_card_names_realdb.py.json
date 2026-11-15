@@ -1,0 +1,1 @@
+{"file": "tests/test_4921_steer_card_names_realdb.py", "sec": 15.0, "source": "story 4921 (2026-11-13) — rounded estimate from the sibling file test_4920 (6 real-Postgres tests, 13.7s local); replace with the CI-measured value once shard-durations artifacts exist for this file."}

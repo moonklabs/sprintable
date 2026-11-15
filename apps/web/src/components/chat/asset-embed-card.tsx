@@ -71,8 +71,8 @@ export function AssetEmbedCard({ entityId, label, onOpenReadingPanel }: AssetEmb
   // 내 메시지 위에서도 다른 카드와 같은 표면(card)을 쓴다 — 이미 대비가 검증된 조합이고, 특수 가지가 없으니 한 곳에서 정한다. 그래서 «내 메시지 여부» 인자는 걷었다(story 4831).
   const cardSurface = 'border-border bg-card hover:bg-muted';
   const nameTone = 'text-foreground';
-  const metaTone = 'text-muted-foreground';
-  const arrowTone = 'text-muted-foreground';
+  const metaTone = 'text-ds-ink-2';
+  const arrowTone = 'text-ds-ink-2';
 
   // ── 로딩: 스켈레톤 카드 ──
   if (loading) {
@@ -91,7 +91,7 @@ export function AssetEmbedCard({ entityId, label, onOpenReadingPanel }: AssetEmb
   if (missing || !asset) {
     return (
       <div className="mt-2 flex max-w-[300px] items-center gap-2.5 rounded-md border border-border bg-muted/40 px-2.5 py-2">
-        <span className="grid size-[38px] shrink-0 place-items-center rounded-sm bg-muted text-muted-foreground">
+        <span className="grid size-[38px] shrink-0 place-items-center rounded-sm bg-muted text-ds-ink-2">
           {fileGlyph(null, 'size-[17px]')}
         </span>
         <div className="min-w-0 flex-1">

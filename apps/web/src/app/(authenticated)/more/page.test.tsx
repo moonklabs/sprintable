@@ -78,46 +78,48 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
   // 산다. h2 레벨엔 데스크톱 미러 3개(오늘·결과·연결·규칙) + legacy 카드 1개(그 밖의
   // 화면)뿐 — 소묶음 자체는 nav-config-legacy-grouping.test.ts·legacy-nav-ssot.test.tsx가
   // 전담(별도 축, 이 파일 관심사 아님).
-  it('섹션(h2) 순서가 확定대로다(오늘/결과/연결·규칙[NAV_GROUPS]/그 밖의 화면[legacy 단일 카드] — 일감[NAV_GROUPS]은 유일 항목이 바텀탭 배제 대상이라 빈 채 안 뜬다)', async () => {
+  // story #4885(UI-2 AC4 PR 1) — 새 구조: 구역은 사이드바와 같은 한 정의(오늘 · 일감 · 에이전트 · 지식 · 조직 · 설정) + 맨 아래 «그 밖의 화면». 일감의 보드(탭 «일감»)와 오늘의 결재(탭 «결재»)는
+  // 바텀 탭이 depth 1로 커버해 빠진다. 「더보기」 서랍과 그 소묶음 · 캡션은 걷혔다.
+  it('⭐섹션(h2) 순서(폰 탭 넷): 팀 · 지식이 맨 위 두 구역 → 설정 → 목표[일감 쪽 남은 항목] → 조직 → 그 밖의 화면 — 한 항목 구역(결재 · 설정)은 머리 없이 항목 줄 하나', async () => {
     await mount();
-    // story #4292(유나 1안) — 한 항목 구역(오늘 · 결과)은 머리 없이 항목 줄 하나. 카드(구역)는 넷 그대로 · 순서도 그대로.
+    // story #4292(유나 1안) — 한 항목 구역(오늘 · 설정)은 머리 없이 항목 줄 하나. 카드(구역)는 일곱 · 순서는 사이드바 순서.
     const sectionLabels = [...container.querySelectorAll('h2')].map((el) => el.textContent?.trim());
-    expect(sectionLabels).toEqual(['연결·규칙', '그 밖의 화면새 자리로 옮기는 중이에요']);
+    expect(sectionLabels).toEqual(['팀', '지식', '목표', '조직', '그 밖의 화면']);
     const cards = [...container.querySelectorAll('[data-testid="more-section-card"]')];
-    expect(cards).toHaveLength(4);
+    expect(cards).toHaveLength(7);
     expect(cards.map((c) => c.querySelector('[data-testid="more-menu-link"] span span')?.textContent)).toEqual(
-      ['오늘', '결과', expect.any(String), expect.any(String)],
+      ['구성원', '문서', '설정', '결재', '목표', '성과 보드', '리워드'],
     );
     // story #4291(PO) — 머리 없는 카드에 group 이름을 붙이지 않는다(구역 이름 = 그 한 항목 이름이라 화면 읽기가 같은 낱말을 두 번 읽음).
-    expect(cards.map((c) => [c.getAttribute('role'), c.getAttribute('aria-label')])).toEqual([[null, null], [null, null], [null, null], [null, null]]);
+    expect(cards.map((c) => [c.getAttribute('role'), c.getAttribute('aria-label')])).toEqual(cards.map(() => [null, null]));
     // 같은 낱말이 한 카드에 두 번(머리 · 항목) 보이지 않는다.
     for (const card of cards) {
-      const header = card.querySelector('[data-testid="more-section-header"]')?.textContent;
+      const header = card.querySelector('[data-slot="ds-section-header"]')?.textContent;
       const rows = card.querySelectorAll('[data-testid="more-menu-link"]');
       if (header && rows.length === 1) expect(rows[0]!.querySelector('span span')?.textContent).not.toBe(header);
     }
-    // h2 안 캡션은 "그 밖의 화면" 라벨과 별도 span(§⑤ 해요체 인라인 캡션, moreLegacyMovingCaptionInline)
-    // — 위 concat 문자열이 그 둘의 합임을 명시로도 확認(텍스트 원문이 바뀌면 이 assert가 RED).
-    const legacyH2 = [...container.querySelectorAll('h2')].find((h) => h.textContent?.startsWith('그 밖의 화면'));
-    expect(legacyH2?.querySelector('[data-testid="legacy-moving-caption"]')?.textContent).toBe('새 자리로 옮기는 중이에요');
+    // 서랍의 «새 자리로 옮기는 중이에요» 캡션은 서랍과 함께 걷혔다.
+    expect(container.querySelector('[data-testid="legacy-moving-caption"]')).toBeNull();
+    expect([...container.querySelectorAll('[data-legacy-group]')]).toHaveLength(0);
   });
 
-  it('「그 밖의 화면」 묶음(레시피·구성원·에이전트)과 오늘(=옛 조직브리핑)이 포함된다(AC1 — 기존 stub의 핵심 결함 수복)', async () => {
+  it('「그 밖의 화면」 묶음(레시피·구성원·에이전트)과 결재가 포함된다(AC1 — 기존 stub의 핵심 결함 수복 · 결재 탭이 없어져 «전체»가 결재의 입구 중 하나)', async () => {
     await mount();
     expect(container.textContent).toContain('레시피');
     expect(container.textContent).toContain('구성원');
     expect(container.textContent).toContain('에이전트');
-    const todayLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/org-briefing');
-    expect(todayLink).toBeDefined();
-    expect(todayLink?.textContent).toContain('오늘');
+    const approvalsLink = [...container.querySelectorAll('a')].find((a) => (a.getAttribute('href') ?? '').startsWith('/inbox'));
+    expect(approvalsLink).toBeDefined();
+    expect(approvalsLink?.textContent).toContain('결재');
   });
 
-  it('flow·inbox·chats는 안 뜬다(바텀 탭이 이미 depth 1로 커버 — 중복 진입점 방지)', async () => {
+  it('홈 · 일감 · 대화(org-briefing · flow · chats)는 안 뜬다(바텀 탭이 이미 depth 1로 커버 — 중복 진입점 방지) · 결재는 뜬다(탭이 아니다)', async () => {
     await mount();
     const links = [...container.querySelectorAll('a')];
     expect(links.some((a) => a.getAttribute('href') === '/flow')).toBe(false);
-    expect(links.some((a) => a.getAttribute('href') === '/inbox')).toBe(false);
+    expect(links.some((a) => a.getAttribute('href') === '/org-briefing')).toBe(false);
     expect(links.some((a) => a.getAttribute('href') === '/chats')).toBe(false);
+    expect(links.some((a) => (a.getAttribute('href') ?? '').startsWith('/inbox'))).toBe(true);
   });
 
   it('임시 stub 배너가 제거됐다(AC3)', async () => {
@@ -148,24 +150,20 @@ describe('MorePage — story #2682 GNB 미러 그룹형 허브(AC1·AC3)', () =>
     expect(goalsLink?.getAttribute('href')).toBe('/goals');
   });
 
-  it('doc a0da40c9 §21-1(2026-09-05) — 조직 그룹에 새로 추가됐던 성과 보드 항목(현 라벨 「결과」, story #3824 navResults 개명)이 이 모바일 허브에도 뜬다(하나만 서면 모바일 진입점이 아예 없다는 규율의 회귀가드)', async () => {
+  it('doc a0da40c9 §21-1(2026-09-05) — 조직 그룹에 새로 추가됐던 성과 보드 항목(현 라벨 「성과 보드」, 4913 이름 통일 — 옛 「결과」, story #3824 navResults 개명)이 이 모바일 허브에도 뜬다(하나만 서면 모바일 진입점이 아예 없다는 규율의 회귀가드)', async () => {
     await mount();
     const insightsBoardLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/organization/insights-board');
-    expect(insightsBoardLink?.textContent).toContain('결과');
+    expect(insightsBoardLink?.textContent).toContain('성과 보드');
   });
 
-  // story #3855(customer-zero·셸, 페드루 PO 판정 2026-09-14 07:34Z 픽셀 커밋) — AC1 갈 곳
-  // 표가 settings를 "묶음 없이 맨 아래 단독(머리말 「설정」)"으로 못박았지만, 픽셀 커밋이
-  // legacy를 단일 카드로 되돌리며 그 머리말은 이제 h2(카드 헤더)가 아니라 카드 «안»의
-  // 소묶음(data-legacy-group="settings")이다 — 데스크톱 사이드바와 동형(app-sidebar.tsx도
-  // 소묶음, h2 아님).
-  it('설정은 legacy 카드 안 자기 소묶음(머리말+개수 pill)을 갖는다(story #3855 §② 흡수 지도 — settings 전용 축)', async () => {
+  // story #4885 — «설정»은 머리 없는 자기 구역(카드)이고 «그 밖의 화면» 맨 아래엔 메뉴 입구를 따로 안 만드는 화면들이 선다(리워드 · 채널 채팅).
+  it('설정은 자기 구역이고, «그 밖의 화면»에는 리워드 · 채널 채팅이 있다(막다른 곳을 안 만든다)', async () => {
     await mount();
-    const settingsGroup = container.querySelector('[data-legacy-group="settings"]');
-    expect(settingsGroup).toBeDefined();
-    expect(settingsGroup?.textContent).toContain('설정');
     const settingsLink = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/settings');
     expect(settingsLink).toBeDefined();
+    const links = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href'));
+    expect(links).toContain('/rewards');
+    expect(links).toContain('/channel');
   });
 });
 
@@ -193,11 +191,11 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
     expect(membersLink?.textContent).toContain('사람과 에이전트 명단');
   });
 
-  it('⭐탭 문장의 탭 이름은 탭바가 실제로 그리는 탭 그대로(story #4278 · 유나 ①) — 플래그 OFF: 「일감」·「결재」·「대화」(예전엔 없는 «오늘» 탭을 가리켰다)', async () => {
+  it('⭐탭 문장의 탭 이름은 탭바가 실제로 그리는 탭 그대로(story #4278 · 유나 ① → 폰 탭 넷): 「홈」·「대화」·「일감」(결재 탭은 없다)', async () => {
     isMobileMock = true;
     await mount();
     const hint = container.querySelector('[data-testid="more-tab-hint"]');
-    expect(hint?.textContent).toBe('아래 탭(「일감」·「결재」·「대화」)에 있는 화면은 여기엔 없어요');
+    expect(hint?.textContent).toBe('아래 탭(「홈」·「대화」·「일감」)에 있는 화면은 여기엔 없어요');
   });
 
   it('⭐데스크톱 폭(lg 이상)에선 탭 문장이 보이지 않는다(탭 바 자체가 없어 거짓이 되므로) — story #4222: JS 분기 대신 lg:hidden', async () => {
@@ -207,10 +205,8 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
     const hint = container.querySelector('[data-testid="more-tab-hint"]');
     expect(hint).not.toBeNull();
     expect(hint!.className.split(/\s+/)).toContain('lg:hidden');
-    // 유나 design — 숨은 문장이 space-y의 마지막 자식이면 부제에 margin이 남아 데스크톱 검색창이 4px 밀렸다 → 묶음은 flex+gap.
-    const group = hint!.parentElement!;
-    expect(group.className.split(/\s+/)).toEqual(expect.arrayContaining(['flex', 'flex-col', 'gap-1']));
-    expect(group.className).not.toMatch(/\bspace-y-/);
+    // story 4890 — the sentence moved under the sections (it explains what is NOT here); the top of the page is only the search row (no margin left behind on a desktop width).
+    expect(hint!.nextElementSibling).toBeNull();
   });
 
   // story #3845(§①④, 2026-09-14) — retro·standup이 LEGACY_NAV_ITEMS에서 빠지며(각각
@@ -219,10 +215,10 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
   // 설명과 안 겹침).
   it('⭐찾기 — 입력값이 이름에 매치하면 그 행만 남고 나머지 구역은 숨는다', async () => {
     await mount();
-    await typeQuery('실행');
+    await typeQuery('레시피');
     const links = [...container.querySelectorAll('a')];
     expect(links).toHaveLength(1);
-    expect(links[0]?.textContent).toContain('실행');
+    expect(links[0]?.textContent).toContain('레시피');
   });
 
   it('⭐찾기 — 입력값이 설명에만 매치해도 걸린다(이름+설명 둘 다 부분일치)', async () => {
@@ -246,7 +242,7 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
 
   it('⭐찾기 — 지우면 전량 복귀한다(story #3824로 총 링크 수 변동, 리터럴 수 대신 >1로 검증)', async () => {
     await mount();
-    await typeQuery('실행');
+    await typeQuery('레시피');
     expect(container.querySelectorAll('a')).toHaveLength(1);
     await typeQuery('');
     expect(container.querySelectorAll('a').length).toBeGreaterThan(1);
@@ -254,15 +250,36 @@ describe('MorePage — story #fddd0e6b(IA ⑦ 전체 메뉴)', () => {
 
   it('찾기 placeholder에 ⌘K를 언급하지 않는다(폰엔 키보드 단축키가 없어 거짓)', async () => {
     await mount();
-    expect(searchInput().getAttribute('placeholder')).toBe('화면 이름으로 찾기');
+    expect(searchInput().getAttribute('placeholder')).toBe('이 목록에서 화면 이름으로 찾기');
     expect(searchInput().getAttribute('placeholder')).not.toContain('⌘');
   });
 
-  it('구역은 Card 프리미티브다(data-slot="card")·행은 min-h-12 터치 타깃을 유지한다(AC4)', async () => {
+  // story #4885 — 구역 = ds Card · 머리 = ds SectionHeader(h2) · 줄 = ds ListRow(asChild · 기본 높이 56 · 폰 누름 영역 44 이상). 손코딩 Link(min-h-12)는 걷었다.
+  it('구역은 ds Card · 머리는 ds SectionHeader · 줄은 ds ListRow(기본 높이)다', async () => {
     await mount();
-    expect(container.querySelectorAll('[data-slot="card"]').length).toBeGreaterThan(0);
+    expect(container.querySelectorAll('[data-slot="ds-card"]').length).toBeGreaterThan(0);
+    expect(container.querySelectorAll('[data-slot="ds-section-header"]').length).toBeGreaterThan(0);
     const membersLink = [...container.querySelectorAll('a')].find((a) => a.textContent?.includes('구성원'));
-    expect(membersLink?.className).toContain('min-h-12');
+    expect(membersLink?.getAttribute('data-slot')).toBe('ds-list-row');
+    expect(membersLink?.getAttribute('data-density')).toBe('default');
+    expect(membersLink?.className).toContain('min-h-ds-row');
+    // 모든 메뉴 줄이 같은 부품이다(손코딩 줄이 섞이지 않는다).
+    const links = [...container.querySelectorAll('[data-testid="more-menu-link"]')];
+    expect(links.length).toBeGreaterThan(10);
+    expect(links.every((a) => a.getAttribute('data-slot') === 'ds-list-row')).toBe(true);
+    // 아이콘은 막대 · 길잡이와 같은 표(rail-icons)의 ds 글리프 — 모든 줄에 있다.
+    expect(links.every((a) => a.querySelector('svg[data-icon]'))).toBe(true);
+  });
+
+  // story #4885 — 설정은 조직(줄 10개 · 약 700px) 뒤가 아니라 지식 바로 뒤다: 폰 390에서 설정 줄이 쓸기 3번 아래(y 1819)이던 것을 짧게 한 번으로. 문서보다 위로는 올리지 않는다(문서 찾기 0 유지).
+  it('⭐설정 줄은 문서 줄 뒤 · 목표 · 조직 줄들보다 앞이다(조직 10줄 뒤로 밀리지 않는다)', async () => {
+    await mount();
+    const labels = [...container.querySelectorAll('[data-testid="more-menu-link"]')].map((a) => a.querySelector('span span')?.textContent);
+    const at = (name: string) => labels.indexOf(name);
+    expect(at('문서')).toBeGreaterThan(-1);
+    expect(at('문서')).toBeLessThan(at('설정'));
+    expect(at('설정')).toBeLessThan(at('목표'));
+    expect(at('설정')).toBeLessThan(at('채널 연결'));
   });
 });
 

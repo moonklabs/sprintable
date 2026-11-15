@@ -1,0 +1,1 @@
+{"file": "tests/test_4899_bulk_update_sprint_must_belong_to_the_story_project_realdb.py", "sec": 30.0, "source": "story-4899 — PATCH /stories/bulk refuses a sprint of another project / org with a 404 and saves nothing; a story the caller cannot reach stays silently skipped — new file measured locally (uv run pytest, 9 tests)"}

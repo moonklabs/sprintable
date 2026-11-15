@@ -16,7 +16,8 @@ from app.core.database import Base
 # a turn held by a macOS window, where a stop cannot reach); always ends, what was signed is what happens
 # story #4733 (0459 · S2 · design 4733-phone-clock-design-1020.md): `clock` — a person's signed clock-out / clock-in of one whole computer from the phone;
 # the word is one, the choice (out_open · out_submit · out_cancel · in) is the payload's `action` (so a new action needs no migration)
-COMMAND_KINDS = ("start_session", "send_prompt", "answer_approval", "stop_session", "end_session", "clock")
+# story #4951 (0477 · ①a): `read_changes` — the computer's pairing person asks for the LIST of changed files of one session's folder (names · status word · line counts, never content); payload exactly {session_key}
+COMMAND_KINDS = ("start_session", "send_prompt", "answer_approval", "stop_session", "end_session", "clock", "read_changes")
 COMMAND_STATES = ("queued", "delivered", "acked", "done", "failed", "rejected")
 # a command's state moves forward only: queued → delivered → acked → one end
 COMMAND_STATE_ORDER = {"queued": 0, "delivered": 1, "acked": 2, "done": 3, "failed": 3, "rejected": 3}
@@ -162,6 +163,8 @@ class DesktopCommand(Base):
         CheckConstraint(_in("kind", COMMAND_KINDS), name="ck_desktop_commands_kind"),
         CheckConstraint(_in("state", COMMAND_STATES), name="ck_desktop_commands_state"),
         Index("ix_desktop_commands_setup_state_seq", "setup_id", "state", "device_seq"),
+        # story #4951 (0477): the person's pause between two «changed files» asks reads their last ask — only those rows are in this index
+        Index("ix_desktop_commands_read_changes_by", "requested_by", "created_at", postgresql_where=text("kind = 'read_changes'")),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -201,6 +204,53 @@ class DesktopClockView(Base):
     view: Mapped[dict] = mapped_column(JSONB, nullable=False)
     reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DesktopChangesRead(Base):
+    """story #4951 (0477 · ①a · Kadir lens A · E · I): one short-lived read of a session folder's changed-file LIST. Who asked (`viewer_id`), which computer (`setup_id`) and
+    the command it travels in are fixed when the row is made; the computer's list (`payload`: names · a status word · line counts — no content) is written once and is
+    deleted the moment the viewer reads it, at `expires_at` (asked + 120 s), with its command, and when its computer is disconnected / its pairing person's account is closed
+    / the organization's remote control is turned off. Never logged."""
+
+    __tablename__ = "desktop_changes_reads"
+    __table_args__ = (
+        CheckConstraint("(payload IS NULL) = (written_at IS NULL)", name="ck_desktop_changes_reads_written"),
+        Index("ix_desktop_changes_reads_expires_at", "expires_at"),
+        Index("ix_desktop_changes_reads_setup_created", "setup_id", "created_at"),
+    )
+
+    command_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("desktop_commands.id", ondelete="CASCADE"), primary_key=True,
+    )
+    setup_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("desktop_setups.id", ondelete="CASCADE"), nullable=False,
+    )
+    viewer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    agent_member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)  # the agent the read was asked for: the session key alone can pass to another agent later
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    written_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # the last look at this pending read (one per second per read)
+
+
+class DesktopChangesAudit(Base):
+    """story #4951 (0477 · Kadir lens G): one line per changed-file list a person actually read — who · which computer · which command · how many files · when. No name, no content.
+    No foreign key to the computer or the command (the line outlives a disconnect); it goes with its organization."""
+
+    __tablename__ = "desktop_changes_audit"
+    __table_args__ = (
+        Index("ix_desktop_changes_audit_org_created", "org_id", "created_at"),
+        Index("ix_desktop_changes_audit_created", "created_at"),  # the 90-day sweep
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    viewer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    setup_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    command_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    file_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class DesktopDeviceTokenCode(Base):

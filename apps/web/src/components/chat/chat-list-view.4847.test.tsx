@@ -101,8 +101,16 @@ async function mount(props: Partial<React.ComponentProps<typeof ChatListView>> =
   await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
 }
 
-const filterSelect = () => container.querySelector('[data-testid="project-filter"]') as HTMLSelectElement | null;
+const filterSelect = () => document.querySelector('[data-testid="project-filter"]') as HTMLSelectElement | null;
+// story 4887 (UI-4 screen PR) — the project filter lives in the list head's «⋯» popover now (a portal): open it (once) before reaching for it
+async function openListOptions() {
+  if (document.querySelector('[data-testid="chat-list-now"]')) return;
+  const trigger = container.querySelector('[data-testid="chat-list-options"]') as HTMLElement;
+  await act(async () => { trigger.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+}
+
 async function chooseFilter(value: string) {
+  await openListOptions();
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(filterSelect()!, value);
     filterSelect()!.dispatchEvent(new Event('change', { bubbles: true }));
@@ -124,6 +132,44 @@ describe('ChatListView — 조직 안 모든 방 한 목록(story 4847 AC1)', ()
     const labels = [...container.querySelectorAll('[data-testid="room-project"]')].map((e) => e.textContent);
     expect(labels).toHaveLength(3);
     expect(labels).toEqual(expect.arrayContaining([A.projectName, B.projectName, koMessages.chats.roomNoProject]));
+  });
+
+  // story 4887 (UI-4 P2-a) — with ONE known project every row of that project would say the same name; the line (the row's fourth) is spared there. Everything else keeps the name: it is information.
+  it('4887 ⭐ a person with ONE project gets no project line on a room of that project — the project-less room still says «프로젝트 없음»', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [A], role: 'member', projectId: undefined });
+    stubOrgServer([N1, A1]);
+    await mount();
+    const labels = [...container.querySelectorAll('[data-testid="room-project"]')].map((e) => e.textContent);
+    expect(labels).toEqual([koMessages.chats.roomNoProject]);
+    expect(container.textContent).toContain('에이 방');
+  });
+
+  it('4887 ⭐ a room of ANOTHER project than the person\'s only one keeps its name (a person who lost access can still read it)', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [A], role: 'member', projectId: undefined });
+    stubOrgServer([A1, B1]);
+    await mount();
+    expect([...container.querySelectorAll('[data-testid="room-project"]')].map((e) => e.textContent)).toEqual([B.projectName]);
+  });
+
+  it('4887 ⭐ an EMPTY (not yet known) membership list keeps the name — «unknown» is not «one project»', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [], role: 'member', projectId: undefined });
+    stubOrgServer([A1, B1]);
+    await mount();
+    expect([...container.querySelectorAll('[data-testid="room-project"]')].map((e) => e.textContent).sort()).toEqual([A.projectName, B.projectName].sort());
+  });
+
+  it('4887 ⭐ with TWO projects the name shows on a room that has a project (the line is the way to tell the rooms apart)', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [A, B], role: 'member', projectId: undefined });
+    stubOrgServer([A1]);
+    await mount();
+    expect([...container.querySelectorAll('[data-testid="room-project"]')].map((e) => e.textContent)).toEqual([A.projectName]);
+  });
+
+  it('4887 ⭐ a FAILED project read that left ONE project (synthesized from /me) keeps the name on that project\'s rooms — the person may have more', async () => {
+    useDashboardContextMock.mockReturnValue({ projectMemberships: [A], role: 'member', projectId: undefined, projectMembershipsFailed: true });
+    stubOrgServer([A1]);
+    await mount();
+    expect([...container.querySelectorAll('[data-testid="room-project"]')].map((e) => e.textContent)).toEqual([A.projectName]); // reverted → hidden
   });
 
   it('줄이 이름을 안 주면(project_name 없음) 내 프로젝트 목록에서 이름을 찾아 붙인다', async () => {
@@ -157,11 +203,13 @@ describe('ChatListView — 프로젝트로 걸러 보기(story 4847 AC1)', () =>
   it('⭐프로젝트가 둘 이상이면 걸러 보기가 뜨고(모든 프로젝트 · 각 프로젝트 · 프로젝트 없음), 하나뿐이면 안 뜬다', async () => {
     stubOrgServer();
     await mount();
+    await openListOptions();
     expect([...filterSelect()!.options].map((o) => o.textContent)).toEqual([koMessages.chats.projectFilterAll, A.projectName, B.projectName, koMessages.chats.roomNoProject]);
     await act(async () => { root.unmount(); });
     root = createRoot(container);
     useDashboardContextMock.mockReturnValue({ projectMemberships: [A], role: 'member', projectId: undefined });
     await mount();
+    await openListOptions();
     expect(filterSelect()).toBeNull();
   });
 
@@ -197,6 +245,7 @@ describe('ChatListView — 프로젝트로 걸러 보기(story 4847 AC1)', () =>
     fetchMock.mockClear();
     await mount();
     expect(listCalls(fetchMock)).toEqual(['/api/conversations?limit=30&offset=0&project_id=proj-a']);
+    await openListOptions();
     expect(filterSelect()!.value).toBe('proj-a');
   });
 
@@ -205,6 +254,7 @@ describe('ChatListView — 프로젝트로 걸러 보기(story 4847 AC1)', () =>
     const fetchMock = stubOrgServer();
     await mount();
     expect(listCalls(fetchMock)).toEqual(['/api/conversations?limit=30&offset=0']);
+    await openListOptions();
     expect(filterSelect()!.value).toBe('');
   });
 });
@@ -281,6 +331,7 @@ describe('ChatListView — 같은 것을 두 번 묻는 경합 · 현재 프로�
     await mount({ projectId: 'proj-a' });
     await chooseFilter('proj-b');
     await act(async () => { release422!(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    await openListOptions();
     expect(filterSelect()).not.toBeNull(); // not the project-only list
     expect(container.textContent).toContain('비 방');
     expect(listCalls(fetchMock).every((u) => !u.endsWith('&project_id=proj-a'))).toBe(true); // never asked for the current project's own list
@@ -476,12 +527,14 @@ describe('ChatListView — 관리자의 에이전트 탭 · 지시 한 줄 · �
     stubOrgServer();
     useDashboardContextMock.mockReturnValue({ projectMemberships: [A, B], role: 'admin', ...ORG_ADMIN, projectId: undefined });
     await mount({ projectId: null });
-    expect(container.textContent).not.toContain(koMessages.chats.agentChatsTab);
+    await openListOptions();
+    expect(document.body.textContent).not.toContain(koMessages.chats.agentChatsTab);
     await act(async () => { root.unmount(); });
     root = createRoot(container);
     useDashboardContextMock.mockReturnValue({ projectMemberships: [A, B], role: 'admin', ...ORG_ADMIN, projectId: 'proj-a' });
     await mount({ projectId: 'proj-a' });
-    expect(container.textContent).toContain(koMessages.chats.agentChatsTab);
+    await openListOptions();
+    expect(document.body.textContent).toContain(koMessages.chats.agentChatsTab);
   });
 
   it('⭐지시 한 줄(?compose=)은 목록 전체에서 가장 최근 방이 아니라 «지금 프로젝트»의 가장 최근 방으로 간다', async () => {
@@ -533,6 +586,7 @@ describe('ChatListView — 옛 서버(조직 전체를 못 묻는 서버)의 대
     expect(container.textContent).toContain('에이 방');
     expect(container.textContent).toContain(koMessages.chats.otherProjectsSection);
     expect(container.textContent).toContain('밖의 방');
+    await openListOptions();
     expect(filterSelect()).toBeNull(); // the project-only list has nothing to filter
   });
 });
@@ -566,11 +620,12 @@ describe('ChatListView — 옛 서버(422)에서는 지금 화면과 같다 (sto
     await mount({ projectId: 'proj-a' });
     const params = (u: string) => Object.fromEntries(new URL(u, 'http://x').searchParams);
     expect(listCalls(fetchMock).map(params)).toEqual([{ limit: '30', offset: '0' }, { limit: '30', offset: '0', project_id: 'proj-a' }]);
-    expect(container.textContent).toContain(koMessages.chats.dmSection);
-    expect(container.textContent).toContain(koMessages.chats.groupSection);
+    // story 4887 (UI-4 screen PR) — ONE list: the «DM» / «그룹» sub-heads are gone, both kinds of room are rows of the same list
+    expect(container.querySelectorAll('[data-testid="chat-list-rooms"] p').length).toBeGreaterThan(0);
     expect(container.textContent).toContain('점검봇');
     expect(container.textContent).toContain('회의방');
     expect(container.querySelectorAll('[data-testid="room-project"]')).toHaveLength(0);
+    await openListOptions();
     expect(filterSelect()).toBeNull();
   });
 
@@ -590,8 +645,9 @@ describe('ChatListView — 옛 서버(422)에서는 지금 화면과 같다 (sto
   it('관리자의 에이전트 탭도 그대로: 같은 주소(project_id · include_agent_conversations)로 읽는다', async () => {
     const fetchMock = oldServer(); ctx({ role: 'admin', ...ORG_ADMIN });
     await mount({ projectId: 'proj-a' });
-    const tab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === koMessages.chats.agentChatsTab)!;
-    await act(async () => { tab.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); tab.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
+    await openListOptions();
+    const tab = [...document.querySelectorAll('[data-testid="chat-list-tabs"] button')].find((t) => t.textContent === koMessages.chats.agentChatsTab)!;
+    await act(async () => { tab.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); });
     expect(listCalls(fetchMock).at(-1)).toBe('/api/conversations?project_id=proj-a&include_agent_conversations=true&limit=30&offset=0');
   });
 
@@ -599,7 +655,29 @@ describe('ChatListView — 옛 서버(422)에서는 지금 화면과 같다 (sto
     searchParamsValueRef.current = 'compose=' + encodeURIComponent('지시');
     oldServer(); ctx();
     await mount({ projectId: 'proj-a' });
-    expect(replaceMock).toHaveBeenCalledWith('/chats/conv-dm?compose=' + encodeURIComponent('지시') + '&p=proj-a');
+    expect(replaceMock).toHaveBeenCalledWith(expect.stringMatching(new RegExp('^/chats/conv-dm\\?compose=' + encodeURIComponent('지시') + '&composeNote=[0-9a-z]+&p=proj-a$'))); // 4906 — the hand-over marks the arrival so the room can say the line was moved here, not sent
+  });
+
+  it('⭐ the «pick a project» fallback still carries the rail\'s name (the overlay rail is labelled by #chat-rail-heading) — an h2 when it sits beside a room', async () => {
+    oldServer(); ctx({ projectId: undefined });
+    await mount({ projectId: null, headingLevel: 2 });
+    const heading = container.querySelector('#chat-rail-heading');
+    expect(heading?.tagName).toBe('H2'); // reverted (the early return has no heading) → null: an unnamed dialog
+    expect(heading?.textContent).toBe(koMessages.chats.title);
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await mount({ projectId: null });
+    expect(container.querySelector('#chat-rail-heading')?.tagName).toBe('H1');
+  });
+
+  it('⭐ the list head is an h2 beside a room and an h1 on the list route; the «⋯» popover has a name', async () => {
+    oldServer(); ctx();
+    await mount({ projectId: 'proj-a', headingLevel: 2 });
+    expect(container.querySelector('[data-testid="chat-list-head"] h2#chat-rail-heading')).not.toBeNull();
+    expect(container.querySelector('[data-testid="chat-list-head"] h1')).toBeNull();
+    await openListOptions();
+    const popup = document.querySelector('[data-testid="chat-list-now"]')!.closest('[role="dialog"]');
+    expect(popup?.getAttribute('aria-label')).toBe(koMessages.chats.listOptions); // reverted (no name on the dialog) → null
   });
 
   it('⭐현재 프로젝트가 없으면 예전처럼 «프로젝트를 고르세요» 한 줄 — 오류도 목록도 아니다. 프로젝트를 고르면 그 프로젝트의 목록이 선다', async () => {
@@ -614,6 +692,44 @@ describe('ChatListView — 옛 서버(422)에서는 지금 화면과 같다 (sto
     expect(container.querySelector('[data-testid="chats-no-project"]')).toBeNull();
     expect(container.textContent).toContain('회의방');
     expect(listCalls(fetchMock).at(-1)).toBe('/api/conversations?limit=30&offset=0&project_id=proj-a');
+  });
+
+  // story 4887 (UI-4 P2-d) — the request for the person's projects FAILED (story 4891 `projectMembershipsFailed`): that is not «none» (they may have projects) — the line says so and offers [다시 시도]
+  it('4887 ⭐ a FAILED project read shows «프로젝트를 불러오지 못했어요» + [다시 시도] — not «프로젝트가 아직 없어요»', async () => {
+    oldServer(); ctx({ projectId: undefined, projectMemberships: [], projectMembershipsFailed: true });
+    await mount({ projectId: null });
+    const box = container.querySelector('[data-testid="chats-no-project"]')!;
+    expect(box.textContent).toContain(koMessages.chats.projectsLoadFailed);
+    expect(box.textContent).not.toContain(koMessages.chats.noProjectYet); // reverted → the failure is read as «none»
+    expect(container.querySelector('[data-testid="chats-retry-projects"]')?.textContent).toBe(koMessages.chats.projectsRetry);
+  });
+
+  it('4887 ⭐ the same screen WITHOUT a failure (really no project) keeps the old line and has no retry', async () => {
+    oldServer(); ctx({ projectId: undefined, projectMemberships: [], projectMembershipsFailed: false });
+    await mount({ projectId: null });
+    expect(container.querySelector('[data-testid="chats-no-project"]')?.textContent).toBe(koMessages.chats.noProjectYet);
+    expect(container.querySelector('[data-testid="chats-retry-projects"]')).toBeNull();
+  });
+
+  it('4887 ⭐ a failure flag with the projects KNOWN (a stale flag · projects in hand) is not «unknown» — the ordinary «프로젝트를 고르세요» line, no failure block', async () => {
+    oldServer(); ctx({ projectId: undefined, projectMembershipsFailed: true }); // [A, B] in hand
+    await mount({ projectId: null });
+    expect(container.querySelector('[data-testid="chats-no-project"]')?.textContent).toBe(koMessages.chats.pickProject); // reverted (flag alone) → the failure block
+    expect(container.querySelector('[data-testid="chats-projects-failed"]')).toBeNull();
+  });
+
+  it('4887 ⭐ [다시 시도] reloads the page (the way the Recruit tab does it)', async () => {
+    const reload = vi.fn();
+    const real = window.location;
+    Object.defineProperty(window, 'location', { configurable: true, value: { ...real, reload } });
+    try {
+      oldServer(); ctx({ projectId: undefined, projectMemberships: [], projectMembershipsFailed: true });
+      await mount({ projectId: null });
+      await act(async () => { (container.querySelector('[data-testid="chats-retry-projects"]') as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+      expect(reload).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(window, 'location', { configurable: true, value: real });
+    }
   });
 
   it('⭐옛 서버의 프로젝트 단위 목록을 보다가 현재 프로젝트를 잃으면 오류가 아니라 «프로젝트를 고르세요» 한 줄이다', async () => {
@@ -638,7 +754,7 @@ describe('ChatListView — 옛 서버(422)에서는 지금 화면과 같다 (sto
     ctx();
     await act(async () => { root.render(wrap(<ChatListView projectId="proj-a" currentTeamMemberId="me-1" open={false} onOpenChange={onOpenChange} />)); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
-    expect(replaceMock).toHaveBeenCalledWith('/chats/conv-dm?compose=' + encodeURIComponent('지시') + '&p=proj-a');
+    expect(replaceMock).toHaveBeenCalledWith(expect.stringMatching(new RegExp('^/chats/conv-dm\\?compose=' + encodeURIComponent('지시') + '&composeNote=[0-9a-z]+&p=proj-a$'))); // 4906 — the hand-over marks the arrival so the room can say the line was moved here, not sent
   });
 });
 
@@ -870,16 +986,18 @@ describe('ChatListView — 프로젝트 없는 방을 만들 수 있는 서버(s
 // (orgMemberships), not on the shell's «role» (/me: the larger of the project and organization roles — a project admin who is only an organization member has `admin` there and used
 // to see a tab the server then refused), and a 403 is said as what it is, not as a failure to retry.
 describe('ChatListView — 에이전트 탭은 조직 owner/admin 몫(story 4847 · 서버와 같은 술어)', () => {
-  const tabs = () => [...container.querySelectorAll('[role="tab"]')].map((t) => t.textContent);
+  const tabs = () => [...document.querySelectorAll('[data-testid="chat-list-tabs"] button')].map((t) => t.textContent);
   const withCtx = (extra: Record<string, unknown>) => useDashboardContextMock.mockReturnValue({ projectMemberships: [A, B], projectId: 'proj-a', ...extra });
   const openAgentTab = async () => {
-    const tab = [...container.querySelectorAll('[role="tab"]')].find((t) => t.textContent === koMessages.chats.agentChatsTab)!;
-    await act(async () => { tab.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); tab.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    await openListOptions();
+    const tab = [...document.querySelectorAll('[data-testid="chat-list-tabs"] button')].find((t) => t.textContent === koMessages.chats.agentChatsTab)!;
+    await act(async () => { tab.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
   };
 
   it('⭐프로젝트 관리자(셸 role=admin)가 조직에서는 member면 탭이 없다 — 서버가 403으로 거절할 보기를 보여 주지 않는다', async () => {
     stubOrgServer(); withCtx({ role: 'admin', ...orgAs('member') });
     await mount({ projectId: 'proj-a' });
+    await openListOptions();
     expect(tabs()).not.toContain(koMessages.chats.agentChatsTab);
   });
 
@@ -887,6 +1005,7 @@ describe('ChatListView — 에이전트 탭은 조직 owner/admin 몫(story 4847
     for (const orgRole of ['owner', 'admin']) {
       stubOrgServer(); withCtx({ role: 'member', ...orgAs(orgRole) });
       await mount({ projectId: 'proj-a' });
+      await openListOptions();
       expect(tabs()).toContain(koMessages.chats.agentChatsTab);
       await act(async () => { root.unmount(); });
       root = createRoot(container);
@@ -896,6 +1015,7 @@ describe('ChatListView — 에이전트 탭은 조직 owner/admin 몫(story 4847
   it('현재 조직이 조직 목록에 아직 없으면(아직 모름) 탭을 세우지 않는다', async () => {
     stubOrgServer(); withCtx({ role: 'owner', orgId: 'org-9', orgMemberships: [{ orgId: 'org-4847-admin', orgName: 'O', orgSlug: 'o', role: 'owner' }] });
     await mount({ projectId: 'proj-a' });
+    await openListOptions();
     expect(tabs()).not.toContain(koMessages.chats.agentChatsTab);
   });
 
@@ -971,6 +1091,7 @@ describe('ChatListView — 에이전트 탭은 조직 owner/admin 몫(story 4847
     expect(agentAsks()).toBe(1);
     withCtx({ role: 'admin', ...orgAs('member') }); // the organization role went down: the tab is gone
     await rerender();
+    await openListOptions();
     expect(tabs()).not.toContain(koMessages.chats.agentChatsTab);
     agentStatus = 200;
     withCtx({ role: 'admin', ...ORG_ADMIN }); // …and came back

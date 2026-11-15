@@ -9,6 +9,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextIntlClientProvider } from 'next-intl';
 import koMessages from '../../../../../../messages/ko.json';
 
+// story 4912 (A2) — the head now sets the top bar title; the top bar itself is not under test here
+vi.mock('@/components/nav/top-bar-slot', () => ({ TopBarSlot: () => null }));
+
 const { routerMock, dashboardCtx } = vi.hoisted(() => ({
   routerMock: { replace: vi.fn(), push: vi.fn() },
   // story 4675 (Yuna 5068): the shell's flags — /desktop only exists while desktopDownloadEnabled (the sidebar's own switch)

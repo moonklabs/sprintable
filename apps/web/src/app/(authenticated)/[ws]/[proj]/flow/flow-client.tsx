@@ -232,7 +232,7 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           var(--font-sans)라 시각 변화 0 — 세리프 켜지면 board TopBar 타이틀도 함께 전환). */}
       <TopBarSlot title={<h1 className="text-sm font-display font-extrabold">{t('title')}</h1>} showContextChip />
 
-      <div className="space-y-4 p-4">
+      <div className={view === 'list' ? 'px-4 pb-4' : 'space-y-4 p-4'}>
         {/* story #2930(P0-G) I3 — nav에서 flow+sprints가 「보드」 단일 항목으로 접히며 사라진
             sprints 진입점을 메우는 얕은 프레임(WorkspaceFrameTabs). 아래 ScaleLadder와 다른
             층 — 그건 안 건드린다(E-FLOW-V4 기 확定). */}
@@ -248,18 +248,13 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
             (칸반의 단위는 스토리 — story #3111에서 «건물»=작업 오매핑 정정) — 「지금 보는
             층 = 묻는 질문 전환」을 탭 전환마다 같은 자리에서 보인다. story #3112 — 클릭
             배선(렌즈 전환·목표 이동·작업 비활성)은 컴포넌트 자체가 갖는다(scale-ladder.tsx). */}
-        {view !== 'hypothesis' ? (
-          // story #4222 — `compact={isMobile}`는 useIsMobile()이 서버·첫 렌더에서 false라 390에서 서버가 전체판(120.5px)을 그리고
-          // 하이드레이션 뒤 칩열(34.5px)로 줄어 그 아래가 밀렸다(배너 0에서 CLS 0.36). 두 판을 다 그리고 CSS 중단점(lg = 훅의 1024)으로
-          // 가른다 — 서버 출력이 곧 최종 높이. 숨은 판은 display:none이라 포커스·스크린리더에서 빠지고, 래더는 데이터 요청이 없다.
-          <>
-            <div className="lg:hidden" data-testid="scale-ladder-compact-slot">
-              <ScaleLadder activeLevel={view === 'flow' ? 'city' : 'street'} compact />
-            </div>
-            <div className="hidden lg:block" data-testid="scale-ladder-full-slot">
-              <ScaleLadder activeLevel={view === 'flow' ? 'city' : 'street'} />
-            </div>
-          </>
+        {view === 'flow' ? (
+          // story #4888 — 래더는 모든 폭에서 칩 한 줄 하나뿐이다. story #4222의 «두 판을 CSS 중단점으로 가름»은 판이 하나가 되며 필요 없어졌다
+          // (서버 출력 = 최종 높이 → 하이드레이션 뒤 흔들림 0은 그대로, 요청 수 0도 그대로).
+          // story #4888(보드 머리 통째) — 목록(칸반) 보기에서는 렌즈 칩이 이 위 줄이 아니라 보드 머리 줄 **안**(맨 앞)에 선다: 렌즈 + 필터가 한 줄(폰은 가로로 미는 한 줄).
+          <div data-testid="scale-ladder-slot">
+            <ScaleLadder activeLevel="city" />
+          </div>
         ) : null}
 
         {view === 'hypothesis' ? (
@@ -275,8 +270,14 @@ export default function FlowPageClient({ projectId, wsSlug, projSlug }: FlowPage
           // 먹고, 위 탭 줄 · 아래 «승인 흐름에서 멈춘 것» 상자가 뿌리 밖으로 넘쳤다(402 실측: 뿌리 804 · 보드 772 = 804−p-4×2). 이 화면에서 보드에
           // 명시 높이(보이는 영역 = 100svh − 셸 크롬 · 문서 · 스프린트 화면과 같은 앵커)를 주면 보드는 제 높이만 쓰고 뿌리가 내용만큼 자란다(넘침 0 ·
           // 뿌리 p-4 아래 여백이 그대로 틈). 보드 칸 안 세로 스크롤(칸마다 overflow-y-auto)은 무변.
-          <div className="h-[calc(100svh-var(--shell-chrome-h))]" data-testid="flow-board-frame">
-            <KanbanBoard projectId={projectId} wsSlug={wsSlug} projSlug={projSlug} />
+          // 4913 셸 후속 — 높이에서 «일감 탭 띠»(--work-tabs-h · 스크롤러 맨 위 sticky, 스프린트·목표 화면과 같은 값)도 뺀다. 목록 보기에서는 뿌리의 위 여백과 보드↔아래 상자 사이 간격(p-4 · space-y-4)을 틀 안 위·아래 16px(py-4)로 옮긴다 — 틀이 «남은 높이»를 정확히 쓰고(뿌리 여백이 틀 밖에 남으면 틀 하단이 main 아래로 띠 + 16px — dev 실측 60px — 나갔다) 뿌리는 옆 여백 + 맨 아래 16px(아래 상자 밑)만 쥔다. 가드 verify-no-hardcoded-shell-chrome-anchor는 calc 안 하드코딩 값을 막는다.
+          <div className="h-[calc(100svh-var(--shell-chrome-h)-var(--work-tabs-h,0px))] py-4 lg:[@media(max-height:600px)]:py-2" data-testid="flow-board-frame">
+            <KanbanBoard
+              projectId={projectId}
+              wsSlug={wsSlug}
+              projSlug={projSlug}
+              headLead={<div data-testid="scale-ladder-slot" className="shrink-0"><ScaleLadder activeLevel="street" /></div>}
+            />
           </div>
         ) : (
           // 「갈래」보기 — story #2224 AC1(2026-07-31) 멀티레인 본체. 30일 안 변화 있는 목표
